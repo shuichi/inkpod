@@ -41,27 +41,31 @@ else()
     set(INKPOD_RUST_STATICLIB "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_PROFILE}/libinkpod_ffi.a")
 endif()
 set(INKPOD_RUST_RLIB "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_PROFILE}/libinkpod_ffi.rlib")
+set(INKPOD_RUST_STAMP "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_PROFILE}/inkpod_ffi.cmake.stamp")
 
-file(GLOB_RECURSE INKPOD_RUST_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/rust/*.rs"
-    "${CMAKE_SOURCE_DIR}/rust/*/Cargo.toml")
 set(INKPOD_RUST_INPUTS
     "${CMAKE_SOURCE_DIR}/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/Cargo.lock"
-    ${INKPOD_RUST_SOURCES})
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-core/Cargo.toml"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/lib.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/Cargo.toml"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/src/lib.rs")
 
 add_custom_command(
-    OUTPUT "${INKPOD_RUST_STATICLIB}"
-    BYPRODUCTS "${INKPOD_RUST_RLIB}"
+    OUTPUT "${INKPOD_RUST_STAMP}"
+    BYPRODUCTS "${INKPOD_RUST_STATICLIB}" "${INKPOD_RUST_RLIB}"
     COMMAND "${CMAKE_COMMAND}" -E env
             "CARGO_TARGET_DIR=${INKPOD_CARGO_TARGET_DIR}"
             "${CARGO_EXECUTABLE}" build --locked --package inkpod-ffi ${INKPOD_CARGO_PROFILE_ARGUMENT}
+    COMMAND "${CMAKE_COMMAND}" -E touch_nocreate
+            "${INKPOD_RUST_STATICLIB}" "${INKPOD_RUST_RLIB}"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${INKPOD_RUST_STAMP}"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     DEPENDS ${INKPOD_RUST_INPUTS}
     COMMENT "Building inkpod-ffi Rust static library (${INKPOD_RUST_PROFILE})"
     VERBATIM)
 
-add_custom_target(inkpod_rust ALL DEPENDS "${INKPOD_RUST_STATICLIB}")
+add_custom_target(inkpod_rust ALL DEPENDS "${INKPOD_RUST_STAMP}")
 add_library(inkpod_ffi_static STATIC IMPORTED GLOBAL)
 set_target_properties(inkpod_ffi_static PROPERTIES
     IMPORTED_LOCATION "${INKPOD_RUST_STATICLIB}"

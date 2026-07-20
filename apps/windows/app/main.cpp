@@ -286,13 +286,23 @@ int APIENTRY wWinMain(
 
     int exit_code = 0;
     if (state.smoke_test) {
-        exit_code = SendMessageW(
-                        state.canvas,
-                        inkpod::renderer::kCanvasRenderOnce,
-                        0,
-                        0) == 1
-            ? 0
-            : 16;
+        const bool resized = MoveWindow(state.canvas, 0, 0, 640, 480, FALSE) != FALSE;
+        const bool dpi_changed = SendMessageW(
+                                     state.canvas,
+                                     WM_DPICHANGED_AFTERPARENT,
+                                     0,
+                                     0) == 1;
+        const bool device_recovered = SendMessageW(
+                                          state.canvas,
+                                          inkpod::renderer::kCanvasSimulateDeviceLoss,
+                                          0,
+                                          0) == 1;
+        const bool rendered = SendMessageW(
+                                  state.canvas,
+                                  inkpod::renderer::kCanvasRenderOnce,
+                                  0,
+                                  0) == 1;
+        exit_code = resized && dpi_changed && device_recovered && rendered ? 0 : 16;
     } else {
         ShowWindow(window, show_command);
         UpdateWindow(window);

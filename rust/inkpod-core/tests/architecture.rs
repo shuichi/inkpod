@@ -28,11 +28,20 @@ fn arch_002_core_sources_do_not_reference_windows_apis() {
         "Win32",
         "winapi",
         "windows::",
+        "windows_sys",
+        "windows_core",
+        "std::os::windows",
         "Direct2D",
         "Direct3D",
         "D3D11",
         "DXGI",
         "IUnknown",
+        "HINSTANCE",
+        "WPARAM",
+        "LPARAM",
+        "HRESULT",
+        "WinRT",
+        "DirectWrite",
     ];
 
     for source in sources {
@@ -45,5 +54,24 @@ fn arch_002_core_sources_do_not_reference_windows_apis() {
                 source.display()
             );
         }
+    }
+
+    let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let manifest = fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", manifest_path.display()));
+    for token in [
+        "windows =",
+        "windows-sys",
+        "windows-core",
+        "windows-targets",
+        "winapi =",
+        "cfg(windows)",
+        "target_os = \"windows\"",
+    ] {
+        assert!(
+            !manifest.contains(token),
+            "{} contains forbidden frontend dependency token {token}",
+            manifest_path.display()
+        );
     }
 }

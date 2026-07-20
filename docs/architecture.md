@@ -33,11 +33,15 @@ immutable tile records without changing the snapshot ownership model.
 
 ## Build graph
 
-CMake is the build entry. A custom command declares the Rust source/manifests
-as inputs, the profile-specific static library as its output, and Cargo's rlib
-as a byproduct. C++ targets depend on an imported static-library target backed
-by that output. Therefore an unchanged Rust library is not rebuilt merely
-because a C++ target is built.
+CMake is the build entry. A custom command explicitly declares the Rust library
+sources/manifests as inputs (excluding test-only files), a profile-specific
+completion stamp as its output, and Cargo's
+staticlib/rlib as byproducts. After Cargo succeeds, their timestamps and then
+the completion stamp are refreshed. Thus a Cargo no-op after an input timestamp
+change cannot leave any declared output perpetually out of date. C++ targets
+depend on an imported
+static-library target backed by the declared byproduct. Therefore an unchanged
+Rust library is not rebuilt merely because a C++ target is built.
 
 The checked-in presets use single-configuration Ninja builds with the MSVC x64
 developer environment. A single configuration ensures the Cargo `debug` or
@@ -51,3 +55,7 @@ Canvas renderer, then the Rust Core. Shutdown reverses the last two ownership
 steps: Core handles are destroyed before the main window releases renderer and
 GPU resources; COM is uninitialized last. Failures unwind only resources that
 were successfully initialized.
+
+The hidden Windows smoke path creates the same main/Canvas windows, then forces
+a resize, recreates the target at the current window DPI, discards and rebuilds
+device resources, renders, and shuts down through the normal ownership path.

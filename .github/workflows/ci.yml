@@ -41,4 +41,15 @@ jobs:
           arch: x64
       - run: cmake --preset ${{ matrix.preset }}
       - run: cmake --build --preset ${{ matrix.preset }}
+      - name: Verify unchanged build does not rebuild Rust
+        shell: pwsh
+        run: |
+          $output = cmake --build --preset ${{ matrix.preset }} --verbose 2>&1
+          $output
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          if ($output -match 'Building inkpod-ffi Rust static library') {
+            throw 'unchanged build rebuilt the Rust static library'
+          }
       - run: ctest --preset ${{ matrix.preset }}

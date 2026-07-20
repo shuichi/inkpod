@@ -41,7 +41,7 @@ C++ に画像処理、レイヤー規則、選択演算、履歴、native file f
 循環依存を避け、`inkpod-ffi` は公開 API の薄い変換だけにする。形式 crate から application state へ逆依存せず、必要なら serialization DTO を境界に置く。
 
 - Rust は stable、edition 2024。nightly 固有機能へ依存しない。
-- Windows は MSVC C++20 と Unicode API を使い、Visual Studio 2022 x64 を基準とする。
+- Windows は MSVC C++20 と Unicode API を使い、Visual Studio 2022 または 2026 x64 を検証基準とする。
 - `staticlib` は `inkpod-ffi` だけに設定し、MSVC runtime は Rust MSVC target と整合する `/MD` 系で統一する。
 - manifest で Common Controls v6 と Per-Monitor DPI Awareness v2 を有効にする。
 - build にローカル絶対 path、手動 file copy、開発者個人だけの前提を埋め込まない。

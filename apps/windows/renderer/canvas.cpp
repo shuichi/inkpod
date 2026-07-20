@@ -55,8 +55,7 @@ public:
         d2d_context_->Clear(D2D1::ColorF(0.12F, 0.13F, 0.15F, 1.0F));
         HRESULT result = d2d_context_->EndDraw();
         if (result == D2DERR_RECREATE_TARGET) {
-            target_bitmap_.Reset();
-            result = CreateTargetBitmap();
+            return RecreateAfterDeviceLoss();
         }
         if (FAILED(result)) {
             return result;
@@ -77,6 +76,20 @@ public:
             snapshot_revision_ = revision;
             InvalidateRect(window_, nullptr, FALSE);
         }
+    }
+
+    HRESULT DpiChanged() noexcept {
+        if (!swap_chain_ || !d2d_context_) {
+            return CreateDeviceResources();
+        }
+        d2d_context_->SetTarget(nullptr);
+        target_bitmap_.Reset();
+        return CreateTargetBitmap();
+    }
+
+    HRESULT SimulateDeviceLossForSmokeTest() noexcept {
+        DiscardDeviceResources();
+        return RecreateAfterDeviceLoss();
     }
 
 private:
@@ -306,6 +319,17 @@ LRESULT CALLBACK CanvasWindowProcedure(
         }
         case WM_ERASEBKGND:
             return 1;
+        case WM_DPICHANGED_AFTERPARENT: {
+            const HRESULT result = renderer == nullptr ? E_UNEXPECTED : renderer->DpiChanged();
+            if (FAILED(result)) {
+                PostMessageW(
+                    GetParent(window),
+                    kCanvasRenderFailed,
+                    static_cast<WPARAM>(result),
+                    0);
+            }
+            return SUCCEEDED(result) ? 1 : 0;
+        }
         case kCanvasSetSnapshotRevision:
             if (renderer != nullptr) {
                 renderer->SetSnapshotRevision(
@@ -314,6 +338,11 @@ LRESULT CALLBACK CanvasWindowProcedure(
             return 0;
         case kCanvasRenderOnce:
             return renderer != nullptr && SUCCEEDED(renderer->Render()) ? 1 : 0;
+        case kCanvasSimulateDeviceLoss:
+            return renderer != nullptr
+                    && SUCCEEDED(renderer->SimulateDeviceLossForSmokeTest())
+                ? 1
+                : 0;
         case WM_NCDESTROY:
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
             delete renderer;
@@ -355,4 +384,3 @@ HWND CreateCanvasWindow(HINSTANCE instance, HWND parent) noexcept {
 }
 
 }  // namespace inkpod::renderer
-

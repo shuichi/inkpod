@@ -5,7 +5,6 @@ use std::cell::RefCell;
 use std::mem::{align_of, size_of};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
-use std::slice;
 use std::thread::{self, ThreadId};
 
 pub const INKPOD_ABI_VERSION: u32 = 1;
@@ -44,6 +43,7 @@ pub struct InkpodCommandBatch {
     pub feature_flags: u64,
     pub commands: *const InkpodCommand,
     pub command_count: u64,
+    pub command_stride_bytes: u64,
 }
 
 #[repr(C)]
@@ -85,6 +85,7 @@ pub struct InkpodSnapshotView {
     pub revision: u64,
     pub tiles: *const InkpodSnapshotTile,
     pub tile_count: u64,
+    pub tile_stride_bytes: u64,
 }
 
 pub struct InkpodCore {
@@ -157,6 +158,34 @@ fn is_aligned<T>(pointer: *const T) -> bool {
     (pointer as usize) % align_of::<T>() == 0
 }
 
+// SAFETY: `pointer` must expose a readable u32 size prefix. When that prefix
+// advertises `size_of::<T>()` or more, the caller must provide that full range.
+unsafe fn validate_struct<T>(pointer: *const T, type_name: &str) -> Result<u32, u32> {
+    if pointer.is_null() || !is_aligned(pointer) {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            &format!("{type_name} is null or misaligned"),
+        ));
+    }
+
+    // SAFETY: Exported-function contracts require every public structure
+    // pointer to expose at least its readable u32 size prefix. Reading only the
+    // prefix avoids creating a full T reference before its size is validated.
+    let struct_size = unsafe { pointer.cast::<u32>().read() };
+    if struct_size < size_of::<T>() as u32 {
+        return Err(fail(
+            INKPOD_STATUS_INCOMPATIBLE_ABI,
+            &format!("{type_name}.struct_size is too small"),
+        ));
+    }
+    Ok(struct_size)
+}
+
+fn assert_snapshot_thread_contract() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<InkpodSnapshot>();
+}
+
 fn validate_core_thread(core: &InkpodCore) -> u32 {
     if core.owner_thread == thread::current().id() {
         INKPOD_STATUS_OK
@@ -176,8 +205,9 @@ pub extern "C" fn inkpod_abi_version() -> u32 {
 /// Creates a single-writer core handle.
 ///
 /// # Safety
-/// `config` must point to a readable `InkpodCoreConfig`, and `out_core` must
-/// point to writable storage for one handle pointer.
+/// `config` must expose a readable size prefix and the byte range it advertises.
+/// `out_core` must point to writable storage for one non-overlapping handle
+/// pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn inkpod_core_create(
     config: *const InkpodCoreConfig,
@@ -194,20 +224,13 @@ pub unsafe extern "C" fn inkpod_core_create(
         // SAFETY: The caller contract requires writable storage at out_core.
         unsafe { out_core.write(ptr::null_mut()) };
 
-        if config.is_null() || !is_aligned(config) {
-            return fail(
-                INKPOD_STATUS_INVALID_ARGUMENT,
-                "config is null or misaligned",
-            );
+        // SAFETY: The exported API requires a readable public-structure prefix.
+        if let Err(status) = unsafe { validate_struct(config, "InkpodCoreConfig") } {
+            return status;
         }
-        // SAFETY: The pointer was checked for null/alignment and is readable by contract.
+        // SAFETY: The size prefix was validated and the caller contract makes
+        // the complete configuration readable for this call.
         let config = unsafe { &*config };
-        if config.struct_size < size_of::<InkpodCoreConfig>() as u32 {
-            return fail(
-                INKPOD_STATUS_INCOMPATIBLE_ABI,
-                "InkpodCoreConfig.struct_size is too small",
-            );
-        }
         if config.abi_version != INKPOD_ABI_VERSION {
             return fail(
                 INKPOD_STATUS_INCOMPATIBLE_ABI,
@@ -273,8 +296,8 @@ pub unsafe extern "C" fn inkpod_core_destroy(core: *mut *mut InkpodCore) -> u32 
 /// Dispatches a validated command batch on the creating thread.
 ///
 /// # Safety
-/// All pointers must follow the sizes, lifetimes, and ownership rules declared
-/// in `include/inkpod/core_ffi.h`.
+/// All pointers must follow the non-overlapping sizes, strides, lifetimes, and
+/// ownership rules declared in `include/inkpod/core_ffi.h`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn inkpod_core_dispatch_batch(
     core: *mut InkpodCore,
@@ -286,34 +309,24 @@ pub unsafe extern "C" fn inkpod_core_dispatch_batch(
         if core.is_null() || !is_aligned(core) {
             return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
         }
-        if batch.is_null() || !is_aligned(batch) {
-            return fail(
-                INKPOD_STATUS_INVALID_ARGUMENT,
-                "batch is null or misaligned",
-            );
+        // SAFETY: The exported API requires readable/writable structure prefixes.
+        if let Err(status) = unsafe { validate_struct(batch, "InkpodCommandBatch") } {
+            return status;
         }
-        if result.is_null() || !is_aligned(result) {
-            return fail(
-                INKPOD_STATUS_INVALID_ARGUMENT,
-                "result is null or misaligned",
-            );
+        // SAFETY: The result prefix is readable before the validated output is written.
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
         }
 
-        // SAFETY: Valid live objects and output storage are required by contract.
+        // SAFETY: Complete structures were size-checked, and valid live,
+        // non-overlapping objects and output storage are required by contract.
         let core = unsafe { &mut *core };
         let batch = unsafe { &*batch };
         let result = unsafe { &mut *result };
         let thread_status = validate_core_thread(core);
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
-        }
-        if batch.struct_size < size_of::<InkpodCommandBatch>() as u32
-            || result.struct_size < size_of::<InkpodDispatchResult>() as u32
-        {
-            return fail(
-                INKPOD_STATUS_INCOMPATIBLE_ABI,
-                "batch or result structure is too small",
-            );
         }
         if batch.reserved != 0 || batch.feature_flags != INKPOD_FEATURE_NONE {
             return fail(
@@ -327,10 +340,10 @@ pub unsafe extern "C" fn inkpod_core_dispatch_batch(
                 "batch command_count exceeds the bounded M0 limit",
             );
         }
-        if batch.command_count != 0 && (batch.commands.is_null() || !is_aligned(batch.commands)) {
+        if batch.commands.is_null() && batch.command_count != 0 {
             return fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
-                "commands is null or misaligned for a non-empty batch",
+                "commands is null for a non-empty batch",
             );
         }
 
@@ -343,32 +356,62 @@ pub unsafe extern "C" fn inkpod_core_dispatch_batch(
                 );
             }
         };
-        let byte_count = match command_count.checked_mul(size_of::<InkpodCommand>()) {
-            Some(bytes) if bytes <= isize::MAX as usize => bytes,
+        let command_stride = match usize::try_from(batch.command_stride_bytes) {
+            Ok(stride)
+                if stride >= size_of::<InkpodCommand>()
+                    && stride % align_of::<InkpodCommand>() == 0 =>
+            {
+                stride
+            }
             _ => {
                 return fail(
                     INKPOD_STATUS_INVALID_ARGUMENT,
-                    "batch command storage size overflows",
+                    "command_stride_bytes is too small, misaligned, or not representable",
                 );
             }
         };
-        let _ = byte_count;
+        if !batch.commands.is_null() && !is_aligned(batch.commands) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "commands is misaligned");
+        }
+        let command_storage_bytes = command_count
+            .saturating_sub(1)
+            .checked_mul(command_stride)
+            .and_then(|last_offset| last_offset.checked_add(size_of::<InkpodCommand>()));
+        if command_storage_bytes.is_none_or(|bytes| bytes > isize::MAX as usize) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch command storage size overflows",
+            );
+        }
 
-        let commands = if command_count == 0 {
-            &[]
-        } else {
-            // SAFETY: Count is bounded, byte size is checked, and the caller promises
-            // a readable array for the duration of this call.
-            unsafe { slice::from_raw_parts(batch.commands, command_count) }
-        };
         let mut domain_commands = Vec::with_capacity(command_count);
-        for command in commands {
-            if command.struct_size < size_of::<InkpodCommand>() as u32 {
+        for index in 0..command_count {
+            let offset = index * command_stride;
+            // SAFETY: The checked count/stride range fits isize, and the caller
+            // promises readable command storage for that complete range.
+            let command_pointer = unsafe {
+                batch
+                    .commands
+                    .cast::<u8>()
+                    .add(offset)
+                    .cast::<InkpodCommand>()
+            };
+            // SAFETY: The containing range and element alignment were checked,
+            // and the caller promises readable records for the complete span.
+            let command_struct_size =
+                match unsafe { validate_struct(command_pointer, "InkpodCommand") } {
+                    Ok(struct_size) => struct_size,
+                    Err(status) => return status,
+                };
+            if u64::from(command_struct_size) > batch.command_stride_bytes {
                 return fail(
                     INKPOD_STATUS_INCOMPATIBLE_ABI,
-                    "InkpodCommand.struct_size is too small",
+                    "InkpodCommand.struct_size exceeds command_stride_bytes",
                 );
             }
+            // SAFETY: The element size, alignment, and containing storage were
+            // validated before constructing the known ABI prefix reference.
+            let command = unsafe { &*command_pointer };
             if command.flags != 0 {
                 return fail(
                     INKPOD_STATUS_UNSUPPORTED,
@@ -395,8 +438,8 @@ pub unsafe extern "C" fn inkpod_core_dispatch_batch(
 /// Builds one immutable snapshot owned by Rust.
 ///
 /// # Safety
-/// `core` and `options` must be readable live objects and `out_snapshot` must
-/// point to writable handle storage.
+/// `core` must be live, `options` must expose its advertised readable byte
+/// range, and `out_snapshot` must point to non-overlapping handle storage.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn inkpod_core_build_snapshot(
     core: *mut InkpodCore,
@@ -416,11 +459,9 @@ pub unsafe extern "C" fn inkpod_core_build_snapshot(
         if core.is_null() || !is_aligned(core) {
             return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
         }
-        if options.is_null() || !is_aligned(options) {
-            return fail(
-                INKPOD_STATUS_INVALID_ARGUMENT,
-                "snapshot options are null or misaligned",
-            );
+        // SAFETY: The exported API requires a readable public-structure prefix.
+        if let Err(status) = unsafe { validate_struct(options, "InkpodSnapshotOptions") } {
+            return status;
         }
 
         // SAFETY: Live/readable objects are required by the caller contract.
@@ -429,12 +470,6 @@ pub unsafe extern "C" fn inkpod_core_build_snapshot(
         let thread_status = validate_core_thread(core);
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
-        }
-        if options.struct_size < size_of::<InkpodSnapshotOptions>() as u32 {
-            return fail(
-                INKPOD_STATUS_INCOMPATIBLE_ABI,
-                "InkpodSnapshotOptions.struct_size is too small",
-            );
         }
         if options.reserved != 0 || options.feature_flags != INKPOD_FEATURE_NONE {
             return fail(
@@ -455,8 +490,8 @@ pub unsafe extern "C" fn inkpod_core_build_snapshot(
 /// Copies the immutable, batched view descriptor for a live snapshot.
 ///
 /// # Safety
-/// `snapshot` must be live and readable; `out_view` must be writable and have
-/// its `struct_size` initialized by the caller.
+/// `snapshot` must be live and externally synchronized; `out_view` must expose
+/// its advertised writable byte range without overlapping the snapshot.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn inkpod_snapshot_get_view(
     snapshot: *const InkpodSnapshot,
@@ -470,27 +505,22 @@ pub unsafe extern "C" fn inkpod_snapshot_get_view(
                 "snapshot is null or misaligned",
             );
         }
-        if out_view.is_null() || !is_aligned(out_view) {
-            return fail(
-                INKPOD_STATUS_INVALID_ARGUMENT,
-                "out_view is null or misaligned",
-            );
+        // SAFETY: The output prefix is readable before the validated view is written.
+        if let Err(status) = unsafe { validate_struct(out_view.cast_const(), "InkpodSnapshotView") }
+        {
+            return status;
         }
-        // SAFETY: Live snapshot and writable view are required by contract.
+        // SAFETY: A live snapshot and complete, writable, non-overlapping view
+        // are required by contract; the view size was checked above.
         let snapshot = unsafe { &*snapshot };
         let out_view = unsafe { &mut *out_view };
-        if out_view.struct_size < size_of::<InkpodSnapshotView>() as u32 {
-            return fail(
-                INKPOD_STATUS_INCOMPATIBLE_ABI,
-                "InkpodSnapshotView.struct_size is too small",
-            );
-        }
 
         out_view.abi_version = INKPOD_ABI_VERSION;
         out_view.feature_flags = INKPOD_FEATURE_NONE;
         out_view.revision = snapshot.snapshot.revision();
         out_view.tiles = ptr::null();
         out_view.tile_count = snapshot.snapshot.tile_count() as u64;
+        out_view.tile_stride_bytes = size_of::<InkpodSnapshotTile>() as u64;
         INKPOD_STATUS_OK
     })
 }
@@ -505,6 +535,7 @@ pub unsafe extern "C" fn inkpod_snapshot_get_view(
 pub unsafe extern "C" fn inkpod_snapshot_release(snapshot: *mut *mut InkpodSnapshot) -> u32 {
     ffi_boundary(|| {
         clear_last_error();
+        assert_snapshot_thread_contract();
         if snapshot.is_null() || !is_aligned(snapshot) {
             return fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
@@ -571,6 +602,8 @@ pub unsafe extern "C" fn inkpod_error_message_copy(
                 "out_written_bytes is null or misaligned",
             );
         }
+        // SAFETY: Writable output storage is required by the caller contract.
+        unsafe { out_written_bytes.write(0) };
         let capacity = match usize::try_from(buffer_capacity) {
             Ok(capacity) => capacity,
             Err(_) => return INKPOD_STATUS_BUFFER_TOO_SMALL,
@@ -638,6 +671,7 @@ mod tests {
             revision: u64::MAX,
             tiles: ptr::null(),
             tile_count: u64::MAX,
+            tile_stride_bytes: 0,
         };
         // SAFETY: Snapshot and output view are live for this call.
         assert_eq!(
@@ -648,6 +682,10 @@ mod tests {
         assert_eq!(view.revision, 0);
         assert!(view.tiles.is_null());
         assert_eq!(view.tile_count, 0);
+        assert_eq!(
+            view.tile_stride_bytes,
+            size_of::<InkpodSnapshotTile>() as u64
+        );
 
         // SAFETY: Owner variables contain live handles, then null after first calls.
         assert_eq!(
@@ -681,6 +719,7 @@ mod tests {
             feature_flags: 0,
             commands: &command,
             command_count: 1,
+            command_stride_bytes: size_of::<InkpodCommand>() as u64,
         };
         let mut result = InkpodDispatchResult {
             struct_size: size_of::<InkpodDispatchResult>() as u32,
@@ -695,6 +734,52 @@ mod tests {
         );
         assert_eq!(result.revision, 0);
         assert_eq!(result.accepted_command_count, 1);
+
+        #[repr(C)]
+        struct ExtendedCommand {
+            command: InkpodCommand,
+            extension: u64,
+        }
+        let extended_commands = [
+            ExtendedCommand {
+                command: InkpodCommand {
+                    struct_size: size_of::<ExtendedCommand>() as u32,
+                    kind: INKPOD_COMMAND_NO_OP,
+                    flags: 0,
+                },
+                extension: 1,
+            },
+            ExtendedCommand {
+                command: InkpodCommand {
+                    struct_size: size_of::<ExtendedCommand>() as u32,
+                    kind: INKPOD_COMMAND_NO_OP,
+                    flags: 0,
+                },
+                extension: 2,
+            },
+        ];
+        let extended_batch = InkpodCommandBatch {
+            commands: &extended_commands[0].command,
+            command_count: extended_commands.len() as u64,
+            command_stride_bytes: size_of::<ExtendedCommand>() as u64,
+            ..batch
+        };
+        // SAFETY: The explicit stride describes both extended records.
+        assert_eq!(
+            unsafe { inkpod_core_dispatch_batch(core, &extended_batch, &mut result) },
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(result.accepted_command_count, 2);
+
+        let invalid_stride_batch = InkpodCommandBatch {
+            command_stride_bytes: (size_of::<InkpodCommand>() - 1) as u64,
+            ..batch
+        };
+        // SAFETY: Storage is valid; the record stride is intentionally short.
+        assert_eq!(
+            unsafe { inkpod_core_dispatch_batch(core, &invalid_stride_batch, &mut result) },
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
 
         let invalid_command = InkpodCommand {
             kind: 99,
@@ -735,6 +820,11 @@ mod tests {
 
     #[test]
     fn abi_001_rejects_null_and_short_structures() {
+        #[repr(C, align(8))]
+        struct StructSizePrefix {
+            struct_size: u32,
+        }
+
         let mut core = ptr::null_mut();
         // SAFETY: Null input is intentionally tested; output is writable.
         assert_eq!(
@@ -743,15 +833,114 @@ mod tests {
         );
         assert!(core.is_null());
 
-        let short = InkpodCoreConfig {
-            struct_size: 1,
-            ..config()
-        };
-        // SAFETY: short is readable and output is writable.
+        let short = StructSizePrefix { struct_size: 4 };
+        // SAFETY: The deliberately short allocation contains the required size
+        // prefix and is sufficiently aligned; no complete config is advertised.
         assert_eq!(
-            unsafe { inkpod_core_create(&short, &mut core) },
+            unsafe { inkpod_core_create((&raw const short).cast::<InkpodCoreConfig>(), &mut core) },
             INKPOD_STATUS_INCOMPATIBLE_ABI
         );
         assert!(core.is_null());
+
+        // SAFETY: All pointers reference initialized local storage.
+        assert_eq!(
+            unsafe { inkpod_core_create(&config(), &mut core) },
+            INKPOD_STATUS_OK
+        );
+        let mut result = InkpodDispatchResult {
+            struct_size: size_of::<InkpodDispatchResult>() as u32,
+            reserved: 0,
+            revision: 0,
+            accepted_command_count: 0,
+        };
+        // SAFETY: The short batch exposes only its aligned size prefix.
+        assert_eq!(
+            unsafe {
+                inkpod_core_dispatch_batch(
+                    core,
+                    (&raw const short).cast::<InkpodCommandBatch>(),
+                    &mut result,
+                )
+            },
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+
+        let empty_batch = InkpodCommandBatch {
+            struct_size: size_of::<InkpodCommandBatch>() as u32,
+            reserved: 0,
+            feature_flags: 0,
+            commands: ptr::null(),
+            command_count: 0,
+            command_stride_bytes: size_of::<InkpodCommand>() as u64,
+        };
+        let mut short_output = StructSizePrefix { struct_size: 4 };
+        // SAFETY: The short result exposes only its writable size prefix.
+        assert_eq!(
+            unsafe {
+                inkpod_core_dispatch_batch(
+                    core,
+                    &empty_batch,
+                    (&raw mut short_output).cast::<InkpodDispatchResult>(),
+                )
+            },
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+
+        let mut snapshot = ptr::null_mut();
+        // SAFETY: The short options expose only their aligned size prefix.
+        assert_eq!(
+            unsafe {
+                inkpod_core_build_snapshot(
+                    core,
+                    (&raw const short).cast::<InkpodSnapshotOptions>(),
+                    &mut snapshot,
+                )
+            },
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert!(snapshot.is_null());
+
+        let options = InkpodSnapshotOptions {
+            struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+            reserved: 0,
+            feature_flags: 0,
+        };
+        // SAFETY: Inputs and output reference initialized local storage.
+        assert_eq!(
+            unsafe { inkpod_core_build_snapshot(core, &options, &mut snapshot) },
+            INKPOD_STATUS_OK
+        );
+        // SAFETY: The short view exposes only its writable size prefix.
+        assert_eq!(
+            unsafe {
+                inkpod_snapshot_get_view(
+                    snapshot,
+                    (&raw mut short_output).cast::<InkpodSnapshotView>(),
+                )
+            },
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+
+        // SAFETY: Owner variables contain live handles.
+        assert_eq!(
+            unsafe { inkpod_snapshot_release(&mut snapshot) },
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(unsafe { inkpod_core_destroy(&mut core) }, INKPOD_STATUS_OK);
+    }
+
+    #[test]
+    fn abi_001_contains_panics_and_preserves_a_diagnostic() {
+        clear_last_error();
+        let status = ffi_boundary(|| panic!("intentional ABI containment test"));
+        assert_eq!(status, INKPOD_STATUS_PANIC);
+
+        let mut required = 0;
+        // SAFETY: required is writable local storage.
+        assert_eq!(
+            unsafe { inkpod_error_message_size(&mut required) },
+            INKPOD_STATUS_OK
+        );
+        assert!(required > 1);
     }
 }

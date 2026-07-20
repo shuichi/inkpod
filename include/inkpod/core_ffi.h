@@ -47,6 +47,7 @@ typedef struct InkpodCommandBatch {
     uint64_t feature_flags;
     const InkpodCommand* commands;
     uint64_t command_count;
+    uint64_t command_stride_bytes;
 } InkpodCommandBatch;
 
 typedef struct InkpodDispatchResult {
@@ -84,38 +85,50 @@ typedef struct InkpodSnapshotView {
     uint64_t revision;
     const InkpodSnapshotTile* tiles;
     uint64_t tile_count;
+    uint64_t tile_stride_bytes;
 } InkpodSnapshotView;
 
 uint32_t inkpod_abi_version(void);
 
+/* On success, Rust allocates *out_core and the calling thread becomes its
+ * single-writer owner. config and out_core must not overlap. */
 InkpodStatus inkpod_core_create(
     const InkpodCoreConfig* config,
     InkpodCore** out_core);
 
-/* Must run on the creating thread. Null is a successful no-op. */
+/* Must run on the creating thread. *core == NULL is a successful no-op. The
+ * function releases Rust ownership and sets *core to NULL. */
 InkpodStatus inkpod_core_destroy(InkpodCore** core);
 
-/* Core mutation is single-writer and must run on the creating thread. */
+/* Core mutation is single-writer and must run on the creating thread. Input,
+ * output, and Core storage must not overlap. command_stride_bytes is required
+ * even for an empty batch and must be at least sizeof(InkpodCommand). */
 InkpodStatus inkpod_core_dispatch_batch(
     InkpodCore* core,
     const InkpodCommandBatch* batch,
     InkpodDispatchResult* result);
 
-/* The returned snapshot is immutable until released. */
+/* Must run on the Core's creating thread. On success, Rust allocates an
+ * immutable snapshot in *out_snapshot. Inputs and output must not overlap. */
 InkpodStatus inkpod_core_build_snapshot(
     InkpodCore* core,
     const InkpodSnapshotOptions* options,
     InkpodSnapshot** out_snapshot);
 
-/* View pointers remain valid only while snapshot remains live. */
+/* May run on any thread. View pointers remain valid only while snapshot remains
+ * live and no concurrent release occurs. Iterate tiles using tile_stride_bytes;
+ * pixel pointers are borrowed from the same snapshot. */
 InkpodStatus inkpod_snapshot_get_view(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotView* out_view);
 
-/* May run on a renderer thread. Null is a successful no-op. */
+/* May run on any externally synchronized renderer thread. *snapshot == NULL is
+ * a successful no-op. The function releases Rust ownership and sets the owner
+ * variable to NULL; copied aliases become invalid. */
 InkpodStatus inkpod_snapshot_release(InkpodSnapshot** snapshot);
 
-/* Error state is per-thread. Required size includes the trailing NUL. */
+/* Error state is per-thread. Required size includes the trailing NUL;
+ * out_written_bytes excludes it and is set to zero on copy failure. */
 InkpodStatus inkpod_error_message_size(uint64_t* out_required_bytes);
 InkpodStatus inkpod_error_message_copy(
     uint8_t* buffer,
