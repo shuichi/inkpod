@@ -22,6 +22,8 @@ typedef uint32_t InkpodStatus;
 #define INKPOD_STATUS_IO_ERROR UINT32_C(7)
 #define INKPOD_STATUS_INVALID_STATE UINT32_C(8)
 #define INKPOD_STATUS_NO_DOCUMENT UINT32_C(9)
+#define INKPOD_STATUS_CANCELLED UINT32_C(10)
+#define INKPOD_STATUS_FILL_OVERFLOW UINT32_C(11)
 
 typedef uint32_t InkpodCommandKind;
 #define INKPOD_COMMAND_NO_OP UINT32_C(0)
@@ -49,6 +51,7 @@ typedef uint32_t InkpodCoordinateSpace;
 #define INKPOD_DOCUMENT_FLAG_DIRTY (UINT32_C(1) << 0)
 #define INKPOD_DOCUMENT_FLAG_CAN_UNDO (UINT32_C(1) << 1)
 #define INKPOD_DOCUMENT_FLAG_CAN_REDO (UINT32_C(1) << 2)
+#define INKPOD_DOCUMENT_FLAG_RECOVERED (UINT32_C(1) << 3)
 
 typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_VIEW_PAN_BY UINT32_C(1)
@@ -56,6 +59,37 @@ typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_VIEW_FIT UINT32_C(3)
 #define INKPOD_VIEW_ONE_TO_ONE UINT32_C(4)
 #define INKPOD_VIEW_VIEWPORT_RESIZED UINT32_C(5)
+
+typedef uint32_t InkpodColorDepth;
+#define INKPOD_COLOR_DEPTH_8 UINT32_C(8)
+#define INKPOD_COLOR_DEPTH_16 UINT32_C(16)
+
+typedef uint32_t InkpodFillOperation;
+#define INKPOD_FILL_SEED UINT32_C(1)
+#define INKPOD_FILL_CLOSED_REGION UINT32_C(2)
+#define INKPOD_FILL_EXTENSION UINT32_C(3)
+#define INKPOD_FILL_FLAG_DETACHED_REGIONS (UINT64_C(1) << 0)
+#define INKPOD_FILL_FLAG_OVERFLOW_ABORT (UINT64_C(1) << 1)
+#define INKPOD_FILL_FLAG_TRANSPARENT_ONLY (UINT64_C(1) << 2)
+#define INKPOD_FILL_FLAG_SELECTION_PRESENT (UINT64_C(1) << 3)
+
+typedef uint32_t InkpodInclusionMode;
+#define INKPOD_INCLUSION_NONE UINT32_C(0)
+#define INKPOD_INCLUSION_SPECIFIED UINT32_C(1)
+#define INKPOD_INCLUSION_EXCEPT_SPECIFIED UINT32_C(2)
+
+#define INKPOD_FILL_RESULT_FLAG_LEAK_CANDIDATE (UINT32_C(1) << 0)
+
+typedef uint32_t InkpodEyedropperSource;
+#define INKPOD_EYEDROPPER_TOPMOST_NONTRANSPARENT UINT32_C(1)
+#define INKPOD_EYEDROPPER_SELECTED_PLANE UINT32_C(2)
+#define INKPOD_EYEDROPPER_COMPOSITE UINT32_C(3)
+#define INKPOD_EYEDROPPER_LIGHT_TABLE_TOPMOST UINT32_C(4)
+
+typedef uint32_t InkpodColorCheckMode;
+#define INKPOD_COLOR_CHECK_OFF UINT32_C(0)
+#define INKPOD_COLOR_CHECK_LEGACY_WHITE UINT32_C(1)
+#define INKPOD_COLOR_CHECK_NATIVE_ALPHA UINT32_C(2)
 
 typedef struct InkpodCore InkpodCore;
 typedef struct InkpodSnapshot InkpodSnapshot;
@@ -177,6 +211,42 @@ typedef struct InkpodViewInput {
     double value4;
 } InkpodViewInput;
 
+typedef struct InkpodColorValue {
+    uint32_t struct_size;
+    InkpodColorDepth depth;
+    uint16_t red;
+    uint16_t green;
+    uint16_t blue;
+    uint16_t alpha;
+} InkpodColorValue;
+
+typedef struct InkpodFillInput {
+    uint32_t struct_size;
+    InkpodFillOperation operation;
+    uint64_t flags;
+    uint32_t seed_x;
+    uint32_t seed_y;
+    InkpodColorValue color;
+    uint16_t tolerance; /* normalized 16-bit maximum per-channel difference */
+    uint16_t gap_close;
+    InkpodInclusionMode inclusion_mode;
+    InkpodFrameRect selection;
+    const InkpodColorValue* inclusion_colors;
+    uint64_t inclusion_color_count;
+    uint64_t inclusion_color_stride_bytes; /* may be zero when count is zero */
+    uint32_t extension_distance;
+    uint32_t reserved;
+} InkpodFillInput;
+
+typedef struct InkpodFillResult {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t revision;
+    uint64_t changed_pixel_count;
+    uint32_t leak_x;
+    uint32_t leak_y;
+} InkpodFillResult;
+
 typedef struct InkpodSnapshotOptions {
     uint32_t struct_size;
     uint32_t reserved;
@@ -239,7 +309,7 @@ InkpodStatus inkpod_core_dispatch_batch(
     const InkpodCommandBatch* batch,
     InkpodDispatchResult* result);
 
-/* Creates a sparse two-plane M1 CellDocument. IDs are stable and nonzero. */
+/* Creates a sparse two-plane coloring CellDocument. IDs are stable/nonzero. */
 InkpodStatus inkpod_core_new_cell(
     InkpodCore* core,
     const InkpodCellCreateOptions* options,
@@ -253,6 +323,25 @@ InkpodStatus inkpod_core_get_document_info(
 InkpodStatus inkpod_core_set_active_plane(
     InkpodCore* core,
     InkpodPlaneKind plane);
+
+/* Fill planning is bounded and all-or-nothing. Overflow reports one candidate
+ * in result and does not change pixels, revision, dirty, or history. */
+InkpodStatus inkpod_core_apply_fill(
+    InkpodCore* core,
+    const InkpodFillInput* input,
+    InkpodFillResult* result);
+
+InkpodStatus inkpod_core_eyedropper(
+    InkpodCore* core,
+    InkpodEyedropperSource source,
+    uint32_t x,
+    uint32_t y,
+    InkpodColorValue* out_color);
+
+/* Temporary view state only; it never edits document pixels/history. */
+InkpodStatus inkpod_core_set_color_check(
+    InkpodCore* core,
+    InkpodColorCheckMode mode);
 
 /* One call contains every sample from pointer down through pointer up. Samples
  * are borrowed only for this call and iterated with sample_stride_bytes. */
@@ -291,6 +380,19 @@ InkpodStatus inkpod_core_save(
     uint64_t path_bytes,
     InkpodDocumentInfo* out_info);
 InkpodStatus inkpod_core_open(
+    InkpodCore* core,
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    InkpodDocumentInfo* out_info);
+/* Autosave does not advance the normal savepoint/path. Recovery opens as a
+ * dirty, pathless document and cannot overwrite the former normal file unless
+ * the caller explicitly supplies that path to a later normal save. */
+InkpodStatus inkpod_core_autosave(
+    InkpodCore* core,
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    InkpodDocumentInfo* out_info);
+InkpodStatus inkpod_core_open_recovery(
     InkpodCore* core,
     const uint8_t* path_utf8,
     uint64_t path_bytes,

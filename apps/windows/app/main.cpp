@@ -26,16 +26,23 @@ int InkpodRunAbiSmoke();
 
 namespace {
 
+constexpr std::uint32_t kInteractionFill = 1001U;
+constexpr std::uint32_t kInteractionEyedropper = 1002U;
+constexpr UINT_PTR kAutosaveTimer = 1U;
+constexpr UINT kAutosaveIntervalMilliseconds = 60U * 1000U;
+
 struct AppState {
     HINSTANCE instance{};
     HWND window{};
     HWND canvas{};
     std::unique_ptr<inkpod::app::CoreEngine> engine;
-    InkpodPaintTool tool{INKPOD_TOOL_PENCIL};
+    std::uint32_t tool{INKPOD_TOOL_PENCIL};
     InkpodPlaneKind plane{INKPOD_PLANE_MAIN_LINE};
     std::uint32_t color_rgba{UINT32_C(0xdc281eff)};
     float diameter{8.0F};
     std::wstring current_path;
+    std::wstring recovery_path;
+    InkpodColorCheckMode color_check_mode{INKPOD_COLOR_CHECK_OFF};
     bool smoke_test{};
 };
 
@@ -293,6 +300,10 @@ void UpdateMenuState(AppState& state) noexcept {
             | (has_document && !state.current_path.empty() ? MF_ENABLED : MF_GRAYED));
     EnableMenuItem(
         menu,
+        IDM_FILE_AUTOSAVE_NOW,
+        MF_BYCOMMAND | (has_document ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(
+        menu,
         IDM_EDIT_UNDO,
         MF_BYCOMMAND
             | (has_document && (info.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) != 0U
@@ -306,21 +317,39 @@ void UpdateMenuState(AppState& state) noexcept {
                    ? MF_ENABLED
                    : MF_GRAYED));
     for (const UINT command : {
-             IDM_TOOL_PENCIL, IDM_TOOL_BRUSH, IDM_TOOL_ERASER,
+             IDM_TOOL_PENCIL, IDM_TOOL_BRUSH, IDM_TOOL_ERASER, IDM_TOOL_FILL,
+             IDM_TOOL_EYEDROPPER,
              IDM_PLANE_MAIN_LINE, IDM_PLANE_COLOR}) {
         CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
     }
     const UINT tool_command = state.tool == INKPOD_TOOL_PENCIL
         ? IDM_TOOL_PENCIL
-        : (state.tool == INKPOD_TOOL_BRUSH ? IDM_TOOL_BRUSH : IDM_TOOL_ERASER);
+        : (state.tool == INKPOD_TOOL_BRUSH
+                  ? IDM_TOOL_BRUSH
+                  : (state.tool == INKPOD_TOOL_ERASER
+                            ? IDM_TOOL_ERASER
+                            : (state.tool == kInteractionFill ? IDM_TOOL_FILL
+                                                               : IDM_TOOL_EYEDROPPER)));
     CheckMenuItem(menu, tool_command, MF_BYCOMMAND | MF_CHECKED);
     CheckMenuItem(
         menu,
         state.plane == INKPOD_PLANE_MAIN_LINE ? IDM_PLANE_MAIN_LINE : IDM_PLANE_COLOR,
         MF_BYCOMMAND | MF_CHECKED);
+    for (const UINT command : {
+             IDM_COLOR_CHECK_OFF, IDM_COLOR_CHECK_LEGACY, IDM_COLOR_CHECK_NATIVE}) {
+        CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
+    }
+    const UINT check_command = state.color_check_mode == INKPOD_COLOR_CHECK_LEGACY_WHITE
+        ? IDM_COLOR_CHECK_LEGACY
+        : (state.color_check_mode == INKPOD_COLOR_CHECK_NATIVE_ALPHA
+                  ? IDM_COLOR_CHECK_NATIVE
+                  : IDM_COLOR_CHECK_OFF);
+    CheckMenuItem(menu, check_command, MF_BYCOMMAND | MF_CHECKED);
 
     std::array<wchar_t, 1024> title{};
-    const wchar_t* name = state.current_path.empty() ? L"無題" : state.current_path.c_str();
+    const wchar_t* name = state.current_path.empty()
+        ? ((info.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U ? L"Recovery" : L"無題")
+        : state.current_path.c_str();
     _snwprintf_s(
         title.data(),
         title.size(),
@@ -398,6 +427,8 @@ InkpodStatus CreateDefaultCell(AppState& state) noexcept {
         return status;
     }
     state.current_path.clear();
+    state.recovery_path.clear();
+    state.color_check_mode = INKPOD_COLOR_CHECK_OFF;
     state.plane = INKPOD_PLANE_MAIN_LINE;
     const InkpodPlaneKind plane = state.plane;
     const InkpodStatus plane_status = state.engine->Invoke(
@@ -456,6 +487,7 @@ InkpodStatus SaveToPath(AppState& state, const std::wstring& path) noexcept {
     if (status == INKPOD_STATUS_OK) {
         try {
             state.current_path = path;
+            state.recovery_path = path + L".recovery.inkpod";
         } catch (const std::bad_alloc&) {
             return INKPOD_STATUS_INVALID_STATE;
         }
@@ -494,10 +526,12 @@ InkpodStatus OpenFromPath(AppState& state, const std::wstring& path) noexcept {
     }
     try {
         state.current_path = path;
+        state.recovery_path = path + L".recovery.inkpod";
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     state.plane = INKPOD_PLANE_MAIN_LINE;
+    state.color_check_mode = INKPOD_COLOR_CHECK_OFF;
     const InkpodPlaneKind plane = state.plane;
     const InkpodStatus plane_status = state.engine->Invoke(
         [plane](InkpodCore* core) { return inkpod_core_set_active_plane(core, plane); },
@@ -509,6 +543,167 @@ InkpodStatus OpenFromPath(AppState& state, const std::wstring& path) noexcept {
     const InkpodStatus view_status = FitCanvas(state, INKPOD_VIEW_FIT);
     UpdateMenuState(state);
     return view_status;
+}
+
+InkpodStatus OpenRecoveryFromPath(AppState& state, const std::wstring& path) noexcept {
+    std::vector<std::uint8_t> utf8;
+    if (!WidePathToUtf8(path, utf8) || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    const InkpodStatus status = state.engine->Invoke(
+        [utf8](InkpodCore* core) {
+            InkpodDocumentInfo info = EmptyDocumentInfo();
+            return inkpod_core_open_recovery(core, utf8.data(), utf8.size(), &info);
+        },
+        false,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    state.current_path.clear();
+    try {
+        state.recovery_path = path;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    state.plane = INKPOD_PLANE_MAIN_LINE;
+    state.color_check_mode = INKPOD_COLOR_CHECK_OFF;
+    const InkpodStatus plane_status = state.engine->Invoke(
+        [](InkpodCore* core) {
+            return inkpod_core_set_active_plane(core, INKPOD_PLANE_MAIN_LINE);
+        },
+        false,
+        false);
+    if (plane_status != INKPOD_STATUS_OK) {
+        return plane_status;
+    }
+    const InkpodStatus view_status = FitCanvas(state, INKPOD_VIEW_FIT);
+    UpdateMenuState(state);
+    return view_status;
+}
+
+bool RecoveryIsNewer(
+    const std::wstring& normal_path, const std::wstring& recovery_path) noexcept {
+    WIN32_FILE_ATTRIBUTE_DATA recovery{};
+    if (GetFileAttributesExW(
+            recovery_path.c_str(), GetFileExInfoStandard, &recovery) == FALSE) {
+        return false;
+    }
+    WIN32_FILE_ATTRIBUTE_DATA normal{};
+    if (GetFileAttributesExW(normal_path.c_str(), GetFileExInfoStandard, &normal) == FALSE) {
+        return true;
+    }
+    return CompareFileTime(&recovery.ftLastWriteTime, &normal.ftLastWriteTime) > 0;
+}
+
+bool QueueAutosave(AppState& state, const std::wstring& path) noexcept {
+    std::vector<std::uint8_t> utf8;
+    if (state.engine == nullptr || !WidePathToUtf8(path, utf8)) {
+        return false;
+    }
+    return state.engine->Enqueue(
+        [utf8](InkpodCore* core) {
+            InkpodDocumentInfo info = EmptyDocumentInfo();
+            return inkpod_core_autosave(core, utf8.data(), utf8.size(), &info);
+        },
+        false,
+        false);
+}
+
+InkpodStatus ApplyFillAtDevicePoint(AppState& state, float device_x, float device_y) noexcept {
+    InkpodDocumentInfo info{};
+    inkpod::renderer::CanvasDocumentBounds bounds{};
+    if (!QueryDocument(state, info)
+        || SendMessageW(
+               state.canvas,
+               inkpod::renderer::kCanvasGetDocumentBounds,
+               0,
+               reinterpret_cast<LPARAM>(&bounds)) != 1
+        || info.width == 0U || info.height == 0U) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const double zoom = (bounds.right - bounds.left) / static_cast<double>(info.width);
+    if (!std::isfinite(zoom) || zoom <= 0.0) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const double document_x = (static_cast<double>(device_x) - bounds.left) / zoom;
+    const double document_y = (static_cast<double>(device_y) - bounds.top) / zoom;
+    if (!std::isfinite(document_x) || !std::isfinite(document_y) || document_x < 0.0
+        || document_y < 0.0 || document_x >= static_cast<double>(info.width)
+        || document_y >= static_cast<double>(info.height)) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    InkpodFillInput input{};
+    input.struct_size = sizeof(input);
+    input.operation = INKPOD_FILL_SEED;
+    input.flags = INKPOD_FILL_FLAG_OVERFLOW_ABORT;
+    input.seed_x = static_cast<std::uint32_t>(std::floor(document_x));
+    input.seed_y = static_cast<std::uint32_t>(std::floor(document_y));
+    input.color = InkpodColorValue{
+        sizeof(InkpodColorValue),
+        INKPOD_COLOR_DEPTH_8,
+        static_cast<std::uint16_t>((state.color_rgba >> 24) & 0xffU),
+        static_cast<std::uint16_t>((state.color_rgba >> 16) & 0xffU),
+        static_cast<std::uint16_t>((state.color_rgba >> 8) & 0xffU),
+        static_cast<std::uint16_t>(state.color_rgba & 0xffU)};
+    input.inclusion_mode = INKPOD_INCLUSION_NONE;
+    input.inclusion_color_stride_bytes = sizeof(InkpodColorValue);
+    const InkpodStatus status = state.engine == nullptr
+        ? INKPOD_STATUS_INVALID_STATE
+        : state.engine->Invoke(
+              [input](InkpodCore* core) {
+                  InkpodFillResult result{};
+                  result.struct_size = sizeof(result);
+                  return inkpod_core_apply_fill(core, &input, &result);
+              },
+              true,
+              true);
+    if (status == INKPOD_STATUS_OK) {
+        state.plane = INKPOD_PLANE_COLOR;
+    }
+    return status;
+}
+
+InkpodStatus EyedropAtDevicePoint(AppState& state, float device_x, float device_y) noexcept {
+    InkpodDocumentInfo info{};
+    inkpod::renderer::CanvasDocumentBounds bounds{};
+    if (!QueryDocument(state, info)
+        || SendMessageW(
+               state.canvas,
+               inkpod::renderer::kCanvasGetDocumentBounds,
+               0,
+               reinterpret_cast<LPARAM>(&bounds)) != 1
+        || info.width == 0U || info.height == 0U) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const double zoom = (bounds.right - bounds.left) / static_cast<double>(info.width);
+    const double document_x = (static_cast<double>(device_x) - bounds.left) / zoom;
+    const double document_y = (static_cast<double>(device_y) - bounds.top) / zoom;
+    if (!std::isfinite(document_x) || !std::isfinite(document_y) || document_x < 0.0
+        || document_y < 0.0 || document_x >= static_cast<double>(info.width)
+        || document_y >= static_cast<double>(info.height)) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    InkpodColorValue sampled{};
+    sampled.struct_size = sizeof(sampled);
+    const auto x = static_cast<std::uint32_t>(std::floor(document_x));
+    const auto y = static_cast<std::uint32_t>(std::floor(document_y));
+    const InkpodStatus status = state.engine == nullptr
+        ? INKPOD_STATUS_INVALID_STATE
+        : state.engine->Invoke(
+              [x, y, &sampled](InkpodCore* core) {
+                  return inkpod_core_eyedropper(
+                      core, INKPOD_EYEDROPPER_COMPOSITE, x, y, &sampled);
+              },
+              false,
+              false);
+    if (status == INKPOD_STATUS_OK && sampled.depth == INKPOD_COLOR_DEPTH_8) {
+        state.color_rgba = (static_cast<std::uint32_t>(sampled.red) << 24)
+            | (static_cast<std::uint32_t>(sampled.green) << 16)
+            | (static_cast<std::uint32_t>(sampled.blue) << 8)
+            | static_cast<std::uint32_t>(sampled.alpha);
+    }
+    return status;
 }
 
 bool ConfirmDiscard(AppState& state) noexcept {
@@ -820,6 +1015,205 @@ int RunM1Smoke(AppState& state) noexcept {
     return dpi_changed && dpi_transform_stable && device_recovered && rendered ? 0 : 52;
 }
 
+int RunM2Smoke(AppState& state) noexcept {
+    if (state.engine == nullptr) {
+        return 200;
+    }
+    const HMENU menu = GetMenu(state.window);
+    if (menu == nullptr
+        || GetMenuState(menu, IDM_TOOL_FILL, MF_BYCOMMAND) == static_cast<UINT>(-1)
+        || GetMenuState(menu, IDM_TOOL_EYEDROPPER, MF_BYCOMMAND) == static_cast<UINT>(-1)
+        || GetMenuState(menu, IDM_COLOR_CHECK_NATIVE, MF_BYCOMMAND)
+            == static_cast<UINT>(-1)) {
+        return 201;
+    }
+
+    std::array<InkpodStrokeSample, 5> boundary_samples{{
+        {sizeof(InkpodStrokeSample), 0U, 100.0F, 100.0F, 1.0F, 0U},
+        {sizeof(InkpodStrokeSample), 0U, 200.0F, 100.0F, 1.0F, 0U},
+        {sizeof(InkpodStrokeSample), 0U, 200.0F, 200.0F, 1.0F, 0U},
+        {sizeof(InkpodStrokeSample), 0U, 100.0F, 200.0F, 1.0F, 0U},
+        {sizeof(InkpodStrokeSample), 0U, 100.0F, 100.0F, 1.0F, 0U},
+    }};
+    const InkpodStrokeInput boundary{
+        sizeof(InkpodStrokeInput),
+        INKPOD_TOOL_PENCIL,
+        INKPOD_PLANE_MAIN_LINE,
+        INKPOD_COORDINATE_SPACE_DOCUMENT,
+        0U,
+        UINT32_C(0x000000ff),
+        1.0F,
+        boundary_samples.data(),
+        boundary_samples.size(),
+        sizeof(InkpodStrokeSample)};
+    if (state.engine->Invoke(
+            [boundary](InkpodCore* core) {
+                InkpodDispatchResult result{};
+                result.struct_size = sizeof(result);
+                return inkpod_core_apply_stroke(core, &boundary, &result);
+            },
+            true,
+            true) != INKPOD_STATUS_OK) {
+        return 202;
+    }
+    InkpodDocumentInfo before_fill{};
+    inkpod::renderer::CanvasDocumentBounds bounds{};
+    if (!QueryDocument(state, before_fill)
+        || SendMessageW(
+               state.canvas,
+               inkpod::renderer::kCanvasGetDocumentBounds,
+               0,
+               reinterpret_cast<LPARAM>(&bounds)) != 1) {
+        return 203;
+    }
+    const double zoom = (bounds.right - bounds.left) / static_cast<double>(before_fill.width);
+    const int fill_x = static_cast<int>(std::lround(bounds.left + 150.0 * zoom));
+    const int fill_y = static_cast<int>(std::lround(bounds.top + 150.0 * zoom));
+    SendMessageW(state.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    if (SendMessageW(
+            state.canvas,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(fill_x, fill_y)) != 1) {
+        return 204;
+    }
+    SendMessageW(state.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
+    InkpodDocumentInfo after_fill{};
+    if (!QueryDocument(state, after_fill)
+        || after_fill.document_revision != before_fill.document_revision + 1U
+        || after_fill.main_plane_checksum != before_fill.main_plane_checksum
+        || after_fill.color_plane_checksum == before_fill.color_plane_checksum) {
+        return 205;
+    }
+
+    const std::uint32_t fill_color = state.color_rgba;
+    state.color_rgba = UINT32_C(0x010203ff);
+    SendMessageW(state.window, WM_COMMAND, IDM_TOOL_EYEDROPPER, 0);
+    if (SendMessageW(
+            state.canvas,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(fill_x, fill_y)) != 1
+        || state.color_rgba != fill_color) {
+        return 206;
+    }
+    SendMessageW(state.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
+
+    const std::uint64_t revision_before_check = after_fill.document_revision;
+    const std::uint64_t view_before_check = after_fill.view_revision;
+    SendMessageW(state.window, WM_COMMAND, IDM_COLOR_CHECK_NATIVE, 0);
+    InkpodDocumentInfo during_check{};
+    if (!QueryDocument(state, during_check)
+        || during_check.document_revision != revision_before_check
+        || during_check.view_revision <= view_before_check
+        || SendMessageW(state.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
+        return 207;
+    }
+    SendMessageW(state.window, WM_COMMAND, IDM_COLOR_CHECK_OFF, 0);
+
+    std::array<wchar_t, MAX_PATH> temporary_directory{};
+    if (GetTempPathW(
+            static_cast<DWORD>(temporary_directory.size()),
+            temporary_directory.data()) == 0U) {
+        return 208;
+    }
+    const auto suffix = static_cast<unsigned long long>(GetTickCount64());
+    std::array<wchar_t, MAX_PATH> normal_buffer{};
+    std::array<wchar_t, MAX_PATH> recovery_buffer{};
+    _snwprintf_s(
+        normal_buffer.data(),
+        normal_buffer.size(),
+        _TRUNCATE,
+        L"%lsinkpod-m2-normal-%lu-%llu.inkpod",
+        temporary_directory.data(),
+        GetCurrentProcessId(),
+        suffix);
+    _snwprintf_s(
+        recovery_buffer.data(),
+        recovery_buffer.size(),
+        _TRUNCATE,
+        L"%lsinkpod-m2-recovery-%lu-%llu.inkpod",
+        temporary_directory.data(),
+        GetCurrentProcessId(),
+        suffix);
+    const std::wstring normal_path(normal_buffer.data());
+    const std::wstring recovery_path(recovery_buffer.data());
+    if (SaveToPath(state, normal_path) != INKPOD_STATUS_OK) {
+        return 209;
+    }
+    InkpodDocumentInfo normally_saved{};
+    if (!QueryDocument(state, normally_saved)) {
+        return 210;
+    }
+    std::array<InkpodStrokeSample, 1> edit_sample{{
+        {sizeof(InkpodStrokeSample), 0U, 300.0F, 300.0F, 1.0F, 0U},
+    }};
+    const InkpodStrokeInput edit{
+        sizeof(InkpodStrokeInput),
+        INKPOD_TOOL_PENCIL,
+        INKPOD_PLANE_COLOR,
+        INKPOD_COORDINATE_SPACE_DOCUMENT,
+        0U,
+        UINT32_C(0x010203ff),
+        1.0F,
+        edit_sample.data(),
+        edit_sample.size(),
+        sizeof(InkpodStrokeSample)};
+    if (state.engine->Invoke(
+            [edit](InkpodCore* core) {
+                InkpodDispatchResult result{};
+                result.struct_size = sizeof(result);
+                return inkpod_core_apply_stroke(core, &edit, &result);
+            },
+            true,
+            true) != INKPOD_STATUS_OK
+        || !QueueAutosave(state, recovery_path)
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK
+        || GetFileAttributesW(normal_path.c_str()) == INVALID_FILE_ATTRIBUTES
+        || GetFileAttributesW(recovery_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        DeleteFileW(normal_path.c_str());
+        DeleteFileW(recovery_path.c_str());
+        return 211;
+    }
+    InkpodDocumentInfo autosaved{};
+    if (!QueryDocument(state, autosaved)
+        || (autosaved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+        DeleteFileW(normal_path.c_str());
+        DeleteFileW(recovery_path.c_str());
+        return 212;
+    }
+    if (CreateDefaultCell(state) != INKPOD_STATUS_OK
+        || OpenRecoveryFromPath(state, recovery_path) != INKPOD_STATUS_OK) {
+        DeleteFileW(normal_path.c_str());
+        DeleteFileW(recovery_path.c_str());
+        return 213;
+    }
+    InkpodDocumentInfo recovered{};
+    const bool recovery_state = QueryDocument(state, recovered)
+        && (recovered.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U
+        && (recovered.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        && recovered.color_plane_checksum == autosaved.color_plane_checksum
+        && state.current_path.empty();
+    const InkpodStatus revert_status = state.engine->Invoke(
+        [](InkpodCore* core) {
+            InkpodDocumentInfo info = EmptyDocumentInfo();
+            return inkpod_core_revert(core, &info);
+        },
+        false,
+        false);
+    const bool normal_unchanged = OpenFromPath(state, normal_path) == INKPOD_STATUS_OK;
+    InkpodDocumentInfo reopened_normal{};
+    const bool normal_matches = QueryDocument(state, reopened_normal)
+        && reopened_normal.color_plane_checksum == normally_saved.color_plane_checksum
+        && reopened_normal.color_plane_checksum != recovered.color_plane_checksum;
+    DeleteFileW(normal_path.c_str());
+    DeleteFileW(recovery_path.c_str());
+    return recovery_state && revert_status == INKPOD_STATUS_INVALID_STATE && normal_unchanged
+            && normal_matches
+        ? 0
+        : 214;
+}
+
 InkpodStatus InitializeCore(AppState& state) noexcept {
     try {
         state.engine = std::make_unique<inkpod::app::CoreEngine>();
@@ -862,7 +1256,15 @@ LRESULT CALLBACK MainWindowProcedure(
             }
             state->canvas = inkpod::renderer::CreateCanvasWindow(
                 state->instance, window);
-            return state->canvas == nullptr ? -1 : 0;
+            if (state->canvas == nullptr
+                || SetTimer(
+                       window,
+                       kAutosaveTimer,
+                       kAutosaveIntervalMilliseconds,
+                       nullptr) == 0U) {
+                return -1;
+            }
+            return 0;
         case WM_SIZE:
             if (state != nullptr && state->canvas != nullptr) {
                 MoveWindow(
@@ -904,7 +1306,33 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (ConfirmDiscard(*state)) {
                         std::wstring path;
                         if (ChooseInkpodPath(window, false, path)) {
-                            const InkpodStatus status = OpenFromPath(*state, path);
+                            std::wstring recovery;
+                            try {
+                                recovery = path + L".recovery.inkpod";
+                            } catch (const std::bad_alloc&) {
+                                ShowCoreError(*state, window, L"Recovery path の作成");
+                                return 0;
+                            }
+                            InkpodStatus status = INKPOD_STATUS_OK;
+                            if (RecoveryIsNewer(path, recovery)) {
+                                const int choice = MessageBoxW(
+                                    window,
+                                    L"通常保存より新しいRecoveryがあります。\n\n"
+                                    L"はい: Recoveryを開く\nいいえ: Recoveryを破棄\n"
+                                    L"キャンセル: 後で判断して通常保存を開く",
+                                    L"inkpod Recovery",
+                                    MB_YESNOCANCEL | MB_ICONQUESTION);
+                                if (choice == IDYES) {
+                                    status = OpenRecoveryFromPath(*state, recovery);
+                                } else {
+                                    if (choice == IDNO) {
+                                        DeleteFileW(recovery.c_str());
+                                    }
+                                    status = OpenFromPath(*state, path);
+                                }
+                            } else {
+                                status = OpenFromPath(*state, path);
+                            }
                             if (status != INKPOD_STATUS_OK) {
                                 ShowCoreError(*state, window, L"開く");
                             }
@@ -936,6 +1364,32 @@ LRESULT CALLBACK MainWindowProcedure(
                         ShowCoreError(*state, window, L"復帰");
                     }
                     UpdateMenuState(*state);
+                    return 0;
+                }
+                case IDM_FILE_AUTOSAVE_NOW: {
+                    std::wstring path = state->recovery_path;
+                    if (path.empty() && !ChooseInkpodPath(window, true, path)) {
+                        return 0;
+                    }
+                    if (!QueueAutosave(*state, path)) {
+                        ShowCoreError(*state, window, L"Recovery保存の予約");
+                    } else {
+                        try {
+                            state->recovery_path = path;
+                        } catch (const std::bad_alloc&) {
+                            ShowCoreError(*state, window, L"Recovery path の保持");
+                        }
+                    }
+                    return 0;
+                }
+                case IDM_FILE_OPEN_RECOVERY: {
+                    if (ConfirmDiscard(*state)) {
+                        std::wstring path = state->recovery_path;
+                        if (ChooseInkpodPath(window, false, path)
+                            && OpenRecoveryFromPath(*state, path) != INKPOD_STATUS_OK) {
+                            ShowCoreError(*state, window, L"Recoveryを開く");
+                        }
+                    }
                     return 0;
                 }
                 case IDM_EDIT_UNDO:
@@ -996,6 +1450,14 @@ LRESULT CALLBACK MainWindowProcedure(
                     state->tool = INKPOD_TOOL_ERASER;
                     UpdateMenuState(*state);
                     return 0;
+                case IDM_TOOL_FILL:
+                    state->tool = kInteractionFill;
+                    UpdateMenuState(*state);
+                    return 0;
+                case IDM_TOOL_EYEDROPPER:
+                    state->tool = kInteractionEyedropper;
+                    UpdateMenuState(*state);
+                    return 0;
                 case IDM_PLANE_MAIN_LINE:
                 case IDM_PLANE_COLOR: {
                     state->plane = LOWORD(wparam) == IDM_PLANE_MAIN_LINE
@@ -1032,6 +1494,30 @@ LRESULT CALLBACK MainWindowProcedure(
                             | (GetGValue(choose.rgbResult) << 16)
                             | (GetBValue(choose.rgbResult) << 8) | 0xffU;
                     }
+                    return 0;
+                }
+                case IDM_COLOR_CHECK_OFF:
+                case IDM_COLOR_CHECK_LEGACY:
+                case IDM_COLOR_CHECK_NATIVE: {
+                    const InkpodColorCheckMode mode = LOWORD(wparam) == IDM_COLOR_CHECK_LEGACY
+                        ? INKPOD_COLOR_CHECK_LEGACY_WHITE
+                        : (LOWORD(wparam) == IDM_COLOR_CHECK_NATIVE
+                                  ? INKPOD_COLOR_CHECK_NATIVE_ALPHA
+                                  : INKPOD_COLOR_CHECK_OFF);
+                    const InkpodStatus status = state->engine == nullptr
+                        ? INKPOD_STATUS_INVALID_STATE
+                        : state->engine->Invoke(
+                              [mode](InkpodCore* core) {
+                                  return inkpod_core_set_color_check(core, mode);
+                              },
+                              true,
+                              true);
+                    if (status != INKPOD_STATUS_OK) {
+                        ShowCoreError(*state, window, L"彩色チェック表示");
+                    } else {
+                        state->color_check_mode = mode;
+                    }
+                    UpdateMenuState(*state);
                     return 0;
                 }
                 case IDM_HELP_ABOUT:
@@ -1082,6 +1568,28 @@ LRESULT CALLBACK MainWindowProcedure(
                     || (input->sample_count != 0U && input->samples == nullptr)) {
                     return 0;
                 }
+                if ((state->tool == kInteractionFill
+                        || state->tool == kInteractionEyedropper)
+                    && input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin
+                    && input->sample_count != 0U) {
+                    const InkpodStatus status = state->tool == kInteractionFill
+                        ? ApplyFillAtDevicePoint(
+                              *state, input->samples[0].x, input->samples[0].y)
+                        : EyedropAtDevicePoint(
+                              *state, input->samples[0].x, input->samples[0].y);
+                    if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                        ShowCoreError(
+                            *state,
+                            window,
+                            state->tool == kInteractionFill ? L"フィル" : L"スポイト");
+                    }
+                    UpdateMenuState(*state);
+                    return 1;
+                }
+                if (state->tool == kInteractionFill
+                    || state->tool == kInteractionEyedropper) {
+                    return 1;
+                }
                 inkpod::app::StrokeEvent event{};
                 switch (input->kind) {
                     case inkpod::renderer::CanvasStrokeEventKind::Begin:
@@ -1098,7 +1606,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         break;
                 }
                 event.style = inkpod::app::StrokeStyle{
-                    state->tool,
+                    static_cast<InkpodPaintTool>(state->tool),
                     state->plane,
                     INKPOD_COORDINATE_SPACE_DEVICE,
                     state->tool == INKPOD_TOOL_PENCIL ? INKPOD_STROKE_FLAG_AUTO_ERASE
@@ -1148,9 +1656,19 @@ LRESULT CALLBACK MainWindowProcedure(
             return 0;
         case inkpod::app::kCoreAsyncFailed:
             if (state != nullptr && !state->smoke_test) {
-                ShowCoreError(*state, window, L"非同期ストローク");
+                ShowCoreError(*state, window, L"非同期処理");
             }
             return 0;
+        case WM_TIMER:
+            if (state != nullptr && wparam == kAutosaveTimer && !state->recovery_path.empty()) {
+                InkpodDocumentInfo info{};
+                if (QueryDocument(*state, info)
+                    && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+                    QueueAutosave(*state, state->recovery_path);
+                }
+                return 0;
+            }
+            break;
         case WM_CLOSE:
             if (state != nullptr && !state->smoke_test && !ConfirmDiscard(*state)) {
                 return 0;
@@ -1171,6 +1689,7 @@ LRESULT CALLBACK MainWindowProcedure(
             }
             return 0;
         case WM_NCDESTROY:
+            KillTimer(window, kAutosaveTimer);
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
             return DefWindowProcW(window, message, wparam, lparam);
         default:
@@ -1293,6 +1812,9 @@ int APIENTRY wWinMain(
     int exit_code = 0;
     if (state.smoke_test) {
         exit_code = RunM1Smoke(state);
+        if (exit_code == 0) {
+            exit_code = RunM2Smoke(state);
+        }
     } else {
         ShowWindow(window, show_command);
         UpdateWindow(window);

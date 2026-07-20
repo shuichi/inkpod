@@ -21,6 +21,9 @@ static_assert(sizeof(InkpodStrokeSample) == 24U);
 static_assert(sizeof(InkpodStrokeInput) == 56U);
 static_assert(sizeof(InkpodViewInput) == 48U);
 static_assert(sizeof(InkpodSnapshotTransform) == 48U);
+static_assert(sizeof(InkpodColorValue) == 16U);
+static_assert(sizeof(InkpodFillInput) == 96U);
+static_assert(sizeof(InkpodFillResult) == 32U);
 
 extern "C" int inkpod_header_c11_smoke(void);
 

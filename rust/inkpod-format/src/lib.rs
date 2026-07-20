@@ -565,6 +565,34 @@ pub fn save_atomic(path: &Path, document: &CellFile) -> Result<(), FormatError> 
     save_atomic_with_cancel(path, document, || false)
 }
 
+/// Recovery uses the same bounded, atomic container write as a normal save.
+/// Savepoint and normal-path semantics deliberately remain a Core concern.
+pub fn save_recovery_atomic(path: &Path, document: &CellFile) -> Result<(), FormatError> {
+    save_atomic(path, document)
+}
+
+pub fn recovery_is_newer(normal_path: &Path, recovery_path: &Path) -> Result<bool, FormatError> {
+    let recovery = match fs::metadata(recovery_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let normal = match fs::metadata(normal_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(recovery.modified()? > normal.modified()?)
+}
+
+pub fn discard_recovery(path: &Path) -> Result<(), FormatError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub fn save_atomic_with_cancel(
     path: &Path,
     document: &CellFile,
@@ -672,7 +700,7 @@ fn validate_document(document: &CellFile) -> Result<(), FormatError> {
     }
     if document.planes.len() != 2 {
         return Err(FormatError::Invalid(
-            "M1 cell must contain exactly two planes",
+            "coloring cell must contain exactly two planes",
         ));
     }
     let main = document
@@ -686,9 +714,15 @@ fn validate_document(document: &CellFile) -> Result<(), FormatError> {
         .find(|plane| plane.kind == PlaneKind::Color)
         .ok_or(FormatError::Invalid("color plane is missing"))?;
     if main.id != document.main_plane_id
-        || main.pixel_format != PixelFormat::BinaryMask8
+        || !matches!(
+            main.pixel_format,
+            PixelFormat::BinaryMask8 | PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+        )
         || color.id != document.color_plane_id
-        || color.pixel_format != PixelFormat::StraightRgba8
+        || !matches!(
+            color.pixel_format,
+            PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+        )
     {
         return Err(FormatError::Invalid(
             "plane ID or pixel format is inconsistent",
@@ -768,6 +802,9 @@ const fn pixel_format_code(format: PixelFormat) -> u32 {
         PixelFormat::BinaryMask8 => 1,
         PixelFormat::StraightRgba8 => 2,
         PixelFormat::PremultipliedBgra8 => 3,
+        PixelFormat::Grayscale8 => 4,
+        PixelFormat::Grayscale16 => 5,
+        PixelFormat::StraightRgba16 => 6,
     }
 }
 
@@ -776,6 +813,9 @@ fn pixel_format_from_code(value: u32) -> Result<PixelFormat, FormatError> {
         1 => Ok(PixelFormat::BinaryMask8),
         2 => Ok(PixelFormat::StraightRgba8),
         3 => Ok(PixelFormat::PremultipliedBgra8),
+        4 => Ok(PixelFormat::Grayscale8),
+        5 => Ok(PixelFormat::Grayscale16),
+        6 => Ok(PixelFormat::StraightRgba16),
         _ => Err(FormatError::Unsupported("unknown required pixel format")),
     }
 }
@@ -921,6 +961,20 @@ mod tests {
         let document = fixture();
         let bytes = encode(&document).unwrap();
         assert_eq!(decode(&bytes).unwrap(), document);
+    }
+
+    #[test]
+    fn m2_grayscale_and_rgba16_tiles_round_trip_without_quantization() {
+        let mut document = fixture();
+        document.planes[0].pixel_format = PixelFormat::Grayscale16;
+        document.planes[0].tiles[0].bytes = 0x1234_u16.to_le_bytes().to_vec();
+        document.planes[1].pixel_format = PixelFormat::StraightRgba16;
+        let exact = [1_u16, 257, 32_769, 65_534];
+        document.planes[1].tiles[0].bytes = exact.into_iter().flat_map(u16::to_le_bytes).collect();
+
+        let decoded = decode(&encode(&document).unwrap()).unwrap();
+        assert_eq!(decoded, document);
+        assert_eq!(decoded.planes[1].tiles[0].bytes[0..2], [1, 0]);
     }
 
     #[test]

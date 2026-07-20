@@ -2,7 +2,9 @@
 
 use inkpod_format::{CellFile, FilePlane, FileTile, FormatError, PlaneKind};
 use inkpod_image::{
-    PixelFormat, PixelValue, RasterError, TILE_SIZE, TileCoord, TileData, TileRaster,
+    ColorCheckCategory, FillError, FillOptions, PixelFormat, PlaneSample, RasterError, TILE_SIZE,
+    TileCoord, TileData, TileRaster, closed_region_fill, color_check_category, extend_fill,
+    eyedropper, seed_fill_with_cancel,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -19,6 +21,7 @@ const MIN_ZOOM: f64 = 0.01;
 const MAX_ZOOM: f64 = 64.0;
 
 pub use inkpod_format::{FrameMetadata, Margins, RectI32};
+pub use inkpod_image::{ColorCheckMode, EyedropperSource, InclusionMode, PixelValue};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Command {
@@ -54,6 +57,36 @@ pub enum PaintTool {
     Pencil,
     Brush,
     Eraser,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FillOperation {
+    Seed,
+    ClosedRegion,
+    Extend,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FillRequest {
+    pub operation: FillOperation,
+    pub seed_x: u32,
+    pub seed_y: u32,
+    pub color: PixelValue,
+    pub selection: Option<RectI32>,
+    pub tolerance: u16,
+    pub detached_regions: bool,
+    pub overflow_abort: bool,
+    pub gap_close: u8,
+    pub transparent_only: bool,
+    pub inclusion_mode: InclusionMode,
+    pub inclusion_colors: Vec<PixelValue>,
+    pub extension_distance: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FillOutcome {
+    pub dispatch: DispatchOutcome,
+    pub changed_pixels: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -167,6 +200,8 @@ pub enum CoreError {
     InvalidArgument(&'static str),
     InvalidState(&'static str),
     Raster(RasterError),
+    Fill(FillError),
+    FillOverflow { x: u32, y: u32 },
     Format(String),
 }
 
@@ -177,6 +212,10 @@ impl fmt::Display for CoreError {
             Self::InvalidArgument(message) => write!(formatter, "invalid argument: {message}"),
             Self::InvalidState(message) => write!(formatter, "invalid state: {message}"),
             Self::Raster(error) => write!(formatter, "raster error: {error}"),
+            Self::Fill(error) => write!(formatter, "fill error: {error}"),
+            Self::FillOverflow { x, y } => {
+                write!(formatter, "fill reached image edge at ({x}, {y})")
+            }
             Self::Format(message) => formatter.write_str(message),
         }
     }
@@ -187,6 +226,15 @@ impl std::error::Error for CoreError {}
 impl From<RasterError> for CoreError {
     fn from(error: RasterError) -> Self {
         Self::Raster(error)
+    }
+}
+
+impl From<FillError> for CoreError {
+    fn from(error: FillError) -> Self {
+        match error {
+            FillError::Overflow { x, y } => Self::FillOverflow { x, y },
+            other => Self::Fill(other),
+        }
     }
 }
 
@@ -214,6 +262,7 @@ pub struct DocumentInfo {
     pub can_undo: bool,
     pub can_redo: bool,
     pub active_plane: ActivePlane,
+    pub recovered: bool,
     pub main_plane_checksum: u64,
     pub color_plane_checksum: u64,
 }
@@ -326,6 +375,7 @@ struct CellDocument {
     dpi_y_milli: u32,
     frames: FrameMetadata,
     main_plane: TileRaster,
+    main_line_color: PixelValue,
     color_plane: TileRaster,
     active_plane: ActivePlane,
 }
@@ -397,6 +447,7 @@ impl CellDocument {
             dpi_y_milli: paper.dpi_y_milli,
             frames,
             main_plane: TileRaster::new(paper.width, paper.height, PixelFormat::BinaryMask8)?,
+            main_line_color: PixelValue::Rgba([0, 0, 0, 255]),
             color_plane: TileRaster::new(paper.width, paper.height, PixelFormat::StraightRgba8)?,
             active_plane: ActivePlane::MainLine,
         })
@@ -434,6 +485,11 @@ impl CellDocument {
             .ok_or(CoreError::InvalidState("color plane is missing"))?;
         let main_plane = file_plane_to_raster(main_file, revision)?;
         let color_plane = file_plane_to_raster(color_file, revision)?;
+        let main_line_color = if color_plane.format() == PixelFormat::StraightRgba16 {
+            PixelValue::Rgba16([0, 0, 0, u16::MAX])
+        } else {
+            PixelValue::Rgba([0, 0, 0, u8::MAX])
+        };
         Ok(Self {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: file.document_id,
@@ -446,6 +502,7 @@ impl CellDocument {
             dpi_y_milli: file.dpi_y_milli,
             frames: file.frames,
             main_plane,
+            main_line_color,
             color_plane,
             active_plane: ActivePlane::MainLine,
         })
@@ -509,9 +566,11 @@ pub struct Core {
     savepoint: Option<u64>,
     next_id: u64,
     current_path: Option<PathBuf>,
+    recovered: bool,
     active_stroke: Option<StrokeSession>,
     render_cache: BTreeMap<TileCoord, RenderTile>,
     next_preview_revision: u64,
+    color_check: Option<ColorCheckMode>,
 }
 
 impl Default for Core {
@@ -540,9 +599,11 @@ impl Core {
             savepoint: None,
             next_id: 1,
             current_path: None,
+            recovered: false,
             active_stroke: None,
             render_cache: BTreeMap::new(),
             next_preview_revision: 1_u64 << 63,
+            color_check: None,
         }
     }
 
@@ -596,6 +657,8 @@ impl Core {
         self.reset_history(false);
         self.reset_view();
         self.current_path = None;
+        self.recovered = false;
+        self.color_check = None;
         self.document_info()
     }
 
@@ -604,6 +667,155 @@ impl Core {
         let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
         document.active_plane = plane;
         Ok(())
+    }
+
+    pub fn apply_fill(&mut self, request: &FillRequest) -> Result<FillOutcome, CoreError> {
+        self.apply_fill_with_cancel(request, || false)
+    }
+
+    pub fn apply_fill_with_cancel(
+        &mut self,
+        request: &FillRequest,
+        is_cancelled: impl FnMut() -> bool,
+    ) -> Result<FillOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let selection = request
+            .selection
+            .map(|rect| selection_from_rect(document.width, document.height, rect))
+            .transpose()?;
+        let options = FillOptions {
+            tolerance: request.tolerance,
+            detached_regions: request.detached_regions,
+            overflow_abort: request.overflow_abort,
+            gap_close: request.gap_close,
+            transparent_only: request.transparent_only,
+            inclusion_mode: request.inclusion_mode,
+            inclusion_colors: request.inclusion_colors.clone(),
+        };
+        let plan = match request.operation {
+            FillOperation::Seed => seed_fill_with_cancel(
+                &document.main_plane,
+                &document.color_plane,
+                selection.as_ref(),
+                (request.seed_x, request.seed_y),
+                request.color,
+                &options,
+                is_cancelled,
+            )?,
+            FillOperation::ClosedRegion => {
+                let operation = selection.as_ref().ok_or(CoreError::InvalidArgument(
+                    "closed-region fill requires an operation selection",
+                ))?;
+                closed_region_fill(
+                    &document.main_plane,
+                    &document.color_plane,
+                    operation,
+                    request.color,
+                    &options,
+                )?
+            }
+            FillOperation::Extend => {
+                let operation = selection.as_ref().ok_or(CoreError::InvalidArgument(
+                    "fill extension requires an operation selection",
+                ))?;
+                extend_fill(
+                    &document.color_plane,
+                    operation,
+                    (request.seed_x, request.seed_y),
+                    request.extension_distance,
+                )?
+            }
+        };
+        if plan.edits.is_empty() {
+            return Ok(FillOutcome {
+                dispatch: DispatchOutcome {
+                    revision: self.document_revision,
+                    accepted_commands: 1,
+                },
+                changed_pixels: 0,
+            });
+        }
+
+        let changed_pixels = u64::try_from(plan.edits.len())
+            .map_err(|_| CoreError::InvalidState("fill edit count is not representable"))?;
+        let mut next_color = document.color_plane.clone();
+        let revision = self.next_document_revision()?;
+        let after_state = self.allocate_state()?;
+        let mut changes = Vec::with_capacity(plan.edits.len());
+        let mut touched = BTreeSet::new();
+        for edit in plan.edits {
+            next_color.set_pixel(edit.x, edit.y, edit.after, revision)?;
+            touched.insert(TileCoord {
+                x: edit.x / TILE_SIZE,
+                y: edit.y / TILE_SIZE,
+            });
+            changes.push(PixelChange {
+                x: edit.x,
+                y: edit.y,
+                before: edit.before,
+                after: edit.after,
+            });
+        }
+        for coord in touched {
+            next_color.remove_tile_if_empty(coord);
+        }
+        let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
+        document.color_plane = next_color;
+        document.active_plane = ActivePlane::Color;
+        self.document_revision = revision;
+        self.commit_history(ActivePlane::Color, changes, after_state);
+        Ok(FillOutcome {
+            dispatch: DispatchOutcome {
+                revision,
+                accepted_commands: 1,
+            },
+            changed_pixels,
+        })
+    }
+
+    pub fn eyedropper(
+        &self,
+        source: EyedropperSource,
+        x: u32,
+        y: u32,
+    ) -> Result<PixelValue, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let line = PlaneSample {
+            raster: &document.main_plane,
+            base_color: Some(document.main_line_color),
+        };
+        let color = PlaneSample {
+            raster: &document.color_plane,
+            base_color: None,
+        };
+        let selected = match document.active_plane {
+            ActivePlane::MainLine => line,
+            ActivePlane::Color => color,
+        };
+        eyedropper(source, x, y, selected, &[line, color], &[])?.ok_or(CoreError::InvalidState(
+            "eyedropper source is transparent or unavailable",
+        ))
+    }
+
+    pub fn set_color_check(
+        &mut self,
+        mode: Option<ColorCheckMode>,
+    ) -> Result<ViewState, CoreError> {
+        self.ensure_no_active_stroke()?;
+        if self.document.is_none() {
+            return Err(CoreError::NoDocument);
+        }
+        if self.color_check != mode {
+            self.color_check = mode;
+            self.view.revision = self
+                .view
+                .revision
+                .checked_add(1)
+                .ok_or(CoreError::InvalidState("view revision overflow"))?;
+            self.render_cache.clear();
+        }
+        Ok(self.view)
     }
 
     pub fn apply_stroke(&mut self, stroke: &Stroke) -> Result<DispatchOutcome, CoreError> {
@@ -752,6 +964,14 @@ impl Core {
         inkpod_format::save_atomic(path, &document.to_file())?;
         self.savepoint = Some(self.current_state);
         self.current_path = Some(path.to_path_buf());
+        self.recovered = false;
+        self.document_info()
+    }
+
+    pub fn autosave(&self, path: &Path) -> Result<DocumentInfo, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        inkpod_format::save_recovery_atomic(path, &document.to_file())?;
         self.document_info()
     }
 
@@ -776,7 +996,53 @@ impl Core {
         self.reset_history(true);
         self.reset_view();
         self.current_path = Some(path.to_path_buf());
+        self.recovered = false;
+        self.color_check = None;
         self.document_info()
+    }
+
+    pub fn open_recovery(&mut self, path: &Path) -> Result<DocumentInfo, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let file = inkpod_format::read(path)?;
+        let revision = self.next_document_revision()?;
+        let document = CellDocument::from_file(file, revision)?;
+        let max_id = [
+            document.id,
+            document.layer_id,
+            document.main_plane_id,
+            document.color_plane_id,
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+        self.next_id = self.next_id.max(max_id.saturating_add(1));
+        self.document = Some(document);
+        self.render_cache.clear();
+        self.document_revision = revision;
+        // Recovery content is deliberately an unsaved document. A subsequent
+        // explicit save needs a caller-selected destination.
+        self.reset_history(false);
+        self.reset_view();
+        self.current_path = None;
+        self.recovered = true;
+        self.color_check = None;
+        self.document_info()
+    }
+
+    pub fn recovery_is_newer(
+        &self,
+        normal_path: &Path,
+        recovery_path: &Path,
+    ) -> Result<bool, CoreError> {
+        Ok(inkpod_format::recovery_is_newer(
+            normal_path,
+            recovery_path,
+        )?)
+    }
+
+    pub fn discard_recovery(&self, path: &Path) -> Result<(), CoreError> {
+        inkpod_format::discard_recovery(path)?;
+        Ok(())
     }
 
     pub fn revert(&mut self) -> Result<DocumentInfo, CoreError> {
@@ -926,6 +1192,7 @@ impl Core {
             can_undo: self.history_cursor > 0,
             can_redo: self.history_cursor < self.history.len(),
             active_plane: document.active_plane,
+            recovered: self.recovered,
             main_plane_checksum: document.main_plane.checksum(),
             color_plane_checksum: document.color_plane.checksum(),
         })
@@ -978,7 +1245,7 @@ impl Core {
                 .get(coord)
                 .is_none_or(|tile| tile.tile_revision != source_revision)
             {
-                if let Some(tile) = compose_tile(document, *coord) {
+                if let Some(tile) = compose_tile(document, *coord, self.color_check) {
                     cache.insert(*coord, tile);
                 } else {
                     cache.remove(coord);
@@ -1246,6 +1513,34 @@ fn file_plane_to_raster(plane: &FilePlane, revision: u64) -> Result<TileRaster, 
     Ok(raster)
 }
 
+fn selection_from_rect(width: u32, height: u32, rect: RectI32) -> Result<TileRaster, CoreError> {
+    if rect.width <= 0 || rect.height <= 0 || rect.x < 0 || rect.y < 0 {
+        return Err(CoreError::InvalidArgument(
+            "selection rectangle must have a nonnegative origin and positive size",
+        ));
+    }
+    let right = u32::try_from(rect.x)
+        .ok()
+        .and_then(|x| x.checked_add(rect.width as u32))
+        .ok_or(CoreError::InvalidArgument("selection rectangle overflows"))?;
+    let bottom = u32::try_from(rect.y)
+        .ok()
+        .and_then(|y| y.checked_add(rect.height as u32))
+        .ok_or(CoreError::InvalidArgument("selection rectangle overflows"))?;
+    if right > width || bottom > height {
+        return Err(CoreError::InvalidArgument(
+            "selection rectangle is outside the document",
+        ));
+    }
+    let mut selection = TileRaster::new(width, height, PixelFormat::BinaryMask8)?;
+    for y in rect.y as u32..bottom {
+        for x in rect.x as u32..right {
+            selection.set_pixel(x, y, PixelValue::Binary(255), 0)?;
+        }
+    }
+    Ok(selection)
+}
+
 fn validate_stroke(stroke: &Stroke) -> Result<(), CoreError> {
     if stroke.samples.is_empty() || stroke.samples.len() > MAX_STROKE_SAMPLES {
         return Err(CoreError::InvalidArgument(
@@ -1284,13 +1579,30 @@ fn stroke_value(
     document: &CellDocument,
     samples: &[StrokeSample],
 ) -> Result<PixelValue, CoreError> {
-    let draw_value = match stroke.plane {
-        ActivePlane::MainLine => PixelValue::Binary(255),
-        ActivePlane::Color => PixelValue::Rgba(stroke.color),
-    };
-    let erase_value = match stroke.plane {
-        ActivePlane::MainLine => PixelValue::Binary(0),
-        ActivePlane::Color => PixelValue::Rgba([0; 4]),
+    let format = document.raster(stroke.plane).format();
+    let (draw_value, erase_value) = match (stroke.plane, format) {
+        (ActivePlane::MainLine, PixelFormat::BinaryMask8) => {
+            (PixelValue::Binary(255), PixelValue::Binary(0))
+        }
+        (ActivePlane::MainLine, PixelFormat::Grayscale8) => {
+            (PixelValue::Grayscale8(u8::MAX), PixelValue::Grayscale8(0))
+        }
+        (ActivePlane::MainLine, PixelFormat::Grayscale16) => (
+            PixelValue::Grayscale16(u16::MAX),
+            PixelValue::Grayscale16(0),
+        ),
+        (ActivePlane::Color, PixelFormat::StraightRgba8) => {
+            (PixelValue::Rgba(stroke.color), PixelValue::Rgba([0; 4]))
+        }
+        (ActivePlane::Color, PixelFormat::StraightRgba16) => (
+            PixelValue::Rgba16(stroke.color.map(|channel| u16::from(channel) * 257)),
+            PixelValue::Rgba16([0; 4]),
+        ),
+        _ => {
+            return Err(CoreError::InvalidState(
+                "active plane pixel format does not support painting",
+            ));
+        }
     };
     if stroke.tool == PaintTool::Eraser {
         return Ok(erase_value);
@@ -1501,7 +1813,11 @@ fn clip_segment_to_document(
     Some((interpolate(lower), interpolate(upper)))
 }
 
-fn compose_tile(document: &CellDocument, coord: TileCoord) -> Option<RenderTile> {
+fn compose_tile(
+    document: &CellDocument,
+    coord: TileCoord,
+    color_check: Option<ColorCheckMode>,
+) -> Option<RenderTile> {
     let origin_x = coord.x.checked_mul(TILE_SIZE)?;
     let origin_y = coord.y.checked_mul(TILE_SIZE)?;
     if origin_x >= document.width || origin_y >= document.height {
@@ -1514,29 +1830,40 @@ fn compose_tile(document: &CellDocument, coord: TileCoord) -> Option<RenderTile>
     let mut pixels = Vec::with_capacity(capacity);
     for y in 0..height {
         for x in 0..width {
-            let color = match document
+            let color_value = document
                 .color_plane
                 .pixel(origin_x + x, origin_y + y)
-                .ok()?
-            {
-                PixelValue::Rgba(value) => value,
-                PixelValue::Binary(_) => return None,
+                .ok()?;
+            if let Some(mode) = color_check {
+                let check_pixel = match color_check_category(color_value, mode) {
+                    ColorCheckCategory::ExactWhite => [255, 255, 255, 255],
+                    ColorCheckCategory::Transparent => [255, 0, 255, 255],
+                    ColorCheckCategory::Colored => [0, 0, 0, 255],
+                };
+                pixels.extend_from_slice(&check_pixel);
+                continue;
+            }
+            let color = rgba8_for_display(color_value)?;
+            let line_coverage = match document.main_plane.pixel(origin_x + x, origin_y + y).ok()? {
+                PixelValue::Binary(value) | PixelValue::Grayscale8(value) => value,
+                PixelValue::Grayscale16(value) => ((u32::from(value) + 128) / 257) as u8,
+                _ => return None,
             };
-            let line = match document.main_plane.pixel(origin_x + x, origin_y + y).ok()? {
-                PixelValue::Binary(value) => value,
-                PixelValue::Rgba(_) => return None,
-            };
-            let inverse_line = 255_u32 - u32::from(line);
+            let line_color = rgba8_for_display(document.main_line_color)?;
+            let line_alpha = (u32::from(line_color[3]) * u32::from(line_coverage) + 127) / 255;
+            let inverse_line = 255_u32 - line_alpha;
             let color_alpha = u32::from(color[3]);
-            let output_alpha = u32::from(line) + (color_alpha * inverse_line + 127) / 255;
-            let premultiply = |channel: u8| -> u8 {
-                let color_premultiplied = (u32::from(channel) * color_alpha + 127) / 255;
-                ((color_premultiplied * inverse_line + 127) / 255) as u8
+            let output_alpha = line_alpha + (color_alpha * inverse_line + 127) / 255;
+            let premultiply = |line_channel: u8, color_channel: u8| -> u8 {
+                let line_premultiplied = u32::from(line_channel) * line_alpha;
+                let color_premultiplied = u32::from(color_channel) * color_alpha;
+                ((line_premultiplied + (color_premultiplied * inverse_line + 127) / 255 + 127)
+                    / 255) as u8
             };
             pixels.extend_from_slice(&[
-                premultiply(color[2]),
-                premultiply(color[1]),
-                premultiply(color[0]),
+                premultiply(line_color[2], color[2]),
+                premultiply(line_color[1], color[1]),
+                premultiply(line_color[0], color[0]),
                 output_alpha as u8,
             ]);
         }
@@ -1557,6 +1884,16 @@ fn compose_tile(document: &CellDocument, coord: TileCoord) -> Option<RenderTile>
             .tile_revision(coord)
             .max(document.color_plane.tile_revision(coord)),
     })
+}
+
+fn rgba8_for_display(value: PixelValue) -> Option<[u8; 4]> {
+    match value {
+        PixelValue::Rgba(value) => Some(value),
+        PixelValue::Rgba16(value) => {
+            Some(value.map(|channel| ((u32::from(channel) + 128) / 257) as u8))
+        }
+        _ => None,
+    }
 }
 
 fn valid_viewport(width: f64, height: f64) -> bool {
@@ -1602,6 +1939,24 @@ mod tests {
             pressure_size: false,
             coordinate_space: CoordinateSpace::Document,
             samples: vec![sample],
+        }
+    }
+
+    fn fill_request(seed_x: u32, seed_y: u32, color: [u8; 4]) -> FillRequest {
+        FillRequest {
+            operation: FillOperation::Seed,
+            seed_x,
+            seed_y,
+            color: PixelValue::Rgba(color),
+            selection: None,
+            tolerance: 0,
+            detached_regions: false,
+            overflow_abort: false,
+            gap_close: 0,
+            transparent_only: false,
+            inclusion_mode: InclusionMode::None,
+            inclusion_colors: Vec::new(),
+            extension_distance: 0,
         }
     }
 
@@ -1720,6 +2075,202 @@ mod tests {
         );
         assert!(!reopened.dirty);
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn m2_fill_is_one_atomic_history_unit_and_never_changes_main_line() {
+        let mut core = Core::new();
+        core.new_cell(9, 9, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        for samples in [
+            vec![
+                StrokeSample {
+                    x: 1.0,
+                    y: 1.0,
+                    pressure: 1.0,
+                },
+                StrokeSample {
+                    x: 7.0,
+                    y: 1.0,
+                    pressure: 1.0,
+                },
+            ],
+            vec![
+                StrokeSample {
+                    x: 7.0,
+                    y: 1.0,
+                    pressure: 1.0,
+                },
+                StrokeSample {
+                    x: 7.0,
+                    y: 7.0,
+                    pressure: 1.0,
+                },
+            ],
+            vec![
+                StrokeSample {
+                    x: 7.0,
+                    y: 7.0,
+                    pressure: 1.0,
+                },
+                StrokeSample {
+                    x: 1.0,
+                    y: 7.0,
+                    pressure: 1.0,
+                },
+            ],
+            vec![
+                StrokeSample {
+                    x: 1.0,
+                    y: 7.0,
+                    pressure: 1.0,
+                },
+                StrokeSample {
+                    x: 1.0,
+                    y: 1.0,
+                    pressure: 1.0,
+                },
+            ],
+        ] {
+            core.apply_stroke(&line_stroke(samples)).unwrap();
+        }
+        let before = core.document_info().unwrap();
+        let fill = PixelValue::Rgba([20, 90, 180, 255]);
+        let outcome = core
+            .apply_fill(&fill_request(4, 4, [20, 90, 180, 255]))
+            .unwrap();
+        let after = core.document_info().unwrap();
+        assert_eq!(outcome.changed_pixels, 25);
+        assert_eq!(after.document_revision, before.document_revision + 1);
+        assert_eq!(after.main_plane_checksum, before.main_plane_checksum);
+        assert_eq!(core.plane_pixel(ActivePlane::Color, 4, 4).unwrap(), fill);
+
+        core.undo().unwrap();
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 4, 4).unwrap(),
+            PixelValue::Rgba([0; 4])
+        );
+        core.redo().unwrap();
+        assert_eq!(core.plane_pixel(ActivePlane::Color, 4, 4).unwrap(), fill);
+    }
+
+    #[test]
+    fn m2_overflow_invalid_cancel_and_noop_do_not_commit_partial_fill() {
+        let mut core = Core::new();
+        let created = core
+            .new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let mut request = fill_request(4, 4, [1, 2, 3, 255]);
+        request.overflow_abort = true;
+        assert!(matches!(
+            core.apply_fill(&request),
+            Err(CoreError::FillOverflow { .. })
+        ));
+        assert_eq!(core.document_info().unwrap(), created);
+
+        request.overflow_abort = false;
+        assert!(matches!(
+            core.apply_fill_with_cancel(&request, || true),
+            Err(CoreError::Fill(FillError::Cancelled))
+        ));
+        assert_eq!(core.document_info().unwrap(), created);
+
+        request.selection = Some(RectI32 {
+            x: 2,
+            y: 2,
+            width: 2,
+            height: 2,
+        });
+        request.seed_x = 2;
+        request.seed_y = 2;
+        let first = core.apply_fill(&request).unwrap();
+        assert_eq!(first.changed_pixels, 4);
+        let before_noop = core.document_info().unwrap();
+        let second = core.apply_fill(&request).unwrap();
+        assert_eq!(second.changed_pixels, 0);
+        assert_eq!(core.document_info().unwrap(), before_noop);
+    }
+
+    #[test]
+    fn m2_autosave_recovery_never_inherits_or_overwrites_normal_path() {
+        let suffix = TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let directory = std::env::temp_dir();
+        let normal = directory.join(format!(
+            "inkpod-m2-normal-{}-{suffix}.inkpod",
+            std::process::id()
+        ));
+        let recovery = directory.join(format!(
+            "inkpod-m2-recovery-{}-{suffix}.inkpod",
+            std::process::id()
+        ));
+        let restored = directory.join(format!(
+            "inkpod-m2-restored-{}-{suffix}.inkpod",
+            std::process::id()
+        ));
+
+        let mut core = Core::new();
+        core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        core.save(&normal).unwrap();
+        let normal_bytes = fs::read(&normal).unwrap();
+        let mut request = fill_request(3, 3, [9, 8, 7, 255]);
+        request.selection = Some(RectI32 {
+            x: 2,
+            y: 2,
+            width: 2,
+            height: 2,
+        });
+        core.apply_fill(&request).unwrap();
+        let before_autosave = core.document_info().unwrap();
+        let after_autosave = core.autosave(&recovery).unwrap();
+        assert_eq!(after_autosave, before_autosave);
+        assert!(after_autosave.dirty);
+        assert_eq!(fs::read(&normal).unwrap(), normal_bytes);
+
+        let mut recovered = Core::new();
+        let recovered_info = recovered.open_recovery(&recovery).unwrap();
+        assert!(recovered_info.recovered);
+        assert!(recovered_info.dirty);
+        assert!(matches!(
+            recovered.revert(),
+            Err(CoreError::InvalidState(_))
+        ));
+        assert_eq!(fs::read(&normal).unwrap(), normal_bytes);
+        recovered.save(&restored).unwrap();
+        assert_eq!(fs::read(&normal).unwrap(), normal_bytes);
+        assert_ne!(fs::read(&restored).unwrap(), normal_bytes);
+
+        fs::remove_file(normal).unwrap();
+        fs::remove_file(recovery).unwrap();
+        fs::remove_file(restored).unwrap();
+    }
+
+    #[test]
+    fn m2_grayscale_eyedropper_and_color_check_are_view_only() {
+        let mut core = Core::new();
+        core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let document = core.document.as_mut().unwrap();
+        document.main_plane = TileRaster::new(4, 4, PixelFormat::Grayscale8).unwrap();
+        document
+            .main_plane
+            .set_pixel(1, 1, PixelValue::Grayscale8(128), 2)
+            .unwrap();
+        document.main_line_color = PixelValue::Rgba([12, 34, 56, 255]);
+        document.active_plane = ActivePlane::MainLine;
+        assert_eq!(
+            core.eyedropper(EyedropperSource::SelectedPlane, 1, 1)
+                .unwrap(),
+            PixelValue::Rgba([12, 34, 56, 255])
+        );
+        let before = core.document_info().unwrap();
+        core.set_color_check(Some(ColorCheckMode::NativeAlpha))
+            .unwrap();
+        let after = core.document_info().unwrap();
+        assert_eq!(after.document_revision, before.document_revision);
+        assert_eq!(after.main_plane_checksum, before.main_plane_checksum);
+        assert!(after.view_revision > before.view_revision);
+        assert!(core.build_snapshot().tile_count() > 0);
     }
 
     #[test]

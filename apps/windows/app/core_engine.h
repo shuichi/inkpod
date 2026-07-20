@@ -62,6 +62,10 @@ public:
         std::function<InkpodStatus(InkpodCore*)> operation,
         bool publish_snapshot,
         bool refresh_document_info) noexcept;
+    bool Enqueue(
+        std::function<InkpodStatus(InkpodCore*)> operation,
+        bool publish_snapshot,
+        bool refresh_document_info) noexcept;
     bool EnqueueStroke(StrokeEvent event) noexcept;
     InkpodStatus WaitIdle() noexcept;
     InkpodStatus FlushPreview() noexcept;

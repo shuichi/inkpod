@@ -56,6 +56,8 @@ BEGIN
         MENUITEM "保存(&S)\tCtrl+S", IDM_FILE_SAVE
         MENUITEM "名前を付けて保存(&A)...", IDM_FILE_SAVE_AS
         MENUITEM "復帰(&R)", IDM_FILE_REVERT
+        MENUITEM "Recoveryを保存(&V)", IDM_FILE_AUTOSAVE_NOW
+        MENUITEM "Recoveryを開く(&Y)...", IDM_FILE_OPEN_RECOVERY
         MENUITEM SEPARATOR
         MENUITEM "終了(&X)", IDM_APP_EXIT
     END
@@ -76,6 +78,8 @@ BEGIN
         MENUITEM "鉛筆(&P)", IDM_TOOL_PENCIL
         MENUITEM "ブラシ(&B)", IDM_TOOL_BRUSH
         MENUITEM "消しゴム(&E)", IDM_TOOL_ERASER
+        MENUITEM "フィル(&F)", IDM_TOOL_FILL
+        MENUITEM "スポイト(&I)", IDM_TOOL_EYEDROPPER
     END
     POPUP "プレーン(&P)"
     BEGIN
@@ -85,6 +89,10 @@ BEGIN
     POPUP "色(&C)"
     BEGIN
         MENUITEM "描画色...", IDM_COLOR_CHOOSE
+        MENUITEM SEPARATOR
+        MENUITEM "彩色チェックを解除", IDM_COLOR_CHECK_OFF
+        MENUITEM "完全な白をチェック", IDM_COLOR_CHECK_LEGACY
+        MENUITEM "白と透明をチェック", IDM_COLOR_CHECK_NATIVE
     END
     POPUP "ヘルプ(&H)"
     BEGIN

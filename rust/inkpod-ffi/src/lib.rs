@@ -1,7 +1,8 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use inkpod_core::{
-    ActivePlane, Command, CoordinateSpace, Core, CoreError, DocumentInfo, PaintTool,
+    ActivePlane, ColorCheckMode, Command, CoordinateSpace, Core, CoreError, DocumentInfo,
+    EyedropperSource, FillOperation, FillRequest, InclusionMode, PaintTool, PixelValue, RectI32,
     RenderSnapshot, Stroke, StrokeSample, ViewCommand,
 };
 use std::cell::RefCell;
@@ -25,6 +26,8 @@ pub const INKPOD_STATUS_WRONG_THREAD: u32 = 6;
 pub const INKPOD_STATUS_IO_ERROR: u32 = 7;
 pub const INKPOD_STATUS_INVALID_STATE: u32 = 8;
 pub const INKPOD_STATUS_NO_DOCUMENT: u32 = 9;
+pub const INKPOD_STATUS_CANCELLED: u32 = 10;
+pub const INKPOD_STATUS_FILL_OVERFLOW: u32 = 11;
 
 pub const INKPOD_COMMAND_NO_OP: u32 = 0;
 pub const INKPOD_PIXEL_FORMAT_PREMULTIPLIED_BGRA8: u32 = 1;
@@ -40,11 +43,32 @@ pub const INKPOD_STROKE_FLAG_PRESSURE_SIZE: u64 = 1 << 1;
 pub const INKPOD_DOCUMENT_FLAG_DIRTY: u32 = 1 << 0;
 pub const INKPOD_DOCUMENT_FLAG_CAN_UNDO: u32 = 1 << 1;
 pub const INKPOD_DOCUMENT_FLAG_CAN_REDO: u32 = 1 << 2;
+pub const INKPOD_DOCUMENT_FLAG_RECOVERED: u32 = 1 << 3;
 pub const INKPOD_VIEW_PAN_BY: u32 = 1;
 pub const INKPOD_VIEW_ZOOM_AT: u32 = 2;
 pub const INKPOD_VIEW_FIT: u32 = 3;
 pub const INKPOD_VIEW_ONE_TO_ONE: u32 = 4;
 pub const INKPOD_VIEW_VIEWPORT_RESIZED: u32 = 5;
+pub const INKPOD_COLOR_DEPTH_8: u32 = 8;
+pub const INKPOD_COLOR_DEPTH_16: u32 = 16;
+pub const INKPOD_FILL_SEED: u32 = 1;
+pub const INKPOD_FILL_CLOSED_REGION: u32 = 2;
+pub const INKPOD_FILL_EXTENSION: u32 = 3;
+pub const INKPOD_FILL_FLAG_DETACHED_REGIONS: u64 = 1 << 0;
+pub const INKPOD_FILL_FLAG_OVERFLOW_ABORT: u64 = 1 << 1;
+pub const INKPOD_FILL_FLAG_TRANSPARENT_ONLY: u64 = 1 << 2;
+pub const INKPOD_FILL_FLAG_SELECTION_PRESENT: u64 = 1 << 3;
+pub const INKPOD_INCLUSION_NONE: u32 = 0;
+pub const INKPOD_INCLUSION_SPECIFIED: u32 = 1;
+pub const INKPOD_INCLUSION_EXCEPT_SPECIFIED: u32 = 2;
+pub const INKPOD_FILL_RESULT_FLAG_LEAK_CANDIDATE: u32 = 1 << 0;
+pub const INKPOD_EYEDROPPER_TOPMOST_NONTRANSPARENT: u32 = 1;
+pub const INKPOD_EYEDROPPER_SELECTED_PLANE: u32 = 2;
+pub const INKPOD_EYEDROPPER_COMPOSITE: u32 = 3;
+pub const INKPOD_EYEDROPPER_LIGHT_TABLE_TOPMOST: u32 = 4;
+pub const INKPOD_COLOR_CHECK_OFF: u32 = 0;
+pub const INKPOD_COLOR_CHECK_LEGACY_WHITE: u32 = 1;
+pub const INKPOD_COLOR_CHECK_NATIVE_ALPHA: u32 = 2;
 const MAX_COMMAND_COUNT: u64 = 65_536;
 const MAX_STROKE_SAMPLE_COUNT: u64 = 1_048_576;
 const MAX_PATH_BYTES: u64 = 32_768;
@@ -178,6 +202,48 @@ pub struct InkpodViewInput {
     pub value2: f64,
     pub value3: f64,
     pub value4: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodColorValue {
+    pub struct_size: u32,
+    pub depth: u32,
+    pub red: u16,
+    pub green: u16,
+    pub blue: u16,
+    pub alpha: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodFillInput {
+    pub struct_size: u32,
+    pub operation: u32,
+    pub flags: u64,
+    pub seed_x: u32,
+    pub seed_y: u32,
+    pub color: InkpodColorValue,
+    pub tolerance: u16,
+    pub gap_close: u16,
+    pub inclusion_mode: u32,
+    pub selection: InkpodFrameRect,
+    pub inclusion_colors: *const InkpodColorValue,
+    pub inclusion_color_count: u64,
+    pub inclusion_color_stride_bytes: u64,
+    pub extension_distance: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodFillResult {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub revision: u64,
+    pub changed_pixel_count: u64,
+    pub leak_x: u32,
+    pub leak_y: u32,
 }
 
 #[repr(C)]
@@ -351,7 +417,10 @@ fn validate_core_thread(core: &InkpodCore) -> u32 {
 fn map_core_error(error: CoreError) -> u32 {
     let status = match error {
         CoreError::NoDocument => INKPOD_STATUS_NO_DOCUMENT,
-        CoreError::InvalidArgument(_) | CoreError::Raster(_) => INKPOD_STATUS_INVALID_ARGUMENT,
+        CoreError::InvalidArgument(_) | CoreError::Raster(_) | CoreError::Fill(_) => {
+            INKPOD_STATUS_INVALID_ARGUMENT
+        }
+        CoreError::FillOverflow { .. } => INKPOD_STATUS_FILL_OVERFLOW,
         CoreError::InvalidState(_) => INKPOD_STATUS_INVALID_STATE,
         CoreError::Format(_) => INKPOD_STATUS_IO_ERROR,
     };
@@ -378,6 +447,10 @@ fn write_document_info(output: &mut InkpodDocumentInfo, info: DocumentInfo) {
         0
     }) | (if info.can_redo {
         INKPOD_DOCUMENT_FLAG_CAN_REDO
+    } else {
+        0
+    }) | (if info.recovered {
+        INKPOD_DOCUMENT_FLAG_RECOVERED
     } else {
         0
     });
@@ -564,6 +637,211 @@ unsafe fn parse_stroke_input(input: &InkpodStrokeInput) -> Result<Stroke, u32> {
         pressure_size: input.flags & INKPOD_STROKE_FLAG_PRESSURE_SIZE != 0,
         coordinate_space,
         samples,
+    })
+}
+
+// SAFETY: `color` must expose a complete, readable InkpodColorValue prefix.
+unsafe fn parse_color_value(color: *const InkpodColorValue) -> Result<PixelValue, u32> {
+    // SAFETY: Forwarded from this helper's caller contract.
+    unsafe { validate_struct(color, "InkpodColorValue") }?;
+    // SAFETY: The complete known structure is readable after validation.
+    let color = unsafe { &*color };
+    match color.depth {
+        INKPOD_COLOR_DEPTH_8
+            if [color.red, color.green, color.blue, color.alpha]
+                .into_iter()
+                .all(|channel| channel <= u16::from(u8::MAX)) =>
+        {
+            Ok(PixelValue::Rgba([
+                color.red as u8,
+                color.green as u8,
+                color.blue as u8,
+                color.alpha as u8,
+            ]))
+        }
+        INKPOD_COLOR_DEPTH_16 => Ok(PixelValue::Rgba16([
+            color.red,
+            color.green,
+            color.blue,
+            color.alpha,
+        ])),
+        INKPOD_COLOR_DEPTH_8 => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "8-bit color contains a channel above 255",
+        )),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "color depth is not 8 or 16 bits",
+        )),
+    }
+}
+
+fn write_color_value(output: &mut InkpodColorValue, color: PixelValue) -> Result<(), u32> {
+    match color {
+        PixelValue::Rgba(value) => {
+            output.depth = INKPOD_COLOR_DEPTH_8;
+            output.red = u16::from(value[0]);
+            output.green = u16::from(value[1]);
+            output.blue = u16::from(value[2]);
+            output.alpha = u16::from(value[3]);
+            Ok(())
+        }
+        PixelValue::Rgba16(value) => {
+            output.depth = INKPOD_COLOR_DEPTH_16;
+            output.red = value[0];
+            output.green = value[1];
+            output.blue = value[2];
+            output.alpha = value[3];
+            Ok(())
+        }
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_STATE,
+            "eyedropper returned a non-color value",
+        )),
+    }
+}
+
+// SAFETY: `input` and its optional color span must be complete and readable for
+// this call. Every advertised strided record exposes its own size prefix.
+unsafe fn parse_fill_input(input: &InkpodFillInput) -> Result<FillRequest, u32> {
+    const SUPPORTED_FLAGS: u64 = INKPOD_FILL_FLAG_DETACHED_REGIONS
+        | INKPOD_FILL_FLAG_OVERFLOW_ABORT
+        | INKPOD_FILL_FLAG_TRANSPARENT_ONLY
+        | INKPOD_FILL_FLAG_SELECTION_PRESENT;
+    if input.flags & !SUPPORTED_FLAGS != 0 || input.reserved != 0 {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "fill input contains unsupported flags or reserved values",
+        ));
+    }
+    let operation = match input.operation {
+        INKPOD_FILL_SEED => FillOperation::Seed,
+        INKPOD_FILL_CLOSED_REGION => FillOperation::ClosedRegion,
+        INKPOD_FILL_EXTENSION => FillOperation::Extend,
+        _ => {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "fill operation is not defined",
+            ));
+        }
+    };
+    let inclusion_mode = match input.inclusion_mode {
+        INKPOD_INCLUSION_NONE => InclusionMode::None,
+        INKPOD_INCLUSION_SPECIFIED => InclusionMode::Specified,
+        INKPOD_INCLUSION_EXCEPT_SPECIFIED => InclusionMode::ExceptSpecified,
+        _ => {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "fill inclusion mode is not defined",
+            ));
+        }
+    };
+    let gap_close = u8::try_from(input.gap_close).map_err(|_| {
+        fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "fill gap-close value is not representable",
+        )
+    })?;
+    // SAFETY: The embedded color resides inside the validated input.
+    let color = unsafe { parse_color_value(ptr::addr_of!(input.color)) }?;
+    if input.inclusion_color_count > 6 {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "fill inclusion color count exceeds six",
+        ));
+    }
+    let count = usize::try_from(input.inclusion_color_count).map_err(|_| {
+        fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "fill inclusion color count is not representable",
+        )
+    })?;
+    let stride = if count == 0 {
+        0
+    } else {
+        let stride = usize::try_from(input.inclusion_color_stride_bytes).map_err(|_| {
+            fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "fill inclusion color stride is not representable",
+            )
+        })?;
+        if stride < size_of::<InkpodColorValue>() || stride % align_of::<InkpodColorValue>() != 0 {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "fill inclusion color stride is too small or misaligned",
+            ));
+        }
+        if input.inclusion_colors.is_null() || !is_aligned(input.inclusion_colors) {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "fill inclusion colors are null or misaligned",
+            ));
+        }
+        let storage = count
+            .saturating_sub(1)
+            .checked_mul(stride)
+            .and_then(|offset| offset.checked_add(size_of::<InkpodColorValue>()));
+        if storage.is_none_or(|bytes| bytes > isize::MAX as usize) {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "fill inclusion color storage size overflows",
+            ));
+        }
+        stride
+    };
+    let mut inclusion_colors = Vec::with_capacity(count);
+    for index in 0..count {
+        // SAFETY: The checked strided record span is readable by contract.
+        let color_pointer = unsafe {
+            input
+                .inclusion_colors
+                .cast::<u8>()
+                .add(index * stride)
+                .cast::<InkpodColorValue>()
+        };
+        // SAFETY: Each record exposes a readable size prefix and complete body.
+        let struct_size = unsafe { validate_struct(color_pointer, "InkpodColorValue") }?;
+        if u64::from(struct_size) > input.inclusion_color_stride_bytes {
+            return Err(fail(
+                INKPOD_STATUS_INCOMPATIBLE_ABI,
+                "InkpodColorValue.struct_size exceeds inclusion color stride",
+            ));
+        }
+        // SAFETY: The record is complete and validated.
+        inclusion_colors.push(unsafe { parse_color_value(color_pointer) }?);
+    }
+    let selection_present = input.flags & INKPOD_FILL_FLAG_SELECTION_PRESENT != 0;
+    let selection = selection_present.then_some(RectI32 {
+        x: input.selection.x,
+        y: input.selection.y,
+        width: input.selection.width,
+        height: input.selection.height,
+    });
+    if !selection_present
+        && (input.selection.x != 0
+            || input.selection.y != 0
+            || input.selection.width != 0
+            || input.selection.height != 0)
+    {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "fill selection fields require the selection-present flag",
+        ));
+    }
+    Ok(FillRequest {
+        operation,
+        seed_x: input.seed_x,
+        seed_y: input.seed_y,
+        color,
+        selection,
+        tolerance: input.tolerance,
+        detached_regions: input.flags & INKPOD_FILL_FLAG_DETACHED_REGIONS != 0,
+        overflow_abort: input.flags & INKPOD_FILL_FLAG_OVERFLOW_ABORT != 0,
+        gap_close,
+        transparent_only: input.flags & INKPOD_FILL_FLAG_TRANSPARENT_ONLY != 0,
+        inclusion_mode,
+        inclusion_colors,
+        extension_distance: input.extension_distance,
     })
 }
 
@@ -954,6 +1232,157 @@ pub unsafe extern "C" fn inkpod_core_set_active_plane(core: *mut InkpodCore, pla
     })
 }
 
+/// Applies seed/closed-region/extension fill as one all-or-nothing history
+/// transaction. A leak returns INKPOD_STATUS_FILL_OVERFLOW and its candidate
+/// coordinate without committing any pixel.
+///
+/// # Safety
+/// Core/input/result and every optional strided color record must be complete,
+/// live, aligned, readable/writable as applicable, and non-overlapping.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_apply_fill(
+    core: *mut InkpodCore,
+    input: *const InkpodFillInput,
+    result: *mut InkpodFillResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: Public structures expose readable size prefixes.
+        if let Err(status) = unsafe { validate_struct(input, "InkpodFillInput") } {
+            return status;
+        }
+        // SAFETY: The output prefix is readable before the validated write.
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodFillResult") } {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by the caller contract.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        result.flags = 0;
+        result.revision = 0;
+        result.changed_pixel_count = 0;
+        result.leak_x = 0;
+        result.leak_y = 0;
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        // SAFETY: The input and optional strided span were validated above.
+        let request = match unsafe { parse_fill_input(input) } {
+            Ok(request) => request,
+            Err(status) => return status,
+        };
+        match core.core.apply_fill(&request) {
+            Ok(outcome) => {
+                result.revision = outcome.dispatch.revision();
+                result.changed_pixel_count = outcome.changed_pixels;
+                INKPOD_STATUS_OK
+            }
+            Err(CoreError::FillOverflow { x, y }) => {
+                result.flags = INKPOD_FILL_RESULT_FLAG_LEAK_CANDIDATE;
+                result.leak_x = x;
+                result.leak_y = y;
+                fail(
+                    INKPOD_STATUS_FILL_OVERFLOW,
+                    &format!("fill reached image edge at ({x}, {y})"),
+                )
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Samples an exact 8/16-bit color from the requested M2 source.
+///
+/// # Safety
+/// Core/output must be live, aligned, non-overlapping owner-thread objects.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_eyedropper(
+    core: *mut InkpodCore,
+    source: u32,
+    x: u32,
+    y: u32,
+    out_color: *mut InkpodColorValue,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: The output prefix is readable before the validated write.
+        if let Err(status) = unsafe { validate_struct(out_color.cast_const(), "InkpodColorValue") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let out_color = unsafe { &mut *out_color };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let source = match source {
+            INKPOD_EYEDROPPER_TOPMOST_NONTRANSPARENT => EyedropperSource::TopmostNonTransparent,
+            INKPOD_EYEDROPPER_SELECTED_PLANE => EyedropperSource::SelectedPlane,
+            INKPOD_EYEDROPPER_COMPOSITE => EyedropperSource::Composite,
+            INKPOD_EYEDROPPER_LIGHT_TABLE_TOPMOST => EyedropperSource::LightTableTopmost,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "eyedropper source is not defined",
+                );
+            }
+        };
+        match core.core.eyedropper(source, x, y) {
+            Ok(color) => match write_color_value(out_color, color) {
+                Ok(()) => INKPOD_STATUS_OK,
+                Err(status) => status,
+            },
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Changes only the temporary coloring-check view; document revision/history
+/// and pixel values remain untouched.
+///
+/// # Safety
+/// `core` must be a live owner-thread handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_set_color_check(core: *mut InkpodCore, mode: u32) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: A complete live Core is required by contract.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let mode = match mode {
+            INKPOD_COLOR_CHECK_OFF => None,
+            INKPOD_COLOR_CHECK_LEGACY_WHITE => Some(ColorCheckMode::LegacyWhiteTransparency),
+            INKPOD_COLOR_CHECK_NATIVE_ALPHA => Some(ColorCheckMode::NativeAlpha),
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "color-check mode is not defined",
+                );
+            }
+        };
+        match core.core.set_color_check(mode) {
+            Ok(_) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Applies all samples from pointer-down through pointer-up as one transaction.
 ///
 /// # Safety
@@ -1247,6 +1676,82 @@ pub unsafe extern "C" fn inkpod_core_open(
 ) -> u32 {
     // SAFETY: This exported function forwards the identical caller contract.
     unsafe { file_operation(core, path_utf8, path_bytes, out_info, true) }
+}
+
+/// Writes a recovery container atomically without changing normal savepoint or
+/// normal path.
+///
+/// # Safety
+/// Path/Core/output follow the same contract as `inkpod_core_save`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_autosave(
+    core: *mut InkpodCore,
+    path_utf8: *const u8,
+    path_bytes: u64,
+    out_info: *mut InkpodDocumentInfo,
+) -> u32 {
+    // SAFETY: This exported function forwards the identical caller contract.
+    unsafe { recovery_file_operation(core, path_utf8, path_bytes, out_info, false) }
+}
+
+/// Opens recovery content as a dirty, pathless document. It never inherits the
+/// recovered file's former normal-save destination.
+///
+/// # Safety
+/// Path/Core/output follow the same contract as `inkpod_core_open`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_open_recovery(
+    core: *mut InkpodCore,
+    path_utf8: *const u8,
+    path_bytes: u64,
+    out_info: *mut InkpodDocumentInfo,
+) -> u32 {
+    // SAFETY: This exported function forwards the identical caller contract.
+    unsafe { recovery_file_operation(core, path_utf8, path_bytes, out_info, true) }
+}
+
+unsafe fn recovery_file_operation(
+    core: *mut InkpodCore,
+    path_utf8: *const u8,
+    path_bytes: u64,
+    out_info: *mut InkpodDocumentInfo,
+    recover: bool,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: The output prefix is readable before the validated write.
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodDocumentInfo") }
+        {
+            return status;
+        }
+        // SAFETY: The path range is readable for this call by contract.
+        let path = match unsafe { path_from_utf8(path_utf8, path_bytes) } {
+            Ok(path) => path,
+            Err(status) => return status,
+        };
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let out_info = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let operation = if recover {
+            core.core.open_recovery(path)
+        } else {
+            core.core.autosave(path)
+        };
+        match operation {
+            Ok(info) => {
+                write_document_info(out_info, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
 }
 
 unsafe fn file_operation(
@@ -2393,5 +2898,195 @@ mod tests {
             INKPOD_STATUS_INVALID_STATE
         );
         assert_eq!(unsafe { inkpod_core_destroy(&mut core) }, INKPOD_STATUS_OK);
+    }
+
+    #[test]
+    fn m2_fill_eyedropper_check_and_recovery_abi_are_transactional() {
+        unsafe {
+            let mut core = ptr::null_mut();
+            assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
+            let options = InkpodCellCreateOptions {
+                struct_size: size_of::<InkpodCellCreateOptions>() as u32,
+                reserved: 0,
+                feature_flags: INKPOD_FEATURE_NONE,
+                document_uuid_high: 1,
+                document_uuid_low: 2,
+                width: 8,
+                height: 8,
+                dpi_x_milli: 96_000,
+                dpi_y_milli: 96_000,
+            };
+            let mut info = InkpodDocumentInfo {
+                struct_size: size_of::<InkpodDocumentInfo>() as u32,
+                ..InkpodDocumentInfo::default()
+            };
+            assert_eq!(
+                inkpod_core_new_cell(core, &options, &mut info),
+                INKPOD_STATUS_OK
+            );
+            let created_revision = info.document_revision;
+            let created_main_checksum = info.main_plane_checksum;
+            let created_color_checksum = info.color_plane_checksum;
+            let color = InkpodColorValue {
+                struct_size: size_of::<InkpodColorValue>() as u32,
+                depth: INKPOD_COLOR_DEPTH_8,
+                red: 12,
+                green: 34,
+                blue: 56,
+                alpha: 255,
+            };
+            let mut fill = InkpodFillInput {
+                struct_size: size_of::<InkpodFillInput>() as u32,
+                operation: INKPOD_FILL_SEED,
+                flags: INKPOD_FILL_FLAG_OVERFLOW_ABORT,
+                seed_x: 4,
+                seed_y: 4,
+                color,
+                tolerance: 0,
+                gap_close: 0,
+                inclusion_mode: INKPOD_INCLUSION_NONE,
+                selection: InkpodFrameRect::default(),
+                inclusion_colors: ptr::null(),
+                inclusion_color_count: 0,
+                inclusion_color_stride_bytes: 0,
+                extension_distance: 0,
+                reserved: 0,
+            };
+            let mut result = InkpodFillResult {
+                struct_size: size_of::<InkpodFillResult>() as u32,
+                ..InkpodFillResult::default()
+            };
+            let mut short_fill = fill;
+            short_fill.struct_size = size_of::<u32>() as u32;
+            assert_eq!(
+                inkpod_core_apply_fill(core, &short_fill, &mut result),
+                INKPOD_STATUS_INCOMPATIBLE_ABI
+            );
+            let mut unknown_fill = fill;
+            unknown_fill.operation = 99;
+            assert_eq!(
+                inkpod_core_apply_fill(core, &unknown_fill, &mut result),
+                INKPOD_STATUS_INVALID_ARGUMENT
+            );
+            let mut short_result = InkpodFillResult {
+                struct_size: size_of::<u32>() as u32,
+                ..InkpodFillResult::default()
+            };
+            assert_eq!(
+                inkpod_core_apply_fill(core, &fill, &mut short_result),
+                INKPOD_STATUS_INCOMPATIBLE_ABI
+            );
+            assert_eq!(
+                inkpod_core_apply_fill(core, &fill, &mut result),
+                INKPOD_STATUS_FILL_OVERFLOW
+            );
+            assert_ne!(result.flags & INKPOD_FILL_RESULT_FLAG_LEAK_CANDIDATE, 0);
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut info),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(info.document_revision, created_revision);
+            assert_eq!(info.color_plane_checksum, created_color_checksum);
+
+            fill.flags = INKPOD_FILL_FLAG_SELECTION_PRESENT;
+            fill.seed_x = 2;
+            fill.seed_y = 2;
+            fill.selection = InkpodFrameRect {
+                x: 2,
+                y: 2,
+                width: 2,
+                height: 2,
+            };
+            assert_eq!(
+                inkpod_core_apply_fill(core, &fill, &mut result),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(result.changed_pixel_count, 4);
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut info),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(info.document_revision, created_revision + 1);
+            assert_eq!(info.main_plane_checksum, created_main_checksum);
+            assert_ne!(info.color_plane_checksum, created_color_checksum);
+
+            let mut sampled = InkpodColorValue {
+                struct_size: size_of::<InkpodColorValue>() as u32,
+                ..InkpodColorValue::default()
+            };
+            assert_eq!(
+                inkpod_core_eyedropper(core, INKPOD_EYEDROPPER_SELECTED_PLANE, 2, 2, &mut sampled,),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(sampled.depth, INKPOD_COLOR_DEPTH_8);
+            assert_eq!(
+                [sampled.red, sampled.green, sampled.blue, sampled.alpha],
+                [12, 34, 56, 255]
+            );
+
+            let revision_before_check = info.document_revision;
+            let view_before_check = info.view_revision;
+            assert_eq!(
+                inkpod_core_set_color_check(core, INKPOD_COLOR_CHECK_NATIVE_ALPHA),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut info),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(info.document_revision, revision_before_check);
+            assert!(info.view_revision > view_before_check);
+
+            let mut sixteen_bit_fill = fill;
+            sixteen_bit_fill.color = InkpodColorValue {
+                struct_size: size_of::<InkpodColorValue>() as u32,
+                depth: INKPOD_COLOR_DEPTH_16,
+                red: 1,
+                green: 257,
+                blue: 32_769,
+                alpha: 65_534,
+            };
+            let checksum_before_invalid = info.color_plane_checksum;
+            assert_eq!(
+                inkpod_core_apply_fill(core, &sixteen_bit_fill, &mut result),
+                INKPOD_STATUS_INVALID_ARGUMENT
+            );
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut info),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(info.color_plane_checksum, checksum_before_invalid);
+
+            let path = std::env::temp_dir().join(format!(
+                "inkpod-ffi-m2-recovery-{}-{}.inkpod",
+                std::process::id(),
+                info.document_revision
+            ));
+            let path_text = path.to_str().unwrap().as_bytes();
+            assert_eq!(
+                inkpod_core_autosave(core, path_text.as_ptr(), path_text.len() as u64, &mut info,),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+
+            assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
+            assert_eq!(
+                inkpod_core_open_recovery(
+                    core,
+                    path_text.as_ptr(),
+                    path_text.len() as u64,
+                    &mut info,
+                ),
+                INKPOD_STATUS_OK
+            );
+            assert_ne!(info.flags & INKPOD_DOCUMENT_FLAG_RECOVERED, 0);
+            assert_ne!(info.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
+            assert_eq!(
+                inkpod_core_revert(core, &mut info),
+                INKPOD_STATUS_INVALID_STATE
+            );
+            assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+            std::fs::remove_file(path).unwrap();
+        }
     }
 }

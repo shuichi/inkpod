@@ -169,6 +169,14 @@ struct CoreEngine::Impl final {
         }
     }
 
+    bool Enqueue(
+        std::function<InkpodStatus(InkpodCore*)> operation,
+        bool publish_snapshot,
+        bool refresh_document_info) noexcept {
+        return Push(SyncWork{
+            std::move(operation), publish_snapshot, refresh_document_info, nullptr});
+    }
+
     bool CopyDocumentInfo(InkpodDocumentInfo& output) const noexcept {
         std::lock_guard lock(state_mutex);
         if (!has_document_info) {
@@ -337,8 +345,11 @@ struct CoreEngine::Impl final {
         if (status == INKPOD_STATUS_OK && item.publish_snapshot) {
             status = PublishSnapshot(core, false);
         }
-        CaptureFailure(status, false);
-        item.completion->set_value(status);
+        const bool asynchronous = item.completion == nullptr;
+        CaptureFailure(status, asynchronous);
+        if (item.completion != nullptr) {
+            item.completion->set_value(status);
+        }
     }
 
     void Run(const std::shared_ptr<std::promise<InkpodStatus>>& ready) noexcept {
@@ -474,6 +485,14 @@ InkpodStatus CoreEngine::Invoke(
     return impl_ == nullptr
         ? INKPOD_STATUS_INVALID_STATE
         : impl_->Invoke(std::move(operation), publish_snapshot, refresh_document_info);
+}
+
+bool CoreEngine::Enqueue(
+    std::function<InkpodStatus(InkpodCore*)> operation,
+    bool publish_snapshot,
+    bool refresh_document_info) noexcept {
+    return impl_ != nullptr
+        && impl_->Enqueue(std::move(operation), publish_snapshot, refresh_document_info);
 }
 
 bool CoreEngine::EnqueueStroke(StrokeEvent event) noexcept {

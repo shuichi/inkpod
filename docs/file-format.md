@@ -24,9 +24,13 @@ blob area
   compact edge-aware tile bytes in manifest order
 ```
 
-M1 requires exactly one binary-mask main-line plane and one straight-alpha
-sRGB RGBA8 color plane. Raster storage is sparse; zero tiles are omitted. Tile
-revision and GPU cache data are runtime state and are not persisted.
+M2 retains exactly one main-line plane and one color plane in the current cell
+DTO. The main-line descriptor accepts binary mask, grayscale 8-bit, or
+grayscale 16-bit storage. The color descriptor accepts straight-alpha sRGB
+RGBA8 or RGBA16 storage. The decoder requires every tile format to equal its
+plane descriptor; 16-bit channels are serialized little-endian without an
+implicit 8-bit conversion. Raster storage is sparse; zero tiles are omitted.
+Tile revision and GPU cache data are runtime state and are not persisted.
 
 The decoder bounds the whole file (1 GiB), including a post-read check against
 concurrent file growth, plus manifest (16 MiB), dimensions, plane/blob counts,
@@ -49,8 +53,21 @@ New documents have no savepoint and are dirty. Open/revert create a clean
 savepoint; Undo/Redo compare history-state identity rather than file timestamp.
 
 The format crate exposes a cancellation hook and tests no-partial-commit
-semantics. User-facing background progress, autosave, and recovery files belong
-to M2 and are not claimed by M1.
+semantics. `save_recovery_atomic` uses the same same-directory temporary-file
+protocol but does not advance a Core normal savepoint or attach the recovery
+path as a normal document path. `open_recovery` loads the container into a
+dirty, recovered, pathless Core document, so a later ordinary Save must choose
+a destination and cannot silently overwrite the pre-recovery normal file.
+
+The Windows adapter associates a companion recovery path only after a normal
+path is known. Timer and manual autosaves are queued to the Core engine without
+blocking the UI. On ordinary Open, a newer recovery file offers explicit open,
+discard, or defer choices; only explicit discard removes it. The format layer
+also provides bounded modification-time comparison and idempotent discard
+helpers. Core, FFI, and Windows tests verify that recovery never changes the
+normal file bytes/checksum. Normal user-facing save/open progress and
+cancellation UI remain incomplete IO-001 work; this does not affect the M2
+recovery acceptance case.
 
 ## Unknown formats
 
