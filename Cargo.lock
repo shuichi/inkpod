@@ -5,6 +5,10 @@ version = 4
 [[package]]
 name = "inkpod-core"
 version = "0.1.0"
+dependencies = [
+ "inkpod-format",
+ "inkpod-image",
+]
 
 [[package]]
 name = "inkpod-ffi"
@@ -12,3 +16,14 @@ version = "0.1.0"
 dependencies = [
  "inkpod-core",
 ]
+
+[[package]]
+name = "inkpod-format"
+version = "0.1.0"
+dependencies = [
+ "inkpod-image",
+]
+
+[[package]]
+name = "inkpod-image"
+version = "0.1.0"

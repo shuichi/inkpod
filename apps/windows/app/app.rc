@@ -15,7 +15,39 @@ IDR_MAIN_MENU MENU
 BEGIN
     POPUP "ファイル(&F)"
     BEGIN
+        MENUITEM "新規セル(&N)\tCtrl+N", IDM_FILE_NEW
+        MENUITEM "開く(&O)...\tCtrl+O", IDM_FILE_OPEN
+        MENUITEM "保存(&S)\tCtrl+S", IDM_FILE_SAVE
+        MENUITEM "名前を付けて保存(&A)...", IDM_FILE_SAVE_AS
+        MENUITEM "復帰(&R)", IDM_FILE_REVERT
+        MENUITEM SEPARATOR
         MENUITEM "終了(&X)", IDM_APP_EXIT
     END
+    POPUP "編集(&E)"
+    BEGIN
+        MENUITEM "元に戻す(&U)\tCtrl+Z", IDM_EDIT_UNDO
+        MENUITEM "やり直し(&R)\tCtrl+Y", IDM_EDIT_REDO
+    END
+    POPUP "表示(&V)"
+    BEGIN
+        MENUITEM "拡大(&I)", IDM_VIEW_ZOOM_IN
+        MENUITEM "縮小(&O)", IDM_VIEW_ZOOM_OUT
+        MENUITEM "全体表示(&F)", IDM_VIEW_FIT
+        MENUITEM "ピクセル等倍(&1)", IDM_VIEW_ONE_TO_ONE
+    END
+    POPUP "ツール(&T)"
+    BEGIN
+        MENUITEM "鉛筆(&P)", IDM_TOOL_PENCIL
+        MENUITEM "ブラシ(&B)", IDM_TOOL_BRUSH
+        MENUITEM "消しゴム(&E)", IDM_TOOL_ERASER
+    END
+    POPUP "プレーン(&P)"
+    BEGIN
+        MENUITEM "主線(&L)", IDM_PLANE_MAIN_LINE
+        MENUITEM "彩色(&C)", IDM_PLANE_COLOR
+    END
+    POPUP "色(&C)"
+    BEGIN
+        MENUITEM "描画色...", IDM_COLOR_CHOOSE
+    END
 END
-

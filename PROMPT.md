@@ -495,6 +495,16 @@ Core の公開 Rust API は C ABI から独立させてください。FFI 用の
 
 Direct2D resource を Rust に渡したり、C++ で document state を別に持ったりしないでください。
 
+Windows frontend は、少なくとも次の三つの長寿命 thread に責務を分離してください。
+
+1. UI/Input thread: `HWND`、message loop、Common Controls、pointer history の取得、client device-pixel 座標への正規化、bounded input/command queue への投入を担当する。描画中に Core の完了や `Present` を待たない。
+2. Core engine thread: `InkpodCore` をこの thread で生成・使用・破棄し、single-writer として command と `stroke begin/append/end/cancel` を順序どおり処理する。描画中の immutable preview snapshot を表示 cadence 以下で発行する。
+3. Renderer thread: D3D11 device、DXGI swap chain、Direct2D device context、GPU tile cache と `Present` をこの thread で生成・使用・破棄し、最新の immutable snapshot を表示 cadence で描画する。
+
+thread 間は所有権を明示した queue で接続してください。renderer は置き換えられた古い snapshot/frame を破棄してよい一方、pointer sample や stroke の begin/end/cancel を描画負荷軽減のために破棄してはいけません。Core thread から Canvas の window message queue へ Rust 所有 pointer を裸で積まず、snapshot の受取側が成功/失敗の両方で release 責務を引き受ける C++ queue を使ってください。
+
+Canvas の view transform は client の物理 device pixel を基準とし、`device = document * zoom + pan` とします。Direct2D Canvas は pixel unit/96-DPI target で同じ transform を使い、Per-Monitor DPI は menu、dialog、toolbar 等の UI scaling と実寸表示 policy にだけ反映してください。同一の client size と view state で DPI 変更だけにより Canvas が移動・縮小してはいけません。
+
 ### C ABI
 
 - opaque `InkpodCore*` と immutable `InkpodSnapshot*`
@@ -505,7 +515,7 @@ Direct2D resource を Rust に渡したり、C++ で document state を別に持
 - `catch_unwind`、NULL/length/alignment/enum validation、thread 契約
 - C11 と C++20 の header compile test
 
-最低限、create、dispatch batch、snapshot build/view/release、error copy、destroy を提供してください。API 名を変える場合は `docs/ffi.md` へ理由と所有権を記録してください。
+最低限、create、dispatch batch、stroke begin/append/end/cancel、snapshot build/view/release、error copy、destroy を提供してください。API 名を変える場合は `docs/ffi.md` へ理由と所有権を記録してください。
 
 ## 要件 ID
 
@@ -598,6 +608,7 @@ Acceptance:
 - 2 値彩色 CellDocument、主線 plane、彩色 plane、tiled raster
 - new/open/save/reopen、dirty/savepoint、Undo/Redo
 - raster snapshot と D2D tile cache
+- UI/Input、Core engine、Renderer の三スレッド構成と、描画中 preview snapshot
 - zoom/pan/fit/1:1
 - mouse/pen pencil、eraser、描画色、主線/彩色 mode switch
 - `.inkpod` v1 manifest と blob、atomic save
@@ -610,7 +621,9 @@ Acceptance scenarios:
 4. 1 stroke を 1 回 Undo/Redo できる。
 5. 保存、破棄、再読込後に layer/plane ID、pixel、frame metadata が一致する。
 6. pan/zoom は文書 revision を変更しない。
-7. 連続描画しても FFI は sample ごとの snapshot call を要求しない。
+7. 連続描画では sample を順序どおり batch/span で Core engine へ渡し、FFI は sample ごとの snapshot call を要求しない。
+8. pointer up 前に stroke preview が一回以上表示される。その間 document revision、dirty、Undo history は変化せず、end は一つの Undo 単位、cancel は開始前の状態へ完全復元する。
+9. UI/Input、Core engine、Renderer の thread ID が異なり、同じ client size/view なら DPI 変更の前後で document の device-pixel bounds が一致する。
 
 ### M2: 中核彩色
 
@@ -761,6 +774,7 @@ Acceptance:
 ### 履歴
 
 - pointer down から up までを一 stroke とする。
+- stroke は begin/append 中の preview state と確定 document state を分け、end だけを一 history entry として commit し、cancel/failure は開始前へ完全復元する。
 - filter/transform dialog は preview state を commit state と分ける。
 - Undo 後に新規編集した場合、redo を無効にする。
 - file save、autosave、export を同じ dirty semantics にしない。
@@ -769,6 +783,9 @@ Acceptance:
 
 - Core snapshot の tile revision で GPU bitmap を cache する。
 - dirty tile だけ upload する。
+- immutable snapshot は Core engine thread から所有権付き queue で Renderer thread へ渡し、古い未描画 snapshot は release して最新を優先する。
+- pointer sample は UI/Input から Core engine へ順序どおり渡し、renderer の遅延を理由に破棄しない。
+- Canvas の document/view/device 変換は client device pixel に統一し、D2D の暗黙 DIP 変換と二重適用しない。
 - minimize/occlusion 時に無駄な rendering loop を止める。
 - device lost で Core document を破棄しない。
 - transparent color、white compatibility check、selection overlay を元画像へ焼き込まない。

@@ -18,11 +18,7 @@ fn collect_rust_sources(directory: &Path, output: &mut Vec<std::path::PathBuf>) 
 }
 
 #[test]
-fn arch_002_core_sources_do_not_reference_windows_apis() {
-    let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut sources = Vec::new();
-    collect_rust_sources(&source_root, &mut sources);
-
+fn arch_002_rust_domain_crates_do_not_reference_windows_apis() {
     let forbidden = [
         "HWND",
         "Win32",
@@ -44,34 +40,42 @@ fn arch_002_core_sources_do_not_reference_windows_apis() {
         "DirectWrite",
     ];
 
-    for source in sources {
-        let contents = fs::read_to_string(&source)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
-        for token in forbidden {
+    let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("core crate must be below the Rust workspace directory");
+    for crate_name in ["inkpod-core", "inkpod-image", "inkpod-format"] {
+        let crate_root = rust_root.join(crate_name);
+        let mut sources = Vec::new();
+        collect_rust_sources(&crate_root.join("src"), &mut sources);
+        for source in sources {
+            let contents = fs::read_to_string(&source)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
+            for token in forbidden {
+                assert!(
+                    !contents.contains(token),
+                    "{} contains forbidden frontend token {token}",
+                    source.display()
+                );
+            }
+        }
+
+        let manifest_path = crate_root.join("Cargo.toml");
+        let manifest = fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", manifest_path.display()));
+        for token in [
+            "windows =",
+            "windows-sys",
+            "windows-core",
+            "windows-targets",
+            "winapi =",
+            "cfg(windows)",
+            "target_os = \"windows\"",
+        ] {
             assert!(
-                !contents.contains(token),
-                "{} contains forbidden frontend token {token}",
-                source.display()
+                !manifest.contains(token),
+                "{} contains forbidden frontend dependency token {token}",
+                manifest_path.display()
             );
         }
-    }
-
-    let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-    let manifest = fs::read_to_string(&manifest_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", manifest_path.display()));
-    for token in [
-        "windows =",
-        "windows-sys",
-        "windows-core",
-        "windows-targets",
-        "winapi =",
-        "cfg(windows)",
-        "target_os = \"windows\"",
-    ] {
-        assert!(
-            !manifest.contains(token),
-            "{} contains forbidden frontend dependency token {token}",
-            manifest_path.display()
-        );
     }
 }

@@ -12,7 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 
 if(CMAKE_CONFIGURATION_TYPES)
-    message(FATAL_ERROR "inkpod M0 uses a single-config generator so Cargo and CMake share one profile")
+    message(FATAL_ERROR "inkpod uses a single-config generator so Cargo and CMake share one profile")
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -48,6 +48,10 @@ set(INKPOD_RUST_INPUTS
     "${CMAKE_SOURCE_DIR}/Cargo.lock"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/lib.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/Cargo.toml"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/lib.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-image/Cargo.toml"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/lib.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/src/lib.rs")
 
@@ -78,9 +82,8 @@ endif()
 
 include(CTest)
 
-add_executable(inkpod_header_c11 tests/header_c11.c)
+add_library(inkpod_header_c11 OBJECT tests/header_c11.c)
 target_include_directories(inkpod_header_c11 PRIVATE "${CMAKE_SOURCE_DIR}/include")
-add_test(NAME inkpod_header_c11 COMMAND inkpod_header_c11)
 
 if(MSVC)
     function(inkpod_enable_strict_warnings target)
@@ -92,14 +95,18 @@ endif()
 if(WIN32)
     add_executable(inkpod WIN32
         apps/windows/app/main.cpp
+        apps/windows/app/core_engine.cpp
         apps/windows/app/app.rc
-        apps/windows/renderer/canvas.cpp)
+        apps/windows/renderer/canvas.cpp
+        tests/abi_smoke.cpp
+        $<TARGET_OBJECTS:inkpod_header_c11>)
     target_include_directories(inkpod PRIVATE
         "${CMAKE_SOURCE_DIR}/apps/windows/renderer"
         "${CMAKE_SOURCE_DIR}/include")
     target_compile_definitions(inkpod PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(inkpod PRIVATE
         inkpod_ffi_static
+        comdlg32
         comctl32
         d2d1
         d3d11
@@ -109,18 +116,17 @@ if(WIN32)
     if(MSVC)
         inkpod_enable_strict_warnings(inkpod)
         target_compile_options(inkpod PRIVATE /EHsc)
+        target_link_options(inkpod PRIVATE /DEBUG:FULL)
+        if(CMAKE_BUILD_TYPE STREQUAL "Release")
+            # Retain optimized code while emitting PDB metadata. Besides useful
+            # crash diagnostics, this permits execution under local enterprise
+            # application-control policies that reject fresh opaque binaries.
+            target_compile_options(inkpod PRIVATE /Zi)
+        endif()
         # The Common Controls v6 / PerMonitorV2 manifest is compiled by app.rc.
         target_link_options(inkpod PRIVATE /MANIFEST:NO)
     endif()
 
-    add_executable(inkpod_abi_smoke tests/abi_smoke.cpp)
-    target_include_directories(inkpod_abi_smoke PRIVATE "${CMAKE_SOURCE_DIR}/include")
-    target_link_libraries(inkpod_abi_smoke PRIVATE inkpod_ffi_static)
-    if(MSVC)
-        inkpod_enable_strict_warnings(inkpod_abi_smoke)
-        target_compile_options(inkpod_abi_smoke PRIVATE /EHsc)
-    endif()
-
-    add_test(NAME inkpod_abi_smoke COMMAND inkpod_abi_smoke)
+    add_test(NAME inkpod_abi_smoke COMMAND inkpod --abi-smoke-test)
     add_test(NAME inkpod_windows_smoke COMMAND inkpod --smoke-test)
 endif()

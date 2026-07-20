@@ -1,12 +1,11 @@
 [package]
-name = "inkpod-core"
+name = "inkpod-format"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-inkpod-format = { path = "../inkpod-format" }
 inkpod-image = { path = "../inkpod-image" }
 
 [lints]

@@ -15,8 +15,19 @@ static_assert(sizeof(InkpodDispatchResult) == 24U);
 static_assert(sizeof(InkpodSnapshotOptions) == 16U);
 static_assert(sizeof(InkpodSnapshotTile) == 64U);
 static_assert(sizeof(InkpodSnapshotView) == 48U);
+static_assert(sizeof(InkpodCellCreateOptions) == 48U);
+static_assert(sizeof(InkpodDocumentInfo) == 192U);
+static_assert(sizeof(InkpodStrokeSample) == 24U);
+static_assert(sizeof(InkpodStrokeInput) == 56U);
+static_assert(sizeof(InkpodViewInput) == 48U);
+static_assert(sizeof(InkpodSnapshotTransform) == 48U);
 
-int main() {
+extern "C" int inkpod_header_c11_smoke(void);
+
+int InkpodRunAbiSmoke() {
+    if (inkpod_header_c11_smoke() != 0) {
+        return 31;
+    }
     if (inkpod_abi_version() != INKPOD_ABI_VERSION) {
         return 1;
     }
@@ -161,6 +172,86 @@ int main() {
         || written == 0U
         || error_text[static_cast<std::size_t>(written)] != 0U) {
         return 13;
+    }
+
+    if (inkpod_core_create(&config, &core) != INKPOD_STATUS_OK || core == nullptr) {
+        return 23;
+    }
+    const InkpodCellCreateOptions cell_options{
+        sizeof(InkpodCellCreateOptions),
+        0U,
+        INKPOD_FEATURE_NONE,
+        UINT64_C(0x123456789abcdef0),
+        UINT64_C(0x1032547698badcfe),
+        1920U,
+        1080U,
+        96000U,
+        96000U};
+    InkpodDocumentInfo document{};
+    document.struct_size = sizeof(document);
+    if (inkpod_core_new_cell(core, &cell_options, &document) != INKPOD_STATUS_OK
+        || document.width != 1920U || document.height != 1080U
+        || (document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+        return 24;
+    }
+    std::array<InkpodStrokeSample, 64> stroke_samples{};
+    for (std::size_t index = 0; index < stroke_samples.size(); ++index) {
+        stroke_samples[index] = InkpodStrokeSample{
+            sizeof(InkpodStrokeSample),
+            0U,
+            20.0F + static_cast<float>(index),
+            30.0F,
+            0.75F,
+            0U};
+    }
+    InkpodStrokeInput stroke{
+        sizeof(InkpodStrokeInput),
+        INKPOD_TOOL_PENCIL,
+        INKPOD_PLANE_MAIN_LINE,
+        INKPOD_COORDINATE_SPACE_DOCUMENT,
+        0U,
+        UINT32_C(0x000000ff),
+        1.0F,
+        stroke_samples.data(),
+        stroke_samples.size(),
+        sizeof(InkpodStrokeSample)};
+    dispatch = InkpodDispatchResult{};
+    dispatch.struct_size = sizeof(dispatch);
+    if (inkpod_core_apply_stroke(core, &stroke, &dispatch) != INKPOD_STATUS_OK
+        || dispatch.accepted_command_count != 1U
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK) {
+        return 25;
+    }
+    const std::uint64_t main_checksum = document.main_plane_checksum;
+    stroke.plane = INKPOD_PLANE_COLOR;
+    stroke.color_rgba = UINT32_C(0xdc281eff);
+    if (inkpod_core_apply_stroke(core, &stroke, &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
+        || document.main_plane_checksum != main_checksum) {
+        return 26;
+    }
+    if (inkpod_core_undo(core, &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_redo(core, &dispatch) != INKPOD_STATUS_OK) {
+        return 27;
+    }
+    snapshot = nullptr;
+    if (inkpod_core_build_snapshot(core, &options, &snapshot) != INKPOD_STATUS_OK
+        || snapshot == nullptr) {
+        return 28;
+    }
+    view = InkpodSnapshotView{};
+    view.struct_size = sizeof(view);
+    InkpodSnapshotTransform transform{};
+    transform.struct_size = sizeof(transform);
+    if (inkpod_snapshot_get_view(snapshot, &view) != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_transform(snapshot, &transform) != INKPOD_STATUS_OK
+        || view.tiles == nullptr || view.tile_count == 0U
+        || transform.document_width != 1920U || transform.document_height != 1080U) {
+        return 29;
+    }
+    if (inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
+        || inkpod_core_destroy(&core) != INKPOD_STATUS_OK) {
+        return 30;
     }
     return 0;
 }

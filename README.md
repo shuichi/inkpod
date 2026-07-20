@@ -1,8 +1,9 @@
 # inkpod
 
 inkpod is a new, maintainable implementation of an animation-paint workflow.
-The project is at milestone M0: a platform-independent Rust Core is connected
-through a versioned C ABI to a Windows 11 Win32/Direct2D application shell.
+The project has completed milestone M1: a platform-independent Rust Core owns a
+sparse two-plane cell, stroke history, view state, and `.inkpod` persistence;
+the versioned C ABI connects it to a Windows 11 Win32/Direct2D drawing slice.
 
 The repository's implementation contract is [AGENTS.md](AGENTS.md), with
 feature behavior and milestones defined by [PROMPT.md](PROMPT.md).
@@ -58,11 +59,14 @@ ctest --preset windows-x64-release
 .\build\windows-x64-release\inkpod.exe
 ```
 
-The Windows smoke test creates a hidden main window and hardware- or
-WARP-backed Direct2D Canvas, requests an empty snapshot through the C ABI,
-exercises resize, DPI-target recreation, and simulated device-resource loss,
-renders once, and shuts down. At milestone M0, the executable is an application
-shell rather than a complete painting application.
+The application creates a 1920 x 1080 binary-color cell. Its menus expose
+new/open/save/revert, Undo/Redo, zoom/pan/fit/1:1, pencil/brush/eraser,
+main-line/color plane switching, and an RGBA8 drawing color. UI/input, the
+single-writer Rust Core engine, and D3D/D2D rendering run on separate threads.
+Live stroke previews are published before pointer-up and commit as one Undo
+unit. The Windows smoke test verifies that path together with protected-main-line
+drawing, history, view revision separation, save/discard/reopen, D2D tile cache,
+device-pixel Fit bounds across DPI changes, and simulated device loss.
 
 ## Validate the Rust workspace only
 

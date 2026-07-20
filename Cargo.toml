@@ -2,6 +2,8 @@
 members = [
     "rust/inkpod-core",
     "rust/inkpod-ffi",
+    "rust/inkpod-format",
+    "rust/inkpod-image",
 ]
 resolver = "3"
 

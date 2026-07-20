@@ -1,61 +1,145 @@
 # Architecture
 
-## M0 component boundary
+## M1 component boundary
 
-inkpod has one state owner and one platform adapter. The dependency direction
-is deliberately one-way:
+inkpod has one platform-independent state owner. The dependency direction is
+one-way:
 
 ```text
-CMake -> Cargo -> inkpod-ffi -> inkpod-core
-   |
-   +-> Win32 application -> versioned C ABI
-                         -> D3D11/DXGI/Direct2D Canvas
+CMake -> Cargo -> inkpod-ffi -> inkpod-core -> inkpod-format -> inkpod-image
+                                      |                ^
+                                      +----------------+
+
+UI/Input thread -> bounded command/sample queue -> Core engine thread
+                                                    | versioned C ABI
+                                                    v
+                                              immutable snapshot
+                                                    | ownership queue
+                                                    v
+                                              Renderer thread -> DXGI Present
 ```
 
-`inkpod-core` contains deterministic, platform-independent state transitions
-and immutable render snapshots. It forbids unsafe Rust and has an architecture
-test that rejects Windows/frontend API tokens anywhere below its `src`
-directory. The crate does not depend on `inkpod-ffi`.
+`inkpod-image` owns typed pixels and 64 x 64 sparse raster tiles. Allocated
+tiles use `Arc` copy-on-write; an untouched 1920 x 1080 document allocates no
+pixel tiles. Binary main-line and straight-alpha sRGB color planes are distinct
+types.
 
-`inkpod-ffi` is the only `staticlib`. It translates fixed-layout C structures
-to typed Core commands, contains panics at every exported fallible boundary,
-and owns all opaque allocations returned through the ABI. C++ does not mirror
-document state.
+`inkpod-format` owns the bounded `.inkpod` v1 container and has no application
+state dependency. `inkpod-core` maps its `CellDocument` to/from the format DTO,
+owns stable IDs, document/view revisions, stroke preview, transactions,
+savepoint, history, and immutable premultiplied-BGRA render snapshots. An
+architecture test scans Core, image, and format sources/manifests for forbidden
+Windows/frontend APIs. All three crates are safe Rust; no `HWND`, COM, D2D,
+DXGI, Win32 DPI, or frontend thread type enters them.
 
-The Windows frontend owns the process entry point, Common Controls and COM
-lifetime, window handles, the message loop, and GPU objects. Each Canvas owns a
-flip-model DXGI swap chain, D3D11 device, Direct2D device context, and target
-bitmap. Hardware device creation falls back to WARP. Resize, occlusion, and
-device removal/reset are handled without discarding the Rust Core.
+`inkpod-ffi` is the only `staticlib`. It validates fixed-layout inputs, exposes
+batched `stroke_begin/append/end/cancel`, catches panics, and owns opaque
+Core/snapshot allocations. Win32 supplies a `CoCreateGuid` document UUID at the
+create boundary; Core persists it without acquiring an OS dependency. The
+Win32 application does not mirror pixels, history, or format rules.
 
-M0 snapshots contain a revision and an empty tile span. M1 will add typed,
-immutable tile records without changing the snapshot ownership model.
+## Windows thread model
+
+The Windows frontend has three distinct long-lived threads:
+
+1. The UI/Input thread owns `HWND`, the message loop, Common Controls, file and
+   color dialogs, capture, and `WM_POINTER`/mouse normalization. It forwards
+   begin/append/end/cancel packets immediately to a bounded Core queue. Pen
+   packets include up to 256 coalesced `GetPointerPenInfoHistory` records in
+   chronological order. The drawing path does not wait for Core or `Present`.
+2. The Core engine thread creates, uses, and destroys `InkpodCore`. It is the
+   ABI's only writer, preserves stroke event order, coalesces adjacent append
+   packets without dropping samples, builds preview snapshots no faster than
+   the configured frame interval, and caches copied document metadata for UI
+   state. It may post value-only state/error notifications to the UI queue; it
+   never mutates a window and Core never calls a C++ callback.
+3. The Renderer thread creates, uses, and destroys D3D11, DXGI swap-chain,
+   Direct2D, tile bitmap, and frame-latency objects. It consumes the newest
+   immutable snapshot, uploads only changed tile revisions, waits on the
+   frame-latency object, and presents independently of pointer dispatch.
+
+The Core engine transfers each new `InkpodSnapshot*` directly to a thread-safe
+C++ snapshot sink, not through an `HWND` message parameter. The sink assumes
+release responsibility on both enqueue success and failure. Replacing a pending
+snapshot releases the stale frame immediately; the current snapshot is retained
+for device recovery. Dropping stale render frames is allowed. Dropping input
+samples or stroke boundary/cancel events is not. If input cannot be queued, the
+Canvas cancels capture and enqueues cancellation so a partial stroke cannot
+commit.
+
+## Coordinate and DPI contract
+
+Canvas input and rendering use client device pixels:
+
+```text
+device_x = document_x * zoom + pan_x
+device_y = document_y * zoom + pan_y
+```
+
+The shared snapshot transform is the only document-to-device transform. The
+Direct2D context uses pixel units and a 96-DPI target bitmap so it does not add a
+second DIP scale. Per-Monitor DPI v2 still controls native UI sizing and future
+physical-size policy, but a DPI notification alone does not translate or shrink
+the document. Fit uses the current client size in device pixels and is recomputed
+on viewport resize; manual pan/zoom is preserved across resize.
+
+## Revision, preview, and transaction model
+
+Document and view revisions are independent. A successful committed pixel
+transaction, Undo, Redo, new, or open advances document revision. Pan, zoom,
+fit, 1:1, or viewport resize advances only view revision when the transform
+changes. Plane selection changes neither revision.
+
+Pointer-down starts one Core-owned `StrokeSession`. Its preview document shares
+sparse tiles through `Arc` copy-on-write and records accumulated before/after
+pixel changes plus the last sample. Begin/append mutate only that preview and
+can therefore produce immutable snapshots before pointer-up without changing
+the committed document revision, dirty state, savepoint, or history. End swaps
+the preview into the document and appends exactly one history entry. Cancel,
+capture loss, or any failed append drops the session and exactly restores the
+base state.
+
+Snapshot tile buffers are `Arc<[u8]>` and the Core render cache reuses unchanged
+composited tile buffers between preview frames. History stores before/after
+pixel values instead of a whole image copy. Undo followed by a new edit
+truncates the redo branch. A unique history-state token identifies the normal
+savepoint, so Undo back to the saved state clears dirty and Redo away restores
+dirty.
+
+Stroke coordinates and rasterization work are bounded cumulatively before
+commit. Segments are clipped to the document before rasterization, so invalid,
+extreme, or resource-limit input leaves pixels, history, and revision unchanged.
 
 ## Build graph
 
-CMake is the build entry. A custom command explicitly declares the Rust library
-sources/manifests as inputs (excluding test-only files), a profile-specific
-completion stamp as its output, and Cargo's
-staticlib/rlib as byproducts. After Cargo succeeds, their timestamps and then
-the completion stamp are refreshed. Thus a Cargo no-op after an input timestamp
-change cannot leave any declared output perpetually out of date. C++ targets
-depend on an imported
-static-library target backed by the declared byproduct. Therefore an unchanged
-Rust library is not rebuilt merely because a C++ target is built.
+CMake is the build entry. Its custom command explicitly lists every library
+manifest/source from `inkpod-image`, `inkpod-format`, `inkpod-core`, and
+`inkpod-ffi`, produces a profile-specific completion stamp, and declares
+Cargo's staticlib/rlib as byproducts. An unchanged repeat build therefore does
+not run Cargo.
 
 The checked-in presets use single-configuration Ninja builds with the MSVC x64
-developer environment. A single configuration ensures the Cargo `debug` or
-`release` artifact always matches the active CMake configuration and the `/MD`
-runtime selection used by Rust's MSVC target.
+developer environment. Cargo `debug`/`release` and CMake `/MD` select matching
+profiles and runtimes.
+
+The C11 header probe is compiled as a C object, linked into the application,
+and invoked by `inkpod.exe --abi-smoke-test` together with the C++20 ABI tests.
+This preserves a real C11 include/layout check while allowing the local Windows
+application-control policy to run one approved test binary.
 
 ## Initialization and shutdown
 
-The application initializes Common Controls, COM, the hidden/main window and
-Canvas renderer, then the Rust Core. Shutdown reverses the last two ownership
-steps: Core handles are destroyed before the main window releases renderer and
-GPU resources; COM is uninitialized last. Failures unwind only resources that
-were successfully initialized.
+The application initializes Common Controls, COM, the main window/Canvas and
+Renderer thread, then starts the Core engine thread. Core creation and initial
+1920 x 1080 cell/Fit snapshot occur on the Core thread. Shutdown first stops and
+joins Core work, then destroys the Canvas and joins its Renderer thread, so no
+snapshot sink or window notification target outlives its owner. A renderer-held
+immutable snapshot may outlive its Core until Canvas destruction because it owns
+all borrowed tile storage and is released by Rust's snapshot release function.
 
-The hidden Windows smoke path creates the same main/Canvas windows, then forces
-a resize, recreates the target at the current window DPI, discards and rebuilds
-device resources, renders, and shuts down through the normal ownership path.
+The hidden Windows smoke path uses the normal UI input adapter, Core queue, ABI,
+format, snapshot sink, and Renderer. It verifies distinct UI/Core/Renderer
+thread IDs, a frame presented before pointer-up while committed state remains
+unchanged, one-unit commit/cancel behavior, protected-plane drawing, history,
+view operations, save/discard/reopen, exact Fit device bounds across DPI change,
+device-loss recovery, render, and normal shutdown.

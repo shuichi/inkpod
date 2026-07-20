@@ -79,6 +79,9 @@ Rust は Direct2D command ではなく immutable render snapshot を生成する
 - 高頻度データは batch/span/snapshot 単位で渡し、sample、pixel、path element ごとに FFI 往復しない。
 - `InkpodCore` は原則 single-writer。immutable snapshot だけを release まで renderer thread から読めるようにする。
 - Core が lock 保持中に C++ callback を呼ばない。worker 結果は queue と revision 検査を経て commit する。
+- Windows frontend は UI/Input、Core engine、Renderer の三つの長寿命 thread に分ける。`InkpodCore` の create/全操作/destroy は Core engine thread、D3D11/DXGI/Direct2D/swap chain/Present は Renderer thread に固定する。
+- UI/Input thread は pointer history を client device-pixel 座標で正規化し、bounded queue へ投入する。描画中に Core や Present を待たず、入力 sample と begin/end/cancel は破棄しない。Renderer は古い未描画 snapshot/frame だけを置換してよい。
+- snapshot は所有権を明示した C++ queue で Core engine から Renderer へ渡す。Rust 所有 pointer を `PostMessage` の `WPARAM`/`LPARAM` に裸で積まず、受取側は enqueue 成否にかかわらず release 責務を一意に引き受ける。
 - C header と Rust 宣言の drift を CI で検出する。
 
 ## 6. 保存、外部入力、互換性
@@ -97,8 +100,9 @@ native extension は `.inkpod` とし、versioned manifest と圧縮可能な bl
 
 - `wWinMain` と wide-character API を使い、`InitCommonControlsEx`、COM、renderer、Core の初期化失敗を安全に unwind する。
 - menu、toolbar、shortcut、context menu は同じ command ID と enable/checked state を共有する。
-- `WM_COMMAND` 等の message handler を責務別に分け、worker thread から `HWND` を直接操作しない。
+- `WM_COMMAND` 等の message handler を責務別に分け、worker thread から `HWND` を直接操作しない。完了通知が必要なら `PostMessage` で UI thread の queue へ値だけを渡し、window 状態の変更は UI thread が行う。
 - pen/mouse/touch は可能な範囲で `WM_POINTER` を用い、pressure/tilt のない mouse fallback を持つ。
+- Canvas の座標は client device pixel に統一し、`device = document * zoom + pan` を Core snapshot と renderer で共有する。D2D Canvas は pixel unit/96-DPI target とし、Per-Monitor DPI を Canvas transform へ二重適用しない。
 - RAII で COM/GPU resource を管理する。resize、occlusion、minimize、DPI change、device removed/reset から復旧する。
 - device lost 時は GPU resource だけを再構築し、Rust の document state を失わない。描画/Present の失敗を無視しない。
 - UI thread で大きな decode、filter、save を同期実行しない。非表示・最小化時は不要な描画を止める。
