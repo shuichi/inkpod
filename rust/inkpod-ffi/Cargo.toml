@@ -1,0 +1,16 @@
+[package]
+name = "inkpod-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+inkpod-core = { path = "../inkpod-core" }
+
+[lints]
+workspace = true
+

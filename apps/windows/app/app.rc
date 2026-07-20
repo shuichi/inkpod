@@ -1,0 +1,21 @@
+#include <windows.h>
+#include "resource.h"
+
+#pragma code_page(65001)
+
+1 RT_MANIFEST "app.manifest"
+
+STRINGTABLE
+BEGIN
+    IDS_APP_TITLE "inkpod"
+    IDS_MAIN_WINDOW_CLASS "InkpodMainWindow"
+END
+
+IDR_MAIN_MENU MENU
+BEGIN
+    POPUP "ファイル(&F)"
+    BEGIN
+        MENUITEM "終了(&X)", IDM_APP_EXIT
+    END
+END
+

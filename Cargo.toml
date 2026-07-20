@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "rust/inkpod-core",
+    "rust/inkpod-ffi",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-only"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
