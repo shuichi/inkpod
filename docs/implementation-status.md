@@ -9,6 +9,18 @@
 `Verified` here means every M1 acceptance scenario in `PROMPT.md` is covered by
 an automated Rust/ABI test or the hidden Windows smoke test. M2 was not started.
 
+## User-requested Windows shell and package additions
+
+- The Japanese Help menu now exposes `Inkpodについて`. Its native, owned modal
+  dialog uses a macOS-inspired centered hierarchy while preserving Windows DPI,
+  keyboard, and modal-window behavior. It displays the generated app icon,
+  product name, CMake-derived `0.1.0` version, and a short description.
+- Windows App Development CLI 0.4.0 generated 48 MSIX PNG assets and one
+  five-resolution ICO directly from `AppIcon.svg`. The ICO is also embedded in
+  the EXE and used by the main window and About dialog.
+- This is `In progress` M8 packaging preparation. No signed MSIX was produced,
+  and clean-machine install/uninstall remains unverified.
+
 ## Requirements
 
 | ID | Status | Implementation | Tests | Notes |
@@ -24,6 +36,8 @@ an automated Rust/ABI test or the hidden Windows smoke test. M2 was not started.
 | HIST-001 (M1) | Verified | Core-owned live stroke preview, end-as-one transaction, exact cancel/failure rollback, Undo/Redo, redo truncation, savepoint, revert | Core live-preview/cancel/failure/history tests; FFI and Windows pre-pointer-up smoke | Dialog preview remains later scope; stroke preview is complete |
 | VIEW-001 (M1) | Verified | device-pixel zoom/pan/fit/1:1 with independent view revision and persistent Fit/1:1 resize behavior | Core mode/transform tests and Windows exact-bounds DPI smoke | Box zoom and flips are M3 |
 | PAINT-001 | Verified | pencil/brush/eraser, auto erase, pressure-size, clipped/bounded incremental staging; UI/Input -> Core queue uses mouse fallback and `WM_POINTER` history | Core tool/resource tests; 256-record FFI test; Windows multi-sample live stroke smoke | M1 tools only; no M2 fill |
+| M0 Windows shell (Help/About) | Verified | Japanese Help command, native modal About, shared generated icon, CMake-derived version and EXE version resource | Release `inkpod_windows_smoke` creates and closes the dialog through `WM_COMMAND`; EXE resource inspection | macOS-inspired information hierarchy implemented with native Win32 behavior |
+| M8 packaging assets | In progress | winapp CLI manifest, 48 scale/target-size PNGs, five-resolution ICO | `inkpod_windows_assets`; Release resource build | MSIX assembly, signing, and clean install/uninstall are not yet tested |
 
 All remaining requirement scope from M2–M8 is `Not started`. No M2 fill,
 selection, autosave/recovery, or coloring extension was added.
@@ -89,6 +103,11 @@ selection, autosave/recovery, or coloring extension was added.
 | `cmake --preset windows-x64-release` / `cmake --build --preset windows-x64-release` | Windows 11 x64, MSVC 19.51 | Passed optimized with `/W4 /WX /permissive-`; PDB emitted for diagnostics/application-control | 2026-07-20 |
 | `ctest --preset windows-x64-release` | Windows 11 x64 | Passed: integrated C11/C++ ABI + M1 Windows smoke, 2/2 | 2026-07-20 |
 | Immediate Debug and Release build repeats | Windows 11 x64 | Passed: both reported `ninja: no work to do`; Cargo was not invoked | 2026-07-20 |
+| `winapp manifest update-assets AppIcon.svg --manifest apps/windows/package/Package.appxmanifest --verbose` | Windows 11 x64, Windows App Development CLI 0.4.0 | Passed: 48 PNG assets and 16/24/32/48/256 ICO generated | 2026-07-20 |
+| `cmake --preset windows-x64-release` / `cmake --build --preset windows-x64-release` | Windows 11 x64, MSVC 19.51 | Passed with `/W4 /WX /permissive-`; icon, About dialog, and version resources linked | 2026-07-20 |
+| `ctest --preset windows-x64-release` | Windows 11 x64 | Passed: assets + ABI + About/Windows smoke, 3/3 | 2026-07-20 |
+| Post-icon Debug configure/build | Windows 11 x64, MSVC 19.51 | Build passed; asset test passed, but local application-control policy blocked the new Debug EXE before both executable smoke tests could start | 2026-07-20 |
+| Post-icon Rust format/clippy/test | Windows 11 x64, stable Rust | Passed: Core 13, architecture 1, FFI 6, format 4, image 4, doc-tests | 2026-07-20 |
 
 Earlier in the M1 review, freshly generated native test executables were
 intermittently held by local application-control evaluation (`CTest` reported

@@ -3,6 +3,11 @@ cmake_minimum_required(VERSION 3.25)
 cmake_policy(SET CMP0091 NEW)
 project(inkpod VERSION 0.1.0 LANGUAGES C CXX)
 
+configure_file(
+    "${CMAKE_SOURCE_DIR}/apps/windows/app/app_version.h.in"
+    "${CMAKE_BINARY_DIR}/generated/app_version.h"
+    @ONLY)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -82,6 +87,13 @@ endif()
 
 include(CTest)
 
+add_test(
+    NAME inkpod_windows_assets
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_PACKAGE_DIR=${CMAKE_SOURCE_DIR}/apps/windows/package"
+            "-DINKPOD_PROJECT_VERSION=${PROJECT_VERSION}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_assets.cmake")
+
 add_library(inkpod_header_c11 OBJECT tests/header_c11.c)
 target_include_directories(inkpod_header_c11 PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
@@ -102,6 +114,7 @@ if(WIN32)
         $<TARGET_OBJECTS:inkpod_header_c11>)
     target_include_directories(inkpod PRIVATE
         "${CMAKE_SOURCE_DIR}/apps/windows/renderer"
+        "${CMAKE_BINARY_DIR}/generated"
         "${CMAKE_SOURCE_DIR}/include")
     target_compile_definitions(inkpod PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(inkpod PRIVATE

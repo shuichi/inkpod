@@ -1,14 +1,50 @@
 #include <windows.h>
+#include "app_version.h"
 #include "resource.h"
 
 #pragma code_page(65001)
 
 1 RT_MANIFEST "app.manifest"
+IDI_APP_ICON ICON "../package/Assets/app.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION INKPOD_VERSION_RESOURCE
+ PRODUCTVERSION INKPOD_VERSION_RESOURCE
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "041104b0"
+        BEGIN
+            VALUE "CompanyName", "inkpod contributors\0"
+            VALUE "FileDescription", "アニメーション彩色のための制作アプリ\0"
+            VALUE "FileVersion", INKPOD_VERSION_STRING "\0"
+            VALUE "InternalName", "inkpod\0"
+            VALUE "OriginalFilename", "inkpod.exe\0"
+            VALUE "ProductName", "inkpod\0"
+            VALUE "ProductVersion", INKPOD_VERSION_STRING "\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0411, 1200
+    END
+END
 
 STRINGTABLE
 BEGIN
     IDS_APP_TITLE "inkpod"
     IDS_MAIN_WINDOW_CLASS "InkpodMainWindow"
+    IDS_APP_VERSION INKPOD_VERSION_STRING
+    IDS_ABOUT_DESCRIPTION "アニメーション彩色のための、長期保守可能な制作アプリです。"
 END
 
 IDR_MAIN_MENU MENU
@@ -50,4 +86,21 @@ BEGIN
     BEGIN
         MENUITEM "描画色...", IDM_COLOR_CHOOSE
     END
+    POPUP "ヘルプ(&H)"
+    BEGIN
+        MENUITEM "Inkpodについて(&A)...", IDM_HELP_ABOUT
+    END
+END
+
+IDD_ABOUT DIALOGEX 0, 0, 260, 190
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_CONTROLPARENT
+CAPTION "Inkpodについて"
+FONT 9, "Segoe UI"
+BEGIN
+    CONTROL         "", IDC_ABOUT_ICON, "Static", SS_ICON | SS_CENTERIMAGE | SS_REALSIZECONTROL, 86, 10, 88, 64
+    LTEXT           "inkpod", IDC_ABOUT_NAME, 20, 80, 220, 20, SS_CENTER | SS_NOPREFIX
+    LTEXT           "", IDC_ABOUT_VERSION, 20, 104, 220, 12, SS_CENTER | SS_NOPREFIX
+    LTEXT           "", IDC_ABOUT_DESCRIPTION, 25, 121, 210, 28, SS_CENTER | SS_NOPREFIX
+    DEFPUSHBUTTON   "OK", IDOK, 100, 163, 60, 18
 END

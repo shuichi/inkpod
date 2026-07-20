@@ -62,6 +62,155 @@ private:
     bool initialized_{};
 };
 
+struct AboutDialogState {
+    HINSTANCE instance{};
+    HICON display_icon{};
+    HFONT name_font{};
+    bool close_immediately{};
+};
+
+INT_PTR CALLBACK AboutDialogProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<AboutDialogState*>(
+        GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    switch (message) {
+        case WM_INITDIALOG: {
+            state = reinterpret_cast<AboutDialogState*>(lparam);
+            if (state == nullptr) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            SetWindowLongPtrW(
+                dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+
+            std::array<wchar_t, 64> version{};
+            std::array<wchar_t, 96> version_label{};
+            std::array<wchar_t, 256> description{};
+            if (LoadStringW(
+                    state->instance,
+                    IDS_APP_VERSION,
+                    version.data(),
+                    static_cast<int>(version.size())) == 0
+                || LoadStringW(
+                       state->instance,
+                       IDS_ABOUT_DESCRIPTION,
+                       description.data(),
+                       static_cast<int>(description.size())) == 0) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            _snwprintf_s(
+                version_label.data(),
+                version_label.size(),
+                _TRUNCATE,
+                L"バージョン %ls",
+                version.data());
+            SetDlgItemTextW(dialog, IDC_ABOUT_VERSION, version_label.data());
+            SetDlgItemTextW(dialog, IDC_ABOUT_DESCRIPTION, description.data());
+
+            const HWND icon_control = GetDlgItem(dialog, IDC_ABOUT_ICON);
+            RECT icon_bounds{};
+            if (icon_control == nullptr
+                || GetClientRect(icon_control, &icon_bounds) == FALSE) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            const int icon_width = icon_bounds.right - icon_bounds.left;
+            const int icon_height = icon_bounds.bottom - icon_bounds.top;
+            const int icon_size = icon_width < icon_height ? icon_width : icon_height;
+            state->display_icon = reinterpret_cast<HICON>(LoadImageW(
+                state->instance,
+                MAKEINTRESOURCEW(IDI_APP_ICON),
+                IMAGE_ICON,
+                icon_size,
+                icon_size,
+                LR_DEFAULTCOLOR));
+            if (state->display_icon == nullptr) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            SendMessageW(
+                icon_control,
+                STM_SETIMAGE,
+                IMAGE_ICON,
+                reinterpret_cast<LPARAM>(state->display_icon));
+
+            const HWND name_control = GetDlgItem(dialog, IDC_ABOUT_NAME);
+            const auto dialog_font = reinterpret_cast<HFONT>(
+                SendMessageW(dialog, WM_GETFONT, 0, 0));
+            LOGFONTW name_log_font{};
+            if (name_control != nullptr && dialog_font != nullptr
+                && GetObjectW(
+                       dialog_font,
+                       static_cast<int>(sizeof(name_log_font)),
+                       &name_log_font) == static_cast<int>(sizeof(name_log_font))) {
+                name_log_font.lfHeight = MulDiv(name_log_font.lfHeight, 17, 9);
+                name_log_font.lfWeight = FW_SEMIBOLD;
+                state->name_font = CreateFontIndirectW(&name_log_font);
+                if (state->name_font != nullptr) {
+                    SendMessageW(
+                        name_control,
+                        WM_SETFONT,
+                        reinterpret_cast<WPARAM>(state->name_font),
+                        TRUE);
+                }
+            }
+
+            const auto caption_icon = LoadIconW(
+                state->instance, MAKEINTRESOURCEW(IDI_APP_ICON));
+            if (caption_icon != nullptr) {
+                SendMessageW(
+                    dialog,
+                    WM_SETICON,
+                    ICON_SMALL,
+                    reinterpret_cast<LPARAM>(caption_icon));
+            }
+            if (state->close_immediately) {
+                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
+            }
+            return TRUE;
+        }
+        case WM_COMMAND:
+            if (LOWORD(wparam) == IDOK || LOWORD(wparam) == IDCANCEL) {
+                EndDialog(dialog, LOWORD(wparam));
+                return TRUE;
+            }
+            break;
+        case WM_CLOSE:
+            EndDialog(dialog, IDCANCEL);
+            return TRUE;
+        case WM_DESTROY:
+            if (state != nullptr) {
+                SendDlgItemMessageW(
+                    dialog, IDC_ABOUT_ICON, STM_SETIMAGE, IMAGE_ICON, 0);
+                if (state->display_icon != nullptr) {
+                    DestroyIcon(state->display_icon);
+                    state->display_icon = nullptr;
+                }
+                if (state->name_font != nullptr) {
+                    DeleteObject(state->name_font);
+                    state->name_font = nullptr;
+                }
+            }
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
+INT_PTR ShowAboutDialog(
+    HINSTANCE instance, HWND owner, bool close_immediately) noexcept {
+    AboutDialogState state{instance, nullptr, nullptr, close_immediately};
+    return DialogBoxParamW(
+        instance,
+        MAKEINTRESOURCEW(IDD_ABOUT),
+        owner,
+        AboutDialogProcedure,
+        reinterpret_cast<LPARAM>(&state));
+}
+
 void ShowCoreError(const AppState& state, HWND owner, const wchar_t* operation) noexcept {
     const std::wstring detail = state.engine == nullptr
         ? L"Core engine is not running"
@@ -421,6 +570,12 @@ void PumpPendingWindowMessages() noexcept {
 }
 
 int RunM1Smoke(AppState& state) noexcept {
+    const HMENU menu = GetMenu(state.window);
+    if (menu == nullptr
+        || GetMenuState(menu, IDM_HELP_ABOUT, MF_BYCOMMAND) == static_cast<UINT>(-1)
+        || SendMessageW(state.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
+        return 29;
+    }
     if (state.engine == nullptr
         || MoveWindow(state.canvas, 0, 0, 640, 480, FALSE) == FALSE
         || FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
@@ -879,6 +1034,14 @@ LRESULT CALLBACK MainWindowProcedure(
                     }
                     return 0;
                 }
+                case IDM_HELP_ABOUT:
+                    return ShowAboutDialog(
+                               state->instance,
+                               window,
+                               state->smoke_test)
+                            == IDOK
+                        ? 1
+                        : 0;
                 case IDM_APP_EXIT:
                     SendMessageW(window, WM_CLOSE, 0, 0);
                     return 0;
@@ -1018,16 +1181,28 @@ LRESULT CALLBACK MainWindowProcedure(
 
 bool RegisterMainWindowClass(
     HINSTANCE instance, const wchar_t* class_name) noexcept {
+    const auto app_icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP_ICON));
+    const auto small_icon = reinterpret_cast<HICON>(LoadImageW(
+        instance,
+        MAKEINTRESOURCEW(IDI_APP_ICON),
+        IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON),
+        LR_DEFAULTCOLOR | LR_SHARED));
+    if (app_icon == nullptr) {
+        return false;
+    }
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
     window_class.style = CS_HREDRAW | CS_VREDRAW;
     window_class.lpfnWndProc = MainWindowProcedure;
     window_class.hInstance = instance;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    window_class.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    window_class.hIcon = app_icon;
     window_class.hbrBackground = nullptr;
     window_class.lpszMenuName = MAKEINTRESOURCEW(IDR_MAIN_MENU);
     window_class.lpszClassName = class_name;
+    window_class.hIconSm = small_icon != nullptr ? small_icon : app_icon;
     return RegisterClassExW(&window_class) != 0;
 }
 
