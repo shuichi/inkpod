@@ -1,18 +1,35 @@
 #![forbid(unsafe_code)]
 
-use inkpod_format::{CellFile, FilePlane, FileTile, FormatError, PlaneKind};
-use inkpod_image::{
-    ColorCheckCategory, FillError, FillOptions, PixelFormat, PlaneSample, RasterError, TILE_SIZE,
-    TileCoord, TileData, TileRaster, closed_region_fill, color_check_category, extend_fill,
-    eyedropper, seed_fill_with_cancel,
+use inkpod_format::{
+    CellFile, FileGrid, FileGuide, FileLayer, FileM3Metadata, FilePlane, FilePlaneProperties,
+    FileTile, FormatError, PlaneKind as FilePlaneKind,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use inkpod_image::{
+    ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,
+    TILE_SIZE, TileCoord, TileData, TileRaster, closed_region_fill_with_cancel,
+    color_check_category, extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
+};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub const CORE_FEATURES: u64 = 1;
+pub const SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE: u64 = 1 << 0;
+pub const SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA: u64 = 1 << 1;
 pub const DEFAULT_DPI_MILLI: u32 = 96_000;
+pub const MAX_LAYERS: usize = 4_096;
+pub const MAX_PLANES_PER_LAYER: usize = 4_096;
+pub const MAX_GUIDES: usize = 4_096;
+pub const MAX_SHORTCUTS: usize = 1_024;
+pub const SHORTCUT_MODIFIER_CONTROL: u32 = 1 << 0;
+pub const SHORTCUT_MODIFIER_SHIFT: u32 = 1 << 1;
+pub const SHORTCUT_MODIFIER_ALT: u32 = 1 << 2;
+pub const SHORTCUT_MODIFIER_EXTENDED: u32 = 1 << 3;
+pub const SHORTCUT_MODIFIER_MASK: u32 = SHORTCUT_MODIFIER_CONTROL
+    | SHORTCUT_MODIFIER_SHIFT
+    | SHORTCUT_MODIFIER_ALT
+    | SHORTCUT_MODIFIER_EXTENDED;
 const MAX_STROKE_SAMPLES: usize = 1_048_576;
 const MAX_BRUSH_DIAMETER: f32 = 256.0;
 const MAX_STROKE_COORDINATE: f32 = 16_777_216.0;
@@ -20,8 +37,8 @@ const MAX_STROKE_WORK: u64 = 16_777_216;
 const MIN_ZOOM: f64 = 0.01;
 const MAX_ZOOM: f64 = 64.0;
 
-pub use inkpod_format::{FrameMetadata, Margins, RectI32};
-pub use inkpod_image::{ColorCheckMode, EyedropperSource, InclusionMode, PixelValue};
+pub use inkpod_format::{FrameMetadata, GuideAxis, LayerKind, Margins, RectI32};
+pub use inkpod_image::{ColorCheckMode, EyedropperSource, InclusionMode, PixelFormat, PixelValue};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Command {
@@ -50,6 +67,188 @@ impl DispatchOutcome {
 pub enum ActivePlane {
     MainLine,
     Color,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlaneType {
+    MainLine,
+    Color,
+    Raster,
+    Selection,
+}
+
+impl PlaneType {
+    const fn file_kind(self) -> FilePlaneKind {
+        match self {
+            Self::MainLine => FilePlaneKind::MainLine,
+            Self::Color => FilePlaneKind::Color,
+            Self::Raster => FilePlaneKind::Raster,
+            Self::Selection => FilePlaneKind::Selection,
+        }
+    }
+
+    const fn from_file(kind: FilePlaneKind) -> Self {
+        match kind {
+            FilePlaneKind::MainLine => Self::MainLine,
+            FilePlaneKind::Color => Self::Color,
+            FilePlaneKind::Raster => Self::Raster,
+            FilePlaneKind::Selection => Self::Selection,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlaneInfo {
+    pub id: u64,
+    pub kind: PlaneType,
+    pub pixel_format: PixelFormat,
+    pub name: String,
+    pub visible: bool,
+    pub editable: bool,
+    pub opacity_milli: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LayerInfo {
+    pub id: u64,
+    pub kind: LayerKind,
+    pub name: String,
+    pub visible: bool,
+    pub editable: bool,
+    pub opacity_milli: u32,
+    pub planes: Vec<PlaneInfo>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SelectionOperation {
+    New,
+    Add,
+    Subtract,
+    Intersect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointF32 {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SelectionShape {
+    Rectangle(RectI32),
+    Ellipse(RectI32),
+    Lasso(Vec<PointF32>),
+    Polyline(Vec<PointF32>),
+    Trace {
+        points: Vec<PointF32>,
+        diameter: f32,
+    },
+    Wand {
+        x: u32,
+        y: u32,
+        tolerance: u16,
+        gap_close: u8,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SelectionLayerOperation {
+    Replace,
+    Add,
+    Subtract,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MirrorAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Guide {
+    pub id: u64,
+    pub axis: GuideAxis,
+    pub position: i32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GridConfig {
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub spacing_x: u32,
+    pub spacing_y: u32,
+    pub subdivisions: u32,
+}
+
+impl Default for GridConfig {
+    fn default() -> Self {
+        Self {
+            origin_x: 0,
+            origin_y: 0,
+            spacing_x: 16,
+            spacing_y: 16,
+            subdivisions: 1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FloatingTransform {
+    pub translate_x: f64,
+    pub translate_y: f64,
+    pub scale_x: f64,
+    pub scale_y: f64,
+    pub rotation_degrees: f64,
+}
+
+impl Default for FloatingTransform {
+    fn default() -> Self {
+        Self {
+            translate_x: 0.0,
+            translate_y: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            rotation_degrees: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipboardPixel {
+    pub x: i32,
+    pub y: i32,
+    pub value: PixelValue,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipboardPlane {
+    pub kind: PlaneType,
+    pub pixel_format: PixelFormat,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub pixels: Vec<ClipboardPixel>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipboardPayload {
+    pub source_document_uuid: u128,
+    pub bounds: RectI32,
+    pub planes: Vec<ClipboardPlane>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocatorSample {
+    pub document_x: i32,
+    pub document_y: i32,
+    pub selection_bounds: Option<RectI32>,
+    pub color: Option<PixelValue>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ShortcutBinding {
+    pub command_id: u32,
+    pub virtual_key: u32,
+    pub modifiers: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -137,6 +336,19 @@ pub enum ViewCommand {
         viewport_width: f64,
         viewport_height: f64,
     },
+    BoxZoom {
+        document_rect: RectI32,
+        viewport_width: f64,
+        viewport_height: f64,
+    },
+    Flip {
+        axis: MirrorAxis,
+    },
+    SetRulerVisible(bool),
+    SetGuidesVisible(bool),
+    SetGridVisible(bool),
+    SetSnapEnabled(bool),
+    SetTransparentView(bool),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -153,6 +365,13 @@ pub struct ViewState {
     pan_y: f64,
     revision: u64,
     mode: ViewMode,
+    flip_horizontal: bool,
+    flip_vertical: bool,
+    ruler_visible: bool,
+    guides_visible: bool,
+    grid_visible: bool,
+    snap_enabled: bool,
+    transparent_view: bool,
 }
 
 impl Default for ViewState {
@@ -163,6 +382,13 @@ impl Default for ViewState {
             pan_y: 0.0,
             revision: 0,
             mode: ViewMode::Manual,
+            flip_horizontal: false,
+            flip_vertical: false,
+            ruler_visible: false,
+            guides_visible: true,
+            grid_visible: false,
+            snap_enabled: false,
+            transparent_view: true,
         }
     }
 }
@@ -192,6 +418,41 @@ impl ViewState {
     pub const fn mode(self) -> ViewMode {
         self.mode
     }
+
+    #[must_use]
+    pub const fn flip_horizontal(self) -> bool {
+        self.flip_horizontal
+    }
+
+    #[must_use]
+    pub const fn flip_vertical(self) -> bool {
+        self.flip_vertical
+    }
+
+    #[must_use]
+    pub const fn ruler_visible(self) -> bool {
+        self.ruler_visible
+    }
+
+    #[must_use]
+    pub const fn guides_visible(self) -> bool {
+        self.guides_visible
+    }
+
+    #[must_use]
+    pub const fn grid_visible(self) -> bool {
+        self.grid_visible
+    }
+
+    #[must_use]
+    pub const fn snap_enabled(self) -> bool {
+        self.snap_enabled
+    }
+
+    #[must_use]
+    pub const fn transparent_view(self) -> bool {
+        self.transparent_view
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -202,6 +463,7 @@ pub enum CoreError {
     Raster(RasterError),
     Fill(FillError),
     FillOverflow { x: u32, y: u32 },
+    Cancelled,
     Format(String),
 }
 
@@ -216,6 +478,7 @@ impl fmt::Display for CoreError {
             Self::FillOverflow { x, y } => {
                 write!(formatter, "fill reached image edge at ({x}, {y})")
             }
+            Self::Cancelled => formatter.write_str("operation was cancelled before commit"),
             Self::Format(message) => formatter.write_str(message),
         }
     }
@@ -233,6 +496,7 @@ impl From<FillError> for CoreError {
     fn from(error: FillError) -> Self {
         match error {
             FillError::Overflow { x, y } => Self::FillOverflow { x, y },
+            FillError::Cancelled => Self::Cancelled,
             other => Self::Fill(other),
         }
     }
@@ -240,7 +504,11 @@ impl From<FillError> for CoreError {
 
 impl From<FormatError> for CoreError {
     fn from(error: FormatError) -> Self {
-        Self::Format(error.to_string())
+        if matches!(error, FormatError::Cancelled) {
+            Self::Cancelled
+        } else {
+            Self::Format(error.to_string())
+        }
     }
 }
 
@@ -276,6 +544,7 @@ pub struct RenderTile {
     height: u32,
     stride_bytes: u32,
     pixels: Arc<[u8]>,
+    source_revision: u64,
     tile_revision: u64,
 }
 
@@ -324,9 +593,12 @@ impl RenderTile {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderSnapshot {
     revision: u64,
+    feature_flags: u64,
     view: ViewState,
     document_width: u32,
     document_height: u32,
+    guides: Vec<Guide>,
+    grid: GridConfig,
     tiles: Vec<RenderTile>,
 }
 
@@ -334,6 +606,11 @@ impl RenderSnapshot {
     #[must_use]
     pub const fn revision(&self) -> u64 {
         self.revision
+    }
+
+    #[must_use]
+    pub const fn feature_flags(&self) -> u64 {
+        self.feature_flags
     }
 
     #[must_use]
@@ -352,6 +629,16 @@ impl RenderSnapshot {
     }
 
     #[must_use]
+    pub fn guides(&self) -> &[Guide] {
+        &self.guides
+    }
+
+    #[must_use]
+    pub const fn grid(&self) -> GridConfig {
+        self.grid
+    }
+
+    #[must_use]
     pub fn tile_count(&self) -> usize {
         self.tiles.len()
     }
@@ -362,22 +649,74 @@ impl RenderSnapshot {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PlaneNode {
+    id: u64,
+    kind: PlaneType,
+    name: String,
+    visible: bool,
+    editable: bool,
+    opacity_milli: u32,
+    raster: TileRaster,
+}
+
+impl PlaneNode {
+    fn info(&self) -> PlaneInfo {
+        PlaneInfo {
+            id: self.id,
+            kind: self.kind,
+            pixel_format: self.raster.format(),
+            name: self.name.clone(),
+            visible: self.visible,
+            editable: self.editable,
+            opacity_milli: self.opacity_milli,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LayerNode {
+    id: u64,
+    kind: LayerKind,
+    name: String,
+    visible: bool,
+    editable: bool,
+    opacity_milli: u32,
+    planes: Vec<PlaneNode>,
+}
+
+impl LayerNode {
+    fn info(&self) -> LayerInfo {
+        LayerInfo {
+            id: self.id,
+            kind: self.kind,
+            name: self.name.clone(),
+            visible: self.visible,
+            editable: self.editable,
+            opacity_milli: self.opacity_milli,
+            planes: self.planes.iter().map(PlaneNode::info).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct CellDocument {
     uuid: u128,
     id: u64,
-    layer_id: u64,
-    main_plane_id: u64,
-    color_plane_id: u64,
     width: u32,
     height: u32,
     dpi_x_milli: u32,
     dpi_y_milli: u32,
     frames: FrameMetadata,
-    main_plane: TileRaster,
     main_line_color: PixelValue,
-    color_plane: TileRaster,
-    active_plane: ActivePlane,
+    palette: Palette,
+    layers: Vec<LayerNode>,
+    active_layer_id: u64,
+    active_plane_id: u64,
+    selection_plane_id: u64,
+    selection: TileRaster,
+    guides: Vec<Guide>,
+    grid: GridConfig,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -386,6 +725,7 @@ struct DocumentIds {
     layer: u64,
     main_plane: u64,
     color_plane: u64,
+    selection_plane: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -435,40 +775,123 @@ impl CellDocument {
             },
             margins: Margins::default(),
         };
+        let main_plane = PlaneNode {
+            id: ids.main_plane,
+            kind: PlaneType::MainLine,
+            name: "Main Line".to_owned(),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            raster: TileRaster::new(paper.width, paper.height, PixelFormat::BinaryMask8)?,
+        };
+        let color_plane = PlaneNode {
+            id: ids.color_plane,
+            kind: PlaneType::Color,
+            name: "Color".to_owned(),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            raster: TileRaster::new(paper.width, paper.height, PixelFormat::StraightRgba8)?,
+        };
         Ok(Self {
             uuid,
             id: ids.document,
-            layer_id: ids.layer,
-            main_plane_id: ids.main_plane,
-            color_plane_id: ids.color_plane,
             width: paper.width,
             height: paper.height,
             dpi_x_milli: paper.dpi_x_milli,
             dpi_y_milli: paper.dpi_y_milli,
             frames,
-            main_plane: TileRaster::new(paper.width, paper.height, PixelFormat::BinaryMask8)?,
             main_line_color: PixelValue::Rgba([0, 0, 0, 255]),
-            color_plane: TileRaster::new(paper.width, paper.height, PixelFormat::StraightRgba8)?,
-            active_plane: ActivePlane::MainLine,
+            palette: Palette::default(),
+            layers: vec![LayerNode {
+                id: ids.layer,
+                kind: LayerKind::BinaryColoring,
+                name: "Coloring Layer".to_owned(),
+                visible: true,
+                editable: true,
+                opacity_milli: 1_000,
+                planes: vec![main_plane, color_plane],
+            }],
+            active_layer_id: ids.layer,
+            active_plane_id: ids.main_plane,
+            selection_plane_id: ids.selection_plane,
+            selection: TileRaster::new(paper.width, paper.height, PixelFormat::BinaryMask8)?,
+            guides: Vec::new(),
+            grid: GridConfig::default(),
         })
     }
 
     fn to_file(&self) -> CellFile {
+        let (layer_id, main_plane_id, color_plane_id) = self.primary_ids();
+        let mut planes: Vec<_> = self
+            .layers
+            .iter()
+            .flat_map(|layer| layer.planes.iter())
+            .map(|plane| raster_to_file_plane(plane.id, plane.kind.file_kind(), &plane.raster))
+            .collect();
+        planes.push(raster_to_file_plane(
+            self.selection_plane_id,
+            FilePlaneKind::Selection,
+            &self.selection,
+        ));
         CellFile {
             document_uuid: self.uuid.to_le_bytes(),
             document_id: self.id,
-            layer_id: self.layer_id,
-            main_plane_id: self.main_plane_id,
-            color_plane_id: self.color_plane_id,
+            layer_id,
+            main_plane_id,
+            color_plane_id,
             width: self.width,
             height: self.height,
             dpi_x_milli: self.dpi_x_milli,
             dpi_y_milli: self.dpi_y_milli,
             frames: self.frames,
-            planes: vec![
-                raster_to_file_plane(self.main_plane_id, PlaneKind::MainLine, &self.main_plane),
-                raster_to_file_plane(self.color_plane_id, PlaneKind::Color, &self.color_plane),
-            ],
+            main_line_color: self.main_line_color,
+            palette: self.palette.colors().to_vec(),
+            planes,
+            m3: Some(FileM3Metadata {
+                active_layer_id: self.active_layer_id,
+                active_plane_id: self.active_plane_id,
+                selection_plane_id: self.selection_plane_id,
+                layers: self
+                    .layers
+                    .iter()
+                    .map(|layer| FileLayer {
+                        id: layer.id,
+                        kind: layer.kind,
+                        name: layer.name.clone(),
+                        visible: layer.visible,
+                        editable: layer.editable,
+                        opacity_milli: layer.opacity_milli,
+                        planes: layer
+                            .planes
+                            .iter()
+                            .map(|plane| FilePlaneProperties {
+                                id: plane.id,
+                                name: plane.name.clone(),
+                                visible: plane.visible,
+                                editable: plane.editable,
+                                opacity_milli: plane.opacity_milli,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                guides: self
+                    .guides
+                    .iter()
+                    .map(|guide| FileGuide {
+                        id: guide.id,
+                        axis: guide.axis,
+                        position: guide.position,
+                    })
+                    .collect(),
+                grid: FileGrid {
+                    origin_x: self.grid.origin_x,
+                    origin_y: self.grid.origin_y,
+                    spacing_x: self.grid.spacing_x,
+                    spacing_y: self.grid.spacing_y,
+                    subdivisions: self.grid.subdivisions,
+                },
+            }),
         }
     }
 
@@ -476,50 +899,277 @@ impl CellDocument {
         let main_file = file
             .planes
             .iter()
-            .find(|plane| plane.kind == PlaneKind::MainLine)
+            .find(|plane| plane.kind == FilePlaneKind::MainLine)
             .ok_or(CoreError::InvalidState("main line plane is missing"))?;
         let color_file = file
             .planes
             .iter()
-            .find(|plane| plane.kind == PlaneKind::Color)
+            .find(|plane| plane.kind == FilePlaneKind::Color)
             .ok_or(CoreError::InvalidState("color plane is missing"))?;
-        let main_plane = file_plane_to_raster(main_file, revision)?;
-        let color_plane = file_plane_to_raster(color_file, revision)?;
-        let main_line_color = if color_plane.format() == PixelFormat::StraightRgba16 {
-            PixelValue::Rgba16([0, 0, 0, u16::MAX])
-        } else {
-            PixelValue::Rgba([0, 0, 0, u8::MAX])
-        };
+        let mut palette = Palette::default();
+        for color in &file.palette {
+            palette.push(*color)?;
+        }
+        let (layers, active_layer_id, active_plane_id, selection_plane_id, selection, guides, grid) =
+            if let Some(metadata) = &file.m3 {
+                let mut layers = Vec::with_capacity(metadata.layers.len());
+                for layer in &metadata.layers {
+                    let mut planes = Vec::with_capacity(layer.planes.len());
+                    for properties in &layer.planes {
+                        let payload = file
+                            .planes
+                            .iter()
+                            .find(|plane| plane.id == properties.id)
+                            .ok_or(CoreError::InvalidState("layer plane payload is missing"))?;
+                        planes.push(PlaneNode {
+                            id: properties.id,
+                            kind: PlaneType::from_file(payload.kind),
+                            name: properties.name.clone(),
+                            visible: properties.visible,
+                            editable: properties.editable,
+                            opacity_milli: properties.opacity_milli,
+                            raster: file_plane_to_raster(payload, revision)?,
+                        });
+                    }
+                    validate_layer_kind(layer.kind, &planes)?;
+                    layers.push(LayerNode {
+                        id: layer.id,
+                        kind: layer.kind,
+                        name: layer.name.clone(),
+                        visible: layer.visible,
+                        editable: layer.editable,
+                        opacity_milli: layer.opacity_milli,
+                        planes,
+                    });
+                }
+                let selection_file = file
+                    .planes
+                    .iter()
+                    .find(|plane| plane.id == metadata.selection_plane_id)
+                    .ok_or(CoreError::InvalidState("selection payload is missing"))?;
+                (
+                    layers,
+                    metadata.active_layer_id,
+                    metadata.active_plane_id,
+                    metadata.selection_plane_id,
+                    file_plane_to_raster(selection_file, revision)?,
+                    metadata
+                        .guides
+                        .iter()
+                        .map(|guide| Guide {
+                            id: guide.id,
+                            axis: guide.axis,
+                            position: guide.position,
+                        })
+                        .collect(),
+                    GridConfig {
+                        origin_x: metadata.grid.origin_x,
+                        origin_y: metadata.grid.origin_y,
+                        spacing_x: metadata.grid.spacing_x,
+                        spacing_y: metadata.grid.spacing_y,
+                        subdivisions: metadata.grid.subdivisions,
+                    },
+                )
+            } else {
+                let selection_plane_id = file
+                    .planes
+                    .iter()
+                    .map(|plane| plane.id)
+                    .chain([file.document_id, file.layer_id])
+                    .max()
+                    .unwrap_or(0)
+                    .checked_add(1)
+                    .ok_or(CoreError::InvalidState("selection ID overflow"))?;
+                let layer_kind = if matches!(
+                    main_file.pixel_format,
+                    PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+                ) {
+                    LayerKind::GrayscaleColoring
+                } else {
+                    LayerKind::BinaryColoring
+                };
+                (
+                    vec![LayerNode {
+                        id: file.layer_id,
+                        kind: layer_kind,
+                        name: "Coloring Layer".to_owned(),
+                        visible: true,
+                        editable: true,
+                        opacity_milli: 1_000,
+                        planes: vec![
+                            PlaneNode {
+                                id: file.main_plane_id,
+                                kind: PlaneType::MainLine,
+                                name: "Main Line".to_owned(),
+                                visible: true,
+                                editable: true,
+                                opacity_milli: 1_000,
+                                raster: file_plane_to_raster(main_file, revision)?,
+                            },
+                            PlaneNode {
+                                id: file.color_plane_id,
+                                kind: PlaneType::Color,
+                                name: "Color".to_owned(),
+                                visible: true,
+                                editable: true,
+                                opacity_milli: 1_000,
+                                raster: file_plane_to_raster(color_file, revision)?,
+                            },
+                        ],
+                    }],
+                    file.layer_id,
+                    file.main_plane_id,
+                    selection_plane_id,
+                    TileRaster::new(file.width, file.height, PixelFormat::BinaryMask8)?,
+                    Vec::new(),
+                    GridConfig::default(),
+                )
+            };
         Ok(Self {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: file.document_id,
-            layer_id: file.layer_id,
-            main_plane_id: file.main_plane_id,
-            color_plane_id: file.color_plane_id,
             width: file.width,
             height: file.height,
             dpi_x_milli: file.dpi_x_milli,
             dpi_y_milli: file.dpi_y_milli,
             frames: file.frames,
-            main_plane,
-            main_line_color,
-            color_plane,
-            active_plane: ActivePlane::MainLine,
+            main_line_color: file.main_line_color,
+            palette,
+            layers,
+            active_layer_id,
+            active_plane_id,
+            selection_plane_id,
+            selection,
+            guides,
+            grid,
         })
     }
 
-    fn raster(&self, plane: ActivePlane) -> &TileRaster {
-        match plane {
-            ActivePlane::MainLine => &self.main_plane,
-            ActivePlane::Color => &self.color_plane,
+    fn primary_layer(&self) -> &LayerNode {
+        self.layers
+            .iter()
+            .find(|layer| {
+                layer
+                    .planes
+                    .iter()
+                    .any(|plane| plane.kind == PlaneType::MainLine)
+                    && layer
+                        .planes
+                        .iter()
+                        .any(|plane| plane.kind == PlaneType::Color)
+            })
+            .expect("validated coloring document must retain a coloring layer")
+    }
+
+    fn primary_ids(&self) -> (u64, u64, u64) {
+        let layer = self.primary_layer();
+        let main = layer
+            .planes
+            .iter()
+            .find(|plane| plane.kind == PlaneType::MainLine)
+            .expect("validated coloring layer has main plane");
+        let color = layer
+            .planes
+            .iter()
+            .find(|plane| plane.kind == PlaneType::Color)
+            .expect("validated coloring layer has color plane");
+        (layer.id, main.id, color.id)
+    }
+
+    fn plane_for_role(&self, role: ActivePlane) -> Result<&PlaneNode, CoreError> {
+        let kind = match role {
+            ActivePlane::MainLine => PlaneType::MainLine,
+            ActivePlane::Color => PlaneType::Color,
+        };
+        self.layers
+            .iter()
+            .find(|layer| layer.id == self.active_layer_id)
+            .and_then(|layer| layer.planes.iter().find(|plane| plane.kind == kind))
+            .or_else(|| {
+                self.layers
+                    .iter()
+                    .flat_map(|layer| layer.planes.iter())
+                    .find(|plane| plane.kind == kind)
+            })
+            .ok_or(CoreError::InvalidState(
+                "requested plane role is unavailable",
+            ))
+    }
+
+    fn plane_for_role_mut(&mut self, role: ActivePlane) -> Result<&mut PlaneNode, CoreError> {
+        let kind = match role {
+            ActivePlane::MainLine => PlaneType::MainLine,
+            ActivePlane::Color => PlaneType::Color,
+        };
+        let preferred = self.active_layer_id;
+        let preferred_index = self.layers.iter().position(|layer| layer.id == preferred);
+        if let Some(index) = preferred_index
+            && let Some(plane_index) = self.layers[index]
+                .planes
+                .iter()
+                .position(|plane| plane.kind == kind)
+        {
+            return Ok(&mut self.layers[index].planes[plane_index]);
         }
+        for layer in &mut self.layers {
+            if let Some(index) = layer.planes.iter().position(|plane| plane.kind == kind) {
+                return Ok(&mut layer.planes[index]);
+            }
+        }
+        Err(CoreError::InvalidState(
+            "requested plane role is unavailable",
+        ))
+    }
+
+    fn raster(&self, plane: ActivePlane) -> &TileRaster {
+        &self
+            .plane_for_role(plane)
+            .expect("validated coloring document must retain required planes")
+            .raster
     }
 
     fn raster_mut(&mut self, plane: ActivePlane) -> &mut TileRaster {
-        match plane {
-            ActivePlane::MainLine => &mut self.main_plane,
-            ActivePlane::Color => &mut self.color_plane,
-        }
+        &mut self
+            .plane_for_role_mut(plane)
+            .expect("validated coloring document must retain required planes")
+            .raster
+    }
+
+    fn active_plane_role(&self) -> ActivePlane {
+        self.layers
+            .iter()
+            .flat_map(|layer| layer.planes.iter())
+            .find(|plane| plane.id == self.active_plane_id)
+            .map_or(ActivePlane::Color, |plane| match plane.kind {
+                PlaneType::MainLine => ActivePlane::MainLine,
+                _ => ActivePlane::Color,
+            })
+    }
+
+    fn plane_by_id(&self, id: u64) -> Option<&PlaneNode> {
+        self.layers
+            .iter()
+            .flat_map(|layer| layer.planes.iter())
+            .find(|plane| plane.id == id)
+    }
+
+    fn plane_by_id_mut(&mut self, id: u64) -> Option<&mut PlaneNode> {
+        self.layers
+            .iter_mut()
+            .flat_map(|layer| layer.planes.iter_mut())
+            .find(|plane| plane.id == id)
+    }
+
+    fn max_stable_id(&self) -> u64 {
+        self.layers
+            .iter()
+            .flat_map(|layer| {
+                std::iter::once(layer.id).chain(layer.planes.iter().map(|plane| plane.id))
+            })
+            .chain(self.guides.iter().map(|guide| guide.id))
+            .chain([self.id, self.selection_plane_id])
+            .max()
+            .unwrap_or(0)
     }
 }
 
@@ -532,9 +1182,28 @@ struct PixelChange {
 }
 
 #[derive(Clone, Debug)]
+enum HistoryChange {
+    Pixels {
+        plane_id: u64,
+        changes: Vec<PixelChange>,
+    },
+    Palette {
+        before: Palette,
+        after: Palette,
+    },
+    MainLineColor {
+        before: PixelValue,
+        after: PixelValue,
+    },
+    Document {
+        before: Box<CellDocument>,
+        after: Box<CellDocument>,
+    },
+}
+
+#[derive(Clone, Debug)]
 struct HistoryEntry {
-    plane: ActivePlane,
-    changes: Vec<PixelChange>,
+    change: HistoryChange,
     before_state: u64,
     after_state: u64,
 }
@@ -549,6 +1218,13 @@ struct StrokeSession {
     sample_count: usize,
     work: u64,
     preview_revision: u64,
+}
+
+#[derive(Clone, Debug)]
+struct FloatingSelection {
+    payload: ClipboardPayload,
+    destination_plane_id: u64,
+    transform: FloatingTransform,
 }
 
 type StagedPixels = BTreeMap<(u32, u32), PixelValue>;
@@ -569,8 +1245,13 @@ pub struct Core {
     recovered: bool,
     active_stroke: Option<StrokeSession>,
     render_cache: BTreeMap<TileCoord, RenderTile>,
+    next_render_tile_revision: u64,
     next_preview_revision: u64,
     color_check: Option<ColorCheckMode>,
+    secondary_views: BTreeMap<u64, ViewState>,
+    next_view_id: u64,
+    floating: Option<FloatingSelection>,
+    shortcuts: BTreeMap<u32, ShortcutBinding>,
 }
 
 impl Default for Core {
@@ -581,7 +1262,7 @@ impl Default for Core {
 
 impl Core {
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             document: None,
             document_revision: 0,
@@ -591,6 +1272,13 @@ impl Core {
                 pan_y: 0.0,
                 revision: 0,
                 mode: ViewMode::Manual,
+                flip_horizontal: false,
+                flip_vertical: false,
+                ruler_visible: false,
+                guides_visible: true,
+                grid_visible: false,
+                snap_enabled: false,
+                transparent_view: true,
             },
             history: Vec::new(),
             history_cursor: 0,
@@ -602,8 +1290,13 @@ impl Core {
             recovered: false,
             active_stroke: None,
             render_cache: BTreeMap::new(),
+            next_render_tile_revision: 1,
             next_preview_revision: 1_u64 << 63,
             color_check: None,
+            secondary_views: BTreeMap::new(),
+            next_view_id: 1,
+            floating: None,
+            shortcuts: default_shortcuts(),
         }
     }
 
@@ -641,6 +1334,7 @@ impl Core {
             layer: self.allocate_id(),
             main_plane: self.allocate_id(),
             color_plane: self.allocate_id(),
+            selection_plane: self.allocate_id(),
         };
         let document = CellDocument::new(
             ids,
@@ -659,14 +1353,1218 @@ impl Core {
         self.current_path = None;
         self.recovered = false;
         self.color_check = None;
+        self.secondary_views.clear();
+        self.floating = None;
         self.document_info()
     }
 
     pub fn set_active_plane(&mut self, plane: ActivePlane) -> Result<(), CoreError> {
         self.ensure_no_active_stroke()?;
         let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
-        document.active_plane = plane;
+        let kind = match plane {
+            ActivePlane::MainLine => PlaneType::MainLine,
+            ActivePlane::Color => PlaneType::Color,
+        };
+        let (layer_id, plane_id) = document
+            .layers
+            .iter()
+            .find_map(|layer| {
+                layer
+                    .planes
+                    .iter()
+                    .find(|candidate| candidate.kind == kind)
+                    .map(|candidate| (layer.id, candidate.id))
+            })
+            .ok_or(CoreError::InvalidState(
+                "requested plane role is unavailable",
+            ))?;
+        document.active_layer_id = layer_id;
+        document.active_plane_id = plane_id;
         Ok(())
+    }
+
+    pub fn layers(&self) -> Result<Vec<LayerInfo>, CoreError> {
+        Ok(self
+            .document
+            .as_ref()
+            .ok_or(CoreError::NoDocument)?
+            .layers
+            .iter()
+            .map(LayerNode::info)
+            .collect())
+    }
+
+    pub fn set_active_node(&mut self, layer_id: u64, plane_id: u64) -> Result<(), CoreError> {
+        self.ensure_no_active_stroke()?;
+        let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
+        let layer = document
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)
+            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+        if !layer.planes.iter().any(|plane| plane.id == plane_id) {
+            return Err(CoreError::InvalidArgument(
+                "plane ID does not belong to the requested layer",
+            ));
+        }
+        document.active_layer_id = layer_id;
+        document.active_plane_id = plane_id;
+        Ok(())
+    }
+
+    pub fn create_layer(
+        &mut self,
+        kind: LayerKind,
+        name: &str,
+    ) -> Result<(DispatchOutcome, u64), CoreError> {
+        self.ensure_no_active_stroke()?;
+        validate_node_name(name)?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        if before.layers.len() >= MAX_LAYERS {
+            return Err(CoreError::InvalidState("layer limit reached"));
+        }
+        let layer_id = self.allocate_id();
+        let mut planes = Vec::new();
+        let (width, height) = (before.width, before.height);
+        match kind {
+            LayerKind::BinaryColoring | LayerKind::GrayscaleColoring => {
+                let main_id = self.allocate_id();
+                let color_id = self.allocate_id();
+                planes.push(PlaneNode {
+                    id: main_id,
+                    kind: PlaneType::MainLine,
+                    name: "Main Line".to_owned(),
+                    visible: true,
+                    editable: true,
+                    opacity_milli: 1_000,
+                    raster: TileRaster::new(
+                        width,
+                        height,
+                        if kind == LayerKind::BinaryColoring {
+                            PixelFormat::BinaryMask8
+                        } else {
+                            PixelFormat::Grayscale8
+                        },
+                    )?,
+                });
+                planes.push(PlaneNode {
+                    id: color_id,
+                    kind: PlaneType::Color,
+                    name: "Color".to_owned(),
+                    visible: true,
+                    editable: true,
+                    opacity_milli: 1_000,
+                    raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
+                });
+            }
+            LayerKind::Raster => planes.push(PlaneNode {
+                id: self.allocate_id(),
+                kind: PlaneType::Raster,
+                name: "Raster".to_owned(),
+                visible: true,
+                editable: true,
+                opacity_milli: 1_000,
+                raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
+            }),
+            LayerKind::Selection => planes.push(PlaneNode {
+                id: self.allocate_id(),
+                kind: PlaneType::Selection,
+                name: "Selection".to_owned(),
+                visible: true,
+                editable: true,
+                opacity_milli: 1_000,
+                raster: TileRaster::new(width, height, PixelFormat::BinaryMask8)?,
+            }),
+            LayerKind::Frame
+            | LayerKind::VanishingPoint
+            | LayerKind::Adjustment
+            | LayerKind::Text
+            | LayerKind::Annotation => {}
+        }
+        validate_layer_kind(kind, &planes)?;
+        let mut after = before.clone();
+        after.layers.push(LayerNode {
+            id: layer_id,
+            kind,
+            name: unique_layer_name(&after.layers, name),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            planes,
+        });
+        after.active_layer_id = layer_id;
+        if let Some(plane) = after.layers.last().and_then(|layer| layer.planes.first()) {
+            after.active_plane_id = plane.id;
+        }
+        let outcome = self.commit_document_edit(before, after)?;
+        Ok((outcome, layer_id))
+    }
+
+    pub fn duplicate_layer(&mut self, layer_id: u64) -> Result<(DispatchOutcome, u64), CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        if before.layers.len() >= MAX_LAYERS {
+            return Err(CoreError::InvalidState("layer limit reached"));
+        }
+        let index = before
+            .layers
+            .iter()
+            .position(|layer| layer.id == layer_id)
+            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+        let mut duplicate = before.layers[index].clone();
+        duplicate.id = self.allocate_id();
+        duplicate.name = unique_layer_name(&before.layers, &format!("{} Copy", duplicate.name));
+        for plane in &mut duplicate.planes {
+            plane.id = self.allocate_id();
+            plane.name = format!("{} Copy", plane.name);
+        }
+        let duplicate_id = duplicate.id;
+        let active_plane_id = duplicate.planes.first().map(|plane| plane.id);
+        let mut after = before.clone();
+        after.layers.insert(index + 1, duplicate);
+        after.active_layer_id = duplicate_id;
+        if let Some(id) = active_plane_id {
+            after.active_plane_id = id;
+        }
+        let outcome = self.commit_document_edit(before, after)?;
+        Ok((outcome, duplicate_id))
+    }
+
+    pub fn delete_layer(&mut self, layer_id: u64) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let index = before
+            .layers
+            .iter()
+            .position(|layer| layer.id == layer_id)
+            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+        if is_coloring_layer(before.layers[index].kind)
+            && before
+                .layers
+                .iter()
+                .filter(|layer| is_coloring_layer(layer.kind))
+                .count()
+                == 1
+        {
+            return Err(CoreError::InvalidState(
+                "the final coloring layer cannot be deleted",
+            ));
+        }
+        let mut after = before.clone();
+        after.layers.remove(index);
+        if after.active_layer_id == layer_id {
+            let replacement = after
+                .layers
+                .get(index.min(after.layers.len().saturating_sub(1)))
+                .ok_or(CoreError::InvalidState("document must retain a layer"))?;
+            after.active_layer_id = replacement.id;
+            after.active_plane_id = replacement
+                .planes
+                .first()
+                .map_or(after.primary_ids().1, |plane| plane.id);
+        }
+        if after.plane_by_id(after.active_plane_id).is_none() {
+            after.active_plane_id = after
+                .layers
+                .iter()
+                .find(|layer| layer.id == after.active_layer_id)
+                .and_then(|layer| layer.planes.first())
+                .map_or(after.primary_ids().1, |plane| plane.id);
+        }
+        self.commit_document_edit(before, after)
+    }
+
+    pub fn reorder_layer(
+        &mut self,
+        layer_id: u64,
+        destination_index: usize,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let source = before
+            .layers
+            .iter()
+            .position(|layer| layer.id == layer_id)
+            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+        if destination_index >= before.layers.len() {
+            return Err(CoreError::InvalidArgument(
+                "layer destination index is outside the tree",
+            ));
+        }
+        if source == destination_index {
+            return Ok(self.noop_outcome());
+        }
+        let mut after = before.clone();
+        let layer = after.layers.remove(source);
+        after.layers.insert(destination_index, layer);
+        self.commit_document_edit(before, after)
+    }
+
+    pub fn set_layer_properties(
+        &mut self,
+        layer_id: u64,
+        visible: bool,
+        editable: bool,
+        opacity_milli: u32,
+        name: &str,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        validate_node_name(name)?;
+        if opacity_milli > 1_000 {
+            return Err(CoreError::InvalidArgument("opacity exceeds 1000"));
+        }
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let mut after = before.clone();
+        let layer = after
+            .layers
+            .iter_mut()
+            .find(|layer| layer.id == layer_id)
+            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+        layer.visible = visible;
+        layer.editable = editable;
+        layer.opacity_milli = opacity_milli;
+        layer.name = name.to_owned();
+        if after.layers == before.layers {
+            return Ok(self.noop_outcome());
+        }
+        self.commit_document_edit(before, after)
+    }
+
+    pub fn create_plane(
+        &mut self,
+        layer_id: u64,
+        kind: PlaneType,
+        format: PixelFormat,
+        name: &str,
+    ) -> Result<(DispatchOutcome, u64), CoreError> {
+        self.ensure_no_active_stroke()?;
+        validate_node_name(name)?;
+        validate_plane_format(kind, format)?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let layer_index = before
+            .layers
+            .iter()
+            .position(|layer| layer.id == layer_id)
+            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+        if before.layers[layer_index].planes.len() >= MAX_PLANES_PER_LAYER {
+            return Err(CoreError::InvalidState("plane limit reached"));
+        }
+        let plane_id = self.allocate_id();
+        let mut after = before.clone();
+        after.layers[layer_index].planes.push(PlaneNode {
+            id: plane_id,
+            kind,
+            name: name.to_owned(),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            raster: TileRaster::new(after.width, after.height, format)?,
+        });
+        validate_layer_kind(
+            after.layers[layer_index].kind,
+            &after.layers[layer_index].planes,
+        )?;
+        after.active_layer_id = layer_id;
+        after.active_plane_id = plane_id;
+        let outcome = self.commit_document_edit(before, after)?;
+        Ok((outcome, plane_id))
+    }
+
+    pub fn duplicate_plane(&mut self, plane_id: u64) -> Result<(DispatchOutcome, u64), CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let (layer_index, plane_index) = find_plane_indices(&before, plane_id)?;
+        if before.layers[layer_index].planes.len() >= MAX_PLANES_PER_LAYER {
+            return Err(CoreError::InvalidState("plane limit reached"));
+        }
+        if matches!(
+            before.layers[layer_index].planes[plane_index].kind,
+            PlaneType::MainLine | PlaneType::Color
+        ) {
+            return Err(CoreError::InvalidState(
+                "required main/color planes cannot be duplicated",
+            ));
+        }
+        let mut duplicate = before.layers[layer_index].planes[plane_index].clone();
+        duplicate.id = self.allocate_id();
+        duplicate.name = unique_plane_name(
+            &before.layers[layer_index].planes,
+            &format!("{} Copy", duplicate.name),
+        );
+        let duplicate_id = duplicate.id;
+        let mut after = before.clone();
+        after.layers[layer_index]
+            .planes
+            .insert(plane_index + 1, duplicate);
+        after.active_layer_id = after.layers[layer_index].id;
+        after.active_plane_id = duplicate_id;
+        let outcome = self.commit_document_edit(before, after)?;
+        Ok((outcome, duplicate_id))
+    }
+
+    pub fn delete_plane(&mut self, plane_id: u64) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let (layer_index, plane_index) = find_plane_indices(&before, plane_id)?;
+        let mut after = before.clone();
+        after.layers[layer_index].planes.remove(plane_index);
+        validate_layer_kind(
+            after.layers[layer_index].kind,
+            &after.layers[layer_index].planes,
+        )?;
+        if after.active_plane_id == plane_id {
+            after.active_plane_id = after.layers[layer_index]
+                .planes
+                .first()
+                .map_or(after.primary_ids().1, |plane| plane.id);
+        }
+        self.commit_document_edit(before, after)
+    }
+
+    pub fn reorder_plane(
+        &mut self,
+        plane_id: u64,
+        destination_index: usize,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let (layer_index, source) = find_plane_indices(&before, plane_id)?;
+        if destination_index >= before.layers[layer_index].planes.len() {
+            return Err(CoreError::InvalidArgument(
+                "plane destination index is outside its layer",
+            ));
+        }
+        if source == destination_index {
+            return Ok(self.noop_outcome());
+        }
+        let mut after = before.clone();
+        let plane = after.layers[layer_index].planes.remove(source);
+        after.layers[layer_index]
+            .planes
+            .insert(destination_index, plane);
+        self.commit_document_edit(before, after)
+    }
+
+    pub fn set_plane_properties(
+        &mut self,
+        plane_id: u64,
+        visible: bool,
+        editable: bool,
+        opacity_milli: u32,
+        name: &str,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        validate_node_name(name)?;
+        if opacity_milli > 1_000 {
+            return Err(CoreError::InvalidArgument("opacity exceeds 1000"));
+        }
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let mut after = before.clone();
+        let plane = after
+            .plane_by_id_mut(plane_id)
+            .ok_or(CoreError::InvalidArgument("plane ID does not exist"))?;
+        plane.visible = visible;
+        plane.editable = editable;
+        plane.opacity_milli = opacity_milli;
+        plane.name = name.to_owned();
+        if after.layers == before.layers {
+            return Ok(self.noop_outcome());
+        }
+        self.commit_document_edit(before, after)
+    }
+
+    pub fn convert_layer(
+        &mut self,
+        layer_id: u64,
+        destination: LayerKind,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let index = before
+            .layers
+            .iter()
+            .position(|layer| layer.id == layer_id)
+            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+        let source = before.layers[index].kind;
+        if source == destination {
+            return Ok(self.noop_outcome());
+        }
+        if !matches!(
+            (source, destination),
+            (LayerKind::BinaryColoring, LayerKind::GrayscaleColoring)
+                | (LayerKind::GrayscaleColoring, LayerKind::BinaryColoring)
+        ) {
+            return Err(CoreError::InvalidArgument(
+                "requested layer conversion would lose unsupported semantics",
+            ));
+        }
+        let revision = self.next_document_revision()?;
+        let mut after = before.clone();
+        let main = after.layers[index]
+            .planes
+            .iter_mut()
+            .find(|plane| plane.kind == PlaneType::MainLine)
+            .ok_or(CoreError::InvalidState("coloring layer has no main plane"))?;
+        main.raster = convert_main_line_raster(
+            &main.raster,
+            destination == LayerKind::GrayscaleColoring,
+            revision,
+        )?;
+        after.layers[index].kind = destination;
+        validate_layer_kind(destination, &after.layers[index].planes)?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn merge_layer_into_below(&mut self, layer_id: u64) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let upper = before
+            .layers
+            .iter()
+            .position(|layer| layer.id == layer_id)
+            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+        if upper + 1 >= before.layers.len() {
+            return Err(CoreError::InvalidArgument("layer has no lower sibling"));
+        }
+        let lower = upper + 1;
+        if before.layers[upper].kind != before.layers[lower].kind
+            || before.layers[upper].planes.len() != before.layers[lower].planes.len()
+            || before.layers[upper]
+                .planes
+                .iter()
+                .zip(&before.layers[lower].planes)
+                .any(|(left, right)| {
+                    left.kind != right.kind || left.raster.format() != right.raster.format()
+                })
+        {
+            return Err(CoreError::InvalidArgument(
+                "only layers with compatible type and plane topology can merge",
+            ));
+        }
+        let revision = self.next_document_revision()?;
+        let mut after = before.clone();
+        let source_planes = after.layers[upper].planes.clone();
+        let lower_id = after.layers[lower].id;
+        let lower_plane_id = after.layers[lower]
+            .planes
+            .first()
+            .map_or(after.primary_ids().1, |plane| plane.id);
+        for (destination, source) in after.layers[lower].planes.iter_mut().zip(&source_planes) {
+            merge_raster(&mut destination.raster, &source.raster, revision)?;
+        }
+        after.layers.remove(upper);
+        after.active_layer_id = lower_id;
+        after.active_plane_id = lower_plane_id;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn apply_selection(
+        &mut self,
+        shape: &SelectionShape,
+        operation: SelectionOperation,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let revision = self.next_document_revision()?;
+        let candidate = selection_mask_for_shape(&before, shape, revision)?;
+        let mut after = before.clone();
+        after.selection =
+            combine_selection_masks(&before.selection, &candidate, operation, revision)?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn invert_selection(&mut self) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let revision = self.next_document_revision()?;
+        let mut after = before.clone();
+        after.selection = invert_selection_mask(&before.selection, revision)?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn resize_selection(&mut self, pixels: i32) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        if pixels == i32::MIN || pixels.unsigned_abs() > 4_096 {
+            return Err(CoreError::InvalidArgument(
+                "selection expansion is outside its bound",
+            ));
+        }
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let revision = self.next_document_revision()?;
+        let mut after = before.clone();
+        after.selection = morphology_selection(&before.selection, pixels, revision)?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn select_color(
+        &mut self,
+        color: PixelValue,
+        tolerance: u16,
+        different: bool,
+        operation: SelectionOperation,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let source = before
+            .plane_by_id(before.active_plane_id)
+            .ok_or(CoreError::InvalidState("active plane is missing"))?;
+        let revision = self.next_document_revision()?;
+        let candidate =
+            color_selection_mask(&source.raster, color, tolerance, different, revision)?;
+        let mut after = before.clone();
+        after.selection =
+            combine_selection_masks(&before.selection, &candidate, operation, revision)?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn selection_bounds(&self) -> Result<Option<RectI32>, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        mask_bounds(&document.selection)
+    }
+
+    pub fn selection_to_layer(&mut self, name: &str) -> Result<(DispatchOutcome, u64), CoreError> {
+        self.ensure_no_active_stroke()?;
+        validate_node_name(name)?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        if before.layers.len() >= MAX_LAYERS {
+            return Err(CoreError::InvalidState("layer limit reached"));
+        }
+        if mask_bounds(&before.selection)?.is_none() {
+            return Err(CoreError::InvalidState("selection is empty"));
+        }
+        let layer_id = self.allocate_id();
+        let plane_id = self.allocate_id();
+        let mut after = before.clone();
+        after.layers.push(LayerNode {
+            id: layer_id,
+            kind: LayerKind::Selection,
+            name: unique_layer_name(&after.layers, name),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            planes: vec![PlaneNode {
+                id: plane_id,
+                kind: PlaneType::Selection,
+                name: "Selection".to_owned(),
+                visible: true,
+                editable: true,
+                opacity_milli: 1_000,
+                raster: before.selection.clone(),
+            }],
+        });
+        after.active_layer_id = layer_id;
+        after.active_plane_id = plane_id;
+        let outcome = self.commit_document_edit(before, after)?;
+        Ok((outcome, layer_id))
+    }
+
+    pub fn selection_from_layer(
+        &mut self,
+        layer_id: u64,
+        operation: SelectionLayerOperation,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let layer = before
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)
+            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+        let mask = layer
+            .planes
+            .iter()
+            .find(|plane| plane.kind == PlaneType::Selection)
+            .ok_or(CoreError::InvalidArgument(
+                "layer does not contain a selection plane",
+            ))?;
+        let revision = self.next_document_revision()?;
+        let selection_operation = match operation {
+            SelectionLayerOperation::Replace => SelectionOperation::New,
+            SelectionLayerOperation::Add => SelectionOperation::Add,
+            SelectionLayerOperation::Subtract => SelectionOperation::Subtract,
+        };
+        let mut after = before.clone();
+        after.selection = combine_selection_masks(
+            &before.selection,
+            &mask.raster,
+            selection_operation,
+            revision,
+        )?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn copy_selection(&self) -> Result<ClipboardPayload, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let bounds = mask_bounds(&document.selection)?
+            .ok_or(CoreError::InvalidState("selection is empty"))?;
+        let plane = document
+            .plane_by_id(document.active_plane_id)
+            .ok_or(CoreError::InvalidState("active plane is missing"))?;
+        if !matches!(
+            plane.kind,
+            PlaneType::MainLine | PlaneType::Color | PlaneType::Raster | PlaneType::Selection
+        ) {
+            return Err(CoreError::InvalidState("active plane is not copyable"));
+        }
+        let mut pixels = Vec::new();
+        for y in bounds.y..bounds.y + bounds.height {
+            for x in bounds.x..bounds.x + bounds.width {
+                let (Ok(x_u32), Ok(y_u32)) = (u32::try_from(x), u32::try_from(y)) else {
+                    continue;
+                };
+                if !matches!(
+                    document.selection.pixel(x_u32, y_u32)?,
+                    PixelValue::Binary(255)
+                ) {
+                    continue;
+                }
+                let value = plane.raster.pixel(x_u32, y_u32)?;
+                if !value.is_zero() {
+                    pixels.push(ClipboardPixel { x, y, value });
+                }
+            }
+        }
+        Ok(ClipboardPayload {
+            source_document_uuid: document.uuid,
+            bounds,
+            planes: vec![ClipboardPlane {
+                kind: plane.kind,
+                pixel_format: plane.raster.format(),
+                origin_x: bounds.x,
+                origin_y: bounds.y,
+                pixels,
+            }],
+        })
+    }
+
+    pub fn begin_paste(&mut self, payload: &ClipboardPayload) -> Result<(), CoreError> {
+        self.ensure_no_active_stroke()?;
+        if self.floating.is_some() {
+            return Err(CoreError::InvalidState("floating paste is already active"));
+        }
+        if payload.planes.is_empty() || payload.planes.len() > MAX_PLANES_PER_LAYER {
+            return Err(CoreError::InvalidArgument(
+                "clipboard plane count is invalid",
+            ));
+        }
+        if payload.bounds.width <= 0
+            || payload.bounds.height <= 0
+            || payload.bounds.x.checked_add(payload.bounds.width).is_none()
+            || payload
+                .bounds
+                .y
+                .checked_add(payload.bounds.height)
+                .is_none()
+        {
+            return Err(CoreError::InvalidArgument(
+                "clipboard bounds are outside the supported range",
+            ));
+        }
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let active_destination = document
+            .plane_by_id(document.active_plane_id)
+            .ok_or(CoreError::InvalidState("active plane is missing"))?;
+        let compatible_source = |destination: &PlaneNode| {
+            payload.planes.iter().find(|plane| {
+                plane.kind == destination.kind && plane.pixel_format == destination.raster.format()
+            })
+        };
+        let active_layer = document.layers.iter().find(|layer| {
+            layer
+                .planes
+                .iter()
+                .any(|plane| plane.id == active_destination.id)
+        });
+        let (destination, source) =
+            compatible_source(active_destination)
+                .map(|source| (active_destination, source))
+                .or_else(|| {
+                    active_layer.and_then(|layer| {
+                        layer.planes.iter().find_map(|plane| {
+                            compatible_source(plane).map(|source| (plane, source))
+                        })
+                    })
+                })
+                .or_else(|| {
+                    document.layers.iter().find_map(|layer| {
+                        layer.planes.iter().find_map(|plane| {
+                            compatible_source(plane).map(|source| (plane, source))
+                        })
+                    })
+                })
+                .ok_or(CoreError::InvalidArgument(
+                    "clipboard has no compatible typed destination payload",
+                ))?;
+        if source.pixels.len() as u64 > MAX_FILL_PIXELS {
+            return Err(CoreError::InvalidArgument(
+                "clipboard payload exceeds work limit",
+            ));
+        }
+        if source.pixels.iter().any(|pixel| {
+            pixel.x < payload.bounds.x
+                || pixel.y < payload.bounds.y
+                || pixel.x >= payload.bounds.x + payload.bounds.width
+                || pixel.y >= payload.bounds.y + payload.bounds.height
+        }) {
+            return Err(CoreError::InvalidArgument(
+                "clipboard pixel lies outside its bounds",
+            ));
+        }
+        self.floating = Some(FloatingSelection {
+            payload: payload.clone(),
+            destination_plane_id: destination.id,
+            transform: FloatingTransform::default(),
+        });
+        Ok(())
+    }
+
+    pub fn set_floating_transform(
+        &mut self,
+        transform: FloatingTransform,
+    ) -> Result<(), CoreError> {
+        validate_floating_transform(transform)?;
+        self.floating
+            .as_mut()
+            .ok_or(CoreError::InvalidState("there is no floating paste"))?
+            .transform = transform;
+        Ok(())
+    }
+
+    pub fn cancel_floating(&mut self) {
+        self.floating = None;
+    }
+
+    pub fn commit_floating(&mut self) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let floating = self
+            .floating
+            .clone()
+            .ok_or(CoreError::InvalidState("there is no floating paste"))?;
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let destination =
+            document
+                .plane_by_id(floating.destination_plane_id)
+                .ok_or(CoreError::InvalidState(
+                    "paste destination no longer exists",
+                ))?;
+        ensure_editable_plane(document, floating.destination_plane_id)?;
+        let source = floating
+            .payload
+            .planes
+            .iter()
+            .find(|plane| {
+                plane.kind == destination.kind && plane.pixel_format == destination.raster.format()
+            })
+            .ok_or(CoreError::InvalidArgument(
+                "compatible clipboard plane is missing",
+            ))?;
+        let mut staged = BTreeMap::new();
+        let center_x = f64::from(floating.payload.bounds.x)
+            + f64::from(floating.payload.bounds.width - 1) / 2.0;
+        let center_y = f64::from(floating.payload.bounds.y)
+            + f64::from(floating.payload.bounds.height - 1) / 2.0;
+        let radians = floating.transform.rotation_degrees.to_radians();
+        let (sin, cos) = radians.sin_cos();
+        let transform_point = |x: f64, y: f64| {
+            let local_x = (x - center_x) * floating.transform.scale_x;
+            let local_y = (y - center_y) * floating.transform.scale_y;
+            (
+                center_x + local_x * cos - local_y * sin + floating.transform.translate_x,
+                center_y + local_x * sin + local_y * cos + floating.transform.translate_y,
+            )
+        };
+        let left = f64::from(floating.payload.bounds.x);
+        let top = f64::from(floating.payload.bounds.y);
+        let right = f64::from(floating.payload.bounds.x + floating.payload.bounds.width - 1);
+        let bottom = f64::from(floating.payload.bounds.y + floating.payload.bounds.height - 1);
+        let corners = [
+            transform_point(left, top),
+            transform_point(right, top),
+            transform_point(left, bottom),
+            transform_point(right, bottom),
+        ];
+        if corners
+            .iter()
+            .any(|(x, y)| !x.is_finite() || !y.is_finite())
+        {
+            return Err(CoreError::InvalidArgument("floating transform overflowed"));
+        }
+        let min_x = corners
+            .iter()
+            .map(|corner| corner.0)
+            .fold(f64::INFINITY, f64::min)
+            .floor()
+            .max(0.0) as i64;
+        let max_x = corners
+            .iter()
+            .map(|corner| corner.0)
+            .fold(f64::NEG_INFINITY, f64::max)
+            .ceil()
+            .min(f64::from(document.width.saturating_sub(1))) as i64;
+        let min_y = corners
+            .iter()
+            .map(|corner| corner.1)
+            .fold(f64::INFINITY, f64::min)
+            .floor()
+            .max(0.0) as i64;
+        let max_y = corners
+            .iter()
+            .map(|corner| corner.1)
+            .fold(f64::NEG_INFINITY, f64::max)
+            .ceil()
+            .min(f64::from(document.height.saturating_sub(1))) as i64;
+        if min_x <= max_x && min_y <= max_y {
+            let work = u64::try_from(max_x - min_x + 1)
+                .ok()
+                .and_then(|width| {
+                    u64::try_from(max_y - min_y + 1)
+                        .ok()
+                        .and_then(|height| width.checked_mul(height))
+                })
+                .ok_or(CoreError::InvalidArgument("floating work size overflows"))?;
+            if work > MAX_FILL_PIXELS {
+                return Err(CoreError::InvalidArgument(
+                    "floating transform exceeds the bounded work limit",
+                ));
+            }
+            let source_pixels: BTreeMap<_, _> = source
+                .pixels
+                .iter()
+                .map(|pixel| ((pixel.x, pixel.y), pixel.value))
+                .collect();
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    let translated_x = x as f64 - center_x - floating.transform.translate_x;
+                    let translated_y = y as f64 - center_y - floating.transform.translate_y;
+                    let source_x = center_x
+                        + (translated_x * cos + translated_y * sin) / floating.transform.scale_x;
+                    let source_y = center_y
+                        + (-translated_x * sin + translated_y * cos) / floating.transform.scale_y;
+                    let source_coord = (source_x.round() as i32, source_y.round() as i32);
+                    if let Some(value) = source_pixels.get(&source_coord) {
+                        staged.insert((x as u32, y as u32), *value);
+                    }
+                }
+            }
+        }
+        if staged.is_empty() {
+            return Err(CoreError::InvalidState(
+                "floating selection contains no content inside the destination paper",
+            ));
+        }
+        let revision = self.next_document_revision()?;
+        let after_state = self.allocate_state()?;
+        let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
+        let plane = document
+            .plane_by_id_mut(floating.destination_plane_id)
+            .ok_or(CoreError::InvalidState(
+                "paste destination no longer exists",
+            ))?;
+        let mut changes = Vec::with_capacity(staged.len());
+        for ((x, y), source_value) in staged {
+            let before = plane.raster.pixel(x, y)?;
+            let after = paste_value(before, source_value, plane.kind)?;
+            if before != after {
+                plane.raster.set_pixel(x, y, after, revision)?;
+                changes.push(PixelChange {
+                    x,
+                    y,
+                    before,
+                    after,
+                });
+            }
+        }
+        if changes.is_empty() {
+            self.floating = None;
+            return Ok(self.noop_outcome());
+        }
+        document.active_plane_id = floating.destination_plane_id;
+        self.document_revision = revision;
+        self.commit_pixel_history(floating.destination_plane_id, changes, after_state);
+        self.floating = None;
+        Ok(DispatchOutcome {
+            revision,
+            accepted_commands: 1,
+        })
+    }
+
+    pub fn mirror_document(&mut self, axis: MirrorAxis) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let revision = self.next_document_revision()?;
+        let mut after = before.clone();
+        for plane in after
+            .layers
+            .iter_mut()
+            .flat_map(|layer| layer.planes.iter_mut())
+        {
+            plane.raster = mirror_raster(&plane.raster, axis, revision)?;
+        }
+        after.selection = mirror_raster(&after.selection, axis, revision)?;
+        mirror_frame_metadata(&mut after.frames, after.width, after.height, axis)?;
+        for guide in &mut after.guides {
+            match (axis, guide.axis) {
+                (MirrorAxis::Horizontal, GuideAxis::Vertical) => {
+                    guide.position = i32::try_from(after.width).map_err(|_| {
+                        CoreError::InvalidState("document width exceeds guide range")
+                    })? - guide.position;
+                }
+                (MirrorAxis::Vertical, GuideAxis::Horizontal) => {
+                    guide.position = i32::try_from(after.height).map_err(|_| {
+                        CoreError::InvalidState("document height exceeds guide range")
+                    })? - guide.position;
+                }
+                _ => {}
+            }
+        }
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn guides(&self) -> Result<&[Guide], CoreError> {
+        Ok(&self.document.as_ref().ok_or(CoreError::NoDocument)?.guides)
+    }
+
+    pub fn add_guide(
+        &mut self,
+        axis: GuideAxis,
+        position: i32,
+    ) -> Result<(DispatchOutcome, u64), CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        if before.guides.len() >= MAX_GUIDES {
+            return Err(CoreError::InvalidState("guide limit reached"));
+        }
+        validate_guide_position(&before, axis, position)?;
+        let id = self.allocate_id();
+        let mut after = before.clone();
+        after.guides.push(Guide { id, axis, position });
+        after
+            .guides
+            .sort_by_key(|guide| (guide.axis as u8, guide.position, guide.id));
+        let outcome = self.commit_document_edit(before, after)?;
+        Ok((outcome, id))
+    }
+
+    pub fn move_guide(
+        &mut self,
+        guide_id: u64,
+        position: i32,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let guide = before
+            .guides
+            .iter()
+            .find(|guide| guide.id == guide_id)
+            .ok_or(CoreError::InvalidArgument("guide ID does not exist"))?;
+        validate_guide_position(&before, guide.axis, position)?;
+        if guide.position == position {
+            return Ok(self.noop_outcome());
+        }
+        let mut after = before.clone();
+        after
+            .guides
+            .iter_mut()
+            .find(|guide| guide.id == guide_id)
+            .expect("guide existence checked")
+            .position = position;
+        after
+            .guides
+            .sort_by_key(|guide| (guide.axis as u8, guide.position, guide.id));
+        self.commit_document_edit(before, after)
+    }
+
+    pub fn delete_guide(&mut self, guide_id: u64) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let index = before
+            .guides
+            .iter()
+            .position(|guide| guide.id == guide_id)
+            .ok_or(CoreError::InvalidArgument("guide ID does not exist"))?;
+        let mut after = before.clone();
+        after.guides.remove(index);
+        self.commit_document_edit(before, after)
+    }
+
+    pub fn grid(&self) -> Result<GridConfig, CoreError> {
+        Ok(self.document.as_ref().ok_or(CoreError::NoDocument)?.grid)
+    }
+
+    pub fn set_grid(&mut self, grid: GridConfig) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        validate_grid(grid)?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        if before.grid == grid {
+            return Ok(self.noop_outcome());
+        }
+        let mut after = before.clone();
+        after.grid = grid;
+        self.commit_document_edit(before, after)
+    }
+
+    pub fn snap_document_point(&self, x: f64, y: f64) -> Result<(f64, f64), CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(CoreError::InvalidArgument("snap point is not finite"));
+        }
+        if !self.view.snap_enabled {
+            return Ok((x, y));
+        }
+        let grid = document.grid;
+        let snap_axis = |value: f64, origin: i32, spacing: u32| {
+            let step = f64::from(spacing) / f64::from(grid.subdivisions);
+            f64::from(origin) + ((value - f64::from(origin)) / step).round() * step
+        };
+        let mut snapped = (
+            snap_axis(x, grid.origin_x, grid.spacing_x),
+            snap_axis(y, grid.origin_y, grid.spacing_y),
+        );
+        for guide in &document.guides {
+            match guide.axis {
+                GuideAxis::Vertical if (x - f64::from(guide.position)).abs() <= 4.0 => {
+                    snapped.0 = f64::from(guide.position);
+                }
+                GuideAxis::Horizontal if (y - f64::from(guide.position)).abs() <= 4.0 => {
+                    snapped.1 = f64::from(guide.position);
+                }
+                _ => {}
+            }
+        }
+        Ok(snapped)
+    }
+
+    pub fn create_view(&mut self) -> Result<u64, CoreError> {
+        if self.document.is_none() {
+            return Err(CoreError::NoDocument);
+        }
+        let id = self.next_view_id;
+        self.next_view_id = self
+            .next_view_id
+            .checked_add(1)
+            .ok_or(CoreError::InvalidState("view ID overflow"))?;
+        self.secondary_views.insert(id, self.view);
+        Ok(id)
+    }
+
+    pub fn close_view(&mut self, view_id: u64) -> Result<(), CoreError> {
+        self.secondary_views
+            .remove(&view_id)
+            .map(|_| ())
+            .ok_or(CoreError::InvalidArgument("view ID does not exist"))
+    }
+
+    pub fn apply_view_for(
+        &mut self,
+        view_id: u64,
+        command: ViewCommand,
+    ) -> Result<ViewState, CoreError> {
+        let original = self.view;
+        self.view = *self
+            .secondary_views
+            .get(&view_id)
+            .ok_or(CoreError::InvalidArgument("view ID does not exist"))?;
+        let result = self.apply_view(command);
+        let updated = self.view;
+        self.view = original;
+        if result.is_ok() {
+            self.secondary_views.insert(view_id, updated);
+        }
+        result.map(|_| updated)
+    }
+
+    pub fn build_snapshot_for(&mut self, view_id: u64) -> Result<RenderSnapshot, CoreError> {
+        let selected = *self
+            .secondary_views
+            .get(&view_id)
+            .ok_or(CoreError::InvalidArgument("view ID does not exist"))?;
+        let original = self.view;
+        self.view = selected;
+        let snapshot = self.build_snapshot();
+        self.view = original;
+        Ok(snapshot)
+    }
+
+    pub fn locator_sample(
+        &self,
+        view_id: Option<u64>,
+        device_x: f64,
+        device_y: f64,
+    ) -> Result<LocatorSample, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let view = match view_id {
+            Some(id) => *self
+                .secondary_views
+                .get(&id)
+                .ok_or(CoreError::InvalidArgument("view ID does not exist"))?,
+            None => self.view,
+        };
+        let (x, y) = device_to_document(view, document.width, document.height, device_x, device_y)?;
+        let document_x = x.floor() as i32;
+        let document_y = y.floor() as i32;
+        let color = if document_x >= 0
+            && document_y >= 0
+            && document_x < document.width as i32
+            && document_y < document.height as i32
+        {
+            self.eyedropper(
+                EyedropperSource::Composite,
+                document_x as u32,
+                document_y as u32,
+            )
+            .ok()
+        } else {
+            None
+        };
+        Ok(LocatorSample {
+            document_x,
+            document_y,
+            selection_bounds: mask_bounds(&document.selection)?,
+            color,
+        })
+    }
+
+    pub fn shortcut_bindings(&self) -> Vec<ShortcutBinding> {
+        self.shortcuts.values().copied().collect()
+    }
+
+    pub fn rebind_shortcut(&mut self, binding: ShortcutBinding) -> Result<(), CoreError> {
+        if binding.command_id == 0
+            || binding.virtual_key == 0
+            || binding.modifiers & !SHORTCUT_MODIFIER_MASK != 0
+        {
+            return Err(CoreError::InvalidArgument("shortcut binding is invalid"));
+        }
+        if self.shortcuts.len() >= MAX_SHORTCUTS
+            && !self.shortcuts.contains_key(&binding.command_id)
+        {
+            return Err(CoreError::InvalidState("shortcut limit reached"));
+        }
+        self.shortcuts.retain(|command, candidate| {
+            *command == binding.command_id
+                || candidate.virtual_key != binding.virtual_key
+                || candidate.modifiers != binding.modifiers
+        });
+        self.shortcuts.insert(binding.command_id, binding);
+        Ok(())
+    }
+
+    pub fn resolve_shortcut(
+        &self,
+        virtual_key: u32,
+        modifiers: u32,
+    ) -> Result<Option<u32>, CoreError> {
+        if virtual_key == 0 || modifiers & !SHORTCUT_MODIFIER_MASK != 0 {
+            return Err(CoreError::InvalidArgument("shortcut input is invalid"));
+        }
+        Ok(self.shortcuts.values().find_map(|binding| {
+            (binding.virtual_key == virtual_key && binding.modifiers == modifiers)
+                .then_some(binding.command_id)
+        }))
+    }
+
+    pub fn reset_shortcuts(&mut self) {
+        self.shortcuts = default_shortcuts();
     }
 
     pub fn apply_fill(&mut self, request: &FillRequest) -> Result<FillOutcome, CoreError> {
@@ -676,13 +2574,24 @@ impl Core {
     pub fn apply_fill_with_cancel(
         &mut self,
         request: &FillRequest,
-        is_cancelled: impl FnMut() -> bool,
+        mut is_cancelled: impl FnMut() -> bool,
     ) -> Result<FillOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        ensure_editable_role(document, ActivePlane::Color)?;
+        let document_pixels = u64::from(document.width)
+            .checked_mul(u64::from(document.height))
+            .ok_or(CoreError::InvalidArgument("fill work size overflows"))?;
+        if document_pixels > MAX_FILL_PIXELS {
+            return Err(CoreError::InvalidArgument(
+                "fill document exceeds the bounded work limit",
+            ));
+        }
         let selection = request
             .selection
-            .map(|rect| selection_from_rect(document.width, document.height, rect))
+            .map(|rect| {
+                selection_from_rect(document.width, document.height, rect, &mut is_cancelled)
+            })
             .transpose()?;
         let options = FillOptions {
             tolerance: request.tolerance,
@@ -695,35 +2604,37 @@ impl Core {
         };
         let plan = match request.operation {
             FillOperation::Seed => seed_fill_with_cancel(
-                &document.main_plane,
-                &document.color_plane,
+                document.raster(ActivePlane::MainLine),
+                document.raster(ActivePlane::Color),
                 selection.as_ref(),
                 (request.seed_x, request.seed_y),
                 request.color,
                 &options,
-                is_cancelled,
+                &mut is_cancelled,
             )?,
             FillOperation::ClosedRegion => {
                 let operation = selection.as_ref().ok_or(CoreError::InvalidArgument(
                     "closed-region fill requires an operation selection",
                 ))?;
-                closed_region_fill(
-                    &document.main_plane,
-                    &document.color_plane,
+                closed_region_fill_with_cancel(
+                    document.raster(ActivePlane::MainLine),
+                    document.raster(ActivePlane::Color),
                     operation,
                     request.color,
                     &options,
+                    &mut is_cancelled,
                 )?
             }
             FillOperation::Extend => {
                 let operation = selection.as_ref().ok_or(CoreError::InvalidArgument(
                     "fill extension requires an operation selection",
                 ))?;
-                extend_fill(
-                    &document.color_plane,
+                extend_fill_with_cancel(
+                    document.raster(ActivePlane::Color),
                     operation,
                     (request.seed_x, request.seed_y),
                     request.extension_distance,
+                    &mut is_cancelled,
                 )?
             }
         };
@@ -739,7 +2650,7 @@ impl Core {
 
         let changed_pixels = u64::try_from(plan.edits.len())
             .map_err(|_| CoreError::InvalidState("fill edit count is not representable"))?;
-        let mut next_color = document.color_plane.clone();
+        let mut next_color = document.raster(ActivePlane::Color).clone();
         let revision = self.next_document_revision()?;
         let after_state = self.allocate_state()?;
         let mut changes = Vec::with_capacity(plan.edits.len());
@@ -761,10 +2672,12 @@ impl Core {
             next_color.remove_tile_if_empty(coord);
         }
         let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
-        document.color_plane = next_color;
-        document.active_plane = ActivePlane::Color;
+        let color_plane = document.plane_for_role_mut(ActivePlane::Color)?;
+        let color_plane_id = color_plane.id;
+        color_plane.raster = next_color;
+        document.active_plane_id = color_plane_id;
         self.document_revision = revision;
-        self.commit_history(ActivePlane::Color, changes, after_state);
+        self.commit_pixel_history(color_plane_id, changes, after_state);
         Ok(FillOutcome {
             dispatch: DispatchOutcome {
                 revision,
@@ -782,20 +2695,111 @@ impl Core {
     ) -> Result<PixelValue, CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let line = PlaneSample {
-            raster: &document.main_plane,
+            raster: document.raster(ActivePlane::MainLine),
             base_color: Some(document.main_line_color),
         };
         let color = PlaneSample {
-            raster: &document.color_plane,
+            raster: document.raster(ActivePlane::Color),
             base_color: None,
         };
-        let selected = match document.active_plane {
+        let selected = match document.active_plane_role() {
             ActivePlane::MainLine => line,
             ActivePlane::Color => color,
         };
         eyedropper(source, x, y, selected, &[line, color], &[])?.ok_or(CoreError::InvalidState(
             "eyedropper source is transparent or unavailable",
         ))
+    }
+
+    pub fn palette(&self) -> Result<&[PixelValue], CoreError> {
+        Ok(self
+            .document
+            .as_ref()
+            .ok_or(CoreError::NoDocument)?
+            .palette
+            .colors())
+    }
+
+    pub fn replace_palette(&mut self, colors: &[PixelValue]) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let mut after = Palette::default();
+        for color in colors {
+            after.push(*color)?;
+        }
+        let before = self
+            .document
+            .as_ref()
+            .ok_or(CoreError::NoDocument)?
+            .palette
+            .clone();
+        if before == after {
+            return Ok(DispatchOutcome {
+                revision: self.document_revision,
+                accepted_commands: 1,
+            });
+        }
+        let revision = self.next_document_revision()?;
+        let after_state = self.allocate_state()?;
+        self.document.as_mut().ok_or(CoreError::NoDocument)?.palette = after.clone();
+        self.document_revision = revision;
+        self.commit_history_change(HistoryChange::Palette { before, after }, after_state);
+        Ok(DispatchOutcome {
+            revision,
+            accepted_commands: 1,
+        })
+    }
+
+    pub fn main_line_color(&self) -> Result<PixelValue, CoreError> {
+        Ok(self
+            .document
+            .as_ref()
+            .ok_or(CoreError::NoDocument)?
+            .main_line_color)
+    }
+
+    pub fn set_main_line_color(&mut self, color: PixelValue) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        if color.rgba16().is_none() {
+            return Err(CoreError::InvalidArgument(
+                "main-line base color must be RGBA",
+            ));
+        }
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        ensure_editable_role(document, ActivePlane::MainLine)?;
+        if !matches!(
+            document.raster(ActivePlane::MainLine).format(),
+            PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+        ) {
+            return Err(CoreError::InvalidState(
+                "main-line base color is editable only for a grayscale main plane",
+            ));
+        }
+        let before = document.main_line_color;
+        if before == color {
+            return Ok(DispatchOutcome {
+                revision: self.document_revision,
+                accepted_commands: 1,
+            });
+        }
+        let revision = self.next_document_revision()?;
+        let after_state = self.allocate_state()?;
+        self.document
+            .as_mut()
+            .ok_or(CoreError::NoDocument)?
+            .main_line_color = color;
+        self.document_revision = revision;
+        self.render_cache.clear();
+        self.commit_history_change(
+            HistoryChange::MainLineColor {
+                before,
+                after: color,
+            },
+            after_state,
+        );
+        Ok(DispatchOutcome {
+            revision,
+            accepted_commands: 1,
+        })
     }
 
     pub fn set_color_check(
@@ -836,9 +2840,15 @@ impl Core {
             ));
         }
         validate_stroke(stroke)?;
-        let samples =
-            document_samples_for_view(self.view, stroke.coordinate_space, &stroke.samples)?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        ensure_editable_role(&document, stroke.plane)?;
+        let samples = document_samples_for_view(
+            self.view,
+            stroke.coordinate_space,
+            &stroke.samples,
+            document.width,
+            document.height,
+        )?;
         let desired = stroke_value(stroke, &document, &samples)?;
         let preview_revision = self.allocate_preview_revision()?;
         let mut settings = stroke.clone();
@@ -867,8 +2877,13 @@ impl Core {
         let mut session = self.active_stroke.take().ok_or(CoreError::InvalidState(
             "there is no active stroke transaction",
         ))?;
-        let samples =
-            document_samples_for_view(self.view, session.stroke.coordinate_space, samples)?;
+        let samples = document_samples_for_view(
+            self.view,
+            session.stroke.coordinate_space,
+            samples,
+            session.preview_document.width,
+            session.preview_document.height,
+        )?;
         let preview_revision = self.allocate_preview_revision()?;
         match session.append_document_samples(&samples, preview_revision) {
             Ok(()) => {
@@ -893,7 +2908,8 @@ impl Core {
         let after_state = self.allocate_state()?;
         let revision = self.next_document_revision()?;
         let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
-        document.active_plane = session.stroke.plane;
+        let plane_id = document.plane_for_role(session.stroke.plane)?.id;
+        document.active_plane_id = plane_id;
         let raster = document.raster_mut(session.stroke.plane);
         let mut changes = Vec::with_capacity(session.changes.len());
         let mut touched_tiles = BTreeSet::new();
@@ -909,7 +2925,7 @@ impl Core {
             raster.remove_tile_if_empty(coord);
         }
         self.document_revision = revision;
-        self.commit_history(session.stroke.plane, changes, after_state);
+        self.commit_pixel_history(plane_id, changes, after_state);
         Ok(DispatchOutcome {
             revision,
             accepted_commands: 1,
@@ -980,15 +2996,7 @@ impl Core {
         let file = inkpod_format::read(path)?;
         let revision = self.next_document_revision()?;
         let document = CellDocument::from_file(file, revision)?;
-        let max_id = [
-            document.id,
-            document.layer_id,
-            document.main_plane_id,
-            document.color_plane_id,
-        ]
-        .into_iter()
-        .max()
-        .unwrap_or(0);
+        let max_id = document.max_stable_id();
         self.next_id = self.next_id.max(max_id.saturating_add(1));
         self.document = Some(document);
         self.render_cache.clear();
@@ -998,6 +3006,8 @@ impl Core {
         self.current_path = Some(path.to_path_buf());
         self.recovered = false;
         self.color_check = None;
+        self.secondary_views.clear();
+        self.floating = None;
         self.document_info()
     }
 
@@ -1006,15 +3016,7 @@ impl Core {
         let file = inkpod_format::read(path)?;
         let revision = self.next_document_revision()?;
         let document = CellDocument::from_file(file, revision)?;
-        let max_id = [
-            document.id,
-            document.layer_id,
-            document.main_plane_id,
-            document.color_plane_id,
-        ]
-        .into_iter()
-        .max()
-        .unwrap_or(0);
+        let max_id = document.max_stable_id();
         self.next_id = self.next_id.max(max_id.saturating_add(1));
         self.document = Some(document);
         self.render_cache.clear();
@@ -1026,6 +3028,8 @@ impl Core {
         self.current_path = None;
         self.recovered = true;
         self.color_check = None;
+        self.secondary_views.clear();
+        self.floating = None;
         self.document_info()
     }
 
@@ -1060,6 +3064,61 @@ impl Core {
             ));
         }
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let toggle_changed = match command {
+            ViewCommand::Flip { axis } => {
+                match axis {
+                    MirrorAxis::Horizontal => {
+                        self.view.flip_horizontal = !self.view.flip_horizontal
+                    }
+                    MirrorAxis::Vertical => self.view.flip_vertical = !self.view.flip_vertical,
+                }
+                true
+            }
+            ViewCommand::SetRulerVisible(value) => {
+                let changed = self.view.ruler_visible != value;
+                self.view.ruler_visible = value;
+                changed
+            }
+            ViewCommand::SetGuidesVisible(value) => {
+                let changed = self.view.guides_visible != value;
+                self.view.guides_visible = value;
+                changed
+            }
+            ViewCommand::SetGridVisible(value) => {
+                let changed = self.view.grid_visible != value;
+                self.view.grid_visible = value;
+                changed
+            }
+            ViewCommand::SetSnapEnabled(value) => {
+                let changed = self.view.snap_enabled != value;
+                self.view.snap_enabled = value;
+                changed
+            }
+            ViewCommand::SetTransparentView(value) => {
+                let changed = self.view.transparent_view != value;
+                self.view.transparent_view = value;
+                changed
+            }
+            _ => false,
+        };
+        if matches!(
+            command,
+            ViewCommand::Flip { .. }
+                | ViewCommand::SetRulerVisible(_)
+                | ViewCommand::SetGuidesVisible(_)
+                | ViewCommand::SetGridVisible(_)
+                | ViewCommand::SetSnapEnabled(_)
+                | ViewCommand::SetTransparentView(_)
+        ) {
+            if toggle_changed {
+                self.view.revision = self
+                    .view
+                    .revision
+                    .checked_add(1)
+                    .ok_or(CoreError::InvalidState("view revision overflow"))?;
+            }
+            return Ok(self.view);
+        }
         let (next_zoom, next_pan_x, next_pan_y, next_mode) = match command {
             ViewCommand::PanBy {
                 device_dx,
@@ -1141,6 +3200,26 @@ impl Core {
                     ViewMode::OneToOne,
                 ),
             },
+            ViewCommand::BoxZoom {
+                document_rect,
+                viewport_width,
+                viewport_height,
+            } if valid_viewport(viewport_width, viewport_height)
+                && document_rect.width > 0
+                && document_rect.height > 0 =>
+            {
+                let zoom = (viewport_width / f64::from(document_rect.width))
+                    .min(viewport_height / f64::from(document_rect.height))
+                    .clamp(MIN_ZOOM, MAX_ZOOM);
+                (
+                    zoom,
+                    (viewport_width - f64::from(document_rect.width) * zoom) / 2.0
+                        - f64::from(document_rect.x) * zoom,
+                    (viewport_height - f64::from(document_rect.height) * zoom) / 2.0
+                        - f64::from(document_rect.y) * zoom,
+                    ViewMode::Manual,
+                )
+            }
             _ => {
                 return Err(CoreError::InvalidArgument(
                     "view command contains invalid values",
@@ -1175,14 +3254,15 @@ impl Core {
 
     pub fn document_info(&self) -> Result<DocumentInfo, CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let (layer_id, main_plane_id, color_plane_id) = document.primary_ids();
         Ok(DocumentInfo {
             document_revision: self.document_revision,
             view_revision: self.view.revision,
             document_id: document.id,
             document_uuid: document.uuid,
-            layer_id: document.layer_id,
-            main_plane_id: document.main_plane_id,
-            color_plane_id: document.color_plane_id,
+            layer_id,
+            main_plane_id,
+            color_plane_id,
             width: document.width,
             height: document.height,
             dpi_x_milli: document.dpi_x_milli,
@@ -1191,10 +3271,10 @@ impl Core {
             dirty: self.savepoint != Some(self.current_state),
             can_undo: self.history_cursor > 0,
             can_redo: self.history_cursor < self.history.len(),
-            active_plane: document.active_plane,
+            active_plane: document.active_plane_role(),
             recovered: self.recovered,
-            main_plane_checksum: document.main_plane.checksum(),
-            color_plane_checksum: document.color_plane.checksum(),
+            main_plane_checksum: document.raster(ActivePlane::MainLine).checksum(),
+            color_plane_checksum: document.raster(ActivePlane::Color).checksum(),
         })
     }
 
@@ -1220,9 +3300,12 @@ impl Core {
             self.render_cache = cache;
             return RenderSnapshot {
                 revision: self.document_revision,
+                feature_flags: 0,
                 view: self.view,
                 document_width: 0,
                 document_height: 0,
+                guides: Vec::new(),
+                grid: GridConfig::default(),
                 tiles: Vec::new(),
             };
         };
@@ -1230,22 +3313,48 @@ impl Core {
             .active_stroke
             .as_ref()
             .map_or(self.document_revision, |session| session.preview_revision);
+        let feature_flags = match self.color_check {
+            Some(ColorCheckMode::LegacyWhiteTransparency) => {
+                SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE
+            }
+            Some(ColorCheckMode::NativeAlpha) => SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA,
+            None => 0,
+        };
         let coords: BTreeSet<_> = document
-            .main_plane
-            .allocated_coords()
-            .chain(document.color_plane.allocated_coords())
+            .layers
+            .iter()
+            .filter(|layer| layer.visible)
+            .flat_map(|layer| layer.planes.iter())
+            .filter(|plane| plane.visible)
+            .flat_map(|plane| plane.raster.allocated_coords())
+            .chain(document.selection.allocated_coords())
             .collect();
         let mut tiles = Vec::with_capacity(coords.len());
         for coord in &coords {
             let source_revision = document
-                .main_plane
-                .tile_revision(*coord)
-                .max(document.color_plane.tile_revision(*coord));
+                .layers
+                .iter()
+                .filter(|layer| layer.visible)
+                .flat_map(|layer| layer.planes.iter())
+                .filter(|plane| plane.visible)
+                .map(|plane| plane.raster.tile_revision(*coord))
+                .max()
+                .unwrap_or(0)
+                .max(document.selection.tile_revision(*coord));
             if cache
                 .get(coord)
-                .is_none_or(|tile| tile.tile_revision != source_revision)
+                .is_none_or(|tile| tile.source_revision != source_revision)
             {
-                if let Some(tile) = compose_tile(document, *coord, self.color_check) {
+                let tile_revision = self.next_render_tile_revision;
+                self.next_render_tile_revision =
+                    self.next_render_tile_revision.wrapping_add(1).max(1);
+                if let Some(tile) = compose_tile(
+                    document,
+                    *coord,
+                    self.color_check,
+                    source_revision,
+                    tile_revision,
+                ) {
                     cache.insert(*coord, tile);
                 } else {
                     cache.remove(coord);
@@ -1261,9 +3370,12 @@ impl Core {
         self.render_cache = cache;
         RenderSnapshot {
             revision: snapshot_revision,
+            feature_flags,
             view: self.view,
             document_width,
             document_height,
+            guides: document.guides.clone(),
+            grid: document.grid,
             tiles,
         }
     }
@@ -1272,6 +3384,48 @@ impl Core {
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1).max(1);
         id
+    }
+
+    const fn noop_outcome(&self) -> DispatchOutcome {
+        DispatchOutcome {
+            revision: self.document_revision,
+            accepted_commands: 1,
+        }
+    }
+
+    fn commit_document_edit(
+        &mut self,
+        before: CellDocument,
+        after: CellDocument,
+    ) -> Result<DispatchOutcome, CoreError> {
+        let revision = self.next_document_revision()?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    fn commit_document_edit_with_revision(
+        &mut self,
+        before: CellDocument,
+        after: CellDocument,
+        revision: u64,
+    ) -> Result<DispatchOutcome, CoreError> {
+        if before == after {
+            return Ok(self.noop_outcome());
+        }
+        let after_state = self.allocate_state()?;
+        self.document = Some(after.clone());
+        self.document_revision = revision;
+        self.render_cache.clear();
+        self.commit_history_change(
+            HistoryChange::Document {
+                before: Box::new(before),
+                after: Box::new(after),
+            },
+            after_state,
+        );
+        Ok(DispatchOutcome {
+            revision,
+            accepted_commands: 1,
+        })
     }
 
     fn next_document_revision(&self) -> Result<u64, CoreError> {
@@ -1324,12 +3478,15 @@ impl Core {
         };
     }
 
-    fn commit_history(&mut self, plane: ActivePlane, changes: Vec<PixelChange>, after_state: u64) {
+    fn commit_pixel_history(&mut self, plane_id: u64, changes: Vec<PixelChange>, after_state: u64) {
+        self.commit_history_change(HistoryChange::Pixels { plane_id, changes }, after_state);
+    }
+
+    fn commit_history_change(&mut self, change: HistoryChange, after_state: u64) {
         self.history.truncate(self.history_cursor);
         let before_state = self.current_state;
         self.history.push(HistoryEntry {
-            plane,
-            changes,
+            change,
             before_state,
             after_state,
         });
@@ -1344,27 +3501,53 @@ impl Core {
         revision: u64,
     ) -> Result<(), CoreError> {
         let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
-        document.active_plane = entry.plane;
-        let raster = document.raster_mut(entry.plane);
-        let mut touched = BTreeSet::new();
-        for change in &entry.changes {
-            raster.set_pixel(
-                change.x,
-                change.y,
-                if use_after {
-                    change.after
+        match &entry.change {
+            HistoryChange::Pixels { plane_id, changes } => {
+                document.active_plane_id = *plane_id;
+                let raster = &mut document
+                    .plane_by_id_mut(*plane_id)
+                    .ok_or(CoreError::InvalidState("history plane no longer exists"))?
+                    .raster;
+                let mut touched = BTreeSet::new();
+                for change in changes {
+                    raster.set_pixel(
+                        change.x,
+                        change.y,
+                        if use_after {
+                            change.after
+                        } else {
+                            change.before
+                        },
+                        revision,
+                    )?;
+                    touched.insert(TileCoord {
+                        x: change.x / TILE_SIZE,
+                        y: change.y / TILE_SIZE,
+                    });
+                }
+                for coord in touched {
+                    raster.remove_tile_if_empty(coord);
+                }
+            }
+            HistoryChange::Palette { before, after } => {
+                document.palette = if use_after {
+                    after.clone()
                 } else {
-                    change.before
-                },
-                revision,
-            )?;
-            touched.insert(TileCoord {
-                x: change.x / TILE_SIZE,
-                y: change.y / TILE_SIZE,
-            });
-        }
-        for coord in touched {
-            raster.remove_tile_if_empty(coord);
+                    before.clone()
+                };
+            }
+            HistoryChange::MainLineColor { before, after } => {
+                document.main_line_color = if use_after { *after } else { *before };
+                self.render_cache.clear();
+            }
+            HistoryChange::Document { before, after } => {
+                *document = if use_after {
+                    (**after).clone()
+                } else {
+                    (**before).clone()
+                };
+                self.render_cache.clear();
+            }
         }
         Ok(())
     }
@@ -1449,6 +3632,8 @@ fn document_samples_for_view(
     view: ViewState,
     coordinate_space: CoordinateSpace,
     samples: &[StrokeSample],
+    width: u32,
+    height: u32,
 ) -> Result<Vec<StrokeSample>, CoreError> {
     validate_stroke_samples(samples)?;
     match coordinate_space {
@@ -1460,8 +3645,13 @@ fn document_samples_for_view(
             samples
                 .iter()
                 .map(|sample| {
-                    let x = (f64::from(sample.x) - view.pan_x) / view.zoom;
-                    let y = (f64::from(sample.y) - view.pan_y) / view.zoom;
+                    let (x, y) = device_to_document(
+                        view,
+                        width,
+                        height,
+                        f64::from(sample.x),
+                        f64::from(sample.y),
+                    )?;
                     if !stroke_coordinate_is_supported(x) || !stroke_coordinate_is_supported(y) {
                         return Err(CoreError::InvalidArgument(
                             "device-to-document stroke coordinate is outside bounds",
@@ -1478,7 +3668,7 @@ fn document_samples_for_view(
     }
 }
 
-fn raster_to_file_plane(id: u64, kind: PlaneKind, raster: &TileRaster) -> FilePlane {
+fn raster_to_file_plane(id: u64, kind: FilePlaneKind, raster: &TileRaster) -> FilePlane {
     let tiles = raster
         .allocated_coords()
         .filter_map(|coord| raster.tile_data(coord))
@@ -1513,7 +3703,12 @@ fn file_plane_to_raster(plane: &FilePlane, revision: u64) -> Result<TileRaster, 
     Ok(raster)
 }
 
-fn selection_from_rect(width: u32, height: u32, rect: RectI32) -> Result<TileRaster, CoreError> {
+fn selection_from_rect(
+    width: u32,
+    height: u32,
+    rect: RectI32,
+    is_cancelled: &mut impl FnMut() -> bool,
+) -> Result<TileRaster, CoreError> {
     if rect.width <= 0 || rect.height <= 0 || rect.x < 0 || rect.y < 0 {
         return Err(CoreError::InvalidArgument(
             "selection rectangle must have a nonnegative origin and positive size",
@@ -1533,10 +3728,20 @@ fn selection_from_rect(width: u32, height: u32, rect: RectI32) -> Result<TileRas
         ));
     }
     let mut selection = TileRaster::new(width, height, PixelFormat::BinaryMask8)?;
+    let mut work = 0_u64;
     for y in rect.y as u32..bottom {
         for x in rect.x as u32..right {
+            work = work
+                .checked_add(1)
+                .ok_or(CoreError::InvalidArgument("selection work size overflows"))?;
+            if work % 1_024 == 0 && is_cancelled() {
+                return Err(CoreError::Cancelled);
+            }
             selection.set_pixel(x, y, PixelValue::Binary(255), 0)?;
         }
+    }
+    if is_cancelled() {
+        return Err(CoreError::Cancelled);
     }
     Ok(selection)
 }
@@ -1813,10 +4018,784 @@ fn clip_segment_to_document(
     Some((interpolate(lower), interpolate(upper)))
 }
 
+fn validate_node_name(name: &str) -> Result<(), CoreError> {
+    if name.is_empty() || name.len() > 1_024 || name.chars().any(char::is_control) {
+        Err(CoreError::InvalidArgument("node name is invalid"))
+    } else {
+        Ok(())
+    }
+}
+
+const fn is_coloring_layer(kind: LayerKind) -> bool {
+    matches!(
+        kind,
+        LayerKind::BinaryColoring | LayerKind::GrayscaleColoring
+    )
+}
+
+fn validate_plane_format(kind: PlaneType, format: PixelFormat) -> Result<(), CoreError> {
+    let valid = match kind {
+        PlaneType::MainLine => matches!(
+            format,
+            PixelFormat::BinaryMask8 | PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+        ),
+        PlaneType::Color | PlaneType::Raster => matches!(
+            format,
+            PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+        ),
+        PlaneType::Selection => format == PixelFormat::BinaryMask8,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(CoreError::InvalidArgument(
+            "pixel format is not allowed for the plane type",
+        ))
+    }
+}
+
+fn validate_layer_kind(kind: LayerKind, planes: &[PlaneNode]) -> Result<(), CoreError> {
+    for plane in planes {
+        validate_plane_format(plane.kind, plane.raster.format())?;
+    }
+    let count = |kind| planes.iter().filter(|plane| plane.kind == kind).count();
+    let valid = match kind {
+        LayerKind::BinaryColoring => {
+            count(PlaneType::MainLine) == 1
+                && count(PlaneType::Color) == 1
+                && count(PlaneType::Selection) == 0
+                && planes
+                    .iter()
+                    .find(|plane| plane.kind == PlaneType::MainLine)
+                    .is_some_and(|plane| plane.raster.format() == PixelFormat::BinaryMask8)
+        }
+        LayerKind::GrayscaleColoring => {
+            count(PlaneType::MainLine) == 1
+                && count(PlaneType::Color) == 1
+                && count(PlaneType::Selection) == 0
+                && planes
+                    .iter()
+                    .find(|plane| plane.kind == PlaneType::MainLine)
+                    .is_some_and(|plane| {
+                        matches!(
+                            plane.raster.format(),
+                            PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+                        )
+                    })
+        }
+        LayerKind::Raster => {
+            !planes.is_empty() && planes.iter().all(|plane| plane.kind == PlaneType::Raster)
+        }
+        LayerKind::Selection => {
+            !planes.is_empty()
+                && planes
+                    .iter()
+                    .all(|plane| plane.kind == PlaneType::Selection)
+        }
+        LayerKind::Frame
+        | LayerKind::VanishingPoint
+        | LayerKind::Adjustment
+        | LayerKind::Text
+        | LayerKind::Annotation => planes.is_empty(),
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(CoreError::InvalidArgument(
+            "layer and plane types form a disallowed combination",
+        ))
+    }
+}
+
+fn unique_layer_name(layers: &[LayerNode], requested: &str) -> String {
+    if !layers.iter().any(|layer| layer.name == requested) {
+        return requested.to_owned();
+    }
+    for suffix in 2..=MAX_LAYERS {
+        let candidate = format!("{requested} {suffix}");
+        if !layers.iter().any(|layer| layer.name == candidate) {
+            return candidate;
+        }
+    }
+    format!("{requested} {}", layers.len() + 1)
+}
+
+fn unique_plane_name(planes: &[PlaneNode], requested: &str) -> String {
+    if !planes.iter().any(|plane| plane.name == requested) {
+        return requested.to_owned();
+    }
+    for suffix in 2..=MAX_PLANES_PER_LAYER {
+        let candidate = format!("{requested} {suffix}");
+        if !planes.iter().any(|plane| plane.name == candidate) {
+            return candidate;
+        }
+    }
+    format!("{requested} {}", planes.len() + 1)
+}
+
+fn find_plane_indices(document: &CellDocument, plane_id: u64) -> Result<(usize, usize), CoreError> {
+    document
+        .layers
+        .iter()
+        .enumerate()
+        .find_map(|(layer_index, layer)| {
+            layer
+                .planes
+                .iter()
+                .position(|plane| plane.id == plane_id)
+                .map(|plane_index| (layer_index, plane_index))
+        })
+        .ok_or(CoreError::InvalidArgument("plane ID does not exist"))
+}
+
+fn ensure_editable_plane(document: &CellDocument, plane_id: u64) -> Result<(), CoreError> {
+    let (layer_index, plane_index) = find_plane_indices(document, plane_id)?;
+    if !document.layers[layer_index].editable
+        || !document.layers[layer_index].planes[plane_index].editable
+    {
+        Err(CoreError::InvalidState(
+            "active layer or plane is not editable",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_editable_role(document: &CellDocument, role: ActivePlane) -> Result<(), CoreError> {
+    ensure_editable_plane(document, document.plane_for_role(role)?.id)
+}
+
+fn bounded_document_pixels(width: u32, height: u32) -> Result<u64, CoreError> {
+    let pixels = u64::from(width)
+        .checked_mul(u64::from(height))
+        .ok_or(CoreError::InvalidArgument("document pixel count overflows"))?;
+    if pixels > MAX_FILL_PIXELS {
+        Err(CoreError::InvalidArgument(
+            "operation exceeds the bounded document work limit",
+        ))
+    } else {
+        Ok(pixels)
+    }
+}
+
+fn convert_main_line_raster(
+    source: &TileRaster,
+    grayscale: bool,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    bounded_document_pixels(source.width(), source.height())?;
+    let mut destination = TileRaster::new(
+        source.width(),
+        source.height(),
+        if grayscale {
+            PixelFormat::Grayscale8
+        } else {
+            PixelFormat::BinaryMask8
+        },
+    )?;
+    for y in 0..source.height() {
+        for x in 0..source.width() {
+            let value = match source.pixel(x, y)? {
+                PixelValue::Binary(value) | PixelValue::Grayscale8(value) => value,
+                PixelValue::Grayscale16(value) => ((u32::from(value) + 128) / 257) as u8,
+                _ => return Err(CoreError::InvalidState("main-line plane format is invalid")),
+            };
+            let value = if grayscale {
+                PixelValue::Grayscale8(value)
+            } else {
+                PixelValue::Binary(if value >= 128 { 255 } else { 0 })
+            };
+            destination.set_pixel(x, y, value, revision)?;
+        }
+    }
+    Ok(destination)
+}
+
+fn merge_raster(
+    destination: &mut TileRaster,
+    source: &TileRaster,
+    revision: u64,
+) -> Result<(), CoreError> {
+    if destination.width() != source.width()
+        || destination.height() != source.height()
+        || destination.format() != source.format()
+    {
+        return Err(CoreError::InvalidArgument("merge raster formats differ"));
+    }
+    bounded_document_pixels(source.width(), source.height())?;
+    for y in 0..source.height() {
+        for x in 0..source.width() {
+            let source_value = source.pixel(x, y)?;
+            if source_value.is_zero() {
+                continue;
+            }
+            let before = destination.pixel(x, y)?;
+            let after = paste_value(
+                before,
+                source_value,
+                match source.format() {
+                    PixelFormat::BinaryMask8
+                    | PixelFormat::Grayscale8
+                    | PixelFormat::Grayscale16 => PlaneType::MainLine,
+                    _ => PlaneType::Raster,
+                },
+            )?;
+            destination.set_pixel(x, y, after, revision)?;
+        }
+    }
+    Ok(())
+}
+
+fn mirror_raster(
+    source: &TileRaster,
+    axis: MirrorAxis,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    bounded_document_pixels(source.width(), source.height())?;
+    let mut destination = TileRaster::new(source.width(), source.height(), source.format())?;
+    for y in 0..source.height() {
+        for x in 0..source.width() {
+            let value = source.pixel(x, y)?;
+            if value.is_zero() {
+                continue;
+            }
+            let (destination_x, destination_y) = match axis {
+                MirrorAxis::Horizontal => (source.width() - 1 - x, y),
+                MirrorAxis::Vertical => (x, source.height() - 1 - y),
+            };
+            destination.set_pixel(destination_x, destination_y, value, revision)?;
+        }
+    }
+    Ok(destination)
+}
+
+fn mirror_frame_metadata(
+    frames: &mut FrameMetadata,
+    width: u32,
+    height: u32,
+    axis: MirrorAxis,
+) -> Result<(), CoreError> {
+    let width = i32::try_from(width)
+        .map_err(|_| CoreError::InvalidState("document width exceeds frame range"))?;
+    let height = i32::try_from(height)
+        .map_err(|_| CoreError::InvalidState("document height exceeds frame range"))?;
+    for frame in [
+        &mut frames.hundred_frame,
+        &mut frames.reference_frame,
+        &mut frames.drawing_frame,
+        &mut frames.safe_frame,
+    ] {
+        match axis {
+            MirrorAxis::Horizontal => frame.x = width - frame.x - frame.width,
+            MirrorAxis::Vertical => frame.y = height - frame.y - frame.height,
+        }
+    }
+    Ok(())
+}
+
+fn paste_value(
+    destination: PixelValue,
+    source: PixelValue,
+    kind: PlaneType,
+) -> Result<PixelValue, CoreError> {
+    match (kind, destination, source) {
+        (PlaneType::MainLine, PixelValue::Binary(left), PixelValue::Binary(right)) => {
+            Ok(PixelValue::Binary(left.max(right)))
+        }
+        (PlaneType::MainLine, PixelValue::Grayscale8(left), PixelValue::Grayscale8(right)) => {
+            Ok(PixelValue::Grayscale8(left.max(right)))
+        }
+        (PlaneType::MainLine, PixelValue::Grayscale16(left), PixelValue::Grayscale16(right)) => {
+            Ok(PixelValue::Grayscale16(left.max(right)))
+        }
+        (_, PixelValue::Rgba(left), PixelValue::Rgba(right)) => {
+            Ok(PixelValue::Rgba(blend_rgba_over(left, right)))
+        }
+        (_, PixelValue::Rgba16(left), PixelValue::Rgba16(right)) => {
+            Ok(PixelValue::Rgba16(blend_rgba16_over(left, right)))
+        }
+        (_, left, right) if std::mem::discriminant(&left) == std::mem::discriminant(&right) => {
+            Ok(if right.is_transparent() { left } else { right })
+        }
+        _ => Err(CoreError::InvalidArgument(
+            "clipboard pixel type does not match destination",
+        )),
+    }
+}
+
+fn selection_mask_for_shape(
+    document: &CellDocument,
+    shape: &SelectionShape,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    bounded_document_pixels(document.width, document.height)?;
+    let mut mask = TileRaster::new(document.width, document.height, PixelFormat::BinaryMask8)?;
+    match shape {
+        SelectionShape::Rectangle(rect) => {
+            let clipped = clip_rect(*rect, document.width, document.height)?;
+            for y in clipped.y..clipped.y + clipped.height {
+                for x in clipped.x..clipped.x + clipped.width {
+                    mask.set_pixel(x as u32, y as u32, PixelValue::Binary(255), revision)?;
+                }
+            }
+        }
+        SelectionShape::Ellipse(rect) => {
+            let clipped = clip_rect(*rect, document.width, document.height)?;
+            if rect.width <= 0 || rect.height <= 0 {
+                return Err(CoreError::InvalidArgument("ellipse bounds are empty"));
+            }
+            let center_x = f64::from(rect.x) + f64::from(rect.width) / 2.0;
+            let center_y = f64::from(rect.y) + f64::from(rect.height) / 2.0;
+            let radius_x = f64::from(rect.width) / 2.0;
+            let radius_y = f64::from(rect.height) / 2.0;
+            for y in clipped.y..clipped.y + clipped.height {
+                for x in clipped.x..clipped.x + clipped.width {
+                    let normalized_x = (f64::from(x) + 0.5 - center_x) / radius_x;
+                    let normalized_y = (f64::from(y) + 0.5 - center_y) / radius_y;
+                    if normalized_x * normalized_x + normalized_y * normalized_y <= 1.0 {
+                        mask.set_pixel(x as u32, y as u32, PixelValue::Binary(255), revision)?;
+                    }
+                }
+            }
+        }
+        SelectionShape::Lasso(points) | SelectionShape::Polyline(points) => {
+            validate_points(points, 3)?;
+            for y in 0..document.height {
+                for x in 0..document.width {
+                    if point_in_polygon(f64::from(x) + 0.5, f64::from(y) + 0.5, points) {
+                        mask.set_pixel(x, y, PixelValue::Binary(255), revision)?;
+                    }
+                }
+            }
+        }
+        SelectionShape::Trace { points, diameter } => {
+            validate_points(points, 1)?;
+            if !diameter.is_finite() || *diameter <= 0.0 || *diameter > 4_096.0 {
+                return Err(CoreError::InvalidArgument("trace diameter is invalid"));
+            }
+            let radius_squared = f64::from(*diameter) * f64::from(*diameter) / 4.0;
+            for y in 0..document.height {
+                for x in 0..document.width {
+                    let px = f64::from(x) + 0.5;
+                    let py = f64::from(y) + 0.5;
+                    let selected = if points.len() == 1 {
+                        distance_squared(px, py, f64::from(points[0].x), f64::from(points[0].y))
+                            <= radius_squared
+                    } else {
+                        points.windows(2).any(|segment| {
+                            distance_to_segment_squared(px, py, segment[0], segment[1])
+                                <= radius_squared
+                        })
+                    };
+                    if selected {
+                        mask.set_pixel(x, y, PixelValue::Binary(255), revision)?;
+                    }
+                }
+            }
+        }
+        SelectionShape::Wand {
+            x,
+            y,
+            tolerance,
+            gap_close,
+        } => {
+            if *x >= document.width || *y >= document.height || *gap_close > 64 {
+                return Err(CoreError::InvalidArgument("wand settings are invalid"));
+            }
+            let source = document
+                .plane_by_id(document.active_plane_id)
+                .ok_or(CoreError::InvalidState("active plane is missing"))?;
+            let target = source.raster.pixel(*x, *y)?;
+            let mut visited = BTreeSet::new();
+            let mut queue = VecDeque::from([(*x, *y)]);
+            while let Some((candidate_x, candidate_y)) = queue.pop_front() {
+                if !visited.insert((candidate_x, candidate_y)) {
+                    continue;
+                }
+                let value = source.raster.pixel(candidate_x, candidate_y)?;
+                if !pixel_within_tolerance(value, target, *tolerance) {
+                    continue;
+                }
+                mask.set_pixel(candidate_x, candidate_y, PixelValue::Binary(255), revision)?;
+                if candidate_x > 0 {
+                    queue.push_back((candidate_x - 1, candidate_y));
+                }
+                if candidate_x + 1 < document.width {
+                    queue.push_back((candidate_x + 1, candidate_y));
+                }
+                if candidate_y > 0 {
+                    queue.push_back((candidate_x, candidate_y - 1));
+                }
+                if candidate_y + 1 < document.height {
+                    queue.push_back((candidate_x, candidate_y + 1));
+                }
+            }
+            if *gap_close > 0 {
+                mask = morphology_selection(&mask, i32::from(*gap_close), revision)?;
+                mask = morphology_selection(&mask, -i32::from(*gap_close), revision)?;
+            }
+        }
+    }
+    Ok(mask)
+}
+
+fn clip_rect(rect: RectI32, width: u32, height: u32) -> Result<RectI32, CoreError> {
+    if rect.width <= 0 || rect.height <= 0 {
+        return Err(CoreError::InvalidArgument("selection bounds are empty"));
+    }
+    let right = rect
+        .x
+        .checked_add(rect.width)
+        .ok_or(CoreError::InvalidArgument("selection X bounds overflow"))?;
+    let bottom = rect
+        .y
+        .checked_add(rect.height)
+        .ok_or(CoreError::InvalidArgument("selection Y bounds overflow"))?;
+    let left = rect.x.max(0);
+    let top = rect.y.max(0);
+    let right = right.min(width as i32);
+    let bottom = bottom.min(height as i32);
+    if left >= right || top >= bottom {
+        return Err(CoreError::InvalidArgument(
+            "selection is outside the document",
+        ));
+    }
+    Ok(RectI32 {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    })
+}
+
+fn validate_points(points: &[PointF32], minimum: usize) -> Result<(), CoreError> {
+    if points.len() < minimum
+        || points.len() > 1_048_576
+        || points.iter().any(|point| {
+            !point.x.is_finite()
+                || !point.y.is_finite()
+                || point.x.abs() > MAX_STROKE_COORDINATE
+                || point.y.abs() > MAX_STROKE_COORDINATE
+        })
+    {
+        Err(CoreError::InvalidArgument(
+            "selection point list is invalid",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn point_in_polygon(x: f64, y: f64, points: &[PointF32]) -> bool {
+    let mut inside = false;
+    let mut previous = points[points.len() - 1];
+    for &current in points {
+        let (x1, y1) = (f64::from(previous.x), f64::from(previous.y));
+        let (x2, y2) = (f64::from(current.x), f64::from(current.y));
+        if (y1 > y) != (y2 > y) {
+            let crossing_x = (x2 - x1).mul_add((y - y1) / (y2 - y1), x1);
+            if x < crossing_x {
+                inside = !inside;
+            }
+        }
+        previous = current;
+    }
+    inside
+}
+
+fn distance_squared(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
+    (x1 - x2).mul_add(x1 - x2, (y1 - y2) * (y1 - y2))
+}
+
+fn distance_to_segment_squared(x: f64, y: f64, start: PointF32, end: PointF32) -> f64 {
+    let start_x = f64::from(start.x);
+    let start_y = f64::from(start.y);
+    let delta_x = f64::from(end.x) - start_x;
+    let delta_y = f64::from(end.y) - start_y;
+    let length_squared = delta_x.mul_add(delta_x, delta_y * delta_y);
+    if length_squared == 0.0 {
+        return distance_squared(x, y, start_x, start_y);
+    }
+    let ratio =
+        (((x - start_x) * delta_x + (y - start_y) * delta_y) / length_squared).clamp(0.0, 1.0);
+    distance_squared(x, y, start_x + ratio * delta_x, start_y + ratio * delta_y)
+}
+
+fn combine_selection_masks(
+    base: &TileRaster,
+    candidate: &TileRaster,
+    operation: SelectionOperation,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    if base.width() != candidate.width() || base.height() != candidate.height() {
+        return Err(CoreError::InvalidArgument("selection dimensions differ"));
+    }
+    bounded_document_pixels(base.width(), base.height())?;
+    let mut output = TileRaster::new(base.width(), base.height(), PixelFormat::BinaryMask8)?;
+    for y in 0..base.height() {
+        for x in 0..base.width() {
+            let left = matches!(base.pixel(x, y)?, PixelValue::Binary(255));
+            let right = matches!(candidate.pixel(x, y)?, PixelValue::Binary(255));
+            let selected = match operation {
+                SelectionOperation::New => right,
+                SelectionOperation::Add => left || right,
+                SelectionOperation::Subtract => left && !right,
+                SelectionOperation::Intersect => left && right,
+            };
+            if selected {
+                output.set_pixel(x, y, PixelValue::Binary(255), revision)?;
+            }
+        }
+    }
+    Ok(output)
+}
+
+fn invert_selection_mask(source: &TileRaster, revision: u64) -> Result<TileRaster, CoreError> {
+    bounded_document_pixels(source.width(), source.height())?;
+    let mut output = TileRaster::new(source.width(), source.height(), PixelFormat::BinaryMask8)?;
+    for y in 0..source.height() {
+        for x in 0..source.width() {
+            if matches!(source.pixel(x, y)?, PixelValue::Binary(0)) {
+                output.set_pixel(x, y, PixelValue::Binary(255), revision)?;
+            }
+        }
+    }
+    Ok(output)
+}
+
+fn morphology_selection(
+    source: &TileRaster,
+    pixels: i32,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    let document_pixels = bounded_document_pixels(source.width(), source.height())?;
+    let steps = u64::from(pixels.unsigned_abs());
+    if document_pixels.saturating_mul(steps.max(1)) > MAX_FILL_PIXELS {
+        return Err(CoreError::InvalidArgument(
+            "selection morphology exceeds the bounded work limit",
+        ));
+    }
+    let mut current = source.clone();
+    for _ in 0..steps {
+        let mut next = TileRaster::new(source.width(), source.height(), PixelFormat::BinaryMask8)?;
+        for y in 0..source.height() {
+            for x in 0..source.width() {
+                let selected = |candidate_x: u32, candidate_y: u32| {
+                    matches!(
+                        current.pixel(candidate_x, candidate_y),
+                        Ok(PixelValue::Binary(255))
+                    )
+                };
+                let value = if pixels > 0 {
+                    selected(x, y)
+                        || x.checked_sub(1).is_some_and(|left| selected(left, y))
+                        || (x + 1 < source.width() && selected(x + 1, y))
+                        || y.checked_sub(1).is_some_and(|top| selected(x, top))
+                        || (y + 1 < source.height() && selected(x, y + 1))
+                } else {
+                    selected(x, y)
+                        && x > 0
+                        && selected(x - 1, y)
+                        && x + 1 < source.width()
+                        && selected(x + 1, y)
+                        && y > 0
+                        && selected(x, y - 1)
+                        && y + 1 < source.height()
+                        && selected(x, y + 1)
+                };
+                if value {
+                    next.set_pixel(x, y, PixelValue::Binary(255), revision)?;
+                }
+            }
+        }
+        current = next;
+    }
+    Ok(current)
+}
+
+fn mask_bounds(mask: &TileRaster) -> Result<Option<RectI32>, CoreError> {
+    bounded_document_pixels(mask.width(), mask.height())?;
+    let mut min_x = mask.width();
+    let mut min_y = mask.height();
+    let mut max_x = 0;
+    let mut max_y = 0;
+    let mut any = false;
+    for y in 0..mask.height() {
+        for x in 0..mask.width() {
+            if matches!(mask.pixel(x, y)?, PixelValue::Binary(255)) {
+                any = true;
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+    if !any {
+        return Ok(None);
+    }
+    Ok(Some(RectI32 {
+        x: min_x as i32,
+        y: min_y as i32,
+        width: (max_x - min_x + 1) as i32,
+        height: (max_y - min_y + 1) as i32,
+    }))
+}
+
+fn color_selection_mask(
+    source: &TileRaster,
+    color: PixelValue,
+    tolerance: u16,
+    different: bool,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    bounded_document_pixels(source.width(), source.height())?;
+    let mut output = TileRaster::new(source.width(), source.height(), PixelFormat::BinaryMask8)?;
+    for y in 0..source.height() {
+        for x in 0..source.width() {
+            if pixel_within_tolerance(source.pixel(x, y)?, color, tolerance) != different {
+                output.set_pixel(x, y, PixelValue::Binary(255), revision)?;
+            }
+        }
+    }
+    Ok(output)
+}
+
+fn pixel_within_tolerance(left: PixelValue, right: PixelValue, tolerance: u16) -> bool {
+    let channels = |value| -> Option<[u16; 4]> {
+        match value {
+            PixelValue::Binary(value) | PixelValue::Grayscale8(value) => {
+                let value = u16::from(value) * 257;
+                Some([value, value, value, u16::MAX])
+            }
+            PixelValue::Grayscale16(value) => Some([value, value, value, u16::MAX]),
+            PixelValue::Rgba(value) => Some(value.map(|channel| u16::from(channel) * 257)),
+            PixelValue::Rgba16(value) => Some(value),
+        }
+    };
+    let (Some(left), Some(right)) = (channels(left), channels(right)) else {
+        return false;
+    };
+    left.into_iter()
+        .zip(right)
+        .all(|(left, right)| left.abs_diff(right) <= tolerance)
+}
+
+fn validate_floating_transform(transform: FloatingTransform) -> Result<(), CoreError> {
+    if !transform.translate_x.is_finite()
+        || !transform.translate_y.is_finite()
+        || !transform.scale_x.is_finite()
+        || !transform.scale_y.is_finite()
+        || !transform.rotation_degrees.is_finite()
+        || transform.scale_x.abs() < 0.000_001
+        || transform.scale_y.abs() < 0.000_001
+        || transform.scale_x.abs() > 1_024.0
+        || transform.scale_y.abs() > 1_024.0
+        || transform.translate_x.abs() > f64::from(MAX_STROKE_COORDINATE)
+        || transform.translate_y.abs() > f64::from(MAX_STROKE_COORDINATE)
+        || transform.rotation_degrees.abs() > 36_000.0
+    {
+        Err(CoreError::InvalidArgument(
+            "floating transform is outside supported bounds",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_guide_position(
+    document: &CellDocument,
+    axis: GuideAxis,
+    position: i32,
+) -> Result<(), CoreError> {
+    let limit = match axis {
+        GuideAxis::Horizontal => document.height,
+        GuideAxis::Vertical => document.width,
+    };
+    if position < 0
+        || u32::try_from(position)
+            .ok()
+            .is_none_or(|value| value > limit)
+    {
+        Err(CoreError::InvalidArgument(
+            "guide position is outside paper",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_grid(grid: GridConfig) -> Result<(), CoreError> {
+    if grid.spacing_x == 0
+        || grid.spacing_y == 0
+        || grid.spacing_x > 1_048_576
+        || grid.spacing_y > 1_048_576
+        || grid.subdivisions == 0
+        || grid.subdivisions > 1_024
+    {
+        Err(CoreError::InvalidArgument("grid values are outside bounds"))
+    } else {
+        Ok(())
+    }
+}
+
+fn default_shortcuts() -> BTreeMap<u32, ShortcutBinding> {
+    [
+        ShortcutBinding {
+            command_id: 1,
+            virtual_key: u32::from(b'Z'),
+            modifiers: 1,
+        },
+        ShortcutBinding {
+            command_id: 2,
+            virtual_key: u32::from(b'Y'),
+            modifiers: 1,
+        },
+        ShortcutBinding {
+            command_id: 3,
+            virtual_key: u32::from(b'C'),
+            modifiers: 1,
+        },
+        ShortcutBinding {
+            command_id: 4,
+            virtual_key: u32::from(b'V'),
+            modifiers: 1,
+        },
+    ]
+    .into_iter()
+    .map(|binding| (binding.command_id, binding))
+    .collect()
+}
+
+fn device_to_document(
+    view: ViewState,
+    width: u32,
+    height: u32,
+    device_x: f64,
+    device_y: f64,
+) -> Result<(f64, f64), CoreError> {
+    if !device_x.is_finite() || !device_y.is_finite() {
+        return Err(CoreError::InvalidArgument(
+            "device coordinate is not finite",
+        ));
+    }
+    let mut x = (device_x - view.pan_x) / view.zoom;
+    let mut y = (device_y - view.pan_y) / view.zoom;
+    if view.flip_horizontal {
+        x = f64::from(width) - x;
+    }
+    if view.flip_vertical {
+        y = f64::from(height) - y;
+    }
+    Ok((x, y))
+}
+
 fn compose_tile(
     document: &CellDocument,
     coord: TileCoord,
     color_check: Option<ColorCheckMode>,
+    source_revision: u64,
+    tile_revision: u64,
 ) -> Option<RenderTile> {
     let origin_x = coord.x.checked_mul(TILE_SIZE)?;
     let origin_y = coord.y.checked_mul(TILE_SIZE)?;
@@ -1830,12 +4809,58 @@ fn compose_tile(
     let mut pixels = Vec::with_capacity(capacity);
     for y in 0..height {
         for x in 0..width {
-            let color_value = document
-                .color_plane
-                .pixel(origin_x + x, origin_y + y)
-                .ok()?;
+            let document_x = origin_x + x;
+            let document_y = origin_y + y;
+            let mut composite = [0_u8; 4];
+            // Layer index zero is the top of the palette. Composite from the
+            // bottom towards the top so palette order and rendered order agree.
+            for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
+                let mut layer_pixel = [0_u8; 4];
+                for plane in layer
+                    .planes
+                    .iter()
+                    .filter(|plane| plane.visible && plane.kind != PlaneType::MainLine)
+                    .chain(
+                        layer
+                            .planes
+                            .iter()
+                            .filter(|plane| plane.visible && plane.kind == PlaneType::MainLine),
+                    )
+                {
+                    let value = plane.raster.pixel(document_x, document_y).ok()?;
+                    let mut rgba = match plane.kind {
+                        PlaneType::MainLine => {
+                            let coverage = match value {
+                                PixelValue::Binary(value) | PixelValue::Grayscale8(value) => value,
+                                PixelValue::Grayscale16(value) => {
+                                    ((u32::from(value) + 128) / 257) as u8
+                                }
+                                _ => return None,
+                            };
+                            let mut line = rgba8_for_display(document.main_line_color)?;
+                            line[3] =
+                                ((u32::from(line[3]) * u32::from(coverage) + 127) / 255) as u8;
+                            line
+                        }
+                        PlaneType::Color | PlaneType::Raster => rgba8_for_display(value)?,
+                        PlaneType::Selection => {
+                            let coverage = match value {
+                                PixelValue::Binary(value) => value,
+                                _ => return None,
+                            };
+                            [0, 160, 255, coverage / 3]
+                        }
+                    };
+                    rgba[3] = ((u32::from(rgba[3]) * plane.opacity_milli + 500) / 1_000) as u8;
+                    layer_pixel = blend_rgba_over(layer_pixel, rgba);
+                }
+                layer_pixel[3] =
+                    ((u32::from(layer_pixel[3]) * layer.opacity_milli + 500) / 1_000) as u8;
+                composite = blend_rgba_over(composite, layer_pixel);
+            }
             if let Some(mode) = color_check {
-                let check_pixel = match color_check_category(color_value, mode) {
+                let check_value = PixelValue::Rgba(composite);
+                let check_pixel = match color_check_category(check_value, mode) {
                     ColorCheckCategory::ExactWhite => [255, 255, 255, 255],
                     ColorCheckCategory::Transparent => [255, 0, 255, 255],
                     ColorCheckCategory::Colored => [0, 0, 0, 255],
@@ -1843,28 +4868,20 @@ fn compose_tile(
                 pixels.extend_from_slice(&check_pixel);
                 continue;
             }
-            let color = rgba8_for_display(color_value)?;
-            let line_coverage = match document.main_plane.pixel(origin_x + x, origin_y + y).ok()? {
-                PixelValue::Binary(value) | PixelValue::Grayscale8(value) => value,
-                PixelValue::Grayscale16(value) => ((u32::from(value) + 128) / 257) as u8,
-                _ => return None,
-            };
-            let line_color = rgba8_for_display(document.main_line_color)?;
-            let line_alpha = (u32::from(line_color[3]) * u32::from(line_coverage) + 127) / 255;
-            let inverse_line = 255_u32 - line_alpha;
-            let color_alpha = u32::from(color[3]);
-            let output_alpha = line_alpha + (color_alpha * inverse_line + 127) / 255;
-            let premultiply = |line_channel: u8, color_channel: u8| -> u8 {
-                let line_premultiplied = u32::from(line_channel) * line_alpha;
-                let color_premultiplied = u32::from(color_channel) * color_alpha;
-                ((line_premultiplied + (color_premultiplied * inverse_line + 127) / 255 + 127)
-                    / 255) as u8
-            };
+            if matches!(
+                document.selection.pixel(document_x, document_y).ok()?,
+                PixelValue::Binary(255)
+            ) {
+                composite = blend_rgba_over(composite, [0, 160, 255, 64]);
+            }
+            let alpha = u32::from(composite[3]);
+            let premultiply =
+                |channel: u8| -> u8 { ((u32::from(channel) * alpha + 127) / 255) as u8 };
             pixels.extend_from_slice(&[
-                premultiply(line_color[2], color[2]),
-                premultiply(line_color[1], color[1]),
-                premultiply(line_color[0], color[0]),
-                output_alpha as u8,
+                premultiply(composite[2]),
+                premultiply(composite[1]),
+                premultiply(composite[0]),
+                composite[3],
             ]);
         }
     }
@@ -1879,11 +4896,48 @@ fn compose_tile(
         height,
         stride_bytes: stride,
         pixels: Arc::from(pixels),
-        tile_revision: document
-            .main_plane
-            .tile_revision(coord)
-            .max(document.color_plane.tile_revision(coord)),
+        source_revision,
+        tile_revision,
     })
+}
+
+fn blend_rgba_over(background: [u8; 4], foreground: [u8; 4]) -> [u8; 4] {
+    let foreground_alpha = u32::from(foreground[3]);
+    let background_alpha = u32::from(background[3]);
+    let inverse = 255 - foreground_alpha;
+    let output_alpha = foreground_alpha + (background_alpha * inverse + 127) / 255;
+    if output_alpha == 0 {
+        return [0; 4];
+    }
+    let channel = |index: usize| -> u8 {
+        let foreground_premultiplied = u32::from(foreground[index]) * foreground_alpha;
+        let background_premultiplied = u32::from(background[index]) * background_alpha;
+        ((foreground_premultiplied
+            + (background_premultiplied * inverse + 127) / 255
+            + output_alpha / 2)
+            / output_alpha) as u8
+    };
+    [channel(0), channel(1), channel(2), output_alpha as u8]
+}
+
+fn blend_rgba16_over(background: [u16; 4], foreground: [u16; 4]) -> [u16; 4] {
+    let foreground_alpha = u64::from(foreground[3]);
+    let background_alpha = u64::from(background[3]);
+    let inverse = u64::from(u16::MAX) - foreground_alpha;
+    let output_alpha =
+        foreground_alpha + (background_alpha * inverse + 32_767) / u64::from(u16::MAX);
+    if output_alpha == 0 {
+        return [0; 4];
+    }
+    let channel = |index: usize| -> u16 {
+        let foreground_premultiplied = u64::from(foreground[index]) * foreground_alpha;
+        let background_premultiplied = u64::from(background[index]) * background_alpha;
+        ((foreground_premultiplied
+            + (background_premultiplied * inverse + 32_767) / u64::from(u16::MAX)
+            + output_alpha / 2)
+            / output_alpha) as u16
+    };
+    [channel(0), channel(1), channel(2), output_alpha as u16]
 }
 
 fn rgba8_for_display(value: PixelValue) -> Option<[u8; 4]> {
@@ -2171,7 +5225,7 @@ mod tests {
         request.overflow_abort = false;
         assert!(matches!(
             core.apply_fill_with_cancel(&request, || true),
-            Err(CoreError::Fill(FillError::Cancelled))
+            Err(CoreError::Cancelled)
         ));
         assert_eq!(core.document_info().unwrap(), created);
 
@@ -2251,18 +5305,23 @@ mod tests {
         core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
             .unwrap();
         let document = core.document.as_mut().unwrap();
-        document.main_plane = TileRaster::new(4, 4, PixelFormat::Grayscale8).unwrap();
-        document
-            .main_plane
+        document.layers[0].kind = LayerKind::GrayscaleColoring;
+        document.layers[0].planes[0].raster =
+            TileRaster::new(4, 4, PixelFormat::Grayscale8).unwrap();
+        document.layers[0].planes[0]
+            .raster
             .set_pixel(1, 1, PixelValue::Grayscale8(128), 2)
             .unwrap();
-        document.main_line_color = PixelValue::Rgba([12, 34, 56, 255]);
-        document.active_plane = ActivePlane::MainLine;
+        document.active_plane_id = document.layers[0].planes[0].id;
+        let line_color = PixelValue::Rgba16([1_001, 2_002, 3_003, 65_535]);
+        core.set_main_line_color(line_color).unwrap();
         assert_eq!(
             core.eyedropper(EyedropperSource::SelectedPlane, 1, 1)
                 .unwrap(),
-            PixelValue::Rgba([12, 34, 56, 255])
+            line_color
         );
+        let normal_snapshot = core.build_snapshot();
+        let normal_tile_revision = normal_snapshot.tiles()[0].tile_revision();
         let before = core.document_info().unwrap();
         core.set_color_check(Some(ColorCheckMode::NativeAlpha))
             .unwrap();
@@ -2270,7 +5329,63 @@ mod tests {
         assert_eq!(after.document_revision, before.document_revision);
         assert_eq!(after.main_plane_checksum, before.main_plane_checksum);
         assert!(after.view_revision > before.view_revision);
-        assert!(core.build_snapshot().tile_count() > 0);
+        let check_snapshot = core.build_snapshot();
+        assert_eq!(
+            check_snapshot.feature_flags(),
+            SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA
+        );
+        assert_ne!(
+            check_snapshot.tiles()[0].tile_revision(),
+            normal_tile_revision
+        );
+
+        let palette = [
+            PixelValue::Rgba([12, 34, 56, 255]),
+            PixelValue::Rgba16([1, 257, 32_769, 65_534]),
+        ];
+        core.replace_palette(&palette).unwrap();
+        assert_eq!(core.palette().unwrap(), palette);
+        core.undo().unwrap();
+        assert!(core.palette().unwrap().is_empty());
+        core.redo().unwrap();
+        assert_eq!(core.palette().unwrap(), palette);
+
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-core-m2-color-metadata-{}-{}.inkpod",
+            std::process::id(),
+            core.document_info().unwrap().document_revision
+        ));
+        core.save(&path).unwrap();
+        let mut reopened = Core::new();
+        reopened.open(&path).unwrap();
+        assert_eq!(reopened.main_line_color().unwrap(), line_color);
+        assert_eq!(reopened.palette().unwrap(), palette);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn m2_fill_rejects_oversized_documents_before_materializing_selection() {
+        let mut core = Core::new();
+        core.new_cell(
+            inkpod_image::MAX_RASTER_DIMENSION,
+            inkpod_image::MAX_RASTER_DIMENSION,
+            DEFAULT_DPI_MILLI,
+            DEFAULT_DPI_MILLI,
+        )
+        .unwrap();
+        let mut request = fill_request(0, 0, [1, 2, 3, 255]);
+        request.selection = Some(RectI32 {
+            x: 0,
+            y: 0,
+            width: i32::try_from(inkpod_image::MAX_RASTER_DIMENSION).unwrap(),
+            height: i32::try_from(inkpod_image::MAX_RASTER_DIMENSION).unwrap(),
+        });
+        assert!(matches!(
+            core.apply_fill(&request),
+            Err(CoreError::InvalidArgument(
+                "fill document exceeds the bounded work limit"
+            ))
+        ));
     }
 
     #[test]
@@ -2652,5 +5767,576 @@ mod tests {
             })
             .unwrap();
         assert_eq!(repeated, manual);
+    }
+
+    #[test]
+    fn m3_acceptance_layer_tree_undo_redo_save_reopen_and_validation() {
+        let mut core = Core::new();
+        let created = core
+            .new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let base_layer = created.layer_id;
+        let (_, duplicate) = core.duplicate_layer(base_layer).unwrap();
+        core.undo().unwrap();
+        assert_eq!(core.layers().unwrap().len(), 1);
+        core.redo().unwrap();
+        assert_eq!(core.layers().unwrap().len(), 2);
+        core.reorder_layer(duplicate, 0).unwrap();
+        core.undo().unwrap();
+        assert_eq!(core.layers().unwrap()[1].id, duplicate);
+        core.redo().unwrap();
+        let saved_order: Vec<_> = core
+            .layers()
+            .unwrap()
+            .iter()
+            .map(|layer| layer.id)
+            .collect();
+        assert_eq!(saved_order, vec![duplicate, base_layer]);
+
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-m3-tree-{}-{}.inkpod",
+            std::process::id(),
+            TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        core.save(&path).unwrap();
+        core.delete_layer(duplicate).unwrap();
+        assert_eq!(core.layers().unwrap().len(), 1);
+        core.undo().unwrap();
+        assert_eq!(
+            core.layers()
+                .unwrap()
+                .iter()
+                .map(|layer| layer.id)
+                .collect::<Vec<_>>(),
+            saved_order
+        );
+        core.redo().unwrap();
+        assert_eq!(core.layers().unwrap().len(), 1);
+        core.save(&path).unwrap();
+
+        let mut reopened = Core::new();
+        reopened.open(&path).unwrap();
+        assert_eq!(reopened.layers().unwrap().len(), 1);
+        reopened.undo().unwrap_err();
+
+        let revision = reopened.document_info().unwrap().document_revision;
+        assert!(matches!(
+            reopened.create_plane(
+                base_layer,
+                PlaneType::Selection,
+                PixelFormat::BinaryMask8,
+                "Invalid Selection"
+            ),
+            Err(CoreError::InvalidArgument(_))
+        ));
+        assert_eq!(
+            reopened.document_info().unwrap().document_revision,
+            revision
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn m3_acceptance_selection_boolean_property_and_authoring_tools() {
+        fn mask(bits: u8) -> TileRaster {
+            let mut mask = TileRaster::new(8, 1, PixelFormat::BinaryMask8).unwrap();
+            for x in 0..8 {
+                if bits & (1 << x) != 0 {
+                    mask.set_pixel(x, 0, PixelValue::Binary(255), 1).unwrap();
+                }
+            }
+            mask
+        }
+        for left in 0_u8..=u8::MAX {
+            for right in [0_u8, 0x55, 0xaa, u8::MAX] {
+                let left_mask = mask(left);
+                let right_mask = mask(right);
+                for (operation, expected) in [
+                    (SelectionOperation::New, right),
+                    (SelectionOperation::Add, left | right),
+                    (SelectionOperation::Subtract, left & !right),
+                    (SelectionOperation::Intersect, left & right),
+                ] {
+                    let combined =
+                        combine_selection_masks(&left_mask, &right_mask, operation, 2).unwrap();
+                    for x in 0..8 {
+                        assert_eq!(
+                            matches!(combined.pixel(x, 0).unwrap(), PixelValue::Binary(255)),
+                            expected & (1 << x) != 0
+                        );
+                    }
+                }
+            }
+        }
+
+        let mut core = Core::new();
+        core.new_cell(12, 12, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        core.apply_selection(
+            &SelectionShape::Ellipse(RectI32 {
+                x: 2,
+                y: 2,
+                width: 8,
+                height: 6,
+            }),
+            SelectionOperation::New,
+        )
+        .unwrap();
+        assert!(core.selection_bounds().unwrap().is_some());
+        core.apply_selection(
+            &SelectionShape::Polyline(vec![
+                PointF32 { x: 1.0, y: 1.0 },
+                PointF32 { x: 10.0, y: 1.0 },
+                PointF32 { x: 5.0, y: 10.0 },
+            ]),
+            SelectionOperation::New,
+        )
+        .unwrap();
+        assert!(core.selection_bounds().unwrap().is_some());
+        core.apply_selection(
+            &SelectionShape::Wand {
+                x: 0,
+                y: 0,
+                tolerance: 0,
+                gap_close: 0,
+            },
+            SelectionOperation::New,
+        )
+        .unwrap();
+        assert_eq!(
+            core.selection_bounds().unwrap(),
+            Some(RectI32 {
+                x: 0,
+                y: 0,
+                width: 12,
+                height: 12,
+            })
+        );
+        core.select_color(PixelValue::Binary(0), 0, false, SelectionOperation::New)
+            .unwrap();
+        assert_eq!(core.selection_bounds().unwrap().unwrap().width, 12);
+        core.select_color(PixelValue::Binary(0), 0, true, SelectionOperation::New)
+            .unwrap();
+        assert_eq!(core.selection_bounds().unwrap(), None);
+        core.apply_selection(
+            &SelectionShape::Lasso(vec![
+                PointF32 { x: 2.0, y: 2.0 },
+                PointF32 { x: 9.0, y: 2.0 },
+                PointF32 { x: 6.0, y: 9.0 },
+            ]),
+            SelectionOperation::New,
+        )
+        .unwrap();
+        let lasso = core.selection_bounds().unwrap().unwrap();
+        assert!(lasso.width >= 6 && lasso.height >= 6);
+        core.apply_selection(
+            &SelectionShape::Trace {
+                points: vec![PointF32 { x: 0.0, y: 0.0 }, PointF32 { x: 11.0, y: 11.0 }],
+                diameter: 1.5,
+            },
+            SelectionOperation::Add,
+        )
+        .unwrap();
+        core.resize_selection(1).unwrap();
+        core.resize_selection(-1).unwrap();
+        let saved_bounds = core.selection_bounds().unwrap();
+        let (_, selection_layer) = core.selection_to_layer("Saved Selection").unwrap();
+        core.invert_selection().unwrap();
+        core.selection_from_layer(selection_layer, SelectionLayerOperation::Replace)
+            .unwrap();
+        assert_eq!(core.selection_bounds().unwrap(), saved_bounds);
+    }
+
+    #[test]
+    fn m3_acceptance_coordinate_preserving_typed_paste_and_floating_transform() {
+        let mut source = Core::new();
+        source
+            .new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        source.set_active_plane(ActivePlane::Color).unwrap();
+        source
+            .apply_stroke(&color_stroke(
+                PaintTool::Pencil,
+                1.0,
+                StrokeSample {
+                    x: 6.0,
+                    y: 6.0,
+                    pressure: 1.0,
+                },
+            ))
+            .unwrap();
+        source
+            .apply_selection(
+                &SelectionShape::Rectangle(RectI32 {
+                    x: 6,
+                    y: 6,
+                    width: 1,
+                    height: 1,
+                }),
+                SelectionOperation::New,
+            )
+            .unwrap();
+        let payload = source.copy_selection().unwrap();
+        assert_eq!(payload.bounds.x, 6);
+        assert_eq!(payload.planes[0].pixels[0].x, 6);
+
+        let mut destination = Core::new();
+        destination
+            .new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        destination.begin_paste(&payload).unwrap();
+        assert!(matches!(
+            destination.commit_floating(),
+            Err(CoreError::InvalidState(_))
+        ));
+        destination
+            .set_floating_transform(FloatingTransform {
+                translate_x: -4.0,
+                translate_y: -4.0,
+                ..FloatingTransform::default()
+            })
+            .unwrap();
+        destination.commit_floating().unwrap();
+        assert_eq!(
+            destination.plane_pixel(ActivePlane::Color, 2, 2).unwrap(),
+            PixelValue::Rgba([12, 34, 56, 255])
+        );
+        destination.undo().unwrap();
+        assert!(
+            destination
+                .plane_pixel(ActivePlane::Color, 2, 2)
+                .unwrap()
+                .is_zero()
+        );
+        let transform_payload = ClipboardPayload {
+            source_document_uuid: 1,
+            bounds: RectI32 {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+            planes: vec![ClipboardPlane {
+                kind: PlaneType::Color,
+                pixel_format: PixelFormat::StraightRgba8,
+                origin_x: 0,
+                origin_y: 0,
+                pixels: vec![
+                    ClipboardPixel {
+                        x: 0,
+                        y: 0,
+                        value: PixelValue::Rgba([255, 0, 0, 255]),
+                    },
+                    ClipboardPixel {
+                        x: 1,
+                        y: 0,
+                        value: PixelValue::Rgba([0, 0, 255, 255]),
+                    },
+                ],
+            }],
+        };
+        destination.begin_paste(&transform_payload).unwrap();
+        destination
+            .set_floating_transform(FloatingTransform {
+                translate_x: 1.0,
+                scale_x: 2.0,
+                ..FloatingTransform::default()
+            })
+            .unwrap();
+        destination.commit_floating().unwrap();
+        assert_eq!(
+            (0..4)
+                .map(|x| destination.plane_pixel(ActivePlane::Color, x, 0).unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                PixelValue::Rgba([255, 0, 0, 255]),
+                PixelValue::Rgba([255, 0, 0, 255]),
+                PixelValue::Rgba([0, 0, 255, 255]),
+                PixelValue::Rgba([0, 0, 255, 255]),
+            ]
+        );
+        destination.undo().unwrap();
+        destination.begin_paste(&transform_payload).unwrap();
+        destination
+            .set_floating_transform(FloatingTransform {
+                rotation_degrees: 180.0,
+                ..FloatingTransform::default()
+            })
+            .unwrap();
+        destination.commit_floating().unwrap();
+        assert_eq!(
+            destination.plane_pixel(ActivePlane::Color, 0, 0).unwrap(),
+            PixelValue::Rgba([0, 0, 255, 255])
+        );
+        assert_eq!(
+            destination.plane_pixel(ActivePlane::Color, 1, 0).unwrap(),
+            PixelValue::Rgba([255, 0, 0, 255])
+        );
+        destination.undo().unwrap();
+        let revision = destination.document_info().unwrap().document_revision;
+        destination.begin_paste(&payload).unwrap();
+        destination.cancel_floating();
+        assert!(matches!(
+            destination.commit_floating(),
+            Err(CoreError::InvalidState(_))
+        ));
+        assert_eq!(
+            destination.document_info().unwrap().document_revision,
+            revision
+        );
+    }
+
+    #[test]
+    fn m3_acceptance_view_flip_and_destructive_mirror_have_separate_revisions() {
+        let mut core = Core::new();
+        core.new_cell(8, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        core.apply_stroke(&line_stroke(vec![StrokeSample {
+            x: 1.0,
+            y: 1.0,
+            pressure: 1.0,
+        }]))
+        .unwrap();
+        let before = core.document_info().unwrap();
+        let view = core
+            .apply_view(ViewCommand::Flip {
+                axis: MirrorAxis::Horizontal,
+            })
+            .unwrap();
+        let after_view = core.document_info().unwrap();
+        assert_eq!(after_view.document_revision, before.document_revision);
+        assert!(after_view.view_revision > before.view_revision);
+        assert!(view.flip_horizontal());
+        assert_eq!(
+            core.plane_pixel(ActivePlane::MainLine, 1, 1).unwrap(),
+            PixelValue::Binary(255)
+        );
+
+        core.mirror_document(MirrorAxis::Horizontal).unwrap();
+        let after_mirror = core.document_info().unwrap();
+        assert!(after_mirror.document_revision > after_view.document_revision);
+        assert_eq!(after_mirror.view_revision, after_view.view_revision);
+        assert_eq!(
+            core.plane_pixel(ActivePlane::MainLine, 6, 1).unwrap(),
+            PixelValue::Binary(255)
+        );
+        core.undo().unwrap();
+        assert_eq!(
+            core.plane_pixel(ActivePlane::MainLine, 1, 1).unwrap(),
+            PixelValue::Binary(255)
+        );
+    }
+
+    #[test]
+    fn m3_acceptance_multi_view_locator_guides_grid_and_shortcuts() {
+        let mut core = Core::new();
+        core.new_cell(16, 16, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let secondary = core.create_view().unwrap();
+        core.apply_view_for(
+            secondary,
+            ViewCommand::BoxZoom {
+                document_rect: RectI32 {
+                    x: 4,
+                    y: 4,
+                    width: 8,
+                    height: 8,
+                },
+                viewport_width: 160.0,
+                viewport_height: 160.0,
+            },
+        )
+        .unwrap();
+        core.apply_stroke(&line_stroke(vec![StrokeSample {
+            x: 3.0,
+            y: 3.0,
+            pressure: 1.0,
+        }]))
+        .unwrap();
+        let primary = core.build_snapshot();
+        let other = core.build_snapshot_for(secondary).unwrap();
+        assert_eq!(primary.revision(), other.revision());
+        assert_ne!(primary.view(), other.view());
+
+        let (_, guide_id) = core.add_guide(GuideAxis::Vertical, 5).unwrap();
+        core.set_grid(GridConfig {
+            origin_x: 0,
+            origin_y: 0,
+            spacing_x: 8,
+            spacing_y: 8,
+            subdivisions: 2,
+        })
+        .unwrap();
+        assert_eq!(core.snap_document_point(5.2, 7.8).unwrap(), (5.2, 7.8));
+        core.apply_view(ViewCommand::SetSnapEnabled(true)).unwrap();
+        assert_eq!(core.snap_document_point(5.2, 7.8).unwrap(), (5.0, 8.0));
+        core.move_guide(guide_id, 6).unwrap();
+        assert_eq!(core.guides().unwrap()[0].position, 6);
+        let overlay_snapshot = core.build_snapshot();
+        assert_eq!(overlay_snapshot.guides()[0].position, 6);
+        assert_eq!(overlay_snapshot.grid().subdivisions, 2);
+
+        let locator = core.locator_sample(None, 3.0, 3.0).unwrap();
+        assert_eq!((locator.document_x, locator.document_y), (3, 3));
+        core.rebind_shortcut(ShortcutBinding {
+            command_id: 99,
+            virtual_key: u32::from(b'Z'),
+            modifiers: 1,
+        })
+        .unwrap();
+        assert_eq!(
+            core.resolve_shortcut(u32::from(b'Z'), SHORTCUT_MODIFIER_CONTROL)
+                .unwrap(),
+            Some(99)
+        );
+        assert!(
+            !core
+                .shortcut_bindings()
+                .iter()
+                .any(|binding| binding.command_id == 1)
+        );
+        assert!(
+            core.shortcut_bindings()
+                .iter()
+                .any(|binding| binding.command_id == 99)
+        );
+        core.reset_shortcuts();
+        assert_eq!(
+            core.resolve_shortcut(u32::from(b'Z'), SHORTCUT_MODIFIER_CONTROL)
+                .unwrap(),
+            Some(1)
+        );
+        assert!(
+            core.shortcut_bindings()
+                .iter()
+                .any(|binding| binding.command_id == 1)
+        );
+    }
+
+    #[test]
+    fn m3_tree_order_merge_names_and_active_ids_remain_consistent() {
+        let mut core = Core::new();
+        let created = core
+            .new_cell(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        core.set_active_plane(ActivePlane::Color).unwrap();
+        core.apply_stroke(&color_stroke(
+            PaintTool::Pencil,
+            1.0,
+            StrokeSample {
+                x: 0.0,
+                y: 0.0,
+                pressure: 1.0,
+            },
+        ))
+        .unwrap();
+        let (_, top) = core.duplicate_layer(created.layer_id).unwrap();
+        core.reorder_layer(top, 0).unwrap();
+        {
+            let document = core.document.as_mut().unwrap();
+            let top_color = document.layers[0]
+                .planes
+                .iter_mut()
+                .find(|plane| plane.kind == PlaneType::Color)
+                .unwrap();
+            top_color
+                .raster
+                .set_pixel(0, 0, PixelValue::Rgba([0, 0, 255, 128]), 99)
+                .unwrap();
+        }
+        core.render_cache.clear();
+        assert_eq!(core.build_snapshot().tiles()[0].pixels(), [156, 17, 6, 255]);
+        core.merge_layer_into_below(top).unwrap();
+        assert_eq!(core.layers().unwrap().len(), 1);
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 0, 0).unwrap(),
+            PixelValue::Rgba([6, 17, 156, 255])
+        );
+        assert_eq!(
+            paste_value(
+                PixelValue::Rgba16([u16::MAX, 0, 0, u16::MAX]),
+                PixelValue::Rgba16([0, 0, u16::MAX, 32_768]),
+                PlaneType::Raster,
+            )
+            .unwrap(),
+            PixelValue::Rgba16([32_767, 0, 32_768, u16::MAX])
+        );
+
+        let (_, raster_layer) = core.create_layer(LayerKind::Raster, "Raster").unwrap();
+        let raster_plane = core
+            .layers()
+            .unwrap()
+            .iter()
+            .find(|layer| layer.id == raster_layer)
+            .unwrap()
+            .planes[0]
+            .id;
+        core.duplicate_plane(raster_plane).unwrap();
+        core.duplicate_plane(raster_plane).unwrap();
+        let raster_names: BTreeSet<_> = core
+            .layers()
+            .unwrap()
+            .iter()
+            .find(|layer| layer.id == raster_layer)
+            .unwrap()
+            .planes
+            .iter()
+            .map(|plane| plane.name.clone())
+            .collect();
+        assert_eq!(raster_names.len(), 3);
+
+        let (_, duplicate_coloring) = core.duplicate_layer(created.layer_id).unwrap();
+        core.create_layer(LayerKind::Frame, "Frame").unwrap();
+        core.delete_layer(duplicate_coloring).unwrap();
+        assert!(core.document_info().is_ok());
+        assert!(
+            core.document
+                .as_ref()
+                .unwrap()
+                .plane_by_id(core.document.as_ref().unwrap().active_plane_id)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn m3_editable_layer_and_plane_flags_guard_pixel_commands() {
+        let mut core = Core::new();
+        let created = core
+            .new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        core.set_active_plane(ActivePlane::Color).unwrap();
+        core.set_plane_properties(created.color_plane_id, true, false, 1_000, "Color")
+            .unwrap();
+        let locked_revision = core.document_info().unwrap().document_revision;
+        assert!(matches!(
+            core.apply_stroke(&color_stroke(
+                PaintTool::Pencil,
+                1.0,
+                StrokeSample {
+                    x: 1.0,
+                    y: 1.0,
+                    pressure: 1.0,
+                }
+            )),
+            Err(CoreError::InvalidState(_))
+        ));
+        assert_eq!(
+            core.document_info().unwrap().document_revision,
+            locked_revision
+        );
+
+        core.set_plane_properties(created.color_plane_id, true, true, 1_000, "Color")
+            .unwrap();
+        core.set_layer_properties(created.layer_id, true, false, 1_000, "Coloring")
+            .unwrap();
+        let locked_revision = core.document_info().unwrap().document_revision;
+        assert!(matches!(
+            core.apply_fill(&fill_request(0, 0, [1, 2, 3, 255])),
+            Err(CoreError::InvalidState(_))
+        ));
+        assert_eq!(
+            core.document_info().unwrap().document_revision,
+            locked_revision
+        );
     }
 }

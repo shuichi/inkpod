@@ -21,9 +21,20 @@ static_assert(sizeof(InkpodStrokeSample) == 24U);
 static_assert(sizeof(InkpodStrokeInput) == 56U);
 static_assert(sizeof(InkpodViewInput) == 48U);
 static_assert(sizeof(InkpodSnapshotTransform) == 48U);
+static_assert(sizeof(InkpodSnapshotGuide) == 24U);
+static_assert(sizeof(InkpodSnapshotOverlay) == 56U);
 static_assert(sizeof(InkpodColorValue) == 16U);
+static_assert(sizeof(InkpodColorArray) == 40U);
+static_assert(sizeof(InkpodColorBuffer) == 48U);
 static_assert(sizeof(InkpodFillInput) == 96U);
 static_assert(sizeof(InkpodFillResult) == 32U);
+static_assert(sizeof(InkpodTreeEdit) == 64U);
+static_assert(sizeof(InkpodNodeInfo) == 72U);
+static_assert(sizeof(InkpodSelectionPoint) == 16U);
+static_assert(sizeof(InkpodSelectionInput) == 72U);
+static_assert(sizeof(InkpodFloatingTransform) == 48U);
+static_assert(sizeof(InkpodGridInput) == 32U);
+static_assert(sizeof(InkpodLocatorOutput) == 48U);
 
 extern "C" int inkpod_header_c11_smoke(void);
 
@@ -197,6 +208,93 @@ int InkpodRunAbiSmoke() {
         || (document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
         return 24;
     }
+    InkpodTreeEdit tree_edit{};
+    tree_edit.struct_size = sizeof(tree_edit);
+    tree_edit.operation = INKPOD_TREE_DUPLICATE_LAYER;
+    tree_edit.object_id = document.layer_id;
+    std::uint64_t tree_object_id{};
+    if (inkpod_core_tree_edit(core, &tree_edit, &dispatch, &tree_object_id)
+            != INKPOD_STATUS_OK
+        || tree_object_id == 0U) {
+        return 34;
+    }
+    const std::uint64_t duplicate_layer = tree_object_id;
+    tree_edit.operation = INKPOD_TREE_REORDER_LAYER;
+    tree_edit.object_id = duplicate_layer;
+    tree_edit.destination_index = 0U;
+    if (inkpod_core_tree_edit(core, &tree_edit, &dispatch, &tree_object_id)
+            != INKPOD_STATUS_OK) {
+        return 35;
+    }
+    InkpodNodeInfo node{};
+    node.struct_size = sizeof(node);
+    if (inkpod_core_node_get(core, 0U, UINT32_MAX, &node) != INKPOD_STATUS_OK
+        || node.id != duplicate_layer || node.child_count != 2U) {
+        return 36;
+    }
+    InkpodDocumentInfo before_invalid_tree{};
+    before_invalid_tree.struct_size = sizeof(before_invalid_tree);
+    InkpodDocumentInfo after_invalid_tree{};
+    after_invalid_tree.struct_size = sizeof(after_invalid_tree);
+    constexpr std::array<std::uint8_t, 17> invalid_plane_name{
+        'I', 'n', 'v', 'a', 'l', 'i', 'd', ' ', 's', 'e', 'l', 'e', 'c', 't', 'i', 'o', 'n'};
+    InkpodTreeEdit invalid_plane{};
+    invalid_plane.struct_size = sizeof(invalid_plane);
+    invalid_plane.operation = INKPOD_TREE_CREATE_PLANE;
+    invalid_plane.parent_id = document.layer_id;
+    invalid_plane.kind = INKPOD_TYPED_PLANE_SELECTION;
+    invalid_plane.pixel_format = INKPOD_STORAGE_BINARY8;
+    invalid_plane.name_utf8 = invalid_plane_name.data();
+    invalid_plane.name_bytes = invalid_plane_name.size();
+    if (inkpod_core_get_document_info(core, &before_invalid_tree) != INKPOD_STATUS_OK
+        || inkpod_core_tree_edit(core, &invalid_plane, &dispatch, &tree_object_id)
+            != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_core_get_document_info(core, &after_invalid_tree) != INKPOD_STATUS_OK
+        || after_invalid_tree.document_revision != before_invalid_tree.document_revision) {
+        return 42;
+    }
+    tree_edit.operation = INKPOD_TREE_DELETE_LAYER;
+    if (inkpod_core_tree_edit(core, &tree_edit, &dispatch, &tree_object_id)
+            != INKPOD_STATUS_OK
+        || inkpod_core_undo(core, &dispatch) != INKPOD_STATUS_OK) {
+        return 37;
+    }
+    const std::array<InkpodColorValue, 2> palette{
+        InkpodColorValue{sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 1U, 2U, 3U, 255U},
+        InkpodColorValue{
+            sizeof(InkpodColorValue),
+            INKPOD_COLOR_DEPTH_16,
+            1U,
+            257U,
+            32769U,
+            65534U}};
+    const InkpodColorArray palette_input{
+        sizeof(InkpodColorArray),
+        0U,
+        INKPOD_FEATURE_NONE,
+        palette.data(),
+        palette.size(),
+        sizeof(InkpodColorValue)};
+    dispatch = InkpodDispatchResult{};
+    dispatch.struct_size = sizeof(dispatch);
+    if (inkpod_core_palette_set(core, &palette_input, &dispatch) != INKPOD_STATUS_OK) {
+        return 32;
+    }
+    std::array<InkpodColorValue, 2> palette_copy{};
+    InkpodColorBuffer palette_output{
+        sizeof(InkpodColorBuffer),
+        0U,
+        INKPOD_FEATURE_NONE,
+        palette_copy.data(),
+        palette_copy.size(),
+        sizeof(InkpodColorValue),
+        0U};
+    if (inkpod_core_palette_get(core, &palette_output) != INKPOD_STATUS_OK
+        || palette_output.color_count != palette.size()
+        || palette_copy[1].depth != INKPOD_COLOR_DEPTH_16
+        || palette_copy[1].blue != 32769U) {
+        return 33;
+    }
     std::array<InkpodStrokeSample, 64> stroke_samples{};
     for (std::size_t index = 0; index < stroke_samples.size(); ++index) {
         stroke_samples[index] = InkpodStrokeSample{
@@ -233,11 +331,83 @@ int InkpodRunAbiSmoke() {
         || document.main_plane_checksum != main_checksum) {
         return 26;
     }
+    const InkpodColorValue selected_color{
+        sizeof(InkpodColorValue),
+        INKPOD_COLOR_DEPTH_8,
+        UINT16_C(220),
+        UINT16_C(40),
+        UINT16_C(30),
+        UINT16_C(255)};
+    if (inkpod_core_set_active_plane(core, INKPOD_PLANE_COLOR) != INKPOD_STATUS_OK
+        || inkpod_core_select_color(
+               core,
+               &selected_color,
+               0U,
+               0U,
+               INKPOD_SELECTION_NEW,
+               &dispatch) != INKPOD_STATUS_OK) {
+        return 41;
+    }
+    const InkpodSelectionInput selection{
+        sizeof(InkpodSelectionInput),
+        INKPOD_SELECTION_RECTANGLE,
+        INKPOD_SELECTION_NEW,
+        0U,
+        InkpodFrameRect{20, 30, 64, 1},
+        nullptr,
+        0U,
+        0U,
+        0.0F,
+        0U,
+        0U,
+        0U,
+        0U};
+    InkpodClipboard* clipboard{};
+    InkpodSelectionInput invalid_selection = selection;
+    invalid_selection.point_stride_bytes = sizeof(InkpodSelectionPoint);
+    if (inkpod_core_apply_selection(core, &invalid_selection, &dispatch)
+            != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_core_apply_selection(core, &selection, &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_clipboard_copy(core, &clipboard) != INKPOD_STATUS_OK
+        || clipboard == nullptr
+        || inkpod_clipboard_release(&clipboard) != INKPOD_STATUS_OK
+        || inkpod_clipboard_release(&clipboard) != INKPOD_STATUS_OK
+        || clipboard != nullptr) {
+        return 38;
+    }
     if (inkpod_core_undo(core, &dispatch) != INKPOD_STATUS_OK
         || inkpod_core_redo(core, &dispatch) != INKPOD_STATUS_OK) {
         return 27;
     }
     snapshot = nullptr;
+    const InkpodViewInput flip{
+        sizeof(InkpodViewInput),
+        INKPOD_VIEW_FLIP_HORIZONTAL,
+        0U,
+        0.0,
+        0.0,
+        0.0,
+        0.0};
+    if (inkpod_core_apply_view(core, &flip, &document) != INKPOD_STATUS_OK) {
+        return 39;
+    }
+    std::uint64_t guide_id{};
+    const InkpodGridInput grid{
+        sizeof(InkpodGridInput), 0U, 0, 0, 16U, 16U, 2U, 0U};
+    const InkpodViewInput show_grid{
+        sizeof(InkpodViewInput),
+        INKPOD_VIEW_SET_GRID_VISIBLE,
+        0U,
+        1.0,
+        0.0,
+        0.0,
+        0.0};
+    if (inkpod_core_guide_add(
+            core, INKPOD_GUIDE_VERTICAL, 12, &dispatch, &guide_id) != INKPOD_STATUS_OK
+        || inkpod_core_grid_set(core, &grid, &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_apply_view(core, &show_grid, &document) != INKPOD_STATUS_OK) {
+        return 43;
+    }
     if (inkpod_core_build_snapshot(core, &options, &snapshot) != INKPOD_STATUS_OK
         || snapshot == nullptr) {
         return 28;
@@ -246,13 +416,70 @@ int InkpodRunAbiSmoke() {
     view.struct_size = sizeof(view);
     InkpodSnapshotTransform transform{};
     transform.struct_size = sizeof(transform);
+    InkpodSnapshotOverlay overlay{};
+    overlay.struct_size = sizeof(overlay);
     if (inkpod_snapshot_get_view(snapshot, &view) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_transform(snapshot, &transform) != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_overlay(snapshot, &overlay) != INKPOD_STATUS_OK
         || view.tiles == nullptr || view.tile_count == 0U
-        || transform.document_width != 1920U || transform.document_height != 1080U) {
+        || transform.document_width != 1920U || transform.document_height != 1080U
+        || (transform.flags & INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL) == 0U
+        || (overlay.flags & INKPOD_SNAPSHOT_OVERLAY_GRID_VISIBLE) == 0U
+        || overlay.grid_spacing_x != 16U || overlay.grid_subdivisions != 2U
+        || overlay.guide_count != 1U || overlay.guides == nullptr
+        || overlay.guides->id != guide_id) {
         return 29;
     }
+    std::uint64_t second_view{};
+    InkpodSnapshot* second_snapshot{};
+    InkpodSnapshotView second_snapshot_view{};
+    second_snapshot_view.struct_size = sizeof(second_snapshot_view);
+    InkpodSnapshotTransform second_transform{};
+    second_transform.struct_size = sizeof(second_transform);
+    const InkpodViewInput second_pan{
+        sizeof(InkpodViewInput),
+        INKPOD_VIEW_PAN_BY,
+        0U,
+        5.0,
+        0.0,
+        0.0,
+        0.0};
+    if (inkpod_core_view_create(core, &second_view) != INKPOD_STATUS_OK
+        || inkpod_core_view_apply(core, second_view, &second_pan) != INKPOD_STATUS_OK
+        || inkpod_core_build_snapshot_for_view(
+               core, second_view, &options, &second_snapshot) != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_view(second_snapshot, &second_snapshot_view)
+            != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_transform(second_snapshot, &second_transform)
+            != INKPOD_STATUS_OK
+        || second_snapshot_view.revision != view.revision
+        || second_transform.pan_x == transform.pan_x
+        || inkpod_snapshot_release(&second_snapshot) != INKPOD_STATUS_OK
+        || inkpod_core_view_close(core, second_view) != INKPOD_STATUS_OK) {
+        return 40;
+    }
+    std::uint32_t shortcut_command{};
+    if (inkpod_core_shortcut_rebind(
+            core,
+            99U,
+            static_cast<std::uint32_t>('Z'),
+            INKPOD_SHORTCUT_MODIFIER_CONTROL) != INKPOD_STATUS_OK
+        || inkpod_core_shortcut_resolve(
+               core,
+               static_cast<std::uint32_t>('Z'),
+               INKPOD_SHORTCUT_MODIFIER_CONTROL,
+               &shortcut_command) != INKPOD_STATUS_OK
+        || shortcut_command != 99U || inkpod_core_shortcut_reset(core) != INKPOD_STATUS_OK
+        || inkpod_core_shortcut_resolve(
+               core,
+               static_cast<std::uint32_t>('Z'),
+               INKPOD_SHORTCUT_MODIFIER_CONTROL,
+               &shortcut_command) != INKPOD_STATUS_OK
+        || shortcut_command != 1U) {
+        return 44;
+    }
     if (inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
+        || inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
         || inkpod_core_destroy(&core) != INKPOD_STATUS_OK) {
         return 30;
     }

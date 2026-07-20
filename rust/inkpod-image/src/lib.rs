@@ -81,17 +81,9 @@ impl PixelValue {
     #[must_use]
     pub const fn is_exact_white(self) -> bool {
         match self {
-            Self::Rgba(value) => {
-                value[0] == u8::MAX
-                    && value[1] == u8::MAX
-                    && value[2] == u8::MAX
-                    && value[3] == u8::MAX
-            }
+            Self::Rgba(value) => value[0] == u8::MAX && value[1] == u8::MAX && value[2] == u8::MAX,
             Self::Rgba16(value) => {
-                value[0] == u16::MAX
-                    && value[1] == u16::MAX
-                    && value[2] == u16::MAX
-                    && value[3] == u16::MAX
+                value[0] == u16::MAX && value[1] == u16::MAX && value[2] == u16::MAX
             }
             _ => false,
         }
@@ -702,6 +694,24 @@ pub fn closed_region_fill(
     fill_color: PixelValue,
     options: &FillOptions,
 ) -> Result<FillPlan, FillError> {
+    closed_region_fill_with_cancel(
+        main_line,
+        color_plane,
+        operation_mask,
+        fill_color,
+        options,
+        || false,
+    )
+}
+
+pub fn closed_region_fill_with_cancel(
+    main_line: &TileRaster,
+    color_plane: &TileRaster,
+    operation_mask: &TileRaster,
+    fill_color: PixelValue,
+    options: &FillOptions,
+    mut is_cancelled: impl FnMut() -> bool,
+) -> Result<FillPlan, FillError> {
     let pixel_count = validate_fill_inputs(
         main_line,
         color_plane,
@@ -710,32 +720,33 @@ pub fn closed_region_fill(
         options,
     )?;
     let mut visited = vec![false; pixel_count];
-    let transparent = zero_for_color_format(color_plane.format())?;
     let mut edits = Vec::new();
+    let mut work = 0_u64;
     for y in 0..color_plane.height() {
         for x in 0..color_plane.width() {
             let index = pixel_index(color_plane.width(), x, y);
-            if visited[index]
-                || !selection_contains(operation_mask, x, y)?
-                || !candidate_pixel(
-                    main_line,
-                    color_plane,
-                    Some(operation_mask),
-                    x,
-                    y,
-                    transparent,
-                    options,
-                )?
-                || virtual_gap_boundary(
-                    main_line,
-                    color_plane,
-                    Some(operation_mask),
-                    x,
-                    y,
-                    transparent,
-                    options,
-                )?
-            {
+            if visited[index] || !selection_contains(operation_mask, x, y)? {
+                visited[index] = true;
+                continue;
+            }
+            let target = color_plane.pixel(x, y)?;
+            if !candidate_pixel(
+                main_line,
+                color_plane,
+                Some(operation_mask),
+                x,
+                y,
+                target,
+                options,
+            )? || virtual_gap_boundary(
+                main_line,
+                color_plane,
+                Some(operation_mask),
+                x,
+                y,
+                target,
+                options,
+            )? {
                 visited[index] = true;
                 continue;
             }
@@ -745,6 +756,13 @@ pub fn closed_region_fill(
             let mut escaped = false;
             visited[index] = true;
             while let Some((current_x, current_y)) = queue.pop_front() {
+                work = work.checked_add(1).ok_or(FillError::WorkLimit)?;
+                if work > MAX_FILL_PIXELS {
+                    return Err(FillError::WorkLimit);
+                }
+                if work % 1_024 == 0 && is_cancelled() {
+                    return Err(FillError::Cancelled);
+                }
                 component.push((current_x, current_y));
                 if current_x == 0
                     || current_y == 0
@@ -766,7 +784,7 @@ pub fn closed_region_fill(
                             None,
                             next_x,
                             next_y,
-                            transparent,
+                            target,
                             options,
                         )? {
                             escaped = true;
@@ -777,14 +795,13 @@ pub fn closed_region_fill(
                     if visited[next_index] {
                         continue;
                     }
-                    visited[next_index] = true;
                     if candidate_pixel(
                         main_line,
                         color_plane,
                         Some(operation_mask),
                         next_x,
                         next_y,
-                        transparent,
+                        target,
                         options,
                     )? && !virtual_gap_boundary(
                         main_line,
@@ -792,9 +809,10 @@ pub fn closed_region_fill(
                         Some(operation_mask),
                         next_x,
                         next_y,
-                        transparent,
+                        target,
                         options,
                     )? {
+                        visited[next_index] = true;
                         queue.push_back((next_x, next_y));
                     }
                 }
@@ -814,6 +832,9 @@ pub fn closed_region_fill(
             }
         }
     }
+    if is_cancelled() {
+        return Err(FillError::Cancelled);
+    }
     edits.sort_by_key(|edit| (edit.y, edit.x));
     Ok(FillPlan { edits })
 }
@@ -825,6 +846,18 @@ pub fn extend_fill(
     operation_mask: &TileRaster,
     seed: (u32, u32),
     maximum_distance: u32,
+) -> Result<FillPlan, FillError> {
+    extend_fill_with_cancel(color_plane, operation_mask, seed, maximum_distance, || {
+        false
+    })
+}
+
+pub fn extend_fill_with_cancel(
+    color_plane: &TileRaster,
+    operation_mask: &TileRaster,
+    seed: (u32, u32),
+    maximum_distance: u32,
+    mut is_cancelled: impl FnMut() -> bool,
 ) -> Result<FillPlan, FillError> {
     validate_selection(color_plane, operation_mask)?;
     if seed.0 >= color_plane.width() || seed.1 >= color_plane.height() {
@@ -843,7 +876,15 @@ pub fn extend_fill(
     let mut queue = VecDeque::from([seed]);
     distance[pixel_index(color_plane.width(), seed.0, seed.1)] = 0;
     let mut edits = Vec::new();
+    let mut work = 0_u64;
     while let Some((x, y)) = queue.pop_front() {
+        work = work.checked_add(1).ok_or(FillError::WorkLimit)?;
+        if work > MAX_FILL_PIXELS {
+            return Err(FillError::WorkLimit);
+        }
+        if work % 1_024 == 0 && is_cancelled() {
+            return Err(FillError::Cancelled);
+        }
         let current_distance = distance[pixel_index(color_plane.width(), x, y)];
         if current_distance >= maximum_distance {
             continue;
@@ -866,6 +907,9 @@ pub fn extend_fill(
             });
             queue.push_back((next_x, next_y));
         }
+    }
+    if is_cancelled() {
+        return Err(FillError::Cancelled);
     }
     edits.sort_by_key(|edit| (edit.y, edit.x));
     Ok(FillPlan { edits })
@@ -902,10 +946,10 @@ pub fn eyedropper(
 
 #[must_use]
 pub const fn color_check_category(value: PixelValue, mode: ColorCheckMode) -> ColorCheckCategory {
-    if value.is_exact_white() {
-        ColorCheckCategory::ExactWhite
-    } else if matches!(mode, ColorCheckMode::NativeAlpha) && value.is_transparent() {
+    if matches!(mode, ColorCheckMode::NativeAlpha) && value.is_transparent() {
         ColorCheckCategory::Transparent
+    } else if value.is_exact_white() {
+        ColorCheckCategory::ExactWhite
     } else {
         ColorCheckCategory::Colored
     }
@@ -989,16 +1033,6 @@ fn validate_color_for_format(format: PixelFormat, color: PixelValue) -> Result<(
         Err(FillError::InvalidArgument(
             "fill color depth does not match the color plane",
         ))
-    }
-}
-
-fn zero_for_color_format(format: PixelFormat) -> Result<PixelValue, FillError> {
-    match format {
-        PixelFormat::StraightRgba8 => Ok(PixelValue::Rgba([0; 4])),
-        PixelFormat::StraightRgba16 => Ok(PixelValue::Rgba16([0; 4])),
-        _ => Err(FillError::InvalidArgument(
-            "plane is not a straight RGBA color plane",
-        )),
     }
 }
 
@@ -1630,5 +1664,60 @@ mod tests {
             ),
             ColorCheckCategory::Transparent
         );
+        assert_eq!(
+            color_check_category(
+                PixelValue::Rgba([255, 255, 255, 0]),
+                ColorCheckMode::LegacyWhiteTransparency,
+            ),
+            ColorCheckCategory::ExactWhite
+        );
+    }
+
+    #[test]
+    fn m2_closed_region_handles_colored_components_and_all_fill_plans_cancel_atomically() {
+        let mut main = binary(7, 7);
+        rectangle_boundary(&mut main, 1, 1, 5, 5);
+        let mut color = color8(7, 7);
+        let source = PixelValue::Rgba([20, 30, 40, 255]);
+        for y in 2..5 {
+            for x in 2..5 {
+                color.set_pixel(x, y, source, 1).unwrap();
+            }
+        }
+        let operation = select_all(7, 7);
+        let fill = PixelValue::Rgba([100, 110, 120, 255]);
+        let plan =
+            closed_region_fill(&main, &color, &operation, fill, &FillOptions::default()).unwrap();
+        assert_eq!(plan.edits.len(), 9);
+        assert!(plan.edits.iter().all(|edit| edit.before == source));
+
+        let transparent_only = FillOptions {
+            transparent_only: true,
+            ..FillOptions::default()
+        };
+        assert!(
+            closed_region_fill(&main, &color, &operation, fill, &transparent_only)
+                .unwrap()
+                .edits
+                .is_empty()
+        );
+
+        let checksum = color.checksum();
+        assert_eq!(
+            closed_region_fill_with_cancel(
+                &main,
+                &color,
+                &operation,
+                fill,
+                &FillOptions::default(),
+                || true,
+            ),
+            Err(FillError::Cancelled)
+        );
+        assert_eq!(
+            extend_fill_with_cancel(&color, &operation, (2, 2), 2, || true),
+            Err(FillError::Cancelled)
+        );
+        assert_eq!(color.checksum(), checksum);
     }
 }

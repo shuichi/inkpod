@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use inkpod_image::{FNV_OFFSET, PixelFormat, TileCoord, fnv_bytes};
+use inkpod_image::{FNV_OFFSET, MAX_PALETTE_COLORS, PixelFormat, PixelValue, TileCoord, fnv_bytes};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fs::{self, OpenOptions};
@@ -12,18 +12,27 @@ const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 pub const FORMAT_VERSION: u32 = 1;
 const HEADER_BYTES: usize = 32;
 const FIXED_MANIFEST_BYTES: usize = 160;
+const COLOR_METADATA_FIXED_BYTES: usize = 24;
+const COLOR_VALUE_BYTES: usize = 16;
 const PLANE_DESCRIPTOR_BYTES: usize = 32;
 const BLOB_DESCRIPTOR_BYTES: usize = 48;
+const CONTAINER_FLAG_M2_COLOR_METADATA: u32 = 1 << 0;
+const CONTAINER_FLAG_M3_DOCUMENT_EDITING: u32 = 1 << 1;
 const MAX_FILE_BYTES: u64 = 1 << 30;
 const MAX_MANIFEST_BYTES: u64 = 16 << 20;
 const MAX_PLANES: usize = 4_096;
 const MAX_BLOBS: usize = 262_144;
+const MAX_LAYERS: usize = 4_096;
+const MAX_GUIDES: usize = 4_096;
+const MAX_NODE_NAME_BYTES: usize = 1_024;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlaneKind {
     MainLine,
     Color,
+    Raster,
+    Selection,
 }
 
 impl PlaneKind {
@@ -31,6 +40,8 @@ impl PlaneKind {
         match self {
             Self::MainLine => 1,
             Self::Color => 2,
+            Self::Raster => 3,
+            Self::Selection => 4,
         }
     }
 
@@ -38,9 +49,107 @@ impl PlaneKind {
         match value {
             1 => Ok(Self::MainLine),
             2 => Ok(Self::Color),
+            3 => Ok(Self::Raster),
+            4 => Ok(Self::Selection),
             _ => Err(FormatError::Unsupported("unknown required plane kind")),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LayerKind {
+    BinaryColoring,
+    GrayscaleColoring,
+    Raster,
+    Selection,
+    Frame,
+    VanishingPoint,
+    Adjustment,
+    Text,
+    Annotation,
+}
+
+impl LayerKind {
+    const fn code(self) -> u32 {
+        match self {
+            Self::BinaryColoring => 1,
+            Self::GrayscaleColoring => 2,
+            Self::Raster => 3,
+            Self::Selection => 4,
+            Self::Frame => 5,
+            Self::VanishingPoint => 6,
+            Self::Adjustment => 7,
+            Self::Text => 8,
+            Self::Annotation => 9,
+        }
+    }
+
+    fn from_code(value: u32) -> Result<Self, FormatError> {
+        match value {
+            1 => Ok(Self::BinaryColoring),
+            2 => Ok(Self::GrayscaleColoring),
+            3 => Ok(Self::Raster),
+            4 => Ok(Self::Selection),
+            5 => Ok(Self::Frame),
+            6 => Ok(Self::VanishingPoint),
+            7 => Ok(Self::Adjustment),
+            8 => Ok(Self::Text),
+            9 => Ok(Self::Annotation),
+            _ => Err(FormatError::Unsupported("unknown required layer kind")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GuideAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FilePlaneProperties {
+    pub id: u64,
+    pub name: String,
+    pub visible: bool,
+    pub editable: bool,
+    pub opacity_milli: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileLayer {
+    pub id: u64,
+    pub kind: LayerKind,
+    pub name: String,
+    pub visible: bool,
+    pub editable: bool,
+    pub opacity_milli: u32,
+    pub planes: Vec<FilePlaneProperties>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileGuide {
+    pub id: u64,
+    pub axis: GuideAxis,
+    pub position: i32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileGrid {
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub spacing_x: u32,
+    pub spacing_y: u32,
+    pub subdivisions: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileM3Metadata {
+    pub active_layer_id: u64,
+    pub active_plane_id: u64,
+    pub selection_plane_id: u64,
+    pub layers: Vec<FileLayer>,
+    pub guides: Vec<FileGuide>,
+    pub grid: FileGrid,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -98,7 +207,12 @@ pub struct CellFile {
     pub dpi_x_milli: u32,
     pub dpi_y_milli: u32,
     pub frames: FrameMetadata,
+    pub main_line_color: PixelValue,
+    pub palette: Vec<PixelValue>,
     pub planes: Vec<FilePlane>,
+    /// Additive M3 editing metadata. `None` represents an M0-M2 v1 file and is
+    /// upgraded to the legacy one-layer tree by the Core on open.
+    pub m3: Option<FileM3Metadata>,
 }
 
 #[derive(Debug)]
@@ -151,7 +265,15 @@ pub fn checksum(bytes: &[u8]) -> u64 {
 }
 
 pub fn encode(document: &CellFile) -> Result<Vec<u8>, FormatError> {
+    encode_with_color_metadata(document, true)
+}
+
+fn encode_with_color_metadata(
+    document: &CellFile,
+    include_color_metadata: bool,
+) -> Result<Vec<u8>, FormatError> {
     validate_document(document)?;
+    let m3_metadata = document.m3.as_ref().map(encode_m3_metadata).transpose()?;
     let blob_count = document.planes.iter().try_fold(0_usize, |count, plane| {
         count
             .checked_add(plane.tiles.len())
@@ -160,14 +282,38 @@ pub fn encode(document: &CellFile) -> Result<Vec<u8>, FormatError> {
     if blob_count > MAX_BLOBS {
         return Err(FormatError::Invalid("too many blobs"));
     }
+    let color_metadata_len = if include_color_metadata {
+        COLOR_METADATA_FIXED_BYTES
+            .checked_add(
+                document
+                    .palette
+                    .len()
+                    .checked_mul(COLOR_VALUE_BYTES)
+                    .ok_or(FormatError::Invalid("palette manifest overflows"))?,
+            )
+            .ok_or(FormatError::Invalid("color metadata length overflows"))?
+    } else {
+        if !document.palette.is_empty()
+            || document.main_line_color != legacy_main_line_color(document)?
+        {
+            return Err(FormatError::Invalid(
+                "legacy v1 manifest cannot store color metadata",
+            ));
+        }
+        0
+    };
     let manifest_len = FIXED_MANIFEST_BYTES
-        .checked_add(
-            document
-                .planes
-                .len()
-                .checked_mul(PLANE_DESCRIPTOR_BYTES)
-                .ok_or(FormatError::Invalid("plane manifest overflows"))?,
-        )
+        .checked_add(color_metadata_len)
+        .and_then(|value| {
+            value.checked_add(
+                m3_metadata
+                    .as_ref()
+                    .map_or(0, |bytes| bytes.len().saturating_add(8)),
+            )
+        })
+        .and_then(|value| {
+            value.checked_add(document.planes.len().checked_mul(PLANE_DESCRIPTOR_BYTES)?)
+        })
         .and_then(|value| value.checked_add(blob_count.checked_mul(BLOB_DESCRIPTOR_BYTES)?))
         .ok_or(FormatError::Invalid("manifest length overflows"))?;
 
@@ -211,7 +357,18 @@ pub fn encode(document: &CellFile) -> Result<Vec<u8>, FormatError> {
     let mut output = Vec::with_capacity(total_len);
     output.extend_from_slice(&MAGIC);
     push_u32(&mut output, FORMAT_VERSION);
-    push_u32(&mut output, 0);
+    push_u32(
+        &mut output,
+        (if include_color_metadata {
+            CONTAINER_FLAG_M2_COLOR_METADATA
+        } else {
+            0
+        }) | if m3_metadata.is_some() {
+            CONTAINER_FLAG_M3_DOCUMENT_EDITING
+        } else {
+            0
+        },
+    );
     push_u64(&mut output, manifest_len as u64);
     push_u64(&mut output, blob_count as u64);
 
@@ -243,6 +400,26 @@ pub fn encode(document: &CellFile) -> Result<Vec<u8>, FormatError> {
     push_u32(&mut output, document.frames.margins.bottom);
     push_u32(&mut output, document.planes.len() as u32);
     push_u32(&mut output, blob_count as u32);
+
+    if include_color_metadata {
+        push_color_value(&mut output, document.main_line_color)?;
+        push_u32(&mut output, document.palette.len() as u32);
+        push_u32(&mut output, 0);
+        for color in &document.palette {
+            push_color_value(&mut output, *color)?;
+        }
+    }
+    if let Some(metadata) = &m3_metadata {
+        push_u32(
+            &mut output,
+            metadata
+                .len()
+                .try_into()
+                .map_err(|_| FormatError::Invalid("M3 metadata length is not representable"))?,
+        );
+        push_u32(&mut output, 0);
+        output.extend_from_slice(metadata);
+    }
 
     let mut first_blob = 0_u32;
     for plane in &document.planes {
@@ -284,7 +461,10 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
     if reader.u32()? != FORMAT_VERSION {
         return Err(FormatError::Unsupported("format version is not supported"));
     }
-    if reader.u32()? != 0 {
+    let container_flags = reader.u32()?;
+    if container_flags & !(CONTAINER_FLAG_M2_COLOR_METADATA | CONTAINER_FLAG_M3_DOCUMENT_EDITING)
+        != 0
+    {
         return Err(FormatError::Unsupported(
             "required container flags are unknown",
         ));
@@ -347,12 +527,56 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
     if manifest_blob_count > MAX_BLOBS || header_blob_count != manifest_blob_count as u64 {
         return Err(FormatError::Invalid("blob count is inconsistent"));
     }
+    let (main_line_color, palette) = if container_flags & CONTAINER_FLAG_M2_COLOR_METADATA != 0 {
+        let main_line_color = reader.color_value()?;
+        let palette_count = reader.u32()? as usize;
+        if reader.u32()? != 0 {
+            return Err(FormatError::Unsupported(
+                "color metadata reserved field is not zero",
+            ));
+        }
+        if palette_count > MAX_PALETTE_COLORS {
+            return Err(FormatError::Invalid("palette count exceeds its bound"));
+        }
+        let mut palette = Vec::with_capacity(palette_count);
+        for _ in 0..palette_count {
+            palette.push(reader.color_value()?);
+        }
+        (Some(main_line_color), palette)
+    } else {
+        (None, Vec::new())
+    };
+    let color_metadata_len = if container_flags & CONTAINER_FLAG_M2_COLOR_METADATA != 0 {
+        COLOR_METADATA_FIXED_BYTES
+            .checked_add(
+                palette
+                    .len()
+                    .checked_mul(COLOR_VALUE_BYTES)
+                    .ok_or(FormatError::Invalid("palette manifest overflows"))?,
+            )
+            .ok_or(FormatError::Invalid("color metadata length overflows"))?
+    } else {
+        0
+    };
+    let (m3, m3_metadata_len) = if container_flags & CONTAINER_FLAG_M3_DOCUMENT_EDITING != 0 {
+        let byte_count = reader.u32()? as usize;
+        if reader.u32()? != 0 {
+            return Err(FormatError::Unsupported(
+                "M3 metadata reserved field is not zero",
+            ));
+        }
+        if byte_count > MAX_MANIFEST_BYTES as usize {
+            return Err(FormatError::Invalid("M3 metadata exceeds its bound"));
+        }
+        let metadata = decode_m3_metadata(reader.take(byte_count)?)?;
+        (Some(metadata), byte_count.saturating_add(8))
+    } else {
+        (None, 0)
+    };
     let expected_manifest_len = FIXED_MANIFEST_BYTES
-        .checked_add(
-            plane_count
-                .checked_mul(PLANE_DESCRIPTOR_BYTES)
-                .ok_or(FormatError::Invalid("plane manifest overflows"))?,
-        )
+        .checked_add(color_metadata_len)
+        .and_then(|value| value.checked_add(m3_metadata_len))
+        .and_then(|value| value.checked_add(plane_count.checked_mul(PLANE_DESCRIPTOR_BYTES)?))
         .and_then(|value| {
             value.checked_add(manifest_blob_count.checked_mul(BLOB_DESCRIPTOR_BYTES)?)
         })
@@ -522,6 +746,10 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
         });
     }
 
+    let main_line_color = match main_line_color {
+        Some(color) => color,
+        None => legacy_main_line_color_for_planes(&planes)?,
+    };
     let document = CellFile {
         document_uuid,
         document_id,
@@ -539,7 +767,10 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
             safe_frame: rects[3],
             margins,
         },
+        main_line_color,
+        palette,
         planes,
+        m3,
     };
     validate_document(&document)?;
     Ok(document)
@@ -647,6 +878,254 @@ fn create_temporary(path: &Path) -> Result<(PathBuf, std::fs::File), FormatError
     )))
 }
 
+fn encode_m3_metadata(metadata: &FileM3Metadata) -> Result<Vec<u8>, FormatError> {
+    validate_m3_metadata(metadata, None)?;
+    let mut output = Vec::new();
+    output.extend_from_slice(b"M3ED");
+    push_u32(&mut output, 1);
+    push_u64(&mut output, metadata.active_layer_id);
+    push_u64(&mut output, metadata.active_plane_id);
+    push_u64(&mut output, metadata.selection_plane_id);
+    push_u32(&mut output, metadata.layers.len() as u32);
+    push_u32(&mut output, metadata.guides.len() as u32);
+    push_i32(&mut output, metadata.grid.origin_x);
+    push_i32(&mut output, metadata.grid.origin_y);
+    push_u32(&mut output, metadata.grid.spacing_x);
+    push_u32(&mut output, metadata.grid.spacing_y);
+    push_u32(&mut output, metadata.grid.subdivisions);
+    push_u32(&mut output, 0);
+    for layer in &metadata.layers {
+        push_u64(&mut output, layer.id);
+        push_u32(&mut output, layer.kind.code());
+        push_u32(
+            &mut output,
+            u32::from(layer.visible) | (u32::from(layer.editable) << 1),
+        );
+        push_u32(&mut output, layer.opacity_milli);
+        push_u32(&mut output, layer.name.len() as u32);
+        push_u32(&mut output, layer.planes.len() as u32);
+        push_u32(&mut output, 0);
+        output.extend_from_slice(layer.name.as_bytes());
+        for plane in &layer.planes {
+            push_u64(&mut output, plane.id);
+            push_u32(
+                &mut output,
+                u32::from(plane.visible) | (u32::from(plane.editable) << 1),
+            );
+            push_u32(&mut output, plane.opacity_milli);
+            push_u32(&mut output, plane.name.len() as u32);
+            push_u32(&mut output, 0);
+            output.extend_from_slice(plane.name.as_bytes());
+        }
+    }
+    for guide in &metadata.guides {
+        push_u64(&mut output, guide.id);
+        push_u32(
+            &mut output,
+            match guide.axis {
+                GuideAxis::Horizontal => 1,
+                GuideAxis::Vertical => 2,
+            },
+        );
+        push_i32(&mut output, guide.position);
+    }
+    if output.len() > MAX_MANIFEST_BYTES as usize {
+        return Err(FormatError::Invalid("M3 metadata exceeds its bound"));
+    }
+    Ok(output)
+}
+
+fn decode_m3_metadata(bytes: &[u8]) -> Result<FileM3Metadata, FormatError> {
+    let mut reader = Reader::new(bytes);
+    if reader.take(4)? != b"M3ED" || reader.u32()? != 1 {
+        return Err(FormatError::Unsupported(
+            "M3 metadata version is not supported",
+        ));
+    }
+    let active_layer_id = reader.u64()?;
+    let active_plane_id = reader.u64()?;
+    let selection_plane_id = reader.u64()?;
+    let layer_count = reader.u32()? as usize;
+    let guide_count = reader.u32()? as usize;
+    if layer_count == 0 || layer_count > MAX_LAYERS || guide_count > MAX_GUIDES {
+        return Err(FormatError::Invalid(
+            "M3 layer or guide count is outside bounds",
+        ));
+    }
+    let grid = FileGrid {
+        origin_x: reader.i32()?,
+        origin_y: reader.i32()?,
+        spacing_x: reader.u32()?,
+        spacing_y: reader.u32()?,
+        subdivisions: reader.u32()?,
+    };
+    if reader.u32()? != 0 {
+        return Err(FormatError::Unsupported(
+            "M3 grid reserved field is not zero",
+        ));
+    }
+    let mut layers = Vec::with_capacity(layer_count);
+    for _ in 0..layer_count {
+        let id = reader.u64()?;
+        let kind = LayerKind::from_code(reader.u32()?)?;
+        let flags = reader.u32()?;
+        if flags & !3 != 0 {
+            return Err(FormatError::Unsupported("unknown M3 layer flags"));
+        }
+        let opacity_milli = reader.u32()?;
+        let name_len = reader.u32()? as usize;
+        let plane_count = reader.u32()? as usize;
+        if reader.u32()? != 0 || plane_count > MAX_PLANES {
+            return Err(FormatError::Invalid("M3 layer descriptor is invalid"));
+        }
+        let name = read_name(&mut reader, name_len)?;
+        let mut planes = Vec::with_capacity(plane_count);
+        for _ in 0..plane_count {
+            let plane_id = reader.u64()?;
+            let plane_flags = reader.u32()?;
+            if plane_flags & !3 != 0 {
+                return Err(FormatError::Unsupported("unknown M3 plane flags"));
+            }
+            let plane_opacity = reader.u32()?;
+            let plane_name_len = reader.u32()? as usize;
+            if reader.u32()? != 0 {
+                return Err(FormatError::Unsupported(
+                    "M3 plane reserved field is not zero",
+                ));
+            }
+            planes.push(FilePlaneProperties {
+                id: plane_id,
+                name: read_name(&mut reader, plane_name_len)?,
+                visible: flags_bit(plane_flags, 0),
+                editable: flags_bit(plane_flags, 1),
+                opacity_milli: plane_opacity,
+            });
+        }
+        layers.push(FileLayer {
+            id,
+            kind,
+            name,
+            visible: flags_bit(flags, 0),
+            editable: flags_bit(flags, 1),
+            opacity_milli,
+            planes,
+        });
+    }
+    let mut guides = Vec::with_capacity(guide_count);
+    for _ in 0..guide_count {
+        guides.push(FileGuide {
+            id: reader.u64()?,
+            axis: match reader.u32()? {
+                1 => GuideAxis::Horizontal,
+                2 => GuideAxis::Vertical,
+                _ => return Err(FormatError::Unsupported("unknown guide axis")),
+            },
+            position: reader.i32()?,
+        });
+    }
+    if reader.position != bytes.len() {
+        return Err(FormatError::Invalid("M3 metadata has trailing bytes"));
+    }
+    let metadata = FileM3Metadata {
+        active_layer_id,
+        active_plane_id,
+        selection_plane_id,
+        layers,
+        guides,
+        grid,
+    };
+    validate_m3_metadata(&metadata, None)?;
+    Ok(metadata)
+}
+
+const fn flags_bit(flags: u32, bit: u32) -> bool {
+    flags & (1 << bit) != 0
+}
+
+fn read_name(reader: &mut Reader<'_>, length: usize) -> Result<String, FormatError> {
+    if length == 0 || length > MAX_NODE_NAME_BYTES {
+        return Err(FormatError::Invalid("node name length is outside bounds"));
+    }
+    let text = std::str::from_utf8(reader.take(length)?)
+        .map_err(|_| FormatError::Invalid("node name is not valid UTF-8"))?;
+    if text.chars().any(char::is_control) {
+        return Err(FormatError::Invalid(
+            "node name contains control characters",
+        ));
+    }
+    Ok(text.to_owned())
+}
+
+fn validate_m3_metadata(
+    metadata: &FileM3Metadata,
+    file_planes: Option<&[FilePlane]>,
+) -> Result<(), FormatError> {
+    if metadata.layers.is_empty()
+        || metadata.layers.len() > MAX_LAYERS
+        || metadata.guides.len() > MAX_GUIDES
+        || metadata.grid.spacing_x == 0
+        || metadata.grid.spacing_y == 0
+        || metadata.grid.spacing_x > 1_048_576
+        || metadata.grid.spacing_y > 1_048_576
+        || metadata.grid.subdivisions == 0
+        || metadata.grid.subdivisions > 1_024
+    {
+        return Err(FormatError::Invalid(
+            "M3 metadata values are outside bounds",
+        ));
+    }
+    let mut ids = BTreeSet::new();
+    let mut active_layer_found = false;
+    let mut active_plane_found = false;
+    let mut referenced_planes = BTreeSet::new();
+    for layer in &metadata.layers {
+        validate_name(&layer.name)?;
+        if layer.id == 0 || !ids.insert(layer.id) || layer.opacity_milli > 1_000 {
+            return Err(FormatError::Invalid("M3 layer properties are invalid"));
+        }
+        active_layer_found |= layer.id == metadata.active_layer_id;
+        for plane in &layer.planes {
+            validate_name(&plane.name)?;
+            if plane.id == 0
+                || !ids.insert(plane.id)
+                || !referenced_planes.insert(plane.id)
+                || plane.opacity_milli > 1_000
+            {
+                return Err(FormatError::Invalid("M3 plane properties are invalid"));
+            }
+            active_plane_found |= plane.id == metadata.active_plane_id;
+        }
+    }
+    for guide in &metadata.guides {
+        if guide.id == 0 || !ids.insert(guide.id) {
+            return Err(FormatError::Invalid("guide ID is invalid"));
+        }
+    }
+    if metadata.selection_plane_id == 0
+        || !ids.insert(metadata.selection_plane_id)
+        || !active_layer_found
+        || !active_plane_found
+    {
+        return Err(FormatError::Invalid("M3 active or selection ID is invalid"));
+    }
+    if let Some(planes) = file_planes {
+        let plane_ids: BTreeSet<_> = planes.iter().map(|plane| plane.id).collect();
+        referenced_planes.insert(metadata.selection_plane_id);
+        if referenced_planes != plane_ids {
+            return Err(FormatError::Invalid("M3 tree and plane payload IDs differ"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_name(name: &str) -> Result<(), FormatError> {
+    if name.is_empty() || name.len() > MAX_NODE_NAME_BYTES || name.chars().any(char::is_control) {
+        Err(FormatError::Invalid("node name is invalid"))
+    } else {
+        Ok(())
+    }
+}
+
 fn validate_document(document: &CellFile) -> Result<(), FormatError> {
     if document.width == 0
         || document.height == 0
@@ -698,9 +1177,9 @@ fn validate_document(document: &CellFile) -> Result<(), FormatError> {
     {
         return Err(FormatError::Invalid("margins exceed document dimensions"));
     }
-    if document.planes.len() != 2 {
+    if document.planes.len() < 2 || document.planes.len() > MAX_PLANES {
         return Err(FormatError::Invalid(
-            "coloring cell must contain exactly two planes",
+            "coloring cell plane count is outside bounds",
         ));
     }
     let main = document
@@ -713,6 +1192,19 @@ fn validate_document(document: &CellFile) -> Result<(), FormatError> {
         .iter()
         .find(|plane| plane.kind == PlaneKind::Color)
         .ok_or(FormatError::Invalid("color plane is missing"))?;
+    if document.main_line_color.rgba16().is_none() {
+        return Err(FormatError::Invalid("main-line base color must be RGBA"));
+    }
+    if document.palette.len() > MAX_PALETTE_COLORS
+        || document
+            .palette
+            .iter()
+            .any(|color| color.rgba16().is_none())
+    {
+        return Err(FormatError::Invalid(
+            "palette count or color type is invalid",
+        ));
+    }
     if main.id != document.main_plane_id
         || !matches!(
             main.pixel_format,
@@ -760,7 +1252,50 @@ fn validate_document(document: &CellFile) -> Result<(), FormatError> {
             }
         }
     }
+    if let Some(metadata) = &document.m3 {
+        validate_m3_metadata(metadata, Some(&document.planes))?;
+        let width = i32::try_from(document.width)
+            .map_err(|_| FormatError::Invalid("document width exceeds guide range"))?;
+        let height = i32::try_from(document.height)
+            .map_err(|_| FormatError::Invalid("document height exceeds guide range"))?;
+        if metadata.guides.iter().any(|guide| match guide.axis {
+            GuideAxis::Horizontal => !(0..=height).contains(&guide.position),
+            GuideAxis::Vertical => !(0..=width).contains(&guide.position),
+        }) {
+            return Err(FormatError::Invalid(
+                "guide position is outside the document",
+            ));
+        }
+        let selection = document
+            .planes
+            .iter()
+            .find(|plane| plane.id == metadata.selection_plane_id)
+            .ok_or(FormatError::Invalid("selection plane is missing"))?;
+        if selection.kind != PlaneKind::Selection
+            || selection.pixel_format != PixelFormat::BinaryMask8
+        {
+            return Err(FormatError::Invalid(
+                "selection plane kind or format is invalid",
+            ));
+        }
+    }
     Ok(())
+}
+
+fn legacy_main_line_color(document: &CellFile) -> Result<PixelValue, FormatError> {
+    legacy_main_line_color_for_planes(&document.planes)
+}
+
+fn legacy_main_line_color_for_planes(planes: &[FilePlane]) -> Result<PixelValue, FormatError> {
+    let color = planes
+        .iter()
+        .find(|plane| plane.kind == PlaneKind::Color)
+        .ok_or(FormatError::Invalid("color plane is missing"))?;
+    Ok(if color.pixel_format == PixelFormat::StraightRgba16 {
+        PixelValue::Rgba16([0, 0, 0, u16::MAX])
+    } else {
+        PixelValue::Rgba([0, 0, 0, u8::MAX])
+    })
 }
 
 fn validate_tile_shape(
@@ -832,6 +1367,20 @@ fn push_u64(output: &mut Vec<u8>, value: u64) {
     output.extend_from_slice(&value.to_le_bytes());
 }
 
+fn push_color_value(output: &mut Vec<u8>, color: PixelValue) -> Result<(), FormatError> {
+    let (depth, channels) = match color {
+        PixelValue::Rgba(value) => (8_u32, value.map(u16::from)),
+        PixelValue::Rgba16(value) => (16_u32, value),
+        _ => return Err(FormatError::Invalid("color metadata value is not RGBA")),
+    };
+    push_u32(output, depth);
+    push_u32(output, 0);
+    for channel in channels {
+        output.extend_from_slice(&channel.to_le_bytes());
+    }
+    Ok(())
+}
+
 struct Reader<'a> {
     bytes: &'a [u8],
     position: usize,
@@ -877,6 +1426,38 @@ impl<'a> Reader<'a> {
             .try_into()
             .map_err(|_| FormatError::Invalid("u64 is truncated"))?;
         Ok(u64::from_le_bytes(bytes))
+    }
+
+    fn color_value(&mut self) -> Result<PixelValue, FormatError> {
+        let depth = self.u32()?;
+        if self.u32()? != 0 {
+            return Err(FormatError::Unsupported(
+                "color metadata record reserved field is not zero",
+            ));
+        }
+        let mut channels = [0_u16; 4];
+        for channel in &mut channels {
+            let bytes: [u8; 2] = self
+                .take(2)?
+                .try_into()
+                .map_err(|_| FormatError::Invalid("color metadata is truncated"))?;
+            *channel = u16::from_le_bytes(bytes);
+        }
+        match depth {
+            8 if channels
+                .iter()
+                .all(|channel| *channel <= u16::from(u8::MAX)) =>
+            {
+                Ok(PixelValue::Rgba(channels.map(|channel| channel as u8)))
+            }
+            16 => Ok(PixelValue::Rgba16(channels)),
+            8 => Err(FormatError::Invalid(
+                "8-bit color metadata contains a channel above 255",
+            )),
+            _ => Err(FormatError::Unsupported(
+                "color metadata depth is not supported",
+            )),
+        }
     }
 }
 
@@ -925,6 +1506,11 @@ mod tests {
                 },
                 margins: Margins::default(),
             },
+            main_line_color: PixelValue::Rgba([0, 0, 0, 255]),
+            palette: vec![
+                PixelValue::Rgba([12, 34, 56, 255]),
+                PixelValue::Rgba16([1, 257, 32_769, 65_534]),
+            ],
             planes: vec![
                 FilePlane {
                     id: 3,
@@ -953,7 +1539,62 @@ mod tests {
                     }],
                 },
             ],
+            m3: None,
         }
+    }
+
+    fn m3_fixture() -> CellFile {
+        let mut document = fixture();
+        document.planes.push(FilePlane {
+            id: 5,
+            kind: PlaneKind::Selection,
+            pixel_format: PixelFormat::BinaryMask8,
+            width: document.width,
+            height: document.height,
+            tiles: Vec::new(),
+        });
+        document.m3 = Some(FileM3Metadata {
+            active_layer_id: 2,
+            active_plane_id: 3,
+            selection_plane_id: 5,
+            layers: vec![FileLayer {
+                id: 2,
+                kind: LayerKind::BinaryColoring,
+                name: "Coloring".to_owned(),
+                visible: true,
+                editable: true,
+                opacity_milli: 1_000,
+                planes: vec![
+                    FilePlaneProperties {
+                        id: 3,
+                        name: "Main".to_owned(),
+                        visible: true,
+                        editable: true,
+                        opacity_milli: 1_000,
+                    },
+                    FilePlaneProperties {
+                        id: 4,
+                        name: "Color".to_owned(),
+                        visible: true,
+                        editable: true,
+                        opacity_milli: 1_000,
+                    },
+                ],
+            }],
+            guides: vec![FileGuide {
+                id: 6,
+                axis: GuideAxis::Vertical,
+                position: 32,
+            }],
+            grid: FileGrid {
+                origin_x: 0,
+                origin_y: 0,
+                spacing_x: 16,
+                spacing_y: 16,
+                subdivisions: 2,
+            },
+        });
+        document
     }
 
     #[test]
@@ -961,6 +1602,21 @@ mod tests {
         let document = fixture();
         let bytes = encode(&document).unwrap();
         assert_eq!(decode(&bytes).unwrap(), document);
+    }
+
+    #[test]
+    fn m2_color_metadata_round_trips_and_legacy_v1_defaults_remain_readable() {
+        let mut document = fixture();
+        document.main_line_color = PixelValue::Rgba16([1_001, 2_002, 3_003, 65_535]);
+        let decoded = decode(&encode(&document).unwrap()).unwrap();
+        assert_eq!(decoded.main_line_color, document.main_line_color);
+        assert_eq!(decoded.palette, document.palette);
+
+        let mut legacy = fixture();
+        legacy.palette.clear();
+        legacy.main_line_color = PixelValue::Rgba([0, 0, 0, 255]);
+        let legacy_bytes = encode_with_color_metadata(&legacy, false).unwrap();
+        assert_eq!(decode(&legacy_bytes).unwrap(), legacy);
     }
 
     #[test]
@@ -975,6 +1631,39 @@ mod tests {
         let decoded = decode(&encode(&document).unwrap()).unwrap();
         assert_eq!(decoded, document);
         assert_eq!(decoded.planes[1].tiles[0].bytes[0..2], [1, 0]);
+    }
+
+    #[test]
+    fn m3_metadata_rejects_out_of_bounds_guides_grid_and_unreferenced_payloads() {
+        let document = m3_fixture();
+        assert_eq!(decode(&encode(&document).unwrap()).unwrap(), document);
+
+        let mut invalid_guide = document.clone();
+        invalid_guide.m3.as_mut().unwrap().guides[0].position = 66;
+        assert!(matches!(
+            encode(&invalid_guide),
+            Err(FormatError::Invalid(
+                "guide position is outside the document"
+            ))
+        ));
+
+        let mut invalid_grid = document.clone();
+        invalid_grid.m3.as_mut().unwrap().grid.spacing_x = 1_048_577;
+        assert!(matches!(
+            encode(&invalid_grid),
+            Err(FormatError::Invalid(
+                "M3 metadata values are outside bounds"
+            ))
+        ));
+
+        let mut unreferenced = document;
+        let mut extra = unreferenced.planes[1].clone();
+        extra.id = 7;
+        unreferenced.planes.push(extra);
+        assert!(matches!(
+            encode(&unreferenced),
+            Err(FormatError::Invalid("M3 tree and plane payload IDs differ"))
+        ));
     }
 
     #[test]

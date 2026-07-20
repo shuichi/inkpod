@@ -31,6 +31,8 @@ typedef uint32_t InkpodCommandKind;
 typedef uint32_t InkpodPixelFormat;
 #define INKPOD_PIXEL_FORMAT_INVALID UINT32_C(0)
 #define INKPOD_PIXEL_FORMAT_PREMULTIPLIED_BGRA8 UINT32_C(1)
+#define INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE (UINT64_C(1) << 0)
+#define INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA (UINT64_C(1) << 1)
 
 typedef uint32_t InkpodPlaneKind;
 #define INKPOD_PLANE_MAIN_LINE UINT32_C(1)
@@ -59,6 +61,27 @@ typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_VIEW_FIT UINT32_C(3)
 #define INKPOD_VIEW_ONE_TO_ONE UINT32_C(4)
 #define INKPOD_VIEW_VIEWPORT_RESIZED UINT32_C(5)
+#define INKPOD_VIEW_BOX_ZOOM UINT32_C(6)
+#define INKPOD_VIEW_FLIP_HORIZONTAL UINT32_C(7)
+#define INKPOD_VIEW_FLIP_VERTICAL UINT32_C(8)
+#define INKPOD_VIEW_SET_RULER_VISIBLE UINT32_C(9)
+#define INKPOD_VIEW_SET_GUIDES_VISIBLE UINT32_C(10)
+#define INKPOD_VIEW_SET_GRID_VISIBLE UINT32_C(11)
+#define INKPOD_VIEW_SET_SNAP_ENABLED UINT32_C(12)
+#define INKPOD_VIEW_SET_TRANSPARENT_VISIBLE UINT32_C(13)
+
+#define INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL (UINT32_C(1) << 0)
+#define INKPOD_SNAPSHOT_TRANSFORM_FLIP_VERTICAL (UINT32_C(1) << 1)
+#define INKPOD_SNAPSHOT_OVERLAY_RULER_VISIBLE (UINT32_C(1) << 0)
+#define INKPOD_SNAPSHOT_OVERLAY_GUIDES_VISIBLE (UINT32_C(1) << 1)
+#define INKPOD_SNAPSHOT_OVERLAY_GRID_VISIBLE (UINT32_C(1) << 2)
+#define INKPOD_SNAPSHOT_OVERLAY_SNAP_ENABLED (UINT32_C(1) << 3)
+#define INKPOD_SNAPSHOT_OVERLAY_TRANSPARENT_VIEW (UINT32_C(1) << 4)
+
+#define INKPOD_SHORTCUT_MODIFIER_CONTROL (UINT32_C(1) << 0)
+#define INKPOD_SHORTCUT_MODIFIER_SHIFT (UINT32_C(1) << 1)
+#define INKPOD_SHORTCUT_MODIFIER_ALT (UINT32_C(1) << 2)
+#define INKPOD_SHORTCUT_MODIFIER_EXTENDED (UINT32_C(1) << 3)
 
 typedef uint32_t InkpodColorDepth;
 #define INKPOD_COLOR_DEPTH_8 UINT32_C(8)
@@ -91,8 +114,73 @@ typedef uint32_t InkpodColorCheckMode;
 #define INKPOD_COLOR_CHECK_LEGACY_WHITE UINT32_C(1)
 #define INKPOD_COLOR_CHECK_NATIVE_ALPHA UINT32_C(2)
 
+typedef uint32_t InkpodLayerKind;
+#define INKPOD_LAYER_BINARY_COLORING UINT32_C(1)
+#define INKPOD_LAYER_GRAYSCALE_COLORING UINT32_C(2)
+#define INKPOD_LAYER_RASTER UINT32_C(3)
+#define INKPOD_LAYER_SELECTION UINT32_C(4)
+#define INKPOD_LAYER_FRAME UINT32_C(5)
+#define INKPOD_LAYER_VANISHING_POINT UINT32_C(6)
+#define INKPOD_LAYER_ADJUSTMENT UINT32_C(7)
+#define INKPOD_LAYER_TEXT UINT32_C(8)
+#define INKPOD_LAYER_ANNOTATION UINT32_C(9)
+
+typedef uint32_t InkpodTypedPlaneKind;
+#define INKPOD_TYPED_PLANE_MAIN_LINE UINT32_C(1)
+#define INKPOD_TYPED_PLANE_COLOR UINT32_C(2)
+#define INKPOD_TYPED_PLANE_RASTER UINT32_C(3)
+#define INKPOD_TYPED_PLANE_SELECTION UINT32_C(4)
+
+typedef uint32_t InkpodStoragePixelFormat;
+#define INKPOD_STORAGE_BINARY8 UINT32_C(1)
+#define INKPOD_STORAGE_GRAYSCALE8 UINT32_C(2)
+#define INKPOD_STORAGE_GRAYSCALE16 UINT32_C(3)
+#define INKPOD_STORAGE_RGBA8 UINT32_C(4)
+#define INKPOD_STORAGE_RGBA16 UINT32_C(5)
+
+typedef uint32_t InkpodTreeOperation;
+#define INKPOD_TREE_CREATE_LAYER UINT32_C(1)
+#define INKPOD_TREE_DUPLICATE_LAYER UINT32_C(2)
+#define INKPOD_TREE_DELETE_LAYER UINT32_C(3)
+#define INKPOD_TREE_REORDER_LAYER UINT32_C(4)
+#define INKPOD_TREE_SET_LAYER_PROPERTIES UINT32_C(5)
+#define INKPOD_TREE_CREATE_PLANE UINT32_C(6)
+#define INKPOD_TREE_DUPLICATE_PLANE UINT32_C(7)
+#define INKPOD_TREE_DELETE_PLANE UINT32_C(8)
+#define INKPOD_TREE_REORDER_PLANE UINT32_C(9)
+#define INKPOD_TREE_SET_PLANE_PROPERTIES UINT32_C(10)
+#define INKPOD_TREE_CONVERT_LAYER UINT32_C(11)
+#define INKPOD_TREE_MERGE_LAYER UINT32_C(12)
+#define INKPOD_NODE_VISIBLE (UINT64_C(1) << 0)
+#define INKPOD_NODE_EDITABLE (UINT64_C(1) << 1)
+
+typedef uint32_t InkpodSelectionShape;
+#define INKPOD_SELECTION_RECTANGLE UINT32_C(1)
+#define INKPOD_SELECTION_ELLIPSE UINT32_C(2)
+#define INKPOD_SELECTION_LASSO UINT32_C(3)
+#define INKPOD_SELECTION_POLYLINE UINT32_C(4)
+#define INKPOD_SELECTION_TRACE UINT32_C(5)
+#define INKPOD_SELECTION_WAND UINT32_C(6)
+typedef uint32_t InkpodSelectionOperation;
+#define INKPOD_SELECTION_NEW UINT32_C(1)
+#define INKPOD_SELECTION_ADD UINT32_C(2)
+#define INKPOD_SELECTION_SUBTRACT UINT32_C(3)
+#define INKPOD_SELECTION_INTERSECT UINT32_C(4)
+#define INKPOD_SELECTION_ADJUST_INVERT UINT32_C(1)
+#define INKPOD_SELECTION_ADJUST_EXPAND UINT32_C(2)
+#define INKPOD_SELECTION_ADJUST_SHRINK UINT32_C(3)
+#define INKPOD_SELECTION_LAYER_REPLACE UINT32_C(1)
+#define INKPOD_SELECTION_LAYER_ADD UINT32_C(2)
+#define INKPOD_SELECTION_LAYER_SUBTRACT UINT32_C(3)
+
+#define INKPOD_GUIDE_HORIZONTAL UINT32_C(1)
+#define INKPOD_GUIDE_VERTICAL UINT32_C(2)
+#define INKPOD_MIRROR_HORIZONTAL UINT32_C(1)
+#define INKPOD_MIRROR_VERTICAL UINT32_C(2)
+
 typedef struct InkpodCore InkpodCore;
 typedef struct InkpodSnapshot InkpodSnapshot;
+typedef struct InkpodClipboard InkpodClipboard;
 
 typedef struct InkpodCoreConfig {
     uint32_t struct_size;
@@ -220,6 +308,25 @@ typedef struct InkpodColorValue {
     uint16_t alpha;
 } InkpodColorValue;
 
+typedef struct InkpodColorArray {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    const InkpodColorValue* colors;
+    uint64_t color_count;
+    uint64_t color_stride_bytes;
+} InkpodColorArray;
+
+typedef struct InkpodColorBuffer {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    InkpodColorValue* colors;
+    uint64_t color_capacity;
+    uint64_t color_stride_bytes;
+    uint64_t color_count;
+} InkpodColorBuffer;
+
 typedef struct InkpodFillInput {
     uint32_t struct_size;
     InkpodFillOperation operation;
@@ -280,7 +387,7 @@ typedef struct InkpodSnapshotView {
 
 typedef struct InkpodSnapshotTransform {
     uint32_t struct_size;
-    uint32_t reserved;
+    uint32_t flags;
     uint64_t view_revision;
     double zoom;
     double pan_x;
@@ -288,6 +395,111 @@ typedef struct InkpodSnapshotTransform {
     uint32_t document_width;
     uint32_t document_height;
 } InkpodSnapshotTransform;
+
+typedef struct InkpodSnapshotGuide {
+    uint32_t struct_size;
+    uint32_t axis;
+    int32_t position;
+    uint32_t reserved;
+    uint64_t id;
+} InkpodSnapshotGuide;
+
+typedef struct InkpodSnapshotOverlay {
+    uint32_t struct_size;
+    uint32_t flags;
+    int32_t grid_origin_x;
+    int32_t grid_origin_y;
+    uint32_t grid_spacing_x;
+    uint32_t grid_spacing_y;
+    uint32_t grid_subdivisions;
+    uint32_t reserved;
+    const InkpodSnapshotGuide* guides;
+    uint64_t guide_count;
+    uint64_t guide_stride_bytes;
+} InkpodSnapshotOverlay;
+
+typedef struct InkpodTreeEdit {
+    uint32_t struct_size;
+    InkpodTreeOperation operation;
+    uint64_t flags;
+    uint64_t object_id;
+    uint64_t parent_id;
+    uint32_t destination_index;
+    uint32_t kind;
+    InkpodStoragePixelFormat pixel_format;
+    uint32_t opacity_milli;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+} InkpodTreeEdit;
+
+typedef struct InkpodNodeInfo {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t id;
+    uint64_t parent_id;
+    uint32_t kind;
+    InkpodStoragePixelFormat pixel_format;
+    uint32_t opacity_milli;
+    uint32_t index;
+    uint32_t child_count;
+    uint32_t reserved;
+    uint8_t* name_utf8;
+    uint64_t name_capacity;
+    uint64_t name_bytes;
+} InkpodNodeInfo;
+
+typedef struct InkpodSelectionPoint {
+    uint32_t struct_size;
+    uint32_t reserved;
+    float x;
+    float y;
+} InkpodSelectionPoint;
+
+typedef struct InkpodSelectionInput {
+    uint32_t struct_size;
+    InkpodSelectionShape shape;
+    InkpodSelectionOperation operation;
+    uint32_t reserved;
+    InkpodFrameRect bounds;
+    const InkpodSelectionPoint* points;
+    uint64_t point_count;
+    uint64_t point_stride_bytes;
+    float diameter;
+    uint16_t tolerance;
+    uint16_t gap_close;
+    uint32_t seed_x;
+    uint32_t seed_y;
+} InkpodSelectionInput;
+
+typedef struct InkpodFloatingTransform {
+    uint32_t struct_size;
+    uint32_t reserved;
+    double translate_x;
+    double translate_y;
+    double scale_x;
+    double scale_y;
+    double rotation_degrees;
+} InkpodFloatingTransform;
+
+typedef struct InkpodGridInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    int32_t origin_x;
+    int32_t origin_y;
+    uint32_t spacing_x;
+    uint32_t spacing_y;
+    uint32_t subdivisions;
+    uint32_t flags;
+} InkpodGridInput;
+
+typedef struct InkpodLocatorOutput {
+    uint32_t struct_size;
+    uint32_t flags;
+    int32_t document_x;
+    int32_t document_y;
+    InkpodFrameRect selection;
+    InkpodColorValue color;
+} InkpodLocatorOutput;
 
 uint32_t inkpod_abi_version(void);
 
@@ -336,6 +548,27 @@ InkpodStatus inkpod_core_eyedropper(
     InkpodEyedropperSource source,
     uint32_t x,
     uint32_t y,
+    InkpodColorValue* out_color);
+
+/* Palette arrays are caller-owned and preserve each entry's explicit depth.
+ * Set is one metadata/history transaction. A zero-capacity, null output buffer
+ * is a successful count query; otherwise get writes complete color records. */
+InkpodStatus inkpod_core_palette_set(
+    InkpodCore* core,
+    const InkpodColorArray* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_palette_get(
+    InkpodCore* core,
+    InkpodColorBuffer* buffer);
+
+/* Base color is meaningful for grayscale main-line coverage and is persisted
+ * exactly. Set is rejected for a binary main-line plane. */
+InkpodStatus inkpod_core_set_main_line_color(
+    InkpodCore* core,
+    const InkpodColorValue* color,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_get_main_line_color(
+    InkpodCore* core,
     InkpodColorValue* out_color);
 
 /* Temporary view state only; it never edits document pixels/history. */
@@ -402,16 +635,135 @@ InkpodStatus inkpod_core_revert(
     InkpodDocumentInfo* out_info);
 
 /* value layout: PAN(dx,dy), ZOOM(factor,anchor_x,anchor_y),
- * FIT(viewport_w,viewport_h), ONE_TO_ONE(viewport_w,viewport_h),
- * VIEWPORT_RESIZED(viewport_w,viewport_h). Resize preserves manual view and
- * recomputes only persistent Fit/OneToOne modes. Values use client device px. */
+ * FIT/ONE_TO_ONE/VIEWPORT_RESIZED(viewport_w,viewport_h),
+ * BOX_ZOOM(document_x,document_y,document_w,document_h), and SET_*(enabled).
+ * Flip commands ignore values. Resize preserves manual view and recomputes
+ * only persistent Fit/OneToOne modes. Values use client device px unless the
+ * BOX_ZOOM fields are explicitly document coordinates. */
 InkpodStatus inkpod_core_apply_view(
     InkpodCore* core,
     const InkpodViewInput* input,
     InkpodDocumentInfo* out_info);
 
+/* M3 typed tree edits are transactional. Names and point spans are borrowed;
+ * node-info buffers and all result storage remain caller-owned. */
+InkpodStatus inkpod_core_tree_edit(
+    InkpodCore* core,
+    const InkpodTreeEdit* input,
+    InkpodDispatchResult* result,
+    uint64_t* out_object_id);
+InkpodStatus inkpod_core_node_get(
+    InkpodCore* core,
+    uint32_t layer_index,
+    /* UINT32_MAX queries the layer record itself. */
+    uint32_t plane_index,
+    InkpodNodeInfo* out_info);
+InkpodStatus inkpod_core_apply_selection(
+    InkpodCore* core,
+    const InkpodSelectionInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_select_color(
+    InkpodCore* core,
+    const InkpodColorValue* color,
+    uint16_t tolerance,
+    uint32_t different,
+    InkpodSelectionOperation operation,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_selection_adjust(
+    InkpodCore* core,
+    uint32_t operation,
+    uint32_t pixels,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_selection_to_layer(
+    InkpodCore* core,
+    const uint8_t* name_utf8,
+    uint64_t name_bytes,
+    InkpodDispatchResult* result,
+    uint64_t* out_layer_id);
+InkpodStatus inkpod_core_selection_from_layer(
+    InkpodCore* core,
+    uint64_t layer_id,
+    uint32_t operation,
+    InkpodDispatchResult* result);
+
+/* Private typed clipboard ownership remains in Rust. Coordinate-preserving
+ * paste stays floating until commit/cancel; release nulls the owner pointer.
+ * out_clipboard storage must not contain a live handle when copy is called. */
+InkpodStatus inkpod_core_clipboard_copy(
+    InkpodCore* core,
+    InkpodClipboard** out_clipboard);
+InkpodStatus inkpod_clipboard_release(InkpodClipboard** clipboard);
+InkpodStatus inkpod_core_paste_begin(
+    InkpodCore* core,
+    const InkpodClipboard* clipboard);
+InkpodStatus inkpod_core_floating_transform(
+    InkpodCore* core,
+    const InkpodFloatingTransform* input);
+InkpodStatus inkpod_core_floating_commit(
+    InkpodCore* core,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_floating_cancel(InkpodCore* core);
+
+InkpodStatus inkpod_core_mirror_document(
+    InkpodCore* core,
+    uint32_t axis,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_guide_add(
+    InkpodCore* core,
+    uint32_t axis,
+    int32_t position,
+    InkpodDispatchResult* result,
+    uint64_t* out_guide_id);
+InkpodStatus inkpod_core_guide_move(
+    InkpodCore* core,
+    uint64_t guide_id,
+    int32_t position,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_guide_delete(
+    InkpodCore* core,
+    uint64_t guide_id,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_grid_set(
+    InkpodCore* core,
+    const InkpodGridInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_locator_sample(
+    InkpodCore* core,
+    uint64_t view_id,
+    double device_x,
+    double device_y,
+    InkpodLocatorOutput* out_locator);
+InkpodStatus inkpod_core_shortcut_rebind(
+    InkpodCore* core,
+    uint32_t command_id,
+    uint32_t virtual_key,
+    uint32_t modifiers);
+InkpodStatus inkpod_core_shortcut_resolve(
+    InkpodCore* core,
+    uint32_t virtual_key,
+    uint32_t modifiers,
+    uint32_t* out_command_id);
+InkpodStatus inkpod_core_shortcut_reset(InkpodCore* core);
+InkpodStatus inkpod_core_view_create(
+    InkpodCore* core,
+    uint64_t* out_view_id);
+InkpodStatus inkpod_core_view_apply(
+    InkpodCore* core,
+    uint64_t view_id,
+    const InkpodViewInput* input);
+InkpodStatus inkpod_core_view_close(
+    InkpodCore* core,
+    uint64_t view_id);
+InkpodStatus inkpod_core_build_snapshot_for_view(
+    InkpodCore* core,
+    uint64_t view_id,
+    const InkpodSnapshotOptions* options,
+    /* Storage must not contain a live snapshot handle. */
+    InkpodSnapshot** out_snapshot);
+
 /* Must run on the Core's creating thread. On success, Rust allocates an
- * immutable snapshot in *out_snapshot. Inputs and output must not overlap. */
+ * immutable snapshot in *out_snapshot. Output storage must not contain a live
+ * handle; inputs and output must not overlap. */
 InkpodStatus inkpod_core_build_snapshot(
     InkpodCore* core,
     const InkpodSnapshotOptions* options,
@@ -427,6 +779,10 @@ InkpodStatus inkpod_snapshot_get_view(
 InkpodStatus inkpod_snapshot_get_transform(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotTransform* out_transform);
+
+InkpodStatus inkpod_snapshot_get_overlay(
+    const InkpodSnapshot* snapshot,
+    InkpodSnapshotOverlay* out_overlay);
 
 /* May run on any externally synchronized renderer thread. *snapshot == NULL is
  * a successful no-op. The function releases Rust ownership and sets the owner

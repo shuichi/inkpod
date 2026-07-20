@@ -38,6 +38,13 @@ fn arch_002_rust_domain_crates_do_not_reference_windows_apis() {
         "HRESULT",
         "WinRT",
         "DirectWrite",
+        "HANDLE",
+        "HDC",
+        "LRESULT",
+        "DWORD",
+        "WIC",
+        "Common Controls",
+        "registry",
     ];
 
     let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))

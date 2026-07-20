@@ -1,6 +1,6 @@
 # Architecture
 
-## M2 component boundary
+## M3 component boundary
 
 inkpod has one platform-independent state owner. The dependency direction is
 one-way:
@@ -34,16 +34,19 @@ about any proprietary legacy implementation.
 
 `inkpod-format` owns the bounded `.inkpod` v1 container and has no application
 state dependency. `inkpod-core` maps its `CellDocument` to/from the format DTO,
-owns stable IDs, document/view revisions, stroke preview, fill transactions,
-normal savepoint/path, recovery state, history, and immutable
+owns a stable-ID typed layer/plane tree, persistent selection mask, guides/grid,
+document/view revisions, multi-view transforms, shortcut bindings, stroke and
+floating-paste preview, fill transactions, exact-depth main-line base color and
+palette metadata, normal savepoint/path, recovery state, history, and immutable
 premultiplied-BGRA render snapshots. An
 architecture test scans Core, image, and format sources/manifests for forbidden
 Windows/frontend APIs. All three crates are safe Rust; no `HWND`, COM, D2D,
 DXGI, Win32 DPI, or frontend thread type enters them.
 
 `inkpod-ffi` is the only `staticlib`. It validates fixed-layout inputs, exposes
-batched `stroke_begin/append/end/cancel` and M2 fill/color/recovery operations,
-catches panics, and owns opaque Core/snapshot allocations. Win32 supplies a
+batched stroke operations, M2 fill/color/recovery, and M3 tree/selection/
+clipboard/transform/navigation/multi-view operations, catches panics, and owns
+opaque Core/snapshot/clipboard allocations. Win32 supplies a
 `CoCreateGuid` document UUID at the create boundary; Core persists it without
 acquiring an OS dependency. The Win32 application does not mirror pixels,
 history, fill, color-depth, or format rules.
@@ -87,6 +90,11 @@ device_x = document_x * zoom + pan_x
 device_y = document_y * zoom + pan_y
 ```
 
+Horizontal or vertical view flip is represented by a documented snapshot
+transform flag and applied around the document extent before zoom/pan. It never
+changes document pixels or history. Destructive mirror instead transforms every
+applicable raster/selection/frame/guide value in one Core transaction.
+
 The shared snapshot transform is the only document-to-device transform. The
 Direct2D context uses pixel units and a 96-DPI target bitmap so it does not add a
 second DIP scale. Per-Monitor DPI v2 still controls native UI sizing and future
@@ -96,10 +104,39 @@ on viewport resize; manual pan/zoom is preserved across resize.
 
 ## Revision, preview, and transaction model
 
-Document and view revisions are independent. A successful committed pixel
-transaction, Undo, Redo, new, or open advances document revision. Pan, zoom,
-fit, 1:1, or viewport resize advances only view revision when the transform
-changes. Plane selection changes neither revision.
+Document and view revisions are independent. A successful committed pixel,
+typed-tree, selection, paste, guide/grid, or destructive transform transaction,
+Undo, Redo, new, or open advances document revision. Pan, zoom, box zoom, fit,
+1:1, viewport resize, view flip, and visibility toggles advance only view
+revision when semantic view state changes. Plane selection changes neither.
+
+Document-wide M3 edits stage a cloned `CellDocument` whose sparse tile rasters
+share allocations through `Arc` copy-on-write. Validation completes before the
+candidate replaces committed state. History keeps the before/after document
+owners rather than eagerly duplicating every tile, so layer reorder/properties,
+selection morphology, guide/grid edits, and mirror remain atomic and Undoable.
+Redo after Undo is discarded by any new edit exactly as for pixel history.
+
+The app-private clipboard owns typed pixels plus absolute document coordinates.
+Paste first chooses a compatible typed destination and enters transient floating
+state. Move/scale/rotate edits only that preview; bounded inverse nearest-neighbor
+sampling avoids holes when scaling, commit clips to the destination paper and
+creates one history entry, while failure retains the floating state and cancel
+drops it with no revision. Pixel edits validate both the target layer and plane
+editable flags before staging.
+The payload may outlive the source document and is released through Rust.
+
+Immutable snapshots also own their guide array and copy grid/view overlay flags.
+The C ABI returns that array as a bounded borrowed span. The renderer validates
+the span, draws grid/guides and a transparent-paper checker under the same
+document transform as tiles, and releases all borrowed data with the snapshot.
+The native key handler resolves Undo/Redo/Copy/Paste through the Core shortcut
+map, so the shortcut editor changes the command path used by key events.
+
+Secondary logical views retain independent immutable `ViewState` values but
+never clone document state. A snapshot build chooses one view transform at the
+last moment, so an edit through either view advances the one shared document
+revision and appears in every view's next snapshot.
 
 Pointer-down starts one Core-owned `StrokeSession`. Its preview document shares
 sparse tiles through `Arc` copy-on-write and records accumulated before/after
@@ -111,8 +148,13 @@ capture loss, or any failed append drops the session and exactly restores the
 base state.
 
 Snapshot tile buffers are `Arc<[u8]>` and the Core render cache reuses unchanged
-composited tile buffers between preview frames. History stores before/after
-pixel values instead of a whole image copy. Undo followed by a new edit
+composited tile buffers between preview frames. A separately generated render
+tile revision changes whenever source pixels or view-only color-check
+composition changes, so the D2D cache cannot mistake a recolored check tile for
+its source tile. Snapshot feature flags select the correct black or magenta
+document background for sparse legacy-white/native-alpha checks without
+materializing every empty raster tile. History stores before/after pixel values
+or bounded palette/base-color metadata instead of a whole image copy. Undo followed by a new edit
 truncates the redo branch. A unique history-state token identifies the normal
 savepoint, so Undo back to the saved state clears dirty and Redo away restores
 dirty.
@@ -124,7 +166,9 @@ extreme, or resource-limit input leaves pixels, history, and revision unchanged.
 Fill follows the same transaction boundary without a live preview session.
 Image code first creates an immutable `FillPlan` containing before/after pixel
 edits. Selection, tolerance, inclusion, gap, cancellation, overflow, and work
-limits are evaluated before Core clones the affected color raster. A successful
+limits are evaluated before Core clones the affected color raster. Oversized
+documents are rejected before a selection rectangle is materialized as a mask;
+seed, closed-region, and extension planners all poll cancellation. A successful
 nonempty plan swaps that clone into the document and appends exactly one history
 entry; invalid, cancelled, overflow, and empty plans leave pixels, main-line
 checksum, dirty state, revision, and history unchanged. Closed-region and
@@ -134,8 +178,9 @@ Color-check mode is temporary view state. Snapshot composition may replace
 display colors according to legacy-white or native-alpha categorization, but it
 does not enter the document transaction or persisted file. Grayscale main-line
 display coverage is likewise separate from exact base-color eyedropper
-sampling. RGBA16 is retained in Core/format and converted only when building the
-current BGRA8 renderer snapshot.
+sampling. The base color and bounded palette are persisted exactly and exposed
+through caller-owned strided ABI buffers. RGBA16 is retained in Core/format and
+converted only when building the current BGRA8 renderer snapshot.
 
 ## Build graph
 
@@ -165,7 +210,8 @@ immutable snapshot may outlive its Core until Canvas destruction because it owns
 all borrowed tile storage and is released by Rust's snapshot release function.
 
 The hidden Windows smoke path uses the normal UI input adapter, Core queue, ABI,
-format, snapshot sink, and Renderer. It verifies distinct UI/Core/Renderer
+format, snapshot sink, and Renderer. It verifies a never-saved private recovery
+path can be autosaved and rediscovered before normal save, distinct UI/Core/Renderer
 thread IDs, a frame presented before pointer-up while committed state remains
 unchanged, one-unit commit/cancel behavior, protected-plane drawing, history,
 view operations, save/discard/reopen, exact Fit device bounds across DPI change,
@@ -174,3 +220,9 @@ real Fill/Eyedropper/Color Check menu commands and Canvas clicks, checks a
 one-unit fill with an unchanged main-line checksum, queues autosave, opens the
 recovery path as dirty/pathless, and proves that reopening the normal file
 restores its original checksum.
+Its M3 phase drives the real Layer, Selection, Copy, Flip, Mirror, Grid, New
+View, Shortcut Editor, and Shortcut Reset commands; verifies tree Undo/Redo/save/reopen and an
+invalid typed combination; checks selection boolean bounds and cross-paper
+coordinate paste; distinguishes view and document revisions; compares primary
+and secondary snapshot revisions; validates rendered overlay data and configured
+shortcut resolution; samples the locator; and presents the result.

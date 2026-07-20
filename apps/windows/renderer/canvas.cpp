@@ -31,6 +31,8 @@ using Microsoft::WRL::ComPtr;
 
 constexpr wchar_t kCanvasClassName[] = L"InkpodCanvasWindow";
 constexpr std::uint64_t kMaximumSnapshotTiles = 262144U;
+constexpr std::uint64_t kMaximumSnapshotGuides = 4096U;
+constexpr std::uint64_t kMaximumOverlayLines = 8192U;
 constexpr std::size_t kMaximumPointerHistory = 256U;
 
 struct CachedTile {
@@ -111,8 +113,20 @@ public:
             d2d_context_->SetTransform(DocumentTransform());
 
             ComPtr<ID2D1SolidColorBrush> paper_brush;
+            const bool legacy_check = (snapshot_view_.feature_flags
+                & INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE) != 0U;
+            const bool native_check = (snapshot_view_.feature_flags
+                & INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA) != 0U;
+            const bool transparent_view = (overlay_.flags
+                & INKPOD_SNAPSHOT_OVERLAY_TRANSPARENT_VIEW) != 0U;
+            const D2D1_COLOR_F paper_color = legacy_check
+                ? D2D1::ColorF(D2D1::ColorF::Black)
+                : (native_check ? D2D1::ColorF(D2D1::ColorF::Magenta)
+                                : (transparent_view
+                                          ? D2D1::ColorF(0.78F, 0.78F, 0.78F, 1.0F)
+                                          : D2D1::ColorF(D2D1::ColorF::White)));
             HRESULT result = d2d_context_->CreateSolidColorBrush(
-                D2D1::ColorF(D2D1::ColorF::White), &paper_brush);
+                paper_color, &paper_brush);
             if (FAILED(result)) {
                 d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
                 d2d_context_->EndDraw();
@@ -125,6 +139,31 @@ public:
                     static_cast<float>(transform_.document_width),
                     static_cast<float>(transform_.document_height)),
                 paper_brush.Get());
+            constexpr UINT checker_size = 16U;
+            const std::uint64_t checker_columns =
+                (transform_.document_width + checker_size - 1U) / checker_size;
+            const std::uint64_t checker_rows =
+                (transform_.document_height + checker_size - 1U) / checker_size;
+            if (transparent_view && checker_columns != 0U
+                && checker_rows <= UINT64_C(16384) / checker_columns) {
+                paper_brush->SetColor(D2D1::ColorF(0.9F, 0.9F, 0.9F, 1.0F));
+                for (std::uint64_t y = 0; y < transform_.document_height; y += checker_size) {
+                    for (std::uint64_t x = 0; x < transform_.document_width; x += checker_size) {
+                        if (((x / checker_size) + (y / checker_size)) % 2U == 0U) {
+                            continue;
+                        }
+                        d2d_context_->FillRectangle(
+                            D2D1::RectF(
+                                static_cast<float>(x),
+                                static_cast<float>(y),
+                                static_cast<float>(std::min<std::uint64_t>(
+                                    transform_.document_width, x + checker_size)),
+                                static_cast<float>(std::min<std::uint64_t>(
+                                    transform_.document_height, y + checker_size))),
+                            paper_brush.Get());
+                    }
+                }
+            }
             for (const auto& entry : tile_cache_) {
                 const CachedTile& tile = entry.second;
                 const D2D1_RECT_F destination = D2D1::RectF(
@@ -137,6 +176,12 @@ public:
                     destination,
                     1.0F,
                     D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+            }
+            result = DrawOverlays();
+            if (FAILED(result)) {
+                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+                d2d_context_->EndDraw();
+                return result;
             }
             d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
         }
@@ -168,11 +213,17 @@ public:
         view.struct_size = sizeof(view);
         InkpodSnapshotTransform transform{};
         transform.struct_size = sizeof(transform);
+        InkpodSnapshotOverlay overlay{};
+        overlay.struct_size = sizeof(overlay);
         const InkpodStatus view_status = inkpod_snapshot_get_view(snapshot, &view);
         const InkpodStatus transform_status = view_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_transform(snapshot, &transform)
             : view_status;
-        if (view_status != INKPOD_STATUS_OK || transform_status != INKPOD_STATUS_OK) {
+        const InkpodStatus overlay_status = transform_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_overlay(snapshot, &overlay)
+            : transform_status;
+        if (view_status != INKPOD_STATUS_OK || transform_status != INKPOD_STATUS_OK
+            || overlay_status != INKPOD_STATUS_OK || !ValidateOverlay(overlay)) {
             inkpod_snapshot_release(&snapshot);
             return E_INVALIDARG;
         }
@@ -182,6 +233,7 @@ public:
         snapshot_ = snapshot;
         snapshot_view_ = view;
         transform_ = transform;
+        overlay_ = overlay;
         return RebuildTileCache();
     }
 
@@ -212,13 +264,135 @@ public:
 private:
     D2D1_MATRIX_3X2_F DocumentTransform() const noexcept {
         const float scale = static_cast<float>(transform_.zoom);
+        const bool flip_horizontal = (transform_.flags
+            & INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL) != 0U;
+        const bool flip_vertical = (transform_.flags
+            & INKPOD_SNAPSHOT_TRANSFORM_FLIP_VERTICAL) != 0U;
         return D2D1::Matrix3x2F(
-            scale,
+            flip_horizontal ? -scale : scale,
             0.0F,
             0.0F,
-            scale,
-            static_cast<float>(transform_.pan_x),
-            static_cast<float>(transform_.pan_y));
+            flip_vertical ? -scale : scale,
+            static_cast<float>(transform_.pan_x)
+                + (flip_horizontal
+                        ? static_cast<float>(transform_.document_width) * scale
+                        : 0.0F),
+            static_cast<float>(transform_.pan_y)
+                + (flip_vertical
+                        ? static_cast<float>(transform_.document_height) * scale
+                        : 0.0F));
+    }
+
+    static bool ValidateOverlay(const InkpodSnapshotOverlay& overlay) noexcept {
+        constexpr std::uint32_t known_flags =
+            INKPOD_SNAPSHOT_OVERLAY_RULER_VISIBLE
+            | INKPOD_SNAPSHOT_OVERLAY_GUIDES_VISIBLE
+            | INKPOD_SNAPSHOT_OVERLAY_GRID_VISIBLE
+            | INKPOD_SNAPSHOT_OVERLAY_SNAP_ENABLED
+            | INKPOD_SNAPSHOT_OVERLAY_TRANSPARENT_VIEW;
+        if ((overlay.flags & ~known_flags) != 0U || overlay.reserved != 0U
+            || overlay.grid_spacing_x == 0U || overlay.grid_spacing_y == 0U
+            || overlay.grid_subdivisions == 0U || overlay.grid_subdivisions > 1024U
+            || overlay.guide_count > kMaximumSnapshotGuides
+            || overlay.guide_stride_bytes < sizeof(InkpodSnapshotGuide)
+            || overlay.guide_stride_bytes % alignof(InkpodSnapshotGuide) != 0U
+            || (overlay.guide_count != 0U && overlay.guides == nullptr)
+            || (overlay.guide_count != 0U
+                && reinterpret_cast<std::uintptr_t>(overlay.guides)
+                    % alignof(InkpodSnapshotGuide) != 0U)
+            || overlay.guide_stride_bytes
+                > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+            || (overlay.guide_count > 1U
+                && overlay.guide_stride_bytes
+                    > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+                        / (overlay.guide_count - 1U))) {
+            return false;
+        }
+        const auto* bytes = reinterpret_cast<const std::byte*>(overlay.guides);
+        for (std::uint64_t index = 0; index < overlay.guide_count; ++index) {
+            const auto* guide = reinterpret_cast<const InkpodSnapshotGuide*>(
+                bytes + static_cast<std::size_t>(index * overlay.guide_stride_bytes));
+            if (guide->struct_size < sizeof(InkpodSnapshotGuide)
+                || guide->struct_size > overlay.guide_stride_bytes
+                || guide->reserved != 0U
+                || (guide->axis != INKPOD_GUIDE_HORIZONTAL
+                    && guide->axis != INKPOD_GUIDE_VERTICAL)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    HRESULT DrawOverlays() noexcept {
+        ComPtr<ID2D1SolidColorBrush> brush;
+        HRESULT result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(0.15F, 0.55F, 0.95F, 0.45F), &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        const float stroke_width = static_cast<float>(1.0 / transform_.zoom);
+        if ((overlay_.flags & INKPOD_SNAPSHOT_OVERLAY_GRID_VISIBLE) != 0U) {
+            const double step_x = static_cast<double>(overlay_.grid_spacing_x)
+                / static_cast<double>(overlay_.grid_subdivisions);
+            const double step_y = static_cast<double>(overlay_.grid_spacing_y)
+                / static_cast<double>(overlay_.grid_subdivisions);
+            const auto x_count = static_cast<std::uint64_t>(
+                std::ceil(static_cast<double>(transform_.document_width) / step_x) + 2.0);
+            const auto y_count = static_cast<std::uint64_t>(
+                std::ceil(static_cast<double>(transform_.document_height) / step_y) + 2.0);
+            if (step_x * transform_.zoom >= 4.0 && x_count <= kMaximumOverlayLines) {
+                const double first = static_cast<double>(overlay_.grid_origin_x)
+                    + std::ceil(-static_cast<double>(overlay_.grid_origin_x) / step_x) * step_x;
+                for (double x = first; x <= transform_.document_width; x += step_x) {
+                    d2d_context_->DrawLine(
+                        D2D1::Point2F(static_cast<float>(x), 0.0F),
+                        D2D1::Point2F(
+                            static_cast<float>(x),
+                            static_cast<float>(transform_.document_height)),
+                        brush.Get(),
+                        stroke_width);
+                }
+            }
+            if (step_y * transform_.zoom >= 4.0 && y_count <= kMaximumOverlayLines) {
+                const double first = static_cast<double>(overlay_.grid_origin_y)
+                    + std::ceil(-static_cast<double>(overlay_.grid_origin_y) / step_y) * step_y;
+                for (double y = first; y <= transform_.document_height; y += step_y) {
+                    d2d_context_->DrawLine(
+                        D2D1::Point2F(0.0F, static_cast<float>(y)),
+                        D2D1::Point2F(
+                            static_cast<float>(transform_.document_width),
+                            static_cast<float>(y)),
+                        brush.Get(),
+                        stroke_width);
+                }
+            }
+        }
+        if ((overlay_.flags & INKPOD_SNAPSHOT_OVERLAY_GUIDES_VISIBLE) != 0U) {
+            const auto* bytes = reinterpret_cast<const std::byte*>(overlay_.guides);
+            brush->SetColor(D2D1::ColorF(0.1F, 0.8F, 0.95F, 0.9F));
+            for (std::uint64_t index = 0; index < overlay_.guide_count; ++index) {
+                const auto* guide = reinterpret_cast<const InkpodSnapshotGuide*>(
+                    bytes + static_cast<std::size_t>(index * overlay_.guide_stride_bytes));
+                if (guide->axis == INKPOD_GUIDE_VERTICAL) {
+                    d2d_context_->DrawLine(
+                        D2D1::Point2F(static_cast<float>(guide->position), 0.0F),
+                        D2D1::Point2F(
+                            static_cast<float>(guide->position),
+                            static_cast<float>(transform_.document_height)),
+                        brush.Get(),
+                        stroke_width);
+                } else {
+                    d2d_context_->DrawLine(
+                        D2D1::Point2F(0.0F, static_cast<float>(guide->position)),
+                        D2D1::Point2F(
+                            static_cast<float>(transform_.document_width),
+                            static_cast<float>(guide->position)),
+                        brush.Get(),
+                        stroke_width);
+                }
+            }
+        }
+        return S_OK;
     }
 
     static bool IsDeviceLost(HRESULT result) noexcept {
@@ -234,6 +408,16 @@ private:
             return S_OK;
         }
         if (snapshot_view_.tile_count > kMaximumSnapshotTiles
+            || (snapshot_view_.feature_flags
+                    & ~(INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE
+                        | INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA))
+                != 0U
+            || (snapshot_view_.feature_flags
+                    & INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE)
+                    != 0U
+                && (snapshot_view_.feature_flags
+                        & INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA)
+                    != 0U
             || snapshot_view_.tile_stride_bytes < sizeof(InkpodSnapshotTile)
             || (snapshot_view_.tile_count != 0U && snapshot_view_.tiles == nullptr)
             || snapshot_view_.tile_stride_bytes
@@ -499,6 +683,7 @@ private:
     InkpodSnapshot* snapshot_{};
     InkpodSnapshotView snapshot_view_{};
     InkpodSnapshotTransform transform_{};
+    InkpodSnapshotOverlay overlay_{};
     std::unordered_map<std::uint64_t, CachedTile> tile_cache_;
     ComPtr<ID3D11Device> d3d_device_;
     ComPtr<ID3D11DeviceContext> d3d_context_;

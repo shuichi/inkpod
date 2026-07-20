@@ -15,6 +15,8 @@ _Static_assert(sizeof(InkpodStrokeInput) == 56U, "stroke input layout drift");
 _Static_assert(sizeof(InkpodStrokeSampleSpan) == 40U, "stroke span layout drift");
 _Static_assert(sizeof(InkpodViewInput) == 48U, "view input layout drift");
 _Static_assert(sizeof(InkpodSnapshotTransform) == 48U, "snapshot transform layout drift");
+_Static_assert(sizeof(InkpodSnapshotGuide) == 24U, "snapshot guide layout drift");
+_Static_assert(sizeof(InkpodSnapshotOverlay) == 56U, "snapshot overlay layout drift");
 
 int inkpod_header_c11_smoke(void) {
     InkpodSnapshotView view = {0};

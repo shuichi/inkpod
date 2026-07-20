@@ -1,8 +1,8 @@
 # C ABI
 
 The public ABI is `include/inkpod/core_ffi.h`. ABI version 1 covers the M0
-lifecycle, the M1 saved-drawing/live-preview slice, and the M2 fill, color,
-eyedropper, color-check, autosave, and recovery slice.
+lifecycle, the M1 saved-drawing/live-preview slice, the M2 fill/color/recovery
+slice, and the M3 typed document-editing slice.
 Numeric fields use fixed-width C types. Every extensible structure begins with
 `struct_size`; configuration/span structures also carry feature or reserved
 fields.
@@ -14,7 +14,7 @@ complete ABI-v1 size. Record arrays carry an explicit byte stride:
 strides, alignments, enum values, flags, lengths, and overflow are validated
 before a span is traversed.
 
-## M1 and M2 typed operations
+## M1 through M3 typed operations
 
 - `inkpod_core_new_cell` creates the two-plane `CellDocument` from a nonzero
   128-bit UUID supplied by the platform adapter and returns that UUID, stable
@@ -53,13 +53,68 @@ before a span is traversed.
 - `inkpod_core_eyedropper` returns an exact-depth value from selected-plane,
   topmost-nontransparent, or composite sampling. The light-table source is a
   real enum but returns unavailable until light-table content exists in M4.
+- `inkpod_core_palette_set` borrows a bounded strided `InkpodColorArray`, copies
+  exact 8/16-bit values into one metadata/history transaction, and never takes
+  ownership of caller storage. `inkpod_core_palette_get` writes complete color
+  records into a caller-owned `InkpodColorBuffer`; a zero-capacity null buffer
+  is a successful count query. No palette release function is required.
+- `inkpod_core_set_main_line_color` changes the exact-depth base color of an
+  opened grayscale main-line plane as one metadata/history transaction;
+  `inkpod_core_get_main_line_color` copies it. Binary main-line documents reject
+  the setter rather than inventing grayscale semantics.
 - `inkpod_core_set_color_check` changes temporary semantic view state only.
   Legacy-white and native-alpha modes affect subsequent render snapshots but
-  never document pixels, revision, dirty state, or history.
+  never document pixels, revision, dirty state, or history. Snapshot feature
+  bits identify the check background, and recomposed tiles receive a new render
+  revision so the frontend cache uploads the view-only result.
 - `inkpod_core_autosave` writes a bounded recovery container without advancing
   the normal path/savepoint. `inkpod_core_open_recovery` creates a dirty,
   recovered, pathless document. Both borrow bounded UTF-8 path bytes only for
   the call and return copied document metadata.
+
+M3 adds these transactional operations without exposing Rust collections or
+native enum layout:
+
+- `inkpod_core_tree_edit` accepts one `InkpodTreeEdit` for create, duplicate,
+  delete, reorder, properties, coloring conversion, or compatible merge. Rust
+  validates the layer/plane/storage combination before committing and returns a
+  stable created ID through caller-owned storage. `inkpod_core_node_get` copies
+  one layer or plane descriptor; its optional UTF-8 name buffer remains caller
+  owned and supports a zero-capacity size query.
+- `inkpod_core_apply_selection` borrows a bounded point span for rectangle,
+  ellipse, lasso, polyline, trace, or wand selection and applies new/add/
+  subtract/intersect atomically. `inkpod_core_selection_adjust` provides invert,
+  expand, and shrink. `inkpod_core_select_color` validates an exact-depth typed
+  color and selects equal or different pixels on the active plane.
+  Selection-layer conversion uses copied UTF-8 names and stable layer IDs.
+- `inkpod_core_clipboard_copy` allocates an opaque Rust-owned typed payload.
+  `inkpod_core_paste_begin` clones its semantic payload into transient Core
+  state, so the clipboard may then be released. Floating translate/scale/rotate
+  remains uncommitted until `inkpod_core_floating_commit`; cancel restores the
+  exact base. Payload coordinates remain relative to document origin, not the
+  source paper bounds.
+- `inkpod_core_mirror_document` is destructive and writes one history result.
+  Horizontal/vertical `inkpod_core_apply_view` flip commands are view-only.
+  `InkpodSnapshotTransform.flags` carries only documented
+  `INKPOD_SNAPSHOT_TRANSFORM_FLIP_*` bits; consumers must reject/ignore no other
+  meaning in ABI v1.
+- Guide/grid functions persist document navigation state.
+  `inkpod_snapshot_get_overlay` copies the current overlay flags/grid and returns
+  a borrowed strided `InkpodSnapshotGuide` span owned by the snapshot. Renderer
+  validation bounds the count/stride and rejects unknown flags or guide axes.
+  Locator output copies
+  per-view document coordinates, optional selection bounds, and optional exact
+  color. A `view_id` of zero selects the primary view; a nonzero ID returned by
+  `inkpod_core_view_create` selects a secondary logical view.
+  `inkpod_core_view_apply` changes only that view's transform/state,
+  `inkpod_core_build_snapshot_for_view` captures it, and
+  `inkpod_core_view_close` releases its logical state (snapshots remain
+  independently owned).
+- Shortcut rebind removes any existing key conflict before inserting the new
+  bounded binding. `inkpod_core_shortcut_resolve` maps a normalized key chord
+  through the current bindings; the Windows key handler uses that result for
+  Undo/Redo/Copy/Paste. Reset restores deterministic defaults. Shortcut state
+  is application configuration and is not part of `.inkpod` persistence.
 
 Stroke color is `0xRRGGBBAA` straight-alpha sRGB. Fill and eyedropper use the
 explicit-depth color record. Snapshot pixels use
@@ -84,6 +139,12 @@ and may reuse their buffers after return. The transient stroke session and fill
 plan are not allocated ABI handles and therefore have no separate release
 function.
 
+`InkpodColorArray` and all input records are likewise borrowed only for one
+call. `InkpodColorBuffer` and its record storage remain caller-owned before,
+during, and after the call. A successful copy initializes each known
+`InkpodColorValue` record, including `struct_size`; an insufficient buffer
+returns `INKPOD_STATUS_BUFFER_TOO_SMALL` and still reports `color_count`.
+
 ## Ownership and lifetime
 
 - `inkpod_core_create` allocates `InkpodCore`; the caller owns it.
@@ -92,10 +153,21 @@ function.
   also drops any uncommitted stroke preview.
 - `inkpod_core_build_snapshot` allocates an immutable `InkpodSnapshot`. During a
   live stroke it captures preview content; otherwise it captures committed
-  content.
+  content. Output owner storage must not already contain a live handle; callers
+  release or move the previous owner before reusing that variable.
+- `inkpod_core_clipboard_copy` allocates `InkpodClipboard`; the caller owns that
+  handle until `inkpod_clipboard_release` receives its owner pointer and writes
+  null. A repeat release through the same owner variable is a successful no-op.
+  Copy output storage likewise must not already contain a live clipboard owner.
+  The opaque payload is immutable and may outlive or cross a document switch;
+  the Windows adapter releases it before shutdown.
+- `inkpod_core_build_snapshot_for_view` has exactly the same snapshot ownership
+  and release contract as `inkpod_core_build_snapshot`.
 - `inkpod_snapshot_get_view` returns a borrowed strided tile span and pixel
-  pointers. `inkpod_snapshot_get_transform` copies its view transform.
-- All borrowed tile/pixel pointers remain valid only while that snapshot is
+  pointers. `inkpod_snapshot_get_transform` copies its view transform;
+  `inkpod_snapshot_get_overlay` returns a borrowed guide span plus copied flags
+  and grid values.
+- All borrowed tile/pixel/guide pointers remain valid only while that snapshot is
   live. Tile storage is independently reference-counted, so a snapshot may
   safely outlive the Core that created it. No per-tile accessor is required.
 - `inkpod_snapshot_release` takes `InkpodSnapshot**`, releases it, and writes
@@ -114,9 +186,9 @@ caller errors after the owning pointer has been released.
 
 ## Threading
 
-`InkpodCore` is single-writer and thread-affine: create, document/view/stroke
-operations, fill/color/recovery operations, snapshot build, and destroy run on
-the creating Core engine thread.
+`InkpodCore` is single-writer and thread-affine: create, document/view/stroke,
+tree/selection/paste/navigation/shortcut, fill/color/recovery operations,
+snapshot build, and destroy run on the creating Core engine thread.
 A violation returns `INKPOD_STATUS_WRONG_THREAD` without consuming the handle.
 Published snapshots are immutable and `Send + Sync`; view/release must still be
 externally synchronized.
@@ -135,9 +207,11 @@ Every fallible export catches Rust panics and converts them to
 no-document, cancellation, and all-or-nothing fill overflow. Boundary code rejects null or
 misaligned pointers, short structures, unknown required flags/enums, invalid
 UTF-8/embedded NUL paths, invalid floating-point values, excessive sample/path
-counts, more than six inclusion colors, invalid color-depth/channel
-combinations, cumulative raster/fill work, out-of-range coordinates, and
-arithmetic overflow.
+counts, more than six inclusion colors, palette counts above 4096, invalid
+layer/plane/storage combinations, invalid selection spans/morphology, non-finite
+floating transforms, invalid view/guide/grid IDs, invalid color-depth/channel
+combinations, cumulative raster/fill/selection work, out-of-range coordinates,
+record sizes larger than their advertised stride, and arithmetic overflow.
 
 Error text is per-thread UTF-8. `inkpod_error_message_size` reports the required
 bytes including NUL; `inkpod_error_message_copy` copies it and reports written
