@@ -17,6 +17,12 @@ _Static_assert(sizeof(InkpodViewInput) == 48U, "view input layout drift");
 _Static_assert(sizeof(InkpodSnapshotTransform) == 48U, "snapshot transform layout drift");
 _Static_assert(sizeof(InkpodSnapshotGuide) == 24U, "snapshot guide layout drift");
 _Static_assert(sizeof(InkpodSnapshotOverlay) == 56U, "snapshot overlay layout drift");
+_Static_assert(sizeof(InkpodM4RasterInput) == 96U, "M4 raster layout drift");
+_Static_assert(sizeof(InkpodLightTableItemInput) == 168U, "light-table input layout drift");
+_Static_assert(sizeof(InkpodSequenceCellInput) == 120U, "sequence cell layout drift");
+_Static_assert(sizeof(InkpodSequenceInput) == 40U, "sequence input layout drift");
+_Static_assert(sizeof(InkpodMotionCheckInput) == 16U, "motion input layout drift");
+_Static_assert(sizeof(InkpodMotionFrame) == 40U, "motion frame layout drift");
 
 int inkpod_header_c11_smoke(void) {
     InkpodSnapshotView view = {0};

@@ -35,6 +35,12 @@ static_assert(sizeof(InkpodSelectionInput) == 72U);
 static_assert(sizeof(InkpodFloatingTransform) == 48U);
 static_assert(sizeof(InkpodGridInput) == 32U);
 static_assert(sizeof(InkpodLocatorOutput) == 48U);
+static_assert(sizeof(InkpodM4RasterInput) == 96U);
+static_assert(sizeof(InkpodLightTableItemInput) == 168U);
+static_assert(sizeof(InkpodSequenceCellInput) == 120U);
+static_assert(sizeof(InkpodSequenceInput) == 40U);
+static_assert(sizeof(InkpodMotionCheckInput) == 16U);
+static_assert(sizeof(InkpodMotionFrame) == 40U);
 
 extern "C" int inkpod_header_c11_smoke(void);
 
@@ -207,6 +213,134 @@ int InkpodRunAbiSmoke() {
         || document.width != 1920U || document.height != 1080U
         || (document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
         return 24;
+    }
+    std::array<std::uint8_t, 4U * 4U * 4U> light_pixels{};
+    const std::size_t light_offset = (2U * 4U + 2U) * 4U;
+    light_pixels[light_offset] = 90U;
+    light_pixels[light_offset + 1U] = 80U;
+    light_pixels[light_offset + 2U] = 70U;
+    light_pixels[light_offset + 3U] = 255U;
+    constexpr std::array<std::uint8_t, 9U> light_name{
+        'r', 'e', 'f', 'e', 'r', 'e', 'n', 'c', 'e'};
+    const InkpodM4RasterInput light_source{
+        sizeof(InkpodM4RasterInput),
+        INKPOD_STORAGE_RGBA8,
+        0U,
+        2U,
+        2U,
+        3U,
+        4U,
+        4U,
+        96000U,
+        96000U,
+        InkpodFrameRect{2, 2, 4, 4},
+        light_pixels.data(),
+        light_pixels.size(),
+        16U};
+    const InkpodLightTableItemInput light_item{
+        sizeof(InkpodLightTableItemInput),
+        INKPOD_LIGHT_TABLE_ITEM_VISIBLE,
+        500U,
+        INKPOD_LIGHT_TABLE_COLOR,
+        InkpodColorValue{
+            sizeof(InkpodColorValue),
+            INKPOD_COLOR_DEPTH_8,
+            0U,
+            128U,
+            255U,
+            255U},
+        0,
+        0,
+        1000U,
+        1000U,
+        0,
+        0U,
+        light_name.data(),
+        light_name.size(),
+        light_source};
+    std::uint64_t light_item_id{};
+    InkpodColorValue light_sample{};
+    light_sample.struct_size = sizeof(light_sample);
+    if (inkpod_core_light_table_add_item(
+            core, &light_item, &dispatch, &light_item_id) != INKPOD_STATUS_OK
+        || light_item_id == 0U
+        || inkpod_core_light_table_set_global_opacity(core, 500U, &dispatch)
+            != INKPOD_STATUS_OK
+        || inkpod_core_light_table_sample(core, 960U, 540U, &light_sample)
+            != INKPOD_STATUS_OK
+        || light_sample.red != 90U || light_sample.green != 80U
+        || light_sample.blue != 70U || light_sample.alpha != 64U) {
+        return 45;
+    }
+    InkpodFillInput light_boundary_fill{};
+    light_boundary_fill.struct_size = sizeof(light_boundary_fill);
+    light_boundary_fill.operation = INKPOD_FILL_SEED;
+    light_boundary_fill.flags = INKPOD_FILL_FLAG_SELECTION_PRESENT
+        | INKPOD_FILL_FLAG_LIGHT_TABLE_BOUNDARY;
+    light_boundary_fill.seed_x = 956U;
+    light_boundary_fill.seed_y = 536U;
+    light_boundary_fill.color = InkpodColorValue{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 200U, 10U, 20U, 255U};
+    light_boundary_fill.inclusion_mode = INKPOD_INCLUSION_NONE;
+    light_boundary_fill.selection = InkpodFrameRect{956, 536, 8, 8};
+    InkpodFillResult light_boundary_result{};
+    light_boundary_result.struct_size = sizeof(light_boundary_result);
+    if (inkpod_core_apply_fill(core, &light_boundary_fill, &light_boundary_result)
+            != INKPOD_STATUS_OK
+        || light_boundary_result.changed_pixel_count != 63U
+        || inkpod_core_light_table_sample(core, 960U, 540U, &light_sample)
+            != INKPOD_STATUS_OK
+        || light_sample.red != 90U || light_sample.green != 80U
+        || light_sample.blue != 70U || light_sample.alpha != 64U) {
+        return 47;
+    }
+    constexpr std::array<std::uint8_t, 4U> sequence_pixel_a{1U, 2U, 3U, 255U};
+    constexpr std::array<std::uint8_t, 4U> sequence_pixel_b{4U, 5U, 6U, 255U};
+    constexpr std::array<std::uint8_t, 10U> sequence_name_a{
+        'c', 'e', 'l', 'l', '1', '0', '.', 'p', 'n', 'g'};
+    constexpr std::array<std::uint8_t, 9U> sequence_name_b{
+        'c', 'e', 'l', 'l', '2', '.', 'p', 'n', 'g'};
+    const std::array<InkpodSequenceCellInput, 2U> sequence_cells{
+        InkpodSequenceCellInput{
+            sizeof(InkpodSequenceCellInput),
+            0U,
+            sequence_name_a.data(),
+            sequence_name_a.size(),
+            InkpodM4RasterInput{
+                sizeof(InkpodM4RasterInput), INKPOD_STORAGE_RGBA8, 0U, 5U, 1U, 1U,
+                1U, 1U, 96000U, 96000U, InkpodFrameRect{0, 0, 1, 1},
+                sequence_pixel_a.data(), sequence_pixel_a.size(), 4U}},
+        InkpodSequenceCellInput{
+            sizeof(InkpodSequenceCellInput),
+            0U,
+            sequence_name_b.data(),
+            sequence_name_b.size(),
+            InkpodM4RasterInput{
+                sizeof(InkpodM4RasterInput), INKPOD_STORAGE_RGBA8, 0U, 5U, 2U, 1U,
+                1U, 1U, 96000U, 96000U, InkpodFrameRect{0, 0, 1, 1},
+                sequence_pixel_b.data(), sequence_pixel_b.size(), 4U}}};
+    const InkpodSequenceInput sequence_input{
+        sizeof(InkpodSequenceInput),
+        0U,
+        0U,
+        sequence_cells.data(),
+        sequence_cells.size(),
+        sizeof(InkpodSequenceCellInput)};
+    const InkpodMotionCheckInput motion_input{
+        sizeof(InkpodMotionCheckInput), 24U, INKPOD_MOTION_FLAG_LOOP};
+    InkpodMotionFrame motion_frame{};
+    motion_frame.struct_size = sizeof(motion_frame);
+    if (inkpod_core_sequence_set(core, &sequence_input) != INKPOD_STATUS_OK
+        || inkpod_core_sequence_step(core, INKPOD_SEQUENCE_NEXT, 0U, &document)
+            != INKPOD_STATUS_UNSAVED_CHANGES
+        || inkpod_core_motion_check_start(core, &motion_input, &motion_frame)
+            != INKPOD_STATUS_OK
+        || motion_frame.cell_number != 2U || motion_frame.thumbnail_checksum == 0U
+        || inkpod_core_motion_check_step(core, INKPOD_SEQUENCE_NEXT, &motion_frame)
+            != INKPOD_STATUS_OK
+        || motion_frame.cell_number != 10U
+        || inkpod_core_motion_check_stop(core) != INKPOD_STATUS_OK) {
+        return 46;
     }
     InkpodTreeEdit tree_edit{};
     tree_edit.struct_size = sizeof(tree_edit);

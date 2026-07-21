@@ -20,6 +20,8 @@ binary manifest
   sequence of exact-depth RGBA8/RGBA16 palette records
   optional M3 document-editing metadata: typed layer tree/properties, active
   IDs, persistent selection plane, guides, and grid
+  optional M4 production-workflow metadata: light-table sets/items, transforms,
+  source identity/revision/DPI/reference frame, and source-plane IDs
   typed plane descriptors with pixel format and blob ranges
   tile blob descriptors with coordinate, dimensions, format,
   offset, length, and FNV-1a 64-bit checksum
@@ -58,6 +60,17 @@ A flag-0 or M2-only v1 file remains readable: Core deterministically upgrades
 its legacy main/color descriptors into one coloring layer and creates an empty
 selection mask without changing the legacy pixel payload.
 
+Header flag bit 2 advertises the additive `"M4WF"` version-1 section. It stores
+stable-ID light-table sets, the active set, global opacity, and ordered items.
+Each item stores a stable item/source-plane ID, source UUID/revision/DPI/
+reference frame, visibility, opacity, display mode/color, translation, scale,
+rotation, and bounded UTF-8 name. Source RGBA8/RGBA16 rasters remain in the
+checksummed blob area as typed `LightTable` planes and may differ in dimensions
+from the editing paper. They are read-only: fill derives a temporary boundary
+or sampled color but never writes the source. M1-M3 files open with one empty
+default set. The decoder rejects missing/unreferenced source planes, colliding
+IDs, invalid transforms/opacities/DPI, and M4 without the M3 typed tree.
+
 The decoder bounds the whole file (1 GiB), including a post-read check against
 concurrent file growth, plus manifest (16 MiB), dimensions, plane/blob counts,
 offsets, and lengths before allocation. It rejects unknown
@@ -65,8 +78,28 @@ required version/flags/types/color space, zero or inconsistent IDs, duplicate
 tile coordinates, mismatched dimensions/pixel formats, truncation, overflow,
 checksum mismatch, duplicate tree/guide IDs, missing active/selection IDs,
 invalid UTF-8/control characters, guide positions outside the document,
-out-of-range opacity/grid values, and a tree
+out-of-range opacity/grid values, stable-ID collisions between M3 state and M4
+source planes/sets/items, and a tree
 plane ID that does not correspond one-to-one with a persisted plane payload.
+
+## Common raster formats
+
+The Rust format layer exposes a bounded straight-alpha `CommonRaster` DTO and
+PNG/TIFF/TGA/BMP codecs. PNG and uncompressed chunky TIFF preserve RGBA8 or
+RGBA16. TGA and BMP preserve RGBA8 and reject RGBA16 instead of quantizing it.
+PNG stores pixels-per-metre, TIFF rational resolution plus an explicit
+unassociated-alpha `ExtraSamples` tag, and BMP
+pixels-per-metre; nearest rounding to/from DPI-thousandths is tested within
+0.02 DPI. TGA has no standard DPI field and reports DPI unavailable. Tests
+round-trip dimensions, bit depth, alpha, and each format's DPI capability.
+The white-background option composites at source depth and forces opaque alpha;
+disabling it preserves alpha. TIFF/TGA/BMP writers are deterministic and
+uncompressed. PNG import expands indexed palettes and transparency; TGA import
+honors both image-origin bits and declared alpha depth; BMP import accepts
+padded 24-bit RGB rows and the writer's standard 32-bit RGBA bitfields while
+rejecting ambiguous masks. Other unsupported compression/layouts are rejected.
+Decoded dimensions and byte lengths are rejected before allocating output
+storage, and public DTO metadata is revalidated before every conversion.
 
 ## Save and savepoint
 

@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 inkpod-image = { path = "../inkpod-image" }
+png = "0.17.16"
 
 [lints]
 workspace = true

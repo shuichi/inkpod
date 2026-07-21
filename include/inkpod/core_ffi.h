@@ -24,6 +24,7 @@ typedef uint32_t InkpodStatus;
 #define INKPOD_STATUS_NO_DOCUMENT UINT32_C(9)
 #define INKPOD_STATUS_CANCELLED UINT32_C(10)
 #define INKPOD_STATUS_FILL_OVERFLOW UINT32_C(11)
+#define INKPOD_STATUS_UNSAVED_CHANGES UINT32_C(12)
 
 typedef uint32_t InkpodCommandKind;
 #define INKPOD_COMMAND_NO_OP UINT32_C(0)
@@ -95,6 +96,8 @@ typedef uint32_t InkpodFillOperation;
 #define INKPOD_FILL_FLAG_OVERFLOW_ABORT (UINT64_C(1) << 1)
 #define INKPOD_FILL_FLAG_TRANSPARENT_ONLY (UINT64_C(1) << 2)
 #define INKPOD_FILL_FLAG_SELECTION_PRESENT (UINT64_C(1) << 3)
+#define INKPOD_FILL_FLAG_LIGHT_TABLE_BOUNDARY (UINT64_C(1) << 4)
+#define INKPOD_FILL_FLAG_LIGHT_TABLE_COLOR (UINT64_C(1) << 5)
 
 typedef uint32_t InkpodInclusionMode;
 #define INKPOD_INCLUSION_NONE UINT32_C(0)
@@ -137,6 +140,23 @@ typedef uint32_t InkpodStoragePixelFormat;
 #define INKPOD_STORAGE_GRAYSCALE16 UINT32_C(3)
 #define INKPOD_STORAGE_RGBA8 UINT32_C(4)
 #define INKPOD_STORAGE_RGBA16 UINT32_C(5)
+
+typedef uint32_t InkpodLightTableDisplayMode;
+#define INKPOD_LIGHT_TABLE_COLOR UINT32_C(1)
+#define INKPOD_LIGHT_TABLE_MONOTONE UINT32_C(2)
+#define INKPOD_LIGHT_TABLE_HALFTONE UINT32_C(3)
+#define INKPOD_LIGHT_TABLE_ITEM_VISIBLE (UINT32_C(1) << 0)
+
+typedef uint32_t InkpodSequenceDirection;
+#define INKPOD_SEQUENCE_PREVIOUS UINT32_C(1)
+#define INKPOD_SEQUENCE_NEXT UINT32_C(2)
+#define INKPOD_SEQUENCE_FLAG_LOOP (UINT32_C(1) << 0)
+#define INKPOD_MOTION_FLAG_LOOP (UINT64_C(1) << 0)
+#define INKPOD_MOTION_FLAG_INCLUDE_SELECTION (UINT64_C(1) << 1)
+#define INKPOD_MOTION_FLAG_INCLUDE_LIGHT_TABLE (UINT64_C(1) << 2)
+#define INKPOD_MOTION_FRAME_PAUSED (UINT32_C(1) << 0)
+#define INKPOD_MOTION_FRAME_INCLUDE_SELECTION (UINT32_C(1) << 1)
+#define INKPOD_MOTION_FRAME_INCLUDE_LIGHT_TABLE (UINT32_C(1) << 2)
 
 typedef uint32_t InkpodTreeOperation;
 #define INKPOD_TREE_CREATE_LAYER UINT32_C(1)
@@ -501,6 +521,77 @@ typedef struct InkpodLocatorOutput {
     InkpodColorValue color;
 } InkpodLocatorOutput;
 
+/* M4 raster bytes are borrowed for one call. Rows may be padded, but the
+ * advertised byte range must contain every complete row. Only straight RGBA8
+ * and RGBA16 storage formats are accepted. */
+typedef struct InkpodM4RasterInput {
+    uint32_t struct_size;
+    InkpodStoragePixelFormat pixel_format;
+    uint64_t flags;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint64_t source_revision;
+    uint32_t width;
+    uint32_t height;
+    uint32_t dpi_x_milli;
+    uint32_t dpi_y_milli;
+    InkpodFrameRect reference_frame;
+    const uint8_t* pixels;
+    uint64_t pixel_bytes;
+    uint64_t row_stride_bytes;
+} InkpodM4RasterInput;
+
+typedef struct InkpodLightTableItemInput {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint32_t opacity_milli;
+    InkpodLightTableDisplayMode display_mode;
+    InkpodColorValue display_color;
+    int32_t translate_x_milli;
+    int32_t translate_y_milli;
+    uint32_t scale_x_milli;
+    uint32_t scale_y_milli;
+    int32_t rotation_milli_degrees;
+    uint32_t reserved;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+    InkpodM4RasterInput source;
+} InkpodLightTableItemInput;
+
+typedef struct InkpodSequenceCellInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+    InkpodM4RasterInput source;
+} InkpodSequenceCellInput;
+
+typedef struct InkpodSequenceInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    const InkpodSequenceCellInput* cells;
+    uint64_t cell_count;
+    uint64_t cell_stride_bytes;
+} InkpodSequenceInput;
+
+typedef struct InkpodMotionCheckInput {
+    uint32_t struct_size;
+    uint32_t fps;
+    uint64_t flags;
+} InkpodMotionCheckInput;
+
+typedef struct InkpodMotionFrame {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t sequence_index;
+    uint32_t cell_number;
+    uint32_t thumbnail_width;
+    uint32_t thumbnail_height;
+    uint32_t reserved;
+    uint64_t thumbnail_checksum;
+} InkpodMotionFrame;
+
 uint32_t inkpod_abi_version(void);
 
 /* On success, Rust allocates *out_core and the calling thread becomes its
@@ -537,7 +628,9 @@ InkpodStatus inkpod_core_set_active_plane(
     InkpodPlaneKind plane);
 
 /* Fill planning is bounded and all-or-nothing. Overflow reports one candidate
- * in result and does not change pixels, revision, dirty, or history. */
+ * in result and does not change pixels, revision, dirty, or history. M4's
+ * LIGHT_TABLE_BOUNDARY/COLOR flags sample immutable reference snapshots; they
+ * never make a light-table raster a writable fill destination. */
 InkpodStatus inkpod_core_apply_fill(
     InkpodCore* core,
     const InkpodFillInput* input,
@@ -754,6 +847,45 @@ InkpodStatus inkpod_core_view_apply(
 InkpodStatus inkpod_core_view_close(
     InkpodCore* core,
     uint64_t view_id);
+
+/* M4 production workflow. Light-table source pixels and sequence-cell spans
+ * are copied before return. A dirty cell switch reports UNSAVED_CHANGES and
+ * leaves the active document/revision untouched. */
+InkpodStatus inkpod_core_light_table_add_item(
+    InkpodCore* core,
+    const InkpodLightTableItemInput* input,
+    InkpodDispatchResult* result,
+    uint64_t* out_item_id);
+InkpodStatus inkpod_core_light_table_set_global_opacity(
+    InkpodCore* core,
+    uint32_t opacity_milli,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_light_table_sample(
+    InkpodCore* core,
+    uint32_t x,
+    uint32_t y,
+    InkpodColorValue* out_color);
+InkpodStatus inkpod_core_light_table_swap(
+    InkpodCore* core,
+    uint64_t item_id,
+    InkpodDocumentInfo* out_info);
+InkpodStatus inkpod_core_sequence_set(
+    InkpodCore* core,
+    const InkpodSequenceInput* input);
+InkpodStatus inkpod_core_sequence_step(
+    InkpodCore* core,
+    InkpodSequenceDirection direction,
+    uint32_t flags,
+    InkpodDocumentInfo* out_info);
+InkpodStatus inkpod_core_motion_check_start(
+    InkpodCore* core,
+    const InkpodMotionCheckInput* input,
+    InkpodMotionFrame* out_frame);
+InkpodStatus inkpod_core_motion_check_step(
+    InkpodCore* core,
+    InkpodSequenceDirection direction,
+    InkpodMotionFrame* out_frame);
+InkpodStatus inkpod_core_motion_check_stop(InkpodCore* core);
 InkpodStatus inkpod_core_build_snapshot_for_view(
     InkpodCore* core,
     uint64_t view_id,

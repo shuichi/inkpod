@@ -1,8 +1,16 @@
 #![forbid(unsafe_code)]
 
+mod m4;
+
+pub use m4::{
+    LightTableDisplayMode, LightTableItemInfo, LightTableItemInput, LightTableSetInfo,
+    LightTableSource, MotionCheckConfig, MotionFrame, RgbaRasterBytes, SequenceCellInfo,
+    SequenceCellSource, SequenceDirection, Thumbnail,
+};
+
 use inkpod_format::{
-    CellFile, FileGrid, FileGuide, FileLayer, FileM3Metadata, FilePlane, FilePlaneProperties,
-    FileTile, FormatError, PlaneKind as FilePlaneKind,
+    CellFile, CommonRaster, CommonRasterFormat, FileGrid, FileGuide, FileLayer, FileM3Metadata,
+    FilePlane, FilePlaneProperties, FileTile, FormatError, PlaneKind as FilePlaneKind,
 };
 use inkpod_image::{
     ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,
@@ -37,8 +45,12 @@ const MAX_STROKE_WORK: u64 = 16_777_216;
 const MIN_ZOOM: f64 = 0.01;
 const MAX_ZOOM: f64 = 64.0;
 
-pub use inkpod_format::{FrameMetadata, GuideAxis, LayerKind, Margins, RectI32};
-pub use inkpod_image::{ColorCheckMode, EyedropperSource, InclusionMode, PixelFormat, PixelValue};
+pub use inkpod_format::{
+    FrameMetadata, GuideAxis, LayerKind, MAX_COMMON_RASTER_BYTES, Margins, RectI32,
+};
+pub use inkpod_image::{
+    ColorCheckMode, EyedropperSource, InclusionMode, MAX_RASTER_DIMENSION, PixelFormat, PixelValue,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Command {
@@ -93,6 +105,7 @@ impl PlaneType {
             FilePlaneKind::Color => Self::Color,
             FilePlaneKind::Raster => Self::Raster,
             FilePlaneKind::Selection => Self::Selection,
+            FilePlaneKind::LightTable => Self::Raster,
         }
     }
 }
@@ -464,6 +477,7 @@ pub enum CoreError {
     Fill(FillError),
     FillOverflow { x: u32, y: u32 },
     Cancelled,
+    UnsavedChanges,
     Format(String),
 }
 
@@ -479,6 +493,8 @@ impl fmt::Display for CoreError {
                 write!(formatter, "fill reached image edge at ({x}, {y})")
             }
             Self::Cancelled => formatter.write_str("operation was cancelled before commit"),
+            Self::UnsavedChanges => formatter
+                .write_str("the active cell has unsaved changes and cannot be switched silently"),
             Self::Format(message) => formatter.write_str(message),
         }
     }
@@ -717,6 +733,7 @@ struct CellDocument {
     selection: TileRaster,
     guides: Vec<Guide>,
     grid: GridConfig,
+    light_table: m4::LightTableState,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -726,6 +743,7 @@ struct DocumentIds {
     main_plane: u64,
     color_plane: u64,
     selection_plane: u64,
+    light_table_set: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -818,6 +836,7 @@ impl CellDocument {
             selection: TileRaster::new(paper.width, paper.height, PixelFormat::BinaryMask8)?,
             guides: Vec::new(),
             grid: GridConfig::default(),
+            light_table: m4::LightTableState::new(ids.light_table_set),
         })
     }
 
@@ -834,6 +853,7 @@ impl CellDocument {
             FilePlaneKind::Selection,
             &self.selection,
         ));
+        planes.extend(self.light_table.file_planes());
         CellFile {
             document_uuid: self.uuid.to_le_bytes(),
             document_id: self.id,
@@ -892,6 +912,7 @@ impl CellDocument {
                     subdivisions: self.grid.subdivisions,
                 },
             }),
+            m4: Some(self.light_table.to_file()),
         }
     }
 
@@ -1025,6 +1046,28 @@ impl CellDocument {
                     GridConfig::default(),
                 )
             };
+        let legacy_light_table_set_id = file
+            .planes
+            .iter()
+            .map(|plane| plane.id)
+            .chain(file.m3.iter().flat_map(|metadata| {
+                metadata
+                    .layers
+                    .iter()
+                    .map(|layer| layer.id)
+                    .chain(metadata.guides.iter().map(|guide| guide.id))
+            }))
+            .chain([file.document_id, selection_plane_id])
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(CoreError::InvalidState("light-table set ID overflow"))?;
+        let light_table = m4::LightTableState::from_file(
+            file.m4.as_ref(),
+            &file.planes,
+            revision,
+            legacy_light_table_set_id,
+        )?;
         Ok(Self {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: file.document_id,
@@ -1042,6 +1085,7 @@ impl CellDocument {
             selection,
             guides,
             grid,
+            light_table,
         })
     }
 
@@ -1167,6 +1211,7 @@ impl CellDocument {
                 std::iter::once(layer.id).chain(layer.planes.iter().map(|plane| plane.id))
             })
             .chain(self.guides.iter().map(|guide| guide.id))
+            .chain([self.light_table.maximum_id()])
             .chain([self.id, self.selection_plane_id])
             .max()
             .unwrap_or(0)
@@ -1252,6 +1297,9 @@ pub struct Core {
     next_view_id: u64,
     floating: Option<FloatingSelection>,
     shortcuts: BTreeMap<u32, ShortcutBinding>,
+    sequence: Option<m4::SequenceState>,
+    motion_check: Option<m4::MotionCheckState>,
+    subpalette_index: Option<usize>,
 }
 
 impl Default for Core {
@@ -1297,6 +1345,9 @@ impl Core {
             next_view_id: 1,
             floating: None,
             shortcuts: default_shortcuts(),
+            sequence: None,
+            motion_check: None,
+            subpalette_index: None,
         }
     }
 
@@ -1335,6 +1386,7 @@ impl Core {
             main_plane: self.allocate_id(),
             color_plane: self.allocate_id(),
             selection_plane: self.allocate_id(),
+            light_table_set: self.allocate_id(),
         };
         let document = CellDocument::new(
             ids,
@@ -1355,6 +1407,9 @@ impl Core {
         self.color_check = None;
         self.secondary_views.clear();
         self.floating = None;
+        self.sequence = None;
+        self.motion_check = None;
+        self.subpalette_index = None;
         self.document_info()
     }
 
@@ -2571,9 +2626,38 @@ impl Core {
         self.apply_fill_with_cancel(request, || false)
     }
 
+    pub fn apply_fill_with_light_table(
+        &mut self,
+        request: &FillRequest,
+        use_boundary: bool,
+        use_sampled_color: bool,
+    ) -> Result<FillOutcome, CoreError> {
+        self.apply_fill_internal(request, use_boundary, use_sampled_color, || false)
+    }
+
+    pub fn apply_fill_with_light_table_and_cancel(
+        &mut self,
+        request: &FillRequest,
+        use_boundary: bool,
+        use_sampled_color: bool,
+        is_cancelled: impl FnMut() -> bool,
+    ) -> Result<FillOutcome, CoreError> {
+        self.apply_fill_internal(request, use_boundary, use_sampled_color, is_cancelled)
+    }
+
     pub fn apply_fill_with_cancel(
         &mut self,
         request: &FillRequest,
+        is_cancelled: impl FnMut() -> bool,
+    ) -> Result<FillOutcome, CoreError> {
+        self.apply_fill_internal(request, false, false, is_cancelled)
+    }
+
+    fn apply_fill_internal(
+        &mut self,
+        request: &FillRequest,
+        use_light_table_boundary: bool,
+        use_light_table_color: bool,
         mut is_cancelled: impl FnMut() -> bool,
     ) -> Result<FillOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
@@ -2602,13 +2686,77 @@ impl Core {
             inclusion_mode: request.inclusion_mode,
             inclusion_colors: request.inclusion_colors.clone(),
         };
+        let light_boundary = if use_light_table_boundary {
+            let mut raster = document.raster(ActivePlane::MainLine).clone();
+            for y in 0..document.height {
+                if is_cancelled() {
+                    return Err(CoreError::Cancelled);
+                }
+                for x in 0..document.width {
+                    if document
+                        .light_table
+                        .sample(document.frames.reference_frame, x, y)?
+                        .is_some()
+                    {
+                        let boundary = match raster.format() {
+                            PixelFormat::BinaryMask8 => PixelValue::Binary(255),
+                            PixelFormat::Grayscale8 => PixelValue::Grayscale8(255),
+                            PixelFormat::Grayscale16 => PixelValue::Grayscale16(u16::MAX),
+                            _ => {
+                                return Err(CoreError::InvalidState(
+                                    "main-line format cannot hold a light-table boundary",
+                                ));
+                            }
+                        };
+                        raster.set_pixel(x, y, boundary, self.document_revision)?;
+                    }
+                }
+            }
+            Some(raster)
+        } else {
+            None
+        };
+        let main_line = light_boundary
+            .as_ref()
+            .unwrap_or_else(|| document.raster(ActivePlane::MainLine));
+        let fill_color = if use_light_table_color {
+            let sampled = document
+                .light_table
+                .sample(
+                    document.frames.reference_frame,
+                    request.seed_x,
+                    request.seed_y,
+                )?
+                .ok_or(CoreError::InvalidState(
+                    "light-table fill color is unavailable at the seed",
+                ))?;
+            match (document.raster(ActivePlane::Color).format(), sampled) {
+                (PixelFormat::StraightRgba8, PixelValue::Rgba(value)) => PixelValue::Rgba(value),
+                (PixelFormat::StraightRgba16, PixelValue::Rgba16(value)) => {
+                    PixelValue::Rgba16(value)
+                }
+                (PixelFormat::StraightRgba16, PixelValue::Rgba(value)) => PixelValue::Rgba16([
+                    u16::from(value[0]) * 257,
+                    u16::from(value[1]) * 257,
+                    u16::from(value[2]) * 257,
+                    u16::from(value[3]) * 257,
+                ]),
+                _ => {
+                    return Err(CoreError::InvalidState(
+                        "light-table fill color does not match the color plane",
+                    ));
+                }
+            }
+        } else {
+            request.color
+        };
         let plan = match request.operation {
             FillOperation::Seed => seed_fill_with_cancel(
-                document.raster(ActivePlane::MainLine),
+                main_line,
                 document.raster(ActivePlane::Color),
                 selection.as_ref(),
                 (request.seed_x, request.seed_y),
-                request.color,
+                fill_color,
                 &options,
                 &mut is_cancelled,
             )?,
@@ -2617,10 +2765,10 @@ impl Core {
                     "closed-region fill requires an operation selection",
                 ))?;
                 closed_region_fill_with_cancel(
-                    document.raster(ActivePlane::MainLine),
+                    main_line,
                     document.raster(ActivePlane::Color),
                     operation,
-                    request.color,
+                    fill_color,
                     &options,
                     &mut is_cancelled,
                 )?
@@ -2694,6 +2842,14 @@ impl Core {
         y: u32,
     ) -> Result<PixelValue, CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        if source == EyedropperSource::LightTableTopmost {
+            return document
+                .light_table
+                .sample(document.frames.reference_frame, x, y)?
+                .ok_or(CoreError::InvalidState(
+                    "eyedropper source is transparent or unavailable",
+                ));
+        }
         let line = PlaneSample {
             raster: document.raster(ActivePlane::MainLine),
             base_color: Some(document.main_line_color),
@@ -3008,6 +3164,9 @@ impl Core {
         self.color_check = None;
         self.secondary_views.clear();
         self.floating = None;
+        self.sequence = None;
+        self.motion_check = None;
+        self.subpalette_index = None;
         self.document_info()
     }
 
@@ -3030,6 +3189,9 @@ impl Core {
         self.color_check = None;
         self.secondary_views.clear();
         self.floating = None;
+        self.sequence = None;
+        self.motion_check = None;
+        self.subpalette_index = None;
         self.document_info()
     }
 
@@ -3320,7 +3482,7 @@ impl Core {
             Some(ColorCheckMode::NativeAlpha) => SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA,
             None => 0,
         };
-        let coords: BTreeSet<_> = document
+        let mut coords: BTreeSet<_> = document
             .layers
             .iter()
             .filter(|layer| layer.visible)
@@ -3329,6 +3491,15 @@ impl Core {
             .flat_map(|plane| plane.raster.allocated_coords())
             .chain(document.selection.allocated_coords())
             .collect();
+        if document.light_table.has_visible_items() {
+            let tiles_x = document.width.div_ceil(TILE_SIZE);
+            let tiles_y = document.height.div_ceil(TILE_SIZE);
+            for y in 0..tiles_y {
+                for x in 0..tiles_x {
+                    coords.insert(TileCoord { x, y });
+                }
+            }
+        }
         let mut tiles = Vec::with_capacity(coords.len());
         for coord in &coords {
             let source_revision = document
@@ -3340,6 +3511,7 @@ impl Core {
                 .map(|plane| plane.raster.tile_revision(*coord))
                 .max()
                 .unwrap_or(0)
+                .max(document.light_table.source_revision())
                 .max(document.selection.tile_revision(*coord));
             if cache
                 .get(coord)
@@ -4811,7 +4983,10 @@ fn compose_tile(
         for x in 0..width {
             let document_x = origin_x + x;
             let document_y = origin_y + y;
-            let mut composite = [0_u8; 4];
+            let mut composite = document
+                .light_table
+                .composite(document.frames.reference_frame, document_x, document_y)
+                .unwrap_or([0_u8; 4]);
             // Layer index zero is the top of the palette. Composite from the
             // bottom towards the top so palette order and rendered order agree.
             for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
@@ -6338,5 +6513,494 @@ mod tests {
             core.document_info().unwrap().document_revision,
             locked_revision
         );
+    }
+
+    fn m4_rgba8(width: u32, height: u32, pixels: Vec<u8>) -> CommonRaster {
+        CommonRaster::new(
+            width,
+            height,
+            PixelFormat::StraightRgba8,
+            Some(DEFAULT_DPI_MILLI),
+            Some(DEFAULT_DPI_MILLI),
+            pixels,
+        )
+        .unwrap()
+    }
+
+    fn m4_rgba16(width: u32, height: u32, channels: Vec<u16>) -> CommonRaster {
+        CommonRaster::new(
+            width,
+            height,
+            PixelFormat::StraightRgba16,
+            Some(DEFAULT_DPI_MILLI),
+            Some(DEFAULT_DPI_MILLI),
+            channels.into_iter().flat_map(u16::to_le_bytes).collect(),
+        )
+        .unwrap()
+    }
+
+    fn m4_source(
+        name: &str,
+        uuid: u128,
+        width: u32,
+        height: u32,
+        pixel: [u8; 4],
+    ) -> SequenceCellSource {
+        let mut pixels = vec![0_u8; width as usize * height as usize * 4];
+        pixels[..4].copy_from_slice(&pixel);
+        SequenceCellSource::from_common_raster(name, uuid, &m4_rgba8(width, height, pixels))
+            .unwrap()
+    }
+
+    #[test]
+    fn m4_acceptance_reference_frame_aligns_different_cell_sizes_and_reopens() {
+        let mut core = Core::new();
+        core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let mut pixels = vec![0_u8; 4 * 4 * 4];
+        pixels[..4].copy_from_slice(&[10, 20, 30, 255]);
+        let source_offset = (2 * 4 + 2) * 4;
+        pixels[source_offset..source_offset + 4].copy_from_slice(&[200, 40, 20, 255]);
+        let source_corner_offset = (3 * 4 + 3) * 4;
+        pixels[source_corner_offset..source_corner_offset + 4].copy_from_slice(&[50, 60, 70, 255]);
+        let source = LightTableSource::from_common_raster(
+            0x1111,
+            7,
+            RectI32 {
+                x: 2,
+                y: 2,
+                width: 4,
+                height: 4,
+            },
+            &m4_rgba8(4, 4, pixels),
+        )
+        .unwrap();
+        core.light_table_add_item(LightTableItemInput::new("small reference", source))
+            .unwrap();
+        assert_eq!(
+            core.light_table_sample(4, 4).unwrap(),
+            PixelValue::Rgba([200, 40, 20, 255])
+        );
+        assert_eq!(
+            core.light_table_sample(2, 2).unwrap(),
+            PixelValue::Rgba([10, 20, 30, 255])
+        );
+        assert_eq!(
+            core.light_table_sample(5, 5).unwrap(),
+            PixelValue::Rgba([50, 60, 70, 255])
+        );
+        assert!(matches!(
+            core.light_table_sample(0, 0),
+            Err(CoreError::InvalidState(_))
+        ));
+        let snapshot = core.build_snapshot();
+        let tile = &snapshot.tiles()[0];
+        let mut golden = vec![0_u8; 8 * 8 * 4];
+        golden[(2 * 8 + 2) * 4..(2 * 8 + 2) * 4 + 4].copy_from_slice(&[30, 20, 10, 255]);
+        golden[(4 * 8 + 4) * 4..(4 * 8 + 4) * 4 + 4].copy_from_slice(&[20, 40, 200, 255]);
+        golden[(5 * 8 + 5) * 4..(5 * 8 + 5) * 4 + 4].copy_from_slice(&[70, 60, 50, 255]);
+        assert_eq!(tile.stride_bytes(), 8 * 4);
+        assert_eq!(tile.pixels(), golden);
+
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-m4-reference-{}-{}.inkpod",
+            std::process::id(),
+            core.document_info().unwrap().document_revision
+        ));
+        let _ = std::fs::remove_file(&path);
+        core.save(&path).unwrap();
+        let mut reopened = Core::new();
+        reopened.open(&path).unwrap();
+        assert_eq!(
+            reopened.light_table_sample(4, 4).unwrap(),
+            PixelValue::Rgba([200, 40, 20, 255])
+        );
+        assert_eq!(
+            reopened.light_table_sample(2, 2).unwrap(),
+            PixelValue::Rgba([10, 20, 30, 255])
+        );
+        assert_eq!(
+            reopened.light_table_sample(5, 5).unwrap(),
+            PixelValue::Rgba([50, 60, 70, 255])
+        );
+        let before_swap = reopened.light_table_items().unwrap();
+        assert_eq!(before_swap.len(), 1);
+        let old_uuid = reopened.document_info().unwrap().document_uuid;
+        let swapped = reopened
+            .light_table_swap_with_active(before_swap[0].id)
+            .unwrap();
+        assert_eq!(swapped.document_uuid, 0x1111);
+        assert_eq!((swapped.width, swapped.height), (4, 4));
+        let after_swap = reopened.light_table_items().unwrap();
+        assert_eq!(after_swap[0].id, before_swap[0].id);
+        assert_eq!(after_swap[0].opacity_milli, before_swap[0].opacity_milli);
+        assert_eq!(after_swap[0].source_document_uuid, old_uuid);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn m4_acceptance_individual_and_global_opacity_multiply_to_twenty_five_percent() {
+        let mut core = Core::new();
+        core.new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let source = LightTableSource::from_common_raster(
+            0x2222,
+            1,
+            RectI32 {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 2,
+            },
+            &m4_rgba8(2, 2, [100, 120, 140, 255].repeat(4)),
+        )
+        .unwrap();
+        let mut input = LightTableItemInput::new("half", source);
+        input.opacity_milli = 500;
+        core.light_table_add_item(input).unwrap();
+        core.light_table_set_global_opacity(500).unwrap();
+        let items = core.light_table_items().unwrap();
+        assert_eq!(items[0].effective_opacity_milli, 250);
+        assert_eq!(
+            core.light_table_sample(1, 1).unwrap(),
+            PixelValue::Rgba([100, 120, 140, 64])
+        );
+    }
+
+    #[test]
+    fn m4_light_table_color_sampling_preserves_exact_rgba16() {
+        let mut core = Core::new();
+        core.new_cell(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let source = LightTableSource::from_common_raster(
+            0x2424,
+            1,
+            RectI32 {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            &m4_rgba16(1, 1, vec![1, 257, 32_769, 65_535]),
+        )
+        .unwrap();
+        core.light_table_add_item(LightTableItemInput::new("RGBA16", source))
+            .unwrap();
+        assert_eq!(
+            core.eyedropper(EyedropperSource::LightTableTopmost, 0, 0)
+                .unwrap(),
+            PixelValue::Rgba16([1, 257, 32_769, 65_535])
+        );
+        core.light_table_set_global_opacity(500).unwrap();
+        assert_eq!(
+            core.light_table_sample(0, 0).unwrap(),
+            PixelValue::Rgba16([1, 257, 32_769, 32_768])
+        );
+        let before_fill = core.document_info().unwrap();
+        assert!(matches!(
+            core.apply_fill_with_light_table(&fill_request(0, 0, [10, 20, 30, 255]), false, true,),
+            Err(CoreError::InvalidState(_))
+        ));
+        assert_eq!(core.document_info().unwrap(), before_fill);
+    }
+
+    #[test]
+    fn m4_light_table_set_item_management_is_transactional_and_stable_id_based() {
+        let mut core = Core::new();
+        core.new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let default_set_id = core.light_table_sets().unwrap()[0].id;
+        let (_, set_id) = core.light_table_create_set("References").unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-m4-active-set-{}-{}.inkpod",
+            std::process::id(),
+            core.document_info().unwrap().document_revision
+        ));
+        let _ = std::fs::remove_file(&path);
+        core.save(&path).unwrap();
+        let before_active_switch = core.document_info().unwrap();
+        let active_switch = core.light_table_set_active(default_set_id).unwrap();
+        assert_eq!(
+            active_switch.revision(),
+            before_active_switch.document_revision + 1
+        );
+        assert!(core.document_info().unwrap().dirty);
+        assert!(
+            core.light_table_sets()
+                .unwrap()
+                .iter()
+                .any(|set| set.id == default_set_id && set.active)
+        );
+        core.undo().unwrap();
+        assert!(!core.document_info().unwrap().dirty);
+        assert!(
+            core.light_table_sets()
+                .unwrap()
+                .iter()
+                .any(|set| set.id == set_id && set.active)
+        );
+        let source = LightTableSource::from_common_raster(
+            0x2525,
+            1,
+            RectI32 {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 2,
+            },
+            &m4_rgba8(2, 2, [20, 40, 60, 255].repeat(4)),
+        )
+        .unwrap();
+        let mut invalid_source = source.clone();
+        invalid_source.document_uuid = 0;
+        let before_invalid_source = core.document_info().unwrap();
+        assert!(matches!(
+            core.light_table_add_item(LightTableItemInput::new("Invalid", invalid_source)),
+            Err(CoreError::InvalidArgument(_))
+        ));
+        assert_eq!(core.document_info().unwrap(), before_invalid_source);
+        let mut invalid_rotation = LightTableItemInput::new("Invalid", source.clone());
+        invalid_rotation.rotation_milli_degrees = i32::MIN;
+        let before_invalid = core.document_info().unwrap();
+        assert!(matches!(
+            core.light_table_add_item(invalid_rotation),
+            Err(CoreError::InvalidArgument(_))
+        ));
+        assert_eq!(core.document_info().unwrap(), before_invalid);
+        let (_, item_id) = core
+            .light_table_add_item(LightTableItemInput::new("Item", source.clone()))
+            .unwrap();
+        let (_, duplicate_id) = core.light_table_duplicate_set(set_id).unwrap();
+        assert_ne!(duplicate_id, set_id);
+        let duplicate_item_id = core.light_table_items().unwrap()[0].id;
+        assert_ne!(duplicate_item_id, item_id);
+        core.light_table_rename_set(duplicate_id, "References")
+            .unwrap();
+        core.light_table_reorder_set(duplicate_id, 0).unwrap();
+        core.light_table_set_active(set_id).unwrap();
+        let mut update = LightTableItemInput::new("Moved", source);
+        update.translate_x_milli = -1_000;
+        core.light_table_update_item(item_id, update).unwrap();
+        assert_eq!(
+            core.light_table_sample(0, 1).unwrap(),
+            PixelValue::Rgba([20, 40, 60, 255])
+        );
+        core.light_table_remove_item(item_id).unwrap();
+        assert!(core.light_table_items().unwrap().is_empty());
+        core.undo().unwrap();
+        assert_eq!(core.light_table_items().unwrap()[0].id, item_id);
+        core.redo().unwrap();
+        assert!(core.light_table_items().unwrap().is_empty());
+        core.light_table_delete_set(set_id).unwrap();
+        core.light_table_delete_set(duplicate_id).unwrap();
+        let sets = core.light_table_sets().unwrap();
+        assert_eq!(sets.len(), 1);
+        let final_set_id = sets[0].id;
+        assert!(core.light_table_delete_set(final_set_id).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn m4_acceptance_light_table_fill_boundary_is_read_only() {
+        let mut core = Core::new();
+        core.new_cell(5, 5, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let mut pixels = vec![0_u8; 5 * 5 * 4];
+        for y in 0..5 {
+            let offset = (y * 5 + 2) * 4;
+            pixels[offset..offset + 4].copy_from_slice(&[10, 20, 30, 255]);
+        }
+        let source = LightTableSource::from_common_raster(
+            0x3333,
+            9,
+            RectI32 {
+                x: 2,
+                y: 2,
+                width: 5,
+                height: 5,
+            },
+            &m4_rgba8(5, 5, pixels),
+        )
+        .unwrap();
+        core.light_table_add_item(LightTableItemInput::new("boundary", source))
+            .unwrap();
+        let before_item = core.light_table_items().unwrap()[0].clone();
+        let before_sample = core.light_table_sample(2, 2).unwrap();
+        let before_cancel = core.document_info().unwrap();
+        let mut cancellation_polls = 0;
+        assert_eq!(
+            core.apply_fill_with_light_table_and_cancel(
+                &fill_request(0, 2, [200, 0, 0, 255]),
+                true,
+                false,
+                || {
+                    cancellation_polls += 1;
+                    cancellation_polls == 2
+                },
+            ),
+            Err(CoreError::Cancelled)
+        );
+        assert_eq!(core.document_info().unwrap(), before_cancel);
+        assert_eq!(core.light_table_items().unwrap()[0], before_item);
+        assert_eq!(core.light_table_sample(2, 2).unwrap(), before_sample);
+        let outcome = core
+            .apply_fill_with_light_table(&fill_request(0, 2, [200, 0, 0, 255]), true, false)
+            .unwrap();
+        assert_eq!(outcome.changed_pixels, 10);
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 1, 2).unwrap(),
+            PixelValue::Rgba([200, 0, 0, 255])
+        );
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 3, 2).unwrap(),
+            PixelValue::Rgba([0, 0, 0, 0])
+        );
+        assert_eq!(core.light_table_items().unwrap()[0], before_item);
+        assert_eq!(core.light_table_sample(2, 2).unwrap(), before_sample);
+        core.undo().unwrap();
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 1, 2).unwrap(),
+            PixelValue::Rgba([0, 0, 0, 0])
+        );
+        assert_eq!(core.light_table_sample(2, 2).unwrap(), before_sample);
+    }
+
+    #[test]
+    fn m4_acceptance_sequence_switch_rejects_unsaved_document_without_discarding_it() {
+        let mut core = Core::new();
+        let current = core
+            .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        core.set_sequence(vec![
+            m4_source("cell1.png", current.document_uuid, 2, 2, [1, 2, 3, 255]),
+            m4_source("cell2.png", 0x4444, 3, 2, [4, 5, 6, 255]),
+        ])
+        .unwrap();
+        let before = core.document_info().unwrap();
+        assert_eq!(
+            core.sequence_step(SequenceDirection::Next, false),
+            Err(CoreError::UnsavedChanges)
+        );
+        let after_rejection = core.document_info().unwrap();
+        assert_eq!(after_rejection.document_uuid, before.document_uuid);
+        assert_eq!(after_rejection.document_revision, before.document_revision);
+        assert!(after_rejection.dirty);
+
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-m4-switch-{}-{}.inkpod",
+            std::process::id(),
+            before.document_revision
+        ));
+        let _ = std::fs::remove_file(&path);
+        core.save(&path).unwrap();
+        let switched = core.sequence_step(SequenceDirection::Next, false).unwrap();
+        assert_eq!(switched.document_uuid, 0x4444);
+        assert_eq!((switched.width, switched.height), (3, 2));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn m4_acceptance_sequence_gaps_natural_order_thumbnails_subpalette_and_motion() {
+        let mut core = Core::new();
+        core.set_sequence(vec![
+            m4_source("cut10.png", 10, 2, 1, [10, 0, 0, 255]),
+            m4_source("cut1.png", 1, 1, 1, [1, 0, 0, 255]),
+            m4_source("cut3.png", 3, 3, 1, [3, 0, 0, 255]),
+        ])
+        .unwrap();
+        let cells = core.sequence_cells().unwrap();
+        assert_eq!(
+            cells
+                .iter()
+                .map(|cell| cell.cell_number)
+                .collect::<Vec<_>>(),
+            vec![1, 3, 10]
+        );
+        assert!(cells.iter().all(|cell| cell.thumbnail.checksum != 0));
+        core.set_subpalette_cell(1).unwrap();
+        assert_eq!(
+            core.subpalette_sample(0, 0).unwrap(),
+            PixelValue::Rgba([3, 0, 0, 255])
+        );
+        let first = core
+            .motion_check_start(MotionCheckConfig {
+                fps: 24,
+                loop_playback: true,
+                include_selection: true,
+                include_light_table: true,
+            })
+            .unwrap();
+        assert_eq!(first.cell_number, 1);
+        assert_eq!(first.fps, 24);
+        assert!(first.include_selection && first.include_light_table);
+        assert_eq!(
+            core.motion_check_step(SequenceDirection::Next)
+                .unwrap()
+                .cell_number,
+            3
+        );
+        assert_eq!(
+            core.motion_check_step(SequenceDirection::Next)
+                .unwrap()
+                .cell_number,
+            10
+        );
+        assert_eq!(
+            core.motion_check_step(SequenceDirection::Next)
+                .unwrap()
+                .cell_number,
+            1
+        );
+        assert!(core.motion_check_toggle_pause().unwrap().paused);
+
+        let exported = core
+            .export_sequence(CommonRasterFormat::Png, false)
+            .unwrap();
+        assert_eq!(exported.len(), 3);
+        let mut imported = Core::new();
+        imported
+            .import_sequence(CommonRasterFormat::Png, exported)
+            .unwrap();
+        assert_eq!(
+            imported
+                .sequence_cells()
+                .unwrap()
+                .iter()
+                .map(|cell| cell.cell_number)
+                .collect::<Vec<_>>(),
+            vec![1, 3, 10]
+        );
+    }
+
+    #[test]
+    fn m4_rejects_a_mutated_common_raster_before_indexing_its_pixels() {
+        let mut malformed = m4_rgba8(1, 1, vec![1, 2, 3, 4]);
+        malformed.pixels.clear();
+        assert!(matches!(
+            LightTableSource::from_common_raster(
+                0x5151,
+                1,
+                RectI32 {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+                &malformed,
+            ),
+            Err(CoreError::Format(_))
+        ));
+
+        let mut invalid_cell = m4_source("cell1.png", 0x6161, 1, 1, [1, 2, 3, 255]);
+        invalid_cell.frames.reference_frame.width = 0;
+        let mut core = Core::new();
+        assert!(matches!(
+            core.set_sequence(vec![invalid_cell]),
+            Err(CoreError::InvalidArgument(_))
+        ));
+        assert!(matches!(
+            core.sequence_cells(),
+            Err(CoreError::InvalidState(_))
+        ));
     }
 }

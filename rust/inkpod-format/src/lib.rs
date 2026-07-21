@@ -1,5 +1,15 @@
 #![forbid(unsafe_code)]
 
+mod common_formats;
+mod native_m4;
+
+pub use common_formats::{
+    CommonRaster, CommonRasterFormat, CommonRasterInfo, MAX_COMMON_RASTER_BYTES,
+    decode_common_raster, encode_common_raster,
+};
+pub use native_m4::{FileLightTableItem, FileLightTableSet, FileM4Metadata, LightTableDisplayMode};
+use native_m4::{decode_m4_metadata, encode_m4_metadata, validate_m4_metadata};
+
 use inkpod_image::{FNV_OFFSET, MAX_PALETTE_COLORS, PixelFormat, PixelValue, TileCoord, fnv_bytes};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -18,6 +28,7 @@ const PLANE_DESCRIPTOR_BYTES: usize = 32;
 const BLOB_DESCRIPTOR_BYTES: usize = 48;
 const CONTAINER_FLAG_M2_COLOR_METADATA: u32 = 1 << 0;
 const CONTAINER_FLAG_M3_DOCUMENT_EDITING: u32 = 1 << 1;
+const CONTAINER_FLAG_M4_PRODUCTION_WORKFLOW: u32 = 1 << 2;
 const MAX_FILE_BYTES: u64 = 1 << 30;
 const MAX_MANIFEST_BYTES: u64 = 16 << 20;
 const MAX_PLANES: usize = 4_096;
@@ -33,6 +44,7 @@ pub enum PlaneKind {
     Color,
     Raster,
     Selection,
+    LightTable,
 }
 
 impl PlaneKind {
@@ -42,6 +54,7 @@ impl PlaneKind {
             Self::Color => 2,
             Self::Raster => 3,
             Self::Selection => 4,
+            Self::LightTable => 5,
         }
     }
 
@@ -51,6 +64,7 @@ impl PlaneKind {
             2 => Ok(Self::Color),
             3 => Ok(Self::Raster),
             4 => Ok(Self::Selection),
+            5 => Ok(Self::LightTable),
             _ => Err(FormatError::Unsupported("unknown required plane kind")),
         }
     }
@@ -213,6 +227,9 @@ pub struct CellFile {
     /// Additive M3 editing metadata. `None` represents an M0-M2 v1 file and is
     /// upgraded to the legacy one-layer tree by the Core on open.
     pub m3: Option<FileM3Metadata>,
+    /// Additive M4 light-table/workflow metadata. Source rasters are blob-backed
+    /// planes referenced by this section and remain outside the editable tree.
+    pub m4: Option<FileM4Metadata>,
 }
 
 #[derive(Debug)]
@@ -274,6 +291,7 @@ fn encode_with_color_metadata(
 ) -> Result<Vec<u8>, FormatError> {
     validate_document(document)?;
     let m3_metadata = document.m3.as_ref().map(encode_m3_metadata).transpose()?;
+    let m4_metadata = document.m4.as_ref().map(encode_m4_metadata).transpose()?;
     let blob_count = document.planes.iter().try_fold(0_usize, |count, plane| {
         count
             .checked_add(plane.tiles.len())
@@ -307,6 +325,13 @@ fn encode_with_color_metadata(
         .and_then(|value| {
             value.checked_add(
                 m3_metadata
+                    .as_ref()
+                    .map_or(0, |bytes| bytes.len().saturating_add(8)),
+            )
+        })
+        .and_then(|value| {
+            value.checked_add(
+                m4_metadata
                     .as_ref()
                     .map_or(0, |bytes| bytes.len().saturating_add(8)),
             )
@@ -367,6 +392,10 @@ fn encode_with_color_metadata(
             CONTAINER_FLAG_M3_DOCUMENT_EDITING
         } else {
             0
+        } | if m4_metadata.is_some() {
+            CONTAINER_FLAG_M4_PRODUCTION_WORKFLOW
+        } else {
+            0
         },
     );
     push_u64(&mut output, manifest_len as u64);
@@ -420,6 +449,17 @@ fn encode_with_color_metadata(
         push_u32(&mut output, 0);
         output.extend_from_slice(metadata);
     }
+    if let Some(metadata) = &m4_metadata {
+        push_u32(
+            &mut output,
+            metadata
+                .len()
+                .try_into()
+                .map_err(|_| FormatError::Invalid("M4 metadata length is not representable"))?,
+        );
+        push_u32(&mut output, 0);
+        output.extend_from_slice(metadata);
+    }
 
     let mut first_blob = 0_u32;
     for plane in &document.planes {
@@ -462,7 +502,10 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
         return Err(FormatError::Unsupported("format version is not supported"));
     }
     let container_flags = reader.u32()?;
-    if container_flags & !(CONTAINER_FLAG_M2_COLOR_METADATA | CONTAINER_FLAG_M3_DOCUMENT_EDITING)
+    if container_flags
+        & !(CONTAINER_FLAG_M2_COLOR_METADATA
+            | CONTAINER_FLAG_M3_DOCUMENT_EDITING
+            | CONTAINER_FLAG_M4_PRODUCTION_WORKFLOW)
         != 0
     {
         return Err(FormatError::Unsupported(
@@ -573,9 +616,25 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
     } else {
         (None, 0)
     };
+    let (m4, m4_metadata_len) = if container_flags & CONTAINER_FLAG_M4_PRODUCTION_WORKFLOW != 0 {
+        let byte_count = reader.u32()? as usize;
+        if reader.u32()? != 0 {
+            return Err(FormatError::Unsupported(
+                "M4 metadata reserved field is not zero",
+            ));
+        }
+        if byte_count > MAX_MANIFEST_BYTES as usize {
+            return Err(FormatError::Invalid("M4 metadata exceeds its bound"));
+        }
+        let metadata = decode_m4_metadata(reader.take(byte_count)?)?;
+        (Some(metadata), byte_count.saturating_add(8))
+    } else {
+        (None, 0)
+    };
     let expected_manifest_len = FIXED_MANIFEST_BYTES
         .checked_add(color_metadata_len)
         .and_then(|value| value.checked_add(m3_metadata_len))
+        .and_then(|value| value.checked_add(m4_metadata_len))
         .and_then(|value| value.checked_add(plane_count.checked_mul(PLANE_DESCRIPTOR_BYTES)?))
         .and_then(|value| {
             value.checked_add(manifest_blob_count.checked_mul(BLOB_DESCRIPTOR_BYTES)?)
@@ -676,7 +735,9 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
     }
     let mut planes = Vec::with_capacity(plane_count);
     for (plane_index, descriptor) in plane_descriptors.into_iter().enumerate() {
-        if descriptor.width != width || descriptor.height != height {
+        if descriptor.kind != PlaneKind::LightTable
+            && (descriptor.width != width || descriptor.height != height)
+        {
             return Err(FormatError::Invalid(
                 "plane dimensions do not match the document",
             ));
@@ -771,6 +832,7 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
         palette,
         planes,
         m3,
+        m4,
     };
     validate_document(&document)?;
     Ok(document)
@@ -1109,7 +1171,11 @@ fn validate_m3_metadata(
         return Err(FormatError::Invalid("M3 active or selection ID is invalid"));
     }
     if let Some(planes) = file_planes {
-        let plane_ids: BTreeSet<_> = planes.iter().map(|plane| plane.id).collect();
+        let plane_ids: BTreeSet<_> = planes
+            .iter()
+            .filter(|plane| plane.kind != PlaneKind::LightTable)
+            .map(|plane| plane.id)
+            .collect();
         referenced_planes.insert(metadata.selection_plane_id);
         if referenced_planes != plane_ids {
             return Err(FormatError::Invalid("M3 tree and plane payload IDs differ"));
@@ -1224,8 +1290,17 @@ fn validate_document(document: &CellFile) -> Result<(), FormatError> {
     for plane in &document.planes {
         if plane.id == 0
             || !plane_ids.insert(plane.id)
-            || plane.width != document.width
-            || plane.height != document.height
+            || plane.width == 0
+            || plane.height == 0
+            || plane.width > inkpod_image::MAX_RASTER_DIMENSION
+            || plane.height > inkpod_image::MAX_RASTER_DIMENSION
+            || (plane.kind != PlaneKind::LightTable
+                && (plane.width != document.width || plane.height != document.height))
+            || (plane.kind == PlaneKind::LightTable
+                && !matches!(
+                    plane.pixel_format,
+                    PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+                ))
         {
             return Err(FormatError::Invalid("plane manifest is inconsistent"));
         }
@@ -1278,6 +1353,84 @@ fn validate_document(document: &CellFile) -> Result<(), FormatError> {
                 "selection plane kind or format is invalid",
             ));
         }
+    }
+    if let Some(metadata) = &document.m4 {
+        if document.m3.is_none() {
+            return Err(FormatError::Invalid("M4 metadata requires the M3 tree"));
+        }
+        let source_plane_ids: BTreeSet<_> = document
+            .planes
+            .iter()
+            .filter(|plane| plane.kind == PlaneKind::LightTable)
+            .map(|plane| plane.id)
+            .collect();
+        validate_m4_metadata(metadata, Some(&source_plane_ids))?;
+        let mut occupied_ids = BTreeSet::from([document.document_id]);
+        if let Some(m3) = &document.m3 {
+            for layer in &m3.layers {
+                if !occupied_ids.insert(layer.id) {
+                    return Err(FormatError::Invalid(
+                        "M4 state collides with an existing stable ID",
+                    ));
+                }
+                for plane in &layer.planes {
+                    if !occupied_ids.insert(plane.id) {
+                        return Err(FormatError::Invalid(
+                            "M4 state collides with an existing stable ID",
+                        ));
+                    }
+                }
+            }
+            for id in m3
+                .guides
+                .iter()
+                .map(|guide| guide.id)
+                .chain([m3.selection_plane_id])
+            {
+                if !occupied_ids.insert(id) {
+                    return Err(FormatError::Invalid(
+                        "M4 state collides with an existing stable ID",
+                    ));
+                }
+            }
+        }
+        for source_plane_id in &source_plane_ids {
+            if !occupied_ids.insert(*source_plane_id) {
+                return Err(FormatError::Invalid(
+                    "M4 source plane collides with document state",
+                ));
+            }
+        }
+        for set in &metadata.sets {
+            if !occupied_ids.insert(set.id) {
+                return Err(FormatError::Invalid(
+                    "M4 set ID collides with document state",
+                ));
+            }
+            for item in &set.items {
+                if !occupied_ids.insert(item.id) {
+                    return Err(FormatError::Invalid(
+                        "M4 item ID collides with document state",
+                    ));
+                }
+                let source = document
+                    .planes
+                    .iter()
+                    .find(|plane| plane.id == item.source_plane_id)
+                    .ok_or(FormatError::Invalid("M4 source plane is missing"))?;
+                if source.kind != PlaneKind::LightTable {
+                    return Err(FormatError::Invalid("M4 source plane kind is invalid"));
+                }
+            }
+        }
+    } else if document
+        .planes
+        .iter()
+        .any(|plane| plane.kind == PlaneKind::LightTable)
+    {
+        return Err(FormatError::Invalid(
+            "light-table planes require M4 metadata",
+        ));
     }
     Ok(())
 }
@@ -1540,6 +1693,7 @@ mod tests {
                 },
             ],
             m3: None,
+            m4: None,
         }
     }
 
@@ -1593,6 +1747,56 @@ mod tests {
                 spacing_y: 16,
                 subdivisions: 2,
             },
+        });
+        document
+    }
+
+    fn m4_fixture() -> CellFile {
+        let mut document = m3_fixture();
+        document.planes.push(FilePlane {
+            id: 9,
+            kind: PlaneKind::LightTable,
+            pixel_format: PixelFormat::StraightRgba8,
+            width: 4,
+            height: 3,
+            tiles: vec![FileTile {
+                coord: TileCoord { x: 0, y: 0 },
+                width: 4,
+                height: 3,
+                bytes: [10_u8, 20, 30, 255].repeat(12),
+            }],
+        });
+        document.m4 = Some(FileM4Metadata {
+            active_set_id: 7,
+            sets: vec![FileLightTableSet {
+                id: 7,
+                name: "Default".to_owned(),
+                global_opacity_milli: 500,
+                items: vec![FileLightTableItem {
+                    id: 8,
+                    source_plane_id: 9,
+                    source_document_uuid: 0x1234_u128.to_le_bytes(),
+                    source_revision: 9,
+                    source_reference_frame: RectI32 {
+                        x: 2,
+                        y: 1,
+                        width: 4,
+                        height: 3,
+                    },
+                    source_dpi_x_milli: 96_000,
+                    source_dpi_y_milli: 96_000,
+                    name: "Reference".to_owned(),
+                    visible: true,
+                    opacity_milli: 500,
+                    display_mode: LightTableDisplayMode::Color,
+                    display_color: PixelValue::Rgba([0, 128, 255, 255]),
+                    translate_x_milli: 0,
+                    translate_y_milli: 0,
+                    scale_x_milli: 1_000,
+                    scale_y_milli: 1_000,
+                    rotation_milli_degrees: 0,
+                }],
+            }],
         });
         document
     }
@@ -1664,6 +1868,53 @@ mod tests {
             encode(&unreferenced),
             Err(FormatError::Invalid("M3 tree and plane payload IDs differ"))
         ));
+    }
+
+    #[test]
+    fn m4_metadata_round_trips_and_rejects_malformed_source_relationships() {
+        let document = m4_fixture();
+        let encoded = encode(&document).unwrap();
+        assert_eq!(decode(&encoded).unwrap(), document);
+
+        let mut invalid_opacity = m4_fixture();
+        invalid_opacity.m4.as_mut().unwrap().sets[0].items[0].opacity_milli = 1_001;
+        assert!(matches!(
+            encode(&invalid_opacity),
+            Err(FormatError::Invalid(_))
+        ));
+
+        let mut missing_source = m4_fixture();
+        missing_source.planes.retain(|plane| plane.id != 9);
+        assert!(matches!(
+            encode(&missing_source),
+            Err(FormatError::Invalid(_))
+        ));
+
+        let mut colliding_source = m4_fixture();
+        colliding_source
+            .planes
+            .iter_mut()
+            .find(|plane| plane.kind == PlaneKind::LightTable)
+            .unwrap()
+            .id = 6;
+        colliding_source.m4.as_mut().unwrap().sets[0].items[0].source_plane_id = 6;
+        assert!(matches!(
+            encode(&colliding_source),
+            Err(FormatError::Invalid(
+                "M4 source plane collides with document state"
+            ))
+        ));
+
+        let mut minimum_rotation = m4_fixture();
+        minimum_rotation.m4.as_mut().unwrap().sets[0].items[0].rotation_milli_degrees = i32::MIN;
+        assert!(matches!(
+            encode(&minimum_rotation),
+            Err(FormatError::Invalid("M4 item properties are invalid"))
+        ));
+
+        let mut no_tree = m4_fixture();
+        no_tree.m3 = None;
+        assert!(matches!(encode(&no_tree), Err(FormatError::Invalid(_))));
     }
 
     #[test]

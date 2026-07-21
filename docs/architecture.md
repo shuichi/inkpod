@@ -1,6 +1,6 @@
 # Architecture
 
-## M3 component boundary
+## M4 component boundary
 
 inkpod has one platform-independent state owner. The dependency direction is
 one-way:
@@ -33,19 +33,25 @@ pixels, and ordered deterministically. This is an inkpod rule, not a claim
 about any proprietary legacy implementation.
 
 `inkpod-format` owns the bounded `.inkpod` v1 container and has no application
-state dependency. `inkpod-core` maps its `CellDocument` to/from the format DTO,
+state dependency. It also owns bounded common-raster codecs; PNG is the only
+new third-party codec dependency, while deterministic uncompressed TIFF/TGA/BMP
+live in the format crate. `inkpod-core` maps its `CellDocument` to/from the format DTO,
 owns a stable-ID typed layer/plane tree, persistent selection mask, guides/grid,
 document/view revisions, multi-view transforms, shortcut bindings, stroke and
 floating-paste preview, fill transactions, exact-depth main-line base color and
 palette metadata, normal savepoint/path, recovery state, history, and immutable
-premultiplied-BGRA render snapshots. An
+premultiplied-BGRA render snapshots. M4 adds persisted stable-ID light-table
+sets/items and source rasters, reference-frame transforms, read-only fill/color
+sampling, naturally ordered cut/cell sequences, thumbnails, subpalette
+sampling, dirty-safe switching/item swap, and motion-check state. An
 architecture test scans Core, image, and format sources/manifests for forbidden
 Windows/frontend APIs. All three crates are safe Rust; no `HWND`, COM, D2D,
 DXGI, Win32 DPI, or frontend thread type enters them.
 
 `inkpod-ffi` is the only `staticlib`. It validates fixed-layout inputs, exposes
-batched stroke operations, M2 fill/color/recovery, and M3 tree/selection/
-clipboard/transform/navigation/multi-view operations, catches panics, and owns
+batched stroke operations, M2 fill/color/recovery, M3 tree/selection/
+clipboard/transform/navigation/multi-view operations, and copied M4 padded-row
+rasters/strided sequences/light-table/motion operations, catches panics, and owns
 opaque Core/snapshot/clipboard allocations. Win32 supplies a
 `CoCreateGuid` document UUID at the create boundary; Core persists it without
 acquiring an OS dependency. The Win32 application does not mirror pixels,

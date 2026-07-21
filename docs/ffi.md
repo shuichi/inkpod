@@ -2,7 +2,8 @@
 
 The public ABI is `include/inkpod/core_ffi.h`. ABI version 1 covers the M0
 lifecycle, the M1 saved-drawing/live-preview slice, the M2 fill/color/recovery
-slice, and the M3 typed document-editing slice.
+slice, the M3 typed document-editing slice, and the M4 production-workflow
+slice.
 Numeric fields use fixed-width C types. Every extensible structure begins with
 `struct_size`; configuration/span structures also carry feature or reserved
 fields.
@@ -122,6 +123,39 @@ explicit-depth color record. Snapshot pixels use
 that display format is explicit and does not alter persisted 16-bit values.
 Binary/grayscale main-line data is composited over color without exposing
 mutable planes.
+
+## M4 production workflow
+
+- `InkpodM4RasterInput` borrows a bounded padded-row straight RGBA8/RGBA16
+  raster for one call. Rust validates nested sizes, UUID/revision, DPI,
+  reference frame, dimensions, stride, byte range, and storage type before any
+  allocation, then compacts/copies it. Per-raster and cumulative sequence input
+  are capped at 1 GiB; dimensions use the shared raster maximum.
+- `INKPOD_FILL_FLAG_LIGHT_TABLE_BOUNDARY` and
+  `INKPOD_FILL_FLAG_LIGHT_TABLE_COLOR` connect the read-only M4 reference
+  sampling path to the existing all-or-nothing fill ABI. The Core cancellable
+  variant also polls while preparing the temporary boundary; cancel leaves both
+  edit and reference rasters exact.
+- Light-table add/global-opacity/sample/swap operations use reference-frame
+  alignment. Swap reports `INKPOD_STATUS_UNSAVED_CHANGES` without mutation
+  until the current cell is clean, then retains item transform/opacity and
+  replaces its source with the former editing image.
+- Color-mode light-table sampling returns the source's exact RGBA8/RGBA16
+  depth; opacity changes only alpha at that depth. Snapshot composition is the
+  separate explicit BGRA8 display conversion.
+- `InkpodSequenceInput` is a bounded strided caller-owned cell array. Core
+  copies and naturally sorts it. Previous/next skips absent numbers; dirty
+  switching leaves UUID/revision unchanged and returns the same explicit
+  unsaved status.
+- Motion-check start/step validates 30/25/24/12/10/8 FPS plus loop, selection,
+  and light-table flags, returning copied cell/thumbnail metadata. Stop is
+  idempotent.
+
+No M4 caller pointer remains borrowed after return. The integrated C11/C++
+smoke validates the new layouts and exercises reference alignment, 25%
+effective opacity, read-only reference-boundary fill, natural order, motion
+stepping, and dirty-switch rejection. Rust negative tests cover a short nested
+raster, an excessive dimension, `i32::MIN` rotation, and padded-row copying.
 
 ## Stroke session state
 
