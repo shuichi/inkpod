@@ -2,6 +2,7 @@
 
 mod common_formats;
 mod native_m4;
+mod native_m5;
 
 pub use common_formats::{
     CommonRaster, CommonRasterFormat, CommonRasterInfo, MAX_COMMON_RASTER_BYTES,
@@ -9,6 +10,11 @@ pub use common_formats::{
 };
 pub use native_m4::{FileLightTableItem, FileLightTableSet, FileM4Metadata, LightTableDisplayMode};
 use native_m4::{decode_m4_metadata, encode_m4_metadata, validate_m4_metadata};
+pub use native_m5::{
+    FileM5Metadata, FileVectorFill, FileVectorPath, FileVectorPoint, FileVectorSegment,
+    MAX_VECTOR_BOUNDARIES, MAX_VECTOR_FILLS, MAX_VECTOR_PATHS, MAX_VECTOR_SEGMENTS,
+};
+use native_m5::{decode_m5_metadata, encode_m5_metadata, validate_m5_metadata};
 
 use inkpod_image::{FNV_OFFSET, MAX_PALETTE_COLORS, PixelFormat, PixelValue, TileCoord, fnv_bytes};
 use std::collections::BTreeSet;
@@ -29,6 +35,7 @@ const BLOB_DESCRIPTOR_BYTES: usize = 48;
 const CONTAINER_FLAG_M2_COLOR_METADATA: u32 = 1 << 0;
 const CONTAINER_FLAG_M3_DOCUMENT_EDITING: u32 = 1 << 1;
 const CONTAINER_FLAG_M4_PRODUCTION_WORKFLOW: u32 = 1 << 2;
+const CONTAINER_FLAG_M5_VECTOR: u32 = 1 << 3;
 const MAX_FILE_BYTES: u64 = 1 << 30;
 const MAX_MANIFEST_BYTES: u64 = 16 << 20;
 const MAX_PLANES: usize = 4_096;
@@ -45,6 +52,9 @@ pub enum PlaneKind {
     Raster,
     Selection,
     LightTable,
+    VectorMainLine,
+    ColorTrace,
+    VectorFill,
 }
 
 impl PlaneKind {
@@ -55,6 +65,9 @@ impl PlaneKind {
             Self::Raster => 3,
             Self::Selection => 4,
             Self::LightTable => 5,
+            Self::VectorMainLine => 6,
+            Self::ColorTrace => 7,
+            Self::VectorFill => 8,
         }
     }
 
@@ -65,6 +78,9 @@ impl PlaneKind {
             3 => Ok(Self::Raster),
             4 => Ok(Self::Selection),
             5 => Ok(Self::LightTable),
+            6 => Ok(Self::VectorMainLine),
+            7 => Ok(Self::ColorTrace),
+            8 => Ok(Self::VectorFill),
             _ => Err(FormatError::Unsupported("unknown required plane kind")),
         }
     }
@@ -81,6 +97,7 @@ pub enum LayerKind {
     Adjustment,
     Text,
     Annotation,
+    VectorColoring,
 }
 
 impl LayerKind {
@@ -95,6 +112,7 @@ impl LayerKind {
             Self::Adjustment => 7,
             Self::Text => 8,
             Self::Annotation => 9,
+            Self::VectorColoring => 10,
         }
     }
 
@@ -109,6 +127,7 @@ impl LayerKind {
             7 => Ok(Self::Adjustment),
             8 => Ok(Self::Text),
             9 => Ok(Self::Annotation),
+            10 => Ok(Self::VectorColoring),
             _ => Err(FormatError::Unsupported("unknown required layer kind")),
         }
     }
@@ -230,6 +249,9 @@ pub struct CellFile {
     /// Additive M4 light-table/workflow metadata. Source rasters are blob-backed
     /// planes referenced by this section and remain outside the editable tree.
     pub m4: Option<FileM4Metadata>,
+    /// Additive M5 vector geometry/topology. Vector plane descriptors remain
+    /// in the typed M3 tree while this section owns their stable path/fill IDs.
+    pub m5: Option<FileM5Metadata>,
 }
 
 #[derive(Debug)]
@@ -292,6 +314,7 @@ fn encode_with_color_metadata(
     validate_document(document)?;
     let m3_metadata = document.m3.as_ref().map(encode_m3_metadata).transpose()?;
     let m4_metadata = document.m4.as_ref().map(encode_m4_metadata).transpose()?;
+    let m5_metadata = document.m5.as_ref().map(encode_m5_metadata).transpose()?;
     let blob_count = document.planes.iter().try_fold(0_usize, |count, plane| {
         count
             .checked_add(plane.tiles.len())
@@ -332,6 +355,13 @@ fn encode_with_color_metadata(
         .and_then(|value| {
             value.checked_add(
                 m4_metadata
+                    .as_ref()
+                    .map_or(0, |bytes| bytes.len().saturating_add(8)),
+            )
+        })
+        .and_then(|value| {
+            value.checked_add(
+                m5_metadata
                     .as_ref()
                     .map_or(0, |bytes| bytes.len().saturating_add(8)),
             )
@@ -394,6 +424,10 @@ fn encode_with_color_metadata(
             0
         } | if m4_metadata.is_some() {
             CONTAINER_FLAG_M4_PRODUCTION_WORKFLOW
+        } else {
+            0
+        } | if m5_metadata.is_some() {
+            CONTAINER_FLAG_M5_VECTOR
         } else {
             0
         },
@@ -460,6 +494,17 @@ fn encode_with_color_metadata(
         push_u32(&mut output, 0);
         output.extend_from_slice(metadata);
     }
+    if let Some(metadata) = &m5_metadata {
+        push_u32(
+            &mut output,
+            metadata
+                .len()
+                .try_into()
+                .map_err(|_| FormatError::Invalid("M5 metadata length is not representable"))?,
+        );
+        push_u32(&mut output, 0);
+        output.extend_from_slice(metadata);
+    }
 
     let mut first_blob = 0_u32;
     for plane in &document.planes {
@@ -505,7 +550,8 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
     if container_flags
         & !(CONTAINER_FLAG_M2_COLOR_METADATA
             | CONTAINER_FLAG_M3_DOCUMENT_EDITING
-            | CONTAINER_FLAG_M4_PRODUCTION_WORKFLOW)
+            | CONTAINER_FLAG_M4_PRODUCTION_WORKFLOW
+            | CONTAINER_FLAG_M5_VECTOR)
         != 0
     {
         return Err(FormatError::Unsupported(
@@ -631,10 +677,26 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
     } else {
         (None, 0)
     };
+    let (m5, m5_metadata_len) = if container_flags & CONTAINER_FLAG_M5_VECTOR != 0 {
+        let byte_count = reader.u32()? as usize;
+        if reader.u32()? != 0 {
+            return Err(FormatError::Unsupported(
+                "M5 metadata reserved field is not zero",
+            ));
+        }
+        if byte_count > MAX_MANIFEST_BYTES as usize {
+            return Err(FormatError::Invalid("M5 metadata exceeds its bound"));
+        }
+        let metadata = decode_m5_metadata(reader.take(byte_count)?)?;
+        (Some(metadata), byte_count.saturating_add(8))
+    } else {
+        (None, 0)
+    };
     let expected_manifest_len = FIXED_MANIFEST_BYTES
         .checked_add(color_metadata_len)
         .and_then(|value| value.checked_add(m3_metadata_len))
         .and_then(|value| value.checked_add(m4_metadata_len))
+        .and_then(|value| value.checked_add(m5_metadata_len))
         .and_then(|value| value.checked_add(plane_count.checked_mul(PLANE_DESCRIPTOR_BYTES)?))
         .and_then(|value| {
             value.checked_add(manifest_blob_count.checked_mul(BLOB_DESCRIPTOR_BYTES)?)
@@ -833,6 +895,7 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
         planes,
         m3,
         m4,
+        m5,
     };
     validate_document(&document)?;
     Ok(document)
@@ -1301,6 +1364,10 @@ fn validate_document(document: &CellFile) -> Result<(), FormatError> {
                     plane.pixel_format,
                     PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
                 ))
+            || (matches!(
+                plane.kind,
+                PlaneKind::VectorMainLine | PlaneKind::ColorTrace | PlaneKind::VectorFill
+            ) && (plane.pixel_format != PixelFormat::StraightRgba8 || !plane.tiles.is_empty()))
         {
             return Err(FormatError::Invalid("plane manifest is inconsistent"));
         }
@@ -1431,6 +1498,157 @@ fn validate_document(document: &CellFile) -> Result<(), FormatError> {
         return Err(FormatError::Invalid(
             "light-table planes require M4 metadata",
         ));
+    }
+
+    let mut stroke_plane_ids = BTreeSet::new();
+    let mut fill_plane_ids = BTreeSet::new();
+    let mut vector_layer_for_plane = std::collections::BTreeMap::new();
+    let mut has_vector_layer = false;
+    if let Some(m3) = &document.m3 {
+        for layer in &m3.layers {
+            let payloads: Vec<_> = layer
+                .planes
+                .iter()
+                .map(|properties| {
+                    document
+                        .planes
+                        .iter()
+                        .find(|plane| plane.id == properties.id)
+                        .ok_or(FormatError::Invalid("M5 vector plane payload is missing"))
+                })
+                .collect::<Result<_, _>>()?;
+            if layer.kind == LayerKind::VectorColoring {
+                has_vector_layer = true;
+                let main_count = payloads
+                    .iter()
+                    .filter(|plane| plane.kind == PlaneKind::VectorMainLine)
+                    .count();
+                let trace_count = payloads
+                    .iter()
+                    .filter(|plane| plane.kind == PlaneKind::ColorTrace)
+                    .count();
+                let fill_count = payloads
+                    .iter()
+                    .filter(|plane| plane.kind == PlaneKind::VectorFill)
+                    .count();
+                if main_count != 1
+                    || trace_count == 0
+                    || fill_count != 1
+                    || payloads.iter().any(|plane| {
+                        !matches!(
+                            plane.kind,
+                            PlaneKind::VectorMainLine
+                                | PlaneKind::ColorTrace
+                                | PlaneKind::VectorFill
+                                | PlaneKind::Raster
+                        )
+                    })
+                {
+                    return Err(FormatError::Invalid(
+                        "M5 vector layer and plane types are inconsistent",
+                    ));
+                }
+                for plane in payloads {
+                    match plane.kind {
+                        PlaneKind::VectorMainLine | PlaneKind::ColorTrace => {
+                            stroke_plane_ids.insert(plane.id);
+                            vector_layer_for_plane.insert(plane.id, layer.id);
+                        }
+                        PlaneKind::VectorFill => {
+                            fill_plane_ids.insert(plane.id);
+                            vector_layer_for_plane.insert(plane.id, layer.id);
+                        }
+                        _ => {}
+                    }
+                }
+            } else if payloads.iter().any(|plane| {
+                matches!(
+                    plane.kind,
+                    PlaneKind::VectorMainLine | PlaneKind::ColorTrace | PlaneKind::VectorFill
+                )
+            }) {
+                return Err(FormatError::Invalid(
+                    "M5 vector plane belongs to a non-vector layer",
+                ));
+            }
+        }
+    }
+    if let Some(metadata) = &document.m5 {
+        if document.m3.is_none() || !has_vector_layer {
+            return Err(FormatError::Invalid(
+                "M5 metadata requires an M3 vector layer",
+            ));
+        }
+        validate_m5_metadata(
+            metadata,
+            Some(&stroke_plane_ids),
+            Some(&fill_plane_ids),
+            Some(&vector_layer_for_plane),
+        )?;
+        let mut occupied_ids = BTreeSet::from([document.document_id]);
+        if let Some(m3) = &document.m3 {
+            for layer in &m3.layers {
+                occupied_ids.insert(layer.id);
+                for plane in &layer.planes {
+                    occupied_ids.insert(plane.id);
+                }
+            }
+            for id in m3
+                .guides
+                .iter()
+                .map(|guide| guide.id)
+                .chain([m3.selection_plane_id])
+            {
+                occupied_ids.insert(id);
+            }
+        }
+        if let Some(m4) = &document.m4 {
+            for set in &m4.sets {
+                occupied_ids.insert(set.id);
+                for item in &set.items {
+                    occupied_ids.insert(item.id);
+                    occupied_ids.insert(item.source_plane_id);
+                }
+            }
+        }
+        for path in &metadata.paths {
+            if !occupied_ids.insert(path.id) {
+                return Err(FormatError::Invalid(
+                    "M5 path collides with an existing stable ID",
+                ));
+            }
+        }
+        for fill in &metadata.fills {
+            if !occupied_ids.insert(fill.id) {
+                return Err(FormatError::Invalid(
+                    "M5 fill collides with an existing stable ID",
+                ));
+            }
+            let fill_layer = vector_layer_for_plane
+                .get(&fill.plane_id)
+                .ok_or(FormatError::Invalid("M5 fill plane is missing"))?;
+            for boundary_id in &fill.boundary_path_ids {
+                let boundary = metadata
+                    .paths
+                    .iter()
+                    .find(|path| path.id == *boundary_id)
+                    .ok_or(FormatError::Invalid("M5 fill boundary is missing"))?;
+                if vector_layer_for_plane.get(&boundary.plane_id) != Some(fill_layer) {
+                    return Err(FormatError::Invalid(
+                        "M5 fill boundary crosses vector layers",
+                    ));
+                }
+            }
+        }
+    } else if has_vector_layer
+        || document.planes.iter().any(|plane| {
+            matches!(
+                plane.kind,
+                PlaneKind::VectorMainLine | PlaneKind::ColorTrace | PlaneKind::VectorFill
+            )
+        })
+    {
+        return Err(FormatError::Invalid("vector layers require M5 metadata"));
     }
     Ok(())
 }
@@ -1694,6 +1912,7 @@ mod tests {
             ],
             m3: None,
             m4: None,
+            m5: None,
         }
     }
 
@@ -1796,6 +2015,83 @@ mod tests {
                     scale_y_milli: 1_000,
                     rotation_milli_degrees: 0,
                 }],
+            }],
+        });
+        document
+    }
+
+    fn m5_fixture() -> CellFile {
+        let mut document = m3_fixture();
+        for (id, kind) in [
+            (8, PlaneKind::VectorMainLine),
+            (9, PlaneKind::ColorTrace),
+            (10, PlaneKind::VectorFill),
+        ] {
+            document.planes.push(FilePlane {
+                id,
+                kind,
+                pixel_format: PixelFormat::StraightRgba8,
+                width: document.width,
+                height: document.height,
+                tiles: Vec::new(),
+            });
+        }
+        document.m3.as_mut().unwrap().layers.push(FileLayer {
+            id: 7,
+            kind: LayerKind::VectorColoring,
+            name: "Vector".to_owned(),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            planes: [(8, "Vector Main"), (9, "Color Trace"), (10, "Vector Fill")]
+                .into_iter()
+                .map(|(id, name)| FilePlaneProperties {
+                    id,
+                    name: name.to_owned(),
+                    visible: true,
+                    editable: true,
+                    opacity_milli: 1_000,
+                })
+                .collect(),
+        });
+        let point = |x_milli, y_milli| FileVectorPoint { x_milli, y_milli };
+        let line = |p0: FileVectorPoint, p3: FileVectorPoint| FileVectorSegment {
+            p0,
+            p1: FileVectorPoint {
+                x_milli: (p0.x_milli * 2 + p3.x_milli) / 3,
+                y_milli: (p0.y_milli * 2 + p3.y_milli) / 3,
+            },
+            p2: FileVectorPoint {
+                x_milli: (p0.x_milli + p3.x_milli * 2) / 3,
+                y_milli: (p0.y_milli + p3.y_milli * 2) / 3,
+            },
+            p3,
+            width_start_milli: 1_000,
+            width_end_milli: 2_000,
+        };
+        let corners = [
+            point(1_000, 1_000),
+            point(5_000, 1_000),
+            point(5_000, 5_000),
+            point(1_000, 5_000),
+            point(1_000, 1_000),
+        ];
+        document.m5 = Some(FileM5Metadata {
+            paths: vec![FileVectorPath {
+                id: 11,
+                plane_id: 9,
+                color: PixelValue::Rgba16([1, 2, 3, 65_535]),
+                closed: true,
+                segments: corners
+                    .windows(2)
+                    .map(|pair| line(pair[0], pair[1]))
+                    .collect(),
+            }],
+            fills: vec![FileVectorFill {
+                id: 12,
+                plane_id: 10,
+                color: PixelValue::Rgba([20, 40, 60, 200]),
+                boundary_path_ids: vec![11],
             }],
         });
         document
@@ -1915,6 +2211,95 @@ mod tests {
         let mut no_tree = m4_fixture();
         no_tree.m3 = None;
         assert!(matches!(encode(&no_tree), Err(FormatError::Invalid(_))));
+    }
+
+    #[test]
+    fn m5_vector_metadata_round_trips_and_rejects_malformed_topology() {
+        let document = m5_fixture();
+        assert_eq!(decode(&encode(&document).unwrap()).unwrap(), document);
+
+        let mut missing_boundary = m5_fixture();
+        missing_boundary.m5.as_mut().unwrap().fills[0].boundary_path_ids[0] = 99;
+        assert!(matches!(
+            encode(&missing_boundary),
+            Err(FormatError::Invalid(_))
+        ));
+
+        let mut open_boundary = m5_fixture();
+        open_boundary.m5.as_mut().unwrap().paths[0].closed = false;
+        assert!(matches!(
+            encode(&open_boundary),
+            Err(FormatError::Invalid(_))
+        ));
+
+        let mut cross_layer = m5_fixture();
+        for (id, kind) in [
+            (14, PlaneKind::VectorMainLine),
+            (15, PlaneKind::ColorTrace),
+            (16, PlaneKind::VectorFill),
+        ] {
+            cross_layer.planes.push(FilePlane {
+                id,
+                kind,
+                pixel_format: PixelFormat::StraightRgba8,
+                width: cross_layer.width,
+                height: cross_layer.height,
+                tiles: Vec::new(),
+            });
+        }
+        cross_layer.m3.as_mut().unwrap().layers.push(FileLayer {
+            id: 13,
+            kind: LayerKind::VectorColoring,
+            name: "Other vector".to_owned(),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            planes: [(14, "Main"), (15, "Trace"), (16, "Fill")]
+                .into_iter()
+                .map(|(id, name)| FilePlaneProperties {
+                    id,
+                    name: name.to_owned(),
+                    visible: true,
+                    editable: true,
+                    opacity_milli: 1_000,
+                })
+                .collect(),
+        });
+        cross_layer.m5.as_mut().unwrap().fills[0].plane_id = 16;
+        assert!(matches!(
+            encode(&cross_layer),
+            Err(FormatError::Invalid(
+                "M5 fill boundary crosses vector layers"
+            ))
+        ));
+
+        let mut out_of_bounds = m5_fixture();
+        out_of_bounds.m5.as_mut().unwrap().paths[0].segments[0]
+            .p1
+            .x_milli = i32::MAX;
+        assert!(matches!(
+            encode(&out_of_bounds),
+            Err(FormatError::Invalid(
+                "M5 segment coordinate is outside bounds"
+            ))
+        ));
+
+        let mut colliding_path = m5_fixture();
+        colliding_path.m5.as_mut().unwrap().paths[0].id = 6;
+        colliding_path.m5.as_mut().unwrap().fills[0].boundary_path_ids[0] = 6;
+        assert!(matches!(
+            encode(&colliding_path),
+            Err(FormatError::Invalid(
+                "M5 path collides with an existing stable ID"
+            ))
+        ));
+
+        let mut missing_metadata = m5_fixture();
+        missing_metadata.m5 = None;
+        assert!(matches!(
+            encode(&missing_metadata),
+            Err(FormatError::Invalid(_))
+        ));
     }
 
     #[test]

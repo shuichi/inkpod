@@ -1544,7 +1544,10 @@ fn flatten_document(document: &CellDocument, revision: u64) -> Result<TileRaster
                         }
                         PlaneType::Color | PlaneType::Raster => rgba8_for_display(value)
                             .ok_or(CoreError::InvalidState("flatten source is not RGBA"))?,
-                        PlaneType::Selection => continue,
+                        PlaneType::Selection
+                        | PlaneType::VectorMainLine
+                        | PlaneType::ColorTrace
+                        | PlaneType::VectorFill => continue,
                     };
                     rgba[3] = ((u32::from(rgba[3]) * plane.opacity_milli + 500) / 1_000) as u8;
                     layer_pixel = blend_rgba_over(layer_pixel, rgba);

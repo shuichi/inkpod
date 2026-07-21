@@ -54,12 +54,15 @@ set(INKPOD_RUST_INPUTS
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/lib.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/m4.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/m5.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/lib.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/common_formats.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/native_m4.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/native_m5.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-image/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/lib.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/vector.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/src/lib.rs")
 

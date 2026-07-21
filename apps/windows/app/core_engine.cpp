@@ -60,6 +60,7 @@ struct SyncWork {
     std::function<InkpodStatus(InkpodCore*)> operation;
     bool publish_snapshot{};
     bool refresh_document_info{};
+    bool defer_during_active_stroke{};
     std::shared_ptr<std::promise<InkpodStatus>> completion;
 };
 
@@ -158,6 +159,7 @@ struct CoreEngine::Impl final {
                     std::move(operation),
                     publish_snapshot,
                     refresh_document_info,
+                    false,
                     completion})) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
@@ -172,9 +174,14 @@ struct CoreEngine::Impl final {
     bool Enqueue(
         std::function<InkpodStatus(InkpodCore*)> operation,
         bool publish_snapshot,
-        bool refresh_document_info) noexcept {
+        bool refresh_document_info,
+        bool defer_during_active_stroke) noexcept {
         return Push(SyncWork{
-            std::move(operation), publish_snapshot, refresh_document_info, nullptr});
+            std::move(operation),
+            publish_snapshot,
+            refresh_document_info,
+            defer_during_active_stroke,
+            nullptr});
     }
 
     bool CopyDocumentInfo(InkpodDocumentInfo& output) const noexcept {
@@ -281,6 +288,7 @@ struct CoreEngine::Impl final {
                     sizeof(InkpodStrokeSample)};
                 status = inkpod_core_stroke_begin(core, &input);
                 if (status == INKPOD_STATUS_OK) {
+                    stroke_active = true;
                     active_sample_count = event.samples.size();
                     status = PublishSnapshot(core, true);
                     preview_dirty = false;
@@ -303,6 +311,7 @@ struct CoreEngine::Impl final {
                     InkpodDispatchResult result{};
                     result.struct_size = sizeof(result);
                     status = inkpod_core_stroke_end(core, &result);
+                    stroke_active = false;
                 }
                 if (status == INKPOD_STATUS_OK) {
                     {
@@ -321,6 +330,7 @@ struct CoreEngine::Impl final {
             }
             case StrokeEventKind::Cancel:
                 status = inkpod_core_stroke_cancel(core);
+                stroke_active = false;
                 active_sample_count = 0;
                 preview_dirty = false;
                 if (status == INKPOD_STATUS_OK) {
@@ -330,6 +340,7 @@ struct CoreEngine::Impl final {
         }
         if (status != INKPOD_STATUS_OK) {
             inkpod_core_stroke_cancel(core);
+            stroke_active = false;
             active_sample_count = 0;
             preview_dirty = false;
             PublishSnapshot(core, false);
@@ -368,38 +379,62 @@ struct CoreEngine::Impl final {
         for (;;) {
             WorkItem item;
             bool has_item = false;
+            bool cancel_for_shutdown = false;
             {
                 std::unique_lock lock(mutex);
                 const auto deadline = preview_dirty
                     ? next_preview_frame
                     : std::chrono::steady_clock::time_point::max();
-                wake.wait_until(lock, deadline, [this] { return stopping || !work.empty(); });
-                if (!work.empty()) {
-                    item = std::move(work.front());
-                    work.pop_front();
+                const auto can_process = [this](const WorkItem& candidate) noexcept {
+                    const auto* sync = std::get_if<SyncWork>(&candidate);
+                    return !stroke_active || sync == nullptr
+                        || !sync->defer_during_active_stroke;
+                };
+                wake.wait_until(lock, deadline, [this, &can_process] {
+                    return stopping
+                        || std::any_of(work.cbegin(), work.cend(), can_process);
+                });
+                auto next = std::find_if(work.begin(), work.end(), can_process);
+                if (next != work.end()) {
+                    const bool was_front = next == work.begin();
+                    item = std::move(*next);
+                    work.erase(next);
                     if (auto* stroke = std::get_if<StrokeEvent>(&item);
-                        stroke != nullptr && stroke->kind == StrokeEventKind::Append) {
+                        was_front && stroke != nullptr
+                        && stroke->kind == StrokeEventKind::Append) {
                         while (!work.empty()) {
-                            auto* next = std::get_if<StrokeEvent>(&work.front());
-                            if (next == nullptr || next->kind != StrokeEventKind::Append
+                            auto* pending_append = std::get_if<StrokeEvent>(&work.front());
+                            if (pending_append == nullptr
+                                || pending_append->kind != StrokeEventKind::Append
                                 || stroke->samples.size()
                                         > kMaximumStrokeSamples - std::min(
-                                               kMaximumStrokeSamples, next->samples.size())) {
+                                               kMaximumStrokeSamples,
+                                               pending_append->samples.size())) {
                                 break;
                             }
                             stroke->samples.insert(
                                 stroke->samples.end(),
-                                next->samples.begin(),
-                                next->samples.end());
+                                pending_append->samples.begin(),
+                                pending_append->samples.end());
                             work.pop_front();
                         }
                     }
                     has_item = true;
                 } else if (stopping) {
-                    break;
+                    cancel_for_shutdown = stroke_active;
+                    if (!cancel_for_shutdown) {
+                        break;
+                    }
                 }
             }
 
+            if (cancel_for_shutdown) {
+                inkpod_core_stroke_cancel(core);
+                stroke_active = false;
+                active_sample_count = 0;
+                preview_dirty = false;
+                continue;
+            }
             if (has_item) {
                 if (auto* sync = std::get_if<SyncWork>(&item)) {
                     ProcessSync(core, std::move(*sync));
@@ -411,6 +446,7 @@ struct CoreEngine::Impl final {
                 const InkpodStatus status = PublishSnapshot(core, true);
                 if (status != INKPOD_STATUS_OK) {
                     inkpod_core_stroke_cancel(core);
+                    stroke_active = false;
                     preview_dirty = false;
                     active_sample_count = 0;
                     CaptureFailure(status, true);
@@ -442,6 +478,7 @@ struct CoreEngine::Impl final {
     EngineMetrics metrics{};
 
     bool preview_dirty{};
+    bool stroke_active{};
     std::chrono::steady_clock::time_point next_preview_frame{};
     std::uint64_t active_sample_count{};
 };
@@ -490,9 +527,14 @@ InkpodStatus CoreEngine::Invoke(
 bool CoreEngine::Enqueue(
     std::function<InkpodStatus(InkpodCore*)> operation,
     bool publish_snapshot,
-    bool refresh_document_info) noexcept {
+    bool refresh_document_info,
+    bool defer_during_active_stroke) noexcept {
     return impl_ != nullptr
-        && impl_->Enqueue(std::move(operation), publish_snapshot, refresh_document_info);
+        && impl_->Enqueue(
+            std::move(operation),
+            publish_snapshot,
+            refresh_document_info,
+            defer_during_active_stroke);
 }
 
 bool CoreEngine::EnqueueStroke(StrokeEvent event) noexcept {

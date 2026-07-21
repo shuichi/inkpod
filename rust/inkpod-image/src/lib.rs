@@ -1,5 +1,15 @@
 #![forbid(unsafe_code)]
 
+mod vector;
+
+pub use vector::{
+    VECTOR_UNITS_PER_PIXEL, VectorFixedCubic, VectorFixedPoint, VectorFlatSample,
+    evaluate_vector_cubic, flatten_vector_path, split_vector_cubic, sub_vector_cubic,
+    vector_distance_to_segment, vector_fixed_xy, vector_lerp, vector_lerp_point, vector_line_cubic,
+    vector_line_intersection, vector_path_intersections, vector_point_at, vector_source_over,
+    vector_squared_distance, vector_stroke_contains,
+};
+
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::sync::Arc;

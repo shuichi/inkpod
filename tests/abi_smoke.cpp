@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 static_assert(std::is_standard_layout_v<InkpodCoreConfig>);
 static_assert(std::is_standard_layout_v<InkpodSnapshotView>);
@@ -41,6 +42,21 @@ static_assert(sizeof(InkpodSequenceCellInput) == 120U);
 static_assert(sizeof(InkpodSequenceInput) == 40U);
 static_assert(sizeof(InkpodMotionCheckInput) == 16U);
 static_assert(sizeof(InkpodMotionFrame) == 40U);
+static_assert(sizeof(InkpodVectorPoint) == 8U);
+static_assert(sizeof(InkpodVectorCubicSegment) == 48U);
+static_assert(sizeof(InkpodVectorPathInput) == 64U);
+static_assert(sizeof(InkpodVectorFillInput) == 56U);
+static_assert(sizeof(InkpodVectorEraseInput) == 32U);
+static_assert(sizeof(InkpodVectorWidthInput) == 40U);
+static_assert(sizeof(InkpodVectorSelectionInput) == 32U);
+static_assert(sizeof(InkpodVectorSelectionRange) == 24U);
+static_assert(sizeof(InkpodVectorSelectionBuffer) == 56U);
+static_assert(sizeof(InkpodVectorRasterizeInput) == 32U);
+static_assert(sizeof(InkpodVectorRasterBuffer) == 48U);
+static_assert(sizeof(InkpodRasterVectorizeInput) == 32U);
+static_assert(sizeof(InkpodSnapshotVectorSegment) == 80U);
+static_assert(sizeof(InkpodSnapshotVectorFill) == 48U);
+static_assert(sizeof(InkpodSnapshotVectorView) == 80U);
 
 extern "C" int inkpod_header_c11_smoke(void);
 
@@ -392,6 +408,199 @@ int InkpodRunAbiSmoke() {
             != INKPOD_STATUS_OK
         || inkpod_core_undo(core, &dispatch) != INKPOD_STATUS_OK) {
         return 37;
+    }
+    constexpr std::array<std::uint8_t, 6U> vector_layer_name{
+        'V', 'e', 'c', 't', 'o', 'r'};
+    tree_edit = InkpodTreeEdit{};
+    tree_edit.struct_size = sizeof(tree_edit);
+    tree_edit.operation = INKPOD_TREE_CREATE_LAYER;
+    tree_edit.kind = INKPOD_LAYER_VECTOR_COLORING;
+    tree_edit.name_utf8 = vector_layer_name.data();
+    tree_edit.name_bytes = vector_layer_name.size();
+    std::uint64_t vector_layer_id{};
+    if (inkpod_core_tree_edit(core, &tree_edit, &dispatch, &vector_layer_id)
+            != INKPOD_STATUS_OK
+        || vector_layer_id == 0U) {
+        return 48;
+    }
+    InkpodNodeInfo vector_plane{};
+    vector_plane.struct_size = sizeof(vector_plane);
+    if (inkpod_core_node_get(core, 2U, 1U, &vector_plane) != INKPOD_STATUS_OK
+        || vector_plane.parent_id != vector_layer_id
+        || vector_plane.kind != INKPOD_TYPED_PLANE_COLOR_TRACE) {
+        return 49;
+    }
+    const std::uint64_t vector_trace_plane_id = vector_plane.id;
+    if (inkpod_core_node_get(core, 2U, 2U, &vector_plane) != INKPOD_STATUS_OK
+        || vector_plane.kind != INKPOD_TYPED_PLANE_VECTOR_FILL) {
+        return 50;
+    }
+    const std::uint64_t vector_fill_plane_id = vector_plane.id;
+    constexpr auto point = [](float x, float y) noexcept {
+        return InkpodVectorPoint{x, y};
+    };
+    constexpr auto vector_line = [](InkpodVectorPoint start, InkpodVectorPoint end) noexcept {
+        return InkpodVectorCubicSegment{
+            sizeof(InkpodVectorCubicSegment),
+            0U,
+            start,
+            InkpodVectorPoint{
+                (start.x * 2.0F + end.x) / 3.0F,
+                (start.y * 2.0F + end.y) / 3.0F},
+            InkpodVectorPoint{
+                (start.x + end.x * 2.0F) / 3.0F,
+                (start.y + end.y * 2.0F) / 3.0F},
+            end,
+            1.0F,
+            3.0F};
+    };
+    constexpr std::array<InkpodVectorPoint, 5U> vector_corners{
+        point(100.0F, 100.0F),
+        point(400.0F, 100.0F),
+        point(400.0F, 400.0F),
+        point(100.0F, 400.0F),
+        point(100.0F, 100.0F)};
+    const std::array<InkpodVectorCubicSegment, 4U> vector_segments{
+        vector_line(vector_corners[0], vector_corners[1]),
+        vector_line(vector_corners[1], vector_corners[2]),
+        vector_line(vector_corners[2], vector_corners[3]),
+        vector_line(vector_corners[3], vector_corners[4])};
+    const InkpodVectorPathInput vector_path{
+        sizeof(InkpodVectorPathInput),
+        0U,
+        INKPOD_VECTOR_PATH_CLOSED,
+        vector_trace_plane_id,
+        InkpodColorValue{
+            sizeof(InkpodColorValue),
+            INKPOD_COLOR_DEPTH_8,
+            20U,
+            40U,
+            60U,
+            255U},
+        vector_segments.data(),
+        vector_segments.size(),
+        sizeof(InkpodVectorCubicSegment)};
+    std::uint64_t vector_path_id{};
+    if (inkpod_core_vector_add_path(core, &vector_path, &dispatch, &vector_path_id)
+            != INKPOD_STATUS_OK
+        || vector_path_id == 0U) {
+        return 51;
+    }
+    InkpodVectorCubicSegment short_vector_segment = vector_segments[0];
+    short_vector_segment.struct_size = sizeof(std::uint32_t);
+    InkpodVectorPathInput short_vector_path = vector_path;
+    short_vector_path.segments = &short_vector_segment;
+    short_vector_path.segment_count = 1U;
+    std::uint64_t rejected_path_id{UINT64_MAX};
+    if (inkpod_core_vector_add_path(
+            core, &short_vector_path, &dispatch, &rejected_path_id)
+            != INKPOD_STATUS_INCOMPATIBLE_ABI
+        || rejected_path_id != 0U) {
+        return 52;
+    }
+    const InkpodVectorFillInput vector_fill{
+        sizeof(InkpodVectorFillInput),
+        0U,
+        0U,
+        vector_fill_plane_id,
+        InkpodColorValue{
+            sizeof(InkpodColorValue),
+            INKPOD_COLOR_DEPTH_16,
+            60000U,
+            1000U,
+            2000U,
+            50000U},
+        &vector_path_id,
+        1U};
+    std::uint64_t vector_fill_id{};
+    if (inkpod_core_vector_add_fill(core, &vector_fill, &dispatch, &vector_fill_id)
+            != INKPOD_STATUS_OK
+        || vector_fill_id == 0U) {
+        return 53;
+    }
+    const InkpodVectorSelectionInput vector_selection{
+        sizeof(InkpodVectorSelectionInput),
+        INKPOD_VECTOR_SELECT_FULLY_CONTAINED,
+        0U,
+        InkpodFrameRect{50, 50, 400, 400}};
+    InkpodVectorSelectionBuffer vector_selection_output{};
+    vector_selection_output.struct_size = sizeof(vector_selection_output);
+    if (inkpod_core_vector_select(core, &vector_selection, &vector_selection_output)
+            != INKPOD_STATUS_BUFFER_TOO_SMALL
+        || vector_selection_output.range_count != 1U
+        || vector_selection_output.fill_count != 0U) {
+        return 56;
+    }
+    std::vector<InkpodVectorSelectionRange> selected_ranges(
+        static_cast<std::size_t>(vector_selection_output.range_count));
+    vector_selection_output.ranges = selected_ranges.data();
+    vector_selection_output.range_capacity = selected_ranges.size();
+    if (inkpod_core_vector_select(core, &vector_selection, &vector_selection_output)
+            != INKPOD_STATUS_OK
+        || selected_ranges[0].struct_size != sizeof(InkpodVectorSelectionRange)
+        || selected_ranges[0].path_id != vector_path_id
+        || selected_ranges[0].start_million != 0U
+        || selected_ranges[0].end_million != 1000000U) {
+        return 57;
+    }
+    const InkpodVectorRasterizeInput vector_rasterize{
+        sizeof(InkpodVectorRasterizeInput),
+        0U,
+        0U,
+        vector_layer_id,
+        1U,
+        0U};
+    InkpodVectorRasterBuffer vector_raster{};
+    vector_raster.struct_size = sizeof(vector_raster);
+    if (inkpod_core_vector_rasterize(core, &vector_rasterize, &vector_raster)
+            != INKPOD_STATUS_OK
+        || vector_raster.width != document.width || vector_raster.height != document.height
+        || vector_raster.stride_bytes != document.width * 4U
+        || vector_raster.required_bytes
+            != static_cast<std::uint64_t>(document.width) * document.height * 4U) {
+        return 58;
+    }
+    std::vector<std::uint8_t> vector_pixels(
+        static_cast<std::size_t>(vector_raster.required_bytes));
+    vector_raster.pixels = vector_pixels.data();
+    vector_raster.pixel_capacity = vector_pixels.size();
+    if (inkpod_core_vector_rasterize(core, &vector_rasterize, &vector_raster)
+            != INKPOD_STATUS_OK
+        || vector_pixels[static_cast<std::size_t>(200U * vector_raster.stride_bytes + 200U * 4U + 3U)]
+            == 0U) {
+        return 59;
+    }
+    snapshot = nullptr;
+    if (inkpod_core_build_snapshot(core, &options, &snapshot) != INKPOD_STATUS_OK
+        || snapshot == nullptr) {
+        return 54;
+    }
+    InkpodSnapshotVectorView vector_view{};
+    vector_view.struct_size = sizeof(vector_view);
+    if (inkpod_snapshot_get_vectors(snapshot, &vector_view) != INKPOD_STATUS_OK
+        || vector_view.abi_version != INKPOD_ABI_VERSION
+        || vector_view.segment_count != vector_segments.size()
+        || vector_view.segment_stride_bytes != sizeof(InkpodSnapshotVectorSegment)
+        || vector_view.fill_count != 1U
+        || vector_view.fill_stride_bytes != sizeof(InkpodSnapshotVectorFill)
+        || vector_view.boundary_path_count != 1U || vector_view.segments == nullptr
+        || vector_view.fills == nullptr || vector_view.boundary_path_ids == nullptr
+        || vector_view.segments->path_id != vector_path_id
+        || vector_view.segments->width_start != 1.0F
+        || vector_view.segments->width_end != 3.0F
+        || vector_view.fills->fill_id != vector_fill_id
+        || *vector_view.boundary_path_ids != vector_path_id
+        || inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK) {
+        return 55;
+    }
+    const InkpodRasterVectorizeInput raster_vectorize{
+        sizeof(InkpodRasterVectorizeInput), 1U, 0U, document.color_plane_id, vector_layer_id};
+    std::uint64_t vectorized_fill_count{};
+    if (inkpod_core_raster_vectorize(
+            core, &raster_vectorize, &dispatch, &vectorized_fill_count)
+            != INKPOD_STATUS_OK
+        || vectorized_fill_count == 0U) {
+        return 60;
     }
     const std::array<InkpodColorValue, 2> palette{
         InkpodColorValue{sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 1U, 2U, 3U, 255U},

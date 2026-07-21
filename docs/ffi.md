@@ -3,7 +3,7 @@
 The public ABI is `include/inkpod/core_ffi.h`. ABI version 1 covers the M0
 lifecycle, the M1 saved-drawing/live-preview slice, the M2 fill/color/recovery
 slice, the M3 typed document-editing slice, and the M4 production-workflow
-slice.
+slice, and the M5 vector slice.
 Numeric fields use fixed-width C types. Every extensible structure begins with
 `struct_size`; configuration/span structures also carry feature or reserved
 fields.
@@ -157,6 +157,41 @@ effective opacity, read-only reference-boundary fill, natural order, motion
 stepping, and dirty-switch rejection. Rust negative tests cover a short nested
 raster, an excessive dimension, `i32::MIN` rotation, and padded-row copying.
 
+## M5 vector workflow
+
+- `inkpod_core_vector_add_path` copies one bounded strided span of cubic
+  segments with variable endpoint widths. `inkpod_core_vector_add_fill` copies
+  closed boundary-path IDs. Both validate typed vector planes and commit one
+  history transaction.
+- Partial, to-intersection, and whole-path erase, deterministic nearest-endpoint
+  connect, and add/subtract/scale/constant width correction are transactional.
+  Nested spans, finite document coordinates, widths, object counts, editable
+  planes, and stable relationships are validated before mutation.
+- `inkpod_core_vector_select` writes path ranges normalized to 0..1,000,000 and
+  fill IDs into caller-owned buffers. Cut, touching, fully-contained, line,
+  whole-line, to-intersection, fill-boundary, and fill modes are supported. A
+  null span with zero capacity is a count query; insufficient capacity returns
+  `INKPOD_STATUS_BUFFER_TOO_SMALL` after reporting both required counts.
+- `inkpod_core_vector_rasterize` returns bounded straight RGBA8 pixels through a
+  caller-owned size-query buffer. Scale is 1..16 and the antialias flag selects
+  deterministic 4x4 supersampling; non-antialiased samples use pixel centers.
+  `inkpod_core_raster_vectorize` converts nonzero-alpha, equal-color RGBA8 row
+  runs from a raster/color plane into closed path/fill topology as one history
+  transaction and reports the fill count. `alpha_threshold` is an inclusive
+  minimum for nonzero alpha; zero-alpha pixels are skipped even when the value
+  is zero. The target vector layer and its trace/fill planes must be editable,
+  and projected path/fill/segment/boundary totals are rejected before commit.
+- `inkpod_snapshot_get_vectors` returns borrowed flat segment/fill/boundary-ID
+  spans owned by the immutable snapshot. Records carry stable path/plane IDs,
+  layer z-order, segment order/count, closed/stroke-visible flags, display RGBA,
+  cubic points, and variable widths. The Renderer validates all spans and builds
+  Direct2D fill and variable-width outline geometry without mutating Core data.
+
+All M5 input storage is borrowed only for its call and copied where retained.
+Selection/raster output storage remains caller-owned. Snapshot vector pointers
+remain valid only until `inkpod_snapshot_release`, exactly like tile and guide
+pointers.
+
 ## Stroke session state
 
 At most one live stroke exists per Core. While it is active, other document,
@@ -200,8 +235,8 @@ returns `INKPOD_STATUS_BUFFER_TOO_SMALL` and still reports `color_count`.
 - `inkpod_snapshot_get_view` returns a borrowed strided tile span and pixel
   pointers. `inkpod_snapshot_get_transform` copies its view transform;
   `inkpod_snapshot_get_overlay` returns a borrowed guide span plus copied flags
-  and grid values.
-- All borrowed tile/pixel/guide pointers remain valid only while that snapshot is
+  and grid values; `inkpod_snapshot_get_vectors` returns borrowed vector spans.
+- All borrowed tile/pixel/guide/vector pointers remain valid only while that snapshot is
   live. Tile storage is independently reference-counted, so a snapshot may
   safely outlive the Core that created it. No per-tile accessor is required.
 - `inkpod_snapshot_release` takes `InkpodSnapshot**`, releases it, and writes
@@ -221,7 +256,7 @@ caller errors after the owning pointer has been released.
 ## Threading
 
 `InkpodCore` is single-writer and thread-affine: create, document/view/stroke,
-tree/selection/paste/navigation/shortcut, fill/color/recovery operations,
+ tree/selection/paste/navigation/shortcut, fill/color/recovery/vector operations,
 snapshot build, and destroy run on the creating Core engine thread.
 A violation returns `INKPOD_STATUS_WRONG_THREAD` without consuming the handle.
 Published snapshots are immutable and `Send + Sync`; view/release must still be
@@ -243,9 +278,10 @@ misaligned pointers, short structures, unknown required flags/enums, invalid
 UTF-8/embedded NUL paths, invalid floating-point values, excessive sample/path
 counts, more than six inclusion colors, palette counts above 4096, invalid
 layer/plane/storage combinations, invalid selection spans/morphology, non-finite
-floating transforms, invalid view/guide/grid IDs, invalid color-depth/channel
-combinations, cumulative raster/fill/selection work, out-of-range coordinates,
-record sizes larger than their advertised stride, and arithmetic overflow.
+ floating transforms, invalid view/guide/grid IDs, invalid color-depth/channel
+  combinations, cumulative raster/fill/selection work, out-of-range coordinates,
+ vector topology/counts/widths/output capacities, record sizes larger than their
+ advertised stride, and arithmetic overflow.
 
 Error text is per-thread UTF-8. `inkpod_error_message_size` reports the required
 bytes including NUL; `inkpod_error_message_copy` copies it and reports written

@@ -1,6 +1,6 @@
 # Architecture
 
-## M4 component boundary
+## M5 component boundary
 
 inkpod has one platform-independent state owner. The dependency direction is
 one-way:
@@ -24,7 +24,10 @@ tiles use `Arc` copy-on-write; an untouched 1920 x 1080 document allocates no
 pixel tiles. Binary/grayscale 8/16-bit main-line and straight-alpha sRGB
 RGBA8/16 color planes are distinct types. It also owns deterministic, bounded
 seed/closed-region/extension planning, selection clipping, inclusion rules,
-gap close, exact-depth sampling/palettes, and display-only color checks.
+ gap close, exact-depth sampling/palettes, and display-only color checks. M5 also
+ places platform-independent fixed-point cubic geometry, deterministic flatten/
+ split/intersection calculations, variable-width hit testing, and source-over
+ sampling in this crate. It has no stable document IDs, history, or UI state.
 The native gap rule is deliberately explicit: a candidate pixel becomes a
 virtual boundary only when hard boundaries exist on both opposing horizontal
 or both opposing vertical rays and the intervening candidate run is no longer
@@ -43,15 +46,20 @@ palette metadata, normal savepoint/path, recovery state, history, and immutable
 premultiplied-BGRA render snapshots. M4 adds persisted stable-ID light-table
 sets/items and source rasters, reference-frame transforms, read-only fill/color
 sampling, naturally ordered cut/cell sequences, thumbnails, subpalette
-sampling, dirty-safe switching/item swap, and motion-check state. An
+ sampling, dirty-safe switching/item swap, and motion-check state. M5 adds
+ stable-ID vector path/fill topology, typed vector layers/planes, transactional
+ draw/erase/connect/width/conversion commands, vector selection, and immutable
+ flat vector snapshot records. Core stores geometry in milli-document units, so
+ zoom/pan never rewrites it. An
 architecture test scans Core, image, and format sources/manifests for forbidden
 Windows/frontend APIs. All three crates are safe Rust; no `HWND`, COM, D2D,
 DXGI, Win32 DPI, or frontend thread type enters them.
 
 `inkpod-ffi` is the only `staticlib`. It validates fixed-layout inputs, exposes
 batched stroke operations, M2 fill/color/recovery, M3 tree/selection/
-clipboard/transform/navigation/multi-view operations, and copied M4 padded-row
-rasters/strided sequences/light-table/motion operations, catches panics, and owns
+ clipboard/transform/navigation/multi-view operations, copied M4 padded-row
+ rasters/strided sequences/light-table/motion operations, and copied M5 vector
+ commands plus caller-owned selection/raster conversion buffers. It catches panics and owns
 opaque Core/snapshot/clipboard allocations. Win32 supplies a
 `CoCreateGuid` document UUID at the create boundary; Core persists it without
 acquiring an OS dependency. The Win32 application does not mirror pixels,
@@ -71,8 +79,10 @@ The Windows frontend has three distinct long-lived threads:
    packets without dropping samples, builds preview snapshots no faster than
    the configured frame interval, executes fill/color/save/recovery work, and
    caches copied document metadata for UI state. Timer autosave is enqueued
-   without a UI wait. It may post value-only state/error notifications to the
-   UI queue; it never mutates a window and Core never calls a C++ callback.
+   without a UI wait; if it reaches the queue during a live stroke, the adapter
+   retains it behind stroke append/end/cancel work and runs it after the stroke
+   closes. It may post value-only state/error notifications to the UI queue; it
+   never mutates a window and Core never calls a C++ callback.
 3. The Renderer thread creates, uses, and destroys D3D11, DXGI swap-chain,
    Direct2D, tile bitmap, and frame-latency objects. It consumes the newest
    immutable snapshot, uploads only changed tile revisions, waits on the
@@ -107,6 +117,22 @@ second DIP scale. Per-Monitor DPI v2 still controls native UI sizing and future
 physical-size policy, but a DPI notification alone does not translate or shrink
 the document. Fit uses the current client size in device pixels and is recomputed
 on viewport resize; manual pan/zoom is preserved across resize.
+
+## M5 vector snapshot and renderer
+
+The immutable snapshot owns flattened cubic segment records, fill records, and
+one packed boundary-path-ID array in addition to raster tiles and overlays. A
+segment repeats path-level stable IDs, z-order, color, closed/visible flags, and
+segment count so the renderer can validate path groups in one pass without
+per-element FFI calls. No snapshot pointer exposes mutable Core geometry.
+
+The Renderer thread validates bounded record counts/strides/group continuity,
+then creates Direct2D path geometry. Closed cubic boundary paths use alternate
+fill mode. Variable-width strokes are sampled deterministically into a filled
+outline; zoom/pan/flip remain the existing document-to-device D2D transform, so
+the outline is generated from unchanged document coordinates. D2D/D3D/DXGI
+objects stay on the Renderer thread and are reconstructed after device loss;
+the retained immutable snapshot remains the reconstruction source.
 
 ## Revision, preview, and transaction model
 

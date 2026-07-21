@@ -1034,7 +1034,8 @@ bool QueueAutosave(AppState& state, const std::wstring& path) noexcept {
             return inkpod_core_autosave(core, utf8.data(), utf8.size(), &info);
         },
         false,
-        false);
+        false,
+        true);
 }
 
 InkpodStatus ApplyFillAtDevicePoint(AppState& state, float device_x, float device_y) noexcept {
@@ -1233,6 +1234,16 @@ int RunM1Smoke(AppState& state) noexcept {
         || _wcsicmp(discovered_recovery.c_str(), initial_recovery_path.c_str()) != 0) {
         return 215;
     }
+    std::wstring active_stroke_recovery_path;
+    try {
+        active_stroke_recovery_path = initial_recovery_path + L".active-stroke-test";
+    } catch (const std::bad_alloc&) {
+        return 217;
+    }
+    if (DeleteFileW(active_stroke_recovery_path.c_str()) == FALSE
+        && GetLastError() != ERROR_FILE_NOT_FOUND) {
+        return 218;
+    }
     PumpPendingWindowMessages();
     const DWORD ui_thread = GetCurrentThreadId();
     const DWORD core_thread = state.engine->ThreadId();
@@ -1269,6 +1280,9 @@ int RunM1Smoke(AppState& state) noexcept {
     if (state.engine->FlushPreview() != INKPOD_STATUS_OK) {
         return 33;
     }
+    if (!QueueAutosave(state, active_stroke_recovery_path)) {
+        return 219;
+    }
     PumpPendingWindowMessages();
     if (SendMessageW(state.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
         return 34;
@@ -1298,6 +1312,11 @@ int RunM1Smoke(AppState& state) noexcept {
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
         return 37;
     }
+    if (GetFileAttributesW(active_stroke_recovery_path.c_str())
+        == INVALID_FILE_ATTRIBUTES) {
+        return 220;
+    }
+    DeleteFileW(active_stroke_recovery_path.c_str());
     PumpPendingWindowMessages();
     InkpodDocumentInfo after_line{};
     if (!QueryDocument(state, after_line)
@@ -2311,6 +2330,210 @@ int RunM3Smoke(AppState& state) noexcept {
         : 333;
 }
 
+int RunM5Smoke(AppState& state) noexcept {
+    if (state.engine == nullptr) {
+        return 500;
+    }
+    const InkpodCellCreateOptions options{
+        sizeof(InkpodCellCreateOptions),
+        0U,
+        INKPOD_FEATURE_NONE,
+        UINT64_C(0x4d35000000000001),
+        UINT64_C(0x4d35000000000002),
+        64U,
+        64U,
+        96000U,
+        96000U};
+    if (state.engine->Invoke(
+            [options](InkpodCore* core) {
+                InkpodDocumentInfo info = EmptyDocumentInfo();
+                return inkpod_core_new_cell(core, &options, &info);
+            },
+            false,
+            false) != INKPOD_STATUS_OK
+        || FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
+        return 501;
+    }
+
+    InkpodSnapshotVectorSegment geometry_before{};
+    std::uint64_t vector_path_id{};
+    std::uint64_t vector_fill_id{};
+    const InkpodStatus vector_status = state.engine->Invoke(
+        [&geometry_before, &vector_path_id, &vector_fill_id](InkpodCore* core) {
+            static constexpr std::array<std::uint8_t, 6U> name{
+                'V', 'e', 'c', 't', 'o', 'r'};
+            InkpodTreeEdit edit{};
+            edit.struct_size = sizeof(edit);
+            edit.operation = INKPOD_TREE_CREATE_LAYER;
+            edit.kind = INKPOD_LAYER_VECTOR_COLORING;
+            edit.name_utf8 = name.data();
+            edit.name_bytes = name.size();
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            std::uint64_t layer_id{};
+            InkpodStatus status = inkpod_core_tree_edit(
+                core, &edit, &result, &layer_id);
+            InkpodNodeInfo trace{};
+            trace.struct_size = sizeof(trace);
+            InkpodNodeInfo fill{};
+            fill.struct_size = sizeof(fill);
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_core_node_get(core, 1U, 1U, &trace);
+            }
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_core_node_get(core, 1U, 2U, &fill);
+            }
+            if (status != INKPOD_STATUS_OK || layer_id == 0U
+                || trace.kind != INKPOD_TYPED_PLANE_COLOR_TRACE
+                || fill.kind != INKPOD_TYPED_PLANE_VECTOR_FILL) {
+                return status == INKPOD_STATUS_OK
+                    ? INKPOD_STATUS_INVALID_STATE
+                    : status;
+            }
+            constexpr auto point = [](float x, float y) noexcept {
+                return InkpodVectorPoint{x, y};
+            };
+            constexpr auto line = [](InkpodVectorPoint start, InkpodVectorPoint end) noexcept {
+                return InkpodVectorCubicSegment{
+                    sizeof(InkpodVectorCubicSegment),
+                    0U,
+                    start,
+                    InkpodVectorPoint{
+                        (start.x * 2.0F + end.x) / 3.0F,
+                        (start.y * 2.0F + end.y) / 3.0F},
+                    InkpodVectorPoint{
+                        (start.x + end.x * 2.0F) / 3.0F,
+                        (start.y + end.y * 2.0F) / 3.0F},
+                    end,
+                    1.0F,
+                    5.0F};
+            };
+            constexpr std::array<InkpodVectorPoint, 5U> corners{
+                point(8.0F, 8.0F),
+                point(56.0F, 8.0F),
+                point(56.0F, 56.0F),
+                point(8.0F, 56.0F),
+                point(8.0F, 8.0F)};
+            const std::array<InkpodVectorCubicSegment, 4U> segments{
+                line(corners[0], corners[1]),
+                line(corners[1], corners[2]),
+                line(corners[2], corners[3]),
+                line(corners[3], corners[4])};
+            const InkpodVectorPathInput path{
+                sizeof(InkpodVectorPathInput),
+                0U,
+                INKPOD_VECTOR_PATH_CLOSED,
+                trace.id,
+                InkpodColorValue{
+                    sizeof(InkpodColorValue),
+                    INKPOD_COLOR_DEPTH_8,
+                    20U,
+                    40U,
+                    220U,
+                    255U},
+                segments.data(),
+                segments.size(),
+                sizeof(InkpodVectorCubicSegment)};
+            status = inkpod_core_vector_add_path(
+                core, &path, &result, &vector_path_id);
+            const InkpodVectorFillInput topology{
+                sizeof(InkpodVectorFillInput),
+                0U,
+                0U,
+                fill.id,
+                InkpodColorValue{
+                    sizeof(InkpodColorValue),
+                    INKPOD_COLOR_DEPTH_8,
+                    240U,
+                    120U,
+                    20U,
+                    180U},
+                &vector_path_id,
+                1U};
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_core_vector_add_fill(
+                    core, &topology, &result, &vector_fill_id);
+            }
+            const InkpodSnapshotOptions snapshot_options{
+                sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
+            InkpodSnapshot* snapshot{};
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_core_build_snapshot(
+                    core, &snapshot_options, &snapshot);
+            }
+            InkpodSnapshotVectorView vectors{};
+            vectors.struct_size = sizeof(vectors);
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_snapshot_get_vectors(snapshot, &vectors);
+            }
+            if (status == INKPOD_STATUS_OK
+                && (vectors.segment_count != 4U || vectors.fill_count != 1U
+                    || vectors.boundary_path_count != 1U || vectors.segments == nullptr
+                    || vectors.fills == nullptr || vectors.boundary_path_ids == nullptr
+                    || vectors.segments->path_id != vector_path_id
+                    || vectors.fills->fill_id != vector_fill_id
+                    || *vectors.boundary_path_ids != vector_path_id)) {
+                status = INKPOD_STATUS_INVALID_STATE;
+            }
+            if (status == INKPOD_STATUS_OK) {
+                geometry_before = *vectors.segments;
+            }
+            const InkpodStatus release_status = inkpod_snapshot_release(&snapshot);
+            return status == INKPOD_STATUS_OK ? release_status : status;
+        },
+        true,
+        true);
+    if (vector_status != INKPOD_STATUS_OK || vector_path_id == 0U || vector_fill_id == 0U) {
+        return 502;
+    }
+    if (ApplyView(state, INKPOD_VIEW_ZOOM_AT, 2.0, 32.0, 32.0)
+        != INKPOD_STATUS_OK) {
+        return 503;
+    }
+    bool geometry_unchanged{};
+    const InkpodStatus zoom_status = state.engine->Invoke(
+        [&geometry_before, &geometry_unchanged](InkpodCore* core) {
+            const InkpodSnapshotOptions options{
+                sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
+            InkpodSnapshot* snapshot{};
+            InkpodStatus status = inkpod_core_build_snapshot(core, &options, &snapshot);
+            InkpodSnapshotVectorView vectors{};
+            vectors.struct_size = sizeof(vectors);
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_snapshot_get_vectors(snapshot, &vectors);
+            }
+            if (status == INKPOD_STATUS_OK && vectors.segment_count != 0U
+                && vectors.segments != nullptr) {
+                const InkpodSnapshotVectorSegment& after = *vectors.segments;
+                geometry_unchanged = after.path_id == geometry_before.path_id
+                    && after.p0.x == geometry_before.p0.x
+                    && after.p0.y == geometry_before.p0.y
+                    && after.p1.x == geometry_before.p1.x
+                    && after.p1.y == geometry_before.p1.y
+                    && after.p2.x == geometry_before.p2.x
+                    && after.p2.y == geometry_before.p2.y
+                    && after.p3.x == geometry_before.p3.x
+                    && after.p3.y == geometry_before.p3.y
+                    && after.width_start == geometry_before.width_start
+                    && after.width_end == geometry_before.width_end;
+            }
+            const InkpodStatus release_status = inkpod_snapshot_release(&snapshot);
+            return status == INKPOD_STATUS_OK ? release_status : status;
+        },
+        false,
+        false);
+    if (zoom_status != INKPOD_STATUS_OK || !geometry_unchanged) {
+        return 504;
+    }
+    return SendMessageW(
+               state.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) == 1
+        ? 0
+        : 505;
+}
+
 InkpodStatus InitializeCore(AppState& state) noexcept {
     try {
         state.engine = std::make_unique<inkpod::app::CoreEngine>();
@@ -3230,6 +3453,9 @@ int APIENTRY wWinMain(
         }
         if (exit_code == 0) {
             exit_code = RunM3Smoke(state);
+        }
+        if (exit_code == 0) {
+            exit_code = RunM5Smoke(state);
         }
     } else {
         ShowWindow(window, show_command);

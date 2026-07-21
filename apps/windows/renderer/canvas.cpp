@@ -32,6 +32,9 @@ using Microsoft::WRL::ComPtr;
 constexpr wchar_t kCanvasClassName[] = L"InkpodCanvasWindow";
 constexpr std::uint64_t kMaximumSnapshotTiles = 262144U;
 constexpr std::uint64_t kMaximumSnapshotGuides = 4096U;
+constexpr std::uint64_t kMaximumVectorSegments = 262144U;
+constexpr std::uint64_t kMaximumVectorFills = 65536U;
+constexpr std::uint64_t kMaximumVectorBoundaries = 262144U;
 constexpr std::uint64_t kMaximumOverlayLines = 8192U;
 constexpr std::size_t kMaximumPointerHistory = 256U;
 
@@ -177,6 +180,12 @@ public:
                     1.0F,
                     D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
             }
+            result = DrawVectors();
+            if (FAILED(result)) {
+                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+                d2d_context_->EndDraw();
+                return result;
+            }
             result = DrawOverlays();
             if (FAILED(result)) {
                 d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -215,6 +224,8 @@ public:
         transform.struct_size = sizeof(transform);
         InkpodSnapshotOverlay overlay{};
         overlay.struct_size = sizeof(overlay);
+        InkpodSnapshotVectorView vectors{};
+        vectors.struct_size = sizeof(vectors);
         const InkpodStatus view_status = inkpod_snapshot_get_view(snapshot, &view);
         const InkpodStatus transform_status = view_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_transform(snapshot, &transform)
@@ -222,8 +233,12 @@ public:
         const InkpodStatus overlay_status = transform_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_overlay(snapshot, &overlay)
             : transform_status;
+        const InkpodStatus vector_status = overlay_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_vectors(snapshot, &vectors)
+            : overlay_status;
         if (view_status != INKPOD_STATUS_OK || transform_status != INKPOD_STATUS_OK
-            || overlay_status != INKPOD_STATUS_OK || !ValidateOverlay(overlay)) {
+            || overlay_status != INKPOD_STATUS_OK || vector_status != INKPOD_STATUS_OK
+            || !ValidateOverlay(overlay) || !ValidateVectors(vectors)) {
             inkpod_snapshot_release(&snapshot);
             return E_INVALIDARG;
         }
@@ -234,6 +249,7 @@ public:
         snapshot_view_ = view;
         transform_ = transform;
         overlay_ = overlay;
+        vectors_ = vectors;
         return RebuildTileCache();
     }
 
@@ -321,6 +337,351 @@ private:
             }
         }
         return true;
+    }
+
+    static bool ValidateVectors(const InkpodSnapshotVectorView& vectors) noexcept {
+        if (vectors.abi_version != INKPOD_ABI_VERSION || vectors.feature_flags != 0U
+            || vectors.segment_count > kMaximumVectorSegments
+            || vectors.fill_count > kMaximumVectorFills
+            || vectors.boundary_path_count > kMaximumVectorBoundaries
+            || vectors.segment_stride_bytes < sizeof(InkpodSnapshotVectorSegment)
+            || vectors.segment_stride_bytes % alignof(InkpodSnapshotVectorSegment) != 0U
+            || vectors.fill_stride_bytes < sizeof(InkpodSnapshotVectorFill)
+            || vectors.fill_stride_bytes % alignof(InkpodSnapshotVectorFill) != 0U
+            || (vectors.segment_count != 0U && vectors.segments == nullptr)
+            || (vectors.fill_count != 0U && vectors.fills == nullptr)
+            || (vectors.boundary_path_count != 0U && vectors.boundary_path_ids == nullptr)
+            || (vectors.segments != nullptr
+                && reinterpret_cast<std::uintptr_t>(vectors.segments)
+                    % alignof(InkpodSnapshotVectorSegment) != 0U)
+            || (vectors.fills != nullptr
+                && reinterpret_cast<std::uintptr_t>(vectors.fills)
+                    % alignof(InkpodSnapshotVectorFill) != 0U)
+            || (vectors.boundary_path_ids != nullptr
+                && reinterpret_cast<std::uintptr_t>(vectors.boundary_path_ids)
+                    % alignof(std::uint64_t) != 0U)
+            || vectors.segment_stride_bytes
+                > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+            || vectors.fill_stride_bytes
+                > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+            || (vectors.segment_count > 1U
+                && vectors.segment_stride_bytes
+                    > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+                        / (vectors.segment_count - 1U))
+            || (vectors.fill_count > 1U
+                && vectors.fill_stride_bytes
+                    > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+                        / (vectors.fill_count - 1U))) {
+            return false;
+        }
+        const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors.segments);
+        std::uint64_t active_path_id = 0U;
+        std::uint32_t active_count = 0U;
+        std::uint32_t next_index = 0U;
+        std::uint32_t active_flags = 0U;
+        for (std::uint64_t index = 0; index < vectors.segment_count; ++index) {
+            const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                segment_bytes + static_cast<std::size_t>(index * vectors.segment_stride_bytes));
+            constexpr std::uint32_t known_flags = INKPOD_SNAPSHOT_VECTOR_CLOSED
+                | INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE;
+            const auto finite_point = [](const InkpodVectorPoint& point) noexcept {
+                return std::isfinite(point.x) && std::isfinite(point.y)
+                    && std::abs(point.x) <= 2000000.0F && std::abs(point.y) <= 2000000.0F;
+            };
+            if (segment->struct_size < sizeof(InkpodSnapshotVectorSegment)
+                || segment->struct_size > vectors.segment_stride_bytes
+                || (segment->flags & ~known_flags) != 0U || segment->path_id == 0U
+                || segment->plane_id == 0U || segment->z_order > 4096U
+                || segment->segment_count == 0U
+                || segment->segment_index >= segment->segment_count
+                || !finite_point(segment->p0) || !finite_point(segment->p1)
+                || !finite_point(segment->p2) || !finite_point(segment->p3)
+                || !std::isfinite(segment->width_start)
+                || !std::isfinite(segment->width_end) || segment->width_start <= 0.0F
+                || segment->width_end <= 0.0F || segment->width_start > 4096.0F
+                || segment->width_end > 4096.0F) {
+                return false;
+            }
+            if (segment->segment_index == 0U) {
+                if (next_index != active_count) {
+                    return false;
+                }
+                active_path_id = segment->path_id;
+                active_count = segment->segment_count;
+                next_index = 0U;
+                active_flags = segment->flags;
+            }
+            if (segment->path_id != active_path_id || segment->segment_count != active_count
+                || segment->segment_index != next_index || segment->flags != active_flags) {
+                return false;
+            }
+            ++next_index;
+        }
+        if (vectors.segment_count != 0U && next_index != active_count) {
+            return false;
+        }
+        const auto* fill_bytes = reinterpret_cast<const std::byte*>(vectors.fills);
+        for (std::uint64_t index = 0; index < vectors.fill_count; ++index) {
+            const auto* fill = reinterpret_cast<const InkpodSnapshotVectorFill*>(
+                fill_bytes + static_cast<std::size_t>(index * vectors.fill_stride_bytes));
+            if (fill->struct_size < sizeof(InkpodSnapshotVectorFill)
+                || fill->struct_size > vectors.fill_stride_bytes || fill->reserved != 0U
+                || fill->fill_id == 0U || fill->plane_id == 0U || fill->z_order > 4096U
+                || fill->boundary_path_count == 0U
+                || fill->first_boundary_path > vectors.boundary_path_count
+                || fill->boundary_path_count
+                    > vectors.boundary_path_count - fill->first_boundary_path) {
+                return false;
+            }
+            for (std::uint64_t boundary = 0; boundary < fill->boundary_path_count; ++boundary) {
+                if (vectors.boundary_path_ids[fill->first_boundary_path + boundary] == 0U) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    struct VectorPathSpan {
+        std::uint64_t id{};
+        std::uint32_t z_order{};
+        std::uint32_t flags{};
+        const InkpodSnapshotVectorSegment* first{};
+        std::uint32_t count{};
+    };
+
+    static D2D1_COLOR_F VectorColor(std::uint32_t rgba) noexcept {
+        return D2D1::ColorF(
+            static_cast<float>((rgba >> 24U) & 0xffU) / 255.0F,
+            static_cast<float>((rgba >> 16U) & 0xffU) / 255.0F,
+            static_cast<float>((rgba >> 8U) & 0xffU) / 255.0F,
+            static_cast<float>(rgba & 0xffU) / 255.0F);
+    }
+
+    static D2D1_POINT_2F CubicPoint(
+        const InkpodSnapshotVectorSegment& segment,
+        float amount) noexcept {
+        const float inverse = 1.0F - amount;
+        const std::array<float, 4> weights{
+            inverse * inverse * inverse,
+            3.0F * inverse * inverse * amount,
+            3.0F * inverse * amount * amount,
+            amount * amount * amount};
+        return D2D1::Point2F(
+            weights[0] * segment.p0.x + weights[1] * segment.p1.x
+                + weights[2] * segment.p2.x + weights[3] * segment.p3.x,
+            weights[0] * segment.p0.y + weights[1] * segment.p1.y
+                + weights[2] * segment.p2.y + weights[3] * segment.p3.y);
+    }
+
+    static float CubicWidth(
+        const InkpodSnapshotVectorSegment& segment,
+        float amount) noexcept {
+        return segment.width_start + (segment.width_end - segment.width_start) * amount;
+    }
+
+    HRESULT DrawFillGeometry(
+        const InkpodSnapshotVectorFill& fill,
+        const std::unordered_map<std::uint64_t, VectorPathSpan>& paths,
+        ID2D1SolidColorBrush* brush) noexcept {
+        ComPtr<ID2D1PathGeometry> geometry;
+        HRESULT result = d2d_factory_->CreatePathGeometry(&geometry);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<ID2D1GeometrySink> sink;
+        result = geometry->Open(&sink);
+        if (FAILED(result)) {
+            return result;
+        }
+        sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
+        for (std::uint64_t index = 0; index < fill.boundary_path_count; ++index) {
+            const std::uint64_t path_id =
+                vectors_.boundary_path_ids[fill.first_boundary_path + index];
+            const auto iterator = paths.find(path_id);
+            if (iterator == paths.end()
+                || (iterator->second.flags & INKPOD_SNAPSHOT_VECTOR_CLOSED) == 0U) {
+                sink->Close();
+                return E_INVALIDARG;
+            }
+            const VectorPathSpan& path = iterator->second;
+            sink->BeginFigure(
+                D2D1::Point2F(path.first->p0.x, path.first->p0.y),
+                D2D1_FIGURE_BEGIN_FILLED);
+            for (std::uint32_t segment_index = 0; segment_index < path.count;
+                 ++segment_index) {
+                const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                    reinterpret_cast<const std::byte*>(path.first)
+                    + static_cast<std::size_t>(segment_index * vectors_.segment_stride_bytes));
+                sink->AddBezier(D2D1::BezierSegment(
+                    D2D1::Point2F(segment->p1.x, segment->p1.y),
+                    D2D1::Point2F(segment->p2.x, segment->p2.y),
+                    D2D1::Point2F(segment->p3.x, segment->p3.y)));
+            }
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        }
+        result = sink->Close();
+        if (FAILED(result)) {
+            return result;
+        }
+        brush->SetColor(VectorColor(fill.color_rgba));
+        d2d_context_->FillGeometry(geometry.Get(), brush);
+        return S_OK;
+    }
+
+    HRESULT DrawStrokeGeometry(
+        const VectorPathSpan& path,
+        ID2D1SolidColorBrush* brush) noexcept {
+        constexpr std::uint32_t samples_per_segment = 24U;
+        try {
+            std::vector<D2D1_POINT_2F> centers;
+            std::vector<float> widths;
+            centers.reserve(static_cast<std::size_t>(path.count) * samples_per_segment + 1U);
+            widths.reserve(centers.capacity());
+            for (std::uint32_t segment_index = 0; segment_index < path.count;
+                 ++segment_index) {
+                const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                    reinterpret_cast<const std::byte*>(path.first)
+                    + static_cast<std::size_t>(segment_index * vectors_.segment_stride_bytes));
+                for (std::uint32_t sample = 0U; sample <= samples_per_segment; ++sample) {
+                    if (segment_index != 0U && sample == 0U) {
+                        continue;
+                    }
+                    const float amount = static_cast<float>(sample)
+                        / static_cast<float>(samples_per_segment);
+                    centers.push_back(CubicPoint(*segment, amount));
+                    widths.push_back(CubicWidth(*segment, amount));
+                }
+            }
+            const bool closed = (path.flags & INKPOD_SNAPSHOT_VECTOR_CLOSED) != 0U;
+            if (closed && centers.size() > 1U
+                && std::abs(centers.front().x - centers.back().x) < 0.0001F
+                && std::abs(centers.front().y - centers.back().y) < 0.0001F) {
+                centers.pop_back();
+                widths.pop_back();
+            }
+            if (centers.size() < 2U) {
+                return E_INVALIDARG;
+            }
+            std::vector<D2D1_POINT_2F> left(centers.size());
+            std::vector<D2D1_POINT_2F> right(centers.size());
+            for (std::size_t index = 0; index < centers.size(); ++index) {
+                const std::size_t previous = index == 0U
+                    ? (closed ? centers.size() - 1U : 0U)
+                    : index - 1U;
+                const std::size_t next = index + 1U == centers.size()
+                    ? (closed ? 0U : centers.size() - 1U)
+                    : index + 1U;
+                float tangent_x = centers[next].x - centers[previous].x;
+                float tangent_y = centers[next].y - centers[previous].y;
+                const float length = std::hypot(tangent_x, tangent_y);
+                if (length <= 0.000001F) {
+                    tangent_x = 1.0F;
+                    tangent_y = 0.0F;
+                } else {
+                    tangent_x /= length;
+                    tangent_y /= length;
+                }
+                const float half_width = widths[index] * 0.5F;
+                const float normal_x = -tangent_y * half_width;
+                const float normal_y = tangent_x * half_width;
+                left[index] = D2D1::Point2F(
+                    centers[index].x + normal_x, centers[index].y + normal_y);
+                right[index] = D2D1::Point2F(
+                    centers[index].x - normal_x, centers[index].y - normal_y);
+            }
+            ComPtr<ID2D1PathGeometry> geometry;
+            HRESULT result = d2d_factory_->CreatePathGeometry(&geometry);
+            if (FAILED(result)) {
+                return result;
+            }
+            ComPtr<ID2D1GeometrySink> sink;
+            result = geometry->Open(&sink);
+            if (FAILED(result)) {
+                return result;
+            }
+            sink->BeginFigure(left.front(), D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddLines(left.data() + 1U, static_cast<UINT32>(left.size() - 1U));
+            for (auto iterator = right.rbegin(); iterator != right.rend(); ++iterator) {
+                sink->AddLine(*iterator);
+            }
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+            result = sink->Close();
+            if (FAILED(result)) {
+                return result;
+            }
+            brush->SetColor(VectorColor(path.first->color_rgba));
+            d2d_context_->FillGeometry(geometry.Get(), brush);
+            return S_OK;
+        } catch (const std::bad_alloc&) {
+            return E_OUTOFMEMORY;
+        }
+    }
+
+    HRESULT DrawVectors() noexcept {
+        if (vectors_.segment_count == 0U && vectors_.fill_count == 0U) {
+            return S_OK;
+        }
+        try {
+            std::vector<VectorPathSpan> ordered_paths;
+            std::unordered_map<std::uint64_t, VectorPathSpan> paths;
+            ordered_paths.reserve(static_cast<std::size_t>(vectors_.segment_count));
+            const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
+            for (std::uint64_t index = 0; index < vectors_.segment_count;) {
+                const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                    segment_bytes + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
+                VectorPathSpan span{
+                    segment->path_id,
+                    segment->z_order,
+                    segment->flags,
+                    segment,
+                    segment->segment_count};
+                ordered_paths.push_back(span);
+                paths.emplace(span.id, span);
+                index += span.count;
+            }
+            ComPtr<ID2D1SolidColorBrush> brush;
+            HRESULT result = d2d_context_->CreateSolidColorBrush(
+                D2D1::ColorF(D2D1::ColorF::Black), &brush);
+            if (FAILED(result)) {
+                return result;
+            }
+            std::uint32_t maximum_z = 0U;
+            for (const auto& path : ordered_paths) {
+                maximum_z = std::max(maximum_z, path.z_order);
+            }
+            const auto* fill_bytes = reinterpret_cast<const std::byte*>(vectors_.fills);
+            for (std::uint64_t index = 0; index < vectors_.fill_count; ++index) {
+                const auto* fill = reinterpret_cast<const InkpodSnapshotVectorFill*>(
+                    fill_bytes + static_cast<std::size_t>(index * vectors_.fill_stride_bytes));
+                maximum_z = std::max(maximum_z, fill->z_order);
+            }
+            for (std::uint32_t z_order = 0U; z_order <= maximum_z; ++z_order) {
+                for (std::uint64_t index = 0; index < vectors_.fill_count; ++index) {
+                    const auto* fill = reinterpret_cast<const InkpodSnapshotVectorFill*>(
+                        fill_bytes + static_cast<std::size_t>(index * vectors_.fill_stride_bytes));
+                    if (fill->z_order == z_order && (fill->color_rgba & 0xffU) != 0U) {
+                        result = DrawFillGeometry(*fill, paths, brush.Get());
+                        if (FAILED(result)) {
+                            return result;
+                        }
+                    }
+                }
+                for (const auto& path : ordered_paths) {
+                    if (path.z_order == z_order
+                        && (path.flags & INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE) != 0U
+                        && (path.first->color_rgba & 0xffU) != 0U) {
+                        result = DrawStrokeGeometry(path, brush.Get());
+                        if (FAILED(result)) {
+                            return result;
+                        }
+                    }
+                }
+            }
+            return S_OK;
+        } catch (const std::bad_alloc&) {
+            return E_OUTOFMEMORY;
+        }
     }
 
     HRESULT DrawOverlays() noexcept {
@@ -684,6 +1045,7 @@ private:
     InkpodSnapshotView snapshot_view_{};
     InkpodSnapshotTransform transform_{};
     InkpodSnapshotOverlay overlay_{};
+    InkpodSnapshotVectorView vectors_{};
     std::unordered_map<std::uint64_t, CachedTile> tile_cache_;
     ComPtr<ID3D11Device> d3d_device_;
     ComPtr<ID3D11DeviceContext> d3d_context_;

@@ -22,6 +22,8 @@ binary manifest
   IDs, persistent selection plane, guides, and grid
   optional M4 production-workflow metadata: light-table sets/items, transforms,
   source identity/revision/DPI/reference frame, and source-plane IDs
+  optional M5 vector metadata: stable paths/fills, cubic control points,
+  endpoint widths, colors, and fill-boundary path IDs
   typed plane descriptors with pixel format and blob ranges
   tile blob descriptors with coordinate, dimensions, format,
   offset, length, and FNV-1a 64-bit checksum
@@ -71,6 +73,26 @@ or sampled color but never writes the source. M1-M3 files open with one empty
 default set. The decoder rejects missing/unreferenced source planes, colliding
 IDs, invalid transforms/opacities/DPI, and M4 without the M3 typed tree.
 
+Header flag bit 3 advertises the additive `"M5VT"` version-1 section. Geometry
+is stored in document coordinates as signed 32-bit thousandths of a pixel,
+restricted to -2,000,000,000 through 2,000,000,000 thousandths so reopened
+geometry obeys the Core's +/-2,000,000 document-pixel bound;
+variable endpoint widths are unsigned thousandths in the range 1 through
+4,096,000. Each stable-ID path names a vector main-line or color-trace plane,
+an exact RGBA8/RGBA16 color, a closed flag, and one or more continuous cubic
+segments. Each stable-ID fill names a vector-fill plane, an exact color, and one
+or more unique closed boundary-path IDs. The section is bounded to 65,536 paths,
+262,144 total segments, 65,536 fills, and 262,144 total boundary references.
+
+A vector-coloring layer has exactly one vector-main-line plane, one or more
+color-trace planes, and exactly one vector-fill plane; optional raster planes are
+allowed. Vector plane payload descriptors are empty RGBA8 placeholders because
+geometry lives in `M5VT`, not in raster blobs. The decoder requires M3 typed-tree
+metadata, rejects vector planes without M5 metadata, cross-layer fill boundaries,
+open/discontinuous fill boundaries, missing plane/path references, duplicate or
+cross-M1-M5 stable IDs, unsupported flags/reserved values, excessive counts, and
+trailing section bytes. M1-M4 files remain readable and acquire no vector state.
+
 The decoder bounds the whole file (1 GiB), including a post-read check against
 concurrent file growth, plus manifest (16 MiB), dimensions, plane/blob counts,
 offsets, and lengths before allocation. It rejects unknown
@@ -78,8 +100,8 @@ required version/flags/types/color space, zero or inconsistent IDs, duplicate
 tile coordinates, mismatched dimensions/pixel formats, truncation, overflow,
 checksum mismatch, duplicate tree/guide IDs, missing active/selection IDs,
 invalid UTF-8/control characters, guide positions outside the document,
-out-of-range opacity/grid values, stable-ID collisions between M3 state and M4
-source planes/sets/items, and a tree
+ out-of-range opacity/grid values, stable-ID collisions across M3/M4/M5 state,
+ and a tree
 plane ID that does not correspond one-to-one with a persisted plane payload.
 
 ## Common raster formats

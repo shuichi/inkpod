@@ -9,6 +9,7 @@ use inkpod_core::{
     RgbaRasterBytes, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
     SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SelectionLayerOperation, SelectionOperation,
     SelectionShape, SequenceCellSource, SequenceDirection, ShortcutBinding, Stroke, StrokeSample,
+    VectorCubicSegment, VectorEraseMode, VectorPathInput, VectorSelectionMode, VectorWidthMode,
     ViewCommand,
 };
 use std::cell::RefCell;
@@ -110,10 +111,14 @@ pub const INKPOD_LAYER_VANISHING_POINT: u32 = 6;
 pub const INKPOD_LAYER_ADJUSTMENT: u32 = 7;
 pub const INKPOD_LAYER_TEXT: u32 = 8;
 pub const INKPOD_LAYER_ANNOTATION: u32 = 9;
+pub const INKPOD_LAYER_VECTOR_COLORING: u32 = 10;
 pub const INKPOD_TYPED_PLANE_MAIN_LINE: u32 = 1;
 pub const INKPOD_TYPED_PLANE_COLOR: u32 = 2;
 pub const INKPOD_TYPED_PLANE_RASTER: u32 = 3;
 pub const INKPOD_TYPED_PLANE_SELECTION: u32 = 4;
+pub const INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE: u32 = 5;
+pub const INKPOD_TYPED_PLANE_COLOR_TRACE: u32 = 6;
+pub const INKPOD_TYPED_PLANE_VECTOR_FILL: u32 = 7;
 pub const INKPOD_STORAGE_BINARY8: u32 = 1;
 pub const INKPOD_STORAGE_GRAYSCALE8: u32 = 2;
 pub const INKPOD_STORAGE_GRAYSCALE16: u32 = 3;
@@ -132,6 +137,25 @@ pub const INKPOD_MOTION_FLAG_INCLUDE_LIGHT_TABLE: u64 = 1 << 2;
 pub const INKPOD_MOTION_FRAME_PAUSED: u32 = 1 << 0;
 pub const INKPOD_MOTION_FRAME_INCLUDE_SELECTION: u32 = 1 << 1;
 pub const INKPOD_MOTION_FRAME_INCLUDE_LIGHT_TABLE: u32 = 1 << 2;
+pub const INKPOD_VECTOR_PATH_CLOSED: u64 = 1 << 0;
+pub const INKPOD_VECTOR_ERASE_PARTIAL: u32 = 1;
+pub const INKPOD_VECTOR_ERASE_TO_INTERSECTION: u32 = 2;
+pub const INKPOD_VECTOR_ERASE_WHOLE_PATH: u32 = 3;
+pub const INKPOD_VECTOR_WIDTH_ADD: u32 = 1;
+pub const INKPOD_VECTOR_WIDTH_SUBTRACT: u32 = 2;
+pub const INKPOD_VECTOR_WIDTH_SCALE: u32 = 3;
+pub const INKPOD_VECTOR_WIDTH_CONSTANT: u32 = 4;
+pub const INKPOD_VECTOR_SELECT_CUT_BY_SELECTION: u32 = 1;
+pub const INKPOD_VECTOR_SELECT_TOUCHING: u32 = 2;
+pub const INKPOD_VECTOR_SELECT_FULLY_CONTAINED: u32 = 3;
+pub const INKPOD_VECTOR_SELECT_LINE: u32 = 4;
+pub const INKPOD_VECTOR_SELECT_WHOLE_LINE: u32 = 5;
+pub const INKPOD_VECTOR_SELECT_TO_INTERSECTION: u32 = 6;
+pub const INKPOD_VECTOR_SELECT_FILL_BOUNDARY: u32 = 7;
+pub const INKPOD_VECTOR_SELECT_FILL: u32 = 8;
+pub const INKPOD_VECTOR_RASTERIZE_ANTIALIAS: u64 = 1 << 0;
+pub const INKPOD_SNAPSHOT_VECTOR_CLOSED: u32 = 1 << 0;
+pub const INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE: u32 = 1 << 1;
 pub const INKPOD_TREE_CREATE_LAYER: u32 = 1;
 pub const INKPOD_TREE_DUPLICATE_LAYER: u32 = 2;
 pub const INKPOD_TREE_DELETE_LAYER: u32 = 3;
@@ -440,6 +464,188 @@ pub struct InkpodSnapshotOverlay {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodVectorPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodVectorCubicSegment {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub p0: InkpodVectorPoint,
+    pub p1: InkpodVectorPoint,
+    pub p2: InkpodVectorPoint,
+    pub p3: InkpodVectorPoint,
+    pub width_start: f32,
+    pub width_end: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodVectorPathInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub flags: u64,
+    pub plane_id: u64,
+    pub color: InkpodColorValue,
+    pub segments: *const InkpodVectorCubicSegment,
+    pub segment_count: u64,
+    pub segment_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodVectorFillInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub color: InkpodColorValue,
+    pub boundary_path_ids: *const u64,
+    pub boundary_path_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodVectorEraseInput {
+    pub struct_size: u32,
+    pub mode: u32,
+    pub plane_id: u64,
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodVectorWidthInput {
+    pub struct_size: u32,
+    pub mode: u32,
+    pub feature_flags: u64,
+    pub path_ids: *const u64,
+    pub path_count: u64,
+    pub parameter: f32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodVectorSelectionInput {
+    pub struct_size: u32,
+    pub mode: u32,
+    pub feature_flags: u64,
+    pub bounds: InkpodFrameRect,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodVectorSelectionRange {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub path_id: u64,
+    pub start_million: u32,
+    pub end_million: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodVectorSelectionBuffer {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub ranges: *mut InkpodVectorSelectionRange,
+    pub range_capacity: u64,
+    pub range_count: u64,
+    pub fill_ids: *mut u64,
+    pub fill_capacity: u64,
+    pub fill_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodVectorRasterizeInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub layer_id: u64,
+    pub scale: u32,
+    pub reserved_2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodVectorRasterBuffer {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub pixels: *mut u8,
+    pub pixel_capacity: u64,
+    pub required_bytes: u64,
+    pub width: u32,
+    pub height: u32,
+    pub stride_bytes: u32,
+    pub reserved_2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodRasterVectorizeInput {
+    pub struct_size: u32,
+    pub alpha_threshold: u32,
+    pub feature_flags: u64,
+    pub source_plane_id: u64,
+    pub target_layer_id: u64,
+}
+
+#[repr(C)]
+pub struct InkpodSnapshotVectorSegment {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub path_id: u64,
+    pub plane_id: u64,
+    pub z_order: u32,
+    pub segment_index: u32,
+    pub segment_count: u32,
+    pub color_rgba: u32,
+    pub p0: InkpodVectorPoint,
+    pub p1: InkpodVectorPoint,
+    pub p2: InkpodVectorPoint,
+    pub p3: InkpodVectorPoint,
+    pub width_start: f32,
+    pub width_end: f32,
+}
+
+#[repr(C)]
+pub struct InkpodSnapshotVectorFill {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub fill_id: u64,
+    pub plane_id: u64,
+    pub z_order: u32,
+    pub color_rgba: u32,
+    pub first_boundary_path: u64,
+    pub boundary_path_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodSnapshotVectorView {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub feature_flags: u64,
+    pub segments: *const InkpodSnapshotVectorSegment,
+    pub segment_count: u64,
+    pub segment_stride_bytes: u64,
+    pub fills: *const InkpodSnapshotVectorFill,
+    pub fill_count: u64,
+    pub fill_stride_bytes: u64,
+    pub boundary_path_ids: *const u64,
+    pub boundary_path_count: u64,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodTreeEdit {
     pub struct_size: u32,
@@ -623,6 +829,9 @@ pub struct InkpodSnapshot {
     snapshot: RenderSnapshot,
     tiles: Box<[InkpodSnapshotTile]>,
     guides: Box<[InkpodSnapshotGuide]>,
+    vector_segments: Box<[InkpodSnapshotVectorSegment]>,
+    vector_fills: Box<[InkpodSnapshotVectorFill]>,
+    vector_boundary_path_ids: Box<[u64]>,
 }
 
 pub struct InkpodClipboard {
@@ -662,10 +871,65 @@ fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
             id: guide.id,
         })
         .collect();
+    let vector_segments = snapshot
+        .vector_segments()
+        .iter()
+        .map(|segment| InkpodSnapshotVectorSegment {
+            struct_size: size_of::<InkpodSnapshotVectorSegment>() as u32,
+            flags: (if segment.closed {
+                INKPOD_SNAPSHOT_VECTOR_CLOSED
+            } else {
+                0
+            }) | if segment.stroke_visible {
+                INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE
+            } else {
+                0
+            },
+            path_id: segment.path_id,
+            plane_id: segment.plane_id,
+            z_order: segment.z_order,
+            segment_index: segment.segment_index,
+            segment_count: segment.segment_count,
+            color_rgba: pack_rgba(segment.color_rgba),
+            p0: vector_point(segment.cubic.p0),
+            p1: vector_point(segment.cubic.p1),
+            p2: vector_point(segment.cubic.p2),
+            p3: vector_point(segment.cubic.p3),
+            width_start: segment.cubic.width_start,
+            width_end: segment.cubic.width_end,
+        })
+        .collect();
+    let vector_boundary_path_ids: Box<[u64]> = snapshot
+        .vector_fills()
+        .iter()
+        .flat_map(|fill| fill.boundary_path_ids.iter().copied())
+        .collect();
+    let mut first_boundary_path = 0_u64;
+    let vector_fills = snapshot
+        .vector_fills()
+        .iter()
+        .map(|fill| {
+            let output = InkpodSnapshotVectorFill {
+                struct_size: size_of::<InkpodSnapshotVectorFill>() as u32,
+                reserved: 0,
+                fill_id: fill.fill_id,
+                plane_id: fill.plane_id,
+                z_order: fill.z_order,
+                color_rgba: pack_rgba(fill.color_rgba),
+                first_boundary_path,
+                boundary_path_count: fill.boundary_path_ids.len() as u64,
+            };
+            first_boundary_path += fill.boundary_path_ids.len() as u64;
+            output
+        })
+        .collect();
     Box::new(InkpodSnapshot {
         snapshot,
         tiles,
         guides,
+        vector_segments,
+        vector_fills,
+        vector_boundary_path_ids,
     })
 }
 
@@ -804,6 +1068,20 @@ fn frame_rect(rect: inkpod_core::RectI32) -> InkpodFrameRect {
     }
 }
 
+const fn pack_rgba(color: [u8; 4]) -> u32 {
+    ((color[0] as u32) << 24)
+        | ((color[1] as u32) << 16)
+        | ((color[2] as u32) << 8)
+        | color[3] as u32
+}
+
+const fn vector_point(point: PointF32) -> InkpodVectorPoint {
+    InkpodVectorPoint {
+        x: point.x,
+        y: point.y,
+    }
+}
+
 fn write_document_info(output: &mut InkpodDocumentInfo, info: DocumentInfo) {
     output.flags = (if info.dirty {
         INKPOD_DOCUMENT_FLAG_DIRTY
@@ -879,6 +1157,7 @@ fn parse_layer_kind(value: u32) -> Result<LayerKind, u32> {
         INKPOD_LAYER_ADJUSTMENT => Ok(LayerKind::Adjustment),
         INKPOD_LAYER_TEXT => Ok(LayerKind::Text),
         INKPOD_LAYER_ANNOTATION => Ok(LayerKind::Annotation),
+        INKPOD_LAYER_VECTOR_COLORING => Ok(LayerKind::VectorColoring),
         _ => Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "layer kind is not defined",
@@ -897,6 +1176,7 @@ fn layer_kind_code(value: LayerKind) -> u32 {
         LayerKind::Adjustment => INKPOD_LAYER_ADJUSTMENT,
         LayerKind::Text => INKPOD_LAYER_TEXT,
         LayerKind::Annotation => INKPOD_LAYER_ANNOTATION,
+        LayerKind::VectorColoring => INKPOD_LAYER_VECTOR_COLORING,
     }
 }
 
@@ -906,6 +1186,9 @@ fn parse_plane_type(value: u32) -> Result<PlaneType, u32> {
         INKPOD_TYPED_PLANE_COLOR => Ok(PlaneType::Color),
         INKPOD_TYPED_PLANE_RASTER => Ok(PlaneType::Raster),
         INKPOD_TYPED_PLANE_SELECTION => Ok(PlaneType::Selection),
+        INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE => Ok(PlaneType::VectorMainLine),
+        INKPOD_TYPED_PLANE_COLOR_TRACE => Ok(PlaneType::ColorTrace),
+        INKPOD_TYPED_PLANE_VECTOR_FILL => Ok(PlaneType::VectorFill),
         _ => Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "typed plane kind is not defined",
@@ -919,6 +1202,9 @@ fn plane_type_code(value: PlaneType) -> u32 {
         PlaneType::Color => INKPOD_TYPED_PLANE_COLOR,
         PlaneType::Raster => INKPOD_TYPED_PLANE_RASTER,
         PlaneType::Selection => INKPOD_TYPED_PLANE_SELECTION,
+        PlaneType::VectorMainLine => INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE,
+        PlaneType::ColorTrace => INKPOD_TYPED_PLANE_COLOR_TRACE,
+        PlaneType::VectorFill => INKPOD_TYPED_PLANE_VECTOR_FILL,
     }
 }
 
@@ -1132,6 +1418,134 @@ unsafe fn parse_color_value(color: *const InkpodColorValue) -> Result<PixelValue
         _ => Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "color depth is not 8 or 16 bits",
+        )),
+    }
+}
+
+unsafe fn parse_vector_path_input(input: &InkpodVectorPathInput) -> Result<VectorPathInput, u32> {
+    if input.reserved != 0 || input.flags & !INKPOD_VECTOR_PATH_CLOSED != 0 {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "vector path input contains unsupported values",
+        ));
+    }
+    let count = usize::try_from(input.segment_count).map_err(|_| {
+        fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "vector segment count is not representable",
+        )
+    })?;
+    if count == 0 || count > 262_144 {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "vector segment count is outside bounds",
+        ));
+    }
+    let stride = usize::try_from(input.segment_stride_bytes).map_err(|_| {
+        fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "vector segment stride is not representable",
+        )
+    })?;
+    if input.segments.is_null()
+        || !is_aligned(input.segments)
+        || stride < size_of::<InkpodVectorCubicSegment>()
+        || stride % align_of::<InkpodVectorCubicSegment>() != 0
+        || count
+            .checked_mul(stride)
+            .is_none_or(|bytes| bytes > isize::MAX as usize)
+    {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "vector segment span is null, misaligned, or outside bounds",
+        ));
+    }
+    let mut segments = Vec::with_capacity(count);
+    for index in 0..count {
+        // SAFETY: The validated borrowed strided span contains this record.
+        let pointer = unsafe {
+            input
+                .segments
+                .cast::<u8>()
+                .add(index * stride)
+                .cast::<InkpodVectorCubicSegment>()
+        };
+        // SAFETY: Every record exposes its readable size prefix.
+        let size = unsafe { validate_struct(pointer, "InkpodVectorCubicSegment") }?;
+        if u64::from(size) > input.segment_stride_bytes {
+            return Err(fail(
+                INKPOD_STATUS_INCOMPATIBLE_ABI,
+                "vector segment struct_size exceeds its stride",
+            ));
+        }
+        // SAFETY: The complete known record is readable after validation.
+        let segment = unsafe { &*pointer };
+        if segment.reserved != 0 {
+            return Err(fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "vector segment reserved field is not zero",
+            ));
+        }
+        let point = |value: InkpodVectorPoint| PointF32 {
+            x: value.x,
+            y: value.y,
+        };
+        segments.push(VectorCubicSegment {
+            p0: point(segment.p0),
+            p1: point(segment.p1),
+            p2: point(segment.p2),
+            p3: point(segment.p3),
+            width_start: segment.width_start,
+            width_end: segment.width_end,
+        });
+    }
+    // SAFETY: The nested color record is a complete field of the validated input.
+    let color = unsafe { parse_color_value(&raw const input.color) }?;
+    Ok(VectorPathInput {
+        segments,
+        color,
+        closed: input.flags & INKPOD_VECTOR_PATH_CLOSED != 0,
+    })
+}
+
+fn parse_vector_erase_mode(value: u32) -> Result<VectorEraseMode, u32> {
+    match value {
+        INKPOD_VECTOR_ERASE_PARTIAL => Ok(VectorEraseMode::Partial),
+        INKPOD_VECTOR_ERASE_TO_INTERSECTION => Ok(VectorEraseMode::ToIntersection),
+        INKPOD_VECTOR_ERASE_WHOLE_PATH => Ok(VectorEraseMode::WholePath),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "vector erase mode is not defined",
+        )),
+    }
+}
+
+fn parse_vector_width_mode(value: u32, parameter: f32) -> Result<VectorWidthMode, u32> {
+    match value {
+        INKPOD_VECTOR_WIDTH_ADD => Ok(VectorWidthMode::Add(parameter)),
+        INKPOD_VECTOR_WIDTH_SUBTRACT => Ok(VectorWidthMode::Subtract(parameter)),
+        INKPOD_VECTOR_WIDTH_SCALE => Ok(VectorWidthMode::Scale(parameter)),
+        INKPOD_VECTOR_WIDTH_CONSTANT => Ok(VectorWidthMode::Constant(parameter)),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "vector width mode is not defined",
+        )),
+    }
+}
+
+fn parse_vector_selection_mode(value: u32) -> Result<VectorSelectionMode, u32> {
+    match value {
+        INKPOD_VECTOR_SELECT_CUT_BY_SELECTION => Ok(VectorSelectionMode::CutBySelection),
+        INKPOD_VECTOR_SELECT_TOUCHING => Ok(VectorSelectionMode::Touching),
+        INKPOD_VECTOR_SELECT_FULLY_CONTAINED => Ok(VectorSelectionMode::FullyContained),
+        INKPOD_VECTOR_SELECT_LINE => Ok(VectorSelectionMode::Line),
+        INKPOD_VECTOR_SELECT_WHOLE_LINE => Ok(VectorSelectionMode::WholeLine),
+        INKPOD_VECTOR_SELECT_TO_INTERSECTION => Ok(VectorSelectionMode::ToIntersection),
+        INKPOD_VECTOR_SELECT_FILL_BOUNDARY => Ok(VectorSelectionMode::FillBoundary),
+        INKPOD_VECTOR_SELECT_FILL => Ok(VectorSelectionMode::Fill),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "vector selection mode is not defined",
         )),
     }
 }
@@ -2990,6 +3404,614 @@ pub unsafe extern "C" fn inkpod_core_build_snapshot(
     })
 }
 
+/// Adds one bounded cubic, variable-width vector path as a single history
+/// transaction. The borrowed strided segment span is copied before return.
+///
+/// # Safety
+/// Core/input/result/output storage must be complete, aligned, live,
+/// non-overlapping owner-thread objects for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_vector_add_path(
+    core: *mut InkpodCore,
+    input: *const InkpodVectorPathInput,
+    result: *mut InkpodDispatchResult,
+    out_path_id: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || out_path_id.is_null() || !is_aligned(out_path_id)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "vector path core or output is null or misaligned",
+            );
+        }
+        // SAFETY: Output storage is writable by contract.
+        unsafe { out_path_id.write(0) };
+        if let Err(status) = unsafe { validate_struct(input, "InkpodVectorPathInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        // SAFETY: The validated input owns the complete borrowed nested span.
+        let parsed = match unsafe { parse_vector_path_input(input) } {
+            Ok(parsed) => parsed,
+            Err(status) => return status,
+        };
+        match core.core.vector_add_path(input.plane_id, parsed) {
+            Ok((outcome, path_id)) => {
+                write_dispatch_result(result, outcome);
+                // SAFETY: Writable output storage was checked above.
+                unsafe { out_path_id.write(path_id) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Adds a fill whose borrowed boundary-ID span is copied before return.
+///
+/// # Safety
+/// All pointers must be complete, aligned, live, and non-overlapping for this
+/// owner-thread call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_vector_add_fill(
+    core: *mut InkpodCore,
+    input: *const InkpodVectorFillInput,
+    result: *mut InkpodDispatchResult,
+    out_fill_id: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || out_fill_id.is_null() || !is_aligned(out_fill_id)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "vector fill core or output is null or misaligned",
+            );
+        }
+        // SAFETY: Output storage is writable by contract.
+        unsafe { out_fill_id.write(0) };
+        if let Err(status) = unsafe { validate_struct(input, "InkpodVectorFillInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if input.reserved != 0 || input.feature_flags != INKPOD_FEATURE_NONE {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "vector fill input contains unsupported values",
+            );
+        }
+        let count = match usize::try_from(input.boundary_path_count) {
+            Ok(count) if (1..=262_144).contains(&count) => count,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "vector fill boundary count is outside bounds",
+                );
+            }
+        };
+        if input.boundary_path_ids.is_null()
+            || !is_aligned(input.boundary_path_ids)
+            || count
+                .checked_mul(size_of::<u64>())
+                .is_none_or(|bytes| bytes > isize::MAX as usize)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "vector fill boundary span is invalid",
+            );
+        }
+        // SAFETY: The bounded aligned span is readable for this call.
+        let boundaries = unsafe { slice::from_raw_parts(input.boundary_path_ids, count) }.to_vec();
+        // SAFETY: The nested color record is a complete field of the input.
+        let color = match unsafe { parse_color_value(&raw const input.color) } {
+            Ok(color) => color,
+            Err(status) => return status,
+        };
+        match core
+            .core
+            .vector_add_fill(input.plane_id, &boundaries, color)
+        {
+            Ok((outcome, fill_id)) => {
+                write_dispatch_result(result, outcome);
+                // SAFETY: Writable output storage was checked above.
+                unsafe { out_fill_id.write(fill_id) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies one partial/intersection/full vector erase transaction.
+///
+/// # Safety
+/// Core/input/result must be complete, aligned, live, and non-overlapping on
+/// the Core owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_vector_erase(
+    core: *mut InkpodCore,
+    input: *const InkpodVectorEraseInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodVectorEraseInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if input.reserved != 0 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "vector erase reserved field is not zero",
+            );
+        }
+        let mode = match parse_vector_erase_mode(input.mode) {
+            Ok(mode) => mode,
+            Err(status) => return status,
+        };
+        match core.core.vector_erase(
+            input.plane_id,
+            PointF32 {
+                x: input.x,
+                y: input.y,
+            },
+            input.radius,
+            mode,
+        ) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Connects the deterministic nearest endpoint pair within `maximum_gap`.
+/// A zero output ID means the command was a successful no-op.
+///
+/// # Safety
+/// Core/result/output must be complete, aligned, live, non-overlapping
+/// owner-thread objects.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_vector_connect(
+    core: *mut InkpodCore,
+    plane_id: u64,
+    maximum_gap: f32,
+    result: *mut InkpodDispatchResult,
+    out_path_id: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || out_path_id.is_null() || !is_aligned(out_path_id)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "vector connect core or output is null or misaligned",
+            );
+        }
+        // SAFETY: Output storage is writable by contract.
+        unsafe { out_path_id.write(0) };
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.vector_connect(plane_id, maximum_gap) {
+            Ok((outcome, path_id)) => {
+                write_dispatch_result(result, outcome);
+                if let Some(path_id) = path_id {
+                    // SAFETY: Writable output storage was checked above.
+                    unsafe { out_path_id.write(path_id) };
+                }
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies one width correction to a borrowed path-ID span.
+///
+/// # Safety
+/// Core/input/result and nested ID storage must be complete, aligned, live,
+/// and non-overlapping on the Core owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_vector_correct_width(
+    core: *mut InkpodCore,
+    input: *const InkpodVectorWidthInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodVectorWidthInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if input.feature_flags != INKPOD_FEATURE_NONE || input.reserved != 0 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "vector width input contains unsupported values",
+            );
+        }
+        let count = match usize::try_from(input.path_count) {
+            Ok(count) if (1..=65_536).contains(&count) => count,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "vector width path count is outside bounds",
+                );
+            }
+        };
+        if input.path_ids.is_null()
+            || !is_aligned(input.path_ids)
+            || count
+                .checked_mul(size_of::<u64>())
+                .is_none_or(|bytes| bytes > isize::MAX as usize)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "vector width path span is invalid",
+            );
+        }
+        // SAFETY: The bounded aligned span is readable for this call.
+        let path_ids = unsafe { slice::from_raw_parts(input.path_ids, count) }.to_vec();
+        let mode = match parse_vector_width_mode(input.mode, input.parameter) {
+            Ok(mode) => mode,
+            Err(status) => return status,
+        };
+        match core.core.vector_correct_width(&path_ids, mode) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Queries deterministic vector selection ranges into caller-owned buffers.
+/// A zero-capacity null span is a successful count query.
+///
+/// # Safety
+/// Core/input/output and any advertised output spans must be complete, aligned,
+/// live, writable, and non-overlapping on the Core owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_vector_select(
+    core: *mut InkpodCore,
+    input: *const InkpodVectorSelectionInput,
+    output: *mut InkpodVectorSelectionBuffer,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodVectorSelectionInput") } {
+            return status;
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodVectorSelectionBuffer") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if input.feature_flags != INKPOD_FEATURE_NONE || output.reserved != 0 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "vector selection contains unsupported flags or reserved values",
+            );
+        }
+        let mode = match parse_vector_selection_mode(input.mode) {
+            Ok(mode) => mode,
+            Err(status) => return status,
+        };
+        let selected = match core.core.vector_select(
+            RectI32 {
+                x: input.bounds.x,
+                y: input.bounds.y,
+                width: input.bounds.width,
+                height: input.bounds.height,
+            },
+            mode,
+        ) {
+            Ok(selected) => selected,
+            Err(error) => return map_core_error(error),
+        };
+        output.range_count = selected.path_ranges.len() as u64;
+        output.fill_count = selected.fill_ids.len() as u64;
+        if output.range_capacity == 0 {
+            if !output.ranges.is_null() {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity vector range output must be null",
+                );
+            }
+        } else if output.range_capacity > 65_536
+            || output.ranges.is_null()
+            || !is_aligned(output.ranges)
+            || usize::try_from(output.range_capacity)
+                .ok()
+                .and_then(|count| count.checked_mul(size_of::<InkpodVectorSelectionRange>()))
+                .is_none_or(|bytes| bytes > isize::MAX as usize)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "vector range output span is invalid",
+            );
+        }
+        if output.fill_capacity == 0 {
+            if !output.fill_ids.is_null() {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity vector fill output must be null",
+                );
+            }
+        } else if output.fill_capacity > 65_536
+            || output.fill_ids.is_null()
+            || !is_aligned(output.fill_ids)
+            || usize::try_from(output.fill_capacity)
+                .ok()
+                .and_then(|count| count.checked_mul(size_of::<u64>()))
+                .is_none_or(|bytes| bytes > isize::MAX as usize)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "vector fill output span is invalid",
+            );
+        }
+        if output.range_capacity < output.range_count || output.fill_capacity < output.fill_count {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "vector selection output capacity is too small",
+            );
+        }
+        for (index, range) in selected.path_ranges.iter().enumerate() {
+            let record = InkpodVectorSelectionRange {
+                struct_size: size_of::<InkpodVectorSelectionRange>() as u32,
+                reserved: 0,
+                path_id: range.path_id,
+                start_million: range.start_million,
+                end_million: range.end_million,
+            };
+            // SAFETY: The caller-owned bounded output span is writable by contract.
+            unsafe { output.ranges.add(index).write(record) };
+        }
+        if !selected.fill_ids.is_empty() {
+            // SAFETY: Capacity and byte bounds were checked and the spans may not overlap.
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    selected.fill_ids.as_ptr(),
+                    output.fill_ids,
+                    selected.fill_ids.len(),
+                )
+            };
+        }
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Rasterizes one vector layer into caller-owned straight RGBA8 storage. A
+/// zero-capacity null buffer is a successful size query.
+///
+/// # Safety
+/// Core/input/output and any advertised pixel range must be complete, aligned,
+/// live, writable, and non-overlapping on the Core owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_vector_rasterize(
+    core: *mut InkpodCore,
+    input: *const InkpodVectorRasterizeInput,
+    output: *mut InkpodVectorRasterBuffer,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodVectorRasterizeInput") } {
+            return status;
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodVectorRasterBuffer") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if input.reserved != 0
+            || input.reserved_2 != 0
+            || input.feature_flags & !INKPOD_VECTOR_RASTERIZE_ANTIALIAS != 0
+            || output.reserved != 0
+            || output.reserved_2 != 0
+        {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "vector rasterize contains unsupported flags or reserved values",
+            );
+        }
+        let (width, height, stride_bytes, required_bytes) =
+            match core.core.vector_raster_layout(input.layer_id, input.scale) {
+                Ok(layout) => layout,
+                Err(error) => return map_core_error(error),
+            };
+        output.required_bytes = required_bytes;
+        output.width = width;
+        output.height = height;
+        output.stride_bytes = stride_bytes;
+        if output.pixel_capacity == 0 {
+            if !output.pixels.is_null() {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity vector raster output must be null",
+                );
+            }
+            return INKPOD_STATUS_OK;
+        }
+        if output.pixels.is_null()
+            || output.pixel_capacity > isize::MAX as u64
+            || output.pixel_capacity < output.required_bytes
+        {
+            return fail(
+                if output.pixel_capacity < output.required_bytes {
+                    INKPOD_STATUS_BUFFER_TOO_SMALL
+                } else {
+                    INKPOD_STATUS_INVALID_ARGUMENT
+                },
+                "vector raster output storage is invalid or too small",
+            );
+        }
+        let raster = match core.core.rasterize_vector_layer(
+            input.layer_id,
+            input.scale,
+            input.feature_flags & INKPOD_VECTOR_RASTERIZE_ANTIALIAS != 0,
+        ) {
+            Ok(raster) => raster,
+            Err(error) => return map_core_error(error),
+        };
+        // SAFETY: The caller advertises enough writable byte storage and it may
+        // not overlap Core/input/output memory.
+        unsafe {
+            ptr::copy_nonoverlapping(raster.pixels.as_ptr(), output.pixels, raster.pixels.len())
+        };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Converts bounded RGBA8 raster runs into vector paths/fills as one history
+/// transaction and reports the number of created fills.
+///
+/// # Safety
+/// Core/input/result/count storage must be complete, aligned, live, writable,
+/// and non-overlapping on the Core owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_raster_vectorize(
+    core: *mut InkpodCore,
+    input: *const InkpodRasterVectorizeInput,
+    result: *mut InkpodDispatchResult,
+    out_fill_count: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || out_fill_count.is_null()
+            || !is_aligned(out_fill_count)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "raster vectorize core or output is null or misaligned",
+            );
+        }
+        // SAFETY: Writable output storage is required by contract.
+        unsafe { out_fill_count.write(0) };
+        if let Err(status) = unsafe { validate_struct(input, "InkpodRasterVectorizeInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if input.feature_flags != INKPOD_FEATURE_NONE || input.alpha_threshold > u8::MAX.into() {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "raster vectorize contains unsupported flags or alpha threshold",
+            );
+        }
+        match core.core.vectorize_raster_plane(
+            input.source_plane_id,
+            input.target_layer_id,
+            input.alpha_threshold as u8,
+        ) {
+            Ok((outcome, fill_ids)) => {
+                write_dispatch_result(result, outcome);
+                // SAFETY: Writable output storage was checked above.
+                unsafe { out_fill_count.write(fill_ids.len() as u64) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Copies the immutable, batched view descriptor for a live snapshot.
 ///
 /// # Safety
@@ -3143,6 +4165,59 @@ pub unsafe extern "C" fn inkpod_snapshot_get_overlay(
         };
         output.guide_count = snapshot.guides.len() as u64;
         output.guide_stride_bytes = size_of::<InkpodSnapshotGuide>() as u64;
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Copies immutable flattened vector spans. All pointers borrow storage owned
+/// by `snapshot` and remain valid only until that snapshot is released.
+///
+/// # Safety
+/// Snapshot/output must be complete, aligned, live, externally synchronized,
+/// writable/non-overlapping objects.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_snapshot_get_vectors(
+    snapshot: *const InkpodSnapshot,
+    out_vectors: *mut InkpodSnapshotVectorView,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if snapshot.is_null() || !is_aligned(snapshot) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "snapshot is null or misaligned",
+            );
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_vectors.cast_const(), "InkpodSnapshotVectorView") }
+        {
+            return status;
+        }
+        // SAFETY: Live snapshot and writable output are required by contract.
+        let snapshot = unsafe { &*snapshot };
+        let output = unsafe { &mut *out_vectors };
+        output.abi_version = INKPOD_ABI_VERSION;
+        output.feature_flags = INKPOD_FEATURE_NONE;
+        output.segments = if snapshot.vector_segments.is_empty() {
+            ptr::null()
+        } else {
+            snapshot.vector_segments.as_ptr()
+        };
+        output.segment_count = snapshot.vector_segments.len() as u64;
+        output.segment_stride_bytes = size_of::<InkpodSnapshotVectorSegment>() as u64;
+        output.fills = if snapshot.vector_fills.is_empty() {
+            ptr::null()
+        } else {
+            snapshot.vector_fills.as_ptr()
+        };
+        output.fill_count = snapshot.vector_fills.len() as u64;
+        output.fill_stride_bytes = size_of::<InkpodSnapshotVectorFill>() as u64;
+        output.boundary_path_ids = if snapshot.vector_boundary_path_ids.is_empty() {
+            ptr::null()
+        } else {
+            snapshot.vector_boundary_path_ids.as_ptr()
+        };
+        output.boundary_path_count = snapshot.vector_boundary_path_ids.len() as u64;
         INKPOD_STATUS_OK
     })
 }
@@ -7131,6 +8206,361 @@ mod tests {
                 INKPOD_STATUS_OK
             );
             assert_eq!(shortcut_command, 1);
+            assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        }
+    }
+
+    #[test]
+    fn m5_vector_commands_snapshot_and_nested_span_validation_are_connected() {
+        unsafe {
+            let mut core = ptr::null_mut();
+            assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
+            let create = InkpodCellCreateOptions {
+                struct_size: size_of::<InkpodCellCreateOptions>() as u32,
+                reserved: 0,
+                feature_flags: 0,
+                document_uuid_high: 0x494e_4b50_4f44_4d35,
+                document_uuid_low: 1,
+                width: 8,
+                height: 8,
+                dpi_x_milli: 96_000,
+                dpi_y_milli: 96_000,
+            };
+            let mut info = InkpodDocumentInfo {
+                struct_size: size_of::<InkpodDocumentInfo>() as u32,
+                ..InkpodDocumentInfo::default()
+            };
+            assert_eq!(
+                inkpod_core_new_cell(core, &create, &mut info),
+                INKPOD_STATUS_OK
+            );
+            let name = b"Vector";
+            let edit = InkpodTreeEdit {
+                struct_size: size_of::<InkpodTreeEdit>() as u32,
+                operation: INKPOD_TREE_CREATE_LAYER,
+                flags: 0,
+                object_id: 0,
+                parent_id: 0,
+                destination_index: 0,
+                kind: INKPOD_LAYER_VECTOR_COLORING,
+                pixel_format: 0,
+                opacity_milli: 0,
+                name_utf8: name.as_ptr(),
+                name_bytes: name.len() as u64,
+            };
+            let mut dispatch = InkpodDispatchResult {
+                struct_size: size_of::<InkpodDispatchResult>() as u32,
+                reserved: 0,
+                revision: 0,
+                accepted_command_count: 0,
+            };
+            let mut layer_id = 0;
+            assert_eq!(
+                inkpod_core_tree_edit(core, &edit, &mut dispatch, &mut layer_id),
+                INKPOD_STATUS_OK
+            );
+            assert_ne!(layer_id, 0);
+            let mut node = InkpodNodeInfo {
+                struct_size: size_of::<InkpodNodeInfo>() as u32,
+                ..InkpodNodeInfo::default()
+            };
+            assert_eq!(
+                inkpod_core_node_get(core, 1, 1, &mut node),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(node.kind, INKPOD_TYPED_PLANE_COLOR_TRACE);
+            let trace_plane_id = node.id;
+            assert_eq!(
+                inkpod_core_node_get(core, 1, 2, &mut node),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(node.kind, INKPOD_TYPED_PLANE_VECTOR_FILL);
+            let fill_plane_id = node.id;
+
+            let point = |x, y| InkpodVectorPoint { x, y };
+            let line = |p0: InkpodVectorPoint, p3: InkpodVectorPoint| InkpodVectorCubicSegment {
+                struct_size: size_of::<InkpodVectorCubicSegment>() as u32,
+                reserved: 0,
+                p0,
+                p1: point((p0.x * 2.0 + p3.x) / 3.0, (p0.y * 2.0 + p3.y) / 3.0),
+                p2: point((p0.x + p3.x * 2.0) / 3.0, (p0.y + p3.y * 2.0) / 3.0),
+                p3,
+                width_start: 1.0,
+                width_end: 2.0,
+            };
+            let corners = [
+                point(1.0, 1.0),
+                point(7.0, 1.0),
+                point(7.0, 7.0),
+                point(1.0, 7.0),
+                point(1.0, 1.0),
+            ];
+            let segments: Vec<_> = corners
+                .windows(2)
+                .map(|pair| line(pair[0], pair[1]))
+                .collect();
+            let path_input = InkpodVectorPathInput {
+                struct_size: size_of::<InkpodVectorPathInput>() as u32,
+                reserved: 0,
+                flags: INKPOD_VECTOR_PATH_CLOSED,
+                plane_id: trace_plane_id,
+                color: InkpodColorValue {
+                    struct_size: size_of::<InkpodColorValue>() as u32,
+                    depth: INKPOD_COLOR_DEPTH_8,
+                    red: 10,
+                    green: 20,
+                    blue: 30,
+                    alpha: 255,
+                },
+                segments: segments.as_ptr(),
+                segment_count: segments.len() as u64,
+                segment_stride_bytes: size_of::<InkpodVectorCubicSegment>() as u64,
+            };
+            let mut path_id = 0;
+            assert_eq!(
+                inkpod_core_vector_add_path(core, &path_input, &mut dispatch, &mut path_id),
+                INKPOD_STATUS_OK
+            );
+            assert_ne!(path_id, 0);
+            let boundary_path_id = path_id;
+            let mut short_segment = segments[0];
+            short_segment.struct_size = size_of::<u32>() as u32;
+            let short_input = InkpodVectorPathInput {
+                segments: &short_segment,
+                segment_count: 1,
+                ..path_input
+            };
+            let revision = dispatch.revision;
+            let mut rejected_path_id = u64::MAX;
+            assert_eq!(
+                inkpod_core_vector_add_path(
+                    core,
+                    &short_input,
+                    &mut dispatch,
+                    &mut rejected_path_id,
+                ),
+                INKPOD_STATUS_INCOMPATIBLE_ABI
+            );
+            assert_eq!(rejected_path_id, 0);
+            assert_eq!(dispatch.revision, revision);
+
+            let mut too_thin_segments = segments.clone();
+            too_thin_segments[0].width_start = 0.0001;
+            too_thin_segments[0].width_end = 0.0001;
+            let too_thin_input = InkpodVectorPathInput {
+                segments: too_thin_segments.as_ptr(),
+                ..path_input
+            };
+            rejected_path_id = u64::MAX;
+            assert_eq!(
+                inkpod_core_vector_add_path(
+                    core,
+                    &too_thin_input,
+                    &mut dispatch,
+                    &mut rejected_path_id,
+                ),
+                INKPOD_STATUS_INVALID_ARGUMENT
+            );
+            assert_eq!(rejected_path_id, 0);
+            assert_eq!(dispatch.revision, revision);
+
+            let fill_input = InkpodVectorFillInput {
+                struct_size: size_of::<InkpodVectorFillInput>() as u32,
+                reserved: 0,
+                feature_flags: 0,
+                plane_id: fill_plane_id,
+                color: InkpodColorValue {
+                    struct_size: size_of::<InkpodColorValue>() as u32,
+                    depth: INKPOD_COLOR_DEPTH_16,
+                    red: 60_000,
+                    green: 1_000,
+                    blue: 2_000,
+                    alpha: 50_000,
+                },
+                boundary_path_ids: &boundary_path_id,
+                boundary_path_count: 1,
+            };
+            let mut fill_id = 0;
+            assert_eq!(
+                inkpod_core_vector_add_fill(core, &fill_input, &mut dispatch, &mut fill_id),
+                INKPOD_STATUS_OK
+            );
+            assert_ne!(fill_id, 0);
+
+            let selection_input = InkpodVectorSelectionInput {
+                struct_size: size_of::<InkpodVectorSelectionInput>() as u32,
+                mode: INKPOD_VECTOR_SELECT_FULLY_CONTAINED,
+                feature_flags: 0,
+                bounds: InkpodFrameRect {
+                    x: 0,
+                    y: 0,
+                    width: 8,
+                    height: 8,
+                },
+            };
+            let mut selection_output = InkpodVectorSelectionBuffer {
+                struct_size: size_of::<InkpodVectorSelectionBuffer>() as u32,
+                reserved: 0,
+                ranges: ptr::null_mut(),
+                range_capacity: 0,
+                range_count: 0,
+                fill_ids: ptr::null_mut(),
+                fill_capacity: 0,
+                fill_count: 0,
+            };
+            assert_eq!(
+                inkpod_core_vector_select(core, &selection_input, &mut selection_output),
+                INKPOD_STATUS_BUFFER_TOO_SMALL
+            );
+            assert_eq!(selection_output.range_count, 1);
+            let mut selection_ranges = [InkpodVectorSelectionRange {
+                struct_size: 0,
+                reserved: u32::MAX,
+                path_id: 0,
+                start_million: u32::MAX,
+                end_million: 0,
+            }];
+            selection_output.ranges = selection_ranges.as_mut_ptr();
+            selection_output.range_capacity = selection_ranges.len() as u64;
+            assert_eq!(
+                inkpod_core_vector_select(core, &selection_input, &mut selection_output),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(selection_ranges[0].path_id, path_id);
+            assert_eq!(selection_ranges[0].start_million, 0);
+            assert_eq!(selection_ranges[0].end_million, 1_000_000);
+
+            let rasterize_input = InkpodVectorRasterizeInput {
+                struct_size: size_of::<InkpodVectorRasterizeInput>() as u32,
+                reserved: 0,
+                feature_flags: INKPOD_VECTOR_RASTERIZE_ANTIALIAS,
+                layer_id,
+                scale: 2,
+                reserved_2: 0,
+            };
+            let mut raster_output = InkpodVectorRasterBuffer {
+                struct_size: size_of::<InkpodVectorRasterBuffer>() as u32,
+                reserved: 0,
+                pixels: ptr::null_mut(),
+                pixel_capacity: 0,
+                required_bytes: 0,
+                width: 0,
+                height: 0,
+                stride_bytes: 0,
+                reserved_2: 0,
+            };
+            assert_eq!(
+                inkpod_core_vector_rasterize(core, &rasterize_input, &mut raster_output),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!((raster_output.width, raster_output.height), (16, 16));
+            assert_eq!(raster_output.required_bytes, 16 * 16 * 4);
+            let mut raster_pixels = vec![0_u8; raster_output.required_bytes as usize];
+            raster_output.pixels = raster_pixels.as_mut_ptr();
+            raster_output.pixel_capacity = raster_pixels.len() as u64;
+            assert_eq!(
+                inkpod_core_vector_rasterize(core, &rasterize_input, &mut raster_output),
+                INKPOD_STATUS_OK
+            );
+            assert!(raster_pixels.iter().any(|value| *value != 0));
+
+            assert_eq!(
+                inkpod_core_set_active_plane(core, INKPOD_PLANE_COLOR),
+                INKPOD_STATUS_OK
+            );
+            let sample = InkpodStrokeSample {
+                struct_size: size_of::<InkpodStrokeSample>() as u32,
+                flags: 0,
+                x: 3.0,
+                y: 3.0,
+                pressure: 1.0,
+                reserved: 0,
+            };
+            let stroke = InkpodStrokeInput {
+                struct_size: size_of::<InkpodStrokeInput>() as u32,
+                tool: INKPOD_TOOL_PENCIL,
+                plane: INKPOD_PLANE_COLOR,
+                coordinate_space: INKPOD_COORDINATE_SPACE_DOCUMENT,
+                flags: 0,
+                color_rgba: 0x0102_03ff,
+                diameter: 1.0,
+                samples: &sample,
+                sample_count: 1,
+                sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
+            };
+            assert_eq!(
+                inkpod_core_apply_stroke(core, &stroke, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+            let vectorize_input = InkpodRasterVectorizeInput {
+                struct_size: size_of::<InkpodRasterVectorizeInput>() as u32,
+                alpha_threshold: 1,
+                feature_flags: 0,
+                source_plane_id: info.color_plane_id,
+                target_layer_id: layer_id,
+            };
+            let mut vectorized_fill_count = 0;
+            let vector_source_input = InkpodRasterVectorizeInput {
+                source_plane_id: trace_plane_id,
+                ..vectorize_input
+            };
+            assert_eq!(
+                inkpod_core_raster_vectorize(
+                    core,
+                    &vector_source_input,
+                    &mut dispatch,
+                    &mut vectorized_fill_count,
+                ),
+                INKPOD_STATUS_INVALID_ARGUMENT
+            );
+            assert_eq!(vectorized_fill_count, 0);
+            assert_eq!(
+                inkpod_core_raster_vectorize(
+                    core,
+                    &vectorize_input,
+                    &mut dispatch,
+                    &mut vectorized_fill_count,
+                ),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(vectorized_fill_count, 1);
+
+            let options = InkpodSnapshotOptions {
+                struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+                reserved: 0,
+                feature_flags: 0,
+            };
+            let mut snapshot = ptr::null_mut();
+            assert_eq!(
+                inkpod_core_build_snapshot(core, &options, &mut snapshot),
+                INKPOD_STATUS_OK
+            );
+            let mut vectors = InkpodSnapshotVectorView {
+                struct_size: size_of::<InkpodSnapshotVectorView>() as u32,
+                abi_version: 0,
+                feature_flags: u64::MAX,
+                segments: ptr::null(),
+                segment_count: 0,
+                segment_stride_bytes: 0,
+                fills: ptr::null(),
+                fill_count: 0,
+                fill_stride_bytes: 0,
+                boundary_path_ids: ptr::null(),
+                boundary_path_count: 0,
+            };
+            assert_eq!(
+                inkpod_snapshot_get_vectors(snapshot, &mut vectors),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(vectors.abi_version, INKPOD_ABI_VERSION);
+            assert_eq!(vectors.segment_count, 8);
+            assert_eq!(vectors.fill_count, 2);
+            assert_eq!(vectors.boundary_path_count, 2);
+            assert!(!vectors.segments.is_null() && !vectors.fills.is_null());
+            assert_eq!((*vectors.segments).path_id, boundary_path_id);
+            assert_eq!((*vectors.fills).fill_id, fill_id);
+            assert_eq!(*vectors.boundary_path_ids, boundary_path_id);
+            assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
             assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
         }
     }

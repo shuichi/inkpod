@@ -127,12 +127,39 @@ typedef uint32_t InkpodLayerKind;
 #define INKPOD_LAYER_ADJUSTMENT UINT32_C(7)
 #define INKPOD_LAYER_TEXT UINT32_C(8)
 #define INKPOD_LAYER_ANNOTATION UINT32_C(9)
+#define INKPOD_LAYER_VECTOR_COLORING UINT32_C(10)
 
 typedef uint32_t InkpodTypedPlaneKind;
 #define INKPOD_TYPED_PLANE_MAIN_LINE UINT32_C(1)
 #define INKPOD_TYPED_PLANE_COLOR UINT32_C(2)
 #define INKPOD_TYPED_PLANE_RASTER UINT32_C(3)
 #define INKPOD_TYPED_PLANE_SELECTION UINT32_C(4)
+#define INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE UINT32_C(5)
+#define INKPOD_TYPED_PLANE_COLOR_TRACE UINT32_C(6)
+#define INKPOD_TYPED_PLANE_VECTOR_FILL UINT32_C(7)
+
+#define INKPOD_VECTOR_PATH_CLOSED (UINT64_C(1) << 0)
+typedef uint32_t InkpodVectorEraseMode;
+#define INKPOD_VECTOR_ERASE_PARTIAL UINT32_C(1)
+#define INKPOD_VECTOR_ERASE_TO_INTERSECTION UINT32_C(2)
+#define INKPOD_VECTOR_ERASE_WHOLE_PATH UINT32_C(3)
+typedef uint32_t InkpodVectorWidthMode;
+#define INKPOD_VECTOR_WIDTH_ADD UINT32_C(1)
+#define INKPOD_VECTOR_WIDTH_SUBTRACT UINT32_C(2)
+#define INKPOD_VECTOR_WIDTH_SCALE UINT32_C(3)
+#define INKPOD_VECTOR_WIDTH_CONSTANT UINT32_C(4)
+typedef uint32_t InkpodVectorSelectionMode;
+#define INKPOD_VECTOR_SELECT_CUT_BY_SELECTION UINT32_C(1)
+#define INKPOD_VECTOR_SELECT_TOUCHING UINT32_C(2)
+#define INKPOD_VECTOR_SELECT_FULLY_CONTAINED UINT32_C(3)
+#define INKPOD_VECTOR_SELECT_LINE UINT32_C(4)
+#define INKPOD_VECTOR_SELECT_WHOLE_LINE UINT32_C(5)
+#define INKPOD_VECTOR_SELECT_TO_INTERSECTION UINT32_C(6)
+#define INKPOD_VECTOR_SELECT_FILL_BOUNDARY UINT32_C(7)
+#define INKPOD_VECTOR_SELECT_FILL UINT32_C(8)
+#define INKPOD_VECTOR_RASTERIZE_ANTIALIAS (UINT64_C(1) << 0)
+#define INKPOD_SNAPSHOT_VECTOR_CLOSED (UINT32_C(1) << 0)
+#define INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE (UINT32_C(1) << 1)
 
 typedef uint32_t InkpodStoragePixelFormat;
 #define INKPOD_STORAGE_BINARY8 UINT32_C(1)
@@ -437,6 +464,160 @@ typedef struct InkpodSnapshotOverlay {
     uint64_t guide_count;
     uint64_t guide_stride_bytes;
 } InkpodSnapshotOverlay;
+
+typedef struct InkpodVectorPoint {
+    float x;
+    float y;
+} InkpodVectorPoint;
+
+typedef struct InkpodVectorCubicSegment {
+    uint32_t struct_size;
+    uint32_t reserved;
+    InkpodVectorPoint p0;
+    InkpodVectorPoint p1;
+    InkpodVectorPoint p2;
+    InkpodVectorPoint p3;
+    float width_start;
+    float width_end;
+} InkpodVectorCubicSegment;
+
+typedef struct InkpodVectorPathInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t flags;
+    uint64_t plane_id;
+    InkpodColorValue color;
+    const InkpodVectorCubicSegment* segments;
+    uint64_t segment_count;
+    uint64_t segment_stride_bytes;
+} InkpodVectorPathInput;
+
+typedef struct InkpodVectorFillInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    InkpodColorValue color;
+    const uint64_t* boundary_path_ids;
+    uint64_t boundary_path_count;
+} InkpodVectorFillInput;
+
+typedef struct InkpodVectorEraseInput {
+    uint32_t struct_size;
+    InkpodVectorEraseMode mode;
+    uint64_t plane_id;
+    float x;
+    float y;
+    float radius;
+    uint32_t reserved;
+} InkpodVectorEraseInput;
+
+typedef struct InkpodVectorWidthInput {
+    uint32_t struct_size;
+    InkpodVectorWidthMode mode;
+    uint64_t feature_flags;
+    const uint64_t* path_ids;
+    uint64_t path_count;
+    float parameter;
+    uint32_t reserved;
+} InkpodVectorWidthInput;
+
+typedef struct InkpodVectorSelectionInput {
+    uint32_t struct_size;
+    InkpodVectorSelectionMode mode;
+    uint64_t feature_flags;
+    InkpodFrameRect bounds;
+} InkpodVectorSelectionInput;
+
+typedef struct InkpodVectorSelectionRange {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t path_id;
+    uint32_t start_million;
+    uint32_t end_million;
+} InkpodVectorSelectionRange;
+
+typedef struct InkpodVectorSelectionBuffer {
+    uint32_t struct_size;
+    uint32_t reserved;
+    InkpodVectorSelectionRange* ranges;
+    uint64_t range_capacity;
+    uint64_t range_count;
+    uint64_t* fill_ids;
+    uint64_t fill_capacity;
+    uint64_t fill_count;
+} InkpodVectorSelectionBuffer;
+
+typedef struct InkpodVectorRasterizeInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t layer_id;
+    uint32_t scale;
+    uint32_t reserved_2;
+} InkpodVectorRasterizeInput;
+
+typedef struct InkpodVectorRasterBuffer {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint8_t* pixels;
+    uint64_t pixel_capacity;
+    uint64_t required_bytes;
+    uint32_t width;
+    uint32_t height;
+    uint32_t stride_bytes;
+    uint32_t reserved_2;
+} InkpodVectorRasterBuffer;
+
+typedef struct InkpodRasterVectorizeInput {
+    uint32_t struct_size;
+    uint32_t alpha_threshold;
+    uint64_t feature_flags;
+    uint64_t source_plane_id;
+    uint64_t target_layer_id;
+} InkpodRasterVectorizeInput;
+
+typedef struct InkpodSnapshotVectorSegment {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t path_id;
+    uint64_t plane_id;
+    uint32_t z_order;
+    uint32_t segment_index;
+    uint32_t segment_count;
+    uint32_t color_rgba;
+    InkpodVectorPoint p0;
+    InkpodVectorPoint p1;
+    InkpodVectorPoint p2;
+    InkpodVectorPoint p3;
+    float width_start;
+    float width_end;
+} InkpodSnapshotVectorSegment;
+
+typedef struct InkpodSnapshotVectorFill {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t fill_id;
+    uint64_t plane_id;
+    uint32_t z_order;
+    uint32_t color_rgba;
+    uint64_t first_boundary_path;
+    uint64_t boundary_path_count;
+} InkpodSnapshotVectorFill;
+
+typedef struct InkpodSnapshotVectorView {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint64_t feature_flags;
+    const InkpodSnapshotVectorSegment* segments;
+    uint64_t segment_count;
+    uint64_t segment_stride_bytes;
+    const InkpodSnapshotVectorFill* fills;
+    uint64_t fill_count;
+    uint64_t fill_stride_bytes;
+    const uint64_t* boundary_path_ids;
+    uint64_t boundary_path_count;
+} InkpodSnapshotVectorView;
 
 typedef struct InkpodTreeEdit {
     uint32_t struct_size;
@@ -886,6 +1067,49 @@ InkpodStatus inkpod_core_motion_check_step(
     InkpodSequenceDirection direction,
     InkpodMotionFrame* out_frame);
 InkpodStatus inkpod_core_motion_check_stop(InkpodCore* core);
+
+/* M5 vector inputs are copied before return and commit as one history entry.
+ * Geometry uses document coordinates; view zoom never rewrites these values. */
+InkpodStatus inkpod_core_vector_add_path(
+    InkpodCore* core,
+    const InkpodVectorPathInput* input,
+    InkpodDispatchResult* result,
+    uint64_t* out_path_id);
+InkpodStatus inkpod_core_vector_add_fill(
+    InkpodCore* core,
+    const InkpodVectorFillInput* input,
+    InkpodDispatchResult* result,
+    uint64_t* out_fill_id);
+InkpodStatus inkpod_core_vector_erase(
+    InkpodCore* core,
+    const InkpodVectorEraseInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_vector_connect(
+    InkpodCore* core,
+    uint64_t plane_id,
+    float maximum_gap,
+    InkpodDispatchResult* result,
+    uint64_t* out_path_id);
+InkpodStatus inkpod_core_vector_correct_width(
+    InkpodCore* core,
+    const InkpodVectorWidthInput* input,
+    InkpodDispatchResult* result);
+/* Selection and rasterization use caller-owned buffers. A null pointer with
+ * zero capacity performs a count/size query without retaining storage. */
+InkpodStatus inkpod_core_vector_select(
+    InkpodCore* core,
+    const InkpodVectorSelectionInput* input,
+    InkpodVectorSelectionBuffer* output);
+InkpodStatus inkpod_core_vector_rasterize(
+    InkpodCore* core,
+    const InkpodVectorRasterizeInput* input,
+    InkpodVectorRasterBuffer* output);
+InkpodStatus inkpod_core_raster_vectorize(
+    InkpodCore* core,
+    const InkpodRasterVectorizeInput* input,
+    InkpodDispatchResult* result,
+    uint64_t* out_fill_count);
+
 InkpodStatus inkpod_core_build_snapshot_for_view(
     InkpodCore* core,
     uint64_t view_id,
@@ -915,6 +1139,12 @@ InkpodStatus inkpod_snapshot_get_transform(
 InkpodStatus inkpod_snapshot_get_overlay(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotOverlay* out_overlay);
+
+/* Returned spans borrow immutable storage from snapshot. Fill boundary ranges
+ * index boundary_path_ids; vector segment records are grouped by path ID. */
+InkpodStatus inkpod_snapshot_get_vectors(
+    const InkpodSnapshot* snapshot,
+    InkpodSnapshotVectorView* out_vectors);
 
 /* May run on any externally synchronized renderer thread. *snapshot == NULL is
  * a successful no-op. The function releases Rust ownership and sets the owner
