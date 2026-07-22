@@ -3,39 +3,65 @@
      width="1024"
      height="1024"
      viewBox="0 0 1024 1024"
+     preserveAspectRatio="xMidYMid meet"
      fill="none"
      color-interpolation="sRGB"
+     color-interpolation-filters="sRGB"
      shape-rendering="geometricPrecision">
-  <g transform="translate(133.12 28) scale(0.74 0.72)">
-    <path fill="#17233B"
-          d="M512 180c-96.548 34.146-165.042 137.87-181 292 65.716 23.964 116.692 78.618 138 150l28 184c2.772 18.208 8.918 29.958 15 38 6.082-8.042 12.228-19.792 15-38l28-184c21.308-71.382 72.284-126.036 138-150-15.958-154.13-84.452-257.854-181-292Z"/>
-    <path fill="#F7FAFC"
-          d="M512 390c-29.824 0-54 24.176-54 54s24.176 54 54 54 54-24.176 54-54-24.176-54-54-54Z"/>
-    <path fill="#F7FAFC"
-          d="M500 486h24v334.5c-3.77 11.486-8.024 19.174-12 24.5-3.976-5.326-8.23-13.014-12-24.5V486Z"/>
-    <path fill="#4DDED0"
-          d="M401.418 348.004C430.092 290.98 467.014 249.68 512 224.29c44.986 25.39 81.908 66.69 110.582 123.714-34.12-30.228-70.98-48.806-110.582-55.734-39.602 6.928-76.462 25.506-110.582 55.734Z"/>
+  <!-- ================================================================
+       アニメ向け 色彩描画ツール アプリアイコン (最終版)
+       macOS 26 Tahoe / Liquid Glass 準拠 (1024x1024, 連続角丸 squircle)
+       グレー基調の下地 + 拡大したインク瓶(スペクトラムインク)
+       瓶の拡大率は #artwork 内の transform scale(1.6) で調整可能
+       ================================================================ -->
+  <defs>
+    <linearGradient id="baseGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EDEDF0"/><stop offset="0.35" stop-color="#DFDFE3"/><stop offset="0.70" stop-color="#CFCFD4"/><stop offset="1" stop-color="#BCBCC2"/></linearGradient>
+    <radialGradient id="specular" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.55"/><stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.10"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+    <linearGradient id="rimGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.85"/><stop offset="0.40" stop-color="#FFFFFF" stop-opacity="0.10"/><stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.14"/></linearGradient>
+    <filter id="iconShadow" x="-25%" y="-25%" width="150%" height="150%"><feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#1A1A1F" flood-opacity="0.30"/></filter>
+    <clipPath id="iconClip"><path d="M 584 0 c 114.8108 0 172.2161 0 216.0681 22.3437 a 205.0000 205.0000 0 0 1 89.5883 89.5883 c 22.3437 43.8519 22.3437 101.2573 22.3437 216.0681 L 912 584 c 0 114.8108 0 172.2161 -22.3437 216.0681 a 205.0000 205.0000 0 0 1 -89.5883 89.5883 c -43.8519 22.3437 -101.2573 22.3437 -216.0681 22.3437 L 328 912 c -114.8108 0 -172.2161 0 -216.0681 -22.3437 a 205.0000 205.0000 0 0 1 -89.5883 -89.5883 c -22.3437 -43.8519 -22.3437 -101.2573 -22.3437 -216.0681 L 0 328 c 0 -114.8108 0 -172.2161 22.3437 -216.0681 a 205.0000 205.0000 0 0 1 89.5883 -89.5883 c 43.8519 -22.3437 101.2573 -22.3437 216.0681 -22.3437 Z"/></clipPath>
+
+    <!-- インク: スペクトラム(紫→青→シアン→緑→黄→赤の対角グラデーション) -->
+    <linearGradient id="inkRainbow" x1="0.08" y1="0.05" x2="0.92" y2="1"><stop offset="0" stop-color="#A64BFF"/><stop offset="0.20" stop-color="#4F6BFF"/><stop offset="0.40" stop-color="#23C0FF"/><stop offset="0.58" stop-color="#22E0A6"/><stop offset="0.78" stop-color="#FFD23D"/><stop offset="1" stop-color="#FF5B3D"/></linearGradient>
+    <linearGradient id="inkDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#101018" stop-opacity="0.32"/></linearGradient>
+    <linearGradient id="glassBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#CCD3DB" stop-opacity="0.95"/><stop offset="0.5" stop-color="#BFC8D2" stop-opacity="0.93"/><stop offset="1" stop-color="#A9B4BF" stop-opacity="0.92"/></linearGradient>
+    <linearGradient id="bottleRim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/><stop offset="0.35" stop-color="#FFFFFF" stop-opacity="0.25"/><stop offset="0.7" stop-color="#7C858F" stop-opacity="0.25"/><stop offset="1" stop-color="#3A4048" stop-opacity="0.45"/></linearGradient>
+    <linearGradient id="capGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3A424C"/><stop offset="0.5" stop-color="#252B32"/><stop offset="1" stop-color="#171B20"/></linearGradient>
+    <clipPath id="bottleClip"><path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z"/></clipPath>
+    <filter id="bottleShadow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="13"/></filter>
+  </defs>
+
+  <!-- ▼ 下地(squircle + グレーグラデ + 光沢 + リム + ソフトシャドウ) -->
+  <g id="icon-body" filter="url(#iconShadow)"><g transform="translate(56,56)">
+    <path id="iconShape" d="M 584 0 c 114.8108 0 172.2161 0 216.0681 22.3437 a 205.0000 205.0000 0 0 1 89.5883 89.5883 c 22.3437 43.8519 22.3437 101.2573 22.3437 216.0681 L 912 584 c 0 114.8108 0 172.2161 -22.3437 216.0681 a 205.0000 205.0000 0 0 1 -89.5883 89.5883 c -43.8519 22.3437 -101.2573 22.3437 -216.0681 22.3437 L 328 912 c -114.8108 0 -172.2161 0 -216.0681 -22.3437 a 205.0000 205.0000 0 0 1 -89.5883 -89.5883 c -22.3437 -43.8519 -22.3437 -101.2573 -22.3437 -216.0681 L 0 328 c 0 -114.8108 0 -172.2161 22.3437 -216.0681 a 205.0000 205.0000 0 0 1 89.5883 -89.5883 c 43.8519 -22.3437 101.2573 -22.3437 216.0681 -22.3437 Z" fill="url(#baseGradient)"/>
+    <g clip-path="url(#iconClip)"><ellipse cx="456" cy="146" rx="365" ry="219" fill="url(#specular)"/></g>
+    <path d="M 584 0 c 114.8108 0 172.2161 0 216.0681 22.3437 a 205.0000 205.0000 0 0 1 89.5883 89.5883 c 22.3437 43.8519 22.3437 101.2573 22.3437 216.0681 L 912 584 c 0 114.8108 0 172.2161 -22.3437 216.0681 a 205.0000 205.0000 0 0 1 -89.5883 89.5883 c -43.8519 22.3437 -101.2573 22.3437 -216.0681 22.3437 L 328 912 c -114.8108 0 -172.2161 0 -216.0681 -22.3437 a 205.0000 205.0000 0 0 1 -89.5883 -89.5883 c -22.3437 -43.8519 -22.3437 -101.2573 -22.3437 -216.0681 L 0 328 c 0 -114.8108 0 -172.2161 22.3437 -216.0681 a 205.0000 205.0000 0 0 1 89.5883 -89.5883 c 43.8519 -22.3437 101.2573 -22.3437 216.0681 -22.3437 Z" fill="none" stroke="url(#rimGradient)" stroke-width="3"/>
+  </g></g>
+
+  <!-- ▼ アイコン内容: インク瓶(scale で拡大。編集はこのグループ内で) -->
+  <g id="artwork" transform="translate(56,56)">
+    <!-- 接地シャドウ(拡大した瓶に合わせつつ、下地内側にクリップ) -->
+    <g clip-path="url(#iconClip)"><g transform="translate(456,510) scale(1.6) translate(-456,-510)"><path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="#0E1116" opacity="0.26" filter="url(#bottleShadow)" transform="translate(6,18)"/></g></g>
+    <!-- 瓶本体(中心基準で scale) -->
+    <g transform="translate(456,510) scale(1.6) translate(-456,-510)">
+      <path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="url(#glassBody)"/>
+      <g clip-path="url(#bottleClip)">
+        <rect x="280" y="494" width="352" height="256" fill="url(#inkRainbow)"/>
+        <rect x="280" y="620" width="352" height="120" fill="url(#inkDepth)"/>
+        <ellipse cx="456" cy="494" rx="151" ry="16" fill="#FFFFFF" opacity="0.30"/>
+        <ellipse cx="456" cy="500" rx="151" ry="12" fill="#101018" opacity="0.12"/>
+        <rect x="300" y="300" width="312" height="200" fill="#FFFFFF" opacity="0.12"/>
+        <rect x="342" y="470" width="16" height="205" rx="8" fill="#FFFFFF" opacity="0.50"/>
+        <rect x="368" y="500" width="7" height="150" rx="3.5" fill="#FFFFFF" opacity="0.32"/>
+        <circle cx="512" cy="560" r="9" fill="#FFFFFF" opacity="0.30"/>
+        <ellipse cx="372" cy="430" rx="34" ry="20" fill="#FFFFFF" opacity="0.35" transform="rotate(-32 372 430)"/>
+      </g>
+      <path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="none" stroke="url(#bottleRim)" stroke-width="2.4"/>
+      <path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="none" stroke="#7C858F" stroke-opacity="0.35" stroke-width="1.1"/>
+      <rect x="380" y="300" width="152" height="74" rx="22" fill="url(#capGrad)"/>
+      <rect x="396" y="311" width="120" height="12" rx="6" fill="#5B6570" opacity="0.55"/>
+      <rect x="380" y="364" width="152" height="10" rx="5" fill="#0F1216" opacity="0.5"/>
+    </g>
   </g>
 
-  <path fill="#17233B"
-        d="M382 700h260c0 25.308 16.14 48.102 40.188 56.026l43.754 21.878c31.682 15.842 44.528 54.372 28.686 86.054l-14.116 28.232A61.998 61.998 0 0 1 685.058 926H338.942a61.998 61.998 0 0 1-55.454-33.81l-14.116-28.232c-15.842-31.682-2.996-70.212 28.686-86.054l43.754-21.878C365.86 748.102 382 725.308 382 700Z"/>
-
-  <path fill="#F7FAFC"
-        d="M407 735h210c7.106 22.496 23.152 41.038 44.36 51.642l34.062 17.03c8.028 4.014 11.284 13.778 7.27 21.806l-22.362 44.724A24.998 24.998 0 0 1 657.968 884H366.032a24.998 24.998 0 0 1-22.362-13.798l-22.362-44.724c-4.014-8.028-.758-17.792 7.27-21.806l34.062-17.03C383.848 776.038 399.894 757.496 407 735Z"/>
-
-  <path fill="#4DDED0"
-        d="M329 817c45.476-23.914 89.81-23.914 133 0 43.19 23.914 86.524 23.914 130 0 34.276-18.988 68.752-18.988 103 0l-20.77 41.54A27.998 27.998 0 0 1 649.188 874H374.812a27.998 27.998 0 0 1-25.042-15.46L329 817Z"/>
-
-  <path fill="#17233B"
-        d="M392 642h240v94H392z"/>
-  <path fill="#7467E8"
-        d="M392 687h240v38H392z"/>
-
-  <path fill="#17233B"
-        d="M384 570h256c27.614 0 50 22.386 50 50s-22.386 50-50 50H384c-27.614 0-50-22.386-50-50s22.386-50 50-50Z"/>
-  <path fill="#F7FAFC"
-        d="M410 600h204c11.046 0 20 8.954 20 20s-8.954 20-20 20H410c-11.046 0-20-8.954-20-20s8.954-20 20-20Z"/>
-
-  <path fill="#F7FAFC"
-        d="M354.83 817.022c18.058-11.284 38.022-20.388 59.892-27.312 6.59-2.086 13.624 1.566 15.71 8.156 2.086 6.59-1.566 13.624-8.156 15.71-20.096 6.362-38.082 14.558-53.958 24.586-5.846 3.692-13.576 1.946-17.268-3.9-3.692-5.846-1.946-13.576 3.9-17.268l-.12.028Z"/>
 </svg>
