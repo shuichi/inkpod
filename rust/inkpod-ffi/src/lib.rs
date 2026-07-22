@@ -1,9 +1,10 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use inkpod_core::{
-    ActivePlane, ClipboardPayload, ColorCheckMode, Command, CoordinateSpace, Core, CoreError,
-    DocumentInfo, EyedropperSource, FillOperation, FillRequest, FloatingTransform, GridConfig,
-    GuideAxis, InclusionMode, LayerKind, LightTableDisplayMode, LightTableItemInput,
+    ActivePlane, Adjustment, Channel, ClipboardPayload, ColorBalance, ColorCheckMode, Command,
+    CoordinateSpace, Core, CoreError, CurveInterpolation, CurvePoint, DocumentInfo,
+    EyedropperSource, FillOperation, FillRequest, Filter, FloatingTransform, GridConfig, GuideAxis,
+    HsvAdjustment, InclusionMode, LayerKind, Levels, LightTableDisplayMode, LightTableItemInput,
     LightTableSource, MAX_COMMON_RASTER_BYTES, MAX_RASTER_DIMENSION, MirrorAxis, MotionCheckConfig,
     MotionFrame, PaintTool, PixelFormat, PixelValue, PlaneType, PointF32, RectI32, RenderSnapshot,
     RgbaRasterBytes, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
@@ -156,6 +157,25 @@ pub const INKPOD_VECTOR_SELECT_FILL: u32 = 8;
 pub const INKPOD_VECTOR_RASTERIZE_ANTIALIAS: u64 = 1 << 0;
 pub const INKPOD_SNAPSHOT_VECTOR_CLOSED: u32 = 1 << 0;
 pub const INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE: u32 = 1 << 1;
+pub const INKPOD_FILTER_SHARPEN_WEAK: u32 = 1;
+pub const INKPOD_FILTER_SHARPEN_STRONG: u32 = 2;
+pub const INKPOD_FILTER_BLUR_WEAK: u32 = 3;
+pub const INKPOD_FILTER_BLUR_STRONG: u32 = 4;
+pub const INKPOD_FILTER_GAUSSIAN_BLUR: u32 = 5;
+pub const INKPOD_FILTER_INVERT: u32 = 6;
+pub const INKPOD_FILTER_AUTO_CONTRAST: u32 = 7;
+pub const INKPOD_FILTER_BRIGHTNESS_CONTRAST: u32 = 8;
+pub const INKPOD_FILTER_TONE_CURVE: u32 = 9;
+pub const INKPOD_FILTER_LEVELS: u32 = 10;
+pub const INKPOD_FILTER_HSV: u32 = 11;
+pub const INKPOD_FILTER_COLOR_BALANCE: u32 = 12;
+pub const INKPOD_FILTER_UNSHARP_MASK: u32 = 13;
+pub const INKPOD_FILTER_CHANNEL_RGB: u32 = 1;
+pub const INKPOD_FILTER_CHANNEL_RED: u32 = 2;
+pub const INKPOD_FILTER_CHANNEL_GREEN: u32 = 3;
+pub const INKPOD_FILTER_CHANNEL_BLUE: u32 = 4;
+pub const INKPOD_CURVE_BEZIER: u32 = 1;
+pub const INKPOD_CURVE_BSPLINE: u32 = 2;
 pub const INKPOD_TREE_CREATE_LAYER: u32 = 1;
 pub const INKPOD_TREE_DUPLICATE_LAYER: u32 = 2;
 pub const INKPOD_TREE_DELETE_LAYER: u32 = 3;
@@ -597,6 +617,45 @@ pub struct InkpodRasterVectorizeInput {
     pub feature_flags: u64,
     pub source_plane_id: u64,
     pub target_layer_id: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodCurvePoint {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub input: u32,
+    pub output: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodFilterInput {
+    pub struct_size: u32,
+    pub kind: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub channel: u32,
+    pub interpolation: u32,
+    pub parameter_0: i32,
+    pub parameter_1: i32,
+    pub parameter_2: i32,
+    pub parameter_3: i32,
+    pub parameter_4: i32,
+    pub reserved: u32,
+    pub points: *const InkpodCurvePoint,
+    pub point_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodFilterPreviewInfo {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub plane_id: u64,
+    pub base_checksum: u64,
+    pub preview_checksum: u64,
+    pub preview_revision: u64,
 }
 
 #[repr(C)]
@@ -1144,6 +1203,259 @@ fn parse_plane(value: u32) -> Result<ActivePlane, u32> {
             "plane is not a defined M1 plane",
         )),
     }
+}
+
+fn parse_filter_channel(value: u32) -> Result<Channel, u32> {
+    match value {
+        INKPOD_FILTER_CHANNEL_RGB => Ok(Channel::Rgb),
+        INKPOD_FILTER_CHANNEL_RED => Ok(Channel::Red),
+        INKPOD_FILTER_CHANNEL_GREEN => Ok(Channel::Green),
+        INKPOD_FILTER_CHANNEL_BLUE => Ok(Channel::Blue),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "filter channel is unknown",
+        )),
+    }
+}
+
+fn parse_curve_interpolation(value: u32) -> Result<CurveInterpolation, u32> {
+    match value {
+        INKPOD_CURVE_BEZIER => Ok(CurveInterpolation::Bezier),
+        INKPOD_CURVE_BSPLINE => Ok(CurveInterpolation::BSpline),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "curve interpolation is unknown",
+        )),
+    }
+}
+
+unsafe fn parse_filter_input(input: &InkpodFilterInput) -> Result<Filter, u32> {
+    if input.feature_flags != INKPOD_FEATURE_NONE || input.reserved != 0 {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "filter input contains unsupported flags or reserved values",
+        ));
+    }
+    let points = if input.point_count == 0 {
+        if !input.points.is_null() {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "zero curve point count requires a null pointer",
+            ));
+        }
+        Vec::new()
+    } else {
+        if input.points.is_null()
+            || !is_aligned(input.points)
+            || input.point_count > inkpod_core::MAX_CURVE_POINTS as u64
+            || usize::try_from(input.point_count)
+                .ok()
+                .and_then(|count| count.checked_mul(size_of::<InkpodCurvePoint>()))
+                .is_none_or(|bytes| bytes > isize::MAX as usize)
+        {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "curve point span is invalid",
+            ));
+        }
+        let count = input.point_count as usize;
+        // SAFETY: The caller supplies a readable, aligned span whose byte bound
+        // was validated above and which is borrowed only for this call.
+        let records = unsafe { slice::from_raw_parts(input.points, count) };
+        let mut points = Vec::with_capacity(count);
+        for record in records {
+            if record.struct_size < size_of::<InkpodCurvePoint>() as u32
+                || record.reserved != 0
+                || record.input > u16::MAX.into()
+                || record.output > u16::MAX.into()
+            {
+                return Err(fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "curve point record is invalid",
+                ));
+            }
+            points.push(CurvePoint {
+                input: record.input as u16,
+                output: record.output as u16,
+            });
+        }
+        points
+    };
+    let no_points = || {
+        if points.is_empty() {
+            Ok(())
+        } else {
+            Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "this filter does not accept curve points",
+            ))
+        }
+    };
+    match input.kind {
+        INKPOD_FILTER_SHARPEN_WEAK => {
+            no_points()?;
+            Ok(Filter::SharpenWeak)
+        }
+        INKPOD_FILTER_SHARPEN_STRONG => {
+            no_points()?;
+            Ok(Filter::SharpenStrong)
+        }
+        INKPOD_FILTER_BLUR_WEAK => {
+            no_points()?;
+            Ok(Filter::BlurWeak)
+        }
+        INKPOD_FILTER_BLUR_STRONG => {
+            no_points()?;
+            Ok(Filter::BlurStrong)
+        }
+        INKPOD_FILTER_GAUSSIAN_BLUR => {
+            no_points()?;
+            Ok(Filter::GaussianBlur {
+                radius: input.parameter_0.try_into().map_err(|_| {
+                    fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "Gaussian radius is negative",
+                    )
+                })?,
+                strength_milli: input.parameter_1.try_into().map_err(|_| {
+                    fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "Gaussian strength is negative",
+                    )
+                })?,
+            })
+        }
+        INKPOD_FILTER_INVERT => {
+            no_points()?;
+            Ok(Filter::Invert {
+                channel: parse_filter_channel(input.channel)?,
+            })
+        }
+        INKPOD_FILTER_AUTO_CONTRAST => {
+            no_points()?;
+            Ok(Filter::AutoContrast)
+        }
+        INKPOD_FILTER_BRIGHTNESS_CONTRAST => {
+            no_points()?;
+            Ok(Filter::BrightnessContrast {
+                brightness_milli: input.parameter_0,
+                contrast_milli: input.parameter_1,
+            })
+        }
+        INKPOD_FILTER_TONE_CURVE => Ok(Filter::ToneCurve {
+            channel: parse_filter_channel(input.channel)?,
+            interpolation: parse_curve_interpolation(input.interpolation)?,
+            points,
+        }),
+        INKPOD_FILTER_LEVELS => {
+            no_points()?;
+            Ok(Filter::Levels(Levels {
+                channel: parse_filter_channel(input.channel)?,
+                input_shadow: input.parameter_0.try_into().map_err(|_| {
+                    fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "levels input shadow is invalid",
+                    )
+                })?,
+                input_gamma_milli: input
+                    .parameter_1
+                    .try_into()
+                    .map_err(|_| fail(INKPOD_STATUS_INVALID_ARGUMENT, "levels gamma is invalid"))?,
+                input_highlight: input.parameter_2.try_into().map_err(|_| {
+                    fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "levels input highlight is invalid",
+                    )
+                })?,
+                output_shadow: input.parameter_3.try_into().map_err(|_| {
+                    fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "levels output shadow is invalid",
+                    )
+                })?,
+                output_highlight: input.parameter_4.try_into().map_err(|_| {
+                    fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "levels output highlight is invalid",
+                    )
+                })?,
+            }))
+        }
+        INKPOD_FILTER_HSV => {
+            no_points()?;
+            Ok(Filter::Hsv(HsvAdjustment {
+                hue_degrees_milli: input.parameter_0,
+                saturation_milli: input.parameter_1,
+                value_milli: input.parameter_2,
+            }))
+        }
+        INKPOD_FILTER_COLOR_BALANCE => {
+            no_points()?;
+            Ok(Filter::ColorBalance(ColorBalance {
+                red_milli: input.parameter_0,
+                green_milli: input.parameter_1,
+                blue_milli: input.parameter_2,
+            }))
+        }
+        INKPOD_FILTER_UNSHARP_MASK => {
+            no_points()?;
+            Ok(Filter::UnsharpMask {
+                radius: input.parameter_0.try_into().map_err(|_| {
+                    fail(INKPOD_STATUS_INVALID_ARGUMENT, "unsharp radius is negative")
+                })?,
+                amount_milli: input.parameter_1.try_into().map_err(|_| {
+                    fail(INKPOD_STATUS_INVALID_ARGUMENT, "unsharp amount is negative")
+                })?,
+                threshold: input.parameter_2.try_into().map_err(|_| {
+                    fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "unsharp threshold is invalid",
+                    )
+                })?,
+            })
+        }
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "filter kind is unknown",
+        )),
+    }
+}
+
+fn filter_to_adjustment(filter: Filter) -> Result<Adjustment, u32> {
+    match filter {
+        Filter::BrightnessContrast {
+            brightness_milli,
+            contrast_milli,
+        } => Ok(Adjustment::BrightnessContrast {
+            brightness_milli,
+            contrast_milli,
+        }),
+        Filter::ToneCurve {
+            channel,
+            interpolation,
+            points,
+        } => Ok(Adjustment::ToneCurve {
+            channel,
+            interpolation,
+            points,
+        }),
+        Filter::Levels(levels) => Ok(Adjustment::Levels(levels)),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "adjustment layers accept brightness/contrast, tone curve, or levels",
+        )),
+    }
+}
+
+fn write_filter_preview_info(
+    output: &mut InkpodFilterPreviewInfo,
+    info: inkpod_core::FilterPreviewInfo,
+) {
+    output.reserved = 0;
+    output.plane_id = info.plane_id;
+    output.base_checksum = info.base_checksum;
+    output.preview_checksum = info.preview_checksum;
+    output.preview_revision = info.preview_revision;
 }
 
 fn parse_layer_kind(value: u32) -> Result<LayerKind, u32> {
@@ -6258,6 +6570,288 @@ pub unsafe extern "C" fn inkpod_core_motion_check_stop(core: *mut InkpodCore) ->
     })
 }
 
+/// Begins a non-committing M6 filter preview from the current document state.
+///
+/// # Safety
+/// Core/input/output must be complete, aligned, live, non-overlapping objects on
+/// the Core owner thread. Any curve span is borrowed only for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_filter_preview_begin(
+    core: *mut InkpodCore,
+    input: *const InkpodFilterInput,
+    out_info: *mut InkpodFilterPreviewInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodFilterInput") } {
+            return status;
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodFilterPreviewInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let output = unsafe { &mut *out_info };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let filter = match unsafe { parse_filter_input(input) } {
+            Ok(filter) => filter,
+            Err(status) => return status,
+        };
+        match core.core.begin_filter_preview(input.plane_id, filter) {
+            Ok(info) => {
+                write_filter_preview_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Recomputes an active M6 preview from its immutable base state.
+///
+/// # Safety
+/// The same requirements as `inkpod_core_filter_preview_begin` apply.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_filter_preview_update(
+    core: *mut InkpodCore,
+    input: *const InkpodFilterInput,
+    out_info: *mut InkpodFilterPreviewInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodFilterInput") } {
+            return status;
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodFilterPreviewInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let output = unsafe { &mut *out_info };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let filter = match unsafe { parse_filter_input(input) } {
+            Ok(filter) => filter,
+            Err(status) => return status,
+        };
+        match core.core.update_filter_preview(input.plane_id, filter) {
+            Ok(info) => {
+                write_filter_preview_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Cancels a preview without changing the document or history.
+///
+/// # Safety
+/// Core/output must be complete, aligned, live, and non-overlapping on the Core
+/// owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_filter_preview_cancel(
+    core: *mut InkpodCore,
+    out_info: *mut InkpodFilterPreviewInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodFilterPreviewInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *out_info };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        match core.core.cancel_filter_preview() {
+            Ok(info) => {
+                write_filter_preview_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Commits the current preview as one history unit.
+///
+/// # Safety
+/// Core/result must be complete, aligned, live, and non-overlapping on the Core
+/// owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_filter_preview_apply(
+    core: *mut InkpodCore,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        match core.core.apply_filter_preview() {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies the last committed filter to another RGBA plane as one history unit.
+///
+/// # Safety
+/// Core/result must satisfy the normal owner-thread dispatch contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_filter_apply_last(
+    core: *mut InkpodCore,
+    plane_id: u64,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        match core.core.apply_last_filter(plane_id) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Creates a persisted, non-destructive adjustment layer. Name and curve
+/// storage are copied before return.
+///
+/// # Safety
+/// All advertised objects/spans must be complete, aligned, live, and
+/// non-overlapping on the Core owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_adjustment_create(
+    core: *mut InkpodCore,
+    input: *const InkpodFilterInput,
+    name_utf8: *const u8,
+    name_length: u64,
+    result: *mut InkpodDispatchResult,
+    out_layer_id: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || out_layer_id.is_null()
+            || !is_aligned(out_layer_id)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "adjustment core or layer output is null or misaligned",
+            );
+        }
+        // SAFETY: Writable output storage is required by contract.
+        unsafe { out_layer_id.write(0) };
+        if let Err(status) = unsafe { validate_struct(input, "InkpodFilterInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        if name_utf8.is_null()
+            || name_length == 0
+            || name_length > 1_024
+            || usize::try_from(name_length).is_err()
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "adjustment name span is invalid",
+            );
+        }
+        // SAFETY: The caller advertises a bounded readable byte span borrowed
+        // only for this call.
+        let name_bytes = unsafe { slice::from_raw_parts(name_utf8, name_length as usize) };
+        let name = match std::str::from_utf8(name_bytes) {
+            Ok(name) => name,
+            Err(_) => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "adjustment name is not UTF-8",
+                );
+            }
+        };
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let adjustment = match unsafe { parse_filter_input(input) }.and_then(filter_to_adjustment) {
+            Ok(adjustment) => adjustment,
+            Err(status) => return status,
+        };
+        match core.core.create_adjustment_layer(name, adjustment) {
+            Ok((outcome, layer_id)) => {
+                write_dispatch_result(result, outcome);
+                // SAFETY: Writable aligned storage was validated above.
+                unsafe { out_layer_id.write(layer_id) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8561,6 +9155,119 @@ mod tests {
             assert_eq!((*vectors.fills).fill_id, fill_id);
             assert_eq!(*vectors.boundary_path_ids, boundary_path_id);
             assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
+            assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        }
+    }
+
+    #[test]
+    fn m6_filter_preview_and_adjustment_validate_records_and_commit_atomically() {
+        unsafe {
+            let config = InkpodCoreConfig {
+                struct_size: size_of::<InkpodCoreConfig>() as u32,
+                abi_version: INKPOD_ABI_VERSION,
+                feature_flags: 0,
+            };
+            let mut core = ptr::null_mut();
+            assert_eq!(inkpod_core_create(&config, &mut core), INKPOD_STATUS_OK);
+            let options = InkpodCellCreateOptions {
+                struct_size: size_of::<InkpodCellCreateOptions>() as u32,
+                reserved: 0,
+                feature_flags: 0,
+                document_uuid_high: 0x4d36_0000_0000_0001,
+                document_uuid_low: 0x4d36_0000_0000_0002,
+                width: 4,
+                height: 4,
+                dpi_x_milli: 96_000,
+                dpi_y_milli: 96_000,
+            };
+            let mut document = InkpodDocumentInfo {
+                struct_size: size_of::<InkpodDocumentInfo>() as u32,
+                ..InkpodDocumentInfo::default()
+            };
+            assert_eq!(
+                inkpod_core_new_cell(core, &options, &mut document),
+                INKPOD_STATUS_OK
+            );
+            let original = document.color_plane_checksum;
+            let mut filter = InkpodFilterInput {
+                struct_size: size_of::<InkpodFilterInput>() as u32,
+                kind: INKPOD_FILTER_INVERT,
+                feature_flags: 0,
+                plane_id: document.color_plane_id,
+                channel: INKPOD_FILTER_CHANNEL_RGB,
+                interpolation: 0,
+                parameter_0: 0,
+                parameter_1: 0,
+                parameter_2: 0,
+                parameter_3: 0,
+                parameter_4: 0,
+                reserved: 0,
+                points: ptr::null(),
+                point_count: 0,
+            };
+            let mut preview = InkpodFilterPreviewInfo {
+                struct_size: size_of::<InkpodFilterPreviewInfo>() as u32,
+                reserved: 0,
+                plane_id: 0,
+                base_checksum: 0,
+                preview_checksum: 0,
+                preview_revision: 0,
+            };
+            let mut short = filter;
+            short.struct_size = size_of::<u32>() as u32;
+            assert_eq!(
+                inkpod_core_filter_preview_begin(core, &short, &mut preview),
+                INKPOD_STATUS_INCOMPATIBLE_ABI
+            );
+            assert_eq!(
+                inkpod_core_filter_preview_begin(core, &filter, &mut preview),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(preview.base_checksum, original);
+            assert_ne!(preview.preview_checksum, original);
+            assert_eq!(
+                inkpod_core_filter_preview_cancel(core, &mut preview),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(preview.preview_checksum, original);
+            assert_eq!(
+                inkpod_core_filter_preview_begin(core, &filter, &mut preview),
+                INKPOD_STATUS_OK
+            );
+            let mut dispatch = InkpodDispatchResult {
+                struct_size: size_of::<InkpodDispatchResult>() as u32,
+                reserved: 0,
+                revision: 0,
+                accepted_command_count: 0,
+            };
+            assert_eq!(
+                inkpod_core_filter_preview_apply(core, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(inkpod_core_undo(core, &mut dispatch), INKPOD_STATUS_OK);
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut document),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(document.color_plane_checksum, original);
+
+            filter.kind = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
+            filter.parameter_0 = 100;
+            filter.parameter_1 = 200;
+            let name = b"M6 Adjustment";
+            let mut layer_id = 0;
+            assert_eq!(
+                inkpod_core_adjustment_create(
+                    core,
+                    &filter,
+                    name.as_ptr(),
+                    name.len() as u64,
+                    &mut dispatch,
+                    &mut layer_id,
+                ),
+                INKPOD_STATUS_OK
+            );
+            assert_ne!(layer_id, 0);
             assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
         }
     }

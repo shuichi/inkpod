@@ -88,8 +88,330 @@ struct AboutDialogState {
     HINSTANCE instance{};
     HICON display_icon{};
     HFONT name_font{};
+    HFONT body_font{};
     bool close_immediately{};
+    bool layout_valid{};
 };
+
+constexpr int kAboutWindowWidth = 574;
+constexpr int kAboutWindowHeight = 544;
+constexpr int kAboutIconSize = 88;
+constexpr int kAboutIconTop = 68;
+constexpr int kAboutNameTop = 194;
+constexpr int kAboutNameHeight = 34;
+constexpr int kAboutDescriptionTop = 250;
+constexpr int kAboutDescriptionHeight = 92;
+constexpr int kAboutVersionTop = 350;
+constexpr int kAboutVersionHeight = 24;
+constexpr int kAboutFooterHeight = 89;
+constexpr int kAboutButtonWidth = 120;
+constexpr int kAboutButtonHeight = 48;
+constexpr int kAboutButtonRightMargin = 18;
+constexpr int kAboutButtonBottomMargin = 23;
+
+int ScaleForDpi(int logical_pixels, UINT dpi) noexcept {
+    return MulDiv(
+        logical_pixels,
+        static_cast<int>(dpi == 0U ? USER_DEFAULT_SCREEN_DPI : dpi),
+        USER_DEFAULT_SCREEN_DPI);
+}
+
+int ClampCoordinate(int value, int minimum, int maximum) noexcept {
+    if (maximum < minimum) {
+        return minimum;
+    }
+    if (value < minimum) {
+        return minimum;
+    }
+    return value > maximum ? maximum : value;
+}
+
+POINT CenteredAboutOrigin(HWND dialog, int width, int height) noexcept {
+    const HWND owner = GetWindow(dialog, GW_OWNER);
+    const HWND monitor_window = owner != nullptr ? owner : dialog;
+    const HMONITOR monitor = MonitorFromWindow(
+        monitor_window, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO monitor_info{};
+    monitor_info.cbSize = sizeof(monitor_info);
+    RECT work_area{};
+    if (monitor == nullptr
+        || GetMonitorInfoW(monitor, &monitor_info) == FALSE) {
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0);
+    } else {
+        work_area = monitor_info.rcWork;
+    }
+
+    RECT anchor = work_area;
+    if (owner != nullptr) {
+        RECT owner_bounds{};
+        if (GetWindowRect(owner, &owner_bounds) != FALSE) {
+            anchor = owner_bounds;
+        }
+    }
+    const int centered_x = anchor.left + (anchor.right - anchor.left - width) / 2;
+    const int centered_y = anchor.top + (anchor.bottom - anchor.top - height) / 2;
+    return POINT{
+        ClampCoordinate(centered_x, work_area.left, work_area.right - width),
+        ClampCoordinate(centered_y, work_area.top, work_area.bottom - height)};
+}
+
+bool MoveAboutControl(
+    HWND dialog, int id, int x, int y, int width, int height) noexcept {
+    const HWND control = GetDlgItem(dialog, id);
+    return control != nullptr
+        && MoveWindow(control, x, y, width, height, TRUE) != FALSE;
+}
+
+void ReleaseAboutFonts(AboutDialogState& state) noexcept {
+    if (state.name_font != nullptr) {
+        DeleteObject(state.name_font);
+        state.name_font = nullptr;
+    }
+    if (state.body_font != nullptr) {
+        DeleteObject(state.body_font);
+        state.body_font = nullptr;
+    }
+}
+
+bool UpdateAboutFonts(
+    HWND dialog, AboutDialogState& state, UINT dpi) noexcept {
+    ReleaseAboutFonts(state);
+    const auto dialog_font = reinterpret_cast<HFONT>(
+        SendMessageW(dialog, WM_GETFONT, 0, 0));
+    LOGFONTW base_font{};
+    if (dialog_font == nullptr
+        || GetObjectW(
+               dialog_font,
+               static_cast<int>(sizeof(base_font)),
+               &base_font) != static_cast<int>(sizeof(base_font))) {
+        return false;
+    }
+
+    LOGFONTW name_font = base_font;
+    name_font.lfHeight = -MulDiv(18, static_cast<int>(dpi), 72);
+    name_font.lfWeight = FW_SEMIBOLD;
+    state.name_font = CreateFontIndirectW(&name_font);
+
+    LOGFONTW body_font = base_font;
+    body_font.lfHeight = -MulDiv(11, static_cast<int>(dpi), 72);
+    body_font.lfWeight = FW_NORMAL;
+    state.body_font = CreateFontIndirectW(&body_font);
+    if (state.name_font == nullptr || state.body_font == nullptr) {
+        ReleaseAboutFonts(state);
+        return false;
+    }
+
+    SendDlgItemMessageW(
+        dialog,
+        IDC_ABOUT_NAME,
+        WM_SETFONT,
+        reinterpret_cast<WPARAM>(state.name_font),
+        TRUE);
+    for (const int id : {IDC_ABOUT_DESCRIPTION, IDC_ABOUT_VERSION, IDOK}) {
+        SendDlgItemMessageW(
+            dialog,
+            id,
+            WM_SETFONT,
+            reinterpret_cast<WPARAM>(state.body_font),
+            TRUE);
+    }
+    return true;
+}
+
+bool UpdateAboutIcon(
+    HWND dialog, AboutDialogState& state, int icon_size) noexcept {
+    const HWND icon_control = GetDlgItem(dialog, IDC_ABOUT_ICON);
+    if (icon_control == nullptr) {
+        return false;
+    }
+    SendMessageW(icon_control, STM_SETIMAGE, IMAGE_ICON, 0);
+    if (state.display_icon != nullptr) {
+        DestroyIcon(state.display_icon);
+        state.display_icon = nullptr;
+    }
+    state.display_icon = reinterpret_cast<HICON>(LoadImageW(
+        state.instance,
+        MAKEINTRESOURCEW(IDI_APP_ICON),
+        IMAGE_ICON,
+        icon_size,
+        icon_size,
+        LR_DEFAULTCOLOR));
+    if (state.display_icon == nullptr) {
+        return false;
+    }
+    SendMessageW(
+        icon_control,
+        STM_SETIMAGE,
+        IMAGE_ICON,
+        reinterpret_cast<LPARAM>(state.display_icon));
+    return true;
+}
+
+bool LayoutAboutDialog(
+    HWND dialog, AboutDialogState& state, bool center_on_owner) noexcept {
+    UINT dpi = GetDpiForWindow(dialog);
+    if (dpi == 0U) {
+        dpi = USER_DEFAULT_SCREEN_DPI;
+    }
+    const int window_width = ScaleForDpi(kAboutWindowWidth, dpi);
+    const int window_height = ScaleForDpi(kAboutWindowHeight, dpi);
+    RECT current_bounds{};
+    if (GetWindowRect(dialog, &current_bounds) == FALSE) {
+        return false;
+    }
+    const POINT origin = center_on_owner
+        ? CenteredAboutOrigin(dialog, window_width, window_height)
+        : POINT{current_bounds.left, current_bounds.top};
+    if (SetWindowPos(
+            dialog,
+            nullptr,
+            origin.x,
+            origin.y,
+            window_width,
+            window_height,
+            SWP_NOACTIVATE | SWP_NOZORDER) == FALSE) {
+        return false;
+    }
+
+    RECT client{};
+    if (GetClientRect(dialog, &client) == FALSE) {
+        return false;
+    }
+    const int icon_size = ScaleForDpi(kAboutIconSize, dpi);
+    const int content_width = client.right - client.left;
+    const int button_width = ScaleForDpi(kAboutButtonWidth, dpi);
+    const int button_height = ScaleForDpi(kAboutButtonHeight, dpi);
+    const int description_margin = ScaleForDpi(48, dpi);
+    const int name_margin = ScaleForDpi(20, dpi);
+    const int divider_height = ScaleForDpi(1, dpi);
+    if (!MoveAboutControl(
+            dialog,
+            IDC_ABOUT_ICON,
+            (content_width - icon_size) / 2,
+            ScaleForDpi(kAboutIconTop, dpi),
+            icon_size,
+            icon_size)
+        || !MoveAboutControl(
+            dialog,
+            IDC_ABOUT_NAME,
+            name_margin,
+            ScaleForDpi(kAboutNameTop, dpi),
+            content_width - name_margin * 2,
+            ScaleForDpi(kAboutNameHeight, dpi))
+        || !MoveAboutControl(
+            dialog,
+            IDC_ABOUT_DESCRIPTION,
+            description_margin,
+            ScaleForDpi(kAboutDescriptionTop, dpi),
+            content_width - description_margin * 2,
+            ScaleForDpi(kAboutDescriptionHeight, dpi))
+        || !MoveAboutControl(
+            dialog,
+            IDC_ABOUT_VERSION,
+            name_margin,
+            ScaleForDpi(kAboutVersionTop, dpi),
+            content_width - name_margin * 2,
+            ScaleForDpi(kAboutVersionHeight, dpi))
+        || !MoveAboutControl(
+            dialog,
+            IDC_ABOUT_SEPARATOR,
+            0,
+            client.bottom - ScaleForDpi(kAboutFooterHeight, dpi),
+            content_width,
+            divider_height)
+        || !MoveAboutControl(
+            dialog,
+            IDOK,
+            content_width - ScaleForDpi(kAboutButtonRightMargin, dpi) - button_width,
+            client.bottom - ScaleForDpi(kAboutButtonBottomMargin, dpi) - button_height,
+            button_width,
+            button_height)
+        || !UpdateAboutFonts(dialog, state, dpi)
+        || !UpdateAboutIcon(dialog, state, icon_size)) {
+        return false;
+    }
+    return true;
+}
+
+bool AboutControlBounds(HWND dialog, int id, RECT& bounds) noexcept {
+    const HWND control = GetDlgItem(dialog, id);
+    if (control == nullptr || GetWindowRect(control, &bounds) == FALSE) {
+        return false;
+    }
+    MapWindowPoints(
+        nullptr,
+        dialog,
+        reinterpret_cast<POINT*>(&bounds),
+        2);
+    return true;
+}
+
+bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
+    UINT dpi = GetDpiForWindow(dialog);
+    if (dpi == 0U) {
+        dpi = USER_DEFAULT_SCREEN_DPI;
+    }
+    RECT dialog_bounds{};
+    RECT icon_bounds{};
+    RECT name_bounds{};
+    if (GetWindowRect(dialog, &dialog_bounds) == FALSE
+        || !AboutControlBounds(dialog, IDC_ABOUT_ICON, icon_bounds)
+        || !AboutControlBounds(dialog, IDC_ABOUT_NAME, name_bounds)) {
+        return false;
+    }
+    const int width = dialog_bounds.right - dialog_bounds.left;
+    const int height = dialog_bounds.bottom - dialog_bounds.top;
+    const POINT expected_origin = CenteredAboutOrigin(dialog, width, height);
+    if (width != ScaleForDpi(kAboutWindowWidth, dpi)
+        || height != ScaleForDpi(kAboutWindowHeight, dpi)
+        || dialog_bounds.left != expected_origin.x
+        || dialog_bounds.top != expected_origin.y
+        || name_bounds.top - icon_bounds.bottom != ScaleForDpi(38, dpi)
+        || SendDlgItemMessageW(
+               dialog, IDC_ABOUT_ICON, STM_GETIMAGE, IMAGE_ICON, 0) == 0) {
+        return false;
+    }
+
+    std::array<wchar_t, 32> name{};
+    std::array<wchar_t, 64> version{};
+    std::array<wchar_t, 96> expected_version{};
+    std::array<wchar_t, 512> description{};
+    std::array<wchar_t, 512> expected_description{};
+    if (GetDlgItemTextW(
+            dialog, IDC_ABOUT_NAME, name.data(), static_cast<int>(name.size())) == 0
+        || GetDlgItemTextW(
+               dialog,
+               IDC_ABOUT_VERSION,
+               expected_version.data(),
+               static_cast<int>(expected_version.size())) == 0
+        || GetDlgItemTextW(
+               dialog,
+               IDC_ABOUT_DESCRIPTION,
+               description.data(),
+               static_cast<int>(description.size())) == 0
+        || LoadStringW(
+               instance,
+               IDS_APP_VERSION,
+               version.data(),
+               static_cast<int>(version.size())) == 0
+        || LoadStringW(
+               instance,
+               IDS_ABOUT_DESCRIPTION,
+               expected_description.data(),
+               static_cast<int>(expected_description.size())) == 0) {
+        return false;
+    }
+    std::array<wchar_t, 96> version_label{};
+    _snwprintf_s(
+        version_label.data(),
+        version_label.size(),
+        _TRUNCATE,
+        L"Version %ls",
+        version.data());
+    return std::wcscmp(name.data(), L"Inkpod") == 0
+        && std::wcscmp(expected_version.data(), version_label.data()) == 0
+        && std::wcscmp(description.data(), expected_description.data()) == 0;
+}
 
 INT_PTR CALLBACK AboutDialogProcedure(
     HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
@@ -107,7 +429,7 @@ INT_PTR CALLBACK AboutDialogProcedure(
 
             std::array<wchar_t, 64> version{};
             std::array<wchar_t, 96> version_label{};
-            std::array<wchar_t, 256> description{};
+            std::array<wchar_t, 512> description{};
             if (LoadStringW(
                     state->instance,
                     IDS_APP_VERSION,
@@ -125,57 +447,13 @@ INT_PTR CALLBACK AboutDialogProcedure(
                 version_label.data(),
                 version_label.size(),
                 _TRUNCATE,
-                L"バージョン %ls",
+                L"Version %ls",
                 version.data());
             SetDlgItemTextW(dialog, IDC_ABOUT_VERSION, version_label.data());
             SetDlgItemTextW(dialog, IDC_ABOUT_DESCRIPTION, description.data());
-
-            const HWND icon_control = GetDlgItem(dialog, IDC_ABOUT_ICON);
-            RECT icon_bounds{};
-            if (icon_control == nullptr
-                || GetClientRect(icon_control, &icon_bounds) == FALSE) {
+            if (!LayoutAboutDialog(dialog, *state, true)) {
                 EndDialog(dialog, IDCANCEL);
                 return TRUE;
-            }
-            const int icon_width = icon_bounds.right - icon_bounds.left;
-            const int icon_height = icon_bounds.bottom - icon_bounds.top;
-            const int icon_size = icon_width < icon_height ? icon_width : icon_height;
-            state->display_icon = reinterpret_cast<HICON>(LoadImageW(
-                state->instance,
-                MAKEINTRESOURCEW(IDI_APP_ICON),
-                IMAGE_ICON,
-                icon_size,
-                icon_size,
-                LR_DEFAULTCOLOR));
-            if (state->display_icon == nullptr) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            SendMessageW(
-                icon_control,
-                STM_SETIMAGE,
-                IMAGE_ICON,
-                reinterpret_cast<LPARAM>(state->display_icon));
-
-            const HWND name_control = GetDlgItem(dialog, IDC_ABOUT_NAME);
-            const auto dialog_font = reinterpret_cast<HFONT>(
-                SendMessageW(dialog, WM_GETFONT, 0, 0));
-            LOGFONTW name_log_font{};
-            if (name_control != nullptr && dialog_font != nullptr
-                && GetObjectW(
-                       dialog_font,
-                       static_cast<int>(sizeof(name_log_font)),
-                       &name_log_font) == static_cast<int>(sizeof(name_log_font))) {
-                name_log_font.lfHeight = MulDiv(name_log_font.lfHeight, 17, 9);
-                name_log_font.lfWeight = FW_SEMIBOLD;
-                state->name_font = CreateFontIndirectW(&name_log_font);
-                if (state->name_font != nullptr) {
-                    SendMessageW(
-                        name_control,
-                        WM_SETFONT,
-                        reinterpret_cast<WPARAM>(state->name_font),
-                        TRUE);
-                }
             }
 
             const auto caption_icon = LoadIconW(
@@ -187,11 +465,29 @@ INT_PTR CALLBACK AboutDialogProcedure(
                     ICON_SMALL,
                     reinterpret_cast<LPARAM>(caption_icon));
             }
+            state->layout_valid = ValidateAboutDialog(
+                dialog, state->instance);
             if (state->close_immediately) {
                 PostMessageW(dialog, WM_COMMAND, IDOK, 0);
             }
             return TRUE;
         }
+        case WM_DPICHANGED:
+            if (state != nullptr) {
+                const auto* suggested = reinterpret_cast<const RECT*>(lparam);
+                if (suggested != nullptr) {
+                    SetWindowPos(
+                        dialog,
+                        nullptr,
+                        suggested->left,
+                        suggested->top,
+                        0,
+                        0,
+                        SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
+                }
+                return LayoutAboutDialog(dialog, *state, false) ? TRUE : FALSE;
+            }
+            break;
         case WM_COMMAND:
             if (LOWORD(wparam) == IDOK || LOWORD(wparam) == IDCANCEL) {
                 EndDialog(dialog, LOWORD(wparam));
@@ -209,10 +505,7 @@ INT_PTR CALLBACK AboutDialogProcedure(
                     DestroyIcon(state->display_icon);
                     state->display_icon = nullptr;
                 }
-                if (state->name_font != nullptr) {
-                    DeleteObject(state->name_font);
-                    state->name_font = nullptr;
-                }
+                ReleaseAboutFonts(*state);
             }
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
             return TRUE;
@@ -224,13 +517,17 @@ INT_PTR CALLBACK AboutDialogProcedure(
 
 INT_PTR ShowAboutDialog(
     HINSTANCE instance, HWND owner, bool close_immediately) noexcept {
-    AboutDialogState state{instance, nullptr, nullptr, close_immediately};
-    return DialogBoxParamW(
+    AboutDialogState state{
+        instance, nullptr, nullptr, nullptr, close_immediately, false};
+    const INT_PTR result = DialogBoxParamW(
         instance,
         MAKEINTRESOURCEW(IDD_ABOUT),
         owner,
         AboutDialogProcedure,
         reinterpret_cast<LPARAM>(&state));
+    return result == IDOK && (!close_immediately || state.layout_valid)
+        ? IDOK
+        : IDCANCEL;
 }
 
 struct ShortcutDialogState {
@@ -2534,6 +2831,113 @@ int RunM5Smoke(AppState& state) noexcept {
         : 505;
 }
 
+int RunM6Smoke(AppState& state) noexcept {
+    if (state.engine == nullptr) {
+        return 600;
+    }
+    bool preview_cancelled{};
+    bool undo_restored{};
+    bool adjustment_preserved_source{};
+    const InkpodStatus status = state.engine->Invoke(
+        [&preview_cancelled, &undo_restored, &adjustment_preserved_source](InkpodCore* core) {
+            InkpodDocumentInfo document = EmptyDocumentInfo();
+            InkpodStatus current = inkpod_core_get_document_info(core, &document);
+            const std::array<InkpodStrokeSample, 1U> samples{
+                InkpodStrokeSample{
+                    sizeof(InkpodStrokeSample), 0U, 32.0F, 32.0F, 1.0F, 0U}};
+            InkpodStrokeInput stroke{
+                sizeof(InkpodStrokeInput),
+                INKPOD_TOOL_PENCIL,
+                INKPOD_PLANE_COLOR,
+                INKPOD_COORDINATE_SPACE_DOCUMENT,
+                0U,
+                UINT32_C(0x204080ff),
+                3.0F,
+                samples.data(),
+                samples.size(),
+                sizeof(InkpodStrokeSample)};
+            InkpodDispatchResult dispatch{};
+            dispatch.struct_size = sizeof(dispatch);
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_apply_stroke(core, &stroke, &dispatch);
+            }
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_get_document_info(core, &document);
+            }
+            const std::uint64_t original = document.color_plane_checksum;
+            InkpodFilterInput filter{};
+            filter.struct_size = sizeof(filter);
+            filter.kind = INKPOD_FILTER_INVERT;
+            filter.plane_id = document.color_plane_id;
+            filter.channel = INKPOD_FILTER_CHANNEL_RGB;
+            InkpodFilterPreviewInfo preview{};
+            preview.struct_size = sizeof(preview);
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_filter_preview_begin(core, &filter, &preview);
+            }
+            if (current == INKPOD_STATUS_OK
+                && (preview.base_checksum != original
+                    || preview.preview_checksum == original)) {
+                current = INKPOD_STATUS_INVALID_STATE;
+            }
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_filter_preview_cancel(core, &preview);
+            }
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_get_document_info(core, &document);
+                preview_cancelled = document.color_plane_checksum == original
+                    && preview.preview_checksum == original;
+            }
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_filter_preview_begin(core, &filter, &preview);
+            }
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_filter_preview_apply(core, &dispatch);
+            }
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_undo(core, &dispatch);
+            }
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_get_document_info(core, &document);
+                undo_restored = document.color_plane_checksum == original;
+            }
+            filter.kind = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
+            filter.parameter_0 = 100;
+            filter.parameter_1 = 200;
+            static constexpr std::array<std::uint8_t, 13U> name{
+                'M', '6', ' ', 'A', 'd', 'j', 'u', 's', 't', 'm', 'e', 'n', 't'};
+            std::uint64_t adjustment_id{};
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_adjustment_create(
+                    core,
+                    &filter,
+                    name.data(),
+                    name.size(),
+                    &dispatch,
+                    &adjustment_id);
+            }
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_get_document_info(core, &document);
+                adjustment_preserved_source = adjustment_id != 0U
+                    && document.color_plane_checksum == original;
+            }
+            return current;
+        },
+        true,
+        true);
+    if (status != INKPOD_STATUS_OK || !preview_cancelled || !undo_restored
+        || !adjustment_preserved_source) {
+        return 601;
+    }
+    return SendMessageW(
+               state.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) == 1
+        ? 0
+        : 602;
+}
+
 InkpodStatus InitializeCore(AppState& state) noexcept {
     try {
         state.engine = std::make_unique<inkpod::app::CoreEngine>();
@@ -3456,6 +3860,9 @@ int APIENTRY wWinMain(
         }
         if (exit_code == 0) {
             exit_code = RunM5Smoke(state);
+        }
+        if (exit_code == 0) {
+            exit_code = RunM6Smoke(state);
         }
     } else {
         ShowWindow(window, show_command);

@@ -18,6 +18,12 @@ icon. It also emits `app.ico` with 16, 24, 32, 48, and 256 pixel images. The
 Win32 resource script embeds that same ICO in `inkpod.exe`, so Explorer, the
 main window, and the About dialog all use one generated asset.
 
+The winapp CLI 0.5.0 SVG renderer omits a group when the group itself uses the
+SVG `feDropShadow` primitive. Keep optional filter effects on separate shadow
+elements rather than on `icon-body`; otherwise the background can disappear
+from every generated Windows asset. The checked-in source keeps the squircle
+and artwork geometry intact and omits only that unsupported outer shadow.
+
 `inkpod_windows_assets` verifies the required file set, base PNG dimensions,
 ICO directory entries, and that the four-part MSIX version matches the CMake
 project version. When changing the application version, update both

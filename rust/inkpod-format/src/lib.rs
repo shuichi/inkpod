@@ -3,6 +3,7 @@
 mod common_formats;
 mod native_m4;
 mod native_m5;
+mod native_m6;
 
 pub use common_formats::{
     CommonRaster, CommonRasterFormat, CommonRasterInfo, MAX_COMMON_RASTER_BYTES,
@@ -15,6 +16,8 @@ pub use native_m5::{
     MAX_VECTOR_BOUNDARIES, MAX_VECTOR_FILLS, MAX_VECTOR_PATHS, MAX_VECTOR_SEGMENTS,
 };
 use native_m5::{decode_m5_metadata, encode_m5_metadata, validate_m5_metadata};
+pub use native_m6::{FileAdjustmentLayer, FileM6Metadata, MAX_ADJUSTMENT_LAYERS};
+use native_m6::{decode_m6_metadata, encode_m6_metadata, validate_m6_metadata};
 
 use inkpod_image::{FNV_OFFSET, MAX_PALETTE_COLORS, PixelFormat, PixelValue, TileCoord, fnv_bytes};
 use std::collections::BTreeSet;
@@ -36,6 +39,7 @@ const CONTAINER_FLAG_M2_COLOR_METADATA: u32 = 1 << 0;
 const CONTAINER_FLAG_M3_DOCUMENT_EDITING: u32 = 1 << 1;
 const CONTAINER_FLAG_M4_PRODUCTION_WORKFLOW: u32 = 1 << 2;
 const CONTAINER_FLAG_M5_VECTOR: u32 = 1 << 3;
+const CONTAINER_FLAG_M6_IMAGE_EDITING: u32 = 1 << 4;
 const MAX_FILE_BYTES: u64 = 1 << 30;
 const MAX_MANIFEST_BYTES: u64 = 16 << 20;
 const MAX_PLANES: usize = 4_096;
@@ -252,6 +256,9 @@ pub struct CellFile {
     /// Additive M5 vector geometry/topology. Vector plane descriptors remain
     /// in the typed M3 tree while this section owns their stable path/fill IDs.
     pub m5: Option<FileM5Metadata>,
+    /// Additive M6 non-destructive adjustment parameters. Adjustment layers
+    /// remain in the M3 tree and never own a raster payload.
+    pub m6: Option<FileM6Metadata>,
 }
 
 #[derive(Debug)]
@@ -315,6 +322,7 @@ fn encode_with_color_metadata(
     let m3_metadata = document.m3.as_ref().map(encode_m3_metadata).transpose()?;
     let m4_metadata = document.m4.as_ref().map(encode_m4_metadata).transpose()?;
     let m5_metadata = document.m5.as_ref().map(encode_m5_metadata).transpose()?;
+    let m6_metadata = document.m6.as_ref().map(encode_m6_metadata).transpose()?;
     let blob_count = document.planes.iter().try_fold(0_usize, |count, plane| {
         count
             .checked_add(plane.tiles.len())
@@ -362,6 +370,13 @@ fn encode_with_color_metadata(
         .and_then(|value| {
             value.checked_add(
                 m5_metadata
+                    .as_ref()
+                    .map_or(0, |bytes| bytes.len().saturating_add(8)),
+            )
+        })
+        .and_then(|value| {
+            value.checked_add(
+                m6_metadata
                     .as_ref()
                     .map_or(0, |bytes| bytes.len().saturating_add(8)),
             )
@@ -428,6 +443,10 @@ fn encode_with_color_metadata(
             0
         } | if m5_metadata.is_some() {
             CONTAINER_FLAG_M5_VECTOR
+        } else {
+            0
+        } | if m6_metadata.is_some() {
+            CONTAINER_FLAG_M6_IMAGE_EDITING
         } else {
             0
         },
@@ -505,6 +524,17 @@ fn encode_with_color_metadata(
         push_u32(&mut output, 0);
         output.extend_from_slice(metadata);
     }
+    if let Some(metadata) = &m6_metadata {
+        push_u32(
+            &mut output,
+            metadata
+                .len()
+                .try_into()
+                .map_err(|_| FormatError::Invalid("M6 metadata length is not representable"))?,
+        );
+        push_u32(&mut output, 0);
+        output.extend_from_slice(metadata);
+    }
 
     let mut first_blob = 0_u32;
     for plane in &document.planes {
@@ -551,7 +581,8 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
         & !(CONTAINER_FLAG_M2_COLOR_METADATA
             | CONTAINER_FLAG_M3_DOCUMENT_EDITING
             | CONTAINER_FLAG_M4_PRODUCTION_WORKFLOW
-            | CONTAINER_FLAG_M5_VECTOR)
+            | CONTAINER_FLAG_M5_VECTOR
+            | CONTAINER_FLAG_M6_IMAGE_EDITING)
         != 0
     {
         return Err(FormatError::Unsupported(
@@ -692,11 +723,27 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
     } else {
         (None, 0)
     };
+    let (m6, m6_metadata_len) = if container_flags & CONTAINER_FLAG_M6_IMAGE_EDITING != 0 {
+        let byte_count = reader.u32()? as usize;
+        if reader.u32()? != 0 {
+            return Err(FormatError::Unsupported(
+                "M6 metadata reserved field is not zero",
+            ));
+        }
+        if byte_count > MAX_MANIFEST_BYTES as usize {
+            return Err(FormatError::Invalid("M6 metadata exceeds its bound"));
+        }
+        let metadata = decode_m6_metadata(reader.take(byte_count)?)?;
+        (Some(metadata), byte_count.saturating_add(8))
+    } else {
+        (None, 0)
+    };
     let expected_manifest_len = FIXED_MANIFEST_BYTES
         .checked_add(color_metadata_len)
         .and_then(|value| value.checked_add(m3_metadata_len))
         .and_then(|value| value.checked_add(m4_metadata_len))
         .and_then(|value| value.checked_add(m5_metadata_len))
+        .and_then(|value| value.checked_add(m6_metadata_len))
         .and_then(|value| value.checked_add(plane_count.checked_mul(PLANE_DESCRIPTOR_BYTES)?))
         .and_then(|value| {
             value.checked_add(manifest_blob_count.checked_mul(BLOB_DESCRIPTOR_BYTES)?)
@@ -896,6 +943,7 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
         m3,
         m4,
         m5,
+        m6,
     };
     validate_document(&document)?;
     Ok(document)
@@ -1500,6 +1548,26 @@ fn validate_document(document: &CellFile) -> Result<(), FormatError> {
         ));
     }
 
+    let adjustment_layer_ids: BTreeSet<_> = document
+        .m3
+        .iter()
+        .flat_map(|metadata| metadata.layers.iter())
+        .filter(|layer| layer.kind == LayerKind::Adjustment)
+        .map(|layer| layer.id)
+        .collect();
+    if let Some(metadata) = &document.m6 {
+        if document.m3.is_none() || adjustment_layer_ids.is_empty() {
+            return Err(FormatError::Invalid(
+                "M6 metadata requires an M3 adjustment layer",
+            ));
+        }
+        validate_m6_metadata(metadata, Some(&adjustment_layer_ids))?;
+    } else if !adjustment_layer_ids.is_empty() {
+        return Err(FormatError::Invalid(
+            "adjustment layers require M6 metadata",
+        ));
+    }
+
     let mut stroke_plane_ids = BTreeSet::new();
     let mut fill_plane_ids = BTreeSet::new();
     let mut vector_layer_for_plane = std::collections::BTreeMap::new();
@@ -1913,6 +1981,7 @@ mod tests {
             m3: None,
             m4: None,
             m5: None,
+            m6: None,
         }
     }
 
@@ -2312,6 +2381,73 @@ mod tests {
         let mut trailing = encode(&fixture()).unwrap();
         trailing.push(0);
         assert!(decode(&trailing).is_err());
+    }
+
+    #[test]
+    fn m6_adjustment_metadata_round_trips_and_rejects_malformed_relationships() {
+        let mut document = m3_fixture();
+        document.m3.as_mut().unwrap().layers.insert(
+            0,
+            FileLayer {
+                id: 100,
+                kind: LayerKind::Adjustment,
+                name: "M6 Adjustment".to_owned(),
+                visible: true,
+                editable: true,
+                opacity_milli: 1_000,
+                planes: Vec::new(),
+            },
+        );
+        document.m6 = Some(FileM6Metadata {
+            adjustments: vec![FileAdjustmentLayer {
+                layer_id: 100,
+                adjustment: inkpod_image::Adjustment::BrightnessContrast {
+                    brightness_milli: 125,
+                    contrast_milli: -250,
+                },
+            }],
+        });
+        assert_eq!(decode(&encode(&document).unwrap()).unwrap(), document);
+
+        let mut missing = document.clone();
+        missing.m6 = None;
+        assert!(matches!(
+            encode(&missing),
+            Err(FormatError::Invalid(
+                "adjustment layers require M6 metadata"
+            ))
+        ));
+
+        let mut duplicate = document.clone();
+        let duplicate_adjustment = duplicate.m6.as_ref().unwrap().adjustments[0].clone();
+        duplicate
+            .m6
+            .as_mut()
+            .unwrap()
+            .adjustments
+            .push(duplicate_adjustment);
+        assert!(matches!(
+            encode(&duplicate),
+            Err(FormatError::Invalid("M6 adjustment properties are invalid"))
+        ));
+
+        let mut wrong_layer = document.clone();
+        wrong_layer.m6.as_mut().unwrap().adjustments[0].layer_id = 101;
+        assert!(matches!(
+            encode(&wrong_layer),
+            Err(FormatError::Invalid("M6 adjustment properties are invalid"))
+        ));
+
+        let mut invalid_parameter = document;
+        invalid_parameter.m6.as_mut().unwrap().adjustments[0].adjustment =
+            inkpod_image::Adjustment::BrightnessContrast {
+                brightness_milli: 1_001,
+                contrast_milli: 0,
+            };
+        assert!(matches!(
+            encode(&invalid_parameter),
+            Err(FormatError::Invalid("M6 adjustment properties are invalid"))
+        ));
     }
 
     #[test]

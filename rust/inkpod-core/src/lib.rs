@@ -2,6 +2,7 @@
 
 mod m4;
 mod m5;
+mod m6;
 
 pub use m4::{
     LightTableDisplayMode, LightTableItemInfo, LightTableItemInput, LightTableSetInfo,
@@ -13,10 +14,12 @@ pub use m5::{
     VectorPathInfo, VectorPathInput, VectorRaster, VectorSelectionMode, VectorSelectionRange,
     VectorSelectionResult, VectorWidthMode,
 };
+pub use m6::FilterPreviewInfo;
 
 use inkpod_format::{
-    CellFile, CommonRaster, CommonRasterFormat, FileGrid, FileGuide, FileLayer, FileM3Metadata,
-    FilePlane, FilePlaneProperties, FileTile, FormatError, PlaneKind as FilePlaneKind,
+    CellFile, CommonRaster, CommonRasterFormat, FileAdjustmentLayer, FileGrid, FileGuide,
+    FileLayer, FileM3Metadata, FileM6Metadata, FilePlane, FilePlaneProperties, FileTile,
+    FormatError, PlaneKind as FilePlaneKind,
 };
 use inkpod_image::{
     ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,
@@ -55,7 +58,10 @@ pub use inkpod_format::{
     FrameMetadata, GuideAxis, LayerKind, MAX_COMMON_RASTER_BYTES, Margins, RectI32,
 };
 pub use inkpod_image::{
-    ColorCheckMode, EyedropperSource, InclusionMode, MAX_RASTER_DIMENSION, PixelFormat, PixelValue,
+    Adjustment, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance, ColorCheckMode,
+    CurveInterpolation, CurvePoint, EyedropperSource, Filter, Gradient, GradientKind, GradientMode,
+    GradientStop, HsvAdjustment, InclusionMode, Levels, MAX_CURVE_POINTS, MAX_RASTER_DIMENSION,
+    PixelFormat, PixelValue, Stamp,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -762,6 +768,7 @@ struct CellDocument {
     grid: GridConfig,
     light_table: m4::LightTableState,
     vector: m5::VectorState,
+    adjustments: BTreeMap<u64, Adjustment>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -866,6 +873,7 @@ impl CellDocument {
             grid: GridConfig::default(),
             light_table: m4::LightTableState::new(ids.light_table_set),
             vector: m5::VectorState::default(),
+            adjustments: BTreeMap::new(),
         })
     }
 
@@ -947,6 +955,16 @@ impl CellDocument {
                     .iter()
                     .any(|layer| layer.kind == LayerKind::VectorColoring),
             ),
+            m6: (!self.adjustments.is_empty()).then(|| FileM6Metadata {
+                adjustments: self
+                    .adjustments
+                    .iter()
+                    .map(|(layer_id, adjustment)| FileAdjustmentLayer {
+                        layer_id: *layer_id,
+                        adjustment: adjustment.clone(),
+                    })
+                    .collect(),
+            }),
         }
     }
 
@@ -1103,6 +1121,17 @@ impl CellDocument {
             legacy_light_table_set_id,
         )?;
         let vector = m5::VectorState::from_file(file.m5.as_ref());
+        let adjustments = file
+            .m6
+            .as_ref()
+            .map(|metadata| {
+                metadata
+                    .adjustments
+                    .iter()
+                    .map(|layer| (layer.layer_id, layer.adjustment.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(Self {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: file.document_id,
@@ -1122,6 +1151,7 @@ impl CellDocument {
             grid,
             light_table,
             vector,
+            adjustments,
         })
     }
 
@@ -1326,6 +1356,8 @@ pub struct Core {
     current_path: Option<PathBuf>,
     recovered: bool,
     active_stroke: Option<StrokeSession>,
+    filter_preview: Option<m6::FilterPreview>,
+    last_filter: Option<Filter>,
     render_cache: BTreeMap<TileCoord, RenderTile>,
     next_render_tile_revision: u64,
     next_preview_revision: u64,
@@ -1374,6 +1406,8 @@ impl Core {
             current_path: None,
             recovered: false,
             active_stroke: None,
+            filter_preview: None,
+            last_filter: None,
             render_cache: BTreeMap::new(),
             next_render_tile_revision: 1,
             next_preview_revision: 1_u64 << 63,
@@ -1416,6 +1450,8 @@ impl Core {
         document_uuid: u128,
     ) -> Result<DocumentInfo, CoreError> {
         self.cancel_stroke();
+        self.filter_preview = None;
+        self.last_filter = None;
         self.render_cache.clear();
         let ids = DocumentIds {
             document: self.allocate_id(),
@@ -1601,6 +1637,15 @@ impl Core {
             opacity_milli: 1_000,
             planes,
         });
+        if kind == LayerKind::Adjustment {
+            after.adjustments.insert(
+                layer_id,
+                Adjustment::BrightnessContrast {
+                    brightness_milli: 0,
+                    contrast_milli: 0,
+                },
+            );
+        }
         after.active_layer_id = layer_id;
         if let Some(plane) = after.layers.last().and_then(|layer| layer.planes.first()) {
             after.active_plane_id = plane.id;
@@ -1640,6 +1685,9 @@ impl Core {
         let active_plane_id = duplicate.planes.first().map(|plane| plane.id);
         let mut after = before.clone();
         after.vector.duplicate_planes(&plane_map, &mut next_id);
+        if let Some(adjustment) = before.adjustments.get(&layer_id).cloned() {
+            after.adjustments.insert(duplicate_id, adjustment);
+        }
         after.vector.ensure_limits()?;
         after.layers.insert(index + 1, duplicate);
         after.active_layer_id = duplicate_id;
@@ -1673,6 +1721,7 @@ impl Core {
         }
         let mut after = before.clone();
         after.vector.remove_layer(&before, layer_id);
+        after.adjustments.remove(&layer_id);
         after.layers.remove(index);
         if after.active_layer_id == layer_id {
             let replacement = after
@@ -1961,6 +2010,11 @@ impl Core {
             return Err(CoreError::InvalidArgument("layer has no lower sibling"));
         }
         let lower = upper + 1;
+        if before.layers[upper].kind == LayerKind::Adjustment {
+            return Err(CoreError::InvalidArgument(
+                "adjustment layers cannot merge without an explicit parameter composition",
+            ));
+        }
         if before.layers[upper].kind != before.layers[lower].kind
             || before.layers[upper].planes.len() != before.layers[lower].planes.len()
             || before.layers[upper]
@@ -3239,6 +3293,8 @@ impl Core {
         let max_id = document.max_stable_id();
         self.next_id = self.next_id.max(max_id.saturating_add(1));
         self.document = Some(document);
+        self.filter_preview = None;
+        self.last_filter = None;
         self.render_cache.clear();
         self.document_revision = revision;
         self.reset_history(true);
@@ -3262,6 +3318,8 @@ impl Core {
         let max_id = document.max_stable_id();
         self.next_id = self.next_id.max(max_id.saturating_add(1));
         self.document = Some(document);
+        self.filter_preview = None;
+        self.last_filter = None;
         self.render_cache.clear();
         self.document_revision = revision;
         // Recovery content is deliberately an unsaved document. A subsequent
@@ -3540,6 +3598,11 @@ impl Core {
             .active_stroke
             .as_ref()
             .map(|session| &session.preview_document)
+            .or_else(|| {
+                self.filter_preview
+                    .as_ref()
+                    .map(|session| &session.preview_document)
+            })
             .or(self.document.as_ref())
         else {
             cache.clear();
@@ -3560,7 +3623,13 @@ impl Core {
         let snapshot_revision = self
             .active_stroke
             .as_ref()
-            .map_or(self.document_revision, |session| session.preview_revision);
+            .map(|session| session.preview_revision)
+            .or_else(|| {
+                self.filter_preview
+                    .as_ref()
+                    .map(|session| session.preview_revision)
+            })
+            .unwrap_or(self.document_revision);
         let feature_flags = match self.color_check {
             Some(ColorCheckMode::LegacyWhiteTransparency) => {
                 SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE
@@ -3705,9 +3774,9 @@ impl Core {
     }
 
     fn ensure_no_active_stroke(&self) -> Result<(), CoreError> {
-        if self.active_stroke.is_some() {
+        if self.active_stroke.is_some() || self.filter_preview.is_some() {
             Err(CoreError::InvalidState(
-                "operation is not allowed during an active stroke transaction",
+                "operation is not allowed during an active preview transaction",
             ))
         } else {
             Ok(())
@@ -5096,6 +5165,14 @@ fn compose_tile(
             // Layer index zero is the top of the palette. Composite from the
             // bottom towards the top so palette order and rendered order agree.
             for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
+                if let Some(adjustment) = document.adjustments.get(&layer.id) {
+                    composite =
+                        inkpod_image::apply_adjustment(PixelValue::Rgba(composite), adjustment)
+                            .ok()?
+                            .rgba16()?
+                            .map(|channel| ((u32::from(channel) + 128) / 257) as u8);
+                    continue;
+                }
                 let mut layer_pixel = [0_u8; 4];
                 for plane in layer
                     .planes

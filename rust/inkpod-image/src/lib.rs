@@ -1,6 +1,14 @@
 #![forbid(unsafe_code)]
 
+mod edit;
 mod vector;
+
+pub use edit::{
+    Adjustment, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance, CurveInterpolation,
+    CurvePoint, Filter, Gradient, GradientKind, GradientMode, GradientStop, HsvAdjustment, Levels,
+    MAX_CURVE_POINTS, MAX_FILTER_RADIUS, MAX_GRADIENT_STOPS, Stamp, apply_adjustment,
+    apply_airbrush, apply_boundary_airbrush, apply_filter, apply_gradient, apply_stamp, edit_alpha,
+};
 
 pub use vector::{
     VECTOR_UNITS_PER_PIXEL, VectorFixedCubic, VectorFixedPoint, VectorFlatSample,

@@ -161,6 +161,31 @@ typedef uint32_t InkpodVectorSelectionMode;
 #define INKPOD_SNAPSHOT_VECTOR_CLOSED (UINT32_C(1) << 0)
 #define INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE (UINT32_C(1) << 1)
 
+typedef uint32_t InkpodFilterKind;
+#define INKPOD_FILTER_SHARPEN_WEAK UINT32_C(1)
+#define INKPOD_FILTER_SHARPEN_STRONG UINT32_C(2)
+#define INKPOD_FILTER_BLUR_WEAK UINT32_C(3)
+#define INKPOD_FILTER_BLUR_STRONG UINT32_C(4)
+#define INKPOD_FILTER_GAUSSIAN_BLUR UINT32_C(5)
+#define INKPOD_FILTER_INVERT UINT32_C(6)
+#define INKPOD_FILTER_AUTO_CONTRAST UINT32_C(7)
+#define INKPOD_FILTER_BRIGHTNESS_CONTRAST UINT32_C(8)
+#define INKPOD_FILTER_TONE_CURVE UINT32_C(9)
+#define INKPOD_FILTER_LEVELS UINT32_C(10)
+#define INKPOD_FILTER_HSV UINT32_C(11)
+#define INKPOD_FILTER_COLOR_BALANCE UINT32_C(12)
+#define INKPOD_FILTER_UNSHARP_MASK UINT32_C(13)
+
+typedef uint32_t InkpodFilterChannel;
+#define INKPOD_FILTER_CHANNEL_RGB UINT32_C(1)
+#define INKPOD_FILTER_CHANNEL_RED UINT32_C(2)
+#define INKPOD_FILTER_CHANNEL_GREEN UINT32_C(3)
+#define INKPOD_FILTER_CHANNEL_BLUE UINT32_C(4)
+
+typedef uint32_t InkpodCurveInterpolation;
+#define INKPOD_CURVE_BEZIER UINT32_C(1)
+#define INKPOD_CURVE_BSPLINE UINT32_C(2)
+
 typedef uint32_t InkpodStoragePixelFormat;
 #define INKPOD_STORAGE_BINARY8 UINT32_C(1)
 #define INKPOD_STORAGE_GRAYSCALE8 UINT32_C(2)
@@ -576,6 +601,42 @@ typedef struct InkpodRasterVectorizeInput {
     uint64_t source_plane_id;
     uint64_t target_layer_id;
 } InkpodRasterVectorizeInput;
+
+typedef struct InkpodCurvePoint {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint32_t input;
+    uint32_t output;
+} InkpodCurvePoint;
+
+/* Filter parameters use normalized milli-units. Gaussian uses radius/strength
+ * in parameter_0/1; brightness/contrast use parameter_0/1; levels use input
+ * shadow/gamma/highlight and output shadow/highlight in parameter_0..4. */
+typedef struct InkpodFilterInput {
+    uint32_t struct_size;
+    InkpodFilterKind kind;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    InkpodFilterChannel channel;
+    InkpodCurveInterpolation interpolation;
+    int32_t parameter_0;
+    int32_t parameter_1;
+    int32_t parameter_2;
+    int32_t parameter_3;
+    int32_t parameter_4;
+    uint32_t reserved;
+    const InkpodCurvePoint* points;
+    uint64_t point_count;
+} InkpodFilterInput;
+
+typedef struct InkpodFilterPreviewInfo {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t plane_id;
+    uint64_t base_checksum;
+    uint64_t preview_checksum;
+    uint64_t preview_revision;
+} InkpodFilterPreviewInfo;
 
 typedef struct InkpodSnapshotVectorSegment {
     uint32_t struct_size;
@@ -1109,6 +1170,35 @@ InkpodStatus inkpod_core_raster_vectorize(
     const InkpodRasterVectorizeInput* input,
     InkpodDispatchResult* result,
     uint64_t* out_fill_count);
+
+/* M6 filter preview never mutates committed tiles until apply. Update always
+ * recomputes from the original base. Apply commits one Undo unit; cancel drops
+ * the preview and returns the original checksum. Input spans are copied. */
+InkpodStatus inkpod_core_filter_preview_begin(
+    InkpodCore* core,
+    const InkpodFilterInput* input,
+    InkpodFilterPreviewInfo* out_info);
+InkpodStatus inkpod_core_filter_preview_update(
+    InkpodCore* core,
+    const InkpodFilterInput* input,
+    InkpodFilterPreviewInfo* out_info);
+InkpodStatus inkpod_core_filter_preview_cancel(
+    InkpodCore* core,
+    InkpodFilterPreviewInfo* out_info);
+InkpodStatus inkpod_core_filter_preview_apply(
+    InkpodCore* core,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_filter_apply_last(
+    InkpodCore* core,
+    uint64_t plane_id,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_adjustment_create(
+    InkpodCore* core,
+    const InkpodFilterInput* input,
+    const uint8_t* name_utf8,
+    uint64_t name_length,
+    InkpodDispatchResult* result,
+    uint64_t* out_layer_id);
 
 InkpodStatus inkpod_core_build_snapshot_for_view(
     InkpodCore* core,

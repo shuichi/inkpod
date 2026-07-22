@@ -192,6 +192,34 @@ Selection/raster output storage remains caller-owned. Snapshot vector pointers
 remain valid only until `inkpod_snapshot_release`, exactly like tile and guide
 pointers.
 
+## M6 image-edit workflow
+
+- `InkpodFilterInput` is a versioned, fixed-size record for fixed sharpen/blur,
+  Gaussian, unsharp, invert, auto contrast, brightness/contrast, tone curve,
+  levels, HSV, and color balance. Optional `InkpodCurvePoint` storage is a
+  caller-owned bounded span; every point record and normalized 16-bit value is
+  validated and copied before return.
+- `inkpod_core_filter_preview_begin` computes a preview document without
+  changing committed revision, dirty state, savepoint, or history.
+  `inkpod_core_filter_preview_update` re-runs from the original base rather than
+  accumulating the previous result. Both return base/preview checksums and a
+  transient preview revision through `InkpodFilterPreviewInfo`.
+- `inkpod_core_filter_preview_cancel` drops the preview and reports the original
+  checksum. `inkpod_core_filter_preview_apply` commits the preview as exactly
+  one Undo unit and records it as the last filter.
+  `inkpod_core_filter_apply_last` reuses that copied semantic filter on another
+  validated RGBA plane.
+- `inkpod_core_adjustment_create` accepts only brightness/contrast, tone-curve,
+  or levels filter records plus copied UTF-8 name storage. It creates one stable
+  non-raster adjustment layer; source raster storage is never retained or
+  modified. Adjustment parameters persist in the `M6AD` native section.
+
+At most one stroke or filter-preview transaction may be active. Document,
+history, save/open, layer, and competing preview operations return invalid state
+while a preview is live; immutable snapshots may still be built and carry the
+transient preview revision. All M6 caller pointers are borrowed only for the
+duration of one call.
+
 ## Stroke session state
 
 At most one live stroke exists per Core. While it is active, other document,
@@ -219,11 +247,12 @@ returns `INKPOD_STATUS_BUFFER_TOO_SMALL` and still reports `color_count`.
 - `inkpod_core_create` allocates `InkpodCore`; the caller owns it.
 - `inkpod_core_destroy` takes `InkpodCore**`, releases it, and writes null. A
   repeat call through the same owner variable is a successful no-op. Destroy
-  also drops any uncommitted stroke preview.
+  also drops any uncommitted stroke or filter preview.
 - `inkpod_core_build_snapshot` allocates an immutable `InkpodSnapshot`. During a
-  live stroke it captures preview content; otherwise it captures committed
-  content. Output owner storage must not already contain a live handle; callers
-  release or move the previous owner before reusing that variable.
+  live stroke or filter transaction it captures preview content; otherwise it
+  captures committed content. Output owner storage must not already contain a
+  live handle; callers release or move the previous owner before reusing that
+  variable.
 - `inkpod_core_clipboard_copy` allocates `InkpodClipboard`; the caller owns that
   handle until `inkpod_clipboard_release` receives its owner pointer and writes
   null. A repeat release through the same owner variable is a successful no-op.

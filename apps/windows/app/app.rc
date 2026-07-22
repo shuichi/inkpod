@@ -44,7 +44,7 @@ BEGIN
     IDS_APP_TITLE "inkpod"
     IDS_MAIN_WINDOW_CLASS "InkpodMainWindow"
     IDS_APP_VERSION INKPOD_VERSION_STRING
-    IDS_ABOUT_DESCRIPTION "アニメーション彩色のための、長期保守可能な制作アプリです。"
+    IDS_ABOUT_DESCRIPTION "Inkpod is a GPU-accelerated digital painting engine with a fully vector-based stroke representation for non-destructive editing.Inkpod is a GPU-accelerated digital painting engine with a fully vector-based stroke representation for non-destructive editing."
 END
 
 IDR_MAIN_MENU MENU
@@ -125,17 +125,18 @@ BEGIN
     END
 END
 
-IDD_ABOUT DIALOGEX 0, 0, 260, 190
+IDD_ABOUT DIALOGEX 0, 0, 383, 290
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_CONTROLPARENT
-CAPTION "Inkpodについて"
+CAPTION "About Inkpod"
 FONT 9, "Segoe UI"
 BEGIN
-    CONTROL         "", IDC_ABOUT_ICON, "Static", SS_ICON | SS_CENTERIMAGE | SS_REALSIZECONTROL, 86, 10, 88, 64
-    LTEXT           "inkpod", IDC_ABOUT_NAME, 20, 80, 220, 20, SS_CENTER | SS_NOPREFIX
-    LTEXT           "", IDC_ABOUT_VERSION, 20, 104, 220, 12, SS_CENTER | SS_NOPREFIX
-    LTEXT           "", IDC_ABOUT_DESCRIPTION, 25, 121, 210, 28, SS_CENTER | SS_NOPREFIX
-    DEFPUSHBUTTON   "OK", IDOK, 100, 163, 60, 18
+    CONTROL         "", IDC_ABOUT_ICON, "Static", SS_ICON | SS_CENTERIMAGE | SS_REALSIZECONTROL, 147, 36, 59, 47
+    LTEXT           "Inkpod", IDC_ABOUT_NAME, 20, 103, 343, 24, SS_CENTER | SS_NOPREFIX
+    LTEXT           "", IDC_ABOUT_DESCRIPTION, 32, 133, 319, 51, SS_CENTER | SS_NOPREFIX
+    LTEXT           "", IDC_ABOUT_VERSION, 20, 187, 343, 15, SS_CENTER | SS_NOPREFIX
+    CONTROL         "", IDC_ABOUT_SEPARATOR, "Static", SS_ETCHEDHORZ, 0, 241, 383, 1
+    DEFPUSHBUTTON   "OK", IDOK, 289, 253, 80, 26
 END
 
 IDD_SHORTCUT_EDITOR DIALOGEX 0, 0, 260, 112

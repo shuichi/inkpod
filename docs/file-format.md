@@ -93,6 +93,20 @@ open/discontinuous fill boundaries, missing plane/path references, duplicate or
 cross-M1-M5 stable IDs, unsupported flags/reserved values, excessive counts, and
 trailing section bytes. M1-M4 files remain readable and acquire no vector state.
 
+Header flag bit 4 advertises the additive `"M6AD"` version-1 section. Each
+record names one stable-ID M3 adjustment layer and stores exactly one bounded
+brightness/contrast, RGB/R/G/B Bezier or B-spline tone curve, or levels
+operation. Curve inputs/outputs use the full normalized 0..65535 range and are
+strictly ordered from 0 through 65535; levels store input shadow/gamma/highlight
+and output shadow/highlight in the same normalized domain. Adjustment layers
+have no raster payload, so source plane bytes and checksums remain unchanged.
+
+The decoder requires a one-to-one relationship between `M6AD` records and
+zero-plane M3 adjustment layers. It rejects missing or duplicate records,
+non-adjustment/wrong layer IDs, invalid channel/interpolation codes, excessive
+layer/curve counts, out-of-range parameters, unknown/reserved values, and
+trailing bytes. M1-M5 files remain readable and acquire no adjustment state.
+
 The decoder bounds the whole file (1 GiB), including a post-read check against
 concurrent file growth, plus manifest (16 MiB), dimensions, plane/blob counts,
 offsets, and lengths before allocation. It rejects unknown

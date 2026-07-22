@@ -54,6 +54,9 @@ static_assert(sizeof(InkpodVectorSelectionBuffer) == 56U);
 static_assert(sizeof(InkpodVectorRasterizeInput) == 32U);
 static_assert(sizeof(InkpodVectorRasterBuffer) == 48U);
 static_assert(sizeof(InkpodRasterVectorizeInput) == 32U);
+static_assert(sizeof(InkpodCurvePoint) == 16U);
+static_assert(sizeof(InkpodFilterInput) == 72U);
+static_assert(sizeof(InkpodFilterPreviewInfo) == 40U);
 static_assert(sizeof(InkpodSnapshotVectorSegment) == 80U);
 static_assert(sizeof(InkpodSnapshotVectorFill) == 48U);
 static_assert(sizeof(InkpodSnapshotVectorView) == 80U);
@@ -820,6 +823,58 @@ int InkpodRunAbiSmoke() {
                &shortcut_command) != INKPOD_STATUS_OK
         || shortcut_command != 1U) {
         return 44;
+    }
+    if (inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK) {
+        return 60;
+    }
+    const std::uint64_t pre_filter_checksum = document.color_plane_checksum;
+    InkpodFilterInput filter{};
+    filter.struct_size = sizeof(filter);
+    filter.kind = INKPOD_FILTER_INVERT;
+    filter.plane_id = document.color_plane_id;
+    filter.channel = INKPOD_FILTER_CHANNEL_RGB;
+    InkpodFilterPreviewInfo preview{};
+    preview.struct_size = sizeof(preview);
+    if (inkpod_core_filter_preview_begin(core, &filter, &preview) != INKPOD_STATUS_OK
+        || preview.plane_id != document.color_plane_id
+        || preview.base_checksum != pre_filter_checksum
+        || preview.preview_checksum == preview.base_checksum
+        || inkpod_core_filter_preview_cancel(core, &preview) != INKPOD_STATUS_OK
+        || preview.base_checksum != pre_filter_checksum
+        || preview.preview_checksum != pre_filter_checksum
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
+        || document.color_plane_checksum != pre_filter_checksum) {
+        return 61;
+    }
+    if (inkpod_core_filter_preview_begin(core, &filter, &preview) != INKPOD_STATUS_OK
+        || inkpod_core_filter_preview_apply(core, &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
+        || document.color_plane_checksum == pre_filter_checksum
+        || inkpod_core_undo(core, &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
+        || document.color_plane_checksum != pre_filter_checksum
+        || inkpod_core_redo(core, &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK) {
+        return 62;
+    }
+    filter.kind = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
+    filter.parameter_0 = 100;
+    filter.parameter_1 = 200;
+    constexpr std::array<std::uint8_t, 10> adjustment_name{
+        'M', '6', ' ', 'A', 'd', 'j', 'u', 's', 't', '1'};
+    std::uint64_t adjustment_layer_id{};
+    const std::uint64_t source_checksum = document.color_plane_checksum;
+    if (inkpod_core_adjustment_create(
+            core,
+            &filter,
+            adjustment_name.data(),
+            adjustment_name.size(),
+            &dispatch,
+            &adjustment_layer_id) != INKPOD_STATUS_OK
+        || adjustment_layer_id == 0U
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
+        || document.color_plane_checksum != source_checksum) {
+        return 63;
     }
     if (inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
         || inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
