@@ -57,6 +57,13 @@ static_assert(sizeof(InkpodRasterVectorizeInput) == 32U);
 static_assert(sizeof(InkpodCurvePoint) == 16U);
 static_assert(sizeof(InkpodFilterInput) == 72U);
 static_assert(sizeof(InkpodFilterPreviewInfo) == 40U);
+static_assert(sizeof(InkpodGradientStop) == 32U);
+static_assert(sizeof(InkpodGradientInput) == 88U);
+static_assert(sizeof(InkpodAirbrushInput) == 72U);
+static_assert(sizeof(InkpodBoundaryAirbrushInput) == 72U);
+static_assert(sizeof(InkpodBlurEffectInput) == 40U);
+static_assert(sizeof(InkpodStampInput) == 56U);
+static_assert(sizeof(InkpodAlphaEditInput) == 64U);
 static_assert(sizeof(InkpodSnapshotVectorSegment) == 80U);
 static_assert(sizeof(InkpodSnapshotVectorFill) == 48U);
 static_assert(sizeof(InkpodSnapshotVectorView) == 80U);
@@ -875,6 +882,127 @@ int InkpodRunAbiSmoke() {
         || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
         || document.color_plane_checksum != source_checksum) {
         return 63;
+    }
+    filter.parameter_0 = 200;
+    filter.parameter_1 = -100;
+    if (inkpod_core_adjustment_update(
+            core, adjustment_layer_id, &filter, &dispatch) != INKPOD_STATUS_OK) {
+        return 64;
+    }
+
+    const auto color16 = [](std::uint16_t red,
+                            std::uint16_t green,
+                            std::uint16_t blue,
+                            std::uint16_t alpha) noexcept {
+        InkpodColorValue color{};
+        color.struct_size = sizeof(color);
+        color.depth = INKPOD_COLOR_DEPTH_16;
+        color.red = red;
+        color.green = green;
+        color.blue = blue;
+        color.alpha = alpha;
+        return color;
+    };
+    std::array<InkpodGradientStop, 3> gradient_stops{};
+    for (auto& stop : gradient_stops) {
+        stop.struct_size = sizeof(stop);
+    }
+    gradient_stops[0].position_milli = 0U;
+    gradient_stops[0].color = color16(65535U, 0U, 0U, 65535U);
+    gradient_stops[1].position_milli = 500U;
+    gradient_stops[1].color = color16(0U, 65535U, 0U, 32768U);
+    gradient_stops[2].position_milli = 1000U;
+    gradient_stops[2].color = color16(0U, 0U, 65535U, 65535U);
+    InkpodGradientInput gradient{};
+    gradient.struct_size = sizeof(gradient);
+    gradient.kind = INKPOD_GRADIENT_LINEAR;
+    gradient.plane_id = document.color_plane_id;
+    gradient.mode = INKPOD_GRADIENT_OVERWRITE;
+    gradient.start_x_milli = 500;
+    gradient.start_y_milli = 500;
+    gradient.end_x_milli = 3500;
+    gradient.end_y_milli = 500;
+    gradient.stops = gradient_stops.data();
+    gradient.stop_count = gradient_stops.size();
+    gradient.stop_stride_bytes = sizeof(InkpodGradientStop);
+    if (inkpod_core_effect_gradient(core, &gradient, &dispatch) != INKPOD_STATUS_OK) {
+        return 65;
+    }
+
+    InkpodAirbrushInput airbrush{};
+    airbrush.struct_size = sizeof(airbrush);
+    airbrush.plane_id = document.color_plane_id;
+    airbrush.center_x_milli = 2000;
+    airbrush.center_y_milli = 2000;
+    airbrush.radius_milli = 1500U;
+    airbrush.hardness_milli = 500U;
+    airbrush.opacity_milli = 500U;
+    airbrush.color = color16(65535U, 65535U, 65535U, 65535U);
+    if (inkpod_core_effect_airbrush(core, &airbrush, &dispatch) != INKPOD_STATUS_OK) {
+        return 66;
+    }
+
+    const std::array<InkpodColorValue, 2> boundary_colors{
+        color16(65535U, 0U, 0U, 65535U), color16(0U, 65535U, 0U, 65535U)};
+    InkpodBoundaryAirbrushInput boundary{};
+    boundary.struct_size = sizeof(boundary);
+    boundary.plane_id = document.color_plane_id;
+    boundary.width = 1U;
+    boundary.strength_milli = 1000U;
+    boundary.colors.struct_size = sizeof(boundary.colors);
+    boundary.colors.colors = boundary_colors.data();
+    boundary.colors.color_count = boundary_colors.size();
+    boundary.colors.color_stride_bytes = sizeof(InkpodColorValue);
+    if (inkpod_core_effect_boundary_airbrush(core, &boundary, &dispatch)
+        != INKPOD_STATUS_OK) {
+        return 67;
+    }
+
+    InkpodBlurEffectInput blur{};
+    blur.struct_size = sizeof(blur);
+    blur.plane_id = document.color_plane_id;
+    blur.radius = 1U;
+    blur.strength_milli = 500U;
+    if (inkpod_core_effect_blur(core, &blur, &dispatch) != INKPOD_STATUS_OK) {
+        return 68;
+    }
+
+    InkpodStampInput stamp{};
+    stamp.struct_size = sizeof(stamp);
+    stamp.plane_id = document.color_plane_id;
+    stamp.source_x = 0;
+    stamp.source_y = 0;
+    stamp.destination_x = 2;
+    stamp.destination_y = 2;
+    stamp.width = 2U;
+    stamp.height = 2U;
+    stamp.opacity_milli = 1000U;
+    if (inkpod_core_effect_stamp(core, &stamp, &dispatch) != INKPOD_STATUS_OK) {
+        return 69;
+    }
+
+    if (inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK) {
+        return 70;
+    }
+    const std::uint64_t before_alpha_checksum = document.color_plane_checksum;
+    std::vector<std::uint8_t> alpha_pixels(
+        static_cast<std::size_t>(document.width) * document.height, 64U);
+    InkpodAlphaEditInput alpha{};
+    alpha.struct_size = sizeof(alpha);
+    alpha.pixel_format = INKPOD_STORAGE_GRAYSCALE8;
+    alpha.plane_id = document.color_plane_id;
+    alpha.width = document.width;
+    alpha.height = document.height;
+    alpha.pixels = alpha_pixels.data();
+    alpha.pixel_bytes = alpha_pixels.size();
+    alpha.row_stride_bytes = document.width;
+    if (inkpod_core_alpha_edit(core, &alpha, &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
+        || document.color_plane_checksum == before_alpha_checksum
+        || inkpod_core_undo(core, &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
+        || document.color_plane_checksum != before_alpha_checksum) {
+        return 71;
     }
     if (inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
         || inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK

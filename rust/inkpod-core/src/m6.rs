@@ -224,6 +224,21 @@ impl Core {
         })
     }
 
+    pub fn apply_blur_to_plane(
+        &mut self,
+        plane_id: u64,
+        radius: u32,
+        strength_milli: u32,
+    ) -> Result<DispatchOutcome, CoreError> {
+        let filter = Filter::GaussianBlur {
+            radius,
+            strength_milli,
+        };
+        self.apply_raster_operation(plane_id, |raster, selection, revision| {
+            apply_filter(raster, selection, &filter, revision)
+        })
+    }
+
     pub fn apply_airbrush_to_plane(
         &mut self,
         plane_id: u64,
@@ -480,6 +495,7 @@ mod tests {
     #[test]
     fn m6_acceptance_adjustment_order_changes_composite_without_changing_source_plane() {
         let (mut core, plane_id) = seeded_core();
+        let unadjusted = core.build_snapshot().tiles()[0].pixels()[..4].to_vec();
         let original = core
             .document
             .as_ref()
@@ -535,6 +551,17 @@ mod tests {
             original
         );
         assert!(core.adjustment(curve).is_ok());
+
+        core.set_layer_properties(brightness, true, true, 0, "Brightness")
+            .unwrap();
+        core.set_layer_properties(curve, false, true, 1_000, "Curve")
+            .unwrap();
+        assert_eq!(core.build_snapshot().tiles()[0].pixels()[..4], unadjusted);
+        core.set_layer_properties(brightness, true, true, 1_000, "Brightness")
+            .unwrap();
+        core.set_layer_properties(curve, true, true, 1_000, "Curve")
+            .unwrap();
+        let second = core.build_snapshot().tiles()[0].pixels()[..4].to_vec();
 
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -602,5 +629,74 @@ mod tests {
             core.merge_layer_into_below(second),
             Err(CoreError::InvalidArgument(_))
         ));
+    }
+
+    #[test]
+    fn m6_noop_invalid_and_adjustment_update_history_are_transactional() {
+        let (mut core, plane_id) = seeded_core();
+        let history = core.history.len();
+        core.begin_filter_preview(
+            plane_id,
+            Filter::BrightnessContrast {
+                brightness_milli: 0,
+                contrast_milli: 0,
+            },
+        )
+        .unwrap();
+        let outcome = core.apply_filter_preview().unwrap();
+        assert_eq!(outcome.revision(), core.document_revision);
+        assert_eq!(core.history.len(), history);
+
+        assert!(matches!(
+            core.begin_filter_preview(
+                plane_id,
+                Filter::BrightnessContrast {
+                    brightness_milli: i32::MIN,
+                    contrast_milli: 0,
+                }
+            ),
+            Err(CoreError::Raster(_))
+        ));
+        assert_eq!(core.history.len(), history);
+
+        let (_, adjustment_id) = core
+            .create_adjustment_layer(
+                "Editable",
+                Adjustment::BrightnessContrast {
+                    brightness_milli: 100,
+                    contrast_milli: 0,
+                },
+            )
+            .unwrap();
+        let before_update = core.history.len();
+        core.update_adjustment_layer(
+            adjustment_id,
+            Adjustment::BrightnessContrast {
+                brightness_milli: 200,
+                contrast_milli: -100,
+            },
+        )
+        .unwrap();
+        assert_eq!(core.history.len(), before_update + 1);
+        core.undo().unwrap();
+        assert_eq!(
+            core.adjustment(adjustment_id).unwrap(),
+            &Adjustment::BrightnessContrast {
+                brightness_milli: 100,
+                contrast_milli: 0,
+            }
+        );
+        core.redo().unwrap();
+        let updated = Adjustment::BrightnessContrast {
+            brightness_milli: 200,
+            contrast_milli: -100,
+        };
+        assert_eq!(core.adjustment(adjustment_id).unwrap(), &updated);
+        let after_redo = core.history.len();
+        let outcome = core
+            .update_adjustment_layer(adjustment_id, updated)
+            .unwrap();
+        assert_eq!(outcome.revision(), core.document_revision);
+        assert_eq!(core.history.len(), after_redo);
     }
 }

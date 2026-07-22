@@ -186,6 +186,14 @@ typedef uint32_t InkpodCurveInterpolation;
 #define INKPOD_CURVE_BEZIER UINT32_C(1)
 #define INKPOD_CURVE_BSPLINE UINT32_C(2)
 
+typedef uint32_t InkpodGradientKind;
+#define INKPOD_GRADIENT_LINEAR UINT32_C(1)
+#define INKPOD_GRADIENT_RADIAL UINT32_C(2)
+
+typedef uint32_t InkpodGradientMode;
+#define INKPOD_GRADIENT_COMPOSITE UINT32_C(1)
+#define INKPOD_GRADIENT_OVERWRITE UINT32_C(2)
+
 typedef uint32_t InkpodStoragePixelFormat;
 #define INKPOD_STORAGE_BINARY8 UINT32_C(1)
 #define INKPOD_STORAGE_GRAYSCALE8 UINT32_C(2)
@@ -624,7 +632,13 @@ typedef struct InkpodFilterInput {
     int32_t parameter_2;
     int32_t parameter_3;
     int32_t parameter_4;
-    uint32_t reserved;
+    /* Record stride for points. Zero is accepted as packed-v1 compatibility
+     * when point_count is nonzero; new callers should pass sizeof(*points).
+     * `reserved` retains source compatibility with the original v1 spelling. */
+    union {
+        uint32_t point_stride_bytes;
+        uint32_t reserved;
+    };
     const InkpodCurvePoint* points;
     uint64_t point_count;
 } InkpodFilterInput;
@@ -637,6 +651,96 @@ typedef struct InkpodFilterPreviewInfo {
     uint64_t preview_checksum;
     uint64_t preview_revision;
 } InkpodFilterPreviewInfo;
+
+typedef struct InkpodGradientStop {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint32_t position_milli;
+    uint32_t reserved_2;
+    InkpodColorValue color;
+} InkpodGradientStop;
+
+typedef struct InkpodGradientInput {
+    uint32_t struct_size;
+    InkpodGradientKind kind;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    InkpodGradientMode mode;
+    uint32_t dither;
+    int64_t start_x_milli;
+    int64_t start_y_milli;
+    int64_t end_x_milli;
+    int64_t end_y_milli;
+    const InkpodGradientStop* stops;
+    uint64_t stop_count;
+    uint64_t stop_stride_bytes;
+} InkpodGradientInput;
+
+typedef struct InkpodAirbrushInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    int64_t center_x_milli;
+    int64_t center_y_milli;
+    uint32_t radius_milli;
+    uint32_t hardness_milli;
+    uint32_t opacity_milli;
+    uint32_t reserved_2;
+    InkpodColorValue color;
+} InkpodAirbrushInput;
+
+typedef struct InkpodBoundaryAirbrushInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    uint32_t width;
+    uint32_t strength_milli;
+    InkpodColorArray colors;
+} InkpodBoundaryAirbrushInput;
+
+typedef struct InkpodBlurEffectInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    uint32_t radius;
+    uint32_t strength_milli;
+    uint32_t reserved_2;
+    uint32_t reserved_3;
+} InkpodBlurEffectInput;
+
+typedef struct InkpodStampInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    int32_t source_x;
+    int32_t source_y;
+    int32_t destination_x;
+    int32_t destination_y;
+    uint32_t width;
+    uint32_t height;
+    uint32_t opacity_milli;
+    uint32_t reserved_2;
+} InkpodStampInput;
+
+/* Alpha pixels are borrowed only for the call. Rows may be padded and must
+ * use GRAYSCALE8 or GRAYSCALE16 storage matching the target dimensions. */
+typedef struct InkpodAlphaEditInput {
+    uint32_t struct_size;
+    InkpodStoragePixelFormat pixel_format;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    uint32_t width;
+    uint32_t height;
+    uint32_t reserved;
+    uint32_t reserved_2;
+    const uint8_t* pixels;
+    uint64_t pixel_bytes;
+    uint64_t row_stride_bytes;
+} InkpodAlphaEditInput;
 
 typedef struct InkpodSnapshotVectorSegment {
     uint32_t struct_size;
@@ -1199,6 +1303,35 @@ InkpodStatus inkpod_core_adjustment_create(
     uint64_t name_length,
     InkpodDispatchResult* result,
     uint64_t* out_layer_id);
+InkpodStatus inkpod_core_adjustment_update(
+    InkpodCore* core,
+    uint64_t layer_id,
+    const InkpodFilterInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_effect_gradient(
+    InkpodCore* core,
+    const InkpodGradientInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_effect_airbrush(
+    InkpodCore* core,
+    const InkpodAirbrushInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_effect_boundary_airbrush(
+    InkpodCore* core,
+    const InkpodBoundaryAirbrushInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_effect_blur(
+    InkpodCore* core,
+    const InkpodBlurEffectInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_effect_stamp(
+    InkpodCore* core,
+    const InkpodStampInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_alpha_edit(
+    InkpodCore* core,
+    const InkpodAlphaEditInput* input,
+    InkpodDispatchResult* result);
 
 InkpodStatus inkpod_core_build_snapshot_for_view(
     InkpodCore* core,

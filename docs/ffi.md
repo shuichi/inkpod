@@ -194,11 +194,13 @@ pointers.
 
 ## M6 image-edit workflow
 
-- `InkpodFilterInput` is a versioned, fixed-size record for fixed sharpen/blur,
-  Gaussian, unsharp, invert, auto contrast, brightness/contrast, tone curve,
-  levels, HSV, and color balance. Optional `InkpodCurvePoint` storage is a
-  caller-owned bounded span; every point record and normalized 16-bit value is
-  validated and copied before return.
+- `InkpodFilterInput` remains the original 72-byte ABI-v1 record for fixed
+  sharpen/blur, Gaussian, unsharp, invert, auto contrast,
+  brightness/contrast, tone curve, levels, HSV, and color balance. Optional
+  `InkpodCurvePoint` storage is a caller-owned bounded strided span; every point
+  record and normalized 16-bit value is validated and copied before return.
+  `point_stride_bytes == 0` remains accepted as packed-v1 compatibility for a
+  non-empty curve, while new callers pass `sizeof(InkpodCurvePoint)`.
 - `inkpod_core_filter_preview_begin` computes a preview document without
   changing committed revision, dirty state, savepoint, or history.
   `inkpod_core_filter_preview_update` re-runs from the original base rather than
@@ -212,7 +214,15 @@ pointers.
 - `inkpod_core_adjustment_create` accepts only brightness/contrast, tone-curve,
   or levels filter records plus copied UTF-8 name storage. It creates one stable
   non-raster adjustment layer; source raster storage is never retained or
-  modified. Adjustment parameters persist in the `M6AD` native section.
+  modified. `inkpod_core_adjustment_update` replaces those copied parameters as
+  one Undo unit. Adjustment parameters persist in the `M6AD` native section.
+- `inkpod_core_effect_gradient`, `inkpod_core_effect_airbrush`,
+  `inkpod_core_effect_boundary_airbrush`, `inkpod_core_effect_blur`, and
+  `inkpod_core_effect_stamp` copy and validate their strided colors/stops before
+  committing one Core history unit. `inkpod_core_alpha_edit` copies bounded,
+  padded grayscale8/16 rows and changes only the matching target alpha channel.
+  No effect input pointer is retained. These calls are synchronous on the Core
+  owner thread; the Windows adapter must not call them from the UI thread.
 
 At most one stroke or filter-preview transaction may be active. Document,
 history, save/open, layer, and competing preview operations return invalid state

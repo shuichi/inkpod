@@ -1,15 +1,17 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use inkpod_core::{
-    ActivePlane, Adjustment, Channel, ClipboardPayload, ColorBalance, ColorCheckMode, Command,
-    CoordinateSpace, Core, CoreError, CurveInterpolation, CurvePoint, DocumentInfo,
-    EyedropperSource, FillOperation, FillRequest, Filter, FloatingTransform, GridConfig, GuideAxis,
+    ActivePlane, Adjustment, AirbrushStroke, BoundaryAirbrush, Channel, ClipboardPayload,
+    ColorBalance, ColorCheckMode, Command, CoordinateSpace, Core, CoreError, CurveInterpolation,
+    CurvePoint, DocumentInfo, EyedropperSource, FillOperation, FillRequest, Filter,
+    FloatingTransform, Gradient, GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis,
     HsvAdjustment, InclusionMode, LayerKind, Levels, LightTableDisplayMode, LightTableItemInput,
-    LightTableSource, MAX_COMMON_RASTER_BYTES, MAX_RASTER_DIMENSION, MirrorAxis, MotionCheckConfig,
-    MotionFrame, PaintTool, PixelFormat, PixelValue, PlaneType, PointF32, RectI32, RenderSnapshot,
-    RgbaRasterBytes, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
-    SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SelectionLayerOperation, SelectionOperation,
-    SelectionShape, SequenceCellSource, SequenceDirection, ShortcutBinding, Stroke, StrokeSample,
+    LightTableSource, MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS,
+    MAX_RASTER_DIMENSION, MirrorAxis, MotionCheckConfig, MotionFrame, PaintTool, PixelFormat,
+    PixelValue, PlaneType, PointF32, RectI32, RenderSnapshot, RgbaRasterBytes,
+    SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE, SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA,
+    SelectionLayerOperation, SelectionOperation, SelectionShape, SequenceCellSource,
+    SequenceDirection, ShortcutBinding, Stamp, Stroke, StrokeSample, TileRaster,
     VectorCubicSegment, VectorEraseMode, VectorPathInput, VectorSelectionMode, VectorWidthMode,
     ViewCommand,
 };
@@ -176,6 +178,10 @@ pub const INKPOD_FILTER_CHANNEL_GREEN: u32 = 3;
 pub const INKPOD_FILTER_CHANNEL_BLUE: u32 = 4;
 pub const INKPOD_CURVE_BEZIER: u32 = 1;
 pub const INKPOD_CURVE_BSPLINE: u32 = 2;
+pub const INKPOD_GRADIENT_LINEAR: u32 = 1;
+pub const INKPOD_GRADIENT_RADIAL: u32 = 2;
+pub const INKPOD_GRADIENT_COMPOSITE: u32 = 1;
+pub const INKPOD_GRADIENT_OVERWRITE: u32 = 2;
 pub const INKPOD_TREE_CREATE_LAYER: u32 = 1;
 pub const INKPOD_TREE_DUPLICATE_LAYER: u32 = 2;
 pub const INKPOD_TREE_DELETE_LAYER: u32 = 3;
@@ -642,7 +648,7 @@ pub struct InkpodFilterInput {
     pub parameter_2: i32,
     pub parameter_3: i32,
     pub parameter_4: i32,
-    pub reserved: u32,
+    pub point_stride_bytes: u32,
     pub points: *const InkpodCurvePoint,
     pub point_count: u64,
 }
@@ -656,6 +662,108 @@ pub struct InkpodFilterPreviewInfo {
     pub base_checksum: u64,
     pub preview_checksum: u64,
     pub preview_revision: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodGradientStop {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub position_milli: u32,
+    pub reserved_2: u32,
+    pub color: InkpodColorValue,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodGradientInput {
+    pub struct_size: u32,
+    pub kind: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub mode: u32,
+    pub dither: u32,
+    pub start_x_milli: i64,
+    pub start_y_milli: i64,
+    pub end_x_milli: i64,
+    pub end_y_milli: i64,
+    pub stops: *const InkpodGradientStop,
+    pub stop_count: u64,
+    pub stop_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodAirbrushInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub center_x_milli: i64,
+    pub center_y_milli: i64,
+    pub radius_milli: u32,
+    pub hardness_milli: u32,
+    pub opacity_milli: u32,
+    pub reserved_2: u32,
+    pub color: InkpodColorValue,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodBoundaryAirbrushInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub width: u32,
+    pub strength_milli: u32,
+    pub colors: InkpodColorArray,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodBlurEffectInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub radius: u32,
+    pub strength_milli: u32,
+    pub reserved_2: u32,
+    pub reserved_3: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodStampInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub source_x: i32,
+    pub source_y: i32,
+    pub destination_x: i32,
+    pub destination_y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub opacity_milli: u32,
+    pub reserved_2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodAlphaEditInput {
+    pub struct_size: u32,
+    pub pixel_format: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub reserved: u32,
+    pub reserved_2: u32,
+    pub pixels: *const u8,
+    pub pixel_bytes: u64,
+    pub row_stride_bytes: u64,
 }
 
 #[repr(C)]
@@ -1230,42 +1338,73 @@ fn parse_curve_interpolation(value: u32) -> Result<CurveInterpolation, u32> {
 }
 
 unsafe fn parse_filter_input(input: &InkpodFilterInput) -> Result<Filter, u32> {
-    if input.feature_flags != INKPOD_FEATURE_NONE || input.reserved != 0 {
+    if input.feature_flags != INKPOD_FEATURE_NONE {
         return Err(fail(
             INKPOD_STATUS_UNSUPPORTED,
-            "filter input contains unsupported flags or reserved values",
+            "filter input contains unsupported feature flags",
         ));
     }
     let points = if input.point_count == 0 {
-        if !input.points.is_null() {
+        if !input.points.is_null() || input.point_stride_bytes != 0 {
             return Err(fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
-                "zero curve point count requires a null pointer",
+                "zero curve point count requires a null pointer and zero stride",
             ));
         }
         Vec::new()
     } else {
-        if input.points.is_null()
-            || !is_aligned(input.points)
-            || input.point_count > inkpod_core::MAX_CURVE_POINTS as u64
-            || usize::try_from(input.point_count)
-                .ok()
-                .and_then(|count| count.checked_mul(size_of::<InkpodCurvePoint>()))
-                .is_none_or(|bytes| bytes > isize::MAX as usize)
+        if input.points.is_null() || !is_aligned(input.points) {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "curve point storage is null or misaligned",
+            ));
+        }
+        let count = usize::try_from(input.point_count).map_err(|_| {
+            fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "curve point count is not representable",
+            )
+        })?;
+        let stride = if input.point_stride_bytes == 0 {
+            size_of::<InkpodCurvePoint>()
+        } else {
+            input.point_stride_bytes as usize
+        };
+        let storage = count
+            .saturating_sub(1)
+            .checked_mul(stride)
+            .and_then(|offset| offset.checked_add(size_of::<InkpodCurvePoint>()));
+        if input.point_count > inkpod_core::MAX_CURVE_POINTS as u64
+            || stride < size_of::<InkpodCurvePoint>()
+            || stride % align_of::<InkpodCurvePoint>() != 0
+            || storage.is_none_or(|bytes| bytes > isize::MAX as usize)
         {
             return Err(fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
-                "curve point span is invalid",
+                "curve point count, stride, or storage size is invalid",
             ));
         }
-        let count = input.point_count as usize;
-        // SAFETY: The caller supplies a readable, aligned span whose byte bound
-        // was validated above and which is borrowed only for this call.
-        let records = unsafe { slice::from_raw_parts(input.points, count) };
         let mut points = Vec::with_capacity(count);
-        for record in records {
-            if record.struct_size < size_of::<InkpodCurvePoint>() as u32
-                || record.reserved != 0
+        for index in 0..count {
+            // SAFETY: The checked count/stride span is readable by contract.
+            let pointer = unsafe {
+                input
+                    .points
+                    .cast::<u8>()
+                    .add(index * stride)
+                    .cast::<InkpodCurvePoint>()
+            };
+            // SAFETY: Every strided record exposes a readable size prefix.
+            let struct_size = unsafe { validate_struct(pointer, "InkpodCurvePoint") }?;
+            if u64::from(struct_size) > stride as u64 {
+                return Err(fail(
+                    INKPOD_STATUS_INCOMPATIBLE_ABI,
+                    "InkpodCurvePoint.struct_size exceeds point stride",
+                ));
+            }
+            // SAFETY: The complete known record is readable after validation.
+            let record = unsafe { &*pointer };
+            if record.reserved != 0
                 || record.input > u16::MAX.into()
                 || record.output > u16::MAX.into()
             {
@@ -1456,6 +1595,279 @@ fn write_filter_preview_info(
     output.base_checksum = info.base_checksum;
     output.preview_checksum = info.preview_checksum;
     output.preview_revision = info.preview_revision;
+}
+
+// SAFETY: `input` and every advertised strided stop record must remain readable
+// for this call. All retained stop/color values are copied into the result.
+unsafe fn parse_gradient_input(input: &InkpodGradientInput) -> Result<Gradient, u32> {
+    if input.feature_flags != INKPOD_FEATURE_NONE || input.dither > 1 {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "gradient input contains unsupported flags or dither value",
+        ));
+    }
+    let kind = match input.kind {
+        INKPOD_GRADIENT_LINEAR => GradientKind::Linear,
+        INKPOD_GRADIENT_RADIAL => GradientKind::Radial,
+        _ => {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "gradient kind is unknown",
+            ));
+        }
+    };
+    let mode = match input.mode {
+        INKPOD_GRADIENT_COMPOSITE => GradientMode::Composite,
+        INKPOD_GRADIENT_OVERWRITE => GradientMode::Overwrite,
+        _ => {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "gradient mode is unknown",
+            ));
+        }
+    };
+    let count = usize::try_from(input.stop_count).map_err(|_| {
+        fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "gradient stop count is not representable",
+        )
+    })?;
+    let stride = usize::try_from(input.stop_stride_bytes).map_err(|_| {
+        fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "gradient stop stride is not representable",
+        )
+    })?;
+    let storage = count
+        .saturating_sub(1)
+        .checked_mul(stride)
+        .and_then(|offset| offset.checked_add(size_of::<InkpodGradientStop>()));
+    if !(3..=MAX_GRADIENT_STOPS).contains(&count)
+        || input.stops.is_null()
+        || !is_aligned(input.stops)
+        || stride < size_of::<InkpodGradientStop>()
+        || stride % align_of::<InkpodGradientStop>() != 0
+        || storage.is_none_or(|bytes| bytes > isize::MAX as usize)
+    {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "gradient stop count, pointer, stride, or storage is invalid",
+        ));
+    }
+    let mut stops = Vec::with_capacity(count);
+    for index in 0..count {
+        // SAFETY: The checked count/stride span is readable by contract.
+        let pointer = unsafe {
+            input
+                .stops
+                .cast::<u8>()
+                .add(index * stride)
+                .cast::<InkpodGradientStop>()
+        };
+        // SAFETY: Every strided record exposes a readable size prefix.
+        let struct_size = unsafe { validate_struct(pointer, "InkpodGradientStop") }?;
+        if u64::from(struct_size) > input.stop_stride_bytes {
+            return Err(fail(
+                INKPOD_STATUS_INCOMPATIBLE_ABI,
+                "InkpodGradientStop.struct_size exceeds stop stride",
+            ));
+        }
+        // SAFETY: The complete known record is readable after validation.
+        let record = unsafe { &*pointer };
+        if record.reserved != 0 || record.reserved_2 != 0 {
+            return Err(fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "gradient stop contains unsupported reserved values",
+            ));
+        }
+        // SAFETY: The nested complete color record is part of the validated stop.
+        let color = unsafe { parse_color_value(&record.color) }?
+            .rgba16()
+            .ok_or_else(|| {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "gradient stop color must be RGBA8 or RGBA16",
+                )
+            })?;
+        stops.push(GradientStop {
+            position_milli: record.position_milli,
+            color,
+        });
+    }
+    Ok(Gradient {
+        kind,
+        mode,
+        start_x_milli: input.start_x_milli,
+        start_y_milli: input.start_y_milli,
+        end_x_milli: input.end_x_milli,
+        end_y_milli: input.end_y_milli,
+        dither: input.dither != 0,
+        stops,
+    })
+}
+
+// SAFETY: `input` and its borrowed nested color record are complete and readable.
+unsafe fn parse_airbrush_input(input: &InkpodAirbrushInput) -> Result<AirbrushStroke, u32> {
+    if input.feature_flags != INKPOD_FEATURE_NONE || input.reserved != 0 || input.reserved_2 != 0 {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "airbrush input contains unsupported flags or reserved values",
+        ));
+    }
+    // SAFETY: The nested complete color record is part of the validated input.
+    let color = unsafe { parse_color_value(&input.color) }?
+        .rgba16()
+        .ok_or_else(|| {
+            fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "airbrush color must be RGBA8 or RGBA16",
+            )
+        })?;
+    Ok(AirbrushStroke {
+        center_x_milli: input.center_x_milli,
+        center_y_milli: input.center_y_milli,
+        radius_milli: input.radius_milli,
+        hardness_milli: input.hardness_milli,
+        opacity_milli: input.opacity_milli,
+        color,
+    })
+}
+
+// SAFETY: `input` and every nested strided color record remain readable for
+// this call. The returned colors own their copied values.
+unsafe fn parse_boundary_airbrush_input(
+    input: &InkpodBoundaryAirbrushInput,
+) -> Result<BoundaryAirbrush, u32> {
+    if input.feature_flags != INKPOD_FEATURE_NONE || input.reserved != 0 {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "boundary-airbrush input contains unsupported flags or reserved values",
+        ));
+    }
+    // SAFETY: The nested array exposes its complete size prefix inside input.
+    unsafe { validate_struct(&input.colors, "InkpodColorArray") }?;
+    // SAFETY: The nested array and all advertised records are readable by contract.
+    let colors = unsafe { parse_color_array(&input.colors) }?;
+    if !(2..=MAX_GRADIENT_STOPS).contains(&colors.len()) {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "boundary-airbrush color count is outside bounds",
+        ));
+    }
+    let colors = colors
+        .into_iter()
+        .map(|color| {
+            color.rgba16().ok_or_else(|| {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "boundary-airbrush colors must be RGBA8 or RGBA16",
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(BoundaryAirbrush {
+        colors,
+        width: input.width,
+        strength_milli: input.strength_milli,
+    })
+}
+
+// SAFETY: `input.pixels` advertises readable padded rows for this call. The
+// returned sparse raster owns copied grayscale pixels.
+unsafe fn parse_alpha_edit_input(input: &InkpodAlphaEditInput) -> Result<TileRaster, u32> {
+    if input.feature_flags != INKPOD_FEATURE_NONE || input.reserved != 0 || input.reserved_2 != 0 {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "alpha-edit input contains unsupported flags or reserved values",
+        ));
+    }
+    let format = match input.pixel_format {
+        INKPOD_STORAGE_GRAYSCALE8 => PixelFormat::Grayscale8,
+        INKPOD_STORAGE_GRAYSCALE16 => PixelFormat::Grayscale16,
+        _ => {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "alpha-edit storage must be grayscale8 or grayscale16",
+            ));
+        }
+    };
+    let pixels = u64::from(input.width)
+        .checked_mul(u64::from(input.height))
+        .ok_or_else(|| {
+            fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "alpha-edit dimensions overflow",
+            )
+        })?;
+    if input.width == 0
+        || input.height == 0
+        || input.width > MAX_RASTER_DIMENSION
+        || input.height > MAX_RASTER_DIMENSION
+        || pixels > MAX_IMAGE_EDIT_PIXELS
+    {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "alpha-edit dimensions are outside bounds",
+        ));
+    }
+    let bytes_per_pixel = format.bytes_per_pixel();
+    let row_bytes = usize::try_from(input.width)
+        .ok()
+        .and_then(|width| width.checked_mul(bytes_per_pixel))
+        .ok_or_else(|| {
+            fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "alpha-edit row size overflows",
+            )
+        })?;
+    let stride = usize::try_from(input.row_stride_bytes).map_err(|_| {
+        fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "alpha-edit row stride is not representable",
+        )
+    })?;
+    let height = input.height as usize;
+    let required = height
+        .saturating_sub(1)
+        .checked_mul(stride)
+        .and_then(|offset| offset.checked_add(row_bytes))
+        .ok_or_else(|| {
+            fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "alpha-edit byte range overflows",
+            )
+        })?;
+    if input.pixels.is_null()
+        || stride < row_bytes
+        || required > isize::MAX as usize
+        || required > MAX_COMMON_RASTER_BYTES
+        || input.pixel_bytes < required as u64
+    {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "alpha-edit pointer, stride, or byte length is invalid",
+        ));
+    }
+    // SAFETY: `required` covers the final readable byte of every padded row.
+    let bytes = unsafe { slice::from_raw_parts(input.pixels, required) };
+    let mut raster = TileRaster::new(input.width, input.height, format)
+        .map_err(|error| map_core_error(error.into()))?;
+    for y in 0..height {
+        for x in 0..input.width as usize {
+            let offset = y * stride + x * bytes_per_pixel;
+            let value = match format {
+                PixelFormat::Grayscale8 => PixelValue::Grayscale8(bytes[offset]),
+                PixelFormat::Grayscale16 => {
+                    PixelValue::Grayscale16(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]))
+                }
+                _ => unreachable!("validated grayscale format"),
+            };
+            raster
+                .set_pixel(x as u32, y as u32, value, 0)
+                .map_err(|error| map_core_error(error.into()))?;
+        }
+    }
+    Ok(raster)
 }
 
 fn parse_layer_kind(value: u32) -> Result<LayerKind, u32> {
@@ -6852,6 +7264,345 @@ pub unsafe extern "C" fn inkpod_core_adjustment_create(
     })
 }
 
+/// Replaces one persisted adjustment parameter record as one Undo unit.
+///
+/// # Safety
+/// All objects and optional curve storage follow the owner-thread, alignment,
+/// non-overlap, and per-call borrowing contract used by adjustment creation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_adjustment_update(
+    core: *mut InkpodCore,
+    layer_id: u64,
+    input: *const InkpodFilterInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodFilterInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let adjustment = match unsafe { parse_filter_input(input) }.and_then(filter_to_adjustment) {
+            Ok(adjustment) => adjustment,
+            Err(status) => return status,
+        };
+        match core.core.update_adjustment_layer(layer_id, adjustment) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies one copied linear/radial multi-stop gradient as one Undo unit.
+///
+/// # Safety
+/// Core/input/result and every advertised stop/color record must be complete,
+/// aligned, readable, non-overlapping, and live for this owner-thread call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_effect_gradient(
+    core: *mut InkpodCore,
+    input: *const InkpodGradientInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodGradientInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let gradient = match unsafe { parse_gradient_input(input) } {
+            Ok(gradient) => gradient,
+            Err(status) => return status,
+        };
+        match core.core.apply_gradient_to_plane(input.plane_id, &gradient) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies one copied airbrush dab as one Undo unit.
+///
+/// # Safety
+/// Core/input/result must satisfy the normal owner-thread ABI contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_effect_airbrush(
+    core: *mut InkpodCore,
+    input: *const InkpodAirbrushInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodAirbrushInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let stroke = match unsafe { parse_airbrush_input(input) } {
+            Ok(stroke) => stroke,
+            Err(status) => return status,
+        };
+        match core.core.apply_airbrush_to_plane(input.plane_id, stroke) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies the copied boundary-color airbrush effect as one Undo unit.
+///
+/// # Safety
+/// Core/input/result and every advertised color record follow the normal
+/// owner-thread span contract and are borrowed only for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_effect_boundary_airbrush(
+    core: *mut InkpodCore,
+    input: *const InkpodBoundaryAirbrushInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodBoundaryAirbrushInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let effect = match unsafe { parse_boundary_airbrush_input(input) } {
+            Ok(effect) => effect,
+            Err(status) => return status,
+        };
+        match core
+            .core
+            .apply_boundary_airbrush_to_plane(input.plane_id, &effect)
+        {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies a bounded Gaussian blur effect as one Undo unit.
+///
+/// # Safety
+/// Core/input/result must satisfy the normal owner-thread ABI contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_effect_blur(
+    core: *mut InkpodCore,
+    input: *const InkpodBlurEffectInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodBlurEffectInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        if input.feature_flags != INKPOD_FEATURE_NONE
+            || input.reserved != 0
+            || input.reserved_2 != 0
+            || input.reserved_3 != 0
+        {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "blur-effect input contains unsupported flags or reserved values",
+            );
+        }
+        match core
+            .core
+            .apply_blur_to_plane(input.plane_id, input.radius, input.strength_milli)
+        {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies one bounded offset stamp from the immutable source plane state.
+///
+/// # Safety
+/// Core/input/result must satisfy the normal owner-thread ABI contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_effect_stamp(
+    core: *mut InkpodCore,
+    input: *const InkpodStampInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodStampInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        if input.feature_flags != INKPOD_FEATURE_NONE
+            || input.reserved != 0
+            || input.reserved_2 != 0
+        {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "stamp input contains unsupported flags or reserved values",
+            );
+        }
+        let stamp = Stamp {
+            source_x: input.source_x,
+            source_y: input.source_y,
+            destination_x: input.destination_x,
+            destination_y: input.destination_y,
+            width: input.width,
+            height: input.height,
+            opacity_milli: input.opacity_milli,
+        };
+        match core.core.apply_stamp_to_plane(input.plane_id, stamp) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Replaces only the target plane alpha from copied grayscale rows.
+///
+/// # Safety
+/// Core/input/result and every advertised pixel row must be complete, readable,
+/// non-overlapping, and live for this owner-thread call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_alpha_edit(
+    core: *mut InkpodCore,
+    input: *const InkpodAlphaEditInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodAlphaEditInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let alpha = match unsafe { parse_alpha_edit_input(input) } {
+            Ok(alpha) => alpha,
+            Err(status) => return status,
+        };
+        match core.core.edit_plane_alpha(input.plane_id, &alpha) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -9160,7 +9911,7 @@ mod tests {
     }
 
     #[test]
-    fn m6_filter_preview_and_adjustment_validate_records_and_commit_atomically() {
+    fn m6_filter_effect_adjustment_and_alpha_records_are_copied_and_atomic() {
         unsafe {
             let config = InkpodCoreConfig {
                 struct_size: size_of::<InkpodCoreConfig>() as u32,
@@ -9201,7 +9952,7 @@ mod tests {
                 parameter_2: 0,
                 parameter_3: 0,
                 parameter_4: 0,
-                reserved: 0,
+                point_stride_bytes: 0,
                 points: ptr::null(),
                 point_count: 0,
             };
@@ -9251,9 +10002,70 @@ mod tests {
             );
             assert_eq!(document.color_plane_checksum, original);
 
+            let curve_points = [
+                InkpodCurvePoint {
+                    struct_size: size_of::<InkpodCurvePoint>() as u32,
+                    reserved: 0,
+                    input: 0,
+                    output: 0,
+                },
+                InkpodCurvePoint {
+                    struct_size: size_of::<InkpodCurvePoint>() as u32,
+                    reserved: 0,
+                    input: 32_768,
+                    output: 40_000,
+                },
+                InkpodCurvePoint {
+                    struct_size: size_of::<InkpodCurvePoint>() as u32,
+                    reserved: 0,
+                    input: 65_535,
+                    output: 65_535,
+                },
+            ];
+            filter.kind = INKPOD_FILTER_TONE_CURVE;
+            filter.channel = INKPOD_FILTER_CHANNEL_RGB;
+            filter.interpolation = INKPOD_CURVE_BEZIER;
+            filter.points = curve_points.as_ptr();
+            filter.point_count = curve_points.len() as u64;
+            filter.point_stride_bytes = (size_of::<InkpodCurvePoint>() - 1) as u32;
+            assert_eq!(
+                inkpod_core_filter_preview_begin(core, &filter, &mut preview),
+                INKPOD_STATUS_INVALID_ARGUMENT
+            );
+            filter.point_stride_bytes = size_of::<InkpodCurvePoint>() as u32;
+            let mut oversized_points = curve_points;
+            oversized_points[0].struct_size = (size_of::<InkpodCurvePoint>() + 8) as u32;
+            filter.points = oversized_points.as_ptr();
+            assert_eq!(
+                inkpod_core_filter_preview_begin(core, &filter, &mut preview),
+                INKPOD_STATUS_INCOMPATIBLE_ABI
+            );
+            filter.points = curve_points.as_ptr();
+            assert_eq!(
+                inkpod_core_filter_preview_begin(core, &filter, &mut preview),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                inkpod_core_filter_preview_cancel(core, &mut preview),
+                INKPOD_STATUS_OK
+            );
+            filter.point_stride_bytes = 0;
+            assert_eq!(
+                inkpod_core_filter_preview_begin(core, &filter, &mut preview),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                inkpod_core_filter_preview_cancel(core, &mut preview),
+                INKPOD_STATUS_OK
+            );
+
             filter.kind = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
+            filter.interpolation = 0;
             filter.parameter_0 = 100;
             filter.parameter_1 = 200;
+            filter.points = ptr::null();
+            filter.point_count = 0;
+            filter.point_stride_bytes = 0;
             let name = b"M6 Adjustment";
             let mut layer_id = 0;
             assert_eq!(
@@ -9268,6 +10080,184 @@ mod tests {
                 INKPOD_STATUS_OK
             );
             assert_ne!(layer_id, 0);
+
+            filter.parameter_0 = 200;
+            filter.parameter_1 = -100;
+            assert_eq!(
+                inkpod_core_adjustment_update(core, layer_id, &filter, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+
+            let color16 = |red, green, blue, alpha| InkpodColorValue {
+                struct_size: size_of::<InkpodColorValue>() as u32,
+                depth: INKPOD_COLOR_DEPTH_16,
+                red,
+                green,
+                blue,
+                alpha,
+            };
+            let stops = [
+                InkpodGradientStop {
+                    struct_size: size_of::<InkpodGradientStop>() as u32,
+                    reserved: 0,
+                    position_milli: 0,
+                    reserved_2: 0,
+                    color: color16(65_535, 0, 0, 65_535),
+                },
+                InkpodGradientStop {
+                    struct_size: size_of::<InkpodGradientStop>() as u32,
+                    reserved: 0,
+                    position_milli: 500,
+                    reserved_2: 0,
+                    color: color16(0, 65_535, 0, 32_768),
+                },
+                InkpodGradientStop {
+                    struct_size: size_of::<InkpodGradientStop>() as u32,
+                    reserved: 0,
+                    position_milli: 1_000,
+                    reserved_2: 0,
+                    color: color16(0, 0, 65_535, 65_535),
+                },
+            ];
+            let gradient = InkpodGradientInput {
+                struct_size: size_of::<InkpodGradientInput>() as u32,
+                kind: INKPOD_GRADIENT_LINEAR,
+                feature_flags: 0,
+                plane_id: document.color_plane_id,
+                mode: INKPOD_GRADIENT_OVERWRITE,
+                dither: 0,
+                start_x_milli: 500,
+                start_y_milli: 500,
+                end_x_milli: 3_500,
+                end_y_milli: 500,
+                stops: stops.as_ptr(),
+                stop_count: stops.len() as u64,
+                stop_stride_bytes: size_of::<InkpodGradientStop>() as u64,
+            };
+            assert_eq!(
+                inkpod_core_effect_gradient(core, &gradient, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut document),
+                INKPOD_STATUS_OK
+            );
+            assert_ne!(document.color_plane_checksum, original);
+
+            let airbrush = InkpodAirbrushInput {
+                struct_size: size_of::<InkpodAirbrushInput>() as u32,
+                reserved: 0,
+                feature_flags: 0,
+                plane_id: document.color_plane_id,
+                center_x_milli: 2_000,
+                center_y_milli: 2_000,
+                radius_milli: 1_500,
+                hardness_milli: 500,
+                opacity_milli: 500,
+                reserved_2: 0,
+                color: color16(65_535, 65_535, 65_535, 65_535),
+            };
+            assert_eq!(
+                inkpod_core_effect_airbrush(core, &airbrush, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+
+            let boundary_colors = [color16(65_535, 0, 0, 65_535), color16(0, 0, 65_535, 65_535)];
+            let boundary = InkpodBoundaryAirbrushInput {
+                struct_size: size_of::<InkpodBoundaryAirbrushInput>() as u32,
+                reserved: 0,
+                feature_flags: 0,
+                plane_id: document.color_plane_id,
+                width: 1,
+                strength_milli: 1_000,
+                colors: InkpodColorArray {
+                    struct_size: size_of::<InkpodColorArray>() as u32,
+                    reserved: 0,
+                    feature_flags: 0,
+                    colors: boundary_colors.as_ptr(),
+                    color_count: boundary_colors.len() as u64,
+                    color_stride_bytes: size_of::<InkpodColorValue>() as u64,
+                },
+            };
+            assert_eq!(
+                inkpod_core_effect_boundary_airbrush(core, &boundary, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+
+            let blur = InkpodBlurEffectInput {
+                struct_size: size_of::<InkpodBlurEffectInput>() as u32,
+                reserved: 0,
+                feature_flags: 0,
+                plane_id: document.color_plane_id,
+                radius: 1,
+                strength_milli: 500,
+                reserved_2: 0,
+                reserved_3: 0,
+            };
+            assert_eq!(
+                inkpod_core_effect_blur(core, &blur, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+
+            let stamp = InkpodStampInput {
+                struct_size: size_of::<InkpodStampInput>() as u32,
+                reserved: 0,
+                feature_flags: 0,
+                plane_id: document.color_plane_id,
+                source_x: 0,
+                source_y: 0,
+                destination_x: 2,
+                destination_y: 2,
+                width: 2,
+                height: 2,
+                opacity_milli: 1_000,
+                reserved_2: 0,
+            };
+            assert_eq!(
+                inkpod_core_effect_stamp(core, &stamp, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut document),
+                INKPOD_STATUS_OK
+            );
+            let before_alpha = document.color_plane_checksum;
+            let alpha_pixels = [64_u8; 16];
+            let mut alpha = InkpodAlphaEditInput {
+                struct_size: size_of::<InkpodAlphaEditInput>() as u32,
+                pixel_format: INKPOD_STORAGE_GRAYSCALE8,
+                feature_flags: 0,
+                plane_id: document.color_plane_id,
+                width: 4,
+                height: 4,
+                reserved: 0,
+                reserved_2: 0,
+                pixels: alpha_pixels.as_ptr(),
+                pixel_bytes: alpha_pixels.len() as u64,
+                row_stride_bytes: 4,
+            };
+            alpha.row_stride_bytes = 3;
+            assert_eq!(
+                inkpod_core_alpha_edit(core, &alpha, &mut dispatch),
+                INKPOD_STATUS_INVALID_ARGUMENT
+            );
+            alpha.row_stride_bytes = 4;
+            assert_eq!(
+                inkpod_core_alpha_edit(core, &alpha, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut document),
+                INKPOD_STATUS_OK
+            );
+            assert_ne!(document.color_plane_checksum, before_alpha);
+            assert_eq!(inkpod_core_undo(core, &mut dispatch), INKPOD_STATUS_OK);
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut document),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(document.color_plane_checksum, before_alpha);
             assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
         }
     }

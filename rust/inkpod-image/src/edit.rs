@@ -3,6 +3,11 @@ use crate::{PixelFormat, PixelValue, RasterError, TileRaster};
 pub const MAX_FILTER_RADIUS: u32 = 64;
 pub const MAX_CURVE_POINTS: usize = 64;
 pub const MAX_GRADIENT_STOPS: usize = 64;
+/// Bounds allocations and synchronous work for one image-edit transaction.
+/// 8192 x 8192 is the largest full-plane edit accepted by the current M6
+/// implementation; radius-dependent effects have an additional work bound.
+pub const MAX_IMAGE_EDIT_PIXELS: u64 = 67_108_864;
+const MAX_IMAGE_EDIT_WORK: u128 = 1_100_000_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Channel {
@@ -228,23 +233,23 @@ pub fn apply_gradient(
     validate_selection(source, selection)?;
     validate_gradient(gradient)?;
     let mut result = source.clone();
-    let dx = gradient.end_x_milli - gradient.start_x_milli;
-    let dy = gradient.end_y_milli - gradient.start_y_milli;
-    let length_squared = (dx as f64).mul_add(dx as f64, (dy as f64) * (dy as f64));
+    // Convert before subtraction so arbitrary public-API i64 coordinates cannot
+    // overflow. Every i64 value is finite and exactly bounded in f64 here.
+    let dx = gradient.end_x_milli as f64 - gradient.start_x_milli as f64;
+    let dy = gradient.end_y_milli as f64 - gradient.start_y_milli as f64;
+    let length_squared = dx.mul_add(dx, dy * dy);
     for y in 0..source.height() {
         for x in 0..source.width() {
             if !selected(selection, x, y)? {
                 continue;
             }
-            let px = i64::from(x) * 1_000 + 500 - gradient.start_x_milli;
-            let py = i64::from(y) * 1_000 + 500 - gradient.start_y_milli;
+            let px = f64::from(x).mul_add(1_000.0, 500.0) - gradient.start_x_milli as f64;
+            let py = f64::from(y).mul_add(1_000.0, 500.0) - gradient.start_y_milli as f64;
             let t = match gradient.kind {
-                GradientKind::Linear => ((px as f64).mul_add(dx as f64, (py as f64) * (dy as f64))
-                    / length_squared)
-                    .clamp(0.0, 1.0),
+                GradientKind::Linear => (px.mul_add(dx, py * dy) / length_squared).clamp(0.0, 1.0),
                 GradientKind::Radial => {
                     let radius = length_squared.sqrt();
-                    ((px as f64).hypot(py as f64) / radius).clamp(0.0, 1.0)
+                    (px.hypot(py) / radius).clamp(0.0, 1.0)
                 }
             };
             let mut color = sample_stops(&gradient.stops, (t * 1_000.0).round() as u32);
@@ -292,9 +297,9 @@ pub fn apply_airbrush(
             if !selected(selection, x, y)? {
                 continue;
             }
-            let dx = i64::from(x) * 1_000 + 500 - stroke.center_x_milli;
-            let dy = i64::from(y) * 1_000 + 500 - stroke.center_y_milli;
-            let distance = (dx as f64).hypot(dy as f64);
+            let dx = f64::from(x).mul_add(1_000.0, 500.0) - stroke.center_x_milli as f64;
+            let dy = f64::from(y).mul_add(1_000.0, 500.0) - stroke.center_y_milli as f64;
+            let distance = dx.hypot(dy);
             if distance > radius {
                 continue;
             }
@@ -330,6 +335,7 @@ pub fn apply_boundary_airbrush(
     {
         return Err(RasterError::InvalidDimensions);
     }
+    validate_radius_work(source, effect.width)?;
     let mut result = source.clone();
     let radius = i32::try_from(effect.width).map_err(|_| RasterError::InvalidDimensions)?;
     for y in 0..source.height() {
@@ -404,37 +410,63 @@ pub fn apply_stamp(
     if stamp.width == 0 || stamp.height == 0 || stamp.opacity_milli > 1_000 {
         return Err(RasterError::InvalidDimensions);
     }
-    let mut samples = Vec::new();
-    for y in 0..stamp.height {
-        for x in 0..stamp.width {
-            let sx = i64::from(stamp.source_x) + i64::from(x);
-            let sy = i64::from(stamp.source_y) + i64::from(y);
-            if sx >= 0
-                && sy >= 0
-                && sx < i64::from(source.width())
-                && sy < i64::from(source.height())
-            {
-                samples.push((x, y, source.pixel(sx as u32, sy as u32)?));
-            }
-        }
+    let x_range = clipped_stamp_axis(
+        stamp.width,
+        stamp.source_x,
+        stamp.destination_x,
+        source.width(),
+    );
+    let y_range = clipped_stamp_axis(
+        stamp.height,
+        stamp.source_y,
+        stamp.destination_y,
+        source.height(),
+    );
+    let clipped_pixels = u64::from(x_range.end.saturating_sub(x_range.start))
+        .checked_mul(u64::from(y_range.end.saturating_sub(y_range.start)))
+        .ok_or(RasterError::InvalidDimensions)?;
+    if clipped_pixels > MAX_IMAGE_EDIT_PIXELS {
+        return Err(RasterError::InvalidDimensions);
     }
     let mut result = source.clone();
-    for (x, y, sample) in samples {
-        let dx = i64::from(stamp.destination_x) + i64::from(x);
-        let dy = i64::from(stamp.destination_y) + i64::from(y);
-        if dx < 0 || dy < 0 || dx >= i64::from(source.width()) || dy >= i64::from(source.height()) {
-            continue;
+    for y in y_range {
+        for x in x_range.clone() {
+            let sx = i64::from(stamp.source_x) + i64::from(x);
+            let sy = i64::from(stamp.source_y) + i64::from(y);
+            let dx = i64::from(stamp.destination_x) + i64::from(x);
+            let dy = i64::from(stamp.destination_y) + i64::from(y);
+            debug_assert!(sx >= 0 && sy >= 0 && dx >= 0 && dy >= 0);
+            let sample = source.pixel(sx as u32, sy as u32)?;
+            let (dx, dy) = (dx as u32, dy as u32);
+            if !selected(selection, dx, dy)? {
+                continue;
+            }
+            let mut rgba = sample.rgba16().ok_or(RasterError::PixelFormatMismatch)?;
+            rgba[3] = ((u64::from(rgba[3]) * u64::from(stamp.opacity_milli) + 500) / 1_000) as u16;
+            let after = source_over(source.pixel(dx, dy)?, rgba)?;
+            result.set_pixel(dx, dy, after, revision)?;
         }
-        let (dx, dy) = (dx as u32, dy as u32);
-        if !selected(selection, dx, dy)? {
-            continue;
-        }
-        let mut rgba = sample.rgba16().ok_or(RasterError::PixelFormatMismatch)?;
-        rgba[3] = ((u64::from(rgba[3]) * u64::from(stamp.opacity_milli) + 500) / 1_000) as u16;
-        let after = source_over(source.pixel(dx, dy)?, rgba)?;
-        result.set_pixel(dx, dy, after, revision)?;
     }
     Ok(result)
+}
+
+fn clipped_stamp_axis(
+    length: u32,
+    source_start: i32,
+    destination_start: i32,
+    bound: u32,
+) -> std::ops::Range<u32> {
+    let start = 0_i64
+        .max(-i64::from(source_start))
+        .max(-i64::from(destination_start));
+    let end = i64::from(length)
+        .min(i64::from(bound) - i64::from(source_start))
+        .min(i64::from(bound) - i64::from(destination_start));
+    if start >= end {
+        0..0
+    } else {
+        start as u32..end as u32
+    }
 }
 
 pub fn edit_alpha(
@@ -476,10 +508,15 @@ pub fn edit_alpha(
 }
 
 fn validate_color_raster(raster: &TileRaster) -> Result<(), RasterError> {
-    if matches!(
-        raster.format(),
-        PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
-    ) {
+    let pixels = u64::from(raster.width())
+        .checked_mul(u64::from(raster.height()))
+        .ok_or(RasterError::InvalidDimensions)?;
+    if pixels <= MAX_IMAGE_EDIT_PIXELS
+        && matches!(
+            raster.format(),
+            PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+        )
+    {
         Ok(())
     } else {
         Err(RasterError::PixelFormatMismatch)
@@ -528,22 +565,24 @@ fn validate_filter(filter: &Filter) -> Result<(), RasterError> {
         Filter::BrightnessContrast {
             brightness_milli,
             contrast_milli,
-        } if brightness_milli.abs() > 1_000 || contrast_milli.abs() > 1_000 => {
+        } if !(-1_000..=1_000).contains(brightness_milli)
+            || !(-1_000..=1_000).contains(contrast_milli) =>
+        {
             Err(RasterError::InvalidDimensions)
         }
         Filter::ToneCurve { points, .. } => validate_curve(points),
         Filter::Levels(levels) => validate_levels(levels),
         Filter::Hsv(value)
-            if value.hue_degrees_milli.abs() > 360_000
-                || value.saturation_milli.abs() > 1_000
-                || value.value_milli.abs() > 1_000 =>
+            if !(-360_000..=360_000).contains(&value.hue_degrees_milli)
+                || !(-1_000..=1_000).contains(&value.saturation_milli)
+                || !(-1_000..=1_000).contains(&value.value_milli) =>
         {
             Err(RasterError::InvalidDimensions)
         }
         Filter::ColorBalance(value)
-            if value.red_milli.abs() > 1_000
-                || value.green_milli.abs() > 1_000
-                || value.blue_milli.abs() > 1_000 =>
+            if !(-1_000..=1_000).contains(&value.red_milli)
+                || !(-1_000..=1_000).contains(&value.green_milli)
+                || !(-1_000..=1_000).contains(&value.blue_milli) =>
         {
             Err(RasterError::InvalidDimensions)
         }
@@ -704,6 +743,7 @@ fn blur(
     strength_milli: u32,
     revision: u64,
 ) -> Result<TileRaster, RasterError> {
+    validate_radius_work(source, radius)?;
     let radius = i32::try_from(radius).map_err(|_| RasterError::InvalidDimensions)?;
     let sigma = (f64::from(radius) / 2.0).max(0.5);
     let mut kernel = Vec::new();
@@ -764,6 +804,23 @@ fn blur(
         }
     }
     Ok(result)
+}
+
+fn validate_radius_work(source: &TileRaster, radius: u32) -> Result<(), RasterError> {
+    let diameter = u128::from(radius)
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(RasterError::InvalidDimensions)?;
+    let work = u128::from(source.width())
+        .checked_mul(u128::from(source.height()))
+        .and_then(|pixels| pixels.checked_mul(diameter))
+        .and_then(|value| value.checked_mul(diameter))
+        .ok_or(RasterError::InvalidDimensions)?;
+    if work > MAX_IMAGE_EDIT_WORK {
+        Err(RasterError::InvalidDimensions)
+    } else {
+        Ok(())
+    }
 }
 
 fn unsharp(
@@ -1040,9 +1097,111 @@ mod tests {
             .unwrap();
             assert_eq!(output.pixel(0, 0).unwrap(), left);
             assert_eq!(output.pixel(2, 0).unwrap(), right);
-            let center = output.pixel(1, 0).unwrap().rgba16().unwrap();
-            assert_eq!(center[3], middle.rgba16().unwrap()[3]);
+            let expected = match format {
+                PixelFormat::StraightRgba8 => PixelValue::Rgba([177, 138, 99, 128]),
+                PixelFormat::StraightRgba16 => PixelValue::Rgba16([45_535, 35_535, 25_535, 32_768]),
+                _ => unreachable!("test uses straight RGBA formats"),
+            };
+            assert_eq!(output.pixel(1, 0).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn m6_invalid_extremes_and_oversized_work_are_rejected_without_panicking() {
+        let source = rgba8(2, 2);
+        for filter in [
+            Filter::BrightnessContrast {
+                brightness_milli: i32::MIN,
+                contrast_milli: 0,
+            },
+            Filter::Hsv(HsvAdjustment {
+                hue_degrees_milli: i32::MIN,
+                saturation_milli: 0,
+                value_milli: 0,
+            }),
+            Filter::ColorBalance(ColorBalance {
+                red_milli: i32::MIN,
+                green_milli: 0,
+                blue_milli: 0,
+            }),
+        ] {
+            assert!(apply_filter(&source, None, &filter, 2).is_err());
+        }
+
+        let extreme_gradient = Gradient {
+            kind: GradientKind::Linear,
+            mode: GradientMode::Overwrite,
+            start_x_milli: i64::MIN,
+            start_y_milli: i64::MIN,
+            end_x_milli: i64::MAX,
+            end_y_milli: i64::MAX,
+            dither: false,
+            stops: vec![
+                GradientStop {
+                    position_milli: 0,
+                    color: [0; 4],
+                },
+                GradientStop {
+                    position_milli: 500,
+                    color: [32_768; 4],
+                },
+                GradientStop {
+                    position_milli: 1_000,
+                    color: [65_535; 4],
+                },
+            ],
+        };
+        assert!(apply_gradient(&source, None, &extreme_gradient, 2).is_ok());
+        assert!(
+            apply_airbrush(
+                &source,
+                None,
+                AirbrushStroke {
+                    center_x_milli: i64::MIN,
+                    center_y_milli: i64::MAX,
+                    radius_milli: 1_000,
+                    hardness_milli: 0,
+                    opacity_milli: 1_000,
+                    color: [65_535; 4],
+                },
+                2,
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            apply_stamp(
+                &source,
+                None,
+                Stamp {
+                    source_x: i32::MIN,
+                    source_y: i32::MIN,
+                    destination_x: i32::MAX,
+                    destination_y: i32::MAX,
+                    width: u32::MAX,
+                    height: u32::MAX,
+                    opacity_milli: 1_000,
+                },
+                2,
+            )
+            .unwrap(),
+            source
+        );
+
+        let oversized = TileRaster::new(8_193, 8_193, PixelFormat::StraightRgba8).unwrap();
+        assert!(apply_filter(&oversized, None, &Filter::AutoContrast, 2).is_err());
+        let expensive = TileRaster::new(1_024, 1_024, PixelFormat::StraightRgba8).unwrap();
+        assert!(
+            apply_filter(
+                &expensive,
+                None,
+                &Filter::GaussianBlur {
+                    radius: MAX_FILTER_RADIUS,
+                    strength_milli: 1_000,
+                },
+                2,
+            )
+            .is_err()
+        );
     }
 
     #[test]

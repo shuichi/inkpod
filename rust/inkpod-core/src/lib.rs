@@ -23,8 +23,8 @@ use inkpod_format::{
 };
 use inkpod_image::{
     ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,
-    TILE_SIZE, TileCoord, TileData, TileRaster, closed_region_fill_with_cancel,
-    color_check_category, extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
+    TILE_SIZE, TileCoord, TileData, closed_region_fill_with_cancel, color_check_category,
+    extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -60,8 +60,8 @@ pub use inkpod_format::{
 pub use inkpod_image::{
     Adjustment, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance, ColorCheckMode,
     CurveInterpolation, CurvePoint, EyedropperSource, Filter, Gradient, GradientKind, GradientMode,
-    GradientStop, HsvAdjustment, InclusionMode, Levels, MAX_CURVE_POINTS, MAX_RASTER_DIMENSION,
-    PixelFormat, PixelValue, Stamp,
+    GradientStop, HsvAdjustment, InclusionMode, Levels, MAX_CURVE_POINTS, MAX_GRADIENT_STOPS,
+    MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION, PixelFormat, PixelValue, Stamp, TileRaster,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -5166,11 +5166,17 @@ fn compose_tile(
             // bottom towards the top so palette order and rendered order agree.
             for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
                 if let Some(adjustment) = document.adjustments.get(&layer.id) {
-                    composite =
+                    let adjusted =
                         inkpod_image::apply_adjustment(PixelValue::Rgba(composite), adjustment)
                             .ok()?
                             .rgba16()?
                             .map(|channel| ((u32::from(channel) + 128) / 257) as u8);
+                    composite = std::array::from_fn(|channel| {
+                        ((u32::from(composite[channel]) * (1_000 - layer.opacity_milli)
+                            + u32::from(adjusted[channel]) * layer.opacity_milli
+                            + 500)
+                            / 1_000) as u8
+                    });
                     continue;
                 }
                 let mut layer_pixel = [0_u8; 4];

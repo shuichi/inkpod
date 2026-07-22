@@ -95,6 +95,13 @@ BEGIN
         MENUITEM "選択範囲を1px拡張", IDM_SELECTION_EXPAND
         MENUITEM "選択範囲を1px縮小", IDM_SELECTION_SHRINK
     END
+    POPUP "フィルタ(&I)"
+    BEGIN
+        MENUITEM "直前のフィルタを再実行", IDM_FILTER_LAST
+        MENUITEM SEPARATOR
+        MENUITEM "階調反転", IDM_FILTER_INVERT
+        MENUITEM "ぼかし（弱）", IDM_FILTER_BLUR_WEAK
+    END
     POPUP "ツール(&T)"
     BEGIN
         MENUITEM "鉛筆(&P)", IDM_TOOL_PENCIL

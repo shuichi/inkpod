@@ -962,6 +962,13 @@ void UpdateMenuState(AppState& state) noexcept {
         EnableMenuItem(
             menu, command, MF_BYCOMMAND | (has_document ? MF_ENABLED : MF_GRAYED));
     }
+    for (const UINT command : {IDM_FILTER_LAST, IDM_FILTER_INVERT, IDM_FILTER_BLUR_WEAK}) {
+        EnableMenuItem(
+            menu,
+            command,
+            MF_BYCOMMAND
+                | (has_document && state.plane == INKPOD_PLANE_COLOR ? MF_ENABLED : MF_GRAYED));
+    }
     EnableMenuItem(
         menu,
         IDM_EDIT_PASTE,
@@ -2838,8 +2845,10 @@ int RunM6Smoke(AppState& state) noexcept {
     bool preview_cancelled{};
     bool undo_restored{};
     bool adjustment_preserved_source{};
+    bool effect_connected{};
     const InkpodStatus status = state.engine->Invoke(
-        [&preview_cancelled, &undo_restored, &adjustment_preserved_source](InkpodCore* core) {
+        [&preview_cancelled, &undo_restored, &adjustment_preserved_source, &effect_connected](
+            InkpodCore* core) {
             InkpodDocumentInfo document = EmptyDocumentInfo();
             InkpodStatus current = inkpod_core_get_document_info(core, &document);
             const std::array<InkpodStrokeSample, 1U> samples{
@@ -2921,13 +2930,68 @@ int RunM6Smoke(AppState& state) noexcept {
                 adjustment_preserved_source = adjustment_id != 0U
                     && document.color_plane_checksum == original;
             }
+            const auto color16 = [](std::uint16_t red,
+                                    std::uint16_t green,
+                                    std::uint16_t blue,
+                                    std::uint16_t alpha) noexcept {
+                InkpodColorValue color{};
+                color.struct_size = sizeof(color);
+                color.depth = INKPOD_COLOR_DEPTH_16;
+                color.red = red;
+                color.green = green;
+                color.blue = blue;
+                color.alpha = alpha;
+                return color;
+            };
+            std::array<InkpodGradientStop, 3U> stops{};
+            for (auto& stop : stops) {
+                stop.struct_size = sizeof(stop);
+            }
+            stops[0].position_milli = 0U;
+            stops[0].color = color16(65535U, 0U, 0U, 65535U);
+            stops[1].position_milli = 500U;
+            stops[1].color = color16(0U, 65535U, 0U, 32768U);
+            stops[2].position_milli = 1000U;
+            stops[2].color = color16(0U, 0U, 65535U, 65535U);
+            InkpodGradientInput gradient{};
+            gradient.struct_size = sizeof(gradient);
+            gradient.kind = INKPOD_GRADIENT_LINEAR;
+            gradient.plane_id = document.color_plane_id;
+            gradient.mode = INKPOD_GRADIENT_OVERWRITE;
+            gradient.start_x_milli = 500;
+            gradient.start_y_milli = 500;
+            gradient.end_x_milli = 63500;
+            gradient.end_y_milli = 500;
+            gradient.stops = stops.data();
+            gradient.stop_count = stops.size();
+            gradient.stop_stride_bytes = sizeof(InkpodGradientStop);
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_effect_gradient(core, &gradient, &dispatch);
+            }
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_core_get_document_info(core, &document);
+                effect_connected = document.color_plane_checksum != original;
+            }
             return current;
         },
         true,
         true);
     if (status != INKPOD_STATUS_OK || !preview_cancelled || !undo_restored
-        || !adjustment_preserved_source) {
+        || !adjustment_preserved_source || !effect_connected) {
         return 601;
+    }
+    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_COLOR, 0);
+    InkpodDocumentInfo before_menu = EmptyDocumentInfo();
+    InkpodDocumentInfo after_menu = EmptyDocumentInfo();
+    HMENU menu = GetMenu(state.window);
+    if (menu == nullptr || !QueryDocument(state, before_menu)
+        || GetMenuState(menu, IDM_FILTER_LAST, MF_BYCOMMAND) == static_cast<UINT>(-1)) {
+        return 602;
+    }
+    SendMessageW(state.window, WM_COMMAND, IDM_FILTER_LAST, 0);
+    if (!QueryDocument(state, after_menu)
+        || after_menu.color_plane_checksum == before_menu.color_plane_checksum) {
+        return 603;
     }
     return SendMessageW(
                state.canvas,
@@ -2935,7 +2999,7 @@ int RunM6Smoke(AppState& state) noexcept {
                0,
                0) == 1
         ? 0
-        : 602;
+        : 604;
 }
 
 InkpodStatus InitializeCore(AppState& state) noexcept {
@@ -3200,6 +3264,52 @@ LRESULT CALLBACK MainWindowProcedure(
                               true);
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"画像の左右反転");
+                    }
+                    UpdateMenuState(*state);
+                    return 0;
+                }
+                case IDM_FILTER_LAST:
+                case IDM_FILTER_INVERT:
+                case IDM_FILTER_BLUR_WEAK: {
+                    const UINT command = LOWORD(wparam);
+                    const InkpodStatus status = state->engine == nullptr
+                            || state->plane != INKPOD_PLANE_COLOR
+                        ? INKPOD_STATUS_INVALID_STATE
+                        : state->engine->Invoke(
+                              [command](InkpodCore* core) {
+                                  InkpodDocumentInfo info = EmptyDocumentInfo();
+                                  InkpodStatus inner = inkpod_core_get_document_info(core, &info);
+                                  InkpodDispatchResult result{};
+                                  result.struct_size = sizeof(result);
+                                  if (inner != INKPOD_STATUS_OK) {
+                                      return inner;
+                                  }
+                                  if (command == IDM_FILTER_LAST) {
+                                      return inkpod_core_filter_apply_last(
+                                          core, info.color_plane_id, &result);
+                                  }
+                                  InkpodFilterInput input{};
+                                  input.struct_size = sizeof(input);
+                                  input.kind = command == IDM_FILTER_INVERT
+                                      ? INKPOD_FILTER_INVERT
+                                      : INKPOD_FILTER_BLUR_WEAK;
+                                  input.plane_id = info.color_plane_id;
+                                  input.channel = INKPOD_FILTER_CHANNEL_RGB;
+                                  InkpodFilterPreviewInfo preview{};
+                                  preview.struct_size = sizeof(preview);
+                                  inner = inkpod_core_filter_preview_begin(core, &input, &preview);
+                                  if (inner == INKPOD_STATUS_OK) {
+                                      inner = inkpod_core_filter_preview_apply(core, &result);
+                                      if (inner != INKPOD_STATUS_OK) {
+                                          inkpod_core_filter_preview_cancel(core, &preview);
+                                      }
+                                  }
+                                  return inner;
+                              },
+                              true,
+                              true);
+                    if (status != INKPOD_STATUS_OK) {
+                        ShowCoreError(*state, window, L"フィルタ");
                     }
                     UpdateMenuState(*state);
                     return 0;
