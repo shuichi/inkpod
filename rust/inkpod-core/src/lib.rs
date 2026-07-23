@@ -1495,7 +1495,11 @@ impl Core {
         )?;
         self.document = Some(document);
         self.document_revision = self.next_document_revision()?;
-        self.reset_history(false);
+        // A new blank cell is the initial in-memory savepoint even though it
+        // does not have a normal-save path yet. Pathlessness controls whether
+        // Save needs a destination; it must not make an unedited document
+        // appear modified.
+        self.reset_history(true);
         self.reset_view();
         self.current_path = None;
         self.recovered = false;
@@ -5448,7 +5452,7 @@ mod tests {
         let created = core
             .new_cell(1920, 1080, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
             .unwrap();
-        assert!(created.dirty);
+        assert!(!created.dirty);
 
         let samples: Vec<_> = (0..128)
             .map(|index| StrokeSample {
@@ -5458,7 +5462,9 @@ mod tests {
             })
             .collect();
         core.apply_stroke(&line_stroke(samples)).unwrap();
-        let line_checksum = core.document_info().unwrap().main_plane_checksum;
+        let after_line = core.document_info().unwrap();
+        assert!(after_line.dirty);
+        let line_checksum = after_line.main_plane_checksum;
         assert_ne!(line_checksum, created.main_plane_checksum);
 
         core.set_active_plane(ActivePlane::Color).unwrap();
@@ -5997,6 +6003,31 @@ mod tests {
         }]))
         .unwrap();
         assert!(!core.document_info().unwrap().can_redo);
+    }
+
+    #[test]
+    fn hist_001_new_cell_starts_clean_and_tracks_initial_savepoint() {
+        let mut core = Core::new();
+        let created = core
+            .new_cell(64, 64, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        assert!(!created.dirty);
+
+        core.apply_stroke(&line_stroke(vec![StrokeSample {
+            x: 1.0,
+            y: 1.0,
+            pressure: 1.0,
+        }]))
+        .unwrap();
+        assert!(core.document_info().unwrap().dirty);
+
+        core.undo().unwrap();
+        let restored = core.document_info().unwrap();
+        assert!(!restored.dirty);
+        assert!(restored.can_redo);
+
+        core.redo().unwrap();
+        assert!(core.document_info().unwrap().dirty);
     }
 
     #[test]
@@ -7109,6 +7140,12 @@ mod tests {
             m4_source("cell1.png", current.document_uuid, 2, 2, [1, 2, 3, 255]),
             m4_source("cell2.png", 0x4444, 3, 2, [4, 5, 6, 255]),
         ])
+        .unwrap();
+        core.apply_stroke(&line_stroke(vec![StrokeSample {
+            x: 0.0,
+            y: 0.0,
+            pressure: 1.0,
+        }]))
         .unwrap();
         let before = core.document_info().unwrap();
         assert_eq!(

@@ -4,15 +4,16 @@
 
 - Milestone: M6
 - Status: Verified
-- Last verified worktree state: M6 completion fixes remain uncommitted. WSL
-  stable Rust 1.97.1 formatting, all-target/all-feature clippy with warnings
-  denied, and the 103-test workspace suite passed on 2026-07-23. VS2026 x64
-  Debug and Release builds passed `/W4 /WX /permissive-`. Final Debug CTest
-  passed assets, integrated C11/C++ M1-M6 ABI, and the real application/D2D
-  smoke 3/3. Final Release assets passed, but local Application Control blocked
-  the newly linked unsigned Release EXE before the ABI/application tests could
-  start on both attempts. An immediate unchanged Debug build reported `ninja:
-  no work to do`, proving Cargo is not rebuilt needlessly.
+- Last verified worktree state: M6 completion fixes and the startup dirty-state
+  fix remain uncommitted. Windows stable Rust formatting and the 104-test
+  all-feature workspace suite passed on 2026-07-23; WSL stable Rust 1.97.1
+  all-target/all-feature clippy passed with warnings denied. VS2026 x64 Debug
+  built with `/W4 /WX /permissive-`, and Debug CTest passed assets, integrated
+  C11/C++ M1-M6 ABI, and the real application/D2D smoke 3/3. The application
+  smoke checks a clean `無題 - inkpod` title before the first edit and dirty
+  state after the committed stroke. The prior unchanged Release build passed,
+  but Release was not rerun for this fix; local Application Control previously
+  blocked its newly linked unsigned EXE before ABI/application tests could run.
 
 Before M6 edits, `cargo test --workspace m5_acceptance -- --nocapture`
 reconfirmed all five M5 acceptance scenarios 5/5. The M6 acceptance boundary is
@@ -55,7 +56,7 @@ No M7 API or implementation was introduced.
 | DOC-001 | Verified | Cell paper/DPI plus transactional 100/reference/drawing/safe frames and independent margins | M1 metadata round-trip plus M4 mixed-size reference-frame golden | Windows paper property dialog remains a UI gap |
 | DOC-002 | Verified | Stable-ID typed tree adds vector-coloring with exactly one main-line, one-or-more color-trace, one fill, and optional raster planes | Core/format topology, invalid-combination, and save/reopen tests; Rust/C++ node queries | Vector geometry is separate from placeholder raster payloads |
 | DOC-003 | Verified | Existing tree operations preserve, duplicate, remove, and reassign vector paths/fills/boundaries transactionally | Core M3 tree tests plus M5 vector duplicate/delete/merge paths | Full Windows panel remains UI work |
-| HIST-001 | Verified | M6 filter and dust preview updates recompute from their immutable base; cancel/failure commits nothing, while apply/last-filter/gesture/effect/adjustment edits commit one document history unit | Named cancel/apply/worker tests; Rust/C++ ABI and Windows smoke; legacy M1-M5 history tests | Preview OK and Cancel are connected to the native Canvas snapshot path |
+| HIST-001 | Verified | A new blank cell starts at a clean in-memory savepoint independently of its path; M6 filter and dust preview updates recompute from their immutable base; cancel/failure commits nothing, while apply/last-filter/gesture/effect/adjustment edits commit one document history unit | New-cell clean/edit/Undo regression; title/dirty Rust/C++ ABI and Windows smoke; named cancel/apply/worker and legacy M1-M5 history tests | Preview OK and Cancel are connected to the native Canvas snapshot path |
 | VIEW-001 | Verified | device-pixel zoom/box zoom/pan/fit/1:1 plus horizontal/vertical view flip use an independent view revision | Core mode/box/flip tests; FFI transform flags; Windows exact-bounds DPI and flip/mirror smoke | Windows exposes flip commands; box zoom is Core-connected for a later drag gesture |
 | VIEW-002 | Verified | Ruler/guide/grid/snap/transparent-view state is Core-owned; snap obeys its enable flag, guides/grid persist, and snapshot overlay state drives renderer grid/guides/transparency | Core guide/grid/snap test; Rust/C++ overlay ABI and Windows grid/guide render smoke | Windows M3 exposes grid; remaining controls are ABI-ready |
 | VIEW-003 | Verified | Locator reports document coordinates, selection bounds, and color per logical view; secondary views share one document and build independent immutable snapshots | Core locator/multi-view test; Rust/C++ ABI and Windows same-revision smoke | M3 creates logical secondary views; separate child-window layout is later UI work |
@@ -344,6 +345,9 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 ## M1 review fixes
 
+- A newly created blank cell now starts clean even before it has a normal-save
+  path. The first committed edit marks it dirty, Undo to the initial state clears
+  dirty again, and the Windows title no longer shows `*` immediately at startup.
 - Extreme or non-finite-result view transforms are rejected without changing
   document/view revision.
 - Stroke coordinates, clipped segments, and rasterization work are bounded;

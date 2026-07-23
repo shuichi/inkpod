@@ -9389,6 +9389,7 @@ mod tests {
             INKPOD_STATUS_OK
         );
         assert_eq!((info.width, info.height), (1920, 1080));
+        assert_eq!(info.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
         let ids = (
             info.document_id,
             info.layer_id,
@@ -9443,6 +9444,7 @@ mod tests {
             unsafe { inkpod_core_get_document_info(core, &mut info) },
             INKPOD_STATUS_OK
         );
+        assert_ne!(info.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
         let line_checksum = info.main_plane_checksum;
 
         stroke.plane = INKPOD_PLANE_COLOR;
@@ -9603,6 +9605,7 @@ mod tests {
             unsafe { inkpod_core_new_cell(core, &create, &mut info) },
             INKPOD_STATUS_OK
         );
+        assert_eq!(info.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
         let initial_revision = info.document_revision;
         let initial_checksum = info.main_plane_checksum;
         let begin_sample = InkpodStrokeSample {
@@ -9636,6 +9639,7 @@ mod tests {
         );
         assert_eq!(info.document_revision, initial_revision);
         assert_eq!(info.main_plane_checksum, initial_checksum);
+        assert_eq!(info.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
 
         let appended = [
             InkpodStrokeSample {
@@ -9708,6 +9712,7 @@ mod tests {
         );
         assert_ne!(info.main_plane_checksum, initial_checksum);
         assert_ne!(info.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO, 0);
+        assert_ne!(info.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
 
         assert_eq!(
             unsafe { inkpod_core_stroke_begin(core, &begin) },

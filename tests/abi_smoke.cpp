@@ -242,7 +242,7 @@ int InkpodRunAbiSmoke() {
     document.struct_size = sizeof(document);
     if (inkpod_core_new_cell(core, &cell_options, &document) != INKPOD_STATUS_OK
         || document.width != 1920U || document.height != 1080U
-        || (document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+        || (document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
         return 24;
     }
     std::array<std::uint8_t, 4U * 4U * 4U> light_pixels{};
@@ -678,7 +678,8 @@ int InkpodRunAbiSmoke() {
     dispatch.struct_size = sizeof(dispatch);
     if (inkpod_core_apply_stroke(core, &stroke, &dispatch) != INKPOD_STATUS_OK
         || dispatch.accepted_command_count != 1U
-        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK) {
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
+        || (document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
         return 25;
     }
     const std::uint64_t main_checksum = document.main_plane_checksum;

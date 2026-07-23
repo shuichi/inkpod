@@ -2972,7 +2972,12 @@ int RunM1Smoke(AppState& state) noexcept {
     }
 
     InkpodDocumentInfo before_line{};
-    if (!QueryDocument(state, before_line)) {
+    std::array<wchar_t, 128> initial_title{};
+    if (!QueryDocument(state, before_line)
+        || (before_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || GetWindowTextW(
+               state.window, initial_title.data(), static_cast<int>(initial_title.size())) == 0
+        || std::wcscmp(initial_title.data(), L"無題 - inkpod") != 0) {
         return 32;
     }
     const auto frames_before = static_cast<std::uint64_t>(SendMessageW(
@@ -3026,6 +3031,7 @@ int RunM1Smoke(AppState& state) noexcept {
     if (!QueryDocument(state, after_line)
         || after_line.document_revision != before_line.document_revision + 1U
         || after_line.main_plane_checksum == before_line.main_plane_checksum
+        || (after_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
         || (after_line.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U) {
         return 38;
     }
