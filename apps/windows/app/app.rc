@@ -6,6 +6,8 @@
 
 1 RT_MANIFEST "app.manifest"
 IDI_APP_ICON ICON "../package/Assets/app.ico"
+IDR_ABOUT_ICON_88_PNG RCDATA "../package/Assets/AppList.scale-200.png"
+IDR_ABOUT_ICON_256_PNG RCDATA "../package/Assets/AppList.targetsize-256.png"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION INKPOD_VERSION_RESOURCE
@@ -44,7 +46,8 @@ BEGIN
     IDS_APP_TITLE "inkpod"
     IDS_MAIN_WINDOW_CLASS "InkpodMainWindow"
     IDS_APP_VERSION INKPOD_VERSION_STRING
-    IDS_ABOUT_DESCRIPTION "Inkpod is a GPU-accelerated digital painting engine with a fully vector-based stroke representation for non-destructive editing.Inkpod is a GPU-accelerated digital painting engine with a fully vector-based stroke representation for non-destructive editing."
+    IDS_ABOUT_DESCRIPTION "Inkpod is a GPU-accelerated painting engine with vector-based strokes for non-destructive editing."
+    IDS_ABOUT_COPYRIGHT "© Shuichi Kurabayashi"
 END
 
 IDR_MAIN_MENU MENU
@@ -207,6 +210,7 @@ BEGIN
     LTEXT           "Inkpod", IDC_ABOUT_NAME, 20, 103, 343, 24, SS_CENTER | SS_NOPREFIX
     LTEXT           "", IDC_ABOUT_DESCRIPTION, 32, 133, 319, 51, SS_CENTER | SS_NOPREFIX
     LTEXT           "", IDC_ABOUT_VERSION, 20, 187, 343, 15, SS_CENTER | SS_NOPREFIX
+    LTEXT           "", IDC_ABOUT_COPYRIGHT, 20, 214, 343, 15, SS_CENTER | SS_NOPREFIX
     CONTROL         "", IDC_ABOUT_SEPARATOR, "Static", SS_ETCHEDHORZ, 0, 241, 383, 1
     DEFPUSHBUTTON   "OK", IDOK, 289, 253, 80, 26
 END

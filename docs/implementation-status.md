@@ -26,14 +26,18 @@ No M7 API or implementation was introduced.
 ## User-requested Windows shell and package additions
 
 - The Japanese Help menu now exposes `Inkpodについて`. Its native, owned modal
-  dialog uses a reference-matched 574 x 544 logical-pixel layout while preserving
-  Windows DPI, keyboard, and modal-window behavior. It displays an 88 px icon,
-  `Inkpod`, the requested English description, and CMake-derived `Version 0.1.0`.
-  The dialog is centered on its owner and clamped only when the monitor work area
-  requires it; smoke tests verify size, spacing, strings, icon, and origin.
+  dialog uses the reference image's 574 x 544 device-pixel layout at its 144 DPI
+  capture scale, then converts once from that reference DPI to the target DPI. It
+  displays the icon, `Inkpod`, the requested shorter English description,
+  CMake-derived `Version 0.1.0`, and `© Shuichi Kurabayashi`. The dialog is
+  centered on its owner and clamped only when the monitor work area requires it;
+  its smoke test checks size, spacing, 15/9-point fonts, exact icon dimensions,
+  the expanded 40 px reference name-label height, strings,
+  copyright/separator separation, and origin.
 - Windows App Development CLI 0.5.0 generated 48 MSIX PNG assets and one
-  five-resolution ICO directly from `AppIcon.svg`. The ICO is also embedded in
-  the EXE and used by the main window and About dialog.
+  five-resolution ICO directly from `AppIcon.svg`. The ICO is embedded for the
+  main window and title bars; About uses the exact generated 88 px PNG at the
+  144-DPI reference scale and a 256 px source above that scale.
 - This is `In progress` M8 packaging preparation. No signed MSIX was produced,
   and clean-machine install/uninstall remains unverified.
 
@@ -80,7 +84,7 @@ No M7 API or implementation was introduced.
 | LT-002 | Verified | Reference-frame alignment, transformed color sampling, read-only fill boundary/color, source reload by validated item replacement, and dirty-safe edit-image swap retaining item display state | Full-tile mixed-size/save-reopen/swap golden; cancellation/read-only fill; Rust/C++ boundary-fill and dirty rejection | Reload is caller-driven; failed validation leaves prior item unchanged |
 | SEQ-001 | Verified | Bounded natural-order cut/cell sequence supports gaps, previous/next, clean-only cell switch, deterministic 64px thumbnails, and common-raster sequence import/export | Natural-order/gap/thumbnail acceptance; dirty-switch Core/FFI/C++ smoke | Sequence is workspace/session state rather than duplicated into every cell file |
 | SEQ-002 | Verified | Motion state validates 30/25/24/12/10/8 FPS, loop/step/pause and selection/light-table option flags, returning deterministic frame thumbnails | Core motion loop/pause test; Rust/C++ ABI start/step smoke | Interactive playback window/timer remains a Windows UI adapter gap |
-| M0 Windows shell (Help/About) | Verified | Japanese Help command, DPI-scaled 574 x 544 owned modal About, reference-matched icon/name spacing, requested description, shared generated icon, and CMake-derived version | Debug `inkpod_windows_smoke` verifies the real menu command, exact size/origin/38 px gap/strings/icon, then closes the dialog | Native Win32 theme and keyboard/modal behavior are retained |
+| M0 Windows shell (Help/About) | Verified | Japanese Help command, reference-DPI-normalized owned modal About, reference-matched spacing, 15/9-point fonts with a 40 px reference-height name label, exact-size generated PNG icon, shorter description, copyright, and CMake-derived version | Debug `inkpod_windows_smoke` verifies exact target-DPI size/origin/spacing/name-label height/font/icon/string and non-overlap; final assets + ABI + application CTest passed 3/3 | The 574 x 544 reference is device pixels captured at 144 DPI and is scaled exactly once; native Win32 theme and keyboard/modal behavior are retained |
 | M8 packaging assets | In progress | winapp CLI manifest, 48 scale/target-size PNGs, five-resolution ICO | `inkpod_windows_assets`; Release resource build | MSIX assembly, signing, and clean install/uninstall are not yet tested |
 
 The five M6 acceptance scenarios and the complete M6 native vertical slices are
@@ -376,6 +380,10 @@ as dirty/pathless, and then reopens the unchanged normal file.
 | `winapp manifest update-assets AppIcon.svg --manifest apps/windows/package/Package.appxmanifest --verbose` | Windows 11 x64, Windows App Development CLI 0.5.0 | Passed: updated 48 PNG assets and 16/24/32/48/256 ICO; 16/44/256/300 px representatives inspected | 2026-07-22 |
 | Post-icon `cmake --preset windows-x64-debug` / build / `ctest --preset windows-x64-debug` | Windows 11 x64, MSVC 19.51 | Passed strict build and assets + ABI + 574 x 544 owner-centered About/application smoke, 3/3 | 2026-07-22 |
 | Post-icon Release configure/build | Windows 11 x64, MSVC 19.51 | Strict optimized build passed; asset CTest passed, while the two fresh-EXE tests were blocked before process start by local application-control policy | 2026-07-22 |
+| Post-About-DPI-fix developer-shell `cmake --build --preset windows-x64-debug` / `ctest --preset windows-x64-debug --output-on-failure` | Windows 11 x64, MSVC 19.51 | Passed strict resource/C++ build and target-DPI About size/centering/description/copyright smoke, 3/3 in 12.39 s | 2026-07-23 |
+| Post-About-icon/font-fix developer-shell `cmake --build --preset windows-x64-debug` / `ctest --preset windows-x64-debug --output-on-failure` | Windows 11 x64, MSVC 19.51 | Strict WIC/resource/C++ build and 88/256 px asset checks passed; two CTest attempts and one direct smoke launch were blocked before process start by local Application Control (`BAD_COMMAND`) | 2026-07-23 |
+| Post-name-descender-fix developer-shell `cmake --build --preset windows-x64-debug` / asset CTest | Windows 11 x64, MSVC 19.51 | Updated `main.cpp` passed `/W4 /WX` compilation and assets passed 1/1; final link could not replace the user-running `inkpod.exe` (`LNK1168`) | 2026-07-23 |
+| Final post-name-descender rebuild / `ctest --preset windows-x64-debug --output-on-failure` | Windows 11 x64, MSVC 19.51 | Strict link passed after the app was closed; assets + ABI + 40 px name-label/application smoke passed 3/3 in 12.31 s | 2026-07-23 |
 
 The complete Rust suite is recorded under WSL because Windows Application
 Control blocked the freshly linked Rust test/clippy executables before their

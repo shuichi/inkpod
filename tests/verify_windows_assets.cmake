@@ -67,6 +67,8 @@ endfunction()
 require_png_dimensions("StoreLogo.png" "0000003200000032")
 require_png_dimensions("MedTile.png" "0000009600000096")
 require_png_dimensions("AppList.png" "0000002c0000002c")
+require_png_dimensions("AppList.scale-200.png" "0000005800000058")
+require_png_dimensions("AppList.targetsize-256.png" "0000010000000100")
 require_png_dimensions("WideTile.png" "0000013600000096")
 
 file(READ "${assets_dir}/app.ico" ico_header LIMIT 86 HEX)

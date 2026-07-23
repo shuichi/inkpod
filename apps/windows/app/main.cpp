@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "about_icon.h"
 #include "canvas.h"
 #include "core_engine.h"
 #include "inkpod/core_ffi.h"
@@ -159,27 +160,31 @@ struct AboutDialogState {
     bool layout_valid{};
 };
 
+// Layout measurements are device pixels from the 144-DPI reference image.
+constexpr UINT kAboutReferenceDpi = 144U;
 constexpr int kAboutWindowWidth = 574;
 constexpr int kAboutWindowHeight = 544;
 constexpr int kAboutIconSize = 88;
 constexpr int kAboutIconTop = 68;
 constexpr int kAboutNameTop = 194;
-constexpr int kAboutNameHeight = 34;
+constexpr int kAboutNameHeight = 40;
 constexpr int kAboutDescriptionTop = 250;
-constexpr int kAboutDescriptionHeight = 92;
-constexpr int kAboutVersionTop = 350;
-constexpr int kAboutVersionHeight = 24;
+constexpr int kAboutDescriptionHeight = 60;
+constexpr int kAboutVersionTop = 324;
+constexpr int kAboutVersionHeight = 22;
+constexpr int kAboutCopyrightTop = 362;
+constexpr int kAboutCopyrightHeight = 22;
 constexpr int kAboutFooterHeight = 89;
 constexpr int kAboutButtonWidth = 120;
 constexpr int kAboutButtonHeight = 48;
 constexpr int kAboutButtonRightMargin = 18;
 constexpr int kAboutButtonBottomMargin = 23;
 
-int ScaleForDpi(int logical_pixels, UINT dpi) noexcept {
+int ScaleAboutReferencePixel(int reference_pixels, UINT dpi) noexcept {
     return MulDiv(
-        logical_pixels,
+        reference_pixels,
         static_cast<int>(dpi == 0U ? USER_DEFAULT_SCREEN_DPI : dpi),
-        USER_DEFAULT_SCREEN_DPI);
+        static_cast<int>(kAboutReferenceDpi));
 }
 
 int ClampCoordinate(int value, int minimum, int maximum) noexcept {
@@ -254,12 +259,12 @@ bool UpdateAboutFonts(
     }
 
     LOGFONTW name_font = base_font;
-    name_font.lfHeight = -MulDiv(18, static_cast<int>(dpi), 72);
+    name_font.lfHeight = -MulDiv(15, static_cast<int>(dpi), 72);
     name_font.lfWeight = FW_SEMIBOLD;
     state.name_font = CreateFontIndirectW(&name_font);
 
     LOGFONTW body_font = base_font;
-    body_font.lfHeight = -MulDiv(11, static_cast<int>(dpi), 72);
+    body_font.lfHeight = -MulDiv(9, static_cast<int>(dpi), 72);
     body_font.lfWeight = FW_NORMAL;
     state.body_font = CreateFontIndirectW(&body_font);
     if (state.name_font == nullptr || state.body_font == nullptr) {
@@ -273,7 +278,11 @@ bool UpdateAboutFonts(
         WM_SETFONT,
         reinterpret_cast<WPARAM>(state.name_font),
         TRUE);
-    for (const int id : {IDC_ABOUT_DESCRIPTION, IDC_ABOUT_VERSION, IDOK}) {
+    for (const int id : {
+             IDC_ABOUT_DESCRIPTION,
+             IDC_ABOUT_VERSION,
+             IDC_ABOUT_COPYRIGHT,
+             IDOK}) {
         SendDlgItemMessageW(
             dialog,
             id,
@@ -295,13 +304,11 @@ bool UpdateAboutIcon(
         DestroyIcon(state.display_icon);
         state.display_icon = nullptr;
     }
-    state.display_icon = reinterpret_cast<HICON>(LoadImageW(
-        state.instance,
-        MAKEINTRESOURCEW(IDI_APP_ICON),
-        IMAGE_ICON,
-        icon_size,
-        icon_size,
-        LR_DEFAULTCOLOR));
+    const int resource_id = icon_size <= kAboutIconSize
+        ? IDR_ABOUT_ICON_88_PNG
+        : IDR_ABOUT_ICON_256_PNG;
+    state.display_icon = inkpod::windows::LoadPngIconResource(
+        state.instance, resource_id, icon_size);
     if (state.display_icon == nullptr) {
         return false;
     }
@@ -319,8 +326,8 @@ bool LayoutAboutDialog(
     if (dpi == 0U) {
         dpi = USER_DEFAULT_SCREEN_DPI;
     }
-    const int window_width = ScaleForDpi(kAboutWindowWidth, dpi);
-    const int window_height = ScaleForDpi(kAboutWindowHeight, dpi);
+    const int window_width = ScaleAboutReferencePixel(kAboutWindowWidth, dpi);
+    const int window_height = ScaleAboutReferencePixel(kAboutWindowHeight, dpi);
     RECT current_bounds{};
     if (GetWindowRect(dialog, &current_bounds) == FALSE) {
         return false;
@@ -343,53 +350,64 @@ bool LayoutAboutDialog(
     if (GetClientRect(dialog, &client) == FALSE) {
         return false;
     }
-    const int icon_size = ScaleForDpi(kAboutIconSize, dpi);
+    const int icon_size = ScaleAboutReferencePixel(kAboutIconSize, dpi);
     const int content_width = client.right - client.left;
-    const int button_width = ScaleForDpi(kAboutButtonWidth, dpi);
-    const int button_height = ScaleForDpi(kAboutButtonHeight, dpi);
-    const int description_margin = ScaleForDpi(48, dpi);
-    const int name_margin = ScaleForDpi(20, dpi);
-    const int divider_height = ScaleForDpi(1, dpi);
+    const int button_width = ScaleAboutReferencePixel(kAboutButtonWidth, dpi);
+    const int button_height = ScaleAboutReferencePixel(kAboutButtonHeight, dpi);
+    const int description_margin = ScaleAboutReferencePixel(48, dpi);
+    const int name_margin = ScaleAboutReferencePixel(20, dpi);
+    const int divider_height = ScaleAboutReferencePixel(1, dpi);
     if (!MoveAboutControl(
             dialog,
             IDC_ABOUT_ICON,
             (content_width - icon_size) / 2,
-            ScaleForDpi(kAboutIconTop, dpi),
+            ScaleAboutReferencePixel(kAboutIconTop, dpi),
             icon_size,
             icon_size)
         || !MoveAboutControl(
             dialog,
             IDC_ABOUT_NAME,
             name_margin,
-            ScaleForDpi(kAboutNameTop, dpi),
+            ScaleAboutReferencePixel(kAboutNameTop, dpi),
             content_width - name_margin * 2,
-            ScaleForDpi(kAboutNameHeight, dpi))
+            ScaleAboutReferencePixel(kAboutNameHeight, dpi))
         || !MoveAboutControl(
             dialog,
             IDC_ABOUT_DESCRIPTION,
             description_margin,
-            ScaleForDpi(kAboutDescriptionTop, dpi),
+            ScaleAboutReferencePixel(kAboutDescriptionTop, dpi),
             content_width - description_margin * 2,
-            ScaleForDpi(kAboutDescriptionHeight, dpi))
+            ScaleAboutReferencePixel(kAboutDescriptionHeight, dpi))
         || !MoveAboutControl(
             dialog,
             IDC_ABOUT_VERSION,
             name_margin,
-            ScaleForDpi(kAboutVersionTop, dpi),
+            ScaleAboutReferencePixel(kAboutVersionTop, dpi),
             content_width - name_margin * 2,
-            ScaleForDpi(kAboutVersionHeight, dpi))
+            ScaleAboutReferencePixel(kAboutVersionHeight, dpi))
+        || !MoveAboutControl(
+            dialog,
+            IDC_ABOUT_COPYRIGHT,
+            name_margin,
+            ScaleAboutReferencePixel(kAboutCopyrightTop, dpi),
+            content_width - name_margin * 2,
+            ScaleAboutReferencePixel(kAboutCopyrightHeight, dpi))
         || !MoveAboutControl(
             dialog,
             IDC_ABOUT_SEPARATOR,
             0,
-            client.bottom - ScaleForDpi(kAboutFooterHeight, dpi),
+            client.bottom - ScaleAboutReferencePixel(kAboutFooterHeight, dpi),
             content_width,
             divider_height)
         || !MoveAboutControl(
             dialog,
             IDOK,
-            content_width - ScaleForDpi(kAboutButtonRightMargin, dpi) - button_width,
-            client.bottom - ScaleForDpi(kAboutButtonBottomMargin, dpi) - button_height,
+            content_width
+                - ScaleAboutReferencePixel(kAboutButtonRightMargin, dpi)
+                - button_width,
+            client.bottom
+                - ScaleAboutReferencePixel(kAboutButtonBottomMargin, dpi)
+                - button_height,
             button_width,
             button_height)
         || !UpdateAboutFonts(dialog, state, dpi)
@@ -412,6 +430,42 @@ bool AboutControlBounds(HWND dialog, int id, RECT& bounds) noexcept {
     return true;
 }
 
+bool AboutIconSizeMatches(HICON icon, int expected_size) noexcept {
+    ICONINFO icon_info{};
+    if (icon == nullptr || GetIconInfo(icon, &icon_info) == FALSE) {
+        return false;
+    }
+    BITMAP bitmap{};
+    const bool matches = icon_info.hbmColor != nullptr
+        && GetObjectW(
+               icon_info.hbmColor,
+               static_cast<int>(sizeof(bitmap)),
+               &bitmap) == static_cast<int>(sizeof(bitmap))
+        && bitmap.bmWidth == expected_size
+        && bitmap.bmHeight == expected_size;
+    if (icon_info.hbmColor != nullptr) {
+        DeleteObject(icon_info.hbmColor);
+    }
+    if (icon_info.hbmMask != nullptr) {
+        DeleteObject(icon_info.hbmMask);
+    }
+    return matches;
+}
+
+bool AboutFontHeightMatches(
+    HWND dialog, int control_id, int point_size, UINT dpi) noexcept {
+    const auto font = reinterpret_cast<HFONT>(
+        SendDlgItemMessageW(dialog, control_id, WM_GETFONT, 0, 0));
+    LOGFONTW font_info{};
+    return font != nullptr
+        && GetObjectW(
+               font,
+               static_cast<int>(sizeof(font_info)),
+               &font_info) == static_cast<int>(sizeof(font_info))
+        && font_info.lfHeight
+            == -MulDiv(point_size, static_cast<int>(dpi), 72);
+}
+
 bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
     UINT dpi = GetDpiForWindow(dialog);
     if (dpi == 0U) {
@@ -420,21 +474,38 @@ bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
     RECT dialog_bounds{};
     RECT icon_bounds{};
     RECT name_bounds{};
+    RECT copyright_bounds{};
+    RECT separator_bounds{};
     if (GetWindowRect(dialog, &dialog_bounds) == FALSE
         || !AboutControlBounds(dialog, IDC_ABOUT_ICON, icon_bounds)
-        || !AboutControlBounds(dialog, IDC_ABOUT_NAME, name_bounds)) {
+        || !AboutControlBounds(dialog, IDC_ABOUT_NAME, name_bounds)
+        || !AboutControlBounds(
+            dialog, IDC_ABOUT_COPYRIGHT, copyright_bounds)
+        || !AboutControlBounds(
+            dialog, IDC_ABOUT_SEPARATOR, separator_bounds)) {
         return false;
     }
     const int width = dialog_bounds.right - dialog_bounds.left;
     const int height = dialog_bounds.bottom - dialog_bounds.top;
     const POINT expected_origin = CenteredAboutOrigin(dialog, width, height);
-    if (width != ScaleForDpi(kAboutWindowWidth, dpi)
-        || height != ScaleForDpi(kAboutWindowHeight, dpi)
+    const int expected_icon_size =
+        ScaleAboutReferencePixel(kAboutIconSize, dpi);
+    const auto displayed_icon = reinterpret_cast<HICON>(
+        SendDlgItemMessageW(
+            dialog, IDC_ABOUT_ICON, STM_GETIMAGE, IMAGE_ICON, 0));
+    if (width != ScaleAboutReferencePixel(kAboutWindowWidth, dpi)
+        || height != ScaleAboutReferencePixel(kAboutWindowHeight, dpi)
         || dialog_bounds.left != expected_origin.x
         || dialog_bounds.top != expected_origin.y
-        || name_bounds.top - icon_bounds.bottom != ScaleForDpi(38, dpi)
-        || SendDlgItemMessageW(
-               dialog, IDC_ABOUT_ICON, STM_GETIMAGE, IMAGE_ICON, 0) == 0) {
+        || name_bounds.top - icon_bounds.bottom
+            != ScaleAboutReferencePixel(38, dpi)
+        || name_bounds.bottom - name_bounds.top
+            != ScaleAboutReferencePixel(kAboutNameHeight, dpi)
+        || copyright_bounds.bottom >= separator_bounds.top
+        || !AboutIconSizeMatches(displayed_icon, expected_icon_size)
+        || !AboutFontHeightMatches(dialog, IDC_ABOUT_NAME, 15, dpi)
+        || !AboutFontHeightMatches(
+            dialog, IDC_ABOUT_DESCRIPTION, 9, dpi)) {
         return false;
     }
 
@@ -443,6 +514,8 @@ bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
     std::array<wchar_t, 96> expected_version{};
     std::array<wchar_t, 512> description{};
     std::array<wchar_t, 512> expected_description{};
+    std::array<wchar_t, 64> copyright{};
+    std::array<wchar_t, 64> expected_copyright{};
     if (GetDlgItemTextW(
             dialog, IDC_ABOUT_NAME, name.data(), static_cast<int>(name.size())) == 0
         || GetDlgItemTextW(
@@ -464,7 +537,17 @@ bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
                instance,
                IDS_ABOUT_DESCRIPTION,
                expected_description.data(),
-               static_cast<int>(expected_description.size())) == 0) {
+               static_cast<int>(expected_description.size())) == 0
+        || GetDlgItemTextW(
+               dialog,
+               IDC_ABOUT_COPYRIGHT,
+               copyright.data(),
+               static_cast<int>(copyright.size())) == 0
+        || LoadStringW(
+               instance,
+               IDS_ABOUT_COPYRIGHT,
+               expected_copyright.data(),
+               static_cast<int>(expected_copyright.size())) == 0) {
         return false;
     }
     std::array<wchar_t, 96> version_label{};
@@ -476,7 +559,8 @@ bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
         version.data());
     return std::wcscmp(name.data(), L"Inkpod") == 0
         && std::wcscmp(expected_version.data(), version_label.data()) == 0
-        && std::wcscmp(description.data(), expected_description.data()) == 0;
+        && std::wcscmp(description.data(), expected_description.data()) == 0
+        && std::wcscmp(copyright.data(), expected_copyright.data()) == 0;
 }
 
 INT_PTR CALLBACK AboutDialogProcedure(
@@ -496,6 +580,7 @@ INT_PTR CALLBACK AboutDialogProcedure(
             std::array<wchar_t, 64> version{};
             std::array<wchar_t, 96> version_label{};
             std::array<wchar_t, 512> description{};
+            std::array<wchar_t, 64> copyright{};
             if (LoadStringW(
                     state->instance,
                     IDS_APP_VERSION,
@@ -505,7 +590,12 @@ INT_PTR CALLBACK AboutDialogProcedure(
                        state->instance,
                        IDS_ABOUT_DESCRIPTION,
                        description.data(),
-                       static_cast<int>(description.size())) == 0) {
+                       static_cast<int>(description.size())) == 0
+                || LoadStringW(
+                       state->instance,
+                       IDS_ABOUT_COPYRIGHT,
+                       copyright.data(),
+                       static_cast<int>(copyright.size())) == 0) {
                 EndDialog(dialog, IDCANCEL);
                 return TRUE;
             }
@@ -517,6 +607,7 @@ INT_PTR CALLBACK AboutDialogProcedure(
                 version.data());
             SetDlgItemTextW(dialog, IDC_ABOUT_VERSION, version_label.data());
             SetDlgItemTextW(dialog, IDC_ABOUT_DESCRIPTION, description.data());
+            SetDlgItemTextW(dialog, IDC_ABOUT_COPYRIGHT, copyright.data());
             if (!LayoutAboutDialog(dialog, *state, true)) {
                 EndDialog(dialog, IDCANCEL);
                 return TRUE;

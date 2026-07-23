@@ -115,6 +115,7 @@ endif()
 
 if(WIN32)
     add_executable(inkpod WIN32
+        apps/windows/app/about_icon.cpp
         apps/windows/app/main.cpp
         apps/windows/app/core_engine.cpp
         apps/windows/app/app.rc
@@ -134,7 +135,8 @@ if(WIN32)
         d3d11
         dxgi
         ole32
-        shell32)
+        shell32
+        windowscodecs)
     if(MSVC)
         inkpod_enable_strict_warnings(inkpod)
         target_compile_options(inkpod PRIVATE /EHsc)

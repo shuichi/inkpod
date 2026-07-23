@@ -103,6 +103,7 @@ native extension は `.inkpod` とし、versioned manifest と圧縮可能な bl
 - `WM_COMMAND` 等の message handler を責務別に分け、worker thread から `HWND` を直接操作しない。完了通知が必要なら `PostMessage` で UI thread の queue へ値だけを渡し、window 状態の変更は UI thread が行う。
 - pen/mouse/touch は可能な範囲で `WM_POINTER` を用い、pressure/tilt のない mouse fallback を持つ。
 - Canvas の座標は client device pixel に統一し、`device = document * zoom + pan` を Core snapshot と renderer で共有する。D2D Canvas は pixel unit/96-DPI target とし、Per-Monitor DPI を Canvas transform へ二重適用しない。
+- UI の DPI 変換は `device_px = MulDiv(reference_px, target_dpi, reference_dpi)` とする。96 DPI 論理値の `reference_dpi` は 96、スクリーンショット等の実 device pixel は撮影時 DPI とし、同じ値へ DPI scale を二重適用しない。
 - RAII で COM/GPU resource を管理する。resize、occlusion、minimize、DPI change、device removed/reset から復旧する。
 - device lost 時は GPU resource だけを再構築し、Rust の document state を失わない。描画/Present の失敗を無視しない。
 - UI thread で大きな decode、filter、save を同期実行しない。非表示・最小化時は不要な描画を止める。
