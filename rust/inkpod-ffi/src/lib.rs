@@ -1,19 +1,19 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use inkpod_core::{
-    ActivePlane, Adjustment, AirbrushStroke, BoundaryAirbrush, Channel, ClipboardPayload,
-    ColorBalance, ColorCheckMode, Command, CoordinateSpace, Core, CoreError, CurveInterpolation,
-    CurvePoint, DocumentInfo, EyedropperSource, FillOperation, FillRequest, Filter,
-    FloatingTransform, Gradient, GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis,
-    HsvAdjustment, InclusionMode, LayerKind, Levels, LightTableDisplayMode, LightTableItemInput,
-    LightTableSource, MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS,
-    MAX_RASTER_DIMENSION, MirrorAxis, MotionCheckConfig, MotionFrame, PaintTool, PixelFormat,
-    PixelValue, PlaneType, PointF32, RectI32, RenderSnapshot, RgbaRasterBytes,
-    SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE, SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA,
-    SelectionLayerOperation, SelectionOperation, SelectionShape, SequenceCellSource,
-    SequenceDirection, ShortcutBinding, Stamp, Stroke, StrokeSample, TileRaster,
-    VectorCubicSegment, VectorEraseMode, VectorPathInput, VectorSelectionMode, VectorWidthMode,
-    ViewCommand,
+    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel,
+    ClipboardPayload, ColorBalance, ColorCheckMode, Command, CoordinateSpace, Core, CoreError,
+    CurveInterpolation, CurvePoint, DocumentInfo, DustMode, DustRemoval, EffectRegionKind,
+    EyedropperSource, FillOperation, FillRequest, Filter, FloatingTransform, Gradient,
+    GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis, HsvAdjustment, InclusionMode,
+    LayerKind, Levels, LightTableDisplayMode, LightTableItemInput, LightTableSource,
+    MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION,
+    MirrorAxis, MotionCheckConfig, MotionFrame, PaintTool, PixelFormat, PixelValue, PlaneType,
+    PointF32, RectI32, RenderSnapshot, RgbaRasterBytes, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
+    SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SelectionLayerOperation, SelectionOperation,
+    SelectionShape, SequenceCellSource, SequenceDirection, ShortcutBinding, Stamp, StampGesture,
+    StampShape, Stroke, StrokeSample, TileRaster, VectorCubicSegment, VectorEraseMode,
+    VectorPathInput, VectorSelectionMode, VectorWidthMode, ViewCommand,
 };
 use std::cell::RefCell;
 use std::mem::{align_of, size_of};
@@ -21,6 +21,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::ptr;
 use std::slice;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::thread::{self, ThreadId};
 
 pub const INKPOD_ABI_VERSION: u32 = 1;
@@ -72,6 +73,7 @@ pub const INKPOD_VIEW_SET_GUIDES_VISIBLE: u32 = 10;
 pub const INKPOD_VIEW_SET_GRID_VISIBLE: u32 = 11;
 pub const INKPOD_VIEW_SET_SNAP_ENABLED: u32 = 12;
 pub const INKPOD_VIEW_SET_TRANSPARENT_VISIBLE: u32 = 13;
+pub const INKPOD_VIEW_SET_ALPHA_VISIBLE: u32 = 14;
 pub const INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL: u32 = 1 << 0;
 pub const INKPOD_SNAPSHOT_TRANSFORM_FLIP_VERTICAL: u32 = 1 << 1;
 pub const INKPOD_SNAPSHOT_OVERLAY_RULER_VISIBLE: u32 = 1 << 0;
@@ -79,6 +81,7 @@ pub const INKPOD_SNAPSHOT_OVERLAY_GUIDES_VISIBLE: u32 = 1 << 1;
 pub const INKPOD_SNAPSHOT_OVERLAY_GRID_VISIBLE: u32 = 1 << 2;
 pub const INKPOD_SNAPSHOT_OVERLAY_SNAP_ENABLED: u32 = 1 << 3;
 pub const INKPOD_SNAPSHOT_OVERLAY_TRANSPARENT_VIEW: u32 = 1 << 4;
+pub const INKPOD_SNAPSHOT_OVERLAY_ALPHA_VIEW: u32 = 1 << 5;
 pub const INKPOD_SHORTCUT_MODIFIER_CONTROL: u32 = 1 << 0;
 pub const INKPOD_SHORTCUT_MODIFIER_SHIFT: u32 = 1 << 1;
 pub const INKPOD_SHORTCUT_MODIFIER_ALT: u32 = 1 << 2;
@@ -182,6 +185,19 @@ pub const INKPOD_GRADIENT_LINEAR: u32 = 1;
 pub const INKPOD_GRADIENT_RADIAL: u32 = 2;
 pub const INKPOD_GRADIENT_COMPOSITE: u32 = 1;
 pub const INKPOD_GRADIENT_OVERWRITE: u32 = 2;
+pub const INKPOD_GRADIENT_FLAG_CONSTRAIN_45: u64 = 1 << 0;
+pub const INKPOD_EFFECT_FLAG_PRESSURE_SIZE: u64 = 1 << 0;
+pub const INKPOD_EFFECT_FLAG_PRESSURE_OPACITY: u64 = 1 << 1;
+pub const INKPOD_STAMP_ROUND: u32 = 1;
+pub const INKPOD_STAMP_SQUARE: u32 = 2;
+pub const INKPOD_DUST_REMOVE_FOREGROUND: u32 = 1;
+pub const INKPOD_DUST_FILL_TRANSPARENT_HOLES: u32 = 2;
+pub const INKPOD_DUST_REPLACE_COLOR_OUTLIERS: u32 = 3;
+pub const INKPOD_M6_TASK_READY: u32 = 0;
+pub const INKPOD_M6_TASK_RUNNING: u32 = 1;
+pub const INKPOD_M6_TASK_COMPLETED: u32 = 2;
+pub const INKPOD_M6_TASK_CANCELLED: u32 = 3;
+pub const INKPOD_M6_TASK_FAILED: u32 = 4;
 pub const INKPOD_TREE_CREATE_LAYER: u32 = 1;
 pub const INKPOD_TREE_DUPLICATE_LAYER: u32 = 2;
 pub const INKPOD_TREE_DELETE_LAYER: u32 = 3;
@@ -767,6 +783,90 @@ pub struct InkpodAlphaEditInput {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodAirbrushGestureInput {
+    pub struct_size: u32,
+    pub coordinate_space: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub view_id: u64,
+    pub radius_milli: u32,
+    pub hardness_milli: u32,
+    pub spacing_milli: u32,
+    pub opacity_milli: u32,
+    pub fade_milli: u32,
+    pub continuous_dabs: u32,
+    pub color: InkpodColorValue,
+    pub samples: *const InkpodStrokeSample,
+    pub sample_count: u64,
+    pub sample_stride_bytes: u64,
+}
+
+#[repr(C)]
+pub struct InkpodStampGestureInput {
+    pub struct_size: u32,
+    pub coordinate_space: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub view_id: u64,
+    pub source: InkpodStrokeSample,
+    pub radius_milli: u32,
+    pub hardness_milli: u32,
+    pub spacing_milli: u32,
+    pub opacity_milli: u32,
+    pub shape: u32,
+    pub reserved: u32,
+    pub samples: *const InkpodStrokeSample,
+    pub sample_count: u64,
+    pub sample_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodBlurToolInput {
+    pub struct_size: u32,
+    pub coordinate_space: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub view_id: u64,
+    pub radius: u32,
+    pub strength_milli: u32,
+    pub shape: u32,
+    pub diameter: f32,
+    pub samples: *const InkpodStrokeSample,
+    pub sample_count: u64,
+    pub sample_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodDustInput {
+    pub struct_size: u32,
+    pub mode: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub view_id: u64,
+    pub coordinate_space: u32,
+    pub shape: u32,
+    pub maximum_pixels: u32,
+    pub use_region: u32,
+    pub diameter: f32,
+    pub samples: *const InkpodStrokeSample,
+    pub sample_count: u64,
+    pub sample_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodM6TaskInfo {
+    pub struct_size: u32,
+    pub state: u32,
+    pub completed_work: u64,
+    pub total_work: u64,
+    pub reserved: u64,
+}
+
+#[repr(C)]
 pub struct InkpodSnapshotVectorSegment {
     pub struct_size: u32,
     pub flags: u32,
@@ -1003,6 +1103,63 @@ pub struct InkpodSnapshot {
 
 pub struct InkpodClipboard {
     payload: ClipboardPayload,
+}
+
+pub struct InkpodM6Task {
+    state: AtomicU32,
+    cancelled: AtomicBool,
+    completed_work: AtomicU64,
+    total_work: AtomicU64,
+}
+
+impl InkpodM6Task {
+    fn new() -> Self {
+        Self {
+            state: AtomicU32::new(INKPOD_M6_TASK_READY),
+            cancelled: AtomicBool::new(false),
+            completed_work: AtomicU64::new(0),
+            total_work: AtomicU64::new(0),
+        }
+    }
+
+    fn begin(&self) -> bool {
+        if self
+            .state
+            .compare_exchange(
+                INKPOD_M6_TASK_READY,
+                INKPOD_M6_TASK_RUNNING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            return true;
+        }
+        self.state
+            .compare_exchange(
+                INKPOD_M6_TASK_CANCELLED,
+                INKPOD_M6_TASK_RUNNING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    fn progress(&self, completed: u64, total: u64) -> bool {
+        self.total_work.store(total, Ordering::Release);
+        self.completed_work
+            .store(completed.min(total), Ordering::Release);
+        !self.cancelled.load(Ordering::Acquire)
+    }
+
+    fn finish(&self, status: u32) {
+        let state = match status {
+            INKPOD_STATUS_OK => INKPOD_M6_TASK_COMPLETED,
+            INKPOD_STATUS_CANCELLED => INKPOD_M6_TASK_CANCELLED,
+            _ => INKPOD_M6_TASK_FAILED,
+        };
+        self.state.store(state, Ordering::Release);
+    }
 }
 
 fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
@@ -1600,7 +1757,7 @@ fn write_filter_preview_info(
 // SAFETY: `input` and every advertised strided stop record must remain readable
 // for this call. All retained stop/color values are copied into the result.
 unsafe fn parse_gradient_input(input: &InkpodGradientInput) -> Result<Gradient, u32> {
-    if input.feature_flags != INKPOD_FEATURE_NONE || input.dither > 1 {
+    if input.feature_flags & !INKPOD_GRADIENT_FLAG_CONSTRAIN_45 != 0 || input.dither > 1 {
         return Err(fail(
             INKPOD_STATUS_UNSUPPORTED,
             "gradient input contains unsupported flags or dither value",
@@ -1694,13 +1851,34 @@ unsafe fn parse_gradient_input(input: &InkpodGradientInput) -> Result<Gradient, 
             color,
         });
     }
+    let (end_x_milli, end_y_milli) = if input.feature_flags & INKPOD_GRADIENT_FLAG_CONSTRAIN_45 != 0
+    {
+        let dx = input.end_x_milli as f64 - input.start_x_milli as f64;
+        let dy = input.end_y_milli as f64 - input.start_y_milli as f64;
+        let length = dx.hypot(dy);
+        let angle =
+            (dy.atan2(dx) / std::f64::consts::FRAC_PI_4).round() * std::f64::consts::FRAC_PI_4;
+        let end_x = input.start_x_milli as f64 + length * angle.cos();
+        let end_y = input.start_y_milli as f64 + length * angle.sin();
+        if !(i64::MIN as f64..=i64::MAX as f64).contains(&end_x)
+            || !(i64::MIN as f64..=i64::MAX as f64).contains(&end_y)
+        {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "constrained gradient endpoint is outside bounds",
+            ));
+        }
+        (end_x.round() as i64, end_y.round() as i64)
+    } else {
+        (input.end_x_milli, input.end_y_milli)
+    };
     Ok(Gradient {
         kind,
         mode,
         start_x_milli: input.start_x_milli,
         start_y_milli: input.start_y_milli,
-        end_x_milli: input.end_x_milli,
-        end_y_milli: input.end_y_milli,
+        end_x_milli,
+        end_y_milli,
         dither: input.dither != 0,
         stops,
     })
@@ -2108,6 +2286,19 @@ unsafe fn parse_stroke_input(input: &InkpodStrokeInput) -> Result<Stroke, u32> {
         coordinate_space,
         samples,
     })
+}
+
+fn parse_effect_region_kind(shape: u32) -> Result<EffectRegionKind, u32> {
+    match shape {
+        INKPOD_SELECTION_TRACE => Ok(EffectRegionKind::Trace),
+        INKPOD_SELECTION_RECTANGLE => Ok(EffectRegionKind::Rectangle),
+        INKPOD_SELECTION_POLYLINE => Ok(EffectRegionKind::Polyline),
+        INKPOD_SELECTION_LASSO => Ok(EffectRegionKind::Lasso),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "effect region must be pen, rectangle, polyline, or lasso",
+        )),
+    }
 }
 
 // SAFETY: `color` must expose a complete, readable InkpodColorValue prefix.
@@ -4018,6 +4209,7 @@ fn parse_view_command(core: &Core, input: &InkpodViewInput) -> Result<ViewComman
         INKPOD_VIEW_SET_GRID_VISIBLE => ViewCommand::SetGridVisible(input.value1 != 0.0),
         INKPOD_VIEW_SET_SNAP_ENABLED => ViewCommand::SetSnapEnabled(input.value1 != 0.0),
         INKPOD_VIEW_SET_TRANSPARENT_VISIBLE => ViewCommand::SetTransparentView(input.value1 != 0.0),
+        INKPOD_VIEW_SET_ALPHA_VISIBLE => ViewCommand::SetAlphaView(input.value1 != 0.0),
         _ => {
             return Err(fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
@@ -4222,7 +4414,7 @@ pub unsafe extern "C" fn inkpod_core_vector_add_fill(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        if input.reserved != 0 || input.feature_flags != INKPOD_FEATURE_NONE {
+        if input.feature_flags != INKPOD_FEATURE_NONE {
             return fail(
                 INKPOD_STATUS_UNSUPPORTED,
                 "vector fill input contains unsupported values",
@@ -4871,8 +5063,12 @@ pub unsafe extern "C" fn inkpod_snapshot_get_overlay(
             INKPOD_SNAPSHOT_OVERLAY_SNAP_ENABLED
         } else {
             0
-        }) | if view.transparent_view() {
+        }) | (if view.transparent_view() {
             INKPOD_SNAPSHOT_OVERLAY_TRANSPARENT_VIEW
+        } else {
+            0
+        }) | if view.alpha_view() {
+            INKPOD_SNAPSHOT_OVERLAY_ALPHA_VIEW
         } else {
             0
         };
@@ -6982,6 +7178,123 @@ pub unsafe extern "C" fn inkpod_core_motion_check_stop(core: *mut InkpodCore) ->
     })
 }
 
+/// Creates a one-shot thread-safe M6 progress/cancellation task.
+///
+/// # Safety
+/// `out_task` must be writable owner storage containing null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_m6_task_create(out_task: *mut *mut InkpodM6Task) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if out_task.is_null() || !is_aligned(out_task) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "M6 task owner pointer is null or misaligned",
+            );
+        }
+        // SAFETY: Caller provides readable/writable owner storage.
+        if !unsafe { out_task.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "M6 task output already owns a handle",
+            );
+        }
+        // SAFETY: The unique Rust owner is transferred to caller storage.
+        unsafe { out_task.write(Box::into_raw(Box::new(InkpodM6Task::new()))) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Queries an M6 task from any thread.
+///
+/// # Safety
+/// `task` must be a live handle and `out_info` a complete writable record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_m6_task_query(
+    task: *const InkpodM6Task,
+    out_info: *mut InkpodM6TaskInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if task.is_null() || !is_aligned(task) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "M6 task is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodM6TaskInfo") } {
+            return status;
+        }
+        // SAFETY: Live task and writable complete output are required by contract.
+        let task = unsafe { &*task };
+        let output = unsafe { &mut *out_info };
+        output.state = task.state.load(Ordering::Acquire);
+        output.completed_work = task.completed_work.load(Ordering::Acquire);
+        output.total_work = task.total_work.load(Ordering::Acquire);
+        output.reserved = 0;
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Requests cancellation from any thread. It is idempotent.
+///
+/// # Safety
+/// `task` must be one live task handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_m6_task_cancel(task: *mut InkpodM6Task) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if task.is_null() || !is_aligned(task) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "M6 task is null or misaligned",
+            );
+        }
+        // SAFETY: A live task is required by contract and contains only atomics.
+        let task = unsafe { &*task };
+        task.cancelled.store(true, Ordering::Release);
+        let _ = task.state.compare_exchange(
+            INKPOD_M6_TASK_READY,
+            INKPOD_M6_TASK_CANCELLED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Releases one Rust-owned M6 task and nulls caller storage.
+///
+/// # Safety
+/// Storage must contain null or one live, no-longer-borrowed task owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_m6_task_release(task: *mut *mut InkpodM6Task) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if task.is_null() || !is_aligned(task) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "M6 task owner pointer is null or misaligned",
+            );
+        }
+        // SAFETY: Caller provides readable/writable owner storage.
+        let handle = unsafe { task.read() };
+        if handle.is_null() {
+            return INKPOD_STATUS_OK;
+        }
+        if !is_aligned(handle) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "M6 task handle is misaligned",
+            );
+        }
+        // SAFETY: Nulling precedes consuming the unique Box owner.
+        unsafe { task.write(ptr::null_mut()) };
+        drop(unsafe { Box::from_raw(handle) });
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Begins a non-committing M6 filter preview from the current document state.
 ///
 /// # Safety
@@ -7028,6 +7341,66 @@ pub unsafe extern "C" fn inkpod_core_filter_preview_begin(
     })
 }
 
+/// Begins a filter preview while publishing progress and honoring cancellation.
+///
+/// # Safety
+/// The base preview requirements apply. `task` must be a live READY task kept
+/// alive until this call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_filter_preview_begin_task(
+    core: *mut InkpodCore,
+    input: *const InkpodFilterInput,
+    task: *mut InkpodM6Task,
+    out_info: *mut InkpodFilterPreviewInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || task.is_null() || !is_aligned(task) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "core or M6 task is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodFilterInput") } {
+            return status;
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodFilterPreviewInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let task = unsafe { &*task };
+        let output = unsafe { &mut *out_info };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let filter = match unsafe { parse_filter_input(input) } {
+            Ok(filter) => filter,
+            Err(status) => return status,
+        };
+        if !task.begin() {
+            return fail(INKPOD_STATUS_INVALID_STATE, "M6 task is not READY");
+        }
+        let status = match core.core.begin_filter_preview_with_progress(
+            input.plane_id,
+            filter,
+            |completed, total| task.progress(completed, total),
+        ) {
+            Ok(info) => {
+                write_filter_preview_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        };
+        task.finish(status);
+        status
+    })
+}
+
 /// Recomputes an active M6 preview from its immutable base state.
 ///
 /// # Safety
@@ -7070,6 +7443,65 @@ pub unsafe extern "C" fn inkpod_core_filter_preview_update(
             }
             Err(error) => map_core_error(error),
         }
+    })
+}
+
+/// Updates a filter preview while publishing progress and honoring cancellation.
+///
+/// # Safety
+/// The task and preview-begin-task requirements apply.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_filter_preview_update_task(
+    core: *mut InkpodCore,
+    input: *const InkpodFilterInput,
+    task: *mut InkpodM6Task,
+    out_info: *mut InkpodFilterPreviewInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || task.is_null() || !is_aligned(task) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "core or M6 task is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodFilterInput") } {
+            return status;
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodFilterPreviewInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let task = unsafe { &*task };
+        let output = unsafe { &mut *out_info };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let filter = match unsafe { parse_filter_input(input) } {
+            Ok(filter) => filter,
+            Err(status) => return status,
+        };
+        if !task.begin() {
+            return fail(INKPOD_STATUS_INVALID_STATE, "M6 task is not READY");
+        }
+        let status = match core.core.update_filter_preview_with_progress(
+            input.plane_id,
+            filter,
+            |completed, total| task.progress(completed, total),
+        ) {
+            Ok(info) => {
+                write_filter_preview_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        };
+        task.finish(status);
+        status
     })
 }
 
@@ -7179,6 +7611,57 @@ pub unsafe extern "C" fn inkpod_core_filter_apply_last(
             }
             Err(error) => map_core_error(error),
         }
+    })
+}
+
+/// Applies the last filter with progress/cancellation as one atomic history unit.
+///
+/// # Safety
+/// Core/result follow the owner-thread contract. `task` must be a live READY
+/// handle kept alive until this call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_filter_apply_last_task(
+    core: *mut InkpodCore,
+    plane_id: u64,
+    task: *mut InkpodM6Task,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || task.is_null() || !is_aligned(task) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "core or M6 task is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let task = unsafe { &*task };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        if !task.begin() {
+            return fail(INKPOD_STATUS_INVALID_STATE, "M6 task is not READY");
+        }
+        let status = match core
+            .core
+            .apply_last_filter_with_progress(plane_id, |completed, total| {
+                task.progress(completed, total)
+            }) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        };
+        task.finish(status);
+        status
     })
 }
 
@@ -7399,6 +7882,96 @@ pub unsafe extern "C" fn inkpod_core_effect_airbrush(
     })
 }
 
+/// Applies a copied, pressure-aware airbrush gesture as one Undo unit.
+///
+/// # Safety
+/// Core/input/result and the advertised sample span must be complete and live
+/// for this owner-thread call. No borrowed pointer is retained.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_effect_airbrush_gesture(
+    core: *mut InkpodCore,
+    input: *const InkpodAirbrushGestureInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodAirbrushGestureInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete records and borrowed spans are required by contract.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        if input.feature_flags
+            & !(INKPOD_EFFECT_FLAG_PRESSURE_SIZE | INKPOD_EFFECT_FLAG_PRESSURE_OPACITY)
+            != 0
+        {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "airbrush gesture contains unsupported flags",
+            );
+        }
+        let coordinate_space = match parse_coordinate_space(input.coordinate_space) {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        let samples = match unsafe {
+            parse_stroke_samples(input.samples, input.sample_count, input.sample_stride_bytes)
+        } {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        let color = match unsafe { parse_color_value(&input.color) } {
+            Ok(value) => match value.rgba16() {
+                Some(value) => value,
+                None => {
+                    return fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "airbrush gesture color must be RGBA",
+                    );
+                }
+            },
+            Err(status) => return status,
+        };
+        let gesture = AirbrushGesture {
+            samples: Vec::new(),
+            radius_milli: input.radius_milli,
+            hardness_milli: input.hardness_milli,
+            spacing_milli: input.spacing_milli,
+            opacity_milli: input.opacity_milli,
+            fade_milli: input.fade_milli,
+            pressure_size: input.feature_flags & INKPOD_EFFECT_FLAG_PRESSURE_SIZE != 0,
+            pressure_opacity: input.feature_flags & INKPOD_EFFECT_FLAG_PRESSURE_OPACITY != 0,
+            continuous_dabs: input.continuous_dabs,
+            color,
+        };
+        match core.core.apply_airbrush_gesture_for_view(
+            input.view_id,
+            coordinate_space,
+            input.plane_id,
+            &samples,
+            gesture,
+        ) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Applies the copied boundary-color airbrush effect as one Undo unit.
 ///
 /// # Safety
@@ -7558,6 +8131,386 @@ pub unsafe extern "C" fn inkpod_core_effect_stamp(
     })
 }
 
+/// Applies a copied pressure-aware clone-stamp gesture as one Undo unit.
+///
+/// # Safety
+/// The airbrush-gesture safety requirements apply, including the embedded source.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_effect_stamp_gesture(
+    core: *mut InkpodCore,
+    input: *const InkpodStampGestureInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodStampGestureInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records and spans are required by contract.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        if input.reserved != 0
+            || input.feature_flags
+                & !(INKPOD_EFFECT_FLAG_PRESSURE_SIZE | INKPOD_EFFECT_FLAG_PRESSURE_OPACITY)
+                != 0
+        {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "stamp gesture contains unsupported flags",
+            );
+        }
+        let coordinate_space = match parse_coordinate_space(input.coordinate_space) {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        let source = match unsafe {
+            parse_stroke_samples(&input.source, 1, size_of::<InkpodStrokeSample>() as u64)
+        } {
+            Ok(mut value) => value.remove(0),
+            Err(status) => return status,
+        };
+        let samples = match unsafe {
+            parse_stroke_samples(input.samples, input.sample_count, input.sample_stride_bytes)
+        } {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        let gesture = StampGesture {
+            source_x_milli: 0,
+            source_y_milli: 0,
+            samples: Vec::new(),
+            radius_milli: input.radius_milli,
+            hardness_milli: input.hardness_milli,
+            spacing_milli: input.spacing_milli,
+            opacity_milli: input.opacity_milli,
+            shape: match input.shape {
+                INKPOD_STAMP_ROUND => StampShape::Round,
+                INKPOD_STAMP_SQUARE => StampShape::Square,
+                _ => {
+                    return fail(INKPOD_STATUS_INVALID_ARGUMENT, "stamp shape is unknown");
+                }
+            },
+            pressure_size: input.feature_flags & INKPOD_EFFECT_FLAG_PRESSURE_SIZE != 0,
+            pressure_opacity: input.feature_flags & INKPOD_EFFECT_FLAG_PRESSURE_OPACITY != 0,
+        };
+        match core.core.apply_stamp_gesture_for_view(
+            input.view_id,
+            coordinate_space,
+            input.plane_id,
+            source,
+            &samples,
+            gesture,
+        ) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies the blur tool inside a copied pen/rectangle/polyline/lasso region.
+///
+/// # Safety
+/// Core/input/result and the embedded region span must remain live for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_effect_blur_tool(
+    core: *mut InkpodCore,
+    input: *const InkpodBlurToolInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodBlurToolInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records and embedded spans are required by contract.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        if input.feature_flags & !INKPOD_EFFECT_FLAG_PRESSURE_SIZE != 0 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "blur tool contains unsupported fields",
+            );
+        }
+        let coordinate_space = match parse_coordinate_space(input.coordinate_space) {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        let kind = match parse_effect_region_kind(input.shape) {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        let samples = match unsafe {
+            parse_stroke_samples(input.samples, input.sample_count, input.sample_stride_bytes)
+        } {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        match core.core.apply_blur_tool_for_view(
+            input.view_id,
+            coordinate_space,
+            input.plane_id,
+            kind,
+            &samples,
+            input.diameter,
+            input.feature_flags & INKPOD_EFFECT_FLAG_PRESSURE_SIZE != 0,
+            input.radius,
+            input.strength_milli,
+        ) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Runs bounded dust removal with progress/cancellation and atomic commit.
+///
+/// # Safety
+/// The Core/input/result records, optional embedded region span, and READY task
+/// must remain live until this owner-thread call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_dust_remove(
+    core: *mut InkpodCore,
+    input: *const InkpodDustInput,
+    task: *mut InkpodM6Task,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || task.is_null() || !is_aligned(task) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "core or M6 task is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodDustInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records and task are required by contract.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let task = unsafe { &*task };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        if input.feature_flags != INKPOD_FEATURE_NONE || input.use_region > 1 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "dust-removal input contains unsupported fields",
+            );
+        }
+        let mode = match input.mode {
+            INKPOD_DUST_REMOVE_FOREGROUND => DustMode::RemoveForeground,
+            INKPOD_DUST_FILL_TRANSPARENT_HOLES => DustMode::FillTransparentHoles,
+            INKPOD_DUST_REPLACE_COLOR_OUTLIERS => DustMode::ReplaceColorOutliers,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "dust-removal mode is unknown",
+                );
+            }
+        };
+        let coordinate_space = match parse_coordinate_space(input.coordinate_space) {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        let kind = if input.use_region != 0 {
+            match parse_effect_region_kind(input.shape) {
+                Ok(value) => Some(value),
+                Err(status) => return status,
+            }
+        } else {
+            None
+        };
+        let samples = if input.use_region != 0 {
+            match unsafe {
+                parse_stroke_samples(input.samples, input.sample_count, input.sample_stride_bytes)
+            } {
+                Ok(value) => value,
+                Err(status) => return status,
+            }
+        } else {
+            if input.sample_count != 0 || !input.samples.is_null() || input.sample_stride_bytes != 0
+            {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "full-image dust removal must not carry region samples",
+                );
+            }
+            Vec::new()
+        };
+        if !task.begin() {
+            return fail(INKPOD_STATUS_INVALID_STATE, "M6 task is not READY");
+        }
+        let status = match core.core.apply_dust_removal_for_view(
+            input.view_id,
+            coordinate_space,
+            input.plane_id,
+            kind,
+            &samples,
+            input.diameter,
+            DustRemoval {
+                mode,
+                maximum_pixels: input.maximum_pixels,
+            },
+            |completed, total| task.progress(completed, total),
+        ) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        };
+        task.finish(status);
+        status
+    })
+}
+
+/// Begins a non-committing dust-removal preview with progress/cancellation.
+///
+/// # Safety
+/// The dust-remove safety requirements apply; output is a complete writable
+/// preview-info record. Apply/cancel uses the filter-preview apply/cancel API.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_dust_preview_begin(
+    core: *mut InkpodCore,
+    input: *const InkpodDustInput,
+    task: *mut InkpodM6Task,
+    out_info: *mut InkpodFilterPreviewInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || task.is_null() || !is_aligned(task) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "core or M6 task is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodDustInput") } {
+            return status;
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodFilterPreviewInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records and task are required by contract.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let task = unsafe { &*task };
+        let output = unsafe { &mut *out_info };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        if input.feature_flags != INKPOD_FEATURE_NONE || input.use_region > 1 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "dust-removal input contains unsupported fields",
+            );
+        }
+        let mode = match input.mode {
+            INKPOD_DUST_REMOVE_FOREGROUND => DustMode::RemoveForeground,
+            INKPOD_DUST_FILL_TRANSPARENT_HOLES => DustMode::FillTransparentHoles,
+            INKPOD_DUST_REPLACE_COLOR_OUTLIERS => DustMode::ReplaceColorOutliers,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "dust-removal mode is unknown",
+                );
+            }
+        };
+        let coordinate_space = match parse_coordinate_space(input.coordinate_space) {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        let kind = if input.use_region != 0 {
+            match parse_effect_region_kind(input.shape) {
+                Ok(value) => Some(value),
+                Err(status) => return status,
+            }
+        } else {
+            None
+        };
+        let samples = if input.use_region != 0 {
+            match unsafe {
+                parse_stroke_samples(input.samples, input.sample_count, input.sample_stride_bytes)
+            } {
+                Ok(value) => value,
+                Err(status) => return status,
+            }
+        } else {
+            if input.sample_count != 0 || !input.samples.is_null() || input.sample_stride_bytes != 0
+            {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "full-image dust removal must not carry region samples",
+                );
+            }
+            Vec::new()
+        };
+        if !task.begin() {
+            return fail(INKPOD_STATUS_INVALID_STATE, "M6 task is not READY");
+        }
+        let status = match core.core.begin_dust_preview_for_view(
+            input.view_id,
+            coordinate_space,
+            input.plane_id,
+            kind,
+            &samples,
+            input.diameter,
+            DustRemoval {
+                mode,
+                maximum_pixels: input.maximum_pixels,
+            },
+            |completed, total| task.progress(completed, total),
+        ) {
+            Ok(info) => {
+                write_filter_preview_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        };
+        task.finish(status);
+        status
+    })
+}
+
 /// Replaces only the target plane alpha from copied grayscale rows.
 ///
 /// # Safety
@@ -7594,6 +8547,53 @@ pub unsafe extern "C" fn inkpod_core_alpha_edit(
             Err(status) => return status,
         };
         match core.core.edit_plane_alpha(input.plane_id, &alpha) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies a multi-stop gradient to alpha only, preserving every RGB channel.
+///
+/// # Safety
+/// The gradient-effect safety requirements apply.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_alpha_gradient(
+    core: *mut InkpodCore,
+    input: *const InkpodGradientInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodGradientInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete records and borrowed stop span are required by contract.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let gradient = match unsafe { parse_gradient_input(input) } {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        match core
+            .core
+            .apply_alpha_gradient_to_plane(input.plane_id, &gradient)
+        {
             Ok(outcome) => {
                 write_dispatch_result(result, outcome);
                 INKPOD_STATUS_OK
@@ -10258,6 +11258,203 @@ mod tests {
                 INKPOD_STATUS_OK
             );
             assert_eq!(document.color_plane_checksum, before_alpha);
+            assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        }
+    }
+
+    #[test]
+    fn m6_gesture_dust_task_ownership_and_cancel_are_connected() {
+        let mut core = ptr::null_mut();
+        // SAFETY: Every record and borrowed span remains live for its call.
+        unsafe {
+            assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
+            let options = InkpodCellCreateOptions {
+                struct_size: size_of::<InkpodCellCreateOptions>() as u32,
+                reserved: 0,
+                feature_flags: 0,
+                document_uuid_high: 61,
+                document_uuid_low: 62,
+                width: 8,
+                height: 8,
+                dpi_x_milli: 96_000,
+                dpi_y_milli: 96_000,
+            };
+            let mut document = InkpodDocumentInfo {
+                struct_size: size_of::<InkpodDocumentInfo>() as u32,
+                ..InkpodDocumentInfo::default()
+            };
+            assert_eq!(
+                inkpod_core_new_cell(core, &options, &mut document),
+                INKPOD_STATUS_OK
+            );
+            let mut dispatch = InkpodDispatchResult {
+                struct_size: size_of::<InkpodDispatchResult>() as u32,
+                reserved: 0,
+                revision: 0,
+                accepted_command_count: 0,
+            };
+            let samples = [
+                InkpodStrokeSample {
+                    struct_size: size_of::<InkpodStrokeSample>() as u32,
+                    flags: 0,
+                    x: 2.0,
+                    y: 2.0,
+                    pressure: 0.25,
+                    reserved: 0,
+                },
+                InkpodStrokeSample {
+                    struct_size: size_of::<InkpodStrokeSample>() as u32,
+                    flags: 0,
+                    x: 6.0,
+                    y: 2.0,
+                    pressure: 1.0,
+                    reserved: 0,
+                },
+            ];
+            let airbrush = InkpodAirbrushGestureInput {
+                struct_size: size_of::<InkpodAirbrushGestureInput>() as u32,
+                coordinate_space: INKPOD_COORDINATE_SPACE_DOCUMENT,
+                feature_flags: INKPOD_EFFECT_FLAG_PRESSURE_SIZE
+                    | INKPOD_EFFECT_FLAG_PRESSURE_OPACITY,
+                plane_id: document.color_plane_id,
+                view_id: 0,
+                radius_milli: 1_500,
+                hardness_milli: 500,
+                spacing_milli: 500,
+                opacity_milli: 1_000,
+                fade_milli: 100,
+                continuous_dabs: 2,
+                color: InkpodColorValue {
+                    struct_size: size_of::<InkpodColorValue>() as u32,
+                    depth: INKPOD_COLOR_DEPTH_16,
+                    red: 65_535,
+                    green: 0,
+                    blue: 0,
+                    alpha: 65_535,
+                },
+                samples: samples.as_ptr(),
+                sample_count: samples.len() as u64,
+                sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
+            };
+            assert_eq!(
+                inkpod_core_effect_airbrush_gesture(core, &airbrush, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut document),
+                INKPOD_STATUS_OK
+            );
+            let before_cancel = document.color_plane_checksum;
+            let filter = InkpodFilterInput {
+                struct_size: size_of::<InkpodFilterInput>() as u32,
+                kind: INKPOD_FILTER_INVERT,
+                feature_flags: 0,
+                plane_id: document.color_plane_id,
+                channel: INKPOD_FILTER_CHANNEL_RGB,
+                interpolation: INKPOD_CURVE_BEZIER,
+                parameter_0: 0,
+                parameter_1: 0,
+                parameter_2: 0,
+                parameter_3: 0,
+                parameter_4: 0,
+                point_stride_bytes: 0,
+                points: ptr::null(),
+                point_count: 0,
+            };
+            let mut task = ptr::null_mut();
+            assert_eq!(inkpod_m6_task_create(&mut task), INKPOD_STATUS_OK);
+            assert_eq!(inkpod_m6_task_cancel(task), INKPOD_STATUS_OK);
+            let mut preview = InkpodFilterPreviewInfo {
+                struct_size: size_of::<InkpodFilterPreviewInfo>() as u32,
+                reserved: 0,
+                plane_id: 0,
+                base_checksum: 0,
+                preview_checksum: 0,
+                preview_revision: 0,
+            };
+            assert_eq!(
+                inkpod_core_filter_preview_begin_task(core, &filter, task, &mut preview),
+                INKPOD_STATUS_CANCELLED
+            );
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut document),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(document.color_plane_checksum, before_cancel);
+            let mut task_info = InkpodM6TaskInfo {
+                struct_size: size_of::<InkpodM6TaskInfo>() as u32,
+                state: 99,
+                completed_work: 0,
+                total_work: 0,
+                reserved: 99,
+            };
+            assert_eq!(inkpod_m6_task_query(task, &mut task_info), INKPOD_STATUS_OK);
+            assert_eq!(task_info.state, INKPOD_M6_TASK_CANCELLED);
+            assert_eq!(inkpod_m6_task_release(&mut task), INKPOD_STATUS_OK);
+            assert_eq!(inkpod_m6_task_release(&mut task), INKPOD_STATUS_OK);
+
+            assert_eq!(inkpod_m6_task_create(&mut task), INKPOD_STATUS_OK);
+            assert_eq!(
+                inkpod_core_filter_preview_begin_task(core, &filter, task, &mut preview),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                inkpod_core_filter_preview_apply(core, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(inkpod_m6_task_release(&mut task), INKPOD_STATUS_OK);
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut document),
+                INKPOD_STATUS_OK
+            );
+            let before_cancelled_last = document.color_plane_checksum;
+            assert_eq!(inkpod_m6_task_create(&mut task), INKPOD_STATUS_OK);
+            assert_eq!(inkpod_m6_task_cancel(task), INKPOD_STATUS_OK);
+            assert_eq!(
+                inkpod_core_filter_apply_last_task(
+                    core,
+                    document.color_plane_id,
+                    task,
+                    &mut dispatch
+                ),
+                INKPOD_STATUS_CANCELLED
+            );
+            assert_eq!(
+                inkpod_core_get_document_info(core, &mut document),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(document.color_plane_checksum, before_cancelled_last);
+            assert_eq!(inkpod_m6_task_release(&mut task), INKPOD_STATUS_OK);
+
+            let mut dust_task = ptr::null_mut();
+            assert_eq!(inkpod_m6_task_create(&mut dust_task), INKPOD_STATUS_OK);
+            let dust = InkpodDustInput {
+                struct_size: size_of::<InkpodDustInput>() as u32,
+                mode: INKPOD_DUST_REMOVE_FOREGROUND,
+                feature_flags: 0,
+                plane_id: document.color_plane_id,
+                view_id: 0,
+                coordinate_space: INKPOD_COORDINATE_SPACE_DOCUMENT,
+                shape: INKPOD_SELECTION_RECTANGLE,
+                maximum_pixels: 1,
+                use_region: 1,
+                diameter: 1.0,
+                samples: samples.as_ptr(),
+                sample_count: samples.len() as u64,
+                sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
+            };
+            assert_eq!(
+                inkpod_core_dust_remove(core, &dust, dust_task, &mut dispatch),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                inkpod_m6_task_query(dust_task, &mut task_info),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(task_info.state, INKPOD_M6_TASK_COMPLETED);
+            assert!(task_info.total_work > 0);
+            assert_eq!(inkpod_m6_task_release(&mut dust_task), INKPOD_STATUS_OK);
             assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
         }
     }

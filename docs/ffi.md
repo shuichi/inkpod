@@ -211,18 +211,32 @@ pointers.
   one Undo unit and records it as the last filter.
   `inkpod_core_filter_apply_last` reuses that copied semantic filter on another
   validated RGBA plane.
+- `inkpod_core_filter_preview_begin_task` and `_update_task` provide the same
+  transaction semantics while reporting bounded work through `InkpodM6Task`.
+  A pre-cancelled or mid-operation cancelled task returns
+  `INKPOD_STATUS_CANCELLED` without installing or committing partial output.
+  `inkpod_core_filter_apply_last_task` gives last-filter reuse the same atomic
+  progress/cancel behavior.
 - `inkpod_core_adjustment_create` accepts only brightness/contrast, tone-curve,
   or levels filter records plus copied UTF-8 name storage. It creates one stable
   non-raster adjustment layer; source raster storage is never retained or
   modified. `inkpod_core_adjustment_update` replaces those copied parameters as
   one Undo unit. Adjustment parameters persist in the `M6AD` native section.
-- `inkpod_core_effect_gradient`, `inkpod_core_effect_airbrush`,
-  `inkpod_core_effect_boundary_airbrush`, `inkpod_core_effect_blur`, and
-  `inkpod_core_effect_stamp` copy and validate their strided colors/stops before
-  committing one Core history unit. `inkpod_core_alpha_edit` copies bounded,
-  padded grayscale8/16 rows and changes only the matching target alpha channel.
-  No effect input pointer is retained. These calls are synchronous on the Core
-  owner thread; the Windows adapter must not call them from the UI thread.
+- `inkpod_core_effect_gradient`, the primitive effect calls, and the full
+  airbrush/stamp/blur gesture calls copy and validate their strided colors,
+  stops, source, and sample spans before committing one Core history unit.
+  Device-pixel batches are converted once using the selected logical view.
+  Airbrush and stamp support pressure; blur's `PRESSURE_SIZE` flag is valid only
+  for the screen-fixed pen region. No effect input pointer is retained.
+- `inkpod_core_dust_remove` and `inkpod_core_dust_preview_begin` accept a READY
+  task and an optional pen/rectangle/polyline/lasso batch. Preview shares the
+  filter-preview apply/cancel API; direct removal commits once. All three dust
+  modes report progress and poll cancellation before atomic commit.
+- `inkpod_core_alpha_edit` copies bounded padded grayscale8/16 rows and changes
+  only target alpha. `inkpod_core_alpha_gradient` applies copied gradient stops
+  only to alpha. Snapshot overlay `ALPHA_VIEW` renders alpha as grayscale without
+  changing pixels. These Core calls remain synchronous on the Core owner thread;
+  the Windows adapter schedules them on its Core engine.
 
 At most one stroke or filter-preview transaction may be active. Document,
 history, save/open, layer, and competing preview operations return invalid state
@@ -271,6 +285,11 @@ returns `INKPOD_STATUS_BUFFER_TOO_SMALL` and still reports `color_count`.
   the Windows adapter releases it before shutdown.
 - `inkpod_core_build_snapshot_for_view` has exactly the same snapshot ownership
   and release contract as `inkpod_core_build_snapshot`.
+- `inkpod_m6_task_create` allocates a Rust-owned atomic task. Its single owner
+  keeps it live until the Core operation returns. `inkpod_m6_task_release` takes
+  `InkpodM6Task**`, frees it, writes null, and is a successful no-op when repeated
+  through the same owner variable. The caller must prevent release racing the
+  Core call; query and cancel may race safely with that call.
 - `inkpod_snapshot_get_view` returns a borrowed strided tile span and pixel
   pointers. `inkpod_snapshot_get_transform` copies its view transform;
   `inkpod_snapshot_get_overlay` returns a borrowed guide span plus copied flags
@@ -300,6 +319,11 @@ snapshot build, and destroy run on the creating Core engine thread.
 A violation returns `INKPOD_STATUS_WRONG_THREAD` without consuming the handle.
 Published snapshots are immutable and `Send + Sync`; view/release must still be
 externally synchronized.
+
+`InkpodM6Task` is the exception to Core affinity: create, query, cancel, and
+release may run on any thread, subject to its owner-lifetime rule. State and
+completed/total work are atomic. Cancellation is advisory until the Core loop
+polls it; the operation then returns cancelled and discards its staged result.
 
 No Core lock is held while calling C++, and the Core never calls a C++ callback.
 The Windows UI/Input thread copies pointer packets into a bounded C++ queue. The

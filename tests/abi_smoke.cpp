@@ -64,6 +64,11 @@ static_assert(sizeof(InkpodBoundaryAirbrushInput) == 72U);
 static_assert(sizeof(InkpodBlurEffectInput) == 40U);
 static_assert(sizeof(InkpodStampInput) == 56U);
 static_assert(sizeof(InkpodAlphaEditInput) == 64U);
+static_assert(sizeof(InkpodAirbrushGestureInput) == 96U);
+static_assert(sizeof(InkpodStampGestureInput) == 104U);
+static_assert(sizeof(InkpodBlurToolInput) == 72U);
+static_assert(sizeof(InkpodDustInput) == 80U);
+static_assert(sizeof(InkpodM6TaskInfo) == 32U);
 static_assert(sizeof(InkpodSnapshotVectorSegment) == 80U);
 static_assert(sizeof(InkpodSnapshotVectorFill) == 48U);
 static_assert(sizeof(InkpodSnapshotVectorView) == 80U);
@@ -1003,6 +1008,129 @@ int InkpodRunAbiSmoke() {
         || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
         || document.color_plane_checksum != before_alpha_checksum) {
         return 71;
+    }
+
+    const std::array<InkpodStrokeSample, 2> gesture_samples{
+        InkpodStrokeSample{sizeof(InkpodStrokeSample), 0U, 1.0F, 1.0F, 0.25F, 0U},
+        InkpodStrokeSample{sizeof(InkpodStrokeSample), 0U, 4.0F, 3.0F, 1.0F, 0U}};
+    InkpodAirbrushGestureInput airbrush_gesture{};
+    airbrush_gesture.struct_size = sizeof(airbrush_gesture);
+    airbrush_gesture.coordinate_space = INKPOD_COORDINATE_SPACE_DOCUMENT;
+    airbrush_gesture.feature_flags =
+        INKPOD_EFFECT_FLAG_PRESSURE_SIZE | INKPOD_EFFECT_FLAG_PRESSURE_OPACITY;
+    airbrush_gesture.plane_id = document.color_plane_id;
+    airbrush_gesture.radius_milli = 1000U;
+    airbrush_gesture.hardness_milli = 500U;
+    airbrush_gesture.spacing_milli = 500U;
+    airbrush_gesture.opacity_milli = 750U;
+    airbrush_gesture.continuous_dabs = 1U;
+    airbrush_gesture.color = color16(65535U, 0U, 0U, 65535U);
+    airbrush_gesture.samples = gesture_samples.data();
+    airbrush_gesture.sample_count = gesture_samples.size();
+    airbrush_gesture.sample_stride_bytes = sizeof(InkpodStrokeSample);
+    if (inkpod_core_effect_airbrush_gesture(core, &airbrush_gesture, &dispatch)
+        != INKPOD_STATUS_OK) {
+        return 72;
+    }
+
+    InkpodStampGestureInput stamp_gesture{};
+    stamp_gesture.struct_size = sizeof(stamp_gesture);
+    stamp_gesture.coordinate_space = INKPOD_COORDINATE_SPACE_DOCUMENT;
+    stamp_gesture.feature_flags = INKPOD_EFFECT_FLAG_PRESSURE_OPACITY;
+    stamp_gesture.plane_id = document.color_plane_id;
+    stamp_gesture.source = gesture_samples[0];
+    stamp_gesture.radius_milli = 1000U;
+    stamp_gesture.hardness_milli = 1000U;
+    stamp_gesture.spacing_milli = 500U;
+    stamp_gesture.opacity_milli = 750U;
+    stamp_gesture.shape = INKPOD_STAMP_ROUND;
+    stamp_gesture.samples = gesture_samples.data();
+    stamp_gesture.sample_count = gesture_samples.size();
+    stamp_gesture.sample_stride_bytes = sizeof(InkpodStrokeSample);
+    if (inkpod_core_effect_stamp_gesture(core, &stamp_gesture, &dispatch)
+        != INKPOD_STATUS_OK) {
+        return 73;
+    }
+
+    InkpodBlurToolInput blur_tool{};
+    blur_tool.struct_size = sizeof(blur_tool);
+    blur_tool.coordinate_space = INKPOD_COORDINATE_SPACE_DOCUMENT;
+    blur_tool.feature_flags = INKPOD_EFFECT_FLAG_PRESSURE_SIZE;
+    blur_tool.plane_id = document.color_plane_id;
+    blur_tool.radius = 1U;
+    blur_tool.strength_milli = 500U;
+    blur_tool.shape = INKPOD_SELECTION_TRACE;
+    blur_tool.diameter = 1.0F;
+    blur_tool.samples = gesture_samples.data();
+    blur_tool.sample_count = gesture_samples.size();
+    blur_tool.sample_stride_bytes = sizeof(InkpodStrokeSample);
+    if (inkpod_core_effect_blur_tool(core, &blur_tool, &dispatch) != INKPOD_STATUS_OK) {
+        return 74;
+    }
+
+    if (inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK) {
+        return 75;
+    }
+    const std::uint64_t before_cancelled_filter = document.color_plane_checksum;
+    filter.kind = INKPOD_FILTER_INVERT;
+    filter.parameter_0 = 0;
+    filter.parameter_1 = 0;
+    InkpodM6Task* task{};
+    if (inkpod_m6_task_create(&task) != INKPOD_STATUS_OK
+        || inkpod_m6_task_cancel(task) != INKPOD_STATUS_OK
+        || inkpod_core_filter_preview_begin_task(core, &filter, task, &preview)
+            != INKPOD_STATUS_CANCELLED
+        || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
+        || document.color_plane_checksum != before_cancelled_filter) {
+        return 76;
+    }
+    InkpodM6TaskInfo task_info{};
+    task_info.struct_size = sizeof(task_info);
+    if (inkpod_m6_task_query(task, &task_info) != INKPOD_STATUS_OK
+        || task_info.state != INKPOD_M6_TASK_CANCELLED
+        || inkpod_m6_task_release(&task) != INKPOD_STATUS_OK
+        || inkpod_m6_task_release(&task) != INKPOD_STATUS_OK) {
+        return 77;
+    }
+
+    InkpodM6Task* dust_task{};
+    InkpodDustInput dust{};
+    dust.struct_size = sizeof(dust);
+    dust.mode = INKPOD_DUST_REMOVE_FOREGROUND;
+    dust.plane_id = document.color_plane_id;
+    dust.coordinate_space = INKPOD_COORDINATE_SPACE_DOCUMENT;
+    dust.maximum_pixels = 1U;
+    if (inkpod_m6_task_create(&dust_task) != INKPOD_STATUS_OK
+        || inkpod_core_dust_preview_begin(core, &dust, dust_task, &preview)
+            != INKPOD_STATUS_OK
+        || inkpod_m6_task_query(dust_task, &task_info) != INKPOD_STATUS_OK
+        || task_info.state != INKPOD_M6_TASK_COMPLETED
+        || inkpod_core_filter_preview_cancel(core, &preview) != INKPOD_STATUS_OK
+        || inkpod_m6_task_release(&dust_task) != INKPOD_STATUS_OK) {
+        return 78;
+    }
+
+    gradient.feature_flags = INKPOD_GRADIENT_FLAG_CONSTRAIN_45;
+    if (inkpod_core_alpha_gradient(core, &gradient, &dispatch) != INKPOD_STATUS_OK) {
+        return 79;
+    }
+    InkpodViewInput alpha_view{};
+    alpha_view.struct_size = sizeof(alpha_view);
+    alpha_view.kind = INKPOD_VIEW_SET_ALPHA_VISIBLE;
+    alpha_view.value1 = 1.0;
+    if (inkpod_core_apply_view(core, &alpha_view, &document) != INKPOD_STATUS_OK) {
+        return 80;
+    }
+    InkpodSnapshot* alpha_snapshot{};
+    if (inkpod_core_build_snapshot(core, &options, &alpha_snapshot) != INKPOD_STATUS_OK) {
+        return 81;
+    }
+    InkpodSnapshotOverlay alpha_overlay{};
+    alpha_overlay.struct_size = sizeof(alpha_overlay);
+    if (inkpod_snapshot_get_overlay(alpha_snapshot, &alpha_overlay) != INKPOD_STATUS_OK
+        || (alpha_overlay.flags & INKPOD_SNAPSHOT_OVERLAY_ALPHA_VIEW) == 0U
+        || inkpod_snapshot_release(&alpha_snapshot) != INKPOD_STATUS_OK) {
+        return 82;
     }
     if (inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
         || inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK

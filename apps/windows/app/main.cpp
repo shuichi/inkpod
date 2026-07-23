@@ -5,7 +5,9 @@
 #include <shlobj.h>
 #include <windowsx.h>
 
+#include <algorithm>
 #include <array>
+#include <cerrno>
 #include <climits>
 #include <cmath>
 #include <cstddef>
@@ -29,8 +31,49 @@ namespace {
 
 constexpr std::uint32_t kInteractionFill = 1001U;
 constexpr std::uint32_t kInteractionEyedropper = 1002U;
+constexpr std::uint32_t kInteractionM6Gradient = 1101U;
+constexpr std::uint32_t kInteractionM6Airbrush = 1102U;
+constexpr std::uint32_t kInteractionM6Blur = 1103U;
+constexpr std::uint32_t kInteractionM6Stamp = 1104U;
+constexpr std::uint32_t kInteractionM6Dust = 1105U;
+constexpr std::uint32_t kInteractionM6AlphaGradient = 1106U;
 constexpr UINT_PTR kAutosaveTimer = 1U;
 constexpr UINT kAutosaveIntervalMilliseconds = 60U * 1000U;
+constexpr UINT kM6TaskCompleted = WM_APP + 0x170U;
+constexpr UINT_PTR kM6ProgressTimer = 1U;
+constexpr UINT_PTR kM6ContinuousSprayTimer = 2U;
+constexpr UINT kM6ContinuousSprayIntervalMilliseconds = 50U;
+
+struct M6StopValue {
+    std::uint32_t position_milli{};
+    std::uint32_t rgba{};
+};
+
+struct M6ToolOptions {
+    std::array<std::int32_t, 5U> parameters{};
+    std::uint32_t shape{INKPOD_SELECTION_TRACE};
+    std::uint32_t mode{};
+    bool option{};
+    bool option2{};
+    std::vector<M6StopValue> stops;
+};
+
+struct M6FilterJob {
+    std::uint32_t kind{INKPOD_FILTER_INVERT};
+    std::uint32_t channel{INKPOD_FILTER_CHANNEL_RGB};
+    std::uint32_t interpolation{INKPOD_CURVE_BEZIER};
+    std::array<std::int32_t, 5U> parameters{};
+    std::vector<InkpodCurvePoint> points;
+    std::uint64_t plane_id{};
+    bool preview{};
+};
+
+struct M6AdjustmentUiState {
+    std::uint64_t id{};
+    bool visible{true};
+    M6FilterJob job;
+    std::string name;
+};
 
 struct AppState {
     HINSTANCE instance{};
@@ -47,6 +90,19 @@ struct AppState {
     InkpodClipboard* clipboard{};
     std::uint64_t m3_layer_id{};
     std::uint64_t secondary_view_id{};
+    std::uint64_t m6_adjustment_id{};
+    bool m6_adjustment_visible{true};
+    std::vector<M6AdjustmentUiState> m6_adjustments;
+    InkpodM6Task* m6_task{};
+    HWND m6_progress{};
+    bool m6_preview_prompt{};
+    bool alpha_view{};
+    bool stamp_source_valid{};
+    InkpodStrokeSample stamp_source{};
+    M6ToolOptions m6_options{};
+    std::vector<InkpodStrokeSample> m6_samples;
+    bool m6_airbrush_active{};
+    InkpodStrokeSample m6_airbrush_last{};
     bool view_flip_horizontal{};
     bool view_flip_vertical{};
     bool grid_visible{};
@@ -59,6 +115,16 @@ void ResetM3DocumentUiState(AppState& state) noexcept {
     state.view_flip_horizontal = false;
     state.view_flip_vertical = false;
     state.grid_visible = false;
+    state.m6_adjustment_id = 0U;
+    state.m6_adjustment_visible = true;
+    state.m6_adjustments.clear();
+    state.alpha_view = false;
+    state.stamp_source_valid = false;
+    state.m6_samples.clear();
+    state.m6_airbrush_active = false;
+    if (state.window != nullptr) {
+        KillTimer(state.window, kM6ContinuousSprayTimer);
+    }
 }
 
 class ComApartment final {
@@ -694,6 +760,247 @@ INT_PTR ShowShortcutEditor(
         reinterpret_cast<LPARAM>(&state));
 }
 
+struct M6EditorState {
+    const wchar_t* title{L"M6 エディター"};
+    std::array<const wchar_t*, 5U> parameter_labels{L"P0", L"P1", L"P2", L"P3", L"P4"};
+    std::array<std::int32_t, 5U> parameters{};
+    std::array<const wchar_t*, 5U> channel_labels{};
+    std::array<std::uint32_t, 5U> channel_values{};
+    std::size_t channel_count{};
+    std::uint32_t channel{};
+    std::array<const wchar_t*, 4U> mode_labels{};
+    std::array<std::uint32_t, 4U> mode_values{};
+    std::size_t mode_count{};
+    std::uint32_t mode{};
+    std::wstring points;
+    const wchar_t* option1_label{L"プレビューして確認"};
+    const wchar_t* option2_label{L"45度制約 / 筆圧"};
+    bool option1{true};
+    bool option2{};
+    bool option1_enabled{true};
+    bool option2_enabled{true};
+    bool close_immediately{};
+};
+
+bool ReadSignedDialogValue(HWND dialog, int control, std::int32_t& output) noexcept {
+    std::array<wchar_t, 64U> text{};
+    if (GetDlgItemTextW(dialog, control, text.data(), static_cast<int>(text.size())) <= 0) {
+        return false;
+    }
+    wchar_t* end{};
+    errno = 0;
+    const long value = wcstol(text.data(), &end, 10);
+    if (errno == ERANGE || end == text.data() || *end != L'\0' || value < INT32_MIN
+        || value > INT32_MAX) {
+        return false;
+    }
+    output = static_cast<std::int32_t>(value);
+    return true;
+}
+
+template <std::size_t Count>
+void FillM6Combo(
+    HWND combo,
+    const std::array<const wchar_t*, Count>& labels,
+    const std::array<std::uint32_t, Count>& values,
+    std::size_t count,
+    std::uint32_t selected_value) noexcept {
+    int selected = 0;
+    for (std::size_t index = 0; index < count; ++index) {
+        const LRESULT item = SendMessageW(
+            combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(labels[index]));
+        if (item == CB_ERR || item == CB_ERRSPACE) {
+            continue;
+        }
+        SendMessageW(combo, CB_SETITEMDATA, item, static_cast<LPARAM>(values[index]));
+        if (values[index] == selected_value) {
+            selected = static_cast<int>(item);
+        }
+    }
+    SendMessageW(combo, CB_SETCURSEL, selected, 0);
+    EnableWindow(combo, count != 0U ? TRUE : FALSE);
+}
+
+std::uint32_t SelectedM6Combo(HWND dialog, int control, std::uint32_t fallback) noexcept {
+    const LRESULT selected = SendDlgItemMessageW(dialog, control, CB_GETCURSEL, 0, 0);
+    if (selected == CB_ERR) {
+        return fallback;
+    }
+    const LRESULT value = SendDlgItemMessageW(
+        dialog, control, CB_GETITEMDATA, static_cast<WPARAM>(selected), 0);
+    return value == CB_ERR ? fallback : static_cast<std::uint32_t>(value);
+}
+
+INT_PTR CALLBACK M6EditorDialogProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<M6EditorState*>(GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    switch (message) {
+        case WM_INITDIALOG: {
+            state = reinterpret_cast<M6EditorState*>(lparam);
+            if (state == nullptr) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            SetDlgItemTextW(dialog, IDC_M6_TITLE, state->title);
+            constexpr std::array<int, 5U> labels{
+                IDC_M6_PARAM0_LABEL,
+                IDC_M6_PARAM1_LABEL,
+                IDC_M6_PARAM2_LABEL,
+                IDC_M6_PARAM3_LABEL,
+                IDC_M6_PARAM4_LABEL};
+            constexpr std::array<int, 5U> edits{
+                IDC_M6_PARAM0, IDC_M6_PARAM1, IDC_M6_PARAM2, IDC_M6_PARAM3, IDC_M6_PARAM4};
+            for (std::size_t index = 0; index < edits.size(); ++index) {
+                SetDlgItemTextW(dialog, labels[index], state->parameter_labels[index]);
+                std::array<wchar_t, 32U> value{};
+                _snwprintf_s(
+                    value.data(), value.size(), _TRUNCATE, L"%d", state->parameters[index]);
+                SetDlgItemTextW(dialog, edits[index], value.data());
+            }
+            FillM6Combo(
+                GetDlgItem(dialog, IDC_M6_CHANNEL),
+                state->channel_labels,
+                state->channel_values,
+                state->channel_count,
+                state->channel);
+            FillM6Combo(
+                GetDlgItem(dialog, IDC_M6_MODE),
+                state->mode_labels,
+                state->mode_values,
+                state->mode_count,
+                state->mode);
+            SetDlgItemTextW(dialog, IDC_M6_POINTS, state->points.c_str());
+            SetDlgItemTextW(dialog, IDC_M6_OPTION1, state->option1_label);
+            SetDlgItemTextW(dialog, IDC_M6_OPTION2, state->option2_label);
+            CheckDlgButton(dialog, IDC_M6_OPTION1, state->option1 ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(dialog, IDC_M6_OPTION2, state->option2 ? BST_CHECKED : BST_UNCHECKED);
+            EnableWindow(GetDlgItem(dialog, IDC_M6_OPTION1), state->option1_enabled ? TRUE : FALSE);
+            EnableWindow(GetDlgItem(dialog, IDC_M6_OPTION2), state->option2_enabled ? TRUE : FALSE);
+            if (state->close_immediately) {
+                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
+            }
+            return TRUE;
+        }
+        case WM_COMMAND:
+            if (state == nullptr) {
+                break;
+            }
+            if (LOWORD(wparam) == IDOK) {
+                constexpr std::array<int, 5U> edits{
+                    IDC_M6_PARAM0, IDC_M6_PARAM1, IDC_M6_PARAM2, IDC_M6_PARAM3, IDC_M6_PARAM4};
+                for (std::size_t index = 0; index < edits.size(); ++index) {
+                    if (!ReadSignedDialogValue(dialog, edits[index], state->parameters[index])) {
+                        if (!state->close_immediately) {
+                            MessageBoxW(
+                                dialog,
+                                L"数値パラメーターを10進整数で入力してください。",
+                                L"inkpod",
+                                MB_OK | MB_ICONWARNING);
+                        }
+                        return TRUE;
+                    }
+                }
+                state->channel = SelectedM6Combo(dialog, IDC_M6_CHANNEL, state->channel);
+                state->mode = SelectedM6Combo(dialog, IDC_M6_MODE, state->mode);
+                std::array<wchar_t, 1024U> points{};
+                GetDlgItemTextW(
+                    dialog, IDC_M6_POINTS, points.data(), static_cast<int>(points.size()));
+                try {
+                    state->points.assign(points.data());
+                } catch (const std::bad_alloc&) {
+                    return TRUE;
+                }
+                state->option1 = IsDlgButtonChecked(dialog, IDC_M6_OPTION1) == BST_CHECKED;
+                state->option2 = IsDlgButtonChecked(dialog, IDC_M6_OPTION2) == BST_CHECKED;
+                EndDialog(dialog, IDOK);
+                return TRUE;
+            }
+            if (LOWORD(wparam) == IDCANCEL) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            break;
+        case WM_CLOSE:
+            EndDialog(dialog, IDCANCEL);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
+INT_PTR ShowM6Editor(
+    HINSTANCE instance, HWND owner, bool close_immediately, M6EditorState& state) noexcept {
+    state.close_immediately = close_immediately;
+    return DialogBoxParamW(
+        instance,
+        MAKEINTRESOURCEW(IDD_M6_EDITOR),
+        owner,
+        M6EditorDialogProcedure,
+        reinterpret_cast<LPARAM>(&state));
+}
+
+INT_PTR CALLBACK M6ProgressDialogProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<AppState*>(GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    switch (message) {
+        case WM_INITDIALOG:
+            state = reinterpret_cast<AppState*>(lparam);
+            if (state == nullptr) {
+                DestroyWindow(dialog);
+                return TRUE;
+            }
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            SendDlgItemMessageW(dialog, IDC_M6_PROGRESS_BAR, PBM_SETRANGE32, 0, 1000);
+            SetTimer(dialog, kM6ProgressTimer, 100U, nullptr);
+            return TRUE;
+        case WM_TIMER:
+            if (state != nullptr && wparam == kM6ProgressTimer && state->m6_task != nullptr) {
+                InkpodM6TaskInfo info{};
+                info.struct_size = sizeof(info);
+                if (inkpod_m6_task_query(state->m6_task, &info) == INKPOD_STATUS_OK) {
+                    const std::uint64_t value = info.total_work == 0U
+                        ? 0U
+                        : std::min<std::uint64_t>(
+                              1000U, info.completed_work * 1000U / info.total_work);
+                    SendDlgItemMessageW(dialog, IDC_M6_PROGRESS_BAR, PBM_SETPOS, value, 0);
+                    std::array<wchar_t, 64U> text{};
+                    _snwprintf_s(
+                        text.data(),
+                        text.size(),
+                        _TRUNCATE,
+                        L"処理中... %llu / %llu",
+                        static_cast<unsigned long long>(info.completed_work),
+                        static_cast<unsigned long long>(info.total_work));
+                    SetDlgItemTextW(dialog, IDC_M6_PROGRESS_TEXT, text.data());
+                }
+                return TRUE;
+            }
+            break;
+        case WM_COMMAND:
+            if (LOWORD(wparam) == IDCANCEL && state != nullptr && state->m6_task != nullptr) {
+                inkpod_m6_task_cancel(state->m6_task);
+                EnableWindow(GetDlgItem(dialog, IDCANCEL), FALSE);
+                SetDlgItemTextW(dialog, IDC_M6_PROGRESS_TEXT, L"キャンセル中...");
+                return TRUE;
+            }
+            break;
+        case WM_CLOSE:
+            if (state != nullptr && state->m6_task != nullptr) {
+                inkpod_m6_task_cancel(state->m6_task);
+            }
+            return TRUE;
+        case WM_NCDESTROY:
+            KillTimer(dialog, kM6ProgressTimer);
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
 std::uint32_t CurrentShortcutModifiers(LPARAM key_data) noexcept {
     std::uint32_t modifiers{};
     if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
@@ -908,6 +1215,954 @@ bool QueryDocument(AppState& state, InkpodDocumentInfo& info) noexcept {
     return state.engine != nullptr && state.engine->GetDocumentInfo(info);
 }
 
+bool ParseCurvePoints(
+    const std::wstring& text, std::vector<InkpodCurvePoint>& points) noexcept {
+    points.clear();
+    const wchar_t* cursor = text.c_str();
+    try {
+        while (*cursor != L'\0') {
+            wchar_t* end{};
+            const unsigned long input = wcstoul(cursor, &end, 10);
+            if (end == cursor || *end != L':' || input > UINT16_MAX) {
+                return false;
+            }
+            cursor = end + 1;
+            const unsigned long output = wcstoul(cursor, &end, 10);
+            if (end == cursor || output > UINT16_MAX
+                || (*end != L';' && *end != L'\0')) {
+                return false;
+            }
+            points.push_back(InkpodCurvePoint{
+                sizeof(InkpodCurvePoint),
+                0U,
+                static_cast<std::uint32_t>(input),
+                static_cast<std::uint32_t>(output)});
+            cursor = *end == L';' ? end + 1 : end;
+        }
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return points.size() >= 2U && points.size() <= 64U;
+}
+
+bool ParseM6Stops(
+    const std::wstring& text,
+    std::vector<M6StopValue>& stops,
+    std::size_t minimum_stops = 3U) noexcept {
+    stops.clear();
+    const wchar_t* cursor = text.c_str();
+    try {
+        while (*cursor != L'\0') {
+            wchar_t* end{};
+            const unsigned long position = wcstoul(cursor, &end, 10);
+            if (end == cursor || *end != L':' || position > 1000U) {
+                return false;
+            }
+            cursor = end + 1;
+            const unsigned long color = wcstoul(cursor, &end, 16);
+            if (end == cursor || color > UINT32_MAX
+                || (*end != L';' && *end != L'\0')) {
+                return false;
+            }
+            stops.push_back(M6StopValue{
+                static_cast<std::uint32_t>(position), static_cast<std::uint32_t>(color)});
+            cursor = *end == L';' ? end + 1 : end;
+        }
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return stops.size() >= minimum_stops && stops.size() <= 16U
+        && std::is_sorted(
+            stops.begin(),
+            stops.end(),
+            [](const M6StopValue& left, const M6StopValue& right) {
+                return left.position_milli < right.position_milli;
+            })
+        && stops.front().position_milli == 0U && stops.back().position_milli == 1000U;
+}
+
+InkpodColorValue M6Color(std::uint32_t rgba) noexcept {
+    return InkpodColorValue{
+        sizeof(InkpodColorValue),
+        INKPOD_COLOR_DEPTH_8,
+        static_cast<std::uint16_t>((rgba >> 24U) & 0xffU),
+        static_cast<std::uint16_t>((rgba >> 16U) & 0xffU),
+        static_cast<std::uint16_t>((rgba >> 8U) & 0xffU),
+        static_cast<std::uint16_t>(rgba & 0xffU)};
+}
+
+InkpodFilterInput M6FilterInputFor(const M6FilterJob& job) noexcept {
+    InkpodFilterInput input{};
+    input.struct_size = sizeof(input);
+    input.kind = job.kind;
+    input.plane_id = job.plane_id;
+    input.channel = job.channel;
+    input.interpolation = job.interpolation;
+    input.parameter_0 = job.parameters[0];
+    input.parameter_1 = job.parameters[1];
+    input.parameter_2 = job.parameters[2];
+    input.parameter_3 = job.parameters[3];
+    input.parameter_4 = job.parameters[4];
+    if (!job.points.empty()) {
+        input.points = job.points.data();
+        input.point_count = job.points.size();
+        input.point_stride_bytes = sizeof(InkpodCurvePoint);
+    }
+    return input;
+}
+
+M6AdjustmentUiState* CurrentM6Adjustment(AppState& state) noexcept {
+    const auto found = std::find_if(
+        state.m6_adjustments.begin(),
+        state.m6_adjustments.end(),
+        [&state](const M6AdjustmentUiState& adjustment) {
+            return adjustment.id == state.m6_adjustment_id;
+        });
+    return found == state.m6_adjustments.end() ? nullptr : &*found;
+}
+
+bool FormatCurvePoints(
+    const std::vector<InkpodCurvePoint>& points, std::wstring& text) noexcept {
+    try {
+        text.clear();
+        for (std::size_t index = 0; index < points.size(); ++index) {
+            if (index != 0U) {
+                text.push_back(L';');
+            }
+            text.append(std::to_wstring(points[index].input));
+            text.push_back(L':');
+            text.append(std::to_wstring(points[index].output));
+        }
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+InkpodStatus StartM6Task(
+    AppState& state,
+    bool preview_prompt,
+    std::function<InkpodStatus(InkpodCore*, InkpodM6Task*)> operation) noexcept {
+    if (state.engine == nullptr || state.m6_task != nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    InkpodM6Task* task{};
+    InkpodStatus status = inkpod_m6_task_create(&task);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    if (state.smoke_test) {
+        status = state.engine->Invoke(
+            [task, operation = std::move(operation)](InkpodCore* core) {
+                return operation(core, task);
+            },
+            true,
+            true);
+        if (status == INKPOD_STATUS_OK && preview_prompt) {
+            status = state.engine->Invoke(
+                [](InkpodCore* core) {
+                    InkpodDispatchResult result{};
+                    result.struct_size = sizeof(result);
+                    return inkpod_core_filter_preview_apply(core, &result);
+                },
+                true,
+                true);
+        }
+        inkpod_m6_task_release(&task);
+        return status;
+    }
+    state.m6_task = task;
+    state.m6_preview_prompt = preview_prompt;
+    state.m6_progress = CreateDialogParamW(
+        state.instance,
+        MAKEINTRESOURCEW(IDD_M6_PROGRESS),
+        state.window,
+        M6ProgressDialogProcedure,
+        reinterpret_cast<LPARAM>(&state));
+    if (state.m6_progress == nullptr) {
+        inkpod_m6_task_release(&state.m6_task);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    ShowWindow(state.m6_progress, SW_SHOW);
+    const HWND window = state.window;
+    if (!state.engine->Enqueue(
+            [task, operation = std::move(operation)](InkpodCore* core) {
+                return operation(core, task);
+            },
+            true,
+            true,
+            true,
+            [window](InkpodStatus completion_status) {
+                PostMessageW(window, kM6TaskCompleted, completion_status, 0);
+            })) {
+        DestroyWindow(state.m6_progress);
+        state.m6_progress = nullptr;
+        inkpod_m6_task_release(&state.m6_task);
+        state.m6_preview_prompt = false;
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    return INKPOD_STATUS_OK;
+}
+
+std::uint32_t M6FilterKindForCommand(UINT command) noexcept {
+    switch (command) {
+        case IDM_FILTER_SHARPEN_WEAK:
+            return INKPOD_FILTER_SHARPEN_WEAK;
+        case IDM_FILTER_SHARPEN_STRONG:
+            return INKPOD_FILTER_SHARPEN_STRONG;
+        case IDM_FILTER_BLUR_WEAK:
+            return INKPOD_FILTER_BLUR_WEAK;
+        case IDM_FILTER_BLUR_STRONG:
+            return INKPOD_FILTER_BLUR_STRONG;
+        case IDM_FILTER_GAUSSIAN:
+            return INKPOD_FILTER_GAUSSIAN_BLUR;
+        case IDM_FILTER_INVERT:
+            return INKPOD_FILTER_INVERT;
+        case IDM_FILTER_AUTO_CONTRAST:
+            return INKPOD_FILTER_AUTO_CONTRAST;
+        case IDM_FILTER_BRIGHTNESS:
+            return INKPOD_FILTER_BRIGHTNESS_CONTRAST;
+        case IDM_FILTER_TONE_CURVE:
+            return INKPOD_FILTER_TONE_CURVE;
+        case IDM_FILTER_LEVELS:
+            return INKPOD_FILTER_LEVELS;
+        case IDM_FILTER_HSV:
+            return INKPOD_FILTER_HSV;
+        case IDM_FILTER_COLOR_BALANCE:
+            return INKPOD_FILTER_COLOR_BALANCE;
+        case IDM_FILTER_UNSHARP:
+            return INKPOD_FILTER_UNSHARP_MASK;
+        default:
+            return 0U;
+    }
+}
+
+bool ConfigureM6FilterEditor(
+    AppState& state, UINT command, M6FilterJob& job) noexcept {
+    job.kind = M6FilterKindForCommand(command);
+    if (job.kind == 0U) {
+        return false;
+    }
+    M6EditorState editor{};
+    editor.title = L"フィルタ（選択範囲があればその内側だけに適用）";
+    editor.parameter_labels = {
+        L"P0 / radius", L"P1 / amount", L"P2", L"P3", L"P4"};
+    editor.channel_labels = {L"RGB", L"Red", L"Green", L"Blue"};
+    editor.channel_values = {
+        INKPOD_FILTER_CHANNEL_RGB,
+        INKPOD_FILTER_CHANNEL_RED,
+        INKPOD_FILTER_CHANNEL_GREEN,
+        INKPOD_FILTER_CHANNEL_BLUE};
+    editor.channel_count = editor.channel_labels.size();
+    editor.channel = INKPOD_FILTER_CHANNEL_RGB;
+    editor.mode_labels = {L"Bezier", L"B-spline", nullptr, nullptr};
+    editor.mode_values = {INKPOD_CURVE_BEZIER, INKPOD_CURVE_BSPLINE, 0U, 0U};
+    editor.mode_count = 2U;
+    editor.mode = INKPOD_CURVE_BEZIER;
+    editor.points = L"0:0;32768:32768;65535:65535";
+    editor.option1 = true;
+    editor.option2_enabled = false;
+    if (job.kind == INKPOD_FILTER_GAUSSIAN_BLUR) {
+        editor.parameters = {3, 1000, 0, 0, 0};
+    } else if (job.kind == INKPOD_FILTER_LEVELS) {
+        editor.parameters = {0, 1000, 65535, 0, 65535};
+    } else if (job.kind == INKPOD_FILTER_UNSHARP_MASK) {
+        editor.parameters = {2, 1000, 0, 0, 0};
+    }
+    if (ShowM6Editor(state.instance, state.window, state.smoke_test, editor) != IDOK) {
+        return false;
+    }
+    job.channel = editor.channel;
+    job.interpolation = editor.mode;
+    job.parameters = editor.parameters;
+    job.preview = editor.option1;
+    if (job.kind == INKPOD_FILTER_TONE_CURVE
+        && !ParseCurvePoints(editor.points, job.points)) {
+        if (!state.smoke_test) {
+            MessageBoxW(
+                state.window,
+                L"トーンカーブ点は input:output;...（各0～65535）で2点以上指定してください。",
+                L"inkpod",
+                MB_OK | MB_ICONWARNING);
+        }
+        return false;
+    }
+    return true;
+}
+
+InkpodStatus QueueM6Filter(AppState& state, M6FilterJob job) noexcept {
+    return StartM6Task(
+        state,
+        job.preview,
+        [job = std::move(job)](InkpodCore* core, InkpodM6Task* task) {
+            const InkpodFilterInput input = M6FilterInputFor(job);
+            InkpodFilterPreviewInfo preview{};
+            preview.struct_size = sizeof(preview);
+            InkpodStatus status = inkpod_core_filter_preview_begin_task(
+                core, &input, task, &preview);
+            if (status == INKPOD_STATUS_OK && !job.preview) {
+                InkpodDispatchResult result{};
+                result.struct_size = sizeof(result);
+                status = inkpod_core_filter_preview_apply(core, &result);
+                if (status != INKPOD_STATUS_OK) {
+                    inkpod_core_filter_preview_cancel(core, &preview);
+                }
+            }
+            return status;
+        });
+}
+
+bool ConfigureM6AdjustmentEditor(
+    AppState& state, M6FilterJob& job, bool update) noexcept {
+    M6EditorState editor{};
+    editor.title = L"調整レイヤー（作成後も同じ項目から再編集可能）";
+    editor.parameter_labels = {
+        L"P0 / 明るさ / shadow",
+        L"P1 / contrast / gamma",
+        L"P2 / highlight",
+        L"P3 / output shadow",
+        L"P4 / output highlight"};
+    editor.channel_labels = {
+        L"明るさ・コントラスト", L"トーンカーブ", L"レベル補正", nullptr, nullptr};
+    editor.channel_values = {
+        INKPOD_FILTER_BRIGHTNESS_CONTRAST,
+        INKPOD_FILTER_TONE_CURVE,
+        INKPOD_FILTER_LEVELS,
+        0U,
+        0U};
+    editor.channel_count = 3U;
+    editor.channel = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
+    editor.mode_labels = {L"Bezier", L"B-spline", nullptr, nullptr};
+    editor.mode_values = {INKPOD_CURVE_BEZIER, INKPOD_CURVE_BSPLINE, 0U, 0U};
+    editor.mode_count = 2U;
+    editor.mode = INKPOD_CURVE_BEZIER;
+    editor.points = L"0:0;32768:32768;65535:65535";
+    editor.option1 = false;
+    editor.option2 = false;
+    editor.option1_enabled = false;
+    editor.option2_enabled = false;
+    if (update) {
+        const M6AdjustmentUiState* current = CurrentM6Adjustment(state);
+        if (current == nullptr) {
+            return false;
+        }
+        try {
+            job = current->job;
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+        editor.channel = job.kind;
+        editor.mode = job.interpolation;
+        editor.parameters = job.parameters;
+        if (job.kind == INKPOD_FILTER_TONE_CURVE
+            && !FormatCurvePoints(job.points, editor.points)) {
+            return false;
+        }
+    }
+    if (ShowM6Editor(state.instance, state.window, state.smoke_test, editor) != IDOK) {
+        return false;
+    }
+    job.kind = editor.channel;
+    job.channel = INKPOD_FILTER_CHANNEL_RGB;
+    job.interpolation = editor.mode;
+    job.parameters = editor.parameters;
+    if (job.kind == INKPOD_FILTER_TONE_CURVE
+        && !ParseCurvePoints(editor.points, job.points)) {
+        if (!state.smoke_test) {
+            MessageBoxW(
+                state.window,
+                L"トーンカーブ点は input:output;... 形式で2点以上指定してください。",
+                L"inkpod",
+                MB_OK | MB_ICONWARNING);
+        }
+        return false;
+    }
+    return true;
+}
+
+InkpodStatus CreateOrUpdateM6Adjustment(
+    AppState& state, M6FilterJob job, bool update) noexcept {
+    if (state.engine == nullptr || (update && state.m6_adjustment_id == 0U)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const std::uint64_t layer_id = state.m6_adjustment_id;
+    std::shared_ptr<M6AdjustmentUiState> pending;
+    try {
+        std::string name;
+        if (update) {
+            const M6AdjustmentUiState* current = CurrentM6Adjustment(state);
+            if (current == nullptr) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            name = current->name;
+        } else {
+            name = "M6 Adjustment " + std::to_string(state.m6_adjustments.size() + 1U);
+            state.m6_adjustments.reserve(state.m6_adjustments.size() + 1U);
+        }
+        pending = std::make_shared<M6AdjustmentUiState>(
+            M6AdjustmentUiState{layer_id, true, std::move(job), std::move(name)});
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    std::uint64_t created_id{};
+    const InkpodStatus status = state.engine->Invoke(
+        [pending, update, layer_id, &created_id](InkpodCore* core) {
+            const InkpodFilterInput input = M6FilterInputFor(pending->job);
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            if (update) {
+                return inkpod_core_adjustment_update(core, layer_id, &input, &result);
+            }
+            return inkpod_core_adjustment_create(
+                core,
+                &input,
+                reinterpret_cast<const std::uint8_t*>(pending->name.data()),
+                pending->name.size(),
+                &result,
+                &created_id);
+        },
+        true,
+        true);
+    if (status == INKPOD_STATUS_OK && !update) {
+        pending->id = created_id;
+        state.m6_adjustment_id = created_id;
+        state.m6_adjustment_visible = true;
+        state.m6_adjustments.push_back(std::move(*pending));
+    } else if (status == INKPOD_STATUS_OK) {
+        M6AdjustmentUiState* current = CurrentM6Adjustment(state);
+        if (current != nullptr) {
+            current->job = std::move(pending->job);
+        }
+    }
+    return status;
+}
+
+InkpodStatus SetM6AdjustmentVisibility(AppState& state, bool visible) noexcept {
+    if (state.engine == nullptr || state.m6_adjustment_id == 0U) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const std::uint64_t layer_id = state.m6_adjustment_id;
+    M6AdjustmentUiState* current = CurrentM6Adjustment(state);
+    if (current == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const InkpodStatus status = state.engine->Invoke(
+        [layer_id, visible, current](InkpodCore* core) {
+            InkpodTreeEdit edit{};
+            edit.struct_size = sizeof(edit);
+            edit.operation = INKPOD_TREE_SET_LAYER_PROPERTIES;
+            edit.flags = INKPOD_NODE_EDITABLE | (visible ? INKPOD_NODE_VISIBLE : 0U);
+            edit.object_id = layer_id;
+            edit.opacity_milli = 1000U;
+            edit.name_utf8 = reinterpret_cast<const std::uint8_t*>(current->name.data());
+            edit.name_bytes = current->name.size();
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            std::uint64_t ignored{};
+            return inkpod_core_tree_edit(core, &edit, &result, &ignored);
+        },
+        true,
+        true);
+    if (status == INKPOD_STATUS_OK) {
+        current->visible = visible;
+    }
+    return status;
+}
+
+bool SelectM6Adjustment(AppState& state, bool next) noexcept {
+    if (state.m6_adjustments.empty()) {
+        return false;
+    }
+    const auto current = std::find_if(
+        state.m6_adjustments.begin(),
+        state.m6_adjustments.end(),
+        [&state](const M6AdjustmentUiState& adjustment) {
+            return adjustment.id == state.m6_adjustment_id;
+        });
+    std::size_t index = current == state.m6_adjustments.end()
+        ? 0U
+        : static_cast<std::size_t>(current - state.m6_adjustments.begin());
+    if (next) {
+        index = (index + 1U) % state.m6_adjustments.size();
+    } else {
+        index = (index + state.m6_adjustments.size() - 1U)
+            % state.m6_adjustments.size();
+    }
+    state.m6_adjustment_id = state.m6_adjustments[index].id;
+    state.m6_adjustment_visible = state.m6_adjustments[index].visible;
+    return true;
+}
+
+std::vector<InkpodGradientStop> M6GradientStops(const std::vector<M6StopValue>& values) {
+    std::vector<InkpodGradientStop> stops;
+    stops.reserve(values.size());
+    for (const M6StopValue& value : values) {
+        stops.push_back(InkpodGradientStop{
+            sizeof(InkpodGradientStop),
+            0U,
+            value.position_milli,
+            0U,
+            M6Color(value.rgba)});
+    }
+    return stops;
+}
+
+InkpodStatus QueueBoundaryAirbrush(AppState& state, const M6ToolOptions& options) noexcept {
+    InkpodDocumentInfo document{};
+    if (!QueryDocument(state, document) || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    std::vector<InkpodColorValue> colors;
+    try {
+        colors.reserve(options.stops.size());
+        for (const M6StopValue& stop : options.stops) {
+            colors.push_back(M6Color(stop.rgba));
+        }
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const std::uint32_t width = static_cast<std::uint32_t>(options.parameters[0]);
+    const std::uint32_t strength = static_cast<std::uint32_t>(options.parameters[1]);
+    const std::uint64_t plane_id = document.color_plane_id;
+    return state.engine->Enqueue(
+               [colors = std::move(colors), width, strength, plane_id](InkpodCore* core) {
+                   InkpodBoundaryAirbrushInput input{};
+                   input.struct_size = sizeof(input);
+                   input.plane_id = plane_id;
+                   input.width = width;
+                   input.strength_milli = strength;
+                   input.colors = InkpodColorArray{
+                       sizeof(InkpodColorArray),
+                       0U,
+                       INKPOD_FEATURE_NONE,
+                       colors.data(),
+                       colors.size(),
+                       sizeof(InkpodColorValue)};
+                   InkpodDispatchResult result{};
+                   result.struct_size = sizeof(result);
+                   return inkpod_core_effect_boundary_airbrush(core, &input, &result);
+               },
+               true,
+               true,
+               true)
+        ? INKPOD_STATUS_OK
+        : INKPOD_STATUS_INVALID_STATE;
+}
+
+bool ConfigureM6Effect(AppState& state, UINT command) noexcept {
+    M6EditorState editor{};
+    editor.option1 = false;
+    editor.option2 = false;
+    editor.channel_labels = {L"ペン", L"矩形", L"折れ線", L"投げ縄", nullptr};
+    editor.channel_values = {
+        INKPOD_SELECTION_TRACE,
+        INKPOD_SELECTION_RECTANGLE,
+        INKPOD_SELECTION_POLYLINE,
+        INKPOD_SELECTION_LASSO,
+        0U};
+    editor.channel_count = 4U;
+    editor.channel = INKPOD_SELECTION_TRACE;
+    editor.points = L"0:00000000;500:80808080;1000:ffffffff";
+    std::uint32_t interaction{};
+    switch (command) {
+        case IDM_EFFECT_GRADIENT:
+        case IDM_EFFECT_ALPHA_GRADIENT:
+            editor.title = command == IDM_EFFECT_GRADIENT
+                ? L"グラデーション（3～16 stops、Canvasをドラッグ）"
+                : L"アルファグラデーション（RGBは保持、Canvasをドラッグ）";
+            editor.parameter_labels = {L"未使用", L"未使用", L"未使用", L"未使用", L"未使用"};
+            editor.channel_labels = {L"合成", L"上書き", nullptr, nullptr, nullptr};
+            editor.channel_values = {
+                INKPOD_GRADIENT_COMPOSITE, INKPOD_GRADIENT_OVERWRITE, 0U, 0U, 0U};
+            editor.channel_count = 2U;
+            editor.channel = INKPOD_GRADIENT_OVERWRITE;
+            editor.mode_labels = {L"線形", L"放射", nullptr, nullptr};
+            editor.mode_values = {INKPOD_GRADIENT_LINEAR, INKPOD_GRADIENT_RADIAL, 0U, 0U};
+            editor.mode_count = 2U;
+            editor.mode = INKPOD_GRADIENT_LINEAR;
+            editor.option1_label = L"ディザー";
+            editor.option2_label = L"45度制約";
+            interaction = command == IDM_EFFECT_GRADIENT ? kInteractionM6Gradient
+                                                         : kInteractionM6AlphaGradient;
+            break;
+        case IDM_EFFECT_AIRBRUSH:
+            editor.title = L"エアブラシ（Canvasをドラッグ）";
+            editor.parameter_labels = {
+                L"半径 milli", L"硬さ 0-1000", L"間隔 milli", L"不透明度", L"fade"};
+            editor.parameters = {8000, 500, 2000, 500, 0};
+            editor.channel_count = 0U;
+            editor.mode_count = 0U;
+            editor.points.clear();
+            editor.option1 = true;
+            editor.option2 = true;
+            editor.option1_label = L"筆圧で不透明度";
+            editor.option2_label = L"筆圧でサイズ";
+            interaction = kInteractionM6Airbrush;
+            break;
+        case IDM_EFFECT_BOUNDARY_AIRBRUSH:
+            editor.title = L"境界色エアブラシ（現在の選択範囲へ適用）";
+            editor.parameter_labels = {L"幅 px", L"強さ 0-1000", L"未使用", L"未使用", L"未使用"};
+            editor.parameters = {3, 500, 0, 0, 0};
+            editor.channel_count = 0U;
+            editor.mode_count = 0U;
+            editor.points = L"0:ff0000ff;500:00ff00ff;1000:0000ffff";
+            editor.option1_enabled = false;
+            editor.option2_enabled = false;
+            break;
+        case IDM_EFFECT_BLUR:
+            editor.title = L"ぼかしツール（領域をCanvasで指定）";
+            editor.parameter_labels = {
+                L"ぼかし半径", L"強さ 0-1000", L"ペン径 px", L"未使用", L"未使用"};
+            editor.parameters = {3, 750, 24, 0, 0};
+            editor.mode_count = 0U;
+            editor.points.clear();
+            editor.option1 = true;
+            editor.option1_label = L"ペン範囲を筆圧で細くする";
+            editor.option2_enabled = false;
+            interaction = kInteractionM6Blur;
+            break;
+        case IDM_EFFECT_STAMP:
+            editor.title = L"スタンプ（Alt+クリックでsource、次にCanvasをドラッグ）";
+            editor.parameter_labels = {
+                L"半径 milli", L"硬さ 0-1000", L"間隔 milli", L"不透明度", L"未使用"};
+            editor.parameters = {8000, 750, 2000, 1000, 0};
+            editor.channel_count = 0U;
+            editor.mode_labels = {L"円形", L"矩形", nullptr, nullptr};
+            editor.mode_values = {INKPOD_STAMP_ROUND, INKPOD_STAMP_SQUARE, 0U, 0U};
+            editor.mode_count = 2U;
+            editor.mode = INKPOD_STAMP_ROUND;
+            editor.points.clear();
+            editor.option1 = true;
+            editor.option2 = true;
+            editor.option1_label = L"筆圧で不透明度";
+            editor.option2_label = L"筆圧でサイズ";
+            interaction = kInteractionM6Stamp;
+            break;
+        case IDM_EFFECT_DUST:
+            editor.title = L"ゴミ取り（全体または領域を指定、vector planeは拒否）";
+            editor.parameter_labels = {
+                L"最大pixel数", L"ペン径 px", L"未使用", L"未使用", L"未使用"};
+            editor.parameters = {8, 24, 0, 0, 0};
+            editor.channel_labels = {L"全体", L"ペン", L"矩形", L"折れ線", L"投げ縄"};
+            editor.channel_values = {
+                0U,
+                INKPOD_SELECTION_TRACE,
+                INKPOD_SELECTION_RECTANGLE,
+                INKPOD_SELECTION_POLYLINE,
+                INKPOD_SELECTION_LASSO};
+            editor.channel_count = 5U;
+            editor.channel = 0U;
+            editor.mode_labels = {L"前景ゴミ除去", L"透明穴埋め", L"色外れ置換", nullptr};
+            editor.mode_values = {
+                INKPOD_DUST_REMOVE_FOREGROUND,
+                INKPOD_DUST_FILL_TRANSPARENT_HOLES,
+                INKPOD_DUST_REPLACE_COLOR_OUTLIERS,
+                0U};
+            editor.mode_count = 3U;
+            editor.mode = INKPOD_DUST_REMOVE_FOREGROUND;
+            editor.points.clear();
+            editor.option1 = true;
+            editor.option1_label = L"プレビューして確認";
+            editor.option2_enabled = false;
+            interaction = kInteractionM6Dust;
+            break;
+        default:
+            return false;
+    }
+    if (ShowM6Editor(state.instance, state.window, state.smoke_test, editor) != IDOK) {
+        return false;
+    }
+    M6ToolOptions options{};
+    options.parameters = editor.parameters;
+    options.shape = editor.channel;
+    options.mode = editor.mode;
+    options.option = editor.option1;
+    options.option2 = editor.option2;
+    if (command == IDM_EFFECT_GRADIENT || command == IDM_EFFECT_ALPHA_GRADIENT
+        || command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
+        const std::size_t minimum_stops = command == IDM_EFFECT_BOUNDARY_AIRBRUSH ? 2U : 3U;
+        if (!ParseM6Stops(editor.points, options.stops, minimum_stops)) {
+            if (!state.smoke_test) {
+                MessageBoxW(
+                    state.window,
+                    command == IDM_EFFECT_BOUNDARY_AIRBRUSH
+                        ? L"境界色は position:RRGGBBAA;... 形式で2～16個、0から1000まで昇順に指定してください。"
+                        : L"stopは position:RRGGBBAA;... 形式で3～16個、0から1000まで昇順に指定してください。",
+                    L"inkpod",
+                    MB_OK | MB_ICONWARNING);
+            }
+            return false;
+        }
+    }
+    if (command == IDM_EFFECT_GRADIENT || command == IDM_EFFECT_ALPHA_GRADIENT) {
+        options.parameters[0] = editor.option1 ? 1 : 0;
+    }
+    state.m6_options = std::move(options);
+    state.tool = interaction;
+    state.m6_samples.clear();
+    if (command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
+        state.tool = INKPOD_TOOL_BRUSH;
+        return QueueBoundaryAirbrush(state, state.m6_options) == INKPOD_STATUS_OK;
+    }
+    return true;
+}
+
+InkpodStatus QueueM6GradientGesture(
+    AppState& state, std::vector<InkpodStrokeSample> samples, bool alpha_only) noexcept {
+    InkpodDocumentInfo document{};
+    if (samples.size() < 2U || !QueryDocument(state, document) || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    std::vector<InkpodGradientStop> stops;
+    try {
+        stops = M6GradientStops(state.m6_options.stops);
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    M6ToolOptions options{};
+    try {
+        options = state.m6_options;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const std::uint64_t plane_id = document.color_plane_id;
+    return state.engine->Enqueue(
+               [samples = std::move(samples), stops = std::move(stops), options, plane_id, alpha_only](
+                   InkpodCore* core) {
+                   InkpodLocatorOutput start{};
+                   InkpodLocatorOutput end{};
+                   start.struct_size = sizeof(start);
+                   end.struct_size = sizeof(end);
+                   InkpodStatus status = inkpod_core_locator_sample(
+                       core, 0U, samples.front().x, samples.front().y, &start);
+                   if (status == INKPOD_STATUS_OK) {
+                       status = inkpod_core_locator_sample(
+                           core, 0U, samples.back().x, samples.back().y, &end);
+                   }
+                   InkpodGradientInput input{};
+                   input.struct_size = sizeof(input);
+                   input.kind = options.mode;
+                   input.feature_flags = options.option2
+                       ? INKPOD_GRADIENT_FLAG_CONSTRAIN_45
+                       : INKPOD_FEATURE_NONE;
+                   input.plane_id = plane_id;
+                   input.mode = options.shape;
+                   input.dither = options.parameters[0] != 0 ? 1U : 0U;
+                   input.start_x_milli = static_cast<std::int64_t>(start.document_x) * 1000;
+                   input.start_y_milli = static_cast<std::int64_t>(start.document_y) * 1000;
+                   input.end_x_milli = static_cast<std::int64_t>(end.document_x) * 1000;
+                   input.end_y_milli = static_cast<std::int64_t>(end.document_y) * 1000;
+                   input.stops = stops.data();
+                   input.stop_count = stops.size();
+                   input.stop_stride_bytes = sizeof(InkpodGradientStop);
+                   InkpodDispatchResult result{};
+                   result.struct_size = sizeof(result);
+                   if (status != INKPOD_STATUS_OK) {
+                       return status;
+                   }
+                   return alpha_only ? inkpod_core_alpha_gradient(core, &input, &result)
+                                     : inkpod_core_effect_gradient(core, &input, &result);
+               },
+               true,
+               true,
+               true)
+        ? INKPOD_STATUS_OK
+        : INKPOD_STATUS_INVALID_STATE;
+}
+
+InkpodStatus QueueM6AirbrushGesture(
+    AppState& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    InkpodDocumentInfo document{};
+    if (samples.empty() || !QueryDocument(state, document) || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    M6ToolOptions options{};
+    try {
+        options = state.m6_options;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const InkpodColorValue color = M6Color(state.color_rgba);
+    const std::uint64_t plane_id = document.color_plane_id;
+    return state.engine->Enqueue(
+               [samples = std::move(samples), options, color, plane_id](InkpodCore* core) {
+                   InkpodAirbrushGestureInput input{};
+                   input.struct_size = sizeof(input);
+                   input.coordinate_space = INKPOD_COORDINATE_SPACE_DEVICE;
+                   input.feature_flags = options.option2 ? INKPOD_EFFECT_FLAG_PRESSURE_SIZE : 0U;
+                   if (options.option) {
+                       input.feature_flags |= INKPOD_EFFECT_FLAG_PRESSURE_OPACITY;
+                   }
+                   input.plane_id = plane_id;
+                   input.radius_milli = static_cast<std::uint32_t>(options.parameters[0]);
+                    input.hardness_milli = static_cast<std::uint32_t>(options.parameters[1]);
+                    input.spacing_milli = static_cast<std::uint32_t>(options.parameters[2]);
+                    input.opacity_milli = static_cast<std::uint32_t>(options.parameters[3]);
+                    input.fade_milli = static_cast<std::uint32_t>(options.parameters[4]);
+                   input.continuous_dabs = 1U;
+                   input.color = color;
+                   input.samples = samples.data();
+                   input.sample_count = samples.size();
+                   input.sample_stride_bytes = sizeof(InkpodStrokeSample);
+                   InkpodDispatchResult result{};
+                   result.struct_size = sizeof(result);
+                   return inkpod_core_effect_airbrush_gesture(core, &input, &result);
+               },
+               true,
+               true,
+               true)
+        ? INKPOD_STATUS_OK
+        : INKPOD_STATUS_INVALID_STATE;
+}
+
+InkpodStatus QueueM6StampGesture(
+    AppState& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    InkpodDocumentInfo document{};
+    if (!state.stamp_source_valid || samples.empty() || !QueryDocument(state, document)
+        || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    M6ToolOptions options{};
+    try {
+        options = state.m6_options;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const InkpodStrokeSample source = state.stamp_source;
+    const std::uint64_t plane_id = document.color_plane_id;
+    return state.engine->Enqueue(
+               [samples = std::move(samples), options, source, plane_id](InkpodCore* core) {
+                   InkpodStampGestureInput input{};
+                   input.struct_size = sizeof(input);
+                   input.coordinate_space = INKPOD_COORDINATE_SPACE_DEVICE;
+                   input.feature_flags = options.option2 ? INKPOD_EFFECT_FLAG_PRESSURE_SIZE : 0U;
+                   if (options.option) {
+                       input.feature_flags |= INKPOD_EFFECT_FLAG_PRESSURE_OPACITY;
+                   }
+                   input.plane_id = plane_id;
+                   input.source = source;
+                   input.radius_milli = static_cast<std::uint32_t>(options.parameters[0]);
+                    input.hardness_milli = static_cast<std::uint32_t>(options.parameters[1]);
+                    input.spacing_milli = static_cast<std::uint32_t>(options.parameters[2]);
+                    input.opacity_milli = static_cast<std::uint32_t>(options.parameters[3]);
+                    input.shape = options.mode;
+                    input.samples = samples.data();
+                   input.sample_count = samples.size();
+                   input.sample_stride_bytes = sizeof(InkpodStrokeSample);
+                   InkpodDispatchResult result{};
+                   result.struct_size = sizeof(result);
+                   return inkpod_core_effect_stamp_gesture(core, &input, &result);
+               },
+               true,
+               true,
+               true)
+        ? INKPOD_STATUS_OK
+        : INKPOD_STATUS_INVALID_STATE;
+}
+
+InkpodStatus QueueM6BlurGesture(
+    AppState& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    InkpodDocumentInfo document{};
+    if (samples.empty() || !QueryDocument(state, document) || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    M6ToolOptions options{};
+    try {
+        options = state.m6_options;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const std::uint64_t plane_id = document.color_plane_id;
+    return state.engine->Enqueue(
+               [samples = std::move(samples), options, plane_id](InkpodCore* core) {
+                   InkpodBlurToolInput input{};
+                   input.struct_size = sizeof(input);
+                   input.coordinate_space = INKPOD_COORDINATE_SPACE_DEVICE;
+                   input.feature_flags = options.option ? INKPOD_EFFECT_FLAG_PRESSURE_SIZE : 0U;
+                   input.plane_id = plane_id;
+                   input.radius = static_cast<std::uint32_t>(options.parameters[0]);
+                   input.strength_milli = static_cast<std::uint32_t>(options.parameters[1]);
+                   input.shape = options.shape;
+                   input.diameter = static_cast<float>(options.parameters[2]);
+                   input.samples = samples.data();
+                   input.sample_count = samples.size();
+                   input.sample_stride_bytes = sizeof(InkpodStrokeSample);
+                   InkpodDispatchResult result{};
+                   result.struct_size = sizeof(result);
+                   return inkpod_core_effect_blur_tool(core, &input, &result);
+               },
+               true,
+               true,
+               true)
+        ? INKPOD_STATUS_OK
+        : INKPOD_STATUS_INVALID_STATE;
+}
+
+InkpodStatus QueueM6Dust(
+    AppState& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    InkpodDocumentInfo document{};
+    if (!QueryDocument(state, document)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    M6ToolOptions options{};
+    try {
+        options = state.m6_options;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const std::uint64_t plane_id = document.color_plane_id;
+    const bool preview = options.option;
+    return StartM6Task(
+        state,
+        preview,
+        [samples = std::move(samples), options, plane_id, preview](
+            InkpodCore* core, InkpodM6Task* task) {
+            InkpodDustInput input{};
+            input.struct_size = sizeof(input);
+            input.mode = options.mode;
+            input.plane_id = plane_id;
+            input.coordinate_space = INKPOD_COORDINATE_SPACE_DEVICE;
+            input.shape = options.shape;
+            input.maximum_pixels = static_cast<std::uint32_t>(options.parameters[0]);
+            input.use_region = options.shape == 0U ? 0U : 1U;
+            input.diameter = static_cast<float>(options.parameters[1]);
+            if (input.use_region != 0U) {
+                input.samples = samples.data();
+                input.sample_count = samples.size();
+                input.sample_stride_bytes = sizeof(InkpodStrokeSample);
+            }
+            if (preview) {
+                InkpodFilterPreviewInfo info{};
+                info.struct_size = sizeof(info);
+                return inkpod_core_dust_preview_begin(core, &input, task, &info);
+            }
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            return inkpod_core_dust_remove(core, &input, task, &result);
+        });
+}
+
+InkpodStatus FinishM6CanvasGesture(AppState& state) noexcept {
+    std::vector<InkpodStrokeSample> samples;
+    samples.swap(state.m6_samples);
+    switch (state.tool) {
+        case kInteractionM6Gradient:
+            return QueueM6GradientGesture(state, std::move(samples), false);
+        case kInteractionM6AlphaGradient:
+            return QueueM6GradientGesture(state, std::move(samples), true);
+        case kInteractionM6Airbrush:
+            return QueueM6AirbrushGesture(state, std::move(samples));
+        case kInteractionM6Blur:
+            return QueueM6BlurGesture(state, std::move(samples));
+        case kInteractionM6Stamp:
+            return QueueM6StampGesture(state, std::move(samples));
+        case kInteractionM6Dust:
+            return QueueM6Dust(state, std::move(samples));
+        default:
+            return INKPOD_STATUS_INVALID_STATE;
+    }
+}
+
 void UpdateMenuState(AppState& state) noexcept {
     HMENU menu = GetMenu(state.window);
     if (menu == nullptr) {
@@ -962,13 +2217,67 @@ void UpdateMenuState(AppState& state) noexcept {
         EnableMenuItem(
             menu, command, MF_BYCOMMAND | (has_document ? MF_ENABLED : MF_GRAYED));
     }
-    for (const UINT command : {IDM_FILTER_LAST, IDM_FILTER_INVERT, IDM_FILTER_BLUR_WEAK}) {
+    for (const UINT command : {
+             IDM_FILTER_LAST,
+             IDM_FILTER_INVERT,
+             IDM_FILTER_BLUR_WEAK,
+             IDM_FILTER_SHARPEN_WEAK,
+             IDM_FILTER_SHARPEN_STRONG,
+             IDM_FILTER_BLUR_STRONG,
+             IDM_FILTER_GAUSSIAN,
+             IDM_FILTER_AUTO_CONTRAST,
+             IDM_FILTER_BRIGHTNESS,
+             IDM_FILTER_TONE_CURVE,
+             IDM_FILTER_LEVELS,
+             IDM_FILTER_HSV,
+             IDM_FILTER_COLOR_BALANCE,
+             IDM_FILTER_UNSHARP,
+             IDM_EFFECT_GRADIENT,
+             IDM_EFFECT_AIRBRUSH,
+             IDM_EFFECT_BOUNDARY_AIRBRUSH,
+             IDM_EFFECT_BLUR,
+             IDM_EFFECT_STAMP,
+             IDM_EFFECT_DUST,
+             IDM_EFFECT_ALPHA_GRADIENT,
+             IDM_EFFECT_ALPHA_VIEW}) {
         EnableMenuItem(
             menu,
             command,
             MF_BYCOMMAND
                 | (has_document && state.plane == INKPOD_PLANE_COLOR ? MF_ENABLED : MF_GRAYED));
     }
+    EnableMenuItem(
+        menu,
+        IDM_ADJUSTMENT_CREATE,
+        MF_BYCOMMAND
+            | (has_document && state.plane == INKPOD_PLANE_COLOR
+                   ? MF_ENABLED
+                   : MF_GRAYED));
+    for (const UINT command : {
+             IDM_ADJUSTMENT_EDIT,
+             IDM_ADJUSTMENT_TOGGLE,
+             IDM_ADJUSTMENT_MOVE_TOP}) {
+        EnableMenuItem(
+            menu,
+            command,
+            MF_BYCOMMAND | (has_document && state.m6_adjustment_id != 0U ? MF_ENABLED
+                                                                          : MF_GRAYED));
+    }
+    for (const UINT command : {IDM_ADJUSTMENT_PREVIOUS, IDM_ADJUSTMENT_NEXT}) {
+        EnableMenuItem(
+            menu,
+            command,
+            MF_BYCOMMAND
+                | (has_document && state.m6_adjustments.size() > 1U ? MF_ENABLED : MF_GRAYED));
+    }
+    CheckMenuItem(
+        menu,
+        IDM_ADJUSTMENT_TOGGLE,
+        MF_BYCOMMAND | (state.m6_adjustment_visible ? MF_CHECKED : MF_UNCHECKED));
+    CheckMenuItem(
+        menu,
+        IDM_EFFECT_ALPHA_VIEW,
+        MF_BYCOMMAND | (state.alpha_view ? MF_CHECKED : MF_UNCHECKED));
     EnableMenuItem(
         menu,
         IDM_EDIT_PASTE,
@@ -2993,6 +4302,68 @@ int RunM6Smoke(AppState& state) noexcept {
         || after_menu.color_plane_checksum == before_menu.color_plane_checksum) {
         return 603;
     }
+    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
+    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
+    if (state.m6_adjustments.size() != 2U
+        || state.m6_adjustments[0].id == state.m6_adjustments[1].id) {
+        return 605;
+    }
+    const std::uint64_t newest_adjustment = state.m6_adjustment_id;
+    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_PREVIOUS, 0);
+    if (state.m6_adjustment_id == newest_adjustment) {
+        return 606;
+    }
+    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_EDIT, 0);
+    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_TOGGLE, 0);
+    if (state.m6_adjustment_visible) {
+        return 607;
+    }
+    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_MOVE_TOP, 0);
+    InkpodDocumentInfo before_spray = EmptyDocumentInfo();
+    InkpodDocumentInfo after_spray = EmptyDocumentInfo();
+    inkpod::renderer::CanvasDocumentBounds spray_bounds{};
+    if (!QueryDocument(state, before_spray)
+        || SendMessageW(
+               state.canvas,
+               inkpod::renderer::kCanvasGetDocumentBounds,
+               0,
+               reinterpret_cast<LPARAM>(&spray_bounds)) != 1) {
+        return 608;
+    }
+    state.tool = kInteractionM6Airbrush;
+    state.m6_options.parameters = {4000, 1000, 1000, 750, 0};
+    state.m6_options.option = true;
+    state.m6_options.option2 = true;
+    const InkpodStrokeSample spray_sample{
+        sizeof(InkpodStrokeSample),
+        0U,
+        static_cast<float>((spray_bounds.left + spray_bounds.right) / 2.0),
+        static_cast<float>((spray_bounds.top + spray_bounds.bottom) / 2.0),
+        1.0F,
+        0U};
+    const inkpod::renderer::CanvasStrokeEvent spray_begin{
+        inkpod::renderer::CanvasStrokeEventKind::Begin, &spray_sample, 1U};
+    const inkpod::renderer::CanvasStrokeEvent spray_end{
+        inkpod::renderer::CanvasStrokeEventKind::End, &spray_sample, 1U};
+    if (SendMessageW(
+            state.window,
+            inkpod::renderer::kCanvasStrokeReady,
+            0,
+            reinterpret_cast<LPARAM>(&spray_begin)) != 1
+        || SendMessageW(state.window, WM_TIMER, kM6ContinuousSprayTimer, 0) != 0
+        || state.m6_samples.size() < 2U
+        || SendMessageW(
+               state.window,
+               inkpod::renderer::kCanvasStrokeReady,
+               0,
+               reinterpret_cast<LPARAM>(&spray_end)) != 1
+        || state.engine->Invoke(
+               [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
+            != INKPOD_STATUS_OK
+        || !QueryDocument(state, after_spray)
+        || after_spray.color_plane_checksum == before_spray.color_plane_checksum) {
+        return 609;
+    }
     return SendMessageW(
                state.canvas,
                inkpod::renderer::kCanvasRenderOnce,
@@ -3016,11 +4387,19 @@ InkpodStatus InitializeCore(AppState& state) noexcept {
 InkpodStatus ShutdownCore(AppState& state) noexcept {
     const InkpodStatus clipboard_status =
         inkpod_clipboard_release(&state.clipboard);
+    if (state.m6_task != nullptr) {
+        inkpod_m6_task_cancel(state.m6_task);
+    }
     if (state.engine != nullptr) {
         state.engine->Stop();
         state.engine.reset();
     }
-    return clipboard_status;
+    if (state.m6_progress != nullptr) {
+        DestroyWindow(state.m6_progress);
+        state.m6_progress = nullptr;
+    }
+    const InkpodStatus task_status = inkpod_m6_task_release(&state.m6_task);
+    return clipboard_status == INKPOD_STATUS_OK ? task_status : clipboard_status;
 }
 
 LRESULT CALLBACK MainWindowProcedure(
@@ -3268,48 +4647,98 @@ LRESULT CALLBACK MainWindowProcedure(
                     UpdateMenuState(*state);
                     return 0;
                 }
-                case IDM_FILTER_LAST:
-                case IDM_FILTER_INVERT:
-                case IDM_FILTER_BLUR_WEAK: {
-                    const UINT command = LOWORD(wparam);
-                    const InkpodStatus status = state->engine == nullptr
-                            || state->plane != INKPOD_PLANE_COLOR
+                case IDM_FILTER_LAST: {
+                    InkpodDocumentInfo document{};
+                    const InkpodStatus status = state->plane != INKPOD_PLANE_COLOR
+                            || !QueryDocument(*state, document)
                         ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [command](InkpodCore* core) {
-                                  InkpodDocumentInfo info = EmptyDocumentInfo();
-                                  InkpodStatus inner = inkpod_core_get_document_info(core, &info);
+                        : StartM6Task(
+                              *state,
+                              false,
+                              [plane_id = document.color_plane_id](
+                                  InkpodCore* core, InkpodM6Task* task) {
                                   InkpodDispatchResult result{};
                                   result.struct_size = sizeof(result);
-                                  if (inner != INKPOD_STATUS_OK) {
-                                      return inner;
-                                  }
-                                  if (command == IDM_FILTER_LAST) {
-                                      return inkpod_core_filter_apply_last(
-                                          core, info.color_plane_id, &result);
-                                  }
-                                  InkpodFilterInput input{};
-                                  input.struct_size = sizeof(input);
-                                  input.kind = command == IDM_FILTER_INVERT
-                                      ? INKPOD_FILTER_INVERT
-                                      : INKPOD_FILTER_BLUR_WEAK;
-                                  input.plane_id = info.color_plane_id;
-                                  input.channel = INKPOD_FILTER_CHANNEL_RGB;
-                                  InkpodFilterPreviewInfo preview{};
-                                  preview.struct_size = sizeof(preview);
-                                  inner = inkpod_core_filter_preview_begin(core, &input, &preview);
-                                  if (inner == INKPOD_STATUS_OK) {
-                                      inner = inkpod_core_filter_preview_apply(core, &result);
-                                      if (inner != INKPOD_STATUS_OK) {
-                                          inkpod_core_filter_preview_cancel(core, &preview);
-                                      }
-                                  }
-                                  return inner;
-                              },
-                              true,
-                              true);
+                                  return inkpod_core_filter_apply_last_task(
+                                      core, plane_id, task, &result);
+                              });
+                    if (status != INKPOD_STATUS_OK) {
+                        ShowCoreError(*state, window, L"直前のフィルタ");
+                    }
+                    UpdateMenuState(*state);
+                    return 0;
+                }
+                case IDM_FILTER_INVERT:
+                case IDM_FILTER_BLUR_WEAK:
+                case IDM_FILTER_SHARPEN_WEAK:
+                case IDM_FILTER_SHARPEN_STRONG:
+                case IDM_FILTER_BLUR_STRONG:
+                case IDM_FILTER_GAUSSIAN:
+                case IDM_FILTER_AUTO_CONTRAST:
+                case IDM_FILTER_BRIGHTNESS:
+                case IDM_FILTER_TONE_CURVE:
+                case IDM_FILTER_LEVELS:
+                case IDM_FILTER_HSV:
+                case IDM_FILTER_COLOR_BALANCE:
+                case IDM_FILTER_UNSHARP: {
+                    const UINT command = LOWORD(wparam);
+                    InkpodDocumentInfo document{};
+                    M6FilterJob job{};
+                    if (state->plane != INKPOD_PLANE_COLOR
+                        || !QueryDocument(*state, document)
+                        || !ConfigureM6FilterEditor(*state, command, job)) {
+                        return 0;
+                    }
+                    job.plane_id = document.color_plane_id;
+                    const InkpodStatus status = QueueM6Filter(*state, std::move(job));
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"フィルタ");
+                    }
+                    UpdateMenuState(*state);
+                    return 0;
+                }
+                case IDM_ADJUSTMENT_CREATE:
+                case IDM_ADJUSTMENT_EDIT: {
+                    const bool update = LOWORD(wparam) == IDM_ADJUSTMENT_EDIT;
+                    M6FilterJob job{};
+                    if (!ConfigureM6AdjustmentEditor(*state, job, update)) {
+                        return 0;
+                    }
+                    const InkpodStatus status = CreateOrUpdateM6Adjustment(
+                        *state, std::move(job), update);
+                    if (status != INKPOD_STATUS_OK) {
+                        ShowCoreError(*state, window, L"調整レイヤー");
+                    }
+                    UpdateMenuState(*state);
+                    return 0;
+                }
+                case IDM_ADJUSTMENT_PREVIOUS:
+                case IDM_ADJUSTMENT_NEXT:
+                    SelectM6Adjustment(
+                        *state, LOWORD(wparam) == IDM_ADJUSTMENT_NEXT);
+                    UpdateMenuState(*state);
+                    return 0;
+                case IDM_ADJUSTMENT_TOGGLE: {
+                    const bool visible = !state->m6_adjustment_visible;
+                    const InkpodStatus status = SetM6AdjustmentVisibility(*state, visible);
+                    if (status == INKPOD_STATUS_OK) {
+                        state->m6_adjustment_visible = visible;
+                    } else {
+                        ShowCoreError(*state, window, L"調整レイヤー表示");
+                    }
+                    UpdateMenuState(*state);
+                    return 0;
+                }
+                case IDM_ADJUSTMENT_MOVE_TOP: {
+                    std::uint64_t ignored{};
+                    const InkpodStatus status = ApplyTreeEdit(
+                        *state,
+                        INKPOD_TREE_REORDER_LAYER,
+                        state->m6_adjustment_id,
+                        0U,
+                        ignored);
+                    if (status != INKPOD_STATUS_OK) {
+                        ShowCoreError(*state, window, L"調整レイヤー移動");
                     }
                     UpdateMenuState(*state);
                     return 0;
@@ -3522,6 +4951,33 @@ LRESULT CALLBACK MainWindowProcedure(
                     state->tool = kInteractionEyedropper;
                     UpdateMenuState(*state);
                     return 0;
+                case IDM_EFFECT_GRADIENT:
+                case IDM_EFFECT_AIRBRUSH:
+                case IDM_EFFECT_BOUNDARY_AIRBRUSH:
+                case IDM_EFFECT_BLUR:
+                case IDM_EFFECT_STAMP:
+                case IDM_EFFECT_DUST:
+                case IDM_EFFECT_ALPHA_GRADIENT:
+                    if (state->plane == INKPOD_PLANE_COLOR
+                        && ConfigureM6Effect(*state, LOWORD(wparam))) {
+                        UpdateMenuState(*state);
+                    }
+                    return 0;
+                case IDM_EFFECT_ALPHA_VIEW: {
+                    const bool enabled = !state->alpha_view;
+                    const InkpodStatus status = ApplyView(
+                        *state,
+                        INKPOD_VIEW_SET_ALPHA_VISIBLE,
+                        enabled ? 1.0 : 0.0,
+                        0.0);
+                    if (status == INKPOD_STATUS_OK) {
+                        state->alpha_view = enabled;
+                    } else {
+                        ShowCoreError(*state, window, L"アルファ表示");
+                    }
+                    UpdateMenuState(*state);
+                    return 0;
+                }
                 case IDM_PLANE_MAIN_LINE:
                 case IDM_PLANE_COLOR: {
                     state->plane = LOWORD(wparam) == IDM_PLANE_MAIN_LINE
@@ -3698,6 +5154,76 @@ LRESULT CALLBACK MainWindowProcedure(
                     || state->tool == kInteractionEyedropper) {
                     return 1;
                 }
+                const bool m6_interaction = state->tool >= kInteractionM6Gradient
+                    && state->tool <= kInteractionM6AlphaGradient;
+                if (m6_interaction) {
+                    if (state->tool == kInteractionM6Stamp
+                        && input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin
+                        && input->sample_count != 0U
+                        && (GetKeyState(VK_MENU) & 0x8000) != 0) {
+                        state->stamp_source = input->samples[0];
+                        state->stamp_source_valid = true;
+                        state->m6_samples.clear();
+                        return 1;
+                    }
+                    if (state->m6_task != nullptr) {
+                        return 1;
+                    }
+                    try {
+                        if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
+                            state->m6_samples.clear();
+                        }
+                        if (input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
+                            && input->sample_count != 0U) {
+                            if (state->m6_samples.size()
+                                > UINT64_C(1048576) - input->sample_count) {
+                                state->m6_samples.clear();
+                                state->m6_airbrush_active = false;
+                                KillTimer(window, kM6ContinuousSprayTimer);
+                                return 0;
+                            }
+                            state->m6_samples.insert(
+                                state->m6_samples.end(),
+                                input->samples,
+                                input->samples + static_cast<std::size_t>(input->sample_count));
+                        }
+                    } catch (const std::bad_alloc&) {
+                        state->m6_samples.clear();
+                        state->m6_airbrush_active = false;
+                        KillTimer(window, kM6ContinuousSprayTimer);
+                        return 0;
+                    }
+                    if (state->tool == kInteractionM6Airbrush
+                        && input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
+                        && input->sample_count != 0U) {
+                        state->m6_airbrush_last =
+                            input->samples[static_cast<std::size_t>(input->sample_count - 1U)];
+                        if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
+                            state->m6_airbrush_active = true;
+                            SetTimer(
+                                window,
+                                kM6ContinuousSprayTimer,
+                                kM6ContinuousSprayIntervalMilliseconds,
+                                nullptr);
+                        }
+                    }
+                    if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
+                        state->m6_samples.clear();
+                        state->m6_airbrush_active = false;
+                        KillTimer(window, kM6ContinuousSprayTimer);
+                        return 1;
+                    }
+                    if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
+                        state->m6_airbrush_active = false;
+                        KillTimer(window, kM6ContinuousSprayTimer);
+                        const InkpodStatus status = FinishM6CanvasGesture(*state);
+                        if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                            ShowCoreError(*state, window, L"M6 Canvas効果");
+                        }
+                        UpdateMenuState(*state);
+                    }
+                    return 1;
+                }
                 inkpod::app::StrokeEvent event{};
                 switch (input->kind) {
                     case inkpod::renderer::CanvasStrokeEventKind::Begin:
@@ -3762,12 +5288,65 @@ LRESULT CALLBACK MainWindowProcedure(
                 UpdateMenuState(*state);
             }
             return 0;
+        case kM6TaskCompleted:
+            if (state != nullptr) {
+                const InkpodStatus status = static_cast<InkpodStatus>(wparam);
+                const bool prompt = state->m6_preview_prompt;
+                state->m6_preview_prompt = false;
+                if (state->m6_progress != nullptr) {
+                    DestroyWindow(state->m6_progress);
+                    state->m6_progress = nullptr;
+                }
+                inkpod_m6_task_release(&state->m6_task);
+                if (status == INKPOD_STATUS_OK && prompt && state->engine != nullptr) {
+                    const int choice = MessageBoxW(
+                        window,
+                        L"Canvasのプレビューを適用しますか？\nキャンセルすると元の状態へ完全に戻ります。",
+                        L"M6 プレビュー",
+                        MB_OKCANCEL | MB_ICONQUESTION);
+                    const InkpodStatus preview_status = state->engine->Invoke(
+                        [choice](InkpodCore* core) {
+                            if (choice == IDOK) {
+                                InkpodDispatchResult result{};
+                                result.struct_size = sizeof(result);
+                                return inkpod_core_filter_preview_apply(core, &result);
+                            }
+                            InkpodFilterPreviewInfo info{};
+                            info.struct_size = sizeof(info);
+                            return inkpod_core_filter_preview_cancel(core, &info);
+                        },
+                        true,
+                        true);
+                    if (preview_status != INKPOD_STATUS_OK) {
+                        ShowCoreError(*state, window, L"M6プレビューの確定");
+                    }
+                }
+                UpdateMenuState(*state);
+            }
+            return 0;
         case inkpod::app::kCoreAsyncFailed:
             if (state != nullptr && !state->smoke_test) {
                 ShowCoreError(*state, window, L"非同期処理");
             }
             return 0;
         case WM_TIMER:
+            if (state != nullptr && wparam == kM6ContinuousSprayTimer) {
+                if (state->m6_airbrush_active && state->tool == kInteractionM6Airbrush
+                    && state->m6_task == nullptr) {
+                    try {
+                        if (state->m6_samples.size() < UINT64_C(1048576)) {
+                            state->m6_samples.push_back(state->m6_airbrush_last);
+                        } else {
+                            state->m6_airbrush_active = false;
+                            KillTimer(window, kM6ContinuousSprayTimer);
+                        }
+                    } catch (const std::bad_alloc&) {
+                        state->m6_airbrush_active = false;
+                        KillTimer(window, kM6ContinuousSprayTimer);
+                    }
+                }
+                return 0;
+            }
             if (state != nullptr && wparam == kAutosaveTimer && !state->recovery_path.empty()) {
                 InkpodDocumentInfo info{};
                 if (QueryDocument(*state, info)
@@ -3780,6 +5359,13 @@ LRESULT CALLBACK MainWindowProcedure(
         case WM_CLOSE:
             if (state != nullptr && !state->smoke_test && !ConfirmDiscard(*state)) {
                 return 0;
+            }
+            if (state != nullptr && state->m6_task != nullptr) {
+                inkpod_m6_task_cancel(state->m6_task);
+            }
+            if (state != nullptr) {
+                state->m6_airbrush_active = false;
+                KillTimer(window, kM6ContinuousSprayTimer);
             }
             ShowWindow(window, SW_HIDE);
             PostQuitMessage(0);
@@ -3798,6 +5384,7 @@ LRESULT CALLBACK MainWindowProcedure(
             return 0;
         case WM_NCDESTROY:
             KillTimer(window, kAutosaveTimer);
+            KillTimer(window, kM6ContinuousSprayTimer);
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
             return DefWindowProcW(window, message, wparam, lparam);
         default:

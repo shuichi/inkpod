@@ -58,10 +58,11 @@ pub use inkpod_format::{
     FrameMetadata, GuideAxis, LayerKind, MAX_COMMON_RASTER_BYTES, Margins, RectI32,
 };
 pub use inkpod_image::{
-    Adjustment, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance, ColorCheckMode,
-    CurveInterpolation, CurvePoint, EyedropperSource, Filter, Gradient, GradientKind, GradientMode,
-    GradientStop, HsvAdjustment, InclusionMode, Levels, MAX_CURVE_POINTS, MAX_GRADIENT_STOPS,
-    MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION, PixelFormat, PixelValue, Stamp, TileRaster,
+    Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance,
+    ColorCheckMode, CurveInterpolation, CurvePoint, DustMode, DustRemoval, EffectSample,
+    EyedropperSource, Filter, Gradient, GradientKind, GradientMode, GradientStop, HsvAdjustment,
+    InclusionMode, Levels, MAX_CURVE_POINTS, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS,
+    MAX_RASTER_DIMENSION, PixelFormat, PixelValue, Stamp, StampGesture, StampShape, TileRaster,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -335,6 +336,14 @@ pub struct StrokeSample {
     pub pressure: f32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EffectRegionKind {
+    Trace,
+    Rectangle,
+    Polyline,
+    Lasso,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stroke {
     pub tool: PaintTool,
@@ -383,6 +392,7 @@ pub enum ViewCommand {
     SetGridVisible(bool),
     SetSnapEnabled(bool),
     SetTransparentView(bool),
+    SetAlphaView(bool),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -406,6 +416,7 @@ pub struct ViewState {
     grid_visible: bool,
     snap_enabled: bool,
     transparent_view: bool,
+    alpha_view: bool,
 }
 
 impl Default for ViewState {
@@ -423,6 +434,7 @@ impl Default for ViewState {
             grid_visible: false,
             snap_enabled: false,
             transparent_view: true,
+            alpha_view: false,
         }
     }
 }
@@ -487,6 +499,11 @@ impl ViewState {
     pub const fn transparent_view(self) -> bool {
         self.transparent_view
     }
+
+    #[must_use]
+    pub const fn alpha_view(self) -> bool {
+        self.alpha_view
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -525,7 +542,11 @@ impl std::error::Error for CoreError {}
 
 impl From<RasterError> for CoreError {
     fn from(error: RasterError) -> Self {
-        Self::Raster(error)
+        if error == RasterError::Cancelled {
+            Self::Cancelled
+        } else {
+            Self::Raster(error)
+        }
     }
 }
 
@@ -1396,6 +1417,7 @@ impl Core {
                 grid_visible: false,
                 snap_enabled: false,
                 transparent_view: true,
+                alpha_view: false,
             },
             history: Vec::new(),
             history_cursor: 0,
@@ -3403,6 +3425,14 @@ impl Core {
                 self.view.transparent_view = value;
                 changed
             }
+            ViewCommand::SetAlphaView(value) => {
+                let changed = self.view.alpha_view != value;
+                self.view.alpha_view = value;
+                if changed {
+                    self.render_cache.clear();
+                }
+                changed
+            }
             _ => false,
         };
         if matches!(
@@ -3413,6 +3443,7 @@ impl Core {
                 | ViewCommand::SetGridVisible(_)
                 | ViewCommand::SetSnapEnabled(_)
                 | ViewCommand::SetTransparentView(_)
+                | ViewCommand::SetAlphaView(_)
         ) {
             if toggle_changed {
                 self.view.revision = self
@@ -3646,7 +3677,7 @@ impl Core {
             .flat_map(|plane| plane.raster.allocated_coords())
             .chain(document.selection.allocated_coords())
             .collect();
-        if document.light_table.has_visible_items() {
+        if document.light_table.has_visible_items() || self.view.alpha_view {
             let tiles_x = document.width.div_ceil(TILE_SIZE);
             let tiles_y = document.height.div_ceil(TILE_SIZE);
             for y in 0..tiles_y {
@@ -3679,6 +3710,7 @@ impl Core {
                     document,
                     *coord,
                     self.color_check,
+                    self.view.alpha_view,
                     source_revision,
                     tile_revision,
                 ) {
@@ -3694,7 +3726,11 @@ impl Core {
         cache.retain(|coord, _| coords.contains(coord));
         let document_width = document.width;
         let document_height = document.height;
-        let (vector_segments, vector_fills) = document.vector.render_items(document);
+        let (vector_segments, vector_fills) = if self.view.alpha_view {
+            (Vec::new(), Vec::new())
+        } else {
+            document.vector.render_items(document)
+        };
         self.render_cache = cache;
         RenderSnapshot {
             revision: snapshot_revision,
@@ -5141,6 +5177,7 @@ fn compose_tile(
     document: &CellDocument,
     coord: TileCoord,
     color_check: Option<ColorCheckMode>,
+    alpha_view: bool,
     source_revision: u64,
     tile_revision: u64,
 ) -> Option<RenderTile> {
@@ -5224,6 +5261,11 @@ fn compose_tile(
                 layer_pixel[3] =
                     ((u32::from(layer_pixel[3]) * layer.opacity_milli + 500) / 1_000) as u8;
                 composite = blend_rgba_over(composite, layer_pixel);
+            }
+            if alpha_view {
+                let alpha = composite[3];
+                pixels.extend_from_slice(&[alpha, alpha, alpha, 255]);
+                continue;
             }
             if let Some(mode) = color_check {
                 let check_value = PixelValue::Rgba(composite);

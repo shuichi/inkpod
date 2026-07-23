@@ -3,25 +3,25 @@
 ## Current milestone
 
 - Milestone: M6
-- Status: In progress (all five M6 acceptance scenarios are Verified)
-- Last verified worktree state: review fixes are uncommitted on top of the M6
-  baseline. WSL stable Rust 1.97.1 formatting, all-target/all-feature clippy,
-  five named M6 acceptance tests, and the full workspace suite passed on
-  2026-07-22. VS2026 x64 Debug/Release configure/build passed with strict
-  warnings. Final Debug CTest passed assets, integrated C11/C++ M1-M6 ABI, and
-  real application/D2D smoke 3/3. Release CTest passed 3/3 after the production
-  fixes; the final test-only source edit caused a relink that local Application
-  Control then blocked before the two EXE tests could start. An immediate second
-  Debug build reported `ninja: no work to do`, so Cargo is not rebuilt needlessly.
+- Status: Verified
+- Last verified worktree state: M6 completion fixes remain uncommitted. WSL
+  stable Rust 1.97.1 formatting, all-target/all-feature clippy with warnings
+  denied, and the 103-test workspace suite passed on 2026-07-23. VS2026 x64
+  Debug and Release builds passed `/W4 /WX /permissive-`. Final Debug CTest
+  passed assets, integrated C11/C++ M1-M6 ABI, and the real application/D2D
+  smoke 3/3. Final Release assets passed, but local Application Control blocked
+  the newly linked unsigned Release EXE before the ABI/application tests could
+  start on both attempts. An immediate unchanged Debug build reported `ninja:
+  no work to do`, proving Cargo is not rebuilt needlessly.
 
 Before M6 edits, `cargo test --workspace m5_acceptance -- --nocapture`
 reconfirmed all five M5 acceptance scenarios 5/5. The M6 acceptance boundary is
 Verified: filter previews remain separate until one-unit apply, non-destructive
 adjustments persist with validated native metadata, effect and alpha operations
-cross the C ABI, and all M0-M5 Rust tests remain green. M6 as a whole remains
-`In progress` because the complete native effect/adjustment editors, the full
-airbrush/blur/stamp gesture models, dust removal, and worker progress/cancel are
-not implemented. No M7 API or implementation was introduced.
+cross the C ABI, and all M0-M5 Rust tests remain green. Full pressure-aware
+airbrush/blur/stamp gestures, native filter/effect/adjustment editors, three-mode
+dust removal with preview, and worker progress/cancel are connected and tested.
+No M7 API or implementation was introduced.
 
 ## User-requested Windows shell and package additions
 
@@ -43,7 +43,7 @@ not implemented. No M7 API or implementation was introduced.
 |---|---|---|---|---|
 | ARCH-001 | Verified | CMake explicitly tracks all image/format/core/FFI inputs, including M6 image-edit/Core/native-format sources, and Cargo byproducts behind a completion stamp | Debug/Release build plus an immediate no-op Debug rebuild | CMake remains the build entry; Cargo does not run on the unchanged rebuild |
 | ARCH-002 | Verified | Core/image/format are safe and frontend-independent | All three domain crates' source/manifest scan, clippy, workspace tests | No Rust Windows dependency |
-| ABI-001 | Verified | ABI v1 adds copied M6 strided curve/filter records, preview lifecycle, last-filter apply, adjustment create/update, gradient/airbrush/boundary/blur/stamp, and alpha-row edit while retaining prior ownership rules | C11/C++20 layouts and executed M1-M6 smoke; Rust short/packed/strided-record, span, ownership, and transaction tests | Caller storage is borrowed only for the synchronous call and never retained; the filter record remains 72 bytes and accepts the original packed stride value 0 |
+| ABI-001 | Verified | ABI v1 adds copied M6 strided curve/filter and gesture records, preview lifecycle, adjustment create/update, gradient/airbrush/boundary/pressure-blur/stamp, dust remove/preview, alpha edit/gradient, and a Rust-owned thread-safe task while retaining prior ownership rules | C11/C++20 layouts and executed M1-M6 smoke; Rust short/packed/strided-record, task pre-cancel/query/double-release, span, ownership, and transaction tests | Caller spans are borrowed only for the owner-thread Core call; task create/query/cancel/release may run on any thread; the filter record remains 72 bytes and accepts packed stride 0 |
 | ABI-002 | Verified | Immutable snapshot owns flat M5 cubic/fill/boundary spans alongside raster/overlay data; ownership remains with the renderer queue | Core zoom invariance; Rust FFI lifetime/count tests; compiled C++ validator/D2D smoke | Vector records remain document-coordinate and snapshot-borrowed |
 | IO-001 (native save) | Verified | `.inkpod` v1 adds bounded optional M3-M6 sections; `M6AD` stores stable adjustment-layer IDs and validated brightness/contrast, curve, or levels parameters while retaining M1-M5 reads | Adjustment order/parameters/composite save-reopen; native round-trip plus missing/duplicate/wrong-layer/invalid-parameter rejection | Blob compression remains optional and disabled |
 | IO-001 (M2 recovery) | Verified | Atomic autosave leaves the normal savepoint/path untouched; recovery opens dirty, recovered, and pathless; Windows gives never-saved cells a private recovery path, queues timer autosave after an active stroke, and discovers private recovery at startup | Core/FFI recovery tests plus Windows active-stroke autosave, private-path discovery, and normal-vs-recovery smoke | Only the newest private recovery is prompted per launch; defer leaves it intact |
@@ -51,7 +51,7 @@ not implemented. No M7 API or implementation was introduced.
 | DOC-001 | Verified | Cell paper/DPI plus transactional 100/reference/drawing/safe frames and independent margins | M1 metadata round-trip plus M4 mixed-size reference-frame golden | Windows paper property dialog remains a UI gap |
 | DOC-002 | Verified | Stable-ID typed tree adds vector-coloring with exactly one main-line, one-or-more color-trace, one fill, and optional raster planes | Core/format topology, invalid-combination, and save/reopen tests; Rust/C++ node queries | Vector geometry is separate from placeholder raster payloads |
 | DOC-003 | Verified | Existing tree operations preserve, duplicate, remove, and reassign vector paths/fills/boundaries transactionally | Core M3 tree tests plus M5 vector duplicate/delete/merge paths | Full Windows panel remains UI work |
-| HIST-001 | Verified | M6 preview updates recompute from their immutable base; cancel commits nothing, apply/last-filter/effects/adjustment edits commit one document history unit | Named cancel/apply acceptance tests; Rust/C++ ABI and Windows smoke; legacy M1-M5 history tests | Filter preview is exposed through C ABI; native parameter dialogs remain UI work |
+| HIST-001 | Verified | M6 filter and dust preview updates recompute from their immutable base; cancel/failure commits nothing, while apply/last-filter/gesture/effect/adjustment edits commit one document history unit | Named cancel/apply/worker tests; Rust/C++ ABI and Windows smoke; legacy M1-M5 history tests | Preview OK and Cancel are connected to the native Canvas snapshot path |
 | VIEW-001 | Verified | device-pixel zoom/box zoom/pan/fit/1:1 plus horizontal/vertical view flip use an independent view revision | Core mode/box/flip tests; FFI transform flags; Windows exact-bounds DPI and flip/mirror smoke | Windows exposes flip commands; box zoom is Core-connected for a later drag gesture |
 | VIEW-002 | Verified | Ruler/guide/grid/snap/transparent-view state is Core-owned; snap obeys its enable flag, guides/grid persist, and snapshot overlay state drives renderer grid/guides/transparency | Core guide/grid/snap test; Rust/C++ overlay ABI and Windows grid/guide render smoke | Windows M3 exposes grid; remaining controls are ABI-ready |
 | VIEW-003 | Verified | Locator reports document coordinates, selection bounds, and color per logical view; secondary views share one document and build independent immutable snapshots | Core locator/multi-view test; Rust/C++ ABI and Windows same-revision smoke | M3 creates logical secondary views; separate child-window layout is later UI work |
@@ -63,13 +63,13 @@ not implemented. No M7 API or implementation was introduced.
 | SEL-002 | Verified | New/add/subtract/intersect boolean algebra, invert, deterministic morphology expand/shrink, and typed color selection | Exhaustive 8-bit mask property table plus Core/Windows operation smoke | Selection changes are ordinary document history units |
 | SEL-003 | Verified | Raster selection-layer conversion remains intact; vector cut/touch/contained/line/whole-line/intersection/fill-boundary/fill modes return deterministic ranges/IDs | `vector_002_all_selection_modes_have_deterministic_ranges_and_ids`; Rust/C++ caller-buffer ABI smoke | Native vector gesture UI is not yet exposed |
 | PAINT-002 (M5 slice) | In progress | Cubic path input represents line/curve/shape/polyline geometry and commits atomically | Core path/Undo plus Rust/C++ ABI draw tests | Interactive preview and authoring UI remain incomplete |
-| PAINT-003 (M5 slice) | In progress | Deterministic nearest-endpoint connect and add/subtract/scale/constant width correction are implemented | `vector_002_connect_width_select_and_raster_vector_conversion_are_transactional` | Dust removal is not implemented |
+| PAINT-003 | Verified | Deterministic nearest-endpoint connect, add/subtract/scale/constant width correction, and bounded three-mode dust removal over full plane or pen/rectangle/polyline/lasso regions are implemented | Vector transaction plus dust mode/region/preview/cancel/atomicity image, Core, ABI, and Windows tests | Vector targets are rejected; undocumented proprietary behavior is not claimed |
 | VECTOR-001 | Verified | `inkpod-image` fixed-point cubic/variable-width geometry, Core main-line/color-trace/fill topology, trace-before-protected-main paint order, immutable vector snapshot, and D2D fill/outline rendering | Image geometry; Core zoom/save/order/golden; Rust FFI; compiled C11/C++20 renderer smoke | Arbitrary raster/vector interleaving still renders vector after precomposited raster tiles |
 | VECTOR-002 | Verified | Transactional draw, partial/intersection/full erase, nearest connect without duplicate zero-gap connectors, four width modes, all vector selection modes, deterministic rasterize, and bounded RGBA8 run vectorization | Five M5 acceptance tests plus object-limit, all-mode, transactional operation, and FFI buffer/conversion tests | Windows authoring controls are not yet exposed |
-| FILTER-001 | Verified | Deterministic fixed sharpen/blur presets, bounded Gaussian, unsharp mask, channel invert, and alpha-independent auto contrast support RGBA8/16 and selection clipping; the native menu connects last-filter, invert, and weak blur to the preview/apply path | Named exact 8/16-bit alpha/selection golden; full catalog/image tests; preview Core/FFI/Windows menu smoke | Operations currently execute synchronously on the Core-engine thread |
-| FILTER-002 | Verified | Brightness/contrast, RGB/R/G/B Bezier/B-spline curves, levels, HSV, and color balance use documented normalized 16-bit clamp/rounding | Catalog validation, preview/Undo acceptance, C ABI record validation, full workspace tests | Native parameter/preset dialogs are not yet exposed |
-| EFFECT-001 | In progress | Core/image and copied C ABI records provide linear/radial multi-stop gradient, airbrush dab, boundary-only airbrush, selection-masked blur, and clipped offset stamp operations | Boundary acceptance; bounded/extreme-coordinate image tests; Rust/C++ ABI and Windows gradient smoke | Full native gesture/pressure editors and the complete blur/stamp control models remain incomplete |
-| ADJUST-001 | Verified | Stable-ID non-destructive brightness/contrast, levels, and curve layers participate in palette-order composition with visibility and opacity, persist in `M6AD`, and can be updated through C ABI; alpha edit replaces only alpha from borrowed strided 8/16-bit grayscale rows | Order/source-checksum/opacity/visibility/save-reopen acceptance; malformed native metadata; Rust/C++ ABI/Windows source-preservation smoke | Native layer/property and alpha-channel editing views are not yet exposed |
+| FILTER-001 | Verified | Deterministic fixed sharpen/blur presets, bounded Gaussian/unsharp, channel invert, and alpha-independent auto contrast support RGBA8/16 and selection clipping; all catalog entries use native editor/preview/last-filter paths | Exact 8/16-bit alpha/selection golden; catalog/image tests; Core/FFI/Windows editor smoke; task progress/cancel | Work runs on the Core engine worker while the UI polls/cancels a thread-safe task |
+| FILTER-002 | Verified | Brightness/contrast, RGB/R/G/B Bezier/B-spline curves, levels, HSV, and color balance use documented normalized 16-bit clamp/rounding; native editors expose channel, interpolation, parameters, and curve points | Catalog validation, preview/Undo acceptance, C ABI validation, full workspace and Windows editor tests | Unknown legacy preset byte layouts are not fabricated |
+| EFFECT-001 | Verified | Linear/radial 3–16-stop alpha gradients with dither/45-degree constraint, pressure/fade/spacing/continuous airbrush, boundary-only effect, pen/rectangle/polyline/lasso blur with screen-fixed pressure diameter, and round/square pressure-sensitive offset stamp gestures are connected through Core/C ABI/native Canvas | Boundary acceptance; deterministic gesture/pressure and extreme-coordinate tests; Rust/C++ ABI and Windows editor/gesture smoke | Native algorithms are documented Inkpod semantics, not inferred proprietary kernels |
+| ADJUST-001 | Verified | Stable-ID non-destructive brightness/contrast, levels, and curve layers compose in palette order with visibility/opacity, persist in `M6AD`, and are exposed as multiple selectable/re-editable/reorderable native entries; alpha row edit/gradient and grayscale view preserve RGB | Order/source/opacity/visibility/save-reopen; malformed metadata; alpha RGB-preservation; Rust/C++ ABI and multiple-adjustment Windows smoke | — |
 | CLIP-001 (M3 typed clipboard) | Verified | Rust-owned typed clipboard retains absolute document coordinates, locates a compatible destination, and remains floating after a failed commit | Core different-paper/failure coordinate test; Rust/C++ ABI and Windows paste smoke | OS standard clipboard interchange is still incomplete and is not claimed Verified |
 | XFORM-001 (M3 flip/mirror) | Verified | View flips change only view revision; destructive document mirror changes pixels/frames/guides and history | Core and Windows revision/history acceptance tests | Destructive rotate/size/resolution remain future scope |
 | XFORM-002 | Verified | Floating typed selection uses bounded inverse nearest-neighbor translate/scale/rotation, preview state, one-unit commit, retry after failure, and exact cancel | Core coordinate/scale/rotate/cancel test; FFI lifecycle and Windows translated-paste smoke | Windows Copy/Paste commits the identity transform; transform editor UI is later work |
@@ -83,10 +83,9 @@ not implemented. No M7 API or implementation was introduced.
 | M0 Windows shell (Help/About) | Verified | Japanese Help command, DPI-scaled 574 x 544 owned modal About, reference-matched icon/name spacing, requested description, shared generated icon, and CMake-derived version | Debug `inkpod_windows_smoke` verifies the real menu command, exact size/origin/38 px gap/strings/icon, then closes the dialog | Native Win32 theme and keyboard/modal behavior are retained |
 | M8 packaging assets | In progress | winapp CLI manifest, 48 scale/target-size PNGs, five-resolution ICO | `inkpod_windows_assets`; Release resource build | MSIX assembly, signing, and clean install/uninstall are not yet tested |
 
-The five M6 acceptance scenarios are complete at the image/Core/native-format/C
-ABI and compiled Windows D2D-smoke boundary. The broader M6 implementation is
-still `In progress`; the remaining native and full-tool differences are listed
-below. M7 remains untouched.
+The five M6 acceptance scenarios and the complete M6 native vertical slices are
+Verified at image/Core/native-format/C ABI/Windows D2D boundaries. M7 remains
+untouched.
 
 ## M0 re-verification before M1
 
@@ -178,13 +177,15 @@ The filter catalog includes fixed sharpen/blur, Gaussian, unsharp, invert,
 alpha-independent auto contrast, brightness/contrast, channel curves, levels,
 HSV, and color balance. Selection masks clip every raster operation; blur uses
 straight-alpha-safe premultiplied accumulation and deterministic rounding.
-Gradient, airbrush, boundary effect, stamp, and alpha-only edit are typed Core/
-image operations connected through copied/strided C ABI records. The versioned
-`M6AD` native section rejects missing, duplicate, invalid, or non-adjustment
-layer relationships. The C ABI validates sizes, strides, counts, ownership, and
-work bounds before mutation. Debug and Release Windows smoke execute preview
-cancel/apply/Undo, the native last/invert/weak-blur menu, gradient, adjustment
-source preservation, snapshot publication, and a real D2D render.
+Gradient, pressure-aware airbrush/stamp gestures, screen-fixed pressure blur,
+boundary effect, dust removal, alpha-only row edit/gradient, and alpha grayscale
+view are typed Core/image operations connected through copied/strided C ABI
+records. The versioned `M6AD` section rejects missing, duplicate, invalid, or
+non-adjustment relationships. The C ABI validates sizes, strides, counts,
+ownership, task state, and work bounds before mutation. Debug and Release
+Windows smoke execute preview cancel/apply/Undo, every native filter/editor
+route, multiple adjustment create/select/re-edit/visibility/reorder, gesture
+records, snapshot publication, and a real D2D render.
 
 ## M6 review corrections
 
@@ -196,9 +197,13 @@ source preservation, snapshot publication, and a real D2D render.
 | Effect, adjustment-update, and alpha-edit Core operations stopped before C ABI | Added copied records and synchronous owner-thread functions for every implemented M6 primitive, with Rust and C++ negative/ownership smoke |
 | Curve pointer/count had no element stride, while growing the record would break ABI v1 layout | Reused the reserved 32-bit slot as `point_stride_bytes`, retained the 72-byte record and packed-stride-0 compatibility, and tests packed/strided callers |
 | The exact 8/16-bit golden and no-op/invalid history behavior were under-tested | Golden tests now assert exact selected RGBA values; transactional tests cover no-op, invalid input, adjustment update, Undo, and Redo |
-| M6 had no native command path | Added minimal native Filter menu commands for last-filter, invert, and weak blur through the Core preview/apply path; Windows smoke invokes the real menu command |
+| M6 had no native command path | Added the complete filter catalog, parameter/curve editor, preview/apply/cancel/last-filter flow, and effect/adjustment commands through the Core engine and renderer snapshot path |
 | Suspected CMake/Cargo rebuild on every invocation | Explicit input/stamp dependency graph was retained; an immediate unchanged Debug rebuild reports `ninja: no work to do` |
 | Possible Windows-specific type leakage into Rust Core | Existing architecture scan plus full clippy/tests confirm Core/image/format contain no Windows API dependency |
+| Full effect gesture/editor controls were absent | Added native editors plus Canvas-batched device-coordinate gradients, pressure/fade/spacing airbrush with 50 ms stationary continuous-spray samples, boundary effect, pressure/screen-fixed blur regions, Alt-source round/square stamp, and alpha gradient/view; Core converts the batch once per gesture and commits one Undo unit |
+| Dust removal was absent | Added bounded deterministic foreground-speck, transparent-hole, and color-outlier modes over full plane or pen/rectangle/polyline/lasso, selection intersection, preview OK/Cancel, progress, cancellation, and atomic no-partial-commit tests |
+| Filter work had no progress/cancel ownership model | Added Rust-owned atomic `InkpodM6Task`; Windows creates it on UI, runs the Core call on the Core engine thread, polls/cancels from UI, posts completion only after snapshot publication, and releases exactly once after the worker returns |
+| Native adjustment controls tracked only one layer | Added multiple create with unique names, previous/next selection, selected-layer parameter reload/re-edit, visibility toggle, and reorder; integrated Windows smoke executes the complete sequence |
 
 ## M4 acceptance scenarios
 
@@ -360,39 +365,25 @@ as dirty/pathless, and then reopens the unchanged normal file.
 | Command | Platform | Result | Date |
 |---|---|---|---|
 | `cargo test --workspace m5_acceptance -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1 | Passed 5/5 before M6 edits | 2026-07-22 |
-| `cargo test --workspace m6 -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1 | Passed five named acceptance tests plus strengthened M6 Core/image/FFI review tests | 2026-07-22 |
-| `cargo fmt --all -- --check` | WSL Ubuntu, stable Rust 1.97.1 | Passed on reviewed M6 source | 2026-07-22 |
-| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | WSL Ubuntu, stable Rust 1.97.1 | Passed with zero warnings | 2026-07-22 |
-| `cargo test --workspace --all-features --no-fail-fast` | WSL Ubuntu, stable Rust 1.97.1 | Passed: Core 47, architecture 1, FFI 12, format 17, image 19, doc-tests (96 total unit/integration tests) | 2026-07-22 |
-| `cmake --preset windows-x64-debug` / developer-shell `cmake --build --preset windows-x64-debug` | Windows 11 x64, MSVC 19.51 | Passed with `/W4 /WX /permissive-` after reviewed M6 ABI/menu smoke linkage | 2026-07-22 |
-| `ctest --preset windows-x64-debug --output-on-failure` | Windows 11 x64 | Passed: assets + integrated C11/C++ M1-M6 ABI + application/D2D smoke, 3/3 in 9.60 s | 2026-07-22 |
-| Immediate second `cmake --build --preset windows-x64-debug` | Windows 11 x64, Ninja | Passed with `ninja: no work to do`; Cargo was not invoked | 2026-07-22 |
-| `cmake --preset windows-x64-release` / developer-shell `cmake --build --preset windows-x64-release` | Windows 11 x64, MSVC 19.51 | Passed optimized with `/W4 /WX /permissive-` after reviewed M6 changes | 2026-07-22 |
-| Pre-final-test `ctest --preset windows-x64-release --output-on-failure` | Windows 11 x64 | Passed after all production M6 fixes: assets + integrated C11/C++ M1-M6 ABI + application/D2D smoke, 3/3 in 1.76 s | 2026-07-22 |
-| Final test-only-edit Release rebuild / CTest retry | Windows 11 x64, MSVC 19.51 | Strict optimized build and asset test passed; ABI/application processes were blocked before start by local Application Control (`BAD_COMMAND`) on both attempts | 2026-07-22 |
+| `cargo fmt --all --check` | WSL Ubuntu, stable Rust 1.97.1 | Passed on final M6 source | 2026-07-23 |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | WSL Ubuntu, stable Rust 1.97.1 | Passed with zero warnings | 2026-07-23 |
+| `cargo test --workspace --all-features` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Passed: Core 50, architecture 1, FFI 13, format 17, image 22, doc-tests (103 unit/integration tests) | 2026-07-23 |
+| Developer-shell `cmake --build --preset windows-x64-debug` | Windows 11 x64, MSVC 19.51 | Passed with `/W4 /WX /permissive-` on final M6 source | 2026-07-23 |
+| `ctest --preset windows-x64-debug --output-on-failure` | Windows 11 x64 | Passed on final source: assets + integrated C11/C++ M1-M6 ABI + continuous-airbrush/multiple-adjustment application/D2D smoke, 3/3 in 13.19 s | 2026-07-23 |
+| `cmake --preset windows-x64-release` / developer-shell `cmake --build --preset windows-x64-release` | Windows 11 x64, MSVC 19.51 | Passed optimized with `/W4 /WX /permissive-` | 2026-07-23 |
+| `ctest --preset windows-x64-release --output-on-failure` (two attempts) | Windows 11 x64 | Assets passed; ABI/application processes were not started because local Application Control blocked the newly linked unsigned Release EXE (`BAD_COMMAND`) | 2026-07-23 |
+| Immediate unchanged `cmake --build --preset windows-x64-debug` | Windows 11 x64, Ninja | `ninja: no work to do`; Cargo was not invoked | 2026-07-23 |
 | `winapp manifest update-assets AppIcon.svg --manifest apps/windows/package/Package.appxmanifest --verbose` | Windows 11 x64, Windows App Development CLI 0.5.0 | Passed: updated 48 PNG assets and 16/24/32/48/256 ICO; 16/44/256/300 px representatives inspected | 2026-07-22 |
 | Post-icon `cmake --preset windows-x64-debug` / build / `ctest --preset windows-x64-debug` | Windows 11 x64, MSVC 19.51 | Passed strict build and assets + ABI + 574 x 544 owner-centered About/application smoke, 3/3 | 2026-07-22 |
 | Post-icon Release configure/build | Windows 11 x64, MSVC 19.51 | Strict optimized build passed; asset CTest passed, while the two fresh-EXE tests were blocked before process start by local application-control policy | 2026-07-22 |
 
-The complete Rust suite was recorded under WSL because that is the established
-stable Rust environment for this worktree. The first M6 Debug build attempt was
-run outside the Visual Studio developer environment and could not locate the C
-standard headers; it is not counted. The developer-shell build then exposed and
-corrected one C++ aggregate-layout error. A first linked ABI smoke returned its
-focused adjustment check code because the test retained pre-Redo local metadata;
-refreshing the document info fixed the test itself. Final Debug/Release builds
-and all post-link tests above passed.
-
-For the later icon/About follow-up, the complete Debug preset passed after the
-new executable was admitted by local application control. Release compiled and
-linked successfully, but its newly emitted executable remained policy-blocked
-before the ABI and application smoke processes could start; no Release test
-  body failed. The later M6 review ran both complete CTest presets successfully
-  after all production-code fixes. A final Rust-test-only edit caused new Debug/
-  Release links: final Debug passed 3/3, while Application Control blocked the
-  final Release ABI/application processes before test start on two attempts.
-  The WSL stable Rust format, clippy, and 96-test workspace suite passed on the
-  final reviewed source.
+The complete Rust suite is recorded under WSL because Windows Application
+Control blocked the freshly linked Rust test/clippy executables before their
+bodies could start (`os error 4551`). The same source passed format, clippy, and
+all 103 tests under WSL using an isolated target directory. This policy event is
+not a code-test failure. Final Debug CTest executed all three tests successfully.
+The final Release binary compiled and linked strictly, but its two EXE tests
+remained externally blocked before process start; no Release test body failed.
 
 ## Known gaps and unknowns
 
@@ -416,18 +407,9 @@ before the ABI and application smoke processes could start; no Release test
   Canvas gesture controls are not yet exposed. Arbitrary interleaving of raster
   and vector layers currently draws vector content after the precomposited
   raster tiles, while ordering among vector layers is preserved.
-- M6 filter preview, last-filter, adjustment create/update, gradient, airbrush,
-  boundary effect, blur, stamp, and alpha edit are connected through C ABI and
-  the Core-engine/Renderer Windows smoke. The native menu exposes last-filter,
-  invert, and weak blur as the vertical slice. Parameter/effect dialogs and
-  adjustment/alpha layer panels are not yet exposed. Raster operations currently
-  run synchronously on the Core-engine thread; worker progress/cancellation
-  remains adapter work.
-- The Core/image effect slice provides deterministic primitives, but the full
-  blur-tool gesture model (screen-fixed diameter/pressure) and stamp brush
-  shape/hardness/spacing controls remain `In progress` under `EFFECT-001`.
-  Dust removal is also not implemented, so the broader M6 milestone is not
-  reported complete despite all five acceptance scenarios passing.
+- M6 filter/effect/dust work executes on the long-lived Core engine thread, not
+  the UI thread. The native progress dialog polls/cancels the thread-safe task;
+  cancellation, failure, or stale revision never commits a partial raster.
 - M7 batch graph, execution, dry-run, progress, and output policy remain
   `Not started`; no M7 code or status was introduced in this milestone.
 - The M3 Windows menu provides the acceptance vertical slice. Box-zoom drag,

@@ -66,7 +66,8 @@ public:
         std::function<InkpodStatus(InkpodCore*)> operation,
         bool publish_snapshot,
         bool refresh_document_info,
-        bool defer_during_active_stroke) noexcept;
+        bool defer_during_active_stroke,
+        std::function<void(InkpodStatus)> completion = {}) noexcept;
     bool EnqueueStroke(StrokeEvent event) noexcept;
     InkpodStatus WaitIdle() noexcept;
     InkpodStatus FlushPreview() noexcept;

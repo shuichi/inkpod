@@ -141,6 +141,27 @@ pub struct AirbrushStroke {
     pub color: [u16; 4],
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EffectSample {
+    pub x_milli: i64,
+    pub y_milli: i64,
+    pub pressure_milli: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AirbrushGesture {
+    pub samples: Vec<EffectSample>,
+    pub radius_milli: u32,
+    pub hardness_milli: u32,
+    pub spacing_milli: u32,
+    pub opacity_milli: u32,
+    pub fade_milli: u32,
+    pub pressure_size: bool,
+    pub pressure_opacity: bool,
+    pub continuous_dabs: u32,
+    pub color: [u16; 4],
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BoundaryAirbrush {
     pub colors: Vec<[u16; 4]>,
@@ -159,40 +180,124 @@ pub struct Stamp {
     pub opacity_milli: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StampGesture {
+    pub source_x_milli: i64,
+    pub source_y_milli: i64,
+    pub samples: Vec<EffectSample>,
+    pub radius_milli: u32,
+    pub hardness_milli: u32,
+    pub spacing_milli: u32,
+    pub opacity_milli: u32,
+    pub shape: StampShape,
+    pub pressure_size: bool,
+    pub pressure_opacity: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StampShape {
+    Round,
+    Square,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DustMode {
+    RemoveForeground,
+    FillTransparentHoles,
+    ReplaceColorOutliers,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DustRemoval {
+    pub mode: DustMode,
+    pub maximum_pixels: u32,
+}
+
 pub fn apply_filter(
     source: &TileRaster,
     selection: Option<&TileRaster>,
     filter: &Filter,
     revision: u64,
 ) -> Result<TileRaster, RasterError> {
+    apply_filter_with_progress(source, selection, filter, revision, |_, _| true)
+}
+
+pub fn apply_filter_with_progress(
+    source: &TileRaster,
+    selection: Option<&TileRaster>,
+    filter: &Filter,
+    revision: u64,
+    mut progress: impl FnMut(u64, u64) -> bool,
+) -> Result<TileRaster, RasterError> {
     validate_color_raster(source)?;
     validate_selection(source, selection)?;
     validate_filter(filter)?;
+    if !progress(0, u64::from(source.height()).max(1)) {
+        return Err(RasterError::Cancelled);
+    }
     match filter {
-        Filter::BlurWeak => blur(source, selection, 1, 1_000, revision),
-        Filter::BlurStrong => blur(source, selection, 2, 1_000, revision),
+        Filter::BlurWeak => blur_progress(
+            source,
+            selection,
+            1,
+            1_000,
+            revision,
+            &mut progress,
+            0,
+            u64::from(source.height()),
+        ),
+        Filter::BlurStrong => blur_progress(
+            source,
+            selection,
+            2,
+            1_000,
+            revision,
+            &mut progress,
+            0,
+            u64::from(source.height()),
+        ),
         Filter::GaussianBlur {
             radius,
             strength_milli,
-        } => blur(source, selection, *radius, *strength_milli, revision),
-        Filter::SharpenWeak => unsharp(source, selection, 1, 500, 0, revision),
-        Filter::SharpenStrong => unsharp(source, selection, 1, 1_000, 0, revision),
+        } => blur_progress(
+            source,
+            selection,
+            *radius,
+            *strength_milli,
+            revision,
+            &mut progress,
+            0,
+            u64::from(source.height()),
+        ),
+        Filter::SharpenWeak => {
+            unsharp_progress(source, selection, 1, 500, 0, revision, &mut progress)
+        }
+        Filter::SharpenStrong => {
+            unsharp_progress(source, selection, 1, 1_000, 0, revision, &mut progress)
+        }
         Filter::UnsharpMask {
             radius,
             amount_milli,
             threshold,
-        } => unsharp(
+        } => unsharp_progress(
             source,
             selection,
             *radius,
             *amount_milli,
             *threshold,
             revision,
+            &mut progress,
         ),
-        Filter::AutoContrast => auto_contrast(source, selection, revision),
-        _ => map_selected(source, selection, revision, |value| {
-            transform_pixel(value, filter)
-        }),
+        Filter::AutoContrast => auto_contrast_progress(source, selection, revision, &mut progress),
+        _ => map_selected_progress(
+            source,
+            selection,
+            revision,
+            |value| transform_pixel(value, filter),
+            &mut progress,
+            0,
+            u64::from(source.height()),
+        ),
     }
 }
 
@@ -290,10 +395,83 @@ pub fn apply_airbrush(
         return Err(RasterError::InvalidDimensions);
     }
     let mut result = source.clone();
+    apply_airbrush_dab(&mut result, selection, stroke, revision)?;
+    Ok(result)
+}
+
+pub fn apply_airbrush_gesture(
+    source: &TileRaster,
+    selection: Option<&TileRaster>,
+    gesture: &AirbrushGesture,
+    revision: u64,
+) -> Result<TileRaster, RasterError> {
+    validate_color_raster(source)?;
+    validate_selection(source, selection)?;
+    validate_effect_samples(&gesture.samples)?;
+    if gesture.radius_milli == 0
+        || gesture.radius_milli > MAX_FILTER_RADIUS * 1_000
+        || gesture.hardness_milli > 1_000
+        || gesture.spacing_milli == 0
+        || gesture.spacing_milli > 4_000
+        || gesture.opacity_milli > 1_000
+        || gesture.fade_milli > 1_000
+        || gesture.continuous_dabs > 1_024
+    {
+        return Err(RasterError::InvalidDimensions);
+    }
+    let dabs = interpolated_effect_samples(
+        &gesture.samples,
+        gesture.spacing_milli,
+        gesture.continuous_dabs,
+    )?;
+    let mut result = source.clone();
+    let denominator = dabs.len().saturating_sub(1).max(1) as u64;
+    for (index, sample) in dabs.into_iter().enumerate() {
+        let pressure = sample.pressure_milli.min(1_000);
+        let fade = 1_000_u64
+            .saturating_sub(u64::from(gesture.fade_milli) * index as u64 / denominator)
+            as u32;
+        let radius = if gesture.pressure_size {
+            ((u64::from(gesture.radius_milli) * u64::from(pressure) + 500) / 1_000).max(1) as u32
+        } else {
+            gesture.radius_milli
+        };
+        let mut opacity =
+            ((u64::from(gesture.opacity_milli) * u64::from(fade) + 500) / 1_000) as u32;
+        if gesture.pressure_opacity {
+            opacity = ((u64::from(opacity) * u64::from(pressure) + 500) / 1_000) as u32;
+        }
+        apply_airbrush_dab(
+            &mut result,
+            selection,
+            AirbrushStroke {
+                center_x_milli: sample.x_milli,
+                center_y_milli: sample.y_milli,
+                radius_milli: radius,
+                hardness_milli: gesture.hardness_milli,
+                opacity_milli: opacity,
+                color: gesture.color,
+            },
+            revision,
+        )?;
+    }
+    Ok(result)
+}
+
+fn apply_airbrush_dab(
+    result: &mut TileRaster,
+    selection: Option<&TileRaster>,
+    stroke: AirbrushStroke,
+    revision: u64,
+) -> Result<(), RasterError> {
     let radius = f64::from(stroke.radius_milli);
     let hard_radius = radius * f64::from(stroke.hardness_milli) / 1_000.0;
-    for y in 0..source.height() {
-        for x in 0..source.width() {
+    let (left, right) =
+        clipped_effect_bounds(stroke.center_x_milli, stroke.radius_milli, result.width());
+    let (top, bottom) =
+        clipped_effect_bounds(stroke.center_y_milli, stroke.radius_milli, result.height());
+    for y in top..bottom {
+        for x in left..right {
             if !selected(selection, x, y)? {
                 continue;
             }
@@ -312,11 +490,11 @@ pub fn apply_airbrush(
             color[3] = ((f64::from(color[3]) * f64::from(stroke.opacity_milli) * falloff) / 1_000.0)
                 .round()
                 .clamp(0.0, 65_535.0) as u16;
-            let after = source_over(source.pixel(x, y)?, color)?;
+            let after = source_over(result.pixel(x, y)?, color)?;
             result.set_pixel(x, y, after, revision)?;
         }
     }
-    Ok(result)
+    Ok(())
 }
 
 pub fn apply_boundary_airbrush(
@@ -450,6 +628,367 @@ pub fn apply_stamp(
     Ok(result)
 }
 
+pub fn apply_stamp_gesture(
+    source: &TileRaster,
+    selection: Option<&TileRaster>,
+    gesture: &StampGesture,
+    revision: u64,
+) -> Result<TileRaster, RasterError> {
+    validate_color_raster(source)?;
+    validate_selection(source, selection)?;
+    validate_effect_samples(&gesture.samples)?;
+    if gesture.radius_milli == 0
+        || gesture.radius_milli > MAX_FILTER_RADIUS * 1_000
+        || gesture.hardness_milli > 1_000
+        || gesture.spacing_milli == 0
+        || gesture.spacing_milli > 4_000
+        || gesture.opacity_milli > 1_000
+    {
+        return Err(RasterError::InvalidDimensions);
+    }
+    let dabs = interpolated_effect_samples(&gesture.samples, gesture.spacing_milli, 0)?;
+    let destination_anchor = *gesture
+        .samples
+        .first()
+        .ok_or(RasterError::InvalidDimensions)?;
+    let mut result = source.clone();
+    for sample in dabs {
+        let pressure = sample.pressure_milli.min(1_000);
+        let radius = if gesture.pressure_size {
+            ((u64::from(gesture.radius_milli) * u64::from(pressure) + 500) / 1_000).max(1) as u32
+        } else {
+            gesture.radius_milli
+        };
+        let opacity = if gesture.pressure_opacity {
+            ((u64::from(gesture.opacity_milli) * u64::from(pressure) + 500) / 1_000) as u32
+        } else {
+            gesture.opacity_milli
+        };
+        apply_stamp_dab(
+            source,
+            &mut result,
+            selection,
+            gesture.source_x_milli,
+            gesture.source_y_milli,
+            destination_anchor.x_milli,
+            destination_anchor.y_milli,
+            sample.x_milli,
+            sample.y_milli,
+            radius,
+            gesture.hardness_milli,
+            opacity,
+            gesture.shape,
+            revision,
+        )?;
+    }
+    Ok(result)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_stamp_dab(
+    source: &TileRaster,
+    result: &mut TileRaster,
+    selection: Option<&TileRaster>,
+    source_anchor_x: i64,
+    source_anchor_y: i64,
+    destination_anchor_x: i64,
+    destination_anchor_y: i64,
+    center_x: i64,
+    center_y: i64,
+    radius_milli: u32,
+    hardness_milli: u32,
+    opacity_milli: u32,
+    shape: StampShape,
+    revision: u64,
+) -> Result<(), RasterError> {
+    let radius = f64::from(radius_milli);
+    let hard_radius = radius * f64::from(hardness_milli) / 1_000.0;
+    let (left, right) = clipped_effect_bounds(center_x, radius_milli, source.width());
+    let (top, bottom) = clipped_effect_bounds(center_y, radius_milli, source.height());
+    let offset_x = i128::from(source_anchor_x) - i128::from(destination_anchor_x);
+    let offset_y = i128::from(source_anchor_y) - i128::from(destination_anchor_y);
+    for y in top..bottom {
+        for x in left..right {
+            if !selected(selection, x, y)? {
+                continue;
+            }
+            let pixel_x = i64::from(x) * 1_000 + 500;
+            let pixel_y = i64::from(y) * 1_000 + 500;
+            let dx = (pixel_x as f64 - center_x as f64).abs();
+            let dy = (pixel_y as f64 - center_y as f64).abs();
+            let distance = match shape {
+                StampShape::Round => dx.hypot(dy),
+                StampShape::Square => dx.max(dy),
+            };
+            if distance > radius {
+                continue;
+            }
+            let source_x_milli = i128::from(pixel_x) + offset_x;
+            let source_y_milli = i128::from(pixel_y) + offset_y;
+            if source_x_milli < 0 || source_y_milli < 0 {
+                continue;
+            }
+            let source_x =
+                u32::try_from(source_x_milli / 1_000).map_err(|_| RasterError::PixelOutOfBounds)?;
+            let source_y =
+                u32::try_from(source_y_milli / 1_000).map_err(|_| RasterError::PixelOutOfBounds)?;
+            if source_x >= source.width() || source_y >= source.height() {
+                continue;
+            }
+            let falloff = if distance <= hard_radius || hard_radius == radius {
+                1.0
+            } else {
+                1.0 - (distance - hard_radius) / (radius - hard_radius)
+            };
+            let mut color = source
+                .pixel(source_x, source_y)?
+                .rgba16()
+                .ok_or(RasterError::PixelFormatMismatch)?;
+            color[3] = ((f64::from(color[3]) * f64::from(opacity_milli) * falloff) / 1_000.0)
+                .round()
+                .clamp(0.0, 65_535.0) as u16;
+            let after = source_over(result.pixel(x, y)?, color)?;
+            result.set_pixel(x, y, after, revision)?;
+        }
+    }
+    Ok(())
+}
+
+fn clipped_effect_bounds(center_milli: i64, radius_milli: u32, bound: u32) -> (u32, u32) {
+    let center = center_milli as f64;
+    let radius = f64::from(radius_milli);
+    let bound = f64::from(bound);
+    let first = ((center - radius) / 1_000.0 - 1.0)
+        .floor()
+        .clamp(0.0, bound) as u32;
+    let last = ((center + radius) / 1_000.0 + 1.0).ceil().clamp(0.0, bound) as u32;
+    (first, last)
+}
+
+pub fn apply_dust_removal(
+    source: &TileRaster,
+    operation_mask: Option<&TileRaster>,
+    options: DustRemoval,
+    revision: u64,
+    mut progress: impl FnMut(u64, u64) -> bool,
+) -> Result<TileRaster, RasterError> {
+    validate_color_raster(source)?;
+    validate_selection(source, operation_mask)?;
+    if options.maximum_pixels == 0 || options.maximum_pixels > 65_536 {
+        return Err(RasterError::InvalidDimensions);
+    }
+    let pixel_count = usize::try_from(u64::from(source.width()) * u64::from(source.height()))
+        .map_err(|_| RasterError::InvalidDimensions)?;
+    let total = u64::try_from(pixel_count).map_err(|_| RasterError::InvalidDimensions)?;
+    let mut visited = vec![false; pixel_count];
+    let mut result = source.clone();
+    let mut completed = 0_u64;
+    for y in 0..source.height() {
+        for x in 0..source.width() {
+            let index = raster_index(source.width(), x, y)?;
+            if visited[index] || !selected(operation_mask, x, y)? {
+                completed += 1;
+                continue;
+            }
+            let seed = source
+                .pixel(x, y)?
+                .rgba16()
+                .ok_or(RasterError::PixelFormatMismatch)?;
+            let eligible = match options.mode {
+                DustMode::RemoveForeground => seed[3] != 0,
+                DustMode::FillTransparentHoles => seed[3] == 0,
+                DustMode::ReplaceColorOutliers => true,
+            };
+            if !eligible {
+                visited[index] = true;
+                completed += 1;
+                continue;
+            }
+            let mut queue = std::collections::VecDeque::from([(x, y)]);
+            let mut component = Vec::new();
+            let mut oversized = false;
+            let mut touches_boundary = false;
+            while let Some((candidate_x, candidate_y)) = queue.pop_front() {
+                let candidate_index = raster_index(source.width(), candidate_x, candidate_y)?;
+                if visited[candidate_index] || !selected(operation_mask, candidate_x, candidate_y)?
+                {
+                    continue;
+                }
+                let value = source
+                    .pixel(candidate_x, candidate_y)?
+                    .rgba16()
+                    .ok_or(RasterError::PixelFormatMismatch)?;
+                let same_component = match options.mode {
+                    DustMode::RemoveForeground => value[3] != 0,
+                    DustMode::FillTransparentHoles => value[3] == 0,
+                    DustMode::ReplaceColorOutliers => value == seed,
+                };
+                if !same_component {
+                    continue;
+                }
+                visited[candidate_index] = true;
+                if component.len() <= options.maximum_pixels as usize {
+                    component.push((candidate_x, candidate_y));
+                } else {
+                    oversized = true;
+                }
+                touches_boundary |= candidate_x == 0
+                    || candidate_y == 0
+                    || candidate_x + 1 == source.width()
+                    || candidate_y + 1 == source.height();
+                for neighbor in
+                    four_neighbors(candidate_x, candidate_y, source.width(), source.height())
+                {
+                    queue.push_back(neighbor);
+                }
+            }
+            completed = completed.saturating_add(component.len() as u64);
+            if !progress(completed.min(total), total) {
+                return Err(RasterError::Cancelled);
+            }
+            if component.is_empty()
+                || oversized
+                || component.len() > options.maximum_pixels as usize
+            {
+                continue;
+            }
+            if options.mode == DustMode::FillTransparentHoles && touches_boundary {
+                continue;
+            }
+            let replacement = match options.mode {
+                DustMode::RemoveForeground => [0; 4],
+                DustMode::FillTransparentHoles | DustMode::ReplaceColorOutliers => {
+                    surrounding_average(source, &component, seed)?
+                }
+            };
+            if options.mode == DustMode::ReplaceColorOutliers && replacement == seed {
+                continue;
+            }
+            let replacement = from_rgba16(source.format(), replacement);
+            for (component_x, component_y) in component {
+                result.set_pixel(component_x, component_y, replacement, revision)?;
+            }
+        }
+        if !progress(completed.min(total), total) {
+            return Err(RasterError::Cancelled);
+        }
+    }
+    if !progress(total, total) {
+        return Err(RasterError::Cancelled);
+    }
+    Ok(result)
+}
+
+fn raster_index(width: u32, x: u32, y: u32) -> Result<usize, RasterError> {
+    usize::try_from(u64::from(y) * u64::from(width) + u64::from(x))
+        .map_err(|_| RasterError::InvalidDimensions)
+}
+
+fn four_neighbors(x: u32, y: u32, width: u32, height: u32) -> Vec<(u32, u32)> {
+    let mut result = Vec::with_capacity(4);
+    if x > 0 {
+        result.push((x - 1, y));
+    }
+    if x + 1 < width {
+        result.push((x + 1, y));
+    }
+    if y > 0 {
+        result.push((x, y - 1));
+    }
+    if y + 1 < height {
+        result.push((x, y + 1));
+    }
+    result
+}
+
+fn surrounding_average(
+    source: &TileRaster,
+    component: &[(u32, u32)],
+    component_color: [u16; 4],
+) -> Result<[u16; 4], RasterError> {
+    let component_set = component
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut sums = [0_u128; 4];
+    let mut count = 0_u128;
+    for &(x, y) in component {
+        for (neighbor_x, neighbor_y) in four_neighbors(x, y, source.width(), source.height()) {
+            if component_set.contains(&(neighbor_x, neighbor_y)) {
+                continue;
+            }
+            let value = source
+                .pixel(neighbor_x, neighbor_y)?
+                .rgba16()
+                .ok_or(RasterError::PixelFormatMismatch)?;
+            if value == component_color {
+                continue;
+            }
+            for channel in 0..4 {
+                sums[channel] += u128::from(value[channel]);
+            }
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return Ok(component_color);
+    }
+    Ok(std::array::from_fn(|channel| {
+        ((sums[channel] + count / 2) / count) as u16
+    }))
+}
+
+fn validate_effect_samples(samples: &[EffectSample]) -> Result<(), RasterError> {
+    if samples.is_empty()
+        || samples.len() > 1_048_576
+        || samples.iter().any(|sample| sample.pressure_milli > 1_000)
+    {
+        Err(RasterError::InvalidDimensions)
+    } else {
+        Ok(())
+    }
+}
+
+fn interpolated_effect_samples(
+    samples: &[EffectSample],
+    spacing_milli: u32,
+    continuous_dabs: u32,
+) -> Result<Vec<EffectSample>, RasterError> {
+    validate_effect_samples(samples)?;
+    if spacing_milli == 0 {
+        return Err(RasterError::InvalidDimensions);
+    }
+    let mut result = Vec::new();
+    result.push(samples[0]);
+    for pair in samples.windows(2) {
+        let dx = pair[1].x_milli as f64 - pair[0].x_milli as f64;
+        let dy = pair[1].y_milli as f64 - pair[0].y_milli as f64;
+        let distance = dx.hypot(dy);
+        let steps = (distance / f64::from(spacing_milli)).ceil().max(1.0) as u64;
+        if result.len().saturating_add(steps as usize) > 1_048_576 {
+            return Err(RasterError::InvalidDimensions);
+        }
+        for step in 1..=steps {
+            let ratio = step as f64 / steps as f64;
+            result.push(EffectSample {
+                x_milli: (pair[0].x_milli as f64 + dx * ratio).round() as i64,
+                y_milli: (pair[0].y_milli as f64 + dy * ratio).round() as i64,
+                pressure_milli: (f64::from(pair[0].pressure_milli)
+                    + (pair[1].pressure_milli as f64 - pair[0].pressure_milli as f64) * ratio)
+                    .round()
+                    .clamp(0.0, 1_000.0) as u32,
+            });
+        }
+    }
+    if continuous_dabs > 0 {
+        result.extend(std::iter::repeat_n(
+            *samples.last().unwrap(),
+            continuous_dabs as usize,
+        ));
+    }
+    Ok(result)
+}
+
 fn clipped_stamp_axis(
     length: u32,
     source_start: i32,
@@ -502,6 +1041,33 @@ pub fn edit_alpha(
                 _ => return Err(RasterError::PixelFormatMismatch),
             };
             result.set_pixel(x, y, from_rgba16(source.format(), color), revision)?;
+        }
+    }
+    Ok(result)
+}
+
+pub fn apply_alpha_gradient(
+    source: &TileRaster,
+    selection: Option<&TileRaster>,
+    gradient: &Gradient,
+    revision: u64,
+) -> Result<TileRaster, RasterError> {
+    let alpha_source = apply_gradient(source, selection, gradient, revision)?;
+    let mut result = source.clone();
+    for y in 0..source.height() {
+        for x in 0..source.width() {
+            if !selected(selection, x, y)? {
+                continue;
+            }
+            let mut original = source
+                .pixel(x, y)?
+                .rgba16()
+                .ok_or(RasterError::PixelFormatMismatch)?;
+            original[3] = alpha_source
+                .pixel(x, y)?
+                .rgba16()
+                .ok_or(RasterError::PixelFormatMismatch)?[3];
+            result.set_pixel(x, y, from_rgba16(source.format(), original), revision)?;
         }
     }
     Ok(result)
@@ -652,11 +1218,15 @@ fn validate_gradient(gradient: &Gradient) -> Result<(), RasterError> {
     }
 }
 
-fn map_selected<F>(
+#[allow(clippy::too_many_arguments)]
+fn map_selected_progress<F>(
     source: &TileRaster,
     selection: Option<&TileRaster>,
     revision: u64,
     mut transform: F,
+    progress: &mut impl FnMut(u64, u64) -> bool,
+    progress_base: u64,
+    progress_total: u64,
 ) -> Result<TileRaster, RasterError>
 where
     F: FnMut(PixelValue) -> Result<PixelValue, RasterError>,
@@ -667,6 +1237,9 @@ where
             if selected(selection, x, y)? {
                 result.set_pixel(x, y, transform(source.pixel(x, y)?)?, revision)?;
             }
+        }
+        if !progress(progress_base + u64::from(y) + 1, progress_total.max(1)) {
+            return Err(RasterError::Cancelled);
         }
     }
     Ok(result)
@@ -736,12 +1309,16 @@ fn transform_pixel(value: PixelValue, filter: &Filter) -> Result<PixelValue, Ras
     Ok(from_rgba16(format, color))
 }
 
-fn blur(
+#[allow(clippy::too_many_arguments)]
+fn blur_progress(
     source: &TileRaster,
     selection: Option<&TileRaster>,
     radius: u32,
     strength_milli: u32,
     revision: u64,
+    progress: &mut impl FnMut(u64, u64) -> bool,
+    progress_base: u64,
+    progress_total: u64,
 ) -> Result<TileRaster, RasterError> {
     validate_radius_work(source, radius)?;
     let radius = i32::try_from(radius).map_err(|_| RasterError::InvalidDimensions)?;
@@ -802,6 +1379,9 @@ fn blur(
             }
             result.set_pixel(x, y, from_rgba16(source.format(), blurred), revision)?;
         }
+        if !progress(progress_base + u64::from(y) + 1, progress_total.max(1)) {
+            return Err(RasterError::Cancelled);
+        }
     }
     Ok(result)
 }
@@ -823,15 +1403,19 @@ fn validate_radius_work(source: &TileRaster, radius: u32) -> Result<(), RasterEr
     }
 }
 
-fn unsharp(
+#[allow(clippy::too_many_arguments)]
+fn unsharp_progress(
     source: &TileRaster,
     selection: Option<&TileRaster>,
     radius: u32,
     amount_milli: u32,
     threshold: u16,
     revision: u64,
+    progress: &mut impl FnMut(u64, u64) -> bool,
 ) -> Result<TileRaster, RasterError> {
-    let soft = blur(source, None, radius, 1_000, revision)?;
+    let height = u64::from(source.height());
+    let total = height.saturating_mul(2).max(1);
+    let soft = blur_progress(source, None, radius, 1_000, revision, progress, 0, total)?;
     let mut result = source.clone();
     for y in 0..source.height() {
         for x in 0..source.width() {
@@ -859,15 +1443,21 @@ fn unsharp(
             }
             result.set_pixel(x, y, from_rgba16(source.format(), output), revision)?;
         }
+        if !progress(height + u64::from(y) + 1, total) {
+            return Err(RasterError::Cancelled);
+        }
     }
     Ok(result)
 }
 
-fn auto_contrast(
+fn auto_contrast_progress(
     source: &TileRaster,
     selection: Option<&TileRaster>,
     revision: u64,
+    progress: &mut impl FnMut(u64, u64) -> bool,
 ) -> Result<TileRaster, RasterError> {
+    let height = u64::from(source.height());
+    let total = height.saturating_mul(2).max(1);
     let mut minimum = [u16::MAX; 3];
     let mut maximum = [0_u16; 3];
     let mut found = false;
@@ -887,22 +1477,33 @@ fn auto_contrast(
             }
             found = true;
         }
+        if !progress(u64::from(y) + 1, total) {
+            return Err(RasterError::Cancelled);
+        }
     }
     if !found {
         return Ok(source.clone());
     }
-    map_selected(source, selection, revision, |value| {
-        let mut color = value.rgba16().ok_or(RasterError::PixelFormatMismatch)?;
-        for channel in 0..3 {
-            let range = u32::from(maximum[channel] - minimum[channel]);
-            if range != 0 {
-                color[channel] = ((u64::from(color[channel] - minimum[channel]) * 65_535
-                    + u64::from(range / 2))
-                    / u64::from(range)) as u16;
+    map_selected_progress(
+        source,
+        selection,
+        revision,
+        |value| {
+            let mut color = value.rgba16().ok_or(RasterError::PixelFormatMismatch)?;
+            for channel in 0..3 {
+                let range = u32::from(maximum[channel] - minimum[channel]);
+                if range != 0 {
+                    color[channel] = ((u64::from(color[channel] - minimum[channel]) * 65_535
+                        + u64::from(range / 2))
+                        / u64::from(range)) as u16;
+                }
             }
-        }
-        Ok(from_rgba16(source.format(), color))
-    })
+            Ok(from_rgba16(source.format(), color))
+        },
+        progress,
+        height,
+        total,
+    )
 }
 
 fn apply_channels<F>(color: &mut [u16; 4], channel: Channel, mut operation: F)
@@ -1202,6 +1803,220 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn m6_full_effect_gestures_are_deterministic_and_pressure_aware() {
+        let source = rgba8(8, 4);
+        let gesture = AirbrushGesture {
+            samples: vec![
+                EffectSample {
+                    x_milli: 1_500,
+                    y_milli: 1_500,
+                    pressure_milli: 250,
+                },
+                EffectSample {
+                    x_milli: 6_500,
+                    y_milli: 1_500,
+                    pressure_milli: 1_000,
+                },
+            ],
+            radius_milli: 1_500,
+            hardness_milli: 500,
+            spacing_milli: 500,
+            opacity_milli: 1_000,
+            fade_milli: 250,
+            pressure_size: true,
+            pressure_opacity: true,
+            continuous_dabs: 2,
+            color: [65_535, 0, 0, 65_535],
+        };
+        let first = apply_airbrush_gesture(&source, None, &gesture, 2).unwrap();
+        let second = apply_airbrush_gesture(&source, None, &gesture, 2).unwrap();
+        assert_eq!(first, second);
+        assert_ne!(first, source);
+        assert!(
+            first.pixel(6, 1).unwrap().rgba16().unwrap()[3]
+                > first.pixel(1, 1).unwrap().rgba16().unwrap()[3]
+        );
+
+        let mut stamp_source = rgba8(8, 4);
+        stamp_source
+            .set_pixel(1, 1, PixelValue::Rgba([0, 255, 0, 255]), 1)
+            .unwrap();
+        stamp_source
+            .set_pixel(3, 1, PixelValue::Rgba([0, 255, 0, 255]), 1)
+            .unwrap();
+        let stamped = apply_stamp_gesture(
+            &stamp_source,
+            None,
+            &StampGesture {
+                source_x_milli: 1_500,
+                source_y_milli: 1_500,
+                samples: vec![
+                    EffectSample {
+                        x_milli: 4_500,
+                        y_milli: 1_500,
+                        pressure_milli: 1_000,
+                    },
+                    EffectSample {
+                        x_milli: 6_500,
+                        y_milli: 1_500,
+                        pressure_milli: 500,
+                    },
+                ],
+                radius_milli: 600,
+                hardness_milli: 1_000,
+                spacing_milli: 1_000,
+                opacity_milli: 1_000,
+                shape: StampShape::Round,
+                pressure_size: true,
+                pressure_opacity: true,
+            },
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            stamped.pixel(4, 1).unwrap(),
+            PixelValue::Rgba([0, 255, 0, 255])
+        );
+        assert_ne!(
+            stamped.pixel(6, 1).unwrap(),
+            stamp_source.pixel(6, 1).unwrap()
+        );
+    }
+
+    #[test]
+    fn paint_003_dust_modes_preview_bounds_and_cancel_are_atomic() {
+        let mut point = rgba8(5, 5);
+        point
+            .set_pixel(2, 2, PixelValue::Rgba([255, 0, 0, 255]), 1)
+            .unwrap();
+        let removed = apply_dust_removal(
+            &point,
+            None,
+            DustRemoval {
+                mode: DustMode::RemoveForeground,
+                maximum_pixels: 1,
+            },
+            2,
+            |_, _| true,
+        )
+        .unwrap();
+        assert_eq!(removed.pixel(2, 2).unwrap(), PixelValue::Rgba([0; 4]));
+
+        let mut hole = rgba8(5, 5);
+        for y in 1..4 {
+            for x in 1..4 {
+                hole.set_pixel(x, y, PixelValue::Rgba([20, 40, 60, 255]), 1)
+                    .unwrap();
+            }
+        }
+        hole.set_pixel(2, 2, PixelValue::Rgba([0; 4]), 1).unwrap();
+        let filled = apply_dust_removal(
+            &hole,
+            None,
+            DustRemoval {
+                mode: DustMode::FillTransparentHoles,
+                maximum_pixels: 1,
+            },
+            2,
+            |_, _| true,
+        )
+        .unwrap();
+        assert_eq!(
+            filled.pixel(2, 2).unwrap(),
+            PixelValue::Rgba([20, 40, 60, 255])
+        );
+
+        let mut outlier = hole.clone();
+        outlier
+            .set_pixel(2, 2, PixelValue::Rgba([0, 0, 255, 255]), 1)
+            .unwrap();
+        let replaced = apply_dust_removal(
+            &outlier,
+            None,
+            DustRemoval {
+                mode: DustMode::ReplaceColorOutliers,
+                maximum_pixels: 1,
+            },
+            2,
+            |_, _| true,
+        )
+        .unwrap();
+        assert_eq!(
+            replaced.pixel(2, 2).unwrap(),
+            PixelValue::Rgba([20, 40, 60, 255])
+        );
+
+        let mut polls = 0;
+        assert_eq!(
+            apply_dust_removal(
+                &outlier,
+                None,
+                DustRemoval {
+                    mode: DustMode::ReplaceColorOutliers,
+                    maximum_pixels: 8
+                },
+                2,
+                |_, _| {
+                    polls += 1;
+                    polls < 2
+                },
+            ),
+            Err(RasterError::Cancelled)
+        );
+        assert_eq!(
+            apply_filter_with_progress(&outlier, None, &Filter::AutoContrast, 2, |_, _| false,),
+            Err(RasterError::Cancelled)
+        );
+    }
+
+    #[test]
+    fn adjust_001_alpha_gradient_never_changes_rgb() {
+        let mut source = rgba8(3, 1);
+        for x in 0..3 {
+            source
+                .set_pixel(x, 0, PixelValue::Rgba([10, 20, 30, 200]), 1)
+                .unwrap();
+        }
+        let output = apply_alpha_gradient(
+            &source,
+            None,
+            &Gradient {
+                kind: GradientKind::Linear,
+                mode: GradientMode::Overwrite,
+                start_x_milli: 500,
+                start_y_milli: 500,
+                end_x_milli: 2_500,
+                end_y_milli: 500,
+                dither: false,
+                stops: vec![
+                    GradientStop {
+                        position_milli: 0,
+                        color: [0, 0, 0, 0],
+                    },
+                    GradientStop {
+                        position_milli: 500,
+                        color: [0, 0, 0, 32_768],
+                    },
+                    GradientStop {
+                        position_milli: 1_000,
+                        color: [0, 0, 0, 65_535],
+                    },
+                ],
+            },
+            2,
+        )
+        .unwrap();
+        for x in 0..3 {
+            assert_eq!(
+                &output.pixel(x, 0).unwrap().rgba16().unwrap()[..3],
+                &[2_570, 5_140, 7_710]
+            );
+        }
+        assert_eq!(output.pixel(0, 0).unwrap().rgba16().unwrap()[3], 0);
+        assert_eq!(output.pixel(2, 0).unwrap().rgba16().unwrap()[3], 65_535);
     }
 
     #[test]

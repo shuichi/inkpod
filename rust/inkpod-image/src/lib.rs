@@ -4,11 +4,13 @@ mod edit;
 mod vector;
 
 pub use edit::{
-    Adjustment, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance, CurveInterpolation,
-    CurvePoint, Filter, Gradient, GradientKind, GradientMode, GradientStop, HsvAdjustment, Levels,
-    MAX_CURVE_POINTS, MAX_FILTER_RADIUS, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, Stamp,
-    apply_adjustment, apply_airbrush, apply_boundary_airbrush, apply_filter, apply_gradient,
-    apply_stamp, edit_alpha,
+    Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance,
+    CurveInterpolation, CurvePoint, DustMode, DustRemoval, EffectSample, Filter, Gradient,
+    GradientKind, GradientMode, GradientStop, HsvAdjustment, Levels, MAX_CURVE_POINTS,
+    MAX_FILTER_RADIUS, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, Stamp, StampGesture, StampShape,
+    apply_adjustment, apply_airbrush, apply_airbrush_gesture, apply_alpha_gradient,
+    apply_boundary_airbrush, apply_dust_removal, apply_filter, apply_filter_with_progress,
+    apply_gradient, apply_stamp, apply_stamp_gesture, edit_alpha,
 };
 
 pub use vector::{
@@ -256,6 +258,7 @@ pub enum RasterError {
     PixelOutOfBounds,
     PixelFormatMismatch,
     InvalidTile,
+    Cancelled,
 }
 
 impl fmt::Display for RasterError {
@@ -265,6 +268,7 @@ impl fmt::Display for RasterError {
             Self::PixelOutOfBounds => "pixel coordinate is outside the raster",
             Self::PixelFormatMismatch => "pixel value does not match the raster pixel format",
             Self::InvalidTile => "tile coordinates or byte length are invalid",
+            Self::Cancelled => "image edit was cancelled before commit",
         })
     }
 }

@@ -70,6 +70,7 @@ typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_VIEW_SET_GRID_VISIBLE UINT32_C(11)
 #define INKPOD_VIEW_SET_SNAP_ENABLED UINT32_C(12)
 #define INKPOD_VIEW_SET_TRANSPARENT_VISIBLE UINT32_C(13)
+#define INKPOD_VIEW_SET_ALPHA_VISIBLE UINT32_C(14)
 
 #define INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL (UINT32_C(1) << 0)
 #define INKPOD_SNAPSHOT_TRANSFORM_FLIP_VERTICAL (UINT32_C(1) << 1)
@@ -78,6 +79,7 @@ typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_SNAPSHOT_OVERLAY_GRID_VISIBLE (UINT32_C(1) << 2)
 #define INKPOD_SNAPSHOT_OVERLAY_SNAP_ENABLED (UINT32_C(1) << 3)
 #define INKPOD_SNAPSHOT_OVERLAY_TRANSPARENT_VIEW (UINT32_C(1) << 4)
+#define INKPOD_SNAPSHOT_OVERLAY_ALPHA_VIEW (UINT32_C(1) << 5)
 
 #define INKPOD_SHORTCUT_MODIFIER_CONTROL (UINT32_C(1) << 0)
 #define INKPOD_SHORTCUT_MODIFIER_SHIFT (UINT32_C(1) << 1)
@@ -193,6 +195,26 @@ typedef uint32_t InkpodGradientKind;
 typedef uint32_t InkpodGradientMode;
 #define INKPOD_GRADIENT_COMPOSITE UINT32_C(1)
 #define INKPOD_GRADIENT_OVERWRITE UINT32_C(2)
+#define INKPOD_GRADIENT_FLAG_CONSTRAIN_45 (UINT64_C(1) << 0)
+
+#define INKPOD_EFFECT_FLAG_PRESSURE_SIZE (UINT64_C(1) << 0)
+#define INKPOD_EFFECT_FLAG_PRESSURE_OPACITY (UINT64_C(1) << 1)
+
+typedef uint32_t InkpodStampShape;
+#define INKPOD_STAMP_ROUND UINT32_C(1)
+#define INKPOD_STAMP_SQUARE UINT32_C(2)
+
+typedef uint32_t InkpodDustMode;
+#define INKPOD_DUST_REMOVE_FOREGROUND UINT32_C(1)
+#define INKPOD_DUST_FILL_TRANSPARENT_HOLES UINT32_C(2)
+#define INKPOD_DUST_REPLACE_COLOR_OUTLIERS UINT32_C(3)
+
+typedef uint32_t InkpodM6TaskState;
+#define INKPOD_M6_TASK_READY UINT32_C(0)
+#define INKPOD_M6_TASK_RUNNING UINT32_C(1)
+#define INKPOD_M6_TASK_COMPLETED UINT32_C(2)
+#define INKPOD_M6_TASK_CANCELLED UINT32_C(3)
+#define INKPOD_M6_TASK_FAILED UINT32_C(4)
 
 typedef uint32_t InkpodStoragePixelFormat;
 #define INKPOD_STORAGE_BINARY8 UINT32_C(1)
@@ -261,6 +283,7 @@ typedef uint32_t InkpodSelectionOperation;
 typedef struct InkpodCore InkpodCore;
 typedef struct InkpodSnapshot InkpodSnapshot;
 typedef struct InkpodClipboard InkpodClipboard;
+typedef struct InkpodM6Task InkpodM6Task;
 
 typedef struct InkpodCoreConfig {
     uint32_t struct_size;
@@ -742,6 +765,53 @@ typedef struct InkpodAlphaEditInput {
     uint64_t row_stride_bytes;
 } InkpodAlphaEditInput;
 
+/* Gesture spans are borrowed and copied during the call. Coordinates may be
+ * document logical units or client device pixels. view_id zero selects the
+ * primary view. Every completed gesture commits at most one Undo unit. */
+typedef struct InkpodAirbrushGestureInput {
+    uint32_t struct_size;
+    InkpodCoordinateSpace coordinate_space;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    uint64_t view_id;
+    uint32_t radius_milli;
+    uint32_t hardness_milli;
+    uint32_t spacing_milli;
+    uint32_t opacity_milli;
+    uint32_t fade_milli;
+    uint32_t continuous_dabs;
+    InkpodColorValue color;
+    const InkpodStrokeSample* samples;
+    uint64_t sample_count;
+    uint64_t sample_stride_bytes;
+} InkpodAirbrushGestureInput;
+
+typedef struct InkpodStampGestureInput {
+    uint32_t struct_size;
+    InkpodCoordinateSpace coordinate_space;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    uint64_t view_id;
+    InkpodStrokeSample source;
+    uint32_t radius_milli;
+    uint32_t hardness_milli;
+    uint32_t spacing_milli;
+    uint32_t opacity_milli;
+    InkpodStampShape shape;
+    uint32_t reserved;
+    const InkpodStrokeSample* samples;
+    uint64_t sample_count;
+    uint64_t sample_stride_bytes;
+} InkpodStampGestureInput;
+
+typedef struct InkpodM6TaskInfo {
+    uint32_t struct_size;
+    InkpodM6TaskState state;
+    uint64_t completed_work;
+    uint64_t total_work;
+    uint64_t reserved;
+} InkpodM6TaskInfo;
+
 typedef struct InkpodSnapshotVectorSegment {
     uint32_t struct_size;
     uint32_t flags;
@@ -836,6 +906,38 @@ typedef struct InkpodSelectionInput {
     uint32_t seed_x;
     uint32_t seed_y;
 } InkpodSelectionInput;
+
+typedef struct InkpodBlurToolInput {
+    uint32_t struct_size;
+    InkpodCoordinateSpace coordinate_space;
+    /* PRESSURE_SIZE varies pen-region diameter; unsupported for other shapes. */
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    uint64_t view_id;
+    uint32_t radius;
+    uint32_t strength_milli;
+    InkpodSelectionShape shape;
+    float diameter;
+    const InkpodStrokeSample* samples;
+    uint64_t sample_count;
+    uint64_t sample_stride_bytes;
+} InkpodBlurToolInput;
+
+typedef struct InkpodDustInput {
+    uint32_t struct_size;
+    InkpodDustMode mode;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    uint64_t view_id;
+    InkpodCoordinateSpace coordinate_space;
+    InkpodSelectionShape shape;
+    uint32_t maximum_pixels;
+    uint32_t use_region;
+    float diameter;
+    const InkpodStrokeSample* samples;
+    uint64_t sample_count;
+    uint64_t sample_stride_bytes;
+} InkpodDustInput;
 
 typedef struct InkpodFloatingTransform {
     uint32_t struct_size;
@@ -1282,9 +1384,19 @@ InkpodStatus inkpod_core_filter_preview_begin(
     InkpodCore* core,
     const InkpodFilterInput* input,
     InkpodFilterPreviewInfo* out_info);
+InkpodStatus inkpod_core_filter_preview_begin_task(
+    InkpodCore* core,
+    const InkpodFilterInput* input,
+    InkpodM6Task* task,
+    InkpodFilterPreviewInfo* out_info);
 InkpodStatus inkpod_core_filter_preview_update(
     InkpodCore* core,
     const InkpodFilterInput* input,
+    InkpodFilterPreviewInfo* out_info);
+InkpodStatus inkpod_core_filter_preview_update_task(
+    InkpodCore* core,
+    const InkpodFilterInput* input,
+    InkpodM6Task* task,
     InkpodFilterPreviewInfo* out_info);
 InkpodStatus inkpod_core_filter_preview_cancel(
     InkpodCore* core,
@@ -1295,6 +1407,11 @@ InkpodStatus inkpod_core_filter_preview_apply(
 InkpodStatus inkpod_core_filter_apply_last(
     InkpodCore* core,
     uint64_t plane_id,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_filter_apply_last_task(
+    InkpodCore* core,
+    uint64_t plane_id,
+    InkpodM6Task* task,
     InkpodDispatchResult* result);
 InkpodStatus inkpod_core_adjustment_create(
     InkpodCore* core,
@@ -1328,10 +1445,46 @@ InkpodStatus inkpod_core_effect_stamp(
     InkpodCore* core,
     const InkpodStampInput* input,
     InkpodDispatchResult* result);
+InkpodStatus inkpod_core_effect_airbrush_gesture(
+    InkpodCore* core,
+    const InkpodAirbrushGestureInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_effect_stamp_gesture(
+    InkpodCore* core,
+    const InkpodStampGestureInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_effect_blur_tool(
+    InkpodCore* core,
+    const InkpodBlurToolInput* input,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_dust_remove(
+    InkpodCore* core,
+    const InkpodDustInput* input,
+    InkpodM6Task* task,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_dust_preview_begin(
+    InkpodCore* core,
+    const InkpodDustInput* input,
+    InkpodM6Task* task,
+    InkpodFilterPreviewInfo* out_info);
 InkpodStatus inkpod_core_alpha_edit(
     InkpodCore* core,
     const InkpodAlphaEditInput* input,
     InkpodDispatchResult* result);
+InkpodStatus inkpod_core_alpha_gradient(
+    InkpodCore* core,
+    const InkpodGradientInput* input,
+    InkpodDispatchResult* result);
+
+/* Task handles are Rust-owned and thread-safe. Create/query/cancel/release may
+ * run on any thread. The owner must keep the handle alive until the Core call
+ * using it has returned; release consumes and nulls exactly one owner slot. */
+InkpodStatus inkpod_m6_task_create(InkpodM6Task** out_task);
+InkpodStatus inkpod_m6_task_query(
+    const InkpodM6Task* task,
+    InkpodM6TaskInfo* out_info);
+InkpodStatus inkpod_m6_task_cancel(InkpodM6Task* task);
+InkpodStatus inkpod_m6_task_release(InkpodM6Task** task);
 
 InkpodStatus inkpod_core_build_snapshot_for_view(
     InkpodCore* core,

@@ -62,6 +62,7 @@ struct SyncWork {
     bool refresh_document_info{};
     bool defer_during_active_stroke{};
     std::shared_ptr<std::promise<InkpodStatus>> completion;
+    std::function<void(InkpodStatus)> async_completion;
 };
 
 using WorkItem = std::variant<SyncWork, StrokeEvent>;
@@ -160,7 +161,8 @@ struct CoreEngine::Impl final {
                     publish_snapshot,
                     refresh_document_info,
                     false,
-                    completion})) {
+                    completion,
+                    {}})) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
             return future.get();
@@ -175,13 +177,15 @@ struct CoreEngine::Impl final {
         std::function<InkpodStatus(InkpodCore*)> operation,
         bool publish_snapshot,
         bool refresh_document_info,
-        bool defer_during_active_stroke) noexcept {
+        bool defer_during_active_stroke,
+        std::function<void(InkpodStatus)> completion) noexcept {
         return Push(SyncWork{
             std::move(operation),
             publish_snapshot,
             refresh_document_info,
             defer_during_active_stroke,
-            nullptr});
+            nullptr,
+            std::move(completion)});
     }
 
     bool CopyDocumentInfo(InkpodDocumentInfo& output) const noexcept {
@@ -204,7 +208,8 @@ struct CoreEngine::Impl final {
     }
 
     void CaptureFailure(InkpodStatus status, bool asynchronous) noexcept {
-        if (status == INKPOD_STATUS_OK) {
+        if (status == INKPOD_STATUS_OK
+            || (asynchronous && status == INKPOD_STATUS_CANCELLED)) {
             return;
         }
         try {
@@ -360,6 +365,13 @@ struct CoreEngine::Impl final {
         CaptureFailure(status, asynchronous);
         if (item.completion != nullptr) {
             item.completion->set_value(status);
+        }
+        if (item.async_completion) {
+            try {
+                item.async_completion(status);
+            } catch (...) {
+                CaptureFailure(INKPOD_STATUS_INVALID_STATE, true);
+            }
         }
     }
 
@@ -528,13 +540,15 @@ bool CoreEngine::Enqueue(
     std::function<InkpodStatus(InkpodCore*)> operation,
     bool publish_snapshot,
     bool refresh_document_info,
-    bool defer_during_active_stroke) noexcept {
+    bool defer_during_active_stroke,
+    std::function<void(InkpodStatus)> completion) noexcept {
     return impl_ != nullptr
         && impl_->Enqueue(
             std::move(operation),
             publish_snapshot,
             refresh_document_info,
-            defer_during_active_stroke);
+            defer_during_active_stroke,
+            std::move(completion));
 }
 
 bool CoreEngine::EnqueueStroke(StrokeEvent event) noexcept {
