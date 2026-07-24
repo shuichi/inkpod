@@ -3,7 +3,8 @@
 The public ABI is `include/inkpod/core_ffi.h`. ABI version 1 covers the M0
 lifecycle, the M1 saved-drawing/live-preview slice, the M2 fill/color/recovery
 slice, the M3 typed document-editing slice, and the M4 production-workflow
-slice, and the M5 vector slice.
+slice, the M5 vector slice, the M6 image-edit slice, and the additional bounded
+operations used by the completed M0-M6 Windows GUI workflows.
 Numeric fields use fixed-width C types. Every extensible structure begins with
 `struct_size`; configuration/span structures also carry feature or reserved
 fields.
@@ -59,6 +60,9 @@ before a span is traversed.
   ownership of caller storage. `inkpod_core_palette_get` writes complete color
   records into a caller-owned `InkpodColorBuffer`; a zero-capacity null buffer
   is a successful count query. No palette release function is required.
+- `inkpod_core_palette_generate` deterministically quantizes the current
+  document composition with validated maximum-color and quantization-bit bounds,
+  then replaces the exact-depth document palette as one history transaction.
 - `inkpod_core_set_main_line_color` changes the exact-depth base color of an
   opened grayscale main-line plane as one metadata/history transaction;
   `inkpod_core_get_main_line_color` copies it. Binary main-line documents reject
@@ -94,7 +98,19 @@ native enum layout:
   remains uncommitted until `inkpod_core_floating_commit`; cancel restores the
   exact base. Payload coordinates remain relative to document origin, not the
   source paper bounds.
-- `inkpod_core_mirror_document` is destructive and writes one history result.
+- `inkpod_core_paste_begin_mode` selects compatible destination, the active
+  plane with validated conversion, or a converted new plane. Copy/cut retain the
+  same Rust-owned typed payload contract; clearing selected content is one
+  document transaction.
+- `inkpod_clipboard_render_rgba8` exports a typed payload into a caller-owned
+  size-query buffer for standard Windows clipboard publication. The inverse
+  `inkpod_clipboard_create_rgba8` validates and copies a bounded, possibly
+  padded, straight-RGBA8 caller raster into a new Rust-owned clipboard handle;
+  it never borrows the Windows global-memory block after return.
+- `inkpod_core_mirror_document` and `inkpod_core_rotate_document` are
+  destructive and each write one history result. `inkpod_core_resize_document`
+  validates dimensions/DPI/anchor flags, transforms document metadata and
+  content transactionally, and returns no partially resized document on error.
   Horizontal/vertical `inkpod_core_apply_view` flip commands are view-only.
   `InkpodSnapshotTransform.flags` carries only documented
   `INKPOD_SNAPSHOT_TRANSFORM_FLIP_*` bits; consumers must reject/ignore no other
@@ -175,6 +191,10 @@ raster, an excessive dimension, `i32::MIN` rotation, and padded-row copying.
 - `inkpod_core_vector_rasterize` returns bounded straight RGBA8 pixels through a
   caller-owned size-query buffer. Scale is 1..16 and the antialias flag selects
   deterministic 4x4 supersampling; non-antialiased samples use pixel centers.
+- `inkpod_core_vector_rasterize_to_layer` uses the same validated input but
+  rasterizes at document scale into a newly named RGBA8 raster layer, preserves
+  the source vector layer, returns its stable ID through caller-owned storage,
+  and commits exactly one Undo unit.
   `inkpod_core_raster_vectorize` converts nonzero-alpha, equal-color RGBA8 row
   runs from a raster/color plane into closed path/fill topology as one history
   transaction and reports the fill count. `alpha_threshold` is an inclusive
@@ -280,7 +300,9 @@ returns `INKPOD_STATUS_BUFFER_TOO_SMALL` and still reports `color_count`.
 - `inkpod_core_clipboard_copy` allocates `InkpodClipboard`; the caller owns that
   handle until `inkpod_clipboard_release` receives its owner pointer and writes
   null. A repeat release through the same owner variable is a successful no-op.
-  Copy output storage likewise must not already contain a live clipboard owner.
+  Copy and `inkpod_clipboard_create_rgba8` output storage likewise must not
+  already contain a live clipboard owner. `inkpod_clipboard_render_rgba8` writes
+  only caller-owned output storage and does not create another owner.
   The opaque payload is immutable and may outlive or cross a document switch;
   the Windows adapter releases it before shutdown.
 - `inkpod_core_build_snapshot_for_view` has exactly the same snapshot ownership

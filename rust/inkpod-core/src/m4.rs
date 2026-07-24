@@ -103,6 +103,19 @@ pub struct LightTableItemInput {
     pub rotation_milli_degrees: i32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LightTableItemProperties {
+    pub visible: bool,
+    pub opacity_milli: u32,
+    pub display_mode: LightTableDisplayMode,
+    pub display_color: PixelValue,
+    pub translate_x_milli: i32,
+    pub translate_y_milli: i32,
+    pub scale_x_milli: u32,
+    pub scale_y_milli: u32,
+    pub rotation_milli_degrees: i32,
+}
+
 impl LightTableItemInput {
     #[must_use]
     pub fn new(name: impl Into<String>, source: LightTableSource) -> Self {
@@ -132,6 +145,13 @@ pub struct LightTableItemInfo {
     pub visible: bool,
     pub opacity_milli: u32,
     pub effective_opacity_milli: u32,
+    pub display_mode: LightTableDisplayMode,
+    pub display_color: PixelValue,
+    pub translate_x_milli: i32,
+    pub translate_y_milli: i32,
+    pub scale_x_milli: u32,
+    pub scale_y_milli: u32,
+    pub rotation_milli_degrees: i32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -705,6 +725,114 @@ pub(crate) struct MotionCheckState {
 }
 
 impl Core {
+    pub fn import_common_raster(
+        &mut self,
+        format: CommonRasterFormat,
+        bytes: &[u8],
+        document_uuid: u128,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.ensure_no_active_stroke()?;
+        if document_uuid == 0 {
+            return Err(CoreError::InvalidArgument(
+                "common-raster document UUID must be nonzero",
+            ));
+        }
+        let raster = decode_common_raster(format, bytes)?;
+        let ids = DocumentIds {
+            document: self.allocate_id(),
+            layer: self.allocate_id(),
+            main_plane: self.allocate_id(),
+            color_plane: self.allocate_id(),
+            selection_plane: self.allocate_id(),
+            light_table_set: self.allocate_id(),
+        };
+        let mut document = CellDocument::new(
+            ids,
+            document_uuid,
+            PaperSpec {
+                width: raster.info.width,
+                height: raster.info.height,
+                dpi_x_milli: raster.info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI),
+                dpi_y_milli: raster.info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI),
+            },
+        )?;
+        document.plane_for_role_mut(ActivePlane::Color)?.raster =
+            common_to_tile_raster(&raster, self.document_revision.max(1))?;
+        let revision = self.next_document_revision()?;
+        self.document = Some(document);
+        self.document_revision = revision;
+        self.render_cache.clear();
+        self.reset_history(true);
+        self.reset_view();
+        self.current_path = None;
+        self.recovered = false;
+        self.floating = None;
+        self.motion_check = None;
+        self.sequence = None;
+        self.subpalette_index = None;
+        self.document_info()
+    }
+
+    pub fn export_common_raster(
+        &self,
+        format: CommonRasterFormat,
+        composite_white: bool,
+    ) -> Result<Vec<u8>, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let flattened = flatten_document(document, self.document_revision.max(1))?;
+        let raster = tile_to_common(
+            &flattened,
+            Some(document.dpi_x_milli),
+            Some(document.dpi_y_milli),
+        )?;
+        Ok(encode_common_raster(format, &raster, composite_white)?)
+    }
+
+    pub fn generate_palette_from_document(
+        &mut self,
+        maximum_colors: usize,
+        quantization_bits: u8,
+    ) -> Result<DispatchOutcome, CoreError> {
+        if maximum_colors == 0 || maximum_colors > inkpod_image::MAX_PALETTE_COLORS {
+            return Err(CoreError::InvalidArgument(
+                "generated palette color limit is invalid",
+            ));
+        }
+        if quantization_bits > 7 {
+            return Err(CoreError::InvalidArgument(
+                "palette quantization must retain at least one bit",
+            ));
+        }
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let flattened = flatten_document(document, self.document_revision.max(1))?;
+        let mask = u8::MAX << quantization_bits;
+        let mut unique = BTreeSet::new();
+        for y in 0..flattened.height() {
+            for x in 0..flattened.width() {
+                let PixelValue::Rgba(mut rgba) = flattened.pixel(x, y)? else {
+                    return Err(CoreError::InvalidState(
+                        "flattened palette source is not RGBA8",
+                    ));
+                };
+                if rgba[3] == 0 {
+                    continue;
+                }
+                rgba[0] &= mask;
+                rgba[1] &= mask;
+                rgba[2] &= mask;
+                rgba[3] &= mask;
+                unique.insert(rgba);
+                if unique.len() > maximum_colors {
+                    return Err(CoreError::InvalidState(
+                        "generated palette exceeds the configured maximum; increase quantization",
+                    ));
+                }
+            }
+        }
+        let colors = unique.into_iter().map(PixelValue::Rgba).collect::<Vec<_>>();
+        self.replace_palette(&colors)
+    }
+
     pub fn update_paper_frames(
         &mut self,
         frames: FrameMetadata,
@@ -960,6 +1088,110 @@ impl Core {
         Ok((outcome, item_id))
     }
 
+    pub fn light_table_add_common_raster(
+        &mut self,
+        format: CommonRasterFormat,
+        bytes: &[u8],
+        name: impl Into<String>,
+        document_uuid: u128,
+        source_revision: u64,
+    ) -> Result<(DispatchOutcome, u64), CoreError> {
+        let raster = decode_common_raster(format, bytes)?;
+        let reference_frame = RectI32 {
+            x: 0,
+            y: 0,
+            width: i32::try_from(raster.info.width)
+                .map_err(|_| CoreError::InvalidArgument("reference width exceeds i32"))?,
+            height: i32::try_from(raster.info.height)
+                .map_err(|_| CoreError::InvalidArgument("reference height exceeds i32"))?,
+        };
+        let source = LightTableSource::from_common_raster(
+            document_uuid,
+            source_revision,
+            reference_frame,
+            &raster,
+        )?;
+        self.light_table_add_item(LightTableItemInput::new(name, source))
+    }
+
+    pub fn light_table_update_item_properties(
+        &mut self,
+        item_id: u64,
+        properties: LightTableItemProperties,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let mut after = before.clone();
+        let item = after
+            .light_table
+            .active_mut()
+            .and_then(|set| set.items.iter_mut().find(|item| item.id == item_id))
+            .ok_or(CoreError::InvalidArgument(
+                "light-table item ID does not exist",
+            ))?;
+        let candidate = LightTableItemInput {
+            name: item.name.clone(),
+            source: item.source.clone(),
+            visible: properties.visible,
+            opacity_milli: properties.opacity_milli,
+            display_mode: properties.display_mode,
+            display_color: properties.display_color,
+            translate_x_milli: properties.translate_x_milli,
+            translate_y_milli: properties.translate_y_milli,
+            scale_x_milli: properties.scale_x_milli,
+            scale_y_milli: properties.scale_y_milli,
+            rotation_milli_degrees: properties.rotation_milli_degrees,
+        };
+        validate_item_input(&candidate)?;
+        item.visible = candidate.visible;
+        item.opacity_milli = candidate.opacity_milli;
+        item.display_mode = candidate.display_mode;
+        item.display_color = candidate.display_color;
+        item.translate_x_milli = candidate.translate_x_milli;
+        item.translate_y_milli = candidate.translate_y_milli;
+        item.scale_x_milli = candidate.scale_x_milli;
+        item.scale_y_milli = candidate.scale_y_milli;
+        item.rotation_milli_degrees = candidate.rotation_milli_degrees;
+        self.commit_document_edit(before, after)
+    }
+
+    pub fn light_table_reload_common_raster(
+        &mut self,
+        item_id: u64,
+        format: CommonRasterFormat,
+        bytes: &[u8],
+        document_uuid: u128,
+        source_revision: u64,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let raster = decode_common_raster(format, bytes)?;
+        let reference_frame = RectI32 {
+            x: 0,
+            y: 0,
+            width: i32::try_from(raster.info.width)
+                .map_err(|_| CoreError::InvalidArgument("reference width exceeds i32"))?,
+            height: i32::try_from(raster.info.height)
+                .map_err(|_| CoreError::InvalidArgument("reference height exceeds i32"))?,
+        };
+        let replacement = LightTableSource::from_common_raster(
+            document_uuid,
+            source_revision,
+            reference_frame,
+            &raster,
+        )?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let mut after = before.clone();
+        after
+            .light_table
+            .active_mut()
+            .and_then(|set| set.items.iter_mut().find(|item| item.id == item_id))
+            .ok_or(CoreError::InvalidArgument(
+                "light-table item ID does not exist",
+            ))?
+            .source = replacement;
+        self.commit_document_edit(before, after)
+    }
+
     pub fn light_table_items(&self) -> Result<Vec<LightTableItemInfo>, CoreError> {
         let state = &self
             .document
@@ -984,6 +1216,13 @@ impl Core {
                     item.opacity_milli,
                     set.global_opacity_milli,
                 ),
+                display_mode: item.display_mode,
+                display_color: item.display_color,
+                translate_x_milli: item.translate_x_milli,
+                translate_y_milli: item.translate_y_milli,
+                scale_x_milli: item.scale_x_milli,
+                scale_y_milli: item.scale_y_milli,
+                rotation_milli_degrees: item.rotation_milli_degrees,
             })
             .collect())
     }
@@ -1283,6 +1522,23 @@ impl Core {
                 }
             }
         };
+        self.sequence_activate(target)
+    }
+
+    pub fn sequence_activate(&mut self, target: usize) -> Result<DocumentInfo, CoreError> {
+        self.ensure_no_active_stroke()?;
+        if self.document_info()?.dirty {
+            return Err(CoreError::UnsavedChanges);
+        }
+        let sequence = self
+            .sequence
+            .as_ref()
+            .ok_or(CoreError::InvalidState("no sequence is configured"))?;
+        if target >= sequence.cells.len() {
+            return Err(CoreError::InvalidArgument(
+                "sequence target index is outside bounds",
+            ));
+        }
         if sequence.active_index == Some(target) {
             return self.document_info();
         }

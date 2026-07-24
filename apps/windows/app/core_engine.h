@@ -71,6 +71,7 @@ public:
     bool EnqueueStroke(StrokeEvent event) noexcept;
     InkpodStatus WaitIdle() noexcept;
     InkpodStatus FlushPreview() noexcept;
+    InkpodStatus SetActiveView(std::uint64_t view_id) noexcept;
 
     bool GetDocumentInfo(InkpodDocumentInfo& info) const noexcept;
     std::wstring LastError() const;

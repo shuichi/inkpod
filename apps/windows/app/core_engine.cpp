@@ -1,6 +1,7 @@
 #include "core_engine.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -243,7 +244,10 @@ struct CoreEngine::Impl final {
         const InkpodSnapshotOptions options{
             sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
         InkpodSnapshot* snapshot{};
-        const InkpodStatus status = inkpod_core_build_snapshot(core, &options, &snapshot);
+        const std::uint64_t view_id = active_view_id.load(std::memory_order_acquire);
+        const InkpodStatus status = view_id == 0U
+            ? inkpod_core_build_snapshot(core, &options, &snapshot)
+            : inkpod_core_build_snapshot_for_view(core, view_id, &options, &snapshot);
         if (status != INKPOD_STATUS_OK) {
             return status;
         }
@@ -493,6 +497,7 @@ struct CoreEngine::Impl final {
     bool stroke_active{};
     std::chrono::steady_clock::time_point next_preview_frame{};
     std::uint64_t active_sample_count{};
+    std::atomic<std::uint64_t> active_view_id{};
 };
 
 CoreEngine::CoreEngine() = default;
@@ -561,6 +566,14 @@ InkpodStatus CoreEngine::WaitIdle() noexcept {
 
 InkpodStatus CoreEngine::FlushPreview() noexcept {
     return Invoke([](InkpodCore*) { return INKPOD_STATUS_OK; }, true, false);
+}
+
+InkpodStatus CoreEngine::SetActiveView(std::uint64_t view_id) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    impl_->active_view_id.store(view_id, std::memory_order_release);
+    return FlushPreview();
 }
 
 bool CoreEngine::GetDocumentInfo(InkpodDocumentInfo& info) const noexcept {

@@ -192,7 +192,24 @@ public:
                 d2d_context_->EndDraw();
                 return result;
             }
+            result = DrawFloatingPreview();
+            if (FAILED(result)) {
+                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+                d2d_context_->EndDraw();
+                return result;
+            }
+            result = DrawGeometryPreview();
+            if (FAILED(result)) {
+                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+                d2d_context_->EndDraw();
+                return result;
+            }
             d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+            result = DrawRulers();
+            if (FAILED(result)) {
+                d2d_context_->EndDraw();
+                return result;
+            }
         }
 
         HRESULT result = d2d_context_->EndDraw();
@@ -260,6 +277,36 @@ public:
         d2d_context_->SetTarget(nullptr);
         target_bitmap_.Reset();
         return CreateTargetBitmap();
+    }
+
+    HRESULT SetFloatingPreview(const CanvasFloatingPreview& preview) noexcept {
+        if (preview.struct_size < sizeof(CanvasFloatingPreview)
+            || preview.transform.struct_size < sizeof(InkpodFloatingTransform)
+            || preview.bounds.width < 0 || preview.bounds.height < 0
+            || !std::isfinite(preview.transform.translate_x)
+            || !std::isfinite(preview.transform.translate_y)
+            || !std::isfinite(preview.transform.scale_x)
+            || !std::isfinite(preview.transform.scale_y)
+            || !std::isfinite(preview.transform.rotation_degrees)) {
+            return E_INVALIDARG;
+        }
+        floating_preview_ = preview;
+        return S_OK;
+    }
+
+    HRESULT SetGeometryPreview(const CanvasGeometryPreview& preview) noexcept {
+        if (preview.struct_size < sizeof(CanvasGeometryPreview)
+            || preview.point_count > kCanvasGeometryPreviewPoints) {
+            return E_INVALIDARG;
+        }
+        for (std::uint32_t index = 0U; index < preview.point_count; ++index) {
+            if (!std::isfinite(preview.points[index].x)
+                || !std::isfinite(preview.points[index].y)) {
+                return E_INVALIDARG;
+            }
+        }
+        geometry_preview_ = preview;
+        return S_OK;
     }
 
     HRESULT SimulateDeviceLossForSmokeTest() noexcept {
@@ -756,6 +803,169 @@ private:
         return S_OK;
     }
 
+    HRESULT DrawFloatingPreview() noexcept {
+        if (floating_preview_.active == 0U || floating_preview_.bounds.width <= 0
+            || floating_preview_.bounds.height <= 0) {
+            return S_OK;
+        }
+        ComPtr<ID2D1SolidColorBrush> brush;
+        HRESULT result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(0.92F, 0.2F, 0.78F, 1.0F), &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        const auto& bounds = floating_preview_.bounds;
+        const auto& transform = floating_preview_.transform;
+        const double center_x = static_cast<double>(bounds.x)
+            + static_cast<double>(bounds.width - 1) / 2.0;
+        const double center_y = static_cast<double>(bounds.y)
+            + static_cast<double>(bounds.height - 1) / 2.0;
+        const double radians = transform.rotation_degrees * 3.14159265358979323846 / 180.0;
+        const double sine = std::sin(radians);
+        const double cosine = std::cos(radians);
+        const auto point = [&](double x, double y) {
+            const double local_x = (x - center_x) * transform.scale_x;
+            const double local_y = (y - center_y) * transform.scale_y;
+            return D2D1::Point2F(
+                static_cast<float>(center_x + local_x * cosine - local_y * sine
+                    + transform.translate_x),
+                static_cast<float>(center_y + local_x * sine + local_y * cosine
+                    + transform.translate_y));
+        };
+        const double left = static_cast<double>(bounds.x);
+        const double top = static_cast<double>(bounds.y);
+        const double right = static_cast<double>(bounds.x + bounds.width - 1);
+        const double bottom = static_cast<double>(bounds.y + bounds.height - 1);
+        const std::array<D2D1_POINT_2F, 4U> corners{
+            point(left, top), point(right, top), point(right, bottom), point(left, bottom)};
+        const float stroke_width = static_cast<float>(std::max(1.0, 1.5 / transform_.zoom));
+        const float handle_radius = static_cast<float>(std::max(2.0, 4.0 / transform_.zoom));
+        for (std::size_t index = 0U; index < corners.size(); ++index) {
+            d2d_context_->DrawLine(
+                corners[index], corners[(index + 1U) % corners.size()], brush.Get(), stroke_width);
+            d2d_context_->FillEllipse(
+                D2D1::Ellipse(corners[index], handle_radius, handle_radius), brush.Get());
+        }
+        return S_OK;
+    }
+
+    HRESULT DrawGeometryPreview() noexcept {
+        if (geometry_preview_.active == 0U || geometry_preview_.point_count < 2U) {
+            return S_OK;
+        }
+        ComPtr<ID2D1SolidColorBrush> shadow;
+        ComPtr<ID2D1SolidColorBrush> foreground;
+        HRESULT result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(0.05F, 0.05F, 0.05F, 0.9F), &shadow);
+        if (SUCCEEDED(result)) {
+            result = d2d_context_->CreateSolidColorBrush(
+                D2D1::ColorF(0.1F, 0.85F, 1.0F, 1.0F), &foreground);
+        }
+        if (FAILED(result)) {
+            return result;
+        }
+        const float width = static_cast<float>(std::max(1.0, 1.5 / transform_.zoom));
+        const float shadow_width = width * 2.5F;
+        const auto draw = [&](std::uint32_t first, std::uint32_t second) {
+            const auto start = D2D1::Point2F(
+                geometry_preview_.points[first].x, geometry_preview_.points[first].y);
+            const auto end = D2D1::Point2F(
+                geometry_preview_.points[second].x, geometry_preview_.points[second].y);
+            d2d_context_->DrawLine(start, end, shadow.Get(), shadow_width);
+            d2d_context_->DrawLine(start, end, foreground.Get(), width);
+        };
+        for (std::uint32_t index = 1U; index < geometry_preview_.point_count; ++index) {
+            draw(index - 1U, index);
+        }
+        if (geometry_preview_.closed != 0U && geometry_preview_.point_count > 2U) {
+            draw(geometry_preview_.point_count - 1U, 0U);
+        }
+        return S_OK;
+    }
+
+    HRESULT DrawRulers() noexcept {
+        if ((overlay_.flags & INKPOD_SNAPSHOT_OVERLAY_RULER_VISIBLE) == 0U
+            || transform_.zoom <= 0.0) {
+            return S_OK;
+        }
+        ComPtr<ID2D1SolidColorBrush> background;
+        ComPtr<ID2D1SolidColorBrush> ticks;
+        HRESULT result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(0.16F, 0.17F, 0.19F, 0.96F), &background);
+        if (FAILED(result)) {
+            return result;
+        }
+        result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(0.82F, 0.84F, 0.88F, 1.0F), &ticks);
+        if (FAILED(result)) {
+            return result;
+        }
+        constexpr float extent = 22.0F;
+        const D2D1_SIZE_F size = d2d_context_->GetSize();
+        d2d_context_->FillRectangle(
+            D2D1::RectF(0.0F, 0.0F, size.width, extent), background.Get());
+        d2d_context_->FillRectangle(
+            D2D1::RectF(0.0F, 0.0F, extent, size.height), background.Get());
+        d2d_context_->DrawLine(
+            D2D1::Point2F(0.0F, extent),
+            D2D1::Point2F(size.width, extent),
+            ticks.Get());
+        d2d_context_->DrawLine(
+            D2D1::Point2F(extent, 0.0F),
+            D2D1::Point2F(extent, size.height),
+            ticks.Get());
+
+        double step = 1.0;
+        while (step * transform_.zoom < 8.0) {
+            step *= 10.0;
+        }
+        const bool flip_x = (transform_.flags
+            & INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL) != 0U;
+        const bool flip_y = (transform_.flags
+            & INKPOD_SNAPSHOT_TRANSFORM_FLIP_VERTICAL) != 0U;
+        const auto device_x = [&](double document_x) {
+            const double source = flip_x
+                ? static_cast<double>(transform_.document_width) - document_x
+                : document_x;
+            return static_cast<float>(transform_.pan_x + source * transform_.zoom);
+        };
+        const auto device_y = [&](double document_y) {
+            const double source = flip_y
+                ? static_cast<double>(transform_.document_height) - document_y
+                : document_y;
+            return static_cast<float>(transform_.pan_y + source * transform_.zoom);
+        };
+        const auto x_count = static_cast<std::uint64_t>(
+            std::ceil(static_cast<double>(transform_.document_width) / step) + 1.0);
+        const auto y_count = static_cast<std::uint64_t>(
+            std::ceil(static_cast<double>(transform_.document_height) / step) + 1.0);
+        if (x_count <= kMaximumOverlayLines) {
+            for (std::uint64_t index = 0U; index < x_count; ++index) {
+                const float x = device_x(static_cast<double>(index) * step);
+                if (x >= extent && x <= size.width) {
+                    const float length = index % 5U == 0U ? 10.0F : 5.0F;
+                    d2d_context_->DrawLine(
+                        D2D1::Point2F(x, extent - length),
+                        D2D1::Point2F(x, extent),
+                        ticks.Get());
+                }
+            }
+        }
+        if (y_count <= kMaximumOverlayLines) {
+            for (std::uint64_t index = 0U; index < y_count; ++index) {
+                const float y = device_y(static_cast<double>(index) * step);
+                if (y >= extent && y <= size.height) {
+                    const float length = index % 5U == 0U ? 10.0F : 5.0F;
+                    d2d_context_->DrawLine(
+                        D2D1::Point2F(extent - length, y),
+                        D2D1::Point2F(extent, y),
+                        ticks.Get());
+                }
+            }
+        }
+        return S_OK;
+    }
+
     static bool IsDeviceLost(HRESULT result) noexcept {
         return result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET;
     }
@@ -1046,6 +1256,8 @@ private:
     InkpodSnapshotTransform transform_{};
     InkpodSnapshotOverlay overlay_{};
     InkpodSnapshotVectorView vectors_{};
+    CanvasFloatingPreview floating_preview_{};
+    CanvasGeometryPreview geometry_preview_{};
     std::unordered_map<std::uint64_t, CachedTile> tile_cache_;
     ComPtr<ID3D11Device> d3d_device_;
     ComPtr<ID3D11DeviceContext> d3d_context_;
@@ -1062,12 +1274,16 @@ enum class RenderControlKind {
     DpiChanged,
     SimulateDeviceLoss,
     GetDocumentBounds,
+    SetFloatingPreview,
+    SetGeometryPreview,
 };
 
 struct RenderControl {
     RenderControlKind kind{};
     std::shared_ptr<std::promise<HRESULT>> completion;
     CanvasDocumentBounds* out_bounds{};
+    CanvasFloatingPreview floating_preview{};
+    CanvasGeometryPreview geometry_preview{};
 };
 
 class RenderThread final {
@@ -1153,7 +1369,9 @@ public:
 
     HRESULT Invoke(
         RenderControlKind kind,
-        CanvasDocumentBounds* out_bounds = nullptr) noexcept {
+        CanvasDocumentBounds* out_bounds = nullptr,
+        const CanvasFloatingPreview* floating_preview = nullptr,
+        const CanvasGeometryPreview* geometry_preview = nullptr) noexcept {
         try {
             auto completion = std::make_shared<std::promise<HRESULT>>();
             auto future = completion->get_future();
@@ -1162,7 +1380,14 @@ public:
                 if (stopping_) {
                     return E_UNEXPECTED;
                 }
-                controls_.push_back(RenderControl{kind, completion, out_bounds});
+                RenderControl control{kind, completion, out_bounds, {}};
+                if (floating_preview != nullptr) {
+                    control.floating_preview = *floating_preview;
+                }
+                if (geometry_preview != nullptr) {
+                    control.geometry_preview = *geometry_preview;
+                }
+                controls_.push_back(control);
             }
             wake_.notify_one();
             return future.get();
@@ -1273,6 +1498,16 @@ private:
                             } else {
                                 *control.out_bounds = renderer.DocumentBounds();
                             }
+                            break;
+                        case RenderControlKind::SetFloatingPreview:
+                            control_result = renderer.SetFloatingPreview(
+                                control.floating_preview);
+                            render = SUCCEEDED(control_result);
+                            break;
+                        case RenderControlKind::SetGeometryPreview:
+                            control_result = renderer.SetGeometryPreview(
+                                control.geometry_preview);
+                            render = SUCCEEDED(control_result);
                             break;
                     }
                 }
@@ -1582,6 +1817,13 @@ LRESULT CALLBACK CanvasWindowProcedure(
             }
             return 0;
         case WM_MOUSEMOVE:
+            if ((wparam & (MK_LBUTTON | MK_MBUTTON | MK_RBUTTON)) == 0U) {
+                PostMessageW(
+                    GetParent(window),
+                    kCanvasPointerMoved,
+                    0,
+                    MAKELPARAM(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)));
+            }
             if (host != nullptr && (wparam & MK_LBUTTON) != 0U
                 && !host->PointerStrokeActive()) {
                 return host->AppendMouse(
@@ -1693,6 +1935,22 @@ LRESULT CALLBACK CanvasWindowProcedure(
             return host != nullptr && bounds != nullptr
                     && SUCCEEDED(host->Renderer().Invoke(
                         RenderControlKind::GetDocumentBounds, bounds))
+                ? 1
+                : 0;
+        }
+        case kCanvasSetFloatingPreview: {
+            const auto* preview = reinterpret_cast<const CanvasFloatingPreview*>(lparam);
+            return host != nullptr && preview != nullptr
+                    && SUCCEEDED(host->Renderer().Invoke(
+                        RenderControlKind::SetFloatingPreview, nullptr, preview))
+                ? 1
+                : 0;
+        }
+        case kCanvasSetGeometryPreview: {
+            const auto* preview = reinterpret_cast<const CanvasGeometryPreview*>(lparam);
+            return host != nullptr && preview != nullptr
+                    && SUCCEEDED(host->Renderer().Invoke(
+                        RenderControlKind::SetGeometryPreview, nullptr, nullptr, preview))
                 ? 1
                 : 0;
         }

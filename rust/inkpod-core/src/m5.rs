@@ -1,6 +1,6 @@
 use super::{
-    CellDocument, Core, CoreError, DispatchOutcome, LayerKind, PixelFormat, PixelValue, PlaneType,
-    PointF32, RectI32,
+    CellDocument, Core, CoreError, DispatchOutcome, LayerKind, LayerNode, PixelFormat, PixelValue,
+    PlaneNode, PlaneType, PointF32, RectI32, TileRaster, validate_node_name,
 };
 use inkpod_format::{
     FileM5Metadata, FileVectorFill, FileVectorPath, FileVectorPoint, FileVectorSegment,
@@ -149,6 +149,34 @@ pub(crate) struct VectorState {
 }
 
 impl VectorState {
+    pub(crate) fn transform_coordinates<F>(
+        &mut self,
+        mut transform: F,
+        width_scale: f64,
+    ) -> Result<(), CoreError>
+    where
+        F: FnMut(FixedPoint) -> Result<FixedPoint, CoreError>,
+    {
+        if !width_scale.is_finite() || width_scale <= 0.0 {
+            return Err(CoreError::InvalidArgument(
+                "vector width scale must be finite and positive",
+            ));
+        }
+        for path in &mut self.paths {
+            for segment in &mut path.segments {
+                segment.p0 = transform(segment.p0)?;
+                segment.p1 = transform(segment.p1)?;
+                segment.p2 = transform(segment.p2)?;
+                segment.p3 = transform(segment.p3)?;
+                segment.width_start_milli =
+                    scaled_vector_width(segment.width_start_milli, width_scale)?;
+                segment.width_end_milli =
+                    scaled_vector_width(segment.width_end_milli, width_scale)?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn to_file(&self, has_vector_layer: bool) -> Option<FileM5Metadata> {
         has_vector_layer.then(|| FileM5Metadata {
             paths: self
@@ -428,6 +456,16 @@ impl VectorState {
         }
         (segments, fills)
     }
+}
+
+fn scaled_vector_width(width_milli: u32, scale: f64) -> Result<u32, CoreError> {
+    let scaled = f64::from(width_milli) * scale;
+    if !scaled.is_finite() || scaled < 0.0 || scaled > f64::from(u32::MAX) {
+        return Err(CoreError::InvalidArgument(
+            "scaled vector width exceeds its range",
+        ));
+    }
+    Ok(scaled.round() as u32)
 }
 
 impl Core {
@@ -1030,6 +1068,64 @@ impl Core {
             stride_bytes,
             pixels,
         })
+    }
+
+    /// Rasterizes a vector-coloring layer into a new RGBA8 raster layer as one
+    /// document transaction. The source vector geometry remains unchanged.
+    pub fn rasterize_vector_layer_to_document(
+        &mut self,
+        layer_id: u64,
+        antialias: bool,
+        name: &str,
+    ) -> Result<(DispatchOutcome, u64), CoreError> {
+        self.ensure_no_active_stroke()?;
+        validate_node_name(name)?;
+        let rasterized = self.rasterize_vector_layer(layer_id, 1, antialias)?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let revision = self.next_document_revision()?;
+        let mut raster = TileRaster::new(
+            rasterized.width,
+            rasterized.height,
+            PixelFormat::StraightRgba8,
+        )?;
+        for y in 0..rasterized.height {
+            for x in 0..rasterized.width {
+                let offset = y as usize * rasterized.stride_bytes as usize + x as usize * 4;
+                let color = [
+                    rasterized.pixels[offset],
+                    rasterized.pixels[offset + 1],
+                    rasterized.pixels[offset + 2],
+                    rasterized.pixels[offset + 3],
+                ];
+                if color[3] != 0 {
+                    raster.set_pixel(x, y, PixelValue::Rgba(color), revision)?;
+                }
+            }
+        }
+        let new_layer_id = self.allocate_id();
+        let new_plane_id = self.allocate_id();
+        let mut after = before.clone();
+        after.layers.push(LayerNode {
+            id: new_layer_id,
+            kind: LayerKind::Raster,
+            name: super::unique_layer_name(&after.layers, name),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            planes: vec![PlaneNode {
+                id: new_plane_id,
+                kind: PlaneType::Raster,
+                name: "Rasterized".to_owned(),
+                visible: true,
+                editable: true,
+                opacity_milli: 1_000,
+                raster,
+            }],
+        });
+        after.active_layer_id = new_layer_id;
+        after.active_plane_id = new_plane_id;
+        let outcome = self.commit_document_edit_with_revision(before, after, revision)?;
+        Ok((outcome, new_layer_id))
     }
 
     pub fn vector_raster_layout(

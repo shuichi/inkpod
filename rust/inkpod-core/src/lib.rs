@@ -4,10 +4,11 @@ mod m4;
 mod m5;
 mod m6;
 
+pub use inkpod_format::CommonRasterFormat;
 pub use m4::{
-    LightTableDisplayMode, LightTableItemInfo, LightTableItemInput, LightTableSetInfo,
-    LightTableSource, MotionCheckConfig, MotionFrame, RgbaRasterBytes, SequenceCellInfo,
-    SequenceCellSource, SequenceDirection, Thumbnail,
+    LightTableDisplayMode, LightTableItemInfo, LightTableItemInput, LightTableItemProperties,
+    LightTableSetInfo, LightTableSource, MotionCheckConfig, MotionFrame, RgbaRasterBytes,
+    SequenceCellInfo, SequenceCellSource, SequenceDirection, Thumbnail,
 };
 pub use m5::{
     RenderVectorFill, RenderVectorSegment, VectorCubicSegment, VectorEraseMode, VectorFillInfo,
@@ -17,14 +18,14 @@ pub use m5::{
 pub use m6::FilterPreviewInfo;
 
 use inkpod_format::{
-    CellFile, CommonRaster, CommonRasterFormat, FileAdjustmentLayer, FileGrid, FileGuide,
-    FileLayer, FileM3Metadata, FileM6Metadata, FilePlane, FilePlaneProperties, FileTile,
-    FormatError, PlaneKind as FilePlaneKind,
+    CellFile, CommonRaster, FileAdjustmentLayer, FileGrid, FileGuide, FileLayer, FileM3Metadata,
+    FileM6Metadata, FilePlane, FilePlaneProperties, FileTile, FormatError,
+    PlaneKind as FilePlaneKind,
 };
 use inkpod_image::{
     ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,
-    TILE_SIZE, TileCoord, TileData, closed_region_fill_with_cancel, color_check_category,
-    extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
+    TILE_SIZE, TileCoord, TileData, VectorFixedPoint, closed_region_fill_with_cancel,
+    color_check_category, extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -200,6 +201,31 @@ pub enum MirrorAxis {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RotateDirection {
+    Left90,
+    Right90,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResizeAnchor {
+    TopLeft,
+    TopRight,
+    Center,
+    BottomLeft,
+    BottomRight,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DocumentResize {
+    pub width: u32,
+    pub height: u32,
+    pub dpi_x_milli: u32,
+    pub dpi_y_milli: u32,
+    pub resample: bool,
+    pub anchor: ResizeAnchor,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Guide {
     pub id: u64,
     pub axis: GuideAxis,
@@ -307,6 +333,7 @@ pub struct FillRequest {
     pub seed_y: u32,
     pub color: PixelValue,
     pub selection: Option<RectI32>,
+    pub use_document_selection: bool,
     pub tolerance: u16,
     pub detached_regions: bool,
     pub overflow_abort: bool,
@@ -391,6 +418,8 @@ pub enum ViewCommand {
     SetGuidesVisible(bool),
     SetGridVisible(bool),
     SetSnapEnabled(bool),
+    SetGuideSnapEnabled(bool),
+    SetGridSnapEnabled(bool),
     SetTransparentView(bool),
     SetAlphaView(bool),
 }
@@ -415,8 +444,12 @@ pub struct ViewState {
     guides_visible: bool,
     grid_visible: bool,
     snap_enabled: bool,
+    guide_snap_enabled: bool,
+    grid_snap_enabled: bool,
     transparent_view: bool,
     alpha_view: bool,
+    viewport_width: f64,
+    viewport_height: f64,
 }
 
 impl Default for ViewState {
@@ -433,8 +466,12 @@ impl Default for ViewState {
             guides_visible: true,
             grid_visible: false,
             snap_enabled: false,
+            guide_snap_enabled: false,
+            grid_snap_enabled: false,
             transparent_view: true,
             alpha_view: false,
+            viewport_width: 1.0,
+            viewport_height: 1.0,
         }
     }
 }
@@ -496,6 +533,16 @@ impl ViewState {
     }
 
     #[must_use]
+    pub const fn guide_snap_enabled(self) -> bool {
+        self.guide_snap_enabled
+    }
+
+    #[must_use]
+    pub const fn grid_snap_enabled(self) -> bool {
+        self.grid_snap_enabled
+    }
+
+    #[must_use]
     pub const fn transparent_view(self) -> bool {
         self.transparent_view
     }
@@ -503,6 +550,16 @@ impl ViewState {
     #[must_use]
     pub const fn alpha_view(self) -> bool {
         self.alpha_view
+    }
+
+    #[must_use]
+    pub const fn viewport_width(self) -> f64 {
+        self.viewport_width
+    }
+
+    #[must_use]
+    pub const fn viewport_height(self) -> f64 {
+        self.viewport_height
     }
 }
 
@@ -1341,6 +1398,13 @@ struct HistoryEntry {
     after_state: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HistoryEntryInfo {
+    pub index: usize,
+    pub applied: bool,
+    pub label: &'static str,
+}
+
 #[derive(Clone, Debug)]
 struct StrokeSession {
     stroke: Stroke,
@@ -1416,8 +1480,12 @@ impl Core {
                 guides_visible: true,
                 grid_visible: false,
                 snap_enabled: false,
+                guide_snap_enabled: false,
+                grid_snap_enabled: false,
                 transparent_view: true,
                 alpha_view: false,
+                viewport_width: 1.0,
+                viewport_height: 1.0,
             },
             history: Vec::new(),
             history_cursor: 0,
@@ -1982,6 +2050,90 @@ impl Core {
         self.commit_document_edit(before, after)
     }
 
+    pub fn convert_plane(
+        &mut self,
+        plane_id: u64,
+        destination_kind: PlaneType,
+        destination_format: PixelFormat,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        validate_plane_format(destination_kind, destination_format)?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let (layer_index, plane_index) = find_plane_indices(&before, plane_id)?;
+        let source = &before.layers[layer_index].planes[plane_index];
+        if source.kind == destination_kind && source.raster.format() == destination_format {
+            return Ok(self.noop_outcome());
+        }
+        if matches!(
+            source.kind,
+            PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill
+        ) || matches!(
+            destination_kind,
+            PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill
+        ) {
+            return Err(CoreError::InvalidArgument(
+                "vector plane conversion requires explicit rasterize/vectorize",
+            ));
+        }
+        let revision = self.next_document_revision()?;
+        let converted = convert_plane_raster(&source.raster, destination_format, revision)?;
+        let mut after = before.clone();
+        let plane = &mut after.layers[layer_index].planes[plane_index];
+        plane.kind = destination_kind;
+        plane.raster = converted;
+        validate_layer_kind(
+            after.layers[layer_index].kind,
+            &after.layers[layer_index].planes,
+        )?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn merge_plane_into_below(&mut self, plane_id: u64) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let (layer_index, upper) = find_plane_indices(&before, plane_id)?;
+        if upper + 1 >= before.layers[layer_index].planes.len() {
+            return Err(CoreError::InvalidArgument("plane has no lower sibling"));
+        }
+        let lower = upper + 1;
+        let source = &before.layers[layer_index].planes[upper];
+        let destination = &before.layers[layer_index].planes[lower];
+        if source.kind != destination.kind || source.raster.format() != destination.raster.format()
+        {
+            return Err(CoreError::InvalidArgument(
+                "only planes with compatible type and pixel format can merge",
+            ));
+        }
+        if before.layers[layer_index].kind == LayerKind::VectorColoring
+            && matches!(
+                source.kind,
+                PlaneType::VectorMainLine | PlaneType::VectorFill
+            )
+        {
+            return Err(CoreError::InvalidArgument(
+                "required singleton vector planes cannot be merged",
+            ));
+        }
+        let revision = self.next_document_revision()?;
+        let mut after = before.clone();
+        let source = after.layers[layer_index].planes[upper].clone();
+        let destination_id = after.layers[layer_index].planes[lower].id;
+        merge_raster(
+            &mut after.layers[layer_index].planes[lower].raster,
+            &source.raster,
+            revision,
+        )?;
+        after.vector.reassign_plane(source.id, destination_id);
+        after.layers[layer_index].planes.remove(upper);
+        after.active_layer_id = after.layers[layer_index].id;
+        after.active_plane_id = destination_id;
+        validate_layer_kind(
+            after.layers[layer_index].kind,
+            &after.layers[layer_index].planes,
+        )?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
     pub fn convert_layer(
         &mut self,
         layer_id: u64,
@@ -2098,6 +2250,18 @@ impl Core {
         let revision = self.next_document_revision()?;
         let mut after = before.clone();
         after.selection = invert_selection_mask(&before.selection, revision)?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn clear_selection(&mut self) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        if mask_bounds(&before.selection)?.is_none() {
+            return Ok(self.noop_outcome());
+        }
+        let revision = self.next_document_revision()?;
+        let mut after = before.clone();
+        after.selection = TileRaster::new(before.width, before.height, PixelFormat::BinaryMask8)?;
         self.commit_document_edit_with_revision(before, after, revision)
     }
 
@@ -2337,6 +2501,96 @@ impl Core {
         Ok(())
     }
 
+    pub fn begin_paste_to_active_converted(
+        &mut self,
+        payload: &ClipboardPayload,
+    ) -> Result<(), CoreError> {
+        self.ensure_no_active_stroke()?;
+        if self.floating.is_some() {
+            return Err(CoreError::InvalidState("floating paste is already active"));
+        }
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let destination = document
+            .plane_by_id(document.active_plane_id)
+            .ok_or(CoreError::InvalidState("active plane is missing"))?;
+        ensure_editable_plane(document, destination.id)?;
+        let source = payload
+            .planes
+            .first()
+            .ok_or(CoreError::InvalidArgument("clipboard has no plane payload"))?;
+        if source.pixels.len() as u64 > MAX_FILL_PIXELS {
+            return Err(CoreError::InvalidArgument(
+                "clipboard payload exceeds work limit",
+            ));
+        }
+        let mut converted = payload.clone();
+        converted.planes.truncate(1);
+        converted.planes[0].kind = destination.kind;
+        converted.planes[0].pixel_format = destination.raster.format();
+        for pixel in &mut converted.planes[0].pixels {
+            pixel.value = convert_plane_pixel(pixel.value, destination.raster.format())?;
+        }
+        self.floating = Some(FloatingSelection {
+            payload: converted,
+            destination_plane_id: destination.id,
+            transform: FloatingTransform::default(),
+        });
+        Ok(())
+    }
+
+    pub fn clear_selected_content(&mut self) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        ensure_editable_plane(document, document.active_plane_id)?;
+        let plane_id = document.active_plane_id;
+        let zero = zero_pixel(
+            document
+                .plane_by_id(plane_id)
+                .ok_or(CoreError::InvalidState("active plane is missing"))?
+                .raster
+                .format(),
+        )?;
+        let mut coordinates = Vec::new();
+        for y in 0..document.height {
+            for x in 0..document.width {
+                if document.selection.pixel(x, y)? != PixelValue::Binary(0) {
+                    coordinates.push((x, y));
+                }
+            }
+        }
+        if coordinates.is_empty() {
+            return Err(CoreError::InvalidState("selection contains no pixels"));
+        }
+        let revision = self.next_document_revision()?;
+        let after_state = self.allocate_state()?;
+        let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
+        let plane = document
+            .plane_by_id_mut(plane_id)
+            .ok_or(CoreError::InvalidState("active plane is missing"))?;
+        let mut changes = Vec::new();
+        for (x, y) in coordinates {
+            let before = plane.raster.pixel(x, y)?;
+            if before != zero {
+                plane.raster.set_pixel(x, y, zero, revision)?;
+                changes.push(PixelChange {
+                    x,
+                    y,
+                    before,
+                    after: zero,
+                });
+            }
+        }
+        if changes.is_empty() {
+            return Ok(self.noop_outcome());
+        }
+        self.document_revision = revision;
+        self.commit_pixel_history(plane_id, changes, after_state);
+        Ok(DispatchOutcome {
+            revision,
+            accepted_commands: 1,
+        })
+    }
+
     pub fn set_floating_transform(
         &mut self,
         transform: FloatingTransform,
@@ -2536,6 +2790,248 @@ impl Core {
                 _ => {}
             }
         }
+        let width_milli = checked_dimension_milli(after.width)?;
+        let height_milli = checked_dimension_milli(after.height)?;
+        after.vector.transform_coordinates(
+            |point| {
+                Ok(match axis {
+                    MirrorAxis::Horizontal => VectorFixedPoint {
+                        x_milli: width_milli.checked_sub(point.x_milli).ok_or(
+                            CoreError::InvalidArgument("mirrored vector point overflowed"),
+                        )?,
+                        y_milli: point.y_milli,
+                    },
+                    MirrorAxis::Vertical => VectorFixedPoint {
+                        x_milli: point.x_milli,
+                        y_milli: height_milli.checked_sub(point.y_milli).ok_or(
+                            CoreError::InvalidArgument("mirrored vector point overflowed"),
+                        )?,
+                    },
+                })
+            },
+            1.0,
+        )?;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn rotate_document(
+        &mut self,
+        direction: RotateDirection,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let revision = self.next_document_revision()?;
+        let mut after = before.clone();
+        for plane in after
+            .layers
+            .iter_mut()
+            .flat_map(|layer| layer.planes.iter_mut())
+        {
+            plane.raster = rotate_raster(&plane.raster, direction, revision)?;
+        }
+        after.selection = rotate_raster(&after.selection, direction, revision)?;
+        rotate_frame_metadata(&mut after.frames, before.width, before.height, direction)?;
+        rotate_guides(&mut after.guides, before.width, before.height, direction)?;
+        let old_grid = after.grid;
+        after.grid.origin_x = match direction {
+            RotateDirection::Left90 => old_grid.origin_y,
+            RotateDirection::Right90 => {
+                i32::try_from(before.height)
+                    .map_err(|_| CoreError::InvalidState("document height exceeds grid range"))?
+                    - old_grid.origin_y
+            }
+        };
+        after.grid.origin_y = match direction {
+            RotateDirection::Left90 => {
+                i32::try_from(before.width)
+                    .map_err(|_| CoreError::InvalidState("document width exceeds grid range"))?
+                    - old_grid.origin_x
+            }
+            RotateDirection::Right90 => old_grid.origin_x,
+        };
+        after.grid.spacing_x = old_grid.spacing_y;
+        after.grid.spacing_y = old_grid.spacing_x;
+        let old_width_milli = checked_dimension_milli(before.width)?;
+        let old_height_milli = checked_dimension_milli(before.height)?;
+        after.vector.transform_coordinates(
+            |point| {
+                Ok(match direction {
+                    RotateDirection::Left90 => VectorFixedPoint {
+                        x_milli: point.y_milli,
+                        y_milli: old_width_milli.checked_sub(point.x_milli).ok_or(
+                            CoreError::InvalidArgument("rotated vector point overflowed"),
+                        )?,
+                    },
+                    RotateDirection::Right90 => VectorFixedPoint {
+                        x_milli: old_height_milli.checked_sub(point.y_milli).ok_or(
+                            CoreError::InvalidArgument("rotated vector point overflowed"),
+                        )?,
+                        y_milli: point.x_milli,
+                    },
+                })
+            },
+            1.0,
+        )?;
+        after.width = before.height;
+        after.height = before.width;
+        after.dpi_x_milli = before.dpi_y_milli;
+        after.dpi_y_milli = before.dpi_x_milli;
+        self.commit_document_edit_with_revision(before, after, revision)
+    }
+
+    pub fn resize_document(
+        &mut self,
+        resize: DocumentResize,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        bounded_document_pixels(resize.width, resize.height)?;
+        if resize.width == 0
+            || resize.height == 0
+            || resize.dpi_x_milli == 0
+            || resize.dpi_y_milli == 0
+        {
+            return Err(CoreError::InvalidArgument(
+                "document dimensions and DPI must be nonzero",
+            ));
+        }
+        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        if before.width == resize.width
+            && before.height == resize.height
+            && before.dpi_x_milli == resize.dpi_x_milli
+            && before.dpi_y_milli == resize.dpi_y_milli
+        {
+            return Ok(self.noop_outcome());
+        }
+        let revision = self.next_document_revision()?;
+        let mut after = before.clone();
+        if resize.resample {
+            for plane in after
+                .layers
+                .iter_mut()
+                .flat_map(|layer| layer.planes.iter_mut())
+            {
+                plane.raster =
+                    resample_raster_nearest(&plane.raster, resize.width, resize.height, revision)?;
+            }
+            after.selection =
+                resample_raster_nearest(&after.selection, resize.width, resize.height, revision)?;
+            let scale_x = f64::from(resize.width) / f64::from(before.width);
+            let scale_y = f64::from(resize.height) / f64::from(before.height);
+            scale_frame_metadata(&mut after.frames, scale_x, scale_y)?;
+            for guide in &mut after.guides {
+                guide.position = checked_scaled_i32(
+                    guide.position,
+                    if guide.axis == GuideAxis::Vertical {
+                        scale_x
+                    } else {
+                        scale_y
+                    },
+                )?;
+            }
+            after.grid.origin_x = checked_scaled_i32(after.grid.origin_x, scale_x)?;
+            after.grid.origin_y = checked_scaled_i32(after.grid.origin_y, scale_y)?;
+            after.grid.spacing_x = checked_scaled_spacing(after.grid.spacing_x, scale_x)?;
+            after.grid.spacing_y = checked_scaled_spacing(after.grid.spacing_y, scale_y)?;
+            after.vector.transform_coordinates(
+                |point| {
+                    Ok(VectorFixedPoint {
+                        x_milli: checked_scaled_i32(point.x_milli, scale_x)?,
+                        y_milli: checked_scaled_i32(point.y_milli, scale_y)?,
+                    })
+                },
+                (scale_x.abs() + scale_y.abs()) / 2.0,
+            )?;
+        } else {
+            let (offset_x, offset_y) = resize_anchor_offset(
+                before.width,
+                before.height,
+                resize.width,
+                resize.height,
+                resize.anchor,
+            )?;
+            for plane in after
+                .layers
+                .iter_mut()
+                .flat_map(|layer| layer.planes.iter_mut())
+            {
+                plane.raster = place_raster(
+                    &plane.raster,
+                    resize.width,
+                    resize.height,
+                    offset_x,
+                    offset_y,
+                    revision,
+                )?;
+            }
+            after.selection = place_raster(
+                &after.selection,
+                resize.width,
+                resize.height,
+                offset_x,
+                offset_y,
+                revision,
+            )?;
+            translate_frame_metadata(&mut after.frames, offset_x, offset_y)?;
+            for guide in &mut after.guides {
+                guide.position = guide
+                    .position
+                    .checked_add(if guide.axis == GuideAxis::Vertical {
+                        offset_x
+                    } else {
+                        offset_y
+                    })
+                    .ok_or(CoreError::InvalidArgument("translated guide overflowed"))?;
+            }
+            after.grid.origin_x =
+                after
+                    .grid
+                    .origin_x
+                    .checked_add(offset_x)
+                    .ok_or(CoreError::InvalidArgument(
+                        "translated grid origin overflowed",
+                    ))?;
+            after.grid.origin_y =
+                after
+                    .grid
+                    .origin_y
+                    .checked_add(offset_y)
+                    .ok_or(CoreError::InvalidArgument(
+                        "translated grid origin overflowed",
+                    ))?;
+            let offset_x_milli = offset_x
+                .checked_mul(1_000)
+                .ok_or(CoreError::InvalidArgument("vector translation overflowed"))?;
+            let offset_y_milli = offset_y
+                .checked_mul(1_000)
+                .ok_or(CoreError::InvalidArgument("vector translation overflowed"))?;
+            after.vector.transform_coordinates(
+                |point| {
+                    Ok(VectorFixedPoint {
+                        x_milli: point.x_milli.checked_add(offset_x_milli).ok_or(
+                            CoreError::InvalidArgument("translated vector point overflowed"),
+                        )?,
+                        y_milli: point.y_milli.checked_add(offset_y_milli).ok_or(
+                            CoreError::InvalidArgument("translated vector point overflowed"),
+                        )?,
+                    })
+                },
+                1.0,
+            )?;
+        }
+        after.guides.retain(|guide| {
+            let limit = if guide.axis == GuideAxis::Vertical {
+                resize.width
+            } else {
+                resize.height
+            };
+            guide.position >= 0
+                && u32::try_from(guide.position).is_ok_and(|position| position <= limit)
+        });
+        clamp_margins(&mut after.frames.margins, resize.width, resize.height);
+        after.width = resize.width;
+        after.height = resize.height;
+        after.dpi_x_milli = resize.dpi_x_milli;
+        after.dpi_y_milli = resize.dpi_y_milli;
         self.commit_document_edit_with_revision(before, after, revision)
     }
 
@@ -2635,19 +3131,25 @@ impl Core {
             let step = f64::from(spacing) / f64::from(grid.subdivisions);
             f64::from(origin) + ((value - f64::from(origin)) / step).round() * step
         };
-        let mut snapped = (
-            snap_axis(x, grid.origin_x, grid.spacing_x),
-            snap_axis(y, grid.origin_y, grid.spacing_y),
-        );
-        for guide in &document.guides {
-            match guide.axis {
-                GuideAxis::Vertical if (x - f64::from(guide.position)).abs() <= 4.0 => {
-                    snapped.0 = f64::from(guide.position);
+        let mut snapped = if self.view.grid_snap_enabled {
+            (
+                snap_axis(x, grid.origin_x, grid.spacing_x),
+                snap_axis(y, grid.origin_y, grid.spacing_y),
+            )
+        } else {
+            (x, y)
+        };
+        if self.view.guide_snap_enabled {
+            for guide in &document.guides {
+                match guide.axis {
+                    GuideAxis::Vertical if (x - f64::from(guide.position)).abs() <= 4.0 => {
+                        snapped.0 = f64::from(guide.position);
+                    }
+                    GuideAxis::Horizontal if (y - f64::from(guide.position)).abs() <= 4.0 => {
+                        snapped.1 = f64::from(guide.position);
+                    }
+                    _ => {}
                 }
-                GuideAxis::Horizontal if (y - f64::from(guide.position)).abs() <= 4.0 => {
-                    snapped.1 = f64::from(guide.position);
-                }
-                _ => {}
             }
         }
         Ok(snapped)
@@ -2835,12 +3337,22 @@ impl Core {
                 "fill document exceeds the bounded work limit",
             ));
         }
-        let selection = request
+        let operation_selection = request
             .selection
             .map(|rect| {
                 selection_from_rect(document.width, document.height, rect, &mut is_cancelled)
             })
             .transpose()?;
+        let selection = match (request.use_document_selection, operation_selection) {
+            (true, Some(operation)) => Some(combine_selection_masks(
+                &document.selection,
+                &operation,
+                SelectionOperation::Intersect,
+                self.document_revision,
+            )?),
+            (true, None) => Some(document.selection.clone()),
+            (false, operation) => operation,
+        };
         let options = FillOptions {
             tolerance: request.tolerance,
             detached_regions: request.detached_regions,
@@ -3294,6 +3806,155 @@ impl Core {
         })
     }
 
+    #[must_use]
+    pub fn history_entries(&self) -> Vec<HistoryEntryInfo> {
+        self.history
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| HistoryEntryInfo {
+                index,
+                applied: index < self.history_cursor,
+                label: match &entry.change {
+                    HistoryChange::Pixels { .. } => "Raster edit",
+                    HistoryChange::Palette { .. } => "Palette edit",
+                    HistoryChange::MainLineColor { .. } => "Main-line color",
+                    HistoryChange::Document { .. } => "Document edit",
+                },
+            })
+            .collect()
+    }
+
+    #[must_use]
+    pub const fn history_cursor(&self) -> usize {
+        self.history_cursor
+    }
+
+    pub fn jump_history(&mut self, target_cursor: usize) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        if target_cursor > self.history.len() {
+            return Err(CoreError::InvalidArgument(
+                "history target is outside the available range",
+            ));
+        }
+        if target_cursor == self.history_cursor {
+            return Ok(self.noop_outcome());
+        }
+        let revision = self.next_document_revision()?;
+        let accepted_commands = self.history_cursor.abs_diff(target_cursor) as u64;
+        while self.history_cursor > target_cursor {
+            let entry = self.history[self.history_cursor - 1].clone();
+            self.apply_history_values(&entry, false, revision)?;
+            self.history_cursor -= 1;
+            self.current_state = entry.before_state;
+        }
+        while self.history_cursor < target_cursor {
+            let entry = self.history[self.history_cursor].clone();
+            self.apply_history_values(&entry, true, revision)?;
+            self.history_cursor += 1;
+            self.current_state = entry.after_state;
+        }
+        self.document_revision = revision;
+        Ok(DispatchOutcome {
+            revision,
+            accepted_commands,
+        })
+    }
+
+    pub fn revert_active_plane_selection(&mut self) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let path = self
+            .current_path
+            .clone()
+            .ok_or(CoreError::InvalidState("document has no normal-save path"))?;
+        let current = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let Some(bounds) = mask_bounds(&current.selection)? else {
+            return Err(CoreError::InvalidState("selection is empty"));
+        };
+        let active_plane_id = current.active_plane_id;
+        let file = inkpod_format::read(&path)?;
+        let saved = CellDocument::from_file(file, self.document_revision)?;
+        if saved.uuid != current.uuid
+            || saved.width != current.width
+            || saved.height != current.height
+        {
+            return Err(CoreError::InvalidState(
+                "saved document no longer matches the open document",
+            ));
+        }
+        let current_plane = current
+            .plane_by_id(active_plane_id)
+            .ok_or(CoreError::InvalidState("active plane no longer exists"))?;
+        let saved_plane = saved
+            .plane_by_id(active_plane_id)
+            .ok_or(CoreError::InvalidState(
+                "active plane does not exist in the saved document",
+            ))?;
+        if current_plane.kind != saved_plane.kind
+            || current_plane.raster.format() != saved_plane.raster.format()
+        {
+            return Err(CoreError::InvalidState(
+                "active plane is incompatible with the saved document",
+            ));
+        }
+        let end_x = bounds
+            .x
+            .checked_add(bounds.width)
+            .ok_or(CoreError::InvalidState("selection bounds overflow"))?;
+        let end_y = bounds
+            .y
+            .checked_add(bounds.height)
+            .ok_or(CoreError::InvalidState("selection bounds overflow"))?;
+        let mut changes = Vec::new();
+        for y in bounds.y..end_y {
+            for x in bounds.x..end_x {
+                let x = u32::try_from(x)
+                    .map_err(|_| CoreError::InvalidState("selection X is negative"))?;
+                let y = u32::try_from(y)
+                    .map_err(|_| CoreError::InvalidState("selection Y is negative"))?;
+                if current.selection.pixel(x, y)? == PixelValue::Binary(0) {
+                    continue;
+                }
+                let before = current_plane.raster.pixel(x, y)?;
+                let after = saved_plane.raster.pixel(x, y)?;
+                if before != after {
+                    changes.push(PixelChange {
+                        x,
+                        y,
+                        before,
+                        after,
+                    });
+                }
+            }
+        }
+        if changes.is_empty() {
+            return Ok(self.noop_outcome());
+        }
+        let revision = self.next_document_revision()?;
+        let after_state = self.allocate_state()?;
+        let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
+        let raster = &mut document
+            .plane_by_id_mut(active_plane_id)
+            .ok_or(CoreError::InvalidState("active plane disappeared"))?
+            .raster;
+        let mut touched = BTreeSet::new();
+        for change in &changes {
+            raster.set_pixel(change.x, change.y, change.after, revision)?;
+            touched.insert(TileCoord {
+                x: change.x / TILE_SIZE,
+                y: change.y / TILE_SIZE,
+            });
+        }
+        for coord in touched {
+            raster.remove_tile_if_empty(coord);
+        }
+        self.document_revision = revision;
+        self.commit_pixel_history(active_plane_id, changes, after_state);
+        Ok(DispatchOutcome {
+            revision,
+            accepted_commands: 1,
+        })
+    }
+
     pub fn save(&mut self, path: &Path) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
@@ -3394,6 +4055,24 @@ impl Core {
             ));
         }
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        match command {
+            ViewCommand::Fit {
+                viewport_width,
+                viewport_height,
+            }
+            | ViewCommand::OneToOne {
+                viewport_width,
+                viewport_height,
+            }
+            | ViewCommand::ViewportResized {
+                viewport_width,
+                viewport_height,
+            } if valid_viewport(viewport_width, viewport_height) => {
+                self.view.viewport_width = viewport_width;
+                self.view.viewport_height = viewport_height;
+            }
+            _ => {}
+        }
         let toggle_changed = match command {
             ViewCommand::Flip { axis } => {
                 match axis {
@@ -3422,6 +4101,20 @@ impl Core {
             ViewCommand::SetSnapEnabled(value) => {
                 let changed = self.view.snap_enabled != value;
                 self.view.snap_enabled = value;
+                self.view.guide_snap_enabled = value;
+                self.view.grid_snap_enabled = value;
+                changed
+            }
+            ViewCommand::SetGuideSnapEnabled(value) => {
+                let changed = self.view.guide_snap_enabled != value;
+                self.view.guide_snap_enabled = value;
+                self.view.snap_enabled = value || self.view.grid_snap_enabled;
+                changed
+            }
+            ViewCommand::SetGridSnapEnabled(value) => {
+                let changed = self.view.grid_snap_enabled != value;
+                self.view.grid_snap_enabled = value;
+                self.view.snap_enabled = value || self.view.guide_snap_enabled;
                 changed
             }
             ViewCommand::SetTransparentView(value) => {
@@ -3446,6 +4139,8 @@ impl Core {
                 | ViewCommand::SetGuidesVisible(_)
                 | ViewCommand::SetGridVisible(_)
                 | ViewCommand::SetSnapEnabled(_)
+                | ViewCommand::SetGuideSnapEnabled(_)
+                | ViewCommand::SetGridSnapEnabled(_)
                 | ViewCommand::SetTransparentView(_)
                 | ViewCommand::SetAlphaView(_)
         ) {
@@ -3589,6 +4284,11 @@ impl Core {
             self.view.mode = next_mode;
         }
         Ok(self.view)
+    }
+
+    #[must_use]
+    pub const fn view_state(&self) -> ViewState {
+        self.view
     }
 
     pub fn document_info(&self) -> Result<DocumentInfo, CoreError> {
@@ -4656,6 +5356,354 @@ fn mirror_raster(
     Ok(destination)
 }
 
+fn convert_plane_raster(
+    source: &TileRaster,
+    destination_format: PixelFormat,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    bounded_document_pixels(source.width(), source.height())?;
+    let mut destination = TileRaster::new(source.width(), source.height(), destination_format)?;
+    for y in 0..source.height() {
+        for x in 0..source.width() {
+            let value = convert_plane_pixel(source.pixel(x, y)?, destination_format)?;
+            if !value.is_zero() {
+                destination.set_pixel(x, y, value, revision)?;
+            }
+        }
+    }
+    Ok(destination)
+}
+
+fn convert_plane_pixel(
+    source: PixelValue,
+    destination_format: PixelFormat,
+) -> Result<PixelValue, CoreError> {
+    let coverage16 = match source {
+        PixelValue::Binary(value) | PixelValue::Grayscale8(value) => u16::from(value) * 257,
+        PixelValue::Grayscale16(value) => value,
+        PixelValue::Rgba(value) => u16::from(value[3]) * 257,
+        PixelValue::Rgba16(value) => value[3],
+    };
+    let rgba16 = match source {
+        PixelValue::Rgba(value) => [
+            u16::from(value[0]) * 257,
+            u16::from(value[1]) * 257,
+            u16::from(value[2]) * 257,
+            u16::from(value[3]) * 257,
+        ],
+        PixelValue::Rgba16(value) => value,
+        _ => [0, 0, 0, coverage16],
+    };
+    match destination_format {
+        PixelFormat::BinaryMask8 => Ok(PixelValue::Binary(if coverage16 == 0 { 0 } else { 255 })),
+        PixelFormat::Grayscale8 => Ok(PixelValue::Grayscale8((coverage16 / 257) as u8)),
+        PixelFormat::Grayscale16 => Ok(PixelValue::Grayscale16(coverage16)),
+        PixelFormat::StraightRgba8 => Ok(PixelValue::Rgba([
+            (rgba16[0] / 257) as u8,
+            (rgba16[1] / 257) as u8,
+            (rgba16[2] / 257) as u8,
+            (rgba16[3] / 257) as u8,
+        ])),
+        PixelFormat::StraightRgba16 => Ok(PixelValue::Rgba16(rgba16)),
+        PixelFormat::PremultipliedBgra8 => Err(CoreError::InvalidArgument(
+            "premultiplied display format cannot be stored in a document plane",
+        )),
+    }
+}
+
+fn zero_pixel(format: PixelFormat) -> Result<PixelValue, CoreError> {
+    match format {
+        PixelFormat::BinaryMask8 => Ok(PixelValue::Binary(0)),
+        PixelFormat::Grayscale8 => Ok(PixelValue::Grayscale8(0)),
+        PixelFormat::Grayscale16 => Ok(PixelValue::Grayscale16(0)),
+        PixelFormat::StraightRgba8 => Ok(PixelValue::Rgba([0; 4])),
+        PixelFormat::StraightRgba16 => Ok(PixelValue::Rgba16([0; 4])),
+        PixelFormat::PremultipliedBgra8 => Err(CoreError::InvalidArgument(
+            "premultiplied display format cannot be stored in a document plane",
+        )),
+    }
+}
+
+fn rotate_raster(
+    source: &TileRaster,
+    direction: RotateDirection,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    bounded_document_pixels(source.height(), source.width())?;
+    let mut destination = TileRaster::new(source.height(), source.width(), source.format())?;
+    for y in 0..source.height() {
+        for x in 0..source.width() {
+            let value = source.pixel(x, y)?;
+            if value.is_zero() {
+                continue;
+            }
+            let (destination_x, destination_y) = match direction {
+                RotateDirection::Left90 => (y, source.width() - 1 - x),
+                RotateDirection::Right90 => (source.height() - 1 - y, x),
+            };
+            destination.set_pixel(destination_x, destination_y, value, revision)?;
+        }
+    }
+    Ok(destination)
+}
+
+fn place_raster(
+    source: &TileRaster,
+    width: u32,
+    height: u32,
+    offset_x: i32,
+    offset_y: i32,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    bounded_document_pixels(width, height)?;
+    let mut destination = TileRaster::new(width, height, source.format())?;
+    for y in 0..source.height() {
+        for x in 0..source.width() {
+            let destination_x = i64::from(x) + i64::from(offset_x);
+            let destination_y = i64::from(y) + i64::from(offset_y);
+            if destination_x < 0
+                || destination_y < 0
+                || destination_x >= i64::from(width)
+                || destination_y >= i64::from(height)
+            {
+                continue;
+            }
+            let value = source.pixel(x, y)?;
+            if !value.is_zero() {
+                destination.set_pixel(
+                    destination_x as u32,
+                    destination_y as u32,
+                    value,
+                    revision,
+                )?;
+            }
+        }
+    }
+    Ok(destination)
+}
+
+fn resample_raster_nearest(
+    source: &TileRaster,
+    width: u32,
+    height: u32,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    bounded_document_pixels(width, height)?;
+    let mut destination = TileRaster::new(width, height, source.format())?;
+    for y in 0..height {
+        let source_y = ((u64::from(y) * u64::from(source.height())) / u64::from(height))
+            .min(u64::from(source.height() - 1)) as u32;
+        for x in 0..width {
+            let source_x = ((u64::from(x) * u64::from(source.width())) / u64::from(width))
+                .min(u64::from(source.width() - 1)) as u32;
+            let value = source.pixel(source_x, source_y)?;
+            if !value.is_zero() {
+                destination.set_pixel(x, y, value, revision)?;
+            }
+        }
+    }
+    Ok(destination)
+}
+
+fn resize_anchor_offset(
+    old_width: u32,
+    old_height: u32,
+    new_width: u32,
+    new_height: u32,
+    anchor: ResizeAnchor,
+) -> Result<(i32, i32), CoreError> {
+    let difference_x = i64::from(new_width) - i64::from(old_width);
+    let difference_y = i64::from(new_height) - i64::from(old_height);
+    let offset_x = match anchor {
+        ResizeAnchor::TopLeft | ResizeAnchor::BottomLeft => 0,
+        ResizeAnchor::Center => difference_x / 2,
+        ResizeAnchor::TopRight | ResizeAnchor::BottomRight => difference_x,
+    };
+    let offset_y = match anchor {
+        ResizeAnchor::TopLeft | ResizeAnchor::TopRight => 0,
+        ResizeAnchor::Center => difference_y / 2,
+        ResizeAnchor::BottomLeft | ResizeAnchor::BottomRight => difference_y,
+    };
+    Ok((
+        i32::try_from(offset_x)
+            .map_err(|_| CoreError::InvalidArgument("horizontal anchor offset overflowed"))?,
+        i32::try_from(offset_y)
+            .map_err(|_| CoreError::InvalidArgument("vertical anchor offset overflowed"))?,
+    ))
+}
+
+fn checked_dimension_milli(dimension: u32) -> Result<i32, CoreError> {
+    i32::try_from(dimension)
+        .ok()
+        .and_then(|value| value.checked_mul(1_000))
+        .ok_or(CoreError::InvalidArgument(
+            "document dimension exceeds vector coordinate range",
+        ))
+}
+
+fn checked_scaled_i32(value: i32, scale: f64) -> Result<i32, CoreError> {
+    let scaled = f64::from(value) * scale;
+    if !scaled.is_finite() || scaled < f64::from(i32::MIN) || scaled > f64::from(i32::MAX) {
+        return Err(CoreError::InvalidArgument("scaled coordinate overflowed"));
+    }
+    Ok(scaled.round() as i32)
+}
+
+fn checked_scaled_spacing(value: u32, scale: f64) -> Result<u32, CoreError> {
+    let scaled = (f64::from(value) * scale).round().max(1.0);
+    if !scaled.is_finite() || scaled > f64::from(u32::MAX) {
+        return Err(CoreError::InvalidArgument("scaled spacing overflowed"));
+    }
+    Ok(scaled as u32)
+}
+
+fn checked_scaled_u32(value: u32, scale: f64) -> Result<u32, CoreError> {
+    let scaled = (f64::from(value) * scale).round().max(0.0);
+    if !scaled.is_finite() || scaled > f64::from(u32::MAX) {
+        return Err(CoreError::InvalidArgument(
+            "scaled unsigned value overflowed",
+        ));
+    }
+    Ok(scaled as u32)
+}
+
+fn clamp_margins(margins: &mut Margins, width: u32, height: u32) {
+    margins.left = margins.left.min(width);
+    margins.right = margins.right.min(width.saturating_sub(margins.left));
+    margins.top = margins.top.min(height);
+    margins.bottom = margins.bottom.min(height.saturating_sub(margins.top));
+}
+
+fn translate_frame_metadata(
+    frames: &mut FrameMetadata,
+    offset_x: i32,
+    offset_y: i32,
+) -> Result<(), CoreError> {
+    for frame in [
+        &mut frames.hundred_frame,
+        &mut frames.reference_frame,
+        &mut frames.drawing_frame,
+        &mut frames.safe_frame,
+    ] {
+        frame.x = frame
+            .x
+            .checked_add(offset_x)
+            .ok_or(CoreError::InvalidArgument("translated frame overflowed"))?;
+        frame.y = frame
+            .y
+            .checked_add(offset_y)
+            .ok_or(CoreError::InvalidArgument("translated frame overflowed"))?;
+    }
+    Ok(())
+}
+
+fn scale_frame_metadata(
+    frames: &mut FrameMetadata,
+    scale_x: f64,
+    scale_y: f64,
+) -> Result<(), CoreError> {
+    for frame in [
+        &mut frames.hundred_frame,
+        &mut frames.reference_frame,
+        &mut frames.drawing_frame,
+        &mut frames.safe_frame,
+    ] {
+        frame.x = checked_scaled_i32(frame.x, scale_x)?;
+        frame.y = checked_scaled_i32(frame.y, scale_y)?;
+        frame.width = checked_scaled_i32(frame.width, scale_x)?.max(1);
+        frame.height = checked_scaled_i32(frame.height, scale_y)?.max(1);
+    }
+    frames.margins.left = checked_scaled_u32(frames.margins.left, scale_x)?;
+    frames.margins.right = checked_scaled_u32(frames.margins.right, scale_x)?;
+    frames.margins.top = checked_scaled_u32(frames.margins.top, scale_y)?;
+    frames.margins.bottom = checked_scaled_u32(frames.margins.bottom, scale_y)?;
+    Ok(())
+}
+
+fn rotate_frame_metadata(
+    frames: &mut FrameMetadata,
+    width: u32,
+    height: u32,
+    direction: RotateDirection,
+) -> Result<(), CoreError> {
+    let width = i32::try_from(width)
+        .map_err(|_| CoreError::InvalidState("document width exceeds frame range"))?;
+    let height = i32::try_from(height)
+        .map_err(|_| CoreError::InvalidState("document height exceeds frame range"))?;
+    for frame in [
+        &mut frames.hundred_frame,
+        &mut frames.reference_frame,
+        &mut frames.drawing_frame,
+        &mut frames.safe_frame,
+    ] {
+        let previous = *frame;
+        *frame = match direction {
+            RotateDirection::Left90 => RectI32 {
+                x: previous.y,
+                y: width - previous.x - previous.width,
+                width: previous.height,
+                height: previous.width,
+            },
+            RotateDirection::Right90 => RectI32 {
+                x: height - previous.y - previous.height,
+                y: previous.x,
+                width: previous.height,
+                height: previous.width,
+            },
+        };
+    }
+    let margins = frames.margins;
+    frames.margins = match direction {
+        RotateDirection::Left90 => Margins {
+            left: margins.top,
+            top: margins.right,
+            right: margins.bottom,
+            bottom: margins.left,
+        },
+        RotateDirection::Right90 => Margins {
+            left: margins.bottom,
+            top: margins.left,
+            right: margins.top,
+            bottom: margins.right,
+        },
+    };
+    Ok(())
+}
+
+fn rotate_guides(
+    guides: &mut [Guide],
+    width: u32,
+    height: u32,
+    direction: RotateDirection,
+) -> Result<(), CoreError> {
+    let width = i32::try_from(width)
+        .map_err(|_| CoreError::InvalidState("document width exceeds guide range"))?;
+    let height = i32::try_from(height)
+        .map_err(|_| CoreError::InvalidState("document height exceeds guide range"))?;
+    for guide in guides {
+        let previous = *guide;
+        match (direction, previous.axis) {
+            (RotateDirection::Left90, GuideAxis::Vertical) => {
+                guide.axis = GuideAxis::Horizontal;
+                guide.position = width - previous.position;
+            }
+            (RotateDirection::Left90, GuideAxis::Horizontal) => {
+                guide.axis = GuideAxis::Vertical;
+                guide.position = previous.position;
+            }
+            (RotateDirection::Right90, GuideAxis::Vertical) => {
+                guide.axis = GuideAxis::Horizontal;
+                guide.position = previous.position;
+            }
+            (RotateDirection::Right90, GuideAxis::Horizontal) => {
+                guide.axis = GuideAxis::Vertical;
+                guide.position = height - previous.position;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn mirror_frame_metadata(
     frames: &mut FrameMetadata,
     width: u32,
@@ -5416,6 +6464,7 @@ mod tests {
             seed_y,
             color: PixelValue::Rgba(color),
             selection: None,
+            use_document_selection: false,
             tolerance: 0,
             detached_regions: false,
             overflow_abort: false,
@@ -5621,6 +6670,34 @@ mod tests {
         );
         core.redo().unwrap();
         assert_eq!(core.plane_pixel(ActivePlane::Color, 4, 4).unwrap(), fill);
+    }
+
+    #[test]
+    fn fill_001_persistent_selection_mask_clips_seed_fill() {
+        let mut core = Core::new();
+        core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        core.apply_selection(
+            &SelectionShape::Ellipse(RectI32 {
+                x: 2,
+                y: 2,
+                width: 4,
+                height: 4,
+            }),
+            SelectionOperation::New,
+        )
+        .unwrap();
+        let mut request = fill_request(4, 4, [20, 80, 200, 255]);
+        request.use_document_selection = true;
+        core.apply_fill(&request).unwrap();
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 4, 4).unwrap(),
+            PixelValue::Rgba([20, 80, 200, 255])
+        );
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 0, 0).unwrap(),
+            PixelValue::Rgba([0; 4])
+        );
     }
 
     #[test]
@@ -6072,6 +7149,73 @@ mod tests {
     }
 
     #[test]
+    fn hist_001_history_jump_and_partial_selection_revert_are_transactional() {
+        let path = std::env::temp_dir().join(format!(
+            "inkpod-core-history-list-{}-{}.inkpod",
+            std::process::id(),
+            TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut core = Core::new();
+        core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        core.set_active_plane(ActivePlane::Color).unwrap();
+        core.save(&path).unwrap();
+        for (x, y) in [(1.0, 1.0), (6.0, 6.0)] {
+            core.apply_stroke(&color_stroke(
+                PaintTool::Pencil,
+                1.0,
+                StrokeSample {
+                    x,
+                    y,
+                    pressure: 1.0,
+                },
+            ))
+            .unwrap();
+        }
+        core.apply_selection(
+            &SelectionShape::Rectangle(RectI32 {
+                x: 0,
+                y: 0,
+                width: 4,
+                height: 4,
+            }),
+            SelectionOperation::New,
+        )
+        .unwrap();
+        let before_revert = core.history_entries().len();
+        core.revert_active_plane_selection().unwrap();
+        assert_eq!(core.history_entries().len(), before_revert + 1);
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 1, 1).unwrap(),
+            PixelValue::Rgba([0; 4])
+        );
+        assert_ne!(
+            core.plane_pixel(ActivePlane::Color, 6, 6).unwrap(),
+            PixelValue::Rgba([0; 4])
+        );
+        core.undo().unwrap();
+        assert_ne!(
+            core.plane_pixel(ActivePlane::Color, 1, 1).unwrap(),
+            PixelValue::Rgba([0; 4])
+        );
+        let full_cursor = core.history_entries().len();
+        core.jump_history(0).unwrap();
+        assert_eq!(core.history_cursor(), 0);
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 6, 6).unwrap(),
+            PixelValue::Rgba([0; 4])
+        );
+        core.jump_history(full_cursor).unwrap();
+        assert_eq!(core.history_cursor(), full_cursor);
+        assert_eq!(
+            core.plane_pixel(ActivePlane::Color, 1, 1).unwrap(),
+            PixelValue::Rgba([0; 4])
+        );
+        assert!(core.history_entries().iter().all(|entry| entry.applied));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn live_stroke_preview_is_visible_before_one_atomic_commit() {
         let mut core = Core::new();
         let created = core
@@ -6206,7 +7350,12 @@ mod tests {
                 viewport_height: 240.0,
             })
             .unwrap();
-        assert_eq!(repeated, manual);
+        assert_eq!(repeated.mode(), ViewMode::Manual);
+        assert_eq!(repeated.zoom(), manual.zoom());
+        assert_eq!(repeated.pan_x(), manual.pan_x());
+        assert_eq!(repeated.pan_y(), manual.pan_y());
+        assert_eq!(repeated.viewport_width(), 320.0);
+        assert_eq!(repeated.viewport_height(), 240.0);
     }
 
     #[test]
@@ -6608,7 +7757,16 @@ mod tests {
         })
         .unwrap();
         assert_eq!(core.snap_document_point(5.2, 7.8).unwrap(), (5.2, 7.8));
-        core.apply_view(ViewCommand::SetSnapEnabled(true)).unwrap();
+        core.apply_view(ViewCommand::SetGuideSnapEnabled(true))
+            .unwrap();
+        assert_eq!(core.snap_document_point(5.2, 7.8).unwrap(), (5.0, 7.8));
+        core.apply_view(ViewCommand::SetGuideSnapEnabled(false))
+            .unwrap();
+        core.apply_view(ViewCommand::SetGridSnapEnabled(true))
+            .unwrap();
+        assert_eq!(core.snap_document_point(5.2, 7.8).unwrap(), (4.0, 8.0));
+        core.apply_view(ViewCommand::SetGuideSnapEnabled(true))
+            .unwrap();
         assert_eq!(core.snap_document_point(5.2, 7.8).unwrap(), (5.0, 8.0));
         core.move_guide(guide_id, 6).unwrap();
         assert_eq!(core.guides().unwrap()[0].position, 6);
@@ -7562,6 +8720,49 @@ mod tests {
                 assert_eq!(&scaled.pixels[offset..offset + 4], &expected);
             }
         }
+    }
+
+    #[test]
+    fn vector_rasterize_to_document_creates_one_undoable_rgba_layer() {
+        let (mut core, layer_id, main_id, _, _) = vector_core(4, 4);
+        core.vector_add_path(
+            main_id,
+            vector_line((0.0, 1.0), (4.0, 1.0), 1.0, 1.0, [255, 0, 0, 255]),
+        )
+        .unwrap();
+        let layer_count = core.layers().unwrap().len();
+        let revision = core.document_info().unwrap().document_revision;
+        let (outcome, raster_layer_id) = core
+            .rasterize_vector_layer_to_document(layer_id, true, "Rasterized")
+            .unwrap();
+        assert_eq!(outcome.accepted_commands, 1);
+        assert!(outcome.revision > revision);
+        let layers = core.layers().unwrap();
+        assert_eq!(layers.len(), layer_count + 1);
+        let raster_layer = layers
+            .iter()
+            .find(|layer| layer.id == raster_layer_id)
+            .unwrap();
+        assert_eq!(raster_layer.kind, LayerKind::Raster);
+        assert_eq!(raster_layer.planes.len(), 1);
+        assert_eq!(
+            raster_layer.planes[0].pixel_format,
+            PixelFormat::StraightRgba8
+        );
+        assert!(
+            core.build_snapshot()
+                .tiles()
+                .iter()
+                .any(|tile| { tile.pixels.chunks_exact(4).any(|pixel| pixel[3] != 0) })
+        );
+        core.undo().unwrap();
+        assert_eq!(core.layers().unwrap().len(), layer_count);
+        assert!(
+            core.layers()
+                .unwrap()
+                .iter()
+                .all(|layer| layer.id != raster_layer_id)
+        );
     }
 
     #[test]

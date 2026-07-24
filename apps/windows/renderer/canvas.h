@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <cstdint>
 
 #include "inkpod/core_ffi.h"
@@ -17,12 +18,31 @@ inline constexpr UINT kCanvasViewportChanged = WM_APP + 0x126U;
 inline constexpr UINT kCanvasGetRendererThreadId = WM_APP + 0x127U;
 inline constexpr UINT kCanvasGetPresentedFrameCount = WM_APP + 0x128U;
 inline constexpr UINT kCanvasGetDocumentBounds = WM_APP + 0x129U;
+inline constexpr UINT kCanvasPointerMoved = WM_APP + 0x12AU;
+inline constexpr UINT kCanvasSetFloatingPreview = WM_APP + 0x12BU;
+inline constexpr UINT kCanvasSetGeometryPreview = WM_APP + 0x12CU;
+inline constexpr std::size_t kCanvasGeometryPreviewPoints = 128U;
 
 struct CanvasDocumentBounds {
     double left;
     double top;
     double right;
     double bottom;
+};
+
+struct CanvasFloatingPreview {
+    std::uint32_t struct_size;
+    std::uint32_t active;
+    InkpodFrameRect bounds;
+    InkpodFloatingTransform transform;
+};
+
+struct CanvasGeometryPreview {
+    std::uint32_t struct_size;
+    std::uint32_t active;
+    std::uint32_t point_count;
+    std::uint32_t closed;
+    InkpodVectorPoint points[kCanvasGeometryPreviewPoints];
 };
 
 enum class CanvasStrokeEventKind : std::uint32_t {

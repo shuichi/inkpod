@@ -59,6 +59,9 @@ BEGIN
         MENUITEM "保存(&S)\tCtrl+S", IDM_FILE_SAVE
         MENUITEM "名前を付けて保存(&A)...", IDM_FILE_SAVE_AS
         MENUITEM "復帰(&R)", IDM_FILE_REVERT
+        MENUITEM "レイヤーを部分的に復帰", IDM_FILE_REVERT_PARTIAL
+        MENUITEM "ラスタ－を読み込み...", IDM_FILE_IMPORT_RASTER
+        MENUITEM "ラスタ－を書き出し...", IDM_FILE_EXPORT_RASTER
         MENUITEM "Recoveryを保存(&V)", IDM_FILE_AUTOSAVE_NOW
         MENUITEM "Recoveryを開く(&Y)...", IDM_FILE_OPEN_RECOVERY
         MENUITEM SEPARATOR
@@ -68,10 +71,20 @@ BEGIN
     BEGIN
         MENUITEM "元に戻す(&U)\tCtrl+Z", IDM_EDIT_UNDO
         MENUITEM "やり直し(&R)\tCtrl+Y", IDM_EDIT_REDO
+        MENUITEM "複数段階戻る...", IDM_EDIT_HISTORY_BACK
+        MENUITEM "複数段階進む...", IDM_EDIT_HISTORY_FORWARD
         MENUITEM SEPARATOR
+        MENUITEM "カット(&X)\tCtrl+X", IDM_EDIT_CUT
         MENUITEM "コピー(&C)\tCtrl+C", IDM_EDIT_COPY
         MENUITEM "貼り付け(&P)\tCtrl+V", IDM_EDIT_PASTE
-        MENUITEM "画像を左右反転", IDM_EDIT_MIRROR_HORIZONTAL
+        MENUITEM "選択プレーンにペースト", IDM_EDIT_PASTE_SELECTED
+        MENUITEM "変換してペースト...", IDM_EDIT_PASTE_CONVERTED
+        POPUP "フローティング選択"
+        BEGIN
+            MENUITEM "移動・拡大縮小・回転...", IDM_EDIT_FLOATING_TRANSFORM
+            MENUITEM "確定", IDM_EDIT_FLOATING_COMMIT
+            MENUITEM "キャンセル", IDM_EDIT_FLOATING_CANCEL
+        END
     END
     POPUP "表示(&V)"
     BEGIN
@@ -79,24 +92,104 @@ BEGIN
         MENUITEM "縮小(&O)", IDM_VIEW_ZOOM_OUT
         MENUITEM "全体表示(&F)", IDM_VIEW_FIT
         MENUITEM "ピクセル等倍(&1)", IDM_VIEW_ONE_TO_ONE
+        MENUITEM "表示倍率...", IDM_VIEW_ZOOM_PERCENT
+        MENUITEM "範囲を拡大", IDM_VIEW_BOX_ZOOM
         MENUITEM SEPARATOR
         MENUITEM "表示を左右反転", IDM_VIEW_FLIP_HORIZONTAL
         MENUITEM "表示を上下反転", IDM_VIEW_FLIP_VERTICAL
+        MENUITEM "ルーラー", IDM_VIEW_RULER
+        MENUITEM "ガイド線", IDM_VIEW_GUIDES
         MENUITEM "グリッド", IDM_VIEW_GRID
+        POPUP "スナップ"
+        BEGIN
+            MENUITEM "ガイド", IDM_VIEW_SNAP_GUIDES
+            MENUITEM "グリッド", IDM_VIEW_SNAP_GRID
+        END
+        POPUP "ガイド"
+        BEGIN
+            MENUITEM "垂直ガイドを追加...", IDM_VIEW_GUIDE_VERTICAL
+            MENUITEM "水平ガイドを追加...", IDM_VIEW_GUIDE_HORIZONTAL
+            MENUITEM "ガイドを移動", IDM_VIEW_GUIDE_MOVE
+            MENUITEM "すべて削除", IDM_VIEW_GUIDE_DELETE_ALL
+        END
+        MENUITEM "グリッド設定...", IDM_VIEW_GRID_SETTINGS
+        MENUITEM "透明部分", IDM_VIEW_TRANSPARENT
         MENUITEM "新しいビュー", IDM_VIEW_NEW
     END
     POPUP "レイヤー(&L)"
     BEGIN
+        MENUITEM "新規...", IDM_LAYER_NEW
         MENUITEM "複製", IDM_LAYER_DUPLICATE
         MENUITEM "削除", IDM_LAYER_DELETE
+        MENUITEM "非表示を削除", IDM_LAYER_DELETE_HIDDEN
         MENUITEM "最前面へ移動", IDM_LAYER_MOVE_TOP
+        MENUITEM "上へ", IDM_LAYER_MOVE_UP
+        MENUITEM "下へ", IDM_LAYER_MOVE_DOWN
+        MENUITEM "表示切替", IDM_LAYER_TOGGLE_VISIBLE
+        MENUITEM "編集可否切替", IDM_LAYER_TOGGLE_EDITABLE
+        MENUITEM "不透明度...", IDM_LAYER_OPACITY
+        MENUITEM "変換...", IDM_LAYER_CONVERT
+        MENUITEM "同種を統合", IDM_LAYER_MERGE
+        MENUITEM "プロパティ...", IDM_LAYER_PROPERTIES
+    END
+    POPUP "セル(&D)"
+    BEGIN
+        MENUITEM "用紙設定...", IDM_CELL_PAPER_SETTINGS
+        MENUITEM "撮影フレームを考慮して用紙サイズ変更", IDM_CELL_FIT_CAPTURE_FRAME
+        MENUITEM "画像サイズ...", IDM_CELL_IMAGE_SIZE
+        MENUITEM "画像解像度...", IDM_CELL_RESOLUTION
+        POPUP "鏡像"
+        BEGIN
+            MENUITEM "水平方向", IDM_EDIT_MIRROR_HORIZONTAL
+            MENUITEM "垂直方向", IDM_CELL_MIRROR_VERTICAL
+        END
+        POPUP "回転"
+        BEGIN
+            MENUITEM "左90度", IDM_CELL_ROTATE_LEFT
+            MENUITEM "右90度", IDM_CELL_ROTATE_RIGHT
+        END
+        POPUP "フレーム設定"
+        BEGIN
+            MENUITEM "100フレーム...", IDM_CELL_FRAME_HUNDRED
+            MENUITEM "基準フレーム...", IDM_CELL_FRAME_REFERENCE
+            MENUITEM "作画フレーム...", IDM_CELL_FRAME_DRAWING
+            MENUITEM "安全フレーム...", IDM_CELL_FRAME_SAFE
+            MENUITEM "余白...", IDM_CELL_MARGINS
+        END
     END
     POPUP "選択(&S)"
     BEGIN
         MENUITEM "すべて選択", IDM_SELECTION_ALL
+        MENUITEM "選択解除", IDM_SELECTION_CLEAR
+        POPUP "選択ツール"
+        BEGIN
+            MENUITEM "長方形", IDM_SELECTION_RECTANGLE
+            MENUITEM "楕円", IDM_SELECTION_ELLIPSE
+            MENUITEM "投げ縄", IDM_SELECTION_LASSO
+            MENUITEM "折れ線", IDM_SELECTION_POLYLINE
+            MENUITEM "トレース", IDM_SELECTION_TRACE
+            MENUITEM "色の杖", IDM_SELECTION_WAND
+        END
+        POPUP "作成モード"
+        BEGIN
+            MENUITEM "新規", IDM_SELECTION_MODE_NEW
+            MENUITEM "追加", IDM_SELECTION_MODE_ADD
+            MENUITEM "削除", IDM_SELECTION_MODE_SUBTRACT
+            MENUITEM "交差", IDM_SELECTION_MODE_INTERSECT
+        END
+        MENUITEM "描画色を選択", IDM_SELECTION_COLOR
+        MENUITEM "描画色以外を選択", IDM_SELECTION_COLOR_DIFFERENT
+        MENUITEM "描画色を選択範囲に追加", IDM_SELECTION_COLOR_ADD
         MENUITEM "選択範囲を反転", IDM_SELECTION_INVERT
-        MENUITEM "選択範囲を1px拡張", IDM_SELECTION_EXPAND
-        MENUITEM "選択範囲を1px縮小", IDM_SELECTION_SHRINK
+        MENUITEM "選択範囲を拡張...", IDM_SELECTION_EXPAND
+        MENUITEM "選択範囲を縮小...", IDM_SELECTION_SHRINK
+        POPUP "変換"
+        BEGIN
+            MENUITEM "選択範囲をレイヤーへ", IDM_SELECTION_TO_LAYER
+            MENUITEM "レイヤーを選択範囲へ", IDM_SELECTION_FROM_LAYER
+            MENUITEM "レイヤーを追加", IDM_SELECTION_LAYER_ADD
+            MENUITEM "レイヤーを削除", IDM_SELECTION_LAYER_SUBTRACT
+        END
     END
     POPUP "フィルタ(&I)"
     BEGIN
@@ -130,7 +223,40 @@ BEGIN
         MENUITEM "ブラシ(&B)", IDM_TOOL_BRUSH
         MENUITEM "消しゴム(&E)", IDM_TOOL_ERASER
         MENUITEM "フィル(&F)", IDM_TOOL_FILL
+        MENUITEM "閉領域フィル", IDM_TOOL_CLOSED_FILL
+        MENUITEM "塗りのばし", IDM_TOOL_FILL_EXTENSION
+        MENUITEM "フィル設定...", IDM_TOOL_FILL_OPTIONS
         MENUITEM "スポイト(&I)", IDM_TOOL_EYEDROPPER
+        POPUP "ベクター描画"
+        BEGIN
+            MENUITEM "直線", IDM_VECTOR_LINE
+            MENUITEM "曲線", IDM_VECTOR_CURVE
+            MENUITEM "長方形", IDM_VECTOR_RECTANGLE
+            MENUITEM "楕円", IDM_VECTOR_ELLIPSE
+            MENUITEM "折れ線", IDM_VECTOR_POLYLINE
+            MENUITEM "ベクター消しゴム", IDM_VECTOR_ERASER
+        END
+        POPUP "ベクター消去モード"
+        BEGIN
+            MENUITEM "触れた部分", IDM_VECTOR_ERASE_PARTIAL
+            MENUITEM "交点まで", IDM_VECTOR_ERASE_INTERSECTION
+            MENUITEM "線全体", IDM_VECTOR_ERASE_WHOLE
+        END
+        MENUITEM "線つなぎ...", IDM_VECTOR_CONNECT
+        MENUITEM "線幅修正...", IDM_VECTOR_WIDTH
+        POPUP "ベクター選択"
+        BEGIN
+            MENUITEM "選択範囲で切断", IDM_VECTOR_SELECT_CUT
+            MENUITEM "一部でも触れる線", IDM_VECTOR_SELECT_TOUCH
+            MENUITEM "完全に含まれる線", IDM_VECTOR_SELECT_CONTAINED
+            MENUITEM "線を選択", IDM_VECTOR_SELECT_LINE
+            MENUITEM "線全体", IDM_VECTOR_SELECT_WHOLE_LINE
+            MENUITEM "交点まで", IDM_VECTOR_SELECT_INTERSECTION
+            MENUITEM "塗りを囲む線", IDM_VECTOR_SELECT_FILL_BOUNDARY
+            MENUITEM "塗り", IDM_VECTOR_SELECT_FILL
+        END
+        MENUITEM "ベクターをラスタライズ...", IDM_VECTOR_RASTERIZE
+        MENUITEM "ラスターをベクター化...", IDM_VECTOR_VECTORIZE
         MENUITEM SEPARATOR
         MENUITEM "グラデーション...", IDM_EFFECT_GRADIENT
         MENUITEM "エアブラシ...", IDM_EFFECT_AIRBRUSH
@@ -145,14 +271,111 @@ BEGIN
     BEGIN
         MENUITEM "主線(&L)", IDM_PLANE_MAIN_LINE
         MENUITEM "彩色(&C)", IDM_PLANE_COLOR
+        MENUITEM SEPARATOR
+        MENUITEM "新規...", IDM_PLANE_NEW
+        MENUITEM "複製", IDM_PLANE_DUPLICATE
+        MENUITEM "削除", IDM_PLANE_DELETE
+        MENUITEM "上へ", IDM_PLANE_MOVE_UP
+        MENUITEM "下へ", IDM_PLANE_MOVE_DOWN
+        MENUITEM "表示切替", IDM_PLANE_TOGGLE_VISIBLE
+        MENUITEM "編集可否切替", IDM_PLANE_TOGGLE_EDITABLE
+        MENUITEM "不透明度...", IDM_PLANE_OPACITY
+        MENUITEM "変換...", IDM_PLANE_CONVERT
+        MENUITEM "同種を統合", IDM_PLANE_MERGE
+        MENUITEM "プロパティ...", IDM_PLANE_PROPERTIES
     END
     POPUP "色(&C)"
     BEGIN
-        MENUITEM "描画色...", IDM_COLOR_CHOOSE
+        MENUITEM "描画色（RGB/HSV・RGBA8/16）...", IDM_COLOR_EDITOR
+        MENUITEM "Windows色選択...", IDM_COLOR_CHOOSE
+        POPUP "スポイト参照元"
+        BEGIN
+            MENUITEM "最上位の非透明プレーン", IDM_COLOR_SOURCE_TOPMOST
+            MENUITEM "選択中プレーン", IDM_COLOR_SOURCE_SELECTED
+            MENUITEM "合成表示色", IDM_COLOR_SOURCE_COMPOSITE
+            MENUITEM "ライトテーブル最上位色", IDM_COLOR_SOURCE_LIGHT_TABLE
+        END
+        POPUP "カラーパレット"
+        BEGIN
+            MENUITEM "現在色を登録", IDM_PALETTE_REGISTER
+            MENUITEM "選択色を削除", IDM_PALETTE_DELETE
+            MENUITEM "クリア", IDM_PALETTE_CLEAR
+            MENUITEM "保存...", IDM_PALETTE_SAVE
+            MENUITEM "読み込み...", IDM_PALETTE_LOAD
+            MENUITEM "次の10色グループ\tTab", IDM_PALETTE_NEXT_GROUP
+        END
+        POPUP "カラーチャート"
+        BEGIN
+            MENUITEM "セルから作成...", IDM_CHART_GENERATE
+            MENUITEM "名前・番号を検索...", IDM_CHART_SEARCH
+            MENUITEM "次候補", IDM_CHART_NEXT
+            MENUITEM "ロック", IDM_CHART_LOCK
+            MENUITEM "名前を変更...", IDM_CHART_RENAME
+            MENUITEM "次のページ", IDM_CHART_NEXT_PAGE
+            MENUITEM "保存...", IDM_CHART_SAVE
+            MENUITEM "読み込み...", IDM_CHART_LOAD
+            MENUITEM "カット", IDM_CHART_CUT
+            MENUITEM "コピー", IDM_CHART_COPY
+            MENUITEM "ペースト", IDM_CHART_PASTE
+        END
         MENUITEM SEPARATOR
         MENUITEM "彩色チェックを解除", IDM_COLOR_CHECK_OFF
         MENUITEM "完全な白をチェック", IDM_COLOR_CHECK_LEGACY
         MENUITEM "白と透明をチェック", IDM_COLOR_CHECK_NATIVE
+    END
+    POPUP "制作(&W)"
+    BEGIN
+        POPUP "ライトテーブルセット"
+        BEGIN
+            MENUITEM "新規...", IDM_LT_SET_NEW
+            MENUITEM "複製", IDM_LT_SET_DUPLICATE
+            MENUITEM "削除", IDM_LT_SET_DELETE
+            MENUITEM "名前を変更...", IDM_LT_SET_RENAME
+            MENUITEM "上へ", IDM_LT_SET_UP
+            MENUITEM "下へ", IDM_LT_SET_DOWN
+            MENUITEM "全体不透明度...", IDM_LT_GLOBAL_OPACITY
+        END
+        POPUP "ライトテーブル項目"
+        BEGIN
+            MENUITEM "画像を追加...", IDM_LT_ITEM_ADD
+            MENUITEM "画像を再読み込み...", IDM_LT_ITEM_RELOAD
+            MENUITEM "削除", IDM_LT_ITEM_DELETE
+            MENUITEM "上へ", IDM_LT_ITEM_UP
+            MENUITEM "下へ", IDM_LT_ITEM_DOWN
+            MENUITEM "表示・変形プロパティ...", IDM_LT_ITEM_PROPERTIES
+            MENUITEM "Canvasで移動 (Shift:全項目)", IDM_LT_ITEM_MOVE
+            MENUITEM "色をサンプル...", IDM_LT_ITEM_SAMPLE
+            MENUITEM "編集画像と入れ替え", IDM_LT_ITEM_SWAP
+        END
+        POPUP "連番・サブパレット"
+        BEGIN
+            MENUITEM "連番を読み込み...", IDM_SEQ_IMPORT
+            MENUITEM "連番を書き出し...", IDM_SEQ_EXPORT
+            MENUITEM "前のセル", IDM_SEQ_PREVIOUS
+            MENUITEM "次のセル", IDM_SEQ_NEXT
+            MENUITEM "セル番号で移動...", IDM_SEQ_GOTO
+            MENUITEM "選択セルをサブパレット登録", IDM_SUBPALETTE_SET
+            MENUITEM "サブパレット色サンプル...", IDM_SUBPALETTE_SAMPLE
+        END
+        POPUP "モーションチェック"
+        BEGIN
+            MENUITEM "開始・設定...", IDM_MOTION_START
+            MENUITEM "一時停止/再開", IDM_MOTION_PAUSE
+            MENUITEM "前のフレーム", IDM_MOTION_PREVIOUS
+            MENUITEM "次のフレーム", IDM_MOTION_NEXT
+            MENUITEM "先頭フレーム", IDM_MOTION_FIRST
+            MENUITEM "末尾フレーム", IDM_MOTION_LAST
+            POPUP "FPS"
+            BEGIN
+                MENUITEM "30 FPS", IDM_MOTION_FPS_30
+                MENUITEM "25 FPS", IDM_MOTION_FPS_25
+                MENUITEM "24 FPS", IDM_MOTION_FPS_24
+                MENUITEM "12 FPS", IDM_MOTION_FPS_12
+                MENUITEM "10 FPS", IDM_MOTION_FPS_10
+                MENUITEM "8 FPS", IDM_MOTION_FPS_8
+            END
+            MENUITEM "停止", IDM_MOTION_STOP
+        END
     END
     POPUP "ヘルプ(&H)"
     BEGIN
@@ -161,6 +384,36 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "Inkpodについて(&A)...", IDM_HELP_ABOUT
     END
+END
+
+IDD_VIEW_OPTIONS DIALOGEX 0, 0, 236, 142
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_CONTROLPARENT
+CAPTION "表示設定"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT           "値", IDC_VIEW_VALUE_LABEL, 12, 15, 74, 12
+    EDITTEXT        IDC_VIEW_VALUE, 92, 12, 128, 14, ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "値2", IDC_VIEW_VALUE2_LABEL, 12, 39, 74, 12
+    EDITTEXT        IDC_VIEW_VALUE2, 92, 36, 128, 14, ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "値3", IDC_VIEW_VALUE3_LABEL, 12, 63, 74, 12
+    EDITTEXT        IDC_VIEW_VALUE3, 92, 60, 128, 14, ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "値4", IDC_VIEW_VALUE4_LABEL, 12, 87, 74, 12
+    EDITTEXT        IDC_VIEW_VALUE4, 92, 84, 128, 14, ES_AUTOHSCROLL | ES_NUMBER
+    DEFPUSHBUTTON   "OK", IDOK, 84, 112, 64, 18
+    PUSHBUTTON      "キャンセル", IDCANCEL, 156, 112, 64, 18
+END
+
+IDD_TEXT_INPUT DIALOGEX 0, 0, 236, 78
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_CONTROLPARENT
+CAPTION "入力"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT           "値", IDC_TEXT_INPUT_LABEL, 12, 14, 54, 12
+    EDITTEXT        IDC_TEXT_INPUT_VALUE, 70, 11, 150, 14, ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "OK", IDOK, 104, 49, 54, 16
+    PUSHBUTTON      "キャンセル", IDCANCEL, 166, 49, 54, 16
 END
 
 IDD_M6_EDITOR DIALOGEX 0, 0, 314, 238
@@ -227,4 +480,44 @@ BEGIN
     CONTROL         "", IDC_SHORTCUT_HOTKEY, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 76, 45, 168, 14
     DEFPUSHBUTTON   "OK", IDOK, 108, 82, 64, 18
     PUSHBUTTON      "キャンセル", IDCANCEL, 180, 82, 64, 18
+END
+
+IDD_HISTORY DIALOGEX 0, 0, 280, 96
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_CONTROLPARENT
+CAPTION "履歴"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT           "移動先", -1, 12, 16, 52, 12
+    COMBOBOX        IDC_HISTORY_LIST, 68, 13, 200, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    DEFPUSHBUTTON   "OK", IDOK, 132, 66, 64, 18
+    PUSHBUTTON      "キャンセル", IDCANCEL, 204, 66, 64, 18
+END
+
+IDD_FILL_OPTIONS DIALOGEX 0, 0, 330, 220
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_CONTROLPARENT
+CAPTION "フィル設定"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT           "操作", -1, 12, 14, 70, 12
+    COMBOBOX        IDC_FILL_OPERATION, 88, 11, 226, 70, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "許容差 (0-65535)", -1, 12, 40, 98, 12
+    EDITTEXT        IDC_FILL_TOLERANCE, 114, 37, 56, 14, ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "隙間", -1, 184, 40, 44, 12
+    EDITTEXT        IDC_FILL_GAP, 232, 37, 82, 14, ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "のばし距離", -1, 12, 64, 70, 12
+    EDITTEXT        IDC_FILL_EXTENSION, 88, 61, 82, 14, ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "含み塗り", -1, 184, 64, 44, 12
+    COMBOBOX        IDC_FILL_INCLUSION_MODE, 232, 61, 82, 70, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "対象色 (RRGGBBAA; 最大6色)", -1, 12, 89, 150, 12
+    EDITTEXT        IDC_FILL_COLORS, 12, 103, 302, 34, ES_AUTOHSCROLL | ES_MULTILINE | WS_VSCROLL
+    AUTOCHECKBOX    "塗りあふれを中断", IDC_FILL_OVERFLOW, 12, 144, 106, 14
+    AUTOCHECKBOX    "離れた同色領域", IDC_FILL_DETACHED, 124, 144, 94, 14
+    AUTOCHECKBOX    "透明だけ", IDC_FILL_TRANSPARENT, 224, 144, 90, 14
+    AUTOCHECKBOX    "文書の選択範囲で制限", IDC_FILL_SELECTION, 12, 163, 130, 14
+    AUTOCHECKBOX    "LTを境界", IDC_FILL_LIGHT_BOUNDARY, 148, 163, 78, 14
+    AUTOCHECKBOX    "LTから色", IDC_FILL_LIGHT_COLOR, 232, 163, 82, 14
+    DEFPUSHBUTTON   "OK", IDOK, 178, 192, 64, 18
+    PUSHBUTTON      "キャンセル", IDCANCEL, 250, 192, 64, 18
 END

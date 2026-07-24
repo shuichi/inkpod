@@ -35,6 +35,12 @@ typedef uint32_t InkpodPixelFormat;
 #define INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE (UINT64_C(1) << 0)
 #define INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA (UINT64_C(1) << 1)
 
+typedef uint32_t InkpodCommonRasterFormat;
+#define INKPOD_COMMON_RASTER_PNG UINT32_C(1)
+#define INKPOD_COMMON_RASTER_TIFF UINT32_C(2)
+#define INKPOD_COMMON_RASTER_TGA UINT32_C(3)
+#define INKPOD_COMMON_RASTER_BMP UINT32_C(4)
+
 typedef uint32_t InkpodPlaneKind;
 #define INKPOD_PLANE_MAIN_LINE UINT32_C(1)
 #define INKPOD_PLANE_COLOR UINT32_C(2)
@@ -55,6 +61,7 @@ typedef uint32_t InkpodCoordinateSpace;
 #define INKPOD_DOCUMENT_FLAG_CAN_UNDO (UINT32_C(1) << 1)
 #define INKPOD_DOCUMENT_FLAG_CAN_REDO (UINT32_C(1) << 2)
 #define INKPOD_DOCUMENT_FLAG_RECOVERED (UINT32_C(1) << 3)
+#define INKPOD_HISTORY_ITEM_APPLIED (UINT32_C(1) << 0)
 
 typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_VIEW_PAN_BY UINT32_C(1)
@@ -71,6 +78,8 @@ typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_VIEW_SET_SNAP_ENABLED UINT32_C(12)
 #define INKPOD_VIEW_SET_TRANSPARENT_VISIBLE UINT32_C(13)
 #define INKPOD_VIEW_SET_ALPHA_VISIBLE UINT32_C(14)
+#define INKPOD_VIEW_SET_GUIDE_SNAP_ENABLED UINT32_C(15)
+#define INKPOD_VIEW_SET_GRID_SNAP_ENABLED UINT32_C(16)
 
 #define INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL (UINT32_C(1) << 0)
 #define INKPOD_SNAPSHOT_TRANSFORM_FLIP_VERTICAL (UINT32_C(1) << 1)
@@ -87,6 +96,9 @@ typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_SHORTCUT_MODIFIER_EXTENDED (UINT32_C(1) << 3)
 
 typedef uint32_t InkpodColorDepth;
+#define INKPOD_COLOR_DEPTH_BINARY UINT32_C(1)
+#define INKPOD_COLOR_DEPTH_GRAYSCALE_8 UINT32_C(2)
+#define INKPOD_COLOR_DEPTH_GRAYSCALE_16 UINT32_C(3)
 #define INKPOD_COLOR_DEPTH_8 UINT32_C(8)
 #define INKPOD_COLOR_DEPTH_16 UINT32_C(16)
 
@@ -100,6 +112,7 @@ typedef uint32_t InkpodFillOperation;
 #define INKPOD_FILL_FLAG_SELECTION_PRESENT (UINT64_C(1) << 3)
 #define INKPOD_FILL_FLAG_LIGHT_TABLE_BOUNDARY (UINT64_C(1) << 4)
 #define INKPOD_FILL_FLAG_LIGHT_TABLE_COLOR (UINT64_C(1) << 5)
+#define INKPOD_FILL_FLAG_DOCUMENT_SELECTION (UINT64_C(1) << 6)
 
 typedef uint32_t InkpodInclusionMode;
 #define INKPOD_INCLUSION_NONE UINT32_C(0)
@@ -228,6 +241,16 @@ typedef uint32_t InkpodLightTableDisplayMode;
 #define INKPOD_LIGHT_TABLE_MONOTONE UINT32_C(2)
 #define INKPOD_LIGHT_TABLE_HALFTONE UINT32_C(3)
 #define INKPOD_LIGHT_TABLE_ITEM_VISIBLE (UINT32_C(1) << 0)
+#define INKPOD_LIGHT_TABLE_SET_ACTIVE (UINT32_C(1) << 1)
+#define INKPOD_LIGHT_TABLE_CREATE_SET UINT32_C(1)
+#define INKPOD_LIGHT_TABLE_DUPLICATE_SET UINT32_C(2)
+#define INKPOD_LIGHT_TABLE_DELETE_SET UINT32_C(3)
+#define INKPOD_LIGHT_TABLE_RENAME_SET UINT32_C(4)
+#define INKPOD_LIGHT_TABLE_REORDER_SET UINT32_C(5)
+#define INKPOD_LIGHT_TABLE_SET_ACTIVE_OPERATION UINT32_C(6)
+#define INKPOD_LIGHT_TABLE_REMOVE_ITEM UINT32_C(7)
+#define INKPOD_LIGHT_TABLE_REORDER_ITEM UINT32_C(8)
+#define INKPOD_LIGHT_TABLE_UPDATE_ITEM UINT32_C(9)
 
 typedef uint32_t InkpodSequenceDirection;
 #define INKPOD_SEQUENCE_PREVIOUS UINT32_C(1)
@@ -253,6 +276,8 @@ typedef uint32_t InkpodTreeOperation;
 #define INKPOD_TREE_SET_PLANE_PROPERTIES UINT32_C(10)
 #define INKPOD_TREE_CONVERT_LAYER UINT32_C(11)
 #define INKPOD_TREE_MERGE_LAYER UINT32_C(12)
+#define INKPOD_TREE_CONVERT_PLANE UINT32_C(13)
+#define INKPOD_TREE_MERGE_PLANE UINT32_C(14)
 #define INKPOD_NODE_VISIBLE (UINT64_C(1) << 0)
 #define INKPOD_NODE_EDITABLE (UINT64_C(1) << 1)
 
@@ -279,10 +304,22 @@ typedef uint32_t InkpodSelectionOperation;
 #define INKPOD_GUIDE_VERTICAL UINT32_C(2)
 #define INKPOD_MIRROR_HORIZONTAL UINT32_C(1)
 #define INKPOD_MIRROR_VERTICAL UINT32_C(2)
+#define INKPOD_ROTATE_LEFT_90 UINT32_C(1)
+#define INKPOD_ROTATE_RIGHT_90 UINT32_C(2)
+#define INKPOD_RESIZE_ANCHOR_TOP_LEFT UINT32_C(1)
+#define INKPOD_RESIZE_ANCHOR_TOP_RIGHT UINT32_C(2)
+#define INKPOD_RESIZE_ANCHOR_CENTER UINT32_C(3)
+#define INKPOD_RESIZE_ANCHOR_BOTTOM_LEFT UINT32_C(4)
+#define INKPOD_RESIZE_ANCHOR_BOTTOM_RIGHT UINT32_C(5)
+#define INKPOD_DOCUMENT_RESIZE_RESAMPLE (UINT64_C(1) << 0)
+#define INKPOD_PASTE_COMPATIBLE UINT32_C(1)
+#define INKPOD_PASTE_ACTIVE_CONVERTED UINT32_C(2)
 
 typedef struct InkpodCore InkpodCore;
 typedef struct InkpodSnapshot InkpodSnapshot;
 typedef struct InkpodClipboard InkpodClipboard;
+typedef struct InkpodByteBuffer InkpodByteBuffer;
+typedef struct InkpodEncodedSequence InkpodEncodedSequence;
 typedef struct InkpodM6Task InkpodM6Task;
 
 typedef struct InkpodCoreConfig {
@@ -360,6 +397,36 @@ typedef struct InkpodDocumentInfo {
     uint64_t main_plane_checksum;
     uint64_t color_plane_checksum;
 } InkpodDocumentInfo;
+
+typedef struct InkpodPaperFramesInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    InkpodFrameRect hundred_frame;
+    InkpodFrameRect reference_frame;
+    InkpodFrameRect drawing_frame;
+    InkpodFrameRect safe_frame;
+    uint32_t margin_left;
+    uint32_t margin_top;
+    uint32_t margin_right;
+    uint32_t margin_bottom;
+} InkpodPaperFramesInput;
+
+typedef struct InkpodHistoryInfo {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t cursor;
+    uint64_t item_count;
+} InkpodHistoryInfo;
+
+typedef struct InkpodHistoryItem {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t index;
+    uint8_t* name_utf8;
+    uint64_t name_capacity;
+    uint64_t name_bytes;
+} InkpodHistoryItem;
 
 typedef struct InkpodStrokeSample {
     uint32_t struct_size;
@@ -949,6 +1016,41 @@ typedef struct InkpodFloatingTransform {
     double rotation_degrees;
 } InkpodFloatingTransform;
 
+typedef struct InkpodDocumentResizeInput {
+    uint32_t struct_size;
+    uint32_t anchor;
+    uint64_t flags;
+    uint32_t width;
+    uint32_t height;
+    uint32_t dpi_x_milli;
+    uint32_t dpi_y_milli;
+} InkpodDocumentResizeInput;
+
+typedef struct InkpodClipboardRasterBuffer {
+    uint32_t struct_size;
+    uint32_t reserved;
+    int32_t origin_x;
+    int32_t origin_y;
+    uint32_t width;
+    uint32_t height;
+    uint8_t* pixels_rgba8;
+    uint64_t pixel_capacity;
+    uint64_t required_bytes;
+    uint64_t row_stride_bytes;
+} InkpodClipboardRasterBuffer;
+
+typedef struct InkpodClipboardRgbaInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    int32_t origin_x;
+    int32_t origin_y;
+    uint32_t width;
+    uint32_t height;
+    const uint8_t* pixels_rgba8;
+    uint64_t pixel_bytes;
+    uint64_t row_stride_bytes;
+} InkpodClipboardRgbaInput;
+
 typedef struct InkpodGridInput {
     uint32_t struct_size;
     uint32_t reserved;
@@ -968,6 +1070,8 @@ typedef struct InkpodLocatorOutput {
     InkpodFrameRect selection;
     InkpodColorValue color;
 } InkpodLocatorOutput;
+#define INKPOD_LOCATOR_SELECTION_PRESENT (UINT32_C(1) << 0)
+#define INKPOD_LOCATOR_COLOR_PRESENT (UINT32_C(1) << 1)
 
 /* M4 raster bytes are borrowed for one call. Rows may be padded, but the
  * advertised byte range must contain every complete row. Only straight RGBA8
@@ -1006,6 +1110,59 @@ typedef struct InkpodLightTableItemInput {
     InkpodM4RasterInput source;
 } InkpodLightTableItemInput;
 
+typedef struct InkpodLightTableEdit {
+    uint32_t struct_size;
+    uint32_t operation;
+    uint64_t object_id;
+    uint32_t destination_index;
+    uint32_t flags;
+    uint32_t opacity_milli;
+    InkpodLightTableDisplayMode display_mode;
+    InkpodColorValue display_color;
+    int32_t translate_x_milli;
+    int32_t translate_y_milli;
+    uint32_t scale_x_milli;
+    uint32_t scale_y_milli;
+    int32_t rotation_milli_degrees;
+    uint32_t reserved;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+} InkpodLightTableEdit;
+
+typedef struct InkpodLightTableSetInfo {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t id;
+    uint32_t opacity_milli;
+    uint32_t item_count;
+    uint8_t* name_utf8;
+    uint64_t name_capacity;
+    uint64_t name_bytes;
+} InkpodLightTableSetInfo;
+
+typedef struct InkpodLightTableItemInfo {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t id;
+    uint64_t source_plane_id;
+    uint64_t source_document_uuid_high;
+    uint64_t source_document_uuid_low;
+    uint64_t source_revision;
+    uint32_t opacity_milli;
+    uint32_t effective_opacity_milli;
+    InkpodLightTableDisplayMode display_mode;
+    InkpodColorValue display_color;
+    int32_t translate_x_milli;
+    int32_t translate_y_milli;
+    uint32_t scale_x_milli;
+    uint32_t scale_y_milli;
+    int32_t rotation_milli_degrees;
+    uint32_t reserved;
+    uint8_t* name_utf8;
+    uint64_t name_capacity;
+    uint64_t name_bytes;
+} InkpodLightTableItemInfo;
+
 typedef struct InkpodSequenceCellInput {
     uint32_t struct_size;
     uint32_t reserved;
@@ -1022,6 +1179,33 @@ typedef struct InkpodSequenceInput {
     uint64_t cell_count;
     uint64_t cell_stride_bytes;
 } InkpodSequenceInput;
+
+typedef struct InkpodNamedBytesInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+    const uint8_t* bytes;
+    uint64_t byte_count;
+} InkpodNamedBytesInput;
+
+typedef struct InkpodSequenceCellInfo {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t sequence_index;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint32_t cell_number;
+    uint32_t width;
+    uint32_t height;
+    uint32_t thumbnail_width;
+    uint32_t thumbnail_height;
+    uint32_t reserved;
+    uint64_t thumbnail_checksum;
+    uint8_t* name_utf8;
+    uint64_t name_capacity;
+    uint64_t name_bytes;
+} InkpodSequenceCellInfo;
 
 typedef struct InkpodMotionCheckInput {
     uint32_t struct_size;
@@ -1069,11 +1253,19 @@ InkpodStatus inkpod_core_new_cell(
 InkpodStatus inkpod_core_get_document_info(
     InkpodCore* core,
     InkpodDocumentInfo* out_info);
+InkpodStatus inkpod_core_update_paper_frames(
+    InkpodCore* core,
+    const InkpodPaperFramesInput* input,
+    InkpodDispatchResult* result);
 
 /* Plane selection is logical UI state and does not change document revision. */
 InkpodStatus inkpod_core_set_active_plane(
     InkpodCore* core,
     InkpodPlaneKind plane);
+InkpodStatus inkpod_core_set_active_node(
+    InkpodCore* core,
+    uint64_t layer_id,
+    uint64_t plane_id);
 
 /* Fill planning is bounded and all-or-nothing. Overflow reports one candidate
  * in result and does not change pixels, revision, dirty, or history. M4's
@@ -1101,6 +1293,11 @@ InkpodStatus inkpod_core_palette_set(
 InkpodStatus inkpod_core_palette_get(
     InkpodCore* core,
     InkpodColorBuffer* buffer);
+InkpodStatus inkpod_core_palette_generate(
+    InkpodCore* core,
+    uint32_t maximum_colors,
+    uint32_t quantization_bits,
+    InkpodDispatchResult* result);
 
 /* Base color is meaningful for grayscale main-line coverage and is persisted
  * exactly. Set is rejected for a binary main-line plane. */
@@ -1143,6 +1340,20 @@ InkpodStatus inkpod_core_undo(
     InkpodCore* core,
     InkpodDispatchResult* result);
 InkpodStatus inkpod_core_redo(
+    InkpodCore* core,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_history_info(
+    InkpodCore* core,
+    InkpodHistoryInfo* out_info);
+InkpodStatus inkpod_core_history_item(
+    InkpodCore* core,
+    uint64_t index,
+    InkpodHistoryItem* out_item);
+InkpodStatus inkpod_core_history_jump(
+    InkpodCore* core,
+    uint64_t target_cursor,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_revert_active_selection(
     InkpodCore* core,
     InkpodDispatchResult* result);
 
@@ -1215,6 +1426,9 @@ InkpodStatus inkpod_core_selection_adjust(
     uint32_t operation,
     uint32_t pixels,
     InkpodDispatchResult* result);
+InkpodStatus inkpod_core_selection_clear(
+    InkpodCore* core,
+    InkpodDispatchResult* result);
 InkpodStatus inkpod_core_selection_to_layer(
     InkpodCore* core,
     const uint8_t* name_utf8,
@@ -1237,6 +1451,16 @@ InkpodStatus inkpod_clipboard_release(InkpodClipboard** clipboard);
 InkpodStatus inkpod_core_paste_begin(
     InkpodCore* core,
     const InkpodClipboard* clipboard);
+InkpodStatus inkpod_core_paste_begin_mode(
+    InkpodCore* core,
+    const InkpodClipboard* clipboard,
+    uint32_t mode);
+InkpodStatus inkpod_clipboard_render_rgba8(
+    const InkpodClipboard* clipboard,
+    InkpodClipboardRasterBuffer* output);
+InkpodStatus inkpod_clipboard_create_rgba8(
+    const InkpodClipboardRgbaInput* input,
+    InkpodClipboard** out_clipboard);
 InkpodStatus inkpod_core_floating_transform(
     InkpodCore* core,
     const InkpodFloatingTransform* input);
@@ -1244,10 +1468,21 @@ InkpodStatus inkpod_core_floating_commit(
     InkpodCore* core,
     InkpodDispatchResult* result);
 InkpodStatus inkpod_core_floating_cancel(InkpodCore* core);
+InkpodStatus inkpod_core_clear_selected_content(
+    InkpodCore* core,
+    InkpodDispatchResult* result);
 
 InkpodStatus inkpod_core_mirror_document(
     InkpodCore* core,
     uint32_t axis,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_rotate_document(
+    InkpodCore* core,
+    uint32_t direction,
+    InkpodDispatchResult* result);
+InkpodStatus inkpod_core_resize_document(
+    InkpodCore* core,
+    const InkpodDocumentResizeInput* input,
     InkpodDispatchResult* result);
 InkpodStatus inkpod_core_guide_add(
     InkpodCore* core,
@@ -1296,6 +1531,27 @@ InkpodStatus inkpod_core_view_close(
     InkpodCore* core,
     uint64_t view_id);
 
+/* Common-raster bytes are decoded/encoded by Rust. Exported bytes remain
+ * immutable and borrowed until the owning buffer is released. */
+InkpodStatus inkpod_core_import_common_raster(
+    InkpodCore* core,
+    InkpodCommonRasterFormat format,
+    const uint8_t* bytes,
+    uint64_t byte_count,
+    uint64_t document_uuid_high,
+    uint64_t document_uuid_low,
+    InkpodDocumentInfo* out_info);
+InkpodStatus inkpod_core_export_common_raster(
+    InkpodCore* core,
+    InkpodCommonRasterFormat format,
+    uint32_t composite_white,
+    InkpodByteBuffer** out_buffer);
+InkpodStatus inkpod_byte_buffer_view(
+    const InkpodByteBuffer* buffer,
+    const uint8_t** out_bytes,
+    uint64_t* out_byte_count);
+InkpodStatus inkpod_byte_buffer_release(InkpodByteBuffer** buffer);
+
 /* M4 production workflow. Light-table source pixels and sequence-cell spans
  * are copied before return. A dirty cell switch reports UNSAVED_CHANGES and
  * leaves the active document/revision untouched. */
@@ -1304,6 +1560,41 @@ InkpodStatus inkpod_core_light_table_add_item(
     const InkpodLightTableItemInput* input,
     InkpodDispatchResult* result,
     uint64_t* out_item_id);
+InkpodStatus inkpod_core_light_table_edit(
+    InkpodCore* core,
+    const InkpodLightTableEdit* input,
+    InkpodDispatchResult* result,
+    uint64_t* out_object_id);
+InkpodStatus inkpod_core_light_table_set_get(
+    InkpodCore* core,
+    uint32_t index,
+    InkpodLightTableSetInfo* output);
+InkpodStatus inkpod_core_light_table_item_get(
+    InkpodCore* core,
+    uint32_t index,
+    InkpodLightTableItemInfo* output);
+InkpodStatus inkpod_core_light_table_add_common_raster(
+    InkpodCore* core,
+    InkpodCommonRasterFormat format,
+    const uint8_t* bytes,
+    uint64_t byte_count,
+    const uint8_t* name_utf8,
+    uint64_t name_bytes,
+    uint64_t document_uuid_high,
+    uint64_t document_uuid_low,
+    uint64_t source_revision,
+    InkpodDispatchResult* result,
+    uint64_t* out_item_id);
+InkpodStatus inkpod_core_light_table_reload_common_raster(
+    InkpodCore* core,
+    uint64_t item_id,
+    InkpodCommonRasterFormat format,
+    const uint8_t* bytes,
+    uint64_t byte_count,
+    uint64_t document_uuid_high,
+    uint64_t document_uuid_low,
+    uint64_t source_revision,
+    InkpodDispatchResult* result);
 InkpodStatus inkpod_core_light_table_set_global_opacity(
     InkpodCore* core,
     uint32_t opacity_milli,
@@ -1320,6 +1611,36 @@ InkpodStatus inkpod_core_light_table_swap(
 InkpodStatus inkpod_core_sequence_set(
     InkpodCore* core,
     const InkpodSequenceInput* input);
+InkpodStatus inkpod_core_sequence_import_encoded(
+    InkpodCore* core,
+    InkpodCommonRasterFormat format,
+    const InkpodNamedBytesInput* files,
+    uint64_t file_count,
+    uint64_t file_stride_bytes);
+InkpodStatus inkpod_core_sequence_export_encoded(
+    InkpodCore* core,
+    InkpodCommonRasterFormat format,
+    uint32_t composite_white,
+    InkpodEncodedSequence** out_sequence);
+InkpodStatus inkpod_encoded_sequence_count(
+    const InkpodEncodedSequence* sequence,
+    uint64_t* out_count);
+InkpodStatus inkpod_encoded_sequence_get(
+    const InkpodEncodedSequence* sequence,
+    uint64_t index,
+    const uint8_t** out_name,
+    uint64_t* out_name_bytes,
+    const uint8_t** out_bytes,
+    uint64_t* out_byte_count);
+InkpodStatus inkpod_encoded_sequence_release(InkpodEncodedSequence** sequence);
+InkpodStatus inkpod_core_sequence_cell_get(
+    InkpodCore* core,
+    uint32_t index,
+    InkpodSequenceCellInfo* output);
+InkpodStatus inkpod_core_sequence_activate(
+    InkpodCore* core,
+    uint32_t index,
+    InkpodDocumentInfo* out_info);
 InkpodStatus inkpod_core_sequence_step(
     InkpodCore* core,
     InkpodSequenceDirection direction,
@@ -1334,6 +1655,15 @@ InkpodStatus inkpod_core_motion_check_step(
     InkpodSequenceDirection direction,
     InkpodMotionFrame* out_frame);
 InkpodStatus inkpod_core_motion_check_stop(InkpodCore* core);
+InkpodStatus inkpod_core_motion_check_toggle_pause(
+    InkpodCore* core,
+    InkpodMotionFrame* out_frame);
+InkpodStatus inkpod_core_subpalette_set(InkpodCore* core, uint32_t index);
+InkpodStatus inkpod_core_subpalette_sample(
+    InkpodCore* core,
+    uint32_t x,
+    uint32_t y,
+    InkpodColorValue* output);
 
 /* M5 vector inputs are copied before return and commit as one history entry.
  * Geometry uses document coordinates; view zoom never rewrites these values. */
@@ -1371,6 +1701,15 @@ InkpodStatus inkpod_core_vector_rasterize(
     InkpodCore* core,
     const InkpodVectorRasterizeInput* input,
     InkpodVectorRasterBuffer* output);
+/* Rasterizes at document scale into a new RGBA8 raster layer and commits one
+ * Undo unit. The source vector layer is preserved. */
+InkpodStatus inkpod_core_vector_rasterize_to_layer(
+    InkpodCore* core,
+    const InkpodVectorRasterizeInput* input,
+    const uint8_t* name_utf8,
+    uint64_t name_bytes,
+    InkpodDispatchResult* result,
+    uint64_t* out_layer_id);
 InkpodStatus inkpod_core_raster_vectorize(
     InkpodCore* core,
     const InkpodRasterVectorizeInput* input,

@@ -2,18 +2,20 @@
 
 use inkpod_core::{
     ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel,
-    ClipboardPayload, ColorBalance, ColorCheckMode, Command, CoordinateSpace, Core, CoreError,
-    CurveInterpolation, CurvePoint, DocumentInfo, DustMode, DustRemoval, EffectRegionKind,
-    EyedropperSource, FillOperation, FillRequest, Filter, FloatingTransform, Gradient,
-    GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis, HsvAdjustment, InclusionMode,
-    LayerKind, Levels, LightTableDisplayMode, LightTableItemInput, LightTableSource,
+    ClipboardPayload, ClipboardPixel, ClipboardPlane, ColorBalance, ColorCheckMode, Command,
+    CommonRasterFormat, CoordinateSpace, Core, CoreError, CurveInterpolation, CurvePoint,
+    DocumentInfo, DocumentResize, DustMode, DustRemoval, EffectRegionKind, EyedropperSource,
+    FillOperation, FillRequest, Filter, FloatingTransform, FrameMetadata, Gradient, GradientKind,
+    GradientMode, GradientStop, GridConfig, GuideAxis, HsvAdjustment, InclusionMode, LayerKind,
+    Levels, LightTableDisplayMode, LightTableItemInput, LightTableItemProperties, LightTableSource,
     MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION,
-    MirrorAxis, MotionCheckConfig, MotionFrame, PaintTool, PixelFormat, PixelValue, PlaneType,
-    PointF32, RectI32, RenderSnapshot, RgbaRasterBytes, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
-    SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SelectionLayerOperation, SelectionOperation,
-    SelectionShape, SequenceCellSource, SequenceDirection, ShortcutBinding, Stamp, StampGesture,
-    StampShape, Stroke, StrokeSample, TileRaster, VectorCubicSegment, VectorEraseMode,
-    VectorPathInput, VectorSelectionMode, VectorWidthMode, ViewCommand,
+    Margins, MirrorAxis, MotionCheckConfig, MotionFrame, PaintTool, PixelFormat, PixelValue,
+    PlaneType, PointF32, RectI32, RenderSnapshot, ResizeAnchor, RgbaRasterBytes, RotateDirection,
+    SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE, SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA,
+    SelectionLayerOperation, SelectionOperation, SelectionShape, SequenceCellInfo,
+    SequenceCellSource, SequenceDirection, ShortcutBinding, Stamp, StampGesture, StampShape,
+    Stroke, StrokeSample, TileRaster, VectorCubicSegment, VectorEraseMode, VectorPathInput,
+    VectorSelectionMode, VectorWidthMode, ViewCommand,
 };
 use std::cell::RefCell;
 use std::mem::{align_of, size_of};
@@ -60,6 +62,7 @@ pub const INKPOD_DOCUMENT_FLAG_DIRTY: u32 = 1 << 0;
 pub const INKPOD_DOCUMENT_FLAG_CAN_UNDO: u32 = 1 << 1;
 pub const INKPOD_DOCUMENT_FLAG_CAN_REDO: u32 = 1 << 2;
 pub const INKPOD_DOCUMENT_FLAG_RECOVERED: u32 = 1 << 3;
+pub const INKPOD_HISTORY_ITEM_APPLIED: u32 = 1 << 0;
 pub const INKPOD_VIEW_PAN_BY: u32 = 1;
 pub const INKPOD_VIEW_ZOOM_AT: u32 = 2;
 pub const INKPOD_VIEW_FIT: u32 = 3;
@@ -72,6 +75,8 @@ pub const INKPOD_VIEW_SET_RULER_VISIBLE: u32 = 9;
 pub const INKPOD_VIEW_SET_GUIDES_VISIBLE: u32 = 10;
 pub const INKPOD_VIEW_SET_GRID_VISIBLE: u32 = 11;
 pub const INKPOD_VIEW_SET_SNAP_ENABLED: u32 = 12;
+pub const INKPOD_VIEW_SET_GUIDE_SNAP_ENABLED: u32 = 15;
+pub const INKPOD_VIEW_SET_GRID_SNAP_ENABLED: u32 = 16;
 pub const INKPOD_VIEW_SET_TRANSPARENT_VISIBLE: u32 = 13;
 pub const INKPOD_VIEW_SET_ALPHA_VISIBLE: u32 = 14;
 pub const INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL: u32 = 1 << 0;
@@ -88,6 +93,13 @@ pub const INKPOD_SHORTCUT_MODIFIER_ALT: u32 = 1 << 2;
 pub const INKPOD_SHORTCUT_MODIFIER_EXTENDED: u32 = 1 << 3;
 pub const INKPOD_COLOR_DEPTH_8: u32 = 8;
 pub const INKPOD_COLOR_DEPTH_16: u32 = 16;
+pub const INKPOD_COLOR_DEPTH_BINARY: u32 = 1;
+pub const INKPOD_COLOR_DEPTH_GRAYSCALE_8: u32 = 2;
+pub const INKPOD_COLOR_DEPTH_GRAYSCALE_16: u32 = 3;
+pub const INKPOD_COMMON_RASTER_PNG: u32 = 1;
+pub const INKPOD_COMMON_RASTER_TIFF: u32 = 2;
+pub const INKPOD_COMMON_RASTER_TGA: u32 = 3;
+pub const INKPOD_COMMON_RASTER_BMP: u32 = 4;
 pub const INKPOD_FILL_SEED: u32 = 1;
 pub const INKPOD_FILL_CLOSED_REGION: u32 = 2;
 pub const INKPOD_FILL_EXTENSION: u32 = 3;
@@ -97,6 +109,7 @@ pub const INKPOD_FILL_FLAG_TRANSPARENT_ONLY: u64 = 1 << 2;
 pub const INKPOD_FILL_FLAG_SELECTION_PRESENT: u64 = 1 << 3;
 pub const INKPOD_FILL_FLAG_LIGHT_TABLE_BOUNDARY: u64 = 1 << 4;
 pub const INKPOD_FILL_FLAG_LIGHT_TABLE_COLOR: u64 = 1 << 5;
+pub const INKPOD_FILL_FLAG_DOCUMENT_SELECTION: u64 = 1 << 6;
 pub const INKPOD_INCLUSION_NONE: u32 = 0;
 pub const INKPOD_INCLUSION_SPECIFIED: u32 = 1;
 pub const INKPOD_INCLUSION_EXCEPT_SPECIFIED: u32 = 2;
@@ -134,6 +147,16 @@ pub const INKPOD_LIGHT_TABLE_COLOR: u32 = 1;
 pub const INKPOD_LIGHT_TABLE_MONOTONE: u32 = 2;
 pub const INKPOD_LIGHT_TABLE_HALFTONE: u32 = 3;
 pub const INKPOD_LIGHT_TABLE_ITEM_VISIBLE: u32 = 1 << 0;
+pub const INKPOD_LIGHT_TABLE_SET_ACTIVE: u32 = 1 << 1;
+pub const INKPOD_LIGHT_TABLE_CREATE_SET: u32 = 1;
+pub const INKPOD_LIGHT_TABLE_DUPLICATE_SET: u32 = 2;
+pub const INKPOD_LIGHT_TABLE_DELETE_SET: u32 = 3;
+pub const INKPOD_LIGHT_TABLE_RENAME_SET: u32 = 4;
+pub const INKPOD_LIGHT_TABLE_REORDER_SET: u32 = 5;
+pub const INKPOD_LIGHT_TABLE_SET_ACTIVE_OPERATION: u32 = 6;
+pub const INKPOD_LIGHT_TABLE_REMOVE_ITEM: u32 = 7;
+pub const INKPOD_LIGHT_TABLE_REORDER_ITEM: u32 = 8;
+pub const INKPOD_LIGHT_TABLE_UPDATE_ITEM: u32 = 9;
 pub const INKPOD_SEQUENCE_PREVIOUS: u32 = 1;
 pub const INKPOD_SEQUENCE_NEXT: u32 = 2;
 pub const INKPOD_SEQUENCE_FLAG_LOOP: u32 = 1 << 0;
@@ -210,6 +233,8 @@ pub const INKPOD_TREE_REORDER_PLANE: u32 = 9;
 pub const INKPOD_TREE_SET_PLANE_PROPERTIES: u32 = 10;
 pub const INKPOD_TREE_CONVERT_LAYER: u32 = 11;
 pub const INKPOD_TREE_MERGE_LAYER: u32 = 12;
+pub const INKPOD_TREE_CONVERT_PLANE: u32 = 13;
+pub const INKPOD_TREE_MERGE_PLANE: u32 = 14;
 pub const INKPOD_NODE_VISIBLE: u64 = 1 << 0;
 pub const INKPOD_NODE_EDITABLE: u64 = 1 << 1;
 pub const INKPOD_SELECTION_RECTANGLE: u32 = 1;
@@ -321,6 +346,39 @@ pub struct InkpodDocumentInfo {
     pub reserved: u32,
     pub main_plane_checksum: u64,
     pub color_plane_checksum: u64,
+}
+
+#[repr(C)]
+pub struct InkpodPaperFramesInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub hundred_frame: InkpodFrameRect,
+    pub reference_frame: InkpodFrameRect,
+    pub drawing_frame: InkpodFrameRect,
+    pub safe_frame: InkpodFrameRect,
+    pub margin_left: u32,
+    pub margin_top: u32,
+    pub margin_right: u32,
+    pub margin_bottom: u32,
+}
+
+#[repr(C)]
+pub struct InkpodHistoryInfo {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub cursor: u64,
+    pub item_count: u64,
+}
+
+#[repr(C)]
+pub struct InkpodHistoryItem {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub index: u64,
+    pub name_utf8: *mut u8,
+    pub name_capacity: u64,
+    pub name_bytes: u64,
 }
 
 #[repr(C)]
@@ -985,6 +1043,44 @@ pub struct InkpodFloatingTransform {
 }
 
 #[repr(C)]
+pub struct InkpodDocumentResizeInput {
+    pub struct_size: u32,
+    pub anchor: u32,
+    pub flags: u64,
+    pub width: u32,
+    pub height: u32,
+    pub dpi_x_milli: u32,
+    pub dpi_y_milli: u32,
+}
+
+#[repr(C)]
+pub struct InkpodClipboardRasterBuffer {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub pixels_rgba8: *mut u8,
+    pub pixel_capacity: u64,
+    pub required_bytes: u64,
+    pub row_stride_bytes: u64,
+}
+
+#[repr(C)]
+pub struct InkpodClipboardRgbaInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub pixels_rgba8: *const u8,
+    pub pixel_bytes: u64,
+    pub row_stride_bytes: u64,
+}
+
+#[repr(C)]
 pub struct InkpodGridInput {
     pub struct_size: u32,
     pub reserved: u32,
@@ -1047,6 +1143,65 @@ pub struct InkpodLightTableItemInput {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct InkpodLightTableEdit {
+    pub struct_size: u32,
+    pub operation: u32,
+    pub object_id: u64,
+    pub destination_index: u32,
+    pub flags: u32,
+    pub opacity_milli: u32,
+    pub display_mode: u32,
+    pub display_color: InkpodColorValue,
+    pub translate_x_milli: i32,
+    pub translate_y_milli: i32,
+    pub scale_x_milli: u32,
+    pub scale_y_milli: u32,
+    pub rotation_milli_degrees: i32,
+    pub reserved: u32,
+    pub name_utf8: *const u8,
+    pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodLightTableSetInfo {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub id: u64,
+    pub opacity_milli: u32,
+    pub item_count: u32,
+    pub name_utf8: *mut u8,
+    pub name_capacity: u64,
+    pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodLightTableItemInfo {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub id: u64,
+    pub source_plane_id: u64,
+    pub source_document_uuid_high: u64,
+    pub source_document_uuid_low: u64,
+    pub source_revision: u64,
+    pub opacity_milli: u32,
+    pub effective_opacity_milli: u32,
+    pub display_mode: u32,
+    pub display_color: InkpodColorValue,
+    pub translate_x_milli: i32,
+    pub translate_y_milli: i32,
+    pub scale_x_milli: u32,
+    pub scale_y_milli: u32,
+    pub rotation_milli_degrees: i32,
+    pub reserved: u32,
+    pub name_utf8: *mut u8,
+    pub name_capacity: u64,
+    pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct InkpodSequenceCellInput {
     pub struct_size: u32,
     pub reserved: u32,
@@ -1064,6 +1219,37 @@ pub struct InkpodSequenceInput {
     pub cells: *const InkpodSequenceCellInput,
     pub cell_count: u64,
     pub cell_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodNamedBytesInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub name_utf8: *const u8,
+    pub name_bytes: u64,
+    pub bytes: *const u8,
+    pub byte_count: u64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodSequenceCellInfo {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub sequence_index: u64,
+    pub document_uuid_high: u64,
+    pub document_uuid_low: u64,
+    pub cell_number: u32,
+    pub width: u32,
+    pub height: u32,
+    pub thumbnail_width: u32,
+    pub thumbnail_height: u32,
+    pub reserved: u32,
+    pub thumbnail_checksum: u64,
+    pub name_utf8: *mut u8,
+    pub name_capacity: u64,
+    pub name_bytes: u64,
 }
 
 #[repr(C)]
@@ -1103,6 +1289,19 @@ pub struct InkpodSnapshot {
 
 pub struct InkpodClipboard {
     payload: ClipboardPayload,
+}
+
+pub struct InkpodByteBuffer {
+    bytes: Box<[u8]>,
+}
+
+struct EncodedSequenceFile {
+    name: Box<[u8]>,
+    bytes: Box<[u8]>,
+}
+
+pub struct InkpodEncodedSequence {
+    files: Vec<EncodedSequenceFile>,
 }
 
 pub struct InkpodM6Task {
@@ -2124,6 +2323,19 @@ fn parse_storage_format(value: u32) -> Result<PixelFormat, u32> {
     }
 }
 
+fn parse_common_raster_format(value: u32) -> Result<CommonRasterFormat, u32> {
+    match value {
+        INKPOD_COMMON_RASTER_PNG => Ok(CommonRasterFormat::Png),
+        INKPOD_COMMON_RASTER_TIFF => Ok(CommonRasterFormat::Tiff),
+        INKPOD_COMMON_RASTER_TGA => Ok(CommonRasterFormat::Tga),
+        INKPOD_COMMON_RASTER_BMP => Ok(CommonRasterFormat::Bmp),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "common raster format is not defined",
+        )),
+    }
+}
+
 fn storage_format_code(value: PixelFormat) -> u32 {
     match value {
         PixelFormat::BinaryMask8 => INKPOD_STORAGE_BINARY8,
@@ -2308,6 +2520,13 @@ unsafe fn parse_color_value(color: *const InkpodColorValue) -> Result<PixelValue
     // SAFETY: The complete known structure is readable after validation.
     let color = unsafe { &*color };
     match color.depth {
+        INKPOD_COLOR_DEPTH_BINARY if color.red <= u16::from(u8::MAX) => {
+            Ok(PixelValue::Binary(color.red as u8))
+        }
+        INKPOD_COLOR_DEPTH_GRAYSCALE_8 if color.red <= u16::from(u8::MAX) => {
+            Ok(PixelValue::Grayscale8(color.red as u8))
+        }
+        INKPOD_COLOR_DEPTH_GRAYSCALE_16 => Ok(PixelValue::Grayscale16(color.red)),
         INKPOD_COLOR_DEPTH_8
             if [color.red, color.green, color.blue, color.alpha]
                 .into_iter()
@@ -2326,6 +2545,14 @@ unsafe fn parse_color_value(color: *const InkpodColorValue) -> Result<PixelValue
             color.blue,
             color.alpha,
         ])),
+        INKPOD_COLOR_DEPTH_BINARY | INKPOD_COLOR_DEPTH_GRAYSCALE_8
+            if color.red > u16::from(u8::MAX) =>
+        {
+            Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "8-bit scalar color contains a value above 255",
+            ))
+        }
         INKPOD_COLOR_DEPTH_8 => Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "8-bit color contains a channel above 255",
@@ -2490,6 +2717,20 @@ fn write_color_value(output: &mut InkpodColorValue, color: PixelValue) -> Result
     }
 }
 
+fn clipboard_pixel_rgba8(color: PixelValue) -> [u8; 4] {
+    match color {
+        PixelValue::Binary(value) | PixelValue::Grayscale8(value) => [0, 0, 0, value],
+        PixelValue::Grayscale16(value) => [0, 0, 0, (value / 257) as u8],
+        PixelValue::Rgba(value) => value,
+        PixelValue::Rgba16(value) => [
+            (value[0] / 257) as u8,
+            (value[1] / 257) as u8,
+            (value[2] / 257) as u8,
+            (value[3] / 257) as u8,
+        ],
+    }
+}
+
 fn color_value_record(color: PixelValue) -> Result<InkpodColorValue, u32> {
     let mut output = InkpodColorValue {
         struct_size: size_of::<InkpodColorValue>() as u32,
@@ -2589,7 +2830,8 @@ unsafe fn parse_fill_input(input: &InkpodFillInput) -> Result<FillRequest, u32> 
         | INKPOD_FILL_FLAG_TRANSPARENT_ONLY
         | INKPOD_FILL_FLAG_SELECTION_PRESENT
         | INKPOD_FILL_FLAG_LIGHT_TABLE_BOUNDARY
-        | INKPOD_FILL_FLAG_LIGHT_TABLE_COLOR;
+        | INKPOD_FILL_FLAG_LIGHT_TABLE_COLOR
+        | INKPOD_FILL_FLAG_DOCUMENT_SELECTION;
     if input.flags & !SUPPORTED_FLAGS != 0 || input.reserved != 0 {
         return Err(fail(
             INKPOD_STATUS_UNSUPPORTED,
@@ -2716,6 +2958,7 @@ unsafe fn parse_fill_input(input: &InkpodFillInput) -> Result<FillRequest, u32> 
         seed_y: input.seed_y,
         color,
         selection,
+        use_document_selection: input.flags & INKPOD_FILL_FLAG_DOCUMENT_SELECTION != 0,
         tolerance: input.tolerance,
         detached_regions: input.flags & INKPOD_FILL_FLAG_DETACHED_REGIONS != 0,
         overflow_abort: input.flags & INKPOD_FILL_FLAG_OVERFLOW_ABORT != 0,
@@ -3274,6 +3517,74 @@ pub unsafe extern "C" fn inkpod_core_get_document_info(
     })
 }
 
+/// Transactionally updates the four production frames and independent margins.
+///
+/// # Safety
+/// `core` must be live on its owner thread, `input` must be a complete readable
+/// record, and `result` must be complete writable non-overlapping storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_update_paper_frames(
+    core: *mut InkpodCore,
+    input: *const InkpodPaperFramesInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: Readable/writable complete records are required by contract.
+        if let Err(status) = unsafe { validate_struct(input, "InkpodPaperFramesInput") } {
+            return status;
+        }
+        // SAFETY: Readable/writable complete records are required by contract.
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Validation proved the advertised known prefixes readable.
+        let input = unsafe { &*input };
+        if input.reserved != 0 || input.feature_flags != INKPOD_FEATURE_NONE {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "paper-frame input contains unsupported flags",
+            );
+        }
+        let frame = |value: InkpodFrameRect| RectI32 {
+            x: value.x,
+            y: value.y,
+            width: value.width,
+            height: value.height,
+        };
+        let frames = FrameMetadata {
+            hundred_frame: frame(input.hundred_frame),
+            reference_frame: frame(input.reference_frame),
+            drawing_frame: frame(input.drawing_frame),
+            safe_frame: frame(input.safe_frame),
+            margins: Margins {
+                left: input.margin_left,
+                top: input.margin_top,
+                right: input.margin_right,
+                bottom: input.margin_bottom,
+            },
+        };
+        // SAFETY: Live owner-thread objects are required by contract.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.update_paper_frames(frames) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Switches the editable plane without mutating document pixels or revision.
 ///
 /// # Safety
@@ -3296,6 +3607,34 @@ pub unsafe extern "C" fn inkpod_core_set_active_plane(core: *mut InkpodCore, pla
             Err(status) => return status,
         };
         match core.core.set_active_plane(plane) {
+            Ok(()) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Selects a stable-ID layer/plane pair without changing document pixels.
+///
+/// # Safety
+/// `core` must be a live owner-thread handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_set_active_node(
+    core: *mut InkpodCore,
+    layer_id: u64,
+    plane_id: u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: A live core is required by the caller contract.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.set_active_node(layer_id, plane_id) {
             Ok(()) => INKPOD_STATUS_OK,
             Err(error) => map_core_error(error),
         }
@@ -3569,6 +3908,50 @@ pub unsafe extern "C" fn inkpod_core_palette_get(
             }
         }
         INKPOD_STATUS_OK
+    })
+}
+
+/// Extracts a bounded quantized unique-color chart and stores it as the document palette.
+///
+/// # Safety
+/// Core/result must be complete live owner-thread records and must not overlap.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_palette_generate(
+    core: *mut InkpodCore,
+    maximum_colors: u32,
+    quantization_bits: u32,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        let quantization_bits = match u8::try_from(quantization_bits) {
+            Ok(bits) => bits,
+            Err(_) => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "quantization exceeds u8"),
+        };
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core
+            .core
+            .generate_palette_from_document(maximum_colors as usize, quantization_bits)
+        {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
     })
 }
 
@@ -3950,6 +4333,192 @@ unsafe fn history_operation(
     })
 }
 
+/// Queries the current history cursor and bounded item count.
+///
+/// # Safety
+/// Core and output must be live, aligned owner-thread objects.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_history_info(
+    core: *mut InkpodCore,
+    out_info: *mut InkpodHistoryInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: The output prefix is readable before the validated write.
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodHistoryInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by the caller contract.
+        let core = unsafe { &mut *core };
+        let out = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        out.reserved = 0;
+        out.cursor = core.core.history_cursor() as u64;
+        out.item_count = core.core.history_entries().len() as u64;
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Queries one history label into caller-owned UTF-8 storage.
+///
+/// # Safety
+/// Core/output and any advertised name buffer must remain live and non-overlapping.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_history_item(
+    core: *mut InkpodCore,
+    index: u64,
+    out_item: *mut InkpodHistoryItem,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: Output prefix is readable before the validated write.
+        if let Err(status) = unsafe { validate_struct(out_item.cast_const(), "InkpodHistoryItem") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let out = unsafe { &mut *out_item };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let index = match usize::try_from(index) {
+            Ok(value) => value,
+            Err(_) => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "history index is not representable",
+                );
+            }
+        };
+        let entries = core.core.history_entries();
+        let Some(entry) = entries.get(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "history index is outside the available range",
+            );
+        };
+        out.flags = if entry.applied {
+            INKPOD_HISTORY_ITEM_APPLIED
+        } else {
+            0
+        };
+        out.index = entry.index as u64;
+        out.name_bytes = entry.label.len() as u64;
+        if out.name_capacity == 0 {
+            if !out.name_utf8.is_null() {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity history label buffer must be null",
+                );
+            }
+            return INKPOD_STATUS_OK;
+        }
+        if out.name_utf8.is_null() || out.name_capacity < out.name_bytes {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "history label buffer is too small",
+            );
+        }
+        // SAFETY: Caller advertises complete writable storage for the copied label.
+        unsafe { ptr::copy_nonoverlapping(entry.label.as_ptr(), out.name_utf8, entry.label.len()) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Moves the history cursor to any available state.
+///
+/// # Safety
+/// Core and result must be live, aligned, non-overlapping owner-thread objects.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_history_jump(
+    core: *mut InkpodCore,
+    target_cursor: u64,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: Output prefix is readable before the validated write.
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        let target = match usize::try_from(target_cursor) {
+            Ok(value) => value,
+            Err(_) => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "history target is not representable",
+                );
+            }
+        };
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.jump_history(target) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Restores the active plane inside the persistent selection from the normal savepoint.
+///
+/// # Safety
+/// Core and result must be live, aligned, non-overlapping owner-thread objects.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_revert_active_selection(
+    core: *mut InkpodCore,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: Output prefix is readable before the validated write.
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.revert_active_plane_selection() {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Saves to a UTF-8 path using same-directory temporary-file replacement.
 ///
 /// # Safety
@@ -4186,7 +4755,7 @@ fn parse_view_command(core: &Core, input: &InkpodViewInput) -> Result<ViewComman
                     "box zoom rectangle is outside the document coordinate range",
                 ));
             }
-            let info = core.document_info().map_err(map_core_error)?;
+            let view = core.view_state();
             ViewCommand::BoxZoom {
                 document_rect: RectI32 {
                     x: input.value1 as i32,
@@ -4194,8 +4763,8 @@ fn parse_view_command(core: &Core, input: &InkpodViewInput) -> Result<ViewComman
                     width: input.value3 as i32,
                     height: input.value4 as i32,
                 },
-                viewport_width: f64::from(info.width),
-                viewport_height: f64::from(info.height),
+                viewport_width: view.viewport_width(),
+                viewport_height: view.viewport_height(),
             }
         }
         INKPOD_VIEW_FLIP_HORIZONTAL => ViewCommand::Flip {
@@ -4208,6 +4777,8 @@ fn parse_view_command(core: &Core, input: &InkpodViewInput) -> Result<ViewComman
         INKPOD_VIEW_SET_GUIDES_VISIBLE => ViewCommand::SetGuidesVisible(input.value1 != 0.0),
         INKPOD_VIEW_SET_GRID_VISIBLE => ViewCommand::SetGridVisible(input.value1 != 0.0),
         INKPOD_VIEW_SET_SNAP_ENABLED => ViewCommand::SetSnapEnabled(input.value1 != 0.0),
+        INKPOD_VIEW_SET_GUIDE_SNAP_ENABLED => ViewCommand::SetGuideSnapEnabled(input.value1 != 0.0),
+        INKPOD_VIEW_SET_GRID_SNAP_ENABLED => ViewCommand::SetGridSnapEnabled(input.value1 != 0.0),
         INKPOD_VIEW_SET_TRANSPARENT_VISIBLE => ViewCommand::SetTransparentView(input.value1 != 0.0),
         INKPOD_VIEW_SET_ALPHA_VISIBLE => ViewCommand::SetAlphaView(input.value1 != 0.0),
         _ => {
@@ -4864,6 +5435,82 @@ pub unsafe extern "C" fn inkpod_core_vector_rasterize(
     })
 }
 
+/// Rasterizes one vector layer at document scale into a new RGBA8 raster
+/// layer, preserving the source and committing one history unit.
+///
+/// # Safety
+/// Core/input/name/result/output storage must be complete, aligned, live, and
+/// non-overlapping on the Core owner thread. The name bytes are borrowed only
+/// for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_vector_rasterize_to_layer(
+    core: *mut InkpodCore,
+    input: *const InkpodVectorRasterizeInput,
+    name_utf8: *const u8,
+    name_bytes: u64,
+    result: *mut InkpodDispatchResult,
+    out_layer_id: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || out_layer_id.is_null()
+            || !is_aligned(out_layer_id)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "vector rasterize-to-layer core or output is null or misaligned",
+            );
+        }
+        // SAFETY: Writable output storage is required by the caller contract.
+        unsafe { out_layer_id.write(0) };
+        if let Err(status) = unsafe { validate_struct(input, "InkpodVectorRasterizeInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live structures and name span are required by the
+        // exported contract and validated before they are borrowed.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let name = match unsafe { name_from_utf8(name_utf8, name_bytes) } {
+            Ok(name) => name,
+            Err(status) => return status,
+        };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if input.reserved != 0
+            || input.reserved_2 != 0
+            || input.scale != 1
+            || input.feature_flags & !INKPOD_VECTOR_RASTERIZE_ANTIALIAS != 0
+        {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "vector rasterize-to-layer requires scale 1 and supported flags",
+            );
+        }
+        match core.core.rasterize_vector_layer_to_document(
+            input.layer_id,
+            input.feature_flags & INKPOD_VECTOR_RASTERIZE_ANTIALIAS != 0,
+            name,
+        ) {
+            Ok((outcome, layer_id)) => {
+                write_dispatch_result(result, outcome);
+                // SAFETY: Writable output storage was validated above.
+                unsafe { out_layer_id.write(layer_id) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Converts bounded RGBA8 raster runs into vector paths/fills as one history
 /// transaction and reports the number of created fills.
 ///
@@ -5381,6 +6028,23 @@ pub unsafe extern "C" fn inkpod_core_tree_edit(
                 .core
                 .merge_layer_into_below(input.object_id)
                 .map(|outcome| (outcome, 0)),
+            INKPOD_TREE_CONVERT_PLANE => {
+                let kind = match parse_plane_type(input.kind) {
+                    Ok(kind) => kind,
+                    Err(status) => return status,
+                };
+                let format = match parse_storage_format(input.pixel_format) {
+                    Ok(format) => format,
+                    Err(status) => return status,
+                };
+                core.core
+                    .convert_plane(input.object_id, kind, format)
+                    .map(|outcome| (outcome, 0))
+            }
+            INKPOD_TREE_MERGE_PLANE => core
+                .core
+                .merge_plane_into_below(input.object_id)
+                .map(|outcome| (outcome, 0)),
             _ => {
                 return fail(
                     INKPOD_STATUS_INVALID_ARGUMENT,
@@ -5787,6 +6451,286 @@ pub unsafe extern "C" fn inkpod_core_clipboard_copy(
     })
 }
 
+/// Renders the first typed clipboard plane into caller-owned straight RGBA8.
+/// A null buffer with zero capacity performs a size query.
+///
+/// # Safety
+/// `clipboard` must remain live for the call and `output` must be a complete
+/// writable record whose advertised pixel range is writable and non-overlapping.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_clipboard_render_rgba8(
+    clipboard: *const InkpodClipboard,
+    output: *mut InkpodClipboardRasterBuffer,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if clipboard.is_null() || !is_aligned(clipboard) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "clipboard handle is null or misaligned",
+            );
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodClipboardRasterBuffer") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let clipboard = unsafe { &*clipboard };
+        let output = unsafe { &mut *output };
+        if output.reserved != 0 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "clipboard raster flags are not supported",
+            );
+        }
+        let Some(plane) = clipboard.payload.planes.first() else {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "clipboard has no plane payload",
+            );
+        };
+        let width = match u32::try_from(clipboard.payload.bounds.width) {
+            Ok(width) if width != 0 => width,
+            _ => return fail(INKPOD_STATUS_INVALID_STATE, "clipboard width is invalid"),
+        };
+        let height = match u32::try_from(clipboard.payload.bounds.height) {
+            Ok(height) if height != 0 => height,
+            _ => return fail(INKPOD_STATUS_INVALID_STATE, "clipboard height is invalid"),
+        };
+        let packed_stride = match u64::from(width).checked_mul(4) {
+            Some(stride) => stride,
+            None => return fail(INKPOD_STATUS_INVALID_STATE, "clipboard stride overflows"),
+        };
+        output.origin_x = clipboard.payload.bounds.x;
+        output.origin_y = clipboard.payload.bounds.y;
+        output.width = width;
+        output.height = height;
+        if output.pixels_rgba8.is_null() && output.pixel_capacity == 0 {
+            output.row_stride_bytes = packed_stride;
+            output.required_bytes = match packed_stride.checked_mul(u64::from(height)) {
+                Some(bytes) => bytes,
+                None => return fail(INKPOD_STATUS_INVALID_STATE, "clipboard bytes overflow"),
+            };
+            return INKPOD_STATUS_OK;
+        }
+        let stride = if output.row_stride_bytes == 0 {
+            packed_stride
+        } else {
+            output.row_stride_bytes
+        };
+        if stride < packed_stride {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "clipboard row stride is too small",
+            );
+        }
+        let required = match stride.checked_mul(u64::from(height)) {
+            Some(bytes) => bytes,
+            None => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "clipboard bytes overflow"),
+        };
+        output.required_bytes = required;
+        output.row_stride_bytes = stride;
+        if output.pixels_rgba8.is_null() || output.pixel_capacity < required {
+            return INKPOD_STATUS_BUFFER_TOO_SMALL;
+        }
+        let required = match usize::try_from(required) {
+            Ok(required) => required,
+            Err(_) => return INKPOD_STATUS_BUFFER_TOO_SMALL,
+        };
+        // SAFETY: Caller advertises a writable output region of `required` bytes.
+        let pixels = unsafe { slice::from_raw_parts_mut(output.pixels_rgba8, required) };
+        pixels.fill(0);
+        for pixel in &plane.pixels {
+            let relative_x = i64::from(pixel.x) - i64::from(output.origin_x);
+            let relative_y = i64::from(pixel.y) - i64::from(output.origin_y);
+            if relative_x < 0
+                || relative_y < 0
+                || relative_x >= i64::from(width)
+                || relative_y >= i64::from(height)
+            {
+                continue;
+            }
+            let offset = match u64::try_from(relative_y)
+                .ok()
+                .and_then(|y| y.checked_mul(stride))
+                .and_then(|row| {
+                    u64::try_from(relative_x)
+                        .ok()
+                        .and_then(|x| x.checked_mul(4))
+                        .and_then(|column| row.checked_add(column))
+                })
+                .and_then(|offset| usize::try_from(offset).ok())
+            {
+                Some(offset) if offset + 4 <= pixels.len() => offset,
+                _ => {
+                    return fail(
+                        INKPOD_STATUS_INVALID_STATE,
+                        "clipboard pixel offset overflows",
+                    );
+                }
+            };
+            pixels[offset..offset + 4].copy_from_slice(&clipboard_pixel_rgba8(pixel.value));
+        }
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Creates a Rust-owned typed clipboard from caller-owned straight RGBA8.
+///
+/// # Safety
+/// `input` and its pixel range must be readable for the call. `out_clipboard`
+/// must be writable storage that does not already own a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_clipboard_create_rgba8(
+    input: *const InkpodClipboardRgbaInput,
+    out_clipboard: *mut *mut InkpodClipboard,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if out_clipboard.is_null() || !is_aligned(out_clipboard) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "clipboard output is null or misaligned",
+            );
+        }
+        // SAFETY: Writable owner storage is required by contract.
+        unsafe { out_clipboard.write(ptr::null_mut()) };
+        if let Err(status) = unsafe { validate_struct(input, "InkpodClipboardRgbaInput") } {
+            return status;
+        }
+        // SAFETY: Complete input record was validated above.
+        let input = unsafe { &*input };
+        if input.reserved != 0 || input.width == 0 || input.height == 0 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "clipboard raster metadata is invalid",
+            );
+        }
+        let pixel_count = match u64::from(input.width).checked_mul(u64::from(input.height)) {
+            Some(count) if count <= 16_777_216 => count,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "clipboard raster exceeds work bound",
+                );
+            }
+        };
+        let packed_stride = u64::from(input.width) * 4;
+        if input.row_stride_bytes < packed_stride {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "clipboard input stride is too small",
+            );
+        }
+        let required = match input.row_stride_bytes.checked_mul(u64::from(input.height)) {
+            Some(required) => required,
+            None => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "clipboard input bytes overflow",
+                );
+            }
+        };
+        if input.pixels_rgba8.is_null() || input.pixel_bytes < required {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "clipboard input pixels are incomplete",
+            );
+        }
+        let required = match usize::try_from(required) {
+            Ok(required) => required,
+            Err(_) => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "clipboard input is too large",
+                );
+            }
+        };
+        // SAFETY: Caller advertises a readable range covering `required` bytes.
+        let source = unsafe { slice::from_raw_parts(input.pixels_rgba8, required) };
+        let mut pixels = Vec::with_capacity(pixel_count as usize);
+        for y in 0..input.height {
+            for x in 0..input.width {
+                let offset = (u64::from(y) * input.row_stride_bytes + u64::from(x) * 4) as usize;
+                let rgba = [
+                    source[offset],
+                    source[offset + 1],
+                    source[offset + 2],
+                    source[offset + 3],
+                ];
+                if rgba != [0; 4] {
+                    let pixel_x = match i64::from(input.origin_x).checked_add(i64::from(x)) {
+                        Some(value) => value,
+                        None => {
+                            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "clipboard X overflows");
+                        }
+                    };
+                    let pixel_y = match i64::from(input.origin_y).checked_add(i64::from(y)) {
+                        Some(value) => value,
+                        None => {
+                            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "clipboard Y overflows");
+                        }
+                    };
+                    let (pixel_x, pixel_y) = match (i32::try_from(pixel_x), i32::try_from(pixel_y))
+                    {
+                        (Ok(x), Ok(y)) => (x, y),
+                        _ => {
+                            return fail(
+                                INKPOD_STATUS_INVALID_ARGUMENT,
+                                "clipboard coordinate overflows",
+                            );
+                        }
+                    };
+                    pixels.push(ClipboardPixel {
+                        x: pixel_x,
+                        y: pixel_y,
+                        value: PixelValue::Rgba(rgba),
+                    });
+                }
+            }
+        }
+        let width = match i32::try_from(input.width) {
+            Ok(width) => width,
+            Err(_) => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "clipboard width exceeds i32",
+                );
+            }
+        };
+        let height = match i32::try_from(input.height) {
+            Ok(height) => height,
+            Err(_) => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "clipboard height exceeds i32",
+                );
+            }
+        };
+        let payload = ClipboardPayload {
+            source_document_uuid: 1,
+            bounds: RectI32 {
+                x: input.origin_x,
+                y: input.origin_y,
+                width,
+                height,
+            },
+            planes: vec![ClipboardPlane {
+                kind: PlaneType::Raster,
+                pixel_format: PixelFormat::StraightRgba8,
+                origin_x: input.origin_x,
+                origin_y: input.origin_y,
+                pixels,
+            }],
+        };
+        let clipboard = Box::new(InkpodClipboard { payload });
+        // SAFETY: Output storage receives one unique Rust Box owner.
+        unsafe { out_clipboard.write(Box::into_raw(clipboard)) };
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Releases one Rust-owned clipboard handle and nulls caller storage.
 ///
 /// # Safety
@@ -5846,6 +6790,45 @@ pub unsafe extern "C" fn inkpod_core_paste_begin(
             return thread_status;
         }
         match core.core.begin_paste(&clipboard.payload) {
+            Ok(()) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Starts floating paste with explicit compatible or active-plane conversion routing.
+///
+/// # Safety
+/// `core` and `clipboard` must remain live and aligned for the call, on the Core owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_paste_begin_mode(
+    core: *mut InkpodCore,
+    clipboard: *const InkpodClipboard,
+    mode: u32,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || clipboard.is_null() || !is_aligned(clipboard) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "paste pointer is null or misaligned",
+            );
+        }
+        // SAFETY: Live handles are required by the exported contract.
+        let core = unsafe { &mut *core };
+        let clipboard = unsafe { &*clipboard };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let result = match mode {
+            1 => core.core.begin_paste(&clipboard.payload),
+            2 => core
+                .core
+                .begin_paste_to_active_converted(&clipboard.payload),
+            _ => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "paste mode is not defined"),
+        };
+        match result {
             Ok(()) => INKPOD_STATUS_OK,
             Err(error) => map_core_error(error),
         }
@@ -5956,6 +6939,41 @@ pub unsafe extern "C" fn inkpod_core_floating_cancel(core: *mut InkpodCore) -> u
     })
 }
 
+/// Clears selected content from the active editable plane as one history transaction.
+///
+/// # Safety
+/// `core` must be live on its owner thread and `result` must be a complete writable record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_clear_selected_content(
+    core: *mut InkpodCore,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records are required by contract.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.clear_selected_content() {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Mirrors persistent document content as one history transaction.
 ///
 /// # Safety
@@ -5990,6 +7008,117 @@ pub unsafe extern "C" fn inkpod_core_mirror_document(
             _ => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "mirror axis is not defined"),
         };
         match core.core.mirror_document(axis) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Rotates persistent document content and metadata as one history transaction.
+///
+/// # Safety
+/// `core` must be live on its owner thread and `result` must expose writable,
+/// non-overlapping storage for a complete dispatch record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_rotate_document(
+    core: *mut InkpodCore,
+    direction: u32,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let direction = match direction {
+            1 => RotateDirection::Left90,
+            2 => RotateDirection::Right90,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "rotate direction is not defined",
+                );
+            }
+        };
+        match core.core.rotate_document(direction) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Resizes/repositions or nearest-neighbor resamples persistent document data.
+///
+/// # Safety
+/// `core`, `input`, and `result` must be complete, live, aligned,
+/// non-overlapping records used on the Core owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_resize_document(
+    core: *mut InkpodCore,
+    input: *const InkpodDocumentResizeInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodDocumentResizeInput") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete records were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if input.flags & !1 != 0 {
+            return fail(INKPOD_STATUS_UNSUPPORTED, "resize flags are not supported");
+        }
+        let anchor = match input.anchor {
+            1 => ResizeAnchor::TopLeft,
+            2 => ResizeAnchor::TopRight,
+            3 => ResizeAnchor::Center,
+            4 => ResizeAnchor::BottomLeft,
+            5 => ResizeAnchor::BottomRight,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "resize anchor is not defined",
+                );
+            }
+        };
+        match core.core.resize_document(DocumentResize {
+            width: input.width,
+            height: input.height,
+            dpi_x_milli: input.dpi_x_milli,
+            dpi_y_milli: input.dpi_y_milli,
+            resample: input.flags & 1 != 0,
+            anchor,
+        }) {
             Ok(outcome) => {
                 write_dispatch_result(result, outcome);
                 INKPOD_STATUS_OK
@@ -6208,6 +7337,42 @@ pub unsafe extern "C" fn inkpod_core_selection_adjust(
             }
         };
         match operation {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Clears the persistent selection mask as one undoable document transaction.
+///
+/// # Safety
+/// Core and result must be live, aligned, non-overlapping owner-thread objects.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_selection_clear(
+    core: *mut InkpodCore,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: Output prefix is readable before the validated write.
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.clear_selection() {
             Ok(outcome) => {
                 write_dispatch_result(result, outcome);
                 INKPOD_STATUS_OK
@@ -6659,6 +7824,198 @@ pub unsafe extern "C" fn inkpod_core_shortcut_reset(core: *mut InkpodCore) -> u3
     })
 }
 
+/// Replaces the active document with a bounded PNG/TIFF/TGA/BMP raster.
+///
+/// # Safety
+/// `core` must be live on its owner thread, `bytes` must identify `byte_count`
+/// readable bytes for this call, and `out_info` must be complete writable
+/// storage. The UUID pair must not be zero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_import_common_raster(
+    core: *mut InkpodCore,
+    format: u32,
+    bytes: *const u8,
+    byte_count: u64,
+    document_uuid_high: u64,
+    document_uuid_low: u64,
+    out_info: *mut InkpodDocumentInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || out_info.is_null() || !is_aligned(out_info) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "common-raster import pointer is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodDocumentInfo") }
+        {
+            return status;
+        }
+        if bytes.is_null() || byte_count == 0 || byte_count > MAX_COMMON_RASTER_BYTES as u64 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "common-raster input span is null, empty, or too large",
+            );
+        }
+        let length = match usize::try_from(byte_count) {
+            Ok(length) => length,
+            Err(_) => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "common-raster input length is not representable",
+                );
+            }
+        };
+        let format = match parse_common_raster_format(format) {
+            Ok(format) => format,
+            Err(status) => return status,
+        };
+        let uuid = (u128::from(document_uuid_high) << 64) | u128::from(document_uuid_low);
+        // SAFETY: The exported-function contract requires this bounded span readable.
+        let bytes = unsafe { slice::from_raw_parts(bytes, length) };
+        // SAFETY: Live owner-thread core and writable output were validated above.
+        let core = unsafe { &mut *core };
+        let out_info = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.import_common_raster(format, bytes, uuid) {
+            Ok(info) => {
+                write_document_info(out_info, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Encodes the flattened visible document to a Rust-owned common-raster buffer.
+///
+/// # Safety
+/// `core` must be live on its owner thread. `out_buffer` must be writable
+/// storage containing null; the returned handle must be released by
+/// `inkpod_byte_buffer_release`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_export_common_raster(
+    core: *mut InkpodCore,
+    format: u32,
+    composite_white: u32,
+    out_buffer: *mut *mut InkpodByteBuffer,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || out_buffer.is_null() || !is_aligned(out_buffer) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "common-raster export pointer is null or misaligned",
+            );
+        }
+        // SAFETY: Caller provides readable/writable owner storage.
+        if !unsafe { out_buffer.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "common-raster output already owns a live buffer",
+            );
+        }
+        if composite_white > 1 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "common-raster white-composite flag must be zero or one",
+            );
+        }
+        let format = match parse_common_raster_format(format) {
+            Ok(format) => format,
+            Err(status) => return status,
+        };
+        // SAFETY: Live owner-thread core was validated above.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.export_common_raster(format, composite_white != 0) {
+            Ok(bytes) => {
+                let handle = Box::new(InkpodByteBuffer {
+                    bytes: bytes.into_boxed_slice(),
+                });
+                // SAFETY: Writable owner storage was validated and currently null.
+                unsafe { out_buffer.write(Box::into_raw(handle)) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Borrows the immutable byte span owned by a common-raster buffer.
+///
+/// # Safety
+/// `buffer` must be live. Both output pointers must be writable aligned storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_byte_buffer_view(
+    buffer: *const InkpodByteBuffer,
+    out_bytes: *mut *const u8,
+    out_byte_count: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if buffer.is_null()
+            || !is_aligned(buffer)
+            || out_bytes.is_null()
+            || !is_aligned(out_bytes)
+            || out_byte_count.is_null()
+            || !is_aligned(out_byte_count)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "byte-buffer view pointer is null or misaligned",
+            );
+        }
+        // SAFETY: Complete live input and writable outputs are required by contract.
+        let buffer = unsafe { &*buffer };
+        unsafe {
+            out_bytes.write(buffer.bytes.as_ptr());
+            out_byte_count.write(buffer.bytes.len() as u64);
+        }
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Releases one Rust-owned byte buffer and nulls caller storage.
+///
+/// # Safety
+/// `buffer` must be writable storage containing null or one live handle returned
+/// by `inkpod_core_export_common_raster`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_byte_buffer_release(buffer: *mut *mut InkpodByteBuffer) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if buffer.is_null() || !is_aligned(buffer) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "byte-buffer owner pointer is null or misaligned",
+            );
+        }
+        // SAFETY: Caller provides readable/writable unique owner storage.
+        let handle = unsafe { buffer.read() };
+        if handle.is_null() {
+            return INKPOD_STATUS_OK;
+        }
+        if !is_aligned(handle) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "byte-buffer handle is misaligned",
+            );
+        }
+        // SAFETY: Null before consuming the unique Box owner exactly once.
+        unsafe { buffer.write(ptr::null_mut()) };
+        drop(unsafe { Box::from_raw(handle) });
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Copies one persistent light-table item into the active set.
 ///
 /// # Safety
@@ -6792,6 +8149,441 @@ pub unsafe extern "C" fn inkpod_core_light_table_set_global_opacity(
             return thread_status;
         }
         match core.core.light_table_set_global_opacity(opacity_milli) {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies a set/item management edit as one document history transaction.
+///
+/// # Safety
+/// All pointers must be complete, aligned, live, non-overlapping owner-thread
+/// records. A name span is required only for create/rename-set operations.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_light_table_edit(
+    core: *mut InkpodCore,
+    input: *const InkpodLightTableEdit,
+    result: *mut InkpodDispatchResult,
+    out_object_id: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || out_object_id.is_null()
+            || !is_aligned(out_object_id)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "light-table edit pointer is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodLightTableEdit") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete records were validated above.
+        let input = unsafe { &*input };
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let edit_result = match input.operation {
+            INKPOD_LIGHT_TABLE_CREATE_SET => {
+                let name = match unsafe { name_from_utf8(input.name_utf8, input.name_bytes) } {
+                    Ok(name) => name.to_owned(),
+                    Err(status) => return status,
+                };
+                core.core.light_table_create_set(name)
+            }
+            INKPOD_LIGHT_TABLE_DUPLICATE_SET => {
+                core.core.light_table_duplicate_set(input.object_id)
+            }
+            INKPOD_LIGHT_TABLE_DELETE_SET => core
+                .core
+                .light_table_delete_set(input.object_id)
+                .map(|outcome| (outcome, 0)),
+            INKPOD_LIGHT_TABLE_RENAME_SET => {
+                let name = match unsafe { name_from_utf8(input.name_utf8, input.name_bytes) } {
+                    Ok(name) => name.to_owned(),
+                    Err(status) => return status,
+                };
+                core.core
+                    .light_table_rename_set(input.object_id, name)
+                    .map(|outcome| (outcome, input.object_id))
+            }
+            INKPOD_LIGHT_TABLE_REORDER_SET => core
+                .core
+                .light_table_reorder_set(input.object_id, input.destination_index as usize)
+                .map(|outcome| (outcome, input.object_id)),
+            INKPOD_LIGHT_TABLE_SET_ACTIVE_OPERATION => core
+                .core
+                .light_table_set_active(input.object_id)
+                .map(|outcome| (outcome, input.object_id)),
+            INKPOD_LIGHT_TABLE_REMOVE_ITEM => core
+                .core
+                .light_table_remove_item(input.object_id)
+                .map(|outcome| (outcome, 0)),
+            INKPOD_LIGHT_TABLE_REORDER_ITEM => core
+                .core
+                .light_table_reorder_item(input.object_id, input.destination_index as usize)
+                .map(|outcome| (outcome, input.object_id)),
+            INKPOD_LIGHT_TABLE_UPDATE_ITEM => {
+                if input.flags & !INKPOD_LIGHT_TABLE_ITEM_VISIBLE != 0 || input.reserved != 0 {
+                    return fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "light-table item property flags are invalid",
+                    );
+                }
+                let display_mode = match input.display_mode {
+                    INKPOD_LIGHT_TABLE_COLOR => LightTableDisplayMode::Color,
+                    INKPOD_LIGHT_TABLE_MONOTONE => LightTableDisplayMode::Monotone,
+                    INKPOD_LIGHT_TABLE_HALFTONE => LightTableDisplayMode::Halftone,
+                    _ => {
+                        return fail(
+                            INKPOD_STATUS_INVALID_ARGUMENT,
+                            "light-table display mode is not defined",
+                        );
+                    }
+                };
+                let display_color = match unsafe { parse_color_value(&input.display_color) } {
+                    Ok(color) => color,
+                    Err(status) => return status,
+                };
+                core.core
+                    .light_table_update_item_properties(
+                        input.object_id,
+                        LightTableItemProperties {
+                            visible: input.flags & INKPOD_LIGHT_TABLE_ITEM_VISIBLE != 0,
+                            opacity_milli: input.opacity_milli,
+                            display_mode,
+                            display_color,
+                            translate_x_milli: input.translate_x_milli,
+                            translate_y_milli: input.translate_y_milli,
+                            scale_x_milli: input.scale_x_milli,
+                            scale_y_milli: input.scale_y_milli,
+                            rotation_milli_degrees: input.rotation_milli_degrees,
+                        },
+                    )
+                    .map(|outcome| (outcome, input.object_id))
+            }
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "light-table edit operation is not defined",
+                );
+            }
+        };
+        match edit_result {
+            Ok((outcome, object_id)) => {
+                write_dispatch_result(result, outcome);
+                // SAFETY: Writable aligned storage was validated above.
+                unsafe { out_object_id.write(object_id) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Returns one persistent light-table set by display order.
+///
+/// # Safety
+/// Core and output must be complete live owner-thread records. The optional
+/// UTF-8 name buffer remains caller-owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_light_table_set_get(
+    core: *mut InkpodCore,
+    index: u32,
+    output: *mut InkpodLightTableSetInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodLightTableSetInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let sets = match core.core.light_table_sets() {
+            Ok(sets) => sets,
+            Err(error) => return map_core_error(error),
+        };
+        let Some(set) = sets.get(index as usize) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "light-table set index is outside bounds",
+            );
+        };
+        output.flags = if set.active {
+            INKPOD_LIGHT_TABLE_SET_ACTIVE
+        } else {
+            0
+        };
+        output.id = set.id;
+        output.opacity_milli = set.global_opacity_milli;
+        output.item_count = set.item_count as u32;
+        output.name_bytes = set.name.len() as u64;
+        if output.name_capacity == 0 {
+            return if output.name_utf8.is_null() {
+                INKPOD_STATUS_OK
+            } else {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity set name buffer must be null",
+                )
+            };
+        }
+        if output.name_utf8.is_null() || output.name_capacity < output.name_bytes {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "light-table set name buffer is too small",
+            );
+        }
+        // SAFETY: Caller advertises sufficient writable name capacity.
+        unsafe { ptr::copy_nonoverlapping(set.name.as_ptr(), output.name_utf8, set.name.len()) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Returns one item from the active light-table set by display order.
+///
+/// # Safety
+/// Core and output must be complete live owner-thread records. The optional
+/// UTF-8 name buffer remains caller-owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_light_table_item_get(
+    core: *mut InkpodCore,
+    index: u32,
+    output: *mut InkpodLightTableItemInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodLightTableItemInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let items = match core.core.light_table_items() {
+            Ok(items) => items,
+            Err(error) => return map_core_error(error),
+        };
+        let Some(item) = items.get(index as usize) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "light-table item index is outside bounds",
+            );
+        };
+        output.flags = if item.visible {
+            INKPOD_LIGHT_TABLE_ITEM_VISIBLE
+        } else {
+            0
+        };
+        output.id = item.id;
+        output.source_plane_id = item.source_plane_id;
+        output.source_document_uuid_high = (item.source_document_uuid >> 64) as u64;
+        output.source_document_uuid_low = item.source_document_uuid as u64;
+        output.source_revision = item.source_revision;
+        output.opacity_milli = item.opacity_milli;
+        output.effective_opacity_milli = item.effective_opacity_milli;
+        output.display_mode = match item.display_mode {
+            LightTableDisplayMode::Color => INKPOD_LIGHT_TABLE_COLOR,
+            LightTableDisplayMode::Monotone => INKPOD_LIGHT_TABLE_MONOTONE,
+            LightTableDisplayMode::Halftone => INKPOD_LIGHT_TABLE_HALFTONE,
+        };
+        if let Err(status) = write_color_value(&mut output.display_color, item.display_color) {
+            return status;
+        }
+        output.translate_x_milli = item.translate_x_milli;
+        output.translate_y_milli = item.translate_y_milli;
+        output.scale_x_milli = item.scale_x_milli;
+        output.scale_y_milli = item.scale_y_milli;
+        output.rotation_milli_degrees = item.rotation_milli_degrees;
+        output.reserved = 0;
+        output.name_bytes = item.name.len() as u64;
+        if output.name_capacity == 0 {
+            return if output.name_utf8.is_null() {
+                INKPOD_STATUS_OK
+            } else {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity item name buffer must be null",
+                )
+            };
+        }
+        if output.name_utf8.is_null() || output.name_capacity < output.name_bytes {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "light-table item name buffer is too small",
+            );
+        }
+        // SAFETY: Caller advertises sufficient writable name capacity.
+        unsafe { ptr::copy_nonoverlapping(item.name.as_ptr(), output.name_utf8, item.name.len()) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Decodes and inserts one common-raster file into the active light-table set.
+///
+/// # Safety
+/// Core/result/output must be valid owner-thread records and both byte/name
+/// spans must remain readable for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_light_table_add_common_raster(
+    core: *mut InkpodCore,
+    format: u32,
+    bytes: *const u8,
+    byte_count: u64,
+    name_utf8: *const u8,
+    name_bytes: u64,
+    document_uuid_high: u64,
+    document_uuid_low: u64,
+    source_revision: u64,
+    result: *mut InkpodDispatchResult,
+    out_item_id: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || out_item_id.is_null()
+            || !is_aligned(out_item_id)
+            || bytes.is_null()
+            || byte_count == 0
+            || byte_count > MAX_COMMON_RASTER_BYTES as u64
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "light-table raster span is invalid",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        let format = match parse_common_raster_format(format) {
+            Ok(format) => format,
+            Err(status) => return status,
+        };
+        let name = match unsafe { name_from_utf8(name_utf8, name_bytes) } {
+            Ok(name) => name.to_owned(),
+            Err(status) => return status,
+        };
+        let length = match usize::try_from(byte_count) {
+            Ok(length) => length,
+            Err(_) => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "raster length overflows"),
+        };
+        // SAFETY: Caller provides this bounded readable byte span.
+        let bytes = unsafe { slice::from_raw_parts(bytes, length) };
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let uuid = (u128::from(document_uuid_high) << 64) | u128::from(document_uuid_low);
+        match core
+            .core
+            .light_table_add_common_raster(format, bytes, name, uuid, source_revision)
+        {
+            Ok((outcome, item_id)) => {
+                write_dispatch_result(result, outcome);
+                // SAFETY: Writable aligned output was validated above.
+                unsafe { out_item_id.write(item_id) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Replaces one item's source image while retaining its display properties.
+///
+/// # Safety
+/// Core/result and the encoded byte span must be valid for this owner-thread call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_light_table_reload_common_raster(
+    core: *mut InkpodCore,
+    item_id: u64,
+    format: u32,
+    bytes: *const u8,
+    byte_count: u64,
+    document_uuid_high: u64,
+    document_uuid_low: u64,
+    source_revision: u64,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || bytes.is_null()
+            || byte_count == 0
+            || byte_count > MAX_COMMON_RASTER_BYTES as u64
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "reload raster span is invalid",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        let format = match parse_common_raster_format(format) {
+            Ok(format) => format,
+            Err(status) => return status,
+        };
+        let length = match usize::try_from(byte_count) {
+            Ok(length) => length,
+            Err(_) => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "raster length overflows"),
+        };
+        // SAFETY: Caller provides this bounded readable byte span.
+        let bytes = unsafe { slice::from_raw_parts(bytes, length) };
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let uuid = (u128::from(document_uuid_high) << 64) | u128::from(document_uuid_low);
+        match core.core.light_table_reload_common_raster(
+            item_id,
+            format,
+            bytes,
+            uuid,
+            source_revision,
+        ) {
             Ok(outcome) => {
                 write_dispatch_result(result, outcome);
                 INKPOD_STATUS_OK
@@ -7013,6 +8805,467 @@ pub unsafe extern "C" fn inkpod_core_sequence_set(
     })
 }
 
+/// Decodes a bounded naturally sorted sequence of common-raster files.
+///
+/// # Safety
+/// Core and every strided named-byte record/span must remain live and readable
+/// for this owner-thread call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_import_encoded(
+    core: *mut InkpodCore,
+    format: u32,
+    files: *const InkpodNamedBytesInput,
+    file_count: u64,
+    file_stride_bytes: u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || files.is_null()
+            || !is_aligned(files)
+            || file_count == 0
+            || file_count > 10_000
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "encoded sequence header is invalid",
+            );
+        }
+        let format = match parse_common_raster_format(format) {
+            Ok(format) => format,
+            Err(status) => return status,
+        };
+        let count = match usize::try_from(file_count) {
+            Ok(count) => count,
+            Err(_) => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "sequence count overflows"),
+        };
+        let stride = match usize::try_from(file_stride_bytes) {
+            Ok(stride)
+                if stride >= size_of::<InkpodNamedBytesInput>()
+                    && stride % align_of::<InkpodNamedBytesInput>() == 0 =>
+            {
+                stride
+            }
+            _ => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "sequence stride is invalid"),
+        };
+        let storage = count
+            .saturating_sub(1)
+            .checked_mul(stride)
+            .and_then(|offset| offset.checked_add(size_of::<InkpodNamedBytesInput>()));
+        if storage.is_none_or(|bytes| bytes > isize::MAX as usize) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence record span overflows",
+            );
+        }
+        let mut decoded = Vec::with_capacity(count);
+        let mut total_bytes = 0_usize;
+        for index in 0..count {
+            // SAFETY: The checked strided span makes every record prefix readable.
+            let pointer = unsafe {
+                files
+                    .cast::<u8>()
+                    .add(index * stride)
+                    .cast::<InkpodNamedBytesInput>()
+            };
+            let advertised = match unsafe { validate_struct(pointer, "InkpodNamedBytesInput") } {
+                Ok(size) => size,
+                Err(status) => return status,
+            };
+            if advertised as usize > stride {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "sequence record exceeds stride",
+                );
+            }
+            // SAFETY: Complete record was validated above.
+            let record = unsafe { &*pointer };
+            if record.reserved != 0
+                || record.bytes.is_null()
+                || record.byte_count == 0
+                || record.byte_count > MAX_COMMON_RASTER_BYTES as u64
+            {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "sequence file span is invalid",
+                );
+            }
+            let name = match unsafe { name_from_utf8(record.name_utf8, record.name_bytes) } {
+                Ok(name) => name.to_owned(),
+                Err(status) => return status,
+            };
+            let length = match usize::try_from(record.byte_count) {
+                Ok(length) => length,
+                Err(_) => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "file length overflows"),
+            };
+            total_bytes = match total_bytes.checked_add(length) {
+                Some(total) if total <= MAX_COMMON_RASTER_BYTES => total,
+                _ => {
+                    return fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "sequence bytes exceed bound",
+                    );
+                }
+            };
+            // SAFETY: Caller advertises this complete bounded byte span.
+            let bytes = unsafe { slice::from_raw_parts(record.bytes, length) }.to_vec();
+            decoded.push((name, bytes));
+        }
+        // SAFETY: Live owner-thread core was validated above.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.import_sequence(format, decoded) {
+            Ok(()) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Encodes the configured sequence into a Rust-owned immutable file collection.
+///
+/// # Safety
+/// Core must be live on its owner thread and `out_sequence` must be writable
+/// null owner storage released by `inkpod_encoded_sequence_release`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_export_encoded(
+    core: *mut InkpodCore,
+    format: u32,
+    composite_white: u32,
+    out_sequence: *mut *mut InkpodEncodedSequence,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || out_sequence.is_null()
+            || !is_aligned(out_sequence)
+            || composite_white > 1
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence export pointer is invalid",
+            );
+        }
+        // SAFETY: Caller provides readable/writable owner storage.
+        if !unsafe { out_sequence.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence output already owns data",
+            );
+        }
+        let format = match parse_common_raster_format(format) {
+            Ok(format) => format,
+            Err(status) => return status,
+        };
+        // SAFETY: Live owner-thread core was validated above.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.export_sequence(format, composite_white != 0) {
+            Ok(files) => {
+                let files = files
+                    .into_iter()
+                    .map(|(name, bytes)| EncodedSequenceFile {
+                        name: name.into_bytes().into_boxed_slice(),
+                        bytes: bytes.into_boxed_slice(),
+                    })
+                    .collect();
+                // SAFETY: Writable null owner storage was validated above.
+                unsafe {
+                    out_sequence.write(Box::into_raw(Box::new(InkpodEncodedSequence { files })))
+                };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Returns the number of encoded files owned by a sequence handle.
+///
+/// # Safety
+/// Handle must be live and output must be writable aligned storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_encoded_sequence_count(
+    sequence: *const InkpodEncodedSequence,
+    out_count: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if sequence.is_null()
+            || !is_aligned(sequence)
+            || out_count.is_null()
+            || !is_aligned(out_count)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence count pointer is invalid",
+            );
+        }
+        // SAFETY: Live input and writable output are required by contract.
+        unsafe { out_count.write((*sequence).files.len() as u64) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Borrows one encoded sequence file name and data span until release.
+///
+/// # Safety
+/// Handle must be live and all output pointers must be writable aligned storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_encoded_sequence_get(
+    sequence: *const InkpodEncodedSequence,
+    index: u64,
+    out_name: *mut *const u8,
+    out_name_bytes: *mut u64,
+    out_bytes: *mut *const u8,
+    out_byte_count: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if sequence.is_null()
+            || !is_aligned(sequence)
+            || out_name.is_null()
+            || !is_aligned(out_name)
+            || out_name_bytes.is_null()
+            || !is_aligned(out_name_bytes)
+            || out_bytes.is_null()
+            || !is_aligned(out_bytes)
+            || out_byte_count.is_null()
+            || !is_aligned(out_byte_count)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence view pointer is invalid",
+            );
+        }
+        // SAFETY: Live handle was validated above.
+        let sequence = unsafe { &*sequence };
+        let Some(file) = sequence.files.get(index as usize) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence file index is outside bounds",
+            );
+        };
+        // SAFETY: All output storage is writable and aligned by contract.
+        unsafe {
+            out_name.write(file.name.as_ptr());
+            out_name_bytes.write(file.name.len() as u64);
+            out_bytes.write(file.bytes.as_ptr());
+            out_byte_count.write(file.bytes.len() as u64);
+        }
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Releases an encoded sequence handle and nulls caller storage.
+///
+/// # Safety
+/// Owner storage must contain null or exactly one live handle from export.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_encoded_sequence_release(
+    sequence: *mut *mut InkpodEncodedSequence,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if sequence.is_null() || !is_aligned(sequence) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence owner pointer is invalid",
+            );
+        }
+        // SAFETY: Caller provides readable/writable unique owner storage.
+        let handle = unsafe { sequence.read() };
+        if handle.is_null() {
+            return INKPOD_STATUS_OK;
+        }
+        if !is_aligned(handle) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence handle is misaligned",
+            );
+        }
+        // SAFETY: Null first, then consume the unique Box owner exactly once.
+        unsafe { sequence.write(ptr::null_mut()) };
+        drop(unsafe { Box::from_raw(handle) });
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Returns one naturally ordered sequence cell and deterministic thumbnail metadata.
+///
+/// # Safety
+/// Core/output must be complete live owner-thread records and the optional name
+/// buffer must be writable for its advertised capacity.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_cell_get(
+    core: *mut InkpodCore,
+    index: u32,
+    output: *mut InkpodSequenceCellInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodSequenceCellInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let cells: Vec<SequenceCellInfo> = match core.core.sequence_cells() {
+            Ok(cells) => cells,
+            Err(error) => return map_core_error(error),
+        };
+        let Some(cell) = cells.get(index as usize) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence cell index is outside bounds",
+            );
+        };
+        output.flags = 0;
+        output.sequence_index = u64::from(index);
+        output.document_uuid_high = (cell.document_uuid >> 64) as u64;
+        output.document_uuid_low = cell.document_uuid as u64;
+        output.cell_number = cell.cell_number;
+        output.width = cell.width;
+        output.height = cell.height;
+        output.thumbnail_width = cell.thumbnail.width;
+        output.thumbnail_height = cell.thumbnail.height;
+        output.reserved = 0;
+        output.thumbnail_checksum = cell.thumbnail.checksum;
+        output.name_bytes = cell.name.len() as u64;
+        if output.name_capacity == 0 {
+            return if output.name_utf8.is_null() {
+                INKPOD_STATUS_OK
+            } else {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity name buffer must be null",
+                )
+            };
+        }
+        if output.name_utf8.is_null() || output.name_capacity < output.name_bytes {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "sequence name buffer is too small",
+            );
+        }
+        // SAFETY: Caller advertises sufficient writable name capacity.
+        unsafe { ptr::copy_nonoverlapping(cell.name.as_ptr(), output.name_utf8, cell.name.len()) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Switches to a sequence cell by natural-order index without discarding dirty data.
+///
+/// # Safety
+/// Core and document-info output must be complete live owner-thread records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_activate(
+    core: *mut InkpodCore,
+    index: u32,
+    out_info: *mut InkpodDocumentInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodDocumentInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.sequence_activate(index as usize) {
+            Ok(info) => {
+                write_document_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Registers one sequence cell as the exact-depth subpalette source.
+///
+/// # Safety
+/// Core must be live on its owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_subpalette_set(core: *mut InkpodCore, index: u32) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: Live owner-thread core is required by contract.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.set_subpalette_cell(index as usize) {
+            Ok(()) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Samples one exact-depth subpalette pixel.
+///
+/// # Safety
+/// Core/output must be complete live owner-thread records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_subpalette_sample(
+    core: *mut InkpodCore,
+    x: u32,
+    y: u32,
+    output: *mut InkpodColorValue,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(output.cast_const(), "InkpodColorValue") } {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.subpalette_sample(x, y) {
+            Ok(color) => match write_color_value(output, color) {
+                Ok(()) => INKPOD_STATUS_OK,
+                Err(status) => status,
+            },
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Switches to a previous/next naturally ordered sequence cell.
 ///
 /// # Safety
@@ -7175,6 +9428,41 @@ pub unsafe extern "C" fn inkpod_core_motion_check_stop(core: *mut InkpodCore) ->
         }
         core.core.motion_check_stop();
         INKPOD_STATUS_OK
+    })
+}
+
+/// Toggles pause for an active motion-check session and returns its frame.
+///
+/// # Safety
+/// Core/output must be complete live owner-thread records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_motion_check_toggle_pause(
+    core: *mut InkpodCore,
+    out_frame: *mut InkpodMotionFrame,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(out_frame.cast_const(), "InkpodMotionFrame") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *out_frame };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.motion_check_toggle_pause() {
+            Ok(frame) => {
+                write_motion_frame(output, frame);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
     })
 }
 
@@ -10813,6 +13101,26 @@ mod tests {
                 INKPOD_STATUS_OK
             );
             assert!(raster_pixels.iter().any(|value| *value != 0));
+
+            let rasterize_layer_input = InkpodVectorRasterizeInput {
+                scale: 1,
+                ..rasterize_input
+            };
+            let rasterized_name = b"Rasterized";
+            let mut raster_layer_id = 0_u64;
+            assert_eq!(
+                inkpod_core_vector_rasterize_to_layer(
+                    core,
+                    &rasterize_layer_input,
+                    rasterized_name.as_ptr(),
+                    rasterized_name.len() as u64,
+                    &mut dispatch,
+                    &mut raster_layer_id,
+                ),
+                INKPOD_STATUS_OK
+            );
+            assert_ne!(raster_layer_id, 0);
+            assert_eq!(dispatch.accepted_command_count, 1);
 
             assert_eq!(
                 inkpod_core_set_active_plane(core, INKPOD_PLANE_COLOR),
