@@ -57,6 +57,8 @@ constexpr UINT_PTR kM6ProgressTimer = 1U;
 constexpr UINT_PTR kM6ContinuousSprayTimer = 2U;
 constexpr UINT_PTR kMotionPlaybackTimer = 3U;
 constexpr UINT kM6ContinuousSprayIntervalMilliseconds = 50U;
+constexpr wchar_t kVectorStrokePlaneRequired[] =
+    L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
 
 struct M6StopValue {
     std::uint32_t position_milli{};
@@ -212,7 +214,11 @@ bool QueryDocument(AppState& state, InkpodDocumentInfo& info) noexcept;
 bool WidePathToUtf8(
     const std::wstring& path, std::vector<std::uint8_t>& output) noexcept;
 std::wstring LocalizedHistoryLabel(const std::string& label);
+struct TreePaneNode;
+bool QueryTreeNode(AppState& state, bool plane, TreePaneNode& output) noexcept;
 bool IsVectorCanvasTool(std::uint32_t tool) noexcept;
+bool IsVectorStrokePlane(std::uint32_t kind) noexcept;
+void ClearVectorGeometryPreview(AppState& state) noexcept;
 
 void ResetM3DocumentUiState(AppState& state) noexcept {
     state.m3_layer_id = 0U;
@@ -690,9 +696,16 @@ bool RefreshSequencePane(AppState& state) noexcept {
                     cell.info.struct_size = sizeof(cell.info);
                     cell.info.name_utf8 = name.data();
                     cell.info.name_capacity = name.size();
-                    if (inkpod_core_sequence_cell_get(core, index, &cell.info)
-                        != INKPOD_STATUS_OK) {
+                    const InkpodStatus cell_status =
+                        inkpod_core_sequence_cell_get(core, index, &cell.info);
+                    if (cell_status == INKPOD_STATUS_INVALID_STATE && index == 0U) {
+                        return INKPOD_STATUS_OK;
+                    }
+                    if (cell_status == INKPOD_STATUS_INVALID_ARGUMENT) {
                         break;
+                    }
+                    if (cell_status != INKPOD_STATUS_OK) {
+                        return cell_status;
                     }
                     cell.name.assign(
                         reinterpret_cast<const char*>(name.data()),
@@ -704,13 +717,17 @@ bool RefreshSequencePane(AppState& state) noexcept {
             } catch (const std::bad_alloc&) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
-            return cells.empty() ? INKPOD_STATUS_INVALID_STATE : INKPOD_STATUS_OK;
+            return INKPOD_STATUS_OK;
         },
         false,
         false);
     SendMessageW(state.sequence_list, LB_RESETCONTENT, 0, 0);
     if (status != INKPOD_STATUS_OK) {
         return false;
+    }
+    if (cells.empty()) {
+        state.active_sequence_index = 0U;
+        return true;
     }
     InkpodDocumentInfo document{};
     QueryDocument(state, document);
@@ -4545,6 +4562,14 @@ void UpdateMenuState(AppState& state) noexcept {
     }
     InkpodDocumentInfo info{};
     const bool has_document = QueryDocument(state, info);
+    TreePaneNode active_plane{};
+    const bool vector_stroke_plane = has_document
+        && QueryTreeNode(state, true, active_plane)
+        && IsVectorStrokePlane(active_plane.kind);
+    if (!vector_stroke_plane && IsVectorCanvasTool(state.tool)) {
+        ClearVectorGeometryPreview(state);
+        state.tool = INKPOD_TOOL_PENCIL;
+    }
     EnableMenuItem(
         menu,
         IDM_FILE_SAVE,
@@ -4855,6 +4880,10 @@ void UpdateMenuState(AppState& state) noexcept {
     for (const UINT command : {
              IDM_VECTOR_LINE, IDM_VECTOR_CURVE, IDM_VECTOR_RECTANGLE,
              IDM_VECTOR_ELLIPSE, IDM_VECTOR_POLYLINE, IDM_VECTOR_ERASER}) {
+        EnableMenuItem(
+            menu,
+            command,
+            MF_BYCOMMAND | (vector_stroke_plane ? MF_ENABLED : MF_GRAYED));
         CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
     }
     const UINT vector_tool_command = state.tool == kInteractionVectorLine
@@ -5607,6 +5636,11 @@ bool IsVectorCanvasTool(std::uint32_t tool) noexcept {
     return tool >= kInteractionVectorLine && tool <= kInteractionVectorEraser;
 }
 
+bool IsVectorStrokePlane(std::uint32_t kind) noexcept {
+    return kind == INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE
+        || kind == INKPOD_TYPED_PLANE_COLOR_TRACE;
+}
+
 void ClearVectorGeometryPreview(AppState& state) noexcept {
     state.vector_gesture_samples.clear();
     if (state.canvas == nullptr) {
@@ -5840,10 +5874,22 @@ InkpodStatus FinishVectorCanvasGesture(AppState& state) noexcept {
     std::vector<InkpodVectorPoint> points;
     std::vector<InkpodVectorCubicSegment> segments;
     bool closed{};
-    if (!QueryTreeNode(state, true, plane)
-        || (plane.kind != INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE
-            && plane.kind != INKPOD_TYPED_PLANE_COLOR_TRACE)
-        || !VectorGestureDocumentPoints(state, state.vector_gesture_samples, points)) {
+    if (!QueryTreeNode(state, true, plane)) {
+        ClearVectorGeometryPreview(state);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (!IsVectorStrokePlane(plane.kind)) {
+        if (state.engine != nullptr) {
+            state.engine->SetLocalFailure(kVectorStrokePlaneRequired);
+        }
+        ClearVectorGeometryPreview(state);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (!VectorGestureDocumentPoints(state, state.vector_gesture_samples, points)) {
+        if (state.engine != nullptr) {
+            state.engine->SetLocalFailure(
+                L"ベクター描画の入力点を文書座標へ変換できませんでした。");
+        }
         ClearVectorGeometryPreview(state);
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -5868,6 +5914,10 @@ InkpodStatus FinishVectorCanvasGesture(AppState& state) noexcept {
             true);
     }
     if (!BuildVectorGestureSegments(state, points, segments, closed)) {
+        if (state.engine != nullptr) {
+            state.engine->SetLocalFailure(
+                L"ベクター描画を確定するための入力点が不足しています。");
+        }
         ClearVectorGeometryPreview(state);
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
@@ -7667,6 +7717,50 @@ int RunM1Smoke(AppState& state) noexcept {
         || MoveWindow(state.canvas, 0, 0, 640, 480, FALSE) == FALSE
         || FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
         return 30;
+    }
+    PumpPendingWindowMessages();
+    UpdateMenuState(state);
+    constexpr std::array<UINT, 6U> vector_draw_commands{
+        IDM_VECTOR_LINE,
+        IDM_VECTOR_CURVE,
+        IDM_VECTOR_RECTANGLE,
+        IDM_VECTOR_ELLIPSE,
+        IDM_VECTOR_POLYLINE,
+        IDM_VECTOR_ERASER};
+    for (const UINT command : vector_draw_commands) {
+        const UINT command_state = GetMenuState(menu, command, MF_BYCOMMAND);
+        if (command_state == static_cast<UINT>(-1)
+            || (command_state & (MF_DISABLED | MF_GRAYED)) == 0U) {
+            return 701;
+        }
+    }
+    if (!RefreshSequencePane(state)
+        || SendMessageW(state.sequence_list, LB_GETCOUNT, 0, 0) != 0) {
+        return 702;
+    }
+    InkpodSequenceCellInfo missing_sequence_cell{};
+    missing_sequence_cell.struct_size = sizeof(missing_sequence_cell);
+    const InkpodStatus missing_sequence_status = state.engine->Invoke(
+        [&missing_sequence_cell](InkpodCore* core) {
+            return inkpod_core_sequence_cell_get(core, 0U, &missing_sequence_cell);
+        },
+        false,
+        false);
+    if (missing_sequence_status != INKPOD_STATUS_INVALID_STATE
+        || state.engine->LastError().find(L"no sequence is configured")
+            == std::wstring::npos) {
+        return 703;
+    }
+    if (FinishVectorCanvasGesture(state) != INKPOD_STATUS_INVALID_STATE
+        || state.engine->LastError() != kVectorStrokePlaneRequired) {
+        return 704;
+    }
+    const std::uint32_t initial_tool = state.tool;
+    for (const UINT command : vector_draw_commands) {
+        if (SendMessageW(state.window, WM_COMMAND, command, 0) != 0
+            || state.tool != initial_tool) {
+            return 705;
+        }
     }
     const std::wstring initial_recovery_path = state.recovery_path;
     std::wstring discovered_recovery;
@@ -10010,11 +10104,28 @@ int RunM5Smoke(AppState& state) noexcept {
             0) != 1) {
         return 505;
     }
+    if (SendMessageW(
+            state.canvas,
+            inkpod::renderer::kCanvasValidateClosedVectorStroke,
+            0,
+            0) != 1) {
+        return 507;
+    }
 
     state.active_tree_layer_id = vector_layer_id;
     state.active_tree_plane_id = vector_trace_plane_id;
     if (!RefreshTreePane(state)) {
         return 506;
+    }
+    UpdateMenuState(state);
+    for (const UINT command : {
+             IDM_VECTOR_LINE, IDM_VECTOR_CURVE, IDM_VECTOR_RECTANGLE,
+             IDM_VECTOR_ELLIPSE, IDM_VECTOR_POLYLINE, IDM_VECTOR_ERASER}) {
+        const UINT command_state = GetMenuState(GetMenu(state.window), command, MF_BYCOMMAND);
+        if (command_state == static_cast<UINT>(-1)
+            || (command_state & (MF_DISABLED | MF_GRAYED)) != 0U) {
+            return 508;
+        }
     }
     inkpod::renderer::CanvasDocumentBounds canvas_bounds{};
     InkpodDocumentInfo document{};
@@ -10964,6 +11075,7 @@ LRESULT CALLBACK MainWindowProcedure(
                             }
                         }
                     }
+                    UpdateMenuState(*state);
                     return 0;
                 case IDC_MAIN_PLANE_LIST:
                     if (HIWORD(wparam) == LBN_SELCHANGE && state->plane_list != nullptr) {
@@ -10994,6 +11106,7 @@ LRESULT CALLBACK MainWindowProcedure(
                             }
                         }
                     }
+                    UpdateMenuState(*state);
                     return 0;
                 case IDC_MAIN_LT_SET_LIST:
                     if (HIWORD(wparam) == LBN_SELCHANGE
@@ -13044,6 +13157,17 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_VECTOR_POLYLINE:
                 case IDM_VECTOR_ERASER: {
                     ClearVectorGeometryPreview(*state);
+                    TreePaneNode plane{};
+                    if (!QueryTreeNode(*state, true, plane)) {
+                        return 0;
+                    }
+                    if (!IsVectorStrokePlane(plane.kind)) {
+                        if (state->engine != nullptr) {
+                            state->engine->SetLocalFailure(kVectorStrokePlaneRequired);
+                        }
+                        UpdateMenuState(*state);
+                        return 0;
+                    }
                     const UINT command = LOWORD(wparam);
                     state->tool = command == IDM_VECTOR_LINE
                         ? kInteractionVectorLine

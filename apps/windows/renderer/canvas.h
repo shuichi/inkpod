@@ -21,6 +21,7 @@ inline constexpr UINT kCanvasGetDocumentBounds = WM_APP + 0x129U;
 inline constexpr UINT kCanvasPointerMoved = WM_APP + 0x12AU;
 inline constexpr UINT kCanvasSetFloatingPreview = WM_APP + 0x12BU;
 inline constexpr UINT kCanvasSetGeometryPreview = WM_APP + 0x12CU;
+inline constexpr UINT kCanvasValidateClosedVectorStroke = WM_APP + 0x12DU;
 inline constexpr std::size_t kCanvasGeometryPreviewPoints = 128U;
 
 struct CanvasDocumentBounds {

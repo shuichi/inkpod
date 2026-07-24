@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "inkpod/core_ffi.h"
@@ -75,6 +76,7 @@ public:
 
     bool GetDocumentInfo(InkpodDocumentInfo& info) const noexcept;
     std::wstring LastError() const;
+    void SetLocalFailure(std::wstring_view message) noexcept;
     EngineMetrics Metrics() const noexcept;
     DWORD ThreadId() const noexcept;
 

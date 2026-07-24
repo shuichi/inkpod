@@ -203,6 +203,16 @@ struct CoreEngine::Impl final {
         return last_error;
     }
 
+    void StoreLocalFailure(std::wstring_view message) noexcept {
+        try {
+            std::lock_guard lock(state_mutex);
+            last_error.assign(message.data(), message.size());
+        } catch (const std::bad_alloc&) {
+            std::lock_guard lock(state_mutex);
+            last_error = L"Local error text allocation failed";
+        }
+    }
+
     EngineMetrics CopyMetrics() const noexcept {
         std::lock_guard lock(state_mutex);
         return metrics;
@@ -582,6 +592,12 @@ bool CoreEngine::GetDocumentInfo(InkpodDocumentInfo& info) const noexcept {
 
 std::wstring CoreEngine::LastError() const {
     return impl_ == nullptr ? L"Core engine is not running" : impl_->CopyLastError();
+}
+
+void CoreEngine::SetLocalFailure(std::wstring_view message) noexcept {
+    if (impl_ != nullptr) {
+        impl_->StoreLocalFailure(message);
+    }
 }
 
 EngineMetrics CoreEngine::Metrics() const noexcept {

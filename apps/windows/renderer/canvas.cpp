@@ -37,6 +37,8 @@ constexpr std::uint64_t kMaximumVectorFills = 65536U;
 constexpr std::uint64_t kMaximumVectorBoundaries = 262144U;
 constexpr std::uint64_t kMaximumOverlayLines = 8192U;
 constexpr std::size_t kMaximumPointerHistory = 256U;
+constexpr std::uint32_t kVectorSamplesPerSegment = 24U;
+constexpr float kVectorMiterLimit = 4.0F;
 
 struct CachedTile {
     std::uint64_t revision{};
@@ -314,6 +316,98 @@ public:
         return RecreateAfterDeviceLoss();
     }
 
+    HRESULT ValidateClosedVectorStrokeForSmokeTest() noexcept {
+        const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
+        for (std::uint64_t index = 0U; index < vectors_.segment_count;) {
+            const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                segment_bytes + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
+            const VectorPathSpan path{
+                segment->path_id,
+                segment->z_order,
+                segment->flags,
+                segment,
+                segment->segment_count};
+            if ((path.flags & INKPOD_SNAPSHOT_VECTOR_CLOSED) != 0U) {
+                ComPtr<ID2D1PathGeometry> geometry;
+                const HRESULT create_result = CreateStrokeGeometry(path, geometry);
+                if (FAILED(create_result)) {
+                    return create_result;
+                }
+                const auto* last = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                    reinterpret_cast<const std::byte*>(path.first)
+                    + static_cast<std::size_t>(
+                        (path.count - 1U) * vectors_.segment_stride_bytes));
+                constexpr float seam_probe_amount =
+                    (static_cast<float>(kVectorSamplesPerSegment) - 0.5F)
+                    / static_cast<float>(kVectorSamplesPerSegment);
+                BOOL contains{};
+                const HRESULT contains_result = geometry->FillContainsPoint(
+                    CubicPoint(*last, seam_probe_amount),
+                    nullptr,
+                    0.01F,
+                    &contains);
+                if (FAILED(contains_result)) {
+                    return contains_result;
+                }
+                if (contains == FALSE || path.count < 2U) {
+                    return E_FAIL;
+                }
+                const auto* next = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                    reinterpret_cast<const std::byte*>(path.first)
+                    + static_cast<std::size_t>(vectors_.segment_stride_bytes));
+                float incoming_x{};
+                float incoming_y{};
+                float outgoing_x{};
+                float outgoing_y{};
+                if (!UnitDirection(
+                        D2D1::Point2F(path.first->p2.x, path.first->p2.y),
+                        D2D1::Point2F(path.first->p3.x, path.first->p3.y),
+                        incoming_x,
+                        incoming_y)
+                    || !UnitDirection(
+                        D2D1::Point2F(next->p0.x, next->p0.y),
+                        D2D1::Point2F(next->p1.x, next->p1.y),
+                        outgoing_x,
+                        outgoing_y)) {
+                    return E_FAIL;
+                }
+                float miter_x = -incoming_y - outgoing_y;
+                float miter_y = incoming_x + outgoing_x;
+                const float miter_length = std::hypot(miter_x, miter_y);
+                if (miter_length <= 0.000001F) {
+                    return E_FAIL;
+                }
+                miter_x /= miter_length;
+                miter_y /= miter_length;
+                const float denominator =
+                    miter_x * -outgoing_y + miter_y * outgoing_x;
+                const float half_width = path.first->width_end * 0.5F;
+                if (denominator <= 0.000001F || half_width <= 0.0F) {
+                    return E_FAIL;
+                }
+                const float corrected_miter = half_width / denominator;
+                if (corrected_miter <= half_width
+                    || corrected_miter > half_width * kVectorMiterLimit) {
+                    return E_FAIL;
+                }
+                const float corner_probe_distance =
+                    (half_width + corrected_miter) * 0.5F;
+                const D2D1_POINT_2F corner_probe = D2D1::Point2F(
+                    path.first->p3.x + miter_x * corner_probe_distance,
+                    path.first->p3.y + miter_y * corner_probe_distance);
+                contains = FALSE;
+                const HRESULT corner_result = geometry->FillContainsPoint(
+                    corner_probe, nullptr, 0.01F, &contains);
+                if (FAILED(corner_result)) {
+                    return corner_result;
+                }
+                return contains != FALSE ? S_OK : E_FAIL;
+            }
+            index += path.count;
+        }
+        return E_INVALIDARG;
+    }
+
     CanvasDocumentBounds DocumentBounds() const noexcept {
         const double left = transform_.pan_x;
         const double top = transform_.pan_y;
@@ -527,6 +621,22 @@ private:
         return segment.width_start + (segment.width_end - segment.width_start) * amount;
     }
 
+    static bool UnitDirection(
+        D2D1_POINT_2F start,
+        D2D1_POINT_2F end,
+        float& x,
+        float& y) noexcept {
+        x = end.x - start.x;
+        y = end.y - start.y;
+        const float length = std::hypot(x, y);
+        if (length <= 0.000001F) {
+            return false;
+        }
+        x /= length;
+        y /= length;
+        return true;
+    }
+
     HRESULT DrawFillGeometry(
         const InkpodSnapshotVectorFill& fill,
         const std::unordered_map<std::uint64_t, VectorPathSpan>& paths,
@@ -576,26 +686,27 @@ private:
         return S_OK;
     }
 
-    HRESULT DrawStrokeGeometry(
+    HRESULT CreateStrokeGeometry(
         const VectorPathSpan& path,
-        ID2D1SolidColorBrush* brush) noexcept {
-        constexpr std::uint32_t samples_per_segment = 24U;
+        ComPtr<ID2D1PathGeometry>& geometry) noexcept {
         try {
             std::vector<D2D1_POINT_2F> centers;
             std::vector<float> widths;
-            centers.reserve(static_cast<std::size_t>(path.count) * samples_per_segment + 1U);
+            centers.reserve(
+                static_cast<std::size_t>(path.count) * kVectorSamplesPerSegment + 1U);
             widths.reserve(centers.capacity());
             for (std::uint32_t segment_index = 0; segment_index < path.count;
                  ++segment_index) {
                 const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
                     reinterpret_cast<const std::byte*>(path.first)
                     + static_cast<std::size_t>(segment_index * vectors_.segment_stride_bytes));
-                for (std::uint32_t sample = 0U; sample <= samples_per_segment; ++sample) {
+                for (std::uint32_t sample = 0U; sample <= kVectorSamplesPerSegment;
+                     ++sample) {
                     if (segment_index != 0U && sample == 0U) {
                         continue;
                     }
                     const float amount = static_cast<float>(sample)
-                        / static_cast<float>(samples_per_segment);
+                        / static_cast<float>(kVectorSamplesPerSegment);
                     centers.push_back(CubicPoint(*segment, amount));
                     widths.push_back(CubicWidth(*segment, amount));
                 }
@@ -610,8 +721,10 @@ private:
             if (centers.size() < 2U) {
                 return E_INVALIDARG;
             }
-            std::vector<D2D1_POINT_2F> left(centers.size());
-            std::vector<D2D1_POINT_2F> right(centers.size());
+            std::vector<D2D1_POINT_2F> left;
+            std::vector<D2D1_POINT_2F> right;
+            left.reserve(centers.size() * 2U);
+            right.reserve(centers.size() * 2U);
             for (std::size_t index = 0; index < centers.size(); ++index) {
                 const std::size_t previous = index == 0U
                     ? (closed ? centers.size() - 1U : 0U)
@@ -619,25 +732,71 @@ private:
                 const std::size_t next = index + 1U == centers.size()
                     ? (closed ? 0U : centers.size() - 1U)
                     : index + 1U;
-                float tangent_x = centers[next].x - centers[previous].x;
-                float tangent_y = centers[next].y - centers[previous].y;
-                const float length = std::hypot(tangent_x, tangent_y);
-                if (length <= 0.000001F) {
-                    tangent_x = 1.0F;
-                    tangent_y = 0.0F;
-                } else {
-                    tangent_x /= length;
-                    tangent_y /= length;
+                float incoming_x{};
+                float incoming_y{};
+                float outgoing_x{};
+                float outgoing_y{};
+                const bool has_incoming = (closed || index != 0U)
+                    && UnitDirection(
+                        centers[previous], centers[index], incoming_x, incoming_y);
+                const bool has_outgoing = (closed || index + 1U != centers.size())
+                    && UnitDirection(
+                        centers[index], centers[next], outgoing_x, outgoing_y);
+                if (!has_incoming && !has_outgoing) {
+                    incoming_x = 1.0F;
+                    incoming_y = 0.0F;
+                    outgoing_x = incoming_x;
+                    outgoing_y = incoming_y;
+                } else if (!has_incoming) {
+                    incoming_x = outgoing_x;
+                    incoming_y = outgoing_y;
+                } else if (!has_outgoing) {
+                    outgoing_x = incoming_x;
+                    outgoing_y = incoming_y;
                 }
                 const float half_width = widths[index] * 0.5F;
-                const float normal_x = -tangent_y * half_width;
-                const float normal_y = tangent_x * half_width;
-                left[index] = D2D1::Point2F(
-                    centers[index].x + normal_x, centers[index].y + normal_y);
-                right[index] = D2D1::Point2F(
-                    centers[index].x - normal_x, centers[index].y - normal_y);
+                const float incoming_normal_x = -incoming_y;
+                const float incoming_normal_y = incoming_x;
+                const float outgoing_normal_x = -outgoing_y;
+                const float outgoing_normal_y = outgoing_x;
+                float miter_x = incoming_normal_x + outgoing_normal_x;
+                float miter_y = incoming_normal_y + outgoing_normal_y;
+                const float miter_vector_length = std::hypot(miter_x, miter_y);
+                if (miter_vector_length > 0.000001F) {
+                    miter_x /= miter_vector_length;
+                    miter_y /= miter_vector_length;
+                    const float denominator =
+                        miter_x * outgoing_normal_x + miter_y * outgoing_normal_y;
+                    if (denominator > 0.000001F) {
+                        const float miter_length = half_width / denominator;
+                        if (miter_length <= half_width * kVectorMiterLimit) {
+                            left.push_back(D2D1::Point2F(
+                                centers[index].x + miter_x * miter_length,
+                                centers[index].y + miter_y * miter_length));
+                            right.push_back(D2D1::Point2F(
+                                centers[index].x - miter_x * miter_length,
+                                centers[index].y - miter_y * miter_length));
+                            continue;
+                        }
+                    }
+                }
+                left.push_back(D2D1::Point2F(
+                    centers[index].x + incoming_normal_x * half_width,
+                    centers[index].y + incoming_normal_y * half_width));
+                right.push_back(D2D1::Point2F(
+                    centers[index].x - incoming_normal_x * half_width,
+                    centers[index].y - incoming_normal_y * half_width));
+                if (incoming_normal_x != outgoing_normal_x
+                    || incoming_normal_y != outgoing_normal_y) {
+                    left.push_back(D2D1::Point2F(
+                        centers[index].x + outgoing_normal_x * half_width,
+                        centers[index].y + outgoing_normal_y * half_width));
+                    right.push_back(D2D1::Point2F(
+                        centers[index].x - outgoing_normal_x * half_width,
+                        centers[index].y - outgoing_normal_y * half_width));
+                }
             }
-            ComPtr<ID2D1PathGeometry> geometry;
+            geometry.Reset();
             HRESULT result = d2d_factory_->CreatePathGeometry(&geometry);
             if (FAILED(result)) {
                 return result;
@@ -647,22 +806,46 @@ private:
             if (FAILED(result)) {
                 return result;
             }
-            sink->BeginFigure(left.front(), D2D1_FIGURE_BEGIN_FILLED);
-            sink->AddLines(left.data() + 1U, static_cast<UINT32>(left.size() - 1U));
-            for (auto iterator = right.rbegin(); iterator != right.rend(); ++iterator) {
-                sink->AddLine(*iterator);
+            sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
+            if (closed) {
+                sink->BeginFigure(left.front(), D2D1_FIGURE_BEGIN_FILLED);
+                sink->AddLines(
+                    left.data() + 1U, static_cast<UINT32>(left.size() - 1U));
+                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                sink->BeginFigure(right.front(), D2D1_FIGURE_BEGIN_FILLED);
+                sink->AddLines(
+                    right.data() + 1U, static_cast<UINT32>(right.size() - 1U));
+                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+            } else {
+                sink->BeginFigure(left.front(), D2D1_FIGURE_BEGIN_FILLED);
+                sink->AddLines(
+                    left.data() + 1U, static_cast<UINT32>(left.size() - 1U));
+                for (auto iterator = right.rbegin(); iterator != right.rend(); ++iterator) {
+                    sink->AddLine(*iterator);
+                }
+                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
             }
-            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
             result = sink->Close();
             if (FAILED(result)) {
                 return result;
             }
-            brush->SetColor(VectorColor(path.first->color_rgba));
-            d2d_context_->FillGeometry(geometry.Get(), brush);
             return S_OK;
         } catch (const std::bad_alloc&) {
             return E_OUTOFMEMORY;
         }
+    }
+
+    HRESULT DrawStrokeGeometry(
+        const VectorPathSpan& path,
+        ID2D1SolidColorBrush* brush) noexcept {
+        ComPtr<ID2D1PathGeometry> geometry;
+        const HRESULT result = CreateStrokeGeometry(path, geometry);
+        if (FAILED(result)) {
+            return result;
+        }
+        brush->SetColor(VectorColor(path.first->color_rgba));
+        d2d_context_->FillGeometry(geometry.Get(), brush);
+        return S_OK;
     }
 
     HRESULT DrawVectors() noexcept {
@@ -1273,6 +1456,7 @@ enum class RenderControlKind {
     Render,
     DpiChanged,
     SimulateDeviceLoss,
+    ValidateClosedVectorStroke,
     GetDocumentBounds,
     SetFloatingPreview,
     SetGeometryPreview,
@@ -1491,6 +1675,9 @@ private:
                         case RenderControlKind::SimulateDeviceLoss:
                             control_result = renderer.SimulateDeviceLossForSmokeTest();
                             render = SUCCEEDED(control_result);
+                            break;
+                        case RenderControlKind::ValidateClosedVectorStroke:
+                            control_result = renderer.ValidateClosedVectorStrokeForSmokeTest();
                             break;
                         case RenderControlKind::GetDocumentBounds:
                             if (control.out_bounds == nullptr) {
@@ -1922,6 +2109,12 @@ LRESULT CALLBACK CanvasWindowProcedure(
             return host != nullptr
                     && SUCCEEDED(
                         host->Renderer().Invoke(RenderControlKind::SimulateDeviceLoss))
+                ? 1
+                : 0;
+        case kCanvasValidateClosedVectorStroke:
+            return host != nullptr
+                    && SUCCEEDED(host->Renderer().Invoke(
+                        RenderControlKind::ValidateClosedVectorStroke))
                 ? 1
                 : 0;
         case kCanvasGetRendererThreadId:
