@@ -1,0 +1,532 @@
+use super::*;
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_graph_create(
+    input: *const InkpodBatchGraphInput,
+    out_graph: *mut *mut InkpodBatchGraph,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if out_graph.is_null() || !is_aligned(out_graph) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch graph owner pointer is null or misaligned",
+            );
+        }
+        // SAFETY: Caller supplies readable/writable owner storage.
+        if !unsafe { out_graph.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "batch graph output already owns a handle",
+            );
+        }
+        let graph = match unsafe { parse_graph_input(input) } {
+            Ok(graph) => graph,
+            Err(status) => return status,
+        };
+        if let Err(error) = graph.validate() {
+            return map_core_error(error);
+        }
+        // SAFETY: A unique Rust owner is transferred to caller storage.
+        unsafe { out_graph.write(Box::into_raw(Box::new(InkpodBatchGraph { graph }))) };
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_graph_load(
+    path_utf8: *const u8,
+    path_bytes: u64,
+    out_graph: *mut *mut InkpodBatchGraph,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if out_graph.is_null() || !is_aligned(out_graph) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch graph owner pointer is null or misaligned",
+            );
+        }
+        if !unsafe { out_graph.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "batch graph output already owns a handle",
+            );
+        }
+        let path = match unsafe { path_from_utf8(path_utf8, path_bytes) } {
+            Ok(path) => path,
+            Err(status) => return status,
+        };
+        match BatchGraph::load(path) {
+            Ok(graph) => {
+                unsafe { out_graph.write(Box::into_raw(Box::new(InkpodBatchGraph { graph }))) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_graph_save(
+    graph: *const InkpodBatchGraph,
+    path_utf8: *const u8,
+    path_bytes: u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if graph.is_null() || !is_aligned(graph) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch graph is null or misaligned",
+            );
+        }
+        let path = match unsafe { path_from_utf8(path_utf8, path_bytes) } {
+            Ok(path) => path,
+            Err(status) => return status,
+        };
+        match unsafe { &*graph }.graph.save(path) {
+            Ok(()) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_graph_get_info(
+    graph: *const InkpodBatchGraph,
+    out_info: *mut InkpodBatchGraphInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if graph.is_null() || !is_aligned(graph) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch graph is null or misaligned",
+            );
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodBatchGraphInfo") }
+        {
+            return status;
+        }
+        let graph = &unsafe { &*graph }.graph;
+        let output = unsafe { &mut *out_info };
+        output.version = graph.version;
+        output.input_count = graph.inputs.len() as u64;
+        output.operation_count = graph.operations.len() as u64;
+        output.output_policy = output_policy_value(graph.output.policy);
+        output.failure_policy = failure_policy_value(graph.output.failure_policy);
+        output.output_flags = output_flags(&graph.output);
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_graph_release(graph: *mut *mut InkpodBatchGraph) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if graph.is_null() || !is_aligned(graph) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch graph owner pointer is null or misaligned",
+            );
+        }
+        let handle = unsafe { graph.read() };
+        if handle.is_null() {
+            return INKPOD_STATUS_OK;
+        }
+        if !is_aligned(handle) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch graph handle is misaligned",
+            );
+        }
+        unsafe { graph.write(ptr::null_mut()) };
+        drop(unsafe { Box::from_raw(handle) });
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_batch_preview(
+    core: *mut InkpodCore,
+    graph: *const InkpodBatchGraph,
+    run_scope: u32,
+    out_preview: *mut *mut InkpodBatchPreview,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || graph.is_null()
+            || !is_aligned(graph)
+            || out_preview.is_null()
+            || !is_aligned(out_preview)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch preview handle pointer is null or misaligned",
+            );
+        }
+        if !unsafe { out_preview.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "batch preview output already owns a handle",
+            );
+        }
+        let core = unsafe { &mut *core };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let scope = match scope(run_scope) {
+            Ok(scope) => scope,
+            Err(status) => return status,
+        };
+        match core.core.batch_preview(&unsafe { &*graph }.graph, scope) {
+            Ok(preview) => {
+                let items = preview
+                    .items
+                    .into_iter()
+                    .map(|item| OwnedPreviewItem {
+                        input_name: item.input_name.into_bytes().into_boxed_slice(),
+                        output_path: bytes_for_path(item.output_path),
+                        warning: item.warnings.join("\n").into_bytes().into_boxed_slice(),
+                    })
+                    .collect();
+                unsafe { out_preview.write(Box::into_raw(Box::new(InkpodBatchPreview { items }))) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_preview_count(
+    preview: *const InkpodBatchPreview,
+    out_count: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if preview.is_null()
+            || !is_aligned(preview)
+            || out_count.is_null()
+            || !is_aligned(out_count)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch preview or count pointer is null or misaligned",
+            );
+        }
+        unsafe { out_count.write((&*preview).items.len() as u64) };
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_preview_get(
+    preview: *const InkpodBatchPreview,
+    index: u64,
+    out_item: *mut InkpodBatchPreviewItem,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if preview.is_null() || !is_aligned(preview) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch preview is null or misaligned",
+            );
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_item.cast_const(), "InkpodBatchPreviewItem") }
+        {
+            return status;
+        }
+        let Ok(index) = usize::try_from(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch preview index is not representable",
+            );
+        };
+        let Some(item) = unsafe { &*preview }.items.get(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch preview index is outside bounds",
+            );
+        };
+        let output = unsafe { &mut *out_item };
+        output.flags = if item.warning.is_empty() {
+            0
+        } else {
+            INKPOD_BATCH_PREVIEW_HAS_WARNING
+        };
+        output.input_name = item.input_name.as_ptr();
+        output.input_name_bytes = item.input_name.len() as u64;
+        output.output_path = item.output_path.as_ptr();
+        output.output_path_bytes = item.output_path.len() as u64;
+        output.warning = item.warning.as_ptr();
+        output.warning_bytes = item.warning.len() as u64;
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_preview_release(
+    preview: *mut *mut InkpodBatchPreview,
+) -> u32 {
+    // SAFETY: Forwarded from this exported ownership contract.
+    unsafe { release_preview(preview) }
+}
+
+unsafe fn release_preview(preview: *mut *mut InkpodBatchPreview) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if preview.is_null() || !is_aligned(preview) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch preview owner pointer is null or misaligned",
+            );
+        }
+        let handle = unsafe { preview.read() };
+        if handle.is_null() {
+            return INKPOD_STATUS_OK;
+        }
+        if !is_aligned(handle) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch preview handle is misaligned",
+            );
+        }
+        unsafe { preview.write(ptr::null_mut()) };
+        drop(unsafe { Box::from_raw(handle) });
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_batch_execute(
+    core: *mut InkpodCore,
+    graph: *const InkpodBatchGraph,
+    run_scope: u32,
+    flags: u64,
+    task: *mut InkpodTask,
+    out_report: *mut *mut InkpodBatchReport,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || graph.is_null()
+            || !is_aligned(graph)
+            || task.is_null()
+            || !is_aligned(task)
+            || out_report.is_null()
+            || !is_aligned(out_report)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch execute handle pointer is null or misaligned",
+            );
+        }
+        if flags & !(INKPOD_BATCH_RUN_DRY | INKPOD_BATCH_RUN_PREVIEW_CONFIRMED) != 0 {
+            return fail(INKPOD_STATUS_UNSUPPORTED, "batch run flags are unsupported");
+        }
+        if !unsafe { out_report.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "batch report output already owns a handle",
+            );
+        }
+        let core = unsafe { &mut *core };
+        let task = unsafe { &*task };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let scope = match scope(run_scope) {
+            Ok(scope) => scope,
+            Err(status) => return status,
+        };
+        if !task.begin() {
+            return fail(INKPOD_STATUS_INVALID_STATE, "batch task is not READY");
+        }
+        let result = core.core.batch_execute(
+            &unsafe { &*graph }.graph,
+            BatchRunOptions {
+                scope,
+                dry_run: flags & INKPOD_BATCH_RUN_DRY != 0,
+                preview_confirmed: flags & INKPOD_BATCH_RUN_PREVIEW_CONFIRMED != 0,
+            },
+            |completed, total| task.progress(completed, total),
+        );
+        match result {
+            Ok(report) => {
+                let cancelled = report.cancelled;
+                let items = report
+                    .items
+                    .into_iter()
+                    .map(|item| OwnedReportItem {
+                        outcome: match item.outcome {
+                            BatchItemOutcome::Succeeded => INKPOD_BATCH_ITEM_SUCCEEDED,
+                            BatchItemOutcome::Skipped => INKPOD_BATCH_ITEM_SKIPPED,
+                            BatchItemOutcome::Failed => INKPOD_BATCH_ITEM_FAILED,
+                            BatchItemOutcome::Cancelled => INKPOD_BATCH_ITEM_CANCELLED,
+                            BatchItemOutcome::DryRun => INKPOD_BATCH_ITEM_DRY_RUN,
+                        },
+                        input_name: item.input_name.into_bytes().into_boxed_slice(),
+                        output_path: bytes_for_path(item.output_path),
+                        message: item.message.into_bytes().into_boxed_slice(),
+                    })
+                    .collect();
+                unsafe {
+                    out_report.write(Box::into_raw(Box::new(InkpodBatchReport {
+                        items,
+                        cancelled,
+                    })))
+                };
+                let status = if cancelled {
+                    INKPOD_STATUS_CANCELLED
+                } else {
+                    INKPOD_STATUS_OK
+                };
+                task.finish(status);
+                status
+            }
+            Err(error) => {
+                let status = map_core_error(error);
+                task.finish(status);
+                status
+            }
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_report_get_info(
+    report: *const InkpodBatchReport,
+    out_info: *mut InkpodBatchReportInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if report.is_null() || !is_aligned(report) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch report is null or misaligned",
+            );
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodBatchReportInfo") }
+        {
+            return status;
+        }
+        let report = unsafe { &*report };
+        let output = unsafe { &mut *out_info };
+        output.cancelled = u32::from(report.cancelled);
+        output.item_count = report.items.len() as u64;
+        output.failure_count = report
+            .items
+            .iter()
+            .filter(|item| item.outcome == INKPOD_BATCH_ITEM_FAILED)
+            .count() as u64;
+        output.reserved = 0;
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_report_get(
+    report: *const InkpodBatchReport,
+    index: u64,
+    out_item: *mut InkpodBatchReportItem,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if report.is_null() || !is_aligned(report) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch report is null or misaligned",
+            );
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_item.cast_const(), "InkpodBatchReportItem") }
+        {
+            return status;
+        }
+        let Ok(index) = usize::try_from(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch report index is not representable",
+            );
+        };
+        let Some(item) = unsafe { &*report }.items.get(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch report index is outside bounds",
+            );
+        };
+        let output = unsafe { &mut *out_item };
+        output.outcome = item.outcome;
+        output.input_name = item.input_name.as_ptr();
+        output.input_name_bytes = item.input_name.len() as u64;
+        output.output_path = item.output_path.as_ptr();
+        output.output_path_bytes = item.output_path.len() as u64;
+        output.message = item.message.as_ptr();
+        output.message_bytes = item.message.len() as u64;
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_report_release(report: *mut *mut InkpodBatchReport) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if report.is_null() || !is_aligned(report) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch report owner pointer is null or misaligned",
+            );
+        }
+        let handle = unsafe { report.read() };
+        if handle.is_null() {
+            return INKPOD_STATUS_OK;
+        }
+        if !is_aligned(handle) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch report handle is misaligned",
+            );
+        }
+        unsafe { report.write(ptr::null_mut()) };
+        drop(unsafe { Box::from_raw(handle) });
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_task_create(out_task: *mut *mut InkpodTask) -> u32 {
+    // SAFETY: This is the same thread-safe task layout and ownership contract.
+    unsafe { inkpod_task_create(out_task) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_task_query(
+    task: *const InkpodTask,
+    out_info: *mut InkpodTaskInfo,
+) -> u32 {
+    // SAFETY: This is the same thread-safe task layout and query contract.
+    unsafe { inkpod_task_query(task, out_info) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_task_cancel(task: *mut InkpodTask) -> u32 {
+    // SAFETY: This is the same thread-safe task layout and cancellation contract.
+    unsafe { inkpod_task_cancel(task) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_task_release(task: *mut *mut InkpodTask) -> u32 {
+    // SAFETY: This is the same thread-safe task layout and ownership contract.
+    unsafe { inkpod_task_release(task) }
+}

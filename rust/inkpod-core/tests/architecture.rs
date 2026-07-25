@@ -104,7 +104,130 @@ fn arch_002_rust_domain_crates_do_not_reference_windows_apis() {
 }
 
 #[test]
-fn m8_acceptance_rust_workspace_has_zero_windows_imports() {
+fn rust_crate_roots_remain_small_indices_and_tests_stay_out_of_src() {
+    let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("core crate must be below the Rust workspace directory");
+    for crate_name in ["inkpod-core", "inkpod-image", "inkpod-format", "inkpod-ffi"] {
+        let crate_root = rust_root.join(crate_name);
+        let source_root = crate_root.join("src");
+        let library_path = source_root.join("lib.rs");
+        let library = fs::read_to_string(&library_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", library_path.display()));
+        assert!(
+            library.lines().count() <= 200,
+            "{} must remain a small module/re-export index",
+            library_path.display()
+        );
+
+        let mut production_sources = Vec::new();
+        collect_rust_sources(&source_root, &mut production_sources);
+        for source in production_sources {
+            let contents = fs::read_to_string(&source)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
+            for inline_test_token in ["#[test]", "mod tests {"] {
+                assert!(
+                    !contents.contains(inline_test_token),
+                    "{} contains inline test code; tests belong below {}/tests",
+                    source.display(),
+                    crate_root.display()
+                );
+            }
+        }
+    }
+
+    let repository_root = rust_root
+        .parent()
+        .expect("Rust workspace must be below the repository root");
+    let cmake_path = repository_root.join("CMakeLists.txt");
+    let cmake = fs::read_to_string(&cmake_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", cmake_path.display()));
+    assert!(
+        cmake.contains("file(GLOB_RECURSE INKPOD_RUST_SOURCE_INPUTS CONFIGURE_DEPENDS"),
+        "{} must recursively track Rust production sources",
+        cmake_path.display()
+    );
+    for crate_name in ["inkpod-core", "inkpod-image", "inkpod-format", "inkpod-ffi"] {
+        let expected = format!("rust/{crate_name}/src/*.rs");
+        assert!(
+            cmake.contains(&expected),
+            "{} does not recursively track {expected}",
+            cmake_path.display()
+        );
+    }
+}
+
+#[test]
+fn public_rust_and_c_ffi_sources_do_not_expose_milestone_names() {
+    let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("core crate must be below the Rust workspace directory");
+
+    for crate_name in ["inkpod-core", "inkpod-image", "inkpod-format", "inkpod-ffi"] {
+        let mut sources = Vec::new();
+        collect_rust_sources(&rust_root.join(crate_name).join("src"), &mut sources);
+        for source in sources {
+            let file_name = source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("Rust source file name must be UTF-8");
+            let contents = fs::read_to_string(&source)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
+            for milestone in 0..=9 {
+                for forbidden_file_name in [
+                    format!("m{milestone}.rs"),
+                    format!("native_m{milestone}.rs"),
+                ] {
+                    assert_ne!(
+                        file_name,
+                        forbidden_file_name,
+                        "{} exposes a milestone as a production module name",
+                        source.display()
+                    );
+                }
+                for forbidden_identifier in [
+                    format!("pub struct FileM{milestone}"),
+                    format!("pub enum FileM{milestone}"),
+                    format!("pub type FileM{milestone}"),
+                    format!("pub struct InkpodM{milestone}"),
+                    format!("pub type InkpodM{milestone}"),
+                    format!("pub const INKPOD_M{milestone}"),
+                    format!("fn inkpod_m{milestone}"),
+                    format!("mod m{milestone};"),
+                ] {
+                    assert!(
+                        !contents.contains(&forbidden_identifier),
+                        "{} exposes milestone identifier {forbidden_identifier}",
+                        source.display()
+                    );
+                }
+            }
+        }
+    }
+
+    let repository_root = rust_root
+        .parent()
+        .expect("Rust workspace must be below the repository root");
+    let header_path = repository_root.join("include/inkpod/core_ffi.h");
+    let header = fs::read_to_string(&header_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", header_path.display()));
+    for milestone in 0..=9 {
+        for forbidden_identifier in [
+            format!("InkpodM{milestone}"),
+            format!("INKPOD_M{milestone}"),
+            format!("inkpod_m{milestone}"),
+        ] {
+            assert!(
+                !header.contains(&forbidden_identifier),
+                "{} exposes milestone identifier {forbidden_identifier}",
+                header_path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn acceptance_rust_workspace_has_zero_windows_imports() {
     let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("core crate must be below the Rust workspace directory");
@@ -231,7 +354,7 @@ fn m8_acceptance_rust_workspace_has_zero_windows_imports() {
 }
 
 #[test]
-fn m8_acceptance_unverified_legacy_codecs_remain_unknown() {
+fn acceptance_unverified_legacy_codecs_remain_unknown() {
     let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)

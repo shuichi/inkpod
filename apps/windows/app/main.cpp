@@ -211,7 +211,7 @@ struct AppState {
     std::uint64_t m6_adjustment_id{};
     bool m6_adjustment_visible{true};
     std::vector<M6AdjustmentUiState> m6_adjustments;
-    InkpodM6Task* m6_task{};
+    InkpodTask* m6_task{};
     HWND m6_progress{};
     bool m6_preview_prompt{};
     bool alpha_view{};
@@ -2618,9 +2618,9 @@ INT_PTR CALLBACK M6ProgressDialogProcedure(
             return TRUE;
         case WM_TIMER:
             if (state != nullptr && wparam == kM6ProgressTimer && state->m6_task != nullptr) {
-                InkpodM6TaskInfo info{};
+                InkpodTaskInfo info{};
                 info.struct_size = sizeof(info);
-                if (inkpod_m6_task_query(state->m6_task, &info) == INKPOD_STATUS_OK) {
+                if (inkpod_task_query(state->m6_task, &info) == INKPOD_STATUS_OK) {
                     const std::uint64_t value = info.total_work == 0U
                         ? 0U
                         : std::min<std::uint64_t>(
@@ -2641,7 +2641,7 @@ INT_PTR CALLBACK M6ProgressDialogProcedure(
             break;
         case WM_COMMAND:
             if (LOWORD(wparam) == IDCANCEL && state != nullptr && state->m6_task != nullptr) {
-                inkpod_m6_task_cancel(state->m6_task);
+                inkpod_task_cancel(state->m6_task);
                 EnableWindow(GetDlgItem(dialog, IDCANCEL), FALSE);
                 SetDlgItemTextW(dialog, IDC_M6_PROGRESS_TEXT, L"キャンセル中...");
                 return TRUE;
@@ -2649,7 +2649,7 @@ INT_PTR CALLBACK M6ProgressDialogProcedure(
             break;
         case WM_CLOSE:
             if (state != nullptr && state->m6_task != nullptr) {
-                inkpod_m6_task_cancel(state->m6_task);
+                inkpod_task_cancel(state->m6_task);
             }
             return TRUE;
         case WM_NCDESTROY:
@@ -2680,7 +2680,7 @@ INT_PTR CALLBACK BatchProgressDialogProcedure(
         case WM_TIMER:
             if (state != nullptr && wparam == kM6ProgressTimer
                 && state->batch_task != nullptr) {
-                InkpodM6TaskInfo info{};
+                InkpodTaskInfo info{};
                 info.struct_size = sizeof(info);
                 if (inkpod_batch_task_query(state->batch_task, &info) == INKPOD_STATUS_OK) {
                     const std::uint64_t value = info.total_work == 0U
@@ -4082,12 +4082,12 @@ bool FormatCurvePoints(
 InkpodStatus StartM6Task(
     AppState& state,
     bool preview_prompt,
-    std::function<InkpodStatus(InkpodCore*, InkpodM6Task*)> operation) noexcept {
+    std::function<InkpodStatus(InkpodCore*, InkpodTask*)> operation) noexcept {
     if (state.engine == nullptr || state.m6_task != nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    InkpodM6Task* task{};
-    InkpodStatus status = inkpod_m6_task_create(&task);
+    InkpodTask* task{};
+    InkpodStatus status = inkpod_task_create(&task);
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
@@ -4108,7 +4108,7 @@ InkpodStatus StartM6Task(
                 true,
                 true);
         }
-        inkpod_m6_task_release(&task);
+        inkpod_task_release(&task);
         return status;
     }
     state.m6_task = task;
@@ -4120,7 +4120,7 @@ InkpodStatus StartM6Task(
         M6ProgressDialogProcedure,
         reinterpret_cast<LPARAM>(&state));
     if (state.m6_progress == nullptr) {
-        inkpod_m6_task_release(&state.m6_task);
+        inkpod_task_release(&state.m6_task);
         return INKPOD_STATUS_INVALID_STATE;
     }
     ShowWindow(state.m6_progress, SW_SHOW);
@@ -4137,7 +4137,7 @@ InkpodStatus StartM6Task(
             })) {
         DestroyWindow(state.m6_progress);
         state.m6_progress = nullptr;
-        inkpod_m6_task_release(&state.m6_task);
+        inkpod_task_release(&state.m6_task);
         state.m6_preview_prompt = false;
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -4234,7 +4234,7 @@ InkpodStatus QueueM6Filter(AppState& state, M6FilterJob job) noexcept {
     return StartM6Task(
         state,
         job.preview,
-        [job = std::move(job)](InkpodCore* core, InkpodM6Task* task) {
+        [job = std::move(job)](InkpodCore* core, InkpodTask* task) {
             const InkpodFilterInput input = M6FilterInputFor(job);
             InkpodFilterPreviewInfo preview{};
             preview.struct_size = sizeof(preview);
@@ -4856,7 +4856,7 @@ InkpodStatus QueueM6Dust(
         state,
         preview,
         [samples = std::move(samples), options, plane_id, preview](
-            InkpodCore* core, InkpodM6Task* task) {
+            InkpodCore* core, InkpodTask* task) {
             InkpodDustInput input{};
             input.struct_size = sizeof(input);
             input.mode = options.mode;
@@ -11691,7 +11691,7 @@ InkpodStatus ShutdownCore(AppState& state) noexcept {
     const InkpodStatus clipboard_status =
         inkpod_clipboard_release(&state.clipboard);
     if (state.m6_task != nullptr) {
-        inkpod_m6_task_cancel(state.m6_task);
+        inkpod_task_cancel(state.m6_task);
     }
     if (state.batch_task != nullptr) {
         inkpod_batch_task_cancel(state.batch_task);
@@ -11712,7 +11712,7 @@ InkpodStatus ShutdownCore(AppState& state) noexcept {
         DestroyWindow(state.batch_palette);
         state.batch_palette = nullptr;
     }
-    const InkpodStatus task_status = inkpod_m6_task_release(&state.m6_task);
+    const InkpodStatus task_status = inkpod_task_release(&state.m6_task);
     const InkpodStatus batch_task_status = inkpod_batch_task_release(&state.batch_task);
     const InkpodStatus preview_status = inkpod_batch_preview_release(&state.batch_preview);
     const InkpodStatus report_status = inkpod_batch_report_release(&state.batch_report);
@@ -13264,7 +13264,7 @@ LRESULT CALLBACK MainWindowProcedure(
                               *state,
                               false,
                               [plane_id = document.color_plane_id](
-                                  InkpodCore* core, InkpodM6Task* task) {
+                                  InkpodCore* core, InkpodTask* task) {
                                   InkpodDispatchResult result{};
                                   result.struct_size = sizeof(result);
                                   return inkpod_core_filter_apply_last_task(
@@ -15993,7 +15993,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     DestroyWindow(state->m6_progress);
                     state->m6_progress = nullptr;
                 }
-                inkpod_m6_task_release(&state->m6_task);
+                inkpod_task_release(&state->m6_task);
                 if (status == INKPOD_STATUS_OK && prompt && state->engine != nullptr) {
                     const int choice = MessageBoxW(
                         window,
@@ -16080,7 +16080,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 return 0;
             }
             if (state != nullptr && state->m6_task != nullptr) {
-                inkpod_m6_task_cancel(state->m6_task);
+                inkpod_task_cancel(state->m6_task);
             }
             if (state != nullptr && state->batch_task != nullptr) {
                 inkpod_batch_task_cancel(state->batch_task);

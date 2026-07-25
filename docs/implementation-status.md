@@ -102,11 +102,11 @@
 | BATCH-002 | Verified | Core and native Batch UI expose color replacement/swap, continuous fill seeds, separation, visibility, four vector line-width modes, all M6 filters, boundary airbrush, dust removal, mirror, 90-degree rotation, resize/DPI, and plane conversion with stable target/missing policy | Complete operation/filter versioned round-trip, Core operation/transaction tests, six named M7 acceptance tests, C ABI nested-record validation, and Windows add/edit/reorder/remove/swap/boundary dry-run smoke | Boundary airbrush starts with the required two colors; operations use documented Inkpod semantics; no proprietary legacy batch preset layout is inferred |
 | BATCH-003 | Verified | Preview resolves natural-order inputs/output names and seed warnings; current scope matches the open file/UUID; dry-run, current/all execution, atomic per-file save, continue/stop failure reports, progress, cancellable waits, and thread-safe cancel run on the Core engine worker | Named M7 acceptance 6/6; current-file/wait-cancel regressions; FFI dry-run/report/cancel tests; final Release and reviewed Debug ABI/real Windows palette preview/dry-run/output smoke | Default Duplicate policy cannot overwrite input; overwrite requires the explicit policy |
 | M0 Windows shell (Help/About) | Verified | Japanese Help command, reference-DPI-normalized owned modal About, reference-matched spacing, 15/9-point fonts with a 40 px reference-height name label, exact-size generated PNG icon, shorter description, copyright, and CMake-derived version | Debug `inkpod_windows_smoke` verifies exact target-DPI size/origin/spacing/name-label height/font/icon/string and non-overlap; final assets + ABI + application CTest passed 3/3 | The 574 x 544 reference is device pixels captured at 144 DPI and is scaled exactly once; native Win32 theme and keyboard/modal behavior are retained |
-| M8 legacy compatibility audit | Verified | Per-codec fixture/read/write/round-trip matrix with a rights-cleared fixture/oracle gate | `m8_acceptance_unverified_legacy_codecs_remain_unknown` | DGA, CEL, and three legacy preset codecs remain `Unknown` at measured zero scope |
+| M8 legacy compatibility audit | Verified | Per-codec fixture/read/write/round-trip matrix with a rights-cleared fixture/oracle gate | `acceptance_unverified_legacy_codecs_remain_unknown` | DGA, CEL, and three legacy preset codecs remain `Unknown` at measured zero scope |
 | M8 malformed-input resilience | Verified | Forged native/batch/PNG/TIFF/TGA/BMP corpus with exact bounded reject-path assertions, deterministic valid-seed truncation/bit-flip mutation, and failed-open Core preservation | Named corrupted-corpus, mutation, and Core failed-open tests | Rejects without panic, current-document or file overwrite, or temporary output |
 | M8 large-document performance | Verified | Maximum-dimension sparse raster/COW and bounded dense filter benchmark | `cargo bench -p inkpod-image --bench large_document -- --quick` | Reports timing and allocation-relevant counts without a hardware-specific threshold |
 | M8 Windows package | In progress | MakeAppx x64 MSIX includes executable/assets/license/notices and app-local MSVC runtime; test signs a copy with an ephemeral matching certificate | Debug/Release package and unpacked-payload smoke 4/4; prior runtime-dependent artifact passed elevated install/installed ABI/uninstall | Corrected self-contained artifact needs one elevated install/run/uninstall pass; distribution signing remains an external protected-credential step |
-| M8 Core portability | Verified | All four Rust crates' `src/tests/benches/examples/build.rs`, crate/workspace manifests, and lockfile reject Windows imports/configuration/packages; next-frontend gaps documented | `m8_acceptance_rust_workspace_has_zero_windows_imports`; Linux/macOS CI | Byte/stream I/O and platform file-authority adapters remain explicit next-frontend work |
+| M8 Core portability | Verified | All four Rust crates' `src/tests/benches/examples/build.rs`, crate/workspace manifests, and lockfile reject Windows imports/configuration/packages; next-frontend gaps documented | `acceptance_rust_workspace_has_zero_windows_imports`; Linux/macOS CI | Byte/stream I/O and platform file-authority adapters remain explicit next-frontend work |
 
 ### GUI vertical-slice audit (2026-07-24)
 
@@ -157,7 +157,7 @@ installed-binary smoke rather than an artificial in-app command.
 
 | Criterion | Status | Evidence on 2026-07-21 before M5 edits |
 |---|---|---|
-| Named M4 Core acceptance tests | Verified | The five `m4_acceptance_*` library tests passed 5/5 and cover all six M4 scenarios; the subsequently enumerated, unrelated Windows architecture test executable was blocked before start by local Application Control |
+| Named M4 Core acceptance tests | Verified | The five `acceptance_*` library tests passed 5/5 and cover all six M4 scenarios; the subsequently enumerated, unrelated Windows architecture test executable was blocked before start by local Application Control |
 | Existing Windows M1-M4 boundary | Verified | `ctest --preset windows-x64-debug --output-on-failure` passed assets, integrated C11/C++ ABI, and application smoke 3/3 before relinking M5 |
 | Worktree baseline | Verified | `git status --short` was clean before M5 implementation |
 
@@ -165,11 +165,11 @@ installed-binary smoke rather than an artificial in-app command.
 
 | # | Scenario | Status | Evidence |
 |---|---|---|---|
-| 1 | Zoom does not change Core vector geometry | Verified | `m5_acceptance_zoom_never_changes_core_vector_geometry` compares every stored cubic point/width before and after view zoom and verifies only the view revision changes |
-| 2 | Partial erase does not change another stroke | Verified | `m5_acceptance_partial_erase_changes_only_the_touched_stroke` checks untouched path ID/geometry byte-for-byte and verifies one atomic Undo restores the erased path |
-| 3 | Intersection erase cut points are deterministic | Verified | `m5_acceptance_intersection_erase_cut_points_are_deterministic` runs equivalent documents twice, compares fixed-point pieces exactly, and fixes the crossing cut at the same parameter |
-| 4 | Fill topology survives save/reopen | Verified | `m5_acceptance_fill_topology_survives_save_and_reopen` persists stable path/fill/plane IDs and ordered boundary IDs through `.inkpod`; format malformed-topology tests reject cross-layer/open/missing relations |
-| 5 | Rasterize antialias, pixel center, and scale are golden-fixed | Verified | `m5_acceptance_rasterize_antialias_pixel_center_and_scale_golden` compares complete straight-RGBA buffers for center-sampled 1x, 4x4-AA 1x, and scaled 2x output |
+| 1 | Zoom does not change Core vector geometry | Verified | `acceptance_zoom_never_changes_core_vector_geometry` compares every stored cubic point/width before and after view zoom and verifies only the view revision changes |
+| 2 | Partial erase does not change another stroke | Verified | `acceptance_partial_erase_changes_only_the_touched_stroke` checks untouched path ID/geometry byte-for-byte and verifies one atomic Undo restores the erased path |
+| 3 | Intersection erase cut points are deterministic | Verified | `acceptance_intersection_erase_cut_points_are_deterministic` runs equivalent documents twice, compares fixed-point pieces exactly, and fixes the crossing cut at the same parameter |
+| 4 | Fill topology survives save/reopen | Verified | `acceptance_fill_topology_survives_save_and_reopen` persists stable path/fill/plane IDs and ordered boundary IDs through `.inkpod`; format malformed-topology tests reject cross-layer/open/missing relations |
+| 5 | Rasterize antialias, pixel center, and scale are golden-fixed | Verified | `acceptance_rasterize_antialias_pixel_center_and_scale_golden` compares complete straight-RGBA buffers for center-sampled 1x, 4x4-AA 1x, and scaled 2x output |
 
 The complementary `vector_002_connect_width_select_and_raster_vector_conversion_are_transactional`
 test covers connect/repeated-connect no-op, all width modes, deterministic
@@ -209,11 +209,11 @@ That code passed both Debug and Release Windows smoke presets.
 
 | # | Scenario | Status | Evidence |
 |---|---|---|---|
-| 1 | Cancel restores the original tile checksum | Verified | `m6_acceptance_cancel_restores_the_original_tile_checksum` proves preview snapshot divergence without committed revision/history change, then exact checksum restoration; Rust/C++ ABI and real Windows smoke repeat the check |
-| 2 | Apply is one Undo unit | Verified | `m6_acceptance_apply_is_exactly_one_undo_unit_and_last_filter_reuses_it` checks one history entry, exact Undo/Redo, and last-filter reuse; C++/Windows smoke applies then restores with one Undo |
-| 3 | Adjustment layer leaves the source unchanged and reorder changes composite | Verified | `m6_acceptance_adjustment_order_changes_composite_without_changing_source_plane` compares source checksums, changes layer order, observes a different BGRA composite, verifies opacity/visibility, and verifies the same order/parameters/composite after save/reopen |
-| 4 | 8/16-bit, alpha edge, and selection edge are golden-fixed | Verified | `m6_acceptance_eight_sixteen_bit_alpha_and_selection_edges_are_golden_fixed` fixes full-depth selected inversion results, unchanged outside-edge pixels, and exact alpha preservation for RGBA8/RGBA16 |
-| 5 | Boundary airbrush does not blur uniform regions | Verified | `m6_acceptance_boundary_airbrush_preserves_uniform_regions` checks exact far-field pixels and changed boundary-band pixels; a second image test covers the same rule on a 2D raster |
+| 1 | Cancel restores the original tile checksum | Verified | `acceptance_cancel_restores_the_original_tile_checksum` proves preview snapshot divergence without committed revision/history change, then exact checksum restoration; Rust/C++ ABI and real Windows smoke repeat the check |
+| 2 | Apply is one Undo unit | Verified | `acceptance_apply_is_exactly_one_undo_unit_and_last_filter_reuses_it` checks one history entry, exact Undo/Redo, and last-filter reuse; C++/Windows smoke applies then restores with one Undo |
+| 3 | Adjustment layer leaves the source unchanged and reorder changes composite | Verified | `acceptance_adjustment_order_changes_composite_without_changing_source_plane` compares source checksums, changes layer order, observes a different BGRA composite, verifies opacity/visibility, and verifies the same order/parameters/composite after save/reopen |
+| 4 | 8/16-bit, alpha edge, and selection edge are golden-fixed | Verified | `acceptance_eight_sixteen_bit_alpha_and_selection_edges_are_golden_fixed` fixes full-depth selected inversion results, unchanged outside-edge pixels, and exact alpha preservation for RGBA8/RGBA16 |
+| 5 | Boundary airbrush does not blur uniform regions | Verified | `acceptance_boundary_airbrush_preserves_uniform_regions` checks exact far-field pixels and changed boundary-band pixels; a second image test covers the same rule on a 2D raster |
 
 The filter catalog includes fixed sharpen/blur, Gaussian, unsharp, invert,
 alpha-independent auto contrast, brightness/contrast, channel curves, levels,
@@ -244,7 +244,7 @@ records, snapshot publication, and a real D2D render.
 | Possible Windows-specific type leakage into Rust Core | Existing architecture scan plus full clippy/tests confirm Core/image/format contain no Windows API dependency |
 | Full effect gesture/editor controls were absent | Added native editors plus Canvas-batched device-coordinate gradients, pressure/fade/spacing airbrush with 50 ms stationary continuous-spray samples, boundary effect, pressure/screen-fixed blur regions, Alt-source round/square stamp, and alpha gradient/view; Core converts the batch once per gesture and commits one Undo unit |
 | Dust removal was absent | Added bounded deterministic foreground-speck, transparent-hole, and color-outlier modes over full plane or pen/rectangle/polyline/lasso, selection intersection, preview OK/Cancel, progress, cancellation, and atomic no-partial-commit tests |
-| Filter work had no progress/cancel ownership model | Added Rust-owned atomic `InkpodM6Task`; Windows creates it on UI, runs the Core call on the Core engine thread, polls/cancels from UI, posts completion only after snapshot publication, and releases exactly once after the worker returns |
+| Filter work had no progress/cancel ownership model | Added Rust-owned atomic `InkpodTask`; Windows creates it on UI, runs the Core call on the Core engine thread, polls/cancels from UI, posts completion only after snapshot publication, and releases exactly once after the worker returns |
 | Native adjustment controls tracked only one layer | Added multiple create with unique names, previous/next selection, selected-layer parameter reload/re-edit, visibility toggle, and reorder; integrated Windows smoke executes the complete sequence |
 
 ## M6 re-verification before M7
@@ -259,12 +259,12 @@ records, snapshot publication, and a real D2D render.
 
 | # | Scenario | Status | Evidence |
 |---|---|---|---|
-| 1 | dry-run writes no files | Verified | `m7_acceptance_dry_run_writes_no_files` checks the resolved output remains absent and reports `DryRun`; FFI and Windows `IDM_BATCH_DRY_RUN` smoke repeat it |
-| 2 | Default output policy never overwrites input | Verified | `m7_acceptance_default_output_never_overwrites_input` verifies unchanged input bytes and a distinct duplicate output; graph defaults and Windows graph-info smoke require Duplicate |
-| 3 | Cancelled current file leaves no temporary output | Verified | `m7_acceptance_cancelled_file_leaves_no_temporary_output` cancels during save, preserves the destination, and checks the same-directory `.inkpod.tmp.*` file is removed; format cancellation tests cover settings/output cleanup |
-| 4 | One failure is recorded and policy continues or stops | Verified | `m7_acceptance_failure_policy_records_and_continues_or_stops` compares full per-item reports and downstream execution for Continue and Stop |
-| 5 | Color replacement old/new swap round-trips | Verified | `m7_acceptance_color_replacement_swap_round_trips` swaps every pair, saves/loads `.inkbatch`, and compares the graph; Windows smoke invokes the production swap/save/load commands |
-| 6 | Continuous-fill seed moved to another color warns in preview | Verified | `m7_acceptance_continuous_fill_preview_warns_when_seed_moves_color` previews two frames and emits the warning only where the expected source color changed |
+| 1 | dry-run writes no files | Verified | `acceptance_dry_run_writes_no_files` checks the resolved output remains absent and reports `DryRun`; FFI and Windows `IDM_BATCH_DRY_RUN` smoke repeat it |
+| 2 | Default output policy never overwrites input | Verified | `acceptance_default_output_never_overwrites_input` verifies unchanged input bytes and a distinct duplicate output; graph defaults and Windows graph-info smoke require Duplicate |
+| 3 | Cancelled current file leaves no temporary output | Verified | `acceptance_cancelled_file_leaves_no_temporary_output` cancels during save, preserves the destination, and checks the same-directory `.inkpod.tmp.*` file is removed; format cancellation tests cover settings/output cleanup |
+| 4 | One failure is recorded and policy continues or stops | Verified | `acceptance_failure_policy_records_and_continues_or_stops` compares full per-item reports and downstream execution for Continue and Stop |
+| 5 | Color replacement old/new swap round-trips | Verified | `acceptance_color_replacement_swap_round_trips` swaps every pair, saves/loads `.inkbatch`, and compares the graph; Windows smoke invokes the production swap/save/load commands |
+| 6 | Continuous-fill seed moved to another color warns in preview | Verified | `acceptance_continuous_fill_preview_warns_when_seed_moves_color` previews two frames and emits the warning only where the expected source color changed |
 
 The graph format has independent container and graph/operation versions,
 bounded UTF-8/count/payload fields, checksum validation, and same-directory
@@ -305,10 +305,10 @@ replacement or shutdown, and posts only completion status to the UI thread.
 | # | Scenario | Status | Evidence |
 |---|---|---|---|
 | 1 | Record measured read/write/round-trip scope for every legacy codec | Verified | The compatibility matrix separates DGA, CEL, palette, chart, and filter preset codecs and records 0 rights-cleared fixtures plus 0 read/write/round-trip variants for each |
-| 2 | Never mark an unverified codec `Verified` | Verified | `m8_acceptance_unverified_legacy_codecs_remain_unknown` parses every legacy row and requires `Unknown` plus the explicit zero-scope measurements |
-| 3 | Corrupted corpus causes no panic, uncontrolled allocation, or overwrite | Verified | The named corpus test now asserts each intended bounded rejection path (including a valid-CRC oversized PNG), mutation passes every decoder without panic, and `m8_corrupted_open_preserves_the_current_document_and_every_file` proves failed open leaves Core state and both files unchanged with no temp |
+| 2 | Never mark an unverified codec `Verified` | Verified | `acceptance_unverified_legacy_codecs_remain_unknown` parses every legacy row and requires `Unknown` plus the explicit zero-scope measurements |
+| 3 | Corrupted corpus causes no panic, uncontrolled allocation, or overwrite | Verified | The named corpus test now asserts each intended bounded rejection path (including a valid-CRC oversized PNG), mutation passes every decoder without panic, and `corrupted_open_preserves_the_current_document_and_every_file` proves failed open leaves Core state and both files unchanged with no temp |
 | 4 | Package installs and uninstalls on clean Windows 11 | In progress | Review found the prior installed artifact omitted the `/MD` MSVC runtime and was tested on a machine that already had it. The corrected MSIX contains app-local CRT DLLs and passes Debug/Release artifact-unpack checks; its elevated install/installed ABI/uninstall rerun was cancelled at UAC |
-| 5 | Rust crates have zero Windows imports | Verified | `m8_acceptance_rust_workspace_has_zero_windows_imports` scans all four crates' source/test/bench/example/build-script inputs, crate/workspace manifests, and resolved `Cargo.lock` for Windows imports, cfg/raw-DLL use, renamed packages, and Windows packages |
+| 5 | Rust crates have zero Windows imports | Verified | `acceptance_rust_workspace_has_zero_windows_imports` scans all four crates' source/test/bench/example/build-script inputs, crate/workspace manifests, and resolved `Cargo.lock` for Windows imports, cfg/raw-DLL use, renamed packages, and Windows packages |
 
 The large-document benchmark adds the M8 performance baseline without a brittle
 wall-clock threshold. `--quick` exercised a 1,048,576-square sparse document
@@ -321,11 +321,11 @@ document/image/history/batch/snapshot state remains portable Rust.
 
 | # | Scenario | Status | Evidence |
 |---|---|---|---|
-| 1 | Different-size cells align by reference frame | Verified | Core `m4_acceptance_reference_frame_aligns_different_cell_sizes_and_reopens` aligns 4x4 `(2,2)` to 8x8 `(4,4)`, compares the complete 8x8 BGRA tile golden, then checks `.inkpod` reopen and edit-image swap |
-| 2 | Individual 50% × global 50% = effective 25% | Verified | Core `m4_acceptance_individual_and_global_opacity_multiply_to_twenty_five_percent`; Rust/C++ ABI checks effective alpha 64 |
-| 3 | Light-table fill boundary never changes the reference | Verified | Core `m4_acceptance_light_table_fill_boundary_is_read_only` checks cancellation/fill/Undo exactness; Rust and C++ ABI invoke the new read-only boundary flag and re-sample the unchanged source |
-| 4 | Previous/next does not silently discard an unsaved cell | Verified | Core `m4_acceptance_sequence_switch_rejects_unsaved_document_without_discarding_it` checks explicit error plus unchanged UUID/revision/dirty, then clean switch; Rust/C++ ABI status 12 |
-| 5 | Sequence gaps and natural ordering are correct | Verified | Core `m4_acceptance_sequence_gaps_natural_order_thumbnails_subpalette_and_motion` sorts 1,3,10 without synthesizing missing cells and covers thumbnails/motion/subpalette/PNG sequence export-import |
+| 1 | Different-size cells align by reference frame | Verified | Core `acceptance_reference_frame_aligns_different_cell_sizes_and_reopens` aligns 4x4 `(2,2)` to 8x8 `(4,4)`, compares the complete 8x8 BGRA tile golden, then checks `.inkpod` reopen and edit-image swap |
+| 2 | Individual 50% × global 50% = effective 25% | Verified | Core `acceptance_individual_and_global_opacity_multiply_to_twenty_five_percent`; Rust/C++ ABI checks effective alpha 64 |
+| 3 | Light-table fill boundary never changes the reference | Verified | Core `acceptance_light_table_fill_boundary_is_read_only` checks cancellation/fill/Undo exactness; Rust and C++ ABI invoke the new read-only boundary flag and re-sample the unchanged source |
+| 4 | Previous/next does not silently discard an unsaved cell | Verified | Core `acceptance_sequence_switch_rejects_unsaved_document_without_discarding_it` checks explicit error plus unchanged UUID/revision/dirty, then clean switch; Rust/C++ ABI status 12 |
+| 5 | Sequence gaps and natural ordering are correct | Verified | Core `acceptance_sequence_gaps_natural_order_thumbnails_subpalette_and_motion` sorts 1,3,10 without synthesizing missing cells and covers thumbnails/motion/subpalette/PNG sequence export-import |
 | 6 | Common-format round-trip verifies depth/alpha/dimensions/DPI | Verified | Format round-trip covers all four formats and RGBA16 where representable; explicit-white, TIFF unassociated-alpha, indexed PNG, origin/alpha-aware TGA, and padded 24-bit BMP tests verify policy; oversized dimensions are rejected before allocation |
 
 The M4 Windows ABI smoke is linked into the real `inkpod.exe` test binary. It
@@ -352,12 +352,12 @@ application smoke passes in both Debug and Release.
 
 | # | Scenario | Status | Evidence |
 |---|---|---|---|
-| 1 | Layer reorder/duplicate/delete survives Undo/Redo/save/reopen | Verified | Core `m3_acceptance_layer_tree_undo_redo_save_reopen_and_validation`; C++ ABI and real Layer-menu Windows smoke |
+| 1 | Layer reorder/duplicate/delete survives Undo/Redo/save/reopen | Verified | Core `acceptance_layer_tree_undo_redo_save_reopen_and_validation`; C++ ABI and real Layer-menu Windows smoke |
 | 2 | Core rejects disallowed layer/plane combinations | Verified | Same Core test plus Rust/C++ ABI invalid selection-plane-in-coloring-layer checks; revision remains unchanged |
-| 3 | Selection boolean passes a property test | Verified | Core `m3_acceptance_selection_boolean_property_and_authoring_tools` exhaustively checks all 256 left masks against representative right masks and every bit for new/add/subtract/intersect |
-| 4 | Paste between different paper sizes preserves document-origin coordinates | Verified | Core `m3_acceptance_coordinate_preserving_typed_paste_and_floating_transform`; FFI and Windows 8x8 `(6,6)` to 4x4 translated `(2,2)` smoke |
-| 5 | View flip and destructive mirror use separate history/revisions | Verified | Core `m3_acceptance_view_flip_and_destructive_mirror_have_separate_revisions`; snapshot flip flag and Windows document/view revision plus Undo checks |
-| 6 | Editing one view appears at the same revision in another view's next snapshot | Verified | Core `m3_acceptance_multi_view_locator_guides_grid_and_shortcuts`; Rust/C++ ABI and Windows primary/secondary snapshot revision equality |
+| 3 | Selection boolean passes a property test | Verified | Core `acceptance_selection_boolean_property_and_authoring_tools` exhaustively checks all 256 left masks against representative right masks and every bit for new/add/subtract/intersect |
+| 4 | Paste between different paper sizes preserves document-origin coordinates | Verified | Core `acceptance_coordinate_preserving_typed_paste_and_floating_transform`; FFI and Windows 8x8 `(6,6)` to 4x4 translated `(2,2)` smoke |
+| 5 | View flip and destructive mirror use separate history/revisions | Verified | Core `acceptance_view_flip_and_destructive_mirror_have_separate_revisions`; snapshot flip flag and Windows document/view revision plus Undo checks |
+| 6 | Editing one view appears at the same revision in another view's next snapshot | Verified | Core `acceptance_multi_view_locator_guides_grid_and_shortcuts`; Rust/C++ ABI and Windows primary/secondary snapshot revision equality |
 
 The M3 Windows smoke also exercises the actual Copy, Layer, Selection, Flip,
 Mirror, Grid, New View, Shortcut Editor, and Shortcut Reset commands, typed clipboard ownership,
@@ -440,7 +440,7 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | # | Scenario | Status | Evidence |
 |---|---|---|---|
-| 1 | Create 1920 x 1080 cell and draw on main line | Verified | Core `m1_acceptance_saved_drawing_vertical_slice`, FFI M1 test, Windows mouse smoke |
+| 1 | Create 1920 x 1080 cell and draw on main line | Verified | Core `acceptance_saved_drawing_vertical_slice`, FFI M1 test, Windows mouse smoke |
 | 2 | Switch to color plane and draw while main line remains visible | Verified | Core verifies premultiplied BGRA color plus black main-line overlay in one snapshot; FFI checksum test and Windows plane-switch/D2D smoke |
 | 3 | Color edit does not change main-line tile checksum | Verified | Core, Rust FFI, C++ ABI, and Windows smoke compare main checksum before/after |
 | 4 | One stroke is one Undo/Redo unit | Verified | Core pixel test, FFI history test, Windows smoke |
@@ -475,10 +475,51 @@ as dirty/pathless, and then reopens the unchanged normal file.
   device pixels at 96 DPI, eliminating the extra monitor-DPI scale that shifted
   and shrank the Canvas.
 
+## Post-M8 semantic API refactoring
+
+- The public C ABI is now version 2. Milestone-derived task and raster input names
+  were replaced by `InkpodTask`, `InkpodTaskInfo`, `INKPOD_TASK_*`,
+  `inkpod_task_*`, and `InkpodRasterSourceInput`; no compatibility aliases keep
+  the old names exposed.
+- Rust production modules now use `animation`, `vector`, `effects`, and `batch`;
+  native format modules and public metadata types use document, light-table,
+  vector, and adjustment terminology. `CellFile` fields follow the same naming.
+  Core feature areas are further divided into model, operation, validation,
+  geometry, codec, and I/O modules where those responsibilities differ.
+- Existing `.inkpod` section magic bytes and flag bit values were preserved so
+  the refactoring does not change on-disk compatibility. Only source identifiers,
+  diagnostics, and API documentation changed.
+- An architecture regression test rejects milestone-numbered production module
+  files and public Rust/C FFI identifiers. The existing surface guard still
+  requires exact header/export parity and a direct test reference for every C ABI
+  function.
+- `inkpod-core/src/lib.rs` was reduced from 9,042 lines to a 103-line module and
+  public re-export index. Public `Core` methods and pure helpers now live in
+  document, selection, transform, view, paint, stroke, history, persistence,
+  snapshot, animation, vector, effects, and batch responsibility modules.
+- `inkpod-image`, `inkpod-format`, and `inkpod-ffi` now follow the same pattern;
+  their crate roots are 45, 49, and 56 lines. FFI ABI records, opaque handles,
+  boundary converters, and feature exports are separate, while the header and
+  all 155 exported symbol names/layouts remain unchanged.
+- Shared internal state kept its prior effective crate scope; public Rust paths,
+  C ABI values, and on-disk bytes did not change. Unit test bodies are stored
+  under each crate's `tests/unit/`, with malformed corpus and resilience tests
+  retained as integration targets under `tests/`.
+- The architecture guard caps every crate root at 200 lines, rejects inline test
+  bodies under `src/`, and verifies configure-aware recursive CMake tracking for
+  all production Rust sources. The FFI parity test also scans `src/` recursively,
+  so splitting an export cannot hide it from header drift detection.
+
 ## Verification
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | All-crate responsibility/test-layout refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-25 |
+| Visual Studio Developer PowerShell `cmake --preset windows-x64-debug`; `cmake --build --preset windows-x64-debug`; `ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Recursive Rust source tracking rebuilt the staticlib after the final module moves; strict C11/C++20 link and MSIX assembly passed; assets, integrated ABI, application/D2D, and package payload passed 4/4 in 15.37 s | 2026-07-25 |
+| `cargo fmt --all -- --check`; `cargo test --workspace --all-features`; WSL-isolated `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Windows 11 x64 + WSL Ubuntu, stable Rust | Core responsibility refactor passed formatting, zero-warning clippy, Core 64, architecture 5, Core resilience 1, FFI 19, format unit 20 plus corpus 2, image 22, and doc-tests | 2026-07-25 |
+| Developer PowerShell `cmake --build --preset windows-x64-debug`; `ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Refactored Core staticlib and unchanged ABI v2 passed strict C11/C++20/Rust build, MSIX assembly, assets, ABI, application/D2D, and payload tests 4/4 in 19.76 s | 2026-07-25 |
+| `cargo fmt --all -- --check`; `cargo test --workspace --all-features`; WSL-isolated `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Windows 11 x64 + WSL Ubuntu, stable Rust | ABI v2 semantic-name refactor passed formatting, all workspace tests, and zero-warning clippy. Native Windows clippy was blocked before startup by Application Control (`os error 4551`) | 2026-07-25 |
+| Developer PowerShell `cmake --build --preset windows-x64-debug`; `ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Strict C11/C++20/Rust build and MSIX assembly passed; assets, ABI v2, application/D2D, and package-payload tests passed 4/4 in 18.62 s | 2026-07-25 |
 | `cargo fmt --all -- --check`; `cargo test --workspace --all-features`; WSL `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Windows 11 x64 + WSL Ubuntu, stable Rust 1.97.1 | Post-M8 FFI baseline passed formatting, zero-warning WSL clippy, Core 64, architecture 3, Core M8 integration 1, FFI 19, format unit 20 plus corpus 2, image 22, and doc-tests. Native Windows clippy frontend was blocked before startup by Application Control (`os error 4551`) | 2026-07-25 |
 | Developer-shell Debug build / `ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Strict C11/C++20/Rust build and MSIX assembly passed; assets + integrated ABI + application/D2D + package payload passed 4/4 in 18.49 s | 2026-07-25 |
 | Developer-shell Release build / non-elevated CTest | Windows 11 x64, MSVC 19.51 | Strict optimized compile/link and MSIX assembly passed; assets and package payload passed, but Application Control blocked the newly linked ABI/application EXE before startup on both attempts (`BAD_COMMAND`) | 2026-07-25 |
@@ -488,7 +529,7 @@ as dirty/pathless, and then reopens the unchanged normal file.
 | Non-elevated then UAC-launched corrected-package install smoke | Windows 11 Pro x64 build 26200 | Normal shell stopped at the required administrator guard; the UAC launch was cancelled by the user before package/certificate mutation. Corrected artifact install/run/uninstall therefore remains unverified | 2026-07-25 |
 | `cargo test --workspace m7_acceptance -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Reconfirmed the clean pre-M8 M7 boundary: all six acceptance scenarios passed 6/6. Windows compiled the suite but local Application Control blocked the fresh test EXE before startup (`os error 4551`) | 2026-07-25 |
 | `cargo test --workspace m8_acceptance -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Passed 3/3: legacy codec status/scope, corrupted corpus, and whole-workspace Rust portability | 2026-07-25 |
-| `cargo test -p inkpod-format m8_mutation_fuzz_all_file_decoders_never_panics -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Passed deterministic truncation and bit-flip mutations for native, batch, PNG, TIFF, TGA, and BMP public decoders | 2026-07-25 |
+| `cargo test -p inkpod-format mutation_fuzz_all_file_decoders_never_panics -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Passed deterministic truncation and bit-flip mutations for native, batch, PNG, TIFF, TGA, and BMP public decoders | 2026-07-25 |
 | `cargo fmt --all -- --check` / `cargo clippy --workspace --all-targets --all-features -- -D warnings` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Final M8 source passed formatting and clippy with zero warnings | 2026-07-25 |
 | `cargo test --workspace --all-features` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Final M8 source passed: Core 64, architecture 3, FFI 15, format unit 20 plus integration 2, image 22, and doc-tests | 2026-07-25 |
 | `cargo bench -p inkpod-image --bench large_document -- --quick` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Passed: 1,048,576-square sparse raster, 512 distributed tiles and COW isolation in 10 ms; 1024-square 4 MiB dense invert in 50 ms | 2026-07-25 |

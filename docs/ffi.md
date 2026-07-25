@@ -43,7 +43,7 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ```
 
 - `struct_size` は必ず呼び出し側が設定する。出力構造体でも同じである。
-- ABI v1 で既知の構造体末尾まで読み書きできるサイズが必要である。
+- ABI v2 で既知の構造体末尾まで読み書きできるサイズが必要である。
 - `reserved` は 0、未知の必須 feature flag は指定しない。
 - record span は各 record の `struct_size` と `*_stride_bytes` の両方を設定する。
 - count、stride、alignment、全 span の byte 範囲が有効でなければならない。
@@ -52,6 +52,12 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 
 ABI version は Core 作成前に比較できる。`INKPOD_ABI_VERSION` と library の戻り値が異なる場合は、
 Core を作らず互換性エラーとして扱う。
+
+ABI v2 は、公開名から実装時のマイルストーン番号を除いた。task API は
+`InkpodTask` / `InkpodTaskInfo` / `INKPOD_TASK_*` / `inkpod_task_*`、共有raster入力は
+`InkpodRasterSourceInput` を使用する。v1のマイルストーン名は公開aliasとして残していないため、
+旧headerを使うcallerはv2 headerへ更新して再ビルドする必要がある。構造体レイアウト、数値定数、
+所有権、thread、statusの契約はこの名称変更では変えていない。
 
 ## スレッド契約
 
@@ -62,7 +68,7 @@ Core を作らず互換性エラーとして扱う。
 例外は immutable handle と atomic task である。
 
 - snapshot の accessor と release は任意 thread で呼べる。同じ snapshot の参照と release は外部同期する。
-- M6 task と batch task の query/cancel は、Core operation の実行中に別 thread から呼べる。
+- task と batch task の query/cancel は、Core operation の実行中に別 thread から呼べる。
 - task の release は任意 thread でよいが、その task を使う Core call が戻るまで待つ。
 - immutable batch graph、preview、report、byte buffer、encoded sequence、clipboard の accessor/release は
   Core affinity を持たない。同じ handle の利用と release は呼び出し側で同期する。
@@ -106,7 +112,7 @@ release 後は、handle から得た tile、pixel、guide、vector、文字列�
 | clipboard | copy/create 成功から release まで | raster export は caller buffer。内部 payload は公開しない | 外部同期した任意 thread |
 | byte buffer | export 成功から release まで | byte span は release まで | 外部同期した任意 thread |
 | encoded sequence | export 成功から release まで | item name/byte span は release まで | 外部同期した任意 thread |
-| M6/batch task | create 成功から release まで | query 値は caller へのコピー | Core call 終了後に任意 thread |
+| task / batch task | create 成功から release まで | query 値は caller へのコピー | Core call 終了後に任意 thread |
 | batch graph | create/load 成功から release まで | execute/preview 中は graph が生存する必要がある | 外部同期した任意 thread |
 | batch preview/report | Core call の出力から release まで | item の UTF-8 span は親 handle の release まで | 外部同期した任意 thread |
 

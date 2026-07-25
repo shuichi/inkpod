@@ -48,29 +48,20 @@ endif()
 set(INKPOD_RUST_RLIB "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_PROFILE}/libinkpod_ffi.rlib")
 set(INKPOD_RUST_STAMP "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_PROFILE}/inkpod_ffi.cmake.stamp")
 
+file(GLOB_RECURSE INKPOD_RUST_SOURCE_INPUTS CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/*.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/src/*.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/*.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/*.rs")
+
 set(INKPOD_RUST_INPUTS
     "${CMAKE_SOURCE_DIR}/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/Cargo.lock"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/Cargo.toml"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/lib.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/m4.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/m5.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/m6.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/m7.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/Cargo.toml"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/lib.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/common_formats.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/native_m4.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/native_m5.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/native_m6.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/batch.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-image/Cargo.toml"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/edit.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/lib.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/vector.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/Cargo.toml"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/src/lib.rs"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/src/m7.rs")
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/Cargo.toml"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-image/Cargo.toml"
+    ${INKPOD_RUST_SOURCE_INPUTS})
 
 add_custom_command(
     OUTPUT "${INKPOD_RUST_STAMP}"

@@ -1,0 +1,304 @@
+use super::*;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodTreeEdit {
+    pub struct_size: u32,
+    pub operation: u32,
+    pub flags: u64,
+    pub object_id: u64,
+    pub parent_id: u64,
+    pub destination_index: u32,
+    pub kind: u32,
+    pub pixel_format: u32,
+    pub opacity_milli: u32,
+    pub name_utf8: *const u8,
+    pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodNodeInfo {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub id: u64,
+    pub parent_id: u64,
+    pub kind: u32,
+    pub pixel_format: u32,
+    pub opacity_milli: u32,
+    pub index: u32,
+    pub child_count: u32,
+    pub reserved: u32,
+    pub name_utf8: *mut u8,
+    pub name_capacity: u64,
+    pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodSelectionPoint {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodSelectionInput {
+    pub struct_size: u32,
+    pub shape: u32,
+    pub operation: u32,
+    pub reserved: u32,
+    pub bounds: InkpodFrameRect,
+    pub points: *const InkpodSelectionPoint,
+    pub point_count: u64,
+    pub point_stride_bytes: u64,
+    pub diameter: f32,
+    pub tolerance: u16,
+    pub gap_close: u16,
+    pub seed_x: u32,
+    pub seed_y: u32,
+}
+
+#[repr(C)]
+pub struct InkpodFloatingTransform {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub translate_x: f64,
+    pub translate_y: f64,
+    pub scale_x: f64,
+    pub scale_y: f64,
+    pub rotation_degrees: f64,
+}
+
+#[repr(C)]
+pub struct InkpodDocumentResizeInput {
+    pub struct_size: u32,
+    pub anchor: u32,
+    pub flags: u64,
+    pub width: u32,
+    pub height: u32,
+    pub dpi_x_milli: u32,
+    pub dpi_y_milli: u32,
+}
+
+#[repr(C)]
+pub struct InkpodClipboardRasterBuffer {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub pixels_rgba8: *mut u8,
+    pub pixel_capacity: u64,
+    pub required_bytes: u64,
+    pub row_stride_bytes: u64,
+}
+
+#[repr(C)]
+pub struct InkpodClipboardRgbaInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub pixels_rgba8: *const u8,
+    pub pixel_bytes: u64,
+    pub row_stride_bytes: u64,
+}
+
+#[repr(C)]
+pub struct InkpodGridInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub spacing_x: u32,
+    pub spacing_y: u32,
+    pub subdivisions: u32,
+    pub flags: u32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodLocatorOutput {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub document_x: i32,
+    pub document_y: i32,
+    pub selection: InkpodFrameRect,
+    pub color: InkpodColorValue,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodRasterSourceInput {
+    pub struct_size: u32,
+    pub pixel_format: u32,
+    pub flags: u64,
+    pub document_uuid_high: u64,
+    pub document_uuid_low: u64,
+    pub source_revision: u64,
+    pub width: u32,
+    pub height: u32,
+    pub dpi_x_milli: u32,
+    pub dpi_y_milli: u32,
+    pub reference_frame: InkpodFrameRect,
+    pub pixels: *const u8,
+    pub pixel_bytes: u64,
+    pub row_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodLightTableItemInput {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub opacity_milli: u32,
+    pub display_mode: u32,
+    pub display_color: InkpodColorValue,
+    pub translate_x_milli: i32,
+    pub translate_y_milli: i32,
+    pub scale_x_milli: u32,
+    pub scale_y_milli: u32,
+    pub rotation_milli_degrees: i32,
+    pub reserved: u32,
+    pub name_utf8: *const u8,
+    pub name_bytes: u64,
+    pub source: InkpodRasterSourceInput,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodLightTableEdit {
+    pub struct_size: u32,
+    pub operation: u32,
+    pub object_id: u64,
+    pub destination_index: u32,
+    pub flags: u32,
+    pub opacity_milli: u32,
+    pub display_mode: u32,
+    pub display_color: InkpodColorValue,
+    pub translate_x_milli: i32,
+    pub translate_y_milli: i32,
+    pub scale_x_milli: u32,
+    pub scale_y_milli: u32,
+    pub rotation_milli_degrees: i32,
+    pub reserved: u32,
+    pub name_utf8: *const u8,
+    pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodLightTableSetInfo {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub id: u64,
+    pub opacity_milli: u32,
+    pub item_count: u32,
+    pub name_utf8: *mut u8,
+    pub name_capacity: u64,
+    pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodLightTableItemInfo {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub id: u64,
+    pub source_plane_id: u64,
+    pub source_document_uuid_high: u64,
+    pub source_document_uuid_low: u64,
+    pub source_revision: u64,
+    pub opacity_milli: u32,
+    pub effective_opacity_milli: u32,
+    pub display_mode: u32,
+    pub display_color: InkpodColorValue,
+    pub translate_x_milli: i32,
+    pub translate_y_milli: i32,
+    pub scale_x_milli: u32,
+    pub scale_y_milli: u32,
+    pub rotation_milli_degrees: i32,
+    pub reserved: u32,
+    pub name_utf8: *mut u8,
+    pub name_capacity: u64,
+    pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodSequenceCellInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub name_utf8: *const u8,
+    pub name_bytes: u64,
+    pub source: InkpodRasterSourceInput,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodSequenceInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub cells: *const InkpodSequenceCellInput,
+    pub cell_count: u64,
+    pub cell_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodNamedBytesInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub name_utf8: *const u8,
+    pub name_bytes: u64,
+    pub bytes: *const u8,
+    pub byte_count: u64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodSequenceCellInfo {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub sequence_index: u64,
+    pub document_uuid_high: u64,
+    pub document_uuid_low: u64,
+    pub cell_number: u32,
+    pub width: u32,
+    pub height: u32,
+    pub thumbnail_width: u32,
+    pub thumbnail_height: u32,
+    pub reserved: u32,
+    pub thumbnail_checksum: u64,
+    pub name_utf8: *mut u8,
+    pub name_capacity: u64,
+    pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodMotionCheckInput {
+    pub struct_size: u32,
+    pub fps: u32,
+    pub flags: u64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodMotionFrame {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub sequence_index: u64,
+    pub cell_number: u32,
+    pub thumbnail_width: u32,
+    pub thumbnail_height: u32,
+    pub reserved: u32,
+    pub thumbnail_checksum: u64,
+}

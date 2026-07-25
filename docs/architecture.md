@@ -65,6 +65,44 @@ opaque Core/snapshot/clipboard allocations. Win32 supplies a
 acquiring an OS dependency. The Win32 application does not mirror pixels,
 history, fill, color-depth, or format rules.
 
+## Rust module structure
+
+Every Rust crate root is intentionally limited to module declarations and
+stable public re-exports. All four `lib.rs` files remain below 200 lines, and
+`inkpod-core/src/lib.rs` contains neither `Core` implementation blocks nor
+document state definitions. CMake uses a configure-aware recursive source list
+for each crate's `src/**/*.rs`, so adding or moving a production submodule also
+updates the Cargo static-library dependency graph.
+
+| Module | Responsibility |
+|---|---|
+| `api` / `error` | Stable public commands, DTOs, view values, and Core errors |
+| `core` | `Core` state, construction, document lifecycle, revision and transaction helpers |
+| `document` | `CellDocument`, stable-ID layer/plane model, validation, and tree operations |
+| `history` | History records, Undo/Redo, history navigation, and savepoint-facing state |
+| `selection` | Selection algebra, clipboard, floating selection, and mask helpers |
+| `stroke` / `paint` | Stroke session/staging and fill, palette, eyedropper, color-check operations |
+| `transform` | Destructive mirror, rotate, resize, raster conversion, and frame/guide transforms |
+| `view` / `snapshot` | Logical views, guides/grid/locator/shortcuts, composition, and immutable snapshots |
+| `persistence` | Native save/open/recovery adapter and raster DTO conversion |
+| `animation` / `vector` / `effects` / `batch` | Feature-specific state and commands |
+
+`inkpod-image` separates pixel/raster storage, fill/sampling/palette logic, and
+alpha/brush/dust/filter/gradient edits. `inkpod-format` separates native model,
+encode, decode, validation and atomic I/O from common raster codecs and feature
+metadata. `inkpod-ffi` separates ABI constants/records/opaque handles, boundary
+validation/conversion, and feature-specific exported functions; its batch ABI
+has its own records, parser and export modules.
+
+Public Rust paths are preserved through crate-root re-exports. Internal state
+that moved out of the root uses `pub(super)` only where sibling Core modules need
+the same access they previously had as descendants of the crate root; it is not
+exposed outside `inkpod-core`. Unit and acceptance test source is stored below
+each crate's `tests/` directory. Private implementation tests are connected with
+test-only `#[path]` modules, which preserves access to internal invariants
+without mixing test bodies into production source files. Integration and
+malformed-corpus tests remain ordinary Cargo integration targets.
+
 ## Windows thread model
 
 The Windows frontend has three distinct long-lived threads:

@@ -38,7 +38,7 @@ static_assert(sizeof(InkpodSelectionInput) == 72U);
 static_assert(sizeof(InkpodFloatingTransform) == 48U);
 static_assert(sizeof(InkpodGridInput) == 32U);
 static_assert(sizeof(InkpodLocatorOutput) == 48U);
-static_assert(sizeof(InkpodM4RasterInput) == 96U);
+static_assert(sizeof(InkpodRasterSourceInput) == 96U);
 static_assert(sizeof(InkpodLightTableItemInput) == 168U);
 static_assert(sizeof(InkpodSequenceCellInput) == 120U);
 static_assert(sizeof(InkpodSequenceInput) == 40U);
@@ -70,7 +70,7 @@ static_assert(sizeof(InkpodAirbrushGestureInput) == 96U);
 static_assert(sizeof(InkpodStampGestureInput) == 104U);
 static_assert(sizeof(InkpodBlurToolInput) == 72U);
 static_assert(sizeof(InkpodDustInput) == 80U);
-static_assert(sizeof(InkpodM6TaskInfo) == 32U);
+static_assert(sizeof(InkpodTaskInfo) == 32U);
 static_assert(sizeof(InkpodBatchInput) == 48U);
 static_assert(sizeof(InkpodBatchColorPairInput) == 48U);
 static_assert(sizeof(InkpodBatchSeedInput) == 64U);
@@ -264,8 +264,8 @@ int InkpodRunAbiSmoke() {
     light_pixels[light_offset + 3U] = 255U;
     constexpr std::array<std::uint8_t, 9U> light_name{
         'r', 'e', 'f', 'e', 'r', 'e', 'n', 'c', 'e'};
-    const InkpodM4RasterInput light_source{
-        sizeof(InkpodM4RasterInput),
+    const InkpodRasterSourceInput light_source{
+        sizeof(InkpodRasterSourceInput),
         INKPOD_STORAGE_RGBA8,
         0U,
         2U,
@@ -348,8 +348,8 @@ int InkpodRunAbiSmoke() {
             0U,
             sequence_name_a.data(),
             sequence_name_a.size(),
-            InkpodM4RasterInput{
-                sizeof(InkpodM4RasterInput), INKPOD_STORAGE_RGBA8, 0U, 5U, 1U, 1U,
+            InkpodRasterSourceInput{
+                sizeof(InkpodRasterSourceInput), INKPOD_STORAGE_RGBA8, 0U, 5U, 1U, 1U,
                 1U, 1U, 96000U, 96000U, InkpodFrameRect{0, 0, 1, 1},
                 sequence_pixel_a.data(), sequence_pixel_a.size(), 4U}},
         InkpodSequenceCellInput{
@@ -357,8 +357,8 @@ int InkpodRunAbiSmoke() {
             0U,
             sequence_name_b.data(),
             sequence_name_b.size(),
-            InkpodM4RasterInput{
-                sizeof(InkpodM4RasterInput), INKPOD_STORAGE_RGBA8, 0U, 5U, 2U, 1U,
+            InkpodRasterSourceInput{
+                sizeof(InkpodRasterSourceInput), INKPOD_STORAGE_RGBA8, 0U, 5U, 2U, 1U,
                 1U, 1U, 96000U, 96000U, InkpodFrameRect{0, 0, 1, 1},
                 sequence_pixel_b.data(), sequence_pixel_b.size(), 4U}}};
     const InkpodSequenceInput sequence_input{
@@ -1087,38 +1087,38 @@ int InkpodRunAbiSmoke() {
     filter.kind = INKPOD_FILTER_INVERT;
     filter.parameter_0 = 0;
     filter.parameter_1 = 0;
-    InkpodM6Task* task{};
-    if (inkpod_m6_task_create(&task) != INKPOD_STATUS_OK
-        || inkpod_m6_task_cancel(task) != INKPOD_STATUS_OK
+    InkpodTask* task{};
+    if (inkpod_task_create(&task) != INKPOD_STATUS_OK
+        || inkpod_task_cancel(task) != INKPOD_STATUS_OK
         || inkpod_core_filter_preview_begin_task(core, &filter, task, &preview)
             != INKPOD_STATUS_CANCELLED
         || inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK
         || document.color_plane_checksum != before_cancelled_filter) {
         return 76;
     }
-    InkpodM6TaskInfo task_info{};
+    InkpodTaskInfo task_info{};
     task_info.struct_size = sizeof(task_info);
-    if (inkpod_m6_task_query(task, &task_info) != INKPOD_STATUS_OK
-        || task_info.state != INKPOD_M6_TASK_CANCELLED
-        || inkpod_m6_task_release(&task) != INKPOD_STATUS_OK
-        || inkpod_m6_task_release(&task) != INKPOD_STATUS_OK) {
+    if (inkpod_task_query(task, &task_info) != INKPOD_STATUS_OK
+        || task_info.state != INKPOD_TASK_CANCELLED
+        || inkpod_task_release(&task) != INKPOD_STATUS_OK
+        || inkpod_task_release(&task) != INKPOD_STATUS_OK) {
         return 77;
     }
 
-    InkpodM6Task* dust_task{};
+    InkpodTask* dust_task{};
     InkpodDustInput dust{};
     dust.struct_size = sizeof(dust);
     dust.mode = INKPOD_DUST_REMOVE_FOREGROUND;
     dust.plane_id = document.color_plane_id;
     dust.coordinate_space = INKPOD_COORDINATE_SPACE_DOCUMENT;
     dust.maximum_pixels = 1U;
-    if (inkpod_m6_task_create(&dust_task) != INKPOD_STATUS_OK
+    if (inkpod_task_create(&dust_task) != INKPOD_STATUS_OK
         || inkpod_core_dust_preview_begin(core, &dust, dust_task, &preview)
             != INKPOD_STATUS_OK
-        || inkpod_m6_task_query(dust_task, &task_info) != INKPOD_STATUS_OK
-        || task_info.state != INKPOD_M6_TASK_COMPLETED
+        || inkpod_task_query(dust_task, &task_info) != INKPOD_STATUS_OK
+        || task_info.state != INKPOD_TASK_COMPLETED
         || inkpod_core_filter_preview_cancel(core, &preview) != INKPOD_STATUS_OK
-        || inkpod_m6_task_release(&dust_task) != INKPOD_STATUS_OK) {
+        || inkpod_task_release(&dust_task) != INKPOD_STATUS_OK) {
         return 78;
     }
 

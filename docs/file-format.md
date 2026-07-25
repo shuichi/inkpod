@@ -215,7 +215,7 @@ expected-result oracle.
 
 The checked-in `rust/inkpod-format/tests/corpus/m8` corpus covers forged native
 manifest and batch-body lengths plus malformed/oversized PNG, TIFF, TGA, and BMP
-headers. `m8_acceptance_corrupted_file_corpus_is_bounded_and_non_destructive`
+headers. `acceptance_corrupted_file_corpus_is_bounded_and_non_destructive`
 passes each case through its public byte decoder and, where available, public
 file reader under panic containment. Each corpus entry asserts the intended
 bounded rejection path; the PNG IHDR has a valid CRC so dimension validation is

@@ -64,7 +64,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(1)
+#define INKPOD_ABI_VERSION UINT32_C(2)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -304,12 +304,12 @@ typedef uint32_t InkpodDustMode;
 #define INKPOD_DUST_REPLACE_COLOR_OUTLIERS UINT32_C(3)
 
 /** @brief thread-safe task の進行状態型。 */
-typedef uint32_t InkpodM6TaskState;
-#define INKPOD_M6_TASK_READY UINT32_C(0)
-#define INKPOD_M6_TASK_RUNNING UINT32_C(1)
-#define INKPOD_M6_TASK_COMPLETED UINT32_C(2)
-#define INKPOD_M6_TASK_CANCELLED UINT32_C(3)
-#define INKPOD_M6_TASK_FAILED UINT32_C(4)
+typedef uint32_t InkpodTaskState;
+#define INKPOD_TASK_READY UINT32_C(0)
+#define INKPOD_TASK_RUNNING UINT32_C(1)
+#define INKPOD_TASK_COMPLETED UINT32_C(2)
+#define INKPOD_TASK_CANCELLED UINT32_C(3)
+#define INKPOD_TASK_FAILED UINT32_C(4)
 
 #define INKPOD_BATCH_GRAPH_VERSION UINT32_C(1)
 /** @brief batch graph の入力 selector 種類。 */
@@ -469,9 +469,9 @@ typedef struct InkpodByteBuffer InkpodByteBuffer;
 /** @brief sequence の複数 encode 結果を保持する Rust-owned handle。 */
 typedef struct InkpodEncodedSequence InkpodEncodedSequence;
 /** @brief 任意スレッドから query/cancel できる Rust-owned atomic task handle。 */
-typedef struct InkpodM6Task InkpodM6Task;
-/** @brief `InkpodM6Task` と同じ ABI・所有権を持つ batch task 別名。 */
-typedef InkpodM6Task InkpodBatchTask;
+typedef struct InkpodTask InkpodTask;
+/** @brief `InkpodTask` と同じ ABI・所有権を持つ batch task 別名。 */
+typedef InkpodTask InkpodBatchTask;
 /** @brief コピー済み batch 設定を保持する immutable・Rust-owned handle。 */
 typedef struct InkpodBatchGraph InkpodBatchGraph;
 /** @brief batch preview item を所有する immutable・Rust-owned handle。 */
@@ -1103,13 +1103,13 @@ typedef struct InkpodStampGestureInput {
 } InkpodStampGestureInput;
 
 /** @brief atomic task の状態と completed/total work を受け取る caller-owned 出力。 */
-typedef struct InkpodM6TaskInfo {
+typedef struct InkpodTaskInfo {
     uint32_t struct_size;
-    InkpodM6TaskState state;
+    InkpodTaskState state;
     uint64_t completed_work;
     uint64_t total_work;
     uint64_t reserved;
-} InkpodM6TaskInfo;
+} InkpodTaskInfo;
 
 /**
  * @brief batch graph の file/folder/current-sequence selector 入力。
@@ -1485,7 +1485,7 @@ typedef struct InkpodLocatorOutput {
  * bytes は 1 呼び出し中だけ借用する。row padding は許すが、advertised byte range に
  * 全 row が必要。保持する API は戻る前に raster をコピーする。
  */
-typedef struct InkpodM4RasterInput {
+typedef struct InkpodRasterSourceInput {
     uint32_t struct_size;
     InkpodStoragePixelFormat pixel_format;
     uint64_t flags;
@@ -1500,7 +1500,7 @@ typedef struct InkpodM4RasterInput {
     const uint8_t* pixels;
     uint64_t pixel_bytes;
     uint64_t row_stride_bytes;
-} InkpodM4RasterInput;
+} InkpodRasterSourceInput;
 
 /** @brief light-table item の表示属性、UTF-8 名、source raster をまとめる borrowed 入力。 */
 typedef struct InkpodLightTableItemInput {
@@ -1517,7 +1517,7 @@ typedef struct InkpodLightTableItemInput {
     uint32_t reserved;
     const uint8_t* name_utf8;
     uint64_t name_bytes;
-    InkpodM4RasterInput source;
+    InkpodRasterSourceInput source;
 } InkpodLightTableItemInput;
 
 /** @brief light-table set/item の operation と属性変更を渡す borrowed 入力。 */
@@ -1582,7 +1582,7 @@ typedef struct InkpodSequenceCellInput {
     uint32_t reserved;
     const uint8_t* name_utf8;
     uint64_t name_bytes;
-    InkpodM4RasterInput source;
+    InkpodRasterSourceInput source;
 } InkpodSequenceCellInput;
 
 /** @brief caller-owned sequence-cell strided span を渡す borrowed 入力。 */
@@ -2980,7 +2980,7 @@ InkpodStatus inkpod_core_filter_preview_begin(
 InkpodStatus inkpod_core_filter_preview_begin_task(
     InkpodCore* core,
     const InkpodFilterInput* input,
-    InkpodM6Task* task,
+    InkpodTask* task,
     InkpodFilterPreviewInfo* out_info);
 /**
  * @brief active filter preview を original base から新 parameter で再計算する。
@@ -3006,7 +3006,7 @@ InkpodStatus inkpod_core_filter_preview_update(
 InkpodStatus inkpod_core_filter_preview_update_task(
     InkpodCore* core,
     const InkpodFilterInput* input,
-    InkpodM6Task* task,
+    InkpodTask* task,
     InkpodFilterPreviewInfo* out_info);
 /**
  * @brief active filter/dust preview を破棄する。
@@ -3053,7 +3053,7 @@ InkpodStatus inkpod_core_filter_apply_last(
 InkpodStatus inkpod_core_filter_apply_last_task(
     InkpodCore* core,
     uint64_t plane_id,
-    InkpodM6Task* task,
+    InkpodTask* task,
     InkpodDispatchResult* result);
 /**
  * @brief supported filter parameter から非破壊 adjustment layer を作成する。
@@ -3193,7 +3193,7 @@ InkpodStatus inkpod_core_effect_blur_tool(
 InkpodStatus inkpod_core_dust_remove(
     InkpodCore* core,
     const InkpodDustInput* input,
-    InkpodM6Task* task,
+    InkpodTask* task,
     InkpodDispatchResult* result);
 /**
  * @brief cancellable task で dust removal preview を開始する。
@@ -3207,7 +3207,7 @@ InkpodStatus inkpod_core_dust_remove(
 InkpodStatus inkpod_core_dust_preview_begin(
     InkpodCore* core,
     const InkpodDustInput* input,
-    InkpodM6Task* task,
+    InkpodTask* task,
     InkpodFilterPreviewInfo* out_info);
 /**
  * @brief grayscale8/16 raster で target plane の alpha だけを置換する。
@@ -3235,14 +3235,14 @@ InkpodStatus inkpod_core_alpha_gradient(
     InkpodDispatchResult* result);
 
 /**
- * @brief READY 状態の thread-safe M6 task を作成する。
+ * @brief READY 状態の thread-safe task を作成する。
  * @par 契約
  * 任意スレッド。`out_task` は非 NULL、`*out_task == NULL`。成功時 Rust-owned handle、失敗時 NULL のまま。
  * Core/document revision、dirty、Undo、stroke/preview に影響しない。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
-InkpodStatus inkpod_m6_task_create(InkpodM6Task** out_task);
+InkpodStatus inkpod_task_create(InkpodTask** out_task);
 /**
  * @brief task の atomic state/progress を取得する。
  * @par 契約
@@ -3251,9 +3251,9 @@ InkpodStatus inkpod_m6_task_create(InkpodM6Task** out_task);
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
-InkpodStatus inkpod_m6_task_query(
-    const InkpodM6Task* task,
-    InkpodM6TaskInfo* out_info);
+InkpodStatus inkpod_task_query(
+    const InkpodTask* task,
+    InkpodTaskInfo* out_info);
 /**
  * @brief task へ thread-safe な cancellation を要求する。
  * @par 契約
@@ -3262,7 +3262,7 @@ InkpodStatus inkpod_m6_task_query(
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
-InkpodStatus inkpod_m6_task_cancel(InkpodM6Task* task);
+InkpodStatus inkpod_task_cancel(InkpodTask* task);
 /**
  * @brief task handle を解放し owner 変数を NULL にする。
  * @par 契約
@@ -3271,7 +3271,7 @@ InkpodStatus inkpod_m6_task_cancel(InkpodM6Task* task);
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
-InkpodStatus inkpod_m6_task_release(InkpodM6Task** task);
+InkpodStatus inkpod_task_release(InkpodTask** task);
 
 /**
  * @brief nested input/operation span を検証・コピーして immutable batch graph を作る。
@@ -3442,7 +3442,7 @@ InkpodStatus inkpod_batch_task_create(InkpodBatchTask** out_task);
  */
 InkpodStatus inkpod_batch_task_query(
     const InkpodBatchTask* task,
-    InkpodM6TaskInfo* out_info);
+    InkpodTaskInfo* out_info);
 /**
  * @brief batch task へ thread-safe cancellation を要求する。
  * @par 契約
