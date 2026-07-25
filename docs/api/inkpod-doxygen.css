@@ -1,0 +1,41 @@
+html {
+    --primary-color: #c34a36;
+    --primary-dark-color: #9f3828;
+    --primary-light-color: #f7e4df;
+    --page-background-color: #fffdfb;
+    --page-foreground-color: #302b29;
+    --separator-color: #eadbd6;
+    --side-nav-background: #faf4f1;
+    --code-background: #f7f2ef;
+    --fragment-background: #f7f2ef;
+    --font-family: "Yu Gothic UI", "Yu Gothic", "Hiragino Kaku Gothic ProN",
+        "Noto Sans JP", sans-serif;
+    --font-family-monospace: "Cascadia Mono", "BIZ UDゴシック", Consolas, monospace;
+}
+
+body,
+table,
+div,
+p,
+dl {
+    line-height: 1.75;
+}
+
+.title,
+h1,
+h2,
+h3 {
+    letter-spacing: 0.02em;
+}
+
+code,
+.fragment,
+.memname,
+.paramname {
+    font-variant-ligatures: none;
+}
+
+.contents table.markdownTable {
+    display: table;
+    width: 100%;
+}

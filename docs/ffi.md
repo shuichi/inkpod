@@ -1,6 +1,6 @@
 # FFI 利用ガイド
 
-Inkpod の公開 C ABI は [`include/inkpod/core_ffi.h`](../include/inkpod/core_ffi.h) を仕様の正本とする。
+Inkpod の公開 C ABI は `include/inkpod/core_ffi.h` を仕様の正本とする。
 各型・関数の引数、`struct_size`、NULL 可否、スレッド、所有権、出力、revision、dirty、Undo、
 排他状態、戻りステータスはヘッダーの Doxygen コメントに記載している。この文書は関数一覧を
 複製せず、frontend が ABI を安全に利用するための横断的な契約と典型的な呼び出し順序を説明する。
@@ -16,20 +16,16 @@ Windows frontend は UI/Input、Core engine、Renderer の三つの長寿命 thr
 Core は C++ callback を呼ばない。UI thread は Core や Renderer の完了を同期的に待たず、Renderer は
 古い未描画 snapshot だけを置き換えてよい。stroke の begin/end/cancel と入力 sample 自体は捨てない。
 
-```mermaid
-sequenceDiagram
-    participant UI as UI/Input thread
-    participant CE as Core engine thread
-    participant RQ as snapshot queue
-    participant RD as Renderer thread
-
-    UI->>CE: 正規化した入力 batch
-    CE->>CE: Core command / stroke
-    CE->>CE: immutable snapshot 構築
-    CE->>RQ: snapshot 所有権を1回だけ移動
-    RQ->>RD: 最新 snapshot
-    RD->>RD: borrowed view を描画
-    RD->>RD: snapshot release
+```text
+UI/Input thread
+  └─ 正規化した入力 batch
+       → Core engine thread
+           ├─ Core command / stroke
+           └─ immutable snapshot 構築
+                → snapshot queue（所有権を1回だけ移動）
+                    → Renderer thread
+                        ├─ borrowed view を描画
+                        └─ snapshot release
 ```
 
 ## ABI と構造体

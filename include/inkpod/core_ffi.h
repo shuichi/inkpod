@@ -1645,19 +1645,24 @@ typedef struct InkpodMotionFrame {
 
 /**
  * @brief library が実装する ABI version を返す。
- * @par 契約 任意スレッド、引数なし、失敗なし。Core/stroke/preview、revision、dirty、Undo に影響しない。
+ * @par 契約
+ * 任意スレッド、引数なし、失敗なし。Core/stroke/preview、revision、dirty、Undo に影響しない。
  */
 uint32_t inkpod_abi_version(void);
 
 /**
  * @brief single-writer Core を作成する。
- * @par スレッド 呼び出したスレッドが Core owner thread になる。
- * @par NULL・サイズ・所有権 `config` と `out_core` は非 NULL・非重複。`config->struct_size` は
+ * @par スレッド
+ * 呼び出したスレッドが Core owner thread になる。
+ * @par NULL・サイズ・所有権
+ * `config` と `out_core` は非 NULL・非重複。`config->struct_size` は
  * ABI v1 全体以上、`abi_version` は一致が必要。`config` は呼び出し中だけ borrowed。
  * `*out_core` は事前に NULL。成功時だけ Rust-owned handle を格納する。
- * @par 状態 成功時は文書なし、stroke/preview なしの Core。失敗時 `*out_core` は NULL のまま。
+ * @par 状態
+ * 成功時は文書なし、stroke/preview なしの Core。失敗時 `*out_core` は NULL のまま。
  * revision、dirty、Undo はまだ存在しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INCOMPATIBLE_ABI`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INCOMPATIBLE_ABI`、`PANIC`。
  */
 InkpodStatus inkpod_core_create(
     const InkpodCoreConfig* config,
@@ -1665,21 +1670,27 @@ InkpodStatus inkpod_core_create(
 
 /**
  * @brief Core の Rust 所有権を解放し owner 変数を NULL にする。
- * @par スレッド Core が非 NULL なら作成スレッド限定。
- * @par NULL・所有権 `core` 自体は非 NULL。`*core == NULL` は成功 no-op。live handle はこの呼び出しが消費する。
- * @par 状態 live stroke/preview/floating は破棄する。成功時 `*core == NULL`。失敗時は handle を消費しない。
+ * @par スレッド
+ * Core が非 NULL なら作成スレッド限定。
+ * @par NULL・所有権
+ * `core` 自体は非 NULL。`*core == NULL` は成功 no-op。live handle はこの呼び出しが消費する。
+ * @par 状態
+ * live stroke/preview/floating は破棄する。成功時 `*core == NULL`。失敗時は handle を消費しない。
  * snapshot は独立所有のため Core より長く生存できる。revision、dirty、Undo を commit しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_destroy(InkpodCore** core);
 
 /**
  * @brief versioned command span を順番に dispatch する。
- * @par 契約 Core owner thread。`core`、`batch`、`result` は非 NULL・非重複で borrowed/caller-owned。
+ * @par 契約
+ * Core owner thread。`core`、`batch`、`result` は非 NULL・非重複で borrowed/caller-owned。
  * 両構造体と各 command は完全な `struct_size`、stride は空 batch でも `sizeof(InkpodCommand)` 以上。
  * 成功時 `result` に revision/受理数を格納する。ABI v1 の NO_OP は文書、dirty、Undo を変えない。
  * 失敗時 result は未使用、Core と履歴は不変。live stroke/preview と競合する command は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`INVALID_STATE`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`INVALID_STATE`、`PANIC`。
  */
 InkpodStatus inkpod_core_dispatch_batch(
     InkpodCore* core,
@@ -1688,12 +1699,15 @@ InkpodStatus inkpod_core_dispatch_batch(
 
 /**
  * @brief sparse な main-line/color 2-plane CellDocument を新規作成する。
- * @par 契約 Core owner thread。`core`、`options`、`out_info` は非 NULL・非重複。
+ * @par 契約
+ * Core owner thread。`core`、`options`、`out_info` は非 NULL・非重複。
  * options は borrowed で完全な `struct_size`、非 0 UUID、bounded 寸法/DPI が必要。
  * 成功時は旧文書を置換し、stable nonzero ID の新規文書情報をコピーする。history は初期化され、
  * stroke/preview は存在しない。失敗時は旧文書と出力を変えない。active stroke/preview 中は不可。
- * @par revision 成功時の初期 revision/dirty は `out_info` が正本。Undo item は作らない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`INVALID_STATE`、`PANIC`。
+ * @par revision
+ * 成功時の初期 revision/dirty は `out_info` が正本。Undo item は作らない。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`INVALID_STATE`、`PANIC`。
  */
 InkpodStatus inkpod_core_new_cell(
     InkpodCore* core,
@@ -1702,20 +1716,24 @@ InkpodStatus inkpod_core_new_cell(
 
 /**
  * @brief committed document metadata をコピーする。
- * @par 契約 Core owner thread。`core` と `out_info` は非 NULL・非重複、出力は完全な `struct_size`。
+ * @par 契約
+ * Core owner thread。`core` と `out_info` は非 NULL・非重複、出力は完全な `struct_size`。
  * 成功時だけ caller-owned 出力を初期化する。query のため revision、dirty、Undo を変えず、
  * live stroke/preview の transient 内容は document info に commit されない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_core_get_document_info(
     InkpodCore* core,
     InkpodDocumentInfo* out_info);
 /**
  * @brief 紙 frame と margin を 1 transaction で更新する。
- * @par 契約 Core owner thread。3 pointer は非 NULL・非重複。入力は完全な `struct_size` で呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL・非重複。入力は完全な `struct_size` で呼び出し中だけ borrowed。
  * 成功時は result を書き、実変更があれば revision を進め dirty/1 Undo 単位にする。失敗時は文書・履歴・出力を変えない。
  * live stroke/preview 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
  */
 InkpodStatus inkpod_core_update_paper_frames(
     InkpodCore* core,
@@ -1724,18 +1742,22 @@ InkpodStatus inkpod_core_update_paper_frames(
 
 /**
  * @brief 互換 main-line/color active plane を切り替える。
- * @par 契約 Core owner thread。`core` は非 NULL borrowed、`plane` は既知値。成功時は論理 UI state だけ更新し、
+ * @par 契約
+ * Core owner thread。`core` は非 NULL borrowed、`plane` は既知値。成功時は論理 UI state だけ更新し、
  * document revision、dirty、Undo を変えない。失敗時不変。stroke/preview と競合中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
  */
 InkpodStatus inkpod_core_set_active_plane(
     InkpodCore* core,
     InkpodPlaneKind plane);
 /**
  * @brief stable layer/plane ID で active node を切り替える。
- * @par 契約 Core owner thread。`core` は非 NULL borrowed、ID は現文書内の整合する組。成功時は UI selection のみで
+ * @par 契約
+ * Core owner thread。`core` は非 NULL borrowed、ID は現文書内の整合する組。成功時は UI selection のみで
  * revision、dirty、Undo は不変。失敗時も不変。stroke/preview と競合中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
  */
 InkpodStatus inkpod_core_set_active_node(
     InkpodCore* core,
@@ -1744,11 +1766,13 @@ InkpodStatus inkpod_core_set_active_node(
 
 /**
  * @brief bounded・all-or-nothing の seed/closed-region/extension fill を適用する。
- * @par 契約 Core owner thread。`core`、`input`、`result` は非 NULL・非重複。入力と nested inclusion-color span は
+ * @par 契約
+ * Core owner thread。`core`、`input`、`result` は非 NULL・非重複。入力と nested inclusion-color span は
  * 呼び出し中だけ borrowed で、各構造体サイズ/stride を検証する。成功時 result を書き、変更時だけ revision、dirty、
  * 1 Undo 単位を進める。no-op は変更数 0。`FILL_OVERFLOW` では漏れ候補だけ result に返し、pixel/revision/dirty/Undo は不変。
  * light-table flags は immutable reference を読むだけ。live stroke/preview 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`FILL_OVERFLOW`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`FILL_OVERFLOW`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_apply_fill(
     InkpodCore* core,
@@ -1757,9 +1781,11 @@ InkpodStatus inkpod_core_apply_fill(
 
 /**
  * @brief 指定 source の document 座標 pixel を exact-depth 色として読む。
- * @par 契約 Core owner thread。`core` と `out_color` は非 NULL・非重複、出力は完全な `struct_size`。
+ * @par 契約
+ * Core owner thread。`core` と `out_color` は非 NULL・非重複、出力は完全な `struct_size`。
  * 成功時のみ色をコピーする。query のため revision、dirty、Undo と stroke/preview state を変えない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_eyedropper(
     InkpodCore* core,
@@ -1770,10 +1796,12 @@ InkpodStatus inkpod_core_eyedropper(
 
 /**
  * @brief document palette を exact-depth color span で置換する。
- * @par 契約 Core owner thread。`core`、`input`、`result` は非 NULL・非重複。span は呼び出し中だけ borrowed、
+ * @par 契約
+ * Core owner thread。`core`、`input`、`result` は非 NULL・非重複。span は呼び出し中だけ borrowed、
  * 各 record の `struct_size` と stride が必要。成功時は 1 metadata transaction として revision/dirty/Undo を更新し result を書く。
  * 失敗時不変。live stroke/preview 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_palette_set(
     InkpodCore* core,
@@ -1781,19 +1809,23 @@ InkpodStatus inkpod_core_palette_set(
     InkpodDispatchResult* result);
 /**
  * @brief document palette を caller-owned buffer へコピーする。
- * @par 契約 Core owner thread。`core` と `buffer` は非 NULL・非重複、buffer は完全な `struct_size`。
+ * @par 契約
+ * Core owner thread。`core` と `buffer` は非 NULL・非重複、buffer は完全な `struct_size`。
  * capacity 0 かつ `colors == NULL` は count query。成功時は complete color record と `color_count` を書く。
  * `BUFFER_TOO_SMALL` でも必要 count を返すが storage は所有しない。revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_palette_get(
     InkpodCore* core,
     InkpodColorBuffer* buffer);
 /**
  * @brief current composite から deterministic palette を生成して置換する。
- * @par 契約 Core owner thread。`core` と `result` は非 NULL、bounds 内の maximum/quantization が必要。
+ * @par 契約
+ * Core owner thread。`core` と `result` は非 NULL、bounds 内の maximum/quantization が必要。
  * 成功時 1 metadata transaction として result/revision/dirty/Undo を更新。失敗時不変。stroke/preview 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_palette_generate(
     InkpodCore* core,
@@ -1803,9 +1835,11 @@ InkpodStatus inkpod_core_palette_generate(
 
 /**
  * @brief grayscale main-line の exact-depth base color を設定する。
- * @par 契約 Core owner thread。3 pointer は非 NULL・非重複、`color` は完全な `struct_size` で borrowed。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL・非重複、`color` は完全な `struct_size` で borrowed。
  * binary main-line は拒否する。成功時は 1 metadata/Undo transaction、失敗時不変。stroke/preview 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_set_main_line_color(
     InkpodCore* core,
@@ -1813,9 +1847,11 @@ InkpodStatus inkpod_core_set_main_line_color(
     InkpodDispatchResult* result);
 /**
  * @brief grayscale main-line の base color をコピーする。
- * @par 契約 Core owner thread。`core` と完全サイズの `out_color` は非 NULL・非重複。成功時だけ出力を初期化し、
+ * @par 契約
+ * Core owner thread。`core` と完全サイズの `out_color` は非 NULL・非重複。成功時だけ出力を初期化し、
  * revision、dirty、Undo、stroke/preview を変えない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_get_main_line_color(
     InkpodCore* core,
@@ -1823,9 +1859,11 @@ InkpodStatus inkpod_core_get_main_line_color(
 
 /**
  * @brief 色チェック表示 mode を切り替える。
- * @par 契約 Core owner thread。`core` は非 NULL borrowed、mode は既知値。成功時は render/view revision のみ変わり得る。
+ * @par 契約
+ * Core owner thread。`core` は非 NULL borrowed、mode は既知値。成功時は render/view revision のみ変わり得る。
  * document revision、dirty、Undo、committed pixel は不変。失敗時すべて不変。live stroke/preview と併用しても文書を commit しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_set_color_check(
     InkpodCore* core,
@@ -1833,10 +1871,12 @@ InkpodStatus inkpod_core_set_color_check(
 
 /**
  * @brief pointer-down から up までの全 sample を 1 transaction で適用する convenience API。
- * @par 契約 Core owner thread。3 pointer は非 NULL・非重複。input/sample span は呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL・非重複。input/sample span は呼び出し中だけ borrowed。
  * 成功時は実 pixel 変更があれば revision/dirty を 1 回更新し 1 Undo 単位、no-op は変更なし。失敗時は atomic に不変。
  * live stroke または filter/dust preview 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_apply_stroke(
     InkpodCore* core,
@@ -1845,75 +1885,91 @@ InkpodStatus inkpod_core_apply_stroke(
 
 /**
  * @brief live stroke を開始し initial sample を transient preview へ適用する。
- * @par 契約 Core owner thread。`core`/`input` は非 NULL・非重複、style/sample span は呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。`core`/`input` は非 NULL・非重複、style/sample span は呼び出し中だけ borrowed。
  * 成功時 live stroke が 1 個存在するが committed revision、dirty、Undo は不変。失敗時 session を残さない。
  * 既存 stroke、filter/dust preview、floating 競合中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_stroke_begin(
     InkpodCore* core,
     const InkpodStrokeInput* input);
 /**
  * @brief live stroke へ sample batch を順序どおり追加する。
- * @par 契約 Core owner thread。`core`/`span` は非 NULL・非重複、span は呼び出し中だけ borrowed で完全サイズ/stride が必要。
+ * @par 契約
+ * Core owner thread。`core`/`span` は非 NULL・非重複、span は呼び出し中だけ borrowed で完全サイズ/stride が必要。
  * 成功時 transient preview だけ更新し revision/dirty/Undo は不変。stroke 不在または preview 競合は `INVALID_STATE`。
  * append 失敗時は部分 stroke を後で commit できないよう session を無効化する。出力はない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_stroke_append(
     InkpodCore* core,
     const InkpodStrokeSampleSpan* span);
 /**
  * @brief live stroke を終了し、全 sample を高々 1 transaction で commit する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL・非重複、result は完全サイズ。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL・非重複、result は完全サイズ。
  * 成功時、実変更なら revision/dirty と 1 Undo 単位を進め、no-op なら進めない。どちらも session を終了する。
  * stroke 不在は `INVALID_STATE`。失敗時 committed base は不変で session は commit されない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_stroke_end(
     InkpodCore* core,
     InkpodDispatchResult* result);
 /**
  * @brief live stroke を破棄して committed base へ戻す。
- * @par 契約 Core owner thread。`core` は非 NULL borrowed。stroke 不在は成功 no-op。
+ * @par 契約
+ * Core owner thread。`core` は非 NULL borrowed。stroke 不在は成功 no-op。
  * 成功時 session を消すが revision、dirty、Undo は begin 前から不変。filter preview state は変更しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_stroke_cancel(InkpodCore* core);
 
 /**
  * @brief history cursor を 1 transaction 戻す。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL・非重複。成功時 result と document revision を更新し、
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL・非重複。成功時 result と document revision を更新し、
  * dirty は savepoint との位置関係で再計算する。Undo item を新規作成せず Redo を可能にする。失敗/no-op 時は出力未使用・不変。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_core_undo(
     InkpodCore* core,
     InkpodDispatchResult* result);
 /**
  * @brief history cursor を 1 transaction 進める。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL・非重複。成功時 result/revision を更新し dirty を savepoint から再計算。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL・非重複。成功時 result/revision を更新し dirty を savepoint から再計算。
  * history item は増やさない。失敗/no-op 時不変。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_core_redo(
     InkpodCore* core,
     InkpodDispatchResult* result);
 /**
  * @brief history cursor と item count をコピーする。
- * @par 契約 Core owner thread。`core`/`out_info` は非 NULL・非重複、出力は完全サイズ。成功時だけ書く。
+ * @par 契約
+ * Core owner thread。`core`/`out_info` は非 NULL・非重複、出力は完全サイズ。成功時だけ書く。
  * query のため revision、dirty、Undo、stroke/preview state は不変。
- * @par 主なステータス `OK`、`NO_DOCUMENT`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`NO_DOCUMENT`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_core_history_info(
     InkpodCore* core,
     InkpodHistoryInfo* out_info);
 /**
  * @brief 指定 history item の適用状態と UTF-8 名を caller buffer へコピーする。
- * @par 契約 Core owner thread。`core`/`out_item` は非 NULL・非重複、完全サイズ。name capacity 0/NULL は size query。
+ * @par 契約
+ * Core owner thread。`core`/`out_item` は非 NULL・非重複、完全サイズ。name capacity 0/NULL は size query。
  * 成功時 complete record、`BUFFER_TOO_SMALL` 時も必要 `name_bytes` を返す。revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_history_item(
     InkpodCore* core,
@@ -1921,9 +1977,11 @@ InkpodStatus inkpod_core_history_item(
     InkpodHistoryItem* out_item);
 /**
  * @brief history cursor を指定位置へ atomic に移動する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL、target は 0..item_count。成功時 revision/result と dirty を更新するが
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL、target は 0..item_count。成功時 revision/result と dirty を更新するが
  * item は追加しない。失敗時不変。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_history_jump(
     InkpodCore* core,
@@ -1931,9 +1989,11 @@ InkpodStatus inkpod_core_history_jump(
     InkpodDispatchResult* result);
 /**
  * @brief active selection に関係する直前状態へ transaction として戻す。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL。成功時実変更があれば revision/dirty/1 Undo 単位を追加。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL。成功時実変更があれば revision/dirty/1 Undo 単位を追加。
  * 失敗時不変。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_core_revert_active_selection(
     InkpodCore* core,
@@ -1941,10 +2001,12 @@ InkpodStatus inkpod_core_revert_active_selection(
 
 /**
  * @brief current document を `.inkpod` へ atomic に通常保存する。
- * @par 契約 Core owner thread。`core`/path/`out_info` は非 NULL・非重複、path は非空 UTF-8 byte span として呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。`core`/path/`out_info` は非 NULL・非重複、path は非空 UTF-8 byte span として呼び出し中だけ borrowed。
  * 同一 directory の一時 file を完成・flush・close 後に置換する。成功時 revision/Undo は不変、normal savepoint/path を更新して dirty を解消し
  * out_info を書く。失敗時既存 file・文書・savepoint・出力は不変。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_save(
     InkpodCore* core,
@@ -1953,10 +2015,12 @@ InkpodStatus inkpod_core_save(
     InkpodDocumentInfo* out_info);
 /**
  * @brief `.inkpod` を検証・decode して current document を置換する。
- * @par 契約 Core owner thread。`core`/非空 UTF-8 path/`out_info` は非 NULL・非重複。path は呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。`core`/非空 UTF-8 path/`out_info` は非 NULL・非重複。path は呼び出し中だけ borrowed。
  * 成功時のみ文書と history/savepoint を置換し out_info を書く。open 自体は Undo item を作らず、通常 dirty は解消済み。
  * decode/IO 失敗時は旧文書・revision・dirty・Undo・出力を完全に保つ。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_open(
     InkpodCore* core,
@@ -1965,10 +2029,12 @@ InkpodStatus inkpod_core_open(
     InkpodDocumentInfo* out_info);
 /**
  * @brief current document を recovery 用 `.inkpod` へ atomic 保存する。
- * @par 契約 Core owner thread。通常 save と同じ非 NULL/UTF-8/borrowed path・出力サイズ規則。
+ * @par 契約
+ * Core owner thread。通常 save と同じ非 NULL/UTF-8/borrowed path・出力サイズ規則。
  * 成功時 out_info を書くが document revision、dirty、Undo、normal path/savepoint は変えない。失敗時文書と既存出力 file は不変。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_autosave(
     InkpodCore* core,
@@ -1977,10 +2043,12 @@ InkpodStatus inkpod_core_autosave(
     InkpodDocumentInfo* out_info);
 /**
  * @brief recovery container を dirty・pathless document として開く。
- * @par 契約 Core owner thread。`core`/非空 UTF-8 path/`out_info` は非 NULL・非重複、path は一時 borrowed。
+ * @par 契約
+ * Core owner thread。`core`/非空 UTF-8 path/`out_info` は非 NULL・非重複、path は一時 borrowed。
  * 成功時のみ current document/history を置換し `RECOVERED|DIRTY` を含む info を書く。normal path/savepoint は引き継がず Undo item は作らない。
  * 失敗時旧文書と出力は不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_open_recovery(
     InkpodCore* core,
@@ -1989,9 +2057,11 @@ InkpodStatus inkpod_core_open_recovery(
     InkpodDocumentInfo* out_info);
 /**
  * @brief current normal path の保存済み内容を再読込して未保存変更を破棄する。
- * @par 契約 Core owner thread。`core`/`out_info` は非 NULL・非重複、出力は完全サイズ。成功時のみ文書/history を置換し dirty を解消、
+ * @par 契約
+ * Core owner thread。`core`/`out_info` は非 NULL・非重複、出力は完全サイズ。成功時のみ文書/history を置換し dirty を解消、
  * Undo history を新規開始する。失敗時現文書を保つ。normal path がない場合や stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_core_revert(
     InkpodCore* core,
@@ -1999,12 +2069,15 @@ InkpodStatus inkpod_core_revert(
 
 /**
  * @brief primary view に pan/zoom/fit/1:1/viewport/flip/overlay command を適用する。
- * @par 値 PAN(dx,dy)、ZOOM(factor,anchor_x,anchor_y)、FIT/ONE_TO_ONE/VIEWPORT_RESIZED(w,h)、
+ * @par 値
+ * PAN(dx,dy)、ZOOM(factor,anchor_x,anchor_y)、FIT/ONE_TO_ONE/VIEWPORT_RESIZED(w,h)、
  * BOX_ZOOM(document_x,document_y,document_w,document_h)、SET_*(enabled)。flip は値を無視する。
  * BOX_ZOOM 以外は Canvas client device pixel。resize は manual view を保持し persistent Fit/1:1 だけ再計算する。
- * @par 契約 Core owner thread。`core`/`input`/`out_info` は非 NULL・非重複、構造体は完全サイズ。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`out_info` は非 NULL・非重複、構造体は完全サイズ。
  * 成功時 view revision/info のみ更新し document revision、dirty、Undo は不変。失敗時不変。live stroke と競合する view mutation は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_apply_view(
     InkpodCore* core,
@@ -2013,10 +2086,12 @@ InkpodStatus inkpod_core_apply_view(
 
 /**
  * @brief typed layer/plane tree を作成・複製・削除・並替・変換・統合する。
- * @par 契約 Core owner thread。`core`/`input`/`result`/`out_object_id` は非 NULL・非重複。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`result`/`out_object_id` は非 NULL・非重複。
  * input と UTF-8 名は呼び出し中だけ borrowed。成功時 result と stable ID を書き、実変更を 1 revision/dirty/Undo 単位で commit。
  * 失敗時 document/history/両出力は不変。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_tree_edit(
     InkpodCore* core,
@@ -2025,10 +2100,12 @@ InkpodStatus inkpod_core_tree_edit(
     uint64_t* out_object_id);
 /**
  * @brief index 指定の layer または plane metadata/name をコピーする。
- * @par 契約 Core owner thread。`core`/`out_info` は非 NULL・非重複、出力は完全サイズ。
+ * @par 契約
+ * Core owner thread。`core`/`out_info` は非 NULL・非重複、出力は完全サイズ。
  * `plane_index == UINT32_MAX` は layer 自体。name capacity 0/NULL は size query、`BUFFER_TOO_SMALL` でも必要 `name_bytes` を返す。
  * query のため revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_node_get(
     InkpodCore* core,
@@ -2037,9 +2114,11 @@ InkpodStatus inkpod_core_node_get(
     InkpodNodeInfo* out_info);
 /**
  * @brief shape/points/wand 条件から selection mask を new/add/subtract/intersect する。
- * @par 契約 Core owner thread。3 pointer は非 NULL・非重複。input/point span は完全サイズ/stride で呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL・非重複。input/point span は完全サイズ/stride で呼び出し中だけ borrowed。
  * 成功時実変更を 1 revision/dirty/Undo 単位で commit し result を書く。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_apply_selection(
     InkpodCore* core,
@@ -2047,9 +2126,11 @@ InkpodStatus inkpod_core_apply_selection(
     InkpodDispatchResult* result);
 /**
  * @brief active plane の指定色と同じ／異なる pixel を selection へ合成する。
- * @par 契約 Core owner thread。`core`/`color`/`result` は非 NULL・非重複、color は完全サイズで borrowed。
+ * @par 契約
+ * Core owner thread。`core`/`color`/`result` は非 NULL・非重複、color は完全サイズで borrowed。
  * 成功時実変更を 1 revision/dirty/Undo 単位で commit。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_select_color(
     InkpodCore* core,
@@ -2060,9 +2141,11 @@ InkpodStatus inkpod_core_select_color(
     InkpodDispatchResult* result);
 /**
  * @brief selection mask を invert/expand/shrink する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL、operation と pixel 上限を検証。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL、operation と pixel 上限を検証。
  * 成功時実変更を 1 revision/dirty/Undo 単位で commit。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_selection_adjust(
     InkpodCore* core,
@@ -2071,18 +2154,22 @@ InkpodStatus inkpod_core_selection_adjust(
     InkpodDispatchResult* result);
 /**
  * @brief document selection mask を空にする。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL。成功時、非空なら 1 revision/dirty/Undo 単位、既に空なら no-op。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL。成功時、非空なら 1 revision/dirty/Undo 単位、既に空なら no-op。
  * 失敗時不変。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_core_selection_clear(
     InkpodCore* core,
     InkpodDispatchResult* result);
 /**
  * @brief selection mask から新しい selection layer を作る。
- * @par 契約 Core owner thread。`core`/非空 UTF-8 name/`result`/`out_layer_id` は非 NULL・非重複。name は呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。`core`/非空 UTF-8 name/`result`/`out_layer_id` は非 NULL・非重複。name は呼び出し中だけ borrowed。
  * 成功時 stable ID と result を書き 1 revision/dirty/Undo 単位。失敗時出力/文書不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_selection_to_layer(
     InkpodCore* core,
@@ -2092,9 +2179,11 @@ InkpodStatus inkpod_core_selection_to_layer(
     uint64_t* out_layer_id);
 /**
  * @brief selection layer を document selection へ replace/add/subtract する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL、layer ID と operation は有効値。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL、layer ID と operation は有効値。
  * 成功時実変更を 1 revision/dirty/Undo 単位で commit。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_selection_from_layer(
     InkpodCore* core,
@@ -2104,36 +2193,44 @@ InkpodStatus inkpod_core_selection_from_layer(
 
 /**
  * @brief current selection/plane を typed clipboard payload へコピーする。
- * @par 契約 Core owner thread。`core`/`out_clipboard` は非 NULL・非重複、`*out_clipboard == NULL` が必要。
+ * @par 契約
+ * Core owner thread。`core`/`out_clipboard` は非 NULL・非重複、`*out_clipboard == NULL` が必要。
  * 成功時だけ Rust-owned immutable handle を格納する。document revision、dirty、Undo は変えない。
  * 失敗時 owner は NULL のまま。live stroke/preview と競合中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_clipboard_copy(
     InkpodCore* core,
     InkpodClipboard** out_clipboard);
 /**
  * @brief clipboard handle を解放して owner 変数を NULL にする。
- * @par 契約 任意スレッド。`clipboard` 自体は非 NULL、`*clipboard == NULL` は成功 no-op。
+ * @par 契約
+ * 任意スレッド。`clipboard` 自体は非 NULL、`*clipboard == NULL` は成功 no-op。
  * 成功時所有権を消費し別名を無効化。Core/revision/dirty/Undo/stroke/preview に影響しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_clipboard_release(InkpodClipboard** clipboard);
 /**
  * @brief clipboard を互換 destination へ floating paste として開始する。
- * @par 契約 Core owner thread。`core`/`clipboard` は非 NULL・非重複。clipboard は呼び出し中 borrowed で payload を Core が複製するため、
+ * @par 契約
+ * Core owner thread。`core`/`clipboard` は非 NULL・非重複。clipboard は呼び出し中 borrowed で payload を Core が複製するため、
  * 成功後は元 handle を解放できる。成功時 floating state だけ作り committed revision/dirty/Undo は不変。
  * stroke/preview/既存 floating 中は `INVALID_STATE`。失敗時 state 不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_paste_begin(
     InkpodCore* core,
     const InkpodClipboard* clipboard);
 /**
  * @brief destination/変換 mode を明示して floating paste を開始する。
- * @par 契約 `inkpod_core_paste_begin` と同じ。mode は既知値、clipboard は一時 borrowed。
+ * @par 契約
+ * `inkpod_core_paste_begin` と同じ。mode は既知値、clipboard は一時 borrowed。
  * 成功時 preview state のみで revision/dirty/Undo は不変。競合 stroke/preview/floating は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_paste_begin_mode(
     InkpodCore* core,
@@ -2141,55 +2238,67 @@ InkpodStatus inkpod_core_paste_begin_mode(
     uint32_t mode);
 /**
  * @brief typed clipboard を straight RGBA8 caller buffer へ rasterize する。
- * @par 契約 任意スレッド。`clipboard`/`output` は非 NULL・非重複、output は完全サイズ。
+ * @par 契約
+ * 任意スレッド。`clipboard`/`output` は非 NULL・非重複、output は完全サイズ。
  * capacity 0/NULL は size query。成功時 raster metadata/bytes、`BUFFER_TOO_SMALL` 時も `required_bytes` を返す。
  * clipboard の所有権と Core/revision/dirty/Undo/排他状態は不変。
- * @par 主なステータス `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_clipboard_render_rgba8(
     const InkpodClipboard* clipboard,
     InkpodClipboardRasterBuffer* output);
 /**
  * @brief external straight RGBA8 raster から typed clipboard handle を作る。
- * @par 契約 任意スレッド。`input`/`out_clipboard` は非 NULL・非重複、入力は完全サイズで呼び出し中だけ borrowed、
+ * @par 契約
+ * 任意スレッド。`input`/`out_clipboard` は非 NULL・非重複、入力は完全サイズで呼び出し中だけ borrowed、
  * `*out_clipboard == NULL`。成功時 raster をコピーした Rust-owned handle を格納。失敗時 NULL のまま。
  * Core/revision/dirty/Undo/排他状態に影響しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_clipboard_create_rgba8(
     const InkpodClipboardRgbaInput* input,
     InkpodClipboard** out_clipboard);
 /**
  * @brief active floating paste の translate/scale/rotate preview を置換する。
- * @par 契約 Core owner thread。`core`/`input` は非 NULL・非重複、input は完全サイズ borrowed、finite 値が必要。
+ * @par 契約
+ * Core owner thread。`core`/`input` は非 NULL・非重複、input は完全サイズ borrowed、finite 値が必要。
  * 成功時 transient preview のみ更新し committed revision/dirty/Undo は不変。floating 不在または stroke/preview 中は `INVALID_STATE`。
  * 失敗時元 preview を保つ。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_floating_transform(
     InkpodCore* core,
     const InkpodFloatingTransform* input);
 /**
  * @brief active floating paste を高々 1 transaction で commit する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL。成功時実変更なら revision/dirty/1 Undo 単位を進め floating state を終了。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL。成功時実変更なら revision/dirty/1 Undo 単位を進め floating state を終了。
  * floating 不在または stroke/preview 中は `INVALID_STATE`。失敗時 committed base と state を保つ。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_floating_commit(
     InkpodCore* core,
     InkpodDispatchResult* result);
 /**
  * @brief active floating paste を破棄して committed base へ戻す。
- * @par 契約 Core owner thread。`core` は非 NULL。floating 不在は成功 no-op。
+ * @par 契約
+ * Core owner thread。`core` は非 NULL。floating 不在は成功 no-op。
  * 成功時 revision、dirty、Undo は begin 前から不変。stroke/filter preview は変更しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_floating_cancel(InkpodCore* core);
 /**
  * @brief active selection 内の selected content を消去する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL。成功時実変更を 1 revision/dirty/Undo 単位で commit。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL。成功時実変更を 1 revision/dirty/Undo 単位で commit。
  * 失敗時不変。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_core_clear_selected_content(
     InkpodCore* core,
@@ -2197,9 +2306,11 @@ InkpodStatus inkpod_core_clear_selected_content(
 
 /**
  * @brief document content と metadata を水平／垂直反転する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL、axis は既知値。成功時 1 revision/dirty/Undo 単位、失敗時不変。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL、axis は既知値。成功時 1 revision/dirty/Undo 単位、失敗時不変。
  * view-only flip とは異なる。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_mirror_document(
     InkpodCore* core,
@@ -2207,9 +2318,11 @@ InkpodStatus inkpod_core_mirror_document(
     InkpodDispatchResult* result);
 /**
  * @brief document content と metadata を左／右 90 度回転する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL、direction は既知値。成功時 1 revision/dirty/Undo 単位、失敗時不変。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL、direction は既知値。成功時 1 revision/dirty/Undo 単位、失敗時不変。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_rotate_document(
     InkpodCore* core,
@@ -2217,10 +2330,12 @@ InkpodStatus inkpod_core_rotate_document(
     InkpodDispatchResult* result);
 /**
  * @brief document 寸法/DPI を anchor と resample 方針に従い変更する。
- * @par 契約 Core owner thread。3 pointer は非 NULL・非重複、input/result は完全サイズ。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL・非重複、input/result は完全サイズ。
  * 成功時全 content/metadata を atomic に 1 revision/dirty/Undo 単位で commit。失敗時 partial resize は残さない。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_resize_document(
     InkpodCore* core,
@@ -2228,9 +2343,11 @@ InkpodStatus inkpod_core_resize_document(
     InkpodDispatchResult* result);
 /**
  * @brief document guide を追加する。
- * @par 契約 Core owner thread。`core`/`result`/`out_guide_id` は非 NULL・非重複、axis は既知値。
+ * @par 契約
+ * Core owner thread。`core`/`result`/`out_guide_id` は非 NULL・非重複、axis は既知値。
  * 成功時 stable ID/result を書き 1 revision/dirty/Undo 単位。失敗時出力/文書不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_guide_add(
     InkpodCore* core,
@@ -2240,9 +2357,11 @@ InkpodStatus inkpod_core_guide_add(
     uint64_t* out_guide_id);
 /**
  * @brief stable guide ID の位置を移動する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL、ID は現文書内。成功時実変更を 1 revision/dirty/Undo 単位。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL、ID は現文書内。成功時実変更を 1 revision/dirty/Undo 単位。
  * 失敗時不変。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_guide_move(
     InkpodCore* core,
@@ -2251,9 +2370,11 @@ InkpodStatus inkpod_core_guide_move(
     InkpodDispatchResult* result);
 /**
  * @brief stable guide ID を削除する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL。成功時 1 revision/dirty/Undo 単位、失敗時不変。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL。成功時 1 revision/dirty/Undo 単位、失敗時不変。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_guide_delete(
     InkpodCore* core,
@@ -2261,9 +2382,11 @@ InkpodStatus inkpod_core_guide_delete(
     InkpodDispatchResult* result);
 /**
  * @brief document grid 定義を置換する。
- * @par 契約 Core owner thread。3 pointer は非 NULL・非重複、input/result は完全サイズ、spacing/subdivision は bounded。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL・非重複、input/result は完全サイズ、spacing/subdivision は bounded。
  * 成功時実変更を 1 revision/dirty/Undo 単位。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_grid_set(
     InkpodCore* core,
@@ -2271,9 +2394,11 @@ InkpodStatus inkpod_core_grid_set(
     InkpodDispatchResult* result);
 /**
  * @brief device point を view transform で document 座標へ変換し selection/color を読む。
- * @par 契約 Core owner thread。`core`/完全サイズの `out_locator` は非 NULL、device 値は finite、`view_id == 0` は primary。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `out_locator` は非 NULL、device 値は finite、`view_id == 0` は primary。
  * 成功時だけ caller-owned 出力を初期化。query のため revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_locator_sample(
     InkpodCore* core,
@@ -2283,9 +2408,11 @@ InkpodStatus inkpod_core_locator_sample(
     InkpodLocatorOutput* out_locator);
 /**
  * @brief command の shortcut key chord を設定し、既存 conflict を置換する。
- * @par 契約 Core owner thread。`core` は非 NULL、command/key/modifier は bounded 既知値。成功時 application 設定だけ変更し、
+ * @par 契約
+ * Core owner thread。`core` は非 NULL、command/key/modifier は bounded 既知値。成功時 application 設定だけ変更し、
  * document revision、dirty、Undo、stroke/preview は不変。失敗時 shortcut map 不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_shortcut_rebind(
     InkpodCore* core,
@@ -2294,9 +2421,11 @@ InkpodStatus inkpod_core_shortcut_rebind(
     uint32_t modifiers);
 /**
  * @brief normalized key chord を command ID へ解決する。
- * @par 契約 Core owner thread。`core`/`out_command_id` は非 NULL。成功時だけ ID を書く。
+ * @par 契約
+ * Core owner thread。`core`/`out_command_id` は非 NULL。成功時だけ ID を書く。
  * query のため document revision、dirty、Undo、stroke/preview は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_shortcut_resolve(
     InkpodCore* core,
@@ -2305,25 +2434,31 @@ InkpodStatus inkpod_core_shortcut_resolve(
     uint32_t* out_command_id);
 /**
  * @brief shortcut map を deterministic default へ戻す。
- * @par 契約 Core owner thread。`core` は非 NULL。成功時 application 設定だけ変更し、document revision、dirty、Undo、
+ * @par 契約
+ * Core owner thread。`core` は非 NULL。成功時 application 設定だけ変更し、document revision、dirty、Undo、
  * stroke/preview は不変。失敗時 map 不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_shortcut_reset(InkpodCore* core);
 /**
  * @brief primary とは独立した logical view を作成する。
- * @par 契約 Core owner thread。`core`/`out_view_id` は非 NULL・非重複。成功時 stable nonzero view ID を書く。
+ * @par 契約
+ * Core owner thread。`core`/`out_view_id` は非 NULL・非重複。成功時 stable nonzero view ID を書く。
  * document revision、dirty、Undo は不変。失敗時出力不変。文書未作成や競合 state は拒否する。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_view_create(
     InkpodCore* core,
     uint64_t* out_view_id);
 /**
  * @brief secondary logical view へ view command を適用する。
- * @par 契約 Core owner thread。`core`/完全サイズの borrowed `input` は非 NULL、view ID は有効。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの borrowed `input` は非 NULL、view ID は有効。
  * 成功時その view revision/state のみ更新し document revision、dirty、Undo は不変。失敗時不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_view_apply(
     InkpodCore* core,
@@ -2331,9 +2466,11 @@ InkpodStatus inkpod_core_view_apply(
     const InkpodViewInput* input);
 /**
  * @brief secondary logical view を閉じる。
- * @par 契約 Core owner thread。`core` は非 NULL、view ID は secondary view。成功時 logical state だけ解放する。
+ * @par 契約
+ * Core owner thread。`core` は非 NULL、view ID は secondary view。成功時 logical state だけ解放する。
  * 既存 snapshot は独立 owned のため有効。document revision、dirty、Undo は不変。失敗時不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_view_close(
     InkpodCore* core,
@@ -2341,10 +2478,12 @@ InkpodStatus inkpod_core_view_close(
 
 /**
  * @brief PNG/TIFF/TGA/BMP bytes を decode して current document を置換する。
- * @par 契約 Core owner thread。`core`/非空 bytes/`out_info` は非 NULL・非重複、bytes は呼び出し中だけ borrowed、UUID は非 0。
+ * @par 契約
+ * Core owner thread。`core`/非空 bytes/`out_info` は非 NULL・非重複、bytes は呼び出し中だけ borrowed、UUID は非 0。
  * 成功時のみ文書/history を置換し info を書く。import 自体は Undo item を作らない。失敗時旧文書・revision・dirty・Undo・出力は不変。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`IO_ERROR`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`IO_ERROR`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_import_common_raster(
     InkpodCore* core,
@@ -2356,9 +2495,11 @@ InkpodStatus inkpod_core_import_common_raster(
     InkpodDocumentInfo* out_info);
 /**
  * @brief current document を PNG/TIFF/TGA/BMP bytes へ encode する。
- * @par 契約 Core owner thread。`core`/`out_buffer` は非 NULL・非重複、`*out_buffer == NULL`、format/white flag は既知値。
+ * @par 契約
+ * Core owner thread。`core`/`out_buffer` は非 NULL・非重複、`*out_buffer == NULL`、format/white flag は既知値。
  * 成功時 Rust-owned immutable byte buffer を格納。失敗時 NULL のまま。query/export のため revision、dirty、Undo、排他 state は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_export_common_raster(
     InkpodCore* core,
@@ -2367,9 +2508,11 @@ InkpodStatus inkpod_core_export_common_raster(
     InkpodByteBuffer** out_buffer);
 /**
  * @brief immutable byte buffer の borrowed byte span を取得する。
- * @par 契約 任意スレッド。`buffer`/`out_bytes`/`out_byte_count` は非 NULL・非重複。同じ handle の release と外部同期する。
+ * @par 契約
+ * 任意スレッド。`buffer`/`out_bytes`/`out_byte_count` は非 NULL・非重複。同じ handle の release と外部同期する。
  * 成功時 span/count を書き、span は buffer release まで有効。失敗時出力未使用。Core/revision/dirty/Undo は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_byte_buffer_view(
     const InkpodByteBuffer* buffer,
@@ -2377,17 +2520,21 @@ InkpodStatus inkpod_byte_buffer_view(
     uint64_t* out_byte_count);
 /**
  * @brief byte buffer handle を解放して owner 変数を NULL にする。
- * @par 契約 任意スレッド。owner pointer は非 NULL、`*buffer == NULL` は成功 no-op。成功後 borrowed byte span は無効。
+ * @par 契約
+ * 任意スレッド。owner pointer は非 NULL、`*buffer == NULL` は成功 no-op。成功後 borrowed byte span は無効。
  * Core/revision/dirty/Undo/排他状態に影響しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_byte_buffer_release(InkpodByteBuffer** buffer);
 
 /**
  * @brief copied raster source から light-table item を追加する。
- * @par 契約 Core owner thread。4 pointer は非 NULL・非重複。input/name/raster bytes は完全サイズで呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。4 pointer は非 NULL・非重複。input/name/raster bytes は完全サイズで呼び出し中だけ borrowed。
  * 成功時 source をコピーし stable ID/result を書き 1 revision/dirty/Undo 単位。失敗時出力/文書不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_light_table_add_item(
     InkpodCore* core,
@@ -2396,9 +2543,11 @@ InkpodStatus inkpod_core_light_table_add_item(
     uint64_t* out_item_id);
 /**
  * @brief light-table set/item を create/duplicate/delete/rename/reorder/update する。
- * @par 契約 Core owner thread。4 pointer は非 NULL・非重複、input/name は呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。4 pointer は非 NULL・非重複、input/name は呼び出し中だけ borrowed。
  * 成功時 result と対象/新規 stable ID を書き、実変更を 1 revision/dirty/Undo 単位。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_light_table_edit(
     InkpodCore* core,
@@ -2407,9 +2556,11 @@ InkpodStatus inkpod_core_light_table_edit(
     uint64_t* out_object_id);
 /**
  * @brief index 指定 light-table set の metadata/name をコピーする。
- * @par 契約 Core owner thread。`core`/完全サイズの `output` は非 NULL。name capacity 0/NULL は size query。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `output` は非 NULL。name capacity 0/NULL は size query。
  * `BUFFER_TOO_SMALL` でも必要 `name_bytes` を返す。revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_light_table_set_get(
     InkpodCore* core,
@@ -2417,9 +2568,11 @@ InkpodStatus inkpod_core_light_table_set_get(
     InkpodLightTableSetInfo* output);
 /**
  * @brief active set の index 指定 item metadata/name をコピーする。
- * @par 契約 Core owner thread。`core`/完全サイズの `output` は非 NULL。name buffer は caller-owned size-query 対応。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `output` は非 NULL。name buffer は caller-owned size-query 対応。
  * query のため revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_light_table_item_get(
     InkpodCore* core,
@@ -2427,9 +2580,11 @@ InkpodStatus inkpod_core_light_table_item_get(
     InkpodLightTableItemInfo* output);
 /**
  * @brief encoded common raster を decode して light-table item に追加する。
- * @par 契約 Core owner thread。`core`/bytes/name/`result`/`out_item_id` は非 NULL・非重複、byte/name span は呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。`core`/bytes/name/`result`/`out_item_id` は非 NULL・非重複、byte/name span は呼び出し中だけ borrowed。
  * 成功時 decode source をコピーし 1 revision/dirty/Undo 単位、ID/result を書く。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`IO_ERROR`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`IO_ERROR`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_light_table_add_common_raster(
     InkpodCore* core,
@@ -2445,9 +2600,11 @@ InkpodStatus inkpod_core_light_table_add_common_raster(
     uint64_t* out_item_id);
 /**
  * @brief 既存 light-table item の source を encoded raster で再読込する。
- * @par 契約 Core owner thread。`core`/非空 bytes/`result` は非 NULL、bytes は一時 borrowed、item ID/UUID/revision は検証する。
+ * @par 契約
+ * Core owner thread。`core`/非空 bytes/`result` は非 NULL、bytes は一時 borrowed、item ID/UUID/revision は検証する。
  * 成功時 source だけを atomic に置換し 1 revision/dirty/Undo 単位。失敗時旧 source/文書不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`IO_ERROR`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`IO_ERROR`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_light_table_reload_common_raster(
     InkpodCore* core,
@@ -2461,9 +2618,11 @@ InkpodStatus inkpod_core_light_table_reload_common_raster(
     InkpodDispatchResult* result);
 /**
  * @brief active light-table set の global opacity を設定する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL、opacity は 0..1000。成功時実変更を 1 revision/dirty/Undo 単位。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL、opacity は 0..1000。成功時実変更を 1 revision/dirty/Undo 単位。
  * 失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_light_table_set_global_opacity(
     InkpodCore* core,
@@ -2471,9 +2630,11 @@ InkpodStatus inkpod_core_light_table_set_global_opacity(
     InkpodDispatchResult* result);
 /**
  * @brief light-table composite の document pixel を exact-depth 色で読む。
- * @par 契約 Core owner thread。`core`/完全サイズの `out_color` は非 NULL。成功時だけ出力を初期化。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `out_color` は非 NULL。成功時だけ出力を初期化。
  * query のため revision、dirty、Undo、stroke/preview state は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_light_table_sample(
     InkpodCore* core,
@@ -2482,10 +2643,12 @@ InkpodStatus inkpod_core_light_table_sample(
     InkpodColorValue* out_color);
 /**
  * @brief current clean cell と指定 light-table source を交換する。
- * @par 契約 Core owner thread。`core`/完全サイズの `out_info` は非 NULL。current document が dirty なら
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `out_info` は非 NULL。current document が dirty なら
  * `UNSAVED_CHANGES` を返し、文書/revision/出力を変えない。成功時 source/current を置換し info を書く。
  * switch 自体は Undo item を作らず、new current の revision/dirty は info が正本。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`UNSAVED_CHANGES`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`UNSAVED_CHANGES`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_light_table_swap(
     InkpodCore* core,
@@ -2493,19 +2656,23 @@ InkpodStatus inkpod_core_light_table_swap(
     InkpodDocumentInfo* out_info);
 /**
  * @brief copied raster cell span で logical sequence を置換する。
- * @par 契約 Core owner thread。`core`/`input` は非 NULL・非重複。全 nested struct/name/raster/span は完全サイズ/stride で一時 borrowed。
+ * @par 契約
+ * Core owner thread。`core`/`input` は非 NULL・非重複。全 nested struct/name/raster/span は完全サイズ/stride で一時 borrowed。
  * 成功時 Core が全値をコピーし自然順に保持する。current document revision、dirty、Undo は変えない。
  * 失敗時旧 sequence 不変。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_sequence_set(
     InkpodCore* core,
     const InkpodSequenceInput* input);
 /**
  * @brief encoded named-file span を decode して sequence を置換する。
- * @par 契約 Core owner thread。`core`/`files` は非 NULL、count/stride/nested sizes と各 name/byte span を検証し呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。`core`/`files` は非 NULL、count/stride/nested sizes と各 name/byte span を検証し呼び出し中だけ borrowed。
  * 成功時全 decode 結果をコピー。current document revision、dirty、Undo は不変。失敗時旧 sequence 不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`IO_ERROR`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`IO_ERROR`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_sequence_import_encoded(
     InkpodCore* core,
@@ -2515,9 +2682,11 @@ InkpodStatus inkpod_core_sequence_import_encoded(
     uint64_t file_stride_bytes);
 /**
  * @brief sequence 全 cell を common raster へ encode する。
- * @par 契約 Core owner thread。`core`/`out_sequence` は非 NULL、`*out_sequence == NULL`。成功時 Rust-owned immutable sequence handle を格納。
+ * @par 契約
+ * Core owner thread。`core`/`out_sequence` は非 NULL、`*out_sequence == NULL`。成功時 Rust-owned immutable sequence handle を格納。
  * 失敗時 NULL のまま。document revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_sequence_export_encoded(
     InkpodCore* core,
@@ -2526,18 +2695,22 @@ InkpodStatus inkpod_core_sequence_export_encoded(
     InkpodEncodedSequence** out_sequence);
 /**
  * @brief encoded sequence の item count を取得する。
- * @par 契約 任意スレッド。`sequence`/`out_count` は非 NULL、release と外部同期。成功時 count をコピー。
+ * @par 契約
+ * 任意スレッド。`sequence`/`out_count` は非 NULL、release と外部同期。成功時 count をコピー。
  * 所有権、Core、revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_encoded_sequence_count(
     const InkpodEncodedSequence* sequence,
     uint64_t* out_count);
 /**
  * @brief encoded sequence item の borrowed name/byte span を取得する。
- * @par 契約 任意スレッド。handle と 4 出力 pointer は非 NULL・非重複、index は範囲内、release と同期。
+ * @par 契約
+ * 任意スレッド。handle と 4 出力 pointer は非 NULL・非重複、index は範囲内、release と同期。
  * 成功時 span/count を書き、span は sequence release まで有効。失敗時出力未使用。状態変更なし。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_encoded_sequence_get(
     const InkpodEncodedSequence* sequence,
@@ -2548,16 +2721,20 @@ InkpodStatus inkpod_encoded_sequence_get(
     uint64_t* out_byte_count);
 /**
  * @brief encoded sequence handle を解放し owner 変数を NULL にする。
- * @par 契約 任意スレッド。owner pointer は非 NULL、`*sequence == NULL` は成功 no-op。成功後すべての borrowed span は無効。
+ * @par 契約
+ * 任意スレッド。owner pointer は非 NULL、`*sequence == NULL` は成功 no-op。成功後すべての borrowed span は無効。
  * Core/revision/dirty/Undo に影響しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_encoded_sequence_release(InkpodEncodedSequence** sequence);
 /**
  * @brief sequence cell metadata/name を caller buffer へコピーする。
- * @par 契約 Core owner thread。`core`/完全サイズの `output` は非 NULL。name buffer は size-query 対応。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `output` は非 NULL。name buffer は size-query 対応。
  * success/`BUFFER_TOO_SMALL` の出力規則は `InkpodSequenceCellInfo` を参照。revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_sequence_cell_get(
     InkpodCore* core,
@@ -2565,9 +2742,11 @@ InkpodStatus inkpod_core_sequence_cell_get(
     InkpodSequenceCellInfo* output);
 /**
  * @brief clean な current document を sequence の index 指定 cell へ切り替える。
- * @par 契約 Core owner thread。`core`/完全サイズの `out_info` は非 NULL。dirty なら `UNSAVED_CHANGES` で文書/revision/出力を変えない。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `out_info` は非 NULL。dirty なら `UNSAVED_CHANGES` で文書/revision/出力を変えない。
  * 成功時文書を置換し info を書くが Undo item は作らない。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`UNSAVED_CHANGES`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`UNSAVED_CHANGES`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_sequence_activate(
     InkpodCore* core,
@@ -2575,10 +2754,12 @@ InkpodStatus inkpod_core_sequence_activate(
     InkpodDocumentInfo* out_info);
 /**
  * @brief previous/next の存在する sequence cell へ移動する。
- * @par 契約 Core owner thread。`core`/完全サイズの `out_info` は非 NULL、direction/flags は既知値。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `out_info` は非 NULL、direction/flags は既知値。
  * dirty なら `UNSAVED_CHANGES` で完全不変。成功時文書を置換し info を書くが Undo item は作らない。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`UNSAVED_CHANGES`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`UNSAVED_CHANGES`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_sequence_step(
     InkpodCore* core,
@@ -2587,10 +2768,12 @@ InkpodStatus inkpod_core_sequence_step(
     InkpodDocumentInfo* out_info);
 /**
  * @brief 指定 FPS/flags で motion-check session を開始する。
- * @par 契約 Core owner thread。`core`/`input`/`out_frame` は非 NULL・非重複、両構造体は完全サイズ、FPS は対応値。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`out_frame` は非 NULL・非重複、両構造体は完全サイズ、FPS は対応値。
  * 成功時 transient playback state と first frame metadata を作る。document revision、dirty、Undo は不変。
  * 既存 motion/stroke/preview/floating と競合時 `INVALID_STATE`。失敗時 session/output 不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_motion_check_start(
     InkpodCore* core,
@@ -2598,9 +2781,11 @@ InkpodStatus inkpod_core_motion_check_start(
     InkpodMotionFrame* out_frame);
 /**
  * @brief active motion-check を previous/next frame へ進める。
- * @par 契約 Core owner thread。`core`/完全サイズの `out_frame` は非 NULL、direction は既知値。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `out_frame` は非 NULL、direction は既知値。
  * 成功時 playback cursor/output のみ更新し document revision、dirty、Undo は不変。session 不在は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_motion_check_step(
     InkpodCore* core,
@@ -2608,32 +2793,40 @@ InkpodStatus inkpod_core_motion_check_step(
     InkpodMotionFrame* out_frame);
 /**
  * @brief motion-check session を停止する。
- * @par 契約 Core owner thread。`core` は非 NULL。session 不在は成功 no-op。
+ * @par 契約
+ * Core owner thread。`core` は非 NULL。session 不在は成功 no-op。
  * playback state だけ破棄し document revision、dirty、Undo、stroke/preview は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_motion_check_stop(InkpodCore* core);
 /**
  * @brief active motion-check の pause を切り替える。
- * @par 契約 Core owner thread。`core`/完全サイズの `out_frame` は非 NULL。成功時 playback flag/output のみ更新。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `out_frame` は非 NULL。成功時 playback flag/output のみ更新。
  * document revision、dirty、Undo は不変。session 不在は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_motion_check_toggle_pause(
     InkpodCore* core,
     InkpodMotionFrame* out_frame);
 /**
  * @brief active subpalette index を切り替える。
- * @par 契約 Core owner thread。`core` は非 NULL、index は範囲内。成功時 UI palette state のみ更新し document revision、dirty、Undo は不変。
+ * @par 契約
+ * Core owner thread。`core` は非 NULL、index は範囲内。成功時 UI palette state のみ更新し document revision、dirty、Undo は不変。
  * 失敗時不変。stroke/preview state を変更しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_subpalette_set(InkpodCore* core, uint32_t index);
 /**
  * @brief active subpalette から document 座標 pixel の色を取得する。
- * @par 契約 Core owner thread。`core`/完全サイズの `output` は非 NULL。成功時 exact-depth 色だけコピー。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `output` は非 NULL。成功時 exact-depth 色だけコピー。
  * query のため revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_subpalette_sample(
     InkpodCore* core,
@@ -2643,10 +2836,12 @@ InkpodStatus inkpod_core_subpalette_sample(
 
 /**
  * @brief cubic segment span から document-coordinate vector path を追加する。
- * @par 契約 Core owner thread。4 pointer は非 NULL・非重複。input/segment span は完全サイズ/stride で呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。4 pointer は非 NULL・非重複。input/segment span は完全サイズ/stride で呼び出し中だけ borrowed。
  * 成功時 stable path ID/result を書き 1 revision/dirty/Undo 単位。失敗時不変。view zoom は geometry を変えない。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_vector_add_path(
     InkpodCore* core,
@@ -2655,9 +2850,11 @@ InkpodStatus inkpod_core_vector_add_path(
     uint64_t* out_path_id);
 /**
  * @brief closed boundary path ID span から vector fill を追加する。
- * @par 契約 Core owner thread。4 pointer は非 NULL・非重複。input/ID span は一時 borrowed。
+ * @par 契約
+ * Core owner thread。4 pointer は非 NULL・非重複。input/ID span は一時 borrowed。
  * 成功時 stable fill ID/result を書き 1 revision/dirty/Undo 単位。失敗時 topology/出力不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_vector_add_fill(
     InkpodCore* core,
@@ -2666,9 +2863,11 @@ InkpodStatus inkpod_core_vector_add_fill(
     uint64_t* out_fill_id);
 /**
  * @brief partial/to-intersection/whole-path mode で vector を消去する。
- * @par 契約 Core owner thread。3 pointer は非 NULL・非重複、input は完全サイズ/finite/bounded。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL・非重複、input は完全サイズ/finite/bounded。
  * 成功時実変更を 1 revision/dirty/Undo 単位、失敗時 topology 不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_vector_erase(
     InkpodCore* core,
@@ -2676,9 +2875,11 @@ InkpodStatus inkpod_core_vector_erase(
     InkpodDispatchResult* result);
 /**
  * @brief maximum gap 内の最近傍 endpoint を deterministic に接続する。
- * @par 契約 Core owner thread。`core`/`result`/`out_path_id` は非 NULL、plane ID と finite gap を検証。
+ * @par 契約
+ * Core owner thread。`core`/`result`/`out_path_id` は非 NULL、plane ID と finite gap を検証。
  * 成功時 ID/result を書き実変更を 1 revision/dirty/Undo 単位。失敗時出力/topology 不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_vector_connect(
     InkpodCore* core,
@@ -2688,9 +2889,11 @@ InkpodStatus inkpod_core_vector_connect(
     uint64_t* out_path_id);
 /**
  * @brief path ID span の線幅を add/subtract/scale/constant で補正する。
- * @par 契約 Core owner thread。3 pointer は非 NULL、input/ID span は一時 borrowed、parameter は finite/bounded。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、input/ID span は一時 borrowed、parameter は finite/bounded。
  * 成功時実変更を 1 revision/dirty/Undo 単位、失敗時 geometry 不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_vector_correct_width(
     InkpodCore* core,
@@ -2698,10 +2901,12 @@ InkpodStatus inkpod_core_vector_correct_width(
     InkpodDispatchResult* result);
 /**
  * @brief mode/bounds に一致する path ranges と fill IDs を caller buffer へ返す。
- * @par 契約 Core owner thread。`core`/`input`/`output` は非 NULL・非重複、構造体は完全サイズ。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`output` は非 NULL・非重複、構造体は完全サイズ。
  * 各出力 pointer が NULL/capacity 0 なら count query。成功時 complete records、`BUFFER_TOO_SMALL` 時も両必要 count を返す。
  * caller-owned storage は保持しない。query のため revision、dirty、Undo、排他状態は不変。
- * @par 主なステータス `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_vector_select(
     InkpodCore* core,
@@ -2709,9 +2914,11 @@ InkpodStatus inkpod_core_vector_select(
     InkpodVectorSelectionBuffer* output);
 /**
  * @brief vector layer を straight RGBA8 caller buffer へ rasterize する。
- * @par 契約 Core owner thread。3 pointer は非 NULL・非重複、input/output は完全サイズ。NULL/capacity 0 は size query。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL・非重複、input/output は完全サイズ。NULL/capacity 0 は size query。
  * 成功時 metadata/bytes、`BUFFER_TOO_SMALL` 時も required bytes/dimensions を返す。document/revision/dirty/Undo は不変。
- * @par 主なステータス `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_vector_rasterize(
     InkpodCore* core,
@@ -2719,10 +2926,12 @@ InkpodStatus inkpod_core_vector_rasterize(
     InkpodVectorRasterBuffer* output);
 /**
  * @brief vector layer を document scale で新規 RGBA8 raster layer へ変換する。
- * @par 契約 Core owner thread。`core`/`input`/非空 UTF-8 name/`result`/`out_layer_id` は非 NULL・非重複。
+ * @par 契約
+ * Core owner thread。`core`/`input`/非空 UTF-8 name/`result`/`out_layer_id` は非 NULL・非重複。
  * name は一時 borrowed。成功時 source vector を保持して新 stable ID/result を書き、ちょうど 1 revision/dirty/Undo 単位。
  * 失敗時 layer tree/出力不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_vector_rasterize_to_layer(
     InkpodCore* core,
@@ -2733,10 +2942,12 @@ InkpodStatus inkpod_core_vector_rasterize_to_layer(
     uint64_t* out_layer_id);
 /**
  * @brief raster/color plane の nonzero-alpha row run を vector path/fill topology へ変換する。
- * @par 契約 Core owner thread。`core`/`input`/`result`/`out_fill_count` は非 NULL・非重複、input は完全サイズ。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`result`/`out_fill_count` は非 NULL・非重複、input は完全サイズ。
  * 成功時 fill count/result を書き 1 revision/dirty/Undo 単位。予測上限超過や失敗時は部分 topology/出力を残さない。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_raster_vectorize(
     InkpodCore* core,
@@ -2746,10 +2957,12 @@ InkpodStatus inkpod_core_raster_vectorize(
 
 /**
  * @brief filter preview を original committed base から計算して開始する。
- * @par 契約 Core owner thread。`core`/`input`/`out_info` は非 NULL・非重複、filter/curve span は一時 borrowed でコピーする。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`out_info` は非 NULL・非重複、filter/curve span は一時 borrowed でコピーする。
  * 成功時 1 preview が存在し info/checksum/transient revision を書くが committed revision、dirty、Undo は不変。
  * stroke/既存 preview/floating 中は `INVALID_STATE`。失敗時 preview/output/document 不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_filter_preview_begin(
     InkpodCore* core,
@@ -2757,10 +2970,12 @@ InkpodStatus inkpod_core_filter_preview_begin(
     InkpodFilterPreviewInfo* out_info);
 /**
  * @brief cancellable task を使って filter preview を開始する。
- * @par 契約 Core owner thread。`core`/`input`/`task`/`out_info` は非 NULL・非重複。task は READY で、Core call 終了まで owner が解放しない。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`task`/`out_info` は非 NULL・非重複。task は READY で、Core call 終了まで owner が解放しない。
  * 成功時の preview/revision/dirty/Undo は非 task 版と同じ。cancel は `CANCELLED` で partial preview/output を install しない。
  * stroke/既存 preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_filter_preview_begin_task(
     InkpodCore* core,
@@ -2769,10 +2984,12 @@ InkpodStatus inkpod_core_filter_preview_begin_task(
     InkpodFilterPreviewInfo* out_info);
 /**
  * @brief active filter preview を original base から新 parameter で再計算する。
- * @par 契約 Core owner thread。`core`/`input`/`out_info` は非 NULL、input span は一時 borrowed。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`out_info` は非 NULL、input span は一時 borrowed。
  * 成功時 transient preview/info のみ置換し committed revision、dirty、Undo は不変。preview 不在、stroke/floating 競合は `INVALID_STATE`。
  * 失敗時従来 preview/output を保つ。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_filter_preview_update(
     InkpodCore* core,
@@ -2780,9 +2997,11 @@ InkpodStatus inkpod_core_filter_preview_update(
     InkpodFilterPreviewInfo* out_info);
 /**
  * @brief cancellable task で active filter preview を original base から再計算する。
- * @par 契約 Core owner thread。4 pointer は非 NULL、task は READY で call 終了まで生存。成功時 transient state のみ更新。
+ * @par 契約
+ * Core owner thread。4 pointer は非 NULL、task は READY で call 終了まで生存。成功時 transient state のみ更新。
  * cancel/失敗時 existing preview を保ち partial result を install しない。committed revision、dirty、Undo は不変。
- * @par 主なステータス `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_filter_preview_update_task(
     InkpodCore* core,
@@ -2791,27 +3010,33 @@ InkpodStatus inkpod_core_filter_preview_update_task(
     InkpodFilterPreviewInfo* out_info);
 /**
  * @brief active filter/dust preview を破棄する。
- * @par 契約 Core owner thread。`core`/完全サイズの `out_info` は非 NULL。成功時 base checksum/info を書き preview を終了。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `out_info` は非 NULL。成功時 base checksum/info を書き preview を終了。
  * committed revision、dirty、Undo は begin 前から不変。preview 不在は `INVALID_STATE`。失敗時 state/output 不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_filter_preview_cancel(
     InkpodCore* core,
     InkpodFilterPreviewInfo* out_info);
 /**
  * @brief active filter/dust preview を committed document へ適用する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL。成功時 preview を終了し、実変更をちょうど 1 revision/dirty/Undo 単位で commit、
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL。成功時 preview を終了し、実変更をちょうど 1 revision/dirty/Undo 単位で commit、
  * last-filter も記録する。preview 不在は `INVALID_STATE`。失敗時 committed base と preview を保つ。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_filter_preview_apply(
     InkpodCore* core,
     InkpodDispatchResult* result);
 /**
  * @brief 最後に apply した filter を指定 plane へ再適用する。
- * @par 契約 Core owner thread。`core`/`result` は非 NULL、plane ID と copied last-filter が必要。
+ * @par 契約
+ * Core owner thread。`core`/`result` は非 NULL、plane ID と copied last-filter が必要。
  * 成功時実変更を 1 revision/dirty/Undo 単位、失敗時不変。stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_filter_apply_last(
     InkpodCore* core,
@@ -2819,9 +3044,11 @@ InkpodStatus inkpod_core_filter_apply_last(
     InkpodDispatchResult* result);
 /**
  * @brief cancellable task で last filter を再適用する。
- * @par 契約 Core owner thread。`core`/`task`/`result` は非 NULL、task は READY で call 終了まで生存。
+ * @par 契約
+ * Core owner thread。`core`/`task`/`result` は非 NULL、task は READY で call 終了まで生存。
  * 成功時 1 revision/dirty/Undo 単位。cancel/失敗時 partial edit/result を commit しない。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_filter_apply_last_task(
     InkpodCore* core,
@@ -2830,10 +3057,12 @@ InkpodStatus inkpod_core_filter_apply_last_task(
     InkpodDispatchResult* result);
 /**
  * @brief supported filter parameter から非破壊 adjustment layer を作成する。
- * @par 契約 Core owner thread。`core`/`input`/非空 UTF-8 name/`result`/`out_layer_id` は非 NULL・非重複。
+ * @par 契約
+ * Core owner thread。`core`/`input`/非空 UTF-8 name/`result`/`out_layer_id` は非 NULL・非重複。
  * input curve/name は一時 borrowed でコピー。成功時 stable ID/result を書き 1 revision/dirty/Undo 単位。
  * source raster は変更しない。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_adjustment_create(
     InkpodCore* core,
@@ -2844,9 +3073,11 @@ InkpodStatus inkpod_core_adjustment_create(
     uint64_t* out_layer_id);
 /**
  * @brief 既存 adjustment layer の copied filter parameter を置換する。
- * @par 契約 Core owner thread。`core`/`input`/`result` は非 NULL、layer ID は adjustment layer。input span は一時 borrowed。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`result` は非 NULL、layer ID は adjustment layer。input span は一時 borrowed。
  * 成功時 1 revision/dirty/Undo 単位。失敗時 parameter/document 不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_adjustment_update(
     InkpodCore* core,
@@ -2855,9 +3086,11 @@ InkpodStatus inkpod_core_adjustment_update(
     InkpodDispatchResult* result);
 /**
  * @brief linear/radial gradient を target plane へ適用する。
- * @par 契約 Core owner thread。`core`/`input`/`result` は非 NULL・非重複、stop span は一時 borrowed、geometry/色/mode は検証する。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`result` は非 NULL・非重複、stop span は一時 borrowed、geometry/色/mode は検証する。
  * 成功時 1 revision/dirty/Undo 単位。失敗時 partial gradient なし。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_effect_gradient(
     InkpodCore* core,
@@ -2865,9 +3098,11 @@ InkpodStatus inkpod_core_effect_gradient(
     InkpodDispatchResult* result);
 /**
  * @brief 1 primitive airbrush dab を target plane へ適用する。
- * @par 契約 Core owner thread。3 pointer は非 NULL、input は完全サイズ/finite/bounded borrowed。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、input は完全サイズ/finite/bounded borrowed。
  * 成功時実変更を 1 revision/dirty/Undo 単位。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_effect_airbrush(
     InkpodCore* core,
@@ -2875,9 +3110,11 @@ InkpodStatus inkpod_core_effect_airbrush(
     InkpodDispatchResult* result);
 /**
  * @brief 指定色境界へ boundary airbrush を適用する。
- * @par 契約 Core owner thread。3 pointer は非 NULL、input/color span は完全サイズ/stride で一時 borrowed。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、input/color span は完全サイズ/stride で一時 borrowed。
  * 成功時 1 revision/dirty/Undo 単位。失敗時 atomic に不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_effect_boundary_airbrush(
     InkpodCore* core,
@@ -2885,9 +3122,11 @@ InkpodStatus inkpod_core_effect_boundary_airbrush(
     InkpodDispatchResult* result);
 /**
  * @brief blur primitive を target plane/selection へ適用する。
- * @par 契約 Core owner thread。3 pointer は非 NULL、input は完全サイズ/bounded。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、input は完全サイズ/bounded。
  * 成功時実変更を 1 revision/dirty/Undo 単位。失敗時 partial blur なし。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_effect_blur(
     InkpodCore* core,
@@ -2895,9 +3134,11 @@ InkpodStatus inkpod_core_effect_blur(
     InkpodDispatchResult* result);
 /**
  * @brief source rectangle を destination へ stamp する。
- * @par 契約 Core owner thread。3 pointer は非 NULL、input は完全サイズ/bounded。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、input は完全サイズ/bounded。
  * 成功時実変更を 1 revision/dirty/Undo 単位。失敗時 overlap を含め atomic に不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_effect_stamp(
     InkpodCore* core,
@@ -2905,10 +3146,12 @@ InkpodStatus inkpod_core_effect_stamp(
     InkpodDispatchResult* result);
 /**
  * @brief sample span 全体を 1 airbrush gesture として適用する。
- * @par 契約 Core owner thread。3 pointer は非 NULL、style/sample span は完全サイズ/stride で一時 borrowed。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、style/sample span は完全サイズ/stride で一時 borrowed。
  * device 座標は view で 1 回変換。成功時 gesture 全体が高々 1 revision/dirty/Undo 単位。失敗時不変。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_effect_airbrush_gesture(
     InkpodCore* core,
@@ -2916,9 +3159,11 @@ InkpodStatus inkpod_core_effect_airbrush_gesture(
     InkpodDispatchResult* result);
 /**
  * @brief source point と destination sample span を 1 stamp gesture として適用する。
- * @par 契約 Core owner thread。3 pointer は非 NULL、input/sample span は一時 borrowed。device 座標は指定 view で変換。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、input/sample span は一時 borrowed。device 座標は指定 view で変換。
  * 成功時 gesture 全体が高々 1 revision/dirty/Undo 単位。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_effect_stamp_gesture(
     InkpodCore* core,
@@ -2926,9 +3171,11 @@ InkpodStatus inkpod_core_effect_stamp_gesture(
     InkpodDispatchResult* result);
 /**
  * @brief pen/rectangle/polyline/lasso region へ blur tool gesture を適用する。
- * @par 契約 Core owner thread。3 pointer は非 NULL、input/sample span は完全サイズ/stride で一時 borrowed。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、input/sample span は完全サイズ/stride で一時 borrowed。
  * 成功時 tool gesture 全体が高々 1 revision/dirty/Undo 単位。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_effect_blur_tool(
     InkpodCore* core,
@@ -2936,10 +3183,12 @@ InkpodStatus inkpod_core_effect_blur_tool(
     InkpodDispatchResult* result);
 /**
  * @brief cancellable task で dust removal を直接適用する。
- * @par 契約 Core owner thread。`core`/`input`/`task`/`result` は非 NULL、input/sample span は一時 borrowed、task は READY で call 終了まで生存。
+ * @par 契約
+ * Core owner thread。`core`/`input`/`task`/`result` は非 NULL、input/sample span は一時 borrowed、task は READY で call 終了まで生存。
  * 成功時全処理を 1 revision/dirty/Undo 単位。cancel/失敗時 partial edit/result を commit しない。
  * stroke/preview/floating 中は `INVALID_STATE`。
- * @par 主なステータス `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_dust_remove(
     InkpodCore* core,
@@ -2948,10 +3197,12 @@ InkpodStatus inkpod_core_dust_remove(
     InkpodDispatchResult* result);
 /**
  * @brief cancellable task で dust removal preview を開始する。
- * @par 契約 Core owner thread。4 pointer は非 NULL、input span は一時 borrowed、task は READY で call 終了まで生存。
+ * @par 契約
+ * Core owner thread。4 pointer は非 NULL、input span は一時 borrowed、task は READY で call 終了まで生存。
  * 成功時 transient preview/info のみで committed revision、dirty、Undo は不変。cancel/失敗時 preview を install しない。
  * stroke/既存 preview/floating 中は `INVALID_STATE`。apply/cancel は filter preview API を使う。
- * @par 主なステータス `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_dust_preview_begin(
     InkpodCore* core,
@@ -2960,9 +3211,11 @@ InkpodStatus inkpod_core_dust_preview_begin(
     InkpodFilterPreviewInfo* out_info);
 /**
  * @brief grayscale8/16 raster で target plane の alpha だけを置換する。
- * @par 契約 Core owner thread。3 pointer は非 NULL、input pixels は完全サイズ/row-range で呼び出し中だけ borrowed。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、input pixels は完全サイズ/row-range で呼び出し中だけ borrowed。
  * 成功時 RGB を保ち実変更を 1 revision/dirty/Undo 単位。失敗時 partial alpha edit なし。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_alpha_edit(
     InkpodCore* core,
@@ -2970,9 +3223,11 @@ InkpodStatus inkpod_core_alpha_edit(
     InkpodDispatchResult* result);
 /**
  * @brief gradient 値を target plane の alpha channel だけへ適用する。
- * @par 契約 Core owner thread。3 pointer は非 NULL、input/stop span は完全サイズ/stride で一時 borrowed。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、input/stop span は完全サイズ/stride で一時 borrowed。
  * 成功時 RGB を保ち 1 revision/dirty/Undo 単位。失敗時不変。stroke/preview/floating 中は不可。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_alpha_gradient(
     InkpodCore* core,
@@ -2981,49 +3236,61 @@ InkpodStatus inkpod_core_alpha_gradient(
 
 /**
  * @brief READY 状態の thread-safe M6 task を作成する。
- * @par 契約 任意スレッド。`out_task` は非 NULL、`*out_task == NULL`。成功時 Rust-owned handle、失敗時 NULL のまま。
+ * @par 契約
+ * 任意スレッド。`out_task` は非 NULL、`*out_task == NULL`。成功時 Rust-owned handle、失敗時 NULL のまま。
  * Core/document revision、dirty、Undo、stroke/preview に影響しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_m6_task_create(InkpodM6Task** out_task);
 /**
  * @brief task の atomic state/progress を取得する。
- * @par 契約 任意スレッド。`task`/完全サイズの `out_info` は非 NULL、task release と外部同期。
+ * @par 契約
+ * 任意スレッド。`task`/完全サイズの `out_info` は非 NULL、task release と外部同期。
  * Core operation と同時 query 可。成功時 snapshot 値をコピー、失敗時出力未使用。文書状態は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_m6_task_query(
     const InkpodM6Task* task,
     InkpodM6TaskInfo* out_info);
 /**
  * @brief task へ thread-safe な cancellation を要求する。
- * @par 契約 任意スレッド。`task` は非 NULL borrowed、release と外部同期。Core operation と同時可。
+ * @par 契約
+ * 任意スレッド。`task` は非 NULL borrowed、release と外部同期。Core operation と同時可。
  * 成功は要求記録を意味し、Core が poll 後 `CANCELLED` で staged result を破棄する。revision、dirty、Undo を直接変えない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_m6_task_cancel(InkpodM6Task* task);
 /**
  * @brief task handle を解放し owner 変数を NULL にする。
- * @par 契約 任意スレッド。owner pointer は非 NULL、`*task == NULL` は成功 no-op。Core call が戻る前に release してはならない。
+ * @par 契約
+ * 任意スレッド。owner pointer は非 NULL、`*task == NULL` は成功 no-op。Core call が戻る前に release してはならない。
  * 成功後別名は無効。document revision、dirty、Undo、preview を変えない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_m6_task_release(InkpodM6Task** task);
 
 /**
  * @brief nested input/operation span を検証・コピーして immutable batch graph を作る。
- * @par 契約 任意スレッド。`input`/`out_graph` は非 NULL・非重複、全 nested structure/stride/string/span は完全で一時 borrowed、
+ * @par 契約
+ * 任意スレッド。`input`/`out_graph` は非 NULL・非重複、全 nested structure/stride/string/span は完全で一時 borrowed、
  * `*out_graph == NULL`。成功時 Rust-owned graph、失敗時 NULL のまま。Core/revision/dirty/Undo/排他状態に影響しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`PANIC`。
  */
 InkpodStatus inkpod_batch_graph_create(
     const InkpodBatchGraphInput* input,
     InkpodBatchGraph** out_graph);
 /**
  * @brief versioned/checksummed `.inkbatch` を immutable graph として読む。
- * @par 契約 任意スレッド。非空 UTF-8 path と `out_graph` は非 NULL・非重複、path は呼び出し中だけ borrowed、`*out_graph == NULL`。
+ * @par 契約
+ * 任意スレッド。非空 UTF-8 path と `out_graph` は非 NULL・非重複、path は呼び出し中だけ borrowed、`*out_graph == NULL`。
  * 成功時 Rust-owned graph、失敗時 NULL のまま。Core/document state は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`IO_ERROR`、`UNSUPPORTED`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`IO_ERROR`、`UNSUPPORTED`、`PANIC`。
  */
 InkpodStatus inkpod_batch_graph_load(
     const uint8_t* path_utf8,
@@ -3031,9 +3298,11 @@ InkpodStatus inkpod_batch_graph_load(
     InkpodBatchGraph** out_graph);
 /**
  * @brief immutable graph を `.inkbatch` へ atomic 保存する。
- * @par 契約 任意スレッド。`graph`/非空 UTF-8 path は非 NULL・非重複、path は一時 borrowed。
+ * @par 契約
+ * 任意スレッド。`graph`/非空 UTF-8 path は非 NULL・非重複、path は一時 borrowed。
  * 同 directory の一時 file 完成後に置換。成功/失敗とも graph 所有権と Core/revision/dirty/Undo は不変、失敗時既存 file を保つ。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`IO_ERROR`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`IO_ERROR`、`PANIC`。
  */
 InkpodStatus inkpod_batch_graph_save(
     const InkpodBatchGraph* graph,
@@ -3041,26 +3310,32 @@ InkpodStatus inkpod_batch_graph_save(
     uint64_t path_bytes);
 /**
  * @brief immutable graph の version/count/policy をコピーする。
- * @par 契約 任意スレッド。`graph`/完全サイズの `out_info` は非 NULL、release と外部同期。
+ * @par 契約
+ * 任意スレッド。`graph`/完全サイズの `out_info` は非 NULL、release と外部同期。
  * 成功時だけ caller-owned 出力を初期化。所有権と文書状態は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_graph_get_info(
     const InkpodBatchGraph* graph,
     InkpodBatchGraphInfo* out_info);
 /**
  * @brief batch graph handle を解放し owner 変数を NULL にする。
- * @par 契約 任意スレッド。owner pointer は非 NULL、`*graph == NULL` は成功 no-op。preview/execute 使用中に解放しない。
+ * @par 契約
+ * 任意スレッド。owner pointer は非 NULL、`*graph == NULL` は成功 no-op。preview/execute 使用中に解放しない。
  * 成功後別名は無効。Core/revision/dirty/Undo に影響しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_graph_release(InkpodBatchGraph** graph);
 /**
  * @brief graph/scope から自然順 input/output/warning の immutable preview を作る。
- * @par 契約 Core owner thread。`core`/`graph`/`out_preview` は非 NULL・非重複、`*out_preview == NULL`。graph は call 中 borrowed。
+ * @par 契約
+ * Core owner thread。`core`/`graph`/`out_preview` は非 NULL・非重複、`*out_preview == NULL`。graph は call 中 borrowed。
  * 成功時 Rust-owned preview。失敗時 NULL のまま。dry preview のため current document revision、dirty、Undo は不変。
  * stroke/filter preview/floating と競合時 `INVALID_STATE`。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`IO_ERROR`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`IO_ERROR`、`PANIC`。
  */
 InkpodStatus inkpod_core_batch_preview(
     InkpodCore* core,
@@ -3069,18 +3344,22 @@ InkpodStatus inkpod_core_batch_preview(
     InkpodBatchPreview** out_preview);
 /**
  * @brief batch preview の item count を取得する。
- * @par 契約 任意スレッド。`preview`/`out_count` は非 NULL、release と外部同期。成功時 count をコピー。
+ * @par 契約
+ * 任意スレッド。`preview`/`out_count` は非 NULL、release と外部同期。成功時 count をコピー。
  * ownership/Core/revision/dirty/Undo は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_preview_count(
     const InkpodBatchPreview* preview,
     uint64_t* out_count);
 /**
  * @brief batch preview 1 item の borrowed UTF-8 spans を取得する。
- * @par 契約 任意スレッド。`preview`/完全サイズの `out_item` は非 NULL、index は範囲内、release と同期。
+ * @par 契約
+ * 任意スレッド。`preview`/完全サイズの `out_item` は非 NULL、index は範囲内、release と同期。
  * 成功時 spans を書き、親 preview release まで有効。失敗時出力未使用。文書状態不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_preview_get(
     const InkpodBatchPreview* preview,
@@ -3088,18 +3367,22 @@ InkpodStatus inkpod_batch_preview_get(
     InkpodBatchPreviewItem* out_item);
 /**
  * @brief batch preview handle を解放し owner 変数を NULL にする。
- * @par 契約 任意スレッド。owner pointer は非 NULL、`*preview == NULL` は成功 no-op。成功後 item/span は無効。
+ * @par 契約
+ * 任意スレッド。owner pointer は非 NULL、`*preview == NULL` は成功 no-op。成功後 item/span は無効。
  * Core/revision/dirty/Undo に影響しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_preview_release(InkpodBatchPreview** preview);
 /**
  * @brief graph を current/all scope で dry-run または実行し immutable report を返す。
- * @par 契約 Core owner thread。`core`/`graph`/`task`/`out_report` は非 NULL・非重複、`*out_report == NULL`。
+ * @par 契約
+ * Core owner thread。`core`/`graph`/`task`/`out_report` は非 NULL・非重複、`*out_report == NULL`。
  * task は READY で call 終了まで生存。成功時 per-output atomic save と Rust-owned report。
  * cancel 時は `CANCELLED` でも利用可能な owned report を返し得るため、caller は status にかかわらず `*out_report` を確認して解放する。
  * current Core document revision、dirty、Undo は変えない。stroke/preview/floating 中は `INVALID_STATE`。失敗 item は既存 output を壊さない。
- * @par 主なステータス `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`CANCELLED`、`INVALID_ARGUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_batch_execute(
     InkpodCore* core,
@@ -3110,18 +3393,22 @@ InkpodStatus inkpod_core_batch_execute(
     InkpodBatchReport** out_report);
 /**
  * @brief batch report の cancelled/item/failure count をコピーする。
- * @par 契約 任意スレッド。`report`/完全サイズの `out_info` は非 NULL、release と外部同期。
+ * @par 契約
+ * 任意スレッド。`report`/完全サイズの `out_info` は非 NULL、release と外部同期。
  * 成功時だけ出力を初期化。ownership/Core/revision/dirty/Undo は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_report_get_info(
     const InkpodBatchReport* report,
     InkpodBatchReportInfo* out_info);
 /**
  * @brief batch report 1 item の outcome と borrowed UTF-8 spans を取得する。
- * @par 契約 任意スレッド。`report`/完全サイズの `out_item` は非 NULL、index は範囲内、release と同期。
+ * @par 契約
+ * 任意スレッド。`report`/完全サイズの `out_item` は非 NULL、index は範囲内、release と同期。
  * 成功時 spans を書き、親 report release まで有効。失敗時出力未使用。文書状態不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_report_get(
     const InkpodBatchReport* report,
@@ -3129,48 +3416,60 @@ InkpodStatus inkpod_batch_report_get(
     InkpodBatchReportItem* out_item);
 /**
  * @brief batch report handle を解放し owner 変数を NULL にする。
- * @par 契約 任意スレッド。owner pointer は非 NULL、`*report == NULL` は成功 no-op。成功後 item/span は無効。
+ * @par 契約
+ * 任意スレッド。owner pointer は非 NULL、`*report == NULL` は成功 no-op。成功後 item/span は無効。
  * Core/revision/dirty/Undo に影響しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_report_release(InkpodBatchReport** report);
 /**
  * @brief READY 状態の thread-safe batch task を作る。
- * @par 契約 任意スレッド。`out_task` は非 NULL、`*out_task == NULL`。成功時 Rust-owned task、失敗時 NULL。
+ * @par 契約
+ * 任意スレッド。`out_task` は非 NULL、`*out_task == NULL`。成功時 Rust-owned task、失敗時 NULL。
  * Core/revision/dirty/Undo/排他状態に影響しない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_task_create(InkpodBatchTask** out_task);
 /**
  * @brief batch task の atomic state/progress を取得する。
- * @par 契約 任意スレッド。`task`/完全サイズの `out_info` は非 NULL、execute と同時可、release と同期。
+ * @par 契約
+ * 任意スレッド。`task`/完全サイズの `out_info` は非 NULL、execute と同時可、release と同期。
  * 成功時 snapshot 値をコピー。文書状態不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_task_query(
     const InkpodBatchTask* task,
     InkpodM6TaskInfo* out_info);
 /**
  * @brief batch task へ thread-safe cancellation を要求する。
- * @par 契約 任意スレッド。`task` は非 NULL borrowed、execute と同時可、release と同期。
+ * @par 契約
+ * 任意スレッド。`task` は非 NULL borrowed、execute と同時可、release と同期。
  * Core が poll すると staged item を commit せず `CANCELLED` report へ反映する。current document 状態を直接変えない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_task_cancel(InkpodBatchTask* task);
 /**
  * @brief batch task handle を解放し owner 変数を NULL にする。
- * @par 契約 任意スレッド。owner pointer は非 NULL、`*task == NULL` は成功 no-op。execute が戻る前に release しない。
+ * @par 契約
+ * 任意スレッド。owner pointer は非 NULL、`*task == NULL` は成功 no-op。execute が戻る前に release しない。
  * 成功後別名は無効。文書状態不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_batch_task_release(InkpodBatchTask** task);
 
 /**
  * @brief 指定 logical view の immutable render snapshot を構築する。
- * @par 契約 Core owner thread。`core`/`options`/`out_snapshot` は非 NULL・非重複、options は完全サイズ borrowed、
+ * @par 契約
+ * Core owner thread。`core`/`options`/`out_snapshot` は非 NULL・非重複、options は完全サイズ borrowed、
  * `*out_snapshot == NULL`。成功時 Rust-owned snapshot。live stroke/filter/dust/floating preview 中も許可し transient content を capture する。
  * snapshot build 自体は document revision、dirty、Undo を変えない。失敗時 owner は NULL のまま。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_build_snapshot_for_view(
     InkpodCore* core,
@@ -3180,10 +3479,12 @@ InkpodStatus inkpod_core_build_snapshot_for_view(
 
 /**
  * @brief primary view の immutable render snapshot を構築する。
- * @par 契約 Core owner thread。`core`/`options`/`out_snapshot` は非 NULL・非重複、options は完全サイズ borrowed、
+ * @par 契約
+ * Core owner thread。`core`/`options`/`out_snapshot` は非 NULL・非重複、options は完全サイズ borrowed、
  * `*out_snapshot == NULL`。成功時 Rust-owned snapshot を格納し、Core destroy 後も独立して生存できる。
  * live stroke/filter/dust/floating preview を capture できるが、build は committed revision、dirty、Undo を変えない。失敗時 NULL のまま。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_build_snapshot(
     InkpodCore* core,
@@ -3192,10 +3493,12 @@ InkpodStatus inkpod_core_build_snapshot(
 
 /**
  * @brief snapshot の raster tile view を取得する。
- * @par 契約 任意スレッド。`snapshot`/完全サイズの `out_view` は非 NULL・非重複、同じ snapshot の release と同期。
+ * @par 契約
+ * 任意スレッド。`snapshot`/完全サイズの `out_view` は非 NULL・非重複、同じ snapshot の release と同期。
  * 成功時 tile span/pixels は親 snapshot 所有の borrowed pointer として返り release まで有効。失敗時出力未使用。
  * accessor は Core/revision/dirty/Undo/stroke/preview を変えない。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_snapshot_get_view(
     const InkpodSnapshot* snapshot,
@@ -3203,9 +3506,11 @@ InkpodStatus inkpod_snapshot_get_view(
 
 /**
  * @brief snapshot が固定した view transform を値コピーする。
- * @par 契約 任意スレッド。`snapshot`/完全サイズの `out_transform` は非 NULL、release と同期。
+ * @par 契約
+ * 任意スレッド。`snapshot`/完全サイズの `out_transform` は非 NULL、release と同期。
  * 成功時だけ出力を初期化。borrowed nested pointer はなく、状態変更なし。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_snapshot_get_transform(
     const InkpodSnapshot* snapshot,
@@ -3213,9 +3518,11 @@ InkpodStatus inkpod_snapshot_get_transform(
 
 /**
  * @brief snapshot の overlay/grid と borrowed guide span を取得する。
- * @par 契約 任意スレッド。`snapshot`/完全サイズの `out_overlay` は非 NULL、release と同期。
+ * @par 契約
+ * 任意スレッド。`snapshot`/完全サイズの `out_overlay` は非 NULL、release と同期。
  * 成功時 guide span は snapshot release まで有効。失敗時出力未使用。Core/revision/dirty/Undo は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_snapshot_get_overlay(
     const InkpodSnapshot* snapshot,
@@ -3223,10 +3530,12 @@ InkpodStatus inkpod_snapshot_get_overlay(
 
 /**
  * @brief snapshot の vector segment/fill/boundary-ID spans を取得する。
- * @par 契約 任意スレッド。`snapshot`/完全サイズの `out_vectors` は非 NULL、release と同期。
+ * @par 契約
+ * 任意スレッド。`snapshot`/完全サイズの `out_vectors` は非 NULL、release と同期。
  * 成功時全 span は snapshot-owned borrowed で release まで有効。fill の範囲は boundary_path_ids を index し、segment は path ID ごとに並ぶ。
  * 失敗時出力未使用。状態変更なし。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_snapshot_get_vectors(
     const InkpodSnapshot* snapshot,
@@ -3234,25 +3543,31 @@ InkpodStatus inkpod_snapshot_get_vectors(
 
 /**
  * @brief snapshot の Rust 所有権を解放し owner 変数を NULL にする。
- * @par 契約 任意の外部同期済み renderer thread。owner pointer は非 NULL、`*snapshot == NULL` は成功 no-op。
+ * @par 契約
+ * 任意の外部同期済み renderer thread。owner pointer は非 NULL、`*snapshot == NULL` は成功 no-op。
  * 成功後 tile/pixel/guide/vector を含む全 borrowed alias は無効。Core/document revision、dirty、Undo、preview は不変。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_snapshot_release(InkpodSnapshot** snapshot);
 
 /**
  * @brief current thread の直近 FFI diagnostic に必要な UTF-8 buffer size を得る。
- * @par 契約 任意スレッド。`out_required_bytes` は非 NULL。成功時 trailing NUL を含む byte 数をコピー。
+ * @par 契約
+ * 任意スレッド。`out_required_bytes` は非 NULL。成功時 trailing NUL を含む byte 数をコピー。
  * Core/stroke/preview/revision/dirty/Undo と所有権は不変。失敗時出力未使用。
- * @par 主なステータス `OK`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_error_message_size(uint64_t* out_required_bytes);
 /**
  * @brief current thread の直近 FFI diagnostic を caller-owned UTF-8 buffer へコピーする。
- * @par 契約 任意スレッド。`buffer` と `out_written_bytes` は非 NULL・非重複。capacity は NUL を含む必要量以上。
+ * @par 契約
+ * 任意スレッド。`buffer` と `out_written_bytes` は非 NULL・非重複。capacity は NUL を含む必要量以上。
  * 成功時 NUL terminate し、`out_written_bytes` は NUL を除く byte 数。失敗時 written=0、diagnostic は再取得可能なまま。
  * Core/stroke/preview/revision/dirty/Undo は不変。
- * @par 主なステータス `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`PANIC`。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_error_message_copy(
     uint8_t* buffer,

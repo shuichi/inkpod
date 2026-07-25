@@ -1,10 +1,9 @@
-# Third-party notices
+# サードパーティ通知
 
-inkpod uses the following Rust crates for PNG encoding/decoding. Versions are
-locked in `Cargo.lock`; license expressions come from the distributed crate
-manifests.
+inkpod は PNG の encode/decode に次の Rust crate を使用する。version は `Cargo.lock` で固定し、
+license expression は配布される crate manifest に基づく。
 
-| Crate | Version | License |
+| crate | version | license |
 |---|---:|---|
 | png | 0.17.16 | MIT OR Apache-2.0 |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 |
@@ -16,11 +15,13 @@ manifests.
 | cfg-if | 1.0.4 | MIT OR Apache-2.0 |
 | bitflags | 1.3.2 | MIT/Apache-2.0 |
 
-TIFF, TGA, and BMP support is implemented in the project format crate and does
-not add another codec dependency. Distribution packaging must include the
-applicable upstream license texts selected under these expressions.
+TIFF、TGA、BMP は project の format crate 内で実装しており、別の codec dependency を追加しない。
+配布 package には、上記 expression に基づいて選択した upstream license text を同梱する。
 
-The Windows MSIX includes the app-local Microsoft Visual C++ runtime DLLs from
-the selected MSVC toolchain's documented redistributable directory. Those files
-remain Microsoft components and are redistributed under the Microsoft Visual
-Studio license terms; they are not covered by inkpod's GPL license.
+FFI API HTML の生成には [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css)
+v2.4.2（commit `d52eafe3e9303399fda15661f3d7bb8fe3d7eabc`）を使用する。license は MIT。
+テーマ本体は文書生成時だけ取得し、生成した HTML へ upstream の `LICENSE` をコピーする。
+
+Windows MSIX は、選択した MSVC toolchain の documented redistributable directory から app-local の
+Microsoft Visual C++ runtime DLL を収録する。これらは Microsoft component であり、Microsoft Visual
+Studio license terms に従って再配布する。inkpod の GPL license の対象ではない。
