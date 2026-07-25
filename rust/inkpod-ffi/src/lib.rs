@@ -2,6 +2,9 @@
 
 mod m7;
 
+#[cfg(test)]
+mod ffi_contract_tests;
+
 use inkpod_core::{
     ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel,
     ClipboardPayload, ClipboardPixel, ClipboardPlane, ColorBalance, ColorCheckMode, Command,

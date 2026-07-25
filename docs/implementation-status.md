@@ -15,6 +15,24 @@
   payload inspection, but its elevated install/run/uninstall rerun was cancelled
   at UAC; M8 therefore remains `In progress` only on acceptance scenario 4.
 
+## Post-M8 refactoring regression baseline
+
+- The public ABI now has a source-level coverage gate for all 155 functions in
+  `include/inkpod/core_ffi.h`. The gate requires the header declarations and
+  Rust `no_mangle` exports to remain identical and requires every public
+  function to have a direct reference in a Rust or C++ contract test.
+- Three focused FFI scenarios cover the 46 functions that previously had no
+  direct test reference: document/frame/history/selection/clipboard/common
+  raster round-trip; light-table/sequence/owned-buffer lifetimes; and
+  vector/filter/task state machines. They exercise success, invalid nested
+  `struct_size`, size query, `BUFFER_TOO_SMALL`, double release, savepoint
+  restoration, natural ordering, cancellation-ready state, and Undo/revision
+  transaction boundaries.
+- These outer-contract tests are the refactoring safety net for ABI-visible
+  behavior. Core/image/format unit, property, malformed-input, golden, and
+  Windows application tests remain necessary for algorithmic edge cases and
+  failure localization; FFI coverage does not replace them.
+
 ## User-requested Windows shell and package additions
 
 - The Japanese Help menu now exposes `Inkpodについて`. Its native, owned modal
@@ -43,7 +61,7 @@
 |---|---|---|---|---|
 | ARCH-001 | Verified | CMake explicitly tracks all image/format/core/FFI inputs, including M7 batch/Core/settings/FFI sources, and Cargo byproducts behind a completion stamp | Debug/Release build plus an immediate no-op Debug rebuild | CMake remains the build entry; Cargo does not run on the unchanged rebuild |
 | ARCH-002 | Verified | Core/image/format are safe and frontend-independent | All three domain crates' source/manifest scan, clippy, workspace tests | No Rust Windows dependency |
-| ABI-001 | Verified | ABI v1 retains M0-M6 records and adds bounded M7 graph/input/operation/output records plus immutable graph, preview, report, and thread-safe task handles | C11/C++20 layouts and executed M1-M7 smoke; Rust short/oversized-stride/misaligned-nested-record, ownership, cancellation, and report tests | Caller graph spans are copied on create; nested records are validated before reference creation; borrowed preview/report strings live until their owning handle is released |
+| ABI-001 | Verified | ABI v1 retains M0-M6 records and adds bounded M7 graph/input/operation/output records plus immutable graph, preview, report, and thread-safe task handles | All 155 public functions have a direct contract-test reference; header/export parity gate; C11/C++20 layouts and post-M8 integrated ABI/application smoke; Rust short/oversized-stride/misaligned-nested-record, buffer, ownership, cancellation, transaction, and round-trip tests | Caller graph spans are copied on create; nested records are validated before reference creation; borrowed preview/report strings live until their owning handle is released |
 | ABI-002 | Verified | Immutable snapshot owns flat M5 cubic/fill/boundary spans alongside raster/overlay data; ownership remains with the renderer queue | Core zoom invariance; Rust FFI lifetime/count tests; compiled C++ validator/D2D smoke | Vector records remain document-coordinate and snapshot-borrowed |
 | IO-001 (native save) | Verified | `.inkpod` v1 adds bounded optional M3-M6 sections; `M6AD` stores stable adjustment-layer IDs and validated brightness/contrast, curve, or levels parameters while retaining M1-M5 reads | Adjustment order/parameters/composite save-reopen; native round-trip plus missing/duplicate/wrong-layer/invalid-parameter rejection | Blob compression remains optional and disabled |
 | IO-001 (M2 recovery) | Verified | Atomic autosave leaves the normal savepoint/path untouched; recovery opens dirty, recovered, and pathless; Windows gives never-saved cells a private recovery path, queues timer autosave after an active stroke, and discovers private recovery at startup | Core/FFI recovery tests plus Windows active-stroke autosave, private-path discovery, and normal-vs-recovery smoke | Only the newest private recovery is prompted per launch; defer leaves it intact |
@@ -461,6 +479,9 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| `cargo fmt --all -- --check`; `cargo test --workspace --all-features`; WSL `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Windows 11 x64 + WSL Ubuntu, stable Rust 1.97.1 | Post-M8 FFI baseline passed formatting, zero-warning WSL clippy, Core 64, architecture 3, Core M8 integration 1, FFI 19, format unit 20 plus corpus 2, image 22, and doc-tests. Native Windows clippy frontend was blocked before startup by Application Control (`os error 4551`) | 2026-07-25 |
+| Developer-shell Debug build / `ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Strict C11/C++20/Rust build and MSIX assembly passed; assets + integrated ABI + application/D2D + package payload passed 4/4 in 18.49 s | 2026-07-25 |
+| Developer-shell Release build / non-elevated CTest | Windows 11 x64, MSVC 19.51 | Strict optimized compile/link and MSIX assembly passed; assets and package payload passed, but Application Control blocked the newly linked ABI/application EXE before startup on both attempts (`BAD_COMMAND`) | 2026-07-25 |
 | `cargo fmt --all -- --check`; WSL clippy/all-feature tests; `cargo bench -p inkpod-image --bench large_document -- --quick` | Windows + WSL Ubuntu, stable Rust 1.97.1, isolated target | Review source passed formatting, zero-warning clippy, Core 64, architecture 3, Core M8 integration 1, FFI 15, format unit 20 plus corpus 2, image 22 and doc-tests; benchmark reported sparse 8 ms and dense 49 ms | 2026-07-25 |
 | Debug/Release configure/build plus immediate unchanged verbose rebuild | Windows 11 Pro x64 build 26200, MSVC 19.51 | Both packages assembled with 10 app-local CRT DLLs; immediate Debug and Release rebuilds reported `ninja: no work to do`, so neither Cargo nor MakeAppx was reinvoked | 2026-07-25 |
 | `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 Pro x64 build 26200 | Corrected source passed assets + integrated ABI ownership + application/D2D + unpacked MSIX payload 4/4; Debug 15.21 s, Release 4.28 s | 2026-07-25 |
