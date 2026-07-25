@@ -107,6 +107,41 @@ non-adjustment/wrong layer IDs, invalid channel/interpolation codes, excessive
 layer/curve counts, out-of-range parameters, unknown/reserved values, and
 trailing bytes. M1-M5 files remain readable and acquire no adjustment state.
 
+## Batch settings format
+
+M7 batch settings use the separate `.inkbatch` extension. Version 1 is a
+bounded little-endian file with a 28-byte header: magic `INKBAT7\0`, graph
+version, body length, and FNV-1a 64-bit body checksum. It does not alter the
+`.inkpod` v1 container or claim compatibility with an undocumented legacy
+batch/preset format.
+
+The body stores a bounded UTF-8 graph name; one or more file, folder, or
+current-sequence input selectors with optional cell-number ranges; up to 1,024
+ordered operations; and one output record. Each operation has its own version,
+kind, enabled/configure-each-run flags, conjunctive stable layer/plane ID and type selector,
+missing-target policy, and a kind-specific bounded payload. Payloads preserve
+exact-depth colors, replacement pairs, continuous-fill seeds and expected
+source colors, filter/curve parameters, separation/effect settings, transforms,
+resize/DPI, and conversion destination. The output record stores Duplicate,
+New Save, or Explicit Overwrite policy, native format code, folder/cell-folder,
+basename/numbering direction, continue/stop failure policy, optional wait, and
+preview-before-save.
+
+The complete file is limited to 16 MiB, inputs to 16,384, operations to 1,024,
+each UTF-8 string to 32 KiB, and each operation payload to 1 MiB. Decode rejects
+unknown versions, invalid flags/types/UTF-8/components, empty required lists,
+out-of-range counts, checksum mismatch, truncation, overflow, and trailing
+bytes before constructing a Core graph. Save encodes and validates in memory,
+writes, flushes, and synchronizes a same-directory exclusive temporary file,
+and replaces the destination only after completion; cancellation or failure removes only that
+exact temporary file.
+
+Batch outputs are ordinary `.inkpod` files. Each input is loaded into a separate
+working Core, enabled operations run in order, and only a fully encoded result
+is atomically installed. Dry-run creates no output or temporary file. Duplicate
+is the default and is forbidden from resolving to its input path; overwrite is
+available only through the explicit output policy.
+
 The decoder bounds the whole file (1 GiB), including a post-read check against
 concurrent file growth, plus manifest (16 MiB), dimensions, plane/blob counts,
 offsets, and lengths before allocation. It rejects unknown

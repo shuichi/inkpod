@@ -1,10 +1,16 @@
 #![forbid(unsafe_code)]
 
+mod batch;
 mod common_formats;
 mod native_m4;
 mod native_m5;
 mod native_m6;
 
+pub use batch::{
+    BATCH_GRAPH_VERSION, FileBatchGraph, FileBatchInput, FileBatchOperation, FileBatchOutput,
+    FileBatchTarget, decode_batch_graph, encode_batch_graph, read_batch_graph,
+    save_batch_graph_atomic, save_batch_graph_atomic_with_cancel,
+};
 pub use common_formats::{
     CommonRaster, CommonRasterFormat, CommonRasterInfo, MAX_COMMON_RASTER_BYTES,
     decode_common_raster, encode_common_raster,
@@ -1006,9 +1012,17 @@ pub fn save_atomic_with_cancel(
         return Err(FormatError::Cancelled);
     }
     let bytes = encode(document)?;
+    if is_cancelled() {
+        return Err(FormatError::Cancelled);
+    }
     let (temporary_path, mut temporary) = create_temporary(path)?;
     let result = (|| {
-        temporary.write_all(&bytes)?;
+        for chunk in bytes.chunks(1_048_576) {
+            if is_cancelled() {
+                return Err(FormatError::Cancelled);
+            }
+            temporary.write_all(chunk)?;
+        }
         temporary.flush()?;
         temporary.sync_all()?;
         drop(temporary);

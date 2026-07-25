@@ -376,6 +376,74 @@ BEGIN
             END
             MENUITEM "停止", IDM_MOTION_STOP
         END
+        POPUP "バッチ"
+        BEGIN
+            MENUITEM "入力ファイル...", IDM_BATCH_INPUT_FILE
+            MENUITEM "入力フォルダー...", IDM_BATCH_INPUT_FOLDER
+            MENUITEM "現在の連番", IDM_BATCH_INPUT_CURRENT
+            MENUITEM "セル番号範囲...", IDM_BATCH_INPUT_RANGE
+            MENUITEM SEPARATOR
+            POPUP "項目を追加"
+            BEGIN
+                MENUITEM "色置換", IDM_BATCH_ADD_COLOR_REPLACE
+                MENUITEM "連続フィル", IDM_BATCH_ADD_CONTINUOUS_FILL
+                MENUITEM "色分解", IDM_BATCH_ADD_SEPARATION
+                MENUITEM "レイヤー表示", IDM_BATCH_ADD_VISIBILITY
+                MENUITEM "線幅", IDM_BATCH_ADD_LINE_WIDTH
+                MENUITEM "境界色エアブラシ", IDM_BATCH_ADD_BOUNDARY_AIRBRUSH
+                MENUITEM "ゴミ取り", IDM_BATCH_ADD_DUST
+                MENUITEM "鏡像", IDM_BATCH_ADD_MIRROR
+                MENUITEM "90度回転", IDM_BATCH_ADD_ROTATE
+                MENUITEM "画像サイズ・解像度", IDM_BATCH_ADD_RESIZE
+                MENUITEM "ラスター変換", IDM_BATCH_ADD_CONVERT
+                POPUP "フィルタ"
+                BEGIN
+                    MENUITEM "シャープ（弱）", IDM_BATCH_ADD_FILTER_SHARPEN_WEAK
+                    MENUITEM "シャープ（強）", IDM_BATCH_ADD_FILTER_SHARPEN_STRONG
+                    MENUITEM "ぼかし（弱）", IDM_BATCH_ADD_FILTER_BLUR_WEAK
+                    MENUITEM "ぼかし（強）", IDM_BATCH_ADD_FILTER_BLUR_STRONG
+                    MENUITEM "ガウスぼかし...", IDM_BATCH_ADD_FILTER_GAUSSIAN
+                    MENUITEM "階調反転", IDM_BATCH_ADD_FILTER_INVERT
+                    MENUITEM "自動コントラスト", IDM_BATCH_ADD_FILTER_AUTO_CONTRAST
+                    MENUITEM "明るさ・コントラスト...", IDM_BATCH_ADD_FILTER_BRIGHTNESS
+                    MENUITEM "トーンカーブ...", IDM_BATCH_ADD_FILTER_TONE_CURVE
+                    MENUITEM "レベル補正...", IDM_BATCH_ADD_FILTER_LEVELS
+                    MENUITEM "色相・彩度・明度...", IDM_BATCH_ADD_FILTER_HSV
+                    MENUITEM "カラーバランス...", IDM_BATCH_ADD_FILTER_COLOR_BALANCE
+                    MENUITEM "アンシャープマスク...", IDM_BATCH_ADD_FILTER_UNSHARP
+                END
+            END
+            MENUITEM "選択項目を編集...", IDM_BATCH_OPERATION_EDIT
+            MENUITEM "色置換 old/new を入替", IDM_BATCH_REPLACE_SWAP
+            MENUITEM "選択項目を削除", IDM_BATCH_OPERATION_REMOVE
+            MENUITEM "上へ", IDM_BATCH_OPERATION_UP
+            MENUITEM "下へ", IDM_BATCH_OPERATION_DOWN
+            MENUITEM SEPARATOR
+            POPUP "出力"
+            BEGIN
+                MENUITEM "複製保存（既定）", IDM_BATCH_OUTPUT_DUPLICATE
+                MENUITEM "新規保存", IDM_BATCH_OUTPUT_NEW
+                MENUITEM "明示上書き", IDM_BATCH_OUTPUT_OVERWRITE
+                MENUITEM "フォルダー・命名・待機...", IDM_BATCH_OUTPUT_SETTINGS
+            END
+            POPUP "失敗時"
+            BEGIN
+                MENUITEM "記録して続行", IDM_BATCH_FAILURE_CONTINUE
+                MENUITEM "記録して停止", IDM_BATCH_FAILURE_STOP
+            END
+            MENUITEM "プレビュー", IDM_BATCH_PREVIEW
+            MENUITEM "dry-run", IDM_BATCH_DRY_RUN
+            MENUITEM "現在セルを実行", IDM_BATCH_RUN_CURRENT
+            MENUITEM "全実行", IDM_BATCH_RUN_ALL
+            MENUITEM "キャンセル", IDM_BATCH_CANCEL
+            MENUITEM SEPARATOR
+            MENUITEM "セットを保存...", IDM_BATCH_SAVE_SET
+            MENUITEM "セットを読み込み...", IDM_BATCH_LOAD_SET
+        END
+    END
+    POPUP "ウィンドウ(&N)"
+    BEGIN
+        MENUITEM "バッチ", IDM_WINDOW_BATCH
     END
     POPUP "ヘルプ(&H)"
     BEGIN
@@ -451,6 +519,34 @@ BEGIN
     LTEXT           "準備中...", IDC_M6_PROGRESS_TEXT, 12, 12, 226, 12
     CONTROL         "", IDC_M6_PROGRESS_BAR, "msctls_progress32", WS_BORDER, 12, 30, 226, 12
     PUSHBUTTON      "キャンセル", IDCANCEL, 174, 53, 64, 18
+END
+
+IDD_BATCH_PALETTE DIALOGEX 0, 0, 300, 318
+STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+EXSTYLE WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT
+CAPTION "バッチ"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT           "入力", -1, 10, 9, 42, 12
+    LISTBOX         IDC_BATCH_INPUTS, 10, 23, 280, 38, LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "順序付きバッチ項目", -1, 10, 67, 104, 12
+    LISTBOX         IDC_BATCH_OPERATIONS, 10, 81, 280, 72, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_BATCH_OPERATION_KIND, 10, 159, 180, 130, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "追加", IDC_BATCH_ADD, 196, 159, 44, 16
+    PUSHBUTTON      "削除", IDC_BATCH_REMOVE, 246, 159, 44, 16
+    PUSHBUTTON      "上へ", IDC_BATCH_UP, 10, 181, 44, 16
+    PUSHBUTTON      "下へ", IDC_BATCH_DOWN, 60, 181, 44, 16
+    PUSHBUTTON      "編集", IDC_BATCH_EDIT, 110, 181, 44, 16
+    LTEXT           "出力", -1, 10, 205, 42, 12
+    LTEXT           "", IDC_BATCH_OUTPUT, 10, 219, 280, 24, SS_LEFT
+    PUSHBUTTON      "プレビュー", IDC_BATCH_PREVIEW, 10, 249, 62, 18
+    PUSHBUTTON      "dry-run", IDC_BATCH_DRY_RUN, 78, 249, 52, 18
+    PUSHBUTTON      "現在セル", IDC_BATCH_RUN_CURRENT, 136, 249, 54, 18
+    PUSHBUTTON      "全実行", IDC_BATCH_RUN_ALL, 196, 249, 44, 18
+    PUSHBUTTON      "中止", IDC_BATCH_CANCEL, 246, 249, 44, 18
+    PUSHBUTTON      "セット保存", IDC_BATCH_SAVE_SET, 10, 277, 70, 18
+    PUSHBUTTON      "セット読込", IDC_BATCH_LOAD_SET, 86, 277, 70, 18
+    PUSHBUTTON      "閉じる", IDCANCEL, 220, 291, 70, 18
 END
 
 IDD_ABOUT DIALOGEX 0, 0, 383, 290

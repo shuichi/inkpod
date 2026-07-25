@@ -5,9 +5,9 @@ saved results—not replication of a legacy UI or assets.
 
 | Requirement | Status | Implementation | Tests | Known difference / next work |
 |---|---|---|---|---|
-| ARCH-001 | Verified | CMake completion stamp lists every Rust source, including M6 image-edit/Core/native-format modules, and connects Cargo `inkpod-ffi` staticlib/rlib byproducts to MSVC targets | VS2026 x64 Debug/Release build plus immediate no-op Debug rebuild | Cargo is not invoked when tracked inputs are unchanged; VS2022 CI remains configured |
+| ARCH-001 | Verified | CMake completion stamp lists every Rust source, including M7 batch/Core/settings/FFI modules, and connects Cargo `inkpod-ffi` staticlib/rlib byproducts to MSVC targets | VS2026 x64 Debug/Release build plus immediate no-op Debug rebuild | Cargo is not invoked when tracked inputs are unchanged; VS2022 CI remains configured |
 | ARCH-002 | Verified | Safe, OS-independent Core/image/format crates with no frontend dependency | All three domain crates' source/manifest scan, clippy, workspace tests | No Rust Windows API dependency |
-| ABI-001 | Verified | ABI v1 retains M6 records and exposes bounded paper/tree/history/view/fill/selection/color/palette/light-table/sequence/vector/clipboard/document-transform operations while preserving all ownership rules | C11/C++20 layouts; executed M1-M6 smoke; Rust short/packed/strided-record, buffer-query, task, ownership, and transaction tests | Caller spans are borrowed only for the synchronous Core call; caller buffers and Rust-owned handles follow `docs/ffi.md` |
+| ABI-001 | Verified | ABI v1 retains M0-M6 records and exposes copied, bounded M7 graph/operation records plus immutable graph/preview/report and atomic task handles | C11/C++20 layouts; executed M1-M7 ABI/application smoke; Rust short/oversized-stride/misaligned-nested-record, task, report, ownership, and transaction tests | Nested records are validated before reference creation; preview/report strings are borrowed from their owning handle; graph creation copies every caller span |
 | ABI-002 | Verified | Immutable snapshot owns batched raster/overlay data plus flat cubic segment, fill, and boundary-ID spans; ownership moves unchanged through the renderer queue | Core zoom invariance; Rust FFI vector ownership; C++ validation and D2D smoke source | Vector records use document coordinates and are borrowed only for snapshot lifetime |
 | IO-001 (native save) | Verified | `.inkpod` v1 adds bounded M3-M6 sections; `M6AD` persists stable adjustment-layer IDs plus brightness/contrast, curve, or levels parameters while retaining M1-M5 readers | Adjustment order/parameter/composite save-reopen; native missing/duplicate/wrong-layer/invalid-parameter rejection | Blob compression is optional and not enabled |
 | IO-001 (M2 recovery) | Verified | Atomic autosave preserves the normal path/savepoint; recovery opens dirty and pathless; Windows assigns never-saved cells a private recovery path, queues timer/manual autosaves, defers them across an active stroke, and discovers private recovery at startup | Core/FFI recovery tests plus Windows active-stroke autosave, private-path discovery, and normal-file/recovery checksum smoke | Only the newest private recovery is prompted per launch; deferred files remain available for a later launch |
@@ -44,9 +44,9 @@ saved results—not replication of a legacy UI or assets.
 | LT-002 | Verified | Reference alignment, Canvas move/Shift-all, boundary/color sampling, reload, and dirty-safe edit-image swap are native controls | Mixed-size/reopen/swap goldens, read-only fill, ABI, and Windows movement/reload/sample/swap smoke | — |
 | SEQ-001 | Verified | Native sequence pane/file commands provide natural-order import/export, numbered thumbnails, gaps, and first/previous/next/last/goto | Order/gap/thumbnail/dirty-switch plus Windows file/menu/pane smoke | — |
 | SEQ-002 | Verified | Timed motion UI provides all six FPS values, loop, pause/step/first/last, selection/light-table options, and shortcuts | Core motion, C ABI state, and Windows timer/menu/key smoke | — |
-| BATCH-001 | Not started | — | — | No batch palette or persisted Input -> Operations -> Output graph |
-| BATCH-002 | Not started | — | — | No batch operation catalog or production UI |
-| BATCH-003 | Not started | — | — | No dry-run, preview, progress/cancel, atomic output, or failure-report workflow |
+| BATCH-001 | Verified | Checksummed versioned `.inkbatch` persists file/folder/current-sequence input selectors, ordered operations, conjunctive stable-ID/type selectors, and output/failure policy; a native modeless Batch palette edits and saves/loads the graph | Format bounds/checksum/atomic replacement tests, complete operation/filter graph round-trip, FFI copied-span ownership, Windows palette/menu smoke | This is the documented Inkpod graph, not a legacy preset compatibility claim |
+| BATCH-002 | Verified | Ordered catalog covers replace/swap, continuous fill, separation, visibility, four line-width modes, all M6 filters, boundary airbrush, dust, mirror, rotate, resize/DPI, and plane conversion with skip/error target policy | Six M7 acceptance tests, complete catalog round-trip, Core operation tests, FFI nested-record validation, Windows add/edit/reorder/remove/swap/boundary dry-run smoke | Boundary airbrush starts with two colors; algorithms retain documented Inkpod semantics; undocumented legacy kernels are not inferred |
+| BATCH-003 | Verified | Natural-order preview, seed-color warnings, current-file/UUID selection, current/all dry-run and execution, progress/cancel including cancellable waits, per-output atomicity, explicit continue/stop reports, and non-overwriting default policy run on the Core engine | Named M7 acceptance 6/6, current-file/wait regressions, FFI preview/report/cancel, final Release and reviewed Debug CTest 3/3 with real Batch palette dry-run/output smoke | Native `.inkpod` is the only batch output format currently enabled; overwrite requires explicit policy |
 | M0 Windows shell (Help/About) | Verified | Japanese Help command opens a reference-DPI-normalized native modal About centered on the owner, with 15/9-point fonts, a 40 px reference-height name label, exact-size generated PNG icon, `Inkpod`, shorter description, CMake-derived version, and copyright | Final Debug smoke verifies target-DPI geometry/name-label height/font/icon/string/non-overlap; assets + ABI + application CTest passed 3/3 | The 574 x 544 reference is device pixels at 144 DPI and is converted once while retaining Windows theme, modal, and keyboard behavior |
 | M8 Windows package preparation | In progress | Windows App Development CLI 0.5.0 manifest, 48 MSIX PNGs, and five-resolution ICO generated from the updated project SVG | Asset file/dimension/ICO/version CTest; representative visual inspection; Debug/Release RC link | No signed MSIX or clean Windows install/uninstall verification yet |
 
@@ -60,12 +60,18 @@ real WM_COMMAND, dialog-control, listbox-drag, keyboard, timer, clipboard, and
 Canvas-pointer application smoke. Internal build, ABI, and renderer contracts
 do not need artificial GUI commands.
 
-The completion worktree passed 107 Rust tests under WSL, format/clippy,
-the strict MSVC Debug build, and final Debug CTest 3/3 in 15.08 s. Windows
-Application Control blocked the freshly relinked Rust test executable before it
-could start, so the complete Rust run used the same worktree under WSL. M7
-remains `Not started`; M8 signed-package work remains `In progress` and neither
-scope is claimed here.
+The reviewed 2026-07-25 M7 worktree passed named M6 acceptance 5/5, named M7
+acceptance 6/6, Rust format, and the final WSL all-feature workspace suite (Core
+64, architecture 1, FFI 15, format 20, image 22, plus doc-tests). WSL clippy
+passed all targets/features with zero warnings; Windows Application Control
+still blocked the exact `cargo-clippy.exe` frontend before startup (`os error
+4551`). Strict MSVC Debug and Release builds passed. Final Release CTest passed
+3/3 with M1-M7 ABI and real Batch palette/application/D2D smoke; Debug passed the
+same reviewed GUI/ABI source before the last Rust-only validation/save-poll
+refinements, then Application Control blocked the freshly linked Debug EXE before
+test startup. The immediate unchanged Debug rebuild reported `ninja: no work to
+do`, so Cargo was not reinvoked. M8 signed-package work remains `In progress`;
+this M7 review did not advance it.
 
 ## Unknown legacy formats
 
@@ -75,5 +81,5 @@ scope is claimed here.
 | Legacy palette/chart/filter preset layouts | Unknown | Byte layouts are not defined by the internal specification |
 
 No legacy manual, image, icon, wording, proprietary binary assumption, or
-third-party artwork was used for M0 through M6. PNG dependency licenses are
+third-party artwork was used for M0 through M7. PNG dependency licenses are
 recorded in `docs/third-party-notices.md`.

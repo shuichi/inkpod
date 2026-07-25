@@ -2,26 +2,29 @@
 
 ## Current milestone
 
-- Milestone: M6
+- Milestone: M7
 - Status: Verified
-- Last verified worktree state: all requirements that were `In progress` through
-  M6 now have production Windows menu/dialog/pane/toolbar/shortcut or Canvas
-  entry points connected through the Windows adapter and C ABI to Rust Core,
-  with result display and real GUI smoke coverage. The uncommitted worktree
-  passed the 107-test all-feature Rust workspace suite under WSL on 2026-07-24;
-  Windows stable Rust format/clippy passed with warnings denied. VS2026 x64
-  Debug built with `/W4 /WX /permissive-`, and Debug CTest passed assets,
-  integrated C11/C++ M1-M6 ABI, and the real application/D2D smoke 3/3 in
-  15.08 s. M7 and M8 behavior was not added by this completion pass.
+- Last verified worktree state: M7 adds a versioned persisted Input -> ordered
+  Operations -> Output graph, bounded selectors and operation catalog, immutable
+  C ABI graph/preview/report handles, dry-run/preview/progress/cancel/failure
+  execution, per-output atomic save, and a native modeless Batch palette. The
+  2026-07-25 M7 review corrected target matching/validation, current-file scope,
+  wait cancellation polling, nested C ABI pointer validation, and the native
+  boundary-airbrush default. Final WSL all-feature tests passed Core 64,
+  architecture 1, FFI 15, format 20, image 22 plus doc-tests; named M7
+  acceptance remains 6/6. VS2026 x64 Debug and Release built with `/W4 /WX
+  /permissive-`. Final Release CTest passed assets, integrated C11/C++ M1-M7
+  ABI, and the real application/D2D smoke 3/3. Debug passed the same reviewed
+  GUI/ABI source before the last Rust-only validation/save-poll refinements,
+  strictly rebuilt those refinements, then Application Control blocked the newly
+  linked EXE before test startup. The immediate unchanged Debug rebuild reported
+  `ninja: no work to do`, so Cargo was not reinvoked.
 
-Before M6 edits, `cargo test --workspace m5_acceptance -- --nocapture`
-reconfirmed all five M5 acceptance scenarios 5/5. The M6 acceptance boundary is
-Verified: filter previews remain separate until one-unit apply, non-destructive
-adjustments persist with validated native metadata, effect and alpha operations
-cross the C ABI, and all M0-M5 Rust tests remain green. Full pressure-aware
-airbrush/blur/stamp gestures, native filter/effect/adjustment editors, three-mode
-dust removal with preview, and worker progress/cancel are connected and tested.
-No M7 API or implementation was introduced.
+Before M7 edits, `cargo test --workspace m6_acceptance -- --nocapture`
+reconfirmed all five M6 acceptance scenarios 5/5. M6 therefore remained
+Verified before M7 work began and passed again on the final M7 worktree. This
+pass implemented only M7. Existing M8 packaging assets were neither extended
+nor claimed complete.
 
 ## User-requested Windows shell and package additions
 
@@ -45,9 +48,9 @@ No M7 API or implementation was introduced.
 
 | ID | Status | Implementation | Tests | Notes |
 |---|---|---|---|---|
-| ARCH-001 | Verified | CMake explicitly tracks all image/format/core/FFI inputs, including M6 image-edit/Core/native-format sources, and Cargo byproducts behind a completion stamp | Debug/Release build plus an immediate no-op Debug rebuild | CMake remains the build entry; Cargo does not run on the unchanged rebuild |
+| ARCH-001 | Verified | CMake explicitly tracks all image/format/core/FFI inputs, including M7 batch/Core/settings/FFI sources, and Cargo byproducts behind a completion stamp | Debug/Release build plus an immediate no-op Debug rebuild | CMake remains the build entry; Cargo does not run on the unchanged rebuild |
 | ARCH-002 | Verified | Core/image/format are safe and frontend-independent | All three domain crates' source/manifest scan, clippy, workspace tests | No Rust Windows dependency |
-| ABI-001 | Verified | ABI v1 retains the M6 records and adds bounded paper/tree/history/view/fill/selection/color/palette/light-table/sequence/vector/clipboard/document-transform calls needed by the completed GUI slices | C11/C++20 layouts and executed M1-M6 smoke; Rust short/packed/strided-record, buffer-query, ownership, task, and transaction tests | Caller spans are borrowed only for the owner-thread Core call; caller buffers and Rust-owned clipboard/task handles follow the documented two-stage ownership rules |
+| ABI-001 | Verified | ABI v1 retains M0-M6 records and adds bounded M7 graph/input/operation/output records plus immutable graph, preview, report, and thread-safe task handles | C11/C++20 layouts and executed M1-M7 smoke; Rust short/oversized-stride/misaligned-nested-record, ownership, cancellation, and report tests | Caller graph spans are copied on create; nested records are validated before reference creation; borrowed preview/report strings live until their owning handle is released |
 | ABI-002 | Verified | Immutable snapshot owns flat M5 cubic/fill/boundary spans alongside raster/overlay data; ownership remains with the renderer queue | Core zoom invariance; Rust FFI lifetime/count tests; compiled C++ validator/D2D smoke | Vector records remain document-coordinate and snapshot-borrowed |
 | IO-001 (native save) | Verified | `.inkpod` v1 adds bounded optional M3-M6 sections; `M6AD` stores stable adjustment-layer IDs and validated brightness/contrast, curve, or levels parameters while retaining M1-M5 reads | Adjustment order/parameters/composite save-reopen; native round-trip plus missing/duplicate/wrong-layer/invalid-parameter rejection | Blob compression remains optional and disabled |
 | IO-001 (M2 recovery) | Verified | Atomic autosave leaves the normal savepoint/path untouched; recovery opens dirty, recovered, and pathless; Windows gives never-saved cells a private recovery path, queues timer autosave after an active stroke, and discovers private recovery at startup | Core/FFI recovery tests plus Windows active-stroke autosave, private-path discovery, and normal-vs-recovery smoke | Only the newest private recovery is prompted per launch; defer leaves it intact |
@@ -84,9 +87,9 @@ No M7 API or implementation was introduced.
 | LT-002 | Verified | Native controls expose reference-frame alignment, Canvas movement (Shift moves all), boundary/color sampling, reload, and dirty-safe edit-image swap while preserving display state | Mixed-size/reopen/swap goldens, cancellation/read-only fill, ABI, and real Canvas move/reload/sample/swap smoke | — |
 | SEQ-001 | Verified | Native sequence pane/file commands provide natural-order import/export, thumbnails, numbered first/previous/next/last/goto navigation, and gap-safe switching | Natural-order/gap/thumbnail/dirty-switch tests plus Windows file/menu/pane smoke | — |
 | SEQ-002 | Verified | Timed motion UI supports 30/25/24/12/10/8 FPS, loop, pause/step/first/last, selection/light-table options, timer playback, and keyboard shortcuts | Core motion loop/pause tests, C ABI state tests, and Windows timer/menu/shortcut smoke | — |
-| BATCH-001 | Not started | — | — | No batch palette or persisted Input -> Operations -> Output graph |
-| BATCH-002 | Not started | — | — | No batch operation catalog or production UI |
-| BATCH-003 | Not started | — | — | No dry-run, preview, progress/cancel, atomic output, or failure-report workflow |
+| BATCH-001 | Verified | Versioned checksummed `.inkbatch` settings persist file/folder/current-sequence selectors, ordered enabled/configure-each-run operations, conjunctive stable-ID/type target selectors, and output/failure policies; a modeless native Batch palette supports add/edit/remove/reorder and save/load | Format checksum/version/bounds/atomic replacement tests, complete operation/filter graph round-trip, FFI copied-span ownership, and Windows `WM_COMMAND`/dialog smoke | Loaded graphs remain immutable handles; editing starts a new UI graph rather than mutating borrowed settings storage |
+| BATCH-002 | Verified | Core and native Batch UI expose color replacement/swap, continuous fill seeds, separation, visibility, four vector line-width modes, all M6 filters, boundary airbrush, dust removal, mirror, 90-degree rotation, resize/DPI, and plane conversion with stable target/missing policy | Complete operation/filter versioned round-trip, Core operation/transaction tests, six named M7 acceptance tests, C ABI nested-record validation, and Windows add/edit/reorder/remove/swap/boundary dry-run smoke | Boundary airbrush starts with the required two colors; operations use documented Inkpod semantics; no proprietary legacy batch preset layout is inferred |
+| BATCH-003 | Verified | Preview resolves natural-order inputs/output names and seed warnings; current scope matches the open file/UUID; dry-run, current/all execution, atomic per-file save, continue/stop failure reports, progress, cancellable waits, and thread-safe cancel run on the Core engine worker | Named M7 acceptance 6/6; current-file/wait-cancel regressions; FFI dry-run/report/cancel tests; final Release and reviewed Debug ABI/real Windows palette preview/dry-run/output smoke | Default Duplicate policy cannot overwrite input; overwrite requires the explicit policy |
 | M0 Windows shell (Help/About) | Verified | Japanese Help command, reference-DPI-normalized owned modal About, reference-matched spacing, 15/9-point fonts with a 40 px reference-height name label, exact-size generated PNG icon, shorter description, copyright, and CMake-derived version | Debug `inkpod_windows_smoke` verifies exact target-DPI size/origin/spacing/name-label height/font/icon/string and non-overlap; final assets + ABI + application CTest passed 3/3 | The 574 x 544 reference is device pixels captured at 144 DPI and is scaled exactly once; native Win32 theme and keyboard/modal behavior are retained |
 | M8 packaging assets | In progress | winapp CLI manifest, 48 scale/target-size PNGs, five-resolution ICO | `inkpod_windows_assets`; Release resource build | MSIX assembly, signing, and clean install/uninstall are not yet tested |
 
@@ -101,10 +104,11 @@ still unavailable, the requirement remains `In progress`; completed Core/ABI
 subsets stay recorded in the implementation and test columns. Internal build,
 ABI, and renderer contracts do not require an artificial GUI entry point.
 
-All formerly `In progress` M0-M6 rows now satisfy that rule. The application
+All M0-M7 rows now satisfy that rule. The application
 smoke enters through real `WM_COMMAND`, dialog control, listbox drag, keyboard,
 timer, clipboard, and Canvas pointer paths; it does not count a direct smoke-only
-C ABI call as completion. M7 remains untouched and M8 packaging remains separate.
+C ABI call as completion. M7 adds real Batch palette and menu command paths;
+M8 packaging remains separate and unchanged by the M7 pass.
 
 ## M0 re-verification before M1
 
@@ -226,6 +230,52 @@ records, snapshot publication, and a real D2D render.
 | Dust removal was absent | Added bounded deterministic foreground-speck, transparent-hole, and color-outlier modes over full plane or pen/rectangle/polyline/lasso, selection intersection, preview OK/Cancel, progress, cancellation, and atomic no-partial-commit tests |
 | Filter work had no progress/cancel ownership model | Added Rust-owned atomic `InkpodM6Task`; Windows creates it on UI, runs the Core call on the Core engine thread, polls/cancels from UI, posts completion only after snapshot publication, and releases exactly once after the worker returns |
 | Native adjustment controls tracked only one layer | Added multiple create with unique names, previous/next selection, selected-layer parameter reload/re-edit, visibility toggle, and reorder; integrated Windows smoke executes the complete sequence |
+
+## M6 re-verification before M7
+
+| Criterion | Status | Evidence on 2026-07-25 before M7 edits |
+|---|---|---|
+| Named M6 acceptance tests | Verified | `cargo test --workspace m6_acceptance -- --nocapture` passed 5/5: preview cancel checksum, one-unit apply/Undo, source-preserving adjustment reorder, RGBA8/16 alpha/selection golden, and boundary-only airbrush |
+| Existing recorded Windows M1-M6 boundary | Verified | The reviewed M6 status recorded strict Debug CTest 3/3 with integrated ABI and real menu/dialog/Canvas smoke; final M7 Debug and Release smoke retained all preceding paths |
+| Worktree baseline | Verified | `git status --short --branch` was clean before M7 implementation |
+
+## M7 acceptance scenarios
+
+| # | Scenario | Status | Evidence |
+|---|---|---|---|
+| 1 | dry-run writes no files | Verified | `m7_acceptance_dry_run_writes_no_files` checks the resolved output remains absent and reports `DryRun`; FFI and Windows `IDM_BATCH_DRY_RUN` smoke repeat it |
+| 2 | Default output policy never overwrites input | Verified | `m7_acceptance_default_output_never_overwrites_input` verifies unchanged input bytes and a distinct duplicate output; graph defaults and Windows graph-info smoke require Duplicate |
+| 3 | Cancelled current file leaves no temporary output | Verified | `m7_acceptance_cancelled_file_leaves_no_temporary_output` cancels during save, preserves the destination, and checks the same-directory `.inkpod.tmp.*` file is removed; format cancellation tests cover settings/output cleanup |
+| 4 | One failure is recorded and policy continues or stops | Verified | `m7_acceptance_failure_policy_records_and_continues_or_stops` compares full per-item reports and downstream execution for Continue and Stop |
+| 5 | Color replacement old/new swap round-trips | Verified | `m7_acceptance_color_replacement_swap_round_trips` swaps every pair, saves/loads `.inkbatch`, and compares the graph; Windows smoke invokes the production swap/save/load commands |
+| 6 | Continuous-fill seed moved to another color warns in preview | Verified | `m7_acceptance_continuous_fill_preview_warns_when_seed_moves_color` previews two frames and emits the warning only where the expected source color changed |
+
+The graph format has independent container and graph/operation versions,
+bounded UTF-8/count/payload fields, checksum validation, and same-directory
+atomic replacement. Execution resolves file, naturally sorted folder, or the
+Core-owned current sequence, creates a separate working Core per input, applies
+enabled operations in order, and commits only a completed output. The native
+Batch palette uses an immutable graph handle while a worker is active, polls a
+thread-safe task in the progress dialog, owns preview/report handles until
+replacement or shutdown, and posts only completion status to the UI thread.
+
+### M7 review corrections
+
+- Batch target selectors now require a layer selector and, for plane operations,
+  a plane selector. Stable IDs and type constraints are matched conjunctively,
+  so a converted or type-mismatched stable target follows its skip/error policy.
+- `Current` file/folder execution now selects the Core's open path instead of
+  silently taking the first naturally sorted input. A current cell outside the
+  resolved input is a validation error.
+- File-to-file wait intervals poll cancellation every 50 ms rather than sleeping
+  for the entire configured interval. Atomic settings/output saves also poll
+  after encoding and between bounded write chunks before replacement.
+- C ABI strided records reject storage spans beyond `isize::MAX`, and a nested
+  `InkpodFilterInput` is checked for alignment and `struct_size` before Rust
+  creates a reference. Regression tests cover both invalid forms.
+- The native boundary-airbrush batch command now supplies the required two-color
+  input and is exercised through a real `WM_COMMAND` dry-run. Settings atomic
+  replacement and every operation/filter serialization variant gained tests.
 
 ## M4 acceptance scenarios
 
@@ -389,6 +439,15 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| `cargo test --workspace m6_acceptance -- --nocapture` | Windows 11 x64, stable Rust 1.97.1 | Reconfirmed the pre-M7 M6 boundary 5/5; repeated on final M7 worktree with the same result | 2026-07-25 |
+| `cargo test --workspace m7_acceptance -- --nocapture` | Windows 11 x64, stable Rust 1.97.1 | Passed all six named M7 acceptance scenarios 6/6 | 2026-07-25 |
+| `cargo fmt --all -- --check` | Windows 11 x64, stable Rust 1.97.1 | Passed on final M7 source | 2026-07-25 |
+| `cargo test --workspace --all-features` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Final review source passed: Core 64, architecture 1, FFI 15, format 20, image 22, plus doc-tests | 2026-07-25 |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Windows 11 x64 + WSL Ubuntu, stable Rust 1.97.1 | Exact Windows frontend remained blocked before startup by Application Control (`os error 4551`); the identical command passed with zero warnings in WSL | 2026-07-25 |
+| Developer-shell `cmake --preset windows-x64-debug` / `cmake --build --preset windows-x64-debug` | Windows 11 x64, MSVC 19.51 | Final review source passed with `/W4 /WX /permissive-`; includes C11 header, C++20 ABI, resource, Rust staticlib, and native Batch palette | 2026-07-25 |
+| `ctest --preset windows-x64-debug --output-on-failure` | Windows 11 x64 | Reviewed GUI/ABI source passed assets + integrated C11/C++ M1-M7 ABI + real application/D2D smoke, including boundary-airbrush Batch dry-run, 3/3 in 18.17 s. The final Rust-only validation/save-poll refinements rebuilt strictly; three later attempts were blocked before both EXE test bodies by Application Control (`BAD_COMMAND`) | 2026-07-25 |
+| Developer-shell Release configure/build / `ctest --preset windows-x64-release --output-on-failure` | Windows 11 x64, MSVC 19.51 | Final strict optimized build passed; assets + M1-M7 ABI + real application/D2D Batch smoke passed 3/3 in 4.26 s | 2026-07-25 |
+| Immediate unchanged developer-shell `cmake --build --preset windows-x64-debug` | Windows 11 x64, Ninja | Final review source reported `ninja: no work to do`; Cargo was not invoked | 2026-07-25 |
 | `cargo test --workspace m5_acceptance -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1 | Passed 5/5 before M6 edits | 2026-07-22 |
 | `cargo fmt --all --check` | WSL Ubuntu, stable Rust 1.97.1 | Passed on final M6 source | 2026-07-23 |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | WSL Ubuntu, stable Rust 1.97.1 | Passed with zero warnings | 2026-07-23 |
@@ -420,19 +479,18 @@ as dirty/pathless, and then reopens the unchanged normal file.
 | Post-vector-corner `cargo fmt --all --check` / clippy / WSL workspace tests | Windows 11 x64 + WSL Ubuntu, stable Rust 1.97.1 | Format and zero-warning clippy passed; Core 54, architecture 1, FFI 13, format 17, image 22 (107 total), plus doc-tests passed | 2026-07-24 |
 | Post-vector-corner developer-shell Debug build / `ctest --preset windows-x64-debug --output-on-failure` | Windows 11 x64, MSVC 19.51 | Strict `/W4 /WX /permissive-` build passed; assets + ABI + D2D seam/corrected-corner application smoke passed 3/3 in 18.56 s | 2026-07-24 |
 
-The final complete Rust suite is recorded under WSL because Windows Application
-Control blocked the freshly relinked Rust Core test executable before its body
-could start (`os error 4551`). The same source passed all 107 tests under WSL;
-Windows format and clippy completed before that relink. This policy event is not
-a code-test failure. Final Debug CTest executed all three tests successfully.
-The final Release binary compiled and linked strictly, but its two EXE tests
-remained externally blocked before process start; no Release test body failed.
+The final reviewed M7 Rust suite passed in WSL, including the architecture and
+new ABI negative tests. Application Control still blocks the Windows
+`cargo-clippy.exe` frontend before startup, so that exact Windows invocation is
+recorded as unverified; the identical WSL command emitted zero warnings. Final
+Windows Release CTest executed all three test bodies and passed. Debug passed the
+reviewed GUI/ABI source, then its final Rust-only rebuild was blocked before
+test-body startup by the same external policy.
 
 ## Known gaps and unknowns
 
-- All user operations grouped under the formerly `In progress` M0-M6 IDs are
-  now connected from production GUI entry points. There are no remaining
-  M0-M6 `In progress` requirements.
+- All user operations grouped under M0-M7 are connected from production GUI
+  entry points. There are no remaining M0-M7 `In progress` requirements.
 - User-facing normal save/open still synchronously waits for its Core-engine
   work item. Autosave and M6 image processing use the existing asynchronous
   queue/task paths; adding progress UI to ordinary native save/open is outside
@@ -446,10 +504,12 @@ remained externally blocked before process start; no Release test body failed.
 - M6 filter/effect/dust work executes on the long-lived Core engine thread. The
   native progress dialog polls/cancels the thread-safe task; cancellation,
   failure, or stale revision never commits a partial raster.
-- M7 batch graph, execution, dry-run, progress, and output policy remain
-  `Not started`; no M7 code or status was introduced.
+- M7 batch output currently writes native `.inkpod` cells. The graph is
+  versioned and extensible, but no undocumented legacy batch/preset format is
+  accepted or emitted.
 - M8 packaging remains `In progress`: signed MSIX creation and clean-machine
-  install/uninstall verification were not requested in this pass.
+  install/uninstall verification were not requested and no M8 implementation
+  was performed in this pass.
 - `.inkpod` v1 separates blobs but does not compress them.
 - DGA/CEL and legacy preset layouts remain `Unknown`; no codec is enabled.
 - Local MSVC is 19.51 from Visual Studio Build Tools 2026. VS2022 and VS2026 x64

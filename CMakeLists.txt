@@ -56,18 +56,21 @@ set(INKPOD_RUST_INPUTS
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/m4.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/m5.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/m6.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/m7.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/lib.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/common_formats.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/native_m4.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/native_m5.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/native_m6.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-format/src/batch.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-image/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/edit.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/lib.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/vector.rs"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/Cargo.toml"
-    "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/src/lib.rs")
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/src/lib.rs"
+    "${CMAKE_SOURCE_DIR}/rust/inkpod-ffi/src/m7.rs")
 
 add_custom_command(
     OUTPUT "${INKPOD_RUST_STAMP}"

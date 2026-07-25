@@ -53,6 +53,7 @@ constexpr std::uint32_t kInteractionVectorEraser = 1206U;
 constexpr UINT_PTR kAutosaveTimer = 1U;
 constexpr UINT kAutosaveIntervalMilliseconds = 60U * 1000U;
 constexpr UINT kM6TaskCompleted = WM_APP + 0x170U;
+constexpr UINT kBatchTaskCompleted = WM_APP + 0x171U;
 constexpr UINT_PTR kM6ProgressTimer = 1U;
 constexpr UINT_PTR kM6ContinuousSprayTimer = 2U;
 constexpr UINT_PTR kMotionPlaybackTimer = 3U;
@@ -91,6 +92,44 @@ struct M6AdjustmentUiState {
     std::string name;
 };
 
+struct BatchOperationUi {
+    std::uint32_t kind{INKPOD_BATCH_OPERATION_COLOR_REPLACE};
+    std::uint64_t flags{INKPOD_BATCH_OPERATION_ENABLED};
+    std::uint64_t layer_id{};
+    std::uint64_t plane_id{};
+    InkpodLayerKind layer_kind{INKPOD_LAYER_BINARY_COLORING};
+    InkpodTypedPlaneKind plane_kind{INKPOD_TYPED_PLANE_COLOR};
+    InkpodBatchMissingPolicy missing_policy{INKPOD_BATCH_MISSING_ERROR};
+    std::array<std::int64_t, 8U> parameters{};
+    InkpodColorValue color_0{};
+    InkpodColorValue color_1{};
+    std::vector<InkpodColorValue> colors;
+    std::vector<InkpodBatchColorPairInput> color_pairs;
+    std::vector<InkpodBatchSeedInput> seeds;
+    M6FilterJob filter;
+    std::wstring label;
+};
+
+struct BatchUiState {
+    InkpodBatchInputKind input_kind{INKPOD_BATCH_INPUT_CURRENT_SEQUENCE};
+    std::wstring input_path;
+    std::uint32_t first_cell{};
+    std::uint32_t last_cell{};
+    std::vector<BatchOperationUi> operations;
+    std::uint32_t selected_operation{};
+    InkpodBatchOutputPolicy output_policy{INKPOD_BATCH_OUTPUT_DUPLICATE};
+    InkpodBatchFailurePolicy failure_policy{INKPOD_BATCH_FAILURE_CONTINUE};
+    std::wstring output_folder{L"."};
+    std::wstring basename{L"batch"};
+    std::uint32_t start_number{1U};
+    std::uint32_t wait_milliseconds{};
+    bool descending{};
+    bool cell_folder{};
+    bool preview_before_save{};
+    bool loaded_graph{};
+    std::wstring last_result;
+};
+
 struct FillToolOptions {
     InkpodFillOperation operation{INKPOD_FILL_SEED};
     std::uint16_t tolerance{};
@@ -123,6 +162,7 @@ struct AppState {
     HWND motion_label{};
     HWND color_palette_list{};
     HWND color_chart_list{};
+    HWND batch_palette{};
     std::unique_ptr<inkpod::app::CoreEngine> engine;
     std::uint32_t tool{INKPOD_TOOL_PENCIL};
     InkpodPlaneKind plane{INKPOD_PLANE_MAIN_LINE};
@@ -178,6 +218,12 @@ struct AppState {
     bool stamp_source_valid{};
     InkpodStrokeSample stamp_source{};
     M6ToolOptions m6_options{};
+    BatchUiState batch{};
+    InkpodBatchGraph* batch_graph{};
+    InkpodBatchPreview* batch_preview{};
+    InkpodBatchReport* batch_report{};
+    InkpodBatchTask* batch_task{};
+    HWND batch_progress{};
     FillToolOptions fill_options{};
     std::vector<InkpodStrokeSample> fill_gesture_samples;
     std::vector<InkpodStrokeSample> m6_samples;
@@ -219,6 +265,39 @@ bool QueryTreeNode(AppState& state, bool plane, TreePaneNode& output) noexcept;
 bool IsVectorCanvasTool(std::uint32_t tool) noexcept;
 bool IsVectorStrokePlane(std::uint32_t kind) noexcept;
 void ClearVectorGeometryPreview(AppState& state) noexcept;
+void RefreshBatchPalette(AppState& state) noexcept;
+
+struct BatchPaletteEntry {
+    UINT command;
+    const wchar_t* label;
+};
+
+constexpr std::array<BatchPaletteEntry, 24U> kBatchPaletteEntries{{
+    {IDM_BATCH_ADD_COLOR_REPLACE, L"色置換"},
+    {IDM_BATCH_ADD_CONTINUOUS_FILL, L"連続フィル"},
+    {IDM_BATCH_ADD_SEPARATION, L"色分解"},
+    {IDM_BATCH_ADD_VISIBILITY, L"レイヤー表示"},
+    {IDM_BATCH_ADD_LINE_WIDTH, L"線幅"},
+    {IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, L"境界色エアブラシ"},
+    {IDM_BATCH_ADD_DUST, L"ゴミ取り"},
+    {IDM_BATCH_ADD_MIRROR, L"鏡像"},
+    {IDM_BATCH_ADD_ROTATE, L"90度回転"},
+    {IDM_BATCH_ADD_RESIZE, L"画像サイズ・解像度"},
+    {IDM_BATCH_ADD_CONVERT, L"ラスター変換"},
+    {IDM_BATCH_ADD_FILTER_SHARPEN_WEAK, L"フィルタ: シャープ（弱）"},
+    {IDM_BATCH_ADD_FILTER_SHARPEN_STRONG, L"フィルタ: シャープ（強）"},
+    {IDM_BATCH_ADD_FILTER_BLUR_WEAK, L"フィルタ: ぼかし（弱）"},
+    {IDM_BATCH_ADD_FILTER_BLUR_STRONG, L"フィルタ: ぼかし（強）"},
+    {IDM_BATCH_ADD_FILTER_GAUSSIAN, L"フィルタ: ガウスぼかし"},
+    {IDM_BATCH_ADD_FILTER_INVERT, L"フィルタ: 階調反転"},
+    {IDM_BATCH_ADD_FILTER_AUTO_CONTRAST, L"フィルタ: 自動コントラスト"},
+    {IDM_BATCH_ADD_FILTER_BRIGHTNESS, L"フィルタ: 明るさ・コントラスト"},
+    {IDM_BATCH_ADD_FILTER_TONE_CURVE, L"フィルタ: トーンカーブ"},
+    {IDM_BATCH_ADD_FILTER_LEVELS, L"フィルタ: レベル補正"},
+    {IDM_BATCH_ADD_FILTER_HSV, L"フィルタ: HSV"},
+    {IDM_BATCH_ADD_FILTER_COLOR_BALANCE, L"フィルタ: カラーバランス"},
+    {IDM_BATCH_ADD_FILTER_UNSHARP, L"フィルタ: アンシャープ"},
+}};
 
 void ResetM3DocumentUiState(AppState& state) noexcept {
     state.m3_layer_id = 0U;
@@ -2575,6 +2654,275 @@ INT_PTR CALLBACK M6ProgressDialogProcedure(
             return TRUE;
         case WM_NCDESTROY:
             KillTimer(dialog, kM6ProgressTimer);
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
+INT_PTR CALLBACK BatchProgressDialogProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<AppState*>(GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    switch (message) {
+        case WM_INITDIALOG:
+            state = reinterpret_cast<AppState*>(lparam);
+            if (state == nullptr) {
+                DestroyWindow(dialog);
+                return TRUE;
+            }
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            SetWindowTextW(dialog, L"バッチ処理中");
+            SendDlgItemMessageW(dialog, IDC_M6_PROGRESS_BAR, PBM_SETRANGE32, 0, 1000);
+            SetTimer(dialog, kM6ProgressTimer, 100U, nullptr);
+            return TRUE;
+        case WM_TIMER:
+            if (state != nullptr && wparam == kM6ProgressTimer
+                && state->batch_task != nullptr) {
+                InkpodM6TaskInfo info{};
+                info.struct_size = sizeof(info);
+                if (inkpod_batch_task_query(state->batch_task, &info) == INKPOD_STATUS_OK) {
+                    const std::uint64_t value = info.total_work == 0U
+                        ? 0U
+                        : std::min<std::uint64_t>(
+                              1000U, info.completed_work * 1000U / info.total_work);
+                    SendDlgItemMessageW(dialog, IDC_M6_PROGRESS_BAR, PBM_SETPOS, value, 0);
+                    std::array<wchar_t, 64U> text{};
+                    _snwprintf_s(
+                        text.data(),
+                        text.size(),
+                        _TRUNCATE,
+                        L"バッチ処理中... %llu / %llu",
+                        static_cast<unsigned long long>(info.completed_work),
+                        static_cast<unsigned long long>(info.total_work));
+                    SetDlgItemTextW(dialog, IDC_M6_PROGRESS_TEXT, text.data());
+                }
+                return TRUE;
+            }
+            break;
+        case WM_COMMAND:
+            if (LOWORD(wparam) == IDCANCEL && state != nullptr
+                && state->batch_task != nullptr) {
+                inkpod_batch_task_cancel(state->batch_task);
+                EnableWindow(GetDlgItem(dialog, IDCANCEL), FALSE);
+                SetDlgItemTextW(dialog, IDC_M6_PROGRESS_TEXT, L"キャンセル中...");
+                return TRUE;
+            }
+            break;
+        case WM_CLOSE:
+            if (state != nullptr && state->batch_task != nullptr) {
+                inkpod_batch_task_cancel(state->batch_task);
+            }
+            return TRUE;
+        case WM_NCDESTROY:
+            KillTimer(dialog, kM6ProgressTimer);
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
+void RefreshBatchPalette(AppState& state) noexcept {
+    if (state.batch_palette == nullptr) {
+        return;
+    }
+    const HWND inputs = GetDlgItem(state.batch_palette, IDC_BATCH_INPUTS);
+    const HWND operations = GetDlgItem(state.batch_palette, IDC_BATCH_OPERATIONS);
+    if (inputs == nullptr || operations == nullptr) {
+        return;
+    }
+    SendMessageW(inputs, LB_RESETCONTENT, 0, 0);
+    std::wstring input_label;
+    if (state.batch.input_kind == INKPOD_BATCH_INPUT_CURRENT_SEQUENCE) {
+        input_label = L"現在セルを含む連番（自然順）";
+    } else if (state.batch.input_kind == INKPOD_BATCH_INPUT_FOLDER) {
+        input_label = L"フォルダー: " + state.batch.input_path;
+    } else {
+        input_label = L"ファイル: " + state.batch.input_path;
+    }
+    if (state.batch.first_cell != 0U || state.batch.last_cell != 0U) {
+        input_label += L" / 範囲 ";
+        input_label += state.batch.first_cell == 0U
+            ? L"先頭"
+            : std::to_wstring(state.batch.first_cell);
+        input_label += L"～";
+        input_label += state.batch.last_cell == 0U
+            ? L"末尾"
+            : std::to_wstring(state.batch.last_cell);
+    }
+    SendMessageW(inputs, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(input_label.c_str()));
+
+    SendMessageW(operations, LB_RESETCONTENT, 0, 0);
+    if (state.batch.loaded_graph && state.batch_graph != nullptr) {
+        InkpodBatchGraphInfo info{};
+        info.struct_size = sizeof(info);
+        if (inkpod_batch_graph_get_info(state.batch_graph, &info) == INKPOD_STATUS_OK) {
+            const std::wstring label = L"読み込み済みセット: "
+                + std::to_wstring(info.operation_count) + L" 項目";
+            SendMessageW(operations, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        }
+    } else {
+        for (const auto& operation : state.batch.operations) {
+            std::wstring label = operation.flags & INKPOD_BATCH_OPERATION_ENABLED
+                ? L"✓ "
+                : L"– ";
+            label += operation.label;
+            if (operation.flags & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN) {
+                label += L"（実行ごとに設定）";
+            }
+            SendMessageW(operations, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        }
+        if (!state.batch.operations.empty()) {
+            state.batch.selected_operation = std::min<std::uint32_t>(
+                state.batch.selected_operation,
+                static_cast<std::uint32_t>(state.batch.operations.size() - 1U));
+            SendMessageW(
+                operations,
+                LB_SETCURSEL,
+                state.batch.selected_operation,
+                0);
+        }
+    }
+    const wchar_t* policy = L"複製保存";
+    if (state.batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE) {
+        policy = L"新規保存";
+    } else if (state.batch.output_policy == INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE) {
+        policy = L"明示上書き";
+    }
+    std::wstring output = L"出力: ";
+    output += policy;
+    output += L" / ";
+    output += state.batch.output_folder.empty() ? L"（入力と同じ場所）" : state.batch.output_folder;
+    if (!state.batch.last_result.empty()) {
+        output += L"\r\n";
+        output += state.batch.last_result;
+    }
+    SetDlgItemTextW(state.batch_palette, IDC_BATCH_OUTPUT, output.c_str());
+    const bool idle = state.batch_task == nullptr;
+    const bool editable = idle && !state.batch.loaded_graph;
+    for (const int control : {
+             IDC_BATCH_OPERATION_KIND,
+             IDC_BATCH_ADD,
+             IDC_BATCH_REMOVE,
+             IDC_BATCH_UP,
+             IDC_BATCH_DOWN,
+             IDC_BATCH_EDIT}) {
+        EnableWindow(GetDlgItem(state.batch_palette, control), editable ? TRUE : FALSE);
+    }
+    const bool runnable = idle
+        && (state.batch_graph != nullptr || !state.batch.operations.empty());
+    for (const int control : {
+             IDC_BATCH_PREVIEW,
+             IDC_BATCH_DRY_RUN,
+             IDC_BATCH_RUN_CURRENT,
+             IDC_BATCH_RUN_ALL,
+             IDC_BATCH_SAVE_SET,
+             IDC_BATCH_LOAD_SET}) {
+        EnableWindow(
+            GetDlgItem(state.batch_palette, control),
+            (control == IDC_BATCH_LOAD_SET ? idle : runnable) ? TRUE : FALSE);
+    }
+    EnableWindow(
+        GetDlgItem(state.batch_palette, IDC_BATCH_CANCEL), idle ? FALSE : TRUE);
+}
+
+INT_PTR CALLBACK BatchPaletteDialogProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<AppState*>(GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    switch (message) {
+        case WM_INITDIALOG: {
+            state = reinterpret_cast<AppState*>(lparam);
+            if (state == nullptr) {
+                DestroyWindow(dialog);
+                return TRUE;
+            }
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            state->batch_palette = dialog;
+            const HWND combo = GetDlgItem(dialog, IDC_BATCH_OPERATION_KIND);
+            for (const auto& entry : kBatchPaletteEntries) {
+                SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(entry.label));
+            }
+            SendMessageW(combo, CB_SETCURSEL, 0, 0);
+            RefreshBatchPalette(*state);
+            return TRUE;
+        }
+        case WM_COMMAND:
+            if (state == nullptr) {
+                break;
+            }
+            switch (LOWORD(wparam)) {
+                case IDC_BATCH_ADD: {
+                    const LRESULT index = SendDlgItemMessageW(
+                        dialog, IDC_BATCH_OPERATION_KIND, CB_GETCURSEL, 0, 0);
+                    if (index >= 0
+                        && static_cast<std::size_t>(index) < kBatchPaletteEntries.size()) {
+                        SendMessageW(
+                            state->window,
+                            WM_COMMAND,
+                            kBatchPaletteEntries[static_cast<std::size_t>(index)].command,
+                            0);
+                    }
+                    return TRUE;
+                }
+                case IDC_BATCH_REMOVE:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0);
+                    return TRUE;
+                case IDC_BATCH_UP:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_OPERATION_UP, 0);
+                    return TRUE;
+                case IDC_BATCH_DOWN:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_OPERATION_DOWN, 0);
+                    return TRUE;
+                case IDC_BATCH_EDIT:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_OPERATION_EDIT, 0);
+                    return TRUE;
+                case IDC_BATCH_PREVIEW:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_PREVIEW, 0);
+                    return TRUE;
+                case IDC_BATCH_DRY_RUN:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0);
+                    return TRUE;
+                case IDC_BATCH_RUN_CURRENT:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_RUN_CURRENT, 0);
+                    return TRUE;
+                case IDC_BATCH_RUN_ALL:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_RUN_ALL, 0);
+                    return TRUE;
+                case IDC_BATCH_SAVE_SET:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_SAVE_SET, 0);
+                    return TRUE;
+                case IDC_BATCH_LOAD_SET:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_LOAD_SET, 0);
+                    return TRUE;
+                case IDC_BATCH_CANCEL:
+                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_CANCEL, 0);
+                    return TRUE;
+                case IDC_BATCH_OPERATIONS:
+                    if (HIWORD(wparam) == LBN_SELCHANGE && !state->batch.loaded_graph) {
+                        const LRESULT index = SendDlgItemMessageW(
+                            dialog, IDC_BATCH_OPERATIONS, LB_GETCURSEL, 0, 0);
+                        if (index >= 0) {
+                            state->batch.selected_operation = static_cast<std::uint32_t>(index);
+                        }
+                    }
+                    return TRUE;
+                case IDCANCEL:
+                    ShowWindow(dialog, SW_HIDE);
+                    return TRUE;
+                default:
+                    break;
+            }
+            break;
+        case WM_CLOSE:
+            ShowWindow(dialog, SW_HIDE);
+            return TRUE;
+        case WM_NCDESTROY:
+            if (state != nullptr && state->batch_palette == dialog) {
+                state->batch_palette = nullptr;
+            }
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
             return TRUE;
         default:
@@ -4965,6 +5313,99 @@ void UpdateMenuState(AppState& state) noexcept {
                                                 ? IDM_MOTION_FPS_10
                                                 : IDM_MOTION_FPS_8))));
     CheckMenuItem(menu, fps_command, MF_BYCOMMAND | MF_CHECKED);
+
+    const bool batch_idle = state.batch_task == nullptr;
+    const bool batch_has_operations = state.batch.loaded_graph
+        ? state.batch_graph != nullptr
+        : !state.batch.operations.empty();
+    CheckMenuItem(
+        menu,
+        IDM_WINDOW_BATCH,
+        MF_BYCOMMAND
+            | (state.batch_palette != nullptr
+                    && IsWindowVisible(state.batch_palette) != FALSE
+                ? MF_CHECKED
+                : MF_UNCHECKED));
+    for (const UINT command : {
+             IDM_BATCH_INPUT_FILE,
+             IDM_BATCH_INPUT_FOLDER,
+             IDM_BATCH_INPUT_CURRENT,
+             IDM_BATCH_INPUT_RANGE,
+             IDM_BATCH_OUTPUT_DUPLICATE,
+             IDM_BATCH_OUTPUT_NEW,
+             IDM_BATCH_OUTPUT_OVERWRITE,
+             IDM_BATCH_OUTPUT_SETTINGS,
+             IDM_BATCH_FAILURE_CONTINUE,
+             IDM_BATCH_FAILURE_STOP,
+             IDM_BATCH_LOAD_SET}) {
+        const bool may_replace_loaded_graph = command == IDM_BATCH_LOAD_SET;
+        EnableMenuItem(
+            menu,
+            command,
+            MF_BYCOMMAND
+                | (batch_idle && (!state.batch.loaded_graph || may_replace_loaded_graph)
+                       ? MF_ENABLED
+                       : MF_GRAYED));
+    }
+    for (const auto& entry : kBatchPaletteEntries) {
+        EnableMenuItem(
+            menu,
+            entry.command,
+            MF_BYCOMMAND | (batch_idle && has_document ? MF_ENABLED : MF_GRAYED));
+    }
+    const bool editable_batch_item = batch_idle && !state.batch.loaded_graph
+        && state.batch.selected_operation < state.batch.operations.size();
+    for (const UINT command : {
+             IDM_BATCH_OPERATION_EDIT,
+             IDM_BATCH_OPERATION_REMOVE,
+             IDM_BATCH_OPERATION_UP,
+             IDM_BATCH_OPERATION_DOWN,
+             IDM_BATCH_REPLACE_SWAP}) {
+        EnableMenuItem(
+            menu,
+            command,
+            MF_BYCOMMAND | (editable_batch_item ? MF_ENABLED : MF_GRAYED));
+    }
+    for (const UINT command : {
+             IDM_BATCH_PREVIEW,
+             IDM_BATCH_DRY_RUN,
+             IDM_BATCH_RUN_CURRENT,
+             IDM_BATCH_RUN_ALL,
+             IDM_BATCH_SAVE_SET}) {
+        EnableMenuItem(
+            menu,
+            command,
+            MF_BYCOMMAND
+                | (batch_idle && batch_has_operations && has_document
+                       ? MF_ENABLED
+                       : MF_GRAYED));
+    }
+    EnableMenuItem(
+        menu,
+        IDM_BATCH_CANCEL,
+        MF_BYCOMMAND | (!batch_idle ? MF_ENABLED : MF_GRAYED));
+    for (const UINT command : {
+             IDM_BATCH_OUTPUT_DUPLICATE,
+             IDM_BATCH_OUTPUT_NEW,
+             IDM_BATCH_OUTPUT_OVERWRITE,
+             IDM_BATCH_FAILURE_CONTINUE,
+             IDM_BATCH_FAILURE_STOP}) {
+        CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
+    }
+    CheckMenuItem(
+        menu,
+        state.batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE
+            ? IDM_BATCH_OUTPUT_NEW
+            : (state.batch.output_policy == INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE
+                      ? IDM_BATCH_OUTPUT_OVERWRITE
+                      : IDM_BATCH_OUTPUT_DUPLICATE),
+        MF_BYCOMMAND | MF_CHECKED);
+    CheckMenuItem(
+        menu,
+        state.batch.failure_policy == INKPOD_BATCH_FAILURE_STOP
+            ? IDM_BATCH_FAILURE_STOP
+            : IDM_BATCH_FAILURE_CONTINUE,
+        MF_BYCOMMAND | MF_CHECKED);
 
     if (state.toolbar != nullptr) {
         const LPARAM enabled = MAKELPARAM(has_document ? TRUE : FALSE, 0);
@@ -10235,6 +10676,656 @@ int RunM5Smoke(AppState& state) noexcept {
     return 0;
 }
 
+void ResetBatchDerivedState(AppState& state) noexcept {
+    inkpod_batch_preview_release(&state.batch_preview);
+    inkpod_batch_report_release(&state.batch_report);
+    inkpod_batch_graph_release(&state.batch_graph);
+    state.batch.loaded_graph = false;
+    state.batch.last_result.clear();
+}
+
+InkpodColorValue BatchTransparentColor() noexcept {
+    return InkpodColorValue{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 0U};
+}
+
+UINT BatchFilterCommandToM6(UINT command) noexcept {
+    switch (command) {
+        case IDM_BATCH_ADD_FILTER_SHARPEN_WEAK:
+            return IDM_FILTER_SHARPEN_WEAK;
+        case IDM_BATCH_ADD_FILTER_SHARPEN_STRONG:
+            return IDM_FILTER_SHARPEN_STRONG;
+        case IDM_BATCH_ADD_FILTER_BLUR_WEAK:
+            return IDM_FILTER_BLUR_WEAK;
+        case IDM_BATCH_ADD_FILTER_BLUR_STRONG:
+            return IDM_FILTER_BLUR_STRONG;
+        case IDM_BATCH_ADD_FILTER_GAUSSIAN:
+            return IDM_FILTER_GAUSSIAN;
+        case IDM_BATCH_ADD_FILTER_INVERT:
+            return IDM_FILTER_INVERT;
+        case IDM_BATCH_ADD_FILTER_AUTO_CONTRAST:
+            return IDM_FILTER_AUTO_CONTRAST;
+        case IDM_BATCH_ADD_FILTER_BRIGHTNESS:
+            return IDM_FILTER_BRIGHTNESS;
+        case IDM_BATCH_ADD_FILTER_TONE_CURVE:
+            return IDM_FILTER_TONE_CURVE;
+        case IDM_BATCH_ADD_FILTER_LEVELS:
+            return IDM_FILTER_LEVELS;
+        case IDM_BATCH_ADD_FILTER_HSV:
+            return IDM_FILTER_HSV;
+        case IDM_BATCH_ADD_FILTER_COLOR_BALANCE:
+            return IDM_FILTER_COLOR_BALANCE;
+        case IDM_BATCH_ADD_FILTER_UNSHARP:
+            return IDM_FILTER_UNSHARP;
+        default:
+            return 0U;
+    }
+}
+
+const wchar_t* BatchOperationLabel(UINT command) noexcept {
+    const auto found = std::find_if(
+        kBatchPaletteEntries.begin(),
+        kBatchPaletteEntries.end(),
+        [command](const BatchPaletteEntry& entry) { return entry.command == command; });
+    return found == kBatchPaletteEntries.end() ? L"バッチ項目" : found->label;
+}
+
+bool AddBatchOperation(AppState& state, UINT command) noexcept {
+    BatchOperationUi operation{};
+    operation.label = BatchOperationLabel(command);
+    operation.color_0 = state.drawing_color;
+    operation.color_1 = state.drawing_color;
+    const UINT filter_command = BatchFilterCommandToM6(command);
+    if (filter_command != 0U) {
+        operation.kind = INKPOD_BATCH_OPERATION_FILTER;
+        if (!ConfigureM6FilterEditor(state, filter_command, operation.filter)) {
+            return false;
+        }
+    } else {
+        switch (command) {
+            case IDM_BATCH_ADD_COLOR_REPLACE: {
+                operation.kind = INKPOD_BATCH_OPERATION_COLOR_REPLACE;
+                InkpodBatchColorPairInput pair{};
+                pair.struct_size = sizeof(pair);
+                pair.enabled = 1U;
+                pair.old_color = BatchTransparentColor();
+                pair.new_color = state.drawing_color;
+                operation.color_pairs.push_back(pair);
+                break;
+            }
+            case IDM_BATCH_ADD_CONTINUOUS_FILL: {
+                operation.kind = INKPOD_BATCH_OPERATION_CONTINUOUS_FILL;
+                InkpodBatchSeedInput seed{};
+                seed.struct_size = sizeof(seed);
+                seed.flags = INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR;
+                seed.fill_color = state.drawing_color;
+                seed.expected_color = BatchTransparentColor();
+                operation.seeds.push_back(seed);
+                break;
+            }
+            case IDM_BATCH_ADD_SEPARATION:
+                operation.kind = INKPOD_BATCH_OPERATION_SEPARATION;
+                operation.colors.push_back(state.drawing_color);
+                operation.color_0 = BatchTransparentColor();
+                break;
+            case IDM_BATCH_ADD_VISIBILITY:
+                operation.kind = INKPOD_BATCH_OPERATION_VISIBILITY;
+                operation.plane_kind = 0U;
+                operation.parameters[0] = 1;
+                break;
+            case IDM_BATCH_ADD_LINE_WIDTH:
+                operation.kind = INKPOD_BATCH_OPERATION_LINE_WIDTH;
+                operation.layer_kind = INKPOD_LAYER_VECTOR_COLORING;
+                operation.plane_kind = INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE;
+                operation.missing_policy = INKPOD_BATCH_MISSING_SKIP;
+                operation.parameters[0] = INKPOD_VECTOR_WIDTH_SCALE;
+                operation.parameters[1] = 1000;
+                break;
+            case IDM_BATCH_ADD_BOUNDARY_AIRBRUSH:
+                operation.kind = INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH;
+                operation.colors.push_back(BatchTransparentColor());
+                operation.colors.push_back(state.drawing_color);
+                operation.parameters[0] = 4;
+                operation.parameters[1] = 1000;
+                break;
+            case IDM_BATCH_ADD_DUST:
+                operation.kind = INKPOD_BATCH_OPERATION_DUST_REMOVAL;
+                operation.parameters[0] = INKPOD_DUST_REMOVE_FOREGROUND;
+                operation.parameters[1] = 4;
+                break;
+            case IDM_BATCH_ADD_MIRROR:
+                operation.kind = INKPOD_BATCH_OPERATION_MIRROR;
+                operation.layer_kind = 0U;
+                operation.plane_kind = 0U;
+                operation.missing_policy = 0U;
+                operation.parameters[0] = INKPOD_MIRROR_HORIZONTAL;
+                break;
+            case IDM_BATCH_ADD_ROTATE:
+                operation.kind = INKPOD_BATCH_OPERATION_ROTATE_90;
+                operation.layer_kind = 0U;
+                operation.plane_kind = 0U;
+                operation.missing_policy = 0U;
+                operation.parameters[0] = INKPOD_ROTATE_RIGHT_90;
+                break;
+            case IDM_BATCH_ADD_RESIZE: {
+                operation.kind = INKPOD_BATCH_OPERATION_RESIZE;
+                operation.layer_kind = 0U;
+                operation.plane_kind = 0U;
+                operation.missing_policy = 0U;
+                InkpodDocumentInfo document = EmptyDocumentInfo();
+                if (!QueryDocument(state, document)) {
+                    return false;
+                }
+                operation.parameters = {
+                    document.width,
+                    document.height,
+                    document.dpi_x_milli,
+                    document.dpi_y_milli,
+                    0,
+                    INKPOD_RESIZE_ANCHOR_CENTER,
+                    0,
+                    0};
+                break;
+            }
+            case IDM_BATCH_ADD_CONVERT:
+                operation.kind = INKPOD_BATCH_OPERATION_CONVERT_PLANE;
+                operation.parameters[0] = INKPOD_TYPED_PLANE_RASTER;
+                operation.parameters[1] = INKPOD_STORAGE_RGBA8;
+                break;
+            default:
+                return false;
+        }
+    }
+    try {
+        ResetBatchDerivedState(state);
+        state.batch.operations.push_back(std::move(operation));
+        state.batch.selected_operation =
+            static_cast<std::uint32_t>(state.batch.operations.size() - 1U);
+        RefreshBatchPalette(state);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+UINT M6CommandForFilterKind(std::uint32_t kind) noexcept {
+    switch (kind) {
+        case INKPOD_FILTER_SHARPEN_WEAK:
+            return IDM_FILTER_SHARPEN_WEAK;
+        case INKPOD_FILTER_SHARPEN_STRONG:
+            return IDM_FILTER_SHARPEN_STRONG;
+        case INKPOD_FILTER_BLUR_WEAK:
+            return IDM_FILTER_BLUR_WEAK;
+        case INKPOD_FILTER_BLUR_STRONG:
+            return IDM_FILTER_BLUR_STRONG;
+        case INKPOD_FILTER_GAUSSIAN_BLUR:
+            return IDM_FILTER_GAUSSIAN;
+        case INKPOD_FILTER_INVERT:
+            return IDM_FILTER_INVERT;
+        case INKPOD_FILTER_AUTO_CONTRAST:
+            return IDM_FILTER_AUTO_CONTRAST;
+        case INKPOD_FILTER_BRIGHTNESS_CONTRAST:
+            return IDM_FILTER_BRIGHTNESS;
+        case INKPOD_FILTER_TONE_CURVE:
+            return IDM_FILTER_TONE_CURVE;
+        case INKPOD_FILTER_LEVELS:
+            return IDM_FILTER_LEVELS;
+        case INKPOD_FILTER_HSV:
+            return IDM_FILTER_HSV;
+        case INKPOD_FILTER_COLOR_BALANCE:
+            return IDM_FILTER_COLOR_BALANCE;
+        case INKPOD_FILTER_UNSHARP_MASK:
+            return IDM_FILTER_UNSHARP;
+        default:
+            return 0U;
+    }
+}
+
+bool EditSelectedBatchOperation(AppState& state) noexcept {
+    if (state.batch.loaded_graph
+        || state.batch.selected_operation >= state.batch.operations.size()) {
+        return false;
+    }
+    BatchOperationUi operation{};
+    try {
+        operation = state.batch.operations[state.batch.selected_operation];
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    ViewOptionsDialogState metadata{};
+    metadata.title = L"バッチ項目の状態";
+    metadata.labels = {
+        L"有効 (0/1)", L"実行ごとに設定 (0/1)", nullptr, nullptr};
+    metadata.values = {
+        (operation.flags & INKPOD_BATCH_OPERATION_ENABLED) != 0U ? 1 : 0,
+        (operation.flags & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN) != 0U ? 1 : 0,
+        0,
+        0};
+    metadata.value_count = 2U;
+    if (ShowViewOptions(state.instance, state.window, state.smoke_test, metadata) != IDOK
+        || metadata.values[0] < 0 || metadata.values[0] > 1
+        || metadata.values[1] < 0 || metadata.values[1] > 1) {
+        return false;
+    }
+    operation.flags = (metadata.values[0] != 0 ? INKPOD_BATCH_OPERATION_ENABLED : 0U)
+        | (metadata.values[1] != 0
+                ? INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN
+                : 0U);
+    if (operation.missing_policy != 0U) {
+        ViewOptionsDialogState target{};
+        target.title = L"バッチ対象セレクター";
+        target.labels = {
+            L"layer kind (0=IDのみ)",
+            L"plane kind (0=layer対象)",
+            L"欠落時 (1:skip 2:error)",
+            nullptr};
+        target.values = {
+            static_cast<std::int32_t>(operation.layer_kind),
+            static_cast<std::int32_t>(operation.plane_kind),
+            static_cast<std::int32_t>(operation.missing_policy),
+            0};
+        target.value_count = 3U;
+        if (ShowViewOptions(state.instance, state.window, state.smoke_test, target) != IDOK
+            || target.values[0] < 0 || target.values[1] < 0
+            || (target.values[2]
+                    != static_cast<std::int32_t>(INKPOD_BATCH_MISSING_SKIP)
+                && target.values[2]
+                    != static_cast<std::int32_t>(INKPOD_BATCH_MISSING_ERROR))
+            || (target.values[0] == 0 && target.values[1] == 0
+                && operation.layer_id == 0U && operation.plane_id == 0U)) {
+            return false;
+        }
+        operation.layer_kind = static_cast<InkpodLayerKind>(target.values[0]);
+        operation.plane_kind = static_cast<InkpodTypedPlaneKind>(target.values[1]);
+        operation.missing_policy =
+            static_cast<InkpodBatchMissingPolicy>(target.values[2]);
+    }
+    if (operation.kind == INKPOD_BATCH_OPERATION_FILTER) {
+        const UINT command = M6CommandForFilterKind(operation.filter.kind);
+        if (command == 0U || !ConfigureM6FilterEditor(state, command, operation.filter)) {
+            return false;
+        }
+    } else if (operation.kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
+        if (operation.color_pairs.empty()) {
+            return false;
+        }
+        operation.color_pairs[0].new_color = state.drawing_color;
+    } else {
+        ViewOptionsDialogState dialog{};
+        dialog.title = L"バッチ項目の編集";
+        dialog.labels = {L"P0", L"P1", L"P2", L"P3"};
+        dialog.values = {
+            static_cast<std::int32_t>(operation.parameters[0]),
+            static_cast<std::int32_t>(operation.parameters[1]),
+            static_cast<std::int32_t>(operation.parameters[2]),
+            static_cast<std::int32_t>(operation.parameters[3])};
+        dialog.value_count = 2U;
+        if (operation.kind == INKPOD_BATCH_OPERATION_CONTINUOUS_FILL) {
+            if (operation.seeds.empty()) {
+                return false;
+            }
+            dialog.labels = {L"seed X", L"seed Y", L"tolerance", L"gap close"};
+            dialog.values = {
+                static_cast<std::int32_t>(operation.seeds[0].x),
+                static_cast<std::int32_t>(operation.seeds[0].y),
+                static_cast<std::int32_t>(operation.seeds[0].tolerance),
+                static_cast<std::int32_t>(operation.seeds[0].gap_close)};
+            dialog.value_count = 4U;
+        } else if (operation.kind == INKPOD_BATCH_OPERATION_SEPARATION) {
+            dialog.labels = {L"反転 (0/1)", nullptr, nullptr, nullptr};
+            dialog.value_count = 1U;
+        } else if (operation.kind == INKPOD_BATCH_OPERATION_VISIBILITY) {
+            dialog.labels = {L"表示 (0/1)", nullptr, nullptr, nullptr};
+            dialog.value_count = 1U;
+        } else if (operation.kind == INKPOD_BATCH_OPERATION_LINE_WIDTH) {
+            dialog.labels = {L"mode (1-4)", L"value x1000", nullptr, nullptr};
+        } else if (operation.kind == INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH) {
+            dialog.labels = {L"幅", L"強さ x1000", nullptr, nullptr};
+        } else if (operation.kind == INKPOD_BATCH_OPERATION_DUST_REMOVAL) {
+            dialog.labels = {L"mode (1-3)", L"最大pixel", nullptr, nullptr};
+        } else if (operation.kind == INKPOD_BATCH_OPERATION_MIRROR) {
+            dialog.labels = {L"方向 (1:左右 2:上下)", nullptr, nullptr, nullptr};
+            dialog.value_count = 1U;
+        } else if (operation.kind == INKPOD_BATCH_OPERATION_ROTATE_90) {
+            dialog.labels = {L"方向 (1:左 2:右)", nullptr, nullptr, nullptr};
+            dialog.value_count = 1U;
+        } else if (operation.kind == INKPOD_BATCH_OPERATION_RESIZE) {
+            dialog.labels = {L"幅", L"高さ", L"X DPI x1000", L"Y DPI x1000"};
+            dialog.value_count = 4U;
+        } else if (operation.kind == INKPOD_BATCH_OPERATION_CONVERT_PLANE) {
+            dialog.labels = {L"plane kind", L"pixel format", nullptr, nullptr};
+        }
+        if (ShowViewOptions(state.instance, state.window, state.smoke_test, dialog) != IDOK) {
+            return false;
+        }
+        if (operation.kind == INKPOD_BATCH_OPERATION_CONTINUOUS_FILL) {
+            if (dialog.values[0] < 0 || dialog.values[1] < 0
+                || dialog.values[2] < 0 || dialog.values[2] > UINT16_MAX
+                || dialog.values[3] < 0 || dialog.values[3] > UINT8_MAX) {
+                return false;
+            }
+            operation.seeds[0].x = static_cast<std::uint32_t>(dialog.values[0]);
+            operation.seeds[0].y = static_cast<std::uint32_t>(dialog.values[1]);
+            operation.seeds[0].tolerance = static_cast<std::uint32_t>(dialog.values[2]);
+            operation.seeds[0].gap_close = static_cast<std::uint32_t>(dialog.values[3]);
+            operation.seeds[0].fill_color = state.drawing_color;
+        } else {
+            for (std::size_t index = 0; index < dialog.value_count; ++index) {
+                operation.parameters[index] = dialog.values[index];
+            }
+        }
+    }
+    state.batch.operations[state.batch.selected_operation] = std::move(operation);
+    ResetBatchDerivedState(state);
+    RefreshBatchPalette(state);
+    return true;
+}
+
+InkpodStatus BuildBatchGraph(AppState& state) noexcept {
+    if (state.batch.loaded_graph && state.batch_graph != nullptr) {
+        return INKPOD_STATUS_OK;
+    }
+    if (state.batch.operations.empty()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    try {
+        std::vector<std::uint8_t> input_path;
+        std::vector<std::uint8_t> output_folder;
+        std::vector<std::uint8_t> basename;
+        if ((!state.batch.input_path.empty()
+                && !WidePathToUtf8(state.batch.input_path, input_path))
+            || (!state.batch.output_folder.empty()
+                && !WidePathToUtf8(state.batch.output_folder, output_folder))
+            || (!state.batch.basename.empty()
+                && !WidePathToUtf8(state.batch.basename, basename))) {
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+        InkpodBatchInput batch_input{};
+        batch_input.struct_size = sizeof(batch_input);
+        batch_input.kind = state.batch.input_kind;
+        batch_input.path_utf8 = input_path.empty() ? nullptr : input_path.data();
+        batch_input.path_bytes = input_path.size();
+        batch_input.first_cell = state.batch.first_cell;
+        batch_input.last_cell = state.batch.last_cell;
+
+        std::vector<InkpodFilterInput> filters(state.batch.operations.size());
+        std::vector<InkpodBatchOperationInput> operations(state.batch.operations.size());
+        for (std::size_t index = 0; index < state.batch.operations.size(); ++index) {
+            const BatchOperationUi& source = state.batch.operations[index];
+            InkpodBatchOperationInput& destination = operations[index];
+            destination.struct_size = sizeof(destination);
+            destination.version = INKPOD_BATCH_GRAPH_VERSION;
+            destination.kind = source.kind;
+            destination.flags = source.flags;
+            destination.layer_id = source.layer_id;
+            destination.plane_id = source.plane_id;
+            destination.layer_kind = source.layer_kind;
+            destination.plane_kind = source.plane_kind;
+            destination.missing_policy = source.missing_policy;
+            std::copy(
+                source.parameters.begin(),
+                source.parameters.end(),
+                std::begin(destination.parameters));
+            destination.color_0 = source.color_0;
+            destination.color_1 = source.color_1;
+            destination.colors.struct_size = sizeof(destination.colors);
+            destination.colors.colors = source.colors.empty() ? nullptr : source.colors.data();
+            destination.colors.color_count = source.colors.size();
+            destination.colors.color_stride_bytes = sizeof(InkpodColorValue);
+            if (source.kind == INKPOD_BATCH_OPERATION_FILTER) {
+                filters[index] = M6FilterInputFor(source.filter);
+                destination.filter = &filters[index];
+            }
+            destination.color_pairs = source.color_pairs.empty()
+                ? nullptr
+                : source.color_pairs.data();
+            destination.color_pair_count = source.color_pairs.size();
+            destination.color_pair_stride_bytes = sizeof(InkpodBatchColorPairInput);
+            destination.seeds = source.seeds.empty() ? nullptr : source.seeds.data();
+            destination.seed_count = source.seeds.size();
+            destination.seed_stride_bytes = sizeof(InkpodBatchSeedInput);
+        }
+        static constexpr std::array<std::uint8_t, 17U> graph_name{
+            'W','i','n','d','o','w','s',' ','B','a','t','c','h',' ','S','e','t'};
+        InkpodBatchGraphInput input{};
+        input.struct_size = sizeof(input);
+        input.version = INKPOD_BATCH_GRAPH_VERSION;
+        input.name_utf8 = graph_name.data();
+        input.name_bytes = graph_name.size();
+        input.inputs = &batch_input;
+        input.input_count = 1U;
+        input.input_stride_bytes = sizeof(batch_input);
+        input.operations = operations.data();
+        input.operation_count = operations.size();
+        input.operation_stride_bytes = sizeof(InkpodBatchOperationInput);
+        input.output_policy = state.batch.output_policy;
+        input.failure_policy = state.batch.failure_policy;
+        input.output_flags = (state.batch.cell_folder ? INKPOD_BATCH_OUTPUT_CELL_FOLDER : 0U)
+            | (state.batch.descending ? INKPOD_BATCH_OUTPUT_DESCENDING : 0U)
+            | (state.batch.preview_before_save
+                   ? INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE
+                   : 0U);
+        input.output_folder_utf8 =
+            output_folder.empty() ? nullptr : output_folder.data();
+        input.output_folder_bytes = output_folder.size();
+        input.basename_utf8 = basename.empty() ? nullptr : basename.data();
+        input.basename_bytes = basename.size();
+        input.start_number = state.batch.start_number;
+        input.wait_milliseconds = state.batch.wait_milliseconds;
+        InkpodBatchGraph* graph{};
+        const InkpodStatus status = inkpod_batch_graph_create(&input, &graph);
+        if (status == INKPOD_STATUS_OK) {
+            inkpod_batch_graph_release(&state.batch_graph);
+            state.batch_graph = graph;
+        }
+        return status;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+}
+
+std::wstring BatchReportSummary(const InkpodBatchReport* report) {
+    InkpodBatchReportInfo info{};
+    info.struct_size = sizeof(info);
+    if (report == nullptr
+        || inkpod_batch_report_get_info(report, &info) != INKPOD_STATUS_OK) {
+        return L"レポートを取得できません";
+    }
+    return L"結果: " + std::to_wstring(info.item_count) + L"件 / 失敗 "
+        + std::to_wstring(info.failure_count)
+        + (info.cancelled != 0U ? L" / キャンセル" : L"");
+}
+
+InkpodStatus PreviewBatch(AppState& state, InkpodBatchRunScope scope) noexcept {
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    InkpodStatus status = BuildBatchGraph(state);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    inkpod_batch_preview_release(&state.batch_preview);
+    status = state.engine->Invoke(
+        [&state, scope](InkpodCore* core) {
+            return inkpod_core_batch_preview(
+                core, state.batch_graph, scope, &state.batch_preview);
+        },
+        false,
+        false);
+    if (status == INKPOD_STATUS_OK) {
+        std::uint64_t count{};
+        std::uint64_t warnings{};
+        status = inkpod_batch_preview_count(state.batch_preview, &count);
+        for (std::uint64_t index = 0U; status == INKPOD_STATUS_OK && index < count; ++index) {
+            InkpodBatchPreviewItem item{};
+            item.struct_size = sizeof(item);
+            status = inkpod_batch_preview_get(state.batch_preview, index, &item);
+            if (status == INKPOD_STATUS_OK
+                && (item.flags & INKPOD_BATCH_PREVIEW_HAS_WARNING) != 0U) {
+                ++warnings;
+            }
+        }
+        if (status == INKPOD_STATUS_OK) {
+            try {
+                state.batch.last_result = L"プレビュー: " + std::to_wstring(count)
+                    + L"件 / 警告 " + std::to_wstring(warnings);
+            } catch (const std::bad_alloc&) {
+                status = INKPOD_STATUS_INVALID_STATE;
+            }
+        }
+    }
+    RefreshBatchPalette(state);
+    return status;
+}
+
+InkpodStatus StartBatch(
+    AppState& state,
+    InkpodBatchRunScope scope,
+    bool dry_run) noexcept {
+    if (state.engine == nullptr || state.batch_task != nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    InkpodStatus status = BuildBatchGraph(state);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    bool preview_confirmed = !state.batch.preview_before_save || dry_run;
+    if (!preview_confirmed) {
+        status = PreviewBatch(state, scope);
+        if (status != INKPOD_STATUS_OK) {
+            return status;
+        }
+        preview_confirmed = state.smoke_test
+            || MessageBoxW(
+                   state.window,
+                   L"表示した入力・出力・警告の内容で保存を続行しますか？",
+                   L"バッチ保存前プレビュー",
+                   MB_OKCANCEL | MB_ICONQUESTION) == IDOK;
+        if (!preview_confirmed) {
+            return INKPOD_STATUS_CANCELLED;
+        }
+    }
+    inkpod_batch_report_release(&state.batch_report);
+    status = inkpod_batch_task_create(&state.batch_task);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    const std::uint64_t flags = (dry_run ? INKPOD_BATCH_RUN_DRY : 0U)
+        | (preview_confirmed ? INKPOD_BATCH_RUN_PREVIEW_CONFIRMED : 0U);
+    if (state.smoke_test) {
+        status = state.engine->Invoke(
+            [&state, scope, flags](InkpodCore* core) {
+                return inkpod_core_batch_execute(
+                    core,
+                    state.batch_graph,
+                    scope,
+                    flags,
+                    state.batch_task,
+                    &state.batch_report);
+            },
+            true,
+            true);
+        if (state.batch_report != nullptr) {
+            try {
+                state.batch.last_result = BatchReportSummary(state.batch_report);
+            } catch (const std::bad_alloc&) {
+                status = INKPOD_STATUS_INVALID_STATE;
+            }
+        }
+        inkpod_batch_task_release(&state.batch_task);
+        RefreshBatchPalette(state);
+        return status;
+    }
+    state.batch_progress = CreateDialogParamW(
+        state.instance,
+        MAKEINTRESOURCEW(IDD_M6_PROGRESS),
+        state.window,
+        BatchProgressDialogProcedure,
+        reinterpret_cast<LPARAM>(&state));
+    if (state.batch_progress == nullptr) {
+        inkpod_batch_task_release(&state.batch_task);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    SetWindowTextW(state.batch_progress, L"バッチ実行");
+    ShowWindow(state.batch_progress, SW_SHOW);
+    AppState* state_pointer = &state;
+    const HWND window = state.window;
+    if (!state.engine->Enqueue(
+            [state_pointer, scope, flags](InkpodCore* core) {
+                return inkpod_core_batch_execute(
+                    core,
+                    state_pointer->batch_graph,
+                    scope,
+                    flags,
+                    state_pointer->batch_task,
+                    &state_pointer->batch_report);
+            },
+            true,
+            true,
+            true,
+            [window](InkpodStatus completion_status) {
+                PostMessageW(window, kBatchTaskCompleted, completion_status, 0);
+            })) {
+        DestroyWindow(state.batch_progress);
+        state.batch_progress = nullptr;
+        inkpod_batch_task_release(&state.batch_task);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    UpdateMenuState(state);
+    return INKPOD_STATUS_OK;
+}
+
+bool ChooseBatchSettingsPath(
+    HWND owner, bool save, std::wstring& selected_path) noexcept {
+    std::array<wchar_t, 32768> path{};
+    if (!selected_path.empty()) {
+        wcsncpy_s(path.data(), path.size(), selected_path.c_str(), _TRUNCATE);
+    }
+    constexpr wchar_t filter[] =
+        L"inkpod バッチセット (*.inkbatch)\0*.inkbatch\0すべてのファイル (*.*)\0*.*\0\0";
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = owner;
+    dialog.lpstrFilter = filter;
+    dialog.lpstrFile = path.data();
+    dialog.nMaxFile = static_cast<DWORD>(path.size());
+    dialog.lpstrDefExt = L"inkbatch";
+    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR
+        | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    if ((save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog)) == FALSE) {
+        return false;
+    }
+    try {
+        selected_path.assign(path.data());
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool ChooseBatchFolder(HWND owner, std::wstring& selected_path) noexcept {
+    BROWSEINFOW browse{};
+    browse.hwndOwner = owner;
+    browse.lpszTitle = L"バッチ入力フォルダーを選択";
+    browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    PIDLIST_ABSOLUTE item = SHBrowseForFolderW(&browse);
+    if (item == nullptr) {
+        return false;
+    }
+    std::array<wchar_t, MAX_PATH> path{};
+    const BOOL resolved = SHGetPathFromIDListW(item, path.data());
+    CoTaskMemFree(item);
+    if (resolved == FALSE) {
+        return false;
+    }
+    try {
+        selected_path.assign(path.data());
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
 int RunM6Smoke(AppState& state) noexcept {
     if (state.engine == nullptr) {
         return 600;
@@ -10461,6 +11552,130 @@ int RunM6Smoke(AppState& state) noexcept {
         : 604;
 }
 
+int RunM7Smoke(AppState& state) noexcept {
+    constexpr wchar_t settings_path[] = L"inkpod-m7-ui-smoke.inkbatch";
+    constexpr wchar_t output_path[] = L"inkpod-m7-windows-smoke_0001.inkpod";
+    const auto cleanup = [&]() noexcept {
+        DeleteFileW(settings_path);
+        DeleteFileW(output_path);
+    };
+    cleanup();
+    if (state.engine == nullptr || state.batch_palette == nullptr) {
+        return 700;
+    }
+    HMENU menu = GetMenu(state.window);
+    if (menu == nullptr
+        || GetMenuState(menu, IDM_WINDOW_BATCH, MF_BYCOMMAND) == static_cast<UINT>(-1)
+        || SendMessageW(state.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
+        || IsWindowVisible(state.batch_palette) == FALSE) {
+        cleanup();
+        return 701;
+    }
+    state.batch.output_folder = L".";
+    state.batch.basename = L"inkpod-m7-windows-smoke";
+    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_INPUT_CURRENT, 0) != 1
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_INPUT_RANGE, 0) != 1
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OUTPUT_SETTINGS, 0) != 1
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_ADD_COLOR_REPLACE, 0) != 1
+        || state.batch.operations.size() != 1U
+        || state.batch.operations[0].color_pairs.size() != 1U) {
+        cleanup();
+        return 702;
+    }
+    const InkpodColorValue old_before = state.batch.operations[0].color_pairs[0].old_color;
+    const InkpodColorValue new_before = state.batch.operations[0].color_pairs[0].new_color;
+    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_REPLACE_SWAP, 0) != 1) {
+        cleanup();
+        return 703;
+    }
+    const auto& swapped = state.batch.operations[0].color_pairs[0];
+    if (std::memcmp(&swapped.old_color, &new_before, sizeof(new_before)) != 0
+        || std::memcmp(&swapped.new_color, &old_before, sizeof(old_before)) != 0) {
+        cleanup();
+        return 704;
+    }
+    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, 0) != 1
+        || state.batch.operations.size() != 2U
+        || state.batch.operations.back().colors.size() < 2U
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
+        || state.batch_report == nullptr
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
+        || state.batch.operations.size() != 1U) {
+        cleanup();
+        return 705;
+    }
+    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_ADD_MIRROR, 0) != 1
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OPERATION_UP, 0) != 1
+        || state.batch.operations.front().kind != INKPOD_BATCH_OPERATION_MIRROR
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OPERATION_DOWN, 0) != 1
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OPERATION_EDIT, 0) != 1
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
+        || state.batch.operations.size() != 1U
+        || state.batch.operations[0].kind != INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
+        cleanup();
+        return 706;
+    }
+    const LRESULT input_count = SendDlgItemMessageW(
+        state.batch_palette, IDC_BATCH_INPUTS, LB_GETCOUNT, 0, 0);
+    const LRESULT operation_count = SendDlgItemMessageW(
+        state.batch_palette, IDC_BATCH_OPERATIONS, LB_GETCOUNT, 0, 0);
+    if (input_count != 1 || operation_count != 1
+        || GetDlgItem(state.batch_palette, IDC_BATCH_OUTPUT) == nullptr) {
+        cleanup();
+        return 707;
+    }
+    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_SAVE_SET, 0) != 1
+        || GetFileAttributesW(settings_path) == INVALID_FILE_ATTRIBUTES
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_LOAD_SET, 0) != 1
+        || !state.batch.loaded_graph || state.batch_graph == nullptr) {
+        cleanup();
+        return 708;
+    }
+    InkpodBatchGraphInfo graph_info{};
+    graph_info.struct_size = sizeof(graph_info);
+    if (inkpod_batch_graph_get_info(state.batch_graph, &graph_info) != INKPOD_STATUS_OK
+        || graph_info.version != INKPOD_BATCH_GRAPH_VERSION
+        || graph_info.operation_count != 1U
+        || graph_info.output_policy != INKPOD_BATCH_OUTPUT_DUPLICATE) {
+        cleanup();
+        return 709;
+    }
+    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_PREVIEW, 0) != 1
+        || state.batch_preview == nullptr
+        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
+        || state.batch_report == nullptr
+        || GetFileAttributesW(output_path) != INVALID_FILE_ATTRIBUTES) {
+        cleanup();
+        return 710;
+    }
+    InkpodBatchReportInfo report_info{};
+    report_info.struct_size = sizeof(report_info);
+    InkpodBatchReportItem report_item{};
+    report_item.struct_size = sizeof(report_item);
+    if (inkpod_batch_report_get_info(state.batch_report, &report_info) != INKPOD_STATUS_OK
+        || report_info.failure_count != 0U || report_info.item_count == 0U
+        || inkpod_batch_report_get(state.batch_report, 0U, &report_item)
+            != INKPOD_STATUS_OK
+        || report_item.outcome != INKPOD_BATCH_ITEM_DRY_RUN) {
+        cleanup();
+        return 711;
+    }
+    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_RUN_CURRENT, 0) != 1
+        || GetFileAttributesW(output_path) == INVALID_FILE_ATTRIBUTES
+        || inkpod_batch_report_get_info(state.batch_report, &report_info) != INKPOD_STATUS_OK
+        || report_info.failure_count != 0U) {
+        cleanup();
+        return 712;
+    }
+    if (SendMessageW(state.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
+        || IsWindowVisible(state.batch_palette) != FALSE) {
+        cleanup();
+        return 713;
+    }
+    cleanup();
+    return 0;
+}
+
 InkpodStatus InitializeCore(AppState& state) noexcept {
     try {
         state.engine = std::make_unique<inkpod::app::CoreEngine>();
@@ -10478,6 +11693,9 @@ InkpodStatus ShutdownCore(AppState& state) noexcept {
     if (state.m6_task != nullptr) {
         inkpod_m6_task_cancel(state.m6_task);
     }
+    if (state.batch_task != nullptr) {
+        inkpod_batch_task_cancel(state.batch_task);
+    }
     if (state.engine != nullptr) {
         state.engine->Stop();
         state.engine.reset();
@@ -10486,8 +11704,31 @@ InkpodStatus ShutdownCore(AppState& state) noexcept {
         DestroyWindow(state.m6_progress);
         state.m6_progress = nullptr;
     }
+    if (state.batch_progress != nullptr) {
+        DestroyWindow(state.batch_progress);
+        state.batch_progress = nullptr;
+    }
+    if (state.batch_palette != nullptr) {
+        DestroyWindow(state.batch_palette);
+        state.batch_palette = nullptr;
+    }
     const InkpodStatus task_status = inkpod_m6_task_release(&state.m6_task);
-    return clipboard_status == INKPOD_STATUS_OK ? task_status : clipboard_status;
+    const InkpodStatus batch_task_status = inkpod_batch_task_release(&state.batch_task);
+    const InkpodStatus preview_status = inkpod_batch_preview_release(&state.batch_preview);
+    const InkpodStatus report_status = inkpod_batch_report_release(&state.batch_report);
+    const InkpodStatus graph_status = inkpod_batch_graph_release(&state.batch_graph);
+    for (const InkpodStatus status : {
+             clipboard_status,
+             task_status,
+             batch_task_status,
+             preview_status,
+             report_status,
+             graph_status}) {
+        if (status != INKPOD_STATUS_OK) {
+            return status;
+        }
+    }
+    return INKPOD_STATUS_OK;
 }
 
 LRESULT CALLBACK TreeListSubclassProcedure(
@@ -10762,6 +12003,16 @@ bool CreateMainChrome(AppState& state) noexcept {
         || state.color_chart_list == nullptr) {
         return false;
     }
+    state.batch_palette = CreateDialogParamW(
+        state.instance,
+        MAKEINTRESOURCEW(IDD_BATCH_PALETTE),
+        state.window,
+        BatchPaletteDialogProcedure,
+        reinterpret_cast<LPARAM>(&state));
+    if (state.batch_palette == nullptr) {
+        return false;
+    }
+    ShowWindow(state.batch_palette, SW_HIDE);
     if (SetWindowSubclass(
             state.layer_list,
             TreeListSubclassProcedure,
@@ -11207,6 +12458,347 @@ LRESULT CALLBACK MainWindowProcedure(
                         }
                     }
                     return 0;
+                case IDM_WINDOW_BATCH:
+                    if (state->batch_palette != nullptr) {
+                        const bool visible = IsWindowVisible(state->batch_palette) != FALSE;
+                        ShowWindow(state->batch_palette, visible ? SW_HIDE : SW_SHOW);
+                        if (!visible) {
+                            RefreshBatchPalette(*state);
+                            SetForegroundWindow(state->batch_palette);
+                        }
+                        UpdateMenuState(*state);
+                        return 1;
+                    }
+                    return 0;
+                case IDM_BATCH_INPUT_FILE:
+                case IDM_BATCH_INPUT_FOLDER:
+                case IDM_BATCH_INPUT_CURRENT: {
+                    if (state->batch_task != nullptr || state->batch.loaded_graph) {
+                        return 0;
+                    }
+                    std::wstring path;
+                    InkpodBatchInputKind kind = INKPOD_BATCH_INPUT_CURRENT_SEQUENCE;
+                    bool accepted = true;
+                    if (LOWORD(wparam) == IDM_BATCH_INPUT_FILE) {
+                        kind = INKPOD_BATCH_INPUT_FILE;
+                        accepted = ChooseInkpodPath(window, false, path);
+                    } else if (LOWORD(wparam) == IDM_BATCH_INPUT_FOLDER) {
+                        kind = INKPOD_BATCH_INPUT_FOLDER;
+                        accepted = ChooseBatchFolder(window, path);
+                    }
+                    if (!accepted) {
+                        return 0;
+                    }
+                    ResetBatchDerivedState(*state);
+                    state->batch.input_kind = kind;
+                    state->batch.input_path = std::move(path);
+                    state->batch.first_cell = 0U;
+                    state->batch.last_cell = 0U;
+                    RefreshBatchPalette(*state);
+                    UpdateMenuState(*state);
+                    return 1;
+                }
+                case IDM_BATCH_INPUT_RANGE: {
+                    if (state->batch_task != nullptr || state->batch.loaded_graph) {
+                        return 0;
+                    }
+                    ViewOptionsDialogState dialog{};
+                    dialog.title = L"バッチ入力範囲";
+                    dialog.labels = {
+                        L"開始セル番号 (0=先頭)",
+                        L"終了セル番号 (0=末尾)",
+                        nullptr,
+                        nullptr};
+                    dialog.values = {
+                        static_cast<std::int32_t>(state->batch.first_cell),
+                        static_cast<std::int32_t>(state->batch.last_cell),
+                        0,
+                        0};
+                    dialog.value_count = 2U;
+                    if (ShowViewOptions(
+                            state->instance, window, state->smoke_test, dialog) != IDOK
+                        || dialog.values[0] < 0 || dialog.values[1] < 0
+                        || (dialog.values[0] != 0 && dialog.values[1] != 0
+                            && dialog.values[0] > dialog.values[1])) {
+                        return 0;
+                    }
+                    ResetBatchDerivedState(*state);
+                    state->batch.first_cell =
+                        static_cast<std::uint32_t>(dialog.values[0]);
+                    state->batch.last_cell =
+                        static_cast<std::uint32_t>(dialog.values[1]);
+                    RefreshBatchPalette(*state);
+                    UpdateMenuState(*state);
+                    return 1;
+                }
+                case IDM_BATCH_ADD_COLOR_REPLACE:
+                case IDM_BATCH_ADD_CONTINUOUS_FILL:
+                case IDM_BATCH_ADD_SEPARATION:
+                case IDM_BATCH_ADD_VISIBILITY:
+                case IDM_BATCH_ADD_LINE_WIDTH:
+                case IDM_BATCH_ADD_BOUNDARY_AIRBRUSH:
+                case IDM_BATCH_ADD_DUST:
+                case IDM_BATCH_ADD_MIRROR:
+                case IDM_BATCH_ADD_ROTATE:
+                case IDM_BATCH_ADD_RESIZE:
+                case IDM_BATCH_ADD_CONVERT:
+                case IDM_BATCH_ADD_FILTER_SHARPEN_WEAK:
+                case IDM_BATCH_ADD_FILTER_SHARPEN_STRONG:
+                case IDM_BATCH_ADD_FILTER_BLUR_WEAK:
+                case IDM_BATCH_ADD_FILTER_BLUR_STRONG:
+                case IDM_BATCH_ADD_FILTER_GAUSSIAN:
+                case IDM_BATCH_ADD_FILTER_INVERT:
+                case IDM_BATCH_ADD_FILTER_AUTO_CONTRAST:
+                case IDM_BATCH_ADD_FILTER_BRIGHTNESS:
+                case IDM_BATCH_ADD_FILTER_TONE_CURVE:
+                case IDM_BATCH_ADD_FILTER_LEVELS:
+                case IDM_BATCH_ADD_FILTER_HSV:
+                case IDM_BATCH_ADD_FILTER_COLOR_BALANCE:
+                case IDM_BATCH_ADD_FILTER_UNSHARP:
+                    if (state->batch_task == nullptr
+                        && AddBatchOperation(*state, LOWORD(wparam))) {
+                        UpdateMenuState(*state);
+                        return 1;
+                    }
+                    return 0;
+                case IDM_BATCH_OPERATION_EDIT:
+                    if (state->batch_task == nullptr
+                        && EditSelectedBatchOperation(*state)) {
+                        UpdateMenuState(*state);
+                        return 1;
+                    }
+                    return 0;
+                case IDM_BATCH_REPLACE_SWAP:
+                    if (state->batch_task == nullptr && !state->batch.loaded_graph
+                        && state->batch.selected_operation < state->batch.operations.size()) {
+                        BatchOperationUi& operation =
+                            state->batch.operations[state->batch.selected_operation];
+                        if (operation.kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE
+                            && !operation.color_pairs.empty()) {
+                            for (auto& pair : operation.color_pairs) {
+                                std::swap(pair.old_color, pair.new_color);
+                            }
+                            ResetBatchDerivedState(*state);
+                            RefreshBatchPalette(*state);
+                            UpdateMenuState(*state);
+                            return 1;
+                        }
+                    }
+                    return 0;
+                case IDM_BATCH_OPERATION_REMOVE:
+                    if (state->batch_task == nullptr && !state->batch.loaded_graph
+                        && state->batch.selected_operation < state->batch.operations.size()) {
+                        state->batch.operations.erase(
+                            state->batch.operations.begin()
+                            + state->batch.selected_operation);
+                        if (!state->batch.operations.empty()) {
+                            state->batch.selected_operation = std::min<std::uint32_t>(
+                                state->batch.selected_operation,
+                                static_cast<std::uint32_t>(
+                                    state->batch.operations.size() - 1U));
+                        } else {
+                            state->batch.selected_operation = 0U;
+                        }
+                        ResetBatchDerivedState(*state);
+                        RefreshBatchPalette(*state);
+                        UpdateMenuState(*state);
+                        return 1;
+                    }
+                    return 0;
+                case IDM_BATCH_OPERATION_UP:
+                case IDM_BATCH_OPERATION_DOWN:
+                    if (state->batch_task == nullptr && !state->batch.loaded_graph
+                        && state->batch.selected_operation < state->batch.operations.size()) {
+                        const std::uint32_t current = state->batch.selected_operation;
+                        const bool up = LOWORD(wparam) == IDM_BATCH_OPERATION_UP;
+                        if ((up && current > 0U)
+                            || (!up && current + 1U < state->batch.operations.size())) {
+                            const std::uint32_t target = up ? current - 1U : current + 1U;
+                            std::swap(
+                                state->batch.operations[current],
+                                state->batch.operations[target]);
+                            state->batch.selected_operation = target;
+                            ResetBatchDerivedState(*state);
+                            RefreshBatchPalette(*state);
+                            UpdateMenuState(*state);
+                            return 1;
+                        }
+                    }
+                    return 0;
+                case IDM_BATCH_OUTPUT_DUPLICATE:
+                case IDM_BATCH_OUTPUT_NEW:
+                case IDM_BATCH_OUTPUT_OVERWRITE:
+                    if (state->batch_task == nullptr && !state->batch.loaded_graph) {
+                        ResetBatchDerivedState(*state);
+                        state->batch.output_policy = LOWORD(wparam) == IDM_BATCH_OUTPUT_NEW
+                            ? INKPOD_BATCH_OUTPUT_NEW_SAVE
+                            : (LOWORD(wparam) == IDM_BATCH_OUTPUT_OVERWRITE
+                                      ? INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE
+                                      : INKPOD_BATCH_OUTPUT_DUPLICATE);
+                        RefreshBatchPalette(*state);
+                        UpdateMenuState(*state);
+                        return 1;
+                    }
+                    return 0;
+                case IDM_BATCH_OUTPUT_SETTINGS: {
+                    if (state->batch_task != nullptr || state->batch.loaded_graph) {
+                        return 0;
+                    }
+                    ViewOptionsDialogState dialog{};
+                    dialog.title = L"バッチ出力設定";
+                    dialog.labels = {
+                        L"cell folder (0/1)",
+                        L"開始番号",
+                        L"降順 (0/1)",
+                        L"file間 wait (ms)"};
+                    dialog.values = {
+                        state->batch.cell_folder ? 1 : 0,
+                        static_cast<std::int32_t>(state->batch.start_number),
+                        state->batch.descending ? 1 : 0,
+                        static_cast<std::int32_t>(state->batch.wait_milliseconds)};
+                    dialog.value_count = 4U;
+                    if (ShowViewOptions(
+                            state->instance, window, state->smoke_test, dialog) != IDOK
+                        || dialog.values[0] < 0 || dialog.values[0] > 1
+                        || dialog.values[1] < 0
+                        || dialog.values[2] < 0 || dialog.values[2] > 1
+                        || dialog.values[3] < 0 || dialog.values[3] > 3'600'000) {
+                        return 0;
+                    }
+                    TextInputDialogState folder{};
+                    folder.title = L"バッチ出力フォルダー";
+                    folder.label = L"空欄は入力と同じ場所";
+                    folder.value = state->batch.output_folder;
+                    TextInputDialogState basename{};
+                    basename.title = L"バッチ出力basename";
+                    basename.label = L"空欄は入力名を使用";
+                    basename.value = state->batch.basename;
+                    if (ShowTextInput(
+                            state->instance, window, state->smoke_test, folder) != IDOK
+                        || ShowTextInput(
+                               state->instance, window, state->smoke_test, basename) != IDOK) {
+                        return 0;
+                    }
+                    bool preview_before_save = state->batch.preview_before_save;
+                    if (!state->smoke_test) {
+                        const int preview_choice = MessageBoxW(
+                            window,
+                            L"保存前に入力・出力と警告のプレビュー確認を必須にしますか？",
+                            L"バッチ出力設定",
+                            MB_YESNOCANCEL | MB_ICONQUESTION);
+                        if (preview_choice == IDCANCEL) {
+                            return 0;
+                        }
+                        preview_before_save = preview_choice == IDYES;
+                    }
+                    ResetBatchDerivedState(*state);
+                    state->batch.cell_folder = dialog.values[0] != 0;
+                    state->batch.start_number =
+                        static_cast<std::uint32_t>(dialog.values[1]);
+                    state->batch.descending = dialog.values[2] != 0;
+                    state->batch.wait_milliseconds =
+                        static_cast<std::uint32_t>(dialog.values[3]);
+                    state->batch.output_folder = std::move(folder.value);
+                    state->batch.basename = std::move(basename.value);
+                    state->batch.preview_before_save = preview_before_save;
+                    RefreshBatchPalette(*state);
+                    UpdateMenuState(*state);
+                    return 1;
+                }
+                case IDM_BATCH_FAILURE_CONTINUE:
+                case IDM_BATCH_FAILURE_STOP:
+                    if (state->batch_task == nullptr && !state->batch.loaded_graph) {
+                        ResetBatchDerivedState(*state);
+                        state->batch.failure_policy = LOWORD(wparam) == IDM_BATCH_FAILURE_STOP
+                            ? INKPOD_BATCH_FAILURE_STOP
+                            : INKPOD_BATCH_FAILURE_CONTINUE;
+                        RefreshBatchPalette(*state);
+                        UpdateMenuState(*state);
+                        return 1;
+                    }
+                    return 0;
+                case IDM_BATCH_PREVIEW: {
+                    const InkpodStatus status = PreviewBatch(*state, INKPOD_BATCH_SCOPE_ALL);
+                    if (status != INKPOD_STATUS_OK) {
+                        ShowCoreError(*state, window, L"バッチプレビュー");
+                    }
+                    return status == INKPOD_STATUS_OK ? 1 : 0;
+                }
+                case IDM_BATCH_DRY_RUN:
+                case IDM_BATCH_RUN_CURRENT:
+                case IDM_BATCH_RUN_ALL: {
+                    const UINT command = LOWORD(wparam);
+                    const InkpodStatus status = StartBatch(
+                        *state,
+                        command == IDM_BATCH_RUN_CURRENT
+                            ? INKPOD_BATCH_SCOPE_CURRENT
+                            : INKPOD_BATCH_SCOPE_ALL,
+                        command == IDM_BATCH_DRY_RUN);
+                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                        ShowCoreError(*state, window, L"バッチ実行");
+                    }
+                    UpdateMenuState(*state);
+                    return status == INKPOD_STATUS_OK ? 1 : 0;
+                }
+                case IDM_BATCH_CANCEL:
+                    if (state->batch_task != nullptr
+                        && inkpod_batch_task_cancel(state->batch_task) == INKPOD_STATUS_OK) {
+                        return 1;
+                    }
+                    return 0;
+                case IDM_BATCH_SAVE_SET:
+                case IDM_BATCH_LOAD_SET: {
+                    const bool save = LOWORD(wparam) == IDM_BATCH_SAVE_SET;
+                    std::wstring path = state->smoke_test
+                        ? L"inkpod-m7-ui-smoke.inkbatch"
+                        : L"";
+                    if (!state->smoke_test
+                        && !ChooseBatchSettingsPath(window, save, path)) {
+                        return 0;
+                    }
+                    std::vector<std::uint8_t> utf8;
+                    if (!WidePathToUtf8(path, utf8)) {
+                        return 0;
+                    }
+                    InkpodStatus status = INKPOD_STATUS_OK;
+                    if (save) {
+                        status = BuildBatchGraph(*state);
+                        if (status == INKPOD_STATUS_OK) {
+                            status = inkpod_batch_graph_save(
+                                state->batch_graph, utf8.data(), utf8.size());
+                        }
+                    } else {
+                        InkpodBatchGraph* loaded{};
+                        status = inkpod_batch_graph_load(
+                            utf8.data(), utf8.size(), &loaded);
+                        if (status == INKPOD_STATUS_OK) {
+                            inkpod_batch_preview_release(&state->batch_preview);
+                            inkpod_batch_report_release(&state->batch_report);
+                            inkpod_batch_graph_release(&state->batch_graph);
+                            state->batch_graph = loaded;
+                            state->batch.loaded_graph = true;
+                            InkpodBatchGraphInfo info{};
+                            info.struct_size = sizeof(info);
+                            if (inkpod_batch_graph_get_info(loaded, &info)
+                                == INKPOD_STATUS_OK) {
+                                state->batch.output_policy = info.output_policy;
+                                state->batch.failure_policy = info.failure_policy;
+                                state->batch.cell_folder = (info.output_flags
+                                    & INKPOD_BATCH_OUTPUT_CELL_FOLDER) != 0U;
+                                state->batch.descending = (info.output_flags
+                                    & INKPOD_BATCH_OUTPUT_DESCENDING) != 0U;
+                                state->batch.preview_before_save = (info.output_flags
+                                    & INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE) != 0U;
+                            }
+                        }
+                    }
+                    if (status != INKPOD_STATUS_OK) {
+                        ShowCoreError(*state, window, save ? L"バッチセット保存" : L"バッチセット読込");
+                    }
+                    RefreshBatchPalette(*state);
+                    UpdateMenuState(*state);
+                    return status == INKPOD_STATUS_OK ? 1 : 0;
+                }
                 case IDM_FILE_NEW:
                     if (ConfirmDiscard(*state)) {
                         ViewOptionsDialogState dialog{};
@@ -14428,6 +16020,29 @@ LRESULT CALLBACK MainWindowProcedure(
                 UpdateMenuState(*state);
             }
             return 0;
+        case kBatchTaskCompleted:
+            if (state != nullptr) {
+                const InkpodStatus status = static_cast<InkpodStatus>(wparam);
+                if (state->batch_progress != nullptr) {
+                    DestroyWindow(state->batch_progress);
+                    state->batch_progress = nullptr;
+                }
+                if (state->batch_report != nullptr) {
+                    try {
+                        state->batch.last_result = BatchReportSummary(state->batch_report);
+                    } catch (const std::bad_alloc&) {
+                        state->batch.last_result = L"レポート表示用メモリが不足しました";
+                    }
+                }
+                inkpod_batch_task_release(&state->batch_task);
+                RefreshBatchPalette(*state);
+                UpdateMenuState(*state);
+                if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED
+                    && !state->smoke_test) {
+                    ShowCoreError(*state, window, L"バッチ実行");
+                }
+            }
+            return 0;
         case inkpod::app::kCoreAsyncFailed:
             if (state != nullptr && !state->smoke_test) {
                 ShowCoreError(*state, window, L"非同期処理");
@@ -14466,6 +16081,9 @@ LRESULT CALLBACK MainWindowProcedure(
             }
             if (state != nullptr && state->m6_task != nullptr) {
                 inkpod_m6_task_cancel(state->m6_task);
+            }
+            if (state != nullptr && state->batch_task != nullptr) {
+                inkpod_batch_task_cancel(state->batch_task);
             }
             if (state != nullptr) {
                 state->m6_airbrush_active = false;
@@ -14668,6 +16286,9 @@ int APIENTRY wWinMain(
         }
         if (exit_code == 0) {
             exit_code = RunM6Smoke(state);
+        }
+        if (exit_code == 0) {
+            exit_code = RunM7Smoke(state);
         }
     } else {
         ShowWindow(window, show_command);

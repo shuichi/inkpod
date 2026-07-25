@@ -3,6 +3,7 @@
 mod m4;
 mod m5;
 mod m6;
+mod m7;
 
 pub use inkpod_format::CommonRasterFormat;
 pub use m4::{
@@ -16,6 +17,13 @@ pub use m5::{
     VectorSelectionResult, VectorWidthMode,
 };
 pub use m6::FilterPreviewInfo;
+pub use m7::{
+    BATCH_OPERATION_VERSION, BatchColorPair, BatchFailurePolicy, BatchGraph, BatchInputKind,
+    BatchInputSelector, BatchItemOutcome, BatchItemResult, BatchMissingTargetPolicy,
+    BatchOperation, BatchOperationKind, BatchOutputPolicy, BatchOutputSettings, BatchPreview,
+    BatchPreviewItem, BatchRunOptions, BatchRunReport, BatchRunScope, BatchSeed, BatchSeparation,
+    BatchTargetSelector,
+};
 
 use inkpod_format::{
     CellFile, CommonRaster, FileAdjustmentLayer, FileGrid, FileGuide, FileLayer, FileM3Metadata,

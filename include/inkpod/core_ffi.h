@@ -229,6 +229,54 @@ typedef uint32_t InkpodM6TaskState;
 #define INKPOD_M6_TASK_CANCELLED UINT32_C(3)
 #define INKPOD_M6_TASK_FAILED UINT32_C(4)
 
+#define INKPOD_BATCH_GRAPH_VERSION UINT32_C(1)
+typedef uint32_t InkpodBatchInputKind;
+#define INKPOD_BATCH_INPUT_FILE UINT32_C(1)
+#define INKPOD_BATCH_INPUT_FOLDER UINT32_C(2)
+#define INKPOD_BATCH_INPUT_CURRENT_SEQUENCE UINT32_C(3)
+typedef uint32_t InkpodBatchOutputPolicy;
+#define INKPOD_BATCH_OUTPUT_DUPLICATE UINT32_C(1)
+#define INKPOD_BATCH_OUTPUT_NEW_SAVE UINT32_C(2)
+#define INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE UINT32_C(3)
+typedef uint32_t InkpodBatchFailurePolicy;
+#define INKPOD_BATCH_FAILURE_CONTINUE UINT32_C(1)
+#define INKPOD_BATCH_FAILURE_STOP UINT32_C(2)
+typedef uint32_t InkpodBatchMissingPolicy;
+#define INKPOD_BATCH_MISSING_SKIP UINT32_C(1)
+#define INKPOD_BATCH_MISSING_ERROR UINT32_C(2)
+typedef uint32_t InkpodBatchOperationKind;
+#define INKPOD_BATCH_OPERATION_COLOR_REPLACE UINT32_C(1)
+#define INKPOD_BATCH_OPERATION_CONTINUOUS_FILL UINT32_C(2)
+#define INKPOD_BATCH_OPERATION_SEPARATION UINT32_C(3)
+#define INKPOD_BATCH_OPERATION_VISIBILITY UINT32_C(4)
+#define INKPOD_BATCH_OPERATION_LINE_WIDTH UINT32_C(5)
+#define INKPOD_BATCH_OPERATION_FILTER UINT32_C(6)
+#define INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH UINT32_C(7)
+#define INKPOD_BATCH_OPERATION_DUST_REMOVAL UINT32_C(8)
+#define INKPOD_BATCH_OPERATION_MIRROR UINT32_C(9)
+#define INKPOD_BATCH_OPERATION_ROTATE_90 UINT32_C(10)
+#define INKPOD_BATCH_OPERATION_RESIZE UINT32_C(11)
+#define INKPOD_BATCH_OPERATION_CONVERT_PLANE UINT32_C(12)
+#define INKPOD_BATCH_OPERATION_ENABLED UINT64_C(1)
+#define INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN (UINT64_C(1) << 1)
+#define INKPOD_BATCH_OUTPUT_CELL_FOLDER UINT64_C(1)
+#define INKPOD_BATCH_OUTPUT_DESCENDING (UINT64_C(1) << 1)
+#define INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE (UINT64_C(1) << 2)
+#define INKPOD_BATCH_SEPARATION_INVERT INT64_C(1)
+#define INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR UINT32_C(1)
+typedef uint32_t InkpodBatchRunScope;
+#define INKPOD_BATCH_SCOPE_CURRENT UINT32_C(1)
+#define INKPOD_BATCH_SCOPE_ALL UINT32_C(2)
+#define INKPOD_BATCH_RUN_DRY UINT64_C(1)
+#define INKPOD_BATCH_RUN_PREVIEW_CONFIRMED (UINT64_C(1) << 1)
+typedef uint32_t InkpodBatchItemOutcome;
+#define INKPOD_BATCH_ITEM_SUCCEEDED UINT32_C(1)
+#define INKPOD_BATCH_ITEM_SKIPPED UINT32_C(2)
+#define INKPOD_BATCH_ITEM_FAILED UINT32_C(3)
+#define INKPOD_BATCH_ITEM_CANCELLED UINT32_C(4)
+#define INKPOD_BATCH_ITEM_DRY_RUN UINT32_C(5)
+#define INKPOD_BATCH_PREVIEW_HAS_WARNING UINT32_C(1)
+
 typedef uint32_t InkpodStoragePixelFormat;
 #define INKPOD_STORAGE_BINARY8 UINT32_C(1)
 #define INKPOD_STORAGE_GRAYSCALE8 UINT32_C(2)
@@ -321,6 +369,10 @@ typedef struct InkpodClipboard InkpodClipboard;
 typedef struct InkpodByteBuffer InkpodByteBuffer;
 typedef struct InkpodEncodedSequence InkpodEncodedSequence;
 typedef struct InkpodM6Task InkpodM6Task;
+typedef InkpodM6Task InkpodBatchTask;
+typedef struct InkpodBatchGraph InkpodBatchGraph;
+typedef struct InkpodBatchPreview InkpodBatchPreview;
+typedef struct InkpodBatchReport InkpodBatchReport;
 
 typedef struct InkpodCoreConfig {
     uint32_t struct_size;
@@ -878,6 +930,139 @@ typedef struct InkpodM6TaskInfo {
     uint64_t total_work;
     uint64_t reserved;
 } InkpodM6TaskInfo;
+
+/* M7 graph records are copied into a Rust-owned immutable graph handle.
+ * Every nested caller span is borrowed only for inkpod_batch_graph_create. */
+typedef struct InkpodBatchInput {
+    uint32_t struct_size;
+    InkpodBatchInputKind kind;
+    uint64_t feature_flags;
+    const uint8_t* path_utf8;
+    uint64_t path_bytes;
+    uint32_t first_cell;
+    uint32_t last_cell;
+    uint64_t reserved;
+} InkpodBatchInput;
+
+typedef struct InkpodBatchColorPairInput {
+    uint32_t struct_size;
+    uint32_t enabled;
+    uint64_t reserved;
+    InkpodColorValue old_color;
+    InkpodColorValue new_color;
+} InkpodBatchColorPairInput;
+
+typedef struct InkpodBatchSeedInput {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint32_t x;
+    uint32_t y;
+    uint32_t tolerance;
+    uint32_t gap_close;
+    uint64_t reserved;
+    InkpodColorValue fill_color;
+    InkpodColorValue expected_color;
+} InkpodBatchSeedInput;
+
+/* Operation parameters are kind-specific and versioned:
+ * visibility [0]=0/1; line width [0]=mode, [1]=value*1000;
+ * separation [0]=INKPOD_BATCH_SEPARATION_INVERT or 0;
+ * boundary effect [0]=width, [1]=strength_milli;
+ * dust [0]=InkpodDustMode, [1]=maximum_pixels;
+ * mirror/rotate [0]=existing axis/direction constants;
+ * resize [0..5]=width,height,dpi_x,dpi_y,resample,anchor;
+ * convert [0..1]=InkpodTypedPlaneKind,InkpodStoragePixelFormat. */
+typedef struct InkpodBatchOperationInput {
+    uint32_t struct_size;
+    uint32_t version;
+    InkpodBatchOperationKind kind;
+    uint32_t reserved;
+    uint64_t flags;
+    uint64_t layer_id;
+    uint64_t plane_id;
+    InkpodLayerKind layer_kind;
+    InkpodTypedPlaneKind plane_kind;
+    InkpodBatchMissingPolicy missing_policy;
+    uint32_t reserved_2;
+    int64_t parameters[8];
+    InkpodColorValue color_0;
+    InkpodColorValue color_1;
+    InkpodColorArray colors;
+    const InkpodFilterInput* filter;
+    const InkpodBatchColorPairInput* color_pairs;
+    uint64_t color_pair_count;
+    uint64_t color_pair_stride_bytes;
+    const InkpodBatchSeedInput* seeds;
+    uint64_t seed_count;
+    uint64_t seed_stride_bytes;
+    uint64_t reserved_3;
+} InkpodBatchOperationInput;
+
+typedef struct InkpodBatchGraphInput {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+    const InkpodBatchInput* inputs;
+    uint64_t input_count;
+    uint64_t input_stride_bytes;
+    const InkpodBatchOperationInput* operations;
+    uint64_t operation_count;
+    uint64_t operation_stride_bytes;
+    InkpodBatchOutputPolicy output_policy;
+    InkpodBatchFailurePolicy failure_policy;
+    uint64_t output_flags;
+    const uint8_t* output_folder_utf8;
+    uint64_t output_folder_bytes;
+    const uint8_t* basename_utf8;
+    uint64_t basename_bytes;
+    uint32_t start_number;
+    uint32_t wait_milliseconds;
+    uint64_t reserved;
+} InkpodBatchGraphInput;
+
+typedef struct InkpodBatchGraphInfo {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t input_count;
+    uint64_t operation_count;
+    InkpodBatchOutputPolicy output_policy;
+    InkpodBatchFailurePolicy failure_policy;
+    uint64_t output_flags;
+} InkpodBatchGraphInfo;
+
+/* Returned UTF-8 spans borrow the owning preview/report handle and remain
+ * valid until that handle is released. */
+typedef struct InkpodBatchPreviewItem {
+    uint32_t struct_size;
+    uint32_t flags;
+    const uint8_t* input_name;
+    uint64_t input_name_bytes;
+    const uint8_t* output_path;
+    uint64_t output_path_bytes;
+    const uint8_t* warning;
+    uint64_t warning_bytes;
+} InkpodBatchPreviewItem;
+
+typedef struct InkpodBatchReportInfo {
+    uint32_t struct_size;
+    uint32_t cancelled;
+    uint64_t item_count;
+    uint64_t failure_count;
+    uint64_t reserved;
+} InkpodBatchReportInfo;
+
+typedef struct InkpodBatchReportItem {
+    uint32_t struct_size;
+    InkpodBatchItemOutcome outcome;
+    const uint8_t* input_name;
+    uint64_t input_name_bytes;
+    const uint8_t* output_path;
+    uint64_t output_path_bytes;
+    const uint8_t* message;
+    uint64_t message_bytes;
+} InkpodBatchReportItem;
 
 typedef struct InkpodSnapshotVectorSegment {
     uint32_t struct_size;
@@ -1824,6 +2009,61 @@ InkpodStatus inkpod_m6_task_query(
     InkpodM6TaskInfo* out_info);
 InkpodStatus inkpod_m6_task_cancel(InkpodM6Task* task);
 InkpodStatus inkpod_m6_task_release(InkpodM6Task** task);
+
+/* M7 graph/settings, preview, and execution. Graph/preview/report handles are
+ * Rust-owned and released idempotently through pointer-to-owner storage.
+ * Batch execution runs on the Core owner thread (the Windows Core-engine
+ * worker), while task query/cancel are thread-safe. A cancelled call may still
+ * return an owned report and INKPOD_STATUS_CANCELLED. */
+InkpodStatus inkpod_batch_graph_create(
+    const InkpodBatchGraphInput* input,
+    InkpodBatchGraph** out_graph);
+InkpodStatus inkpod_batch_graph_load(
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    InkpodBatchGraph** out_graph);
+InkpodStatus inkpod_batch_graph_save(
+    const InkpodBatchGraph* graph,
+    const uint8_t* path_utf8,
+    uint64_t path_bytes);
+InkpodStatus inkpod_batch_graph_get_info(
+    const InkpodBatchGraph* graph,
+    InkpodBatchGraphInfo* out_info);
+InkpodStatus inkpod_batch_graph_release(InkpodBatchGraph** graph);
+InkpodStatus inkpod_core_batch_preview(
+    InkpodCore* core,
+    const InkpodBatchGraph* graph,
+    InkpodBatchRunScope scope,
+    InkpodBatchPreview** out_preview);
+InkpodStatus inkpod_batch_preview_count(
+    const InkpodBatchPreview* preview,
+    uint64_t* out_count);
+InkpodStatus inkpod_batch_preview_get(
+    const InkpodBatchPreview* preview,
+    uint64_t index,
+    InkpodBatchPreviewItem* out_item);
+InkpodStatus inkpod_batch_preview_release(InkpodBatchPreview** preview);
+InkpodStatus inkpod_core_batch_execute(
+    InkpodCore* core,
+    const InkpodBatchGraph* graph,
+    InkpodBatchRunScope scope,
+    uint64_t flags,
+    InkpodBatchTask* task,
+    InkpodBatchReport** out_report);
+InkpodStatus inkpod_batch_report_get_info(
+    const InkpodBatchReport* report,
+    InkpodBatchReportInfo* out_info);
+InkpodStatus inkpod_batch_report_get(
+    const InkpodBatchReport* report,
+    uint64_t index,
+    InkpodBatchReportItem* out_item);
+InkpodStatus inkpod_batch_report_release(InkpodBatchReport** report);
+InkpodStatus inkpod_batch_task_create(InkpodBatchTask** out_task);
+InkpodStatus inkpod_batch_task_query(
+    const InkpodBatchTask* task,
+    InkpodM6TaskInfo* out_info);
+InkpodStatus inkpod_batch_task_cancel(InkpodBatchTask* task);
+InkpodStatus inkpod_batch_task_release(InkpodBatchTask** task);
 
 InkpodStatus inkpod_core_build_snapshot_for_view(
     InkpodCore* core,

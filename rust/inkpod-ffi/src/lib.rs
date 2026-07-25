@@ -1,5 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod m7;
+
 use inkpod_core::{
     ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel,
     ClipboardPayload, ClipboardPixel, ClipboardPlane, ColorBalance, ColorCheckMode, Command,

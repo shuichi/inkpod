@@ -593,7 +593,7 @@ pub struct SequenceCellSource {
     pub dpi_x_milli: u32,
     pub dpi_y_milli: u32,
     pub frames: FrameMetadata,
-    raster: TileRaster,
+    pub(crate) raster: TileRaster,
 }
 
 impl SequenceCellSource {
@@ -676,7 +676,7 @@ pub struct SequenceCellInfo {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SequenceState {
-    cells: Vec<SequenceCellSource>,
+    pub(crate) cells: Vec<SequenceCellSource>,
     active_index: Option<usize>,
 }
 
@@ -1959,7 +1959,7 @@ fn thumbnail_for_raster(raster: &TileRaster) -> Result<Thumbnail, CoreError> {
     })
 }
 
-fn parse_cell_number(name: &str) -> Option<u32> {
+pub(crate) fn parse_cell_number(name: &str) -> Option<u32> {
     let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
     let bytes = stem.as_bytes();
     let end = bytes.iter().rposition(u8::is_ascii_digit)? + 1;
@@ -1970,7 +1970,7 @@ fn parse_cell_number(name: &str) -> Option<u32> {
     stem[start..end].parse().ok()
 }
 
-fn natural_cmp(left: &str, right: &str) -> Ordering {
+pub(crate) fn natural_cmp(left: &str, right: &str) -> Ordering {
     let left_bytes = left.as_bytes();
     let right_bytes = right.as_bytes();
     let (mut left_index, mut right_index) = (0, 0);

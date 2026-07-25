@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <string>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -69,6 +71,15 @@ static_assert(sizeof(InkpodStampGestureInput) == 104U);
 static_assert(sizeof(InkpodBlurToolInput) == 72U);
 static_assert(sizeof(InkpodDustInput) == 80U);
 static_assert(sizeof(InkpodM6TaskInfo) == 32U);
+static_assert(sizeof(InkpodBatchInput) == 48U);
+static_assert(sizeof(InkpodBatchColorPairInput) == 48U);
+static_assert(sizeof(InkpodBatchSeedInput) == 64U);
+static_assert(sizeof(InkpodBatchOperationInput) == 256U);
+static_assert(sizeof(InkpodBatchGraphInput) == 144U);
+static_assert(sizeof(InkpodBatchGraphInfo) == 40U);
+static_assert(sizeof(InkpodBatchPreviewItem) == 56U);
+static_assert(sizeof(InkpodBatchReportInfo) == 32U);
+static_assert(sizeof(InkpodBatchReportItem) == 56U);
 static_assert(sizeof(InkpodSnapshotVectorSegment) == 80U);
 static_assert(sizeof(InkpodSnapshotVectorFill) == 48U);
 static_assert(sizeof(InkpodSnapshotVectorView) == 80U);
@@ -1133,6 +1144,128 @@ int InkpodRunAbiSmoke() {
         || inkpod_snapshot_release(&alpha_snapshot) != INKPOD_STATUS_OK) {
         return 82;
     }
+
+    const std::string batch_name{"M7 ABI Smoke"};
+    const std::string batch_output{"."};
+    const std::string batch_basename{"abi-smoke"};
+    InkpodBatchInput batch_input{};
+    batch_input.struct_size = sizeof(batch_input);
+    batch_input.kind = INKPOD_BATCH_INPUT_CURRENT_SEQUENCE;
+    InkpodBatchColorPairInput batch_pair{};
+    batch_pair.struct_size = sizeof(batch_pair);
+    batch_pair.enabled = 1U;
+    batch_pair.old_color = color16(0U, 0U, 0U, 0U);
+    batch_pair.new_color = color16(65535U, 0U, 0U, 65535U);
+    InkpodBatchOperationInput batch_operation{};
+    batch_operation.struct_size = sizeof(batch_operation);
+    batch_operation.version = INKPOD_BATCH_GRAPH_VERSION;
+    batch_operation.kind = INKPOD_BATCH_OPERATION_COLOR_REPLACE;
+    batch_operation.flags = INKPOD_BATCH_OPERATION_ENABLED;
+    batch_operation.layer_kind = INKPOD_LAYER_BINARY_COLORING;
+    batch_operation.plane_kind = INKPOD_TYPED_PLANE_COLOR;
+    batch_operation.missing_policy = INKPOD_BATCH_MISSING_ERROR;
+    batch_operation.color_pairs = &batch_pair;
+    batch_operation.color_pair_count = 1U;
+    batch_operation.color_pair_stride_bytes = sizeof(batch_pair);
+    InkpodBatchGraphInput batch_graph_input{};
+    batch_graph_input.struct_size = sizeof(batch_graph_input);
+    batch_graph_input.version = INKPOD_BATCH_GRAPH_VERSION;
+    batch_graph_input.name_utf8 = reinterpret_cast<const std::uint8_t*>(batch_name.data());
+    batch_graph_input.name_bytes = batch_name.size();
+    batch_graph_input.inputs = &batch_input;
+    batch_graph_input.input_count = 1U;
+    batch_graph_input.input_stride_bytes = sizeof(batch_input);
+    batch_graph_input.operations = &batch_operation;
+    batch_graph_input.operation_count = 1U;
+    batch_graph_input.operation_stride_bytes = sizeof(batch_operation);
+    batch_graph_input.output_policy = INKPOD_BATCH_OUTPUT_NEW_SAVE;
+    batch_graph_input.failure_policy = INKPOD_BATCH_FAILURE_CONTINUE;
+    batch_graph_input.output_folder_utf8 =
+        reinterpret_cast<const std::uint8_t*>(batch_output.data());
+    batch_graph_input.output_folder_bytes = batch_output.size();
+    batch_graph_input.basename_utf8 =
+        reinterpret_cast<const std::uint8_t*>(batch_basename.data());
+    batch_graph_input.basename_bytes = batch_basename.size();
+    batch_graph_input.start_number = 1U;
+    InkpodBatchGraph* batch_graph{};
+    if (inkpod_batch_graph_create(&batch_graph_input, &batch_graph) != INKPOD_STATUS_OK
+        || batch_graph == nullptr) {
+        return 83;
+    }
+    InkpodBatchGraphInfo batch_graph_info{};
+    batch_graph_info.struct_size = sizeof(batch_graph_info);
+    if (inkpod_batch_graph_get_info(batch_graph, &batch_graph_info) != INKPOD_STATUS_OK
+        || batch_graph_info.input_count != 1U
+        || batch_graph_info.operation_count != 1U
+        || batch_graph_info.output_policy != INKPOD_BATCH_OUTPUT_NEW_SAVE) {
+        return 84;
+    }
+    InkpodBatchPreview* batch_preview{};
+    std::uint64_t batch_preview_count{};
+    InkpodBatchPreviewItem batch_preview_item{};
+    batch_preview_item.struct_size = sizeof(batch_preview_item);
+    if (inkpod_core_batch_preview(
+            core, batch_graph, INKPOD_BATCH_SCOPE_ALL, &batch_preview)
+            != INKPOD_STATUS_OK
+        || inkpod_batch_preview_count(batch_preview, &batch_preview_count)
+            != INKPOD_STATUS_OK
+        || batch_preview_count == 0U
+        || inkpod_batch_preview_get(batch_preview, 0U, &batch_preview_item)
+            != INKPOD_STATUS_OK
+        || batch_preview_item.input_name_bytes == 0U
+        || inkpod_batch_preview_release(&batch_preview) != INKPOD_STATUS_OK
+        || inkpod_batch_preview_release(&batch_preview) != INKPOD_STATUS_OK) {
+        return 85;
+    }
+    InkpodBatchTask* batch_task{};
+    InkpodBatchReport* batch_report{};
+    if (inkpod_batch_task_create(&batch_task) != INKPOD_STATUS_OK
+        || inkpod_core_batch_execute(
+               core,
+               batch_graph,
+               INKPOD_BATCH_SCOPE_ALL,
+               INKPOD_BATCH_RUN_DRY | INKPOD_BATCH_RUN_PREVIEW_CONFIRMED,
+               batch_task,
+               &batch_report)
+            != INKPOD_STATUS_OK) {
+        return 86;
+    }
+    InkpodBatchReportInfo batch_report_info{};
+    batch_report_info.struct_size = sizeof(batch_report_info);
+    InkpodBatchReportItem batch_report_item{};
+    batch_report_item.struct_size = sizeof(batch_report_item);
+    if (inkpod_batch_report_get_info(batch_report, &batch_report_info)
+            != INKPOD_STATUS_OK
+        || batch_report_info.item_count == 0U
+        || batch_report_info.failure_count != 0U
+        || inkpod_batch_report_get(batch_report, 0U, &batch_report_item)
+            != INKPOD_STATUS_OK
+        || batch_report_item.outcome != INKPOD_BATCH_ITEM_DRY_RUN
+        || inkpod_batch_report_release(&batch_report) != INKPOD_STATUS_OK
+        || inkpod_batch_task_release(&batch_task) != INKPOD_STATUS_OK) {
+        return 87;
+    }
+    const std::string batch_settings{"inkpod-m7-abi-smoke.inkbatch"};
+    std::remove(batch_settings.c_str());
+    InkpodBatchGraph* loaded_batch_graph{};
+    if (inkpod_batch_graph_save(
+            batch_graph,
+            reinterpret_cast<const std::uint8_t*>(batch_settings.data()),
+            batch_settings.size())
+            != INKPOD_STATUS_OK
+        || inkpod_batch_graph_load(
+               reinterpret_cast<const std::uint8_t*>(batch_settings.data()),
+               batch_settings.size(),
+               &loaded_batch_graph)
+            != INKPOD_STATUS_OK
+        || loaded_batch_graph == nullptr
+        || inkpod_batch_graph_release(&loaded_batch_graph) != INKPOD_STATUS_OK
+        || inkpod_batch_graph_release(&batch_graph) != INKPOD_STATUS_OK
+        || inkpod_batch_graph_release(&batch_graph) != INKPOD_STATUS_OK) {
+        std::remove(batch_settings.c_str());
+        return 88;
+    }
+    std::remove(batch_settings.c_str());
     if (inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
         || inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
         || inkpod_core_destroy(&core) != INKPOD_STATUS_OK) {

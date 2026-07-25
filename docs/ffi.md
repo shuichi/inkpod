@@ -3,8 +3,8 @@
 The public ABI is `include/inkpod/core_ffi.h`. ABI version 1 covers the M0
 lifecycle, the M1 saved-drawing/live-preview slice, the M2 fill/color/recovery
 slice, the M3 typed document-editing slice, and the M4 production-workflow
-slice, the M5 vector slice, the M6 image-edit slice, and the additional bounded
-operations used by the completed M0-M6 Windows GUI workflows.
+slice, the M5 vector slice, the M6 image-edit slice, the M7 batch slice, and the
+additional bounded operations used by the completed M0-M7 Windows GUI workflows.
 Numeric fields use fixed-width C types. Every extensible structure begins with
 `struct_size`; configuration/span structures also carry feature or reserved
 fields.
@@ -264,6 +264,42 @@ while a preview is live; immutable snapshots may still be built and carry the
 transient preview revision. All M6 caller pointers are borrowed only for the
 duration of one call.
 
+## M7 batch workflow
+
+- `inkpod_batch_graph_create` validates and copies the complete graph, including
+  every UTF-8 path/name, strided input/operation record, filter curve, color
+  array, replacement pair, and continuous-fill seed. The caller may release or
+  reuse all source storage after the function returns. The returned
+  `InkpodBatchGraph` is immutable. Every outer and nested record is checked for
+  alignment and `struct_size` before reference creation, and a strided span whose
+  total readable extent exceeds `isize::MAX` is rejected before pointer
+  arithmetic.
+- `inkpod_batch_graph_save` and `inkpod_batch_graph_load` persist the versioned
+  checksummed `.inkbatch` representation using UTF-8 paths. Save completes and
+  synchronizes a same-directory temporary file before replacement; failure
+  removes only that exact temporary file.
+- `inkpod_core_batch_preview` runs on the Core owner thread and allocates an
+  immutable `InkpodBatchPreview`. Count/get accessors return copied fields plus
+  borrowed UTF-8 input/output/warning spans. Those spans remain valid only until
+  `inkpod_batch_preview_release` consumes the owner.
+- `inkpod_core_batch_execute` runs on the Core owner thread. It uses a separate
+  working Core for each resolved input, applies enabled operations in graph
+  order, and writes only a fully encoded atomic output. It allocates an
+  `InkpodBatchReport` even for dry-run, per-item failure, or cancellation when a
+  report is available. Report accessor UTF-8 spans are borrowed until
+  `inkpod_batch_report_release`.
+- `InkpodBatchTask` aliases the thread-safe atomic task representation used by
+  M6. Create/query/cancel/release follow the same lifetime rule: the single
+  owner keeps it live until the Core execution call returns, while query and
+  cancel may race safely with execution. Release consumes and nulls the owner.
+
+Graph, preview, report, and task output storage must be null before a creating
+call. Each release takes pointer-to-owner storage, writes null, and is an
+idempotent success when repeated through that same owner variable. The Windows
+adapter retains the graph and task while its Core-engine work item is active,
+then releases task/report/preview/graph in dependency order during replacement
+or shutdown.
+
 ## Stroke session state
 
 At most one live stroke exists per Core. While it is active, other document,
@@ -312,6 +348,10 @@ returns `INKPOD_STATUS_BUFFER_TOO_SMALL` and still reports `color_count`.
   `InkpodM6Task**`, frees it, writes null, and is a successful no-op when repeated
   through the same owner variable. The caller must prevent release racing the
   Core call; query and cancel may race safely with that call.
+- `inkpod_batch_graph_create/load`, `inkpod_core_batch_preview`, and
+  `inkpod_core_batch_execute` allocate Rust-owned graph, preview, and report
+  handles as described above. Their release calls consume owner storage and
+  null it. Accessor string spans are borrowed only for the owner lifetime.
 - `inkpod_snapshot_get_view` returns a borrowed strided tile span and pixel
   pointers. `inkpod_snapshot_get_transform` copies its view transform;
   `inkpod_snapshot_get_overlay` returns a borrowed guide span plus copied flags
@@ -342,10 +382,11 @@ A violation returns `INKPOD_STATUS_WRONG_THREAD` without consuming the handle.
 Published snapshots are immutable and `Send + Sync`; view/release must still be
 externally synchronized.
 
-`InkpodM6Task` is the exception to Core affinity: create, query, cancel, and
-release may run on any thread, subject to its owner-lifetime rule. State and
-completed/total work are atomic. Cancellation is advisory until the Core loop
-polls it; the operation then returns cancelled and discards its staged result.
+`InkpodM6Task` and its `InkpodBatchTask` alias are the exceptions to Core
+affinity: create, query, cancel, and release may run on any thread, subject to
+their owner-lifetime rule. State and completed/total work are atomic.
+Cancellation is advisory until the Core loop polls it; the operation then
+returns cancelled and discards its staged result and any exact temporary file.
 
 No Core lock is held while calling C++, and the Core never calls a C++ callback.
 The Windows UI/Input thread copies pointer packets into a bounded C++ queue. The
