@@ -210,3 +210,19 @@ affect the M2 recovery acceptance case.
 DGA, CEL, and legacy palette/chart/filter-preset layouts remain `Unknown`. No
 reader or writer is enabled without rights-cleared fixtures and an independent
 expected-result oracle.
+
+## M8 corrupted corpus
+
+The checked-in `rust/inkpod-format/tests/corpus/m8` corpus covers forged native
+manifest and batch-body lengths plus malformed/oversized PNG, TIFF, TGA, and BMP
+headers. `m8_acceptance_corrupted_file_corpus_is_bounded_and_non_destructive`
+passes each case through its public byte decoder and, where available, public
+file reader under panic containment. Each corpus entry asserts the intended
+bounded rejection path; the PNG IHDR has a valid CRC so dimension validation is
+not bypassed by an earlier checksum error. The tests verify unchanged input and
+pre-existing output bytes, absence of adjacent temporary output, and preservation
+of the current Core document plus its normal file after a failed corrupt open. A second
+deterministic mutation harness truncates and bit-flips valid native, batch, and
+all four common-raster seeds across every decoder. These regression tests do not
+replace coverage-guided fuzzing, but keep the accepted corruption corpus and
+allocation-bound paths executable on every normal `cargo test` run.

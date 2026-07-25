@@ -14,6 +14,7 @@
   <Identity
     Name="inkpod"
     Publisher="CN=inkpod"
+    ProcessorArchitecture="x64"
     Version="0.1.0.0" />
 
   <Properties>
@@ -33,7 +34,7 @@
 
   <Applications>
     <Application Id="inkpod"
-      Executable="$targetnametoken$.exe"
+      Executable="inkpod.exe"
       EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="inkpod"

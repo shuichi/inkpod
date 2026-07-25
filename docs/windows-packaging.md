@@ -1,4 +1,4 @@
-# Windows packaging assets
+# Windows packaging
 
 `AppIcon.svg` at the repository root is the source of truth for the Windows app
 icon. The checked-in MSIX PNG assets and Win32 icon live under
@@ -28,12 +28,47 @@ from every generated Windows asset. The checked-in source keeps the squircle
 and artwork geometry intact and omits only that unsupported outer shadow.
 
 `inkpod_windows_assets` verifies the required file set, base and About PNG
-dimensions, ICO directory entries, and that the four-part MSIX version matches
-the CMake project version. When changing the application version, update both
-`project(inkpod VERSION ...)` in `CMakeLists.txt` and `Identity/@Version` in
-`Package.appxmanifest`; the last MSIX component remains zero.
+dimensions, ICO directory entries, x64 package identity, executable name, and
+that the four-part MSIX version matches the CMake project version. When changing
+the application version, update both `project(inkpod VERSION ...)` in
+`CMakeLists.txt` and `Identity/@Version` in `Package.appxmanifest`; the last MSIX
+component remains zero.
 
-The manifest and visual assets are packaging preparation only. A distributable
-MSIX still requires release-layout assembly, publisher selection, signing, and
-clean Windows 11 install/uninstall verification before M8 can be marked
-Verified.
+Every Windows CMake build now assembles an unsigned package through the Windows
+SDK `MakeAppx` tool. The artifact is written to
+`build/<preset>/package/inkpod-<version>-x64.msix` and contains `inkpod.exe`, the
+manifest, generated PNG assets, `LICENSE.txt`, `ThirdPartyNotices.txt`, and the
+MSVC toolchain's x64 app-local CRT DLLs required by the `/MD` executable. The
+runtime DLLs are explicit CMake dependencies, so changing one rebuilds the
+package while an unchanged second build remains a no-op. `inkpod_msix` can also
+be selected explicitly as a build target.
+
+`m8_windows_msix_payload_smoke` unpacks the produced artifact with `MakeAppx`
+without elevation and verifies the executable, identity/version, license,
+notices, and required MSVC runtime payload. Hosted CI runs this test for Debug
+and Release.
+
+`m8_windows_msix_install_uninstall_smoke` must run from an elevated Windows 11
+workstation shell and rejects Windows 10 and Windows Server. It refuses to
+disturb an existing all-users `inkpod` package, copies the
+unsigned build artifact to a private temporary directory, creates a one-day
+ephemeral code-signing certificate whose subject matches `Identity/@Publisher`,
+adds that certificate to LocalMachine Root only for the test, signs the copy,
+installs it, verifies the installed version and payload, executes the installed
+`inkpod.exe --abi-smoke-test`, uninstalls it, then removes the certificate,
+private key, and temporary package in `finally`. Failure cleanup retains the
+installed package identity until removal is confirmed, so a failed post-install
+assertion can retry uninstall instead of orphaning the package. The generated artifact remains
+unsigned; a release publisher must sign it with the organization's protected
+production credential before distribution.
+
+The hosted Windows CI image is Windows Server 2022, so its normal CTest command
+excludes this workstation-only install test while still building the MSIX and
+running manifest/assets, payload, ABI, and application smoke tests. Run the full package
+test on an elevated clean Windows 11 workstation with:
+
+```powershell
+ctest --preset windows-x64-release `
+  -R m8_windows_msix_install_uninstall_smoke `
+  --output-on-failure
+```

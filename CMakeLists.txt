@@ -156,4 +156,83 @@ if(WIN32)
 
     add_test(NAME inkpod_abi_smoke COMMAND inkpod --abi-smoke-test)
     add_test(NAME inkpod_windows_smoke COMMAND inkpod --smoke-test)
+
+    file(GLOB INKPOD_MSIX_ASSETS CONFIGURE_DEPENDS
+        "${CMAKE_SOURCE_DIR}/apps/windows/package/Assets/*.png")
+    if(NOT MSVC)
+        message(FATAL_ERROR "inkpod MSIX packaging requires the supported MSVC toolchain")
+    endif()
+    get_filename_component(INKPOD_MSVC_COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(INKPOD_MSVC_HOST_DIR "${INKPOD_MSVC_COMPILER_DIR}" DIRECTORY)
+    get_filename_component(INKPOD_MSVC_BIN_DIR "${INKPOD_MSVC_HOST_DIR}" DIRECTORY)
+    get_filename_component(INKPOD_MSVC_VERSION_DIR "${INKPOD_MSVC_BIN_DIR}" DIRECTORY)
+    get_filename_component(INKPOD_MSVC_VERSION "${INKPOD_MSVC_VERSION_DIR}" NAME)
+    get_filename_component(INKPOD_MSVC_FAMILY_DIR "${INKPOD_MSVC_VERSION_DIR}" DIRECTORY)
+    get_filename_component(INKPOD_MSVC_TOOLS_DIR "${INKPOD_MSVC_FAMILY_DIR}" DIRECTORY)
+    get_filename_component(INKPOD_VC_DIR "${INKPOD_MSVC_TOOLS_DIR}" DIRECTORY)
+    file(GLOB INKPOD_MSVC_CRT_DIRECTORIES
+        "${INKPOD_VC_DIR}/Redist/MSVC/${INKPOD_MSVC_VERSION}/x64/Microsoft.VC*.CRT")
+    list(LENGTH INKPOD_MSVC_CRT_DIRECTORIES INKPOD_MSVC_CRT_DIRECTORY_COUNT)
+    if(NOT INKPOD_MSVC_CRT_DIRECTORY_COUNT EQUAL 1)
+        message(FATAL_ERROR
+            "Expected one x64 MSVC CRT redist directory for ${INKPOD_MSVC_VERSION}; "
+            "found ${INKPOD_MSVC_CRT_DIRECTORY_COUNT}")
+    endif()
+    list(GET INKPOD_MSVC_CRT_DIRECTORIES 0 INKPOD_MSVC_CRT_DIRECTORY)
+    file(GLOB INKPOD_MSVC_RUNTIME_DLLS "${INKPOD_MSVC_CRT_DIRECTORY}/*.dll")
+    foreach(INKPOD_REQUIRED_RUNTIME IN ITEMS
+            msvcp140.dll
+            vcruntime140.dll
+            vcruntime140_1.dll)
+        if(NOT EXISTS "${INKPOD_MSVC_CRT_DIRECTORY}/${INKPOD_REQUIRED_RUNTIME}")
+            message(FATAL_ERROR
+                "MSVC CRT redist is missing ${INKPOD_REQUIRED_RUNTIME}: "
+                "${INKPOD_MSVC_CRT_DIRECTORY}")
+        endif()
+    endforeach()
+    set(INKPOD_MSIX_PATH
+        "${CMAKE_BINARY_DIR}/package/inkpod-${PROJECT_VERSION}-x64.msix")
+    add_custom_command(
+        OUTPUT "${INKPOD_MSIX_PATH}"
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/tests/build_msix.ps1"
+                -Executable "$<TARGET_FILE:inkpod>"
+                -Manifest "${CMAKE_SOURCE_DIR}/apps/windows/package/Package.appxmanifest"
+                -AssetsDirectory "${CMAKE_SOURCE_DIR}/apps/windows/package/Assets"
+                -License "${CMAKE_SOURCE_DIR}/LICENSE"
+                -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
+                -RuntimeDirectory "${INKPOD_MSVC_CRT_DIRECTORY}"
+                -OutputPath "${INKPOD_MSIX_PATH}"
+        DEPENDS
+            inkpod
+            "${CMAKE_SOURCE_DIR}/tests/build_msix.ps1"
+            "${CMAKE_SOURCE_DIR}/apps/windows/package/Package.appxmanifest"
+            "${CMAKE_SOURCE_DIR}/LICENSE"
+            "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
+            ${INKPOD_MSIX_ASSETS}
+            ${INKPOD_MSVC_RUNTIME_DLLS}
+        COMMENT "Assembling unsigned inkpod MSIX"
+        VERBATIM)
+    add_custom_target(inkpod_msix ALL DEPENDS "${INKPOD_MSIX_PATH}")
+
+    add_test(
+        NAME m8_windows_msix_payload_smoke
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/tests/verify_msix.ps1"
+                -PackagePath "${INKPOD_MSIX_PATH}"
+                -ExpectedVersion "${PROJECT_VERSION}.0")
+    set_tests_properties(m8_windows_msix_payload_smoke PROPERTIES
+        DEPENDS inkpod_windows_assets
+        TIMEOUT 60)
+
+    add_test(
+        NAME m8_windows_msix_install_uninstall_smoke
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/tests/msix_install_smoke.ps1"
+                -PackagePath "${INKPOD_MSIX_PATH}"
+                -ExpectedVersion "${PROJECT_VERSION}.0")
+    set_tests_properties(m8_windows_msix_install_uninstall_smoke PROPERTIES
+        DEPENDS m8_windows_msix_payload_smoke
+        RUN_SERIAL TRUE
+        TIMEOUT 180)
 endif()

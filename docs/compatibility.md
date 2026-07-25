@@ -48,7 +48,11 @@ saved results—not replication of a legacy UI or assets.
 | BATCH-002 | Verified | Ordered catalog covers replace/swap, continuous fill, separation, visibility, four line-width modes, all M6 filters, boundary airbrush, dust, mirror, rotate, resize/DPI, and plane conversion with skip/error target policy | Six M7 acceptance tests, complete catalog round-trip, Core operation tests, FFI nested-record validation, Windows add/edit/reorder/remove/swap/boundary dry-run smoke | Boundary airbrush starts with two colors; algorithms retain documented Inkpod semantics; undocumented legacy kernels are not inferred |
 | BATCH-003 | Verified | Natural-order preview, seed-color warnings, current-file/UUID selection, current/all dry-run and execution, progress/cancel including cancellable waits, per-output atomicity, explicit continue/stop reports, and non-overwriting default policy run on the Core engine | Named M7 acceptance 6/6, current-file/wait regressions, FFI preview/report/cancel, final Release and reviewed Debug CTest 3/3 with real Batch palette dry-run/output smoke | Native `.inkpod` is the only batch output format currently enabled; overwrite requires explicit policy |
 | M0 Windows shell (Help/About) | Verified | Japanese Help command opens a reference-DPI-normalized native modal About centered on the owner, with 15/9-point fonts, a 40 px reference-height name label, exact-size generated PNG icon, `Inkpod`, shorter description, CMake-derived version, and copyright | Final Debug smoke verifies target-DPI geometry/name-label height/font/icon/string/non-overlap; assets + ABI + application CTest passed 3/3 | The 574 x 544 reference is device pixels at 144 DPI and is converted once while retaining Windows theme, modal, and keyboard behavior |
-| M8 Windows package preparation | In progress | Windows App Development CLI 0.5.0 manifest, 48 MSIX PNGs, and five-resolution ICO generated from the updated project SVG | Asset file/dimension/ICO/version CTest; representative visual inspection; Debug/Release RC link | No signed MSIX or clean Windows install/uninstall verification yet |
+| M8 legacy compatibility audit | Verified | Rights-cleared fixture/oracle gate plus per-format measured read/write/round-trip matrix | `m8_acceptance_unverified_legacy_codecs_remain_unknown` | The audit is Verified; each unavailable codec remains `Unknown` with zero measured variants |
+| M8 malformed-input resilience | Verified | Six-file forged-length/dimension corpus with asserted bounded reject paths, deterministic truncation/bit-flip harness, and failed-open Core preservation cover native, batch, PNG, TIFF, TGA, and BMP public decoders/readers | `m8_acceptance_corrupted_file_corpus_is_bounded_and_non_destructive`; `m8_mutation_fuzz_all_file_decoders_never_panics`; `m8_corrupted_open_preserves_the_current_document_and_every_file` | Corpus rejection preserves Core state, input/existing output, and creates no temporary output |
+| M8 large-document performance | Verified | Maximum-dimension sparse allocation/COW plus bounded dense filter benchmark | `cargo bench -p inkpod-image --bench large_document -- --quick` | Timing is reported, not used as a machine-dependent pass threshold |
+| M8 Windows package | In progress | CMake assembles x64 MSIX with executable, assets, license, notices, and app-local MSVC runtime; non-elevated smoke unpacks and verifies the actual artifact | Debug/Release MakeAppx and payload CTest 4/4; the earlier runtime-dependent package passed elevated install/run/uninstall, but UAC cancellation prevented rerunning that acceptance on the corrected self-contained artifact | Current corrected artifact still needs one elevated Windows 11 install/installed ABI/uninstall pass; distribution also requires a protected production publisher credential |
+| M8 Core portability | Verified | All Rust crate source targets, crate/workspace manifests, and resolved lockfile reject Windows imports/configuration/packages; next-frontend API gaps are documented | `m8_acceptance_rust_workspace_has_zero_windows_imports`; Linux/macOS CI workspace checks | Sandboxed frontends still need byte/stream I/O plus platform file-authority adapters |
 
 The 2026-07-24 GUI vertical-slice audit treats production menu/dialog/pane/
 toolbar/shortcut/Canvas routing through the Windows adapter, C ABI, Core, and result display as
@@ -70,16 +74,36 @@ still blocked the exact `cargo-clippy.exe` frontend before startup (`os error
 same reviewed GUI/ABI source before the last Rust-only validation/save-poll
 refinements, then Application Control blocked the freshly linked Debug EXE before
 test startup. The immediate unchanged Debug rebuild reported `ninja: no work to
-do`, so Cargo was not reinvoked. M8 signed-package work remains `In progress`;
-this M7 review did not advance it.
+do`, so Cargo was not reinvoked. The subsequent M8 pass re-ran the named M7
+acceptance suite 6/6 before making M8 changes.
 
-## Unknown legacy formats
+The final M8 pass completed the three named acceptance tests, the six-decoder
+mutation harness, zero-warning clippy, all-feature workspace tests, and the
+large-document quick benchmark under WSL. Strict Debug and Release Windows
+builds assembled the MSIX and passed their non-package native smoke 3/3. An
+elevated Windows 11 Pro build 26200 Release-package smoke then enforced a clean
+all-users state and passed install, installed ABI execution, uninstall, and
+ephemeral certificate/private-key/temp cleanup. Hosted Windows Server CI builds
+the package but excludes that explicitly workstation-only install test.
 
-| Item | Status | Reason |
-|---|---|---|
-| DGA/CEL binary codec | Unknown | No rights-cleared fixture and independent oracle |
-| Legacy palette/chart/filter preset layouts | Unknown | Byte layouts are not defined by the internal specification |
+The 2026-07-25 M8 review found that the installed smoke had run on a developer
+machine with the MSVC runtime already present, while the MSIX did not carry its
+`/MD` runtime. The package now includes the toolchain's app-local CRT and a
+non-elevated artifact-unpack smoke. Debug and Release CTest pass 4/4 and repeated
+builds are no-ops. The corrected artifact's elevated install rerun was cancelled
+at UAC, so only the Windows-package row is conservatively `In progress`.
+
+## Legacy codec measured scope
+
+| Item | Status | Fixture / oracle | Read | Write | Round-trip | Reason |
+|---|---|---:|---:|---:|---:|---|
+| DGA binary codec | Unknown | 0 fixtures | 0 variants | 0 variants | 0 variants | No rights-cleared fixture and independent oracle |
+| CEL binary codec | Unknown | 0 fixtures | 0 variants | 0 variants | 0 variants | No rights-cleared fixture and independent oracle |
+| Legacy palette preset | Unknown | 0 fixtures | 0 variants | 0 variants | 0 variants | Byte layout is not defined by the internal specification |
+| Legacy chart preset | Unknown | 0 fixtures | 0 variants | 0 variants | 0 variants | Byte layout is not defined by the internal specification |
+| Legacy filter preset | Unknown | 0 fixtures | 0 variants | 0 variants | 0 variants | Byte layout and proprietary kernel semantics are not independently defined |
 
 No legacy manual, image, icon, wording, proprietary binary assumption, or
-third-party artwork was used for M0 through M7. PNG dependency licenses are
+third-party artwork was used. The matrix records the measured zero scope rather
+than presenting absent codecs as compatible. PNG dependency licenses are
 recorded in `docs/third-party-notices.md`.

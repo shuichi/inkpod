@@ -2,29 +2,18 @@
 
 ## Current milestone
 
-- Milestone: M7
-- Status: Verified
-- Last verified worktree state: M7 adds a versioned persisted Input -> ordered
-  Operations -> Output graph, bounded selectors and operation catalog, immutable
-  C ABI graph/preview/report handles, dry-run/preview/progress/cancel/failure
-  execution, per-output atomic save, and a native modeless Batch palette. The
-  2026-07-25 M7 review corrected target matching/validation, current-file scope,
-  wait cancellation polling, nested C ABI pointer validation, and the native
-  boundary-airbrush default. Final WSL all-feature tests passed Core 64,
-  architecture 1, FFI 15, format 20, image 22 plus doc-tests; named M7
-  acceptance remains 6/6. VS2026 x64 Debug and Release built with `/W4 /WX
-  /permissive-`. Final Release CTest passed assets, integrated C11/C++ M1-M7
-  ABI, and the real application/D2D smoke 3/3. Debug passed the same reviewed
-  GUI/ABI source before the last Rust-only validation/save-poll refinements,
-  strictly rebuilt those refinements, then Application Control blocked the newly
-  linked EXE before test startup. The immediate unchanged Debug rebuild reported
-  `ninja: no work to do`, so Cargo was not reinvoked.
-
-Before M7 edits, `cargo test --workspace m6_acceptance -- --nocapture`
-reconfirmed all five M6 acceptance scenarios 5/5. M6 therefore remained
-Verified before M7 work began and passed again on the final M7 worktree. This
-pass implemented only M7. Existing M8 packaging assets were neither extended
-nor claimed complete.
+- Milestone: M8
+- Status: In progress
+- Last verified worktree state: M8 retains all M0-M7 vertical slices and adds a
+  checked legacy-codec scope matrix, a six-format corrupted-file corpus plus
+  deterministic mutation harness, a maximum-dimension sparse/COW and dense
+  filter benchmark, whole-workspace Rust portability enforcement, documented
+  next-frontend API gaps, and CMake-owned x64 MSIX assembly. Review corrected
+  incomplete portability scanning, a corrupt PNG fixture that rejected before
+  its intended dimension check, missing app-local MSVC runtime payload, and
+  install-smoke failure cleanup. The corrected artifact passes non-elevated
+  payload inspection, but its elevated install/run/uninstall rerun was cancelled
+  at UAC; M8 therefore remains `In progress` only on acceptance scenario 4.
 
 ## User-requested Windows shell and package additions
 
@@ -41,8 +30,12 @@ nor claimed complete.
   five-resolution ICO directly from `AppIcon.svg`. The ICO is embedded for the
   main window and title bars; About uses the exact generated 88 px PNG at the
   144-DPI reference scale and a 256 px source above that scale.
-- This is `In progress` M8 packaging preparation. No signed MSIX was produced,
-  and clean-machine install/uninstall remains unverified.
+- CMake now assembles the x64 MSIX with executable, all generated assets,
+  license, third-party notices, and the MSVC app-local runtime required by the
+  `/MD` executable. A non-elevated CTest unpacks and verifies the actual package.
+  The earlier runtime-dependent package passed elevated install/run/uninstall;
+  the corrected self-contained package still needs that elevated rerun. The
+  build artifact remains unsigned for the publisher's protected credential.
 
 ## Requirements
 
@@ -91,7 +84,11 @@ nor claimed complete.
 | BATCH-002 | Verified | Core and native Batch UI expose color replacement/swap, continuous fill seeds, separation, visibility, four vector line-width modes, all M6 filters, boundary airbrush, dust removal, mirror, 90-degree rotation, resize/DPI, and plane conversion with stable target/missing policy | Complete operation/filter versioned round-trip, Core operation/transaction tests, six named M7 acceptance tests, C ABI nested-record validation, and Windows add/edit/reorder/remove/swap/boundary dry-run smoke | Boundary airbrush starts with the required two colors; operations use documented Inkpod semantics; no proprietary legacy batch preset layout is inferred |
 | BATCH-003 | Verified | Preview resolves natural-order inputs/output names and seed warnings; current scope matches the open file/UUID; dry-run, current/all execution, atomic per-file save, continue/stop failure reports, progress, cancellable waits, and thread-safe cancel run on the Core engine worker | Named M7 acceptance 6/6; current-file/wait-cancel regressions; FFI dry-run/report/cancel tests; final Release and reviewed Debug ABI/real Windows palette preview/dry-run/output smoke | Default Duplicate policy cannot overwrite input; overwrite requires the explicit policy |
 | M0 Windows shell (Help/About) | Verified | Japanese Help command, reference-DPI-normalized owned modal About, reference-matched spacing, 15/9-point fonts with a 40 px reference-height name label, exact-size generated PNG icon, shorter description, copyright, and CMake-derived version | Debug `inkpod_windows_smoke` verifies exact target-DPI size/origin/spacing/name-label height/font/icon/string and non-overlap; final assets + ABI + application CTest passed 3/3 | The 574 x 544 reference is device pixels captured at 144 DPI and is scaled exactly once; native Win32 theme and keyboard/modal behavior are retained |
-| M8 packaging assets | In progress | winapp CLI manifest, 48 scale/target-size PNGs, five-resolution ICO | `inkpod_windows_assets`; Release resource build | MSIX assembly, signing, and clean install/uninstall are not yet tested |
+| M8 legacy compatibility audit | Verified | Per-codec fixture/read/write/round-trip matrix with a rights-cleared fixture/oracle gate | `m8_acceptance_unverified_legacy_codecs_remain_unknown` | DGA, CEL, and three legacy preset codecs remain `Unknown` at measured zero scope |
+| M8 malformed-input resilience | Verified | Forged native/batch/PNG/TIFF/TGA/BMP corpus with exact bounded reject-path assertions, deterministic valid-seed truncation/bit-flip mutation, and failed-open Core preservation | Named corrupted-corpus, mutation, and Core failed-open tests | Rejects without panic, current-document or file overwrite, or temporary output |
+| M8 large-document performance | Verified | Maximum-dimension sparse raster/COW and bounded dense filter benchmark | `cargo bench -p inkpod-image --bench large_document -- --quick` | Reports timing and allocation-relevant counts without a hardware-specific threshold |
+| M8 Windows package | In progress | MakeAppx x64 MSIX includes executable/assets/license/notices and app-local MSVC runtime; test signs a copy with an ephemeral matching certificate | Debug/Release package and unpacked-payload smoke 4/4; prior runtime-dependent artifact passed elevated install/installed ABI/uninstall | Corrected self-contained artifact needs one elevated install/run/uninstall pass; distribution signing remains an external protected-credential step |
+| M8 Core portability | Verified | All four Rust crates' `src/tests/benches/examples/build.rs`, crate/workspace manifests, and lockfile reject Windows imports/configuration/packages; next-frontend gaps documented | `m8_acceptance_rust_workspace_has_zero_windows_imports`; Linux/macOS CI | Byte/stream I/O and platform file-authority adapters remain explicit next-frontend work |
 
 ### GUI vertical-slice audit (2026-07-24)
 
@@ -104,11 +101,12 @@ still unavailable, the requirement remains `In progress`; completed Core/ABI
 subsets stay recorded in the implementation and test columns. Internal build,
 ABI, and renderer contracts do not require an artificial GUI entry point.
 
-All M0-M7 rows now satisfy that rule. The application
+All M0-M7 rows satisfy that rule. The application
 smoke enters through real `WM_COMMAND`, dialog control, listbox drag, keyboard,
 timer, clipboard, and Canvas pointer paths; it does not count a direct smoke-only
 C ABI call as completion. M7 adds real Batch palette and menu command paths;
-M8 packaging remains separate and unchanged by the M7 pass.
+M8 packaging is a build/install boundary and therefore uses package and
+installed-binary smoke rather than an artificial in-app command.
 
 ## M0 re-verification before M1
 
@@ -277,6 +275,30 @@ replacement or shutdown, and posts only completion status to the UI thread.
   input and is exercised through a real `WM_COMMAND` dry-run. Settings atomic
   replacement and every operation/filter serialization variant gained tests.
 
+## M7 re-verification before M8
+
+| Criterion | Status | Evidence on 2026-07-25 before M8 edits |
+|---|---|---|
+| Named M7 acceptance tests | Verified | Windows compiled the suite, then local Application Control blocked the fresh test EXE before startup (`os error 4551`); the same clean worktree ran under WSL with an isolated target and passed all six scenarios 6/6 |
+| Worktree baseline | Verified | `git status --short --branch` reported clean `main...origin/main` before M8 implementation |
+
+## M8 acceptance scenarios
+
+| # | Scenario | Status | Evidence |
+|---|---|---|---|
+| 1 | Record measured read/write/round-trip scope for every legacy codec | Verified | The compatibility matrix separates DGA, CEL, palette, chart, and filter preset codecs and records 0 rights-cleared fixtures plus 0 read/write/round-trip variants for each |
+| 2 | Never mark an unverified codec `Verified` | Verified | `m8_acceptance_unverified_legacy_codecs_remain_unknown` parses every legacy row and requires `Unknown` plus the explicit zero-scope measurements |
+| 3 | Corrupted corpus causes no panic, uncontrolled allocation, or overwrite | Verified | The named corpus test now asserts each intended bounded rejection path (including a valid-CRC oversized PNG), mutation passes every decoder without panic, and `m8_corrupted_open_preserves_the_current_document_and_every_file` proves failed open leaves Core state and both files unchanged with no temp |
+| 4 | Package installs and uninstalls on clean Windows 11 | In progress | Review found the prior installed artifact omitted the `/MD` MSVC runtime and was tested on a machine that already had it. The corrected MSIX contains app-local CRT DLLs and passes Debug/Release artifact-unpack checks; its elevated install/installed ABI/uninstall rerun was cancelled at UAC |
+| 5 | Rust crates have zero Windows imports | Verified | `m8_acceptance_rust_workspace_has_zero_windows_imports` scans all four crates' source/test/bench/example/build-script inputs, crate/workspace manifests, and resolved `Cargo.lock` for Windows imports, cfg/raw-DLL use, renamed packages, and Windows packages |
+
+The large-document benchmark adds the M8 performance baseline without a brittle
+wall-clock threshold. `--quick` exercised a 1,048,576-square sparse document
+with 512 allocated tiles/COW isolation and a 1024-square 4 MiB dense invert in
+8 ms and 49 ms respectively under the review WSL run. The next-frontend audit
+records byte/stream I/O and platform file authority as explicit adapter/API gaps;
+document/image/history/batch/snapshot state remains portable Rust.
+
 ## M4 acceptance scenarios
 
 | # | Scenario | Status | Evidence |
@@ -439,6 +461,19 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| `cargo fmt --all -- --check`; WSL clippy/all-feature tests; `cargo bench -p inkpod-image --bench large_document -- --quick` | Windows + WSL Ubuntu, stable Rust 1.97.1, isolated target | Review source passed formatting, zero-warning clippy, Core 64, architecture 3, Core M8 integration 1, FFI 15, format unit 20 plus corpus 2, image 22 and doc-tests; benchmark reported sparse 8 ms and dense 49 ms | 2026-07-25 |
+| Debug/Release configure/build plus immediate unchanged verbose rebuild | Windows 11 Pro x64 build 26200, MSVC 19.51 | Both packages assembled with 10 app-local CRT DLLs; immediate Debug and Release rebuilds reported `ninja: no work to do`, so neither Cargo nor MakeAppx was reinvoked | 2026-07-25 |
+| `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 Pro x64 build 26200 | Corrected source passed assets + integrated ABI ownership + application/D2D + unpacked MSIX payload 4/4; Debug 15.21 s, Release 4.28 s | 2026-07-25 |
+| Non-elevated then UAC-launched corrected-package install smoke | Windows 11 Pro x64 build 26200 | Normal shell stopped at the required administrator guard; the UAC launch was cancelled by the user before package/certificate mutation. Corrected artifact install/run/uninstall therefore remains unverified | 2026-07-25 |
+| `cargo test --workspace m7_acceptance -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Reconfirmed the clean pre-M8 M7 boundary: all six acceptance scenarios passed 6/6. Windows compiled the suite but local Application Control blocked the fresh test EXE before startup (`os error 4551`) | 2026-07-25 |
+| `cargo test --workspace m8_acceptance -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Passed 3/3: legacy codec status/scope, corrupted corpus, and whole-workspace Rust portability | 2026-07-25 |
+| `cargo test -p inkpod-format m8_mutation_fuzz_all_file_decoders_never_panics -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Passed deterministic truncation and bit-flip mutations for native, batch, PNG, TIFF, TGA, and BMP public decoders | 2026-07-25 |
+| `cargo fmt --all -- --check` / `cargo clippy --workspace --all-targets --all-features -- -D warnings` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Final M8 source passed formatting and clippy with zero warnings | 2026-07-25 |
+| `cargo test --workspace --all-features` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Final M8 source passed: Core 64, architecture 3, FFI 15, format unit 20 plus integration 2, image 22, and doc-tests | 2026-07-25 |
+| `cargo bench -p inkpod-image --bench large_document -- --quick` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Passed: 1,048,576-square sparse raster, 512 distributed tiles and COW isolation in 10 ms; 1024-square 4 MiB dense invert in 50 ms | 2026-07-25 |
+| Developer-shell Debug build / `ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 Pro x64 build 26200, MSVC 19.51 | Strict build and MakeAppx package target passed; assets + integrated ABI + application/D2D smoke passed 3/3 in 16.25 s | 2026-07-25 |
+| Developer-shell Release configure/build / `ctest --preset windows-x64-release -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 Pro x64 build 26200, MSVC 19.51 | Strict optimized build and MakeAppx package target passed; assets + integrated ABI + application/D2D smoke passed 3/3 in 5.10 s | 2026-07-25 |
+| Elevated `ctest --preset windows-x64-release -R m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 Pro x64 build 26200 | Exit 0 after enforcing workstation/build and clean all-users state, signing a private copy, installing, checking version/payload, running installed ABI smoke, uninstalling, and deleting the ephemeral root certificate/private-key/temp state | 2026-07-25 |
 | `cargo test --workspace m6_acceptance -- --nocapture` | Windows 11 x64, stable Rust 1.97.1 | Reconfirmed the pre-M7 M6 boundary 5/5; repeated on final M7 worktree with the same result | 2026-07-25 |
 | `cargo test --workspace m7_acceptance -- --nocapture` | Windows 11 x64, stable Rust 1.97.1 | Passed all six named M7 acceptance scenarios 6/6 | 2026-07-25 |
 | `cargo fmt --all -- --check` | Windows 11 x64, stable Rust 1.97.1 | Passed on final M7 source | 2026-07-25 |
@@ -479,13 +514,15 @@ as dirty/pathless, and then reopens the unchanged normal file.
 | Post-vector-corner `cargo fmt --all --check` / clippy / WSL workspace tests | Windows 11 x64 + WSL Ubuntu, stable Rust 1.97.1 | Format and zero-warning clippy passed; Core 54, architecture 1, FFI 13, format 17, image 22 (107 total), plus doc-tests passed | 2026-07-24 |
 | Post-vector-corner developer-shell Debug build / `ctest --preset windows-x64-debug --output-on-failure` | Windows 11 x64, MSVC 19.51 | Strict `/W4 /WX /permissive-` build passed; assets + ABI + D2D seam/corrected-corner application smoke passed 3/3 in 18.56 s | 2026-07-24 |
 
-The final reviewed M7 Rust suite passed in WSL, including the architecture and
-new ABI negative tests. Application Control still blocks the Windows
-`cargo-clippy.exe` frontend before startup, so that exact Windows invocation is
-recorded as unverified; the identical WSL command emitted zero warnings. Final
-Windows Release CTest executed all three test bodies and passed. Debug passed the
-reviewed GUI/ABI source, then its final Rust-only rebuild was blocked before
-test-body startup by the same external policy.
+The reviewed M8 Rust suite passed in WSL, including the expanded architecture,
+exact-path corpus, mutation, and failed-open preservation tests. Local
+Application Control still blocks newly generated Windows Rust test/clippy
+frontends intermittently, so the isolated WSL results are recorded. Corrected
+Debug and Release CTest executed and passed 4/4, including the unpacked MSIX
+payload. Windows Server 2022 hosted CI excludes only the workstation/elevation
+install test. The pre-review package completed an elevated Windows 11
+install/run/uninstall pass, but the corrected app-local-runtime artifact has not:
+its UAC rerun was cancelled before mutation.
 
 ## Known gaps and unknowns
 
@@ -507,10 +544,14 @@ test-body startup by the same external policy.
 - M7 batch output currently writes native `.inkpod` cells. The graph is
   versioned and extensible, but no undocumented legacy batch/preset format is
   accepted or emitted.
-- M8 packaging remains `In progress`: signed MSIX creation and clean-machine
-  install/uninstall verification were not requested and no M8 implementation
-  was performed in this pass.
+- M8's CMake-produced MSIX artifact is intentionally unsigned. The automated smoke
+  signs only a private copy with an ephemeral test certificate; public release
+  still requires the publisher's protected production credential and timestamp
+  policy, which must not be committed to the repository. The corrected package
+  now carries its app-local MSVC runtime and passes artifact inspection, but one
+  elevated install/installed-ABI/uninstall rerun is still required.
 - `.inkpod` v1 separates blobs but does not compress them.
-- DGA/CEL and legacy preset layouts remain `Unknown`; no codec is enabled.
+- DGA/CEL and legacy preset layouts remain `Unknown` at the explicitly recorded
+  zero-fixture/read/write/round-trip scope; no codec is enabled.
 - Local MSVC is 19.51 from Visual Studio Build Tools 2026. VS2022 and VS2026 x64
   remain accepted Windows validation baselines.

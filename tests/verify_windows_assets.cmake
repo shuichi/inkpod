@@ -16,6 +16,16 @@ if(manifest_version_offset EQUAL -1)
         "Package.appxmanifest version does not match CMake project version "
         "${INKPOD_PROJECT_VERSION}")
 endif()
+foreach(required_manifest_text IN ITEMS
+        "Executable=\"inkpod.exe\""
+        "ProcessorArchitecture=\"x64\""
+        "Publisher=\"CN=inkpod\"")
+    string(FIND "${package_manifest}" "${required_manifest_text}" manifest_text_offset)
+    if(manifest_text_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Package.appxmanifest is missing ${required_manifest_text}")
+    endif()
+endforeach()
 
 set(assets_dir "${INKPOD_PACKAGE_DIR}/Assets")
 set(expected_assets app.ico)

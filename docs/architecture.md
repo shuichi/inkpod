@@ -231,6 +231,34 @@ and invoked by `inkpod.exe --abi-smoke-test` together with the C++20 ABI tests.
 This preserves a real C11 include/layout check while allowing the local Windows
 application-control policy to run one approved test binary.
 
+## M8 portability and performance audit
+
+The M8 architecture test scans every Rust workspace crate (`inkpod-core`,
+`inkpod-image`, `inkpod-format`, and `inkpod-ffi`), including `src`, `tests`,
+`benches`, `examples`, and `build.rs`, plus crate/workspace manifests and the
+resolved `Cargo.lock`. It rejects Windows-only imports, `cfg(windows)` branches,
+raw-DLL links, renamed Windows crate packages, and Windows packages in the
+lockfile. This is stricter than the original `ARCH-002` domain-crate scan and
+proves that the whole Rust workspace can build without a Windows SDK; Win32
+system libraries remain attached only by CMake to the final Windows
+static-library consumer.
+
+The standalone `large_document` benchmark constructs a maximum-dimension
+1,048,576 x 1,048,576 sparse RGBA document without allocating empty tiles,
+writes bounded distributed samples, checks copy-on-write isolation, and then
+filters a dense 1024 x 1024 (`--quick`) or 2048 x 2048 raster. It reports elapsed
+times and allocation-relevant tile/byte counts without enforcing a
+machine-specific timing threshold.
+
+The next-frontend audit found no platform type gap in document, image,
+selection, history, batch, or immutable snapshot APIs. The remaining adapter
+work is explicit rather than hidden in Core: a sandboxed frontend needs
+byte/stream-based open/save endpoints in addition to the current UTF-8 path ABI,
+must inject a platform UUID and file/bookmark authority, must provide its own
+font/GPU resource resolution, and must map its native clipboard and picker to
+the existing typed payloads. These are frontend/API extensions; they do not
+require a Windows dependency or a second document implementation in Rust.
+
 ## Initialization and shutdown
 
 The application initializes Common Controls, COM, the main window/Canvas and

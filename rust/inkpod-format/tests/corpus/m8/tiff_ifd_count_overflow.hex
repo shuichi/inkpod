@@ -1,0 +1,2 @@
+# Little-endian TIFF with an IFD count above the 256-entry bound.
+49 49 2a 00 08 00 00 00 ff ff

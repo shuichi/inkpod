@@ -23,6 +23,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features
+      - if: matrix.os == 'ubuntu-latest'
+        run: cargo bench -p inkpod-image --bench large_document -- --quick
 
   windows:
     name: Windows (${{ matrix.preset }})
@@ -41,7 +43,7 @@ jobs:
           arch: x64
       - run: cmake --preset ${{ matrix.preset }}
       - run: cmake --build --preset ${{ matrix.preset }}
-      - name: Verify unchanged build does not rebuild Rust
+      - name: Verify unchanged build does not rebuild Rust or MSIX
         shell: pwsh
         run: |
           $output = cmake --build --preset ${{ matrix.preset }} --verbose 2>&1
@@ -52,4 +54,9 @@ jobs:
           if ($output -match 'Building inkpod-ffi Rust static library') {
             throw 'unchanged build rebuilt the Rust static library'
           }
-      - run: ctest --preset ${{ matrix.preset }}
+          if ($output -match 'Assembling unsigned inkpod MSIX') {
+            throw 'unchanged build rebuilt the MSIX package'
+          }
+      # GitHub's hosted image is Windows Server 2022. The elevated package
+      # install/uninstall acceptance runs separately on a Windows 11 workstation.
+      - run: ctest --preset ${{ matrix.preset }} -E m8_windows_msix_install_uninstall_smoke

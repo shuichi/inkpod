@@ -19,3 +19,8 @@ manifests.
 TIFF, TGA, and BMP support is implemented in the project format crate and does
 not add another codec dependency. Distribution packaging must include the
 applicable upstream license texts selected under these expressions.
+
+The Windows MSIX includes the app-local Microsoft Visual C++ runtime DLLs from
+the selected MSVC toolchain's documented redistributable directory. Those files
+remain Microsoft components and are redistributed under the Microsoft Visual
+Studio license terms; they are not covered by inkpod's GPL license.
