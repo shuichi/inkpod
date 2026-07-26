@@ -6,8 +6,6 @@
 
 1 RT_MANIFEST "app.manifest"
 IDI_APP_ICON ICON "../package/Assets/app.ico"
-IDR_ABOUT_ICON_88_PNG RCDATA "../package/Assets/AppList.scale-200.png"
-IDR_ABOUT_ICON_256_PNG RCDATA "../package/Assets/AppList.targetsize-256.png"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION INKPOD_VERSION_RESOURCE

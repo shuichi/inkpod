@@ -33,6 +33,29 @@
   Windows application tests remain necessary for algorithmic edge cases and
   failure localization; FFI coverage does not replace them.
 
+## Windows frontend refactoring R0-R1
+
+- R0 is complete. The baseline records 274 defined `IDM_*` values, 273
+  production resource commands, and exact ownership of all 273 in the main
+  window procedure. `IDM_BATCH_OPERATION_ADD` remains an intentionally unused
+  range marker; the 24 concrete Batch add commands are separately inventoried
+  in `docs/windows-command-inventory.md`.
+- R1.1-R1.3 source work is complete. COM apartment lifetime, About, shortcut,
+  view, text-input, fill, history, M6 editor/progress, and Batch
+  progress/palette code now lives in focused modules under `apps/windows`.
+  Modal outputs are published only after `IDOK`; modeless dialogs receive typed
+  query/cancel or dispatch/select callbacks and never receive the complete
+  application state, Core handle, or FFI task ownership.
+- `main.cpp` is 14,645 lines and 635,662 bytes after the extraction, down from
+  the recorded 16,311 lines and 701,656 bytes. It contains no dialog procedure,
+  `DialogBoxParamW`, or `CreateDialogParamW`; message and command routing remain
+  in place for later R4 work.
+- The public ABI, file format, renderer ownership, Core engine thread, renderer
+  thread, snapshot queues, menus, resources, and user-visible dialog behavior
+  are unchanged. R1 is `Complete`; the elevated installed-MSIX ABI smoke was
+  cancelled at UAC after all non-elevated checks passed, and the user accepted
+  that exact recorded external blocker for R1 completion.
+
 ## User-requested Windows shell and package additions
 
 - The Japanese Help menu now exposes `Inkpodについて`. Its native, owned modal
@@ -45,9 +68,10 @@
   the expanded 40 px reference name-label height, strings,
   copyright/separator separation, and origin.
 - Windows App Development CLI 0.5.0 generated 48 MSIX PNG assets and one
-  five-resolution ICO directly from `AppIcon.svg`. The ICO is embedded for the
-  main window and title bars; About uses the exact generated 88 px PNG at the
-  144-DPI reference scale and a 256 px source above that scale.
+  five-resolution ICO directly from `AppIcon.svg`. The ICO is embedded once for
+  the main window, title bars, and About. About requests its target-DPI size via
+  `LoadIconWithScaleDown`; the former WIC decoder and duplicate 88/256 px
+  Win32 resources are removed while the MSIX PNG assets remain unchanged.
 - CMake now assembles the x64 MSIX with executable, all generated assets,
   license, third-party notices, and the MSVC app-local runtime required by the
   `/MD` executable. A non-elevated CTest unpacks and verifies the actual package.
@@ -101,7 +125,7 @@
 | BATCH-001 | Verified | Versioned checksummed `.inkbatch` settings persist file/folder/current-sequence selectors, ordered enabled/configure-each-run operations, conjunctive stable-ID/type target selectors, and output/failure policies; a modeless native Batch palette supports add/edit/remove/reorder and save/load | Format checksum/version/bounds/atomic replacement tests, complete operation/filter graph round-trip, FFI copied-span ownership, and Windows `WM_COMMAND`/dialog smoke | Loaded graphs remain immutable handles; editing starts a new UI graph rather than mutating borrowed settings storage |
 | BATCH-002 | Verified | Core and native Batch UI expose color replacement/swap, continuous fill seeds, separation, visibility, four vector line-width modes, all M6 filters, boundary airbrush, dust removal, mirror, 90-degree rotation, resize/DPI, and plane conversion with stable target/missing policy | Complete operation/filter versioned round-trip, Core operation/transaction tests, six named M7 acceptance tests, C ABI nested-record validation, and Windows add/edit/reorder/remove/swap/boundary dry-run smoke | Boundary airbrush starts with the required two colors; operations use documented Inkpod semantics; no proprietary legacy batch preset layout is inferred |
 | BATCH-003 | Verified | Preview resolves natural-order inputs/output names and seed warnings; current scope matches the open file/UUID; dry-run, current/all execution, atomic per-file save, continue/stop failure reports, progress, cancellable waits, and thread-safe cancel run on the Core engine worker | Named M7 acceptance 6/6; current-file/wait-cancel regressions; FFI dry-run/report/cancel tests; final Release and reviewed Debug ABI/real Windows palette preview/dry-run/output smoke | Default Duplicate policy cannot overwrite input; overwrite requires the explicit policy |
-| M0 Windows shell (Help/About) | Verified | Japanese Help command, reference-DPI-normalized owned modal About, reference-matched spacing, 15/9-point fonts with a 40 px reference-height name label, exact-size generated PNG icon, shorter description, copyright, and CMake-derived version | Debug `inkpod_windows_smoke` verifies exact target-DPI size/origin/spacing/name-label height/font/icon/string and non-overlap; final assets + ABI + application CTest passed 3/3 | The 574 x 544 reference is device pixels captured at 144 DPI and is scaled exactly once; native Win32 theme and keyboard/modal behavior are retained |
+| M0 Windows shell (Help/About) | Verified | Japanese Help command, reference-DPI-normalized owned modal About, reference-matched spacing, 15/9-point fonts with a 40 px reference-height name label, target-size native icon loaded from the shared application ICO, shorter description, copyright, and CMake-derived version | Debug `inkpod_windows_smoke` verifies exact target-DPI size/origin/spacing/name-label height/font/icon/string and non-overlap; final assets + ABI + application CTest passed 3/3 | The 574 x 544 reference is device pixels captured at 144 DPI and is scaled exactly once; native Win32 theme and keyboard/modal behavior are retained |
 | M8 legacy compatibility audit | Verified | Per-codec fixture/read/write/round-trip matrix with a rights-cleared fixture/oracle gate | `acceptance_unverified_legacy_codecs_remain_unknown` | DGA, CEL, and three legacy preset codecs remain `Unknown` at measured zero scope |
 | M8 malformed-input resilience | Verified | Forged native/batch/PNG/TIFF/TGA/BMP corpus with exact bounded reject-path assertions, deterministic valid-seed truncation/bit-flip mutation, and failed-open Core preservation | Named corrupted-corpus, mutation, and Core failed-open tests | Rejects without panic, current-document or file overwrite, or temporary output |
 | M8 large-document performance | Verified | Maximum-dimension sparse raster/COW and bounded dense filter benchmark | `cargo bench -p inkpod-image --bench large_document -- --quick` | Reports timing and allocation-relevant counts without a hardware-specific threshold |
@@ -514,6 +538,13 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | Shared-ICO About cleanup passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
+| Developer-shell Debug and Release configure/build; non-elevated CTest excluding install smoke | Windows 11 x64, MSVC 19.51 | WIC-free About resource/C++ link and both MSIX assemblies passed; assets, integrated ABI, target-DPI About/application, and package payload passed 4/4 in Debug (17.65 s) and Release (4.12 s) | 2026-07-26 |
+| Non-elevated `ctest --preset windows-x64-release -R m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64 | Stopped at the required administrator guard before certificate/package mutation; the earlier UAC cancellation was not re-prompted, so installed execution remains unverified | 2026-07-26 |
+| `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R0/R1 source passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
+| Developer-shell Debug configure/build; `ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | All extracted C++20 translation units, resources, Rust staticlib, link, and MSIX assembly passed; assets, integrated ABI, application/D2D, and package payload passed 4/4 in 15.11 s | 2026-07-26 |
+| Developer-shell Release configure/build; `ctest --preset windows-x64-release -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Strict optimized build and MSIX assembly passed; assets, integrated ABI, application/D2D, and package payload passed 4/4 in 4.21 s | 2026-07-26 |
+| Non-elevated then UAC-launched `ctest --preset windows-x64-release -R m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64 | Normal shell stopped at the required administrator guard; the `RunAs` launch was cancelled at UAC before package/certificate mutation, so the changed packaged executable still needs its installed ABI smoke rerun | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | All-crate responsibility/test-layout refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-25 |
 | Visual Studio Developer PowerShell `cmake --preset windows-x64-debug`; `cmake --build --preset windows-x64-debug`; `ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Recursive Rust source tracking rebuilt the staticlib after the final module moves; strict C11/C++20 link and MSIX assembly passed; assets, integrated ABI, application/D2D, and package payload passed 4/4 in 15.37 s | 2026-07-25 |
 | `cargo fmt --all -- --check`; `cargo test --workspace --all-features`; WSL-isolated `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Windows 11 x64 + WSL Ubuntu, stable Rust | Core responsibility refactor passed formatting, zero-warning clippy, Core 64, architecture 5, Core resilience 1, FFI 19, format unit 20 plus corpus 2, image 22, and doc-tests | 2026-07-25 |

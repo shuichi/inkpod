@@ -244,8 +244,8 @@ Allowed status values in this table are `Not started`, `In progress`, and
 
 | Step | Status | Depends on | Result |
 |---|---|---|---|
-| R0 | Not started | — | Regression baseline and refactoring safety rules confirmed |
-| R1 | Not started | R0 | Self-contained dialogs and runtime helpers extracted |
+| R0 | Complete | — | Regression baseline and refactoring safety rules confirmed |
+| R1 | Complete | R0 | Self-contained dialogs and runtime helpers extracted |
 | R2 | Not started | R1 | Application state grouped with explicit ownership |
 | R3 | Not started | R2 | Feature controllers, shell adapters, and panes extracted |
 | R4 | Not started | R3 | Main window procedure reduced to message delegation |
@@ -541,4 +541,7 @@ Add newest entries first. Keep entries concise and evidence-based.
 
 | Date | Step | Result | Verification | Remaining |
 |---|---|---|---|---|
+| 2026-07-26 | R1 follow-up | About reuses the embedded application ICO through `LoadIconWithScaleDown`; the WIC loader, duplicate Win32 PNG resources, and `windowscodecs` link were removed while Shell STA ownership remains | Rust fmt/clippy/133 tests passed; strict Debug and Release builds passed; non-elevated CTest passed 4/4 in both presets | None for R1; elevated MSIX install smoke still requires an administrator shell |
+| 2026-07-26 | R1 | Complete: R1.1-R1.3 implemented; COM lifetime and all modal/modeless dialog procedures moved behind typed, private Windows UI boundaries; explicit CMake sources added | Rust fmt/clippy/tests passed; strict Debug and Release builds passed; non-elevated Debug and Release CTest passed 4/4; elevated launch was cancelled at UAC and accepted by the user as a recorded external blocker | None |
+| 2026-07-26 | R0 | Clean baseline captured, production command ownership inventoried, size metrics recorded, and three-thread/snapshot contracts reconfirmed without production changes | Baseline Rust validation and Debug/Release configure, build, and non-elevated CTest passed | None |
 | 2026-07-25 | Plan | Refactoring plan created; no production source changed | Document review only | R0-R6 not started |

@@ -307,6 +307,22 @@ snapshot sink or window notification target outlives its owner. A renderer-held
 immutable snapshot may outlive its Core until Canvas destruction because it owns
 all borrowed tile storage and is released by Rust's snapshot release function.
 
+COM apartment lifetime is owned by the private application runtime module. It
+remains required by the new-style Shell folder browser used by Batch; About no
+longer creates a WIC COM object. Its image reuses the embedded application ICO
+through `LoadIconWithScaleDown` at the target-DPI size.
+Self-contained modal dialogs are private modules under
+`apps/windows/ui/dialogs`: About owns its resource/DPI/font/icon layout;
+shortcut, view, text, fill, history, and effects editors accept typed candidate
+values and publish results only after `IDOK`. Modeless progress dialogs receive
+only a progress query and cancellation callback, while the Batch palette
+receives a typed presentation model plus command/selection callbacks. No dialog
+module receives `AppState`, calls `CoreEngine`, or invokes a Rust function.
+`main.cpp` retains the thin adapters that translate those callbacks to the
+existing UI-thread task handles and command IDs. This R1 boundary does not
+change Core/Renderer threads, snapshot ownership, shutdown order, the public
+C ABI, or file formats.
+
 The hidden Windows smoke path uses the normal UI input adapter, Core queue, ABI,
 format, snapshot sink, and Renderer. It verifies a never-saved private recovery
 path can be autosaved and rediscovered before normal save, distinct UI/Core/Renderer

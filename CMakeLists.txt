@@ -109,14 +109,19 @@ endif()
 
 if(WIN32)
     add_executable(inkpod WIN32
-        apps/windows/app/about_icon.cpp
+        apps/windows/app/com_runtime.cpp
         apps/windows/app/main.cpp
         apps/windows/app/core_engine.cpp
         apps/windows/app/app.rc
         apps/windows/renderer/canvas.cpp
+        apps/windows/ui/dialogs/about_dialog.cpp
+        apps/windows/ui/dialogs/basic_dialogs.cpp
+        apps/windows/ui/dialogs/batch_dialog.cpp
+        apps/windows/ui/dialogs/effects_dialogs.cpp
         tests/abi_smoke.cpp
         $<TARGET_OBJECTS:inkpod_header_c11>)
     target_include_directories(inkpod PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
         "${CMAKE_SOURCE_DIR}/apps/windows/renderer"
         "${CMAKE_BINARY_DIR}/generated"
         "${CMAKE_SOURCE_DIR}/include")
@@ -129,8 +134,7 @@ if(WIN32)
         d3d11
         dxgi
         ole32
-        shell32
-        windowscodecs)
+        shell32)
     if(MSVC)
         inkpod_enable_strict_warnings(inkpod)
         target_compile_options(inkpod PRIVATE /EHsc)

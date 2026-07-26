@@ -16,10 +16,11 @@ The command currently emits 48 PNG files: five scale variants for each
 manifest asset, plus plated and unplated target-size variants for the app-list
 icon. It also emits `app.ico` with 16, 24, 32, 48, and 256 pixel images. The
 Win32 resource script embeds that same ICO in `inkpod.exe`, so Explorer, the
-main window, and the title bars use one generated asset. The About dialog embeds
-the generated 88 px app-list PNG for an exact match at the 144-DPI reference
-scale, plus the 256 px PNG for high-DPI downsampling; it does not ask Windows to
-upscale the 48 px ICO entry to its 88 px display box.
+main window, title bars, and About dialog use one generated asset. About calls
+`LoadIconWithScaleDown` with its target-DPI size so Common Controls selects a
+suitable ICO image and scales it down instead of maintaining a separate WIC
+PNG-decoding path. The generated app-list PNGs remain package assets referenced
+by the MSIX manifest; they are not duplicated as About-specific Win32 resources.
 
 The winapp CLI 0.5.0 SVG renderer omits a group when the group itself uses the
 SVG `feDropShadow` primitive. Keep optional filter effects on separate shadow
@@ -27,8 +28,8 @@ elements rather than on `icon-body`; otherwise the background can disappear
 from every generated Windows asset. The checked-in source keeps the squircle
 and artwork geometry intact and omits only that unsupported outer shadow.
 
-`inkpod_windows_assets` verifies the required file set, base and About PNG
-dimensions, ICO directory entries, x64 package identity, executable name, and
+`inkpod_windows_assets` verifies the required file set, representative package
+PNG dimensions, ICO directory entries, x64 package identity, executable name, and
 that the four-part MSIX version matches the CMake project version. When changing
 the application version, update both `project(inkpod VERSION ...)` in
 `CMakeLists.txt` and `Identity/@Version` in `Package.appxmanifest`; the last MSIX

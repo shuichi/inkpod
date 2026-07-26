@@ -1,7 +1,6 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
-#include <objbase.h>
 #include <shlobj.h>
 #include <windowsx.h>
 
@@ -21,15 +20,32 @@
 #include <utility>
 #include <vector>
 
-#include "about_icon.h"
 #include "canvas.h"
+#include "com_runtime.h"
 #include "core_engine.h"
 #include "inkpod/core_ffi.h"
 #include "resource.h"
+#include "ui/dialogs/about_dialog.h"
+#include "ui/dialogs/basic_dialogs.h"
+#include "ui/dialogs/batch_dialog.h"
+#include "ui/dialogs/effects_dialogs.h"
 
 int InkpodRunAbiSmoke();
 
 namespace {
+
+using inkpod::windows::ui::FillToolOptions;
+using inkpod::windows::ui::HistoryDialogState;
+using inkpod::windows::ui::M6EditorState;
+using inkpod::windows::ui::ShortcutDialogState;
+using inkpod::windows::ui::TextInputDialogState;
+using inkpod::windows::ui::ViewOptionsDialogState;
+using inkpod::windows::ui::ShowAboutDialog;
+using inkpod::windows::ui::ShowHistoryDialog;
+using inkpod::windows::ui::ShowM6Editor;
+using inkpod::windows::ui::ShowShortcutEditor;
+using inkpod::windows::ui::ShowTextInput;
+using inkpod::windows::ui::ShowViewOptions;
 
 constexpr std::uint32_t kInteractionFill = 1001U;
 constexpr std::uint32_t kInteractionEyedropper = 1002U;
@@ -130,21 +146,6 @@ struct BatchUiState {
     std::wstring last_result;
 };
 
-struct FillToolOptions {
-    InkpodFillOperation operation{INKPOD_FILL_SEED};
-    std::uint16_t tolerance{};
-    std::uint16_t gap_close{};
-    std::uint32_t extension_distance{1U};
-    InkpodInclusionMode inclusion_mode{INKPOD_INCLUSION_NONE};
-    std::vector<std::uint32_t> inclusion_rgba;
-    bool overflow_abort{true};
-    bool detached_regions{};
-    bool transparent_only{};
-    bool use_document_selection{};
-    bool light_table_boundary{};
-    bool light_table_color{};
-};
-
 struct AppState {
     HINSTANCE instance{};
     HWND window{};
@@ -163,6 +164,7 @@ struct AppState {
     HWND color_palette_list{};
     HWND color_chart_list{};
     HWND batch_palette{};
+    inkpod::windows::ui::BatchPaletteDialogState batch_palette_dialog{};
     std::unique_ptr<inkpod::app::CoreEngine> engine;
     std::uint32_t tool{INKPOD_TOOL_PENCIL};
     InkpodPlaneKind plane{INKPOD_PLANE_MAIN_LINE};
@@ -213,6 +215,7 @@ struct AppState {
     std::vector<M6AdjustmentUiState> m6_adjustments;
     InkpodTask* m6_task{};
     HWND m6_progress{};
+    inkpod::windows::ui::ProgressDialogState m6_progress_dialog{};
     bool m6_preview_prompt{};
     bool alpha_view{};
     bool stamp_source_valid{};
@@ -224,6 +227,7 @@ struct AppState {
     InkpodBatchReport* batch_report{};
     InkpodBatchTask* batch_task{};
     HWND batch_progress{};
+    inkpod::windows::ui::ProgressDialogState batch_progress_dialog{};
     FillToolOptions fill_options{};
     std::vector<InkpodStrokeSample> fill_gesture_samples;
     std::vector<InkpodStrokeSample> m6_samples;
@@ -267,37 +271,67 @@ bool IsVectorStrokePlane(std::uint32_t kind) noexcept;
 void ClearVectorGeometryPreview(AppState& state) noexcept;
 void RefreshBatchPalette(AppState& state) noexcept;
 
-struct BatchPaletteEntry {
-    UINT command;
-    const wchar_t* label;
-};
+bool QueryM6Progress(
+    void* context, inkpod::windows::ui::ProgressDialogInfo& output) noexcept {
+    auto* state = static_cast<AppState*>(context);
+    if (state == nullptr || state->m6_task == nullptr) {
+        return false;
+    }
+    InkpodTaskInfo info{};
+    info.struct_size = sizeof(info);
+    if (inkpod_task_query(state->m6_task, &info) != INKPOD_STATUS_OK) {
+        return false;
+    }
+    output.completed_work = info.completed_work;
+    output.total_work = info.total_work;
+    return true;
+}
 
-constexpr std::array<BatchPaletteEntry, 24U> kBatchPaletteEntries{{
-    {IDM_BATCH_ADD_COLOR_REPLACE, L"色置換"},
-    {IDM_BATCH_ADD_CONTINUOUS_FILL, L"連続フィル"},
-    {IDM_BATCH_ADD_SEPARATION, L"色分解"},
-    {IDM_BATCH_ADD_VISIBILITY, L"レイヤー表示"},
-    {IDM_BATCH_ADD_LINE_WIDTH, L"線幅"},
-    {IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, L"境界色エアブラシ"},
-    {IDM_BATCH_ADD_DUST, L"ゴミ取り"},
-    {IDM_BATCH_ADD_MIRROR, L"鏡像"},
-    {IDM_BATCH_ADD_ROTATE, L"90度回転"},
-    {IDM_BATCH_ADD_RESIZE, L"画像サイズ・解像度"},
-    {IDM_BATCH_ADD_CONVERT, L"ラスター変換"},
-    {IDM_BATCH_ADD_FILTER_SHARPEN_WEAK, L"フィルタ: シャープ（弱）"},
-    {IDM_BATCH_ADD_FILTER_SHARPEN_STRONG, L"フィルタ: シャープ（強）"},
-    {IDM_BATCH_ADD_FILTER_BLUR_WEAK, L"フィルタ: ぼかし（弱）"},
-    {IDM_BATCH_ADD_FILTER_BLUR_STRONG, L"フィルタ: ぼかし（強）"},
-    {IDM_BATCH_ADD_FILTER_GAUSSIAN, L"フィルタ: ガウスぼかし"},
-    {IDM_BATCH_ADD_FILTER_INVERT, L"フィルタ: 階調反転"},
-    {IDM_BATCH_ADD_FILTER_AUTO_CONTRAST, L"フィルタ: 自動コントラスト"},
-    {IDM_BATCH_ADD_FILTER_BRIGHTNESS, L"フィルタ: 明るさ・コントラスト"},
-    {IDM_BATCH_ADD_FILTER_TONE_CURVE, L"フィルタ: トーンカーブ"},
-    {IDM_BATCH_ADD_FILTER_LEVELS, L"フィルタ: レベル補正"},
-    {IDM_BATCH_ADD_FILTER_HSV, L"フィルタ: HSV"},
-    {IDM_BATCH_ADD_FILTER_COLOR_BALANCE, L"フィルタ: カラーバランス"},
-    {IDM_BATCH_ADD_FILTER_UNSHARP, L"フィルタ: アンシャープ"},
-}};
+void CancelM6Progress(void* context) noexcept {
+    auto* state = static_cast<AppState*>(context);
+    if (state != nullptr && state->m6_task != nullptr) {
+        inkpod_task_cancel(state->m6_task);
+    }
+}
+
+bool QueryBatchProgress(
+    void* context, inkpod::windows::ui::ProgressDialogInfo& output) noexcept {
+    auto* state = static_cast<AppState*>(context);
+    if (state == nullptr || state->batch_task == nullptr) {
+        return false;
+    }
+    InkpodTaskInfo info{};
+    info.struct_size = sizeof(info);
+    if (inkpod_batch_task_query(
+            state->batch_task, &info) != INKPOD_STATUS_OK) {
+        return false;
+    }
+    output.completed_work = info.completed_work;
+    output.total_work = info.total_work;
+    return true;
+}
+
+void CancelBatchProgress(void* context) noexcept {
+    auto* state = static_cast<AppState*>(context);
+    if (state != nullptr && state->batch_task != nullptr) {
+        inkpod_batch_task_cancel(state->batch_task);
+    }
+}
+
+void DispatchBatchPaletteCommand(void* context, UINT command) noexcept {
+    auto* state = static_cast<AppState*>(context);
+    if (state != nullptr && state->window != nullptr) {
+        SendMessageW(state->window, WM_COMMAND, command, 0);
+    }
+}
+
+void SelectBatchPaletteOperation(
+    void* context, std::uint32_t selected_index) noexcept {
+    auto* state = static_cast<AppState*>(context);
+    if (state != nullptr && !state->batch.loaded_graph) {
+        state->batch.selected_operation = selected_index;
+    }
+}
 
 void ResetM3DocumentUiState(AppState& state) noexcept {
     state.m3_layer_id = 0U;
@@ -966,1278 +1000,6 @@ void UpdateMotionLabel(AppState& state, const InkpodMotionFrame& frame) noexcept
     SetWindowTextW(state.motion_label, text.data());
 }
 
-class ComApartment final {
-public:
-    HRESULT Initialize() noexcept {
-        const HRESULT result = CoInitializeEx(
-            nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-        initialized_ = SUCCEEDED(result);
-        return result;
-    }
-
-    ~ComApartment() {
-        if (initialized_) {
-            CoUninitialize();
-        }
-    }
-
-    ComApartment(const ComApartment&) = delete;
-    ComApartment& operator=(const ComApartment&) = delete;
-    ComApartment() = default;
-
-private:
-    bool initialized_{};
-};
-
-struct AboutDialogState {
-    HINSTANCE instance{};
-    HICON display_icon{};
-    HFONT name_font{};
-    HFONT body_font{};
-    bool close_immediately{};
-    bool layout_valid{};
-};
-
-// Layout measurements are device pixels from the 144-DPI reference image.
-constexpr UINT kAboutReferenceDpi = 144U;
-constexpr int kAboutWindowWidth = 574;
-constexpr int kAboutWindowHeight = 544;
-constexpr int kAboutIconSize = 88;
-constexpr int kAboutIconTop = 68;
-constexpr int kAboutNameTop = 194;
-constexpr int kAboutNameHeight = 40;
-constexpr int kAboutDescriptionTop = 250;
-constexpr int kAboutDescriptionHeight = 60;
-constexpr int kAboutVersionTop = 324;
-constexpr int kAboutVersionHeight = 22;
-constexpr int kAboutCopyrightTop = 362;
-constexpr int kAboutCopyrightHeight = 22;
-constexpr int kAboutFooterHeight = 89;
-constexpr int kAboutButtonWidth = 120;
-constexpr int kAboutButtonHeight = 48;
-constexpr int kAboutButtonRightMargin = 18;
-constexpr int kAboutButtonBottomMargin = 23;
-
-int ScaleAboutReferencePixel(int reference_pixels, UINT dpi) noexcept {
-    return MulDiv(
-        reference_pixels,
-        static_cast<int>(dpi == 0U ? USER_DEFAULT_SCREEN_DPI : dpi),
-        static_cast<int>(kAboutReferenceDpi));
-}
-
-int ClampCoordinate(int value, int minimum, int maximum) noexcept {
-    if (maximum < minimum) {
-        return minimum;
-    }
-    if (value < minimum) {
-        return minimum;
-    }
-    return value > maximum ? maximum : value;
-}
-
-POINT CenteredAboutOrigin(HWND dialog, int width, int height) noexcept {
-    const HWND owner = GetWindow(dialog, GW_OWNER);
-    const HWND monitor_window = owner != nullptr ? owner : dialog;
-    const HMONITOR monitor = MonitorFromWindow(
-        monitor_window, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO monitor_info{};
-    monitor_info.cbSize = sizeof(monitor_info);
-    RECT work_area{};
-    if (monitor == nullptr
-        || GetMonitorInfoW(monitor, &monitor_info) == FALSE) {
-        SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0);
-    } else {
-        work_area = monitor_info.rcWork;
-    }
-
-    RECT anchor = work_area;
-    if (owner != nullptr) {
-        RECT owner_bounds{};
-        if (GetWindowRect(owner, &owner_bounds) != FALSE) {
-            anchor = owner_bounds;
-        }
-    }
-    const int centered_x = anchor.left + (anchor.right - anchor.left - width) / 2;
-    const int centered_y = anchor.top + (anchor.bottom - anchor.top - height) / 2;
-    return POINT{
-        ClampCoordinate(centered_x, work_area.left, work_area.right - width),
-        ClampCoordinate(centered_y, work_area.top, work_area.bottom - height)};
-}
-
-bool MoveAboutControl(
-    HWND dialog, int id, int x, int y, int width, int height) noexcept {
-    const HWND control = GetDlgItem(dialog, id);
-    return control != nullptr
-        && MoveWindow(control, x, y, width, height, TRUE) != FALSE;
-}
-
-void ReleaseAboutFonts(AboutDialogState& state) noexcept {
-    if (state.name_font != nullptr) {
-        DeleteObject(state.name_font);
-        state.name_font = nullptr;
-    }
-    if (state.body_font != nullptr) {
-        DeleteObject(state.body_font);
-        state.body_font = nullptr;
-    }
-}
-
-bool UpdateAboutFonts(
-    HWND dialog, AboutDialogState& state, UINT dpi) noexcept {
-    ReleaseAboutFonts(state);
-    const auto dialog_font = reinterpret_cast<HFONT>(
-        SendMessageW(dialog, WM_GETFONT, 0, 0));
-    LOGFONTW base_font{};
-    if (dialog_font == nullptr
-        || GetObjectW(
-               dialog_font,
-               static_cast<int>(sizeof(base_font)),
-               &base_font) != static_cast<int>(sizeof(base_font))) {
-        return false;
-    }
-
-    LOGFONTW name_font = base_font;
-    name_font.lfHeight = -MulDiv(15, static_cast<int>(dpi), 72);
-    name_font.lfWeight = FW_SEMIBOLD;
-    state.name_font = CreateFontIndirectW(&name_font);
-
-    LOGFONTW body_font = base_font;
-    body_font.lfHeight = -MulDiv(9, static_cast<int>(dpi), 72);
-    body_font.lfWeight = FW_NORMAL;
-    state.body_font = CreateFontIndirectW(&body_font);
-    if (state.name_font == nullptr || state.body_font == nullptr) {
-        ReleaseAboutFonts(state);
-        return false;
-    }
-
-    SendDlgItemMessageW(
-        dialog,
-        IDC_ABOUT_NAME,
-        WM_SETFONT,
-        reinterpret_cast<WPARAM>(state.name_font),
-        TRUE);
-    for (const int id : {
-             IDC_ABOUT_DESCRIPTION,
-             IDC_ABOUT_VERSION,
-             IDC_ABOUT_COPYRIGHT,
-             IDOK}) {
-        SendDlgItemMessageW(
-            dialog,
-            id,
-            WM_SETFONT,
-            reinterpret_cast<WPARAM>(state.body_font),
-            TRUE);
-    }
-    return true;
-}
-
-bool UpdateAboutIcon(
-    HWND dialog, AboutDialogState& state, int icon_size) noexcept {
-    const HWND icon_control = GetDlgItem(dialog, IDC_ABOUT_ICON);
-    if (icon_control == nullptr) {
-        return false;
-    }
-    SendMessageW(icon_control, STM_SETIMAGE, IMAGE_ICON, 0);
-    if (state.display_icon != nullptr) {
-        DestroyIcon(state.display_icon);
-        state.display_icon = nullptr;
-    }
-    const int resource_id = icon_size <= kAboutIconSize
-        ? IDR_ABOUT_ICON_88_PNG
-        : IDR_ABOUT_ICON_256_PNG;
-    state.display_icon = inkpod::windows::LoadPngIconResource(
-        state.instance, resource_id, icon_size);
-    if (state.display_icon == nullptr) {
-        return false;
-    }
-    SendMessageW(
-        icon_control,
-        STM_SETIMAGE,
-        IMAGE_ICON,
-        reinterpret_cast<LPARAM>(state.display_icon));
-    return true;
-}
-
-bool LayoutAboutDialog(
-    HWND dialog, AboutDialogState& state, bool center_on_owner) noexcept {
-    UINT dpi = GetDpiForWindow(dialog);
-    if (dpi == 0U) {
-        dpi = USER_DEFAULT_SCREEN_DPI;
-    }
-    const int window_width = ScaleAboutReferencePixel(kAboutWindowWidth, dpi);
-    const int window_height = ScaleAboutReferencePixel(kAboutWindowHeight, dpi);
-    RECT current_bounds{};
-    if (GetWindowRect(dialog, &current_bounds) == FALSE) {
-        return false;
-    }
-    const POINT origin = center_on_owner
-        ? CenteredAboutOrigin(dialog, window_width, window_height)
-        : POINT{current_bounds.left, current_bounds.top};
-    if (SetWindowPos(
-            dialog,
-            nullptr,
-            origin.x,
-            origin.y,
-            window_width,
-            window_height,
-            SWP_NOACTIVATE | SWP_NOZORDER) == FALSE) {
-        return false;
-    }
-
-    RECT client{};
-    if (GetClientRect(dialog, &client) == FALSE) {
-        return false;
-    }
-    const int icon_size = ScaleAboutReferencePixel(kAboutIconSize, dpi);
-    const int content_width = client.right - client.left;
-    const int button_width = ScaleAboutReferencePixel(kAboutButtonWidth, dpi);
-    const int button_height = ScaleAboutReferencePixel(kAboutButtonHeight, dpi);
-    const int description_margin = ScaleAboutReferencePixel(48, dpi);
-    const int name_margin = ScaleAboutReferencePixel(20, dpi);
-    const int divider_height = ScaleAboutReferencePixel(1, dpi);
-    if (!MoveAboutControl(
-            dialog,
-            IDC_ABOUT_ICON,
-            (content_width - icon_size) / 2,
-            ScaleAboutReferencePixel(kAboutIconTop, dpi),
-            icon_size,
-            icon_size)
-        || !MoveAboutControl(
-            dialog,
-            IDC_ABOUT_NAME,
-            name_margin,
-            ScaleAboutReferencePixel(kAboutNameTop, dpi),
-            content_width - name_margin * 2,
-            ScaleAboutReferencePixel(kAboutNameHeight, dpi))
-        || !MoveAboutControl(
-            dialog,
-            IDC_ABOUT_DESCRIPTION,
-            description_margin,
-            ScaleAboutReferencePixel(kAboutDescriptionTop, dpi),
-            content_width - description_margin * 2,
-            ScaleAboutReferencePixel(kAboutDescriptionHeight, dpi))
-        || !MoveAboutControl(
-            dialog,
-            IDC_ABOUT_VERSION,
-            name_margin,
-            ScaleAboutReferencePixel(kAboutVersionTop, dpi),
-            content_width - name_margin * 2,
-            ScaleAboutReferencePixel(kAboutVersionHeight, dpi))
-        || !MoveAboutControl(
-            dialog,
-            IDC_ABOUT_COPYRIGHT,
-            name_margin,
-            ScaleAboutReferencePixel(kAboutCopyrightTop, dpi),
-            content_width - name_margin * 2,
-            ScaleAboutReferencePixel(kAboutCopyrightHeight, dpi))
-        || !MoveAboutControl(
-            dialog,
-            IDC_ABOUT_SEPARATOR,
-            0,
-            client.bottom - ScaleAboutReferencePixel(kAboutFooterHeight, dpi),
-            content_width,
-            divider_height)
-        || !MoveAboutControl(
-            dialog,
-            IDOK,
-            content_width
-                - ScaleAboutReferencePixel(kAboutButtonRightMargin, dpi)
-                - button_width,
-            client.bottom
-                - ScaleAboutReferencePixel(kAboutButtonBottomMargin, dpi)
-                - button_height,
-            button_width,
-            button_height)
-        || !UpdateAboutFonts(dialog, state, dpi)
-        || !UpdateAboutIcon(dialog, state, icon_size)) {
-        return false;
-    }
-    return true;
-}
-
-bool AboutControlBounds(HWND dialog, int id, RECT& bounds) noexcept {
-    const HWND control = GetDlgItem(dialog, id);
-    if (control == nullptr || GetWindowRect(control, &bounds) == FALSE) {
-        return false;
-    }
-    MapWindowPoints(
-        nullptr,
-        dialog,
-        reinterpret_cast<POINT*>(&bounds),
-        2);
-    return true;
-}
-
-bool AboutIconSizeMatches(HICON icon, int expected_size) noexcept {
-    ICONINFO icon_info{};
-    if (icon == nullptr || GetIconInfo(icon, &icon_info) == FALSE) {
-        return false;
-    }
-    BITMAP bitmap{};
-    const bool matches = icon_info.hbmColor != nullptr
-        && GetObjectW(
-               icon_info.hbmColor,
-               static_cast<int>(sizeof(bitmap)),
-               &bitmap) == static_cast<int>(sizeof(bitmap))
-        && bitmap.bmWidth == expected_size
-        && bitmap.bmHeight == expected_size;
-    if (icon_info.hbmColor != nullptr) {
-        DeleteObject(icon_info.hbmColor);
-    }
-    if (icon_info.hbmMask != nullptr) {
-        DeleteObject(icon_info.hbmMask);
-    }
-    return matches;
-}
-
-bool AboutFontHeightMatches(
-    HWND dialog, int control_id, int point_size, UINT dpi) noexcept {
-    const auto font = reinterpret_cast<HFONT>(
-        SendDlgItemMessageW(dialog, control_id, WM_GETFONT, 0, 0));
-    LOGFONTW font_info{};
-    return font != nullptr
-        && GetObjectW(
-               font,
-               static_cast<int>(sizeof(font_info)),
-               &font_info) == static_cast<int>(sizeof(font_info))
-        && font_info.lfHeight
-            == -MulDiv(point_size, static_cast<int>(dpi), 72);
-}
-
-bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
-    UINT dpi = GetDpiForWindow(dialog);
-    if (dpi == 0U) {
-        dpi = USER_DEFAULT_SCREEN_DPI;
-    }
-    RECT dialog_bounds{};
-    RECT icon_bounds{};
-    RECT name_bounds{};
-    RECT copyright_bounds{};
-    RECT separator_bounds{};
-    if (GetWindowRect(dialog, &dialog_bounds) == FALSE
-        || !AboutControlBounds(dialog, IDC_ABOUT_ICON, icon_bounds)
-        || !AboutControlBounds(dialog, IDC_ABOUT_NAME, name_bounds)
-        || !AboutControlBounds(
-            dialog, IDC_ABOUT_COPYRIGHT, copyright_bounds)
-        || !AboutControlBounds(
-            dialog, IDC_ABOUT_SEPARATOR, separator_bounds)) {
-        return false;
-    }
-    const int width = dialog_bounds.right - dialog_bounds.left;
-    const int height = dialog_bounds.bottom - dialog_bounds.top;
-    const POINT expected_origin = CenteredAboutOrigin(dialog, width, height);
-    const int expected_icon_size =
-        ScaleAboutReferencePixel(kAboutIconSize, dpi);
-    const auto displayed_icon = reinterpret_cast<HICON>(
-        SendDlgItemMessageW(
-            dialog, IDC_ABOUT_ICON, STM_GETIMAGE, IMAGE_ICON, 0));
-    if (width != ScaleAboutReferencePixel(kAboutWindowWidth, dpi)
-        || height != ScaleAboutReferencePixel(kAboutWindowHeight, dpi)
-        || dialog_bounds.left != expected_origin.x
-        || dialog_bounds.top != expected_origin.y
-        || name_bounds.top - icon_bounds.bottom
-            != ScaleAboutReferencePixel(38, dpi)
-        || name_bounds.bottom - name_bounds.top
-            != ScaleAboutReferencePixel(kAboutNameHeight, dpi)
-        || copyright_bounds.bottom >= separator_bounds.top
-        || !AboutIconSizeMatches(displayed_icon, expected_icon_size)
-        || !AboutFontHeightMatches(dialog, IDC_ABOUT_NAME, 15, dpi)
-        || !AboutFontHeightMatches(
-            dialog, IDC_ABOUT_DESCRIPTION, 9, dpi)) {
-        return false;
-    }
-
-    std::array<wchar_t, 32> name{};
-    std::array<wchar_t, 64> version{};
-    std::array<wchar_t, 96> expected_version{};
-    std::array<wchar_t, 512> description{};
-    std::array<wchar_t, 512> expected_description{};
-    std::array<wchar_t, 64> copyright{};
-    std::array<wchar_t, 64> expected_copyright{};
-    if (GetDlgItemTextW(
-            dialog, IDC_ABOUT_NAME, name.data(), static_cast<int>(name.size())) == 0
-        || GetDlgItemTextW(
-               dialog,
-               IDC_ABOUT_VERSION,
-               expected_version.data(),
-               static_cast<int>(expected_version.size())) == 0
-        || GetDlgItemTextW(
-               dialog,
-               IDC_ABOUT_DESCRIPTION,
-               description.data(),
-               static_cast<int>(description.size())) == 0
-        || LoadStringW(
-               instance,
-               IDS_APP_VERSION,
-               version.data(),
-               static_cast<int>(version.size())) == 0
-        || LoadStringW(
-               instance,
-               IDS_ABOUT_DESCRIPTION,
-               expected_description.data(),
-               static_cast<int>(expected_description.size())) == 0
-        || GetDlgItemTextW(
-               dialog,
-               IDC_ABOUT_COPYRIGHT,
-               copyright.data(),
-               static_cast<int>(copyright.size())) == 0
-        || LoadStringW(
-               instance,
-               IDS_ABOUT_COPYRIGHT,
-               expected_copyright.data(),
-               static_cast<int>(expected_copyright.size())) == 0) {
-        return false;
-    }
-    std::array<wchar_t, 96> version_label{};
-    _snwprintf_s(
-        version_label.data(),
-        version_label.size(),
-        _TRUNCATE,
-        L"Version %ls",
-        version.data());
-    return std::wcscmp(name.data(), L"Inkpod") == 0
-        && std::wcscmp(expected_version.data(), version_label.data()) == 0
-        && std::wcscmp(description.data(), expected_description.data()) == 0
-        && std::wcscmp(copyright.data(), expected_copyright.data()) == 0;
-}
-
-INT_PTR CALLBACK AboutDialogProcedure(
-    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<AboutDialogState*>(
-        GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    switch (message) {
-        case WM_INITDIALOG: {
-            state = reinterpret_cast<AboutDialogState*>(lparam);
-            if (state == nullptr) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            SetWindowLongPtrW(
-                dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-
-            std::array<wchar_t, 64> version{};
-            std::array<wchar_t, 96> version_label{};
-            std::array<wchar_t, 512> description{};
-            std::array<wchar_t, 64> copyright{};
-            if (LoadStringW(
-                    state->instance,
-                    IDS_APP_VERSION,
-                    version.data(),
-                    static_cast<int>(version.size())) == 0
-                || LoadStringW(
-                       state->instance,
-                       IDS_ABOUT_DESCRIPTION,
-                       description.data(),
-                       static_cast<int>(description.size())) == 0
-                || LoadStringW(
-                       state->instance,
-                       IDS_ABOUT_COPYRIGHT,
-                       copyright.data(),
-                       static_cast<int>(copyright.size())) == 0) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            _snwprintf_s(
-                version_label.data(),
-                version_label.size(),
-                _TRUNCATE,
-                L"Version %ls",
-                version.data());
-            SetDlgItemTextW(dialog, IDC_ABOUT_VERSION, version_label.data());
-            SetDlgItemTextW(dialog, IDC_ABOUT_DESCRIPTION, description.data());
-            SetDlgItemTextW(dialog, IDC_ABOUT_COPYRIGHT, copyright.data());
-            if (!LayoutAboutDialog(dialog, *state, true)) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-
-            const auto caption_icon = LoadIconW(
-                state->instance, MAKEINTRESOURCEW(IDI_APP_ICON));
-            if (caption_icon != nullptr) {
-                SendMessageW(
-                    dialog,
-                    WM_SETICON,
-                    ICON_SMALL,
-                    reinterpret_cast<LPARAM>(caption_icon));
-            }
-            state->layout_valid = ValidateAboutDialog(
-                dialog, state->instance);
-            if (state->close_immediately) {
-                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
-            }
-            return TRUE;
-        }
-        case WM_DPICHANGED:
-            if (state != nullptr) {
-                const auto* suggested = reinterpret_cast<const RECT*>(lparam);
-                if (suggested != nullptr) {
-                    SetWindowPos(
-                        dialog,
-                        nullptr,
-                        suggested->left,
-                        suggested->top,
-                        0,
-                        0,
-                        SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
-                }
-                return LayoutAboutDialog(dialog, *state, false) ? TRUE : FALSE;
-            }
-            break;
-        case WM_COMMAND:
-            if (LOWORD(wparam) == IDOK || LOWORD(wparam) == IDCANCEL) {
-                EndDialog(dialog, LOWORD(wparam));
-                return TRUE;
-            }
-            break;
-        case WM_CLOSE:
-            EndDialog(dialog, IDCANCEL);
-            return TRUE;
-        case WM_DESTROY:
-            if (state != nullptr) {
-                SendDlgItemMessageW(
-                    dialog, IDC_ABOUT_ICON, STM_SETIMAGE, IMAGE_ICON, 0);
-                if (state->display_icon != nullptr) {
-                    DestroyIcon(state->display_icon);
-                    state->display_icon = nullptr;
-                }
-                ReleaseAboutFonts(*state);
-            }
-            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
-            return TRUE;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
-INT_PTR ShowAboutDialog(
-    HINSTANCE instance, HWND owner, bool close_immediately) noexcept {
-    AboutDialogState state{
-        instance, nullptr, nullptr, nullptr, close_immediately, false};
-    const INT_PTR result = DialogBoxParamW(
-        instance,
-        MAKEINTRESOURCEW(IDD_ABOUT),
-        owner,
-        AboutDialogProcedure,
-        reinterpret_cast<LPARAM>(&state));
-    return result == IDOK && (!close_immediately || state.layout_valid)
-        ? IDOK
-        : IDCANCEL;
-}
-
-struct ShortcutDialogState {
-    std::uint32_t command_id{1U};
-    std::uint32_t virtual_key{static_cast<std::uint32_t>('Z')};
-    std::uint32_t modifiers{INKPOD_SHORTCUT_MODIFIER_CONTROL};
-    bool close_immediately{};
-};
-
-struct ShortcutEntry {
-    std::uint32_t command_id;
-    UINT menu_command;
-    const wchar_t* label;
-};
-
-constexpr std::array<ShortcutEntry, 24U> kShortcutEntries{{
-    {1U, IDM_EDIT_UNDO, L"[メニュー] 元に戻す"},
-    {2U, IDM_EDIT_REDO, L"[メニュー] やり直し"},
-    {3U, IDM_EDIT_COPY, L"[メニュー] コピー"},
-    {4U, IDM_EDIT_PASTE, L"[メニュー] 貼り付け"},
-    {IDM_FILE_NEW, IDM_FILE_NEW, L"[メニュー] 新規セル"},
-    {IDM_FILE_OPEN, IDM_FILE_OPEN, L"[メニュー] 開く"},
-    {IDM_FILE_SAVE, IDM_FILE_SAVE, L"[メニュー] 保存"},
-    {IDM_VIEW_FIT, IDM_VIEW_FIT, L"[メニュー] 全体表示"},
-    {IDM_VIEW_ONE_TO_ONE, IDM_VIEW_ONE_TO_ONE, L"[メニュー] ピクセル等倍"},
-    {IDM_VIEW_FLIP_HORIZONTAL, IDM_VIEW_FLIP_HORIZONTAL, L"[メニュー] 表示を左右反転"},
-    {IDM_VIEW_FLIP_VERTICAL, IDM_VIEW_FLIP_VERTICAL, L"[メニュー] 表示を上下反転"},
-    {IDM_SELECTION_ALL, IDM_SELECTION_ALL, L"[メニュー] すべて選択"},
-    {IDM_SELECTION_CLEAR, IDM_SELECTION_CLEAR, L"[メニュー] 選択解除"},
-    {IDM_TOOL_PENCIL, IDM_TOOL_PENCIL, L"[ツール] 鉛筆"},
-    {IDM_TOOL_BRUSH, IDM_TOOL_BRUSH, L"[ツール] ブラシ"},
-    {IDM_TOOL_ERASER, IDM_TOOL_ERASER, L"[ツール] 消しゴム"},
-    {IDM_TOOL_FILL, IDM_TOOL_FILL, L"[ツール] フィル"},
-    {IDM_TOOL_EYEDROPPER, IDM_TOOL_EYEDROPPER, L"[ツール] スポイト"},
-    {IDM_SELECTION_RECTANGLE, IDM_SELECTION_RECTANGLE, L"[ツール] 長方形選択"},
-    {IDM_SELECTION_WAND, IDM_SELECTION_WAND, L"[ツール] 色の杖"},
-    {IDM_VIEW_GRID, IDM_VIEW_GRID, L"[その他] グリッド表示"},
-    {IDM_VIEW_GUIDES, IDM_VIEW_GUIDES, L"[その他] ガイド表示"},
-    {IDM_VIEW_NEW, IDM_VIEW_NEW, L"[その他] 新規セルビュー"},
-    {IDM_COLOR_CHOOSE, IDM_COLOR_CHOOSE, L"[その他] 描画色"},
-}};
-
-constexpr WORD DefaultShortcutHotkey(std::uint32_t command_id) noexcept {
-    const BYTE key = command_id == 2U
-        ? static_cast<BYTE>('Y')
-        : (command_id == 3U
-                  ? static_cast<BYTE>('C')
-                  : (command_id == 4U ? static_cast<BYTE>('V')
-                                      : (command_id == 1U ? static_cast<BYTE>('Z') : 0U)));
-    return key == 0U ? 0U : MAKEWORD(key, HOTKEYF_CONTROL);
-}
-
-std::uint32_t ShortcutModifiers(BYTE hotkey_flags) noexcept {
-    std::uint32_t modifiers{};
-    if ((hotkey_flags & HOTKEYF_CONTROL) != 0U) {
-        modifiers |= INKPOD_SHORTCUT_MODIFIER_CONTROL;
-    }
-    if ((hotkey_flags & HOTKEYF_SHIFT) != 0U) {
-        modifiers |= INKPOD_SHORTCUT_MODIFIER_SHIFT;
-    }
-    if ((hotkey_flags & HOTKEYF_ALT) != 0U) {
-        modifiers |= INKPOD_SHORTCUT_MODIFIER_ALT;
-    }
-    if ((hotkey_flags & HOTKEYF_EXT) != 0U) {
-        modifiers |= INKPOD_SHORTCUT_MODIFIER_EXTENDED;
-    }
-    return modifiers;
-}
-
-INT_PTR CALLBACK ShortcutDialogProcedure(
-    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<ShortcutDialogState*>(
-        GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    switch (message) {
-        case WM_INITDIALOG: {
-            state = reinterpret_cast<ShortcutDialogState*>(lparam);
-            if (state == nullptr) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            SetWindowLongPtrW(
-                dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            const HWND commands = GetDlgItem(dialog, IDC_SHORTCUT_COMMAND);
-            if (commands == nullptr) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            for (const auto& entry : kShortcutEntries) {
-                const LRESULT item = SendMessageW(
-                    commands,
-                    CB_ADDSTRING,
-                    0,
-                    reinterpret_cast<LPARAM>(entry.label));
-                if (item == CB_ERR || item == CB_ERRSPACE) {
-                    EndDialog(dialog, IDCANCEL);
-                    return TRUE;
-                }
-                SendMessageW(
-                    commands,
-                    CB_SETITEMDATA,
-                    static_cast<WPARAM>(item),
-                    static_cast<LPARAM>(entry.command_id));
-            }
-            SendMessageW(commands, CB_SETCURSEL, 0, 0);
-            SendDlgItemMessageW(
-                dialog,
-                IDC_SHORTCUT_HOTKEY,
-                HKM_SETHOTKEY,
-                DefaultShortcutHotkey(1U),
-                0);
-            if (state->close_immediately) {
-                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
-            }
-            return TRUE;
-        }
-        case WM_COMMAND:
-            if (state == nullptr) {
-                break;
-            }
-            if (LOWORD(wparam) == IDC_SHORTCUT_COMMAND
-                && HIWORD(wparam) == CBN_SELCHANGE) {
-                const LRESULT selected = SendDlgItemMessageW(
-                    dialog, IDC_SHORTCUT_COMMAND, CB_GETCURSEL, 0, 0);
-                if (selected != CB_ERR) {
-                    const auto command_id = static_cast<std::uint32_t>(
-                        SendDlgItemMessageW(
-                            dialog,
-                            IDC_SHORTCUT_COMMAND,
-                            CB_GETITEMDATA,
-                            static_cast<WPARAM>(selected),
-                            0));
-                    SendDlgItemMessageW(
-                        dialog,
-                        IDC_SHORTCUT_HOTKEY,
-                        HKM_SETHOTKEY,
-                        DefaultShortcutHotkey(command_id),
-                        0);
-                }
-                return TRUE;
-            }
-            if (LOWORD(wparam) == IDOK) {
-                const LRESULT selected = SendDlgItemMessageW(
-                    dialog, IDC_SHORTCUT_COMMAND, CB_GETCURSEL, 0, 0);
-                const LRESULT command_id = selected == CB_ERR
-                    ? CB_ERR
-                    : SendDlgItemMessageW(
-                          dialog,
-                          IDC_SHORTCUT_COMMAND,
-                          CB_GETITEMDATA,
-                          static_cast<WPARAM>(selected),
-                          0);
-                const WORD hotkey = static_cast<WORD>(SendDlgItemMessageW(
-                    dialog, IDC_SHORTCUT_HOTKEY, HKM_GETHOTKEY, 0, 0));
-                if (command_id == CB_ERR || LOBYTE(hotkey) == 0U) {
-                    if (!state->close_immediately) {
-                        MessageBoxW(
-                            dialog,
-                            L"コマンドとキーを指定してください。",
-                            L"inkpod",
-                            MB_OK | MB_ICONWARNING);
-                    }
-                    return TRUE;
-                }
-                state->command_id = static_cast<std::uint32_t>(command_id);
-                state->virtual_key = LOBYTE(hotkey);
-                state->modifiers = ShortcutModifiers(HIBYTE(hotkey));
-                EndDialog(dialog, IDOK);
-                return TRUE;
-            }
-            if (LOWORD(wparam) == IDCANCEL) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            break;
-        case WM_CLOSE:
-            EndDialog(dialog, IDCANCEL);
-            return TRUE;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
-INT_PTR ShowShortcutEditor(
-    HINSTANCE instance,
-    HWND owner,
-    bool close_immediately,
-    ShortcutDialogState& state) noexcept {
-    state.close_immediately = close_immediately;
-    return DialogBoxParamW(
-        instance,
-        MAKEINTRESOURCEW(IDD_SHORTCUT_EDITOR),
-        owner,
-        ShortcutDialogProcedure,
-        reinterpret_cast<LPARAM>(&state));
-}
-
-struct ViewOptionsDialogState {
-    const wchar_t* title{};
-    std::array<const wchar_t*, 4U> labels{};
-    std::array<std::int32_t, 4U> values{};
-    std::uint32_t value_count{1U};
-    bool close_immediately{};
-};
-
-INT_PTR CALLBACK ViewOptionsDialogProcedure(
-    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<ViewOptionsDialogState*>(
-        GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    constexpr std::array<int, 4U> label_ids{
-        IDC_VIEW_VALUE_LABEL,
-        IDC_VIEW_VALUE2_LABEL,
-        IDC_VIEW_VALUE3_LABEL,
-        IDC_VIEW_VALUE4_LABEL};
-    constexpr std::array<int, 4U> edit_ids{
-        IDC_VIEW_VALUE,
-        IDC_VIEW_VALUE2,
-        IDC_VIEW_VALUE3,
-        IDC_VIEW_VALUE4};
-    switch (message) {
-        case WM_INITDIALOG: {
-            state = reinterpret_cast<ViewOptionsDialogState*>(lparam);
-            if (state == nullptr || state->value_count == 0U
-                || state->value_count > label_ids.size()) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            SetWindowLongPtrW(
-                dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            if (state->title != nullptr) {
-                SetWindowTextW(dialog, state->title);
-            }
-            for (std::size_t index = 0; index < label_ids.size(); ++index) {
-                const bool visible = index < state->value_count;
-                ShowWindow(GetDlgItem(dialog, label_ids[index]), visible ? SW_SHOW : SW_HIDE);
-                ShowWindow(GetDlgItem(dialog, edit_ids[index]), visible ? SW_SHOW : SW_HIDE);
-                if (!visible) {
-                    continue;
-                }
-                SetDlgItemTextW(
-                    dialog,
-                    label_ids[index],
-                    state->labels[index] == nullptr ? L"値" : state->labels[index]);
-                std::array<wchar_t, 32U> value{};
-                _snwprintf_s(
-                    value.data(), value.size(), _TRUNCATE, L"%d", state->values[index]);
-                SetDlgItemTextW(dialog, edit_ids[index], value.data());
-            }
-            if (state->close_immediately) {
-                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
-            }
-            return TRUE;
-        }
-        case WM_COMMAND:
-            if (state == nullptr) {
-                break;
-            }
-            if (LOWORD(wparam) == IDOK) {
-                for (std::size_t index = 0; index < state->value_count; ++index) {
-                    std::array<wchar_t, 32U> text{};
-                    if (GetDlgItemTextW(
-                            dialog,
-                            edit_ids[index],
-                            text.data(),
-                            static_cast<int>(text.size())) <= 0) {
-                        return TRUE;
-                    }
-                    wchar_t* end{};
-                    errno = 0;
-                    const long value = std::wcstol(text.data(), &end, 10);
-                    if (errno == ERANGE || end == text.data() || *end != L'\0'
-                        || value < INT_MIN || value > INT_MAX) {
-                        if (!state->close_immediately) {
-                            MessageBoxW(
-                                dialog,
-                                L"すべての値を整数で指定してください。",
-                                L"inkpod",
-                                MB_OK | MB_ICONWARNING);
-                        }
-                        return TRUE;
-                    }
-                    state->values[index] = static_cast<std::int32_t>(value);
-                }
-                EndDialog(dialog, IDOK);
-                return TRUE;
-            }
-            if (LOWORD(wparam) == IDCANCEL) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            break;
-        case WM_CLOSE:
-            EndDialog(dialog, IDCANCEL);
-            return TRUE;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
-INT_PTR ShowViewOptions(
-    HINSTANCE instance,
-    HWND owner,
-    bool close_immediately,
-    ViewOptionsDialogState& state) noexcept {
-    state.close_immediately = close_immediately;
-    return DialogBoxParamW(
-        instance,
-        MAKEINTRESOURCEW(IDD_VIEW_OPTIONS),
-        owner,
-        ViewOptionsDialogProcedure,
-        reinterpret_cast<LPARAM>(&state));
-}
-
-struct TextInputDialogState {
-    const wchar_t* title{};
-    const wchar_t* label{};
-    std::wstring value;
-    bool close_immediately{};
-};
-
-INT_PTR CALLBACK TextInputDialogProcedure(
-    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<TextInputDialogState*>(
-        GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    switch (message) {
-        case WM_INITDIALOG:
-            state = reinterpret_cast<TextInputDialogState*>(lparam);
-            if (state == nullptr) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            if (state->title != nullptr) {
-                SetWindowTextW(dialog, state->title);
-            }
-            SetDlgItemTextW(
-                dialog, IDC_TEXT_INPUT_LABEL,
-                state->label == nullptr ? L"値" : state->label);
-            SetDlgItemTextW(dialog, IDC_TEXT_INPUT_VALUE, state->value.c_str());
-            if (state->close_immediately) {
-                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
-            }
-            return TRUE;
-        case WM_COMMAND:
-            if (state == nullptr) {
-                break;
-            }
-            if (LOWORD(wparam) == IDOK) {
-                std::array<wchar_t, 1025U> text{};
-                const int length = GetDlgItemTextW(
-                    dialog, IDC_TEXT_INPUT_VALUE, text.data(), static_cast<int>(text.size()));
-                if (length <= 0) {
-                    return TRUE;
-                }
-                try {
-                    state->value.assign(text.data(), static_cast<std::size_t>(length));
-                } catch (const std::bad_alloc&) {
-                    EndDialog(dialog, IDCANCEL);
-                    return TRUE;
-                }
-                EndDialog(dialog, IDOK);
-                return TRUE;
-            }
-            if (LOWORD(wparam) == IDCANCEL) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            break;
-        case WM_CLOSE:
-            EndDialog(dialog, IDCANCEL);
-            return TRUE;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
-INT_PTR ShowTextInput(
-    HINSTANCE instance,
-    HWND owner,
-    bool close_immediately,
-    TextInputDialogState& state) noexcept {
-    state.close_immediately = close_immediately;
-    return DialogBoxParamW(
-        instance,
-        MAKEINTRESOURCEW(IDD_TEXT_INPUT),
-        owner,
-        TextInputDialogProcedure,
-        reinterpret_cast<LPARAM>(&state));
-}
-
-struct FillOptionsDialogState {
-    FillToolOptions options;
-    bool close_immediately{};
-};
-
-bool ParseFillColors(const wchar_t* text, std::vector<std::uint32_t>& colors) noexcept {
-    colors.clear();
-    if (text == nullptr) {
-        return false;
-    }
-    try {
-        const std::wstring input(text);
-        std::size_t start{};
-        while (start < input.size()) {
-            const std::size_t separator = input.find(L';', start);
-            const std::size_t end = separator == std::wstring::npos
-                ? input.size()
-                : separator;
-            std::size_t first = start;
-            while (first < end && iswspace(input[first]) != 0) {
-                ++first;
-            }
-            std::size_t last = end;
-            while (last > first && iswspace(input[last - 1U]) != 0) {
-                --last;
-            }
-            if (first != last) {
-                if (last - first != 8U || colors.size() >= 6U) {
-                    return false;
-                }
-                const std::wstring token = input.substr(first, last - first);
-                wchar_t* token_end{};
-                errno = 0;
-                const unsigned long value = std::wcstoul(
-                    token.c_str(), &token_end, 16);
-                if (errno == ERANGE || token_end == token.c_str()
-                    || *token_end != L'\0') {
-                    return false;
-                }
-                colors.push_back(static_cast<std::uint32_t>(value));
-            }
-            if (separator == std::wstring::npos) {
-                break;
-            }
-            start = separator + 1U;
-        }
-        return true;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-}
-
-INT_PTR CALLBACK FillOptionsDialogProcedure(
-    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<FillOptionsDialogState*>(
-        GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    switch (message) {
-        case WM_INITDIALOG: {
-            state = reinterpret_cast<FillOptionsDialogState*>(lparam);
-            if (state == nullptr) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            SetWindowLongPtrW(
-                dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            const HWND operation = GetDlgItem(dialog, IDC_FILL_OPERATION);
-            for (const wchar_t* label : {L"通常フィル", L"閉領域フィル", L"塗りのばし"}) {
-                SendMessageW(
-                    operation,
-                    CB_ADDSTRING,
-                    0,
-                    reinterpret_cast<LPARAM>(label));
-            }
-            SendMessageW(
-                operation,
-                CB_SETCURSEL,
-                state->options.operation == INKPOD_FILL_CLOSED_REGION
-                    ? 1
-                    : (state->options.operation == INKPOD_FILL_EXTENSION ? 2 : 0),
-                0);
-            const HWND inclusion = GetDlgItem(dialog, IDC_FILL_INCLUSION_MODE);
-            for (const wchar_t* label : {L"なし", L"指定色", L"指定色以外"}) {
-                SendMessageW(
-                    inclusion,
-                    CB_ADDSTRING,
-                    0,
-                    reinterpret_cast<LPARAM>(label));
-            }
-            SendMessageW(
-                inclusion,
-                CB_SETCURSEL,
-                state->options.inclusion_mode == INKPOD_INCLUSION_SPECIFIED
-                    ? 1
-                    : (state->options.inclusion_mode == INKPOD_INCLUSION_EXCEPT_SPECIFIED
-                              ? 2
-                              : 0),
-                0);
-            SetDlgItemInt(dialog, IDC_FILL_TOLERANCE, state->options.tolerance, FALSE);
-            SetDlgItemInt(dialog, IDC_FILL_GAP, state->options.gap_close, FALSE);
-            SetDlgItemInt(
-                dialog, IDC_FILL_EXTENSION, state->options.extension_distance, FALSE);
-            std::wstring color_text;
-            try {
-                std::array<wchar_t, 16U> token{};
-                for (std::size_t index = 0; index < state->options.inclusion_rgba.size(); ++index) {
-                    if (index != 0U) {
-                        color_text += L';';
-                    }
-                    _snwprintf_s(
-                        token.data(),
-                        token.size(),
-                        _TRUNCATE,
-                        L"%08X",
-                        state->options.inclusion_rgba[index]);
-                    color_text += token.data();
-                }
-            } catch (const std::bad_alloc&) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            SetDlgItemTextW(dialog, IDC_FILL_COLORS, color_text.c_str());
-            for (const auto& [control, checked] : std::array<std::pair<int, bool>, 6U>{
-                     std::pair{IDC_FILL_OVERFLOW, state->options.overflow_abort},
-                     std::pair{IDC_FILL_DETACHED, state->options.detached_regions},
-                     std::pair{IDC_FILL_TRANSPARENT, state->options.transparent_only},
-                     std::pair{IDC_FILL_SELECTION, state->options.use_document_selection},
-                     std::pair{IDC_FILL_LIGHT_BOUNDARY, state->options.light_table_boundary},
-                     std::pair{IDC_FILL_LIGHT_COLOR, state->options.light_table_color}}) {
-                CheckDlgButton(dialog, control, checked ? BST_CHECKED : BST_UNCHECKED);
-            }
-            if (state->close_immediately) {
-                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
-            }
-            return TRUE;
-        }
-        case WM_COMMAND:
-            if (state == nullptr) {
-                break;
-            }
-            if (LOWORD(wparam) == IDOK) {
-                BOOL tolerance_ok{};
-                BOOL gap_ok{};
-                BOOL extension_ok{};
-                const UINT tolerance = GetDlgItemInt(
-                    dialog, IDC_FILL_TOLERANCE, &tolerance_ok, FALSE);
-                const UINT gap = GetDlgItemInt(dialog, IDC_FILL_GAP, &gap_ok, FALSE);
-                const UINT extension = GetDlgItemInt(
-                    dialog, IDC_FILL_EXTENSION, &extension_ok, FALSE);
-                std::array<wchar_t, 256U> color_text{};
-                GetDlgItemTextW(
-                    dialog,
-                    IDC_FILL_COLORS,
-                    color_text.data(),
-                    static_cast<int>(color_text.size()));
-                std::vector<std::uint32_t> colors;
-                if (tolerance_ok == FALSE || gap_ok == FALSE || extension_ok == FALSE
-                    || tolerance > UINT16_MAX || gap > UINT16_MAX || extension == 0U
-                    || !ParseFillColors(color_text.data(), colors)) {
-                    if (!state->close_immediately) {
-                        MessageBoxW(
-                            dialog,
-                            L"許容差、隙間、距離、対象色を確認してください。",
-                            L"inkpod",
-                            MB_OK | MB_ICONWARNING);
-                    }
-                    return TRUE;
-                }
-                const LRESULT operation = SendDlgItemMessageW(
-                    dialog, IDC_FILL_OPERATION, CB_GETCURSEL, 0, 0);
-                const LRESULT inclusion = SendDlgItemMessageW(
-                    dialog, IDC_FILL_INCLUSION_MODE, CB_GETCURSEL, 0, 0);
-                if (operation == CB_ERR || inclusion == CB_ERR) {
-                    return TRUE;
-                }
-                state->options.operation = operation == 1
-                    ? INKPOD_FILL_CLOSED_REGION
-                    : (operation == 2 ? INKPOD_FILL_EXTENSION : INKPOD_FILL_SEED);
-                state->options.inclusion_mode = inclusion == 1
-                    ? INKPOD_INCLUSION_SPECIFIED
-                    : (inclusion == 2 ? INKPOD_INCLUSION_EXCEPT_SPECIFIED
-                                      : INKPOD_INCLUSION_NONE);
-                if (state->options.inclusion_mode != INKPOD_INCLUSION_NONE
-                    && colors.empty()) {
-                    if (!state->close_immediately) {
-                        MessageBoxW(
-                            dialog,
-                            L"含み塗りには対象色が必要です。",
-                            L"inkpod",
-                            MB_OK | MB_ICONWARNING);
-                    }
-                    return TRUE;
-                }
-                state->options.tolerance = static_cast<std::uint16_t>(tolerance);
-                state->options.gap_close = static_cast<std::uint16_t>(gap);
-                state->options.extension_distance = extension;
-                state->options.inclusion_rgba = std::move(colors);
-                state->options.overflow_abort =
-                    IsDlgButtonChecked(dialog, IDC_FILL_OVERFLOW) == BST_CHECKED;
-                state->options.detached_regions =
-                    IsDlgButtonChecked(dialog, IDC_FILL_DETACHED) == BST_CHECKED;
-                state->options.transparent_only =
-                    IsDlgButtonChecked(dialog, IDC_FILL_TRANSPARENT) == BST_CHECKED;
-                state->options.use_document_selection =
-                    IsDlgButtonChecked(dialog, IDC_FILL_SELECTION) == BST_CHECKED;
-                state->options.light_table_boundary =
-                    IsDlgButtonChecked(dialog, IDC_FILL_LIGHT_BOUNDARY) == BST_CHECKED;
-                state->options.light_table_color =
-                    IsDlgButtonChecked(dialog, IDC_FILL_LIGHT_COLOR) == BST_CHECKED;
-                EndDialog(dialog, IDOK);
-                return TRUE;
-            }
-            if (LOWORD(wparam) == IDCANCEL) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            break;
-        case WM_CLOSE:
-            EndDialog(dialog, IDCANCEL);
-            return TRUE;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
-bool ShowFillOptions(AppState& app) noexcept {
-    FillOptionsDialogState state{app.fill_options, app.smoke_test};
-    if (DialogBoxParamW(
-            app.instance,
-            MAKEINTRESOURCEW(IDD_FILL_OPTIONS),
-            app.window,
-            FillOptionsDialogProcedure,
-            reinterpret_cast<LPARAM>(&state)) != IDOK) {
-        return false;
-    }
-    app.fill_options = std::move(state.options);
-    return true;
-}
-
-struct HistoryDialogState {
-    std::vector<std::wstring> labels;
-    std::vector<std::uint64_t> cursors;
-    std::size_t selected_index{};
-    std::uint64_t selected_cursor{};
-    bool close_immediately{};
-};
-
-INT_PTR CALLBACK HistoryDialogProcedure(
-    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<HistoryDialogState*>(
-        GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    switch (message) {
-        case WM_INITDIALOG: {
-            state = reinterpret_cast<HistoryDialogState*>(lparam);
-            if (state == nullptr || state->labels.empty()
-                || state->labels.size() != state->cursors.size()) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            SetWindowLongPtrW(
-                dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            const HWND list = GetDlgItem(dialog, IDC_HISTORY_LIST);
-            for (std::size_t index = 0; index < state->labels.size(); ++index) {
-                const LRESULT item = SendMessageW(
-                    list,
-                    CB_ADDSTRING,
-                    0,
-                    reinterpret_cast<LPARAM>(state->labels[index].c_str()));
-                if (item == CB_ERR || item == CB_ERRSPACE) {
-                    EndDialog(dialog, IDCANCEL);
-                    return TRUE;
-                }
-                SendMessageW(
-                    list,
-                    CB_SETITEMDATA,
-                    static_cast<WPARAM>(item),
-                    static_cast<LPARAM>(index));
-            }
-            const auto selected = static_cast<WPARAM>(
-                std::min(state->selected_index, state->labels.size() - 1U));
-            SendMessageW(list, CB_SETCURSEL, selected, 0);
-            if (state->close_immediately) {
-                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
-            }
-            return TRUE;
-        }
-        case WM_COMMAND:
-            if (state == nullptr) {
-                break;
-            }
-            if (LOWORD(wparam) == IDOK) {
-                const LRESULT selected = SendDlgItemMessageW(
-                    dialog, IDC_HISTORY_LIST, CB_GETCURSEL, 0, 0);
-                if (selected == CB_ERR) {
-                    return TRUE;
-                }
-                const auto index = static_cast<std::size_t>(SendDlgItemMessageW(
-                    dialog,
-                    IDC_HISTORY_LIST,
-                    CB_GETITEMDATA,
-                    static_cast<WPARAM>(selected),
-                    0));
-                if (index >= state->cursors.size()) {
-                    return TRUE;
-                }
-                state->selected_cursor = state->cursors[index];
-                EndDialog(dialog, IDOK);
-                return TRUE;
-            }
-            if (LOWORD(wparam) == IDCANCEL) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            break;
-        case WM_CLOSE:
-            EndDialog(dialog, IDCANCEL);
-            return TRUE;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
 std::wstring LocalizedHistoryLabel(const std::string& label) {
     if (label == "Raster edit") {
         return L"画像編集";
@@ -2411,526 +1173,91 @@ bool QueryHistoryMenuLabels(
     return true;
 }
 
-INT_PTR ShowHistoryDialog(
-    HINSTANCE instance, HWND owner, HistoryDialogState& state) noexcept {
-    return DialogBoxParamW(
-        instance,
-        MAKEINTRESOURCEW(IDD_HISTORY),
-        owner,
-        HistoryDialogProcedure,
-        reinterpret_cast<LPARAM>(&state));
-}
-
-struct M6EditorState {
-    const wchar_t* title{L"M6 エディター"};
-    std::array<const wchar_t*, 5U> parameter_labels{L"P0", L"P1", L"P2", L"P3", L"P4"};
-    std::array<std::int32_t, 5U> parameters{};
-    std::array<const wchar_t*, 5U> channel_labels{};
-    std::array<std::uint32_t, 5U> channel_values{};
-    std::size_t channel_count{};
-    std::uint32_t channel{};
-    std::array<const wchar_t*, 4U> mode_labels{};
-    std::array<std::uint32_t, 4U> mode_values{};
-    std::size_t mode_count{};
-    std::uint32_t mode{};
-    std::wstring points;
-    const wchar_t* option1_label{L"プレビューして確認"};
-    const wchar_t* option2_label{L"45度制約 / 筆圧"};
-    bool option1{true};
-    bool option2{};
-    bool option1_enabled{true};
-    bool option2_enabled{true};
-    bool close_immediately{};
-};
-
-bool ReadSignedDialogValue(HWND dialog, int control, std::int32_t& output) noexcept {
-    std::array<wchar_t, 64U> text{};
-    if (GetDlgItemTextW(dialog, control, text.data(), static_cast<int>(text.size())) <= 0) {
-        return false;
-    }
-    wchar_t* end{};
-    errno = 0;
-    const long value = wcstol(text.data(), &end, 10);
-    if (errno == ERANGE || end == text.data() || *end != L'\0' || value < INT32_MIN
-        || value > INT32_MAX) {
-        return false;
-    }
-    output = static_cast<std::int32_t>(value);
-    return true;
-}
-
-template <std::size_t Count>
-void FillM6Combo(
-    HWND combo,
-    const std::array<const wchar_t*, Count>& labels,
-    const std::array<std::uint32_t, Count>& values,
-    std::size_t count,
-    std::uint32_t selected_value) noexcept {
-    int selected = 0;
-    for (std::size_t index = 0; index < count; ++index) {
-        const LRESULT item = SendMessageW(
-            combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(labels[index]));
-        if (item == CB_ERR || item == CB_ERRSPACE) {
-            continue;
-        }
-        SendMessageW(combo, CB_SETITEMDATA, item, static_cast<LPARAM>(values[index]));
-        if (values[index] == selected_value) {
-            selected = static_cast<int>(item);
-        }
-    }
-    SendMessageW(combo, CB_SETCURSEL, selected, 0);
-    EnableWindow(combo, count != 0U ? TRUE : FALSE);
-}
-
-std::uint32_t SelectedM6Combo(HWND dialog, int control, std::uint32_t fallback) noexcept {
-    const LRESULT selected = SendDlgItemMessageW(dialog, control, CB_GETCURSEL, 0, 0);
-    if (selected == CB_ERR) {
-        return fallback;
-    }
-    const LRESULT value = SendDlgItemMessageW(
-        dialog, control, CB_GETITEMDATA, static_cast<WPARAM>(selected), 0);
-    return value == CB_ERR ? fallback : static_cast<std::uint32_t>(value);
-}
-
-INT_PTR CALLBACK M6EditorDialogProcedure(
-    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<M6EditorState*>(GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    switch (message) {
-        case WM_INITDIALOG: {
-            state = reinterpret_cast<M6EditorState*>(lparam);
-            if (state == nullptr) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            SetDlgItemTextW(dialog, IDC_M6_TITLE, state->title);
-            constexpr std::array<int, 5U> labels{
-                IDC_M6_PARAM0_LABEL,
-                IDC_M6_PARAM1_LABEL,
-                IDC_M6_PARAM2_LABEL,
-                IDC_M6_PARAM3_LABEL,
-                IDC_M6_PARAM4_LABEL};
-            constexpr std::array<int, 5U> edits{
-                IDC_M6_PARAM0, IDC_M6_PARAM1, IDC_M6_PARAM2, IDC_M6_PARAM3, IDC_M6_PARAM4};
-            for (std::size_t index = 0; index < edits.size(); ++index) {
-                SetDlgItemTextW(dialog, labels[index], state->parameter_labels[index]);
-                std::array<wchar_t, 32U> value{};
-                _snwprintf_s(
-                    value.data(), value.size(), _TRUNCATE, L"%d", state->parameters[index]);
-                SetDlgItemTextW(dialog, edits[index], value.data());
-            }
-            FillM6Combo(
-                GetDlgItem(dialog, IDC_M6_CHANNEL),
-                state->channel_labels,
-                state->channel_values,
-                state->channel_count,
-                state->channel);
-            FillM6Combo(
-                GetDlgItem(dialog, IDC_M6_MODE),
-                state->mode_labels,
-                state->mode_values,
-                state->mode_count,
-                state->mode);
-            SetDlgItemTextW(dialog, IDC_M6_POINTS, state->points.c_str());
-            SetDlgItemTextW(dialog, IDC_M6_OPTION1, state->option1_label);
-            SetDlgItemTextW(dialog, IDC_M6_OPTION2, state->option2_label);
-            CheckDlgButton(dialog, IDC_M6_OPTION1, state->option1 ? BST_CHECKED : BST_UNCHECKED);
-            CheckDlgButton(dialog, IDC_M6_OPTION2, state->option2 ? BST_CHECKED : BST_UNCHECKED);
-            EnableWindow(GetDlgItem(dialog, IDC_M6_OPTION1), state->option1_enabled ? TRUE : FALSE);
-            EnableWindow(GetDlgItem(dialog, IDC_M6_OPTION2), state->option2_enabled ? TRUE : FALSE);
-            if (state->close_immediately) {
-                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
-            }
-            return TRUE;
-        }
-        case WM_COMMAND:
-            if (state == nullptr) {
-                break;
-            }
-            if (LOWORD(wparam) == IDOK) {
-                constexpr std::array<int, 5U> edits{
-                    IDC_M6_PARAM0, IDC_M6_PARAM1, IDC_M6_PARAM2, IDC_M6_PARAM3, IDC_M6_PARAM4};
-                for (std::size_t index = 0; index < edits.size(); ++index) {
-                    if (!ReadSignedDialogValue(dialog, edits[index], state->parameters[index])) {
-                        if (!state->close_immediately) {
-                            MessageBoxW(
-                                dialog,
-                                L"数値パラメーターを10進整数で入力してください。",
-                                L"inkpod",
-                                MB_OK | MB_ICONWARNING);
-                        }
-                        return TRUE;
-                    }
-                }
-                state->channel = SelectedM6Combo(dialog, IDC_M6_CHANNEL, state->channel);
-                state->mode = SelectedM6Combo(dialog, IDC_M6_MODE, state->mode);
-                std::array<wchar_t, 1024U> points{};
-                GetDlgItemTextW(
-                    dialog, IDC_M6_POINTS, points.data(), static_cast<int>(points.size()));
-                try {
-                    state->points.assign(points.data());
-                } catch (const std::bad_alloc&) {
-                    return TRUE;
-                }
-                state->option1 = IsDlgButtonChecked(dialog, IDC_M6_OPTION1) == BST_CHECKED;
-                state->option2 = IsDlgButtonChecked(dialog, IDC_M6_OPTION2) == BST_CHECKED;
-                EndDialog(dialog, IDOK);
-                return TRUE;
-            }
-            if (LOWORD(wparam) == IDCANCEL) {
-                EndDialog(dialog, IDCANCEL);
-                return TRUE;
-            }
-            break;
-        case WM_CLOSE:
-            EndDialog(dialog, IDCANCEL);
-            return TRUE;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
-INT_PTR ShowM6Editor(
-    HINSTANCE instance, HWND owner, bool close_immediately, M6EditorState& state) noexcept {
-    state.close_immediately = close_immediately;
-    return DialogBoxParamW(
-        instance,
-        MAKEINTRESOURCEW(IDD_M6_EDITOR),
-        owner,
-        M6EditorDialogProcedure,
-        reinterpret_cast<LPARAM>(&state));
-}
-
-INT_PTR CALLBACK M6ProgressDialogProcedure(
-    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<AppState*>(GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    switch (message) {
-        case WM_INITDIALOG:
-            state = reinterpret_cast<AppState*>(lparam);
-            if (state == nullptr) {
-                DestroyWindow(dialog);
-                return TRUE;
-            }
-            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            SendDlgItemMessageW(dialog, IDC_M6_PROGRESS_BAR, PBM_SETRANGE32, 0, 1000);
-            SetTimer(dialog, kM6ProgressTimer, 100U, nullptr);
-            return TRUE;
-        case WM_TIMER:
-            if (state != nullptr && wparam == kM6ProgressTimer && state->m6_task != nullptr) {
-                InkpodTaskInfo info{};
-                info.struct_size = sizeof(info);
-                if (inkpod_task_query(state->m6_task, &info) == INKPOD_STATUS_OK) {
-                    const std::uint64_t value = info.total_work == 0U
-                        ? 0U
-                        : std::min<std::uint64_t>(
-                              1000U, info.completed_work * 1000U / info.total_work);
-                    SendDlgItemMessageW(dialog, IDC_M6_PROGRESS_BAR, PBM_SETPOS, value, 0);
-                    std::array<wchar_t, 64U> text{};
-                    _snwprintf_s(
-                        text.data(),
-                        text.size(),
-                        _TRUNCATE,
-                        L"処理中... %llu / %llu",
-                        static_cast<unsigned long long>(info.completed_work),
-                        static_cast<unsigned long long>(info.total_work));
-                    SetDlgItemTextW(dialog, IDC_M6_PROGRESS_TEXT, text.data());
-                }
-                return TRUE;
-            }
-            break;
-        case WM_COMMAND:
-            if (LOWORD(wparam) == IDCANCEL && state != nullptr && state->m6_task != nullptr) {
-                inkpod_task_cancel(state->m6_task);
-                EnableWindow(GetDlgItem(dialog, IDCANCEL), FALSE);
-                SetDlgItemTextW(dialog, IDC_M6_PROGRESS_TEXT, L"キャンセル中...");
-                return TRUE;
-            }
-            break;
-        case WM_CLOSE:
-            if (state != nullptr && state->m6_task != nullptr) {
-                inkpod_task_cancel(state->m6_task);
-            }
-            return TRUE;
-        case WM_NCDESTROY:
-            KillTimer(dialog, kM6ProgressTimer);
-            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
-            return TRUE;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
-INT_PTR CALLBACK BatchProgressDialogProcedure(
-    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<AppState*>(GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    switch (message) {
-        case WM_INITDIALOG:
-            state = reinterpret_cast<AppState*>(lparam);
-            if (state == nullptr) {
-                DestroyWindow(dialog);
-                return TRUE;
-            }
-            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            SetWindowTextW(dialog, L"バッチ処理中");
-            SendDlgItemMessageW(dialog, IDC_M6_PROGRESS_BAR, PBM_SETRANGE32, 0, 1000);
-            SetTimer(dialog, kM6ProgressTimer, 100U, nullptr);
-            return TRUE;
-        case WM_TIMER:
-            if (state != nullptr && wparam == kM6ProgressTimer
-                && state->batch_task != nullptr) {
-                InkpodTaskInfo info{};
-                info.struct_size = sizeof(info);
-                if (inkpod_batch_task_query(state->batch_task, &info) == INKPOD_STATUS_OK) {
-                    const std::uint64_t value = info.total_work == 0U
-                        ? 0U
-                        : std::min<std::uint64_t>(
-                              1000U, info.completed_work * 1000U / info.total_work);
-                    SendDlgItemMessageW(dialog, IDC_M6_PROGRESS_BAR, PBM_SETPOS, value, 0);
-                    std::array<wchar_t, 64U> text{};
-                    _snwprintf_s(
-                        text.data(),
-                        text.size(),
-                        _TRUNCATE,
-                        L"バッチ処理中... %llu / %llu",
-                        static_cast<unsigned long long>(info.completed_work),
-                        static_cast<unsigned long long>(info.total_work));
-                    SetDlgItemTextW(dialog, IDC_M6_PROGRESS_TEXT, text.data());
-                }
-                return TRUE;
-            }
-            break;
-        case WM_COMMAND:
-            if (LOWORD(wparam) == IDCANCEL && state != nullptr
-                && state->batch_task != nullptr) {
-                inkpod_batch_task_cancel(state->batch_task);
-                EnableWindow(GetDlgItem(dialog, IDCANCEL), FALSE);
-                SetDlgItemTextW(dialog, IDC_M6_PROGRESS_TEXT, L"キャンセル中...");
-                return TRUE;
-            }
-            break;
-        case WM_CLOSE:
-            if (state != nullptr && state->batch_task != nullptr) {
-                inkpod_batch_task_cancel(state->batch_task);
-            }
-            return TRUE;
-        case WM_NCDESTROY:
-            KillTimer(dialog, kM6ProgressTimer);
-            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
-            return TRUE;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
 void RefreshBatchPalette(AppState& state) noexcept {
     if (state.batch_palette == nullptr) {
         return;
     }
-    const HWND inputs = GetDlgItem(state.batch_palette, IDC_BATCH_INPUTS);
-    const HWND operations = GetDlgItem(state.batch_palette, IDC_BATCH_OPERATIONS);
-    if (inputs == nullptr || operations == nullptr) {
+    inkpod::windows::ui::BatchPaletteView view{};
+    try {
+        if (state.batch.input_kind == INKPOD_BATCH_INPUT_CURRENT_SEQUENCE) {
+            view.input_label = L"現在セルを含む連番（自然順）";
+        } else if (state.batch.input_kind == INKPOD_BATCH_INPUT_FOLDER) {
+            view.input_label = L"フォルダー: " + state.batch.input_path;
+        } else {
+            view.input_label = L"ファイル: " + state.batch.input_path;
+        }
+        if (state.batch.first_cell != 0U || state.batch.last_cell != 0U) {
+            view.input_label += L" / 範囲 ";
+            view.input_label += state.batch.first_cell == 0U
+                ? L"先頭"
+                : std::to_wstring(state.batch.first_cell);
+            view.input_label += L"～";
+            view.input_label += state.batch.last_cell == 0U
+                ? L"末尾"
+                : std::to_wstring(state.batch.last_cell);
+        }
+
+        view.loaded_graph = state.batch.loaded_graph;
+        if (state.batch.loaded_graph && state.batch_graph != nullptr) {
+            InkpodBatchGraphInfo info{};
+            info.struct_size = sizeof(info);
+            if (inkpod_batch_graph_get_info(
+                    state.batch_graph, &info) == INKPOD_STATUS_OK) {
+                view.operation_labels.push_back(
+                    L"読み込み済みセット: "
+                    + std::to_wstring(info.operation_count) + L" 項目");
+            }
+        } else {
+            view.operation_labels.reserve(state.batch.operations.size());
+            for (const auto& operation : state.batch.operations) {
+                std::wstring label =
+                    operation.flags & INKPOD_BATCH_OPERATION_ENABLED
+                    ? L"✓ "
+                    : L"– ";
+                label += operation.label;
+                if (operation.flags
+                    & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN) {
+                    label += L"（実行ごとに設定）";
+                }
+                view.operation_labels.push_back(std::move(label));
+            }
+            if (!state.batch.operations.empty()) {
+                state.batch.selected_operation = std::min<std::uint32_t>(
+                    state.batch.selected_operation,
+                    static_cast<std::uint32_t>(
+                        state.batch.operations.size() - 1U));
+                view.selected_operation = state.batch.selected_operation;
+            }
+        }
+
+        const wchar_t* policy = L"複製保存";
+        if (state.batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE) {
+            policy = L"新規保存";
+        } else if (
+            state.batch.output_policy
+            == INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE) {
+            policy = L"明示上書き";
+        }
+        view.output_text = L"出力: ";
+        view.output_text += policy;
+        view.output_text += L" / ";
+        view.output_text += state.batch.output_folder.empty()
+            ? L"（入力と同じ場所）"
+            : state.batch.output_folder;
+        if (!state.batch.last_result.empty()) {
+            view.output_text += L"\r\n";
+            view.output_text += state.batch.last_result;
+        }
+        view.idle = state.batch_task == nullptr;
+        view.runnable = view.idle
+            && (state.batch_graph != nullptr
+                || !state.batch.operations.empty());
+    } catch (const std::bad_alloc&) {
         return;
     }
-    SendMessageW(inputs, LB_RESETCONTENT, 0, 0);
-    std::wstring input_label;
-    if (state.batch.input_kind == INKPOD_BATCH_INPUT_CURRENT_SEQUENCE) {
-        input_label = L"現在セルを含む連番（自然順）";
-    } else if (state.batch.input_kind == INKPOD_BATCH_INPUT_FOLDER) {
-        input_label = L"フォルダー: " + state.batch.input_path;
-    } else {
-        input_label = L"ファイル: " + state.batch.input_path;
-    }
-    if (state.batch.first_cell != 0U || state.batch.last_cell != 0U) {
-        input_label += L" / 範囲 ";
-        input_label += state.batch.first_cell == 0U
-            ? L"先頭"
-            : std::to_wstring(state.batch.first_cell);
-        input_label += L"～";
-        input_label += state.batch.last_cell == 0U
-            ? L"末尾"
-            : std::to_wstring(state.batch.last_cell);
-    }
-    SendMessageW(inputs, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(input_label.c_str()));
-
-    SendMessageW(operations, LB_RESETCONTENT, 0, 0);
-    if (state.batch.loaded_graph && state.batch_graph != nullptr) {
-        InkpodBatchGraphInfo info{};
-        info.struct_size = sizeof(info);
-        if (inkpod_batch_graph_get_info(state.batch_graph, &info) == INKPOD_STATUS_OK) {
-            const std::wstring label = L"読み込み済みセット: "
-                + std::to_wstring(info.operation_count) + L" 項目";
-            SendMessageW(operations, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
-        }
-    } else {
-        for (const auto& operation : state.batch.operations) {
-            std::wstring label = operation.flags & INKPOD_BATCH_OPERATION_ENABLED
-                ? L"✓ "
-                : L"– ";
-            label += operation.label;
-            if (operation.flags & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN) {
-                label += L"（実行ごとに設定）";
-            }
-            SendMessageW(operations, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
-        }
-        if (!state.batch.operations.empty()) {
-            state.batch.selected_operation = std::min<std::uint32_t>(
-                state.batch.selected_operation,
-                static_cast<std::uint32_t>(state.batch.operations.size() - 1U));
-            SendMessageW(
-                operations,
-                LB_SETCURSEL,
-                state.batch.selected_operation,
-                0);
-        }
-    }
-    const wchar_t* policy = L"複製保存";
-    if (state.batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE) {
-        policy = L"新規保存";
-    } else if (state.batch.output_policy == INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE) {
-        policy = L"明示上書き";
-    }
-    std::wstring output = L"出力: ";
-    output += policy;
-    output += L" / ";
-    output += state.batch.output_folder.empty() ? L"（入力と同じ場所）" : state.batch.output_folder;
-    if (!state.batch.last_result.empty()) {
-        output += L"\r\n";
-        output += state.batch.last_result;
-    }
-    SetDlgItemTextW(state.batch_palette, IDC_BATCH_OUTPUT, output.c_str());
-    const bool idle = state.batch_task == nullptr;
-    const bool editable = idle && !state.batch.loaded_graph;
-    for (const int control : {
-             IDC_BATCH_OPERATION_KIND,
-             IDC_BATCH_ADD,
-             IDC_BATCH_REMOVE,
-             IDC_BATCH_UP,
-             IDC_BATCH_DOWN,
-             IDC_BATCH_EDIT}) {
-        EnableWindow(GetDlgItem(state.batch_palette, control), editable ? TRUE : FALSE);
-    }
-    const bool runnable = idle
-        && (state.batch_graph != nullptr || !state.batch.operations.empty());
-    for (const int control : {
-             IDC_BATCH_PREVIEW,
-             IDC_BATCH_DRY_RUN,
-             IDC_BATCH_RUN_CURRENT,
-             IDC_BATCH_RUN_ALL,
-             IDC_BATCH_SAVE_SET,
-             IDC_BATCH_LOAD_SET}) {
-        EnableWindow(
-            GetDlgItem(state.batch_palette, control),
-            (control == IDC_BATCH_LOAD_SET ? idle : runnable) ? TRUE : FALSE);
-    }
-    EnableWindow(
-        GetDlgItem(state.batch_palette, IDC_BATCH_CANCEL), idle ? FALSE : TRUE);
+    inkpod::windows::ui::UpdateBatchPaletteDialog(
+        state.batch_palette, view);
 }
-
-INT_PTR CALLBACK BatchPaletteDialogProcedure(
-    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<AppState*>(GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    switch (message) {
-        case WM_INITDIALOG: {
-            state = reinterpret_cast<AppState*>(lparam);
-            if (state == nullptr) {
-                DestroyWindow(dialog);
-                return TRUE;
-            }
-            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            state->batch_palette = dialog;
-            const HWND combo = GetDlgItem(dialog, IDC_BATCH_OPERATION_KIND);
-            for (const auto& entry : kBatchPaletteEntries) {
-                SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(entry.label));
-            }
-            SendMessageW(combo, CB_SETCURSEL, 0, 0);
-            RefreshBatchPalette(*state);
-            return TRUE;
-        }
-        case WM_COMMAND:
-            if (state == nullptr) {
-                break;
-            }
-            switch (LOWORD(wparam)) {
-                case IDC_BATCH_ADD: {
-                    const LRESULT index = SendDlgItemMessageW(
-                        dialog, IDC_BATCH_OPERATION_KIND, CB_GETCURSEL, 0, 0);
-                    if (index >= 0
-                        && static_cast<std::size_t>(index) < kBatchPaletteEntries.size()) {
-                        SendMessageW(
-                            state->window,
-                            WM_COMMAND,
-                            kBatchPaletteEntries[static_cast<std::size_t>(index)].command,
-                            0);
-                    }
-                    return TRUE;
-                }
-                case IDC_BATCH_REMOVE:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0);
-                    return TRUE;
-                case IDC_BATCH_UP:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_OPERATION_UP, 0);
-                    return TRUE;
-                case IDC_BATCH_DOWN:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_OPERATION_DOWN, 0);
-                    return TRUE;
-                case IDC_BATCH_EDIT:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_OPERATION_EDIT, 0);
-                    return TRUE;
-                case IDC_BATCH_PREVIEW:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_PREVIEW, 0);
-                    return TRUE;
-                case IDC_BATCH_DRY_RUN:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0);
-                    return TRUE;
-                case IDC_BATCH_RUN_CURRENT:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_RUN_CURRENT, 0);
-                    return TRUE;
-                case IDC_BATCH_RUN_ALL:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_RUN_ALL, 0);
-                    return TRUE;
-                case IDC_BATCH_SAVE_SET:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_SAVE_SET, 0);
-                    return TRUE;
-                case IDC_BATCH_LOAD_SET:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_LOAD_SET, 0);
-                    return TRUE;
-                case IDC_BATCH_CANCEL:
-                    SendMessageW(state->window, WM_COMMAND, IDM_BATCH_CANCEL, 0);
-                    return TRUE;
-                case IDC_BATCH_OPERATIONS:
-                    if (HIWORD(wparam) == LBN_SELCHANGE && !state->batch.loaded_graph) {
-                        const LRESULT index = SendDlgItemMessageW(
-                            dialog, IDC_BATCH_OPERATIONS, LB_GETCURSEL, 0, 0);
-                        if (index >= 0) {
-                            state->batch.selected_operation = static_cast<std::uint32_t>(index);
-                        }
-                    }
-                    return TRUE;
-                case IDCANCEL:
-                    ShowWindow(dialog, SW_HIDE);
-                    return TRUE;
-                default:
-                    break;
-            }
-            break;
-        case WM_CLOSE:
-            ShowWindow(dialog, SW_HIDE);
-            return TRUE;
-        case WM_NCDESTROY:
-            if (state != nullptr && state->batch_palette == dialog) {
-                state->batch_palette = nullptr;
-            }
-            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
-            return TRUE;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
 std::uint32_t CurrentShortcutModifiers(LPARAM key_data) noexcept {
     std::uint32_t modifiers{};
     if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
@@ -2949,12 +1276,7 @@ std::uint32_t CurrentShortcutModifiers(LPARAM key_data) noexcept {
 }
 
 UINT ShortcutMenuCommand(std::uint32_t command_id) noexcept {
-    for (const auto& entry : kShortcutEntries) {
-        if (entry.command_id == command_id) {
-            return entry.menu_command;
-        }
-    }
-    return 0U;
+    return inkpod::windows::ui::ShortcutMenuCommand(command_id);
 }
 
 bool ResolveConfiguredShortcut(
@@ -4113,12 +2435,15 @@ InkpodStatus StartM6Task(
     }
     state.m6_task = task;
     state.m6_preview_prompt = preview_prompt;
-    state.m6_progress = CreateDialogParamW(
-        state.instance,
-        MAKEINTRESOURCEW(IDD_M6_PROGRESS),
-        state.window,
-        M6ProgressDialogProcedure,
-        reinterpret_cast<LPARAM>(&state));
+    state.m6_progress_dialog = {
+        &state,
+        QueryM6Progress,
+        CancelM6Progress,
+        nullptr,
+        L"処理中...",
+        L"キャンセル中..."};
+    state.m6_progress = inkpod::windows::ui::CreateProgressDialog(
+        state.instance, state.window, state.m6_progress_dialog);
     if (state.m6_progress == nullptr) {
         inkpod_task_release(&state.m6_task);
         return INKPOD_STATUS_INVALID_STATE;
@@ -5347,7 +3672,7 @@ void UpdateMenuState(AppState& state) noexcept {
                        ? MF_ENABLED
                        : MF_GRAYED));
     }
-    for (const auto& entry : kBatchPaletteEntries) {
+    for (const auto& entry : inkpod::windows::ui::BatchPaletteEntries()) {
         EnableMenuItem(
             menu,
             entry.command,
@@ -10723,11 +9048,12 @@ UINT BatchFilterCommandToM6(UINT command) noexcept {
 }
 
 const wchar_t* BatchOperationLabel(UINT command) noexcept {
-    const auto found = std::find_if(
-        kBatchPaletteEntries.begin(),
-        kBatchPaletteEntries.end(),
-        [command](const BatchPaletteEntry& entry) { return entry.command == command; });
-    return found == kBatchPaletteEntries.end() ? L"バッチ項目" : found->label;
+    for (const auto& entry : inkpod::windows::ui::BatchPaletteEntries()) {
+        if (entry.command == command) {
+            return entry.label;
+        }
+    }
+    return L"バッチ項目";
 }
 
 bool AddBatchOperation(AppState& state, UINT command) noexcept {
@@ -11236,17 +9562,19 @@ InkpodStatus StartBatch(
         RefreshBatchPalette(state);
         return status;
     }
-    state.batch_progress = CreateDialogParamW(
-        state.instance,
-        MAKEINTRESOURCEW(IDD_M6_PROGRESS),
-        state.window,
-        BatchProgressDialogProcedure,
-        reinterpret_cast<LPARAM>(&state));
+    state.batch_progress_dialog = {
+        &state,
+        QueryBatchProgress,
+        CancelBatchProgress,
+        L"バッチ実行",
+        L"バッチ処理中...",
+        L"キャンセル中..."};
+    state.batch_progress = inkpod::windows::ui::CreateProgressDialog(
+        state.instance, state.window, state.batch_progress_dialog);
     if (state.batch_progress == nullptr) {
         inkpod_batch_task_release(&state.batch_task);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    SetWindowTextW(state.batch_progress, L"バッチ実行");
     ShowWindow(state.batch_progress, SW_SHOW);
     AppState* state_pointer = &state;
     const HWND window = state.window;
@@ -12003,15 +10331,17 @@ bool CreateMainChrome(AppState& state) noexcept {
         || state.color_chart_list == nullptr) {
         return false;
     }
-    state.batch_palette = CreateDialogParamW(
-        state.instance,
-        MAKEINTRESOURCEW(IDD_BATCH_PALETTE),
-        state.window,
-        BatchPaletteDialogProcedure,
-        reinterpret_cast<LPARAM>(&state));
+    state.batch_palette_dialog = {
+        &state,
+        DispatchBatchPaletteCommand,
+        SelectBatchPaletteOperation,
+        state.batch.loaded_graph};
+    state.batch_palette = inkpod::windows::ui::CreateBatchPaletteDialog(
+        state.instance, state.window, state.batch_palette_dialog);
     if (state.batch_palette == nullptr) {
         return false;
     }
+    RefreshBatchPalette(state);
     ShowWindow(state.batch_palette, SW_HIDE);
     if (SetWindowSubclass(
             state.layer_list,
@@ -14732,7 +13062,11 @@ LRESULT CALLBACK MainWindowProcedure(
                     UpdateMenuState(*state);
                     return 0;
                 case IDM_TOOL_FILL_OPTIONS:
-                    if (ShowFillOptions(*state)) {
+                    if (inkpod::windows::ui::ShowFillOptions(
+                            state->instance,
+                            state->window,
+                            state->smoke_test,
+                            state->fill_options)) {
                         state->tool = kInteractionFill;
                         state->fill_gesture_samples.clear();
                         UpdateMenuState(*state);
@@ -16166,7 +14500,7 @@ int APIENTRY wWinMain(
         return 10;
     }
 
-    ComApartment com;
+    inkpod::app::ComApartment com;
     if (FAILED(com.Initialize())) {
         MessageBoxW(
             nullptr,

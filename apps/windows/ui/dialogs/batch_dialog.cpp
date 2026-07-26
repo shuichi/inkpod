@@ -1,0 +1,233 @@
+#include "batch_dialog.h"
+
+#include <array>
+#include <cstddef>
+
+#include "app/resource.h"
+
+namespace inkpod::windows::ui {
+namespace {
+
+constexpr std::array<BatchPaletteEntry, 24U> kBatchPaletteEntries{{
+    {IDM_BATCH_ADD_COLOR_REPLACE, L"色置換"},
+    {IDM_BATCH_ADD_CONTINUOUS_FILL, L"連続フィル"},
+    {IDM_BATCH_ADD_SEPARATION, L"色分解"},
+    {IDM_BATCH_ADD_VISIBILITY, L"レイヤー表示"},
+    {IDM_BATCH_ADD_LINE_WIDTH, L"線幅"},
+    {IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, L"境界色エアブラシ"},
+    {IDM_BATCH_ADD_DUST, L"ゴミ取り"},
+    {IDM_BATCH_ADD_MIRROR, L"鏡像"},
+    {IDM_BATCH_ADD_ROTATE, L"90度回転"},
+    {IDM_BATCH_ADD_RESIZE, L"画像サイズ・解像度"},
+    {IDM_BATCH_ADD_CONVERT, L"ラスター変換"},
+    {IDM_BATCH_ADD_FILTER_SHARPEN_WEAK, L"フィルタ: シャープ（弱）"},
+    {IDM_BATCH_ADD_FILTER_SHARPEN_STRONG, L"フィルタ: シャープ（強）"},
+    {IDM_BATCH_ADD_FILTER_BLUR_WEAK, L"フィルタ: ぼかし（弱）"},
+    {IDM_BATCH_ADD_FILTER_BLUR_STRONG, L"フィルタ: ぼかし（強）"},
+    {IDM_BATCH_ADD_FILTER_GAUSSIAN, L"フィルタ: ガウスぼかし"},
+    {IDM_BATCH_ADD_FILTER_INVERT, L"フィルタ: 階調反転"},
+    {IDM_BATCH_ADD_FILTER_AUTO_CONTRAST, L"フィルタ: 自動コントラスト"},
+    {IDM_BATCH_ADD_FILTER_BRIGHTNESS, L"フィルタ: 明るさ・コントラスト"},
+    {IDM_BATCH_ADD_FILTER_TONE_CURVE, L"フィルタ: トーンカーブ"},
+    {IDM_BATCH_ADD_FILTER_LEVELS, L"フィルタ: レベル補正"},
+    {IDM_BATCH_ADD_FILTER_HSV, L"フィルタ: HSV"},
+    {IDM_BATCH_ADD_FILTER_COLOR_BALANCE, L"フィルタ: カラーバランス"},
+    {IDM_BATCH_ADD_FILTER_UNSHARP, L"フィルタ: アンシャープ"},
+}};
+
+void DispatchCommand(BatchPaletteDialogState& state, UINT command) noexcept {
+    if (state.dispatch_command != nullptr) {
+        state.dispatch_command(state.context, command);
+    }
+}
+
+INT_PTR CALLBACK BatchPaletteDialogProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<BatchPaletteDialogState*>(
+        GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    switch (message) {
+        case WM_INITDIALOG: {
+            state = reinterpret_cast<BatchPaletteDialogState*>(lparam);
+            if (state == nullptr || state->dispatch_command == nullptr
+                || state->select_operation == nullptr) {
+                DestroyWindow(dialog);
+                return TRUE;
+            }
+            SetWindowLongPtrW(
+                dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            const HWND combo = GetDlgItem(dialog, IDC_BATCH_OPERATION_KIND);
+            for (const auto& entry : kBatchPaletteEntries) {
+                SendMessageW(
+                    combo,
+                    CB_ADDSTRING,
+                    0,
+                    reinterpret_cast<LPARAM>(entry.label));
+            }
+            SendMessageW(combo, CB_SETCURSEL, 0, 0);
+            return TRUE;
+        }
+        case WM_COMMAND:
+            if (state == nullptr) {
+                break;
+            }
+            switch (LOWORD(wparam)) {
+                case IDC_BATCH_ADD: {
+                    const LRESULT index = SendDlgItemMessageW(
+                        dialog, IDC_BATCH_OPERATION_KIND, CB_GETCURSEL, 0, 0);
+                    if (index >= 0
+                        && static_cast<std::size_t>(index)
+                            < kBatchPaletteEntries.size()) {
+                        DispatchCommand(
+                            *state,
+                            kBatchPaletteEntries[static_cast<std::size_t>(index)]
+                                .command);
+                    }
+                    return TRUE;
+                }
+                case IDC_BATCH_REMOVE:
+                    DispatchCommand(*state, IDM_BATCH_OPERATION_REMOVE);
+                    return TRUE;
+                case IDC_BATCH_UP:
+                    DispatchCommand(*state, IDM_BATCH_OPERATION_UP);
+                    return TRUE;
+                case IDC_BATCH_DOWN:
+                    DispatchCommand(*state, IDM_BATCH_OPERATION_DOWN);
+                    return TRUE;
+                case IDC_BATCH_EDIT:
+                    DispatchCommand(*state, IDM_BATCH_OPERATION_EDIT);
+                    return TRUE;
+                case IDC_BATCH_PREVIEW:
+                    DispatchCommand(*state, IDM_BATCH_PREVIEW);
+                    return TRUE;
+                case IDC_BATCH_DRY_RUN:
+                    DispatchCommand(*state, IDM_BATCH_DRY_RUN);
+                    return TRUE;
+                case IDC_BATCH_RUN_CURRENT:
+                    DispatchCommand(*state, IDM_BATCH_RUN_CURRENT);
+                    return TRUE;
+                case IDC_BATCH_RUN_ALL:
+                    DispatchCommand(*state, IDM_BATCH_RUN_ALL);
+                    return TRUE;
+                case IDC_BATCH_SAVE_SET:
+                    DispatchCommand(*state, IDM_BATCH_SAVE_SET);
+                    return TRUE;
+                case IDC_BATCH_LOAD_SET:
+                    DispatchCommand(*state, IDM_BATCH_LOAD_SET);
+                    return TRUE;
+                case IDC_BATCH_CANCEL:
+                    DispatchCommand(*state, IDM_BATCH_CANCEL);
+                    return TRUE;
+                case IDC_BATCH_OPERATIONS:
+                    if (HIWORD(wparam) == LBN_SELCHANGE && !state->loaded_graph) {
+                        const LRESULT index = SendDlgItemMessageW(
+                            dialog, IDC_BATCH_OPERATIONS, LB_GETCURSEL, 0, 0);
+                        if (index >= 0) {
+                            state->select_operation(
+                                state->context,
+                                static_cast<std::uint32_t>(index));
+                        }
+                    }
+                    return TRUE;
+                case IDCANCEL:
+                    ShowWindow(dialog, SW_HIDE);
+                    return TRUE;
+                default:
+                    break;
+            }
+            break;
+        case WM_CLOSE:
+            ShowWindow(dialog, SW_HIDE);
+            return TRUE;
+        case WM_NCDESTROY:
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
+}  // namespace
+
+const std::array<BatchPaletteEntry, 24U>& BatchPaletteEntries() noexcept {
+    return kBatchPaletteEntries;
+}
+
+HWND CreateBatchPaletteDialog(
+    HINSTANCE instance, HWND owner, BatchPaletteDialogState& state) noexcept {
+    return CreateDialogParamW(
+        instance,
+        MAKEINTRESOURCEW(IDD_BATCH_PALETTE),
+        owner,
+        BatchPaletteDialogProcedure,
+        reinterpret_cast<LPARAM>(&state));
+}
+
+void UpdateBatchPaletteDialog(
+    HWND dialog, const BatchPaletteView& view) noexcept {
+    if (dialog == nullptr) {
+        return;
+    }
+    const HWND inputs = GetDlgItem(dialog, IDC_BATCH_INPUTS);
+    const HWND operations = GetDlgItem(dialog, IDC_BATCH_OPERATIONS);
+    if (inputs == nullptr || operations == nullptr) {
+        return;
+    }
+    auto* state = reinterpret_cast<BatchPaletteDialogState*>(
+        GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    if (state != nullptr) {
+        state->loaded_graph = view.loaded_graph;
+    }
+
+    SendMessageW(inputs, LB_RESETCONTENT, 0, 0);
+    SendMessageW(
+        inputs,
+        LB_ADDSTRING,
+        0,
+        reinterpret_cast<LPARAM>(view.input_label.c_str()));
+
+    SendMessageW(operations, LB_RESETCONTENT, 0, 0);
+    for (const auto& label : view.operation_labels) {
+        SendMessageW(
+            operations,
+            LB_ADDSTRING,
+            0,
+            reinterpret_cast<LPARAM>(label.c_str()));
+    }
+    if (!view.operation_labels.empty() && !view.loaded_graph) {
+        SendMessageW(
+            operations,
+            LB_SETCURSEL,
+            view.selected_operation,
+            0);
+    }
+
+    SetDlgItemTextW(dialog, IDC_BATCH_OUTPUT, view.output_text.c_str());
+    const bool editable = view.idle && !view.loaded_graph;
+    for (const int control : {
+             IDC_BATCH_OPERATION_KIND,
+             IDC_BATCH_ADD,
+             IDC_BATCH_REMOVE,
+             IDC_BATCH_UP,
+             IDC_BATCH_DOWN,
+             IDC_BATCH_EDIT}) {
+        EnableWindow(GetDlgItem(dialog, control), editable ? TRUE : FALSE);
+    }
+    for (const int control : {
+             IDC_BATCH_PREVIEW,
+             IDC_BATCH_DRY_RUN,
+             IDC_BATCH_RUN_CURRENT,
+             IDC_BATCH_RUN_ALL,
+             IDC_BATCH_SAVE_SET,
+             IDC_BATCH_LOAD_SET}) {
+        EnableWindow(
+            GetDlgItem(dialog, control),
+            (control == IDC_BATCH_LOAD_SET ? view.idle : view.runnable)
+                ? TRUE
+                : FALSE);
+    }
+    EnableWindow(
+        GetDlgItem(dialog, IDC_BATCH_CANCEL), view.idle ? FALSE : TRUE);
+}
+
+}  // namespace inkpod::windows::ui
