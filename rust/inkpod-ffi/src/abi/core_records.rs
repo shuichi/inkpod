@@ -23,6 +23,23 @@ pub struct InkpodCommandBatch {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodShortcutStroke {
+    pub virtual_key: u32,
+    pub modifiers: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodShortcutSequence {
+    pub struct_size: u32,
+    pub command_id: u32,
+    pub stroke_count: u32,
+    pub reserved: u32,
+    pub strokes: [InkpodShortcutStroke; 4],
+}
+
+#[repr(C)]
 pub struct InkpodDispatchResult {
     pub struct_size: u32,
     pub reserved: u32,

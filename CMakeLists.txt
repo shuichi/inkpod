@@ -127,6 +127,8 @@ endif()
 
 if(WIN32)
     add_executable(inkpod_windows_command_state_tests
+        apps/windows/ui/command_catalog.cpp
+        apps/windows/ui/command_catalog.h
         apps/windows/ui/command_state.cpp
         apps/windows/ui/command_state.h
         apps/windows/ui/command_state_catalog.inc
@@ -175,6 +177,10 @@ if(WIN32)
         apps/windows/ui/tools/vector_controller.cpp
         apps/windows/ui/command_state.cpp
         apps/windows/ui/command_state_catalog.inc
+        apps/windows/ui/command_catalog.cpp
+        apps/windows/ui/command_catalog.h
+        apps/windows/ui/shortcut_controller.cpp
+        apps/windows/ui/shortcut_controller.h
         apps/windows/ui/effects_controller.cpp
         apps/windows/ui/batch_controller.cpp
         apps/windows/ui/main_window.cpp
@@ -196,6 +202,7 @@ if(WIN32)
         d3d11
         dxgi
         ole32
+        advapi32
         shell32)
     if(MSVC)
         inkpod_enable_strict_warnings(inkpod)

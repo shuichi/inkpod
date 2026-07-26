@@ -30,6 +30,7 @@ file(READ "${chrome_source}" chrome_text)
 file(READ "${chrome_header}" chrome_header_text)
 string(APPEND chrome_text "${chrome_header_text}")
 foreach(forbidden_chrome_token IN ITEMS
+        "TOOLBARCLASSNAME"
         "TRACKBAR_CLASSW"
         "L\"LISTBOX\""
         "right_pane_width"
@@ -147,6 +148,8 @@ foreach(required_cmake_source IN ITEMS
         "apps/windows/app/app_smoke.cpp"
         "apps/windows/app/application.cpp"
         "apps/windows/app/main.cpp"
+        "apps/windows/ui/command_catalog.cpp"
+        "apps/windows/ui/shortcut_controller.cpp"
         "apps/windows/ui/main_window_runtime.cpp")
     string(FIND "${cmake_text}" "${required_cmake_source}" source_offset)
     if(source_offset LESS 0)

@@ -1934,6 +1934,124 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
 }
 
 #[test]
+fn multi_stroke_shortcut_table_copies_resolves_and_rejects_conflicts() {
+    unsafe {
+        let mut core = ptr::null_mut();
+        assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
+        let stroke = |key, modifiers| InkpodShortcutStroke {
+            virtual_key: u32::from(key),
+            modifiers,
+        };
+        let sequence = |command_id, strokes: &[InkpodShortcutStroke]| {
+            let mut value = InkpodShortcutSequence {
+                struct_size: size_of::<InkpodShortcutSequence>() as u32,
+                command_id,
+                stroke_count: strokes.len() as u32,
+                ..InkpodShortcutSequence::default()
+            };
+            value.strokes[..strokes.len()].copy_from_slice(strokes);
+            value
+        };
+        let defaults = [
+            sequence(100, &[stroke(b'Q', 0), stroke(b'F', 0), stroke(b'A', 0)]),
+            sequence(101, &[stroke(b'Q', 0), stroke(b'F', 0), stroke(b'B', 0)]),
+            sequence(102, &[stroke(b'S', INKPOD_SHORTCUT_MODIFIER_CONTROL)]),
+        ];
+        assert_eq!(
+            inkpod_core_shortcut_defaults_set(
+                core,
+                defaults.as_ptr(),
+                defaults.len() as u64,
+                size_of::<InkpodShortcutSequence>() as u64,
+            ),
+            INKPOD_STATUS_OK
+        );
+
+        let mut required = 0;
+        assert_eq!(
+            inkpod_core_shortcut_sequences_copy(core, ptr::null_mut(), 0, 0, &mut required),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(required, defaults.len() as u64);
+        let mut copied = [InkpodShortcutSequence::default(); 3];
+        assert_eq!(
+            inkpod_core_shortcut_sequences_copy(
+                core,
+                copied.as_mut_ptr(),
+                copied.len() as u64,
+                size_of::<InkpodShortcutSequence>() as u64,
+                &mut required,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(copied[1].command_id, 101);
+
+        let mut match_kind = INKPOD_SHORTCUT_MATCH_NONE;
+        let mut command_id = 999;
+        let prefix = [stroke(b'Q', 0), stroke(b'F', 0)];
+        assert_eq!(
+            inkpod_shortcut_sequence_resolve(
+                copied.as_ptr(),
+                copied.len() as u64,
+                size_of::<InkpodShortcutSequence>() as u64,
+                prefix.as_ptr(),
+                prefix.len() as u32,
+                &mut match_kind,
+                &mut command_id,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(match_kind, INKPOD_SHORTCUT_MATCH_PREFIX);
+        assert_eq!(command_id, 0);
+        let exact = [stroke(b'Q', 0), stroke(b'F', 0), stroke(b'B', 0)];
+        assert_eq!(
+            inkpod_shortcut_sequence_resolve(
+                copied.as_ptr(),
+                copied.len() as u64,
+                size_of::<InkpodShortcutSequence>() as u64,
+                exact.as_ptr(),
+                exact.len() as u32,
+                &mut match_kind,
+                &mut command_id,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(match_kind, INKPOD_SHORTCUT_MATCH_EXACT);
+        assert_eq!(command_id, 101);
+        let alignment = align_of::<InkpodShortcutSequence>();
+        let overflowing_stride = ((isize::MAX as usize / alignment) + 1) * alignment;
+        assert_eq!(
+            inkpod_shortcut_sequence_resolve(
+                copied.as_ptr(),
+                2,
+                overflowing_stride as u64,
+                exact.as_ptr(),
+                exact.len() as u32,
+                &mut match_kind,
+                &mut command_id,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+
+        let conflicting = [
+            sequence(200, &[stroke(b'Q', 0), stroke(b'F', 0)]),
+            sequence(201, &[stroke(b'Q', 0), stroke(b'F', 0), stroke(b'C', 0)]),
+        ];
+        assert_eq!(
+            inkpod_core_shortcut_sequences_set(
+                core,
+                conflicting.as_ptr(),
+                conflicting.len() as u64,
+                size_of::<InkpodShortcutSequence>() as u64,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(inkpod_core_shortcut_reset(core), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn vector_commands_snapshot_and_nested_span_validation_are_connected() {
     unsafe {
         let mut core = ptr::null_mut();

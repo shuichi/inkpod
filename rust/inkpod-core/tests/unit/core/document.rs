@@ -501,6 +501,80 @@ fn acceptance_multi_view_locator_guides_grid_and_shortcuts() {
 }
 
 #[test]
+fn shortcut_sequences_are_prefix_free_transactional_and_resettable() {
+    let mut core = Core::new();
+    let stroke = |key| ShortcutStroke {
+        virtual_key: u32::from(key),
+        modifiers: 0,
+    };
+    let defaults = vec![
+        ShortcutSequenceBinding {
+            command_id: 10,
+            strokes: vec![stroke(b'Q'), stroke(b'F'), stroke(b'A')],
+        },
+        ShortcutSequenceBinding {
+            command_id: 11,
+            strokes: vec![stroke(b'Q'), stroke(b'F'), stroke(b'B')],
+        },
+        ShortcutSequenceBinding {
+            command_id: 12,
+            strokes: vec![ShortcutStroke {
+                virtual_key: u32::from(b'S'),
+                modifiers: SHORTCUT_MODIFIER_CONTROL,
+            }],
+        },
+    ];
+    core.set_shortcut_defaults(&defaults).unwrap();
+    assert_eq!(
+        core.resolve_shortcut_sequence(&[stroke(b'Q')]).unwrap(),
+        ShortcutSequenceMatch::Prefix
+    );
+    assert_eq!(
+        core.resolve_shortcut_sequence(&[stroke(b'Q'), stroke(b'F')])
+            .unwrap(),
+        ShortcutSequenceMatch::Prefix
+    );
+    assert_eq!(
+        core.resolve_shortcut_sequence(&[stroke(b'Q'), stroke(b'F'), stroke(b'B')])
+            .unwrap(),
+        ShortcutSequenceMatch::Exact(11)
+    );
+
+    let conflicting = vec![
+        ShortcutSequenceBinding {
+            command_id: 20,
+            strokes: vec![stroke(b'Q'), stroke(b'F')],
+        },
+        ShortcutSequenceBinding {
+            command_id: 21,
+            strokes: vec![stroke(b'Q'), stroke(b'F'), stroke(b'C')],
+        },
+    ];
+    assert!(core.replace_shortcut_sequences(&conflicting).is_err());
+    assert_eq!(core.shortcut_sequences(), defaults);
+
+    core.rebind_shortcut_sequence(ShortcutSequenceBinding {
+        command_id: 12,
+        strokes: vec![stroke(b'Q'), stroke(b'F'), stroke(b'A')],
+    })
+    .unwrap();
+    assert_eq!(
+        core.resolve_shortcut_sequence(&[stroke(b'Q'), stroke(b'F'), stroke(b'A')])
+            .unwrap(),
+        ShortcutSequenceMatch::Exact(12)
+    );
+    assert!(
+        !core
+            .shortcut_sequences()
+            .iter()
+            .any(|binding| binding.command_id == 10)
+    );
+
+    core.reset_shortcuts();
+    assert_eq!(core.shortcut_sequences(), defaults);
+}
+
+#[test]
 fn tree_order_merge_names_and_active_ids_remain_consistent() {
     let mut core = Core::new();
     let created = core

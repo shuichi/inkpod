@@ -18,47 +18,73 @@
 namespace inkpod::windows::ui {
 namespace {
 
-struct ShortcutEntry {
-    std::uint32_t command_id;
-    UINT menu_command;
-    const wchar_t* label;
-};
+constexpr std::array<int, 4U> kShortcutHotkeyControls{
+    IDC_SHORTCUT_HOTKEY,
+    IDC_SHORTCUT_HOTKEY2,
+    IDC_SHORTCUT_HOTKEY3,
+    IDC_SHORTCUT_HOTKEY4};
 
-constexpr std::array<ShortcutEntry, 24U> kShortcutEntries{{
-    {1U, IDM_EDIT_UNDO, L"[メニュー] 元に戻す"},
-    {2U, IDM_EDIT_REDO, L"[メニュー] やり直し"},
-    {3U, IDM_EDIT_COPY, L"[メニュー] コピー"},
-    {4U, IDM_EDIT_PASTE, L"[メニュー] 貼り付け"},
-    {IDM_FILE_NEW, IDM_FILE_NEW, L"[メニュー] 新規セル"},
-    {IDM_FILE_OPEN, IDM_FILE_OPEN, L"[メニュー] 開く"},
-    {IDM_FILE_SAVE, IDM_FILE_SAVE, L"[メニュー] 保存"},
-    {IDM_VIEW_FIT, IDM_VIEW_FIT, L"[メニュー] 全体表示"},
-    {IDM_VIEW_ONE_TO_ONE, IDM_VIEW_ONE_TO_ONE, L"[メニュー] ピクセル等倍"},
-    {IDM_VIEW_FLIP_HORIZONTAL, IDM_VIEW_FLIP_HORIZONTAL, L"[メニュー] 表示を左右反転"},
-    {IDM_VIEW_FLIP_VERTICAL, IDM_VIEW_FLIP_VERTICAL, L"[メニュー] 表示を上下反転"},
-    {IDM_SELECTION_ALL, IDM_SELECTION_ALL, L"[メニュー] すべて選択"},
-    {IDM_SELECTION_CLEAR, IDM_SELECTION_CLEAR, L"[メニュー] 選択解除"},
-    {IDM_TOOL_PENCIL, IDM_TOOL_PENCIL, L"[ツール] 鉛筆"},
-    {IDM_TOOL_BRUSH, IDM_TOOL_BRUSH, L"[ツール] ブラシ"},
-    {IDM_TOOL_ERASER, IDM_TOOL_ERASER, L"[ツール] 消しゴム"},
-    {IDM_TOOL_FILL, IDM_TOOL_FILL, L"[ツール] フィル"},
-    {IDM_TOOL_EYEDROPPER, IDM_TOOL_EYEDROPPER, L"[ツール] スポイト"},
-    {IDM_SELECTION_RECTANGLE, IDM_SELECTION_RECTANGLE, L"[ツール] 長方形選択"},
-    {IDM_SELECTION_WAND, IDM_SELECTION_WAND, L"[ツール] 色の杖"},
-    {IDM_VIEW_GRID, IDM_VIEW_GRID, L"[その他] グリッド表示"},
-    {IDM_VIEW_GUIDES, IDM_VIEW_GUIDES, L"[その他] ガイド表示"},
-    {IDM_VIEW_NEW, IDM_VIEW_NEW, L"[その他] 新規セルビュー"},
-    {IDM_COLOR_CHOOSE, IDM_COLOR_CHOOSE, L"[その他] 描画色"},
-}};
+WORD ShortcutHotkey(const InkpodShortcutStroke& stroke) noexcept {
+    BYTE flags{};
+    if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_CONTROL) != 0U) {
+        flags |= HOTKEYF_CONTROL;
+    }
+    if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_SHIFT) != 0U) {
+        flags |= HOTKEYF_SHIFT;
+    }
+    if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_ALT) != 0U) {
+        flags |= HOTKEYF_ALT;
+    }
+    if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_EXTENDED) != 0U) {
+        flags |= HOTKEYF_EXT;
+    }
+    return MAKEWORD(static_cast<BYTE>(stroke.virtual_key), flags);
+}
 
-constexpr WORD DefaultShortcutHotkey(std::uint32_t command_id) noexcept {
-    const BYTE key = command_id == 2U
-        ? static_cast<BYTE>('Y')
-        : (command_id == 3U
-                  ? static_cast<BYTE>('C')
-                  : (command_id == 4U ? static_cast<BYTE>('V')
-                                      : (command_id == 1U ? static_cast<BYTE>('Z') : 0U)));
-    return key == 0U ? 0U : MAKEWORD(key, HOTKEYF_CONTROL);
+void ShowShortcutSequence(HWND dialog, const InkpodShortcutSequence& sequence) noexcept {
+    for (std::size_t index = 0; index < kShortcutHotkeyControls.size(); ++index) {
+        const WORD hotkey = index < sequence.stroke_count
+            ? ShortcutHotkey(sequence.strokes[index])
+            : 0U;
+        SendDlgItemMessageW(
+            dialog, kShortcutHotkeyControls[index], HKM_SETHOTKEY, hotkey, 0);
+    }
+}
+
+const ShortcutDialogEntry* FindShortcutEntry(
+    const ShortcutDialogState& state, std::uint32_t command_id) noexcept {
+    const auto found = std::find_if(
+        state.entries.begin(), state.entries.end(), [command_id](const auto& entry) {
+            return entry.command_id == command_id;
+        });
+    return found == state.entries.end() ? nullptr : &*found;
+}
+
+void SelectShortcutFromTypedPrefix(HWND dialog, const ShortcutDialogState& state) noexcept {
+    const HWND commands = GetDlgItem(dialog, IDC_SHORTCUT_COMMAND);
+    const int length = commands == nullptr ? 0 : GetWindowTextLengthW(commands);
+    if (length <= 0) {
+        return;
+    }
+    std::vector<wchar_t> text;
+    try {
+        text.resize(static_cast<std::size_t>(length) + 1U);
+    } catch (const std::bad_alloc&) {
+        return;
+    }
+    GetWindowTextW(commands, text.data(), static_cast<int>(text.size()));
+    const LRESULT found = SendMessageW(
+        commands, CB_FINDSTRING, static_cast<WPARAM>(-1), reinterpret_cast<LPARAM>(text.data()));
+    if (found == CB_ERR) {
+        return;
+    }
+    SendMessageW(commands, CB_SETCURSEL, static_cast<WPARAM>(found), 0);
+    SendMessageW(commands, CB_SETEDITSEL, 0, MAKELPARAM(length, -1));
+    const auto command_id = static_cast<std::uint32_t>(
+        SendMessageW(commands, CB_GETITEMDATA, static_cast<WPARAM>(found), 0));
+    if (const auto* entry = FindShortcutEntry(state, command_id)) {
+        ShowShortcutSequence(dialog, entry->sequence);
+    }
 }
 
 std::uint32_t ShortcutModifiers(BYTE hotkey_flags) noexcept {
@@ -96,12 +122,12 @@ INT_PTR CALLBACK ShortcutDialogProcedure(
                 EndDialog(dialog, IDCANCEL);
                 return TRUE;
             }
-            for (const auto& entry : kShortcutEntries) {
+            for (const auto& entry : state->entries) {
                 const LRESULT item = SendMessageW(
                     commands,
                     CB_ADDSTRING,
                     0,
-                    reinterpret_cast<LPARAM>(entry.label));
+                    reinterpret_cast<LPARAM>(entry.label.c_str()));
                 if (item == CB_ERR || item == CB_ERRSPACE) {
                     EndDialog(dialog, IDCANCEL);
                     return TRUE;
@@ -113,12 +139,9 @@ INT_PTR CALLBACK ShortcutDialogProcedure(
                     static_cast<LPARAM>(entry.command_id));
             }
             SendMessageW(commands, CB_SETCURSEL, 0, 0);
-            SendDlgItemMessageW(
-                dialog,
-                IDC_SHORTCUT_HOTKEY,
-                HKM_SETHOTKEY,
-                DefaultShortcutHotkey(1U),
-                0);
+            if (!state->entries.empty()) {
+                ShowShortcutSequence(dialog, state->entries.front().sequence);
+            }
             if (state->close_immediately) {
                 PostMessageW(dialog, WM_COMMAND, IDOK, 0);
             }
@@ -140,18 +163,34 @@ INT_PTR CALLBACK ShortcutDialogProcedure(
                             CB_GETITEMDATA,
                             static_cast<WPARAM>(selected),
                             0));
-                    SendDlgItemMessageW(
-                        dialog,
-                        IDC_SHORTCUT_HOTKEY,
-                        HKM_SETHOTKEY,
-                        DefaultShortcutHotkey(command_id),
-                        0);
+                    if (const auto* entry = FindShortcutEntry(*state, command_id)) {
+                        ShowShortcutSequence(dialog, entry->sequence);
+                    }
                 }
                 return TRUE;
             }
+            if (LOWORD(wparam) == IDC_SHORTCUT_COMMAND
+                && HIWORD(wparam) == CBN_EDITUPDATE) {
+                SelectShortcutFromTypedPrefix(dialog, *state);
+                return TRUE;
+            }
             if (LOWORD(wparam) == IDOK) {
-                const LRESULT selected = SendDlgItemMessageW(
+                LRESULT selected = SendDlgItemMessageW(
                     dialog, IDC_SHORTCUT_COMMAND, CB_GETCURSEL, 0, 0);
+                if (selected == CB_ERR) {
+                    std::array<wchar_t, 512U> typed{};
+                    GetDlgItemTextW(
+                        dialog,
+                        IDC_SHORTCUT_COMMAND,
+                        typed.data(),
+                        static_cast<int>(typed.size()));
+                    selected = SendDlgItemMessageW(
+                        dialog,
+                        IDC_SHORTCUT_COMMAND,
+                        CB_FINDSTRINGEXACT,
+                        static_cast<WPARAM>(-1),
+                        reinterpret_cast<LPARAM>(typed.data()));
+                }
                 const LRESULT command_id = selected == CB_ERR
                     ? CB_ERR
                     : SendDlgItemMessageW(
@@ -160,9 +199,22 @@ INT_PTR CALLBACK ShortcutDialogProcedure(
                           CB_GETITEMDATA,
                           static_cast<WPARAM>(selected),
                           0);
-                const WORD hotkey = static_cast<WORD>(SendDlgItemMessageW(
-                    dialog, IDC_SHORTCUT_HOTKEY, HKM_GETHOTKEY, 0, 0));
-                if (command_id == CB_ERR || LOBYTE(hotkey) == 0U) {
+                InkpodShortcutSequence sequence{};
+                sequence.struct_size = sizeof(sequence);
+                sequence.command_id = command_id == CB_ERR
+                    ? 0U
+                    : static_cast<std::uint32_t>(command_id);
+                for (const int control : kShortcutHotkeyControls) {
+                    const WORD hotkey = static_cast<WORD>(
+                        SendDlgItemMessageW(dialog, control, HKM_GETHOTKEY, 0, 0));
+                    if (LOBYTE(hotkey) == 0U) {
+                        break;
+                    }
+                    auto& stroke = sequence.strokes[sequence.stroke_count++];
+                    stroke.virtual_key = LOBYTE(hotkey);
+                    stroke.modifiers = ShortcutModifiers(HIBYTE(hotkey));
+                }
+                if (command_id == CB_ERR || sequence.stroke_count == 0U) {
                     if (!state->close_immediately) {
                         MessageBoxW(
                             dialog,
@@ -173,8 +225,9 @@ INT_PTR CALLBACK ShortcutDialogProcedure(
                     return TRUE;
                 }
                 state->command_id = static_cast<std::uint32_t>(command_id);
-                state->virtual_key = LOBYTE(hotkey);
-                state->modifiers = ShortcutModifiers(HIBYTE(hotkey));
+                state->virtual_key = sequence.strokes[0].virtual_key;
+                state->modifiers = sequence.strokes[0].modifiers;
+                state->sequence = sequence;
                 EndDialog(dialog, IDOK);
                 return TRUE;
             }
@@ -648,12 +701,16 @@ INT_PTR CALLBACK HistoryDialogProcedure(
 }  // namespace
 
 UINT ShortcutMenuCommand(std::uint32_t command_id) noexcept {
-    for (const auto& entry : kShortcutEntries) {
-        if (entry.command_id == command_id) {
-            return entry.menu_command;
-        }
+    switch (command_id) {
+        case 1U: return IDM_EDIT_UNDO;
+        case 2U: return IDM_EDIT_REDO;
+        case 3U: return IDM_EDIT_COPY;
+        case 4U: return IDM_EDIT_PASTE;
+        default: break;
     }
-    return 0U;
+    return command_id >= 40000U && command_id <= 42099U
+        ? static_cast<UINT>(command_id)
+        : 0U;
 }
 
 INT_PTR ShowShortcutEditor(

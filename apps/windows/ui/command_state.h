@@ -123,7 +123,6 @@ const CommandState* FindCommandState(
 bool IsCommandEnabled(const CommandStateSet& states, UINT command) noexcept;
 bool IsCommandChecked(const CommandStateSet& states, UINT command) noexcept;
 
-void ApplyCommandStates(
-    const CommandStateSet& states, HMENU menu, HWND toolbar) noexcept;
+void ApplyCommandStates(const CommandStateSet& states, HMENU menu) noexcept;
 
 } // namespace inkpod::windows::ui

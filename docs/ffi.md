@@ -75,6 +75,21 @@ ABI v2 は、公開名から実装時のマイルストーン番号を除いた�
 
 任意 thread で呼べることは、同じ owner 変数を同時に解放してよいことを意味しない。
 
+## Shortcut sequence 契約
+
+Windows frontend は menu command と同じ `command_id` を持つ
+`InkpodShortcutSequence` 表を Core engine thread で登録する。各列は1–4個の
+`InkpodShortcutStroke` からなり、command ID の重複、完全一致、一方が他方の
+prefix になる表は Core が transactional に拒否する。
+
+- `inkpod_core_shortcut_defaults_set` は検証済み既定値と現在値を同時に置き換える。
+- `inkpod_core_shortcut_sequences_set` は現在値だけを置き換え、`reset` は登録済み既定値へ戻す。
+- `inkpod_core_shortcut_sequences_copy` は件数queryとcaller-owned strided buffer copyに対応する。これら3関数は Core owner thread 限定である。
+- `inkpod_shortcut_sequence_resolve` は Core handle を取らない pure helper で、Core からcopyした immutable形状の表に対して任意 thread から `NONE` / `PREFIX` / `EXACT` を返す。UI keydown ごとに Core engine thread へ往復しないためのAPIである。
+
+これらは document revision、dirty、Undo を変更しない。永続化形式や
+text-focus guard、入力timeout、衝突時のUI上の交換policyはfrontendの責務である。
+
 ## 所有権と有効期間
 
 ### borrowed 入力

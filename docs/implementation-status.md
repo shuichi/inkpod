@@ -21,10 +21,17 @@
   `.inkpod` v2 with required color metadata and semantic `DOCM`, `LTBL`, `VECT`,
   and `ADJT` sections; `.inkbatch` uses `INKBATCH`. Pre-v2 files are intentionally
   unsupported.
+- The 2026-07-26 initial GUI command-surface pass removes the main-frame toolbar,
+  exposes every production command through the menu, assigns all 273 commands a
+  displayed and configurable single- or multi-stroke shortcut, and expands the
+  status bar to six adaptive information groups with asynchronous Core locator
+  sampling. Document tabs now identify the active sequence cell or saved filename,
+  fall back to `無題セル 1`/`復元セル`, append `*` for dirty state, and distinguish
+  additional views with `[ビュー N]`.
 
 ## Post-M8 refactoring regression baseline
 
-- The public ABI now has a source-level coverage gate for all 155 functions in
+- The public ABI now has a source-level coverage gate for all 159 functions in
   `include/inkpod/core_ffi.h`. The gate requires the header declarations and
   Rust `no_mangle` exports to remain identical and requires every public
   function to have a direct reference in a Rust or C++ contract test.
@@ -88,7 +95,10 @@
 - On 2026-07-26 the main-window chrome was intentionally simplified: the zoom
   slider and the persistent locator, motion-state, layer/plane, color,
   light-table, and sequence controls are no longer created. The Canvas now uses
-  the full content width and the status bar owns the persistent zoom readout.
+  the full content width. The toolbar is intentionally absent; command
+  discovery is menu-first and high-frequency access is shortcut-first. The
+  six-part status bar owns tool/plane, zoom/view flags, coordinates,
+  RGBA/selection, document/DPI, and task/shortcut/dirty summaries.
   Core/C ABI behavior, pane controllers, and synchronized selection state are
   retained for later modeless floating palettes; a static boundary test rejects
   reintroduction of the retired child controls.
@@ -125,10 +135,10 @@
   catalog gives each of all 273 production command IDs exactly one state owner;
   a structural test compares it with `app.rc` and rejects omissions or
   duplicates.
-- `AppContext` caches the latest immutable result. The main menu and toolbar,
-  configured and built-in keyboard shortcuts, and the Batch palette consume
-  that same result. Application smoke compares every menu item and every
-  matching toolbar button with the cache. Focused Windows tests cover no
+- `AppContext` caches the latest immutable result. The main menu, configured
+  keyboard shortcuts, and the Batch palette consume that same result. The
+  current application smoke compares every menu item with the cache and rejects
+  creation of a main-frame toolbar. Focused Windows tests cover no
   document, clean/dirty document equivalence, Undo/Redo and history movement,
   vector/non-vector planes, floating preview, and ready/running Batch states.
 - Active-tool writes now pass through `tools/tool_state.*`. Vector geometry
@@ -161,6 +171,34 @@
   package-payload smoke. The administrator MSIX install/uninstall test was
   omitted as explicitly permitted and is not an R6 or M8 completion gate.
 
+## Initial GUI command surface
+
+- `command_catalog.*` derives the production catalog from the same 273-entry
+  state-owner include used by menu routing. Every command receives one
+  prefix-free sequence of at most four strokes. Conventional file/edit keys are
+  retained; pencil/brush/eraser/fill/eyedropper, selection tools, gradient,
+  airbrush, palette group, and motion FPS use direct bindings; the remaining
+  commands use categorized `Q`-led sequences.
+- The searchable native shortcut editor displays and edits four strokes. Exact
+  conflicts exchange the two assignments so no menu command loses access;
+  prefix conflicts are rejected. The complete versioned table persists under
+  the user settings key and Reset restores application-provided defaults.
+- Core validates and owns the default/current maps through four additive C ABI
+  functions. UI keydown resolves against a Core-copied table through the pure
+  Rust helper without a Core-thread round trip. Text and RichEdit focus bypass
+  global shortcuts; palette `1`–`0` remains the fallback when no binding matches.
+- The status bar has six adaptive parts. Pointer motion queues only the newest
+  locator request to the Core engine and accepts a result only when its
+  generation is current. It reports active tool/plane, zoom/flip/grid, X/Y,
+  RGBA/selection size, document size/DPI, and task progress, pending sequence,
+  or dirty state.
+- Structural tests retain one route and one state owner for all 273 commands.
+  The focused Windows test proves the default shortcut table is complete,
+  command-unique, prefix-free, and contains the required direct bindings. Real
+  application smoke recursively checks every menu leaf has a displayed binding,
+  checks multi-stroke resolution/reset and six status parts, and rejects a
+  toolbar child.
+
 ## User-requested Windows shell and package additions
 
 - The Japanese Help menu now exposes `Inkpodについて`. Its native, owned modal
@@ -191,7 +229,7 @@
 |---|---|---|---|---|
 | ARCH-001 | Verified | CMake explicitly tracks all image/format/core/FFI inputs, including M7 batch/Core/settings/FFI sources, and Cargo byproducts behind a completion stamp | Debug/Release build plus an immediate no-op Debug rebuild | CMake remains the build entry; Cargo does not run on the unchanged rebuild |
 | ARCH-002 | Verified | Core/image/format are safe and frontend-independent | All three domain crates' source/manifest scan, clippy, workspace tests | No Rust Windows dependency |
-| ABI-001 | Verified | ABI v1 retains M0-M6 records and adds bounded M7 graph/input/operation/output records plus immutable graph, preview, report, and thread-safe task handles | All 155 public functions have a direct contract-test reference; header/export parity gate; C11/C++20 layouts and post-M8 integrated ABI/application smoke; Rust short/oversized-stride/misaligned-nested-record, buffer, ownership, cancellation, transaction, and round-trip tests | Caller graph spans are copied on create; nested records are validated before reference creation; borrowed preview/report strings live until their owning handle is released |
+| ABI-001 | Verified | ABI v2 includes bounded graph/task handles and adds validated fixed-record shortcut sequence set/copy plus a thread-independent pure resolver | All 159 public functions have a direct contract-test reference; header/export parity gate; C11/C++20 layouts and integrated ABI/application smoke; Rust short/oversized-stride/misaligned-nested-record, buffer, ownership, cancellation, transaction, round-trip, and shortcut prefix/conflict tests | Existing handles retain their ownership contracts; the four shortcut exports are additive and do not change document revision, dirty, or Undo |
 | ABI-002 | Verified | Immutable snapshot owns flat M5 cubic/fill/boundary spans alongside raster/overlay data; ownership remains with the renderer queue | Core zoom invariance; Rust FFI lifetime/count tests; compiled C++ validator/D2D smoke | Vector records remain document-coordinate and snapshot-borrowed |
 | IO-001 (native save) | Verified | `.inkpod` v2 uses bounded semantic `DOCM`, `LTBL`, `VECT`, and `ADJT` sections; adjustment records store stable IDs and validated brightness/contrast, curve, or levels parameters | Adjustment order/parameters/composite save-reopen; native round-trip plus missing/duplicate/wrong-layer/invalid-parameter rejection | Pre-v2 project files are intentionally unsupported; blob compression remains optional and disabled |
 | IO-001 (M2 recovery) | Verified | Atomic autosave leaves the normal savepoint/path untouched; recovery opens dirty, recovered, and pathless; Windows gives never-saved cells a private recovery path, queues timer autosave after an active stroke, and discovers private recovery at startup | Core/FFI recovery tests plus Windows active-stroke autosave, private-path discovery, and normal-vs-recovery smoke | Only the newest private recovery is prompted per launch; defer leaves it intact |
@@ -202,7 +240,7 @@
 | HIST-001 | Verified | Transactions, Undo/Redo, savepoints, whole revert, multi-step history selection, layer/selection partial revert, and preview apply/cancel are available from native UI | Core history/savepoint/preview tests plus title/dirty, multi-step dialog, partial-revert, and M6 preview Windows smoke | — |
 | VIEW-001 | Verified | Canvas zoom/pan/box-zoom gestures, fit, 1:1, numeric zoom, and horizontal/vertical view flips update independent view state; current zoom is always shown in the status bar | Core mode/resize/box/flip tests; ABI transform flags; Windows gesture/dialog/DPI/status smoke | The former main-window zoom slider is intentionally removed; manual viewport resize preserves zoom/pan while recording the new viewport dimensions |
 | VIEW-002 | Verified | Ruler, guide add/move/delete, grid settings, snap, and transparent view are Core-owned and exposed through native menus/dialogs and renderer overlays | Core persistence/snap tests, snapshot overlay ABI, and Windows guide/grid/ruler/snap/transparency smoke | — |
-| VIEW-003 | In progress | Document tabs create same-document logical views with independent transforms; locator sampling remains available through Core/C ABI but its persistent main-window label was removed | Core locator/multi-view tests, ABI same-revision snapshots, and Windows tab smoke | Re-expose locator results in a modeless floating locator palette |
+| VIEW-003 | In progress | Document tabs create same-document logical views with independent transforms and identify the active sequence cell/saved file, untitled/recovery state, dirty state, and view number; asynchronous Core locator sampling exposes current X/Y, RGBA, and selection size in the status bar | Core locator/multi-view tests, ABI same-revision snapshots, and Windows tab naming/dirty/multi-view/status smoke | A modeless magnified locator palette is still required for detailed neighborhood display and editing |
 | PAINT-001 | Verified | pencil/brush/eraser, auto erase, pressure-size, clipped/bounded incremental staging; UI/Input -> Core queue uses mouse fallback and `WM_POINTER` history | Core tool/resource tests; 256-record FFI test; Windows multi-sample live stroke smoke | PAINT-001 scope complete |
 | FILL-001 | Verified | Canvas seed fill uses a native option dialog for tolerance and selection clipping, then dispatches the normalized typed request | Image goldens/properties, Core/FFI transactions, and Windows option-dialog plus Canvas-click smoke | — |
 | FILL-002 | Verified | The fill dialog exposes up to six inclusion/exclusion colors, overflow abort/reporting, gap-close axes/value, and detached matching regions | Inclusion/gap/overflow/cancel/no-op goldens plus Windows option-to-Core smoke | Gap close uses the documented deterministic native axis-bridge rule |
@@ -221,7 +259,7 @@
 | CLIP-001 | Verified | Cut/Copy and compatible, selected-plane, or converted-plane Paste preserve document coordinates; the adapter publishes/imports the private typed format and standard CF_DIBV5/CF_DIB | Core cross-paper/failure tests, FFI ownership, and Windows private plus DIB-only external-clipboard menu smoke | Standard interchange is bounded to supported 24/32-bit DIB layouts; other Windows formats are ignored safely |
 | XFORM-001 | Verified | Native menus/dialogs separate view-only flips from destructive horizontal/vertical mirror, 90-degree rotation, image/paper size, and resolution changes | Core pixel/frame/guide/history tests and Windows command/dialog revision smoke | — |
 | XFORM-002 | Verified | Floating paste offers dialog and Canvas-handle move/scale/rotate preview, Enter/OK commit, and Esc/Cancel restoration | Core coordinate/scale/rotate/retry/cancel, FFI lifecycle, and Windows dialog/handle gesture smoke | — |
-| SHORT-001 | Verified | The categorized native editor covers 24 menu/tool/other commands; rebind conflict replacement, actual key resolution, and reset use the Core shortcut map | Core/FFI resolve tests plus Windows editor/conflict/reset and real WM_KEY command smoke | — |
+| SHORT-001 | Verified | All 273 production menu commands have displayed configurable 1–4-stroke bindings; conventional and high-frequency direct keys coexist with categorized prefix-free sequences, exact-conflict exchange, persistence, text-focus guard, pending-status display, and reset | Core transactional prefix/conflict/reset unit test; FFI set/copy/pure-resolve tests; Windows 273-entry completeness/prefix test and real menu/editor/single+multi WM_KEY smoke | Palette `1`–`0` remains a no-match fallback; menu labels always show the active binding |
 | COLOR-001 | Verified | Native RGB/HSV plus alpha editor preserves straight RGBA8/16 values; eyedropper source menus select active/topmost/composite/light-table sampling | Exact-depth Core/FFI tests and Windows editor/source-selection/Canvas sampling smoke | Display conversion remains explicit BGRA8 and does not replace the stored exact-depth color |
 | COLOR-002 | In progress | Palette, named chart, sequence subpalette, color-check models, menu commands, and 1–0/Tab shortcuts remain connected; persistent palette/chart controls were removed from the main window | Palette/chart/subpalette Core tests and Windows model/menu/shortcut/save-load smoke | Re-expose palette and chart models in modeless floating palettes; legacy preset layouts remain `Unknown` |
 | LT-001 | In progress | Set/item state and commands for administration, transform, color, mode, per-item opacity, and global opacity remain in Core/C ABI and the Windows controller; persistent split panes were removed | Set/item transaction/opacity/native round-trip tests plus Windows state/command smoke | Re-expose the set and item models in a modeless floating light-table palette |
@@ -241,7 +279,7 @@
 ### GUI vertical-slice audit (2026-07-24)
 
 For user-invoked requirements, `Verified` now requires a production menu,
-dialog, toolbar, or Canvas gesture to reach the Windows adapter, C ABI, Core,
+dialog, shortcut, or Canvas gesture to reach the Windows adapter, C ABI, Core,
 and visible/document result, with a Windows test covering that route. Direct C
 ABI calls made only inside the application smoke test do not count as a GUI
 vertical slice. If one user-visible operation grouped under a requirement ID is
@@ -630,8 +668,9 @@ as dirty/pathless, and then reopens the unchanged normal file.
   snapshot, animation, vector, effects, and batch responsibility modules.
 - `inkpod-image`, `inkpod-format`, and `inkpod-ffi` now follow the same pattern;
   their crate roots are 45, 49, and 56 lines. FFI ABI records, opaque handles,
-  boundary converters, and feature exports are separate, while the header and
-  all 155 exported symbol names/layouts remain unchanged.
+  boundary converters, and feature exports are separate. The prior 155 exported
+  names/layouts remain unchanged; the GUI command-surface pass adds four
+  fixed-record shortcut sequence exports, bringing the covered total to 159.
 - Shared internal state kept its prior effective crate scope; public Rust paths
   and C ABI values did not change. Unit test bodies are stored
   under each crate's `tests/unit/`, with malformed corpus and resilience tests
@@ -645,6 +684,9 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| Post-tab-label strict Debug build/CTest; isolated strict Release configure/build/CTest because the normal Release executable was open in the GUI | Windows 11 x64, MSVC 19.51 | Active sequence-cell/saved-file naming, `無題セル 1`/`復元セル`, asynchronous dirty `*`, and `[ビュー 2]` application smoke passed with all existing assets/routes/states/frontend/ABI/package checks: Debug 8/8 (16.26 s), Release 8/8 (4.56 s) | 2026-07-26 |
+| `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features`; `git diff --check` | Windows 11 x64, stable Rust | Initial GUI command-surface source passed formatting, zero-warning clippy, whitespace validation, and 136 tests: Core 65, architecture 5, resilience 1, FFI 20, format 21 plus malformed corpus 2, image 22, and doc-tests | 2026-07-26 |
+| Explicit Visual Studio 2026 x64 Debug/Release configure and strict build; `ctest --preset windows-x64-{debug,release} -E "windows_(msix_install\|msix_uninstall)" --output-on-failure` | Windows 11 x64, MSVC 19.51 | `/W4 /WX /permissive-`, C11 header, Rust staticlib, C++20 GUI, RC, and MSIX assembly passed; assets, all 273 routes/states/shortcuts, frontend boundary, ABI, real application menu/status/single+multi-key smoke, and payload passed 8/8 in Debug (16.01 s) and Release (4.65 s) | 2026-07-26 |
 | Semantic-label scan; `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | Non-document source has zero M0-M8/R0-R6 labels; semantic-name architecture guard and explicit previous-container-version rejection passed; formatting and clippy passed; Core 64, architecture 5, resilience 1, FFI 19, format 21 plus malformed corpus 2, image 22, and doc-tests passed | 2026-07-26 |
 | Explicit Visual Studio 2026 x64 Developer environment Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E inkpod_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Semantic C++/RC names, application/ABI smoke, command route/state ownership, frontend boundaries, and renamed MSIX payload test passed 8/8 in Debug (14.86 s) and Release (3.97 s) | 2026-07-26 |
 | M8 status/compatibility consistency audit; `git diff --check` | Documentation-only closeout | M8 milestone and all five M8 requirement rows are complete/Verified under the explicitly revised package acceptance scope; administrator install/installed ABI/uninstall remains accurately recorded as optional and unexecuted | 2026-07-26 |

@@ -62,13 +62,15 @@
 main frame は標準的な Windows 11 desktop application とし、次の領域を持たせてください。
 
 - 最上段: menu bar。
-- menu bar の下: 拡大/縮小、fit、1:1、表示反転、guide/grid、前後セル、保存等の高頻度 command を置く toolbar。常設の zoom slider は置かない。
+- toolbar は置かない。利用者が実行できる全機能を menu bar の末端項目から呼び出せることを優先する。
 - 左側の dock pane: tool palette。選択中 tool は一つだけ明示する。
-- 中央: 一つ以上の document tab と custom Canvas `HWND`。同じ document の multi-view も別 tab/view として開ける。
+- 中央: 一つ以上の document tab と custom Canvas `HWND`。tab label は active sequence cell 名、保存 file 名、`無題セル N`、`復元セル`の順で意味のある識別名を使い、dirty は `*`、同じ document の追加 view は`[ビュー N]`で示す。同じ document の multi-view も別 tab/view として開ける。
 - main frame に常設の右 dock pane は置かず、Canvas を利用可能な横幅全体へ広げる。tool options、layer/plane、color palette、color chart、color locator、light table、cell/sequence、subpalette、file preview は、必要な Core/C ABI の状態を保持したまま、後続作業で独立した modeless floating palette として実装する。再実装までは非表示の placeholder child control も生成しない。
-- 下段: status bar。現在 tool、document 座標、zoom、pixel color、文書寸法、処理進捗、dirty 状態を表示する。
+- 下段: status bar。現在 tool/active plane、document 座標、zoom/view flip/grid、pixel RGBA/selection 寸法、文書寸法/DPI、処理進捗、dirty 状態、複数ストローク入力待ちを短く表示する。
 - modeless palette は表示/非表示と位置復元ができ、high-DPI、keyboard navigation、high contrast を尊重する。
-- menu、toolbar、shortcut、context menu は同じ command ID と enable/checked state を共有し、同じ処理を重複実装しない。
+- menu、shortcut、context menu は同じ command ID と enable/checked state を共有し、同じ処理を重複実装しない。
+- 全の実行可能な menu 末端項目に shortcut を割り当て、menu label に現在の割当を表示する。`Ctrl+S`、`Ctrl+O`、Undo/Redo、clipboard など標準操作は一般的な割当を維持する。描画・選択・塗りなど高頻度操作は、text 入力に focus がないときの single stroke を基本とする。その他は短い prefix-free な multi-stroke を使い、入力待ちを status bar に表示する。
+- 色 palette の `1`–`0`、次 group の `Tab` は数値入力中でない場合の高速操作として保持する。shortcut は検索可能な設定 dialog で最大4 strokeまで再割当てでき、完全一致の衝突は元の割当と交換し、prefix 衝突は拒否する。
 - 実行不能 command は disable する。例として vector layer で pencil、選択なしの一部 command、対象 layer 未指定の batch を無言で成功させない。
 
 ### 3. メニュー構成
@@ -204,7 +206,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - active selection と複数 edit target を区別する。描画 command は active plane と明示 target 規則を検証する。
 - drag and drop で同階層の順序を変える。
 - opacity は数値と slider で変更する。
-- 新規、複製、削除、menu、alpha edit を標準 button/toolbar から操作できる。
+- 新規、複製、削除、property、alpha edit は必ず menu から操作でき、modeless palette を追加する場合も同じ command ID へ委譲する。
 - 複製名は一意にする。削除は Undo 可能とし、必須 plane を最後の一枚まで削除できないよう validation する。
 - 同種統合は同じ種類だけを対象にし、plane color 等の互換条件が異なるものを黙って統合しない。
 - property dialog では name、type、opacity、plane color 等を編集し、type conversion は損失内容を事前表示する。
@@ -221,7 +223,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 ### 8. 表示、移動、ルーラー、ロケーター
 
 - zoom tool は click で拡大、`Alt`+click で縮小する。box zoom を有効にすると drag 矩形が viewport に収まる倍率へ移動する。
-- toolbar と shortcut から拡大、縮小、数値倍率、slider、fit、1:1 を操作できる。1:1 は document pixel と表示 device pixel の関係を DPI policy とともに文書化する。
+- menu と shortcut から拡大、縮小、数値倍率、fit、1:1 を操作できる。1:1 は document pixel と表示 device pixel の関係を DPI policy とともに文書化する。
 - pan tool は Canvas drag。別 tool 使用中も一時 modifier で pan へ切替できる。
 - 左右/上下 view flip は表示 transform だけを変更する。セル menu の mirror は実データを変更する。
 - ruler から guide を drag して作成し、Canvas 外へ drag して削除する。move tool で位置変更する。
@@ -486,7 +488,7 @@ Core の公開 Rust API は C ABI から独立させてください。FFI 用の
 ### Windows frontend
 
 - `wWinMain`、Unicode Win32 API、Common Controls v6、Per-Monitor DPI v2
-- main frame、menu/toolbar/status bar、layer/plane panel、tool options、custom Canvas child window
+- main frame、menu/status bar、modeless layer/plane palette、tool options、custom Canvas child window。toolbar は作成しない
 - Canvas ごとに swap chain を持ち、D3D11/DXGI surface から D2D device context を作る
 - Rust snapshot の raster/vector/text/overlay を Direct2D primitive へ変換する
 - resize、minimize、occlusion、DPI change、theme change、device lost を処理する
@@ -503,7 +505,7 @@ Windows frontend は、少なくとも次の三つの長寿命 thread に責務�
 
 thread 間は所有権を明示した queue で接続してください。renderer は置き換えられた古い snapshot/frame を破棄してよい一方、pointer sample や stroke の begin/end/cancel を描画負荷軽減のために破棄してはいけません。Core thread から Canvas の window message queue へ Rust 所有 pointer を裸で積まず、snapshot の受取側が成功/失敗の両方で release 責務を引き受ける C++ queue を使ってください。
 
-Canvas の view transform は client の物理 device pixel を基準とし、`device = document * zoom + pan` とします。Direct2D Canvas は pixel unit/96-DPI target で同じ transform を使い、Per-Monitor DPI は menu、dialog、toolbar 等の UI scaling と実寸表示 policy にだけ反映してください。同一の client size と view state で DPI 変更だけにより Canvas が移動・縮小してはいけません。
+Canvas の view transform は client の物理 device pixel を基準とし、`device = document * zoom + pan` とします。Direct2D Canvas は pixel unit/96-DPI target で同じ transform を使い、Per-Monitor DPI は menu、dialog、status bar、modeless palette 等の UI scaling と実寸表示 policy にだけ反映してください。同一の client size と view state で DPI 変更だけにより Canvas が移動・縮小してはいけません。
 
 ### C ABI
 
@@ -566,7 +568,7 @@ Canvas の view transform は client の物理 device pixel を基準とし、`d
 - `LT-002`: reference-frame alignment、boundary/color sampling、edit image swap
 - `SEQ-001`: cut/cell sequence、前後セル、欠番、thumbnail preview
 - `SEQ-002`: motion check、FPS、loop、step、selection/light table option
-- `SHORT-001`: rebindable shortcut、conflict replacement、reset
+- `SHORT-001`: 全 menu command への single/multi-stroke shortcut、text-focus guard、prefix-free resolve、conflict replacement、永続化、reset
 
 ### Image processing and batch
 

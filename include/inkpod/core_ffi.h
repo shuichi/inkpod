@@ -158,6 +158,11 @@ typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_SHORTCUT_MODIFIER_SHIFT (UINT32_C(1) << 1)
 #define INKPOD_SHORTCUT_MODIFIER_ALT (UINT32_C(1) << 2)
 #define INKPOD_SHORTCUT_MODIFIER_EXTENDED (UINT32_C(1) << 3)
+#define INKPOD_SHORTCUT_MAX_STROKES UINT32_C(4)
+typedef uint32_t InkpodShortcutMatch;
+#define INKPOD_SHORTCUT_MATCH_NONE UINT32_C(0)
+#define INKPOD_SHORTCUT_MATCH_PREFIX UINT32_C(1)
+#define INKPOD_SHORTCUT_MATCH_EXACT UINT32_C(2)
 
 /** @brief binary、grayscale、RGBA 8/16 bit を明示する色深度型。 */
 typedef uint32_t InkpodColorDepth;
@@ -1479,6 +1484,21 @@ typedef struct InkpodLocatorOutput {
 #define INKPOD_LOCATOR_SELECTION_PRESENT (UINT32_C(1) << 0)
 #define INKPOD_LOCATOR_COLOR_PRESENT (UINT32_C(1) << 1)
 
+/** @brief 一つの正規化済みshortcut stroke。 */
+typedef struct InkpodShortcutStroke {
+    uint32_t virtual_key;
+    uint32_t modifiers;
+} InkpodShortcutStroke;
+
+/** @brief 最大4 strokeのprefix-free shortcut列。 */
+typedef struct InkpodShortcutSequence {
+    uint32_t struct_size;
+    uint32_t command_id;
+    uint32_t stroke_count;
+    uint32_t reserved;
+    InkpodShortcutStroke strokes[4];
+} InkpodShortcutSequence;
+
 /**
  * @brief light-table/sequence 用 straight RGBA8/16 raster の borrowed 入力。
  *
@@ -2441,6 +2461,45 @@ InkpodStatus inkpod_core_shortcut_resolve(
  * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_shortcut_reset(InkpodCore* core);
+/**
+ * @brief application提供の完全な既定shortcut集合を検証して登録し、現在値にも反映する。
+ * @par 契約
+ * Core owner thread。各列は1～4 stroke、commandは一意、全列はprefix-free。入力は呼出中だけ借用する。
+ * 成功時だけ既定値と現在値を同時置換し、document revision、dirty、Undoは不変。
+ */
+InkpodStatus inkpod_core_shortcut_defaults_set(
+    InkpodCore* core,
+    const InkpodShortcutSequence* sequences,
+    uint64_t sequence_count,
+    uint64_t sequence_stride_bytes);
+/** @brief 現在の完全なshortcut集合をtransactionalに置換する。 */
+InkpodStatus inkpod_core_shortcut_sequences_set(
+    InkpodCore* core,
+    const InkpodShortcutSequence* sequences,
+    uint64_t sequence_count,
+    uint64_t sequence_stride_bytes);
+/** @brief 現在のshortcut集合をcaller bufferへコピーする。buffer無しは必要件数queryになる。 */
+InkpodStatus inkpod_core_shortcut_sequences_copy(
+    InkpodCore* core,
+    InkpodShortcutSequence* out_sequences,
+    uint64_t sequence_capacity,
+    uint64_t sequence_stride_bytes,
+    uint64_t* out_sequence_count);
+/**
+ * @brief caller-owned immutable shortcut表で入力列を解決するthread-independent pure helper。
+ * @par 契約
+ * Core handle不要。入力表は Core で検証・copyした完全サイズのprefix-free表とする。
+ * 各recordの形式不正は拒否する。成功時matchとcommandを書き、
+ * prefix/noneではcommandを0にする。
+ */
+InkpodStatus inkpod_shortcut_sequence_resolve(
+    const InkpodShortcutSequence* sequences,
+    uint64_t sequence_count,
+    uint64_t sequence_stride_bytes,
+    const InkpodShortcutStroke* strokes,
+    uint32_t stroke_count,
+    InkpodShortcutMatch* out_match,
+    uint32_t* out_command_id);
 /**
  * @brief primary とは独立した logical view を作成する。
  * @par 契約

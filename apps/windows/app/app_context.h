@@ -15,6 +15,7 @@
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
 #include "ui/main_window.h"
+#include "ui/shortcut_controller.h"
 
 namespace inkpod::app {
 
@@ -126,6 +127,12 @@ struct ViewUiState {
     bool snap_guides{};
     bool snap_grid{};
     bool transparent_visible{true};
+    std::int32_t pointer_device_x{};
+    std::int32_t pointer_device_y{};
+    std::uint64_t locator_generation{};
+    bool locator_pending{};
+    bool locator_valid{};
+    InkpodLocatorOutput locator{};
     std::vector<InkpodStrokeSample> gesture_samples;
     bool guide_drag_active{};
     std::uint32_t guide_drag_axis{};
@@ -158,6 +165,7 @@ struct PaneUiState {
 
 struct AnimationUiState {
     std::uint32_t active_sequence_index{};
+    std::wstring active_sequence_name;
     std::uint32_t motion_fps{24U};
     std::uint64_t motion_flags{INKPOD_MOTION_FLAG_LOOP};
     bool motion_active{};
@@ -220,6 +228,7 @@ struct AppContext {
     AnimationUiState animation;
     EffectsUiState effects;
     BatchUiState batch;
+    windows::ui::ShortcutUiState shortcuts;
     windows::ui::CommandStateSet command_states;
     std::unique_ptr<CoreEngine> engine;
 };

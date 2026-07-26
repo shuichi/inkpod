@@ -16,6 +16,7 @@
 #include "resource.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
+#include "ui/shortcut_controller.h"
 
 namespace inkpod::app {
 namespace {
@@ -26,9 +27,14 @@ InkpodStatus StartCore(AppContext& state) noexcept {
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    return state.engine->Start(
+    const InkpodStatus status = state.engine->Start(
         renderer::GetCanvasSnapshotSink(state.windows.canvas),
         state.windows.window);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    return windows::ui::InitializeShortcuts(
+        *state.engine, state.shortcuts, !state.lifetime.smoke_test);
 }
 
 InkpodStatus StopCore(AppContext& state) noexcept {
@@ -75,10 +81,17 @@ InkpodStatus StopCore(AppContext& state) noexcept {
     return INKPOD_STATUS_OK;
 }
 
-int RunMessageLoop() noexcept {
+int RunMessageLoop(AppContext& state) noexcept {
     MSG message{};
     BOOL result{};
     while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+        if (state.batch.palette != nullptr
+            && IsDialogMessageW(state.batch.palette, &message) != FALSE) {
+            continue;
+        }
+        if (windows::ui::runtime::PreTranslateKeyboardMessage(state, message)) {
+            continue;
+        }
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
@@ -217,7 +230,7 @@ int Application::Run() {
     } else {
         ShowWindow(window, launch_.show_command);
         UpdateWindow(window);
-        exit_code = RunMessageLoop();
+        exit_code = RunMessageLoop(state);
     }
 
     core_status = StopCore(state);

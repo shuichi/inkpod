@@ -25,5 +25,6 @@ void ShowCoreError(
     const app::AppContext& state,
     HWND owner,
     const wchar_t* operation) noexcept;
+bool PreTranslateKeyboardMessage(app::AppContext& state, const MSG& message) noexcept;
 
 }  // namespace inkpod::windows::ui::runtime

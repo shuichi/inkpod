@@ -1,7 +1,5 @@
 #include "command_state.h"
 
-#include <commctrl.h>
-
 #include <algorithm>
 #include <initializer_list>
 #include <iterator>
@@ -531,8 +529,7 @@ bool IsCommandChecked(const CommandStateSet& states, UINT command) noexcept {
     return state != nullptr && state->checked;
 }
 
-void ApplyCommandStates(
-    const CommandStateSet& states, HMENU menu, HWND toolbar) noexcept {
+void ApplyCommandStates(const CommandStateSet& states, HMENU menu) noexcept {
     for (const CommandState& state : states) {
         if (menu != nullptr) {
             EnableMenuItem(
@@ -543,19 +540,6 @@ void ApplyCommandStates(
                 menu,
                 state.command,
                 MF_BYCOMMAND | (state.checked ? MF_CHECKED : MF_UNCHECKED));
-        }
-        if (toolbar != nullptr
-            && SendMessageW(toolbar, TB_COMMANDTOINDEX, state.command, 0) >= 0) {
-            SendMessageW(
-                toolbar,
-                TB_ENABLEBUTTON,
-                state.command,
-                MAKELPARAM(state.enabled ? TRUE : FALSE, 0));
-            SendMessageW(
-                toolbar,
-                TB_CHECKBUTTON,
-                state.command,
-                MAKELPARAM(state.checked ? TRUE : FALSE, 0));
         }
     }
 }

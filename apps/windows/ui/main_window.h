@@ -7,7 +7,6 @@ namespace inkpod::app {
 struct MainWindowHandles {
     HWND window{};
     HWND canvas{};
-    HWND toolbar{};
     HWND status_bar{};
     HWND document_tabs{};
 };

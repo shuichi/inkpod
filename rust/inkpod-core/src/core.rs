@@ -11,6 +11,7 @@ impl Default for Core {
 impl Core {
     #[must_use]
     pub fn new() -> Self {
+        let shortcuts = default_shortcuts();
         Self {
             document: None,
             document_revision: 0,
@@ -51,7 +52,8 @@ impl Core {
             secondary_views: BTreeMap::new(),
             next_view_id: 1,
             floating: None,
-            shortcuts: default_shortcuts(),
+            shortcut_defaults: shortcuts.clone(),
+            shortcuts,
             sequence: None,
             motion_check: None,
             subpalette_index: None,
@@ -151,7 +153,8 @@ pub struct Core {
     pub(super) secondary_views: BTreeMap<u64, ViewState>,
     pub(super) next_view_id: u64,
     pub(super) floating: Option<FloatingSelection>,
-    pub(super) shortcuts: BTreeMap<u32, ShortcutBinding>,
+    pub(super) shortcut_defaults: BTreeMap<u32, Vec<ShortcutStroke>>,
+    pub(super) shortcuts: BTreeMap<u32, Vec<ShortcutStroke>>,
     pub(super) sequence: Option<animation::SequenceState>,
     pub(super) motion_check: Option<animation::MotionCheckState>,
     pub(super) subpalette_index: Option<usize>,

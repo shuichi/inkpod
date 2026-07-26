@@ -83,6 +83,11 @@ BEGIN
             MENUITEM "確定", IDM_EDIT_FLOATING_COMMIT
             MENUITEM "キャンセル", IDM_EDIT_FLOATING_CANCEL
         END
+        POPUP "設定(&G)"
+        BEGIN
+            MENUITEM "ショートカット編集...", IDM_SHORTCUT_EDIT
+            MENUITEM "ショートカットを初期化", IDM_SHORTCUT_RESET
+        END
     END
     POPUP "表示(&V)"
     BEGIN
@@ -114,22 +119,6 @@ BEGIN
         MENUITEM "透明部分", IDM_VIEW_TRANSPARENT
         MENUITEM "新しいビュー", IDM_VIEW_NEW
     END
-    POPUP "レイヤー(&L)"
-    BEGIN
-        MENUITEM "新規...", IDM_LAYER_NEW
-        MENUITEM "複製", IDM_LAYER_DUPLICATE
-        MENUITEM "削除", IDM_LAYER_DELETE
-        MENUITEM "非表示を削除", IDM_LAYER_DELETE_HIDDEN
-        MENUITEM "最前面へ移動", IDM_LAYER_MOVE_TOP
-        MENUITEM "上へ", IDM_LAYER_MOVE_UP
-        MENUITEM "下へ", IDM_LAYER_MOVE_DOWN
-        MENUITEM "表示切替", IDM_LAYER_TOGGLE_VISIBLE
-        MENUITEM "編集可否切替", IDM_LAYER_TOGGLE_EDITABLE
-        MENUITEM "不透明度...", IDM_LAYER_OPACITY
-        MENUITEM "変換...", IDM_LAYER_CONVERT
-        MENUITEM "同種を統合", IDM_LAYER_MERGE
-        MENUITEM "プロパティ...", IDM_LAYER_PROPERTIES
-    END
     POPUP "セル(&D)"
     BEGIN
         MENUITEM "用紙設定...", IDM_CELL_PAPER_SETTINGS
@@ -153,6 +142,39 @@ BEGIN
             MENUITEM "作画フレーム...", IDM_CELL_FRAME_DRAWING
             MENUITEM "安全フレーム...", IDM_CELL_FRAME_SAFE
             MENUITEM "余白...", IDM_CELL_MARGINS
+        END
+        POPUP "レイヤー(&L)"
+        BEGIN
+            MENUITEM "新規...", IDM_LAYER_NEW
+            MENUITEM "複製", IDM_LAYER_DUPLICATE
+            MENUITEM "削除", IDM_LAYER_DELETE
+            MENUITEM "非表示を削除", IDM_LAYER_DELETE_HIDDEN
+            MENUITEM "最前面へ移動", IDM_LAYER_MOVE_TOP
+            MENUITEM "上へ", IDM_LAYER_MOVE_UP
+            MENUITEM "下へ", IDM_LAYER_MOVE_DOWN
+            MENUITEM "表示切替", IDM_LAYER_TOGGLE_VISIBLE
+            MENUITEM "編集可否切替", IDM_LAYER_TOGGLE_EDITABLE
+            MENUITEM "不透明度...", IDM_LAYER_OPACITY
+            MENUITEM "変換...", IDM_LAYER_CONVERT
+            MENUITEM "同種を統合", IDM_LAYER_MERGE
+            MENUITEM "プロパティ...", IDM_LAYER_PROPERTIES
+        END
+        POPUP "プレーン(&P)"
+        BEGIN
+            MENUITEM "主線(&L)", IDM_PLANE_MAIN_LINE
+            MENUITEM "彩色(&C)", IDM_PLANE_COLOR
+            MENUITEM SEPARATOR
+            MENUITEM "新規...", IDM_PLANE_NEW
+            MENUITEM "複製", IDM_PLANE_DUPLICATE
+            MENUITEM "削除", IDM_PLANE_DELETE
+            MENUITEM "上へ", IDM_PLANE_MOVE_UP
+            MENUITEM "下へ", IDM_PLANE_MOVE_DOWN
+            MENUITEM "表示切替", IDM_PLANE_TOGGLE_VISIBLE
+            MENUITEM "編集可否切替", IDM_PLANE_TOGGLE_EDITABLE
+            MENUITEM "不透明度...", IDM_PLANE_OPACITY
+            MENUITEM "変換...", IDM_PLANE_CONVERT
+            MENUITEM "同種を統合", IDM_PLANE_MERGE
+            MENUITEM "プロパティ...", IDM_PLANE_PROPERTIES
         END
     END
     POPUP "選択(&S)"
@@ -264,23 +286,6 @@ BEGIN
         MENUITEM "ゴミ取り...", IDM_EFFECT_DUST
         MENUITEM "アルファグラデーション...", IDM_EFFECT_ALPHA_GRADIENT
         MENUITEM "アルファをグレースケール表示", IDM_EFFECT_ALPHA_VIEW
-    END
-    POPUP "プレーン(&P)"
-    BEGIN
-        MENUITEM "主線(&L)", IDM_PLANE_MAIN_LINE
-        MENUITEM "彩色(&C)", IDM_PLANE_COLOR
-        MENUITEM SEPARATOR
-        MENUITEM "新規...", IDM_PLANE_NEW
-        MENUITEM "複製", IDM_PLANE_DUPLICATE
-        MENUITEM "削除", IDM_PLANE_DELETE
-        MENUITEM "上へ", IDM_PLANE_MOVE_UP
-        MENUITEM "下へ", IDM_PLANE_MOVE_DOWN
-        MENUITEM "表示切替", IDM_PLANE_TOGGLE_VISIBLE
-        MENUITEM "編集可否切替", IDM_PLANE_TOGGLE_EDITABLE
-        MENUITEM "不透明度...", IDM_PLANE_OPACITY
-        MENUITEM "変換...", IDM_PLANE_CONVERT
-        MENUITEM "同種を統合", IDM_PLANE_MERGE
-        MENUITEM "プロパティ...", IDM_PLANE_PROPERTIES
     END
     POPUP "色(&C)"
     BEGIN
@@ -445,9 +450,6 @@ BEGIN
     END
     POPUP "ヘルプ(&H)"
     BEGIN
-        MENUITEM "ショートカット編集...", IDM_SHORTCUT_EDIT
-        MENUITEM "ショートカットを初期化", IDM_SHORTCUT_RESET
-        MENUITEM SEPARATOR
         MENUITEM "Inkpodについて(&A)...", IDM_HELP_ABOUT
     END
 END
@@ -562,18 +564,22 @@ BEGIN
     DEFPUSHBUTTON   "OK", IDOK, 289, 253, 80, 26
 END
 
-IDD_SHORTCUT_EDITOR DIALOGEX 0, 0, 260, 112
+IDD_SHORTCUT_EDITOR DIALOGEX 0, 0, 330, 154
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_CONTROLPARENT
 CAPTION "ショートカット編集"
 FONT 9, "Segoe UI"
 BEGIN
-    LTEXT           "コマンド", -1, 16, 17, 54, 12
-    COMBOBOX        IDC_SHORTCUT_COMMAND, 76, 14, 168, 70, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "キー", -1, 16, 48, 54, 12
-    CONTROL         "", IDC_SHORTCUT_HOTKEY, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 76, 45, 168, 14
-    DEFPUSHBUTTON   "OK", IDOK, 108, 82, 64, 18
-    PUSHBUTTON      "キャンセル", IDCANCEL, 180, 82, 64, 18
+    LTEXT           "コマンド", -1, 12, 15, 58, 12
+    COMBOBOX        IDC_SHORTCUT_COMMAND, 76, 12, 242, 110, CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "キー列", -1, 12, 45, 58, 12
+    CONTROL         "", IDC_SHORTCUT_HOTKEY, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 76, 42, 112, 14
+    CONTROL         "", IDC_SHORTCUT_HOTKEY2, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 206, 42, 112, 14
+    CONTROL         "", IDC_SHORTCUT_HOTKEY3, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 76, 66, 112, 14
+    CONTROL         "", IDC_SHORTCUT_HOTKEY4, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 206, 66, 112, 14
+    LTEXT           "左上から順に1～4ストロークを指定します。既存割当との完全一致は交換されます。", -1, 12, 92, 306, 24
+    DEFPUSHBUTTON   "適用", IDOK, 182, 124, 64, 18
+    PUSHBUTTON      "キャンセル", IDCANCEL, 254, 124, 64, 18
 END
 
 IDD_HISTORY DIALOGEX 0, 0, 280, 96

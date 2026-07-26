@@ -72,6 +72,7 @@ pub const MAX_LAYERS: usize = 4_096;
 pub const MAX_PLANES_PER_LAYER: usize = 4_096;
 pub const MAX_GUIDES: usize = 4_096;
 pub const MAX_SHORTCUTS: usize = 1_024;
+pub const MAX_SHORTCUT_STROKES: usize = 4;
 pub const SHORTCUT_MODIFIER_CONTROL: u32 = 1 << 0;
 pub const SHORTCUT_MODIFIER_SHIFT: u32 = 1 << 1;
 pub const SHORTCUT_MODIFIER_ALT: u32 = 1 << 2;

@@ -215,28 +215,26 @@ impl Core {
     }
 
     pub fn shortcut_bindings(&self) -> Vec<ShortcutBinding> {
-        self.shortcuts.values().copied().collect()
+        self.shortcuts
+            .iter()
+            .filter_map(|(command_id, strokes)| {
+                (strokes.len() == 1).then_some(ShortcutBinding {
+                    command_id: *command_id,
+                    virtual_key: strokes[0].virtual_key,
+                    modifiers: strokes[0].modifiers,
+                })
+            })
+            .collect()
     }
 
     pub fn rebind_shortcut(&mut self, binding: ShortcutBinding) -> Result<(), CoreError> {
-        if binding.command_id == 0
-            || binding.virtual_key == 0
-            || binding.modifiers & !SHORTCUT_MODIFIER_MASK != 0
-        {
-            return Err(CoreError::InvalidArgument("shortcut binding is invalid"));
-        }
-        if self.shortcuts.len() >= MAX_SHORTCUTS
-            && !self.shortcuts.contains_key(&binding.command_id)
-        {
-            return Err(CoreError::InvalidState("shortcut limit reached"));
-        }
-        self.shortcuts.retain(|command, candidate| {
-            *command == binding.command_id
-                || candidate.virtual_key != binding.virtual_key
-                || candidate.modifiers != binding.modifiers
-        });
-        self.shortcuts.insert(binding.command_id, binding);
-        Ok(())
+        self.rebind_shortcut_sequence(ShortcutSequenceBinding {
+            command_id: binding.command_id,
+            strokes: vec![ShortcutStroke {
+                virtual_key: binding.virtual_key,
+                modifiers: binding.modifiers,
+            }],
+        })
     }
 
     pub fn resolve_shortcut(
@@ -244,18 +242,139 @@ impl Core {
         virtual_key: u32,
         modifiers: u32,
     ) -> Result<Option<u32>, CoreError> {
-        if virtual_key == 0 || modifiers & !SHORTCUT_MODIFIER_MASK != 0 {
-            return Err(CoreError::InvalidArgument("shortcut input is invalid"));
+        match self.resolve_shortcut_sequence(&[ShortcutStroke {
+            virtual_key,
+            modifiers,
+        }])? {
+            ShortcutSequenceMatch::Exact(command_id) => Ok(Some(command_id)),
+            ShortcutSequenceMatch::None | ShortcutSequenceMatch::Prefix => Ok(None),
         }
-        Ok(self.shortcuts.values().find_map(|binding| {
-            (binding.virtual_key == virtual_key && binding.modifiers == modifiers)
-                .then_some(binding.command_id)
-        }))
     }
 
     pub fn reset_shortcuts(&mut self) {
-        self.shortcuts = default_shortcuts();
+        self.shortcuts.clone_from(&self.shortcut_defaults);
     }
+
+    pub fn shortcut_sequences(&self) -> Vec<ShortcutSequenceBinding> {
+        self.shortcuts
+            .iter()
+            .map(|(command_id, strokes)| ShortcutSequenceBinding {
+                command_id: *command_id,
+                strokes: strokes.clone(),
+            })
+            .collect()
+    }
+
+    pub fn set_shortcut_defaults(
+        &mut self,
+        bindings: &[ShortcutSequenceBinding],
+    ) -> Result<(), CoreError> {
+        let replacement = validate_shortcut_sequences(bindings)?;
+        self.shortcut_defaults = replacement.clone();
+        self.shortcuts = replacement;
+        Ok(())
+    }
+
+    pub fn replace_shortcut_sequences(
+        &mut self,
+        bindings: &[ShortcutSequenceBinding],
+    ) -> Result<(), CoreError> {
+        self.shortcuts = validate_shortcut_sequences(bindings)?;
+        Ok(())
+    }
+
+    pub fn rebind_shortcut_sequence(
+        &mut self,
+        binding: ShortcutSequenceBinding,
+    ) -> Result<(), CoreError> {
+        validate_shortcut_sequence(&binding)?;
+        if self.shortcuts.len() >= MAX_SHORTCUTS
+            && !self.shortcuts.contains_key(&binding.command_id)
+        {
+            return Err(CoreError::InvalidState("shortcut limit reached"));
+        }
+        self.shortcuts.retain(|command, candidate| {
+            *command == binding.command_id
+                || !shortcut_sequences_conflict(candidate, &binding.strokes)
+        });
+        self.shortcuts.insert(binding.command_id, binding.strokes);
+        Ok(())
+    }
+
+    pub fn resolve_shortcut_sequence(
+        &self,
+        strokes: &[ShortcutStroke],
+    ) -> Result<ShortcutSequenceMatch, CoreError> {
+        validate_shortcut_strokes(strokes)?;
+        if let Some(command_id) = self.shortcuts.iter().find_map(|(command_id, candidate)| {
+            (candidate.as_slice() == strokes).then_some(*command_id)
+        }) {
+            return Ok(ShortcutSequenceMatch::Exact(command_id));
+        }
+        if self
+            .shortcuts
+            .values()
+            .any(|candidate| candidate.starts_with(strokes))
+        {
+            Ok(ShortcutSequenceMatch::Prefix)
+        } else {
+            Ok(ShortcutSequenceMatch::None)
+        }
+    }
+}
+
+fn validate_shortcut_sequences(
+    bindings: &[ShortcutSequenceBinding],
+) -> Result<BTreeMap<u32, Vec<ShortcutStroke>>, CoreError> {
+    if bindings.len() > MAX_SHORTCUTS {
+        return Err(CoreError::InvalidArgument("too many shortcut bindings"));
+    }
+    let mut replacement = BTreeMap::new();
+    for binding in bindings {
+        validate_shortcut_sequence(binding)?;
+        if replacement
+            .insert(binding.command_id, binding.strokes.clone())
+            .is_some()
+        {
+            return Err(CoreError::InvalidArgument("duplicate shortcut command"));
+        }
+    }
+    let sequences = replacement.values().collect::<Vec<_>>();
+    for (index, sequence) in sequences.iter().enumerate() {
+        if sequences[index + 1..]
+            .iter()
+            .any(|candidate| shortcut_sequences_conflict(sequence, candidate))
+        {
+            return Err(CoreError::InvalidArgument("shortcut sequences conflict"));
+        }
+    }
+    Ok(replacement)
+}
+
+fn validate_shortcut_sequence(binding: &ShortcutSequenceBinding) -> Result<(), CoreError> {
+    if binding.command_id == 0 {
+        return Err(CoreError::InvalidArgument("shortcut command is invalid"));
+    }
+    validate_shortcut_strokes(&binding.strokes)
+}
+
+fn validate_shortcut_strokes(strokes: &[ShortcutStroke]) -> Result<(), CoreError> {
+    if strokes.is_empty() || strokes.len() > MAX_SHORTCUT_STROKES {
+        return Err(CoreError::InvalidArgument(
+            "shortcut stroke count is invalid",
+        ));
+    }
+    if strokes
+        .iter()
+        .any(|stroke| stroke.virtual_key == 0 || stroke.modifiers & !SHORTCUT_MODIFIER_MASK != 0)
+    {
+        return Err(CoreError::InvalidArgument("shortcut stroke is invalid"));
+    }
+    Ok(())
+}
+
+fn shortcut_sequences_conflict(left: &[ShortcutStroke], right: &[ShortcutStroke]) -> bool {
+    left.starts_with(right) || right.starts_with(left)
 }
 
 impl Core {
@@ -541,7 +660,7 @@ pub(super) fn validate_grid(grid: GridConfig) -> Result<(), CoreError> {
     }
 }
 
-pub(super) fn default_shortcuts() -> BTreeMap<u32, ShortcutBinding> {
+pub(super) fn default_shortcuts() -> BTreeMap<u32, Vec<ShortcutStroke>> {
     [
         ShortcutBinding {
             command_id: 1,
@@ -565,7 +684,15 @@ pub(super) fn default_shortcuts() -> BTreeMap<u32, ShortcutBinding> {
         },
     ]
     .into_iter()
-    .map(|binding| (binding.command_id, binding))
+    .map(|binding| {
+        (
+            binding.command_id,
+            vec![ShortcutStroke {
+                virtual_key: binding.virtual_key,
+                modifiers: binding.modifiers,
+            }],
+        )
+    })
     .collect()
 }
 

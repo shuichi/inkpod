@@ -12,10 +12,18 @@
 
 namespace inkpod::windows::ui {
 
+struct ShortcutDialogEntry {
+    std::uint32_t command_id{};
+    std::wstring label;
+    InkpodShortcutSequence sequence{};
+};
+
 struct ShortcutDialogState {
-    std::uint32_t command_id{1U};
+    std::uint32_t command_id{};
     std::uint32_t virtual_key{static_cast<std::uint32_t>('Z')};
     std::uint32_t modifiers{INKPOD_SHORTCUT_MODIFIER_CONTROL};
+    InkpodShortcutSequence sequence{};
+    std::vector<ShortcutDialogEntry> entries;
     bool close_immediately{};
 };
 

@@ -40,7 +40,7 @@ state dependency. It also owns bounded common-raster codecs; PNG is the only
 new third-party codec dependency, while deterministic uncompressed TIFF/TGA/BMP
 live in the format crate. `inkpod-core` maps its `CellDocument` to/from the format DTO,
 owns a stable-ID typed layer/plane tree, persistent selection mask, guides/grid,
-document/view revisions, multi-view transforms, shortcut bindings, stroke and
+document/view revisions, multi-view transforms, prefix-free shortcut sequences, stroke and
 floating-paste preview, fill transactions, exact-depth main-line base color and
 palette metadata, normal savepoint/path, recovery state, history, and immutable
 premultiplied-BGRA render snapshots. M4 adds persisted stable-ID light-table
@@ -193,15 +193,31 @@ timer/close behavior. A CMake structural test compares their direct owner cases
 with all 273 production command IDs in `app.rc` and rejects missing or duplicate
 ownership.
 
+The status bar is a six-part adaptive Common Control. It presents active
+tool/plane, zoom plus view flags, document coordinates, RGBA plus selection
+dimensions, paper dimensions/DPI, and progress/pending-shortcut/dirty state.
+Pointer motion records only the newest device coordinate on the UI thread;
+locator sampling is queued to the Core engine and returned with a generation so
+stale samples are discarded. Mouse hover therefore never synchronously waits on
+Core.
+
 R5 separates command queries from transitions. The private
 `apps/windows/ui/command_state.*` module builds a fixed result for all 273
 production command IDs from typed, feature-owned input values. Its providers do
 not call Core or Win32, mutate tools, or clear previews. One application adapter
-caches that result and applies it to the main menu and every matching toolbar
-button; keyboard shortcuts and the Batch palette consult the same cache before
-dispatch. There is currently no separate production context-menu surface.
+caches that result and applies it to the main menu; keyboard shortcuts and the
+Batch palette consult the same cache before dispatch. The main frame deliberately
+has no toolbar. There is currently no separate production context-menu surface.
 `command_state_catalog.inc` assigns every production command exactly one state
 owner, and a CMake structural test compares the catalog with `app.rc`.
+
+Document tabs identify content rather than displaying a generic cell placeholder.
+The primary label uses the active sequence-cell name when that cell is the edited
+document, otherwise the saved path's leaf filename, `復元セル`, or `無題セル 1`.
+Dirty state appends `*`; additional logical views append `[ビュー N]`. The labels
+refresh from the same cached Core document-state notification used by the window
+title and status bar, so asynchronous stroke completion updates them on the UI
+thread.
 
 Active-tool mutation is independently owned by
 `apps/windows/ui/tools/tool_state.*`. Leaving a vector tool clears its geometry
@@ -304,8 +320,15 @@ Immutable snapshots also own their guide array and copy grid/view overlay flags.
 The C ABI returns that array as a bounded borrowed span. The renderer validates
 the span, draws grid/guides and a transparent-paper checker under the same
 document transform as tiles, and releases all borrowed data with the snapshot.
-The native key handler resolves Undo/Redo/Copy/Paste through the Core shortcut
-map, so the shortcut editor changes the command path used by key events.
+The application registers one shortcut sequence for each of the 273 production
+menu commands. Conventional commands retain `Ctrl+O`, `Ctrl+S`, Undo/Redo, and
+clipboard bindings; high-frequency paint and selection tools use single strokes;
+the remainder use a `Q`-led sequence of at most four strokes. The Core validates
+the complete table as command-unique and prefix-free. The UI keeps a copied,
+immutable-shape table and calls the thread-independent Rust resolver directly,
+so ordinary keydown does not wait for the Core engine thread. Text/RichEdit focus
+bypasses global resolution. Exact conflicts exchange the two command sequences;
+prefix conflicts are rejected, and the versioned table persists in user settings.
 
 Secondary logical views retain independent immutable `ViewState` values but
 never clone document state. A snapshot build chooses one view transform at the
@@ -445,7 +468,9 @@ one-unit fill with an unchanged main-line checksum, queues autosave, opens the
 recovery path as dirty/pathless, and proves that reopening the normal file
 restores its original checksum.
 Its M3 phase drives the real Layer, Selection, Copy, Flip, Mirror, Grid, New
-View, Shortcut Editor, and Shortcut Reset commands; verifies tree Undo/Redo/save/reopen and an
+ View, Shortcut Editor, and Shortcut Reset commands; verifies every menu leaf has
+ a displayed binding, the toolbar is absent, the six-part status bar exists,
+ single- and multi-stroke resolution/reset work, tree Undo/Redo/save/reopen and an
 invalid typed combination; checks selection boolean bounds and cross-paper
 coordinate paste; distinguishes view and document revisions; compares primary
 and secondary snapshot revisions; validates rendered overlay data and configured

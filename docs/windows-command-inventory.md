@@ -16,6 +16,32 @@ It is not a new command registry: `apps/windows/app/resource.h` and
 - Batch palette buttons forward to the same production IDs synchronously on the
   UI thread. They are alternate entry points, not additional command owners.
 
+## Current menu and shortcut surface (2026-07-26)
+
+- The production menu contains 274 actionable leaf occurrences representing all
+  273 unique production commands; `IDM_EFFECT_DUST` intentionally appears in two
+  relevant submenus and both occurrences use the same command owner/state.
+- Layer and Plane commands are nested under Cell, while shortcut settings are
+  under Edit > Settings. This reduces top-level scanning without changing any
+  command ID or Core route.
+- `command_state_catalog.inc` remains the one-owner catalog and now also seeds a
+  complete default shortcut table. All 273 commands have one command-unique,
+  prefix-free sequence of one to four strokes. Runtime menu labels display the
+  active sequence on every leaf occurrence.
+- Conventional file/edit commands retain standard Ctrl combinations. The main
+  drawing, fill, eyedropper, selection, gradient, and airbrush tools use single
+  strokes; motion FPS keeps its established Ctrl+Alt combinations; remaining
+  commands use categorized `Q`-led sequences. Palette colors `1`–`0` remain a
+  fallback when no configured sequence matches.
+- The main frame creates no toolbar. All user-invocable operations must remain
+  reachable through a production menu leaf; optional palette controls are only
+  alternate entry points to the same ID. Internal lifecycle, immutable accessor,
+  queue, snapshot release, and diagnostic ABI functions are not artificial user
+  commands.
+- Windows tests compare `app.rc`, command routes, state owners, and shortcut
+  bindings; real application smoke recursively verifies every leaf has a visible
+  assignment and rejects a toolbar child.
+
 | Value range | Area | Defined | Production owner at R0 |
 |---|---|---:|---|
 | 40000-40099 | File | 11 | `MainWindowProcedure` |

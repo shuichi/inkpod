@@ -249,6 +249,25 @@ pub struct ShortcutBinding {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ShortcutStroke {
+    pub virtual_key: u32,
+    pub modifiers: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ShortcutSequenceBinding {
+    pub command_id: u32,
+    pub strokes: Vec<ShortcutStroke>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShortcutSequenceMatch {
+    None,
+    Prefix,
+    Exact(u32),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PaintTool {
     Pencil,
     Brush,

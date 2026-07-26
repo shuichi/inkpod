@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -32,7 +33,9 @@
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/command_catalog.h"
 #include "ui/command_state.h"
+#include "ui/shortcut_controller.h"
 #include "ui/panes/document_panes.h"
 #include "ui/panes/color_panes.h"
 #include "ui/tools/fill_controller.h"
@@ -90,6 +93,71 @@ bool ResolveConfiguredShortcut(AppContext& state, std::uint32_t virtual_key, std
 bool SamePersistentMetadata(const InkpodDocumentInfo& left, const InkpodDocumentInfo& right) noexcept;
 InkpodStatus SaveToPath(AppContext& state, const std::wstring& path) noexcept;
 
+bool MenuLeavesHaveAssignedShortcuts(
+    HMENU menu,
+    std::span<const InkpodShortcutSequence> bindings,
+    std::size_t& leaf_count) noexcept {
+    const int count = GetMenuItemCount(menu);
+    for (int position = 0; position < count; ++position) {
+        MENUITEMINFOW item{};
+        item.cbSize = sizeof(item);
+        item.fMask = MIIM_ID | MIIM_FTYPE | MIIM_SUBMENU;
+        if (GetMenuItemInfoW(menu, static_cast<UINT>(position), TRUE, &item) == FALSE) {
+            return false;
+        }
+        if (item.hSubMenu != nullptr) {
+            if (!MenuLeavesHaveAssignedShortcuts(item.hSubMenu, bindings, leaf_count)) {
+                return false;
+            }
+            continue;
+        }
+        if ((item.fType & MFT_SEPARATOR) != 0U) {
+            continue;
+        }
+        ++leaf_count;
+        if (windows::ui::FindShortcutSequence(bindings, item.wID) == nullptr) {
+            return false;
+        }
+        const int length = GetMenuStringW(
+            menu, static_cast<UINT>(position), nullptr, 0, MF_BYPOSITION);
+        try {
+            std::wstring label(static_cast<std::size_t>(length) + 1U, L'\0');
+            GetMenuStringW(
+                menu,
+                static_cast<UINT>(position),
+                label.data(),
+                static_cast<int>(label.size()),
+                MF_BYPOSITION);
+            if (label.find(L'\t') == std::wstring::npos) {
+                return false;
+            }
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ReadDocumentTabLabel(HWND tabs, int index, std::wstring& output) noexcept {
+    if (tabs == nullptr || index < 0) {
+        return false;
+    }
+    std::array<wchar_t, 1024U> buffer{};
+    TCITEMW item{};
+    item.mask = TCIF_TEXT;
+    item.pszText = buffer.data();
+    item.cchTextMax = static_cast<int>(buffer.size());
+    if (TabCtrl_GetItem(tabs, index, &item) == FALSE) {
+        return false;
+    }
+    try {
+        output.assign(buffer.data());
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return true;
+}
+
 int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     const HMENU menu = GetMenu(state.windows.window);
     if (menu == nullptr
@@ -113,7 +181,18 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     }
     PumpPendingWindowMessages();
     UpdateMenuState(state);
-    if (!CommandSurfacesMatchComputedState(state)) {
+    std::wstring tab_label;
+    if (!ReadDocumentTabLabel(state.windows.document_tabs, 0, tab_label)
+        || tab_label != L"無題セル 1") {
+        return 716;
+    }
+    std::size_t shortcut_leaf_count{};
+    if (!CommandSurfacesMatchComputedState(state)
+        || !MenuLeavesHaveAssignedShortcuts(
+            menu, state.shortcuts.bindings, shortcut_leaf_count)
+        || shortcut_leaf_count < windows::ui::MenuCommandCatalog().size()
+        || FindWindowExW(state.windows.window, nullptr, TOOLBARCLASSNAMEW, nullptr) != nullptr
+        || SendMessageW(state.windows.status_bar, SB_GETPARTS, 0, 0) != 6) {
         return 706;
     }
     if (DispatchEnabledCommand(state, state.windows.window, IDM_EDIT_UNDO)) {
@@ -264,7 +343,9 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || after_line.document_revision != before_line.document_revision + 1U
         || after_line.main_plane_checksum == before_line.main_plane_checksum
         || (after_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
-        || (after_line.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U) {
+        || (after_line.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U
+        || !ReadDocumentTabLabel(state.windows.document_tabs, 0, tab_label)
+        || tab_label != L"無題セル 1 *") {
         return 38;
     }
     const std::uint64_t line_checksum = after_line.main_plane_checksum;
@@ -377,6 +458,15 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     const std::wstring path(temporary_file.data());
     if (SaveToPath(state, path) != INKPOD_STATUS_OK) {
         return 48;
+    }
+    const std::size_t path_separator = path.find_last_of(L"\\/");
+    const std::wstring expected_saved_tab = path_separator == std::wstring::npos
+        ? path
+        : path.substr(path_separator + 1U);
+    if (!ReadDocumentTabLabel(state.windows.document_tabs, 0, tab_label)
+        || tab_label != expected_saved_tab) {
+        DeleteFileW(path.c_str());
+        return 717;
     }
     if (GetFileAttributesW(initial_recovery_path.c_str()) != INVALID_FILE_ATTRIBUTES
         || GetLastError() != ERROR_FILE_NOT_FOUND) {
@@ -1559,9 +1649,12 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     }
 
     SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_NEW, 0);
+    std::wstring secondary_tab_label;
     if (state.view.secondary_view_id == 0U || state.view.active_view_id != state.view.secondary_view_id
         || state.windows.document_tabs == nullptr
-        || TabCtrl_GetItemCount(state.windows.document_tabs) != 2) {
+        || TabCtrl_GetItemCount(state.windows.document_tabs) != 2
+        || !ReadDocumentTabLabel(state.windows.document_tabs, 1, secondary_tab_label)
+        || secondary_tab_label.find(L"[ビュー 2]") == std::wstring::npos) {
         return 324;
     }
     const InkpodViewInput secondary_pan{
@@ -1685,25 +1778,31 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     if (wcsstr(zoom_status.data(), L"ズーム:") == nullptr) {
         return 358;
     }
+    const InkpodShortcutSequence* multi_stroke =
+        windows::ui::FindShortcutSequence(state.shortcuts.bindings, IDM_FILE_REVERT);
+    if (multi_stroke == nullptr || multi_stroke->stroke_count <= 1U) {
+        return 359;
+    }
+    for (std::uint32_t index = 0; index < multi_stroke->stroke_count; ++index) {
+        UINT resolved{};
+        const InkpodShortcutMatch match = windows::ui::ResolveShortcutStroke(
+            state.shortcuts, multi_stroke->strokes[index], resolved);
+        const bool last = index + 1U == multi_stroke->stroke_count;
+        if ((!last && match != INKPOD_SHORTCUT_MATCH_PREFIX)
+            || (last
+                && (match != INKPOD_SHORTCUT_MATCH_EXACT || resolved != IDM_FILE_REVERT))) {
+            return 360;
+        }
+    }
 
-    const InkpodStatus navigation_status = state.engine->Invoke(
-        [](InkpodCore* core) {
-            InkpodStatus status = inkpod_core_shortcut_rebind(
-                core,
-                99U,
-                static_cast<std::uint32_t>('Z'),
-                INKPOD_SHORTCUT_MODIFIER_CONTROL);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_shortcut_rebind(
-                    core,
-                    1U,
-                    static_cast<std::uint32_t>('U'),
-                    INKPOD_SHORTCUT_MODIFIER_CONTROL);
-            }
-            return status;
-        },
-        true,
-        true);
+    InkpodShortcutSequence undo_shortcut{};
+    undo_shortcut.struct_size = sizeof(undo_shortcut);
+    undo_shortcut.command_id = IDM_EDIT_UNDO;
+    undo_shortcut.stroke_count = 1U;
+    undo_shortcut.strokes[0] = {
+        static_cast<std::uint32_t>('U'), INKPOD_SHORTCUT_MODIFIER_CONTROL};
+    const InkpodStatus navigation_status = windows::ui::RebindShortcut(
+        *state.engine, state.shortcuts, undo_shortcut, false);
     if (navigation_status != INKPOD_STATUS_OK) {
         return 327;
     }
@@ -1872,18 +1971,26 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     }
     if (!ResolveConfiguredShortcut(
             state,
-            static_cast<std::uint32_t>('Z'),
+            static_cast<std::uint32_t>('U'),
             INKPOD_SHORTCUT_MODIFIER_CONTROL,
             shortcut_menu_command)
         || shortcut_menu_command != IDM_EDIT_UNDO
         || ResolveConfiguredShortcut(
             state,
-            static_cast<std::uint32_t>('U'),
+            static_cast<std::uint32_t>('Z'),
             INKPOD_SHORTCUT_MODIFIER_CONTROL,
             shortcut_menu_command)) {
         return 330;
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_SHORTCUT_RESET, 0);
+    if (!ResolveConfiguredShortcut(
+            state,
+            static_cast<std::uint32_t>('Z'),
+            INKPOD_SHORTCUT_MODIFIER_CONTROL,
+            shortcut_menu_command)
+        || shortcut_menu_command != IDM_EDIT_UNDO) {
+        return 361;
+    }
     locator = {};
     locator.struct_size = sizeof(locator);
     const std::uint64_t active_view_id = state.view.active_view_id;
@@ -2245,6 +2352,11 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_8, 0) != 1
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_STOP, 0) != 1) {
         return 412;
+    }
+    std::wstring active_cell_tab;
+    if (!ReadDocumentTabLabel(state.windows.document_tabs, 0, active_cell_tab)
+        || active_cell_tab != L"cell3.png") {
+        return 718;
     }
     DeleteFileW(state.lifetime.smoke_raster_path.c_str());
     state.lifetime.smoke_raster_path = L"inkpod-sequence-export.png";

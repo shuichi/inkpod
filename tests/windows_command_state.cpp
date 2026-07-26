@@ -3,6 +3,7 @@
 
 #include "app/app_context.h"
 #include "app/resource.h"
+#include "ui/command_catalog.h"
 #include "ui/command_state.h"
 #include "ui/tools/tool_state.h"
 
@@ -13,9 +14,12 @@ using inkpod::windows::ui::CommandStateInputs;
 using inkpod::windows::ui::CommandStateOwner;
 using inkpod::windows::ui::CommandStateSet;
 using inkpod::windows::ui::ComputeCommandStates;
+using inkpod::windows::ui::BuildDefaultShortcutSequences;
+using inkpod::windows::ui::FindShortcutSequence;
 using inkpod::windows::ui::FindCommandState;
 using inkpod::windows::ui::IsCommandChecked;
 using inkpod::windows::ui::IsCommandEnabled;
+using inkpod::windows::ui::MenuCommandCatalog;
 using inkpod::windows::ui::kProductionCommandStateCount;
 using inkpod::windows::ui::tools::HandleActivePlaneTransition;
 using inkpod::windows::ui::tools::kInteractionVectorLine;
@@ -57,12 +61,69 @@ bool CatalogHasExactlyOneOwner(const CommandStateSet& states) noexcept {
     return states.size() == kProductionCommandStateCount;
 }
 
+bool StartsWith(
+    const InkpodShortcutSequence& sequence,
+    const InkpodShortcutSequence& prefix) noexcept {
+    if (prefix.stroke_count > sequence.stroke_count) {
+        return false;
+    }
+    for (std::uint32_t index = 0; index < prefix.stroke_count; ++index) {
+        if (sequence.strokes[index].virtual_key != prefix.strokes[index].virtual_key
+            || sequence.strokes[index].modifiers != prefix.strokes[index].modifiers) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ShortcutCatalogIsCompleteAndPrefixFree() {
+    const auto commands = MenuCommandCatalog();
+    const auto shortcuts = BuildDefaultShortcutSequences();
+    if (shortcuts.size() != commands.size() || commands.size() != kProductionCommandStateCount) {
+        return false;
+    }
+    for (const UINT command : commands) {
+        const auto* sequence = FindShortcutSequence(shortcuts, command);
+        if (sequence == nullptr || sequence->command_id != command
+            || sequence->struct_size != sizeof(InkpodShortcutSequence)
+            || sequence->stroke_count == 0U
+            || sequence->stroke_count > INKPOD_SHORTCUT_MAX_STROKES) {
+            return false;
+        }
+        for (std::uint32_t index = 0; index < sequence->stroke_count; ++index) {
+            if (sequence->strokes[index].virtual_key == 0U) {
+                return false;
+            }
+        }
+    }
+    for (std::size_t left = 0; left < shortcuts.size(); ++left) {
+        for (std::size_t right = left + 1U; right < shortcuts.size(); ++right) {
+            if (shortcuts[left].command_id == shortcuts[right].command_id
+                || StartsWith(shortcuts[left], shortcuts[right])
+                || StartsWith(shortcuts[right], shortcuts[left])) {
+                return false;
+            }
+        }
+    }
+    const auto* save = FindShortcutSequence(shortcuts, IDM_FILE_SAVE);
+    const auto* pencil = FindShortcutSequence(shortcuts, IDM_TOOL_PENCIL);
+    const auto* batch = FindShortcutSequence(shortcuts, IDM_WINDOW_BATCH);
+    return save != nullptr && save->stroke_count == 1U
+        && save->strokes[0].virtual_key == static_cast<std::uint32_t>('S')
+        && save->strokes[0].modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL
+        && pencil != nullptr && pencil->stroke_count == 1U
+        && pencil->strokes[0].virtual_key == static_cast<std::uint32_t>('P')
+        && pencil->strokes[0].modifiers == 0U
+        && batch != nullptr && batch->stroke_count > 1U;
+}
+
 } // namespace
 
 int main() {
     CommandStateInputs inputs{};
     CommandStateSet states = ComputeCommandStates(inputs);
     if (!CatalogHasExactlyOneOwner(states)
+        || !ShortcutCatalogIsCompleteAndPrefixFree()
         || FindCommandState(states, IDM_HELP_ABOUT) == nullptr
         || IsCommandEnabled(states, IDM_FILE_SAVE)
         || IsCommandEnabled(states, IDM_VIEW_FIT)

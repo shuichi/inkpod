@@ -16,6 +16,7 @@
 #include <cwctype>
 #include <functional>
 #include <memory>
+#include <new>
 #include <optional>
 #include <string>
 #include <utility>
@@ -33,6 +34,8 @@
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
 #include "ui/command_state.h"
+#include "ui/command_catalog.h"
+#include "ui/shortcut_controller.h"
 #include "ui/panes/document_panes.h"
 #include "ui/panes/color_panes.h"
 #include "ui/tools/fill_controller.h"
@@ -47,6 +50,8 @@
 #include "ui/main_window_runtime.h"
 
 namespace inkpod::windows::ui::runtime {
+
+inline constexpr UINT kLocatorSampleReady = WM_APP + 0x172U;
 
 using inkpod::windows::ui::HistoryDialogState;
 using inkpod::windows::ui::EffectEditorState;
@@ -88,6 +93,12 @@ using inkpod::app::RecoveryIsNewer;
 using inkpod::app::WidePathToUtf8;
 using inkpod::app::WriteFileAtomically;
 using inkpod::windows::ui::ApplyCommandStates;
+using inkpod::windows::ui::ApplyShortcutLabelsToMenu;
+using inkpod::windows::ui::ClearPendingShortcut;
+using inkpod::windows::ui::MenuCommandDisplayName;
+using inkpod::windows::ui::RebindShortcut;
+using inkpod::windows::ui::ResetShortcuts;
+using inkpod::windows::ui::ResolveShortcutStroke;
 using inkpod::windows::ui::CommandStateInputs;
 using inkpod::windows::ui::ComputeCommandStates;
 using inkpod::windows::ui::IsCommandEnabled;
@@ -122,6 +133,10 @@ constexpr UINT kBatchTaskCompleted = WM_APP + 0x171U;
 constexpr UINT_PTR kEffectProgressTimer = 1U;
 constexpr UINT_PTR kContinuousSprayTimer = 2U;
 constexpr UINT_PTR kMotionPlaybackTimer = 3U;
+constexpr UINT_PTR kShortcutSequenceTimer = 4U;
+constexpr UINT kShortcutSequenceTimerMilliseconds = 100U;
+constexpr UINT_PTR kStatusProgressTimer = 5U;
+constexpr UINT kStatusProgressTimerMilliseconds = 100U;
 constexpr UINT kContinuousSprayIntervalMilliseconds = 50U;
 constexpr wchar_t kVectorStrokePlaneRequired[] =
     L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
@@ -221,6 +236,9 @@ void ResetViewDocumentState(ViewUiState& view) noexcept {
     view.snap_guides = false;
     view.snap_grid = false;
     view.transparent_visible = true;
+    ++view.locator_generation;
+    view.locator_valid = false;
+    view.locator = {};
     view.gesture_samples.clear();
     view.guide_drag_active = false;
     view.guide_drag_axis = 0U;
@@ -229,6 +247,7 @@ void ResetViewDocumentState(ViewUiState& view) noexcept {
 
 void ResetAnimationDocumentState(AnimationUiState& animation) noexcept {
     animation.active_sequence_index = 0U;
+    animation.active_sequence_name.clear();
     animation.motion_active = false;
     animation.motion_paused = false;
 }
@@ -254,7 +273,7 @@ void ResetUiForDocumentReplacement(AppContext& state) noexcept {
         TabCtrl_DeleteAllItems(state.windows.document_tabs);
         TCITEMW item{};
         item.mask = TCIF_TEXT | TCIF_PARAM;
-        item.pszText = const_cast<wchar_t*>(L"セル");
+        item.pszText = const_cast<wchar_t*>(L"無題セル 1");
         item.lParam = 0;
         TabCtrl_InsertItem(state.windows.document_tabs, 0, &item);
         TabCtrl_SetCurSel(state.windows.document_tabs, 0);
@@ -265,6 +284,7 @@ void ResetUiForDocumentReplacement(AppContext& state) noexcept {
     if (state.windows.window != nullptr) {
         KillTimer(state.windows.window, kContinuousSprayTimer);
         KillTimer(state.windows.window, kMotionPlaybackTimer);
+        KillTimer(state.windows.window, kShortcutSequenceTimer);
     }
     HandleActiveTreePlaneTransition(state);
 }
@@ -366,27 +386,108 @@ bool RefreshSequencePane(AppContext& state) noexcept {
     const InkpodStatus status = controller.LoadSequence(cells);
     if (status != INKPOD_STATUS_OK) {
         state.panes.sequence_count = 0U;
+        state.animation.active_sequence_name.clear();
         return false;
     }
     state.panes.sequence_count = static_cast<std::uint32_t>(cells.size());
     if (cells.empty()) {
         state.animation.active_sequence_index = 0U;
+        state.animation.active_sequence_name.clear();
         return true;
     }
     InkpodDocumentInfo document{};
     QueryDocument(state, document);
     std::uint32_t selected = std::min<std::uint32_t>(
         state.animation.active_sequence_index, static_cast<std::uint32_t>(cells.size() - 1U));
+    bool has_active_cell{};
     for (std::size_t index = 0; index < cells.size(); ++index) {
         const auto& cell = cells[index];
         const bool active = cell.info.document_uuid_high == document.document_uuid_high
             && cell.info.document_uuid_low == document.document_uuid_low;
         if (active) {
             selected = static_cast<std::uint32_t>(index);
+            has_active_cell = true;
         }
     }
     state.animation.active_sequence_index = selected;
+    state.animation.active_sequence_name.clear();
+    if (has_active_cell) {
+        const std::string& name = cells[selected].name;
+        if (!name.empty() && name.size() <= static_cast<std::size_t>(INT_MAX)) {
+            const int required = MultiByteToWideChar(
+                CP_UTF8,
+                MB_ERR_INVALID_CHARS,
+                name.data(),
+                static_cast<int>(name.size()),
+                nullptr,
+                0);
+            if (required > 0) {
+                try {
+                    state.animation.active_sequence_name.resize(
+                        static_cast<std::size_t>(required));
+                    if (MultiByteToWideChar(
+                            CP_UTF8,
+                            MB_ERR_INVALID_CHARS,
+                            name.data(),
+                            static_cast<int>(name.size()),
+                            state.animation.active_sequence_name.data(),
+                            required) != required) {
+                        state.animation.active_sequence_name.clear();
+                    }
+                } catch (const std::bad_alloc&) {
+                    state.animation.active_sequence_name.clear();
+                }
+            }
+        }
+    }
     return true;
+}
+
+struct LocatorAsyncResult {
+    std::uint64_t generation{};
+    InkpodStatus status{INKPOD_STATUS_INVALID_STATE};
+    InkpodLocatorOutput output{};
+};
+
+void QueueLocatorSample(AppContext& state) noexcept {
+    if (state.engine == nullptr || state.view.locator_pending) {
+        return;
+    }
+    std::shared_ptr<LocatorAsyncResult> result;
+    try {
+        result = std::make_shared<LocatorAsyncResult>();
+    } catch (const std::bad_alloc&) {
+        return;
+    }
+    result->generation = state.view.locator_generation;
+    result->output.struct_size = sizeof(InkpodLocatorOutput);
+    const std::uint64_t view_id = state.view.active_view_id;
+    const double device_x = static_cast<double>(state.view.pointer_device_x);
+    const double device_y = static_cast<double>(state.view.pointer_device_y);
+    const HWND window = state.windows.window;
+    state.view.locator_pending = true;
+    if (!state.engine->Enqueue(
+            [result, view_id, device_x, device_y](InkpodCore* core) {
+                return inkpod_core_locator_sample(
+                    core, view_id, device_x, device_y, &result->output);
+            },
+            false,
+            false,
+            false,
+            [result, window](InkpodStatus status) {
+                result->status = status;
+                auto* delivery = new (std::nothrow) LocatorAsyncResult(*result);
+                if (delivery == nullptr
+                    || PostMessageW(
+                           window,
+                           kLocatorSampleReady,
+                           0,
+                           reinterpret_cast<LPARAM>(delivery)) == FALSE) {
+                    delete delivery;
+                }
+            })) {
+        state.view.locator_pending = false;
+    }
 }
 
 bool RefreshColorPanes(AppContext& state) noexcept {
@@ -613,22 +714,12 @@ bool ResolveConfiguredShortcut(
     std::uint32_t virtual_key,
     std::uint32_t modifiers,
     UINT& menu_command) noexcept {
-    if (state.engine == nullptr) {
-        return false;
-    }
-    std::uint32_t command_id{};
-    const InkpodStatus status = state.engine->Invoke(
-        [virtual_key, modifiers, &command_id](InkpodCore* core) {
-            return inkpod_core_shortcut_resolve(
-                core, virtual_key, modifiers, &command_id);
-        },
-        false,
-        false);
-    if (status != INKPOD_STATUS_OK) {
-        return false;
-    }
-    menu_command = ShortcutMenuCommand(command_id);
-    return menu_command != 0U;
+    ClearPendingShortcut(state.shortcuts);
+    UINT command{};
+    const InkpodShortcutMatch match = ResolveShortcutStroke(
+        state.shortcuts, InkpodShortcutStroke{virtual_key, modifiers}, command);
+    menu_command = ShortcutMenuCommand(command);
+    return match == INKPOD_SHORTCUT_MATCH_EXACT && menu_command != 0U;
 }
 
 void ShowCoreError(const AppContext& state, HWND owner, const wchar_t* operation) noexcept {
@@ -647,6 +738,34 @@ void ShowCoreError(const AppContext& state, HWND owner, const wchar_t* operation
         operation,
         detail.c_str());
     MessageBoxW(owner, message.data(), L"inkpod", MB_OK | MB_ICONERROR);
+}
+
+void ShowShortcutError(
+    const AppContext& state,
+    HWND owner,
+    const wchar_t* operation,
+    InkpodStatus status) noexcept {
+    if (state.lifetime.smoke_test) {
+        return;
+    }
+    if (status == INKPOD_STATUS_INVALID_ARGUMENT) {
+        MessageBoxW(
+            owner,
+            L"その割り当ては別のショートカットと前方一致します。\n"
+            L"両方を一意に識別できるキー列を指定してください。",
+            L"inkpod",
+            MB_OK | MB_ICONWARNING);
+        return;
+    }
+    if (status == INKPOD_STATUS_IO_ERROR) {
+        MessageBoxW(
+            owner,
+            L"割り当ては反映されましたが、次回起動用の設定を保存できませんでした。",
+            L"inkpod",
+            MB_OK | MB_ICONWARNING);
+        return;
+    }
+    ShowCoreError(state, owner, operation);
 }
 
 void UpdateFloatingPreview(AppContext& state) noexcept {
@@ -2150,6 +2269,148 @@ void UpdateCommandLabels(
         redo_label.c_str());
 }
 
+void UpdateLocatorStatus(const AppContext& state) noexcept {
+    if (state.windows.status_bar == nullptr) {
+        return;
+    }
+    std::array<wchar_t, 128U> coordinate_text{};
+    if (state.view.locator_valid) {
+        _snwprintf_s(
+            coordinate_text.data(),
+            coordinate_text.size(),
+            _TRUNCATE,
+            L"X %d  Y %d",
+            state.view.locator.document_x,
+            state.view.locator.document_y);
+    } else {
+        wcscpy_s(coordinate_text.data(), coordinate_text.size(), L"X --  Y --");
+    }
+    std::array<wchar_t, 160U> sample_text{};
+    if (state.view.locator_valid
+        && (state.view.locator.flags & INKPOD_LOCATOR_COLOR_PRESENT) != 0U) {
+        const auto& color = state.view.locator.color;
+        _snwprintf_s(
+            sample_text.data(),
+            sample_text.size(),
+            _TRUNCATE,
+            (state.view.locator.flags & INKPOD_LOCATOR_SELECTION_PRESENT) != 0U
+                ? L"RGBA %u,%u,%u,%u | W %d H %d"
+                : L"RGBA %u,%u,%u,%u",
+            color.red,
+            color.green,
+            color.blue,
+            color.alpha,
+            state.view.locator.selection.width,
+            state.view.locator.selection.height);
+    } else {
+        wcscpy_s(sample_text.data(), sample_text.size(), L"RGBA --");
+    }
+    SendMessageW(
+        state.windows.status_bar,
+        SB_SETTEXTW,
+        2,
+        reinterpret_cast<LPARAM>(coordinate_text.data()));
+    SendMessageW(
+        state.windows.status_bar,
+        SB_SETTEXTW,
+        3,
+        reinterpret_cast<LPARAM>(sample_text.data()));
+}
+
+bool FormatTaskProgressStatus(
+    const AppContext& state,
+    std::array<wchar_t, 192U>& text) noexcept {
+    InkpodTaskInfo task_info{};
+    task_info.struct_size = sizeof(task_info);
+    const wchar_t* task_name = L"処理";
+    bool running{};
+    if (state.effects.task != nullptr
+        && inkpod_task_query(state.effects.task, &task_info) == INKPOD_STATUS_OK
+        && task_info.state == INKPOD_TASK_RUNNING) {
+        running = true;
+        task_name = L"画像処理";
+    } else if (state.batch.task != nullptr
+        && inkpod_batch_task_query(state.batch.task, &task_info) == INKPOD_STATUS_OK
+        && task_info.state == INKPOD_TASK_RUNNING) {
+        running = true;
+        task_name = L"バッチ";
+    }
+    if (!running) {
+        return false;
+    }
+    const std::uint64_t percent = task_info.total_work == 0U
+        ? 0U
+        : std::min<std::uint64_t>(
+              100U,
+              static_cast<std::uint64_t>(
+                  static_cast<long double>(task_info.completed_work) * 100.0L
+                  / static_cast<long double>(task_info.total_work)));
+    _snwprintf_s(
+        text.data(), text.size(), _TRUNCATE, L"%ls %llu%%", task_name, percent);
+    return true;
+}
+
+const wchar_t* DocumentTabBaseName(
+    const AppContext& state,
+    const InkpodDocumentInfo& info,
+    bool has_document) noexcept {
+    if (!has_document) {
+        return L"文書なし";
+    }
+    if (!state.animation.active_sequence_name.empty()) {
+        return state.animation.active_sequence_name.c_str();
+    }
+    if (!state.document.current_path.empty()) {
+        const wchar_t* leaf = state.document.current_path.c_str();
+        for (const wchar_t* cursor = leaf; *cursor != L'\0'; ++cursor) {
+            if (*cursor == L'\\' || *cursor == L'/') {
+                leaf = cursor + 1;
+            }
+        }
+        if (*leaf != L'\0') {
+            return leaf;
+        }
+    }
+    return (info.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U
+        ? L"復元セル"
+        : L"無題セル 1";
+}
+
+void UpdateDocumentTabLabels(
+    AppContext& state,
+    const InkpodDocumentInfo& info,
+    bool has_document) noexcept {
+    if (state.windows.document_tabs == nullptr) {
+        return;
+    }
+    const int count = TabCtrl_GetItemCount(state.windows.document_tabs);
+    const wchar_t* base_name = DocumentTabBaseName(state, info, has_document);
+    const wchar_t* dirty = has_document
+            && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        ? L" *"
+        : L"";
+    for (int index = 0; index < count; ++index) {
+        std::array<wchar_t, 1024U> label{};
+        if (index == 0) {
+            _snwprintf_s(
+                label.data(), label.size(), _TRUNCATE, L"%ls%ls", base_name, dirty);
+        } else {
+            _snwprintf_s(
+                label.data(),
+                label.size(),
+                _TRUNCATE,
+                L"%ls [ビュー %d]%ls",
+                base_name,
+                index + 1,
+                dirty);
+        }
+        TCITEMW item{};
+        item.mask = TCIF_TEXT;
+        item.pszText = label.data();
+        TabCtrl_SetItem(state.windows.document_tabs, index, &item);
+    }
+}
+
 void UpdateMainWindowStatus(
     AppContext& state,
     const InkpodDocumentInfo& info,
@@ -2166,48 +2427,91 @@ void UpdateMainWindowStatus(
         name,
         has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L" *" : L"");
     SetWindowTextW(state.windows.window, title.data());
+    UpdateDocumentTabLabels(state, info, has_document);
     if (state.windows.status_bar == nullptr) {
         return;
     }
 
     InkpodSnapshotTransform transform{};
     const bool has_transform = has_document && QuerySnapshotTransform(state, transform);
-    std::array<wchar_t, 96U> tool_text{};
-    const wchar_t* tool_name = state.tools.active_tool == kInteractionBoxZoom
-        ? L"範囲を拡大"
-        : (state.tools.active_tool == kInteractionGuideMove
-                  ? L"ガイド移動"
-                  : (state.tools.active_tool == kInteractionSelection
-                            ? L"選択"
-                            : (state.tools.active_tool == kInteractionFill
-                                      ? L"フィル"
-                                      : (state.tools.active_tool == kInteractionEyedropper
-                                                ? L"スポイト"
-                                                : (state.tools.active_tool == INKPOD_TOOL_ERASER
-                                                          ? L"消しゴム"
-                                                          : (state.tools.active_tool
-                                                                    == INKPOD_TOOL_BRUSH
-                                                                ? L"ブラシ"
-                                                                : L"鉛筆"))))));
+    const auto tool_name = [&state]() noexcept -> const wchar_t* {
+        switch (state.tools.active_tool) {
+            case kInteractionBoxZoom: return L"範囲拡大";
+            case kInteractionGuideMove: return L"ガイド移動";
+            case kInteractionSelection: return L"選択";
+            case kInteractionFill: return L"フィル";
+            case kInteractionEyedropper: return L"スポイト";
+            case kInteractionFloatingTransform: return L"変形";
+            case kInteractionLightTableMove: return L"ライトテーブル移動";
+            case kInteractionVectorLine: return L"直線";
+            case kInteractionVectorCurve: return L"曲線";
+            case kInteractionVectorRectangle: return L"長方形";
+            case kInteractionVectorEllipse: return L"楕円";
+            case kInteractionVectorPolyline: return L"折れ線";
+            case kInteractionVectorEraser: return L"ベクター消しゴム";
+            case kInteractionEffectGradient: return L"グラデーション";
+            case kInteractionEffectAirbrush: return L"エアブラシ";
+            case kInteractionEffectBlur: return L"ぼかし";
+            case kInteractionEffectStamp: return L"スタンプ";
+            case kInteractionEffectDust: return L"ゴミ取り";
+            case kInteractionEffectAlphaGradient: return L"アルファ";
+            case INKPOD_TOOL_ERASER: return L"消しゴム";
+            case INKPOD_TOOL_BRUSH: return L"ブラシ";
+            default: return L"鉛筆";
+        }
+    };
+    std::array<wchar_t, 128U> tool_text{};
     _snwprintf_s(
-        tool_text.data(), tool_text.size(), _TRUNCATE, L"ツール: %ls", tool_name);
-    std::array<wchar_t, 96U> zoom_text{};
-    _snwprintf_s(
-        zoom_text.data(),
-        zoom_text.size(),
+        tool_text.data(),
+        tool_text.size(),
         _TRUNCATE,
-        has_transform ? L"ズーム: %.1f%%" : L"ズーム: --",
-        has_transform ? transform.zoom * 100.0 : 0.0);
-    std::array<wchar_t, 96U> document_text{};
+        L"%ls | %ls",
+        tool_name(),
+        state.tools.active_plane == INKPOD_PLANE_COLOR ? L"彩色" : L"主線");
+    std::array<wchar_t, 160U> zoom_text{};
+    if (has_transform) {
+        _snwprintf_s(
+            zoom_text.data(),
+            zoom_text.size(),
+            _TRUNCATE,
+            L"ズーム: %.1f%%%ls%ls%ls",
+            transform.zoom * 100.0,
+            state.view.flip_horizontal ? L" | 左右" : L"",
+            state.view.flip_vertical ? L" | 上下" : L"",
+            state.view.grid_visible ? L" | グリッド" : L"");
+    } else {
+        wcscpy_s(zoom_text.data(), zoom_text.size(), L"ズーム: --");
+    }
+    std::array<wchar_t, 160U> document_text{};
     _snwprintf_s(
         document_text.data(),
         document_text.size(),
         _TRUNCATE,
-        has_document ? L"%u x %u / %ls" : L"文書なし",
+        has_document ? L"%u×%u | %.1f dpi" : L"文書なし",
         has_document ? info.width : 0U,
         has_document ? info.height : 0U,
-        has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L"変更あり"
-                                                                         : L"保存済み");
+        has_document ? static_cast<double>(info.dpi_x_milli) / 1000.0 : 0.0);
+    std::array<wchar_t, 192U> state_text{};
+    const bool has_progress = FormatTaskProgressStatus(state, state_text);
+    if (has_progress) {
+        SetTimer(
+            state.windows.window,
+            kStatusProgressTimer,
+            kStatusProgressTimerMilliseconds,
+            nullptr);
+    } else if (!state.shortcuts.pending_text.empty()) {
+        KillTimer(state.windows.window, kStatusProgressTimer);
+        wcsncpy_s(
+            state_text.data(), state_text.size(), state.shortcuts.pending_text.c_str(), _TRUNCATE);
+    } else {
+        KillTimer(state.windows.window, kStatusProgressTimer);
+        wcscpy_s(
+            state_text.data(),
+            state_text.size(),
+            !has_document
+                ? L"文書なし"
+                : ((info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L"変更あり" : L"保存済み"));
+    }
     SendMessageW(
         state.windows.status_bar,
         SB_SETTEXTW,
@@ -2221,8 +2525,14 @@ void UpdateMainWindowStatus(
     SendMessageW(
         state.windows.status_bar,
         SB_SETTEXTW,
-        2,
+        4,
         reinterpret_cast<LPARAM>(document_text.data()));
+    SendMessageW(
+        state.windows.status_bar,
+        SB_SETTEXTW,
+        5,
+        reinterpret_cast<LPARAM>(state_text.data()));
+    UpdateLocatorStatus(state);
 }
 
 void UpdateMenuState(AppContext& state) noexcept {
@@ -2245,7 +2555,8 @@ void UpdateMenuState(AppContext& state) noexcept {
     // the same immutable result; no tool or preview transition happens here.
     state.command_states = ComputeCommandStates(inputs);
     UpdateCommandLabels(menu, has_history, undo_label, redo_label);
-    ApplyCommandStates(state.command_states, menu, state.windows.toolbar);
+    ApplyCommandStates(state.command_states, menu);
+    ApplyShortcutLabelsToMenu(menu, state.shortcuts.bindings);
     UpdateMainWindowStatus(state, info, has_document);
     DrawMenuBar(state.windows.window);
 }
@@ -2261,29 +2572,6 @@ bool CommandSurfacesMatchComputedState(const AppContext& state) noexcept {
             || ((menu_state & (MF_DISABLED | MF_GRAYED)) == 0U)
                 != command_state.enabled
             || ((menu_state & MF_CHECKED) != 0U) != command_state.checked) {
-            return false;
-        }
-        if (state.windows.toolbar != nullptr
-            && SendMessageW(
-                   state.windows.toolbar,
-                   TB_COMMANDTOINDEX,
-                   command_state.command,
-                   0)
-                >= 0
-            && ((SendMessageW(
-                     state.windows.toolbar,
-                     TB_ISBUTTONENABLED,
-                     command_state.command,
-                     0)
-                    != FALSE)
-                    != command_state.enabled
-                || (SendMessageW(
-                        state.windows.toolbar,
-                        TB_ISBUTTONCHECKED,
-                        command_state.command,
-                        0)
-                        != FALSE)
-                    != command_state.checked)) {
             return false;
         }
     }
@@ -6299,6 +6587,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 ShowCoreError(*state, window, L"連番読み込み");
             }
             RefreshSequencePane(*state);
+            UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_SEQ_EXPORT: {
@@ -6343,6 +6632,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 FitCanvas(*state, INKPOD_VIEW_FIT);
                 RefreshSequencePane(*state);
             }
+            UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_SEQ_GOTO: {
@@ -6386,6 +6676,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 FitCanvas(*state, INKPOD_VIEW_FIT);
                 RefreshSequencePane(*state);
             }
+            UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_SUBPALETTE_SET: {
@@ -7086,7 +7377,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 if (state->windows.document_tabs != nullptr) {
                     TCITEMW item{};
                     item.mask = TCIF_TEXT | TCIF_PARAM;
-                    item.pszText = const_cast<wchar_t*>(L"セル [ビュー 2]");
+                    item.pszText = const_cast<wchar_t*>(L"無題セル 1 [ビュー 2]");
                     item.lParam = static_cast<LPARAM>(view_id);
                     const int index = TabCtrl_GetItemCount(state->windows.document_tabs);
                     if (TabCtrl_InsertItem(state->windows.document_tabs, index, &item) >= 0) {
@@ -7855,19 +8146,30 @@ std::optional<LRESULT> RouteApplicationCommand(
         case IDM_SHORTCUT_RESET: {
             const InkpodStatus status = state->engine == nullptr
                 ? INKPOD_STATUS_INVALID_STATE
-                : state->engine->Invoke(
-                      [](InkpodCore* core) {
-                          return inkpod_core_shortcut_reset(core);
-                      },
-                      false,
-                      false);
+                : ResetShortcuts(
+                      *state->engine, state->shortcuts, !state->lifetime.smoke_test);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ショートカットの初期化");
+                ShowShortcutError(
+                    *state, window, L"ショートカットの初期化", status);
             }
+            UpdateMenuState(*state);
             return 0;
         }
         case IDM_SHORTCUT_EDIT: {
             ShortcutDialogState dialog_state{};
+            try {
+                dialog_state.entries.reserve(state->shortcuts.bindings.size());
+                const HMENU menu = GetMenu(window);
+                for (const auto& binding : state->shortcuts.bindings) {
+                    dialog_state.entries.push_back({
+                        binding.command_id,
+                        MenuCommandDisplayName(menu, binding.command_id),
+                        binding});
+                }
+            } catch (const std::bad_alloc&) {
+                ShowCoreError(*state, window, L"ショートカット一覧の作成");
+                return 0;
+            }
             if (ShowShortcutEditor(
                     state->lifetime.instance,
                     window,
@@ -7877,20 +8179,20 @@ std::optional<LRESULT> RouteApplicationCommand(
             }
             const InkpodStatus status = state->engine == nullptr
                 ? INKPOD_STATUS_INVALID_STATE
-                : state->engine->Invoke(
-                      [dialog_state](InkpodCore* core) {
-                          return inkpod_core_shortcut_rebind(
-                              core,
-                              dialog_state.command_id,
-                              dialog_state.virtual_key,
-                              dialog_state.modifiers);
-                      },
-                      false,
-                      false);
+                : RebindShortcut(
+                      *state->engine,
+                      state->shortcuts,
+                      dialog_state.sequence,
+                      !state->lifetime.smoke_test);
             if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, L"ショートカット編集");
+                ShowShortcutError(*state, window, L"ショートカット編集", status);
+                if (status == INKPOD_STATUS_IO_ERROR) {
+                    UpdateMenuState(*state);
+                    return 1;
+                }
                 return 0;
             }
+            UpdateMenuState(*state);
             return 1;
         }
         case IDM_HELP_ABOUT:
@@ -8021,6 +8323,12 @@ std::optional<LRESULT> RouteKeyboardMessage(
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
             if (state != nullptr) {
+                if (!state->shortcuts.pending_strokes.empty() && wparam == VK_ESCAPE) {
+                    ClearPendingShortcut(state->shortcuts);
+                    KillTimer(window, kShortcutSequenceTimer);
+                    UpdateMenuState(*state);
+                    return 0;
+                }
                 if (state->tools.floating_active && wparam == VK_RETURN) {
                     DispatchEnabledCommand(*state, window, IDM_EDIT_FLOATING_COMMIT);
                     return 0;
@@ -8049,27 +8357,26 @@ std::optional<LRESULT> RouteKeyboardMessage(
                     return 0;
                 }
                 const std::uint32_t modifiers = CurrentShortcutModifiers(lparam);
-                if (modifiers
-                        == (INKPOD_SHORTCUT_MODIFIER_CONTROL
-                            | INKPOD_SHORTCUT_MODIFIER_ALT)
-                    && (wparam == '3' || wparam == '2' || wparam == '4'
-                        || wparam == '1' || wparam == '0' || wparam == '8')) {
-                    const UINT command = wparam == '3'
-                        ? IDM_MOTION_FPS_30
-                        : (wparam == '2'
-                                  ? IDM_MOTION_FPS_25
-                                  : (wparam == '4'
-                                            ? IDM_MOTION_FPS_24
-                                            : (wparam == '1'
-                                                      ? IDM_MOTION_FPS_12
-                                                      : (wparam == '0'
-                                                                ? IDM_MOTION_FPS_10
-                                                                : IDM_MOTION_FPS_8))));
-                    DispatchEnabledCommand(*state, window, command);
+                UINT menu_command{};
+                const InkpodShortcutMatch shortcut_match = ResolveShortcutStroke(
+                    state->shortcuts,
+                    InkpodShortcutStroke{static_cast<std::uint32_t>(wparam), modifiers},
+                    menu_command);
+                if (shortcut_match == INKPOD_SHORTCUT_MATCH_PREFIX) {
+                    SetTimer(
+                        window,
+                        kShortcutSequenceTimer,
+                        kShortcutSequenceTimerMilliseconds,
+                        nullptr);
+                    UpdateMenuState(*state);
                     return 0;
                 }
-                if (modifiers == 0U && wparam == VK_TAB) {
-                    DispatchEnabledCommand(*state, window, IDM_PALETTE_NEXT_GROUP);
+                KillTimer(window, kShortcutSequenceTimer);
+                if (shortcut_match == INKPOD_SHORTCUT_MATCH_EXACT) {
+                    const UINT resolved_command = ShortcutMenuCommand(menu_command);
+                    if (resolved_command != 0U) {
+                        DispatchEnabledCommand(*state, window, resolved_command);
+                    }
                     return 0;
                 }
                 if (modifiers == 0U && wparam >= '0' && wparam <= '9') {
@@ -8083,27 +8390,6 @@ std::optional<LRESULT> RouteKeyboardMessage(
                         SetDrawingColor(state->tools, state->panes.palette_colors[index]);
                         InvalidateRect(state->windows.canvas, nullptr, FALSE);
                     }
-                    return 0;
-                }
-                UINT menu_command{};
-                if (ResolveConfiguredShortcut(
-                        *state,
-                        static_cast<std::uint32_t>(wparam),
-                        modifiers,
-                        menu_command)) {
-                    DispatchEnabledCommand(*state, window, menu_command);
-                    return 0;
-                }
-                if (modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL && wparam == 'S') {
-                    DispatchEnabledCommand(*state, window, IDM_FILE_SAVE);
-                    return 0;
-                }
-                if (modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL && wparam == 'N') {
-                    DispatchEnabledCommand(*state, window, IDM_FILE_NEW);
-                    return 0;
-                }
-                if (modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL && wparam == 'O') {
-                    DispatchEnabledCommand(*state, window, IDM_FILE_OPEN);
                     return 0;
                 }
             }
@@ -8538,6 +8824,14 @@ std::optional<LRESULT> RouteCanvasMessage(
                     static_cast<double>(lparam));
             }
             return 0;
+        case inkpod::renderer::kCanvasPointerMoved:
+            if (state != nullptr) {
+                state->view.pointer_device_x = GET_X_LPARAM(lparam);
+                state->view.pointer_device_y = GET_Y_LPARAM(lparam);
+                ++state->view.locator_generation;
+                QueueLocatorSample(*state);
+            }
+            return 1;
         default:
             break;
     }
@@ -8550,7 +8844,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
     HWND window,
     UINT message,
     WPARAM wparam,
-    LPARAM) noexcept {
+    LPARAM lparam) noexcept {
     switch (message) {
         case inkpod::app::kCoreStateChanged:
             if (state != nullptr) {
@@ -8561,6 +8855,22 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 UpdateMenuState(*state);
             }
             return 0;
+        case kLocatorSampleReady: {
+            std::unique_ptr<LocatorAsyncResult> result(
+                reinterpret_cast<LocatorAsyncResult*>(lparam));
+            if (state != nullptr && result != nullptr) {
+                state->view.locator_pending = false;
+                if (result->status == INKPOD_STATUS_OK
+                    && result->generation == state->view.locator_generation) {
+                    state->view.locator = result->output;
+                    state->view.locator_valid = true;
+                    UpdateLocatorStatus(*state);
+                } else if (result->generation != state->view.locator_generation) {
+                    QueueLocatorSample(*state);
+                }
+            }
+            return 0;
+        }
         case kEffectTaskCompleted:
             if (state != nullptr) {
                 const InkpodStatus status = static_cast<InkpodStatus>(wparam);
@@ -8640,6 +8950,28 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
     LPARAM lparam) noexcept {
     switch (message) {
         case WM_TIMER:
+            if (state != nullptr && wparam == kStatusProgressTimer) {
+                std::array<wchar_t, 192U> progress{};
+                if (FormatTaskProgressStatus(*state, progress)) {
+                    SendMessageW(
+                        state->windows.status_bar,
+                        SB_SETTEXTW,
+                        5,
+                        reinterpret_cast<LPARAM>(progress.data()));
+                } else {
+                    KillTimer(window, kStatusProgressTimer);
+                }
+                return 0;
+            }
+            if (state != nullptr && wparam == kShortcutSequenceTimer) {
+                if (state->shortcuts.pending_deadline == 0U
+                    || GetTickCount64() >= state->shortcuts.pending_deadline) {
+                    KillTimer(window, kShortcutSequenceTimer);
+                    ClearPendingShortcut(state->shortcuts);
+                    UpdateMenuState(*state);
+                }
+                return 0;
+            }
             if (state != nullptr && wparam == kMotionPlaybackTimer) {
                 if (state->animation.motion_active && !state->animation.motion_paused
                     && state->engine != nullptr) {
@@ -8723,6 +9055,8 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
             KillTimer(window, kAutosaveTimer);
             KillTimer(window, kContinuousSprayTimer);
             KillTimer(window, kMotionPlaybackTimer);
+            KillTimer(window, kShortcutSequenceTimer);
+            KillTimer(window, kStatusProgressTimer);
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
             return DefWindowProcW(window, message, wparam, lparam);
         default:
@@ -8751,6 +9085,34 @@ std::optional<LRESULT> RouteMainWindowMessage(
         }
     }
     return std::nullopt;
+}
+
+bool PreTranslateKeyboardMessage(AppContext& state, const MSG& message) noexcept {
+    if (message.message != WM_KEYDOWN && message.message != WM_SYSKEYDOWN) {
+        return false;
+    }
+    const HWND focus = GetFocus();
+    if (focus != nullptr) {
+        wchar_t class_name[64]{};
+        if (GetClassNameW(focus, class_name, static_cast<int>(std::size(class_name))) > 0
+            && (_wcsicmp(class_name, L"Edit") == 0
+                || _wcsnicmp(class_name, L"RichEdit", 8) == 0)) {
+            return false;
+        }
+    }
+    const HWND target_root = message.hwnd == nullptr ? nullptr : GetAncestor(message.hwnd, GA_ROOTOWNER);
+    if (message.hwnd != state.windows.window
+        && !IsChild(state.windows.window, message.hwnd)
+        && target_root != state.windows.window) {
+        return false;
+    }
+    return RouteKeyboardMessage(
+               &state,
+               state.windows.window,
+               message.message,
+               message.wParam,
+               message.lParam)
+        .has_value();
 }
 
 LRESULT CALLBACK MainWindowProcedure(

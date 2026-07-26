@@ -15,13 +15,14 @@ use inkpod_core::{
     GradientMode, GradientStop, GridConfig, GuideAxis, HsvAdjustment, InclusionMode, LayerKind,
     Levels, LightTableDisplayMode, LightTableItemInput, LightTableItemProperties, LightTableSource,
     MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION,
-    Margins, MirrorAxis, MotionCheckConfig, MotionFrame, PaintTool, PixelFormat, PixelValue,
-    PlaneType, PointF32, RectI32, RenderSnapshot, ResizeAnchor, RgbaRasterBytes, RotateDirection,
-    SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE, SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA,
-    SelectionLayerOperation, SelectionOperation, SelectionShape, SequenceCellInfo,
-    SequenceCellSource, SequenceDirection, ShortcutBinding, Stamp, StampGesture, StampShape,
-    Stroke, StrokeSample, TileRaster, VectorCubicSegment, VectorEraseMode, VectorPathInput,
-    VectorSelectionMode, VectorWidthMode, ViewCommand,
+    MAX_SHORTCUT_STROKES, MAX_SHORTCUTS, Margins, MirrorAxis, MotionCheckConfig, MotionFrame,
+    PaintTool, PixelFormat, PixelValue, PlaneType, PointF32, RectI32, RenderSnapshot, ResizeAnchor,
+    RgbaRasterBytes, RotateDirection, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
+    SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SelectionLayerOperation, SelectionOperation,
+    SelectionShape, SequenceCellInfo, SequenceCellSource, SequenceDirection, ShortcutBinding,
+    ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape, Stroke, StrokeSample,
+    TileRaster, VectorCubicSegment, VectorEraseMode, VectorPathInput, VectorSelectionMode,
+    VectorWidthMode, ViewCommand,
 };
 use std::cell::RefCell;
 use std::mem::{align_of, size_of};
