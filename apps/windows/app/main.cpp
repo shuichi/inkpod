@@ -22,14 +22,25 @@
 
 #include "app_context.h"
 #include "canvas.h"
+#include "clipboard_adapter.h"
 #include "com_runtime.h"
 #include "core_engine.h"
+#include "document_shell.h"
 #include "inkpod/core_ffi.h"
 #include "resource.h"
 #include "ui/dialogs/about_dialog.h"
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/panes/document_panes.h"
+#include "ui/panes/color_panes.h"
+#include "ui/tools/fill_controller.h"
+#include "ui/tools/floating_paste_controller.h"
+#include "ui/tools/selection_controller.h"
+#include "ui/tools/view_controller.h"
+#include "ui/tools/vector_controller.h"
+#include "ui/effects_controller.h"
+#include "ui/batch_controller.h"
 
 int InkpodRunAbiSmoke();
 
@@ -51,6 +62,7 @@ using inkpod::app::AppContext;
 using inkpod::app::BatchOperationUi;
 using inkpod::app::BatchUiState;
 using inkpod::app::DocumentShellState;
+using inkpod::app::DocumentShellController;
 using inkpod::app::EffectsUiState;
 using inkpod::app::M6AdjustmentUiState;
 using inkpod::app::M6FilterJob;
@@ -59,6 +71,20 @@ using inkpod::app::M6ToolOptions;
 using inkpod::app::PaneUiState;
 using inkpod::app::ToolUiState;
 using inkpod::app::ViewUiState;
+using inkpod::app::ImportStandardClipboard;
+using inkpod::app::InkpodClipboardFormat;
+using inkpod::app::PublishStandardClipboard;
+using inkpod::app::ChooseCommonRasterPath;
+using inkpod::app::ChooseCommonRasterPaths;
+using inkpod::app::ChooseInkpodPath;
+using inkpod::app::ChooseOpenDocumentPath;
+using inkpod::app::CommonRasterFormatFromPath;
+using inkpod::app::NewestPrivateRecovery;
+using inkpod::app::PrivateRecoveryPath;
+using inkpod::app::ReadBoundedFile;
+using inkpod::app::RecoveryIsNewer;
+using inkpod::app::WidePathToUtf8;
+using inkpod::app::WriteFileAtomically;
 
 constexpr std::uint32_t kInteractionFill = 1001U;
 constexpr std::uint32_t kInteractionEyedropper = 1002U;
@@ -93,61 +119,24 @@ constexpr wchar_t kVectorStrokePlaneRequired[] =
 bool QuerySnapshotTransform(
     AppContext& state, InkpodSnapshotTransform& transform) noexcept;
 bool QueryDocument(AppContext& state, InkpodDocumentInfo& info) noexcept;
-bool WidePathToUtf8(
-    const std::wstring& path, std::vector<std::uint8_t>& output) noexcept;
 std::wstring LocalizedHistoryLabel(const std::string& label);
-struct TreePaneNode;
+using inkpod::windows::ui::panes::DocumentPanesController;
+using inkpod::windows::ui::panes::ColorPanesController;
+using inkpod::windows::ui::panes::LightTablePaneItem;
+using inkpod::windows::ui::panes::LightTablePaneSet;
+using inkpod::windows::ui::panes::SequencePaneCell;
+using inkpod::windows::ui::panes::TreePaneNode;
+using inkpod::windows::ui::tools::FillController;
+using inkpod::windows::ui::tools::FloatingPasteController;
+using inkpod::windows::ui::tools::SelectionController;
+using inkpod::windows::ui::tools::ViewController;
+using inkpod::windows::ui::tools::VectorController;
+using inkpod::windows::ui::BatchController;
+using inkpod::windows::ui::EffectsController;
 bool QueryTreeNode(AppContext& state, bool plane, TreePaneNode& output) noexcept;
 bool IsVectorCanvasTool(std::uint32_t tool) noexcept;
 bool IsVectorStrokePlane(std::uint32_t kind) noexcept;
 void ClearVectorGeometryPreview(ToolUiState& tools, HWND canvas) noexcept;
-void RefreshBatchPalette(BatchUiState& state) noexcept;
-
-bool QueryM6Progress(
-    void* context, inkpod::windows::ui::ProgressDialogInfo& output) noexcept {
-    auto* effects = static_cast<EffectsUiState*>(context);
-    if (effects == nullptr || effects->task == nullptr) {
-        return false;
-    }
-    InkpodTaskInfo info{};
-    info.struct_size = sizeof(info);
-    if (inkpod_task_query(effects->task, &info) != INKPOD_STATUS_OK) {
-        return false;
-    }
-    output.completed_work = info.completed_work;
-    output.total_work = info.total_work;
-    return true;
-}
-
-void CancelM6Progress(void* context) noexcept {
-    auto* effects = static_cast<EffectsUiState*>(context);
-    if (effects != nullptr && effects->task != nullptr) {
-        inkpod_task_cancel(effects->task);
-    }
-}
-
-bool QueryBatchProgress(
-    void* context, inkpod::windows::ui::ProgressDialogInfo& output) noexcept {
-    auto* batch = static_cast<BatchUiState*>(context);
-    if (batch == nullptr || batch->task == nullptr) {
-        return false;
-    }
-    InkpodTaskInfo info{};
-    info.struct_size = sizeof(info);
-    if (inkpod_batch_task_query(batch->task, &info) != INKPOD_STATUS_OK) {
-        return false;
-    }
-    output.completed_work = info.completed_work;
-    output.total_work = info.total_work;
-    return true;
-}
-
-void CancelBatchProgress(void* context) noexcept {
-    auto* batch = static_cast<BatchUiState*>(context);
-    if (batch != nullptr && batch->task != nullptr) {
-        inkpod_batch_task_cancel(batch->task);
-    }
-}
 
 void DispatchBatchPaletteCommand(void* context, UINT command) noexcept {
     auto* state = static_cast<AppContext*>(context);
@@ -261,17 +250,9 @@ void UpdateLocatorDisplay(AppContext& state, int device_x, int device_y) noexcep
     InkpodLocatorOutput locator{};
     locator.struct_size = sizeof(locator);
     const std::uint64_t view_id = state.view.active_view_id;
-    const InkpodStatus status = state.engine->Invoke(
-        [view_id, device_x, device_y, &locator](InkpodCore* core) {
-            return inkpod_core_locator_sample(
-                core,
-                view_id,
-                static_cast<double>(device_x),
-                static_cast<double>(device_y),
-                &locator);
-        },
-        false,
-        false);
+    DocumentPanesController controller(*state.engine);
+    const InkpodStatus status =
+        controller.SampleLocator(view_id, device_x, device_y, locator);
     if (status != INKPOD_STATUS_OK) {
         return;
     }
@@ -332,18 +313,6 @@ void UpdateLocatorDisplay(AppContext& state, int device_x, int device_y) noexcep
     }
 }
 
-struct TreePaneNode {
-    std::uint64_t id{};
-    std::uint64_t parent_id{};
-    std::uint32_t index{};
-    std::uint32_t kind{};
-    std::uint32_t pixel_format{};
-    std::uint32_t opacity_milli{};
-    std::uint32_t child_count{};
-    std::uint32_t flags{};
-    std::string name;
-};
-
 bool RefreshTreePane(AppContext& state) noexcept {
     if (state.engine == nullptr || state.windows.layer_list == nullptr || state.windows.plane_list == nullptr) {
         return false;
@@ -352,75 +321,9 @@ bool RefreshTreePane(AppContext& state) noexcept {
     std::vector<TreePaneNode> planes;
     const std::uint64_t requested_layer_id = state.panes.active_tree_layer_id;
     std::uint32_t selected_layer_index{};
-    const InkpodStatus status = state.engine->Invoke(
-        [&layers, &planes, requested_layer_id, &selected_layer_index](InkpodCore* core) {
-            try {
-                layers.reserve(64U);
-                planes.reserve(64U);
-                for (std::uint32_t layer_index = 0U; layer_index < 1024U; ++layer_index) {
-                    std::array<std::uint8_t, 256U> name{};
-                    InkpodNodeInfo info{};
-                    info.struct_size = sizeof(info);
-                    info.name_utf8 = name.data();
-                    info.name_capacity = name.size();
-                    const InkpodStatus node_status = inkpod_core_node_get(
-                        core, layer_index, UINT32_MAX, &info);
-                    if (node_status != INKPOD_STATUS_OK) {
-                        break;
-                    }
-                    layers.push_back(TreePaneNode{
-                        info.id,
-                        info.parent_id,
-                        info.index,
-                        info.kind,
-                        info.pixel_format,
-                        info.opacity_milli,
-                        info.child_count,
-                        info.flags,
-                        std::string(
-                            reinterpret_cast<const char*>(name.data()),
-                            static_cast<std::size_t>(info.name_bytes))});
-                    if (info.id == requested_layer_id) {
-                        selected_layer_index = layer_index;
-                    }
-                }
-                if (layers.empty()) {
-                    return INKPOD_STATUS_INVALID_STATE;
-                }
-                if (requested_layer_id == 0U) {
-                    selected_layer_index = 0U;
-                }
-                for (std::uint32_t plane_index = 0U; plane_index < 1024U; ++plane_index) {
-                    std::array<std::uint8_t, 256U> name{};
-                    InkpodNodeInfo info{};
-                    info.struct_size = sizeof(info);
-                    info.name_utf8 = name.data();
-                    info.name_capacity = name.size();
-                    const InkpodStatus node_status = inkpod_core_node_get(
-                        core, selected_layer_index, plane_index, &info);
-                    if (node_status != INKPOD_STATUS_OK) {
-                        break;
-                    }
-                    planes.push_back(TreePaneNode{
-                        info.id,
-                        info.parent_id,
-                        info.index,
-                        info.kind,
-                        info.pixel_format,
-                        info.opacity_milli,
-                        info.child_count,
-                        info.flags,
-                        std::string(
-                            reinterpret_cast<const char*>(name.data()),
-                            static_cast<std::size_t>(info.name_bytes))});
-                }
-            } catch (const std::bad_alloc&) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            return INKPOD_STATUS_OK;
-        },
-        false,
-        false);
+    DocumentPanesController controller(*state.engine);
+    const InkpodStatus status = controller.LoadTree(
+        requested_layer_id, layers, planes, selected_layer_index);
     if (status != INKPOD_STATUS_OK || layers.empty()) {
         return false;
     }
@@ -514,19 +417,6 @@ bool RefreshTreePane(AppContext& state) noexcept {
     return true;
 }
 
-struct LightTablePaneSet {
-    std::uint64_t id{};
-    std::uint32_t flags{};
-    std::uint32_t opacity_milli{};
-    std::uint32_t item_count{};
-    std::string name;
-};
-
-struct LightTablePaneItem {
-    InkpodLightTableItemInfo info{};
-    std::string name;
-};
-
 bool RefreshLightTablePane(AppContext& state) noexcept {
     if (state.engine == nullptr || state.windows.light_table_set_list == nullptr
         || state.windows.light_table_item_list == nullptr) {
@@ -534,53 +424,8 @@ bool RefreshLightTablePane(AppContext& state) noexcept {
     }
     std::vector<LightTablePaneSet> sets;
     std::vector<LightTablePaneItem> items;
-    const InkpodStatus status = state.engine->Invoke(
-        [&sets, &items](InkpodCore* core) {
-            try {
-                for (std::uint32_t index = 0U; index < 256U; ++index) {
-                    std::array<std::uint8_t, 1024U> name{};
-                    InkpodLightTableSetInfo info{};
-                    info.struct_size = sizeof(info);
-                    info.name_utf8 = name.data();
-                    info.name_capacity = name.size();
-                    if (inkpod_core_light_table_set_get(core, index, &info)
-                        != INKPOD_STATUS_OK) {
-                        break;
-                    }
-                    sets.push_back(LightTablePaneSet{
-                        info.id,
-                        info.flags,
-                        info.opacity_milli,
-                        info.item_count,
-                        std::string(
-                            reinterpret_cast<const char*>(name.data()),
-                            static_cast<std::size_t>(info.name_bytes))});
-                }
-                for (std::uint32_t index = 0U; index < 4096U; ++index) {
-                    std::array<std::uint8_t, 1024U> name{};
-                    LightTablePaneItem item{};
-                    item.info.struct_size = sizeof(item.info);
-                    item.info.display_color.struct_size = sizeof(item.info.display_color);
-                    item.info.name_utf8 = name.data();
-                    item.info.name_capacity = name.size();
-                    if (inkpod_core_light_table_item_get(core, index, &item.info)
-                        != INKPOD_STATUS_OK) {
-                        break;
-                    }
-                    item.name.assign(
-                        reinterpret_cast<const char*>(name.data()),
-                        static_cast<std::size_t>(item.info.name_bytes));
-                    item.info.name_utf8 = nullptr;
-                    item.info.name_capacity = 0U;
-                    items.push_back(std::move(item));
-                }
-            } catch (const std::bad_alloc&) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            return sets.empty() ? INKPOD_STATUS_INVALID_STATE : INKPOD_STATUS_OK;
-        },
-        false,
-        false);
+    DocumentPanesController controller(*state.engine);
+    const InkpodStatus status = controller.LoadLightTable(sets, items);
     if (status != INKPOD_STATUS_OK || sets.empty()) {
         return false;
     }
@@ -645,50 +490,13 @@ bool RefreshLightTablePane(AppContext& state) noexcept {
     return true;
 }
 
-struct SequencePaneCell {
-    InkpodSequenceCellInfo info{};
-    std::string name;
-};
-
 bool RefreshSequencePane(AppContext& state) noexcept {
     if (state.engine == nullptr || state.windows.sequence_list == nullptr) {
         return false;
     }
     std::vector<SequencePaneCell> cells;
-    const InkpodStatus status = state.engine->Invoke(
-        [&cells](InkpodCore* core) {
-            try {
-                for (std::uint32_t index = 0U; index < 10000U; ++index) {
-                    std::array<std::uint8_t, 1024U> name{};
-                    SequencePaneCell cell{};
-                    cell.info.struct_size = sizeof(cell.info);
-                    cell.info.name_utf8 = name.data();
-                    cell.info.name_capacity = name.size();
-                    const InkpodStatus cell_status =
-                        inkpod_core_sequence_cell_get(core, index, &cell.info);
-                    if (cell_status == INKPOD_STATUS_INVALID_STATE && index == 0U) {
-                        return INKPOD_STATUS_OK;
-                    }
-                    if (cell_status == INKPOD_STATUS_INVALID_ARGUMENT) {
-                        break;
-                    }
-                    if (cell_status != INKPOD_STATUS_OK) {
-                        return cell_status;
-                    }
-                    cell.name.assign(
-                        reinterpret_cast<const char*>(name.data()),
-                        static_cast<std::size_t>(cell.info.name_bytes));
-                    cell.info.name_utf8 = nullptr;
-                    cell.info.name_capacity = 0U;
-                    cells.push_back(std::move(cell));
-                }
-            } catch (const std::bad_alloc&) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            return INKPOD_STATUS_OK;
-        },
-        false,
-        false);
+    DocumentPanesController controller(*state.engine);
+    const InkpodStatus status = controller.LoadSequence(cells);
     SendMessageW(state.windows.sequence_list, LB_RESETCONTENT, 0, 0);
     if (status != INKPOD_STATUS_OK) {
         return false;
@@ -730,51 +538,12 @@ bool RefreshColorPanes(AppContext& state) noexcept {
         || state.windows.color_chart_list == nullptr) {
         return false;
     }
-    std::vector<InkpodColorValue> colors;
-    const InkpodStatus status = state.engine->Invoke(
-        [&colors](InkpodCore* core) {
-            InkpodColorBuffer query{};
-            query.struct_size = sizeof(query);
-            InkpodStatus inner = inkpod_core_palette_get(core, &query);
-            if (inner != INKPOD_STATUS_OK) {
-                return inner;
-            }
-            try {
-                colors.resize(static_cast<std::size_t>(query.color_count));
-            } catch (const std::bad_alloc&) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            for (auto& color : colors) {
-                color.struct_size = sizeof(color);
-            }
-            if (colors.empty()) {
-                return INKPOD_STATUS_OK;
-            }
-            InkpodColorBuffer output{};
-            output.struct_size = sizeof(output);
-            output.colors = colors.data();
-            output.color_capacity = colors.size();
-            output.color_stride_bytes = sizeof(InkpodColorValue);
-            return inkpod_core_palette_get(core, &output);
-        },
-        false,
-        false);
+    ColorPanesController controller(*state.engine);
+    const InkpodStatus status = controller.RefreshModel(state.panes);
     if (status != INKPOD_STATUS_OK) {
         return false;
     }
-    try {
-        state.panes.palette_colors = colors;
-        const std::size_t previous_names = state.panes.color_chart_names.size();
-        state.panes.color_chart_names.resize(colors.size());
-        for (std::size_t index = previous_names; index < colors.size(); ++index) {
-            state.panes.color_chart_names[index] = L"Color " + std::to_wstring(index + 1U);
-        }
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    const std::uint32_t group_count = std::max<std::uint32_t>(
-        1U, static_cast<std::uint32_t>((colors.size() + 9U) / 10U));
-    state.panes.palette_group %= group_count;
+    const auto& colors = state.panes.palette_colors;
     SendMessageW(state.windows.color_palette_list, LB_RESETCONTENT, 0, 0);
     const std::size_t start = static_cast<std::size_t>(state.panes.palette_group) * 10U;
     for (std::size_t index = start; index < std::min(colors.size(), start + 10U); ++index) {
@@ -792,10 +561,6 @@ bool RefreshColorPanes(AppContext& state) noexcept {
     }
     SendMessageW(state.windows.color_chart_list, LB_RESETCONTENT, 0, 0);
     constexpr std::size_t chart_page_size = 20U;
-    const std::uint32_t chart_page_count = std::max<std::uint32_t>(
-        1U, static_cast<std::uint32_t>((colors.size() + chart_page_size - 1U)
-            / chart_page_size));
-    state.panes.color_chart_page %= chart_page_count;
     const std::size_t chart_start = static_cast<std::size_t>(state.panes.color_chart_page)
         * chart_page_size;
     for (std::size_t index = chart_start;
@@ -823,19 +588,8 @@ InkpodStatus ReplacePalette(
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    return state.engine->Invoke(
-        [&colors](InkpodCore* core) {
-            InkpodColorArray input{};
-            input.struct_size = sizeof(input);
-            input.colors = colors.empty() ? nullptr : colors.data();
-            input.color_count = colors.size();
-            input.color_stride_bytes = colors.empty() ? 0U : sizeof(InkpodColorValue);
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            return inkpod_core_palette_set(core, &input, &result);
-        },
-        true,
-        true);
+    ColorPanesController controller(*state.engine);
+    return controller.ReplacePalette(colors);
 }
 
 void UpdateMotionLabel(
@@ -1030,89 +784,7 @@ bool QueryHistoryMenuLabels(
 }
 
 void RefreshBatchPalette(BatchUiState& batch) noexcept {
-    if (batch.palette == nullptr) {
-        return;
-    }
-    inkpod::windows::ui::BatchPaletteView view{};
-    try {
-        if (batch.input_kind == INKPOD_BATCH_INPUT_CURRENT_SEQUENCE) {
-            view.input_label = L"現在セルを含む連番（自然順）";
-        } else if (batch.input_kind == INKPOD_BATCH_INPUT_FOLDER) {
-            view.input_label = L"フォルダー: " + batch.input_path;
-        } else {
-            view.input_label = L"ファイル: " + batch.input_path;
-        }
-        if (batch.first_cell != 0U || batch.last_cell != 0U) {
-            view.input_label += L" / 範囲 ";
-            view.input_label += batch.first_cell == 0U
-                ? L"先頭"
-                : std::to_wstring(batch.first_cell);
-            view.input_label += L"～";
-            view.input_label += batch.last_cell == 0U
-                ? L"末尾"
-                : std::to_wstring(batch.last_cell);
-        }
-
-        view.loaded_graph = batch.loaded_graph;
-        if (batch.loaded_graph && batch.graph != nullptr) {
-            InkpodBatchGraphInfo info{};
-            info.struct_size = sizeof(info);
-            if (inkpod_batch_graph_get_info(
-                    batch.graph, &info) == INKPOD_STATUS_OK) {
-                view.operation_labels.push_back(
-                    L"読み込み済みセット: "
-                    + std::to_wstring(info.operation_count) + L" 項目");
-            }
-        } else {
-            view.operation_labels.reserve(batch.operations.size());
-            for (const auto& operation : batch.operations) {
-                std::wstring label =
-                    operation.flags & INKPOD_BATCH_OPERATION_ENABLED
-                    ? L"✓ "
-                    : L"– ";
-                label += operation.label;
-                if (operation.flags
-                    & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN) {
-                    label += L"（実行ごとに設定）";
-                }
-                view.operation_labels.push_back(std::move(label));
-            }
-            if (!batch.operations.empty()) {
-                batch.selected_operation = std::min<std::uint32_t>(
-                    batch.selected_operation,
-                    static_cast<std::uint32_t>(
-                        batch.operations.size() - 1U));
-                view.selected_operation = batch.selected_operation;
-            }
-        }
-
-        const wchar_t* policy = L"複製保存";
-        if (batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE) {
-            policy = L"新規保存";
-        } else if (
-            batch.output_policy
-            == INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE) {
-            policy = L"明示上書き";
-        }
-        view.output_text = L"出力: ";
-        view.output_text += policy;
-        view.output_text += L" / ";
-        view.output_text += batch.output_folder.empty()
-            ? L"（入力と同じ場所）"
-            : batch.output_folder;
-        if (!batch.last_result.empty()) {
-            view.output_text += L"\r\n";
-            view.output_text += batch.last_result;
-        }
-        view.idle = batch.task == nullptr;
-        view.runnable = view.idle
-            && (batch.graph != nullptr
-                || !batch.operations.empty());
-    } catch (const std::bad_alloc&) {
-        return;
-    }
-    inkpod::windows::ui::UpdateBatchPaletteDialog(
-        batch.palette, view);
+    BatchController::RefreshPalette(batch);
 }
 std::uint32_t CurrentShortcutModifiers(LPARAM key_data) noexcept {
     std::uint32_t modifiers{};
@@ -1176,335 +848,6 @@ void ShowCoreError(const AppContext& state, HWND owner, const wchar_t* operation
     MessageBoxW(owner, message.data(), L"inkpod", MB_OK | MB_ICONERROR);
 }
 
-bool WidePathToUtf8(
-    const std::wstring& path, std::vector<std::uint8_t>& output) noexcept {
-    if (path.empty() || path.size() > static_cast<std::size_t>(INT_MAX)) {
-        return false;
-    }
-    const int required = WideCharToMultiByte(
-        CP_UTF8,
-        WC_ERR_INVALID_CHARS,
-        path.data(),
-        static_cast<int>(path.size()),
-        nullptr,
-        0,
-        nullptr,
-        nullptr);
-    if (required <= 0) {
-        return false;
-    }
-    try {
-        output.resize(static_cast<std::size_t>(required));
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    return WideCharToMultiByte(
-               CP_UTF8,
-               WC_ERR_INVALID_CHARS,
-               path.data(),
-               static_cast<int>(path.size()),
-               reinterpret_cast<char*>(output.data()),
-               required,
-               nullptr,
-               nullptr)
-        == required;
-}
-
-struct ClipboardPrivateHeader {
-    std::uint32_t magic{UINT32_C(0x504b4e49)};
-    std::uint32_t version{1U};
-    std::int32_t origin_x{};
-    std::int32_t origin_y{};
-    std::uint32_t width{};
-    std::uint32_t height{};
-    std::uint64_t stride{};
-    std::uint64_t bytes{};
-};
-
-UINT InkpodClipboardFormat() noexcept {
-    static const UINT format = RegisterClipboardFormatW(L"inkpod/typed-rgba-v1");
-    return format;
-}
-
-bool PublishStandardClipboard(HWND owner, const InkpodClipboard* clipboard) noexcept {
-    if (clipboard == nullptr) {
-        return false;
-    }
-    InkpodClipboardRasterBuffer view{};
-    view.struct_size = sizeof(view);
-    if (inkpod_clipboard_render_rgba8(clipboard, &view) != INKPOD_STATUS_OK
-        || view.required_bytes == 0U
-        || view.required_bytes > static_cast<std::uint64_t>(SIZE_MAX)) {
-        return false;
-    }
-    std::vector<std::uint8_t> rgba;
-    try {
-        rgba.resize(static_cast<std::size_t>(view.required_bytes));
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    view.pixels_rgba8 = rgba.data();
-    view.pixel_capacity = rgba.size();
-    if (inkpod_clipboard_render_rgba8(clipboard, &view) != INKPOD_STATUS_OK) {
-        return false;
-    }
-    const std::uint64_t dib_bytes_u64 = sizeof(BITMAPV5HEADER) + view.required_bytes;
-    const std::uint64_t private_bytes_u64 = sizeof(ClipboardPrivateHeader) + view.required_bytes;
-    if (dib_bytes_u64 > static_cast<std::uint64_t>(SIZE_MAX)
-        || private_bytes_u64 > static_cast<std::uint64_t>(SIZE_MAX)) {
-        return false;
-    }
-    HGLOBAL dib = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(dib_bytes_u64));
-    HGLOBAL typed = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(private_bytes_u64));
-    if (dib == nullptr || typed == nullptr) {
-        if (dib != nullptr) {
-            GlobalFree(dib);
-        }
-        if (typed != nullptr) {
-            GlobalFree(typed);
-        }
-        return false;
-    }
-    auto* dib_memory = static_cast<std::uint8_t*>(GlobalLock(dib));
-    auto* typed_memory = static_cast<std::uint8_t*>(GlobalLock(typed));
-    if (dib_memory == nullptr || typed_memory == nullptr) {
-        if (dib_memory != nullptr) {
-            GlobalUnlock(dib);
-        }
-        if (typed_memory != nullptr) {
-            GlobalUnlock(typed);
-        }
-        GlobalFree(dib);
-        GlobalFree(typed);
-        return false;
-    }
-    BITMAPV5HEADER header{};
-    header.bV5Size = sizeof(header);
-    header.bV5Width = static_cast<LONG>(view.width);
-    header.bV5Height = -static_cast<LONG>(view.height);
-    header.bV5Planes = 1U;
-    header.bV5BitCount = 32U;
-    header.bV5Compression = BI_BITFIELDS;
-    header.bV5SizeImage = static_cast<DWORD>(std::min<std::uint64_t>(
-        view.required_bytes, static_cast<std::uint64_t>(UINT32_MAX)));
-    header.bV5RedMask = UINT32_C(0x00ff0000);
-    header.bV5GreenMask = UINT32_C(0x0000ff00);
-    header.bV5BlueMask = UINT32_C(0x000000ff);
-    header.bV5AlphaMask = UINT32_C(0xff000000);
-    header.bV5CSType = LCS_sRGB;
-    std::memcpy(dib_memory, &header, sizeof(header));
-    auto* bgra = dib_memory + sizeof(header);
-    for (std::uint32_t y = 0U; y < view.height; ++y) {
-        for (std::uint32_t x = 0U; x < view.width; ++x) {
-            const std::size_t offset = static_cast<std::size_t>(
-                static_cast<std::uint64_t>(y) * view.row_stride_bytes
-                + static_cast<std::uint64_t>(x) * 4U);
-            bgra[offset] = rgba[offset + 2U];
-            bgra[offset + 1U] = rgba[offset + 1U];
-            bgra[offset + 2U] = rgba[offset];
-            bgra[offset + 3U] = rgba[offset + 3U];
-        }
-    }
-    const ClipboardPrivateHeader private_header{
-        UINT32_C(0x504b4e49),
-        1U,
-        view.origin_x,
-        view.origin_y,
-        view.width,
-        view.height,
-        view.row_stride_bytes,
-        view.required_bytes};
-    std::memcpy(typed_memory, &private_header, sizeof(private_header));
-    std::memcpy(typed_memory + sizeof(private_header), rgba.data(), rgba.size());
-    GlobalUnlock(dib);
-    GlobalUnlock(typed);
-    if (OpenClipboard(owner) == FALSE) {
-        GlobalFree(dib);
-        GlobalFree(typed);
-        return false;
-    }
-    EmptyClipboard();
-    const bool dib_ok = SetClipboardData(CF_DIBV5, dib) != nullptr;
-    if (!dib_ok) {
-        GlobalFree(dib);
-    }
-    const UINT typed_format = InkpodClipboardFormat();
-    const bool typed_ok = typed_format != 0U
-        && SetClipboardData(typed_format, typed) != nullptr;
-    if (!typed_ok) {
-        GlobalFree(typed);
-    }
-    CloseClipboard();
-    return dib_ok && typed_ok;
-}
-
-bool ImportStandardClipboard(HWND owner, InkpodClipboard*& output) noexcept {
-    const UINT typed_format = InkpodClipboardFormat();
-    if (OpenClipboard(owner) == FALSE) {
-        return false;
-    }
-    InkpodClipboard* replacement{};
-    InkpodStatus status = INKPOD_STATUS_INVALID_ARGUMENT;
-    if (typed_format != 0U) {
-        HANDLE handle = GetClipboardData(typed_format);
-        if (handle != nullptr) {
-            const SIZE_T bytes = GlobalSize(handle);
-            const auto* memory = static_cast<const std::uint8_t*>(GlobalLock(handle));
-            if (memory != nullptr && bytes >= sizeof(ClipboardPrivateHeader)) {
-                ClipboardPrivateHeader header{};
-                std::memcpy(&header, memory, sizeof(header));
-                const bool valid = header.magic == UINT32_C(0x504b4e49)
-                    && header.version == 1U && header.width != 0U && header.height != 0U
-                    && header.stride >= static_cast<std::uint64_t>(header.width) * 4U
-                    && header.bytes <= bytes - sizeof(ClipboardPrivateHeader)
-                    && header.stride <= header.bytes
-                    && header.height <= header.bytes / header.stride;
-                if (valid) {
-                    const InkpodClipboardRgbaInput input{
-                        sizeof(InkpodClipboardRgbaInput),
-                        0U,
-                        header.origin_x,
-                        header.origin_y,
-                        header.width,
-                        header.height,
-                        memory + sizeof(ClipboardPrivateHeader),
-                        header.bytes,
-                        header.stride};
-                    status = inkpod_clipboard_create_rgba8(&input, &replacement);
-                }
-            }
-            if (memory != nullptr) {
-                GlobalUnlock(handle);
-            }
-        }
-    }
-
-    // Private data preserves the Inkpod document origin. For images copied by
-    // another application, import a conventional DIB at document origin (0, 0).
-    for (const UINT format : {CF_DIBV5, CF_DIB}) {
-        if (status == INKPOD_STATUS_OK) {
-            break;
-        }
-        HANDLE handle = GetClipboardData(format);
-        if (handle == nullptr) {
-            continue;
-        }
-        const SIZE_T bytes = GlobalSize(handle);
-        const auto* memory = static_cast<const std::uint8_t*>(GlobalLock(handle));
-        if (memory == nullptr || bytes < sizeof(BITMAPINFOHEADER)) {
-            if (memory != nullptr) {
-                GlobalUnlock(handle);
-            }
-            continue;
-        }
-        BITMAPINFOHEADER header{};
-        std::memcpy(&header, memory, sizeof(header));
-        const std::int64_t height64 = header.biHeight < 0
-            ? -static_cast<std::int64_t>(header.biHeight)
-            : static_cast<std::int64_t>(header.biHeight);
-        const bool bitfields = header.biCompression == BI_BITFIELDS;
-        const bool format_valid = header.biSize >= sizeof(BITMAPINFOHEADER)
-            && header.biSize <= bytes && header.biWidth > 0 && height64 > 0
-            && height64 <= static_cast<std::int64_t>(UINT32_MAX)
-            && header.biPlanes == 1U && (header.biBitCount == 24U || header.biBitCount == 32U)
-            && (header.biCompression == BI_RGB || (bitfields && header.biBitCount == 32U));
-        std::uint64_t pixel_offset = header.biSize;
-        std::array<std::uint32_t, 4U> masks{
-            UINT32_C(0x00ff0000), UINT32_C(0x0000ff00),
-            UINT32_C(0x000000ff), UINT32_C(0xff000000)};
-        if (format_valid && bitfields) {
-            if (header.biSize >= sizeof(BITMAPV4HEADER)) {
-                std::memcpy(masks.data(), memory + sizeof(BITMAPINFOHEADER), sizeof(masks));
-            } else {
-                if (bytes - pixel_offset < 3U * sizeof(std::uint32_t)) {
-                    GlobalUnlock(handle);
-                    continue;
-                }
-                std::memcpy(masks.data(), memory + pixel_offset, 3U * sizeof(std::uint32_t));
-                masks[3] = 0U;
-                pixel_offset += 3U * sizeof(std::uint32_t);
-            }
-        }
-        const std::uint64_t width = format_valid
-            ? static_cast<std::uint64_t>(header.biWidth)
-            : 0U;
-        const std::uint64_t bits_per_row = width * header.biBitCount;
-        const std::uint64_t row_stride = ((bits_per_row + 31U) / 32U) * 4U;
-        const std::uint64_t required = row_stride * static_cast<std::uint64_t>(height64);
-        const std::uint64_t rgba_bytes = width * static_cast<std::uint64_t>(height64) * 4U;
-        if (!format_valid || pixel_offset > bytes || required > bytes - pixel_offset
-            || rgba_bytes > UINT64_C(536870912) || rgba_bytes > SIZE_MAX) {
-            GlobalUnlock(handle);
-            continue;
-        }
-        std::vector<std::uint8_t> rgba;
-        try {
-            rgba.resize(static_cast<std::size_t>(rgba_bytes));
-        } catch (const std::bad_alloc&) {
-            GlobalUnlock(handle);
-            continue;
-        }
-        const auto channel = [](std::uint32_t value, std::uint32_t mask, std::uint8_t fallback) {
-            if (mask == 0U) {
-                return fallback;
-            }
-            std::uint32_t shift{};
-            while (((mask >> shift) & 1U) == 0U && shift < 31U) {
-                ++shift;
-            }
-            const std::uint32_t maximum = mask >> shift;
-            return static_cast<std::uint8_t>(
-                ((value & mask) >> shift) * UINT32_C(255) / maximum);
-        };
-        const std::uint32_t height = static_cast<std::uint32_t>(height64);
-        for (std::uint32_t y = 0U; y < height; ++y) {
-            const std::uint32_t source_y = header.biHeight < 0
-                ? y
-                : height - 1U - y;
-            const auto* source = memory + pixel_offset
-                + static_cast<std::uint64_t>(source_y) * row_stride;
-            auto* destination = rgba.data()
-                + static_cast<std::uint64_t>(y) * width * 4U;
-            for (std::uint32_t x = 0U; x < width; ++x) {
-                if (header.biBitCount == 24U) {
-                    destination[x * 4U] = source[x * 3U + 2U];
-                    destination[x * 4U + 1U] = source[x * 3U + 1U];
-                    destination[x * 4U + 2U] = source[x * 3U];
-                    destination[x * 4U + 3U] = 255U;
-                } else {
-                    std::uint32_t value{};
-                    std::memcpy(&value, source + x * 4U, sizeof(value));
-                    destination[x * 4U] = channel(value, masks[0], 0U);
-                    destination[x * 4U + 1U] = channel(value, masks[1], 0U);
-                    destination[x * 4U + 2U] = channel(value, masks[2], 0U);
-                    destination[x * 4U + 3U] = bitfields
-                        ? channel(value, masks[3], 255U)
-                        : 255U;
-                }
-            }
-        }
-        const InkpodClipboardRgbaInput input{
-            sizeof(InkpodClipboardRgbaInput),
-            0U,
-            0,
-            0,
-            static_cast<std::uint32_t>(width),
-            height,
-            rgba.data(),
-            rgba.size(),
-            width * 4U};
-        status = inkpod_clipboard_create_rgba8(&input, &replacement);
-        GlobalUnlock(handle);
-    }
-    CloseClipboard();
-    if (status != INKPOD_STATUS_OK) {
-        return false;
-    }
-    inkpod_clipboard_release(&output);
-    output = replacement;
-    return true;
-}
-
 void UpdateFloatingPreview(AppContext& state) noexcept {
     if (state.windows.canvas == nullptr) {
         return;
@@ -1533,21 +876,11 @@ InkpodStatus BeginFloatingPaste(AppContext& state, std::uint32_t mode) noexcept 
         imported_standard = true;
     }
     const InkpodClipboard* clipboard = state.document.clipboard;
-    InkpodStatus status = state.engine->Invoke(
-        [clipboard, mode](InkpodCore* core) {
-            return inkpod_core_paste_begin_mode(core, clipboard, mode);
-        },
-        false,
-        false);
+    FloatingPasteController controller(*state.engine);
+    InkpodStatus status = controller.Begin(clipboard, mode);
     if (status != INKPOD_STATUS_OK && imported_standard
         && mode == INKPOD_PASTE_COMPATIBLE) {
-        status = state.engine->Invoke(
-            [clipboard](InkpodCore* core) {
-                return inkpod_core_paste_begin_mode(
-                    core, clipboard, INKPOD_PASTE_ACTIVE_CONVERTED);
-            },
-            false,
-            false);
+        status = controller.Begin(clipboard, INKPOD_PASTE_ACTIVE_CONVERTED);
     }
     if (status != INKPOD_STATUS_OK) {
         return status;
@@ -1557,10 +890,7 @@ InkpodStatus BeginFloatingPaste(AppContext& state, std::uint32_t mode) noexcept 
     if (inkpod_clipboard_render_rgba8(clipboard, &view) != INKPOD_STATUS_OK
         || view.width > static_cast<std::uint32_t>(INT_MAX)
         || view.height > static_cast<std::uint32_t>(INT_MAX)) {
-        state.engine->Invoke(
-            [](InkpodCore* core) { return inkpod_core_floating_cancel(core); },
-            false,
-            false);
+        controller.Finish(false);
         return INKPOD_STATUS_INVALID_STATE;
     }
     state.tools.floating_active = true;
@@ -1581,12 +911,8 @@ InkpodStatus SetFloatingTransform(
     if (!state.tools.floating_active || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const InkpodStatus status = state.engine->Invoke(
-        [transform](InkpodCore* core) {
-            return inkpod_core_floating_transform(core, &transform);
-        },
-        false,
-        false);
+    FloatingPasteController controller(*state.engine);
+    const InkpodStatus status = controller.Transform(transform);
     if (status == INKPOD_STATUS_OK) {
         state.tools.floating_transform = transform;
         UpdateFloatingPreview(state);
@@ -1760,17 +1086,8 @@ InkpodStatus EndFloatingPaste(AppContext& state, bool commit) noexcept {
     if (!state.tools.floating_active || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const InkpodStatus status = state.engine->Invoke(
-        [commit](InkpodCore* core) {
-            if (!commit) {
-                return inkpod_core_floating_cancel(core);
-            }
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            return inkpod_core_floating_commit(core, &result);
-        },
-        commit,
-        commit);
+    FloatingPasteController controller(*state.engine);
+    const InkpodStatus status = controller.Finish(commit);
     if (status == INKPOD_STATUS_OK || !commit) {
         state.tools.floating_active = false;
         state.tools.floating_bounds = {};
@@ -1887,105 +1204,6 @@ InkpodStatus FitPaperToCaptureFrame(AppContext& state) noexcept {
         },
         true,
         true);
-}
-
-bool EnsureDirectory(const std::wstring& path) noexcept {
-    if (CreateDirectoryW(path.c_str(), nullptr) != FALSE) {
-        return true;
-    }
-    if (GetLastError() != ERROR_ALREADY_EXISTS) {
-        return false;
-    }
-    const DWORD attributes = GetFileAttributesW(path.c_str());
-    return attributes != INVALID_FILE_ATTRIBUTES
-        && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0U;
-}
-
-bool RecoveryDirectory(std::wstring& output) noexcept {
-    PWSTR local_app_data{};
-    if (FAILED(SHGetKnownFolderPath(
-            FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &local_app_data))) {
-        return false;
-    }
-    try {
-        std::wstring root(local_app_data);
-        CoTaskMemFree(local_app_data);
-        local_app_data = nullptr;
-        root += L"\\inkpod";
-        if (!EnsureDirectory(root)) {
-            return false;
-        }
-        root += L"\\Recovery";
-        if (!EnsureDirectory(root)) {
-            return false;
-        }
-        output = std::move(root);
-        return true;
-    } catch (const std::bad_alloc&) {
-        if (local_app_data != nullptr) {
-            CoTaskMemFree(local_app_data);
-        }
-        return false;
-    }
-}
-
-bool PrivateRecoveryPath(
-    std::uint64_t uuid_high,
-    std::uint64_t uuid_low,
-    std::wstring& output) noexcept {
-    std::wstring directory;
-    if (!RecoveryDirectory(directory)) {
-        return false;
-    }
-    std::array<wchar_t, 96> name{};
-    _snwprintf_s(
-        name.data(),
-        name.size(),
-        _TRUNCATE,
-        L"\\%016llx%016llx.inkpod",
-        static_cast<unsigned long long>(uuid_high),
-        static_cast<unsigned long long>(uuid_low));
-    try {
-        output = directory + name.data();
-        return true;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-}
-
-bool NewestPrivateRecovery(std::wstring& output) noexcept {
-    std::wstring directory;
-    if (!RecoveryDirectory(directory)) {
-        return false;
-    }
-    std::wstring pattern;
-    try {
-        pattern = directory + L"\\*.inkpod";
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    WIN32_FIND_DATAW entry{};
-    HANDLE search = FindFirstFileW(pattern.c_str(), &entry);
-    if (search == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    FILETIME newest{};
-    bool found{};
-    do {
-        if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0U
-            && (!found || CompareFileTime(&entry.ftLastWriteTime, &newest) > 0)) {
-            try {
-                output = directory + L"\\" + entry.cFileName;
-            } catch (const std::bad_alloc&) {
-                FindClose(search);
-                return false;
-            }
-            newest = entry.ftLastWriteTime;
-            found = true;
-        }
-    } while (FindNextFileW(search, &entry) != FALSE);
-    FindClose(search);
-    return found;
 }
 
 InkpodDocumentInfo EmptyDocumentInfo() noexcept {
@@ -2261,68 +1479,13 @@ InkpodStatus StartM6Task(
     AppContext& state,
     bool preview_prompt,
     std::function<InkpodStatus(InkpodCore*, InkpodTask*)> operation) noexcept {
-    if (state.engine == nullptr || state.effects.task != nullptr) {
+    if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    InkpodTask* task{};
-    InkpodStatus status = inkpod_task_create(&task);
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
-    if (state.lifetime.smoke_test) {
-        status = state.engine->Invoke(
-            [task, operation = std::move(operation)](InkpodCore* core) {
-                return operation(core, task);
-            },
-            true,
-            true);
-        if (status == INKPOD_STATUS_OK && preview_prompt) {
-            status = state.engine->Invoke(
-                [](InkpodCore* core) {
-                    InkpodDispatchResult result{};
-                    result.struct_size = sizeof(result);
-                    return inkpod_core_filter_preview_apply(core, &result);
-                },
-                true,
-                true);
-        }
-        inkpod_task_release(&task);
-        return status;
-    }
-    state.effects.task = task;
-    state.effects.preview_prompt = preview_prompt;
-    state.effects.progress_dialog = {
-        &state.effects,
-        QueryM6Progress,
-        CancelM6Progress,
-        nullptr,
-        L"処理中...",
-        L"キャンセル中..."};
-    state.effects.progress = inkpod::windows::ui::CreateProgressDialog(
-        state.lifetime.instance, state.windows.window, state.effects.progress_dialog);
-    if (state.effects.progress == nullptr) {
-        inkpod_task_release(&state.effects.task);
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    ShowWindow(state.effects.progress, SW_SHOW);
-    const HWND window = state.windows.window;
-    if (!state.engine->Enqueue(
-            [task, operation = std::move(operation)](InkpodCore* core) {
-                return operation(core, task);
-            },
-            true,
-            true,
-            true,
-            [window](InkpodStatus completion_status) {
-                PostMessageW(window, kM6TaskCompleted, completion_status, 0);
-            })) {
-        DestroyWindow(state.effects.progress);
-        state.effects.progress = nullptr;
-        inkpod_task_release(&state.effects.task);
-        state.effects.preview_prompt = false;
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    return INKPOD_STATUS_OK;
+    EffectsController controller(
+        state.lifetime, state.windows, state.effects, *state.engine);
+    return controller.StartTask(
+        preview_prompt, std::move(operation), kM6TaskCompleted);
 }
 
 std::uint32_t M6FilterKindForCommand(UINT command) noexcept {
@@ -3702,21 +2865,11 @@ InkpodStatus ApplyView(
     const InkpodViewInput input{
         sizeof(InkpodViewInput), kind, 0U, value1, value2, value3, value4};
     const std::uint64_t view_id = state.view.active_view_id;
-    return state.engine == nullptr
-        ? INKPOD_STATUS_INVALID_STATE
-        : state.engine->Invoke(
-              [input, view_id](InkpodCore* core) {
-                  InkpodDocumentInfo info = EmptyDocumentInfo();
-                  InkpodStatus status = view_id == 0U
-                      ? inkpod_core_apply_view(core, &input, &info)
-                      : inkpod_core_view_apply(core, view_id, &input);
-                  if (status == INKPOD_STATUS_OK && view_id != 0U) {
-                      status = inkpod_core_get_document_info(core, &info);
-                  }
-                  return status;
-              },
-              true,
-              true);
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    ViewController controller(*state.engine);
+    return controller.Apply(view_id, input);
 }
 
 bool QuerySnapshotTransform(
@@ -3822,83 +2975,28 @@ InkpodStatus ApplyBoxZoomGesture(
 
 InkpodStatus AddGuide(
     AppContext& state, std::uint32_t axis, std::int32_t position) noexcept {
-    return state.engine == nullptr
-        ? INKPOD_STATUS_INVALID_STATE
-        : state.engine->Invoke(
-              [axis, position](InkpodCore* core) {
-                  InkpodDispatchResult result{};
-                  result.struct_size = sizeof(result);
-                  std::uint64_t guide_id{};
-                  return inkpod_core_guide_add(
-                      core, axis, position, &result, &guide_id);
-              },
-              true,
-              true);
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    std::uint64_t guide_id{};
+    ViewController controller(*state.engine);
+    return controller.AddGuide(axis, position, guide_id);
 }
 
 InkpodStatus DeleteAllGuides(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    return state.engine->Invoke(
-        [](InkpodCore* core) {
-            const InkpodSnapshotOptions options{
-                sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
-            InkpodSnapshot* snapshot{};
-            InkpodStatus status = inkpod_core_build_snapshot(
-                core, &options, &snapshot);
-            InkpodSnapshotOverlay overlay{};
-            overlay.struct_size = sizeof(overlay);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_snapshot_get_overlay(snapshot, &overlay);
-            }
-            std::vector<std::uint64_t> guide_ids;
-            if (status == INKPOD_STATUS_OK) {
-                try {
-                    guide_ids.reserve(static_cast<std::size_t>(overlay.guide_count));
-                    const auto* bytes = reinterpret_cast<const std::uint8_t*>(overlay.guides);
-                    for (std::uint64_t index = 0; index < overlay.guide_count; ++index) {
-                        const auto* guide = reinterpret_cast<const InkpodSnapshotGuide*>(
-                            bytes + static_cast<std::size_t>(
-                                        index * overlay.guide_stride_bytes));
-                        guide_ids.push_back(guide->id);
-                    }
-                } catch (const std::bad_alloc&) {
-                    status = INKPOD_STATUS_INVALID_STATE;
-                }
-            }
-            const InkpodStatus release_status = inkpod_snapshot_release(&snapshot);
-            if (status != INKPOD_STATUS_OK) {
-                return status;
-            }
-            if (release_status != INKPOD_STATUS_OK) {
-                return release_status;
-            }
-            for (const std::uint64_t guide_id : guide_ids) {
-                InkpodDispatchResult result{};
-                result.struct_size = sizeof(result);
-                status = inkpod_core_guide_delete(core, guide_id, &result);
-                if (status != INKPOD_STATUS_OK) {
-                    return status;
-                }
-            }
-            return INKPOD_STATUS_OK;
-        },
-        true,
-        true);
+    ViewController controller(*state.engine);
+    return controller.DeleteAllGuides();
 }
 
 InkpodStatus SetGrid(AppContext& state, const InkpodGridInput& input) noexcept {
-    return state.engine == nullptr
-        ? INKPOD_STATUS_INVALID_STATE
-        : state.engine->Invoke(
-              [input](InkpodCore* core) {
-                  InkpodDispatchResult result{};
-                  result.struct_size = sizeof(result);
-                  return inkpod_core_grid_set(core, &input, &result);
-              },
-              true,
-              true);
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    ViewController controller(*state.engine);
+    return controller.SetGrid(input);
 }
 
 bool BeginGuideDrag(
@@ -4526,14 +3624,8 @@ InkpodStatus FinishVectorCanvasGesture(AppContext& state) noexcept {
             std::max(0.5F, state.tools.diameter / 2.0F),
             0U};
         ClearVectorGeometryPreview(state.tools, state.windows.canvas);
-        return state.engine->Invoke(
-            [input](InkpodCore* core) {
-                InkpodDispatchResult result{};
-                result.struct_size = sizeof(result);
-                return inkpod_core_vector_erase(core, &input, &result);
-            },
-            true,
-            true);
+        VectorController controller(*state.engine);
+        return controller.Erase(input);
     }
     if (!BuildVectorGestureSegments(state, points, segments, closed)) {
         if (state.engine != nullptr) {
@@ -4552,15 +3644,8 @@ InkpodStatus FinishVectorCanvasGesture(AppContext& state) noexcept {
         segments.data(),
         segments.size(),
         sizeof(InkpodVectorCubicSegment)};
-    const InkpodStatus status = state.engine->Invoke(
-        [&input](InkpodCore* core) {
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            std::uint64_t path_id{};
-            return inkpod_core_vector_add_path(core, &input, &result, &path_id);
-        },
-        true,
-        true);
+    VectorController controller(*state.engine);
+    const InkpodStatus status = controller.AddPath(input);
     ClearVectorGeometryPreview(state.tools, state.windows.canvas);
     return status;
 }
@@ -4570,66 +3655,8 @@ InkpodStatus SelectVectorObjects(AppContext& state) noexcept {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodVectorSelectionMode mode = state.tools.vector_selection_mode;
-    return state.engine->Invoke(
-        [&state, mode](InkpodCore* core) {
-            InkpodDocumentInfo document = EmptyDocumentInfo();
-            InkpodStatus status = inkpod_core_get_document_info(core, &document);
-            InkpodLocatorOutput locator{};
-            locator.struct_size = sizeof(locator);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_locator_sample(core, 0U, 0.0, 0.0, &locator);
-            }
-            InkpodFrameRect bounds = locator.selection;
-            if (bounds.width <= 0 || bounds.height <= 0) {
-                bounds = InkpodFrameRect{
-                    0, 0, static_cast<std::int32_t>(document.width),
-                    static_cast<std::int32_t>(document.height)};
-            }
-            const InkpodVectorSelectionInput input{
-                sizeof(InkpodVectorSelectionInput), mode, 0U, bounds};
-            InkpodVectorSelectionBuffer output{};
-            output.struct_size = sizeof(output);
-            status = inkpod_core_vector_select(core, &input, &output);
-            if (status == INKPOD_STATUS_BUFFER_TOO_SMALL) {
-                status = INKPOD_STATUS_OK;
-            }
-            std::vector<InkpodVectorSelectionRange> ranges;
-            std::vector<std::uint64_t> fill_ids;
-            try {
-                ranges.resize(static_cast<std::size_t>(output.range_count));
-                fill_ids.resize(static_cast<std::size_t>(output.fill_count));
-            } catch (const std::bad_alloc&) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            for (auto& range : ranges) {
-                range.struct_size = sizeof(range);
-            }
-            output.ranges = ranges.data();
-            output.range_capacity = ranges.size();
-            output.fill_ids = fill_ids.data();
-            output.fill_capacity = fill_ids.size();
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_vector_select(core, &input, &output);
-            }
-            if (status == INKPOD_STATUS_OK) {
-                try {
-                    state.tools.vector_selected_path_ids.clear();
-                    for (const auto& range : ranges) {
-                        if (std::find(
-                                state.tools.vector_selected_path_ids.begin(),
-                                state.tools.vector_selected_path_ids.end(),
-                                range.path_id) == state.tools.vector_selected_path_ids.end()) {
-                            state.tools.vector_selected_path_ids.push_back(range.path_id);
-                        }
-                    }
-                } catch (const std::bad_alloc&) {
-                    return INKPOD_STATUS_INVALID_STATE;
-                }
-            }
-            return status;
-        },
-        false,
-        false);
+    VectorController controller(*state.engine);
+    return controller.Select(mode, state.tools.vector_selected_path_ids);
 }
 
 InkpodStatus ConnectSelectedVectorPlane(AppContext& state, float maximum_gap) noexcept {
@@ -4637,16 +3664,8 @@ InkpodStatus ConnectSelectedVectorPlane(AppContext& state, float maximum_gap) no
     if (!QueryTreeNode(state, true, plane) || maximum_gap <= 0.0F) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
-    return state.engine->Invoke(
-        [plane_id = plane.id, maximum_gap](InkpodCore* core) {
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            std::uint64_t path_id{};
-            return inkpod_core_vector_connect(
-                core, plane_id, maximum_gap, &result, &path_id);
-        },
-        true,
-        true);
+    VectorController controller(*state.engine);
+    return controller.Connect(plane.id, maximum_gap);
 }
 
 InkpodStatus CorrectSelectedVectorWidth(
@@ -4668,14 +3687,8 @@ InkpodStatus CorrectSelectedVectorWidth(
         state.tools.vector_selected_path_ids.size(),
         parameter,
         0U};
-    return state.engine->Invoke(
-        [&input](InkpodCore* core) {
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            return inkpod_core_vector_correct_width(core, &input, &result);
-        },
-        true,
-        true);
+    VectorController controller(*state.engine);
+    return controller.CorrectWidth(input);
 }
 
 InkpodStatus AdjustSelection(
@@ -4849,248 +3862,6 @@ InkpodStatus CreateCell(
 
 InkpodStatus CreateDefaultCell(AppContext& state) noexcept {
     return CreateCell(state, 1920U, 1080U, 96000U);
-}
-
-bool ChooseInkpodPath(
-    HWND owner, bool save, std::wstring& selected_path) noexcept {
-    std::array<wchar_t, 32768> path{};
-    if (!selected_path.empty()) {
-        wcsncpy_s(path.data(), path.size(), selected_path.c_str(), _TRUNCATE);
-    }
-    constexpr wchar_t filter[] = L"inkpod セル (*.inkpod)\0*.inkpod\0すべてのファイル (*.*)\0*.*\0\0";
-    OPENFILENAMEW dialog{};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.hwndOwner = owner;
-    dialog.lpstrFilter = filter;
-    dialog.lpstrFile = path.data();
-    dialog.nMaxFile = static_cast<DWORD>(path.size());
-    dialog.lpstrDefExt = L"inkpod";
-    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR
-        | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
-    const BOOL accepted = save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog);
-    if (accepted == FALSE) {
-        return false;
-    }
-    try {
-        selected_path.assign(path.data());
-        return true;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-}
-
-bool ChooseCommonRasterPath(
-    HWND owner, bool save, std::wstring& selected_path) noexcept {
-    std::array<wchar_t, 32768> path{};
-    if (!selected_path.empty()) {
-        wcsncpy_s(path.data(), path.size(), selected_path.c_str(), _TRUNCATE);
-    }
-    constexpr wchar_t filter[] =
-        L"対応画像 (*.png;*.tif;*.tiff;*.tga;*.bmp)\0*.png;*.tif;*.tiff;*.tga;*.bmp\0"
-        L"PNG (*.png)\0*.png\0TIFF (*.tif;*.tiff)\0*.tif;*.tiff\0"
-        L"TGA (*.tga)\0*.tga\0BMP (*.bmp)\0*.bmp\0すべてのファイル (*.*)\0*.*\0\0";
-    OPENFILENAMEW dialog{};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.hwndOwner = owner;
-    dialog.lpstrFilter = filter;
-    dialog.lpstrFile = path.data();
-    dialog.nMaxFile = static_cast<DWORD>(path.size());
-    dialog.lpstrDefExt = L"png";
-    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR
-        | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
-    const BOOL accepted = save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog);
-    if (accepted == FALSE) {
-        return false;
-    }
-    try {
-        selected_path.assign(path.data());
-        return true;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-}
-
-bool ChooseCommonRasterPaths(
-    HWND owner, std::vector<std::wstring>& selected_paths) noexcept {
-    std::vector<wchar_t> buffer;
-    try {
-        buffer.resize(65536U);
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    constexpr wchar_t filter[] =
-        L"対応画像 (*.png;*.tif;*.tiff;*.tga;*.bmp)\0*.png;*.tif;*.tiff;*.tga;*.bmp\0"
-        L"すべてのファイル (*.*)\0*.*\0\0";
-    OPENFILENAMEW dialog{};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.hwndOwner = owner;
-    dialog.lpstrFilter = filter;
-    dialog.lpstrFile = buffer.data();
-    dialog.nMaxFile = static_cast<DWORD>(buffer.size());
-    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR
-        | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT;
-    if (GetOpenFileNameW(&dialog) == FALSE) {
-        return false;
-    }
-    selected_paths.clear();
-    try {
-        const std::wstring first(buffer.data());
-        const wchar_t* cursor = buffer.data() + first.size() + 1U;
-        if (*cursor == L'\0') {
-            selected_paths.push_back(first);
-            return true;
-        }
-        while (*cursor != L'\0') {
-            const std::wstring name(cursor);
-            selected_paths.push_back(first + L"\\" + name);
-            cursor += name.size() + 1U;
-        }
-        return !selected_paths.empty();
-    } catch (const std::bad_alloc&) {
-        selected_paths.clear();
-        return false;
-    }
-}
-
-bool ChooseOpenDocumentPath(HWND owner, std::wstring& selected_path) noexcept {
-    std::array<wchar_t, 32768> path{};
-    constexpr wchar_t filter[] =
-        L"inkpod/対応画像 (*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp)\0"
-        L"*.inkpod;*.png;*.tif;*.tiff;*.tga;*.bmp\0"
-        L"inkpod セル (*.inkpod)\0*.inkpod\0対応画像\0*.png;*.tif;*.tiff;*.tga;*.bmp\0"
-        L"すべてのファイル (*.*)\0*.*\0\0";
-    OPENFILENAMEW dialog{};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.hwndOwner = owner;
-    dialog.lpstrFilter = filter;
-    dialog.lpstrFile = path.data();
-    dialog.nMaxFile = static_cast<DWORD>(path.size());
-    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_FILEMUSTEXIST;
-    if (GetOpenFileNameW(&dialog) == FALSE) {
-        return false;
-    }
-    try {
-        selected_path.assign(path.data());
-        return true;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-}
-
-InkpodCommonRasterFormat CommonRasterFormatFromPath(
-    const std::wstring& path) noexcept {
-    const std::size_t dot = path.find_last_of(L'.');
-    if (dot == std::wstring::npos) {
-        return 0U;
-    }
-    std::wstring extension;
-    try {
-        extension = path.substr(dot + 1U);
-    } catch (const std::bad_alloc&) {
-        return 0U;
-    }
-    std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
-    if (extension == L"png") {
-        return INKPOD_COMMON_RASTER_PNG;
-    }
-    if (extension == L"tif" || extension == L"tiff") {
-        return INKPOD_COMMON_RASTER_TIFF;
-    }
-    if (extension == L"tga") {
-        return INKPOD_COMMON_RASTER_TGA;
-    }
-    if (extension == L"bmp") {
-        return INKPOD_COMMON_RASTER_BMP;
-    }
-    return 0U;
-}
-
-bool ReadBoundedFile(
-    const std::wstring& path, std::vector<std::uint8_t>& output) noexcept {
-    constexpr std::uint64_t maximum_bytes = UINT64_C(512) * 1024U * 1024U;
-    HANDLE file = CreateFileW(
-        path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    LARGE_INTEGER size{};
-    if (GetFileSizeEx(file, &size) == FALSE || size.QuadPart <= 0
-        || static_cast<std::uint64_t>(size.QuadPart) > maximum_bytes) {
-        CloseHandle(file);
-        return false;
-    }
-    try {
-        output.resize(static_cast<std::size_t>(size.QuadPart));
-    } catch (const std::bad_alloc&) {
-        CloseHandle(file);
-        return false;
-    }
-    std::size_t offset{};
-    while (offset < output.size()) {
-        const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(
-            output.size() - offset, 1024U * 1024U));
-        DWORD read{};
-        if (ReadFile(file, output.data() + offset, chunk, &read, nullptr) == FALSE
-            || read != chunk) {
-            CloseHandle(file);
-            output.clear();
-            return false;
-        }
-        offset += read;
-    }
-    const bool closed = CloseHandle(file) != FALSE;
-    return closed;
-}
-
-bool WriteFileAtomically(
-    const std::wstring& path, const std::vector<std::uint8_t>& bytes) noexcept {
-    if (path.empty() || bytes.empty()) {
-        return false;
-    }
-    GUID guid{};
-    std::array<wchar_t, 40> guid_text{};
-    if (FAILED(CoCreateGuid(&guid))
-        || StringFromGUID2(guid, guid_text.data(), static_cast<int>(guid_text.size())) <= 0) {
-        return false;
-    }
-    std::wstring temporary;
-    try {
-        temporary = path + L"." + guid_text.data() + L".tmp";
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    HANDLE file = CreateFileW(
-        temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
-        FILE_ATTRIBUTE_TEMPORARY, nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    bool success = true;
-    std::size_t offset{};
-    while (offset < bytes.size()) {
-        const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(
-            bytes.size() - offset, 1024U * 1024U));
-        DWORD written{};
-        if (WriteFile(file, bytes.data() + offset, chunk, &written, nullptr) == FALSE
-            || written != chunk) {
-            success = false;
-            break;
-        }
-        offset += written;
-    }
-    success = success && FlushFileBuffers(file) != FALSE;
-    success = CloseHandle(file) != FALSE && success;
-    if (success) {
-        success = MoveFileExW(
-                      temporary.c_str(), path.c_str(),
-                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
-            != FALSE;
-    }
-    if (!success) {
-        DeleteFileW(temporary.c_str());
-    }
-    return success;
 }
 
 bool ChoosePalettePath(HWND owner, bool save, std::wstring& path) noexcept {
@@ -5312,32 +4083,14 @@ bool LoadColorChartFile(
 
 InkpodStatus ImportCommonRasterFromPath(
     AppContext& state, const std::wstring& path) noexcept {
-    const InkpodCommonRasterFormat format = CommonRasterFormatFromPath(path);
-    std::vector<std::uint8_t> bytes;
-    if (state.engine == nullptr || format == 0U || !ReadBoundedFile(path, bytes)) {
-        return INKPOD_STATUS_IO_ERROR;
-    }
-    GUID uuid{};
-    if (FAILED(CoCreateGuid(&uuid))) {
+    if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    std::uint64_t high{};
-    std::uint64_t low{};
-    std::memcpy(&high, &uuid, sizeof(high));
-    std::memcpy(&low, reinterpret_cast<const std::uint8_t*>(&uuid) + sizeof(high), sizeof(low));
-    const InkpodStatus status = state.engine->Invoke(
-        [format, bytes = std::move(bytes), high, low](InkpodCore* core) {
-            InkpodDocumentInfo info = EmptyDocumentInfo();
-            return inkpod_core_import_common_raster(
-                core, format, bytes.data(), bytes.size(), high, low, &info);
-        },
-        false,
-        false);
+    DocumentShellController shell(state.document, *state.engine);
+    const InkpodStatus status = shell.ImportCommonRaster(path);
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
-    state.document.current_path.clear();
-    state.document.recovery_path.clear();
     state.tools.active_plane = INKPOD_PLANE_COLOR;
     state.view.color_check_mode = INKPOD_COLOR_CHECK_OFF;
     ResetUiForDocumentReplacement(state);
@@ -5352,37 +4105,11 @@ InkpodStatus ImportCommonRasterFromPath(
 
 InkpodStatus ExportCommonRasterToPath(
     AppContext& state, const std::wstring& path, bool composite_white) noexcept {
-    const InkpodCommonRasterFormat format = CommonRasterFormatFromPath(path);
-    if (state.engine == nullptr || format == 0U) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
     }
-    std::vector<std::uint8_t> bytes;
-    const InkpodStatus status = state.engine->Invoke(
-        [format, composite_white, &bytes](InkpodCore* core) {
-            InkpodByteBuffer* buffer{};
-            InkpodStatus current = inkpod_core_export_common_raster(
-                core, format, composite_white ? 1U : 0U, &buffer);
-            const std::uint8_t* data{};
-            std::uint64_t length{};
-            if (current == INKPOD_STATUS_OK) {
-                current = inkpod_byte_buffer_view(buffer, &data, &length);
-            }
-            if (current == INKPOD_STATUS_OK) {
-                try {
-                    bytes.assign(data, data + static_cast<std::size_t>(length));
-                } catch (const std::bad_alloc&) {
-                    current = INKPOD_STATUS_INVALID_STATE;
-                }
-            }
-            const InkpodStatus release_status = inkpod_byte_buffer_release(&buffer);
-            return current == INKPOD_STATUS_OK ? release_status : current;
-        },
-        false,
-        false);
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
-    return WriteFileAtomically(path, bytes) ? INKPOD_STATUS_OK : INKPOD_STATUS_IO_ERROR;
+    DocumentShellController shell(state.document, *state.engine);
+    return shell.ExportCommonRaster(path, composite_white);
 }
 
 InkpodStatus ApplyLightTableEdit(
@@ -5793,36 +4520,12 @@ InkpodStatus ExportSequenceToPath(
 }
 
 InkpodStatus SaveToPath(AppContext& state, const std::wstring& path) noexcept {
-    std::vector<std::uint8_t> utf8;
-    if (!WidePathToUtf8(path, utf8)) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    std::wstring old_recovery_path;
-    std::wstring next_current_path;
-    std::wstring next_recovery_path;
-    try {
-        old_recovery_path = state.document.recovery_path;
-        next_current_path = path;
-        next_recovery_path = path + L".recovery.inkpod";
-    } catch (const std::bad_alloc&) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const InkpodStatus status = state.engine->Invoke(
-        [utf8](InkpodCore* core) {
-            InkpodDocumentInfo info = EmptyDocumentInfo();
-            return inkpod_core_save(core, utf8.data(), utf8.size(), &info);
-        },
-        false,
-        true);
+    DocumentShellController shell(state.document, *state.engine);
+    const InkpodStatus status = shell.Save(path);
     if (status == INKPOD_STATUS_OK) {
-        state.document.current_path = std::move(next_current_path);
-        state.document.recovery_path = std::move(next_recovery_path);
-        if (!old_recovery_path.empty() && old_recovery_path != path) {
-            DeleteFileW(old_recovery_path.c_str());
-        }
         UpdateMenuState(state);
     }
     return status;
@@ -5839,28 +4542,13 @@ InkpodStatus SaveDocument(AppContext& state, bool force_dialog) noexcept {
 }
 
 InkpodStatus OpenFromPath(AppContext& state, const std::wstring& path) noexcept {
-    std::vector<std::uint8_t> utf8;
-    if (!WidePathToUtf8(path, utf8)) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const InkpodStatus status = state.engine->Invoke(
-        [utf8](InkpodCore* core) {
-            InkpodDocumentInfo info = EmptyDocumentInfo();
-            return inkpod_core_open(core, utf8.data(), utf8.size(), &info);
-        },
-        false,
-        false);
+    DocumentShellController shell(state.document, *state.engine);
+    const InkpodStatus status = shell.Open(path);
     if (status != INKPOD_STATUS_OK) {
         return status;
-    }
-    try {
-        state.document.current_path = path;
-        state.document.recovery_path = path + L".recovery.inkpod";
-    } catch (const std::bad_alloc&) {
-        return INKPOD_STATUS_INVALID_STATE;
     }
     state.tools.active_plane = INKPOD_PLANE_MAIN_LINE;
     state.view.color_check_mode = INKPOD_COLOR_CHECK_OFF;
@@ -5879,25 +4567,13 @@ InkpodStatus OpenFromPath(AppContext& state, const std::wstring& path) noexcept 
 }
 
 InkpodStatus OpenRecoveryFromPath(AppContext& state, const std::wstring& path) noexcept {
-    std::vector<std::uint8_t> utf8;
-    if (!WidePathToUtf8(path, utf8) || state.engine == nullptr) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
     }
-    const InkpodStatus status = state.engine->Invoke(
-        [utf8](InkpodCore* core) {
-            InkpodDocumentInfo info = EmptyDocumentInfo();
-            return inkpod_core_open_recovery(core, utf8.data(), utf8.size(), &info);
-        },
-        false,
-        false);
+    DocumentShellController shell(state.document, *state.engine);
+    const InkpodStatus status = shell.OpenRecovery(path);
     if (status != INKPOD_STATUS_OK) {
         return status;
-    }
-    state.document.current_path.clear();
-    try {
-        state.document.recovery_path = path;
-    } catch (const std::bad_alloc&) {
-        return INKPOD_STATUS_INVALID_STATE;
     }
     state.tools.active_plane = INKPOD_PLANE_MAIN_LINE;
     state.view.color_check_mode = INKPOD_COLOR_CHECK_OFF;
@@ -5916,33 +4592,12 @@ InkpodStatus OpenRecoveryFromPath(AppContext& state, const std::wstring& path) n
     return view_status;
 }
 
-bool RecoveryIsNewer(
-    const std::wstring& normal_path, const std::wstring& recovery_path) noexcept {
-    WIN32_FILE_ATTRIBUTE_DATA recovery{};
-    if (GetFileAttributesExW(
-            recovery_path.c_str(), GetFileExInfoStandard, &recovery) == FALSE) {
-        return false;
-    }
-    WIN32_FILE_ATTRIBUTE_DATA normal{};
-    if (GetFileAttributesExW(normal_path.c_str(), GetFileExInfoStandard, &normal) == FALSE) {
-        return true;
-    }
-    return CompareFileTime(&recovery.ftLastWriteTime, &normal.ftLastWriteTime) > 0;
-}
-
 bool QueueAutosave(AppContext& state, const std::wstring& path) noexcept {
-    std::vector<std::uint8_t> utf8;
-    if (state.engine == nullptr || !WidePathToUtf8(path, utf8)) {
+    if (state.engine == nullptr) {
         return false;
     }
-    return state.engine->Enqueue(
-        [utf8](InkpodCore* core) {
-            InkpodDocumentInfo info = EmptyDocumentInfo();
-            return inkpod_core_autosave(core, utf8.data(), utf8.size(), &info);
-        },
-        false,
-        false,
-        true);
+    DocumentShellController shell(state.document, *state.engine);
+    return shell.QueueAutosave(path);
 }
 
 InkpodStatus ApplyFillAtDeviceRange(
@@ -6053,17 +4708,12 @@ InkpodStatus ApplyFillAtDeviceRange(
     input.inclusion_color_count = inclusion_colors.size();
     InkpodFillResult fill_result{};
     fill_result.struct_size = sizeof(fill_result);
-    const InkpodStatus status = state.engine == nullptr
-        ? INKPOD_STATUS_INVALID_STATE
-        : state.engine->Invoke(
-              [input, inclusion_colors, &fill_result](InkpodCore* core) mutable {
-                  input.inclusion_colors = inclusion_colors.empty()
-                      ? nullptr
-                      : inclusion_colors.data();
-                  return inkpod_core_apply_fill(core, &input, &fill_result);
-              },
-              true,
-              true);
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    FillController controller(*state.engine);
+    const InkpodStatus status =
+        controller.Apply(input, inclusion_colors, fill_result);
     if (status == INKPOD_STATUS_OK) {
         state.tools.active_plane = INKPOD_PLANE_COLOR;
     }
@@ -6167,19 +4817,11 @@ InkpodStatus ApplySelectionGesture(
         input.point_count = points.size();
         input.point_stride_bytes = sizeof(InkpodSelectionPoint);
     }
-    return state.engine == nullptr
-        ? INKPOD_STATUS_INVALID_STATE
-        : state.engine->Invoke(
-              [input, points](InkpodCore* core) mutable {
-                  if (!points.empty()) {
-                      input.points = points.data();
-                  }
-                  InkpodDispatchResult result{};
-                  result.struct_size = sizeof(result);
-                  return inkpod_core_apply_selection(core, &input, &result);
-              },
-              true,
-              true);
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    SelectionController controller(*state.engine);
+    return controller.Apply(input, points);
 }
 
 InkpodStatus SelectDrawingColor(
@@ -6193,22 +4835,11 @@ InkpodStatus SelectDrawingColor(
         color = state.tools.drawing_color;
         color.struct_size = sizeof(InkpodColorValue);
     }
-    return state.engine == nullptr
-        ? INKPOD_STATUS_INVALID_STATE
-        : state.engine->Invoke(
-              [color, different, operation](InkpodCore* core) {
-                  InkpodDispatchResult result{};
-                  result.struct_size = sizeof(result);
-                  return inkpod_core_select_color(
-                      core,
-                      &color,
-                      0U,
-                      different ? 1U : 0U,
-                      operation,
-                      &result);
-              },
-              true,
-              true);
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    SelectionController controller(*state.engine);
+    return controller.SelectColor(color, different, operation);
 }
 
 InkpodStatus EyedropAtDevicePoint(AppContext& state, float device_x, float device_y) noexcept {
@@ -8858,11 +7489,7 @@ int RunM5Smoke(AppContext& state) noexcept {
 }
 
 void ResetBatchDerivedState(BatchUiState& batch) noexcept {
-    inkpod_batch_preview_release(&batch.preview);
-    inkpod_batch_report_release(&batch.report);
-    inkpod_batch_graph_release(&batch.graph);
-    batch.loaded_graph = false;
-    batch.last_result.clear();
+    BatchController::ResetDerivedState(batch);
 }
 
 InkpodColorValue BatchTransparentColor() noexcept {
@@ -9203,161 +7830,17 @@ bool EditSelectedBatchOperation(AppContext& state) noexcept {
     return true;
 }
 
-InkpodStatus BuildBatchGraph(AppContext& state) noexcept {
-    if (state.batch.loaded_graph && state.batch.graph != nullptr) {
-        return INKPOD_STATUS_OK;
-    }
-    if (state.batch.operations.empty()) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    try {
-        std::vector<std::uint8_t> input_path;
-        std::vector<std::uint8_t> output_folder;
-        std::vector<std::uint8_t> basename;
-        if ((!state.batch.input_path.empty()
-                && !WidePathToUtf8(state.batch.input_path, input_path))
-            || (!state.batch.output_folder.empty()
-                && !WidePathToUtf8(state.batch.output_folder, output_folder))
-            || (!state.batch.basename.empty()
-                && !WidePathToUtf8(state.batch.basename, basename))) {
-            return INKPOD_STATUS_INVALID_ARGUMENT;
-        }
-        InkpodBatchInput batch_input{};
-        batch_input.struct_size = sizeof(batch_input);
-        batch_input.kind = state.batch.input_kind;
-        batch_input.path_utf8 = input_path.empty() ? nullptr : input_path.data();
-        batch_input.path_bytes = input_path.size();
-        batch_input.first_cell = state.batch.first_cell;
-        batch_input.last_cell = state.batch.last_cell;
-
-        std::vector<InkpodFilterInput> filters(state.batch.operations.size());
-        std::vector<InkpodBatchOperationInput> operations(state.batch.operations.size());
-        for (std::size_t index = 0; index < state.batch.operations.size(); ++index) {
-            const BatchOperationUi& source = state.batch.operations[index];
-            InkpodBatchOperationInput& destination = operations[index];
-            destination.struct_size = sizeof(destination);
-            destination.version = INKPOD_BATCH_GRAPH_VERSION;
-            destination.kind = source.kind;
-            destination.flags = source.flags;
-            destination.layer_id = source.layer_id;
-            destination.plane_id = source.plane_id;
-            destination.layer_kind = source.layer_kind;
-            destination.plane_kind = source.plane_kind;
-            destination.missing_policy = source.missing_policy;
-            std::copy(
-                source.parameters.begin(),
-                source.parameters.end(),
-                std::begin(destination.parameters));
-            destination.color_0 = source.color_0;
-            destination.color_1 = source.color_1;
-            destination.colors.struct_size = sizeof(destination.colors);
-            destination.colors.colors = source.colors.empty() ? nullptr : source.colors.data();
-            destination.colors.color_count = source.colors.size();
-            destination.colors.color_stride_bytes = sizeof(InkpodColorValue);
-            if (source.kind == INKPOD_BATCH_OPERATION_FILTER) {
-                filters[index] = M6FilterInputFor(source.filter);
-                destination.filter = &filters[index];
-            }
-            destination.color_pairs = source.color_pairs.empty()
-                ? nullptr
-                : source.color_pairs.data();
-            destination.color_pair_count = source.color_pairs.size();
-            destination.color_pair_stride_bytes = sizeof(InkpodBatchColorPairInput);
-            destination.seeds = source.seeds.empty() ? nullptr : source.seeds.data();
-            destination.seed_count = source.seeds.size();
-            destination.seed_stride_bytes = sizeof(InkpodBatchSeedInput);
-        }
-        static constexpr std::array<std::uint8_t, 17U> graph_name{
-            'W','i','n','d','o','w','s',' ','B','a','t','c','h',' ','S','e','t'};
-        InkpodBatchGraphInput input{};
-        input.struct_size = sizeof(input);
-        input.version = INKPOD_BATCH_GRAPH_VERSION;
-        input.name_utf8 = graph_name.data();
-        input.name_bytes = graph_name.size();
-        input.inputs = &batch_input;
-        input.input_count = 1U;
-        input.input_stride_bytes = sizeof(batch_input);
-        input.operations = operations.data();
-        input.operation_count = operations.size();
-        input.operation_stride_bytes = sizeof(InkpodBatchOperationInput);
-        input.output_policy = state.batch.output_policy;
-        input.failure_policy = state.batch.failure_policy;
-        input.output_flags = (state.batch.cell_folder ? INKPOD_BATCH_OUTPUT_CELL_FOLDER : 0U)
-            | (state.batch.descending ? INKPOD_BATCH_OUTPUT_DESCENDING : 0U)
-            | (state.batch.preview_before_save
-                   ? INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE
-                   : 0U);
-        input.output_folder_utf8 =
-            output_folder.empty() ? nullptr : output_folder.data();
-        input.output_folder_bytes = output_folder.size();
-        input.basename_utf8 = basename.empty() ? nullptr : basename.data();
-        input.basename_bytes = basename.size();
-        input.start_number = state.batch.start_number;
-        input.wait_milliseconds = state.batch.wait_milliseconds;
-        InkpodBatchGraph* graph{};
-        const InkpodStatus status = inkpod_batch_graph_create(&input, &graph);
-        if (status == INKPOD_STATUS_OK) {
-            inkpod_batch_graph_release(&state.batch.graph);
-            state.batch.graph = graph;
-        }
-        return status;
-    } catch (const std::bad_alloc&) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-}
-
 std::wstring BatchReportSummary(const InkpodBatchReport* report) {
-    InkpodBatchReportInfo info{};
-    info.struct_size = sizeof(info);
-    if (report == nullptr
-        || inkpod_batch_report_get_info(report, &info) != INKPOD_STATUS_OK) {
-        return L"レポートを取得できません";
-    }
-    return L"結果: " + std::to_wstring(info.item_count) + L"件 / 失敗 "
-        + std::to_wstring(info.failure_count)
-        + (info.cancelled != 0U ? L" / キャンセル" : L"");
+    return BatchController::ReportSummary(report);
 }
 
 InkpodStatus PreviewBatch(AppContext& state, InkpodBatchRunScope scope) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    InkpodStatus status = BuildBatchGraph(state);
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
-    inkpod_batch_preview_release(&state.batch.preview);
-    status = state.engine->Invoke(
-        [&state, scope](InkpodCore* core) {
-            return inkpod_core_batch_preview(
-                core, state.batch.graph, scope, &state.batch.preview);
-        },
-        false,
-        false);
-    if (status == INKPOD_STATUS_OK) {
-        std::uint64_t count{};
-        std::uint64_t warnings{};
-        status = inkpod_batch_preview_count(state.batch.preview, &count);
-        for (std::uint64_t index = 0U; status == INKPOD_STATUS_OK && index < count; ++index) {
-            InkpodBatchPreviewItem item{};
-            item.struct_size = sizeof(item);
-            status = inkpod_batch_preview_get(state.batch.preview, index, &item);
-            if (status == INKPOD_STATUS_OK
-                && (item.flags & INKPOD_BATCH_PREVIEW_HAS_WARNING) != 0U) {
-                ++warnings;
-            }
-        }
-        if (status == INKPOD_STATUS_OK) {
-            try {
-                state.batch.last_result = L"プレビュー: " + std::to_wstring(count)
-                    + L"件 / 警告 " + std::to_wstring(warnings);
-            } catch (const std::bad_alloc&) {
-                status = INKPOD_STATUS_INVALID_STATE;
-            }
-        }
-    }
-    RefreshBatchPalette(state.batch);
-    return status;
+    BatchController controller(
+        state.lifetime, state.windows, state.batch, *state.engine);
+    return controller.Preview(scope);
 }
 
 InkpodStatus StartBatch(
@@ -9367,96 +7850,9 @@ InkpodStatus StartBatch(
     if (state.engine == nullptr || state.batch.task != nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    InkpodStatus status = BuildBatchGraph(state);
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
-    bool preview_confirmed = !state.batch.preview_before_save || dry_run;
-    if (!preview_confirmed) {
-        status = PreviewBatch(state, scope);
-        if (status != INKPOD_STATUS_OK) {
-            return status;
-        }
-        preview_confirmed = state.lifetime.smoke_test
-            || MessageBoxW(
-                   state.windows.window,
-                   L"表示した入力・出力・警告の内容で保存を続行しますか？",
-                   L"バッチ保存前プレビュー",
-                   MB_OKCANCEL | MB_ICONQUESTION) == IDOK;
-        if (!preview_confirmed) {
-            return INKPOD_STATUS_CANCELLED;
-        }
-    }
-    inkpod_batch_report_release(&state.batch.report);
-    status = inkpod_batch_task_create(&state.batch.task);
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
-    const std::uint64_t flags = (dry_run ? INKPOD_BATCH_RUN_DRY : 0U)
-        | (preview_confirmed ? INKPOD_BATCH_RUN_PREVIEW_CONFIRMED : 0U);
-    if (state.lifetime.smoke_test) {
-        status = state.engine->Invoke(
-            [&state, scope, flags](InkpodCore* core) {
-                return inkpod_core_batch_execute(
-                    core,
-                    state.batch.graph,
-                    scope,
-                    flags,
-                    state.batch.task,
-                    &state.batch.report);
-            },
-            true,
-            true);
-        if (state.batch.report != nullptr) {
-            try {
-                state.batch.last_result = BatchReportSummary(state.batch.report);
-            } catch (const std::bad_alloc&) {
-                status = INKPOD_STATUS_INVALID_STATE;
-            }
-        }
-        inkpod_batch_task_release(&state.batch.task);
-        RefreshBatchPalette(state.batch);
-        return status;
-    }
-    state.batch.progress_dialog = {
-        &state.batch,
-        QueryBatchProgress,
-        CancelBatchProgress,
-        L"バッチ実行",
-        L"バッチ処理中...",
-        L"キャンセル中..."};
-    state.batch.progress = inkpod::windows::ui::CreateProgressDialog(
-        state.lifetime.instance, state.windows.window, state.batch.progress_dialog);
-    if (state.batch.progress == nullptr) {
-        inkpod_batch_task_release(&state.batch.task);
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    ShowWindow(state.batch.progress, SW_SHOW);
-    AppContext* state_pointer = &state;
-    const HWND window = state.windows.window;
-    if (!state.engine->Enqueue(
-            [state_pointer, scope, flags](InkpodCore* core) {
-                return inkpod_core_batch_execute(
-                    core,
-                    state_pointer->batch.graph,
-                    scope,
-                    flags,
-                    state_pointer->batch.task,
-                    &state_pointer->batch.report);
-            },
-            true,
-            true,
-            true,
-            [window](InkpodStatus completion_status) {
-                PostMessageW(window, kBatchTaskCompleted, completion_status, 0);
-            })) {
-        DestroyWindow(state.batch.progress);
-        state.batch.progress = nullptr;
-        inkpod_batch_task_release(&state.batch.task);
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    UpdateMenuState(state);
-    return INKPOD_STATUS_OK;
+    BatchController controller(
+        state.lifetime, state.windows, state.batch, *state.engine);
+    return controller.Start(scope, dry_run, kBatchTaskCompleted);
 }
 
 bool ChooseBatchSettingsPath(
@@ -9488,26 +7884,7 @@ bool ChooseBatchSettingsPath(
 }
 
 bool ChooseBatchFolder(HWND owner, std::wstring& selected_path) noexcept {
-    BROWSEINFOW browse{};
-    browse.hwndOwner = owner;
-    browse.lpszTitle = L"バッチ入力フォルダーを選択";
-    browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-    PIDLIST_ABSOLUTE item = SHBrowseForFolderW(&browse);
-    if (item == nullptr) {
-        return false;
-    }
-    std::array<wchar_t, MAX_PATH> path{};
-    const BOOL resolved = SHGetPathFromIDListW(item, path.data());
-    CoTaskMemFree(item);
-    if (resolved == FALSE) {
-        return false;
-    }
-    try {
-        selected_path.assign(path.data());
-        return true;
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
+    return BatchController::ChooseFolder(owner, selected_path);
 }
 
 int RunM6Smoke(AppContext& state) noexcept {
@@ -10947,36 +9324,15 @@ LRESULT CALLBACK MainWindowProcedure(
                         return 0;
                     }
                     InkpodStatus status = INKPOD_STATUS_OK;
+                    BatchController controller(
+                        state->lifetime,
+                        state->windows,
+                        state->batch,
+                        *state->engine);
                     if (save) {
-                        status = BuildBatchGraph(*state);
-                        if (status == INKPOD_STATUS_OK) {
-                            status = inkpod_batch_graph_save(
-                                state->batch.graph, utf8.data(), utf8.size());
-                        }
+                        status = controller.SaveGraph(utf8.data(), utf8.size());
                     } else {
-                        InkpodBatchGraph* loaded{};
-                        status = inkpod_batch_graph_load(
-                            utf8.data(), utf8.size(), &loaded);
-                        if (status == INKPOD_STATUS_OK) {
-                            inkpod_batch_preview_release(&state->batch.preview);
-                            inkpod_batch_report_release(&state->batch.report);
-                            inkpod_batch_graph_release(&state->batch.graph);
-                            state->batch.graph = loaded;
-                            state->batch.loaded_graph = true;
-                            InkpodBatchGraphInfo info{};
-                            info.struct_size = sizeof(info);
-                            if (inkpod_batch_graph_get_info(loaded, &info)
-                                == INKPOD_STATUS_OK) {
-                                state->batch.output_policy = info.output_policy;
-                                state->batch.failure_policy = info.failure_policy;
-                                state->batch.cell_folder = (info.output_flags
-                                    & INKPOD_BATCH_OUTPUT_CELL_FOLDER) != 0U;
-                                state->batch.descending = (info.output_flags
-                                    & INKPOD_BATCH_OUTPUT_DESCENDING) != 0U;
-                                state->batch.preview_before_save = (info.output_flags
-                                    & INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE) != 0U;
-                            }
-                        }
+                        status = controller.LoadGraph(utf8.data(), utf8.size());
                     }
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, save ? L"バッチセット保存" : L"バッチセット読込");

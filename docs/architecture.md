@@ -158,8 +158,26 @@ and effects before performing the existing tab, active-view, and timer work.
 Progress callbacks receive only `EffectsUiState` or `BatchUiState`; color,
 motion-label, vector-preview, adjustment lookup, Batch palette refresh, and
 Batch derived-handle helpers likewise accept their narrow owner state and any
-explicit window handle they need. Later controller extraction may narrow more
-callers, but it must not reintroduce a broadly shared feature state.
+explicit window handle they need.
+
+R3 adds private feature boundaries without changing that composition root.
+`DocumentShellController` owns normal save/open, recovery, autosave, and common
+raster shell coordination; `clipboard_adapter` owns Win32 clipboard formats and
+memory transfer. Both call the existing Rust serialization, codec, and typed
+clipboard APIs, so neither contains a second document or image implementation.
+`DocumentPanesController` loads tree, light-table, sequence, and locator models
+in batches, while `ColorPanesController` owns palette and color-chart model
+synchronization. Native child-control population remains presentation work for
+the main-window owner until R4.
+
+View/guide/grid, fill, selection, floating-paste, and vector controllers receive
+only `CoreEngine` plus typed command inputs. Effects owns its task/progress and
+preview lifecycle. Batch owns graph construction/save/load, preview/run,
+progress, report/task lifetimes, and palette presentation state; queued work
+captures the long-lived `BatchUiState`, never the temporary routing controller.
+All Core calls retain the prior `CoreEngine::Invoke`/`Enqueue` snapshot and
+document-info refresh flags. No controller invokes renderer APIs or changes the
+Core-engine, renderer-thread, or snapshot queue contracts.
 
 ## Coordinate and DPI contract
 
@@ -343,11 +361,11 @@ shortcut, view, text, fill, history, and effects editors accept typed candidate
 values and publish results only after `IDOK`. Modeless progress dialogs receive
 only a progress query and cancellation callback, while the Batch palette
 receives a typed presentation model plus command/selection callbacks. No dialog
-module receives `AppState`, calls `CoreEngine`, or invokes a Rust function.
-`main.cpp` retains the thin adapters that translate those callbacks to the
-existing UI-thread task handles and command IDs. This R1 boundary does not
-change Core/Renderer threads, snapshot ownership, shutdown order, the public
-C ABI, or file formats.
+module receives `AppContext`, calls `CoreEngine`, or invokes a Rust function.
+R3 feature controllers translate those callbacks to their owned UI-thread task
+handles and typed Core operations; `main.cpp` retains command/message routing
+until R4. These boundaries do not change Core/Renderer threads, snapshot
+ownership, shutdown order, the public C ABI, or file formats.
 
 The hidden Windows smoke path uses the normal UI input adapter, Core queue, ABI,
 format, snapshot sink, and Renderer. It verifies a never-saved private recovery

@@ -33,7 +33,7 @@
   Windows application tests remain necessary for algorithmic edge cases and
   failure localization; FFI coverage does not replace them.
 
-## Windows frontend refactoring R0-R2
+## Windows frontend refactoring R0-R3
 
 - R0 is complete. The baseline records 274 defined `IDM_*` values, 273
   production resource commands, and exact ownership of all 273 in the main
@@ -72,6 +72,24 @@
   The explicitly optional elevated MSIX install/uninstall smoke was not run for
   R2. Public ABI, file format, menus, GUI behavior, thread assignment, shutdown,
   and snapshot ownership remain unchanged.
+- R3.1-R3.4 are complete. `DocumentShellController` and the clipboard adapter
+  own Windows document/recovery/common-raster path flow and native clipboard
+  publication/import while Rust retains serialization, codecs, and typed
+  document conversion. Document and color pane controllers load batched Core
+  models; color-chart name/page synchronization is owned with the color pane
+  model while Win32 list presentation remains in the main window for R4.
+- View/guide/grid, fill, selection, floating paste, and vector commands now pass
+  typed inputs to focused controllers. Effects owns task creation, progress,
+  cancellation, preview apply, and completion posting. Batch owns graph
+  creation/save/load, preview/run, report/task handles, progress, and derived
+  state; asynchronous work captures the long-lived Batch state rather than a
+  temporary controller.
+- `main.cpp` is 12,857 lines and 577,974 bytes after R3. The command IDs, menu
+  and dialog behavior, CoreEngine publish/refresh flags, Core and renderer
+  threads, immutable snapshot ownership, public C ABI, and file formats are
+  unchanged. Debug and Release strict builds and all four non-elevated CTest
+  scenarios passed in both presets. The explicitly optional MSIX
+  install/uninstall smoke was not run.
 
 ## User-requested Windows shell and package additions
 
@@ -555,6 +573,8 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R3 controller/shell/pane extraction passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
+| Visual Studio 2026 developer shell Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | All R3 translation units passed `/W4 /WX /permissive-`; application, ABI, assets, and package-payload smoke passed 4/4 in Debug and Release | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R2 state-ownership refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
 | Visual Studio 2026 Developer PowerShell Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Private `AppContext` and all migrated call sites passed `/W4 /WX /permissive-`; final application/ABI/assets/package-payload tests passed 4/4 in Debug (15.21 s) and Release (4.21 s) | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | Shared-ICO About cleanup passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |

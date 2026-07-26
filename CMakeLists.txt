@@ -110,15 +110,26 @@ endif()
 if(WIN32)
     add_executable(inkpod WIN32
         apps/windows/app/app_context.h
+        apps/windows/app/clipboard_adapter.cpp
         apps/windows/app/com_runtime.cpp
         apps/windows/app/main.cpp
         apps/windows/app/core_engine.cpp
+        apps/windows/app/document_shell.cpp
         apps/windows/app/app.rc
         apps/windows/renderer/canvas.cpp
         apps/windows/ui/dialogs/about_dialog.cpp
         apps/windows/ui/dialogs/basic_dialogs.cpp
         apps/windows/ui/dialogs/batch_dialog.cpp
         apps/windows/ui/dialogs/effects_dialogs.cpp
+        apps/windows/ui/panes/document_panes.cpp
+        apps/windows/ui/panes/color_panes.cpp
+        apps/windows/ui/tools/view_controller.cpp
+        apps/windows/ui/tools/fill_controller.cpp
+        apps/windows/ui/tools/selection_controller.cpp
+        apps/windows/ui/tools/floating_paste_controller.cpp
+        apps/windows/ui/tools/vector_controller.cpp
+        apps/windows/ui/effects_controller.cpp
+        apps/windows/ui/batch_controller.cpp
         tests/abi_smoke.cpp
         $<TARGET_OBJECTS:inkpod_header_c11>)
     target_include_directories(inkpod PRIVATE
