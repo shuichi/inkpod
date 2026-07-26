@@ -749,7 +749,10 @@ Acceptance:
 - legacy codec ごとに read/write/round-trip の実測範囲を compatibility 表へ記載
 - 未検証 codec を `Verified` にしない
 - corrupted file corpus で panic/OOM/overwrite を起こさない
-- package から clean Windows 11 環境へ install/uninstall できる
+- CMake が自己完結した Windows package を生成し、非管理者 payload smoke で
+  executable、assets、license、notices、app-local runtime を検証できる
+- 管理者権限を使う package install／installed ABI smoke／uninstall は任意の
+  release-validation とし、M8 の完了条件には含めない
 - Rust crates の Windows import がゼロであることを自動検査する
 
 ## 実装の詳細規則

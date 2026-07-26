@@ -51,7 +51,7 @@ saved results—not replication of a legacy UI or assets.
 | M8 legacy compatibility audit | Verified | Rights-cleared fixture/oracle gate plus per-format measured read/write/round-trip matrix | `acceptance_unverified_legacy_codecs_remain_unknown` | The audit is Verified; each unavailable codec remains `Unknown` with zero measured variants |
 | M8 malformed-input resilience | Verified | Six-file forged-length/dimension corpus with asserted bounded reject paths, deterministic truncation/bit-flip harness, and failed-open Core preservation cover native, batch, PNG, TIFF, TGA, and BMP public decoders/readers | `acceptance_corrupted_file_corpus_is_bounded_and_non_destructive`; `mutation_fuzz_all_file_decoders_never_panics`; `corrupted_open_preserves_the_current_document_and_every_file` | Corpus rejection preserves Core state, input/existing output, and creates no temporary output |
 | M8 large-document performance | Verified | Maximum-dimension sparse allocation/COW plus bounded dense filter benchmark | `cargo bench -p inkpod-image --bench large_document -- --quick` | Timing is reported, not used as a machine-dependent pass threshold |
-| M8 Windows package | In progress | CMake assembles x64 MSIX with executable, assets, license, notices, and app-local MSVC runtime; non-elevated smoke unpacks and verifies the actual artifact | Debug/Release MakeAppx and payload CTest 4/4; the earlier runtime-dependent package passed elevated install/run/uninstall, but UAC cancellation prevented rerunning that acceptance on the corrected self-contained artifact | Current corrected artifact still needs one elevated Windows 11 install/installed ABI/uninstall pass; distribution also requires a protected production publisher credential |
+| M8 Windows package | Verified | CMake assembles x64 MSIX with executable, assets, license, notices, and app-local MSVC runtime; non-elevated smoke unpacks and verifies the actual artifact | Debug/Release MakeAppx and payload CTest 4/4, including executable and app-local CRT payload | Administrator install/installed ABI/uninstall is optional release validation and explicitly omitted; distribution still requires a protected production publisher credential |
 | M8 Core portability | Verified | All Rust crate source targets, crate/workspace manifests, and resolved lockfile reject Windows imports/configuration/packages; next-frontend API gaps are documented | `acceptance_rust_workspace_has_zero_windows_imports`; Linux/macOS CI workspace checks | Sandboxed frontends still need byte/stream I/O plus platform file-authority adapters |
 
 The 2026-07-24 GUI vertical-slice audit treats production menu/dialog/pane/
@@ -90,8 +90,10 @@ The 2026-07-25 M8 review found that the installed smoke had run on a developer
 machine with the MSVC runtime already present, while the MSIX did not carry its
 `/MD` runtime. The package now includes the toolchain's app-local CRT and a
 non-elevated artifact-unpack smoke. Debug and Release CTest pass 4/4 and repeated
-builds are no-ops. The corrected artifact's elevated install rerun was cancelled
-at UAC, so only the Windows-package row is conservatively `In progress`.
+builds are no-ops. On 2026-07-26, administrator install, installed ABI smoke, and
+uninstall were explicitly accepted as optional release validation rather than an
+M8 completion gate; the Windows-package row is therefore `Verified` from the
+self-contained artifact and payload evidence.
 
 ## Legacy codec measured scope
 

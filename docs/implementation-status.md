@@ -3,7 +3,7 @@
 ## Current milestone
 
 - Milestone: M8
-- Status: In progress
+- Status: Complete
 - Last verified worktree state: M8 retains all M0-M7 vertical slices and adds a
   checked legacy-codec scope matrix, a six-format corrupted-file corpus plus
   deterministic mutation harness, a maximum-dimension sparse/COW and dense
@@ -11,9 +11,11 @@
   next-frontend API gaps, and CMake-owned x64 MSIX assembly. Review corrected
   incomplete portability scanning, a corrupt PNG fixture that rejected before
   its intended dimension check, missing app-local MSVC runtime payload, and
-  install-smoke failure cleanup. The corrected artifact passes non-elevated
-  payload inspection, but its elevated install/run/uninstall rerun was cancelled
-  at UAC; M8 therefore remains `In progress` only on acceptance scenario 4.
+  install-smoke failure cleanup. The corrected self-contained artifact passes
+  Debug and Release non-elevated payload inspection. Per the explicit 2026-07-26
+  scope decision, administrator package install, installed ABI smoke, and
+  uninstall are optional release validation rather than an M8 completion gate;
+  all M0-M8 milestones are complete.
 
 ## Post-M8 refactoring regression baseline
 
@@ -144,9 +146,8 @@
   snapshot ownership, and shutdown order are unchanged. Strict Debug and
   Release builds passed; all eight non-elevated tests passed in both presets,
   including ABI, application, frontend-boundary, route/state ownership, and
-  package-payload smoke. The MSIX install/uninstall test was omitted as
-  explicitly permitted for this R6 run; the pre-existing M8 installed-package
-  gap is unchanged.
+  package-payload smoke. The administrator MSIX install/uninstall test was
+  omitted as explicitly permitted and is not an R6 or M8 completion gate.
 
 ## User-requested Windows shell and package additions
 
@@ -168,8 +169,9 @@
   license, third-party notices, and the MSVC app-local runtime required by the
   `/MD` executable. A non-elevated CTest unpacks and verifies the actual package.
   The earlier runtime-dependent package passed elevated install/run/uninstall;
-  the corrected self-contained package still needs that elevated rerun. The
-  build artifact remains unsigned for the publisher's protected credential.
+  an elevated rerun of the corrected self-contained package is optional release
+  validation and was explicitly omitted. The build artifact remains unsigned
+  for the publisher's protected credential.
 
 ## Requirements
 
@@ -221,7 +223,7 @@
 | M8 legacy compatibility audit | Verified | Per-codec fixture/read/write/round-trip matrix with a rights-cleared fixture/oracle gate | `acceptance_unverified_legacy_codecs_remain_unknown` | DGA, CEL, and three legacy preset codecs remain `Unknown` at measured zero scope |
 | M8 malformed-input resilience | Verified | Forged native/batch/PNG/TIFF/TGA/BMP corpus with exact bounded reject-path assertions, deterministic valid-seed truncation/bit-flip mutation, and failed-open Core preservation | Named corrupted-corpus, mutation, and Core failed-open tests | Rejects without panic, current-document or file overwrite, or temporary output |
 | M8 large-document performance | Verified | Maximum-dimension sparse raster/COW and bounded dense filter benchmark | `cargo bench -p inkpod-image --bench large_document -- --quick` | Reports timing and allocation-relevant counts without a hardware-specific threshold |
-| M8 Windows package | In progress | MakeAppx x64 MSIX includes executable/assets/license/notices and app-local MSVC runtime; test signs a copy with an ephemeral matching certificate | Debug/Release package and unpacked-payload smoke 4/4; prior runtime-dependent artifact passed elevated install/installed ABI/uninstall | Corrected self-contained artifact needs one elevated install/run/uninstall pass; distribution signing remains an external protected-credential step |
+| M8 Windows package | Verified | MakeAppx x64 MSIX includes executable/assets/license/notices and app-local MSVC runtime; non-elevated smoke inspects the built artifact | Debug/Release package and unpacked-payload smoke 4/4, including executable and app-local CRT payload | Administrator install/installed ABI/uninstall is optional release validation and explicitly omitted; distribution signing remains an external protected-credential step |
 | M8 Core portability | Verified | All four Rust crates' `src/tests/benches/examples/build.rs`, crate/workspace manifests, and lockfile reject Windows imports/configuration/packages; next-frontend gaps documented | `acceptance_rust_workspace_has_zero_windows_imports`; Linux/macOS CI | Byte/stream I/O and platform file-authority adapters remain explicit next-frontend work |
 
 ### GUI vertical-slice audit (2026-07-24)
@@ -239,8 +241,9 @@ All M0-M7 rows satisfy that rule. The application
 smoke enters through real `WM_COMMAND`, dialog control, listbox drag, keyboard,
 timer, clipboard, and Canvas pointer paths; it does not count a direct smoke-only
 C ABI call as completion. M7 adds real Batch palette and menu command paths;
-M8 packaging is a build/install boundary and therefore uses package and
-installed-binary smoke rather than an artificial in-app command.
+M8 packaging is a build boundary and therefore uses package assembly and
+artifact-payload smoke rather than an artificial in-app command. Administrator
+install and installed-binary smoke remain an optional release check.
 
 ## M0 re-verification before M1
 
@@ -423,7 +426,7 @@ replacement or shutdown, and posts only completion status to the UI thread.
 | 1 | Record measured read/write/round-trip scope for every legacy codec | Verified | The compatibility matrix separates DGA, CEL, palette, chart, and filter preset codecs and records 0 rights-cleared fixtures plus 0 read/write/round-trip variants for each |
 | 2 | Never mark an unverified codec `Verified` | Verified | `acceptance_unverified_legacy_codecs_remain_unknown` parses every legacy row and requires `Unknown` plus the explicit zero-scope measurements |
 | 3 | Corrupted corpus causes no panic, uncontrolled allocation, or overwrite | Verified | The named corpus test now asserts each intended bounded rejection path (including a valid-CRC oversized PNG), mutation passes every decoder without panic, and `corrupted_open_preserves_the_current_document_and_every_file` proves failed open leaves Core state and both files unchanged with no temp |
-| 4 | Package installs and uninstalls on clean Windows 11 | In progress | Review found the prior installed artifact omitted the `/MD` MSVC runtime and was tested on a machine that already had it. The corrected MSIX contains app-local CRT DLLs and passes Debug/Release artifact-unpack checks; its elevated install/installed ABI/uninstall rerun was cancelled at UAC |
+| 4 | Self-contained Windows package assembles and its payload is verified | Verified | The corrected MSIX contains the executable, assets, license, notices, and app-local CRT DLLs and passes Debug/Release artifact-unpack checks. Administrator install/installed ABI/uninstall was explicitly removed from the M8 completion gate on 2026-07-26 and remains optional release validation |
 | 5 | Rust crates have zero Windows imports | Verified | `acceptance_rust_workspace_has_zero_windows_imports` scans all four crates' source/test/bench/example/build-script inputs, crate/workspace manifests, and resolved `Cargo.lock` for Windows imports, cfg/raw-DLL use, renamed packages, and Windows packages |
 
 The large-document benchmark adds the M8 performance baseline without a brittle
@@ -630,6 +633,7 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| M8 status/compatibility consistency audit; `git diff --check` | Documentation-only closeout | M8 milestone and all five M8 requirement rows are complete/Verified under the explicitly revised package acceptance scope; administrator install/installed ABI/uninstall remains accurately recorded as optional and unexecuted | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R6 bootstrap/smoke boundary refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
 | Explicit Visual Studio 2026 x64 Developer environment Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Separate `Application`, application smoke, and MainWindow runtime sources passed `/W4 /WX /permissive-`; assets, 273/273 command routes/states, frontend boundaries, focused state, ABI, real M1-M7 application/D2D, and package payload passed 8/8 in Debug (16.53 s) and Release (3.81 s) | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R5 command-state/tool-transition refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
@@ -642,11 +646,11 @@ as dirty/pathless, and then reopens the unchanged normal file.
 | Visual Studio 2026 Developer PowerShell Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Private `AppContext` and all migrated call sites passed `/W4 /WX /permissive-`; final application/ABI/assets/package-payload tests passed 4/4 in Debug (15.21 s) and Release (4.21 s) | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | Shared-ICO About cleanup passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
 | Developer-shell Debug and Release configure/build; non-elevated CTest excluding install smoke | Windows 11 x64, MSVC 19.51 | WIC-free About resource/C++ link and both MSIX assemblies passed; assets, integrated ABI, target-DPI About/application, and package payload passed 4/4 in Debug (17.65 s) and Release (4.12 s) | 2026-07-26 |
-| Non-elevated `ctest --preset windows-x64-release -R m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64 | Stopped at the required administrator guard before certificate/package mutation; the earlier UAC cancellation was not re-prompted, so installed execution remains unverified | 2026-07-26 |
+| Non-elevated `ctest --preset windows-x64-release -R m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64 | Stopped at the required administrator guard before certificate/package mutation; installed execution was not reverified and was later classified as optional release validation | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R0/R1 source passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
 | Developer-shell Debug configure/build; `ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | All extracted C++20 translation units, resources, Rust staticlib, link, and MSIX assembly passed; assets, integrated ABI, application/D2D, and package payload passed 4/4 in 15.11 s | 2026-07-26 |
 | Developer-shell Release configure/build; `ctest --preset windows-x64-release -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Strict optimized build and MSIX assembly passed; assets, integrated ABI, application/D2D, and package payload passed 4/4 in 4.21 s | 2026-07-26 |
-| Non-elevated then UAC-launched `ctest --preset windows-x64-release -R m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64 | Normal shell stopped at the required administrator guard; the `RunAs` launch was cancelled at UAC before package/certificate mutation, so the changed packaged executable still needs its installed ABI smoke rerun | 2026-07-26 |
+| Non-elevated then UAC-launched `ctest --preset windows-x64-release -R m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64 | Normal shell stopped at the required administrator guard; the `RunAs` launch was cancelled at UAC before package/certificate mutation. The installed ABI rerun was later classified as optional release validation | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | All-crate responsibility/test-layout refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-25 |
 | Visual Studio Developer PowerShell `cmake --preset windows-x64-debug`; `cmake --build --preset windows-x64-debug`; `ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Recursive Rust source tracking rebuilt the staticlib after the final module moves; strict C11/C++20 link and MSIX assembly passed; assets, integrated ABI, application/D2D, and package payload passed 4/4 in 15.37 s | 2026-07-25 |
 | `cargo fmt --all -- --check`; `cargo test --workspace --all-features`; WSL-isolated `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Windows 11 x64 + WSL Ubuntu, stable Rust | Core responsibility refactor passed formatting, zero-warning clippy, Core 64, architecture 5, Core resilience 1, FFI 19, format unit 20 plus corpus 2, image 22, and doc-tests | 2026-07-25 |
@@ -659,7 +663,7 @@ as dirty/pathless, and then reopens the unchanged normal file.
 | `cargo fmt --all -- --check`; WSL clippy/all-feature tests; `cargo bench -p inkpod-image --bench large_document -- --quick` | Windows + WSL Ubuntu, stable Rust 1.97.1, isolated target | Review source passed formatting, zero-warning clippy, Core 64, architecture 3, Core M8 integration 1, FFI 15, format unit 20 plus corpus 2, image 22 and doc-tests; benchmark reported sparse 8 ms and dense 49 ms | 2026-07-25 |
 | Debug/Release configure/build plus immediate unchanged verbose rebuild | Windows 11 Pro x64 build 26200, MSVC 19.51 | Both packages assembled with 10 app-local CRT DLLs; immediate Debug and Release rebuilds reported `ninja: no work to do`, so neither Cargo nor MakeAppx was reinvoked | 2026-07-25 |
 | `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 Pro x64 build 26200 | Corrected source passed assets + integrated ABI ownership + application/D2D + unpacked MSIX payload 4/4; Debug 15.21 s, Release 4.28 s | 2026-07-25 |
-| Non-elevated then UAC-launched corrected-package install smoke | Windows 11 Pro x64 build 26200 | Normal shell stopped at the required administrator guard; the UAC launch was cancelled by the user before package/certificate mutation. Corrected artifact install/run/uninstall therefore remains unverified | 2026-07-25 |
+| Non-elevated then UAC-launched corrected-package install smoke | Windows 11 Pro x64 build 26200 | Normal shell stopped at the required administrator guard; the UAC launch was cancelled by the user before package/certificate mutation. The installed lifecycle was not reverified and was later classified as optional release validation | 2026-07-25 |
 | `cargo test --workspace m7_acceptance -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Reconfirmed the clean pre-M8 M7 boundary: all six acceptance scenarios passed 6/6. Windows compiled the suite but local Application Control blocked the fresh test EXE before startup (`os error 4551`) | 2026-07-25 |
 | `cargo test --workspace m8_acceptance -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Passed 3/3: legacy codec status/scope, corrupted corpus, and whole-workspace Rust portability | 2026-07-25 |
 | `cargo test -p inkpod-format mutation_fuzz_all_file_decoders_never_panics -- --nocapture` | WSL Ubuntu, stable Rust 1.97.1, isolated target | Passed deterministic truncation and bit-flip mutations for native, batch, PNG, TIFF, TGA, and BMP public decoders | 2026-07-25 |
@@ -714,10 +718,11 @@ exact-path corpus, mutation, and failed-open preservation tests. Local
 Application Control still blocks newly generated Windows Rust test/clippy
 frontends intermittently, so the isolated WSL results are recorded. Corrected
 Debug and Release CTest executed and passed 4/4, including the unpacked MSIX
-payload. Windows Server 2022 hosted CI excludes only the workstation/elevation
-install test. The pre-review package completed an elevated Windows 11
-install/run/uninstall pass, but the corrected app-local-runtime artifact has not:
-its UAC rerun was cancelled before mutation.
+payload. Windows Server 2022 hosted CI excludes the workstation/elevation install
+test. The pre-review package completed an elevated Windows 11
+install/run/uninstall pass; the corrected app-local-runtime artifact's UAC rerun
+was cancelled before mutation and was explicitly accepted as optional release
+validation on 2026-07-26.
 
 ## Known gaps and unknowns
 
@@ -743,8 +748,10 @@ its UAC rerun was cancelled before mutation.
   signs only a private copy with an ephemeral test certificate; public release
   still requires the publisher's protected production credential and timestamp
   policy, which must not be committed to the repository. The corrected package
-  now carries its app-local MSVC runtime and passes artifact inspection, but one
-  elevated install/installed-ABI/uninstall rerun is still required.
+  carries its app-local MSVC runtime and passes artifact inspection.
+- Administrator MSIX install, installed-ABI smoke, and uninstall remain available
+  as optional release validation but were explicitly omitted from the M8
+  completion criteria; their absence is not an implementation gap.
 - `.inkpod` v1 separates blobs but does not compress them.
 - DGA/CEL and legacy preset layouts remain `Unknown` at the explicitly recorded
   zero-fixture/read/write/round-trip scope; no codec is enabled.
