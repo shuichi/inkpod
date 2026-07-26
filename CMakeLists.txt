@@ -109,6 +109,12 @@ add_test(
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_command_states.cmake")
 
+add_test(
+    NAME inkpod_windows_frontend_boundaries
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_frontend_boundaries.cmake")
+
 add_library(inkpod_header_c11 OBJECT tests/header_c11.c)
 target_include_directories(inkpod_header_c11 PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
@@ -144,6 +150,10 @@ if(WIN32)
 
     add_executable(inkpod WIN32
         apps/windows/app/app_context.h
+        apps/windows/app/app_smoke.cpp
+        apps/windows/app/app_smoke.h
+        apps/windows/app/application.cpp
+        apps/windows/app/application.h
         apps/windows/app/clipboard_adapter.cpp
         apps/windows/app/com_runtime.cpp
         apps/windows/app/main.cpp
@@ -168,6 +178,8 @@ if(WIN32)
         apps/windows/ui/effects_controller.cpp
         apps/windows/ui/batch_controller.cpp
         apps/windows/ui/main_window.cpp
+        apps/windows/ui/main_window_runtime.cpp
+        apps/windows/ui/main_window_runtime.h
         tests/abi_smoke.cpp
         $<TARGET_OBJECTS:inkpod_header_c11>)
     target_include_directories(inkpod PRIVATE

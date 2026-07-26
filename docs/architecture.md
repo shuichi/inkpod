@@ -210,6 +210,35 @@ pencil fallback. Document replacement, tree refresh, and direct plane selection
 invoke that transition boundary. A command-state refresh itself cannot change
 the active tool, preview samples, Core state, or document state.
 
+R6 finalizes the private bootstrap boundary. `apps/windows/app/main.cpp` is a
+45-line launch-mode adapter: it recognizes the existing application, embedded
+application-smoke, and ABI-smoke modes, then invokes either `Application` or the
+existing ABI runner. `Application` owns Common Controls and COM initialization,
+resource/class registration, main-window construction, Core-engine startup,
+startup Recovery choice, default-cell creation, the message loop, and ordered
+shutdown. It contains no feature command IDs or feature command handlers.
+
+The existing MainWindow owner has two implementation sources. `main_window.cpp`
+continues to own standard chrome creation/layout/class registration, while
+`main_window_runtime.cpp` owns the already-established presentation adapters,
+command routes, and top-level message normalization. Its only bootstrap-facing
+private header exposes the window procedure and the existing UI-coordinated
+default-cell, Recovery, error, and command-state paths; no declaration enters
+the public `include/inkpod` surface. The dependency direction is `main ->
+Application`; Application composes MainWindow, application smoke, and
+CoreEngine, while MainWindow/application smoke depend only downward on focused
+controllers and CoreEngine. The renderer is reached only through the existing
+Canvas and snapshot sink. MainWindow and smoke code do not include or call
+`Application`, so the graph remains acyclic.
+
+The M1-M7 application smoke bodies are a normal private translation unit linked
+directly into `inkpod.exe`, not a second harness or reusable library. This keeps
+the Debug, Release, and packaged executable on the same production UI, Core
+engine, renderer, and ABI path. A CMake structural test rejects bootstrap,
+feature-command, or smoke bodies returning to `main.cpp`, checks all seven smoke
+stages and explicit source-list entries, and keeps the existing 273-command
+route owner check pointed at the MainWindow runtime source.
+
 ## Coordinate and DPI contract
 
 Canvas input and rendering use client device pixels:
@@ -374,13 +403,14 @@ require a Windows dependency or a second document implementation in Rust.
 
 ## Initialization and shutdown
 
-The application initializes Common Controls, COM, the main window/Canvas and
-Renderer thread, then starts the Core engine thread. Core creation and initial
-1920 x 1080 cell/Fit snapshot occur on the Core thread. Shutdown first stops and
-joins Core work, then destroys the Canvas and joins its Renderer thread, so no
-snapshot sink or window notification target outlives its owner. A renderer-held
-immutable snapshot may outlive its Core until Canvas destruction because it owns
-all borrowed tile storage and is released by Rust's snapshot release function.
+The private `Application` initializes Common Controls, COM, the main
+window/Canvas and Renderer thread, then starts the Core engine thread. Core
+creation and initial 1920 x 1080 cell/Fit snapshot occur on the Core thread.
+Shutdown first stops and joins Core work, then destroys the Canvas and joins its
+Renderer thread, so no snapshot sink or window notification target outlives its
+owner. A renderer-held immutable snapshot may outlive its Core until Canvas
+destruction because it owns all borrowed tile storage and is released by Rust's
+snapshot release function.
 
 COM apartment lifetime is owned by the private application runtime module. It
 remains required by the new-style Shell folder browser used by Batch; About no
@@ -397,11 +427,14 @@ R3 feature controllers translate those callbacks to their owned UI-thread task
 handles and typed Core operations. R4's main-window routes delegate to those
 same controllers and preserve synchronous value returns and posted-message
 payload lifetimes. R5's command-state providers and tool-transition owner sit
-above those routes without changing their Core calls. These boundaries do not change Core/Renderer threads,
-snapshot ownership, shutdown order, the public C ABI, or file formats.
+above those routes without changing their Core calls. R6 moves the lifetime and
+smoke boundaries without changing the routes themselves. These boundaries do
+not change Core/Renderer threads, snapshot ownership, shutdown order, the public
+C ABI, or file formats.
 
-The hidden Windows smoke path uses the normal UI input adapter, Core queue, ABI,
-format, snapshot sink, and Renderer. It verifies a never-saved private recovery
+The hidden Windows smoke path in `apps/windows/app/app_smoke.cpp` uses the normal
+UI input adapter, Core queue, ABI, format, snapshot sink, and Renderer. It
+verifies a never-saved private recovery
 path can be autosaved and rediscovered before normal save, distinct UI/Core/Renderer
 thread IDs, a frame presented before pointer-up while committed state remains
 unchanged, one-unit commit/cancel behavior, protected-plane drawing, history,

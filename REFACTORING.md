@@ -133,6 +133,8 @@ apps/windows/app/
 apps/windows/ui/
   main_window.h
   main_window.cpp
+  main_window_runtime.h
+  main_window_runtime.cpp
   command_router.h
   command_router.cpp
   command_state.h
@@ -250,7 +252,7 @@ Allowed status values in this table are `Not started`, `In progress`, and
 | R3 | Complete | R2 | Feature controllers, shell adapters, and panes extracted |
 | R4 | Complete | R3 | Main window procedure reduced to message delegation |
 | R5 | Complete | R4 | Shared, side-effect-free command state implemented |
-| R6 | Not started | R5 | Bootstrap and smoke support separated; final boundaries verified |
+| R6 | Complete | R5 | Bootstrap and smoke support separated; final boundaries verified |
 
 Only mark a step `Complete` when all of its acceptance criteria and required
 verification pass. If part of a step lands safely, mark it `In progress` and
@@ -541,6 +543,7 @@ Add newest entries first. Keep entries concise and evidence-based.
 
 | Date | Step | Result | Verification | Remaining |
 |---|---|---|---|---|
+| 2026-07-26 | R6 | Complete: `main.cpp` is a 45-line launch-mode adapter; the 231-line `Application` owns initialization, Recovery/default-cell startup, message loop, and shutdown; unchanged M1-M7 smoke bodies are a dedicated private translation unit linked into the real executable; MainWindow retains production presentation/routing without a new broad controller | `git diff --check`; exact smoke-body comparison 2,886/2,886 lines with zero differences; Rust fmt/clippy/133 tests; strict Debug and Release builds; frontend-boundary and existing ownership tests; non-elevated CTest passed 8/8 in both presets, including application, ABI, and package-payload smoke | None for R6; MSIX install/uninstall smoke was omitted as explicitly permitted for this run, leaving the pre-existing M8 package acceptance gap unchanged |
 | 2026-07-26 | R5 | Complete: all 273 production commands have one feature-specific state owner; pure providers compute one cached result consumed by menus, toolbar buttons, keyboard shortcuts, and the Batch palette; vector-tool fallback and preview clearing now occur only through explicit tool/active-plane transitions | `git diff --check`; state ownership 273/273 and focused no-document/dirty/Undo-Redo/vector/floating-preview/Batch-task tests; Rust fmt/clippy/133 tests; strict Debug and Release builds; non-elevated CTest passed 7/7 in both presets, including application, ABI, command-state surface parity, route/state ownership, and package-payload smoke | None for R5; MSIX install/uninstall smoke was omitted as explicitly permitted for this run |
 | 2026-07-26 | R4 | Complete: standard main chrome creation/layout/class registration moved to a narrow `MainWindow` module; 273 production commands route through 11 feature owners, while lifecycle/notify, keyboard, Canvas, Core/task, and timer/close messages use five named handlers; the top-level procedure is 24 lines | `git diff --check`; command-route structural test 273/273 with no duplicate owners; Rust fmt/clippy/133 tests; strict Debug and Release builds; non-elevated CTest passed 5/5 in both presets, including application, ABI, route-ownership, and package-payload smoke | None for R4; MSIX install/uninstall smoke was omitted as explicitly permitted for this run |
 | 2026-07-26 | R3 | Complete: R3.1-R3.4 implemented; document/clipboard shell adapters, pane model adapters, focused view/fill/selection/vector/floating-paste controllers, and effects/Batch task and graph owners were extracted with explicit CMake sources | `git diff --check`; Rust fmt/clippy/133 tests; strict Debug and Release builds; non-elevated CTest passed 4/4 in both presets, including application, ABI, and package-payload smoke | None for R3; MSIX install/uninstall smoke was omitted as explicitly permitted for this run |

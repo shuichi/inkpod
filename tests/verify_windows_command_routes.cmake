@@ -2,7 +2,8 @@ if(NOT DEFINED INKPOD_SOURCE_DIR)
     message(FATAL_ERROR "INKPOD_SOURCE_DIR is required")
 endif()
 
-set(main_source "${INKPOD_SOURCE_DIR}/apps/windows/app/main.cpp")
+set(main_source
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp")
 set(resource_source "${INKPOD_SOURCE_DIR}/apps/windows/app/app.rc")
 file(READ "${main_source}" main_text)
 file(READ "${resource_source}" resource_text)
