@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "app_context.h"
 #include "canvas.h"
 #include "com_runtime.h"
 #include "core_engine.h"
@@ -34,7 +35,6 @@ int InkpodRunAbiSmoke();
 
 namespace {
 
-using inkpod::windows::ui::FillToolOptions;
 using inkpod::windows::ui::HistoryDialogState;
 using inkpod::windows::ui::M6EditorState;
 using inkpod::windows::ui::ShortcutDialogState;
@@ -46,6 +46,19 @@ using inkpod::windows::ui::ShowM6Editor;
 using inkpod::windows::ui::ShowShortcutEditor;
 using inkpod::windows::ui::ShowTextInput;
 using inkpod::windows::ui::ShowViewOptions;
+using inkpod::app::AnimationUiState;
+using inkpod::app::AppContext;
+using inkpod::app::BatchOperationUi;
+using inkpod::app::BatchUiState;
+using inkpod::app::DocumentShellState;
+using inkpod::app::EffectsUiState;
+using inkpod::app::M6AdjustmentUiState;
+using inkpod::app::M6FilterJob;
+using inkpod::app::M6StopValue;
+using inkpod::app::M6ToolOptions;
+using inkpod::app::PaneUiState;
+using inkpod::app::ToolUiState;
+using inkpod::app::ViewUiState;
 
 constexpr std::uint32_t kInteractionFill = 1001U;
 constexpr std::uint32_t kInteractionEyedropper = 1002U;
@@ -77,209 +90,28 @@ constexpr UINT kM6ContinuousSprayIntervalMilliseconds = 50U;
 constexpr wchar_t kVectorStrokePlaneRequired[] =
     L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
 
-struct M6StopValue {
-    std::uint32_t position_milli{};
-    std::uint32_t rgba{};
-};
-
-struct M6ToolOptions {
-    std::array<std::int32_t, 5U> parameters{};
-    std::uint32_t shape{INKPOD_SELECTION_TRACE};
-    std::uint32_t mode{};
-    bool option{};
-    bool option2{};
-    std::vector<M6StopValue> stops;
-};
-
-struct M6FilterJob {
-    std::uint32_t kind{INKPOD_FILTER_INVERT};
-    std::uint32_t channel{INKPOD_FILTER_CHANNEL_RGB};
-    std::uint32_t interpolation{INKPOD_CURVE_BEZIER};
-    std::array<std::int32_t, 5U> parameters{};
-    std::vector<InkpodCurvePoint> points;
-    std::uint64_t plane_id{};
-    bool preview{};
-};
-
-struct M6AdjustmentUiState {
-    std::uint64_t id{};
-    bool visible{true};
-    M6FilterJob job;
-    std::string name;
-};
-
-struct BatchOperationUi {
-    std::uint32_t kind{INKPOD_BATCH_OPERATION_COLOR_REPLACE};
-    std::uint64_t flags{INKPOD_BATCH_OPERATION_ENABLED};
-    std::uint64_t layer_id{};
-    std::uint64_t plane_id{};
-    InkpodLayerKind layer_kind{INKPOD_LAYER_BINARY_COLORING};
-    InkpodTypedPlaneKind plane_kind{INKPOD_TYPED_PLANE_COLOR};
-    InkpodBatchMissingPolicy missing_policy{INKPOD_BATCH_MISSING_ERROR};
-    std::array<std::int64_t, 8U> parameters{};
-    InkpodColorValue color_0{};
-    InkpodColorValue color_1{};
-    std::vector<InkpodColorValue> colors;
-    std::vector<InkpodBatchColorPairInput> color_pairs;
-    std::vector<InkpodBatchSeedInput> seeds;
-    M6FilterJob filter;
-    std::wstring label;
-};
-
-struct BatchUiState {
-    InkpodBatchInputKind input_kind{INKPOD_BATCH_INPUT_CURRENT_SEQUENCE};
-    std::wstring input_path;
-    std::uint32_t first_cell{};
-    std::uint32_t last_cell{};
-    std::vector<BatchOperationUi> operations;
-    std::uint32_t selected_operation{};
-    InkpodBatchOutputPolicy output_policy{INKPOD_BATCH_OUTPUT_DUPLICATE};
-    InkpodBatchFailurePolicy failure_policy{INKPOD_BATCH_FAILURE_CONTINUE};
-    std::wstring output_folder{L"."};
-    std::wstring basename{L"batch"};
-    std::uint32_t start_number{1U};
-    std::uint32_t wait_milliseconds{};
-    bool descending{};
-    bool cell_folder{};
-    bool preview_before_save{};
-    bool loaded_graph{};
-    std::wstring last_result;
-};
-
-struct AppState {
-    HINSTANCE instance{};
-    HWND window{};
-    HWND canvas{};
-    HWND toolbar{};
-    HWND zoom_slider{};
-    HWND status_bar{};
-    HWND document_tabs{};
-    HWND locator_label{};
-    HWND layer_list{};
-    HWND plane_list{};
-    HWND light_table_set_list{};
-    HWND light_table_item_list{};
-    HWND sequence_list{};
-    HWND motion_label{};
-    HWND color_palette_list{};
-    HWND color_chart_list{};
-    HWND batch_palette{};
-    inkpod::windows::ui::BatchPaletteDialogState batch_palette_dialog{};
-    std::unique_ptr<inkpod::app::CoreEngine> engine;
-    std::uint32_t tool{INKPOD_TOOL_PENCIL};
-    InkpodPlaneKind plane{INKPOD_PLANE_MAIN_LINE};
-    std::uint32_t color_rgba{UINT32_C(0xdc281eff)};
-    InkpodColorValue drawing_color{
-        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 220U, 40U, 30U, 255U};
-    InkpodEyedropperSource eyedropper_source{INKPOD_EYEDROPPER_COMPOSITE};
-    std::vector<InkpodColorValue> palette_colors;
-    std::uint32_t palette_group{};
-    std::vector<std::wstring> color_chart_names;
-    std::uint32_t color_chart_page{};
-    bool color_chart_locked{};
-    float diameter{8.0F};
-    std::wstring current_path;
-    std::wstring recovery_path;
-    std::wstring smoke_raster_path;
-    std::vector<std::wstring> smoke_sequence_paths;
-    InkpodColorCheckMode color_check_mode{INKPOD_COLOR_CHECK_OFF};
-    InkpodClipboard* clipboard{};
-    bool floating_active{};
-    InkpodFloatingTransform floating_transform{
-        sizeof(InkpodFloatingTransform), 0U, 0.0, 0.0, 1.0, 1.0, 0.0};
-    InkpodFrameRect floating_bounds{};
-    std::vector<InkpodStrokeSample> floating_gesture_samples;
-    std::uint32_t floating_drag_mode{};
-    InkpodFloatingTransform floating_drag_start{
-        sizeof(InkpodFloatingTransform), 0U, 0.0, 0.0, 1.0, 1.0, 0.0};
-    std::uint64_t m3_layer_id{};
-    std::uint64_t selection_layer_id{};
-    std::uint64_t active_tree_layer_id{};
-    std::uint64_t active_tree_plane_id{};
-    std::uint32_t active_tree_layer_index{};
-    std::uint32_t active_tree_plane_index{};
-    std::uint64_t active_light_table_set_id{};
-    std::uint64_t active_light_table_item_id{};
-    std::uint32_t active_light_table_set_index{};
-    std::uint32_t active_light_table_item_index{};
-    std::vector<InkpodStrokeSample> light_table_move_samples;
-    std::uint32_t active_sequence_index{};
-    std::uint32_t motion_fps{24U};
-    std::uint64_t motion_flags{INKPOD_MOTION_FLAG_LOOP};
-    bool motion_active{};
-    bool motion_paused{};
-    std::uint64_t secondary_view_id{};
-    std::uint64_t active_view_id{};
-    std::uint64_t m6_adjustment_id{};
-    bool m6_adjustment_visible{true};
-    std::vector<M6AdjustmentUiState> m6_adjustments;
-    InkpodTask* m6_task{};
-    HWND m6_progress{};
-    inkpod::windows::ui::ProgressDialogState m6_progress_dialog{};
-    bool m6_preview_prompt{};
-    bool alpha_view{};
-    bool stamp_source_valid{};
-    InkpodStrokeSample stamp_source{};
-    M6ToolOptions m6_options{};
-    BatchUiState batch{};
-    InkpodBatchGraph* batch_graph{};
-    InkpodBatchPreview* batch_preview{};
-    InkpodBatchReport* batch_report{};
-    InkpodBatchTask* batch_task{};
-    HWND batch_progress{};
-    inkpod::windows::ui::ProgressDialogState batch_progress_dialog{};
-    FillToolOptions fill_options{};
-    std::vector<InkpodStrokeSample> fill_gesture_samples;
-    std::vector<InkpodStrokeSample> m6_samples;
-    bool m6_airbrush_active{};
-    InkpodStrokeSample m6_airbrush_last{};
-    bool view_flip_horizontal{};
-    bool view_flip_vertical{};
-    bool ruler_visible{};
-    bool guides_visible{true};
-    bool grid_visible{};
-    bool snap_guides{};
-    bool snap_grid{};
-    bool transparent_visible{true};
-    std::vector<InkpodStrokeSample> view_gesture_samples;
-    bool guide_drag_active{};
-    std::uint32_t guide_drag_axis{};
-    std::uint64_t guide_drag_id{};
-    InkpodSelectionShape selection_shape{INKPOD_SELECTION_RECTANGLE};
-    InkpodSelectionOperation selection_operation{INKPOD_SELECTION_NEW};
-    std::uint16_t selection_tolerance{};
-    std::uint16_t selection_gap_close{};
-    float selection_diameter{8.0F};
-    std::vector<InkpodStrokeSample> selection_gesture_samples;
-    std::vector<InkpodStrokeSample> vector_gesture_samples;
-    InkpodVectorEraseMode vector_erase_mode{INKPOD_VECTOR_ERASE_PARTIAL};
-    InkpodVectorSelectionMode vector_selection_mode{INKPOD_VECTOR_SELECT_TOUCHING};
-    std::vector<std::uint64_t> vector_selected_path_ids;
-    bool smoke_test{};
-};
-
 bool QuerySnapshotTransform(
-    AppState& state, InkpodSnapshotTransform& transform) noexcept;
-bool QueryDocument(AppState& state, InkpodDocumentInfo& info) noexcept;
+    AppContext& state, InkpodSnapshotTransform& transform) noexcept;
+bool QueryDocument(AppContext& state, InkpodDocumentInfo& info) noexcept;
 bool WidePathToUtf8(
     const std::wstring& path, std::vector<std::uint8_t>& output) noexcept;
 std::wstring LocalizedHistoryLabel(const std::string& label);
 struct TreePaneNode;
-bool QueryTreeNode(AppState& state, bool plane, TreePaneNode& output) noexcept;
+bool QueryTreeNode(AppContext& state, bool plane, TreePaneNode& output) noexcept;
 bool IsVectorCanvasTool(std::uint32_t tool) noexcept;
 bool IsVectorStrokePlane(std::uint32_t kind) noexcept;
-void ClearVectorGeometryPreview(AppState& state) noexcept;
-void RefreshBatchPalette(AppState& state) noexcept;
+void ClearVectorGeometryPreview(ToolUiState& tools, HWND canvas) noexcept;
+void RefreshBatchPalette(BatchUiState& state) noexcept;
 
 bool QueryM6Progress(
     void* context, inkpod::windows::ui::ProgressDialogInfo& output) noexcept {
-    auto* state = static_cast<AppState*>(context);
-    if (state == nullptr || state->m6_task == nullptr) {
+    auto* effects = static_cast<EffectsUiState*>(context);
+    if (effects == nullptr || effects->task == nullptr) {
         return false;
     }
     InkpodTaskInfo info{};
     info.struct_size = sizeof(info);
-    if (inkpod_task_query(state->m6_task, &info) != INKPOD_STATUS_OK) {
+    if (inkpod_task_query(effects->task, &info) != INKPOD_STATUS_OK) {
         return false;
     }
     output.completed_work = info.completed_work;
@@ -288,22 +120,21 @@ bool QueryM6Progress(
 }
 
 void CancelM6Progress(void* context) noexcept {
-    auto* state = static_cast<AppState*>(context);
-    if (state != nullptr && state->m6_task != nullptr) {
-        inkpod_task_cancel(state->m6_task);
+    auto* effects = static_cast<EffectsUiState*>(context);
+    if (effects != nullptr && effects->task != nullptr) {
+        inkpod_task_cancel(effects->task);
     }
 }
 
 bool QueryBatchProgress(
     void* context, inkpod::windows::ui::ProgressDialogInfo& output) noexcept {
-    auto* state = static_cast<AppState*>(context);
-    if (state == nullptr || state->batch_task == nullptr) {
+    auto* batch = static_cast<BatchUiState*>(context);
+    if (batch == nullptr || batch->task == nullptr) {
         return false;
     }
     InkpodTaskInfo info{};
     info.struct_size = sizeof(info);
-    if (inkpod_batch_task_query(
-            state->batch_task, &info) != INKPOD_STATUS_OK) {
+    if (inkpod_batch_task_query(batch->task, &info) != INKPOD_STATUS_OK) {
         return false;
     }
     output.completed_work = info.completed_work;
@@ -312,100 +143,124 @@ bool QueryBatchProgress(
 }
 
 void CancelBatchProgress(void* context) noexcept {
-    auto* state = static_cast<AppState*>(context);
-    if (state != nullptr && state->batch_task != nullptr) {
-        inkpod_batch_task_cancel(state->batch_task);
+    auto* batch = static_cast<BatchUiState*>(context);
+    if (batch != nullptr && batch->task != nullptr) {
+        inkpod_batch_task_cancel(batch->task);
     }
 }
 
 void DispatchBatchPaletteCommand(void* context, UINT command) noexcept {
-    auto* state = static_cast<AppState*>(context);
-    if (state != nullptr && state->window != nullptr) {
-        SendMessageW(state->window, WM_COMMAND, command, 0);
+    auto* state = static_cast<AppContext*>(context);
+    if (state != nullptr && state->windows.window != nullptr) {
+        SendMessageW(state->windows.window, WM_COMMAND, command, 0);
     }
 }
 
 void SelectBatchPaletteOperation(
     void* context, std::uint32_t selected_index) noexcept {
-    auto* state = static_cast<AppState*>(context);
+    auto* state = static_cast<AppContext*>(context);
     if (state != nullptr && !state->batch.loaded_graph) {
         state->batch.selected_operation = selected_index;
     }
 }
 
-void ResetM3DocumentUiState(AppState& state) noexcept {
-    state.m3_layer_id = 0U;
-    state.selection_layer_id = 0U;
-    state.active_tree_layer_id = 0U;
-    state.active_tree_plane_id = 0U;
-    state.active_tree_layer_index = 0U;
-    state.active_tree_plane_index = 0U;
-    state.active_light_table_set_id = 0U;
-    state.active_light_table_item_id = 0U;
-    state.active_light_table_set_index = 0U;
-    state.active_light_table_item_index = 0U;
-    state.light_table_move_samples.clear();
-    state.active_sequence_index = 0U;
-    state.floating_active = false;
-    state.floating_transform = InkpodFloatingTransform{
+void ResetDocumentShellTransientState(DocumentShellState& document) noexcept {
+    document.smoke_layer_id = 0U;
+    document.selection_layer_id = 0U;
+}
+
+void ResetPaneDocumentState(PaneUiState& panes) noexcept {
+    panes.active_tree_layer_id = 0U;
+    panes.active_tree_plane_id = 0U;
+    panes.active_tree_layer_index = 0U;
+    panes.active_tree_plane_index = 0U;
+    panes.active_light_table_set_id = 0U;
+    panes.active_light_table_item_id = 0U;
+    panes.active_light_table_set_index = 0U;
+    panes.active_light_table_item_index = 0U;
+    panes.light_table_move_samples.clear();
+}
+
+void ResetToolDocumentState(ToolUiState& tools) noexcept {
+    tools.floating_active = false;
+    tools.floating_transform = InkpodFloatingTransform{
         sizeof(InkpodFloatingTransform), 0U, 0.0, 0.0, 1.0, 1.0, 0.0};
-    state.floating_bounds = {};
-    state.floating_gesture_samples.clear();
-    state.floating_drag_mode = 0U;
-    state.motion_active = false;
-    state.motion_paused = false;
-    state.secondary_view_id = 0U;
-    state.active_view_id = 0U;
-    state.view_flip_horizontal = false;
-    state.view_flip_vertical = false;
-    state.ruler_visible = false;
-    state.guides_visible = true;
-    state.grid_visible = false;
-    state.snap_guides = false;
-    state.snap_grid = false;
-    state.transparent_visible = true;
-    state.view_gesture_samples.clear();
-    state.fill_gesture_samples.clear();
-    state.guide_drag_active = false;
-    state.guide_drag_axis = 0U;
-    state.guide_drag_id = 0U;
-    state.selection_shape = INKPOD_SELECTION_RECTANGLE;
-    state.selection_operation = INKPOD_SELECTION_NEW;
-    state.selection_gesture_samples.clear();
-    state.vector_gesture_samples.clear();
-    state.vector_selected_path_ids.clear();
-    if (state.document_tabs != nullptr) {
-        TabCtrl_DeleteAllItems(state.document_tabs);
+    tools.floating_bounds = {};
+    tools.floating_gesture_samples.clear();
+    tools.floating_drag_mode = 0U;
+    tools.fill_gesture_samples.clear();
+    tools.selection_shape = INKPOD_SELECTION_RECTANGLE;
+    tools.selection_operation = INKPOD_SELECTION_NEW;
+    tools.selection_gesture_samples.clear();
+    tools.vector_gesture_samples.clear();
+    tools.vector_selected_path_ids.clear();
+}
+
+void ResetViewDocumentState(ViewUiState& view) noexcept {
+    view.secondary_view_id = 0U;
+    view.active_view_id = 0U;
+    view.flip_horizontal = false;
+    view.flip_vertical = false;
+    view.ruler_visible = false;
+    view.guides_visible = true;
+    view.grid_visible = false;
+    view.snap_guides = false;
+    view.snap_grid = false;
+    view.transparent_visible = true;
+    view.gesture_samples.clear();
+    view.guide_drag_active = false;
+    view.guide_drag_axis = 0U;
+    view.guide_drag_id = 0U;
+}
+
+void ResetAnimationDocumentState(AnimationUiState& animation) noexcept {
+    animation.active_sequence_index = 0U;
+    animation.motion_active = false;
+    animation.motion_paused = false;
+}
+
+void ResetEffectsDocumentState(EffectsUiState& effects) noexcept {
+    effects.adjustment_id = 0U;
+    effects.adjustment_visible = true;
+    effects.adjustments.clear();
+    effects.alpha_view = false;
+    effects.stamp_source_valid = false;
+    effects.samples.clear();
+    effects.airbrush_active = false;
+}
+
+void ResetUiForDocumentReplacement(AppContext& state) noexcept {
+    ResetDocumentShellTransientState(state.document);
+    ResetPaneDocumentState(state.panes);
+    ResetToolDocumentState(state.tools);
+    ResetViewDocumentState(state.view);
+    ResetAnimationDocumentState(state.animation);
+    ResetEffectsDocumentState(state.effects);
+    if (state.windows.document_tabs != nullptr) {
+        TabCtrl_DeleteAllItems(state.windows.document_tabs);
         TCITEMW item{};
         item.mask = TCIF_TEXT | TCIF_PARAM;
         item.pszText = const_cast<wchar_t*>(L"セル");
         item.lParam = 0;
-        TabCtrl_InsertItem(state.document_tabs, 0, &item);
-        TabCtrl_SetCurSel(state.document_tabs, 0);
+        TabCtrl_InsertItem(state.windows.document_tabs, 0, &item);
+        TabCtrl_SetCurSel(state.windows.document_tabs, 0);
     }
     if (state.engine != nullptr) {
         state.engine->SetActiveView(0U);
     }
-    state.m6_adjustment_id = 0U;
-    state.m6_adjustment_visible = true;
-    state.m6_adjustments.clear();
-    state.alpha_view = false;
-    state.stamp_source_valid = false;
-    state.m6_samples.clear();
-    state.m6_airbrush_active = false;
-    if (state.window != nullptr) {
-        KillTimer(state.window, kM6ContinuousSprayTimer);
-        KillTimer(state.window, kMotionPlaybackTimer);
+    if (state.windows.window != nullptr) {
+        KillTimer(state.windows.window, kM6ContinuousSprayTimer);
+        KillTimer(state.windows.window, kMotionPlaybackTimer);
     }
 }
 
-void UpdateLocatorDisplay(AppState& state, int device_x, int device_y) noexcept {
+void UpdateLocatorDisplay(AppContext& state, int device_x, int device_y) noexcept {
     if (state.engine == nullptr) {
         return;
     }
     InkpodLocatorOutput locator{};
     locator.struct_size = sizeof(locator);
-    const std::uint64_t view_id = state.active_view_id;
+    const std::uint64_t view_id = state.view.active_view_id;
     const InkpodStatus status = state.engine->Invoke(
         [view_id, device_x, device_y, &locator](InkpodCore* core) {
             return inkpod_core_locator_sample(
@@ -454,10 +309,10 @@ void UpdateLocatorDisplay(AppState& state, int device_x, int device_y) noexcept 
             locator.selection.height,
             diagonal);
     }
-    if (state.locator_label != nullptr) {
-        SetWindowTextW(state.locator_label, text.data());
+    if (state.windows.locator_label != nullptr) {
+        SetWindowTextW(state.windows.locator_label, text.data());
     }
-    if (state.status_bar != nullptr) {
+    if (state.windows.status_bar != nullptr) {
         std::array<wchar_t, 160U> compact{};
         _snwprintf_s(
             compact.data(),
@@ -470,7 +325,7 @@ void UpdateLocatorDisplay(AppState& state, int device_x, int device_y) noexcept 
             locator.selection.height,
             diagonal);
         SendMessageW(
-            state.status_bar,
+            state.windows.status_bar,
             SB_SETTEXTW,
             1,
             reinterpret_cast<LPARAM>(compact.data()));
@@ -489,13 +344,13 @@ struct TreePaneNode {
     std::string name;
 };
 
-bool RefreshTreePane(AppState& state) noexcept {
-    if (state.engine == nullptr || state.layer_list == nullptr || state.plane_list == nullptr) {
+bool RefreshTreePane(AppContext& state) noexcept {
+    if (state.engine == nullptr || state.windows.layer_list == nullptr || state.windows.plane_list == nullptr) {
         return false;
     }
     std::vector<TreePaneNode> layers;
     std::vector<TreePaneNode> planes;
-    const std::uint64_t requested_layer_id = state.active_tree_layer_id;
+    const std::uint64_t requested_layer_id = state.panes.active_tree_layer_id;
     std::uint32_t selected_layer_index{};
     const InkpodStatus status = state.engine->Invoke(
         [&layers, &planes, requested_layer_id, &selected_layer_index](InkpodCore* core) {
@@ -570,7 +425,7 @@ bool RefreshTreePane(AppState& state) noexcept {
         return false;
     }
 
-    SendMessageW(state.layer_list, LB_RESETCONTENT, 0, 0);
+    SendMessageW(state.windows.layer_list, LB_RESETCONTENT, 0, 0);
     for (const auto& node : layers) {
         std::wstring name;
         try {
@@ -590,13 +445,13 @@ bool RefreshTreePane(AppState& state) noexcept {
             node.kind,
             node.opacity_milli / 10U);
         const LRESULT item = SendMessageW(
-            state.layer_list,
+            state.windows.layer_list,
             LB_ADDSTRING,
             0,
             reinterpret_cast<LPARAM>(label.data()));
         if (item >= 0) {
             SendMessageW(
-                state.layer_list,
+                state.windows.layer_list,
                 LB_SETITEMDATA,
                 static_cast<WPARAM>(item),
                 static_cast<LPARAM>(node.id));
@@ -604,11 +459,11 @@ bool RefreshTreePane(AppState& state) noexcept {
     }
     selected_layer_index = std::min<std::uint32_t>(
         selected_layer_index, static_cast<std::uint32_t>(layers.size() - 1U));
-    SendMessageW(state.layer_list, LB_SETCURSEL, selected_layer_index, 0);
-    state.active_tree_layer_index = selected_layer_index;
-    state.active_tree_layer_id = layers[selected_layer_index].id;
+    SendMessageW(state.windows.layer_list, LB_SETCURSEL, selected_layer_index, 0);
+    state.panes.active_tree_layer_index = selected_layer_index;
+    state.panes.active_tree_layer_id = layers[selected_layer_index].id;
 
-    SendMessageW(state.plane_list, LB_RESETCONTENT, 0, 0);
+    SendMessageW(state.windows.plane_list, LB_RESETCONTENT, 0, 0);
     std::uint32_t selected_plane_index{};
     for (std::size_t index = 0U; index < planes.size(); ++index) {
         const auto& node = planes[index];
@@ -631,30 +486,30 @@ bool RefreshTreePane(AppState& state) noexcept {
             node.pixel_format,
             node.opacity_milli / 10U);
         const LRESULT item = SendMessageW(
-            state.plane_list,
+            state.windows.plane_list,
             LB_ADDSTRING,
             0,
             reinterpret_cast<LPARAM>(label.data()));
         if (item >= 0) {
             SendMessageW(
-                state.plane_list,
+                state.windows.plane_list,
                 LB_SETITEMDATA,
                 static_cast<WPARAM>(item),
                 static_cast<LPARAM>(node.id));
         }
-        if (node.id == state.active_tree_plane_id) {
+        if (node.id == state.panes.active_tree_plane_id) {
             selected_plane_index = static_cast<std::uint32_t>(index);
         }
     }
     if (!planes.empty()) {
         selected_plane_index = std::min<std::uint32_t>(
             selected_plane_index, static_cast<std::uint32_t>(planes.size() - 1U));
-        SendMessageW(state.plane_list, LB_SETCURSEL, selected_plane_index, 0);
-        state.active_tree_plane_index = selected_plane_index;
-        state.active_tree_plane_id = planes[selected_plane_index].id;
+        SendMessageW(state.windows.plane_list, LB_SETCURSEL, selected_plane_index, 0);
+        state.panes.active_tree_plane_index = selected_plane_index;
+        state.panes.active_tree_plane_id = planes[selected_plane_index].id;
     } else {
-        state.active_tree_plane_index = 0U;
-        state.active_tree_plane_id = 0U;
+        state.panes.active_tree_plane_index = 0U;
+        state.panes.active_tree_plane_id = 0U;
     }
     return true;
 }
@@ -672,9 +527,9 @@ struct LightTablePaneItem {
     std::string name;
 };
 
-bool RefreshLightTablePane(AppState& state) noexcept {
-    if (state.engine == nullptr || state.light_table_set_list == nullptr
-        || state.light_table_item_list == nullptr) {
+bool RefreshLightTablePane(AppContext& state) noexcept {
+    if (state.engine == nullptr || state.windows.light_table_set_list == nullptr
+        || state.windows.light_table_item_list == nullptr) {
         return false;
     }
     std::vector<LightTablePaneSet> sets;
@@ -729,7 +584,7 @@ bool RefreshLightTablePane(AppState& state) noexcept {
     if (status != INKPOD_STATUS_OK || sets.empty()) {
         return false;
     }
-    SendMessageW(state.light_table_set_list, LB_RESETCONTENT, 0, 0);
+    SendMessageW(state.windows.light_table_set_list, LB_RESETCONTENT, 0, 0);
     std::uint32_t selected_set{};
     for (std::size_t index = 0; index < sets.size(); ++index) {
         const auto& set = sets[index];
@@ -740,23 +595,23 @@ bool RefreshLightTablePane(AppState& state) noexcept {
             (set.flags & INKPOD_LIGHT_TABLE_SET_ACTIVE) != 0U ? L"▶ " : L"",
             name.c_str(), set.item_count, set.opacity_milli / 10U);
         const LRESULT row = SendMessageW(
-            state.light_table_set_list, LB_ADDSTRING, 0,
+            state.windows.light_table_set_list, LB_ADDSTRING, 0,
             reinterpret_cast<LPARAM>(label.data()));
         if (row >= 0) {
             SendMessageW(
-                state.light_table_set_list, LB_SETITEMDATA, static_cast<WPARAM>(row),
+                state.windows.light_table_set_list, LB_SETITEMDATA, static_cast<WPARAM>(row),
                 static_cast<LPARAM>(set.id));
         }
-        if (set.id == state.active_light_table_set_id
+        if (set.id == state.panes.active_light_table_set_id
             || (set.flags & INKPOD_LIGHT_TABLE_SET_ACTIVE) != 0U) {
             selected_set = static_cast<std::uint32_t>(index);
         }
     }
-    SendMessageW(state.light_table_set_list, LB_SETCURSEL, selected_set, 0);
-    state.active_light_table_set_index = selected_set;
-    state.active_light_table_set_id = sets[selected_set].id;
+    SendMessageW(state.windows.light_table_set_list, LB_SETCURSEL, selected_set, 0);
+    state.panes.active_light_table_set_index = selected_set;
+    state.panes.active_light_table_set_id = sets[selected_set].id;
 
-    SendMessageW(state.light_table_item_list, LB_RESETCONTENT, 0, 0);
+    SendMessageW(state.windows.light_table_item_list, LB_RESETCONTENT, 0, 0);
     std::uint32_t selected_item{};
     for (std::size_t index = 0; index < items.size(); ++index) {
         const auto& item = items[index];
@@ -768,24 +623,24 @@ bool RefreshLightTablePane(AppState& state) noexcept {
             name.c_str(), item.info.opacity_milli / 10U,
             item.info.effective_opacity_milli / 10U);
         const LRESULT row = SendMessageW(
-            state.light_table_item_list, LB_ADDSTRING, 0,
+            state.windows.light_table_item_list, LB_ADDSTRING, 0,
             reinterpret_cast<LPARAM>(label.data()));
         if (row >= 0) {
             SendMessageW(
-                state.light_table_item_list, LB_SETITEMDATA, static_cast<WPARAM>(row),
+                state.windows.light_table_item_list, LB_SETITEMDATA, static_cast<WPARAM>(row),
                 static_cast<LPARAM>(item.info.id));
         }
-        if (item.info.id == state.active_light_table_item_id) {
+        if (item.info.id == state.panes.active_light_table_item_id) {
             selected_item = static_cast<std::uint32_t>(index);
         }
     }
     if (!items.empty()) {
-        SendMessageW(state.light_table_item_list, LB_SETCURSEL, selected_item, 0);
-        state.active_light_table_item_index = selected_item;
-        state.active_light_table_item_id = items[selected_item].info.id;
+        SendMessageW(state.windows.light_table_item_list, LB_SETCURSEL, selected_item, 0);
+        state.panes.active_light_table_item_index = selected_item;
+        state.panes.active_light_table_item_id = items[selected_item].info.id;
     } else {
-        state.active_light_table_item_index = 0U;
-        state.active_light_table_item_id = 0U;
+        state.panes.active_light_table_item_index = 0U;
+        state.panes.active_light_table_item_id = 0U;
     }
     return true;
 }
@@ -795,8 +650,8 @@ struct SequencePaneCell {
     std::string name;
 };
 
-bool RefreshSequencePane(AppState& state) noexcept {
-    if (state.engine == nullptr || state.sequence_list == nullptr) {
+bool RefreshSequencePane(AppContext& state) noexcept {
+    if (state.engine == nullptr || state.windows.sequence_list == nullptr) {
         return false;
     }
     std::vector<SequencePaneCell> cells;
@@ -834,18 +689,18 @@ bool RefreshSequencePane(AppState& state) noexcept {
         },
         false,
         false);
-    SendMessageW(state.sequence_list, LB_RESETCONTENT, 0, 0);
+    SendMessageW(state.windows.sequence_list, LB_RESETCONTENT, 0, 0);
     if (status != INKPOD_STATUS_OK) {
         return false;
     }
     if (cells.empty()) {
-        state.active_sequence_index = 0U;
+        state.animation.active_sequence_index = 0U;
         return true;
     }
     InkpodDocumentInfo document{};
     QueryDocument(state, document);
     std::uint32_t selected = std::min<std::uint32_t>(
-        state.active_sequence_index, static_cast<std::uint32_t>(cells.size() - 1U));
+        state.animation.active_sequence_index, static_cast<std::uint32_t>(cells.size() - 1U));
     for (std::size_t index = 0; index < cells.size(); ++index) {
         const auto& cell = cells[index];
         const bool active = cell.info.document_uuid_high == document.document_uuid_high
@@ -859,20 +714,20 @@ bool RefreshSequencePane(AppState& state) noexcept {
             cell.info.height, cell.info.thumbnail_width, cell.info.thumbnail_height,
             static_cast<unsigned long long>(cell.info.thumbnail_checksum));
         SendMessageW(
-            state.sequence_list, LB_ADDSTRING, 0,
+            state.windows.sequence_list, LB_ADDSTRING, 0,
             reinterpret_cast<LPARAM>(label.data()));
         if (active) {
             selected = static_cast<std::uint32_t>(index);
         }
     }
-    SendMessageW(state.sequence_list, LB_SETCURSEL, selected, 0);
-    state.active_sequence_index = selected;
+    SendMessageW(state.windows.sequence_list, LB_SETCURSEL, selected, 0);
+    state.animation.active_sequence_index = selected;
     return true;
 }
 
-bool RefreshColorPanes(AppState& state) noexcept {
-    if (state.engine == nullptr || state.color_palette_list == nullptr
-        || state.color_chart_list == nullptr) {
+bool RefreshColorPanes(AppContext& state) noexcept {
+    if (state.engine == nullptr || state.windows.color_palette_list == nullptr
+        || state.windows.color_chart_list == nullptr) {
         return false;
     }
     std::vector<InkpodColorValue> colors;
@@ -908,20 +763,20 @@ bool RefreshColorPanes(AppState& state) noexcept {
         return false;
     }
     try {
-        state.palette_colors = colors;
-        const std::size_t previous_names = state.color_chart_names.size();
-        state.color_chart_names.resize(colors.size());
+        state.panes.palette_colors = colors;
+        const std::size_t previous_names = state.panes.color_chart_names.size();
+        state.panes.color_chart_names.resize(colors.size());
         for (std::size_t index = previous_names; index < colors.size(); ++index) {
-            state.color_chart_names[index] = L"Color " + std::to_wstring(index + 1U);
+            state.panes.color_chart_names[index] = L"Color " + std::to_wstring(index + 1U);
         }
     } catch (const std::bad_alloc&) {
         return false;
     }
     const std::uint32_t group_count = std::max<std::uint32_t>(
         1U, static_cast<std::uint32_t>((colors.size() + 9U) / 10U));
-    state.palette_group %= group_count;
-    SendMessageW(state.color_palette_list, LB_RESETCONTENT, 0, 0);
-    const std::size_t start = static_cast<std::size_t>(state.palette_group) * 10U;
+    state.panes.palette_group %= group_count;
+    SendMessageW(state.windows.color_palette_list, LB_RESETCONTENT, 0, 0);
+    const std::size_t start = static_cast<std::size_t>(state.panes.palette_group) * 10U;
     for (std::size_t index = start; index < std::min(colors.size(), start + 10U); ++index) {
         const auto& color = colors[index];
         std::array<wchar_t, 160U> label{};
@@ -932,16 +787,16 @@ bool RefreshColorPanes(AppState& state) noexcept {
                 : L"%zu  RGBA8 #%02X%02X%02X%02X",
             index + 1U, color.red, color.green, color.blue, color.alpha);
         SendMessageW(
-            state.color_palette_list, LB_ADDSTRING, 0,
+            state.windows.color_palette_list, LB_ADDSTRING, 0,
             reinterpret_cast<LPARAM>(label.data()));
     }
-    SendMessageW(state.color_chart_list, LB_RESETCONTENT, 0, 0);
+    SendMessageW(state.windows.color_chart_list, LB_RESETCONTENT, 0, 0);
     constexpr std::size_t chart_page_size = 20U;
     const std::uint32_t chart_page_count = std::max<std::uint32_t>(
         1U, static_cast<std::uint32_t>((colors.size() + chart_page_size - 1U)
             / chart_page_size));
-    state.color_chart_page %= chart_page_count;
-    const std::size_t chart_start = static_cast<std::size_t>(state.color_chart_page)
+    state.panes.color_chart_page %= chart_page_count;
+    const std::size_t chart_start = static_cast<std::size_t>(state.panes.color_chart_page)
         * chart_page_size;
     for (std::size_t index = chart_start;
          index < std::min(colors.size(), chart_start + chart_page_size);
@@ -953,18 +808,18 @@ bool RefreshColorPanes(AppState& state) noexcept {
             color.depth == INKPOD_COLOR_DEPTH_16
                 ? L"[%u] %ls  #%04X%04X%04X%04X"
                 : L"[%u] %ls  #%02X%02X%02X%02X",
-            state.color_chart_page + 1U,
-            state.color_chart_names[index].c_str(),
+            state.panes.color_chart_page + 1U,
+            state.panes.color_chart_names[index].c_str(),
             color.red, color.green, color.blue, color.alpha);
         SendMessageW(
-            state.color_chart_list, LB_ADDSTRING, 0,
+            state.windows.color_chart_list, LB_ADDSTRING, 0,
             reinterpret_cast<LPARAM>(label.data()));
     }
     return true;
 }
 
 InkpodStatus ReplacePalette(
-    AppState& state, const std::vector<InkpodColorValue>& colors) noexcept {
+    AppContext& state, const std::vector<InkpodColorValue>& colors) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -983,21 +838,22 @@ InkpodStatus ReplacePalette(
         true);
 }
 
-void UpdateMotionLabel(AppState& state, const InkpodMotionFrame& frame) noexcept {
-    state.motion_paused = (frame.flags & INKPOD_MOTION_FRAME_PAUSED) != 0U;
-    if (state.motion_label == nullptr) {
+void UpdateMotionLabel(
+    AnimationUiState& animation, HWND motion_label, const InkpodMotionFrame& frame) noexcept {
+    animation.motion_paused = (frame.flags & INKPOD_MOTION_FRAME_PAUSED) != 0U;
+    if (motion_label == nullptr) {
         return;
     }
     std::array<wchar_t, 256U> text{};
     _snwprintf_s(
         text.data(), text.size(), _TRUNCATE,
         L"モーション %ls  %u fps  セル%u  frame:%llu  thumb:%016llx",
-        state.motion_paused ? L"一時停止" : L"再生",
-        state.motion_fps,
+        animation.motion_paused ? L"一時停止" : L"再生",
+        animation.motion_fps,
         frame.cell_number,
         static_cast<unsigned long long>(frame.sequence_index),
         static_cast<unsigned long long>(frame.thumbnail_checksum));
-    SetWindowTextW(state.motion_label, text.data());
+    SetWindowTextW(motion_label, text.data());
 }
 
 std::wstring LocalizedHistoryLabel(const std::string& label) {
@@ -1037,7 +893,7 @@ std::wstring LocalizedHistoryLabel(const std::string& label) {
 }
 
 bool ConfigureHistoryDialog(
-    AppState& app, bool forward, HistoryDialogState& dialog) noexcept {
+    AppContext& app, bool forward, HistoryDialogState& dialog) noexcept {
     if (app.engine == nullptr) {
         return false;
     }
@@ -1107,15 +963,15 @@ bool ConfigureHistoryDialog(
     } catch (const std::bad_alloc&) {
         return false;
     }
-    dialog.selected_index = app.smoke_test
+    dialog.selected_index = app.lifetime.smoke_test
         ? (forward ? dialog.labels.size() - 1U : 0U)
         : (forward ? 0U : dialog.labels.size() - 1U);
-    dialog.close_immediately = app.smoke_test;
+    dialog.close_immediately = app.lifetime.smoke_test;
     return true;
 }
 
 bool QueryHistoryMenuLabels(
-    AppState& app,
+    AppContext& app,
     InkpodHistoryInfo& info,
     std::wstring& undo_label,
     std::wstring& redo_label) noexcept {
@@ -1173,43 +1029,43 @@ bool QueryHistoryMenuLabels(
     return true;
 }
 
-void RefreshBatchPalette(AppState& state) noexcept {
-    if (state.batch_palette == nullptr) {
+void RefreshBatchPalette(BatchUiState& batch) noexcept {
+    if (batch.palette == nullptr) {
         return;
     }
     inkpod::windows::ui::BatchPaletteView view{};
     try {
-        if (state.batch.input_kind == INKPOD_BATCH_INPUT_CURRENT_SEQUENCE) {
+        if (batch.input_kind == INKPOD_BATCH_INPUT_CURRENT_SEQUENCE) {
             view.input_label = L"現在セルを含む連番（自然順）";
-        } else if (state.batch.input_kind == INKPOD_BATCH_INPUT_FOLDER) {
-            view.input_label = L"フォルダー: " + state.batch.input_path;
+        } else if (batch.input_kind == INKPOD_BATCH_INPUT_FOLDER) {
+            view.input_label = L"フォルダー: " + batch.input_path;
         } else {
-            view.input_label = L"ファイル: " + state.batch.input_path;
+            view.input_label = L"ファイル: " + batch.input_path;
         }
-        if (state.batch.first_cell != 0U || state.batch.last_cell != 0U) {
+        if (batch.first_cell != 0U || batch.last_cell != 0U) {
             view.input_label += L" / 範囲 ";
-            view.input_label += state.batch.first_cell == 0U
+            view.input_label += batch.first_cell == 0U
                 ? L"先頭"
-                : std::to_wstring(state.batch.first_cell);
+                : std::to_wstring(batch.first_cell);
             view.input_label += L"～";
-            view.input_label += state.batch.last_cell == 0U
+            view.input_label += batch.last_cell == 0U
                 ? L"末尾"
-                : std::to_wstring(state.batch.last_cell);
+                : std::to_wstring(batch.last_cell);
         }
 
-        view.loaded_graph = state.batch.loaded_graph;
-        if (state.batch.loaded_graph && state.batch_graph != nullptr) {
+        view.loaded_graph = batch.loaded_graph;
+        if (batch.loaded_graph && batch.graph != nullptr) {
             InkpodBatchGraphInfo info{};
             info.struct_size = sizeof(info);
             if (inkpod_batch_graph_get_info(
-                    state.batch_graph, &info) == INKPOD_STATUS_OK) {
+                    batch.graph, &info) == INKPOD_STATUS_OK) {
                 view.operation_labels.push_back(
                     L"読み込み済みセット: "
                     + std::to_wstring(info.operation_count) + L" 項目");
             }
         } else {
-            view.operation_labels.reserve(state.batch.operations.size());
-            for (const auto& operation : state.batch.operations) {
+            view.operation_labels.reserve(batch.operations.size());
+            for (const auto& operation : batch.operations) {
                 std::wstring label =
                     operation.flags & INKPOD_BATCH_OPERATION_ENABLED
                     ? L"✓ "
@@ -1221,42 +1077,42 @@ void RefreshBatchPalette(AppState& state) noexcept {
                 }
                 view.operation_labels.push_back(std::move(label));
             }
-            if (!state.batch.operations.empty()) {
-                state.batch.selected_operation = std::min<std::uint32_t>(
-                    state.batch.selected_operation,
+            if (!batch.operations.empty()) {
+                batch.selected_operation = std::min<std::uint32_t>(
+                    batch.selected_operation,
                     static_cast<std::uint32_t>(
-                        state.batch.operations.size() - 1U));
-                view.selected_operation = state.batch.selected_operation;
+                        batch.operations.size() - 1U));
+                view.selected_operation = batch.selected_operation;
             }
         }
 
         const wchar_t* policy = L"複製保存";
-        if (state.batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE) {
+        if (batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE) {
             policy = L"新規保存";
         } else if (
-            state.batch.output_policy
+            batch.output_policy
             == INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE) {
             policy = L"明示上書き";
         }
         view.output_text = L"出力: ";
         view.output_text += policy;
         view.output_text += L" / ";
-        view.output_text += state.batch.output_folder.empty()
+        view.output_text += batch.output_folder.empty()
             ? L"（入力と同じ場所）"
-            : state.batch.output_folder;
-        if (!state.batch.last_result.empty()) {
+            : batch.output_folder;
+        if (!batch.last_result.empty()) {
             view.output_text += L"\r\n";
-            view.output_text += state.batch.last_result;
+            view.output_text += batch.last_result;
         }
-        view.idle = state.batch_task == nullptr;
+        view.idle = batch.task == nullptr;
         view.runnable = view.idle
-            && (state.batch_graph != nullptr
-                || !state.batch.operations.empty());
+            && (batch.graph != nullptr
+                || !batch.operations.empty());
     } catch (const std::bad_alloc&) {
         return;
     }
     inkpod::windows::ui::UpdateBatchPaletteDialog(
-        state.batch_palette, view);
+        batch.palette, view);
 }
 std::uint32_t CurrentShortcutModifiers(LPARAM key_data) noexcept {
     std::uint32_t modifiers{};
@@ -1280,7 +1136,7 @@ UINT ShortcutMenuCommand(std::uint32_t command_id) noexcept {
 }
 
 bool ResolveConfiguredShortcut(
-    AppState& state,
+    AppContext& state,
     std::uint32_t virtual_key,
     std::uint32_t modifiers,
     UINT& menu_command) noexcept {
@@ -1302,8 +1158,8 @@ bool ResolveConfiguredShortcut(
     return menu_command != 0U;
 }
 
-void ShowCoreError(const AppState& state, HWND owner, const wchar_t* operation) noexcept {
-    if (state.smoke_test) {
+void ShowCoreError(const AppContext& state, HWND owner, const wchar_t* operation) noexcept {
+    if (state.lifetime.smoke_test) {
         return;
     }
     const std::wstring detail = state.engine == nullptr
@@ -1649,34 +1505,34 @@ bool ImportStandardClipboard(HWND owner, InkpodClipboard*& output) noexcept {
     return true;
 }
 
-void UpdateFloatingPreview(AppState& state) noexcept {
-    if (state.canvas == nullptr) {
+void UpdateFloatingPreview(AppContext& state) noexcept {
+    if (state.windows.canvas == nullptr) {
         return;
     }
     inkpod::renderer::CanvasFloatingPreview preview{};
     preview.struct_size = sizeof(preview);
-    preview.active = state.floating_active ? 1U : 0U;
-    preview.bounds = state.floating_bounds;
-    preview.transform = state.floating_transform;
+    preview.active = state.tools.floating_active ? 1U : 0U;
+    preview.bounds = state.tools.floating_bounds;
+    preview.transform = state.tools.floating_transform;
     SendMessageW(
-        state.canvas,
+        state.windows.canvas,
         inkpod::renderer::kCanvasSetFloatingPreview,
         0,
         reinterpret_cast<LPARAM>(&preview));
 }
 
-InkpodStatus BeginFloatingPaste(AppState& state, std::uint32_t mode) noexcept {
+InkpodStatus BeginFloatingPaste(AppContext& state, std::uint32_t mode) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     bool imported_standard{};
-    if (state.clipboard == nullptr) {
-        if (!ImportStandardClipboard(state.window, state.clipboard)) {
+    if (state.document.clipboard == nullptr) {
+        if (!ImportStandardClipboard(state.windows.window, state.document.clipboard)) {
             return INKPOD_STATUS_INVALID_STATE;
         }
         imported_standard = true;
     }
-    const InkpodClipboard* clipboard = state.clipboard;
+    const InkpodClipboard* clipboard = state.document.clipboard;
     InkpodStatus status = state.engine->Invoke(
         [clipboard, mode](InkpodCore* core) {
             return inkpod_core_paste_begin_mode(core, clipboard, mode);
@@ -1707,22 +1563,22 @@ InkpodStatus BeginFloatingPaste(AppState& state, std::uint32_t mode) noexcept {
             false);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    state.floating_active = true;
-    state.floating_bounds = {
+    state.tools.floating_active = true;
+    state.tools.floating_bounds = {
         view.origin_x,
         view.origin_y,
         static_cast<std::int32_t>(view.width),
         static_cast<std::int32_t>(view.height)};
-    state.floating_transform = InkpodFloatingTransform{
+    state.tools.floating_transform = InkpodFloatingTransform{
         sizeof(InkpodFloatingTransform), 0U, 0.0, 0.0, 1.0, 1.0, 0.0};
-    state.tool = kInteractionFloatingTransform;
+    state.tools.active_tool = kInteractionFloatingTransform;
     UpdateFloatingPreview(state);
     return INKPOD_STATUS_OK;
 }
 
 InkpodStatus SetFloatingTransform(
-    AppState& state, const InkpodFloatingTransform& transform) noexcept {
-    if (!state.floating_active || state.engine == nullptr) {
+    AppContext& state, const InkpodFloatingTransform& transform) noexcept {
+    if (!state.tools.floating_active || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus status = state.engine->Invoke(
@@ -1732,30 +1588,30 @@ InkpodStatus SetFloatingTransform(
         false,
         false);
     if (status == INKPOD_STATUS_OK) {
-        state.floating_transform = transform;
+        state.tools.floating_transform = transform;
         UpdateFloatingPreview(state);
     }
     return status;
 }
 
-InkpodStatus ShowFloatingTransformDialog(AppState& state) noexcept {
-    if (!state.floating_active) {
+InkpodStatus ShowFloatingTransformDialog(AppContext& state) noexcept {
+    if (!state.tools.floating_active) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     ViewOptionsDialogState geometry{};
     geometry.title = L"フローティング選択の変形";
     geometry.labels = {L"X移動 (px)", L"Y移動 (px)", L"幅 (%)", L"高さ (%)"};
     geometry.values = {
-        static_cast<std::int32_t>(std::lround(state.floating_transform.translate_x)),
-        static_cast<std::int32_t>(std::lround(state.floating_transform.translate_y)),
-        static_cast<std::int32_t>(std::lround(state.floating_transform.scale_x * 100.0)),
-        static_cast<std::int32_t>(std::lround(state.floating_transform.scale_y * 100.0))};
+        static_cast<std::int32_t>(std::lround(state.tools.floating_transform.translate_x)),
+        static_cast<std::int32_t>(std::lround(state.tools.floating_transform.translate_y)),
+        static_cast<std::int32_t>(std::lround(state.tools.floating_transform.scale_x * 100.0)),
+        static_cast<std::int32_t>(std::lround(state.tools.floating_transform.scale_y * 100.0))};
     geometry.value_count = 4U;
-    if (state.smoke_test) {
+    if (state.lifetime.smoke_test) {
         geometry.values = {2, 1, 125, 75};
     }
     if (ShowViewOptions(
-            state.instance, state.window, state.smoke_test, geometry) != IDOK
+            state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, geometry) != IDOK
         || geometry.values[2] <= 0 || geometry.values[3] <= 0) {
         return INKPOD_STATUS_CANCELLED;
     }
@@ -1763,16 +1619,16 @@ InkpodStatus ShowFloatingTransformDialog(AppState& state) noexcept {
     rotation.title = L"回転・基準点";
     rotation.labels = {L"角度 (度)", L"縦横比固定 (0/1)", L"五点基準 (1-5)", nullptr};
     rotation.values = {
-        static_cast<std::int32_t>(std::lround(state.floating_transform.rotation_degrees)),
+        static_cast<std::int32_t>(std::lround(state.tools.floating_transform.rotation_degrees)),
         0,
         INKPOD_RESIZE_ANCHOR_CENTER,
         0};
     rotation.value_count = 3U;
-    if (state.smoke_test) {
+    if (state.lifetime.smoke_test) {
         rotation.values[0] = 15;
     }
     if (ShowViewOptions(
-            state.instance, state.window, state.smoke_test, rotation) != IDOK) {
+            state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, rotation) != IDOK) {
         return INKPOD_STATUS_CANCELLED;
     }
     if (rotation.values[1] != 0) {
@@ -1790,15 +1646,15 @@ InkpodStatus ShowFloatingTransformDialog(AppState& state) noexcept {
 }
 
 InkpodStatus UpdateFloatingHandleDrag(
-    AppState& state,
+    AppContext& state,
     const InkpodStrokeSample& start,
     const InkpodStrokeSample& current,
     bool begin) noexcept {
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds canvas{};
-    if (!state.floating_active || !QueryDocument(state, info)
+    if (!state.tools.floating_active || !QueryDocument(state, info)
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&canvas)) != 1
@@ -1812,40 +1668,40 @@ InkpodStatus UpdateFloatingHandleDrag(
     const auto to_document = [&](const InkpodStrokeSample& sample) {
         double x = (static_cast<double>(sample.x) - canvas.left) / zoom;
         double y = (static_cast<double>(sample.y) - canvas.top) / zoom;
-        if (state.view_flip_horizontal) {
+        if (state.view.flip_horizontal) {
             x = static_cast<double>(info.width) - x;
         }
-        if (state.view_flip_vertical) {
+        if (state.view.flip_vertical) {
             y = static_cast<double>(info.height) - y;
         }
         return std::pair{x, y};
     };
     const auto to_device = [&](double x, double y) {
-        if (state.view_flip_horizontal) {
+        if (state.view.flip_horizontal) {
             x = static_cast<double>(info.width) - x;
         }
-        if (state.view_flip_vertical) {
+        if (state.view.flip_vertical) {
             y = static_cast<double>(info.height) - y;
         }
         return std::pair{canvas.left + x * zoom, canvas.top + y * zoom};
     };
-    const double center_x = static_cast<double>(state.floating_bounds.x)
-        + static_cast<double>(state.floating_bounds.width - 1) / 2.0
-        + state.floating_transform.translate_x;
-    const double center_y = static_cast<double>(state.floating_bounds.y)
-        + static_cast<double>(state.floating_bounds.height - 1) / 2.0
-        + state.floating_transform.translate_y;
+    const double center_x = static_cast<double>(state.tools.floating_bounds.x)
+        + static_cast<double>(state.tools.floating_bounds.width - 1) / 2.0
+        + state.tools.floating_transform.translate_x;
+    const double center_y = static_cast<double>(state.tools.floating_bounds.y)
+        + static_cast<double>(state.tools.floating_bounds.height - 1) / 2.0
+        + state.tools.floating_transform.translate_y;
     if (begin) {
-        state.floating_drag_start = state.floating_transform;
-        state.floating_drag_mode = 1U;
-        const double radians = state.floating_transform.rotation_degrees
+        state.tools.floating_drag_start = state.tools.floating_transform;
+        state.tools.floating_drag_mode = 1U;
+        const double radians = state.tools.floating_transform.rotation_degrees
             * 3.14159265358979323846 / 180.0;
         const double sine = std::sin(radians);
         const double cosine = std::cos(radians);
-        const double half_width = static_cast<double>(state.floating_bounds.width - 1)
-            * state.floating_transform.scale_x / 2.0;
-        const double half_height = static_cast<double>(state.floating_bounds.height - 1)
-            * state.floating_transform.scale_y / 2.0;
+        const double half_width = static_cast<double>(state.tools.floating_bounds.width - 1)
+            * state.tools.floating_transform.scale_x / 2.0;
+        const double half_height = static_cast<double>(state.tools.floating_bounds.height - 1)
+            * state.tools.floating_transform.scale_y / 2.0;
         const std::array<std::pair<double, double>, 4U> local{
             std::pair{-half_width, -half_height},
             std::pair{half_width, -half_height},
@@ -1858,7 +1714,7 @@ InkpodStatus UpdateFloatingHandleDrag(
             if (std::hypot(
                     device.first - static_cast<double>(start.x),
                     device.second - static_cast<double>(start.y)) <= 14.0) {
-                state.floating_drag_mode = 2U;
+                state.tools.floating_drag_mode = 2U;
                 break;
             }
         }
@@ -1868,14 +1724,14 @@ InkpodStatus UpdateFloatingHandleDrag(
         if (std::hypot(
                 rotation_handle.first - static_cast<double>(start.x),
                 rotation_handle.second - static_cast<double>(start.y)) <= 16.0) {
-            state.floating_drag_mode = 3U;
+            state.tools.floating_drag_mode = 3U;
         }
         return INKPOD_STATUS_OK;
     }
     const auto start_document = to_document(start);
     const auto current_document = to_document(current);
-    InkpodFloatingTransform transform = state.floating_drag_start;
-    if (state.floating_drag_mode == 2U) {
+    InkpodFloatingTransform transform = state.tools.floating_drag_start;
+    if (state.tools.floating_drag_mode == 2U) {
         const double start_dx = start_document.first - center_x;
         const double start_dy = start_document.second - center_y;
         const double current_dx = current_document.first - center_x;
@@ -1886,7 +1742,7 @@ InkpodStatus UpdateFloatingHandleDrag(
         if (std::abs(start_dy) > 0.01) {
             transform.scale_y *= std::max(0.01, std::abs(current_dy / start_dy));
         }
-    } else if (state.floating_drag_mode == 3U) {
+    } else if (state.tools.floating_drag_mode == 3U) {
         const double start_angle = std::atan2(
             start_document.second - center_y, start_document.first - center_x);
         const double current_angle = std::atan2(
@@ -1900,8 +1756,8 @@ InkpodStatus UpdateFloatingHandleDrag(
     return SetFloatingTransform(state, transform);
 }
 
-InkpodStatus EndFloatingPaste(AppState& state, bool commit) noexcept {
-    if (!state.floating_active || state.engine == nullptr) {
+InkpodStatus EndFloatingPaste(AppContext& state, bool commit) noexcept {
+    if (!state.tools.floating_active || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus status = state.engine->Invoke(
@@ -1916,17 +1772,17 @@ InkpodStatus EndFloatingPaste(AppState& state, bool commit) noexcept {
         commit,
         commit);
     if (status == INKPOD_STATUS_OK || !commit) {
-        state.floating_active = false;
-        state.floating_bounds = {};
-        state.floating_gesture_samples.clear();
+        state.tools.floating_active = false;
+        state.tools.floating_bounds = {};
+        state.tools.floating_gesture_samples.clear();
         UpdateFloatingPreview(state);
-        state.tool = INKPOD_TOOL_PENCIL;
+        state.tools.active_tool = INKPOD_TOOL_PENCIL;
     }
     return status;
 }
 
 InkpodStatus ResizeDocumentFromDialog(
-    AppState& state, const wchar_t* title, bool resolution_mode) noexcept {
+    AppContext& state, const wchar_t* title, bool resolution_mode) noexcept {
     InkpodDocumentInfo info{};
     if (!QueryDocument(state, info)) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -1940,7 +1796,7 @@ InkpodStatus ResizeDocumentFromDialog(
         static_cast<std::int32_t>(info.dpi_x_milli),
         static_cast<std::int32_t>(info.dpi_y_milli)};
     dimensions.value_count = 4U;
-    if (state.smoke_test) {
+    if (state.lifetime.smoke_test) {
         if (resolution_mode) {
             dimensions.values[2] = 120000;
             dimensions.values[3] = 120000;
@@ -1950,7 +1806,7 @@ InkpodStatus ResizeDocumentFromDialog(
         }
     }
     if (ShowViewOptions(
-            state.instance, state.window, state.smoke_test, dimensions) != IDOK
+            state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, dimensions) != IDOK
         || dimensions.values[0] <= 0 || dimensions.values[1] <= 0
         || dimensions.values[2] <= 0 || dimensions.values[3] <= 0) {
         return INKPOD_STATUS_CANCELLED;
@@ -1965,7 +1821,7 @@ InkpodStatus ResizeDocumentFromDialog(
         0};
     placement.value_count = 3U;
     if (ShowViewOptions(
-            state.instance, state.window, state.smoke_test, placement) != IDOK
+            state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, placement) != IDOK
         || placement.values[2] == 0) {
         return INKPOD_STATUS_CANCELLED;
     }
@@ -1989,7 +1845,7 @@ InkpodStatus ResizeDocumentFromDialog(
               true);
 }
 
-InkpodStatus FitPaperToCaptureFrame(AppState& state) noexcept {
+InkpodStatus FitPaperToCaptureFrame(AppContext& state) noexcept {
     InkpodDocumentInfo info{};
     if (!QueryDocument(state, info)) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -2138,7 +1994,7 @@ InkpodDocumentInfo EmptyDocumentInfo() noexcept {
     return info;
 }
 
-bool QueryDocument(AppState& state, InkpodDocumentInfo& info) noexcept {
+bool QueryDocument(AppContext& state, InkpodDocumentInfo& info) noexcept {
     info = EmptyDocumentInfo();
     return state.engine != nullptr && state.engine->GetDocumentInfo(info);
 }
@@ -2229,27 +2085,27 @@ std::uint32_t ColorToRgba8(const InkpodColorValue& color) noexcept {
         | (channel(color.blue) << 8U) | channel(color.alpha);
 }
 
-void SetDrawingColor(AppState& state, InkpodColorValue color) noexcept {
+void SetDrawingColor(ToolUiState& tools, InkpodColorValue color) noexcept {
     color.struct_size = sizeof(InkpodColorValue);
-    state.drawing_color = color;
-    state.color_rgba = ColorToRgba8(color);
+    tools.drawing_color = color;
+    tools.color_rgba = ColorToRgba8(color);
 }
 
-InkpodStatus ShowDrawingColorEditor(AppState& state) noexcept {
+InkpodStatus ShowDrawingColorEditor(AppContext& state) noexcept {
     ViewOptionsDialogState format{};
     format.title = L"描画色形式";
     format.labels = {L"深度 (8/16)", L"編集方式 (1:RGB 2:HSV)", L"Alpha表示 (1:数値 2:%)", nullptr};
     format.values = {
-        state.drawing_color.depth == INKPOD_COLOR_DEPTH_16 ? 16 : 8,
+        state.tools.drawing_color.depth == INKPOD_COLOR_DEPTH_16 ? 16 : 8,
         1,
         1,
         0};
     format.value_count = 3U;
-    if (state.smoke_test) {
+    if (state.lifetime.smoke_test) {
         format.values = {16, 2, 2, 0};
     }
     if (ShowViewOptions(
-            state.instance, state.window, state.smoke_test, format) != IDOK
+            state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, format) != IDOK
         || (format.values[0] != 8 && format.values[0] != 16)
         || (format.values[1] != 1 && format.values[1] != 2)) {
         return INKPOD_STATUS_CANCELLED;
@@ -2261,29 +2117,29 @@ InkpodStatus ShowDrawingColorEditor(AppState& state) noexcept {
     if (format.values[1] == 1) {
         values.labels = {L"R", L"G", L"B", format.values[2] == 2 ? L"Alpha (%)" : L"Alpha"};
         values.values = {
-            state.drawing_color.depth == INKPOD_COLOR_DEPTH_16
-                ? state.drawing_color.red
-                : static_cast<std::int32_t>(state.drawing_color.red),
-            state.drawing_color.green,
-            state.drawing_color.blue,
+            state.tools.drawing_color.depth == INKPOD_COLOR_DEPTH_16
+                ? state.tools.drawing_color.red
+                : static_cast<std::int32_t>(state.tools.drawing_color.red),
+            state.tools.drawing_color.green,
+            state.tools.drawing_color.blue,
             format.values[2] == 2
                 ? static_cast<std::int32_t>(
-                      (static_cast<std::uint64_t>(state.drawing_color.alpha) * 100U
+                      (static_cast<std::uint64_t>(state.tools.drawing_color.alpha) * 100U
                           + maximum / 2U)
                       / maximum)
-                : state.drawing_color.alpha};
-        if (state.smoke_test) {
+                : state.tools.drawing_color.alpha};
+        if (state.lifetime.smoke_test) {
             values.values = {65535, 32768, 0, 50};
         }
     } else {
         values.labels = {L"H (0-359)", L"S (0-1000)", L"V (0-1000)", format.values[2] == 2 ? L"Alpha (%)" : L"Alpha"};
         values.values = {30, 1000, 1000, format.values[2] == 2 ? 100 : static_cast<std::int32_t>(maximum)};
-        if (state.smoke_test) {
+        if (state.lifetime.smoke_test) {
             values.values = {210, 750, 800, 50};
         }
     }
     if (ShowViewOptions(
-            state.instance, state.window, state.smoke_test, values) != IDOK) {
+            state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, values) != IDOK) {
         return INKPOD_STATUS_CANCELLED;
     }
     InkpodColorValue color{};
@@ -2349,7 +2205,7 @@ InkpodStatus ShowDrawingColorEditor(AppState& state) noexcept {
         }
         color.alpha = static_cast<std::uint16_t>(values.values[3]);
     }
-    SetDrawingColor(state, color);
+    SetDrawingColor(state.tools, color);
     return INKPOD_STATUS_OK;
 }
 
@@ -2373,14 +2229,14 @@ InkpodFilterInput M6FilterInputFor(const M6FilterJob& job) noexcept {
     return input;
 }
 
-M6AdjustmentUiState* CurrentM6Adjustment(AppState& state) noexcept {
+M6AdjustmentUiState* CurrentM6Adjustment(EffectsUiState& effects) noexcept {
     const auto found = std::find_if(
-        state.m6_adjustments.begin(),
-        state.m6_adjustments.end(),
-        [&state](const M6AdjustmentUiState& adjustment) {
-            return adjustment.id == state.m6_adjustment_id;
+        effects.adjustments.begin(),
+        effects.adjustments.end(),
+        [&effects](const M6AdjustmentUiState& adjustment) {
+            return adjustment.id == effects.adjustment_id;
         });
-    return found == state.m6_adjustments.end() ? nullptr : &*found;
+    return found == effects.adjustments.end() ? nullptr : &*found;
 }
 
 bool FormatCurvePoints(
@@ -2402,10 +2258,10 @@ bool FormatCurvePoints(
 }
 
 InkpodStatus StartM6Task(
-    AppState& state,
+    AppContext& state,
     bool preview_prompt,
     std::function<InkpodStatus(InkpodCore*, InkpodTask*)> operation) noexcept {
-    if (state.engine == nullptr || state.m6_task != nullptr) {
+    if (state.engine == nullptr || state.effects.task != nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     InkpodTask* task{};
@@ -2413,7 +2269,7 @@ InkpodStatus StartM6Task(
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
-    if (state.smoke_test) {
+    if (state.lifetime.smoke_test) {
         status = state.engine->Invoke(
             [task, operation = std::move(operation)](InkpodCore* core) {
                 return operation(core, task);
@@ -2433,23 +2289,23 @@ InkpodStatus StartM6Task(
         inkpod_task_release(&task);
         return status;
     }
-    state.m6_task = task;
-    state.m6_preview_prompt = preview_prompt;
-    state.m6_progress_dialog = {
-        &state,
+    state.effects.task = task;
+    state.effects.preview_prompt = preview_prompt;
+    state.effects.progress_dialog = {
+        &state.effects,
         QueryM6Progress,
         CancelM6Progress,
         nullptr,
         L"処理中...",
         L"キャンセル中..."};
-    state.m6_progress = inkpod::windows::ui::CreateProgressDialog(
-        state.instance, state.window, state.m6_progress_dialog);
-    if (state.m6_progress == nullptr) {
-        inkpod_task_release(&state.m6_task);
+    state.effects.progress = inkpod::windows::ui::CreateProgressDialog(
+        state.lifetime.instance, state.windows.window, state.effects.progress_dialog);
+    if (state.effects.progress == nullptr) {
+        inkpod_task_release(&state.effects.task);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    ShowWindow(state.m6_progress, SW_SHOW);
-    const HWND window = state.window;
+    ShowWindow(state.effects.progress, SW_SHOW);
+    const HWND window = state.windows.window;
     if (!state.engine->Enqueue(
             [task, operation = std::move(operation)](InkpodCore* core) {
                 return operation(core, task);
@@ -2460,10 +2316,10 @@ InkpodStatus StartM6Task(
             [window](InkpodStatus completion_status) {
                 PostMessageW(window, kM6TaskCompleted, completion_status, 0);
             })) {
-        DestroyWindow(state.m6_progress);
-        state.m6_progress = nullptr;
-        inkpod_task_release(&state.m6_task);
-        state.m6_preview_prompt = false;
+        DestroyWindow(state.effects.progress);
+        state.effects.progress = nullptr;
+        inkpod_task_release(&state.effects.task);
+        state.effects.preview_prompt = false;
         return INKPOD_STATUS_INVALID_STATE;
     }
     return INKPOD_STATUS_OK;
@@ -2503,7 +2359,7 @@ std::uint32_t M6FilterKindForCommand(UINT command) noexcept {
 }
 
 bool ConfigureM6FilterEditor(
-    AppState& state, UINT command, M6FilterJob& job) noexcept {
+    AppContext& state, UINT command, M6FilterJob& job) noexcept {
     job.kind = M6FilterKindForCommand(command);
     if (job.kind == 0U) {
         return false;
@@ -2534,7 +2390,7 @@ bool ConfigureM6FilterEditor(
     } else if (job.kind == INKPOD_FILTER_UNSHARP_MASK) {
         editor.parameters = {2, 1000, 0, 0, 0};
     }
-    if (ShowM6Editor(state.instance, state.window, state.smoke_test, editor) != IDOK) {
+    if (ShowM6Editor(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, editor) != IDOK) {
         return false;
     }
     job.channel = editor.channel;
@@ -2543,9 +2399,9 @@ bool ConfigureM6FilterEditor(
     job.preview = editor.option1;
     if (job.kind == INKPOD_FILTER_TONE_CURVE
         && !ParseCurvePoints(editor.points, job.points)) {
-        if (!state.smoke_test) {
+        if (!state.lifetime.smoke_test) {
             MessageBoxW(
-                state.window,
+                state.windows.window,
                 L"トーンカーブ点は input:output;...（各0～65535）で2点以上指定してください。",
                 L"inkpod",
                 MB_OK | MB_ICONWARNING);
@@ -2555,7 +2411,7 @@ bool ConfigureM6FilterEditor(
     return true;
 }
 
-InkpodStatus QueueM6Filter(AppState& state, M6FilterJob job) noexcept {
+InkpodStatus QueueM6Filter(AppContext& state, M6FilterJob job) noexcept {
     return StartM6Task(
         state,
         job.preview,
@@ -2578,7 +2434,7 @@ InkpodStatus QueueM6Filter(AppState& state, M6FilterJob job) noexcept {
 }
 
 bool ConfigureM6AdjustmentEditor(
-    AppState& state, M6FilterJob& job, bool update) noexcept {
+    AppContext& state, M6FilterJob& job, bool update) noexcept {
     M6EditorState editor{};
     editor.title = L"調整レイヤー（作成後も同じ項目から再編集可能）";
     editor.parameter_labels = {
@@ -2607,7 +2463,7 @@ bool ConfigureM6AdjustmentEditor(
     editor.option1_enabled = false;
     editor.option2_enabled = false;
     if (update) {
-        const M6AdjustmentUiState* current = CurrentM6Adjustment(state);
+        const M6AdjustmentUiState* current = CurrentM6Adjustment(state.effects);
         if (current == nullptr) {
             return false;
         }
@@ -2624,7 +2480,7 @@ bool ConfigureM6AdjustmentEditor(
             return false;
         }
     }
-    if (ShowM6Editor(state.instance, state.window, state.smoke_test, editor) != IDOK) {
+    if (ShowM6Editor(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, editor) != IDOK) {
         return false;
     }
     job.kind = editor.channel;
@@ -2633,9 +2489,9 @@ bool ConfigureM6AdjustmentEditor(
     job.parameters = editor.parameters;
     if (job.kind == INKPOD_FILTER_TONE_CURVE
         && !ParseCurvePoints(editor.points, job.points)) {
-        if (!state.smoke_test) {
+        if (!state.lifetime.smoke_test) {
             MessageBoxW(
-                state.window,
+                state.windows.window,
                 L"トーンカーブ点は input:output;... 形式で2点以上指定してください。",
                 L"inkpod",
                 MB_OK | MB_ICONWARNING);
@@ -2646,23 +2502,23 @@ bool ConfigureM6AdjustmentEditor(
 }
 
 InkpodStatus CreateOrUpdateM6Adjustment(
-    AppState& state, M6FilterJob job, bool update) noexcept {
-    if (state.engine == nullptr || (update && state.m6_adjustment_id == 0U)) {
+    AppContext& state, M6FilterJob job, bool update) noexcept {
+    if (state.engine == nullptr || (update && state.effects.adjustment_id == 0U)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const std::uint64_t layer_id = state.m6_adjustment_id;
+    const std::uint64_t layer_id = state.effects.adjustment_id;
     std::shared_ptr<M6AdjustmentUiState> pending;
     try {
         std::string name;
         if (update) {
-            const M6AdjustmentUiState* current = CurrentM6Adjustment(state);
+            const M6AdjustmentUiState* current = CurrentM6Adjustment(state.effects);
             if (current == nullptr) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
             name = current->name;
         } else {
-            name = "M6 Adjustment " + std::to_string(state.m6_adjustments.size() + 1U);
-            state.m6_adjustments.reserve(state.m6_adjustments.size() + 1U);
+            name = "M6 Adjustment " + std::to_string(state.effects.adjustments.size() + 1U);
+            state.effects.adjustments.reserve(state.effects.adjustments.size() + 1U);
         }
         pending = std::make_shared<M6AdjustmentUiState>(
             M6AdjustmentUiState{layer_id, true, std::move(job), std::move(name)});
@@ -2690,11 +2546,11 @@ InkpodStatus CreateOrUpdateM6Adjustment(
         true);
     if (status == INKPOD_STATUS_OK && !update) {
         pending->id = created_id;
-        state.m6_adjustment_id = created_id;
-        state.m6_adjustment_visible = true;
-        state.m6_adjustments.push_back(std::move(*pending));
+        state.effects.adjustment_id = created_id;
+        state.effects.adjustment_visible = true;
+        state.effects.adjustments.push_back(std::move(*pending));
     } else if (status == INKPOD_STATUS_OK) {
-        M6AdjustmentUiState* current = CurrentM6Adjustment(state);
+        M6AdjustmentUiState* current = CurrentM6Adjustment(state.effects);
         if (current != nullptr) {
             current->job = std::move(pending->job);
         }
@@ -2702,12 +2558,12 @@ InkpodStatus CreateOrUpdateM6Adjustment(
     return status;
 }
 
-InkpodStatus SetM6AdjustmentVisibility(AppState& state, bool visible) noexcept {
-    if (state.engine == nullptr || state.m6_adjustment_id == 0U) {
+InkpodStatus SetM6AdjustmentVisibility(AppContext& state, bool visible) noexcept {
+    if (state.engine == nullptr || state.effects.adjustment_id == 0U) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const std::uint64_t layer_id = state.m6_adjustment_id;
-    M6AdjustmentUiState* current = CurrentM6Adjustment(state);
+    const std::uint64_t layer_id = state.effects.adjustment_id;
+    M6AdjustmentUiState* current = CurrentM6Adjustment(state.effects);
     if (current == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -2734,27 +2590,27 @@ InkpodStatus SetM6AdjustmentVisibility(AppState& state, bool visible) noexcept {
     return status;
 }
 
-bool SelectM6Adjustment(AppState& state, bool next) noexcept {
-    if (state.m6_adjustments.empty()) {
+bool SelectM6Adjustment(AppContext& state, bool next) noexcept {
+    if (state.effects.adjustments.empty()) {
         return false;
     }
     const auto current = std::find_if(
-        state.m6_adjustments.begin(),
-        state.m6_adjustments.end(),
+        state.effects.adjustments.begin(),
+        state.effects.adjustments.end(),
         [&state](const M6AdjustmentUiState& adjustment) {
-            return adjustment.id == state.m6_adjustment_id;
+            return adjustment.id == state.effects.adjustment_id;
         });
-    std::size_t index = current == state.m6_adjustments.end()
+    std::size_t index = current == state.effects.adjustments.end()
         ? 0U
-        : static_cast<std::size_t>(current - state.m6_adjustments.begin());
+        : static_cast<std::size_t>(current - state.effects.adjustments.begin());
     if (next) {
-        index = (index + 1U) % state.m6_adjustments.size();
+        index = (index + 1U) % state.effects.adjustments.size();
     } else {
-        index = (index + state.m6_adjustments.size() - 1U)
-            % state.m6_adjustments.size();
+        index = (index + state.effects.adjustments.size() - 1U)
+            % state.effects.adjustments.size();
     }
-    state.m6_adjustment_id = state.m6_adjustments[index].id;
-    state.m6_adjustment_visible = state.m6_adjustments[index].visible;
+    state.effects.adjustment_id = state.effects.adjustments[index].id;
+    state.effects.adjustment_visible = state.effects.adjustments[index].visible;
     return true;
 }
 
@@ -2772,7 +2628,7 @@ std::vector<InkpodGradientStop> M6GradientStops(const std::vector<M6StopValue>& 
     return stops;
 }
 
-InkpodStatus QueueBoundaryAirbrush(AppState& state, const M6ToolOptions& options) noexcept {
+InkpodStatus QueueBoundaryAirbrush(AppContext& state, const M6ToolOptions& options) noexcept {
     InkpodDocumentInfo document{};
     if (!QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -2814,7 +2670,7 @@ InkpodStatus QueueBoundaryAirbrush(AppState& state, const M6ToolOptions& options
         : INKPOD_STATUS_INVALID_STATE;
 }
 
-bool ConfigureM6Effect(AppState& state, UINT command) noexcept {
+bool ConfigureM6Effect(AppContext& state, UINT command) noexcept {
     M6EditorState editor{};
     editor.option1 = false;
     editor.option2 = false;
@@ -2934,7 +2790,7 @@ bool ConfigureM6Effect(AppState& state, UINT command) noexcept {
         default:
             return false;
     }
-    if (ShowM6Editor(state.instance, state.window, state.smoke_test, editor) != IDOK) {
+    if (ShowM6Editor(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, editor) != IDOK) {
         return false;
     }
     M6ToolOptions options{};
@@ -2947,9 +2803,9 @@ bool ConfigureM6Effect(AppState& state, UINT command) noexcept {
         || command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
         const std::size_t minimum_stops = command == IDM_EFFECT_BOUNDARY_AIRBRUSH ? 2U : 3U;
         if (!ParseM6Stops(editor.points, options.stops, minimum_stops)) {
-            if (!state.smoke_test) {
+            if (!state.lifetime.smoke_test) {
                 MessageBoxW(
-                    state.window,
+                    state.windows.window,
                     command == IDM_EFFECT_BOUNDARY_AIRBRUSH
                         ? L"境界色は position:RRGGBBAA;... 形式で2～16個、0から1000まで昇順に指定してください。"
                         : L"stopは position:RRGGBBAA;... 形式で3～16個、0から1000まで昇順に指定してください。",
@@ -2962,31 +2818,31 @@ bool ConfigureM6Effect(AppState& state, UINT command) noexcept {
     if (command == IDM_EFFECT_GRADIENT || command == IDM_EFFECT_ALPHA_GRADIENT) {
         options.parameters[0] = editor.option1 ? 1 : 0;
     }
-    state.m6_options = std::move(options);
-    state.tool = interaction;
-    state.m6_samples.clear();
+    state.effects.options = std::move(options);
+    state.tools.active_tool = interaction;
+    state.effects.samples.clear();
     if (command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
-        state.tool = INKPOD_TOOL_BRUSH;
-        return QueueBoundaryAirbrush(state, state.m6_options) == INKPOD_STATUS_OK;
+        state.tools.active_tool = INKPOD_TOOL_BRUSH;
+        return QueueBoundaryAirbrush(state, state.effects.options) == INKPOD_STATUS_OK;
     }
     return true;
 }
 
 InkpodStatus QueueM6GradientGesture(
-    AppState& state, std::vector<InkpodStrokeSample> samples, bool alpha_only) noexcept {
+    AppContext& state, std::vector<InkpodStrokeSample> samples, bool alpha_only) noexcept {
     InkpodDocumentInfo document{};
     if (samples.size() < 2U || !QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     std::vector<InkpodGradientStop> stops;
     try {
-        stops = M6GradientStops(state.m6_options.stops);
+        stops = M6GradientStops(state.effects.options.stops);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     M6ToolOptions options{};
     try {
-        options = state.m6_options;
+        options = state.effects.options;
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -3036,18 +2892,18 @@ InkpodStatus QueueM6GradientGesture(
 }
 
 InkpodStatus QueueM6AirbrushGesture(
-    AppState& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (samples.empty() || !QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     M6ToolOptions options{};
     try {
-        options = state.m6_options;
+        options = state.effects.options;
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const InkpodColorValue color = M6Color(state.color_rgba);
+    const InkpodColorValue color = M6Color(state.tools.color_rgba);
     const std::uint64_t plane_id = document.color_plane_id;
     return state.engine->Enqueue(
                [samples = std::move(samples), options, color, plane_id](InkpodCore* core) {
@@ -3081,19 +2937,19 @@ InkpodStatus QueueM6AirbrushGesture(
 }
 
 InkpodStatus QueueM6StampGesture(
-    AppState& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
-    if (!state.stamp_source_valid || samples.empty() || !QueryDocument(state, document)
+    if (!state.effects.stamp_source_valid || samples.empty() || !QueryDocument(state, document)
         || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     M6ToolOptions options{};
     try {
-        options = state.m6_options;
+        options = state.effects.options;
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const InkpodStrokeSample source = state.stamp_source;
+    const InkpodStrokeSample source = state.effects.stamp_source;
     const std::uint64_t plane_id = document.color_plane_id;
     return state.engine->Enqueue(
                [samples = std::move(samples), options, source, plane_id](InkpodCore* core) {
@@ -3126,14 +2982,14 @@ InkpodStatus QueueM6StampGesture(
 }
 
 InkpodStatus QueueM6BlurGesture(
-    AppState& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (samples.empty() || !QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     M6ToolOptions options{};
     try {
-        options = state.m6_options;
+        options = state.effects.options;
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -3164,14 +3020,14 @@ InkpodStatus QueueM6BlurGesture(
 }
 
 InkpodStatus QueueM6Dust(
-    AppState& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (!QueryDocument(state, document)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     M6ToolOptions options{};
     try {
-        options = state.m6_options;
+        options = state.effects.options;
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -3207,10 +3063,10 @@ InkpodStatus QueueM6Dust(
         });
 }
 
-InkpodStatus FinishM6CanvasGesture(AppState& state) noexcept {
+InkpodStatus FinishM6CanvasGesture(AppContext& state) noexcept {
     std::vector<InkpodStrokeSample> samples;
-    samples.swap(state.m6_samples);
-    switch (state.tool) {
+    samples.swap(state.effects.samples);
+    switch (state.tools.active_tool) {
         case kInteractionM6Gradient:
             return QueueM6GradientGesture(state, std::move(samples), false);
         case kInteractionM6AlphaGradient:
@@ -3228,8 +3084,8 @@ InkpodStatus FinishM6CanvasGesture(AppState& state) noexcept {
     }
 }
 
-void UpdateMenuState(AppState& state) noexcept {
-    HMENU menu = GetMenu(state.window);
+void UpdateMenuState(AppContext& state) noexcept {
+    HMENU menu = GetMenu(state.windows.window);
     if (menu == nullptr) {
         return;
     }
@@ -3239,9 +3095,9 @@ void UpdateMenuState(AppState& state) noexcept {
     const bool vector_stroke_plane = has_document
         && QueryTreeNode(state, true, active_plane)
         && IsVectorStrokePlane(active_plane.kind);
-    if (!vector_stroke_plane && IsVectorCanvasTool(state.tool)) {
-        ClearVectorGeometryPreview(state);
-        state.tool = INKPOD_TOOL_PENCIL;
+    if (!vector_stroke_plane && IsVectorCanvasTool(state.tools.active_tool)) {
+        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
+        state.tools.active_tool = INKPOD_TOOL_PENCIL;
     }
     EnableMenuItem(
         menu,
@@ -3255,12 +3111,12 @@ void UpdateMenuState(AppState& state) noexcept {
         menu,
         IDM_FILE_REVERT,
         MF_BYCOMMAND
-            | (has_document && !state.current_path.empty() ? MF_ENABLED : MF_GRAYED));
+            | (has_document && !state.document.current_path.empty() ? MF_ENABLED : MF_GRAYED));
     EnableMenuItem(
         menu,
         IDM_FILE_REVERT_PARTIAL,
         MF_BYCOMMAND
-            | (has_document && !state.current_path.empty() ? MF_ENABLED : MF_GRAYED));
+            | (has_document && !state.document.current_path.empty() ? MF_ENABLED : MF_GRAYED));
     EnableMenuItem(
         menu,
         IDM_FILE_AUTOSAVE_NOW,
@@ -3380,13 +3236,13 @@ void UpdateMenuState(AppState& state) noexcept {
             menu,
             command,
             MF_BYCOMMAND
-                | (has_document && state.plane == INKPOD_PLANE_COLOR ? MF_ENABLED : MF_GRAYED));
+                | (has_document && state.tools.active_plane == INKPOD_PLANE_COLOR ? MF_ENABLED : MF_GRAYED));
     }
     EnableMenuItem(
         menu,
         IDM_ADJUSTMENT_CREATE,
         MF_BYCOMMAND
-            | (has_document && state.plane == INKPOD_PLANE_COLOR
+            | (has_document && state.tools.active_plane == INKPOD_PLANE_COLOR
                    ? MF_ENABLED
                    : MF_GRAYED));
     for (const UINT command : {
@@ -3396,7 +3252,7 @@ void UpdateMenuState(AppState& state) noexcept {
         EnableMenuItem(
             menu,
             command,
-            MF_BYCOMMAND | (has_document && state.m6_adjustment_id != 0U ? MF_ENABLED
+            MF_BYCOMMAND | (has_document && state.effects.adjustment_id != 0U ? MF_ENABLED
                                                                           : MF_GRAYED));
     }
     for (const UINT command : {IDM_ADJUSTMENT_PREVIOUS, IDM_ADJUSTMENT_NEXT}) {
@@ -3404,17 +3260,17 @@ void UpdateMenuState(AppState& state) noexcept {
             menu,
             command,
             MF_BYCOMMAND
-                | (has_document && state.m6_adjustments.size() > 1U ? MF_ENABLED : MF_GRAYED));
+                | (has_document && state.effects.adjustments.size() > 1U ? MF_ENABLED : MF_GRAYED));
     }
     CheckMenuItem(
         menu,
         IDM_ADJUSTMENT_TOGGLE,
-        MF_BYCOMMAND | (state.m6_adjustment_visible ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.effects.adjustment_visible ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(
         menu,
         IDM_EFFECT_ALPHA_VIEW,
-        MF_BYCOMMAND | (state.alpha_view ? MF_CHECKED : MF_UNCHECKED));
-    const bool paste_available = state.clipboard != nullptr
+        MF_BYCOMMAND | (state.effects.alpha_view ? MF_CHECKED : MF_UNCHECKED));
+    const bool paste_available = state.document.clipboard != nullptr
         || (InkpodClipboardFormat() != 0U
             && IsClipboardFormatAvailable(InkpodClipboardFormat()) != FALSE);
     for (const UINT command : {
@@ -3422,7 +3278,7 @@ void UpdateMenuState(AppState& state) noexcept {
         EnableMenuItem(
             menu,
             command,
-            MF_BYCOMMAND | (has_document && paste_available && !state.floating_active
+            MF_BYCOMMAND | (has_document && paste_available && !state.tools.floating_active
                                   ? MF_ENABLED
                                   : MF_GRAYED));
     }
@@ -3433,13 +3289,13 @@ void UpdateMenuState(AppState& state) noexcept {
         EnableMenuItem(
             menu,
             command,
-            MF_BYCOMMAND | (state.floating_active ? MF_ENABLED : MF_GRAYED));
+            MF_BYCOMMAND | (state.tools.floating_active ? MF_ENABLED : MF_GRAYED));
     }
     EnableMenuItem(
         menu,
         IDM_LAYER_DELETE,
         MF_BYCOMMAND
-            | (has_document && state.m3_layer_id != 0U ? MF_ENABLED : MF_GRAYED));
+            | (has_document && state.document.smoke_layer_id != 0U ? MF_ENABLED : MF_GRAYED));
     for (const UINT command : {
              IDM_SELECTION_FROM_LAYER,
              IDM_SELECTION_LAYER_ADD,
@@ -3448,45 +3304,45 @@ void UpdateMenuState(AppState& state) noexcept {
             menu,
             command,
             MF_BYCOMMAND
-                | (has_document && state.selection_layer_id != 0U ? MF_ENABLED
+                | (has_document && state.document.selection_layer_id != 0U ? MF_ENABLED
                                                                    : MF_GRAYED));
     }
     CheckMenuItem(
         menu,
         IDM_VIEW_FLIP_HORIZONTAL,
-        MF_BYCOMMAND | (state.view_flip_horizontal ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.view.flip_horizontal ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(
         menu,
         IDM_VIEW_FLIP_VERTICAL,
-        MF_BYCOMMAND | (state.view_flip_vertical ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.view.flip_vertical ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(
         menu,
         IDM_VIEW_GRID,
-        MF_BYCOMMAND | (state.grid_visible ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.view.grid_visible ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(
         menu,
         IDM_VIEW_RULER,
-        MF_BYCOMMAND | (state.ruler_visible ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.view.ruler_visible ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(
         menu,
         IDM_VIEW_GUIDES,
-        MF_BYCOMMAND | (state.guides_visible ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.view.guides_visible ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(
         menu,
         IDM_VIEW_SNAP_GUIDES,
-        MF_BYCOMMAND | (state.snap_guides ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.view.snap_guides ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(
         menu,
         IDM_VIEW_SNAP_GRID,
-        MF_BYCOMMAND | (state.snap_grid ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.view.snap_grid ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(
         menu,
         IDM_VIEW_TRANSPARENT,
-        MF_BYCOMMAND | (state.transparent_visible ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.view.transparent_visible ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(
         menu,
         IDM_VIEW_BOX_ZOOM,
-        MF_BYCOMMAND | (state.tool == kInteractionBoxZoom ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.tools.active_tool == kInteractionBoxZoom ? MF_CHECKED : MF_UNCHECKED));
     for (const UINT command : {
              IDM_SELECTION_RECTANGLE,
              IDM_SELECTION_ELLIPSE,
@@ -3500,22 +3356,22 @@ void UpdateMenuState(AppState& state) noexcept {
              IDM_SELECTION_MODE_INTERSECT}) {
         CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
     }
-    const UINT selection_shape_command = state.selection_shape == INKPOD_SELECTION_ELLIPSE
+    const UINT selection_shape_command = state.tools.selection_shape == INKPOD_SELECTION_ELLIPSE
         ? IDM_SELECTION_ELLIPSE
-        : (state.selection_shape == INKPOD_SELECTION_LASSO
+        : (state.tools.selection_shape == INKPOD_SELECTION_LASSO
                   ? IDM_SELECTION_LASSO
-                  : (state.selection_shape == INKPOD_SELECTION_POLYLINE
+                  : (state.tools.selection_shape == INKPOD_SELECTION_POLYLINE
                             ? IDM_SELECTION_POLYLINE
-                            : (state.selection_shape == INKPOD_SELECTION_TRACE
+                            : (state.tools.selection_shape == INKPOD_SELECTION_TRACE
                                       ? IDM_SELECTION_TRACE
-                                      : (state.selection_shape == INKPOD_SELECTION_WAND
+                                      : (state.tools.selection_shape == INKPOD_SELECTION_WAND
                                                 ? IDM_SELECTION_WAND
                                                 : IDM_SELECTION_RECTANGLE))));
-    const UINT selection_mode_command = state.selection_operation == INKPOD_SELECTION_ADD
+    const UINT selection_mode_command = state.tools.selection_operation == INKPOD_SELECTION_ADD
         ? IDM_SELECTION_MODE_ADD
-        : (state.selection_operation == INKPOD_SELECTION_SUBTRACT
+        : (state.tools.selection_operation == INKPOD_SELECTION_SUBTRACT
                   ? IDM_SELECTION_MODE_SUBTRACT
-                  : (state.selection_operation == INKPOD_SELECTION_INTERSECT
+                  : (state.tools.selection_operation == INKPOD_SELECTION_INTERSECT
                             ? IDM_SELECTION_MODE_INTERSECT
                             : IDM_SELECTION_MODE_NEW));
     CheckMenuItem(
@@ -3528,26 +3384,26 @@ void UpdateMenuState(AppState& state) noexcept {
              IDM_PLANE_MAIN_LINE, IDM_PLANE_COLOR}) {
         CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
     }
-    const UINT tool_command = state.tool == INKPOD_TOOL_PENCIL
+    const UINT tool_command = state.tools.active_tool == INKPOD_TOOL_PENCIL
         ? IDM_TOOL_PENCIL
-        : (state.tool == INKPOD_TOOL_BRUSH
+        : (state.tools.active_tool == INKPOD_TOOL_BRUSH
                   ? IDM_TOOL_BRUSH
-                  : (state.tool == INKPOD_TOOL_ERASER
+                  : (state.tools.active_tool == INKPOD_TOOL_ERASER
                             ? IDM_TOOL_ERASER
-                            : (state.tool == kInteractionFill
-                                      ? (state.fill_options.operation == INKPOD_FILL_CLOSED_REGION
+                            : (state.tools.active_tool == kInteractionFill
+                                      ? (state.tools.fill_options.operation == INKPOD_FILL_CLOSED_REGION
                                                 ? IDM_TOOL_CLOSED_FILL
-                                                : (state.fill_options.operation
+                                                : (state.tools.fill_options.operation
                                                             == INKPOD_FILL_EXTENSION
                                                       ? IDM_TOOL_FILL_EXTENSION
                                                       : IDM_TOOL_FILL))
                                       : IDM_TOOL_EYEDROPPER)));
-    if (state.tool != kInteractionBoxZoom && state.tool != kInteractionGuideMove
-        && state.tool != kInteractionSelection && state.tool != kInteractionFloatingTransform
-        && state.tool != kInteractionLightTableMove
-        && !IsVectorCanvasTool(state.tool)
-        && !(state.tool >= kInteractionM6Gradient
-            && state.tool <= kInteractionM6AlphaGradient)) {
+    if (state.tools.active_tool != kInteractionBoxZoom && state.tools.active_tool != kInteractionGuideMove
+        && state.tools.active_tool != kInteractionSelection && state.tools.active_tool != kInteractionFloatingTransform
+        && state.tools.active_tool != kInteractionLightTableMove
+        && !IsVectorCanvasTool(state.tools.active_tool)
+        && !(state.tools.active_tool >= kInteractionM6Gradient
+            && state.tools.active_tool <= kInteractionM6AlphaGradient)) {
         CheckMenuItem(menu, tool_command, MF_BYCOMMAND | MF_CHECKED);
     }
     for (const UINT command : {
@@ -3559,18 +3415,18 @@ void UpdateMenuState(AppState& state) noexcept {
             MF_BYCOMMAND | (vector_stroke_plane ? MF_ENABLED : MF_GRAYED));
         CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
     }
-    const UINT vector_tool_command = state.tool == kInteractionVectorLine
+    const UINT vector_tool_command = state.tools.active_tool == kInteractionVectorLine
         ? IDM_VECTOR_LINE
-        : (state.tool == kInteractionVectorCurve
+        : (state.tools.active_tool == kInteractionVectorCurve
                   ? IDM_VECTOR_CURVE
-                  : (state.tool == kInteractionVectorRectangle
+                  : (state.tools.active_tool == kInteractionVectorRectangle
                             ? IDM_VECTOR_RECTANGLE
-                            : (state.tool == kInteractionVectorEllipse
+                            : (state.tools.active_tool == kInteractionVectorEllipse
                                       ? IDM_VECTOR_ELLIPSE
-                                      : (state.tool == kInteractionVectorPolyline
+                                      : (state.tools.active_tool == kInteractionVectorPolyline
                                                 ? IDM_VECTOR_POLYLINE
                                                 : IDM_VECTOR_ERASER))));
-    if (IsVectorCanvasTool(state.tool)) {
+    if (IsVectorCanvasTool(state.tools.active_tool)) {
         CheckMenuItem(menu, vector_tool_command, MF_BYCOMMAND | MF_CHECKED);
     }
     for (const UINT command : {
@@ -3581,23 +3437,23 @@ void UpdateMenuState(AppState& state) noexcept {
     }
     CheckMenuItem(
         menu,
-        state.vector_erase_mode == INKPOD_VECTOR_ERASE_TO_INTERSECTION
+        state.tools.vector_erase_mode == INKPOD_VECTOR_ERASE_TO_INTERSECTION
             ? IDM_VECTOR_ERASE_INTERSECTION
-            : (state.vector_erase_mode == INKPOD_VECTOR_ERASE_WHOLE_PATH
+            : (state.tools.vector_erase_mode == INKPOD_VECTOR_ERASE_WHOLE_PATH
                       ? IDM_VECTOR_ERASE_WHOLE
                       : IDM_VECTOR_ERASE_PARTIAL),
         MF_BYCOMMAND | MF_CHECKED);
     CheckMenuItem(
         menu,
-        state.plane == INKPOD_PLANE_MAIN_LINE ? IDM_PLANE_MAIN_LINE : IDM_PLANE_COLOR,
+        state.tools.active_plane == INKPOD_PLANE_MAIN_LINE ? IDM_PLANE_MAIN_LINE : IDM_PLANE_COLOR,
         MF_BYCOMMAND | MF_CHECKED);
     for (const UINT command : {
              IDM_COLOR_CHECK_OFF, IDM_COLOR_CHECK_LEGACY, IDM_COLOR_CHECK_NATIVE}) {
         CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
     }
-    const UINT check_command = state.color_check_mode == INKPOD_COLOR_CHECK_LEGACY_WHITE
+    const UINT check_command = state.view.color_check_mode == INKPOD_COLOR_CHECK_LEGACY_WHITE
         ? IDM_COLOR_CHECK_LEGACY
-        : (state.color_check_mode == INKPOD_COLOR_CHECK_NATIVE_ALPHA
+        : (state.view.color_check_mode == INKPOD_COLOR_CHECK_NATIVE_ALPHA
                   ? IDM_COLOR_CHECK_NATIVE
                   : IDM_COLOR_CHECK_OFF);
     CheckMenuItem(menu, check_command, MF_BYCOMMAND | MF_CHECKED);
@@ -3608,47 +3464,47 @@ void UpdateMenuState(AppState& state) noexcept {
              IDM_COLOR_SOURCE_LIGHT_TABLE}) {
         CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
     }
-    const UINT source_command = state.eyedropper_source
+    const UINT source_command = state.tools.eyedropper_source
             == INKPOD_EYEDROPPER_TOPMOST_NONTRANSPARENT
         ? IDM_COLOR_SOURCE_TOPMOST
-        : (state.eyedropper_source == INKPOD_EYEDROPPER_SELECTED_PLANE
+        : (state.tools.eyedropper_source == INKPOD_EYEDROPPER_SELECTED_PLANE
                   ? IDM_COLOR_SOURCE_SELECTED
-                  : (state.eyedropper_source == INKPOD_EYEDROPPER_LIGHT_TABLE_TOPMOST
+                  : (state.tools.eyedropper_source == INKPOD_EYEDROPPER_LIGHT_TABLE_TOPMOST
                             ? IDM_COLOR_SOURCE_LIGHT_TABLE
                             : IDM_COLOR_SOURCE_COMPOSITE));
     CheckMenuItem(menu, source_command, MF_BYCOMMAND | MF_CHECKED);
     CheckMenuItem(
         menu,
         IDM_CHART_LOCK,
-        MF_BYCOMMAND | (state.color_chart_locked ? MF_CHECKED : MF_UNCHECKED));
+        MF_BYCOMMAND | (state.panes.color_chart_locked ? MF_CHECKED : MF_UNCHECKED));
     for (const UINT command : {
              IDM_MOTION_FPS_30, IDM_MOTION_FPS_25, IDM_MOTION_FPS_24,
              IDM_MOTION_FPS_12, IDM_MOTION_FPS_10, IDM_MOTION_FPS_8}) {
         CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
     }
-    const UINT fps_command = state.motion_fps == 30U
+    const UINT fps_command = state.animation.motion_fps == 30U
         ? IDM_MOTION_FPS_30
-        : (state.motion_fps == 25U
+        : (state.animation.motion_fps == 25U
                   ? IDM_MOTION_FPS_25
-                  : (state.motion_fps == 24U
+                  : (state.animation.motion_fps == 24U
                             ? IDM_MOTION_FPS_24
-                            : (state.motion_fps == 12U
+                            : (state.animation.motion_fps == 12U
                                       ? IDM_MOTION_FPS_12
-                                      : (state.motion_fps == 10U
+                                      : (state.animation.motion_fps == 10U
                                                 ? IDM_MOTION_FPS_10
                                                 : IDM_MOTION_FPS_8))));
     CheckMenuItem(menu, fps_command, MF_BYCOMMAND | MF_CHECKED);
 
-    const bool batch_idle = state.batch_task == nullptr;
+    const bool batch_idle = state.batch.task == nullptr;
     const bool batch_has_operations = state.batch.loaded_graph
-        ? state.batch_graph != nullptr
+        ? state.batch.graph != nullptr
         : !state.batch.operations.empty();
     CheckMenuItem(
         menu,
         IDM_WINDOW_BATCH,
         MF_BYCOMMAND
-            | (state.batch_palette != nullptr
-                    && IsWindowVisible(state.batch_palette) != FALSE
+            | (state.batch.palette != nullptr
+                    && IsWindowVisible(state.batch.palette) != FALSE
                 ? MF_CHECKED
                 : MF_UNCHECKED));
     for (const UINT command : {
@@ -3732,7 +3588,7 @@ void UpdateMenuState(AppState& state) noexcept {
             : IDM_BATCH_FAILURE_CONTINUE,
         MF_BYCOMMAND | MF_CHECKED);
 
-    if (state.toolbar != nullptr) {
+    if (state.windows.toolbar != nullptr) {
         const LPARAM enabled = MAKELPARAM(has_document ? TRUE : FALSE, 0);
         for (const UINT command : {
                  IDM_FILE_SAVE,
@@ -3745,18 +3601,18 @@ void UpdateMenuState(AppState& state) noexcept {
                  IDM_VIEW_GUIDES,
                  IDM_VIEW_GRID,
                  IDM_VIEW_TRANSPARENT}) {
-            SendMessageW(state.toolbar, TB_ENABLEBUTTON, command, enabled);
+            SendMessageW(state.windows.toolbar, TB_ENABLEBUTTON, command, enabled);
         }
         for (const auto& [command, checked] : std::array<std::pair<UINT, bool>, 7U>{
-                 std::pair{IDM_VIEW_BOX_ZOOM, state.tool == kInteractionBoxZoom},
-                 std::pair{IDM_VIEW_FLIP_HORIZONTAL, state.view_flip_horizontal},
-                 std::pair{IDM_VIEW_FLIP_VERTICAL, state.view_flip_vertical},
-                 std::pair{IDM_VIEW_RULER, state.ruler_visible},
-                 std::pair{IDM_VIEW_GUIDES, state.guides_visible},
-                 std::pair{IDM_VIEW_GRID, state.grid_visible},
-                 std::pair{IDM_VIEW_TRANSPARENT, state.transparent_visible}}) {
+                 std::pair{IDM_VIEW_BOX_ZOOM, state.tools.active_tool == kInteractionBoxZoom},
+                 std::pair{IDM_VIEW_FLIP_HORIZONTAL, state.view.flip_horizontal},
+                 std::pair{IDM_VIEW_FLIP_VERTICAL, state.view.flip_vertical},
+                 std::pair{IDM_VIEW_RULER, state.view.ruler_visible},
+                 std::pair{IDM_VIEW_GUIDES, state.view.guides_visible},
+                 std::pair{IDM_VIEW_GRID, state.view.grid_visible},
+                 std::pair{IDM_VIEW_TRANSPARENT, state.view.transparent_visible}}) {
             SendMessageW(
-                state.toolbar,
+                state.windows.toolbar,
                 TB_CHECKBUTTON,
                 command,
                 MAKELPARAM(checked ? TRUE : FALSE, 0));
@@ -3764,9 +3620,9 @@ void UpdateMenuState(AppState& state) noexcept {
     }
 
     std::array<wchar_t, 1024> title{};
-    const wchar_t* name = state.current_path.empty()
+    const wchar_t* name = state.document.current_path.empty()
         ? ((info.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U ? L"Recovery" : L"無題")
-        : state.current_path.c_str();
+        : state.document.current_path.c_str();
     _snwprintf_s(
         title.data(),
         title.size(),
@@ -3774,24 +3630,24 @@ void UpdateMenuState(AppState& state) noexcept {
         L"%ls%ls - inkpod",
         name,
         has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L" *" : L"");
-    SetWindowTextW(state.window, title.data());
-    if (state.status_bar != nullptr) {
+    SetWindowTextW(state.windows.window, title.data());
+    if (state.windows.status_bar != nullptr) {
         InkpodSnapshotTransform transform{};
         const bool has_transform = has_document && QuerySnapshotTransform(state, transform);
         std::array<wchar_t, 96U> tool_text{};
-        const wchar_t* tool_name = state.tool == kInteractionBoxZoom
+        const wchar_t* tool_name = state.tools.active_tool == kInteractionBoxZoom
             ? L"範囲を拡大"
-            : (state.tool == kInteractionGuideMove
+            : (state.tools.active_tool == kInteractionGuideMove
                       ? L"ガイド移動"
-                      : (state.tool == kInteractionSelection
+                      : (state.tools.active_tool == kInteractionSelection
                                 ? L"選択"
-            : (state.tool == kInteractionFill
+            : (state.tools.active_tool == kInteractionFill
                       ? L"フィル"
-                      : (state.tool == kInteractionEyedropper
+                      : (state.tools.active_tool == kInteractionEyedropper
                                 ? L"スポイト"
-                                : (state.tool == INKPOD_TOOL_ERASER
+                                : (state.tools.active_tool == INKPOD_TOOL_ERASER
                                           ? L"消しゴム"
-                                          : (state.tool == INKPOD_TOOL_BRUSH ? L"ブラシ"
+                                          : (state.tools.active_tool == INKPOD_TOOL_BRUSH ? L"ブラシ"
                                                                               : L"鉛筆"))))));
         _snwprintf_s(
             tool_text.data(), tool_text.size(), _TRUNCATE, L"ツール: %ls", tool_name);
@@ -3813,31 +3669,31 @@ void UpdateMenuState(AppState& state) noexcept {
             has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L"変更あり"
                                                                              : L"保存済み");
         SendMessageW(
-            state.status_bar,
+            state.windows.status_bar,
             SB_SETTEXTW,
             0,
             reinterpret_cast<LPARAM>(tool_text.data()));
         SendMessageW(
-            state.status_bar,
+            state.windows.status_bar,
             SB_SETTEXTW,
             1,
             reinterpret_cast<LPARAM>(zoom_text.data()));
         SendMessageW(
-            state.status_bar,
+            state.windows.status_bar,
             SB_SETTEXTW,
             2,
             reinterpret_cast<LPARAM>(document_text.data()));
-        if (has_transform && state.zoom_slider != nullptr) {
+        if (has_transform && state.windows.zoom_slider != nullptr) {
             const auto slider_value = static_cast<LPARAM>(std::clamp(
                 static_cast<int>(std::lround(transform.zoom * 100.0)), 1, 800));
-            SendMessageW(state.zoom_slider, TBM_SETPOS, TRUE, slider_value);
+            SendMessageW(state.windows.zoom_slider, TBM_SETPOS, TRUE, slider_value);
         }
     }
-    DrawMenuBar(state.window);
+    DrawMenuBar(state.windows.window);
 }
 
 InkpodStatus ApplyView(
-    AppState& state,
+    AppContext& state,
     InkpodViewCommandKind kind,
     double value1,
     double value2,
@@ -3845,7 +3701,7 @@ InkpodStatus ApplyView(
     double value4 = 0.0) noexcept {
     const InkpodViewInput input{
         sizeof(InkpodViewInput), kind, 0U, value1, value2, value3, value4};
-    const std::uint64_t view_id = state.active_view_id;
+    const std::uint64_t view_id = state.view.active_view_id;
     return state.engine == nullptr
         ? INKPOD_STATUS_INVALID_STATE
         : state.engine->Invoke(
@@ -3864,13 +3720,13 @@ InkpodStatus ApplyView(
 }
 
 bool QuerySnapshotTransform(
-    AppState& state, InkpodSnapshotTransform& transform) noexcept {
+    AppContext& state, InkpodSnapshotTransform& transform) noexcept {
     transform = {};
     transform.struct_size = sizeof(transform);
     if (state.engine == nullptr) {
         return false;
     }
-    const std::uint64_t view_id = state.active_view_id;
+    const std::uint64_t view_id = state.view.active_view_id;
     return state.engine->Invoke(
                [&transform, view_id](InkpodCore* core) {
                    const InkpodSnapshotOptions options{
@@ -3891,14 +3747,14 @@ bool QuerySnapshotTransform(
                false) == INKPOD_STATUS_OK;
 }
 
-InkpodStatus ApplyZoomPercent(AppState& state, std::uint32_t percent) noexcept {
+InkpodStatus ApplyZoomPercent(AppContext& state, std::uint32_t percent) noexcept {
     if (percent == 0U || percent > 6400U) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
     InkpodSnapshotTransform transform{};
     RECT client{};
     if (!QuerySnapshotTransform(state, transform)
-        || GetClientRect(state.canvas, &client) == FALSE
+        || GetClientRect(state.windows.canvas, &client) == FALSE
         || !std::isfinite(transform.zoom) || transform.zoom <= 0.0) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -3912,14 +3768,14 @@ InkpodStatus ApplyZoomPercent(AppState& state, std::uint32_t percent) noexcept {
 }
 
 InkpodStatus ApplyBoxZoomGesture(
-    AppState& state,
+    AppContext& state,
     const InkpodStrokeSample& start,
     const InkpodStrokeSample& end) noexcept {
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, info)
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&bounds)) != 1
@@ -3932,14 +3788,14 @@ InkpodStatus ApplyBoxZoomGesture(
     }
     auto document_x = [&](double value) {
         double result = (value - bounds.left) / zoom;
-        if (state.view_flip_horizontal) {
+        if (state.view.flip_horizontal) {
             result = static_cast<double>(info.width) - result;
         }
         return std::clamp(result, 0.0, static_cast<double>(info.width));
     };
     auto document_y = [&](double value) {
         double result = (value - bounds.top) / zoom;
-        if (state.view_flip_vertical) {
+        if (state.view.flip_vertical) {
             result = static_cast<double>(info.height) - result;
         }
         return std::clamp(result, 0.0, static_cast<double>(info.height));
@@ -3965,7 +3821,7 @@ InkpodStatus ApplyBoxZoomGesture(
 }
 
 InkpodStatus AddGuide(
-    AppState& state, std::uint32_t axis, std::int32_t position) noexcept {
+    AppContext& state, std::uint32_t axis, std::int32_t position) noexcept {
     return state.engine == nullptr
         ? INKPOD_STATUS_INVALID_STATE
         : state.engine->Invoke(
@@ -3980,7 +3836,7 @@ InkpodStatus AddGuide(
               true);
 }
 
-InkpodStatus DeleteAllGuides(AppState& state) noexcept {
+InkpodStatus DeleteAllGuides(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -4032,7 +3888,7 @@ InkpodStatus DeleteAllGuides(AppState& state) noexcept {
         true);
 }
 
-InkpodStatus SetGrid(AppState& state, const InkpodGridInput& input) noexcept {
+InkpodStatus SetGrid(AppContext& state, const InkpodGridInput& input) noexcept {
     return state.engine == nullptr
         ? INKPOD_STATUS_INVALID_STATE
         : state.engine->Invoke(
@@ -4046,31 +3902,31 @@ InkpodStatus SetGrid(AppState& state, const InkpodGridInput& input) noexcept {
 }
 
 bool BeginGuideDrag(
-    AppState& state, const InkpodStrokeSample& sample) noexcept {
+    AppContext& state, const InkpodStrokeSample& sample) noexcept {
     constexpr float ruler_extent = 22.0F;
-    if (state.tool != kInteractionGuideMove && state.ruler_visible
+    if (state.tools.active_tool != kInteractionGuideMove && state.view.ruler_visible
         && sample.y >= 0.0F && sample.y <= ruler_extent
         && sample.x > ruler_extent) {
-        state.guide_drag_active = true;
-        state.guide_drag_axis = INKPOD_GUIDE_VERTICAL;
-        state.guide_drag_id = 0U;
+        state.view.guide_drag_active = true;
+        state.view.guide_drag_axis = INKPOD_GUIDE_VERTICAL;
+        state.view.guide_drag_id = 0U;
         return true;
     }
-    if (state.tool != kInteractionGuideMove && state.ruler_visible
+    if (state.tools.active_tool != kInteractionGuideMove && state.view.ruler_visible
         && sample.x >= 0.0F && sample.x <= ruler_extent
         && sample.y > ruler_extent) {
-        state.guide_drag_active = true;
-        state.guide_drag_axis = INKPOD_GUIDE_HORIZONTAL;
-        state.guide_drag_id = 0U;
+        state.view.guide_drag_active = true;
+        state.view.guide_drag_axis = INKPOD_GUIDE_HORIZONTAL;
+        state.view.guide_drag_id = 0U;
         return true;
     }
-    if (state.tool != kInteractionGuideMove || state.engine == nullptr) {
+    if (state.tools.active_tool != kInteractionGuideMove || state.engine == nullptr) {
         return false;
     }
     std::uint64_t nearest_id{};
     std::uint32_t nearest_axis{};
     double nearest_distance = 7.0;
-    const std::uint64_t view_id = state.active_view_id;
+    const std::uint64_t view_id = state.view.active_view_id;
     const InkpodStatus status = state.engine->Invoke(
         [view_id, &sample, &nearest_id, &nearest_axis, &nearest_distance](InkpodCore* core) {
             const InkpodSnapshotOptions options{
@@ -4130,29 +3986,29 @@ bool BeginGuideDrag(
     if (status != INKPOD_STATUS_OK || nearest_id == 0U) {
         return false;
     }
-    state.guide_drag_active = true;
-    state.guide_drag_axis = nearest_axis;
-    state.guide_drag_id = nearest_id;
+    state.view.guide_drag_active = true;
+    state.view.guide_drag_axis = nearest_axis;
+    state.view.guide_drag_id = nearest_id;
     return true;
 }
 
 InkpodStatus FinishGuideDrag(
-    AppState& state, const InkpodStrokeSample& sample) noexcept {
-    if (!state.guide_drag_active) {
+    AppContext& state, const InkpodStrokeSample& sample) noexcept {
+    if (!state.view.guide_drag_active) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const std::uint32_t axis = state.guide_drag_axis;
-    const std::uint64_t guide_id = state.guide_drag_id;
-    state.guide_drag_active = false;
-    state.guide_drag_axis = 0U;
-    state.guide_drag_id = 0U;
+    const std::uint32_t axis = state.view.guide_drag_axis;
+    const std::uint64_t guide_id = state.view.guide_drag_id;
+    state.view.guide_drag_active = false;
+    state.view.guide_drag_axis = 0U;
+    state.view.guide_drag_id = 0U;
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     RECT client{};
     if (!QueryDocument(state, info)
-        || GetClientRect(state.canvas, &client) == FALSE
+        || GetClientRect(state.windows.canvas, &client) == FALSE
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&bounds)) != 1) {
@@ -4168,8 +4024,8 @@ InkpodStatus FinishGuideDrag(
     double document_position = axis == INKPOD_GUIDE_VERTICAL
         ? (static_cast<double>(sample.x) - bounds.left) / zoom
         : (static_cast<double>(sample.y) - bounds.top) / zoom;
-    if ((axis == INKPOD_GUIDE_VERTICAL && state.view_flip_horizontal)
-        || (axis == INKPOD_GUIDE_HORIZONTAL && state.view_flip_vertical)) {
+    if ((axis == INKPOD_GUIDE_VERTICAL && state.view.flip_horizontal)
+        || (axis == INKPOD_GUIDE_HORIZONTAL && state.view.flip_vertical)) {
         document_position = static_cast<double>(
             axis == INKPOD_GUIDE_VERTICAL ? info.width : info.height)
             - document_position;
@@ -4209,9 +4065,9 @@ InkpodStatus FinishGuideDrag(
               true);
 }
 
-InkpodStatus FitCanvas(AppState& state, InkpodViewCommandKind kind) noexcept {
+InkpodStatus FitCanvas(AppContext& state, InkpodViewCommandKind kind) noexcept {
     RECT client{};
-    GetClientRect(state.canvas, &client);
+    GetClientRect(state.windows.canvas, &client);
     return ApplyView(
         state,
         kind,
@@ -4220,7 +4076,7 @@ InkpodStatus FitCanvas(AppState& state, InkpodViewCommandKind kind) noexcept {
 }
 
 InkpodStatus ApplyTreeEdit(
-    AppState& state,
+    AppContext& state,
     InkpodTreeOperation operation,
     std::uint64_t object_id,
     std::uint32_t destination_index,
@@ -4244,12 +4100,12 @@ InkpodStatus ApplyTreeEdit(
               true);
 }
 
-bool QueryTreeNode(AppState& state, bool plane, TreePaneNode& output) noexcept {
+bool QueryTreeNode(AppContext& state, bool plane, TreePaneNode& output) noexcept {
     if (state.engine == nullptr) {
         return false;
     }
-    const std::uint32_t layer_index = state.active_tree_layer_index;
-    const std::uint32_t plane_index = plane ? state.active_tree_plane_index : UINT32_MAX;
+    const std::uint32_t layer_index = state.panes.active_tree_layer_index;
+    const std::uint32_t plane_index = plane ? state.panes.active_tree_plane_index : UINT32_MAX;
     return state.engine->Invoke(
                [layer_index, plane_index, &output](InkpodCore* core) {
                    std::array<std::uint8_t, 256U> name{};
@@ -4285,7 +4141,7 @@ bool QueryTreeNode(AppState& state, bool plane, TreePaneNode& output) noexcept {
 }
 
 InkpodStatus ApplyTreeEditRecord(
-    AppState& state, InkpodTreeEdit edit, const std::string& name, std::uint64_t& object_id) noexcept {
+    AppContext& state, InkpodTreeEdit edit, const std::string& name, std::uint64_t& object_id) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -4304,7 +4160,7 @@ InkpodStatus ApplyTreeEditRecord(
 }
 
 InkpodStatus SetSelectedTreeNodeProperties(
-    AppState& state, bool plane, UINT command) noexcept {
+    AppContext& state, bool plane, UINT command) noexcept {
     TreePaneNode node{};
     if (!QueryTreeNode(state, plane, node)) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -4328,11 +4184,11 @@ InkpodStatus SetSelectedTreeNodeProperties(
         ViewOptionsDialogState dialog{};
         dialog.title = plane ? L"プレーンの不透明度" : L"レイヤーの不透明度";
         dialog.labels[0] = L"不透明度 (0-100%)";
-        dialog.values[0] = state.smoke_test
+        dialog.values[0] = state.lifetime.smoke_test
             ? 75
             : static_cast<std::int32_t>(node.opacity_milli / 10U);
         if (ShowViewOptions(
-                state.instance, state.window, state.smoke_test, dialog) != IDOK
+                state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, dialog) != IDOK
             || dialog.values[0] < 0 || dialog.values[0] > 100) {
             return INKPOD_STATUS_CANCELLED;
         }
@@ -4342,7 +4198,7 @@ InkpodStatus SetSelectedTreeNodeProperties(
     return ApplyTreeEditRecord(state, edit, node.name, ignored);
 }
 
-InkpodStatus EditSelectedTreeNodeProperties(AppState& state, bool plane) noexcept {
+InkpodStatus EditSelectedTreeNodeProperties(AppContext& state, bool plane) noexcept {
     TreePaneNode node{};
     if (!QueryTreeNode(state, plane, node)) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -4355,11 +4211,11 @@ InkpodStatus EditSelectedTreeNodeProperties(AppState& state, bool plane) noexcep
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    if (state.smoke_test) {
+    if (state.lifetime.smoke_test) {
         name_dialog.value = plane ? L"Smoke Plane" : L"Smoke Layer";
     }
     if (ShowTextInput(
-            state.instance, state.window, state.smoke_test, name_dialog) != IDOK) {
+            state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, name_dialog) != IDOK) {
         return INKPOD_STATUS_CANCELLED;
     }
     ViewOptionsDialogState options{};
@@ -4372,7 +4228,7 @@ InkpodStatus EditSelectedTreeNodeProperties(AppState& state, bool plane) noexcep
         static_cast<std::int32_t>(node.kind)};
     options.value_count = 4U;
     if (ShowViewOptions(
-            state.instance, state.window, state.smoke_test, options) != IDOK
+            state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, options) != IDOK
         || options.values[0] < 0 || options.values[0] > 100) {
         return INKPOD_STATUS_CANCELLED;
     }
@@ -4407,29 +4263,29 @@ bool IsVectorStrokePlane(std::uint32_t kind) noexcept {
         || kind == INKPOD_TYPED_PLANE_COLOR_TRACE;
 }
 
-void ClearVectorGeometryPreview(AppState& state) noexcept {
-    state.vector_gesture_samples.clear();
-    if (state.canvas == nullptr) {
+void ClearVectorGeometryPreview(ToolUiState& tools, HWND canvas) noexcept {
+    tools.vector_gesture_samples.clear();
+    if (canvas == nullptr) {
         return;
     }
     inkpod::renderer::CanvasGeometryPreview preview{};
     preview.struct_size = sizeof(preview);
     SendMessageW(
-        state.canvas,
+        canvas,
         inkpod::renderer::kCanvasSetGeometryPreview,
         0,
         reinterpret_cast<LPARAM>(&preview));
 }
 
 bool VectorGestureDocumentPoints(
-    AppState& state,
+    AppContext& state,
     const std::vector<InkpodStrokeSample>& samples,
     std::vector<InkpodVectorPoint>& points) noexcept {
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (samples.empty() || !QueryDocument(state, info) || info.width == 0U || info.height == 0U
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&bounds)) != 1) {
@@ -4449,10 +4305,10 @@ bool VectorGestureDocumentPoints(
         for (std::size_t index = 0U; index < samples.size(); index += stride) {
             double x = (static_cast<double>(samples[index].x) - bounds.left) / zoom;
             double y = (static_cast<double>(samples[index].y) - bounds.top) / zoom;
-            if (state.view_flip_horizontal) {
+            if (state.view.flip_horizontal) {
                 x = static_cast<double>(info.width) - x;
             }
-            if (state.view_flip_vertical) {
+            if (state.view.flip_vertical) {
                 y = static_cast<double>(info.height) - y;
             }
             if (!std::isfinite(x) || !std::isfinite(y)) {
@@ -4465,10 +4321,10 @@ bool VectorGestureDocumentPoints(
         const auto& final_sample = samples.back();
         double final_x = (static_cast<double>(final_sample.x) - bounds.left) / zoom;
         double final_y = (static_cast<double>(final_sample.y) - bounds.top) / zoom;
-        if (state.view_flip_horizontal) {
+        if (state.view.flip_horizontal) {
             final_x = static_cast<double>(info.width) - final_x;
         }
-        if (state.view_flip_vertical) {
+        if (state.view.flip_vertical) {
             final_y = static_cast<double>(info.height) - final_y;
         }
         const InkpodVectorPoint final_point{
@@ -4506,21 +4362,21 @@ InkpodVectorCubicSegment VectorLineSegment(
 }
 
 bool BuildVectorGestureSegments(
-    const AppState& state,
+    const AppContext& state,
     const std::vector<InkpodVectorPoint>& points,
     std::vector<InkpodVectorCubicSegment>& segments,
     bool& closed) noexcept {
     if (points.size() < 2U) {
         return false;
     }
-    const float width = std::clamp(state.diameter, 0.001F, 4096.0F);
-    closed = state.tool == kInteractionVectorRectangle
-        || state.tool == kInteractionVectorEllipse;
+    const float width = std::clamp(state.tools.diameter, 0.001F, 4096.0F);
+    closed = state.tools.active_tool == kInteractionVectorRectangle
+        || state.tools.active_tool == kInteractionVectorEllipse;
     try {
         segments.clear();
-        if (state.tool == kInteractionVectorLine) {
+        if (state.tools.active_tool == kInteractionVectorLine) {
             segments.push_back(VectorLineSegment(points.front(), points.back(), width));
-        } else if (state.tool == kInteractionVectorCurve) {
+        } else if (state.tools.active_tool == kInteractionVectorCurve) {
             const InkpodVectorPoint start = points.front();
             const InkpodVectorPoint end = points.back();
             const InkpodVectorPoint control1 = points[points.size() / 3U];
@@ -4534,7 +4390,7 @@ bool BuildVectorGestureSegments(
                 end,
                 width,
                 width});
-        } else if (state.tool == kInteractionVectorRectangle) {
+        } else if (state.tools.active_tool == kInteractionVectorRectangle) {
             const InkpodVectorPoint start = points.front();
             const InkpodVectorPoint end = points.back();
             const std::array<InkpodVectorPoint, 4U> corners{
@@ -4546,7 +4402,7 @@ bool BuildVectorGestureSegments(
                 segments.push_back(VectorLineSegment(
                     corners[index], corners[(index + 1U) % corners.size()], width));
             }
-        } else if (state.tool == kInteractionVectorEllipse) {
+        } else if (state.tools.active_tool == kInteractionVectorEllipse) {
             const InkpodVectorPoint start = points.front();
             const InkpodVectorPoint end = points.back();
             const float left = std::min(start.x, end.x);
@@ -4580,7 +4436,7 @@ bool BuildVectorGestureSegments(
                     {center_x + radius_x, center_y - radius_y * kappa},
                     {center_x + radius_x, center_y}, width, width}};
             segments.assign(ellipse.begin(), ellipse.end());
-        } else if (state.tool == kInteractionVectorPolyline) {
+        } else if (state.tools.active_tool == kInteractionVectorPolyline) {
             segments.reserve(points.size() - 1U);
             for (std::size_t index = 1U; index < points.size(); ++index) {
                 if (points[index - 1U].x != points[index].x
@@ -4597,11 +4453,11 @@ bool BuildVectorGestureSegments(
     }
 }
 
-void UpdateVectorGeometryPreview(AppState& state) noexcept {
+void UpdateVectorGeometryPreview(AppContext& state) noexcept {
     std::vector<InkpodVectorPoint> points;
     std::vector<InkpodVectorCubicSegment> segments;
     bool closed{};
-    if (!VectorGestureDocumentPoints(state, state.vector_gesture_samples, points)
+    if (!VectorGestureDocumentPoints(state, state.tools.vector_gesture_samples, points)
         || !BuildVectorGestureSegments(state, points, segments, closed)) {
         return;
     }
@@ -4629,47 +4485,47 @@ void UpdateVectorGeometryPreview(AppState& state) noexcept {
         }
     }
     SendMessageW(
-        state.canvas,
+        state.windows.canvas,
         inkpod::renderer::kCanvasSetGeometryPreview,
         0,
         reinterpret_cast<LPARAM>(&preview));
 }
 
-InkpodStatus FinishVectorCanvasGesture(AppState& state) noexcept {
+InkpodStatus FinishVectorCanvasGesture(AppContext& state) noexcept {
     TreePaneNode plane{};
     std::vector<InkpodVectorPoint> points;
     std::vector<InkpodVectorCubicSegment> segments;
     bool closed{};
     if (!QueryTreeNode(state, true, plane)) {
-        ClearVectorGeometryPreview(state);
+        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
         return INKPOD_STATUS_INVALID_STATE;
     }
     if (!IsVectorStrokePlane(plane.kind)) {
         if (state.engine != nullptr) {
             state.engine->SetLocalFailure(kVectorStrokePlaneRequired);
         }
-        ClearVectorGeometryPreview(state);
+        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    if (!VectorGestureDocumentPoints(state, state.vector_gesture_samples, points)) {
+    if (!VectorGestureDocumentPoints(state, state.tools.vector_gesture_samples, points)) {
         if (state.engine != nullptr) {
             state.engine->SetLocalFailure(
                 L"ベクター描画の入力点を文書座標へ変換できませんでした。");
         }
-        ClearVectorGeometryPreview(state);
+        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    if (state.tool == kInteractionVectorEraser) {
+    if (state.tools.active_tool == kInteractionVectorEraser) {
         const InkpodVectorPoint point = points.back();
         const InkpodVectorEraseInput input{
             sizeof(InkpodVectorEraseInput),
-            state.vector_erase_mode,
+            state.tools.vector_erase_mode,
             plane.id,
             point.x,
             point.y,
-            std::max(0.5F, state.diameter / 2.0F),
+            std::max(0.5F, state.tools.diameter / 2.0F),
             0U};
-        ClearVectorGeometryPreview(state);
+        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
         return state.engine->Invoke(
             [input](InkpodCore* core) {
                 InkpodDispatchResult result{};
@@ -4684,7 +4540,7 @@ InkpodStatus FinishVectorCanvasGesture(AppState& state) noexcept {
             state.engine->SetLocalFailure(
                 L"ベクター描画を確定するための入力点が不足しています。");
         }
-        ClearVectorGeometryPreview(state);
+        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
     const InkpodVectorPathInput input{
@@ -4692,7 +4548,7 @@ InkpodStatus FinishVectorCanvasGesture(AppState& state) noexcept {
         0U,
         closed ? INKPOD_VECTOR_PATH_CLOSED : 0U,
         plane.id,
-        state.drawing_color,
+        state.tools.drawing_color,
         segments.data(),
         segments.size(),
         sizeof(InkpodVectorCubicSegment)};
@@ -4705,15 +4561,15 @@ InkpodStatus FinishVectorCanvasGesture(AppState& state) noexcept {
         },
         true,
         true);
-    ClearVectorGeometryPreview(state);
+    ClearVectorGeometryPreview(state.tools, state.windows.canvas);
     return status;
 }
 
-InkpodStatus SelectVectorObjects(AppState& state) noexcept {
+InkpodStatus SelectVectorObjects(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const InkpodVectorSelectionMode mode = state.vector_selection_mode;
+    const InkpodVectorSelectionMode mode = state.tools.vector_selection_mode;
     return state.engine->Invoke(
         [&state, mode](InkpodCore* core) {
             InkpodDocumentInfo document = EmptyDocumentInfo();
@@ -4757,13 +4613,13 @@ InkpodStatus SelectVectorObjects(AppState& state) noexcept {
             }
             if (status == INKPOD_STATUS_OK) {
                 try {
-                    state.vector_selected_path_ids.clear();
+                    state.tools.vector_selected_path_ids.clear();
                     for (const auto& range : ranges) {
                         if (std::find(
-                                state.vector_selected_path_ids.begin(),
-                                state.vector_selected_path_ids.end(),
-                                range.path_id) == state.vector_selected_path_ids.end()) {
-                            state.vector_selected_path_ids.push_back(range.path_id);
+                                state.tools.vector_selected_path_ids.begin(),
+                                state.tools.vector_selected_path_ids.end(),
+                                range.path_id) == state.tools.vector_selected_path_ids.end()) {
+                            state.tools.vector_selected_path_ids.push_back(range.path_id);
                         }
                     }
                 } catch (const std::bad_alloc&) {
@@ -4776,7 +4632,7 @@ InkpodStatus SelectVectorObjects(AppState& state) noexcept {
         false);
 }
 
-InkpodStatus ConnectSelectedVectorPlane(AppState& state, float maximum_gap) noexcept {
+InkpodStatus ConnectSelectedVectorPlane(AppContext& state, float maximum_gap) noexcept {
     TreePaneNode plane{};
     if (!QueryTreeNode(state, true, plane) || maximum_gap <= 0.0F) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
@@ -4794,22 +4650,22 @@ InkpodStatus ConnectSelectedVectorPlane(AppState& state, float maximum_gap) noex
 }
 
 InkpodStatus CorrectSelectedVectorWidth(
-    AppState& state, InkpodVectorWidthMode mode, float parameter) noexcept {
-    if (state.vector_selected_path_ids.empty()) {
+    AppContext& state, InkpodVectorWidthMode mode, float parameter) noexcept {
+    if (state.tools.vector_selected_path_ids.empty()) {
         const InkpodStatus select_status = SelectVectorObjects(state);
         if (select_status != INKPOD_STATUS_OK) {
             return select_status;
         }
     }
-    if (state.vector_selected_path_ids.empty()) {
+    if (state.tools.vector_selected_path_ids.empty()) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodVectorWidthInput input{
         sizeof(InkpodVectorWidthInput),
         mode,
         0U,
-        state.vector_selected_path_ids.data(),
-        state.vector_selected_path_ids.size(),
+        state.tools.vector_selected_path_ids.data(),
+        state.tools.vector_selected_path_ids.size(),
         parameter,
         0U};
     return state.engine->Invoke(
@@ -4823,7 +4679,7 @@ InkpodStatus CorrectSelectedVectorWidth(
 }
 
 InkpodStatus AdjustSelection(
-    AppState& state, std::uint32_t operation, std::uint32_t pixels) noexcept {
+    AppContext& state, std::uint32_t operation, std::uint32_t pixels) noexcept {
     return state.engine == nullptr
         ? INKPOD_STATUS_INVALID_STATE
         : state.engine->Invoke(
@@ -4837,7 +4693,7 @@ InkpodStatus AdjustSelection(
               true);
 }
 
-InkpodStatus EditPaperFrames(AppState& state, UINT command) noexcept {
+InkpodStatus EditPaperFrames(AppContext& state, UINT command) noexcept {
     InkpodDocumentInfo info{};
     if (!QueryDocument(state, info) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -4872,7 +4728,7 @@ InkpodStatus EditPaperFrames(AppState& state, UINT command) noexcept {
     if (frame != nullptr) {
         dialog.labels = {L"X", L"Y", L"幅", L"高さ"};
         dialog.values = {frame->x, frame->y, frame->width, frame->height};
-        if (state.smoke_test && info.width > 8U && info.height > 8U
+        if (state.lifetime.smoke_test && info.width > 8U && info.height > 8U
             && command != IDM_CELL_FRAME_HUNDRED) {
             const std::int32_t inset = command == IDM_CELL_FRAME_REFERENCE
                 ? 1
@@ -4891,14 +4747,14 @@ InkpodStatus EditPaperFrames(AppState& state, UINT command) noexcept {
             static_cast<std::int32_t>(input.margin_top),
             static_cast<std::int32_t>(input.margin_right),
             static_cast<std::int32_t>(input.margin_bottom)};
-        if (state.smoke_test) {
+        if (state.lifetime.smoke_test) {
             dialog.values = {1, 2, 3, 4};
         }
     } else {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
     if (ShowViewOptions(
-            state.instance, state.window, state.smoke_test, dialog) != IDOK) {
+            state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, dialog) != IDOK) {
         return INKPOD_STATUS_CANCELLED;
     }
     if (frame != nullptr) {
@@ -4929,7 +4785,7 @@ InkpodStatus EditPaperFrames(AppState& state, UINT command) noexcept {
 }
 
 InkpodStatus CreateCell(
-    AppState& state,
+    AppContext& state,
     std::uint32_t width,
     std::uint32_t height,
     std::uint32_t dpi_milli) noexcept {
@@ -4975,12 +4831,12 @@ InkpodStatus CreateCell(
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
-    state.current_path.clear();
-    state.recovery_path = std::move(private_recovery_path);
-    state.color_check_mode = INKPOD_COLOR_CHECK_OFF;
-    state.plane = INKPOD_PLANE_MAIN_LINE;
-    ResetM3DocumentUiState(state);
-    const InkpodPlaneKind plane = state.plane;
+    state.document.current_path.clear();
+    state.document.recovery_path = std::move(private_recovery_path);
+    state.view.color_check_mode = INKPOD_COLOR_CHECK_OFF;
+    state.tools.active_plane = INKPOD_PLANE_MAIN_LINE;
+    ResetUiForDocumentReplacement(state);
+    const InkpodPlaneKind plane = state.tools.active_plane;
     const InkpodStatus plane_status = state.engine->Invoke(
         [plane](InkpodCore* core) { return inkpod_core_set_active_plane(core, plane); },
         false,
@@ -4991,7 +4847,7 @@ InkpodStatus CreateCell(
     return FitCanvas(state, INKPOD_VIEW_FIT);
 }
 
-InkpodStatus CreateDefaultCell(AppState& state) noexcept {
+InkpodStatus CreateDefaultCell(AppContext& state) noexcept {
     return CreateCell(state, 1920U, 1080U, 96000U);
 }
 
@@ -5455,7 +5311,7 @@ bool LoadColorChartFile(
 }
 
 InkpodStatus ImportCommonRasterFromPath(
-    AppState& state, const std::wstring& path) noexcept {
+    AppContext& state, const std::wstring& path) noexcept {
     const InkpodCommonRasterFormat format = CommonRasterFormatFromPath(path);
     std::vector<std::uint8_t> bytes;
     if (state.engine == nullptr || format == 0U || !ReadBoundedFile(path, bytes)) {
@@ -5480,11 +5336,11 @@ InkpodStatus ImportCommonRasterFromPath(
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
-    state.current_path.clear();
-    state.recovery_path.clear();
-    state.plane = INKPOD_PLANE_COLOR;
-    state.color_check_mode = INKPOD_COLOR_CHECK_OFF;
-    ResetM3DocumentUiState(state);
+    state.document.current_path.clear();
+    state.document.recovery_path.clear();
+    state.tools.active_plane = INKPOD_PLANE_COLOR;
+    state.view.color_check_mode = INKPOD_COLOR_CHECK_OFF;
+    ResetUiForDocumentReplacement(state);
     const InkpodStatus plane_status = state.engine->Invoke(
         [](InkpodCore* core) { return inkpod_core_set_active_plane(core, INKPOD_PLANE_COLOR); },
         false,
@@ -5495,7 +5351,7 @@ InkpodStatus ImportCommonRasterFromPath(
 }
 
 InkpodStatus ExportCommonRasterToPath(
-    AppState& state, const std::wstring& path, bool composite_white) noexcept {
+    AppContext& state, const std::wstring& path, bool composite_white) noexcept {
     const InkpodCommonRasterFormat format = CommonRasterFormatFromPath(path);
     if (state.engine == nullptr || format == 0U) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
@@ -5530,7 +5386,7 @@ InkpodStatus ExportCommonRasterToPath(
 }
 
 InkpodStatus ApplyLightTableEdit(
-    AppState& state,
+    AppContext& state,
     InkpodLightTableEdit edit,
     const std::wstring& name,
     std::uint64_t& object_id) noexcept {
@@ -5558,7 +5414,7 @@ InkpodStatus ApplyLightTableEdit(
 }
 
 bool QueryLightTableItem(
-    AppState& state,
+    AppContext& state,
     std::uint32_t index,
     InkpodLightTableItemInfo& output) noexcept {
     output = {};
@@ -5575,7 +5431,7 @@ bool QueryLightTableItem(
 }
 
 InkpodStatus AddOrReloadLightTableRaster(
-    AppState& state, const std::wstring& path, bool reload) noexcept {
+    AppContext& state, const std::wstring& path, bool reload) noexcept {
     std::vector<std::uint8_t> bytes;
     const InkpodCommonRasterFormat format = CommonRasterFormatFromPath(path);
     if (state.engine == nullptr || format == 0U || !ReadBoundedFile(path, bytes)) {
@@ -5598,7 +5454,7 @@ InkpodStatus AddOrReloadLightTableRaster(
     if (!WidePathToUtf8(filename, name)) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
-    const std::uint64_t item_id = state.active_light_table_item_id;
+    const std::uint64_t item_id = state.panes.active_light_table_item_id;
     std::uint64_t added_item_id{};
     const InkpodStatus status = state.engine->Invoke(
         [reload,
@@ -5639,15 +5495,15 @@ InkpodStatus AddOrReloadLightTableRaster(
         true,
         true);
     if (status == INKPOD_STATUS_OK && !reload && added_item_id != 0U) {
-        state.active_light_table_item_id = added_item_id;
-        state.active_light_table_item_index = 0U;
+        state.panes.active_light_table_item_id = added_item_id;
+        state.panes.active_light_table_item_index = 0U;
     }
     return status;
 }
 
-InkpodStatus EditLightTableItemProperties(AppState& state) noexcept {
+InkpodStatus EditLightTableItemProperties(AppContext& state) noexcept {
     InkpodLightTableItemInfo info{};
-    if (!QueryLightTableItem(state, state.active_light_table_item_index, info)) {
+    if (!QueryLightTableItem(state, state.panes.active_light_table_item_index, info)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     ViewOptionsDialogState display{};
@@ -5659,10 +5515,10 @@ InkpodStatus EditLightTableItemProperties(AppState& state) noexcept {
         (info.flags & INKPOD_LIGHT_TABLE_ITEM_VISIBLE) != 0U ? 1 : 0,
         info.rotation_milli_degrees / 1000};
     display.value_count = 4U;
-    if (state.smoke_test) {
+    if (state.lifetime.smoke_test) {
         display.values = {50, INKPOD_LIGHT_TABLE_MONOTONE, 1, 5};
     }
-    if (ShowViewOptions(state.instance, state.window, state.smoke_test, display) != IDOK) {
+    if (ShowViewOptions(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, display) != IDOK) {
         return INKPOD_STATUS_CANCELLED;
     }
     ViewOptionsDialogState transform{};
@@ -5674,10 +5530,10 @@ InkpodStatus EditLightTableItemProperties(AppState& state) noexcept {
         static_cast<std::int32_t>(info.scale_x_milli / 10U),
         static_cast<std::int32_t>(info.scale_y_milli / 10U)};
     transform.value_count = 4U;
-    if (state.smoke_test) {
+    if (state.lifetime.smoke_test) {
         transform.values = {1000, -1000, 110, 90};
     }
-    if (ShowViewOptions(state.instance, state.window, state.smoke_test, transform) != IDOK
+    if (ShowViewOptions(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, transform) != IDOK
         || display.values[0] < 0 || display.values[0] > 100
         || display.values[1] < INKPOD_LIGHT_TABLE_COLOR
         || display.values[1] > INKPOD_LIGHT_TABLE_HALFTONE
@@ -5690,7 +5546,7 @@ InkpodStatus EditLightTableItemProperties(AppState& state) noexcept {
     edit.flags = display.values[2] != 0 ? INKPOD_LIGHT_TABLE_ITEM_VISIBLE : 0U;
     edit.opacity_milli = static_cast<std::uint32_t>(display.values[0]) * 10U;
     edit.display_mode = static_cast<std::uint32_t>(display.values[1]);
-    edit.display_color = M6Color(state.color_rgba);
+    edit.display_color = M6Color(state.tools.color_rgba);
     edit.translate_x_milli = transform.values[0];
     edit.translate_y_milli = transform.values[1];
     edit.scale_x_milli = static_cast<std::uint32_t>(transform.values[2]) * 10U;
@@ -5700,15 +5556,15 @@ InkpodStatus EditLightTableItemProperties(AppState& state) noexcept {
     return ApplyLightTableEdit(state, edit, {}, ignored);
 }
 
-InkpodStatus MoveLightTableFromCanvas(AppState& state) noexcept {
-    if (state.light_table_move_samples.size() < 2U) {
+InkpodStatus MoveLightTableFromCanvas(AppContext& state) noexcept {
+    if (state.panes.light_table_move_samples.size() < 2U) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
     InkpodDocumentInfo document{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, document) || document.width == 0U
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&bounds)) != 1) {
@@ -5718,14 +5574,14 @@ InkpodStatus MoveLightTableFromCanvas(AppState& state) noexcept {
     if (!std::isfinite(zoom) || zoom <= 0.0) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    double delta_x = (state.light_table_move_samples.back().x
-        - state.light_table_move_samples.front().x) / zoom;
-    double delta_y = (state.light_table_move_samples.back().y
-        - state.light_table_move_samples.front().y) / zoom;
-    if (state.view_flip_horizontal) {
+    double delta_x = (state.panes.light_table_move_samples.back().x
+        - state.panes.light_table_move_samples.front().x) / zoom;
+    double delta_y = (state.panes.light_table_move_samples.back().y
+        - state.panes.light_table_move_samples.front().y) / zoom;
+    if (state.view.flip_horizontal) {
         delta_x = -delta_x;
     }
-    if (state.view_flip_vertical) {
+    if (state.view.flip_vertical) {
         delta_y = -delta_y;
     }
     const std::int64_t delta_x_milli = std::llround(delta_x * 1000.0);
@@ -5733,7 +5589,7 @@ InkpodStatus MoveLightTableFromCanvas(AppState& state) noexcept {
     const bool all_items = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     InkpodStatus status = INKPOD_STATUS_OK;
     for (std::uint32_t index = 0U; index < 10000U; ++index) {
-        if (!all_items && index != state.active_light_table_item_index) {
+        if (!all_items && index != state.panes.active_light_table_item_index) {
             continue;
         }
         InkpodLightTableItemInfo info{};
@@ -5775,7 +5631,7 @@ struct SequenceEncodedFile {
 };
 
 InkpodStatus ImportSequencePaths(
-    AppState& state, const std::vector<std::wstring>& paths) noexcept {
+    AppContext& state, const std::vector<std::wstring>& paths) noexcept {
     if (state.engine == nullptr || paths.empty()) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
@@ -5830,7 +5686,7 @@ InkpodStatus ImportSequencePaths(
 }
 
 InkpodStatus ExportSequenceToPath(
-    AppState& state, const std::wstring& selected_path, bool composite_white) noexcept {
+    AppContext& state, const std::wstring& selected_path, bool composite_white) noexcept {
     const InkpodCommonRasterFormat format = CommonRasterFormatFromPath(selected_path);
     if (state.engine == nullptr || format == 0U) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
@@ -5936,7 +5792,7 @@ InkpodStatus ExportSequenceToPath(
     return INKPOD_STATUS_OK;
 }
 
-InkpodStatus SaveToPath(AppState& state, const std::wstring& path) noexcept {
+InkpodStatus SaveToPath(AppContext& state, const std::wstring& path) noexcept {
     std::vector<std::uint8_t> utf8;
     if (!WidePathToUtf8(path, utf8)) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
@@ -5945,7 +5801,7 @@ InkpodStatus SaveToPath(AppState& state, const std::wstring& path) noexcept {
     std::wstring next_current_path;
     std::wstring next_recovery_path;
     try {
-        old_recovery_path = state.recovery_path;
+        old_recovery_path = state.document.recovery_path;
         next_current_path = path;
         next_recovery_path = path + L".recovery.inkpod";
     } catch (const std::bad_alloc&) {
@@ -5962,8 +5818,8 @@ InkpodStatus SaveToPath(AppState& state, const std::wstring& path) noexcept {
         false,
         true);
     if (status == INKPOD_STATUS_OK) {
-        state.current_path = std::move(next_current_path);
-        state.recovery_path = std::move(next_recovery_path);
+        state.document.current_path = std::move(next_current_path);
+        state.document.recovery_path = std::move(next_recovery_path);
         if (!old_recovery_path.empty() && old_recovery_path != path) {
             DeleteFileW(old_recovery_path.c_str());
         }
@@ -5972,17 +5828,17 @@ InkpodStatus SaveToPath(AppState& state, const std::wstring& path) noexcept {
     return status;
 }
 
-InkpodStatus SaveDocument(AppState& state, bool force_dialog) noexcept {
-    std::wstring path = state.current_path;
+InkpodStatus SaveDocument(AppContext& state, bool force_dialog) noexcept {
+    std::wstring path = state.document.current_path;
     if (force_dialog || path.empty()) {
-        if (!ChooseInkpodPath(state.window, true, path)) {
+        if (!ChooseInkpodPath(state.windows.window, true, path)) {
             return INKPOD_STATUS_INVALID_STATE;
         }
     }
     return SaveToPath(state, path);
 }
 
-InkpodStatus OpenFromPath(AppState& state, const std::wstring& path) noexcept {
+InkpodStatus OpenFromPath(AppContext& state, const std::wstring& path) noexcept {
     std::vector<std::uint8_t> utf8;
     if (!WidePathToUtf8(path, utf8)) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
@@ -6001,15 +5857,15 @@ InkpodStatus OpenFromPath(AppState& state, const std::wstring& path) noexcept {
         return status;
     }
     try {
-        state.current_path = path;
-        state.recovery_path = path + L".recovery.inkpod";
+        state.document.current_path = path;
+        state.document.recovery_path = path + L".recovery.inkpod";
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    state.plane = INKPOD_PLANE_MAIN_LINE;
-    state.color_check_mode = INKPOD_COLOR_CHECK_OFF;
-    ResetM3DocumentUiState(state);
-    const InkpodPlaneKind plane = state.plane;
+    state.tools.active_plane = INKPOD_PLANE_MAIN_LINE;
+    state.view.color_check_mode = INKPOD_COLOR_CHECK_OFF;
+    ResetUiForDocumentReplacement(state);
+    const InkpodPlaneKind plane = state.tools.active_plane;
     const InkpodStatus plane_status = state.engine->Invoke(
         [plane](InkpodCore* core) { return inkpod_core_set_active_plane(core, plane); },
         false,
@@ -6022,7 +5878,7 @@ InkpodStatus OpenFromPath(AppState& state, const std::wstring& path) noexcept {
     return view_status;
 }
 
-InkpodStatus OpenRecoveryFromPath(AppState& state, const std::wstring& path) noexcept {
+InkpodStatus OpenRecoveryFromPath(AppContext& state, const std::wstring& path) noexcept {
     std::vector<std::uint8_t> utf8;
     if (!WidePathToUtf8(path, utf8) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
@@ -6037,15 +5893,15 @@ InkpodStatus OpenRecoveryFromPath(AppState& state, const std::wstring& path) noe
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
-    state.current_path.clear();
+    state.document.current_path.clear();
     try {
-        state.recovery_path = path;
+        state.document.recovery_path = path;
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    state.plane = INKPOD_PLANE_MAIN_LINE;
-    state.color_check_mode = INKPOD_COLOR_CHECK_OFF;
-    ResetM3DocumentUiState(state);
+    state.tools.active_plane = INKPOD_PLANE_MAIN_LINE;
+    state.view.color_check_mode = INKPOD_COLOR_CHECK_OFF;
+    ResetUiForDocumentReplacement(state);
     const InkpodStatus plane_status = state.engine->Invoke(
         [](InkpodCore* core) {
             return inkpod_core_set_active_plane(core, INKPOD_PLANE_MAIN_LINE);
@@ -6074,7 +5930,7 @@ bool RecoveryIsNewer(
     return CompareFileTime(&recovery.ftLastWriteTime, &normal.ftLastWriteTime) > 0;
 }
 
-bool QueueAutosave(AppState& state, const std::wstring& path) noexcept {
+bool QueueAutosave(AppContext& state, const std::wstring& path) noexcept {
     std::vector<std::uint8_t> utf8;
     if (state.engine == nullptr || !WidePathToUtf8(path, utf8)) {
         return false;
@@ -6090,7 +5946,7 @@ bool QueueAutosave(AppState& state, const std::wstring& path) noexcept {
 }
 
 InkpodStatus ApplyFillAtDeviceRange(
-    AppState& state,
+    AppContext& state,
     float device_x,
     float device_y,
     float end_device_x,
@@ -6100,7 +5956,7 @@ InkpodStatus ApplyFillAtDeviceRange(
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, info)
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&bounds)) != 1
@@ -6113,14 +5969,14 @@ InkpodStatus ApplyFillAtDeviceRange(
     }
     auto to_document_x = [&](double value) {
         double result = (value - bounds.left) / zoom;
-        if (state.view_flip_horizontal) {
+        if (state.view.flip_horizontal) {
             result = static_cast<double>(info.width) - result;
         }
         return result;
     };
     auto to_document_y = [&](double value) {
         double result = (value - bounds.top) / zoom;
-        if (state.view_flip_vertical) {
+        if (state.view.flip_vertical) {
             result = static_cast<double>(info.height) - result;
         }
         return result;
@@ -6134,25 +5990,25 @@ InkpodStatus ApplyFillAtDeviceRange(
     }
     InkpodFillInput input{};
     input.struct_size = sizeof(input);
-    input.operation = state.fill_options.operation;
-    input.flags = (state.fill_options.overflow_abort ? INKPOD_FILL_FLAG_OVERFLOW_ABORT : 0U)
-        | (state.fill_options.detached_regions ? INKPOD_FILL_FLAG_DETACHED_REGIONS : 0U)
-        | (state.fill_options.transparent_only ? INKPOD_FILL_FLAG_TRANSPARENT_ONLY : 0U)
-        | (state.fill_options.use_document_selection
+    input.operation = state.tools.fill_options.operation;
+    input.flags = (state.tools.fill_options.overflow_abort ? INKPOD_FILL_FLAG_OVERFLOW_ABORT : 0U)
+        | (state.tools.fill_options.detached_regions ? INKPOD_FILL_FLAG_DETACHED_REGIONS : 0U)
+        | (state.tools.fill_options.transparent_only ? INKPOD_FILL_FLAG_TRANSPARENT_ONLY : 0U)
+        | (state.tools.fill_options.use_document_selection
                   ? INKPOD_FILL_FLAG_DOCUMENT_SELECTION
                   : 0U)
-        | (state.fill_options.light_table_boundary
+        | (state.tools.fill_options.light_table_boundary
                   ? INKPOD_FILL_FLAG_LIGHT_TABLE_BOUNDARY
                   : 0U)
-        | (state.fill_options.light_table_color ? INKPOD_FILL_FLAG_LIGHT_TABLE_COLOR : 0U);
+        | (state.tools.fill_options.light_table_color ? INKPOD_FILL_FLAG_LIGHT_TABLE_COLOR : 0U);
     input.seed_x = static_cast<std::uint32_t>(std::floor(document_x));
     input.seed_y = static_cast<std::uint32_t>(std::floor(document_y));
-    input.color = state.drawing_color;
+    input.color = state.tools.drawing_color;
     input.color.struct_size = sizeof(InkpodColorValue);
-    input.tolerance = state.fill_options.tolerance;
-    input.gap_close = state.fill_options.gap_close;
-    input.inclusion_mode = state.fill_options.inclusion_mode;
-    input.extension_distance = state.fill_options.extension_distance;
+    input.tolerance = state.tools.fill_options.tolerance;
+    input.gap_close = state.tools.fill_options.gap_close;
+    input.inclusion_mode = state.tools.fill_options.inclusion_mode;
+    input.extension_distance = state.tools.fill_options.extension_distance;
     input.inclusion_color_stride_bytes = sizeof(InkpodColorValue);
     if (input.operation != INKPOD_FILL_SEED) {
         if (!has_range) {
@@ -6180,8 +6036,8 @@ InkpodStatus ApplyFillAtDeviceRange(
     }
     std::vector<InkpodColorValue> inclusion_colors;
     try {
-        inclusion_colors.reserve(state.fill_options.inclusion_rgba.size());
-        for (const std::uint32_t rgba : state.fill_options.inclusion_rgba) {
+        inclusion_colors.reserve(state.tools.fill_options.inclusion_rgba.size());
+        for (const std::uint32_t rgba : state.tools.fill_options.inclusion_rgba) {
             inclusion_colors.push_back(InkpodColorValue{
                 sizeof(InkpodColorValue),
                 INKPOD_COLOR_DEPTH_8,
@@ -6209,9 +6065,9 @@ InkpodStatus ApplyFillAtDeviceRange(
               true,
               true);
     if (status == INKPOD_STATUS_OK) {
-        state.plane = INKPOD_PLANE_COLOR;
+        state.tools.active_plane = INKPOD_PLANE_COLOR;
     }
-    if (status == INKPOD_STATUS_FILL_OVERFLOW && !state.smoke_test
+    if (status == INKPOD_STATUS_FILL_OVERFLOW && !state.lifetime.smoke_test
         && (fill_result.flags & INKPOD_FILL_RESULT_FLAG_LEAK_CANDIDATE) != 0U) {
         std::array<wchar_t, 160U> message{};
         _snwprintf_s(
@@ -6221,24 +6077,24 @@ InkpodStatus ApplyFillAtDeviceRange(
             L"塗りあふれを中断しました。候補座標: (%u, %u)",
             fill_result.leak_x,
             fill_result.leak_y);
-        MessageBoxW(state.window, message.data(), L"inkpod", MB_OK | MB_ICONWARNING);
+        MessageBoxW(state.windows.window, message.data(), L"inkpod", MB_OK | MB_ICONWARNING);
     }
     return status;
 }
 
 InkpodStatus ApplyFillAtDevicePoint(
-    AppState& state, float device_x, float device_y) noexcept {
+    AppContext& state, float device_x, float device_y) noexcept {
     return ApplyFillAtDeviceRange(
         state, device_x, device_y, device_x, device_y, false);
 }
 
 InkpodStatus ApplySelectionGesture(
-    AppState& state, const std::vector<InkpodStrokeSample>& samples) noexcept {
+    AppContext& state, const std::vector<InkpodStrokeSample>& samples) noexcept {
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (samples.empty() || !QueryDocument(state, info)
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&bounds)) != 1
@@ -6252,10 +6108,10 @@ InkpodStatus ApplySelectionGesture(
     const auto document_point = [&](const InkpodStrokeSample& sample) {
         double x = (static_cast<double>(sample.x) - bounds.left) / zoom;
         double y = (static_cast<double>(sample.y) - bounds.top) / zoom;
-        if (state.view_flip_horizontal) {
+        if (state.view.flip_horizontal) {
             x = static_cast<double>(info.width) - x;
         }
-        if (state.view_flip_vertical) {
+        if (state.view.flip_vertical) {
             y = static_cast<double>(info.height) - y;
         }
         return InkpodSelectionPoint{
@@ -6266,9 +6122,9 @@ InkpodStatus ApplySelectionGesture(
     };
     std::vector<InkpodSelectionPoint> points;
     try {
-        if (state.selection_shape == INKPOD_SELECTION_LASSO
-            || state.selection_shape == INKPOD_SELECTION_POLYLINE
-            || state.selection_shape == INKPOD_SELECTION_TRACE) {
+        if (state.tools.selection_shape == INKPOD_SELECTION_LASSO
+            || state.tools.selection_shape == INKPOD_SELECTION_POLYLINE
+            || state.tools.selection_shape == INKPOD_SELECTION_TRACE) {
             points.reserve(samples.size());
             for (const auto& sample : samples) {
                 points.push_back(document_point(sample));
@@ -6279,13 +6135,13 @@ InkpodStatus ApplySelectionGesture(
     }
     InkpodSelectionInput input{};
     input.struct_size = sizeof(input);
-    input.shape = state.selection_shape;
-    input.operation = state.selection_operation;
-    input.tolerance = state.selection_tolerance;
-    input.gap_close = state.selection_gap_close;
-    input.diameter = state.selection_diameter;
-    if (state.selection_shape == INKPOD_SELECTION_RECTANGLE
-        || state.selection_shape == INKPOD_SELECTION_ELLIPSE) {
+    input.shape = state.tools.selection_shape;
+    input.operation = state.tools.selection_operation;
+    input.tolerance = state.tools.selection_tolerance;
+    input.gap_close = state.tools.selection_gap_close;
+    input.diameter = state.tools.selection_diameter;
+    if (state.tools.selection_shape == INKPOD_SELECTION_RECTANGLE
+        || state.tools.selection_shape == INKPOD_SELECTION_ELLIPSE) {
         if (samples.size() < 2U) {
             return INKPOD_STATUS_INVALID_ARGUMENT;
         }
@@ -6296,7 +6152,7 @@ InkpodStatus ApplySelectionGesture(
         const auto right = static_cast<std::int32_t>(std::ceil(std::max(first.x, last.x)));
         const auto bottom = static_cast<std::int32_t>(std::ceil(std::max(first.y, last.y)));
         input.bounds = {left, top, right - left, bottom - top};
-    } else if (state.selection_shape == INKPOD_SELECTION_WAND) {
+    } else if (state.tools.selection_shape == INKPOD_SELECTION_WAND) {
         const auto point = document_point(samples.front());
         input.seed_x = static_cast<std::uint32_t>(std::clamp(
             std::floor(static_cast<double>(point.x)),
@@ -6327,14 +6183,14 @@ InkpodStatus ApplySelectionGesture(
 }
 
 InkpodStatus SelectDrawingColor(
-    AppState& state, bool different, InkpodSelectionOperation operation) noexcept {
+    AppContext& state, bool different, InkpodSelectionOperation operation) noexcept {
     InkpodColorValue color{};
     color.struct_size = sizeof(color);
-    if (state.plane == INKPOD_PLANE_MAIN_LINE) {
+    if (state.tools.active_plane == INKPOD_PLANE_MAIN_LINE) {
         color.depth = INKPOD_COLOR_DEPTH_BINARY;
-        color.red = state.color_rgba == 0U ? 0U : UINT8_MAX;
+        color.red = state.tools.color_rgba == 0U ? 0U : UINT8_MAX;
     } else {
-        color = state.drawing_color;
+        color = state.tools.drawing_color;
         color.struct_size = sizeof(InkpodColorValue);
     }
     return state.engine == nullptr
@@ -6355,12 +6211,12 @@ InkpodStatus SelectDrawingColor(
               true);
 }
 
-InkpodStatus EyedropAtDevicePoint(AppState& state, float device_x, float device_y) noexcept {
+InkpodStatus EyedropAtDevicePoint(AppContext& state, float device_x, float device_y) noexcept {
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, info)
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&bounds)) != 1
@@ -6382,34 +6238,34 @@ InkpodStatus EyedropAtDevicePoint(AppState& state, float device_x, float device_
     const InkpodStatus status = state.engine == nullptr
         ? INKPOD_STATUS_INVALID_STATE
         : state.engine->Invoke(
-              [x, y, source = state.eyedropper_source, &sampled](InkpodCore* core) {
+              [x, y, source = state.tools.eyedropper_source, &sampled](InkpodCore* core) {
                   return inkpod_core_eyedropper(
                       core, source, x, y, &sampled);
               },
               false,
               false);
     if (status == INKPOD_STATUS_OK) {
-        SetDrawingColor(state, sampled);
+        SetDrawingColor(state.tools, sampled);
     }
     return status;
 }
 
-bool DiscardCurrentRecovery(AppState& state) noexcept {
-    if (state.recovery_path.empty()) {
+bool DiscardCurrentRecovery(AppContext& state) noexcept {
+    if (state.document.recovery_path.empty()) {
         return true;
     }
     if (state.engine != nullptr && state.engine->WaitIdle() != INKPOD_STATUS_OK) {
         return false;
     }
-    if (DeleteFileW(state.recovery_path.c_str()) == FALSE
+    if (DeleteFileW(state.document.recovery_path.c_str()) == FALSE
         && GetLastError() != ERROR_FILE_NOT_FOUND) {
         return false;
     }
-    state.recovery_path.clear();
+    state.document.recovery_path.clear();
     return true;
 }
 
-bool ConfirmDiscard(AppState& state) noexcept {
+bool ConfirmDiscard(AppContext& state) noexcept {
     InkpodDocumentInfo info{};
     if (!QueryDocument(state, info)) {
         return true;
@@ -6418,7 +6274,7 @@ bool ConfirmDiscard(AppState& state) noexcept {
         return true;
     }
     const int choice = MessageBoxW(
-        state.window,
+        state.windows.window,
         L"変更を保存しますか？",
         L"inkpod",
         MB_YESNOCANCEL | MB_ICONQUESTION);
@@ -6429,12 +6285,12 @@ bool ConfirmDiscard(AppState& state) noexcept {
         const InkpodStatus status = SaveDocument(state, false);
         if (status != INKPOD_STATUS_OK) {
             if (status != INKPOD_STATUS_INVALID_STATE) {
-                ShowCoreError(state, state.window, L"保存");
+                ShowCoreError(state, state.windows.window, L"保存");
             }
             return false;
         }
     } else if (!DiscardCurrentRecovery(state)) {
-        ShowCoreError(state, state.window, L"Recoveryの破棄");
+        ShowCoreError(state, state.windows.window, L"Recoveryの破棄");
         return false;
     }
     return true;
@@ -6472,15 +6328,15 @@ void PumpPendingWindowMessages() noexcept {
     }
 }
 
-int RunM1Smoke(AppState& state) noexcept {
-    const HMENU menu = GetMenu(state.window);
+int RunM1Smoke(AppContext& state) noexcept {
+    const HMENU menu = GetMenu(state.windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_HELP_ABOUT, MF_BYCOMMAND) == static_cast<UINT>(-1)
-        || SendMessageW(state.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
         return 29;
     }
     if (state.engine == nullptr
-        || MoveWindow(state.canvas, 0, 0, 640, 480, FALSE) == FALSE
+        || MoveWindow(state.windows.canvas, 0, 0, 640, 480, FALSE) == FALSE
         || FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
         return 30;
     }
@@ -6501,7 +6357,7 @@ int RunM1Smoke(AppState& state) noexcept {
         }
     }
     if (!RefreshSequencePane(state)
-        || SendMessageW(state.sequence_list, LB_GETCOUNT, 0, 0) != 0) {
+        || SendMessageW(state.windows.sequence_list, LB_GETCOUNT, 0, 0) != 0) {
         return 702;
     }
     InkpodSequenceCellInfo missing_sequence_cell{};
@@ -6521,14 +6377,14 @@ int RunM1Smoke(AppState& state) noexcept {
         || state.engine->LastError() != kVectorStrokePlaneRequired) {
         return 704;
     }
-    const std::uint32_t initial_tool = state.tool;
+    const std::uint32_t initial_tool = state.tools.active_tool;
     for (const UINT command : vector_draw_commands) {
-        if (SendMessageW(state.window, WM_COMMAND, command, 0) != 0
-            || state.tool != initial_tool) {
+        if (SendMessageW(state.windows.window, WM_COMMAND, command, 0) != 0
+            || state.tools.active_tool != initial_tool) {
             return 705;
         }
     }
-    const std::wstring initial_recovery_path = state.recovery_path;
+    const std::wstring initial_recovery_path = state.document.recovery_path;
     std::wstring discovered_recovery;
     if (initial_recovery_path.empty()
         || !QueueAutosave(state, initial_recovery_path)
@@ -6552,14 +6408,14 @@ int RunM1Smoke(AppState& state) noexcept {
     const DWORD ui_thread = GetCurrentThreadId();
     const DWORD core_thread = state.engine->ThreadId();
     const DWORD renderer_thread = static_cast<DWORD>(SendMessageW(
-        state.canvas, inkpod::renderer::kCanvasGetRendererThreadId, 0, 0));
+        state.windows.canvas, inkpod::renderer::kCanvasGetRendererThreadId, 0, 0));
     if (core_thread == 0U || renderer_thread == 0U || core_thread == ui_thread
         || renderer_thread == ui_thread || core_thread == renderer_thread) {
         return 31;
     }
     inkpod::renderer::CanvasDocumentBounds document_bounds{};
     if (SendMessageW(
-            state.canvas,
+            state.windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&document_bounds))
@@ -6576,15 +6432,15 @@ int RunM1Smoke(AppState& state) noexcept {
     if (!QueryDocument(state, before_line)
         || (before_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
         || GetWindowTextW(
-               state.window, initial_title.data(), static_cast<int>(initial_title.size())) == 0
+               state.windows.window, initial_title.data(), static_cast<int>(initial_title.size())) == 0
         || std::wcscmp(initial_title.data(), L"無題 - inkpod") != 0) {
         return 32;
     }
     const auto frames_before = static_cast<std::uint64_t>(SendMessageW(
-        state.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
-    SendMessageW(state.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 100));
+        state.windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
+    SendMessageW(state.windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 100));
     for (int x = 90; x <= 240; x += 15) {
-        SendMessageW(state.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 120));
+        SendMessageW(state.windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 120));
     }
     if (state.engine->FlushPreview() != INKPOD_STATUS_OK) {
         return 33;
@@ -6593,12 +6449,12 @@ int RunM1Smoke(AppState& state) noexcept {
         return 219;
     }
     PumpPendingWindowMessages();
-    if (SendMessageW(state.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
+    if (SendMessageW(state.windows.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
         return 34;
     }
     InkpodDocumentInfo during_line{};
     const auto frames_during = static_cast<std::uint64_t>(SendMessageW(
-        state.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
+        state.windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
     if (!QueryDocument(state, during_line)) {
         return 130;
     }
@@ -6615,7 +6471,7 @@ int RunM1Smoke(AppState& state) noexcept {
     if (frames_during <= frames_before) {
         return 134;
     }
-    if (SendMessageW(state.canvas, WM_LBUTTONUP, 0, MAKELPARAM(250, 120)) != 1) {
+    if (SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(250, 120)) != 1) {
         return 36;
     }
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
@@ -6637,9 +6493,9 @@ int RunM1Smoke(AppState& state) noexcept {
     }
     const std::uint64_t line_checksum = after_line.main_plane_checksum;
 
-    SendMessageW(state.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 150));
-    SendMessageW(state.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(180, 150));
-    SendMessageW(state.canvas, WM_CAPTURECHANGED, 0, 0);
+    SendMessageW(state.windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 150));
+    SendMessageW(state.windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(180, 150));
+    SendMessageW(state.windows.canvas, WM_CAPTURECHANGED, 0, 0);
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
         return 54;
     }
@@ -6650,7 +6506,7 @@ int RunM1Smoke(AppState& state) noexcept {
         return 55;
     }
 
-    state.plane = INKPOD_PLANE_COLOR;
+    state.tools.active_plane = INKPOD_PLANE_COLOR;
     if (state.engine->Invoke(
             [](InkpodCore* core) {
                 return inkpod_core_set_active_plane(core, INKPOD_PLANE_COLOR);
@@ -6660,11 +6516,11 @@ int RunM1Smoke(AppState& state) noexcept {
         != INKPOD_STATUS_OK) {
         return 39;
     }
-    SendMessageW(state.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 180));
+    SendMessageW(state.windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 180));
     for (int x = 115; x <= 260; x += 15) {
-        SendMessageW(state.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 190));
+        SendMessageW(state.windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 190));
     }
-    if (SendMessageW(state.canvas, WM_LBUTTONUP, 0, MAKELPARAM(270, 190)) != 1) {
+    if (SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(270, 190)) != 1) {
         return 40;
     }
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
@@ -6710,13 +6566,13 @@ int RunM1Smoke(AppState& state) noexcept {
     }
 
     const std::uint64_t revision_before_view = after_redo.document_revision;
-    SendMessageW(state.canvas, WM_MBUTTONDOWN, MK_MBUTTON, MAKELPARAM(300, 220));
-    SendMessageW(state.canvas, WM_MOUSEMOVE, MK_MBUTTON, MAKELPARAM(320, 230));
-    SendMessageW(state.canvas, WM_MBUTTONUP, 0, MAKELPARAM(320, 230));
+    SendMessageW(state.windows.canvas, WM_MBUTTONDOWN, MK_MBUTTON, MAKELPARAM(300, 220));
+    SendMessageW(state.windows.canvas, WM_MOUSEMOVE, MK_MBUTTON, MAKELPARAM(320, 230));
+    SendMessageW(state.windows.canvas, WM_MBUTTONUP, 0, MAKELPARAM(320, 230));
     RECT canvas_bounds{};
-    GetWindowRect(state.canvas, &canvas_bounds);
+    GetWindowRect(state.windows.canvas, &canvas_bounds);
     SendMessageW(
-        state.canvas,
+        state.windows.canvas,
         WM_MOUSEWHEEL,
         MAKEWPARAM(0, WHEEL_DELTA),
         MAKELPARAM(canvas_bounds.left + 320, canvas_bounds.top + 240));
@@ -6808,15 +6664,15 @@ int RunM1Smoke(AppState& state) noexcept {
         DeleteFileW(path.c_str());
         return 217;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_FILE_REVERT_PARTIAL, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_FILE_REVERT_PARTIAL, 0);
     InkpodDocumentInfo partially_reverted{};
     if (!QueryDocument(state, partially_reverted)
         || partially_reverted.color_plane_checksum != reopened.color_plane_checksum) {
         DeleteFileW(path.c_str());
         return 241;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_EDIT_HISTORY_BACK, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_HISTORY_BACK, 0);
     InkpodHistoryInfo smoke_history{};
     smoke_history.struct_size = sizeof(smoke_history);
     if (state.engine->Invoke(
@@ -6829,7 +6685,7 @@ int RunM1Smoke(AppState& state) noexcept {
         DeleteFileW(path.c_str());
         return 219;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_EDIT_HISTORY_FORWARD, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_HISTORY_FORWARD, 0);
     if (state.engine->Invoke(
             [&smoke_history](InkpodCore* core) {
                 return inkpod_core_history_info(core, &smoke_history);
@@ -6847,23 +6703,23 @@ int RunM1Smoke(AppState& state) noexcept {
         DeleteFileW(path.c_str());
         return 220;
     }
-    state.plane = INKPOD_PLANE_MAIN_LINE;
+    state.tools.active_plane = INKPOD_PLANE_MAIN_LINE;
     DeleteFileW(path.c_str());
 
     inkpod::renderer::CanvasDocumentBounds before_dpi_bounds{};
     inkpod::renderer::CanvasDocumentBounds after_dpi_bounds{};
     const bool bounds_before_dpi = SendMessageW(
-                                       state.canvas,
+                                       state.windows.canvas,
                                        inkpod::renderer::kCanvasGetDocumentBounds,
                                        0,
                                        reinterpret_cast<LPARAM>(&before_dpi_bounds)) == 1;
     const bool dpi_changed = SendMessageW(
-                                 state.canvas,
+                                 state.windows.canvas,
                                  WM_DPICHANGED_AFTERPARENT,
                                  0,
                                  0) == 1;
     const bool bounds_after_dpi = SendMessageW(
-                                      state.canvas,
+                                      state.windows.canvas,
                                       inkpod::renderer::kCanvasGetDocumentBounds,
                                       0,
                                       reinterpret_cast<LPARAM>(&after_dpi_bounds)) == 1;
@@ -6873,23 +6729,23 @@ int RunM1Smoke(AppState& state) noexcept {
         && std::abs(before_dpi_bounds.right - after_dpi_bounds.right) <= 0.01
         && std::abs(before_dpi_bounds.bottom - after_dpi_bounds.bottom) <= 0.01;
     const bool device_recovered = SendMessageW(
-                                      state.canvas,
+                                      state.windows.canvas,
                                       inkpod::renderer::kCanvasSimulateDeviceLoss,
                                       0,
                                       0) == 1;
     const bool rendered = SendMessageW(
-                              state.canvas,
+                              state.windows.canvas,
                               inkpod::renderer::kCanvasRenderOnce,
                               0,
                               0) == 1;
     return dpi_changed && dpi_transform_stable && device_recovered && rendered ? 0 : 52;
 }
 
-int RunM2Smoke(AppState& state) noexcept {
+int RunM2Smoke(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return 200;
     }
-    const HMENU menu = GetMenu(state.window);
+    const HMENU menu = GetMenu(state.windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_TOOL_FILL, MF_BYCOMMAND) == static_cast<UINT>(-1)
         || GetMenuState(menu, IDM_TOOL_EYEDROPPER, MF_BYCOMMAND) == static_cast<UINT>(-1)
@@ -6930,7 +6786,7 @@ int RunM2Smoke(AppState& state) noexcept {
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, before_fill)
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&bounds)) != 1) {
@@ -6939,15 +6795,15 @@ int RunM2Smoke(AppState& state) noexcept {
     const double zoom = (bounds.right - bounds.left) / static_cast<double>(before_fill.width);
     const int fill_x = static_cast<int>(std::lround(bounds.left + 150.0 * zoom));
     const int fill_y = static_cast<int>(std::lround(bounds.top + 150.0 * zoom));
-    SendMessageW(state.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
     if (SendMessageW(
-            state.canvas,
+            state.windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(fill_x, fill_y)) != 1) {
         return 204;
     }
-    SendMessageW(state.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
+    SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
     InkpodDocumentInfo after_fill{};
     if (!QueryDocument(state, after_fill)
         || after_fill.document_revision != before_fill.document_revision + 1U
@@ -6956,29 +6812,29 @@ int RunM2Smoke(AppState& state) noexcept {
         return 205;
     }
 
-    const std::uint32_t fill_color = state.color_rgba;
-    state.color_rgba = UINT32_C(0x010203ff);
-    SendMessageW(state.window, WM_COMMAND, IDM_TOOL_EYEDROPPER, 0);
+    const std::uint32_t fill_color = state.tools.color_rgba;
+    state.tools.color_rgba = UINT32_C(0x010203ff);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_EYEDROPPER, 0);
     if (SendMessageW(
-            state.canvas,
+            state.windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(fill_x, fill_y)) != 1
-        || state.color_rgba != fill_color) {
+        || state.tools.color_rgba != fill_color) {
         return 206;
     }
-    SendMessageW(state.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
+    SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
 
-    SendMessageW(state.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
-    state.color_rgba = fill_color;
-    state.fill_options.operation = INKPOD_FILL_CLOSED_REGION;
-    state.fill_options.tolerance = 257U;
-    state.fill_options.gap_close = 1U;
-    state.fill_options.extension_distance = 2U;
-    state.fill_options.detached_regions = true;
-    state.fill_options.overflow_abort = true;
-    if (SendMessageW(state.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0) != 0
-        || state.fill_options.operation != INKPOD_FILL_CLOSED_REGION) {
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    state.tools.color_rgba = fill_color;
+    state.tools.fill_options.operation = INKPOD_FILL_CLOSED_REGION;
+    state.tools.fill_options.tolerance = 257U;
+    state.tools.fill_options.gap_close = 1U;
+    state.tools.fill_options.extension_distance = 2U;
+    state.tools.fill_options.detached_regions = true;
+    state.tools.fill_options.overflow_abort = true;
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0) != 0
+        || state.tools.fill_options.operation != INKPOD_FILL_CLOSED_REGION) {
         return 221;
     }
     const auto device_x = [&](double document_x) {
@@ -6989,15 +6845,15 @@ int RunM2Smoke(AppState& state) noexcept {
     };
     const auto canvas_drag = [&state](int x1, int y1, int x2, int y2) {
         if (SendMessageW(
-                state.canvas,
+                state.windows.canvas,
                 WM_LBUTTONDOWN,
                 MK_LBUTTON,
                 MAKELPARAM(x1, y1)) != 1) {
             return false;
         }
         SendMessageW(
-            state.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x2, y2));
-        SendMessageW(state.canvas, WM_LBUTTONUP, 0, MAKELPARAM(x2, y2));
+            state.windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x2, y2));
+        SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(x2, y2));
         return true;
     };
     InkpodDocumentInfo before_closed{};
@@ -7059,10 +6915,10 @@ int RunM2Smoke(AppState& state) noexcept {
     }
     InkpodDocumentInfo before_extension{};
     QueryDocument(state, before_extension);
-    state.fill_options.operation = INKPOD_FILL_EXTENSION;
-    state.fill_options.extension_distance = 3U;
-    state.fill_options.detached_regions = false;
-    SendMessageW(state.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0);
+    state.tools.fill_options.operation = INKPOD_FILL_EXTENSION;
+    state.tools.fill_options.extension_distance = 3U;
+    state.tools.fill_options.detached_regions = false;
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0);
     if (!canvas_drag(
             extension_left,
             extension_top,
@@ -7092,22 +6948,22 @@ int RunM2Smoke(AppState& state) noexcept {
             true) != INKPOD_STATUS_OK) {
         return 227;
     }
-    state.fill_options.operation = INKPOD_FILL_SEED;
-    state.fill_options.use_document_selection = true;
-    state.fill_options.overflow_abort = false;
-    state.fill_options.gap_close = 0U;
-    SendMessageW(state.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0);
+    state.tools.fill_options.operation = INKPOD_FILL_SEED;
+    state.tools.fill_options.use_document_selection = true;
+    state.tools.fill_options.overflow_abort = false;
+    state.tools.fill_options.gap_close = 0U;
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0);
     const int selected_x = device_x(304.0);
     const int selected_y = device_y(304.0);
     if (SendMessageW(
-            state.canvas,
+            state.windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(selected_x, selected_y)) != 1) {
         return 228;
     }
     SendMessageW(
-        state.canvas, WM_LBUTTONUP, 0, MAKELPARAM(selected_x, selected_y));
+        state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(selected_x, selected_y));
     InkpodColorValue selected_fill{};
     selected_fill.struct_size = sizeof(selected_fill);
     InkpodColorValue outside_fill{};
@@ -7137,7 +6993,7 @@ int RunM2Smoke(AppState& state) noexcept {
         || outside_fill_status != INKPOD_STATUS_INVALID_STATE) {
         return 229;
     }
-    state.fill_options = {};
+    state.tools.fill_options = {};
 
     InkpodDocumentInfo before_check{};
     if (!QueryDocument(state, before_check)) {
@@ -7145,7 +7001,7 @@ int RunM2Smoke(AppState& state) noexcept {
     }
     const std::uint64_t revision_before_check = before_check.document_revision;
     const std::uint64_t view_before_check = before_check.view_revision;
-    SendMessageW(state.window, WM_COMMAND, IDM_COLOR_CHECK_NATIVE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_COLOR_CHECK_NATIVE, 0);
     InkpodDocumentInfo during_check{};
     std::uint64_t check_features{};
     const InkpodStatus check_snapshot_status = state.engine->Invoke(
@@ -7173,10 +7029,10 @@ int RunM2Smoke(AppState& state) noexcept {
         || check_features != INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA
         || during_check.document_revision != revision_before_check
         || during_check.view_revision <= view_before_check
-        || SendMessageW(state.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
+        || SendMessageW(state.windows.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
         return 207;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_COLOR_CHECK_OFF, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_COLOR_CHECK_OFF, 0);
 
     std::array<wchar_t, MAX_PATH> temporary_directory{};
     if (GetTempPathW(
@@ -7260,7 +7116,7 @@ int RunM2Smoke(AppState& state) noexcept {
         && (recovered.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U
         && (recovered.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
         && recovered.color_plane_checksum == autosaved.color_plane_checksum
-        && state.current_path.empty();
+        && state.document.current_path.empty();
     const InkpodStatus revert_status = state.engine->Invoke(
         [](InkpodCore* core) {
             InkpodDocumentInfo info = EmptyDocumentInfo();
@@ -7281,11 +7137,11 @@ int RunM2Smoke(AppState& state) noexcept {
         : 214;
 }
 
-int RunM3Smoke(AppState& state) noexcept {
+int RunM3Smoke(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return 300;
     }
-    const HMENU menu = GetMenu(state.window);
+    const HMENU menu = GetMenu(state.windows.window);
     for (const UINT command : {
              IDM_EDIT_COPY,
              IDM_EDIT_PASTE,
@@ -7347,7 +7203,7 @@ int RunM3Smoke(AppState& state) noexcept {
             false) != INKPOD_STATUS_OK) {
         return 302;
     }
-    ResetM3DocumentUiState(state);
+    ResetUiForDocumentReplacement(state);
     if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
         return 303;
     }
@@ -7356,14 +7212,14 @@ int RunM3Smoke(AppState& state) noexcept {
     if (!QueryDocument(state, initial)) {
         return 304;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_DUPLICATE, 0);
-    const std::uint64_t duplicate_id = state.m3_layer_id;
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_DUPLICATE, 0);
+    const std::uint64_t duplicate_id = state.document.smoke_layer_id;
     InkpodDocumentInfo duplicated{};
     if (duplicate_id == 0U || !QueryDocument(state, duplicated)
         || duplicated.document_revision != initial.document_revision + 1U) {
         return 305;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_MOVE_TOP, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_MOVE_TOP, 0);
     InkpodNodeInfo top_layer{};
     top_layer.struct_size = sizeof(top_layer);
     const InkpodStatus top_status = state.engine->Invoke(
@@ -7377,13 +7233,13 @@ int RunM3Smoke(AppState& state) noexcept {
         return 306;
     }
 
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_DELETE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_DELETE, 0);
     InkpodDocumentInfo after_delete{};
     if (!QueryDocument(state, after_delete)
         || (after_delete.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U) {
         return 307;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
     top_layer = {};
     top_layer.struct_size = sizeof(top_layer);
     if (state.engine->Invoke(
@@ -7396,7 +7252,7 @@ int RunM3Smoke(AppState& state) noexcept {
         || top_layer.id != duplicate_id) {
         return 308;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_EDIT_REDO, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
     top_layer = {};
     top_layer.struct_size = sizeof(top_layer);
     if (state.engine->Invoke(
@@ -7409,7 +7265,7 @@ int RunM3Smoke(AppState& state) noexcept {
         || top_layer.id == duplicate_id) {
         return 309;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
 
     std::array<wchar_t, MAX_PATH> temporary_directory{};
     if (GetTempPathW(
@@ -7487,7 +7343,7 @@ int RunM3Smoke(AppState& state) noexcept {
 
     inkpod::renderer::CanvasDocumentBounds selection_canvas_bounds{};
     if (SendMessageW(
-            state.canvas,
+            state.windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&selection_canvas_bounds)) != 1) {
@@ -7513,7 +7369,7 @@ int RunM3Smoke(AppState& state) noexcept {
         const inkpod::renderer::CanvasStrokeEvent begin{
             inkpod::renderer::CanvasStrokeEventKind::Begin, samples.data(), 1U};
         if (SendMessageW(
-                state.window,
+                state.windows.window,
                 inkpod::renderer::kCanvasStrokeReady,
                 0,
                 reinterpret_cast<LPARAM>(&begin)) != 1) {
@@ -7525,7 +7381,7 @@ int RunM3Smoke(AppState& state) noexcept {
                 samples.data() + 1U,
                 samples.size() - 2U};
             if (SendMessageW(
-                    state.window,
+                    state.windows.window,
                     inkpod::renderer::kCanvasStrokeReady,
                     0,
                     reinterpret_cast<LPARAM>(&append)) != 1) {
@@ -7537,7 +7393,7 @@ int RunM3Smoke(AppState& state) noexcept {
             samples.data() + samples.size() - 1U,
             1U};
         return SendMessageW(
-                   state.window,
+                   state.windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&end)) == 1;
@@ -7553,8 +7409,8 @@ int RunM3Smoke(AppState& state) noexcept {
                    false) == INKPOD_STATUS_OK;
     };
     const auto select_rectangle = [&](UINT mode, float x1, float y1, float x2, float y2) {
-        SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_RECTANGLE, 0);
-        SendMessageW(state.window, WM_COMMAND, mode, 0);
+        SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_RECTANGLE, 0);
+        SendMessageW(state.windows.window, WM_COMMAND, mode, 0);
         const std::array<InkpodStrokeSample, 2U> samples{
             selection_sample(x1, y1), selection_sample(x2, y2)};
         return send_selection_gesture(samples);
@@ -7572,14 +7428,14 @@ int RunM3Smoke(AppState& state) noexcept {
         || locator.selection.height != 4) {
         return 316;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_ELLIPSE, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_ELLIPSE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
     const std::array<InkpodStrokeSample, 2U> ellipse_samples{
         selection_sample(1.0F, 1.0F), selection_sample(7.0F, 7.0F)};
     if (!send_selection_gesture(ellipse_samples)) {
         return 357;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
     const std::array<InkpodStrokeSample, 3U> lasso_samples{
         selection_sample(0.0F, 0.0F),
         selection_sample(7.0F, 0.0F),
@@ -7587,7 +7443,7 @@ int RunM3Smoke(AppState& state) noexcept {
     if (!send_selection_gesture(lasso_samples)) {
         return 345;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_POLYLINE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_POLYLINE, 0);
     const std::array<InkpodStrokeSample, 3U> polyline_samples{
         selection_sample(1.0F, 1.0F),
         selection_sample(7.0F, 1.0F),
@@ -7595,27 +7451,27 @@ int RunM3Smoke(AppState& state) noexcept {
     if (!send_selection_gesture(polyline_samples)) {
         return 346;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_TRACE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_TRACE, 0);
     const std::array<InkpodStrokeSample, 2U> trace_samples{
         selection_sample(0.5F, 7.5F), selection_sample(7.5F, 0.5F)};
     if (!send_selection_gesture(trace_samples)) {
         return 347;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_WAND, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_WAND, 0);
     const std::array<InkpodStrokeSample, 1U> wand_samples{
         selection_sample(4.0F, 4.0F)};
     if (!send_selection_gesture(wand_samples) || !query_selection(locator)
         || (locator.flags & 1U) == 0U) {
         return 348;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_INVERT, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_EXPAND, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_SHRINK, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_INVERT, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_EXPAND, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_SHRINK, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
     if (!query_selection(locator) || (locator.flags & 1U) != 0U) {
         return 349;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_ALL, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_ALL, 0);
     if (!query_selection(locator) || (locator.flags & 1U) == 0U
         || locator.selection.width != 8 || locator.selection.height != 8) {
         return 350;
@@ -7645,46 +7501,46 @@ int RunM3Smoke(AppState& state) noexcept {
             true) != INKPOD_STATUS_OK) {
         return 317;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_COLOR, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_COLOR, 0);
     if (!query_selection(locator) || (locator.flags & 1U) == 0U
         || locator.selection.x != 6 || locator.selection.y != 6
         || locator.selection.width != 1 || locator.selection.height != 1) {
         return 351;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_COLOR_DIFFERENT, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_COLOR_DIFFERENT, 0);
     if (!query_selection(locator) || (locator.flags & 1U) == 0U
         || locator.selection.width != 8 || locator.selection.height != 8) {
         return 352;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_COLOR_ADD, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_TO_LAYER, 0);
-    if (state.selection_layer_id == 0U) {
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_COLOR_ADD, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_TO_LAYER, 0);
+    if (state.document.selection_layer_id == 0U) {
         return 353;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_FROM_LAYER, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_FROM_LAYER, 0);
     if (!query_selection(locator) || (locator.flags & 1U) == 0U) {
         return 354;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_LAYER_ADD, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_SELECTION_LAYER_SUBTRACT, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LAYER_ADD, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LAYER_SUBTRACT, 0);
     if (!query_selection(locator) || (locator.flags & 1U) != 0U) {
         return 355;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_MAIN_LINE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MAIN_LINE, 0);
     if (!select_rectangle(IDM_SELECTION_MODE_NEW, 6.0F, 6.0F, 7.0F, 7.0F)) {
         return 356;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_EDIT_COPY, 0);
-    if (state.clipboard == nullptr
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_COPY, 0);
+    if (state.document.clipboard == nullptr
         || IsClipboardFormatAvailable(CF_DIBV5) == FALSE
         || IsClipboardFormatAvailable(InkpodClipboardFormat()) == FALSE
-        || SendMessageW(state.window, WM_COMMAND, IDM_EDIT_CUT, 0) != 1) {
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_CUT, 0) != 1) {
         return 318;
     }
     std::vector<std::uint8_t> external_dib;
-    if (OpenClipboard(state.window) == FALSE) {
+    if (OpenClipboard(state.windows.window) == FALSE) {
         return 367;
     }
     HANDLE dib_handle = GetClipboardData(CF_DIBV5);
@@ -7717,7 +7573,7 @@ int RunM3Smoke(AppState& state) noexcept {
     }
     std::memcpy(external_destination, external_dib.data(), external_dib.size());
     GlobalUnlock(external_handle);
-    if (OpenClipboard(state.window) == FALSE) {
+    if (OpenClipboard(state.windows.window) == FALSE) {
         GlobalFree(external_handle);
         return 370;
     }
@@ -7727,21 +7583,21 @@ int RunM3Smoke(AppState& state) noexcept {
         GlobalFree(external_handle);
     }
     CloseClipboard();
-    InkpodClipboard* private_clipboard = state.clipboard;
-    state.clipboard = nullptr;
+    InkpodClipboard* private_clipboard = state.document.clipboard;
+    state.document.clipboard = nullptr;
     int external_failure{};
     if (!external_published) {
         external_failure = 371;
-    } else if (SendMessageW(state.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1) {
+    } else if (SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1) {
         external_failure = 372;
-    } else if (!state.floating_active) {
+    } else if (!state.tools.floating_active) {
         external_failure = 373;
-    } else if (SendMessageW(state.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1) {
+    } else if (SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1) {
         external_failure = 374;
     }
-    inkpod_clipboard_release(&state.clipboard);
-    state.clipboard = private_clipboard;
-    PublishStandardClipboard(state.window, state.clipboard);
+    inkpod_clipboard_release(&state.document.clipboard);
+    state.document.clipboard = private_clipboard;
+    PublishStandardClipboard(state.windows.window, state.document.clipboard);
     if (external_failure != 0) {
         return external_failure;
     }
@@ -7766,24 +7622,24 @@ int RunM3Smoke(AppState& state) noexcept {
             false) != INKPOD_STATUS_OK) {
         return 319;
     }
-    ResetM3DocumentUiState(state);
+    ResetUiForDocumentReplacement(state);
     if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK
         || !RefreshTreePane(state)
-        || SendMessageW(state.window, WM_COMMAND, IDM_EDIT_PASTE_SELECTED, 0) != 1
-        || !state.floating_active
-        || SendMessageW(state.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_EDIT_PASTE_CONVERTED, 0) != 1
-        || !state.floating_active
-        || SendMessageW(state.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_EDIT_FLOATING_TRANSFORM, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1) {
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_PASTE_SELECTED, 0) != 1
+        || !state.tools.floating_active
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_PASTE_CONVERTED, 0) != 1
+        || !state.tools.floating_active
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_TRANSFORM, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1) {
         return 358;
     }
     inkpod::renderer::CanvasDocumentBounds floating_canvas{};
     if (SendMessageW(
-            state.canvas,
+            state.windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&floating_canvas)) != 1) {
@@ -7803,16 +7659,16 @@ int RunM3Smoke(AppState& state) noexcept {
     const inkpod::renderer::CanvasStrokeEvent floating_finish{
         inkpod::renderer::CanvasStrokeEventKind::End, &floating_end, 1U};
     if (SendMessageW(
-            state.window,
+            state.windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&floating_begin)) != 1
         || SendMessageW(
-               state.window,
+               state.windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&floating_finish)) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1) {
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1) {
         return 359;
     }
     const InkpodFloatingTransform floating{
@@ -7826,7 +7682,7 @@ int RunM3Smoke(AppState& state) noexcept {
     const InkpodStatus paste_status = state.engine->Invoke(
         [&state, floating](InkpodCore* core) {
             InkpodStatus status = inkpod_core_paste_begin(
-                core, state.clipboard);
+                core, state.document.clipboard);
             if (status == INKPOD_STATUS_OK) {
                 status = inkpod_core_floating_transform(core, &floating);
             }
@@ -7865,7 +7721,7 @@ int RunM3Smoke(AppState& state) noexcept {
     if (!QueryDocument(state, before_flip)) {
         return 321;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_FLIP_HORIZONTAL, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_FLIP_HORIZONTAL, 0);
     InkpodDocumentInfo after_flip{};
     InkpodSnapshotTransform transform{};
     transform.struct_size = sizeof(transform);
@@ -7894,7 +7750,7 @@ int RunM3Smoke(AppState& state) noexcept {
         return 322;
     }
     SendMessageW(
-        state.window, WM_COMMAND, IDM_EDIT_MIRROR_HORIZONTAL, 0);
+        state.windows.window, WM_COMMAND, IDM_EDIT_MIRROR_HORIZONTAL, 0);
     InkpodDocumentInfo after_mirror{};
     if (!QueryDocument(state, after_mirror)
         || after_mirror.document_revision
@@ -7903,7 +7759,7 @@ int RunM3Smoke(AppState& state) noexcept {
         || (after_mirror.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U) {
         return 323;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
 
     const std::array<UINT, 6U> document_transform_commands{
         IDM_CELL_MIRROR_VERTICAL,
@@ -7914,7 +7770,7 @@ int RunM3Smoke(AppState& state) noexcept {
         IDM_CELL_PAPER_SETTINGS};
     for (std::size_t index = 0U; index < document_transform_commands.size(); ++index) {
         if (SendMessageW(
-                state.window, WM_COMMAND, document_transform_commands[index], 0) != 1) {
+                state.windows.window, WM_COMMAND, document_transform_commands[index], 0) != 1) {
             return 360 + static_cast<int>(index);
         }
     }
@@ -7926,10 +7782,10 @@ int RunM3Smoke(AppState& state) noexcept {
         return 366;
     }
 
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_NEW, 0);
-    if (state.secondary_view_id == 0U || state.active_view_id != state.secondary_view_id
-        || state.document_tabs == nullptr
-        || TabCtrl_GetItemCount(state.document_tabs) != 2) {
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_NEW, 0);
+    if (state.view.secondary_view_id == 0U || state.view.active_view_id != state.view.secondary_view_id
+        || state.windows.document_tabs == nullptr
+        || TabCtrl_GetItemCount(state.windows.document_tabs) != 2) {
         return 324;
     }
     const InkpodViewInput secondary_pan{
@@ -7940,7 +7796,7 @@ int RunM3Smoke(AppState& state) noexcept {
         0.0,
         0.0,
         0.0};
-    const std::uint64_t secondary_view_id = state.secondary_view_id;
+    const std::uint64_t secondary_view_id = state.view.secondary_view_id;
     if (state.engine->Invoke(
             [secondary_view_id, secondary_pan](InkpodCore* core) {
                 return inkpod_core_view_apply(
@@ -8044,11 +7900,11 @@ int RunM3Smoke(AppState& state) noexcept {
         return 326;
     }
     SendMessageW(
-        state.window,
+        state.windows.window,
         inkpod::renderer::kCanvasPointerMoved,
         0,
         MAKELPARAM(2, 2));
-    if (state.locator_label == nullptr || GetWindowTextLengthW(state.locator_label) < 20) {
+    if (state.windows.locator_label == nullptr || GetWindowTextLengthW(state.windows.locator_label) < 20) {
         return 358;
     }
 
@@ -8087,11 +7943,11 @@ int RunM3Smoke(AppState& state) noexcept {
             shortcut_menu_command)) {
         return 328;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_GRID_SETTINGS, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_GUIDE_VERTICAL, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_GRID_SETTINGS, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_GUIDE_VERTICAL, 0);
     const auto query_guide_count = [&state]() noexcept {
         std::uint64_t count = UINT64_MAX;
-        const std::uint64_t view_id = state.active_view_id;
+        const std::uint64_t view_id = state.view.active_view_id;
         const InkpodStatus status = state.engine->Invoke(
             [view_id, &count](InkpodCore* core) {
                 const InkpodSnapshotOptions options{
@@ -8119,16 +7975,16 @@ int RunM3Smoke(AppState& state) noexcept {
     if (query_guide_count() != 1U) {
         return 341;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_RULER, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_GRID, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_SNAP_GUIDES, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_SNAP_GRID, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_TRANSPARENT, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_ZOOM_PERCENT, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_BOX_ZOOM, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_RULER, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_GRID, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_SNAP_GUIDES, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_SNAP_GRID, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_TRANSPARENT, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_ZOOM_PERCENT, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_BOX_ZOOM, 0);
     inkpod::renderer::CanvasDocumentBounds box_bounds{};
     if (SendMessageW(
-            state.canvas,
+            state.windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&box_bounds)) != 1) {
@@ -8162,12 +8018,12 @@ int RunM3Smoke(AppState& state) noexcept {
         box_samples.data() + 1U,
         1U};
     if (SendMessageW(
-            state.window,
+            state.windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&box_begin)) != 1
         || SendMessageW(
-               state.window,
+               state.windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&box_end)) != 1) {
@@ -8175,7 +8031,7 @@ int RunM3Smoke(AppState& state) noexcept {
     }
     inkpod::renderer::CanvasDocumentBounds guide_bounds{};
     if (SendMessageW(
-            state.canvas,
+            state.windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&guide_bounds)) != 1) {
@@ -8190,12 +8046,12 @@ int RunM3Smoke(AppState& state) noexcept {
         const inkpod::renderer::CanvasStrokeEvent end_event{
             inkpod::renderer::CanvasStrokeEventKind::End, &end_sample, 1U};
         return SendMessageW(
-                   state.window,
+                   state.windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&begin_event)) == 1
             && SendMessageW(
-                   state.window,
+                   state.windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&end_event)) == 1;
@@ -8215,7 +8071,7 @@ int RunM3Smoke(AppState& state) noexcept {
     if (query_guide_count() != 2U) {
         return 342;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_VIEW_GUIDE_MOVE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_GUIDE_MOVE, 0);
     if (!send_guide_drag(
             guide_sample(guide_x1, guide_y),
             guide_sample(guide_x3, guide_y))) {
@@ -8233,7 +8089,7 @@ int RunM3Smoke(AppState& state) noexcept {
         return 344;
     }
     if (SendMessageW(
-            state.window, WM_COMMAND, IDM_SHORTCUT_EDIT, 0) != 1) {
+            state.windows.window, WM_COMMAND, IDM_SHORTCUT_EDIT, 0) != 1) {
         return 329;
     }
     if (!ResolveConfiguredShortcut(
@@ -8249,12 +8105,12 @@ int RunM3Smoke(AppState& state) noexcept {
             shortcut_menu_command)) {
         return 330;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_SHORTCUT_RESET, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SHORTCUT_RESET, 0);
     locator = {};
     locator.struct_size = sizeof(locator);
-    const std::uint64_t active_view_id = state.active_view_id;
-    if (!state.grid_visible || !state.ruler_visible || !state.snap_guides
-        || !state.snap_grid || state.transparent_visible
+    const std::uint64_t active_view_id = state.view.active_view_id;
+    if (!state.view.grid_visible || !state.view.ruler_visible || !state.view.snap_guides
+        || !state.view.snap_grid || state.view.transparent_visible
         || state.engine->Invoke(
                [active_view_id, &locator](InkpodCore* core) {
                    return inkpod_core_locator_sample(
@@ -8332,7 +8188,7 @@ int RunM3Smoke(AppState& state) noexcept {
             : 340 + static_cast<int>(std::min<std::uint64_t>(smoke_guide_count, 10U));
     }
     return SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasRenderOnce,
                0,
                0) == 1
@@ -8340,7 +8196,7 @@ int RunM3Smoke(AppState& state) noexcept {
         : 333;
 }
 
-int RunM4Smoke(AppState& state) noexcept {
+int RunM4Smoke(AppContext& state) noexcept {
     if (state.engine == nullptr
         || CreateCell(state, 32U, 24U, 120000U) != INKPOD_STATUS_OK) {
         return 400;
@@ -8352,7 +8208,7 @@ int RunM4Smoke(AppState& state) noexcept {
              IDM_CELL_FRAME_DRAWING,
              IDM_CELL_FRAME_SAFE,
              IDM_CELL_MARGINS}) {
-        SendMessageW(state.window, WM_COMMAND, command, 0);
+        SendMessageW(state.windows.window, WM_COMMAND, command, 0);
     }
     InkpodDocumentInfo paper{};
     if (!QueryDocument(state, paper) || paper.width != 32U || paper.height != 24U
@@ -8363,92 +8219,92 @@ int RunM4Smoke(AppState& state) noexcept {
         return 401;
     }
 
-    if (SendMessageW(state.window, WM_COMMAND, IDM_LAYER_NEW, 0) != 0
-        || SendMessageW(state.layer_list, LB_GETCOUNT, 0, 0) < 2) {
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_NEW, 0) != 0
+        || SendMessageW(state.windows.layer_list, LB_GETCOUNT, 0, 0) < 2) {
         return 402;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_TOGGLE_VISIBLE, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_TOGGLE_EDITABLE, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_OPACITY, 0);
-    if (SendMessageW(state.window, WM_COMMAND, IDM_LAYER_PROPERTIES, 0) != 1) {
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_VISIBLE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_EDITABLE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_OPACITY, 0);
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_PROPERTIES, 0) != 1) {
         return 402;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_CONVERT, 0);
-    if (SendMessageW(state.window, WM_COMMAND, IDM_PLANE_NEW, 0) != 0
-        || SendMessageW(state.plane_list, LB_GETCOUNT, 0, 0) < 2) {
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_CONVERT, 0);
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_NEW, 0) != 0
+        || SendMessageW(state.windows.plane_list, LB_GETCOUNT, 0, 0) < 2) {
         return 403;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_TOGGLE_VISIBLE, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_TOGGLE_EDITABLE, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_OPACITY, 0);
-    if (SendMessageW(state.window, WM_COMMAND, IDM_PLANE_PROPERTIES, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_PLANE_CONVERT, 0) != 1) {
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_VISIBLE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_EDITABLE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_OPACITY, 0);
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_PROPERTIES, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_CONVERT, 0) != 1) {
         return 403;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
     SetWindowPos(
-        state.plane_list, nullptr, 0, 0, 220, 160,
+        state.windows.plane_list, nullptr, 0, 0, 220, 160,
         SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOMOVE);
     const int plane_item_height = static_cast<int>(SendMessageW(
-        state.plane_list, LB_GETITEMHEIGHT, 0, 0));
-    const std::uint32_t plane_drag_start = state.active_tree_plane_index;
+        state.windows.plane_list, LB_GETITEMHEIGHT, 0, 0));
+    const std::uint32_t plane_drag_start = state.panes.active_tree_plane_index;
     if (plane_drag_start != 0U) {
         SendMessageW(
-            state.plane_list,
+            state.windows.plane_list,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(4, plane_item_height * static_cast<int>(plane_drag_start) + 2));
         SendMessageW(
-            state.plane_list, WM_LBUTTONUP, 0, MAKELPARAM(4, 2));
-        if (state.active_tree_plane_index != 0U) {
+            state.windows.plane_list, WM_LBUTTONUP, 0, MAKELPARAM(4, 2));
+        if (state.panes.active_tree_plane_index != 0U) {
             return 468;
         }
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_MOVE_DOWN, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_DELETE, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
-    if (SendMessageW(state.window, WM_COMMAND, IDM_PLANE_MERGE, 0) != 1) {
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_DOWN, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_DELETE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MERGE, 0) != 1) {
         return 403;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_DUPLICATE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_DUPLICATE, 0);
     SetWindowPos(
-        state.layer_list, nullptr, 0, 0, 220, 160,
+        state.windows.layer_list, nullptr, 0, 0, 220, 160,
         SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOMOVE);
     const int layer_item_height = static_cast<int>(SendMessageW(
-        state.layer_list, LB_GETITEMHEIGHT, 0, 0));
-    const std::uint32_t layer_drag_start = state.active_tree_layer_index;
+        state.windows.layer_list, LB_GETITEMHEIGHT, 0, 0));
+    const std::uint32_t layer_drag_start = state.panes.active_tree_layer_index;
     if (layer_drag_start != 0U) {
         SendMessageW(
-            state.layer_list,
+            state.windows.layer_list,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(4, layer_item_height * static_cast<int>(layer_drag_start) + 2));
         SendMessageW(
-            state.layer_list, WM_LBUTTONUP, 0, MAKELPARAM(4, 2));
-        if (state.active_tree_layer_index != 0U) {
+            state.windows.layer_list, WM_LBUTTONUP, 0, MAKELPARAM(4, 2));
+        if (state.panes.active_tree_layer_index != 0U) {
             return 469;
         }
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_MOVE_UP, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_MOVE_DOWN, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_LAYER_MERGE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_MOVE_UP, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_MOVE_DOWN, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_MERGE, 0);
 
     if (CreateCell(state, 12U, 10U, 96000U) != INKPOD_STATUS_OK) {
         return 404;
     }
     try {
-        state.smoke_raster_path = L"inkpod-io2-smoke.png";
+        state.lifetime.smoke_raster_path = L"inkpod-io2-smoke.png";
     } catch (const std::bad_alloc&) {
         return 405;
     }
-    DeleteFileW(state.smoke_raster_path.c_str());
-    if (SendMessageW(state.window, WM_COMMAND, IDM_FILE_EXPORT_RASTER, 0) != 1
-        || GetFileAttributesW(state.smoke_raster_path.c_str()) == INVALID_FILE_ATTRIBUTES
-        || SendMessageW(state.window, WM_COMMAND, IDM_FILE_IMPORT_RASTER, 0) != 1) {
-        DeleteFileW(state.smoke_raster_path.c_str());
-        state.smoke_raster_path.clear();
+    DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_FILE_EXPORT_RASTER, 0) != 1
+        || GetFileAttributesW(state.lifetime.smoke_raster_path.c_str()) == INVALID_FILE_ATTRIBUTES
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_FILE_IMPORT_RASTER, 0) != 1) {
+        DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+        state.lifetime.smoke_raster_path.clear();
         return 406;
     }
     InkpodDocumentInfo imported{};
@@ -8457,12 +8313,12 @@ int RunM4Smoke(AppState& state) noexcept {
         && imported.dpi_x_milli <= 97000U;
     RefreshLightTablePane(state);
     if (!import_ok) {
-        DeleteFileW(state.smoke_raster_path.c_str());
-        state.smoke_raster_path.clear();
+        DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+        state.lifetime.smoke_raster_path.clear();
         return 407;
     }
-    if (SendMessageW(state.window, WM_COMMAND, IDM_COLOR_EDITOR, 0) != 1
-        || state.drawing_color.depth != INKPOD_COLOR_DEPTH_16) {
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_COLOR_EDITOR, 0) != 1
+        || state.tools.drawing_color.depth != INKPOD_COLOR_DEPTH_16) {
         return 430;
     }
     const std::array<UINT, 10U> color_commands{
@@ -8477,33 +8333,33 @@ int RunM4Smoke(AppState& state) noexcept {
         IDM_PALETTE_NEXT_GROUP,
         IDM_CHART_GENERATE};
     for (std::size_t index = 0U; index < color_commands.size(); ++index) {
-        if (SendMessageW(state.window, WM_COMMAND, color_commands[index], 0) != 1) {
+        if (SendMessageW(state.windows.window, WM_COMMAND, color_commands[index], 0) != 1) {
             return 434 + static_cast<int>(index);
         }
     }
     RefreshColorPanes(state);
-    SendMessageW(state.color_chart_list, LB_SETCURSEL, 0, 0);
+    SendMessageW(state.windows.color_chart_list, LB_SETCURSEL, 0, 0);
     const std::array<UINT, 4U> chart_navigation_commands{
         IDM_CHART_RENAME, IDM_CHART_SEARCH, IDM_CHART_NEXT, IDM_CHART_NEXT_PAGE};
     for (std::size_t index = 0U; index < chart_navigation_commands.size(); ++index) {
         if (SendMessageW(
-                state.window, WM_COMMAND, chart_navigation_commands[index], 0) != 1) {
+                state.windows.window, WM_COMMAND, chart_navigation_commands[index], 0) != 1) {
             return 450 + static_cast<int>(index);
         }
     }
-    state.color_chart_page = 0U;
+    state.panes.color_chart_page = 0U;
     RefreshColorPanes(state);
-    SendMessageW(state.color_chart_list, LB_SETCURSEL, 0, 0);
-    if (SendMessageW(state.window, WM_COMMAND, IDM_CHART_SAVE, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_CHART_COPY, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_CHART_PASTE, 0) != 1) {
+    SendMessageW(state.windows.color_chart_list, LB_SETCURSEL, 0, 0);
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_SAVE, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_COPY, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_PASTE, 0) != 1) {
         return 432;
     }
-    SendMessageW(state.color_chart_list, LB_SETCURSEL, 0, 0);
-    if (SendMessageW(state.window, WM_COMMAND, IDM_CHART_CUT, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_CHART_LOAD, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_CHART_LOCK, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_CHART_LOCK, 0) != 1) {
+    SendMessageW(state.windows.color_chart_list, LB_SETCURSEL, 0, 0);
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_CUT, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_LOAD, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_LOCK, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_LOCK, 0) != 1) {
         return 433;
     }
     DeleteFileW(L"inkpod-palette-smoke.inkpalette");
@@ -8525,26 +8381,26 @@ int RunM4Smoke(AppState& state) noexcept {
         IDM_LT_ITEM_RELOAD};
     for (std::size_t index = 0U; index < light_table_commands.size(); ++index) {
         if (SendMessageW(
-                state.window, WM_COMMAND, light_table_commands[index], 0) != 1) {
-            DeleteFileW(state.smoke_raster_path.c_str());
-            state.smoke_raster_path.clear();
+                state.windows.window, WM_COMMAND, light_table_commands[index], 0) != 1) {
+            DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+            state.lifetime.smoke_raster_path.clear();
             return 414 + static_cast<int>(index);
         }
     }
     InkpodLightTableItemInfo light_item{};
-    if (!QueryLightTableItem(state, state.active_light_table_item_index, light_item)
+    if (!QueryLightTableItem(state, state.panes.active_light_table_item_index, light_item)
         || light_item.opacity_milli != 500U
         || light_item.effective_opacity_milli != 250U
         || light_item.translate_x_milli != 1000
         || light_item.translate_y_milli != -1000) {
-        DeleteFileW(state.smoke_raster_path.c_str());
-        state.smoke_raster_path.clear();
+        DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+        state.lifetime.smoke_raster_path.clear();
         return 408;
     }
     inkpod::renderer::CanvasDocumentBounds light_canvas{};
-    if (SendMessageW(state.window, WM_COMMAND, IDM_LT_ITEM_MOVE, 0) != 1
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_LT_ITEM_MOVE, 0) != 1
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&light_canvas)) != 1) {
@@ -8563,16 +8419,16 @@ int RunM4Smoke(AppState& state) noexcept {
     const inkpod::renderer::CanvasStrokeEvent light_end{
         inkpod::renderer::CanvasStrokeEventKind::End, &light_move_end, 1U};
     if (SendMessageW(
-            state.window,
+            state.windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&light_begin)) != 1
         || SendMessageW(
-               state.window,
+               state.windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&light_end)) != 1
-        || !QueryLightTableItem(state, state.active_light_table_item_index, light_item)
+        || !QueryLightTableItem(state, state.panes.active_light_table_item_index, light_item)
         || (light_item.translate_x_milli == 1000
             && light_item.translate_y_milli == -1000)) {
         return 471;
@@ -8580,64 +8436,64 @@ int RunM4Smoke(AppState& state) noexcept {
     const std::wstring swap_save = L"inkpod-lt-smoke.inkpod";
     DeleteFileW(swap_save.c_str());
     if (SaveToPath(state, swap_save) != INKPOD_STATUS_OK
-        || SendMessageW(state.window, WM_COMMAND, IDM_LT_ITEM_SWAP, 0) != 1) {
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_LT_ITEM_SWAP, 0) != 1) {
         DeleteFileW(swap_save.c_str());
         DeleteFileW((swap_save + L".recovery.inkpod").c_str());
-        DeleteFileW(state.smoke_raster_path.c_str());
-        state.smoke_raster_path.clear();
+        DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+        state.lifetime.smoke_raster_path.clear();
         return 409;
     }
     DeleteFileW(swap_save.c_str());
     DeleteFileW((swap_save + L".recovery.inkpod").c_str());
     std::vector<std::uint8_t> sequence_source;
-    if (!ReadBoundedFile(state.smoke_raster_path, sequence_source)) {
-        DeleteFileW(state.smoke_raster_path.c_str());
-        state.smoke_raster_path.clear();
+    if (!ReadBoundedFile(state.lifetime.smoke_raster_path, sequence_source)) {
+        DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+        state.lifetime.smoke_raster_path.clear();
         return 410;
     }
     try {
-        state.smoke_sequence_paths = {L"cell10.png", L"cell1.png", L"cell3.png"};
+        state.lifetime.smoke_sequence_paths = {L"cell10.png", L"cell1.png", L"cell3.png"};
     } catch (const std::bad_alloc&) {
-        DeleteFileW(state.smoke_raster_path.c_str());
-        state.smoke_raster_path.clear();
+        DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+        state.lifetime.smoke_raster_path.clear();
         return 410;
     }
-    for (const auto& path : state.smoke_sequence_paths) {
+    for (const auto& path : state.lifetime.smoke_sequence_paths) {
         DeleteFileW(path.c_str());
         if (!WriteFileAtomically(path, sequence_source)) {
             return 410;
         }
     }
-    if (SendMessageW(state.window, WM_COMMAND, IDM_SEQ_IMPORT, 0) != 1) {
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_IMPORT, 0) != 1) {
         return 411;
     }
     RefreshSequencePane(state);
-    if (SendMessageW(state.sequence_list, LB_GETCOUNT, 0, 0) != 3
-        || SendMessageW(state.window, WM_COMMAND, IDM_SUBPALETTE_SET, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_SUBPALETTE_SAMPLE, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_SEQ_GOTO, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_SEQ_NEXT, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_START, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_NEXT, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_PAUSE, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_PAUSE, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_PREVIOUS, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_FIRST, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_LAST, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_FPS_30, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_FPS_25, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_FPS_24, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_FPS_12, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_FPS_10, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_FPS_8, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_MOTION_STOP, 0) != 1) {
+    if (SendMessageW(state.windows.sequence_list, LB_GETCOUNT, 0, 0) != 3
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_SUBPALETTE_SET, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_SUBPALETTE_SAMPLE, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_GOTO, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_NEXT, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_START, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_NEXT, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_PAUSE, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_PAUSE, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_PREVIOUS, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FIRST, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_LAST, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_30, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_25, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_24, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_12, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_10, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_8, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_STOP, 0) != 1) {
         return 412;
     }
-    DeleteFileW(state.smoke_raster_path.c_str());
-    state.smoke_raster_path = L"inkpod-sequence-export.png";
-    DeleteFileW(state.smoke_raster_path.c_str());
-    if (SendMessageW(state.window, WM_COMMAND, IDM_SEQ_EXPORT, 0) != 1
+    DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+    state.lifetime.smoke_raster_path = L"inkpod-sequence-export.png";
+    DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_EXPORT, 0) != 1
         || GetFileAttributesW(L"inkpod-sequence-export-cell1.png")
             == INVALID_FILE_ATTRIBUTES
         || GetFileAttributesW(L"inkpod-sequence-export-cell3.png")
@@ -8646,19 +8502,19 @@ int RunM4Smoke(AppState& state) noexcept {
             == INVALID_FILE_ATTRIBUTES) {
         return 413;
     }
-    for (const auto& path : state.smoke_sequence_paths) {
+    for (const auto& path : state.lifetime.smoke_sequence_paths) {
         DeleteFileW(path.c_str());
     }
-    state.smoke_sequence_paths.clear();
+    state.lifetime.smoke_sequence_paths.clear();
     DeleteFileW(L"inkpod-sequence-export-cell1.png");
     DeleteFileW(L"inkpod-sequence-export-cell3.png");
     DeleteFileW(L"inkpod-sequence-export-cell10.png");
-    DeleteFileW(state.smoke_raster_path.c_str());
-    state.smoke_raster_path.clear();
+    DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+    state.lifetime.smoke_raster_path.clear();
     return 0;
 }
 
-int RunM5Smoke(AppState& state) noexcept {
+int RunM5Smoke(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return 500;
     }
@@ -8681,7 +8537,7 @@ int RunM5Smoke(AppState& state) noexcept {
             false) != INKPOD_STATUS_OK) {
         return 501;
     }
-    ResetM3DocumentUiState(state);
+    ResetUiForDocumentReplacement(state);
     if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
         return 501;
     }
@@ -8864,22 +8720,22 @@ int RunM5Smoke(AppState& state) noexcept {
         return 504;
     }
     if (SendMessageW(
-            state.canvas,
+            state.windows.canvas,
             inkpod::renderer::kCanvasRenderOnce,
             0,
             0) != 1) {
         return 505;
     }
     if (SendMessageW(
-            state.canvas,
+            state.windows.canvas,
             inkpod::renderer::kCanvasValidateClosedVectorStroke,
             0,
             0) != 1) {
         return 507;
     }
 
-    state.active_tree_layer_id = vector_layer_id;
-    state.active_tree_plane_id = vector_trace_plane_id;
+    state.panes.active_tree_layer_id = vector_layer_id;
+    state.panes.active_tree_plane_id = vector_trace_plane_id;
     if (!RefreshTreePane(state)) {
         return 506;
     }
@@ -8887,7 +8743,7 @@ int RunM5Smoke(AppState& state) noexcept {
     for (const UINT command : {
              IDM_VECTOR_LINE, IDM_VECTOR_CURVE, IDM_VECTOR_RECTANGLE,
              IDM_VECTOR_ELLIPSE, IDM_VECTOR_POLYLINE, IDM_VECTOR_ERASER}) {
-        const UINT command_state = GetMenuState(GetMenu(state.window), command, MF_BYCOMMAND);
+        const UINT command_state = GetMenuState(GetMenu(state.windows.window), command, MF_BYCOMMAND);
         if (command_state == static_cast<UINT>(-1)
             || (command_state & (MF_DISABLED | MF_GRAYED)) != 0U) {
             return 508;
@@ -8897,7 +8753,7 @@ int RunM5Smoke(AppState& state) noexcept {
     InkpodDocumentInfo document{};
     if (!QueryDocument(state, document)
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&canvas_bounds)) != 1) {
@@ -8915,7 +8771,7 @@ int RunM5Smoke(AppState& state) noexcept {
             0U};
     };
     const auto gesture = [&](UINT command, const std::array<InkpodStrokeSample, 4U>& samples) {
-        if (SendMessageW(state.window, WM_COMMAND, command, 0) != 1) {
+        if (SendMessageW(state.windows.window, WM_COMMAND, command, 0) != 1) {
             return false;
         }
         const inkpod::renderer::CanvasStrokeEvent begin{
@@ -8925,17 +8781,17 @@ int RunM5Smoke(AppState& state) noexcept {
         const inkpod::renderer::CanvasStrokeEvent end{
             inkpod::renderer::CanvasStrokeEventKind::End, samples.data() + 3U, 1U};
         return SendMessageW(
-                   state.window,
+                   state.windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&begin)) == 1
             && SendMessageW(
-                   state.window,
+                   state.windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&append)) == 1
             && SendMessageW(
-                   state.window,
+                   state.windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&end)) == 1;
@@ -8970,14 +8826,14 @@ int RunM5Smoke(AppState& state) noexcept {
         IDM_VECTOR_SELECT_FILL};
     for (std::size_t index = 0U; index < selection_commands.size(); ++index) {
         const UINT command = selection_commands[index];
-        if (SendMessageW(state.window, WM_COMMAND, command, 0) != 1) {
+        if (SendMessageW(state.windows.window, WM_COMMAND, command, 0) != 1) {
             return 520 + static_cast<int>(index);
         }
     }
-    if (SendMessageW(state.window, WM_COMMAND, IDM_VECTOR_SELECT_TOUCH, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_VECTOR_WIDTH, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_VECTOR_CONNECT, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_VECTOR_ERASE_WHOLE, 0) != 1) {
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_SELECT_TOUCH, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_WIDTH, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_CONNECT, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_ERASE_WHOLE, 0) != 1) {
         return 509;
     }
     const inkpod::renderer::CanvasStrokeEvent erase_begin{
@@ -8985,28 +8841,28 @@ int RunM5Smoke(AppState& state) noexcept {
     const inkpod::renderer::CanvasStrokeEvent erase_end{
         inkpod::renderer::CanvasStrokeEventKind::End, line_samples.data() + 2U, 1U};
     if (SendMessageW(
-            state.window,
+            state.windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&erase_begin)) != 1
         || SendMessageW(
-               state.window,
+               state.windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&erase_end)) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_VECTOR_RASTERIZE, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_VECTOR_VECTORIZE, 0) != 1) {
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_RASTERIZE, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_VECTORIZE, 0) != 1) {
         return 510;
     }
     return 0;
 }
 
-void ResetBatchDerivedState(AppState& state) noexcept {
-    inkpod_batch_preview_release(&state.batch_preview);
-    inkpod_batch_report_release(&state.batch_report);
-    inkpod_batch_graph_release(&state.batch_graph);
-    state.batch.loaded_graph = false;
-    state.batch.last_result.clear();
+void ResetBatchDerivedState(BatchUiState& batch) noexcept {
+    inkpod_batch_preview_release(&batch.preview);
+    inkpod_batch_report_release(&batch.report);
+    inkpod_batch_graph_release(&batch.graph);
+    batch.loaded_graph = false;
+    batch.last_result.clear();
 }
 
 InkpodColorValue BatchTransparentColor() noexcept {
@@ -9056,11 +8912,11 @@ const wchar_t* BatchOperationLabel(UINT command) noexcept {
     return L"バッチ項目";
 }
 
-bool AddBatchOperation(AppState& state, UINT command) noexcept {
+bool AddBatchOperation(AppContext& state, UINT command) noexcept {
     BatchOperationUi operation{};
     operation.label = BatchOperationLabel(command);
-    operation.color_0 = state.drawing_color;
-    operation.color_1 = state.drawing_color;
+    operation.color_0 = state.tools.drawing_color;
+    operation.color_1 = state.tools.drawing_color;
     const UINT filter_command = BatchFilterCommandToM6(command);
     if (filter_command != 0U) {
         operation.kind = INKPOD_BATCH_OPERATION_FILTER;
@@ -9075,7 +8931,7 @@ bool AddBatchOperation(AppState& state, UINT command) noexcept {
                 pair.struct_size = sizeof(pair);
                 pair.enabled = 1U;
                 pair.old_color = BatchTransparentColor();
-                pair.new_color = state.drawing_color;
+                pair.new_color = state.tools.drawing_color;
                 operation.color_pairs.push_back(pair);
                 break;
             }
@@ -9084,14 +8940,14 @@ bool AddBatchOperation(AppState& state, UINT command) noexcept {
                 InkpodBatchSeedInput seed{};
                 seed.struct_size = sizeof(seed);
                 seed.flags = INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR;
-                seed.fill_color = state.drawing_color;
+                seed.fill_color = state.tools.drawing_color;
                 seed.expected_color = BatchTransparentColor();
                 operation.seeds.push_back(seed);
                 break;
             }
             case IDM_BATCH_ADD_SEPARATION:
                 operation.kind = INKPOD_BATCH_OPERATION_SEPARATION;
-                operation.colors.push_back(state.drawing_color);
+                operation.colors.push_back(state.tools.drawing_color);
                 operation.color_0 = BatchTransparentColor();
                 break;
             case IDM_BATCH_ADD_VISIBILITY:
@@ -9110,7 +8966,7 @@ bool AddBatchOperation(AppState& state, UINT command) noexcept {
             case IDM_BATCH_ADD_BOUNDARY_AIRBRUSH:
                 operation.kind = INKPOD_BATCH_OPERATION_BOUNDARY_AIRBRUSH;
                 operation.colors.push_back(BatchTransparentColor());
-                operation.colors.push_back(state.drawing_color);
+                operation.colors.push_back(state.tools.drawing_color);
                 operation.parameters[0] = 4;
                 operation.parameters[1] = 1000;
                 break;
@@ -9163,11 +9019,11 @@ bool AddBatchOperation(AppState& state, UINT command) noexcept {
         }
     }
     try {
-        ResetBatchDerivedState(state);
+        ResetBatchDerivedState(state.batch);
         state.batch.operations.push_back(std::move(operation));
         state.batch.selected_operation =
             static_cast<std::uint32_t>(state.batch.operations.size() - 1U);
-        RefreshBatchPalette(state);
+        RefreshBatchPalette(state.batch);
         return true;
     } catch (const std::bad_alloc&) {
         return false;
@@ -9207,7 +9063,7 @@ UINT M6CommandForFilterKind(std::uint32_t kind) noexcept {
     }
 }
 
-bool EditSelectedBatchOperation(AppState& state) noexcept {
+bool EditSelectedBatchOperation(AppContext& state) noexcept {
     if (state.batch.loaded_graph
         || state.batch.selected_operation >= state.batch.operations.size()) {
         return false;
@@ -9228,7 +9084,7 @@ bool EditSelectedBatchOperation(AppState& state) noexcept {
         0,
         0};
     metadata.value_count = 2U;
-    if (ShowViewOptions(state.instance, state.window, state.smoke_test, metadata) != IDOK
+    if (ShowViewOptions(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, metadata) != IDOK
         || metadata.values[0] < 0 || metadata.values[0] > 1
         || metadata.values[1] < 0 || metadata.values[1] > 1) {
         return false;
@@ -9251,7 +9107,7 @@ bool EditSelectedBatchOperation(AppState& state) noexcept {
             static_cast<std::int32_t>(operation.missing_policy),
             0};
         target.value_count = 3U;
-        if (ShowViewOptions(state.instance, state.window, state.smoke_test, target) != IDOK
+        if (ShowViewOptions(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, target) != IDOK
             || target.values[0] < 0 || target.values[1] < 0
             || (target.values[2]
                     != static_cast<std::int32_t>(INKPOD_BATCH_MISSING_SKIP)
@@ -9275,7 +9131,7 @@ bool EditSelectedBatchOperation(AppState& state) noexcept {
         if (operation.color_pairs.empty()) {
             return false;
         }
-        operation.color_pairs[0].new_color = state.drawing_color;
+        operation.color_pairs[0].new_color = state.tools.drawing_color;
     } else {
         ViewOptionsDialogState dialog{};
         dialog.title = L"バッチ項目の編集";
@@ -9321,7 +9177,7 @@ bool EditSelectedBatchOperation(AppState& state) noexcept {
         } else if (operation.kind == INKPOD_BATCH_OPERATION_CONVERT_PLANE) {
             dialog.labels = {L"plane kind", L"pixel format", nullptr, nullptr};
         }
-        if (ShowViewOptions(state.instance, state.window, state.smoke_test, dialog) != IDOK) {
+        if (ShowViewOptions(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, dialog) != IDOK) {
             return false;
         }
         if (operation.kind == INKPOD_BATCH_OPERATION_CONTINUOUS_FILL) {
@@ -9334,7 +9190,7 @@ bool EditSelectedBatchOperation(AppState& state) noexcept {
             operation.seeds[0].y = static_cast<std::uint32_t>(dialog.values[1]);
             operation.seeds[0].tolerance = static_cast<std::uint32_t>(dialog.values[2]);
             operation.seeds[0].gap_close = static_cast<std::uint32_t>(dialog.values[3]);
-            operation.seeds[0].fill_color = state.drawing_color;
+            operation.seeds[0].fill_color = state.tools.drawing_color;
         } else {
             for (std::size_t index = 0; index < dialog.value_count; ++index) {
                 operation.parameters[index] = dialog.values[index];
@@ -9342,13 +9198,13 @@ bool EditSelectedBatchOperation(AppState& state) noexcept {
         }
     }
     state.batch.operations[state.batch.selected_operation] = std::move(operation);
-    ResetBatchDerivedState(state);
-    RefreshBatchPalette(state);
+    ResetBatchDerivedState(state.batch);
+    RefreshBatchPalette(state.batch);
     return true;
 }
 
-InkpodStatus BuildBatchGraph(AppState& state) noexcept {
-    if (state.batch.loaded_graph && state.batch_graph != nullptr) {
+InkpodStatus BuildBatchGraph(AppContext& state) noexcept {
+    if (state.batch.loaded_graph && state.batch.graph != nullptr) {
         return INKPOD_STATUS_OK;
     }
     if (state.batch.operations.empty()) {
@@ -9441,8 +9297,8 @@ InkpodStatus BuildBatchGraph(AppState& state) noexcept {
         InkpodBatchGraph* graph{};
         const InkpodStatus status = inkpod_batch_graph_create(&input, &graph);
         if (status == INKPOD_STATUS_OK) {
-            inkpod_batch_graph_release(&state.batch_graph);
-            state.batch_graph = graph;
+            inkpod_batch_graph_release(&state.batch.graph);
+            state.batch.graph = graph;
         }
         return status;
     } catch (const std::bad_alloc&) {
@@ -9462,7 +9318,7 @@ std::wstring BatchReportSummary(const InkpodBatchReport* report) {
         + (info.cancelled != 0U ? L" / キャンセル" : L"");
 }
 
-InkpodStatus PreviewBatch(AppState& state, InkpodBatchRunScope scope) noexcept {
+InkpodStatus PreviewBatch(AppContext& state, InkpodBatchRunScope scope) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -9470,22 +9326,22 @@ InkpodStatus PreviewBatch(AppState& state, InkpodBatchRunScope scope) noexcept {
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
-    inkpod_batch_preview_release(&state.batch_preview);
+    inkpod_batch_preview_release(&state.batch.preview);
     status = state.engine->Invoke(
         [&state, scope](InkpodCore* core) {
             return inkpod_core_batch_preview(
-                core, state.batch_graph, scope, &state.batch_preview);
+                core, state.batch.graph, scope, &state.batch.preview);
         },
         false,
         false);
     if (status == INKPOD_STATUS_OK) {
         std::uint64_t count{};
         std::uint64_t warnings{};
-        status = inkpod_batch_preview_count(state.batch_preview, &count);
+        status = inkpod_batch_preview_count(state.batch.preview, &count);
         for (std::uint64_t index = 0U; status == INKPOD_STATUS_OK && index < count; ++index) {
             InkpodBatchPreviewItem item{};
             item.struct_size = sizeof(item);
-            status = inkpod_batch_preview_get(state.batch_preview, index, &item);
+            status = inkpod_batch_preview_get(state.batch.preview, index, &item);
             if (status == INKPOD_STATUS_OK
                 && (item.flags & INKPOD_BATCH_PREVIEW_HAS_WARNING) != 0U) {
                 ++warnings;
@@ -9500,15 +9356,15 @@ InkpodStatus PreviewBatch(AppState& state, InkpodBatchRunScope scope) noexcept {
             }
         }
     }
-    RefreshBatchPalette(state);
+    RefreshBatchPalette(state.batch);
     return status;
 }
 
 InkpodStatus StartBatch(
-    AppState& state,
+    AppContext& state,
     InkpodBatchRunScope scope,
     bool dry_run) noexcept {
-    if (state.engine == nullptr || state.batch_task != nullptr) {
+    if (state.engine == nullptr || state.batch.task != nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     InkpodStatus status = BuildBatchGraph(state);
@@ -9521,9 +9377,9 @@ InkpodStatus StartBatch(
         if (status != INKPOD_STATUS_OK) {
             return status;
         }
-        preview_confirmed = state.smoke_test
+        preview_confirmed = state.lifetime.smoke_test
             || MessageBoxW(
-                   state.window,
+                   state.windows.window,
                    L"表示した入力・出力・警告の内容で保存を続行しますか？",
                    L"バッチ保存前プレビュー",
                    MB_OKCANCEL | MB_ICONQUESTION) == IDOK;
@@ -9531,62 +9387,62 @@ InkpodStatus StartBatch(
             return INKPOD_STATUS_CANCELLED;
         }
     }
-    inkpod_batch_report_release(&state.batch_report);
-    status = inkpod_batch_task_create(&state.batch_task);
+    inkpod_batch_report_release(&state.batch.report);
+    status = inkpod_batch_task_create(&state.batch.task);
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
     const std::uint64_t flags = (dry_run ? INKPOD_BATCH_RUN_DRY : 0U)
         | (preview_confirmed ? INKPOD_BATCH_RUN_PREVIEW_CONFIRMED : 0U);
-    if (state.smoke_test) {
+    if (state.lifetime.smoke_test) {
         status = state.engine->Invoke(
             [&state, scope, flags](InkpodCore* core) {
                 return inkpod_core_batch_execute(
                     core,
-                    state.batch_graph,
+                    state.batch.graph,
                     scope,
                     flags,
-                    state.batch_task,
-                    &state.batch_report);
+                    state.batch.task,
+                    &state.batch.report);
             },
             true,
             true);
-        if (state.batch_report != nullptr) {
+        if (state.batch.report != nullptr) {
             try {
-                state.batch.last_result = BatchReportSummary(state.batch_report);
+                state.batch.last_result = BatchReportSummary(state.batch.report);
             } catch (const std::bad_alloc&) {
                 status = INKPOD_STATUS_INVALID_STATE;
             }
         }
-        inkpod_batch_task_release(&state.batch_task);
-        RefreshBatchPalette(state);
+        inkpod_batch_task_release(&state.batch.task);
+        RefreshBatchPalette(state.batch);
         return status;
     }
-    state.batch_progress_dialog = {
-        &state,
+    state.batch.progress_dialog = {
+        &state.batch,
         QueryBatchProgress,
         CancelBatchProgress,
         L"バッチ実行",
         L"バッチ処理中...",
         L"キャンセル中..."};
-    state.batch_progress = inkpod::windows::ui::CreateProgressDialog(
-        state.instance, state.window, state.batch_progress_dialog);
-    if (state.batch_progress == nullptr) {
-        inkpod_batch_task_release(&state.batch_task);
+    state.batch.progress = inkpod::windows::ui::CreateProgressDialog(
+        state.lifetime.instance, state.windows.window, state.batch.progress_dialog);
+    if (state.batch.progress == nullptr) {
+        inkpod_batch_task_release(&state.batch.task);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    ShowWindow(state.batch_progress, SW_SHOW);
-    AppState* state_pointer = &state;
-    const HWND window = state.window;
+    ShowWindow(state.batch.progress, SW_SHOW);
+    AppContext* state_pointer = &state;
+    const HWND window = state.windows.window;
     if (!state.engine->Enqueue(
             [state_pointer, scope, flags](InkpodCore* core) {
                 return inkpod_core_batch_execute(
                     core,
-                    state_pointer->batch_graph,
+                    state_pointer->batch.graph,
                     scope,
                     flags,
-                    state_pointer->batch_task,
-                    &state_pointer->batch_report);
+                    state_pointer->batch.task,
+                    &state_pointer->batch.report);
             },
             true,
             true,
@@ -9594,9 +9450,9 @@ InkpodStatus StartBatch(
             [window](InkpodStatus completion_status) {
                 PostMessageW(window, kBatchTaskCompleted, completion_status, 0);
             })) {
-        DestroyWindow(state.batch_progress);
-        state.batch_progress = nullptr;
-        inkpod_batch_task_release(&state.batch_task);
+        DestroyWindow(state.batch.progress);
+        state.batch.progress = nullptr;
+        inkpod_batch_task_release(&state.batch.task);
         return INKPOD_STATUS_INVALID_STATE;
     }
     UpdateMenuState(state);
@@ -9654,7 +9510,7 @@ bool ChooseBatchFolder(HWND owner, std::wstring& selected_path) noexcept {
     }
 }
 
-int RunM6Smoke(AppState& state) noexcept {
+int RunM6Smoke(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return 600;
     }
@@ -9796,51 +9652,51 @@ int RunM6Smoke(AppState& state) noexcept {
         || !adjustment_preserved_source || !effect_connected) {
         return 601;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_PLANE_COLOR, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_COLOR, 0);
     InkpodDocumentInfo before_menu = EmptyDocumentInfo();
     InkpodDocumentInfo after_menu = EmptyDocumentInfo();
-    HMENU menu = GetMenu(state.window);
+    HMENU menu = GetMenu(state.windows.window);
     if (menu == nullptr || !QueryDocument(state, before_menu)
         || GetMenuState(menu, IDM_FILTER_LAST, MF_BYCOMMAND) == static_cast<UINT>(-1)) {
         return 602;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_FILTER_LAST, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_FILTER_LAST, 0);
     if (!QueryDocument(state, after_menu)
         || after_menu.color_plane_checksum == before_menu.color_plane_checksum) {
         return 603;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
-    if (state.m6_adjustments.size() != 2U
-        || state.m6_adjustments[0].id == state.m6_adjustments[1].id) {
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
+    if (state.effects.adjustments.size() != 2U
+        || state.effects.adjustments[0].id == state.effects.adjustments[1].id) {
         return 605;
     }
-    const std::uint64_t newest_adjustment = state.m6_adjustment_id;
-    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_PREVIOUS, 0);
-    if (state.m6_adjustment_id == newest_adjustment) {
+    const std::uint64_t newest_adjustment = state.effects.adjustment_id;
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_PREVIOUS, 0);
+    if (state.effects.adjustment_id == newest_adjustment) {
         return 606;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_EDIT, 0);
-    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_TOGGLE, 0);
-    if (state.m6_adjustment_visible) {
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_EDIT, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_TOGGLE, 0);
+    if (state.effects.adjustment_visible) {
         return 607;
     }
-    SendMessageW(state.window, WM_COMMAND, IDM_ADJUSTMENT_MOVE_TOP, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_MOVE_TOP, 0);
     InkpodDocumentInfo before_spray = EmptyDocumentInfo();
     InkpodDocumentInfo after_spray = EmptyDocumentInfo();
     inkpod::renderer::CanvasDocumentBounds spray_bounds{};
     if (!QueryDocument(state, before_spray)
         || SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&spray_bounds)) != 1) {
         return 608;
     }
-    state.tool = kInteractionM6Airbrush;
-    state.m6_options.parameters = {4000, 1000, 1000, 750, 0};
-    state.m6_options.option = true;
-    state.m6_options.option2 = true;
+    state.tools.active_tool = kInteractionM6Airbrush;
+    state.effects.options.parameters = {4000, 1000, 1000, 750, 0};
+    state.effects.options.option = true;
+    state.effects.options.option2 = true;
     const InkpodStrokeSample spray_sample{
         sizeof(InkpodStrokeSample),
         0U,
@@ -9853,14 +9709,14 @@ int RunM6Smoke(AppState& state) noexcept {
     const inkpod::renderer::CanvasStrokeEvent spray_end{
         inkpod::renderer::CanvasStrokeEventKind::End, &spray_sample, 1U};
     if (SendMessageW(
-            state.window,
+            state.windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&spray_begin)) != 1
-        || SendMessageW(state.window, WM_TIMER, kM6ContinuousSprayTimer, 0) != 0
-        || state.m6_samples.size() < 2U
+        || SendMessageW(state.windows.window, WM_TIMER, kM6ContinuousSprayTimer, 0) != 0
+        || state.effects.samples.size() < 2U
         || SendMessageW(
-               state.window,
+               state.windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&spray_end)) != 1
@@ -9872,7 +9728,7 @@ int RunM6Smoke(AppState& state) noexcept {
         return 609;
     }
     return SendMessageW(
-               state.canvas,
+               state.windows.canvas,
                inkpod::renderer::kCanvasRenderOnce,
                0,
                0) == 1
@@ -9880,7 +9736,7 @@ int RunM6Smoke(AppState& state) noexcept {
         : 604;
 }
 
-int RunM7Smoke(AppState& state) noexcept {
+int RunM7Smoke(AppContext& state) noexcept {
     constexpr wchar_t settings_path[] = L"inkpod-m7-ui-smoke.inkbatch";
     constexpr wchar_t output_path[] = L"inkpod-m7-windows-smoke_0001.inkpod";
     const auto cleanup = [&]() noexcept {
@@ -9888,23 +9744,23 @@ int RunM7Smoke(AppState& state) noexcept {
         DeleteFileW(output_path);
     };
     cleanup();
-    if (state.engine == nullptr || state.batch_palette == nullptr) {
+    if (state.engine == nullptr || state.batch.palette == nullptr) {
         return 700;
     }
-    HMENU menu = GetMenu(state.window);
+    HMENU menu = GetMenu(state.windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_WINDOW_BATCH, MF_BYCOMMAND) == static_cast<UINT>(-1)
-        || SendMessageW(state.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
-        || IsWindowVisible(state.batch_palette) == FALSE) {
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
+        || IsWindowVisible(state.batch.palette) == FALSE) {
         cleanup();
         return 701;
     }
     state.batch.output_folder = L".";
     state.batch.basename = L"inkpod-m7-windows-smoke";
-    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_INPUT_CURRENT, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_INPUT_RANGE, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OUTPUT_SETTINGS, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_ADD_COLOR_REPLACE, 0) != 1
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_INPUT_CURRENT, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_INPUT_RANGE, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OUTPUT_SETTINGS, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_ADD_COLOR_REPLACE, 0) != 1
         || state.batch.operations.size() != 1U
         || state.batch.operations[0].color_pairs.size() != 1U) {
         cleanup();
@@ -9912,7 +9768,7 @@ int RunM7Smoke(AppState& state) noexcept {
     }
     const InkpodColorValue old_before = state.batch.operations[0].color_pairs[0].old_color;
     const InkpodColorValue new_before = state.batch.operations[0].color_pairs[0].new_color;
-    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_REPLACE_SWAP, 0) != 1) {
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_REPLACE_SWAP, 0) != 1) {
         cleanup();
         return 703;
     }
@@ -9922,56 +9778,56 @@ int RunM7Smoke(AppState& state) noexcept {
         cleanup();
         return 704;
     }
-    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, 0) != 1
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, 0) != 1
         || state.batch.operations.size() != 2U
         || state.batch.operations.back().colors.size() < 2U
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
-        || state.batch_report == nullptr
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
+        || state.batch.report == nullptr
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
         || state.batch.operations.size() != 1U) {
         cleanup();
         return 705;
     }
-    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_ADD_MIRROR, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OPERATION_UP, 0) != 1
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_ADD_MIRROR, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OPERATION_UP, 0) != 1
         || state.batch.operations.front().kind != INKPOD_BATCH_OPERATION_MIRROR
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OPERATION_DOWN, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OPERATION_EDIT, 0) != 1
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OPERATION_DOWN, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OPERATION_EDIT, 0) != 1
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
         || state.batch.operations.size() != 1U
         || state.batch.operations[0].kind != INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
         cleanup();
         return 706;
     }
     const LRESULT input_count = SendDlgItemMessageW(
-        state.batch_palette, IDC_BATCH_INPUTS, LB_GETCOUNT, 0, 0);
+        state.batch.palette, IDC_BATCH_INPUTS, LB_GETCOUNT, 0, 0);
     const LRESULT operation_count = SendDlgItemMessageW(
-        state.batch_palette, IDC_BATCH_OPERATIONS, LB_GETCOUNT, 0, 0);
+        state.batch.palette, IDC_BATCH_OPERATIONS, LB_GETCOUNT, 0, 0);
     if (input_count != 1 || operation_count != 1
-        || GetDlgItem(state.batch_palette, IDC_BATCH_OUTPUT) == nullptr) {
+        || GetDlgItem(state.batch.palette, IDC_BATCH_OUTPUT) == nullptr) {
         cleanup();
         return 707;
     }
-    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_SAVE_SET, 0) != 1
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_SAVE_SET, 0) != 1
         || GetFileAttributesW(settings_path) == INVALID_FILE_ATTRIBUTES
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_LOAD_SET, 0) != 1
-        || !state.batch.loaded_graph || state.batch_graph == nullptr) {
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_LOAD_SET, 0) != 1
+        || !state.batch.loaded_graph || state.batch.graph == nullptr) {
         cleanup();
         return 708;
     }
     InkpodBatchGraphInfo graph_info{};
     graph_info.struct_size = sizeof(graph_info);
-    if (inkpod_batch_graph_get_info(state.batch_graph, &graph_info) != INKPOD_STATUS_OK
+    if (inkpod_batch_graph_get_info(state.batch.graph, &graph_info) != INKPOD_STATUS_OK
         || graph_info.version != INKPOD_BATCH_GRAPH_VERSION
         || graph_info.operation_count != 1U
         || graph_info.output_policy != INKPOD_BATCH_OUTPUT_DUPLICATE) {
         cleanup();
         return 709;
     }
-    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_PREVIEW, 0) != 1
-        || state.batch_preview == nullptr
-        || SendMessageW(state.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
-        || state.batch_report == nullptr
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_PREVIEW, 0) != 1
+        || state.batch.preview == nullptr
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
+        || state.batch.report == nullptr
         || GetFileAttributesW(output_path) != INVALID_FILE_ATTRIBUTES) {
         cleanup();
         return 710;
@@ -9980,23 +9836,23 @@ int RunM7Smoke(AppState& state) noexcept {
     report_info.struct_size = sizeof(report_info);
     InkpodBatchReportItem report_item{};
     report_item.struct_size = sizeof(report_item);
-    if (inkpod_batch_report_get_info(state.batch_report, &report_info) != INKPOD_STATUS_OK
+    if (inkpod_batch_report_get_info(state.batch.report, &report_info) != INKPOD_STATUS_OK
         || report_info.failure_count != 0U || report_info.item_count == 0U
-        || inkpod_batch_report_get(state.batch_report, 0U, &report_item)
+        || inkpod_batch_report_get(state.batch.report, 0U, &report_item)
             != INKPOD_STATUS_OK
         || report_item.outcome != INKPOD_BATCH_ITEM_DRY_RUN) {
         cleanup();
         return 711;
     }
-    if (SendMessageW(state.window, WM_COMMAND, IDM_BATCH_RUN_CURRENT, 0) != 1
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_RUN_CURRENT, 0) != 1
         || GetFileAttributesW(output_path) == INVALID_FILE_ATTRIBUTES
-        || inkpod_batch_report_get_info(state.batch_report, &report_info) != INKPOD_STATUS_OK
+        || inkpod_batch_report_get_info(state.batch.report, &report_info) != INKPOD_STATUS_OK
         || report_info.failure_count != 0U) {
         cleanup();
         return 712;
     }
-    if (SendMessageW(state.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
-        || IsWindowVisible(state.batch_palette) != FALSE) {
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
+        || IsWindowVisible(state.batch.palette) != FALSE) {
         cleanup();
         return 713;
     }
@@ -10004,47 +9860,47 @@ int RunM7Smoke(AppState& state) noexcept {
     return 0;
 }
 
-InkpodStatus InitializeCore(AppState& state) noexcept {
+InkpodStatus InitializeCore(AppContext& state) noexcept {
     try {
         state.engine = std::make_unique<inkpod::app::CoreEngine>();
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus status = state.engine->Start(
-        inkpod::renderer::GetCanvasSnapshotSink(state.canvas), state.window);
+        inkpod::renderer::GetCanvasSnapshotSink(state.windows.canvas), state.windows.window);
     return status;
 }
 
-InkpodStatus ShutdownCore(AppState& state) noexcept {
+InkpodStatus ShutdownCore(AppContext& state) noexcept {
     const InkpodStatus clipboard_status =
-        inkpod_clipboard_release(&state.clipboard);
-    if (state.m6_task != nullptr) {
-        inkpod_task_cancel(state.m6_task);
+        inkpod_clipboard_release(&state.document.clipboard);
+    if (state.effects.task != nullptr) {
+        inkpod_task_cancel(state.effects.task);
     }
-    if (state.batch_task != nullptr) {
-        inkpod_batch_task_cancel(state.batch_task);
+    if (state.batch.task != nullptr) {
+        inkpod_batch_task_cancel(state.batch.task);
     }
     if (state.engine != nullptr) {
         state.engine->Stop();
         state.engine.reset();
     }
-    if (state.m6_progress != nullptr) {
-        DestroyWindow(state.m6_progress);
-        state.m6_progress = nullptr;
+    if (state.effects.progress != nullptr) {
+        DestroyWindow(state.effects.progress);
+        state.effects.progress = nullptr;
     }
-    if (state.batch_progress != nullptr) {
-        DestroyWindow(state.batch_progress);
-        state.batch_progress = nullptr;
+    if (state.batch.progress != nullptr) {
+        DestroyWindow(state.batch.progress);
+        state.batch.progress = nullptr;
     }
-    if (state.batch_palette != nullptr) {
-        DestroyWindow(state.batch_palette);
-        state.batch_palette = nullptr;
+    if (state.batch.palette != nullptr) {
+        DestroyWindow(state.batch.palette);
+        state.batch.palette = nullptr;
     }
-    const InkpodStatus task_status = inkpod_task_release(&state.m6_task);
-    const InkpodStatus batch_task_status = inkpod_batch_task_release(&state.batch_task);
-    const InkpodStatus preview_status = inkpod_batch_preview_release(&state.batch_preview);
-    const InkpodStatus report_status = inkpod_batch_report_release(&state.batch_report);
-    const InkpodStatus graph_status = inkpod_batch_graph_release(&state.batch_graph);
+    const InkpodStatus task_status = inkpod_task_release(&state.effects.task);
+    const InkpodStatus batch_task_status = inkpod_batch_task_release(&state.batch.task);
+    const InkpodStatus preview_status = inkpod_batch_preview_release(&state.batch.preview);
+    const InkpodStatus report_status = inkpod_batch_report_release(&state.batch.report);
+    const InkpodStatus graph_status = inkpod_batch_graph_release(&state.batch.graph);
     for (const InkpodStatus status : {
              clipboard_status,
              task_status,
@@ -10066,7 +9922,7 @@ LRESULT CALLBACK TreeListSubclassProcedure(
     LPARAM lparam,
     UINT_PTR subclass_id,
     DWORD_PTR reference_data) noexcept {
-    auto* state = reinterpret_cast<AppState*>(reference_data);
+    auto* state = reinterpret_cast<AppContext*>(reference_data);
     if (state == nullptr) {
         return DefSubclassProc(window, message, wparam, lparam);
     }
@@ -10081,8 +9937,8 @@ LRESULT CALLBACK TreeListSubclassProcedure(
         const bool outside = HIWORD(hit) != 0U;
         const bool plane = subclass_id == 2U;
         const std::uint32_t start = plane
-            ? state->active_tree_plane_index
-            : state->active_tree_layer_index;
+            ? state->panes.active_tree_plane_index
+            : state->panes.active_tree_layer_index;
         ReleaseCapture();
         const LRESULT count = SendMessageW(window, LB_GETCOUNT, 0, 0);
         if (!outside && count > 0 && target < static_cast<std::uint32_t>(count)
@@ -10092,7 +9948,7 @@ LRESULT CALLBACK TreeListSubclassProcedure(
                 : (plane ? IDM_PLANE_MOVE_DOWN : IDM_LAYER_MOVE_DOWN);
             const std::uint32_t steps = target < start ? start - target : target - start;
             for (std::uint32_t step = 0U; step < steps; ++step) {
-                SendMessageW(state->window, WM_COMMAND, command, 0);
+                SendMessageW(state->windows.window, WM_COMMAND, command, 0);
             }
         }
         return 0;
@@ -10107,9 +9963,9 @@ LRESULT CALLBACK TreeListSubclassProcedure(
     return DefSubclassProc(window, message, wparam, lparam);
 }
 
-bool CreateMainChrome(AppState& state) noexcept {
-    const DWORD visible = state.smoke_test ? 0U : WS_VISIBLE;
-    state.toolbar = CreateWindowExW(
+bool CreateMainChrome(AppContext& state) noexcept {
+    const DWORD visible = state.lifetime.smoke_test ? 0U : WS_VISIBLE;
+    state.windows.toolbar = CreateWindowExW(
         0,
         TOOLBARCLASSNAMEW,
         nullptr,
@@ -10119,19 +9975,19 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_TOOLBAR)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    if (state.toolbar == nullptr) {
+    if (state.windows.toolbar == nullptr) {
         return false;
     }
-    SendMessageW(state.toolbar, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
-    SendMessageW(state.toolbar, TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_MIXEDBUTTONS);
+    SendMessageW(state.windows.toolbar, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
+    SendMessageW(state.windows.toolbar, TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_MIXEDBUTTONS);
     constexpr wchar_t labels[] =
         L"保存\0全体\0等倍\0範囲\0左右\0上下\0ルーラー\0ガイド\0グリッド\0透明\0";
     const LRESULT first_string = SendMessageW(
-        state.toolbar,
+        state.windows.toolbar,
         TB_ADDSTRINGW,
         0,
         reinterpret_cast<LPARAM>(labels));
@@ -10160,13 +10016,13 @@ bool CreateMainChrome(AppState& state) noexcept {
         buttons[index].iString = first_string + static_cast<LRESULT>(index);
     }
     if (SendMessageW(
-            state.toolbar,
+            state.windows.toolbar,
             TB_ADDBUTTONS,
             static_cast<WPARAM>(buttons.size()),
             reinterpret_cast<LPARAM>(buttons.data())) == FALSE) {
         return false;
     }
-    state.zoom_slider = CreateWindowExW(
+    state.windows.zoom_slider = CreateWindowExW(
         0,
         TRACKBAR_CLASSW,
         nullptr,
@@ -10175,11 +10031,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_ZOOM_SLIDER)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.status_bar = CreateWindowExW(
+    state.windows.status_bar = CreateWindowExW(
         0,
         STATUSCLASSNAMEW,
         nullptr,
@@ -10188,11 +10044,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_STATUS)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.document_tabs = CreateWindowExW(
+    state.windows.document_tabs = CreateWindowExW(
         0,
         WC_TABCONTROLW,
         nullptr,
@@ -10201,11 +10057,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_DOCUMENT_TABS)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.locator_label = CreateWindowExW(
+    state.windows.locator_label = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         L"STATIC",
         L"カラーロケーター\r\nX: —  Y: —\r\nH: —  V: —  L: —\r\nRGBA: —",
@@ -10214,11 +10070,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LOCATOR)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.layer_list = CreateWindowExW(
+    state.windows.layer_list = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         L"LISTBOX",
         nullptr,
@@ -10227,11 +10083,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LAYER_LIST)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.plane_list = CreateWindowExW(
+    state.windows.plane_list = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         L"LISTBOX",
         nullptr,
@@ -10240,11 +10096,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_PLANE_LIST)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.light_table_set_list = CreateWindowExW(
+    state.windows.light_table_set_list = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         L"LISTBOX",
         nullptr,
@@ -10253,11 +10109,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LT_SET_LIST)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.light_table_item_list = CreateWindowExW(
+    state.windows.light_table_item_list = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         L"LISTBOX",
         nullptr,
@@ -10266,11 +10122,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LT_ITEM_LIST)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.sequence_list = CreateWindowExW(
+    state.windows.sequence_list = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         L"LISTBOX",
         nullptr,
@@ -10279,11 +10135,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_SEQUENCE_LIST)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.motion_label = CreateWindowExW(
+    state.windows.motion_label = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         L"STATIC",
         L"モーション停止",
@@ -10292,11 +10148,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_MOTION_LABEL)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.color_palette_list = CreateWindowExW(
+    state.windows.color_palette_list = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         L"LISTBOX",
         nullptr,
@@ -10305,11 +10161,11 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_COLOR_PALETTE)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    state.color_chart_list = CreateWindowExW(
+    state.windows.color_chart_list = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         L"LISTBOX",
         nullptr,
@@ -10318,38 +10174,38 @@ bool CreateMainChrome(AppState& state) noexcept {
         0,
         0,
         0,
-        state.window,
+        state.windows.window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_COLOR_CHART)),
-        state.instance,
+        state.lifetime.instance,
         nullptr);
-    if (state.zoom_slider == nullptr || state.status_bar == nullptr
-        || state.document_tabs == nullptr || state.locator_label == nullptr
-        || state.layer_list == nullptr || state.plane_list == nullptr
-        || state.light_table_set_list == nullptr
-        || state.light_table_item_list == nullptr || state.sequence_list == nullptr
-        || state.motion_label == nullptr || state.color_palette_list == nullptr
-        || state.color_chart_list == nullptr) {
+    if (state.windows.zoom_slider == nullptr || state.windows.status_bar == nullptr
+        || state.windows.document_tabs == nullptr || state.windows.locator_label == nullptr
+        || state.windows.layer_list == nullptr || state.windows.plane_list == nullptr
+        || state.windows.light_table_set_list == nullptr
+        || state.windows.light_table_item_list == nullptr || state.windows.sequence_list == nullptr
+        || state.windows.motion_label == nullptr || state.windows.color_palette_list == nullptr
+        || state.windows.color_chart_list == nullptr) {
         return false;
     }
-    state.batch_palette_dialog = {
+    state.batch.palette_dialog = {
         &state,
         DispatchBatchPaletteCommand,
         SelectBatchPaletteOperation,
         state.batch.loaded_graph};
-    state.batch_palette = inkpod::windows::ui::CreateBatchPaletteDialog(
-        state.instance, state.window, state.batch_palette_dialog);
-    if (state.batch_palette == nullptr) {
+    state.batch.palette = inkpod::windows::ui::CreateBatchPaletteDialog(
+        state.lifetime.instance, state.windows.window, state.batch.palette_dialog);
+    if (state.batch.palette == nullptr) {
         return false;
     }
-    RefreshBatchPalette(state);
-    ShowWindow(state.batch_palette, SW_HIDE);
+    RefreshBatchPalette(state.batch);
+    ShowWindow(state.batch.palette, SW_HIDE);
     if (SetWindowSubclass(
-            state.layer_list,
+            state.windows.layer_list,
             TreeListSubclassProcedure,
             1U,
             reinterpret_cast<DWORD_PTR>(&state)) == FALSE
         || SetWindowSubclass(
-               state.plane_list,
+               state.windows.plane_list,
                TreeListSubclassProcedure,
                2U,
                reinterpret_cast<DWORD_PTR>(&state)) == FALSE) {
@@ -10359,30 +10215,30 @@ bool CreateMainChrome(AppState& state) noexcept {
     primary.mask = TCIF_TEXT | TCIF_PARAM;
     primary.pszText = const_cast<wchar_t*>(L"セル");
     primary.lParam = 0;
-    if (TabCtrl_InsertItem(state.document_tabs, 0, &primary) < 0) {
+    if (TabCtrl_InsertItem(state.windows.document_tabs, 0, &primary) < 0) {
         return false;
     }
-    SendMessageW(state.zoom_slider, TBM_SETRANGE, TRUE, MAKELPARAM(1, 800));
-    SendMessageW(state.zoom_slider, TBM_SETTICFREQ, 100, 0);
-    SendMessageW(state.zoom_slider, TBM_SETPOS, TRUE, 100);
+    SendMessageW(state.windows.zoom_slider, TBM_SETRANGE, TRUE, MAKELPARAM(1, 800));
+    SendMessageW(state.windows.zoom_slider, TBM_SETTICFREQ, 100, 0);
+    SendMessageW(state.windows.zoom_slider, TBM_SETPOS, TRUE, 100);
     return true;
 }
 
-void LayoutMainChrome(AppState& state, int width, int height) noexcept {
+void LayoutMainChrome(AppContext& state, int width, int height) noexcept {
     int toolbar_height{};
     int status_height{};
-    if (!state.smoke_test && state.toolbar != nullptr) {
-        SendMessageW(state.toolbar, TB_AUTOSIZE, 0, 0);
+    if (!state.lifetime.smoke_test && state.windows.toolbar != nullptr) {
+        SendMessageW(state.windows.toolbar, TB_AUTOSIZE, 0, 0);
         RECT bounds{};
-        if (GetWindowRect(state.toolbar, &bounds) != FALSE) {
+        if (GetWindowRect(state.windows.toolbar, &bounds) != FALSE) {
             toolbar_height = bounds.bottom - bounds.top;
         }
-        MoveWindow(state.zoom_slider, std::max(0, width - 178), 2, 170, 28, TRUE);
+        MoveWindow(state.windows.zoom_slider, std::max(0, width - 178), 2, 170, 28, TRUE);
     }
-    if (!state.smoke_test && state.status_bar != nullptr) {
-        SendMessageW(state.status_bar, WM_SIZE, 0, 0);
+    if (!state.lifetime.smoke_test && state.windows.status_bar != nullptr) {
+        SendMessageW(state.windows.status_bar, WM_SIZE, 0, 0);
         RECT bounds{};
-        if (GetWindowRect(state.status_bar, &bounds) != FALSE) {
+        if (GetWindowRect(state.windows.status_bar, &bounds) != FALSE) {
             status_height = bounds.bottom - bounds.top;
         }
         const std::array<int, 3U> parts{
@@ -10390,7 +10246,7 @@ void LayoutMainChrome(AppState& state, int width, int height) noexcept {
             std::max(320, width / 2),
             -1};
         SendMessageW(
-            state.status_bar,
+            state.windows.status_bar,
             SB_SETPARTS,
             static_cast<WPARAM>(parts.size()),
             reinterpret_cast<LPARAM>(parts.data()));
@@ -10399,31 +10255,31 @@ void LayoutMainChrome(AppState& state, int width, int height) noexcept {
     int content_top = toolbar_height;
     int content_width = width;
     int content_height = std::max(0, height - toolbar_height - status_height);
-    if (!state.smoke_test) {
+    if (!state.lifetime.smoke_test) {
         constexpr int right_pane_width = 238;
         constexpr int tabs_height = 28;
         content_width = std::max(0, width - right_pane_width);
-        if (state.document_tabs != nullptr) {
+        if (state.windows.document_tabs != nullptr) {
             MoveWindow(
-                state.document_tabs,
+                state.windows.document_tabs,
                 content_left,
                 content_top,
                 content_width,
                 tabs_height,
                 TRUE);
         }
-        if (state.locator_label != nullptr) {
+        if (state.windows.locator_label != nullptr) {
             MoveWindow(
-                state.locator_label,
+                state.windows.locator_label,
                 content_width + 6,
                 content_top + 6,
                 std::max(0, right_pane_width - 12),
                 70,
                 TRUE);
         }
-        if (state.motion_label != nullptr) {
+        if (state.windows.motion_label != nullptr) {
             MoveWindow(
-                state.motion_label,
+                state.windows.motion_label,
                 content_width + 6,
                 content_top + 78,
                 std::max(0, right_pane_width - 12),
@@ -10435,63 +10291,63 @@ void LayoutMainChrome(AppState& state, int width, int height) noexcept {
         const int lists_top = content_top + 110;
         const int lists_height = std::max(0, content_height - 116);
         const int section = std::max(0, (lists_height - 24) / 7);
-        if (state.layer_list != nullptr) {
+        if (state.windows.layer_list != nullptr) {
             MoveWindow(
-                state.layer_list,
+                state.windows.layer_list,
                 pane_x,
                 lists_top,
                 pane_width,
                 section,
                 TRUE);
         }
-        if (state.plane_list != nullptr) {
+        if (state.windows.plane_list != nullptr) {
             MoveWindow(
-                state.plane_list,
+                state.windows.plane_list,
                 pane_x,
                 lists_top + section + 4,
                 pane_width,
                 section,
                 TRUE);
         }
-        if (state.light_table_set_list != nullptr) {
+        if (state.windows.light_table_set_list != nullptr) {
             MoveWindow(
-                state.light_table_set_list,
+                state.windows.light_table_set_list,
                 pane_x,
                 lists_top + (section + 4) * 2,
                 pane_width,
                 section,
                 TRUE);
         }
-        if (state.light_table_item_list != nullptr) {
+        if (state.windows.light_table_item_list != nullptr) {
             MoveWindow(
-                state.light_table_item_list,
+                state.windows.light_table_item_list,
                 pane_x,
                 lists_top + (section + 4) * 3,
                 pane_width,
                 section,
                 TRUE);
         }
-        if (state.sequence_list != nullptr) {
+        if (state.windows.sequence_list != nullptr) {
             MoveWindow(
-                state.sequence_list,
+                state.windows.sequence_list,
                 pane_x,
                 lists_top + (section + 4) * 4,
                 pane_width,
                 section,
                 TRUE);
         }
-        if (state.color_palette_list != nullptr) {
+        if (state.windows.color_palette_list != nullptr) {
             MoveWindow(
-                state.color_palette_list,
+                state.windows.color_palette_list,
                 pane_x,
                 lists_top + (section + 4) * 5,
                 pane_width,
                 section,
                 TRUE);
         }
-        if (state.color_chart_list != nullptr) {
+        if (state.windows.color_chart_list != nullptr) {
             MoveWindow(
-                state.color_chart_list,
+                state.windows.color_chart_list,
                 pane_x,
                 lists_top + (section + 4) * 6,
                 pane_width,
@@ -10501,9 +10357,9 @@ void LayoutMainChrome(AppState& state, int width, int height) noexcept {
         content_top += tabs_height;
         content_height = std::max(0, content_height - tabs_height);
     }
-    if (state.canvas != nullptr) {
+    if (state.windows.canvas != nullptr) {
         MoveWindow(
-            state.canvas,
+            state.windows.canvas,
             content_left,
             content_top,
             content_width,
@@ -10514,13 +10370,13 @@ void LayoutMainChrome(AppState& state, int width, int height) noexcept {
 
 LRESULT CALLBACK MainWindowProcedure(
     HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<AppState*>(
+    auto* state = reinterpret_cast<AppContext*>(
         GetWindowLongPtrW(window, GWLP_USERDATA));
 
     if (message == WM_NCCREATE) {
         const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lparam);
-        state = static_cast<AppState*>(create->lpCreateParams);
-        state->window = window;
+        state = static_cast<AppContext*>(create->lpCreateParams);
+        state->windows.window = window;
         SetWindowLongPtrW(
             window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
     }
@@ -10530,9 +10386,9 @@ LRESULT CALLBACK MainWindowProcedure(
             if (state == nullptr) {
                 return -1;
             }
-            state->canvas = inkpod::renderer::CreateCanvasWindow(
-                state->instance, window);
-            if (state->canvas == nullptr || !CreateMainChrome(*state)
+            state->windows.canvas = inkpod::renderer::CreateCanvasWindow(
+                state->lifetime.instance, window);
+            if (state->windows.canvas == nullptr || !CreateMainChrome(*state)
                 || SetTimer(
                        window,
                        kAutosaveTimer,
@@ -10547,25 +10403,25 @@ LRESULT CALLBACK MainWindowProcedure(
             }
             return 0;
         case WM_NOTIFY:
-            if (state != nullptr && state->document_tabs != nullptr) {
+            if (state != nullptr && state->windows.document_tabs != nullptr) {
                 const auto* notification = reinterpret_cast<const NMHDR*>(lparam);
                 if (notification != nullptr
-                    && notification->hwndFrom == state->document_tabs
+                    && notification->hwndFrom == state->windows.document_tabs
                     && notification->code == TCN_SELCHANGE) {
-                    const int selected = TabCtrl_GetCurSel(state->document_tabs);
+                    const int selected = TabCtrl_GetCurSel(state->windows.document_tabs);
                     TCITEMW item{};
                     item.mask = TCIF_PARAM;
                     if (selected >= 0
-                        && TabCtrl_GetItem(state->document_tabs, selected, &item) != FALSE) {
-                        state->active_view_id = static_cast<std::uint64_t>(item.lParam);
+                        && TabCtrl_GetItem(state->windows.document_tabs, selected, &item) != FALSE) {
+                        state->view.active_view_id = static_cast<std::uint64_t>(item.lParam);
                         if (state->engine != nullptr) {
-                            state->engine->SetActiveView(state->active_view_id);
+                            state->engine->SetActiveView(state->view.active_view_id);
                         }
                         InkpodSnapshotTransform transform{};
                         if (QuerySnapshotTransform(*state, transform)) {
-                            state->view_flip_horizontal = (transform.flags
+                            state->view.flip_horizontal = (transform.flags
                                 & INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL) != 0U;
-                            state->view_flip_vertical = (transform.flags
+                            state->view.flip_vertical = (transform.flags
                                 & INKPOD_SNAPSHOT_TRANSFORM_FLIP_VERTICAL) != 0U;
                         }
                         UpdateMenuState(*state);
@@ -10587,10 +10443,10 @@ LRESULT CALLBACK MainWindowProcedure(
             return 0;
         }
         case WM_HSCROLL:
-            if (state != nullptr && state->zoom_slider != nullptr
-                && reinterpret_cast<HWND>(lparam) == state->zoom_slider) {
+            if (state != nullptr && state->windows.zoom_slider != nullptr
+                && reinterpret_cast<HWND>(lparam) == state->windows.zoom_slider) {
                 const int position = static_cast<int>(SendMessageW(
-                    state->zoom_slider, TBM_GETPOS, 0, 0));
+                    state->windows.zoom_slider, TBM_GETPOS, 0, 0));
                 if (position > 0
                     && ApplyZoomPercent(*state, static_cast<std::uint32_t>(position))
                         == INKPOD_STATUS_OK) {
@@ -10599,7 +10455,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 return 0;
             }
             if (state != nullptr && wparam == kMotionPlaybackTimer) {
-                if (state->motion_active && !state->motion_paused && state->engine != nullptr) {
+                if (state->animation.motion_active && !state->animation.motion_paused && state->engine != nullptr) {
                     InkpodMotionFrame frame{};
                     frame.struct_size = sizeof(frame);
                     const InkpodStatus status = state->engine->Invoke(
@@ -10610,11 +10466,11 @@ LRESULT CALLBACK MainWindowProcedure(
                         false,
                         false);
                     if (status == INKPOD_STATUS_OK) {
-                        UpdateMotionLabel(*state, frame);
+                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
                     } else {
-                        state->motion_active = false;
+                        state->animation.motion_active = false;
                         KillTimer(window, kMotionPlaybackTimer);
-                        if (!state->smoke_test) {
+                        if (!state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"モーション再生");
                         }
                     }
@@ -10628,23 +10484,23 @@ LRESULT CALLBACK MainWindowProcedure(
             }
             switch (LOWORD(wparam)) {
                 case IDC_MAIN_LAYER_LIST:
-                    if (HIWORD(wparam) == LBN_SELCHANGE && state->layer_list != nullptr) {
+                    if (HIWORD(wparam) == LBN_SELCHANGE && state->windows.layer_list != nullptr) {
                         const LRESULT selected = SendMessageW(
-                            state->layer_list, LB_GETCURSEL, 0, 0);
+                            state->windows.layer_list, LB_GETCURSEL, 0, 0);
                         if (selected != LB_ERR) {
                             const LRESULT id = SendMessageW(
-                                state->layer_list,
+                                state->windows.layer_list,
                                 LB_GETITEMDATA,
                                 static_cast<WPARAM>(selected),
                                 0);
                             if (id != LB_ERR) {
-                                state->active_tree_layer_id = static_cast<std::uint64_t>(id);
-                                state->active_tree_layer_index = static_cast<std::uint32_t>(selected);
-                                state->active_tree_plane_id = 0U;
+                                state->panes.active_tree_layer_id = static_cast<std::uint64_t>(id);
+                                state->panes.active_tree_layer_index = static_cast<std::uint32_t>(selected);
+                                state->panes.active_tree_plane_id = 0U;
                                 RefreshTreePane(*state);
-                                if (state->active_tree_plane_id != 0U && state->engine != nullptr) {
-                                    const std::uint64_t layer_id = state->active_tree_layer_id;
-                                    const std::uint64_t plane_id = state->active_tree_plane_id;
+                                if (state->panes.active_tree_plane_id != 0U && state->engine != nullptr) {
+                                    const std::uint64_t layer_id = state->panes.active_tree_layer_id;
+                                    const std::uint64_t plane_id = state->panes.active_tree_plane_id;
                                     state->engine->Invoke(
                                         [layer_id, plane_id](InkpodCore* core) {
                                             return inkpod_core_set_active_node(
@@ -10659,21 +10515,21 @@ LRESULT CALLBACK MainWindowProcedure(
                     UpdateMenuState(*state);
                     return 0;
                 case IDC_MAIN_PLANE_LIST:
-                    if (HIWORD(wparam) == LBN_SELCHANGE && state->plane_list != nullptr) {
+                    if (HIWORD(wparam) == LBN_SELCHANGE && state->windows.plane_list != nullptr) {
                         const LRESULT selected = SendMessageW(
-                            state->plane_list, LB_GETCURSEL, 0, 0);
+                            state->windows.plane_list, LB_GETCURSEL, 0, 0);
                         if (selected != LB_ERR) {
                             const LRESULT id = SendMessageW(
-                                state->plane_list,
+                                state->windows.plane_list,
                                 LB_GETITEMDATA,
                                 static_cast<WPARAM>(selected),
                                 0);
                             if (id != LB_ERR && state->engine != nullptr) {
-                                state->active_tree_plane_id = static_cast<std::uint64_t>(id);
-                                state->active_tree_plane_index =
+                                state->panes.active_tree_plane_id = static_cast<std::uint64_t>(id);
+                                state->panes.active_tree_plane_index =
                                     static_cast<std::uint32_t>(selected);
-                                const std::uint64_t layer_id = state->active_tree_layer_id;
-                                const std::uint64_t plane_id = state->active_tree_plane_id;
+                                const std::uint64_t layer_id = state->panes.active_tree_layer_id;
+                                const std::uint64_t plane_id = state->panes.active_tree_plane_id;
                                 const InkpodStatus status = state->engine->Invoke(
                                     [layer_id, plane_id](InkpodCore* core) {
                                         return inkpod_core_set_active_node(
@@ -10691,12 +10547,12 @@ LRESULT CALLBACK MainWindowProcedure(
                     return 0;
                 case IDC_MAIN_LT_SET_LIST:
                     if (HIWORD(wparam) == LBN_SELCHANGE
-                        && state->light_table_set_list != nullptr) {
+                        && state->windows.light_table_set_list != nullptr) {
                         const LRESULT selected = SendMessageW(
-                            state->light_table_set_list, LB_GETCURSEL, 0, 0);
+                            state->windows.light_table_set_list, LB_GETCURSEL, 0, 0);
                         if (selected != LB_ERR) {
                             const LRESULT id = SendMessageW(
-                                state->light_table_set_list,
+                                state->windows.light_table_set_list,
                                 LB_GETITEMDATA,
                                 static_cast<WPARAM>(selected),
                                 0);
@@ -10707,10 +10563,10 @@ LRESULT CALLBACK MainWindowProcedure(
                                 std::uint64_t ignored{};
                                 if (ApplyLightTableEdit(*state, edit, {}, ignored)
                                     == INKPOD_STATUS_OK) {
-                                    state->active_light_table_set_id = edit.object_id;
-                                    state->active_light_table_set_index =
+                                    state->panes.active_light_table_set_id = edit.object_id;
+                                    state->panes.active_light_table_set_index =
                                         static_cast<std::uint32_t>(selected);
-                                    state->active_light_table_item_id = 0U;
+                                    state->panes.active_light_table_item_id = 0U;
                                     RefreshLightTablePane(*state);
                                 }
                             }
@@ -10719,19 +10575,19 @@ LRESULT CALLBACK MainWindowProcedure(
                     return 0;
                 case IDC_MAIN_LT_ITEM_LIST:
                     if (HIWORD(wparam) == LBN_SELCHANGE
-                        && state->light_table_item_list != nullptr) {
+                        && state->windows.light_table_item_list != nullptr) {
                         const LRESULT selected = SendMessageW(
-                            state->light_table_item_list, LB_GETCURSEL, 0, 0);
+                            state->windows.light_table_item_list, LB_GETCURSEL, 0, 0);
                         if (selected != LB_ERR) {
                             const LRESULT id = SendMessageW(
-                                state->light_table_item_list,
+                                state->windows.light_table_item_list,
                                 LB_GETITEMDATA,
                                 static_cast<WPARAM>(selected),
                                 0);
                             if (id != LB_ERR) {
-                                state->active_light_table_item_id =
+                                state->panes.active_light_table_item_id =
                                     static_cast<std::uint64_t>(id);
-                                state->active_light_table_item_index =
+                                state->panes.active_light_table_item_index =
                                     static_cast<std::uint32_t>(selected);
                             }
                         }
@@ -10739,15 +10595,15 @@ LRESULT CALLBACK MainWindowProcedure(
                     return 0;
                 case IDC_MAIN_SEQUENCE_LIST:
                     if ((HIWORD(wparam) == LBN_SELCHANGE || HIWORD(wparam) == LBN_DBLCLK)
-                        && state->sequence_list != nullptr) {
+                        && state->windows.sequence_list != nullptr) {
                         const LRESULT selected = SendMessageW(
-                            state->sequence_list, LB_GETCURSEL, 0, 0);
+                            state->windows.sequence_list, LB_GETCURSEL, 0, 0);
                         if (selected != LB_ERR) {
-                            state->active_sequence_index =
+                            state->animation.active_sequence_index =
                                 static_cast<std::uint32_t>(selected);
                             if (HIWORD(wparam) == LBN_DBLCLK && state->engine != nullptr) {
                                 InkpodDocumentInfo info{};
-                                const std::uint32_t index = state->active_sequence_index;
+                                const std::uint32_t index = state->animation.active_sequence_index;
                                 const InkpodStatus status = state->engine->Invoke(
                                     [index, &info](InkpodCore* core) {
                                         info = EmptyDocumentInfo();
@@ -10756,8 +10612,8 @@ LRESULT CALLBACK MainWindowProcedure(
                                     false,
                                     false);
                                 if (status == INKPOD_STATUS_OK) {
-                                    ResetM3DocumentUiState(*state);
-                                    state->active_sequence_index = index;
+                                    ResetUiForDocumentReplacement(*state);
+                                    state->animation.active_sequence_index = index;
                                     FitCanvas(*state, INKPOD_VIEW_FIT);
                                     RefreshSequencePane(*state);
                                 } else {
@@ -10771,30 +10627,30 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDC_MAIN_COLOR_CHART:
                     if (HIWORD(wparam) == LBN_DBLCLK) {
                         const bool chart = LOWORD(wparam) == IDC_MAIN_COLOR_CHART;
-                        if (chart && state->color_chart_locked) {
+                        if (chart && state->panes.color_chart_locked) {
                             return 0;
                         }
-                        HWND list = chart ? state->color_chart_list : state->color_palette_list;
+                        HWND list = chart ? state->windows.color_chart_list : state->windows.color_palette_list;
                         const LRESULT selected = SendMessageW(list, LB_GETCURSEL, 0, 0);
                         if (selected != LB_ERR) {
                             const std::size_t index = chart
-                                ? static_cast<std::size_t>(state->color_chart_page) * 20U
+                                ? static_cast<std::size_t>(state->panes.color_chart_page) * 20U
                                     + static_cast<std::size_t>(selected)
-                                : static_cast<std::size_t>(state->palette_group) * 10U
+                                : static_cast<std::size_t>(state->panes.palette_group) * 10U
                                     + static_cast<std::size_t>(selected);
-                            if (index < state->palette_colors.size()) {
-                                SetDrawingColor(*state, state->palette_colors[index]);
+                            if (index < state->panes.palette_colors.size()) {
+                                SetDrawingColor(state->tools, state->panes.palette_colors[index]);
                             }
                         }
                     }
                     return 0;
                 case IDM_WINDOW_BATCH:
-                    if (state->batch_palette != nullptr) {
-                        const bool visible = IsWindowVisible(state->batch_palette) != FALSE;
-                        ShowWindow(state->batch_palette, visible ? SW_HIDE : SW_SHOW);
+                    if (state->batch.palette != nullptr) {
+                        const bool visible = IsWindowVisible(state->batch.palette) != FALSE;
+                        ShowWindow(state->batch.palette, visible ? SW_HIDE : SW_SHOW);
                         if (!visible) {
-                            RefreshBatchPalette(*state);
-                            SetForegroundWindow(state->batch_palette);
+                            RefreshBatchPalette(state->batch);
+                            SetForegroundWindow(state->batch.palette);
                         }
                         UpdateMenuState(*state);
                         return 1;
@@ -10803,7 +10659,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_BATCH_INPUT_FILE:
                 case IDM_BATCH_INPUT_FOLDER:
                 case IDM_BATCH_INPUT_CURRENT: {
-                    if (state->batch_task != nullptr || state->batch.loaded_graph) {
+                    if (state->batch.task != nullptr || state->batch.loaded_graph) {
                         return 0;
                     }
                     std::wstring path;
@@ -10819,17 +10675,17 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (!accepted) {
                         return 0;
                     }
-                    ResetBatchDerivedState(*state);
+                    ResetBatchDerivedState(state->batch);
                     state->batch.input_kind = kind;
                     state->batch.input_path = std::move(path);
                     state->batch.first_cell = 0U;
                     state->batch.last_cell = 0U;
-                    RefreshBatchPalette(*state);
+                    RefreshBatchPalette(state->batch);
                     UpdateMenuState(*state);
                     return 1;
                 }
                 case IDM_BATCH_INPUT_RANGE: {
-                    if (state->batch_task != nullptr || state->batch.loaded_graph) {
+                    if (state->batch.task != nullptr || state->batch.loaded_graph) {
                         return 0;
                     }
                     ViewOptionsDialogState dialog{};
@@ -10846,18 +10702,18 @@ LRESULT CALLBACK MainWindowProcedure(
                         0};
                     dialog.value_count = 2U;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[0] < 0 || dialog.values[1] < 0
                         || (dialog.values[0] != 0 && dialog.values[1] != 0
                             && dialog.values[0] > dialog.values[1])) {
                         return 0;
                     }
-                    ResetBatchDerivedState(*state);
+                    ResetBatchDerivedState(state->batch);
                     state->batch.first_cell =
                         static_cast<std::uint32_t>(dialog.values[0]);
                     state->batch.last_cell =
                         static_cast<std::uint32_t>(dialog.values[1]);
-                    RefreshBatchPalette(*state);
+                    RefreshBatchPalette(state->batch);
                     UpdateMenuState(*state);
                     return 1;
                 }
@@ -10885,21 +10741,21 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_BATCH_ADD_FILTER_HSV:
                 case IDM_BATCH_ADD_FILTER_COLOR_BALANCE:
                 case IDM_BATCH_ADD_FILTER_UNSHARP:
-                    if (state->batch_task == nullptr
+                    if (state->batch.task == nullptr
                         && AddBatchOperation(*state, LOWORD(wparam))) {
                         UpdateMenuState(*state);
                         return 1;
                     }
                     return 0;
                 case IDM_BATCH_OPERATION_EDIT:
-                    if (state->batch_task == nullptr
+                    if (state->batch.task == nullptr
                         && EditSelectedBatchOperation(*state)) {
                         UpdateMenuState(*state);
                         return 1;
                     }
                     return 0;
                 case IDM_BATCH_REPLACE_SWAP:
-                    if (state->batch_task == nullptr && !state->batch.loaded_graph
+                    if (state->batch.task == nullptr && !state->batch.loaded_graph
                         && state->batch.selected_operation < state->batch.operations.size()) {
                         BatchOperationUi& operation =
                             state->batch.operations[state->batch.selected_operation];
@@ -10908,15 +10764,15 @@ LRESULT CALLBACK MainWindowProcedure(
                             for (auto& pair : operation.color_pairs) {
                                 std::swap(pair.old_color, pair.new_color);
                             }
-                            ResetBatchDerivedState(*state);
-                            RefreshBatchPalette(*state);
+                            ResetBatchDerivedState(state->batch);
+                            RefreshBatchPalette(state->batch);
                             UpdateMenuState(*state);
                             return 1;
                         }
                     }
                     return 0;
                 case IDM_BATCH_OPERATION_REMOVE:
-                    if (state->batch_task == nullptr && !state->batch.loaded_graph
+                    if (state->batch.task == nullptr && !state->batch.loaded_graph
                         && state->batch.selected_operation < state->batch.operations.size()) {
                         state->batch.operations.erase(
                             state->batch.operations.begin()
@@ -10929,15 +10785,15 @@ LRESULT CALLBACK MainWindowProcedure(
                         } else {
                             state->batch.selected_operation = 0U;
                         }
-                        ResetBatchDerivedState(*state);
-                        RefreshBatchPalette(*state);
+                        ResetBatchDerivedState(state->batch);
+                        RefreshBatchPalette(state->batch);
                         UpdateMenuState(*state);
                         return 1;
                     }
                     return 0;
                 case IDM_BATCH_OPERATION_UP:
                 case IDM_BATCH_OPERATION_DOWN:
-                    if (state->batch_task == nullptr && !state->batch.loaded_graph
+                    if (state->batch.task == nullptr && !state->batch.loaded_graph
                         && state->batch.selected_operation < state->batch.operations.size()) {
                         const std::uint32_t current = state->batch.selected_operation;
                         const bool up = LOWORD(wparam) == IDM_BATCH_OPERATION_UP;
@@ -10948,8 +10804,8 @@ LRESULT CALLBACK MainWindowProcedure(
                                 state->batch.operations[current],
                                 state->batch.operations[target]);
                             state->batch.selected_operation = target;
-                            ResetBatchDerivedState(*state);
-                            RefreshBatchPalette(*state);
+                            ResetBatchDerivedState(state->batch);
+                            RefreshBatchPalette(state->batch);
                             UpdateMenuState(*state);
                             return 1;
                         }
@@ -10958,20 +10814,20 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_BATCH_OUTPUT_DUPLICATE:
                 case IDM_BATCH_OUTPUT_NEW:
                 case IDM_BATCH_OUTPUT_OVERWRITE:
-                    if (state->batch_task == nullptr && !state->batch.loaded_graph) {
-                        ResetBatchDerivedState(*state);
+                    if (state->batch.task == nullptr && !state->batch.loaded_graph) {
+                        ResetBatchDerivedState(state->batch);
                         state->batch.output_policy = LOWORD(wparam) == IDM_BATCH_OUTPUT_NEW
                             ? INKPOD_BATCH_OUTPUT_NEW_SAVE
                             : (LOWORD(wparam) == IDM_BATCH_OUTPUT_OVERWRITE
                                       ? INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE
                                       : INKPOD_BATCH_OUTPUT_DUPLICATE);
-                        RefreshBatchPalette(*state);
+                        RefreshBatchPalette(state->batch);
                         UpdateMenuState(*state);
                         return 1;
                     }
                     return 0;
                 case IDM_BATCH_OUTPUT_SETTINGS: {
-                    if (state->batch_task != nullptr || state->batch.loaded_graph) {
+                    if (state->batch.task != nullptr || state->batch.loaded_graph) {
                         return 0;
                     }
                     ViewOptionsDialogState dialog{};
@@ -10988,7 +10844,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         static_cast<std::int32_t>(state->batch.wait_milliseconds)};
                     dialog.value_count = 4U;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[0] < 0 || dialog.values[0] > 1
                         || dialog.values[1] < 0
                         || dialog.values[2] < 0 || dialog.values[2] > 1
@@ -11004,13 +10860,13 @@ LRESULT CALLBACK MainWindowProcedure(
                     basename.label = L"空欄は入力名を使用";
                     basename.value = state->batch.basename;
                     if (ShowTextInput(
-                            state->instance, window, state->smoke_test, folder) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, folder) != IDOK
                         || ShowTextInput(
-                               state->instance, window, state->smoke_test, basename) != IDOK) {
+                               state->lifetime.instance, window, state->lifetime.smoke_test, basename) != IDOK) {
                         return 0;
                     }
                     bool preview_before_save = state->batch.preview_before_save;
-                    if (!state->smoke_test) {
+                    if (!state->lifetime.smoke_test) {
                         const int preview_choice = MessageBoxW(
                             window,
                             L"保存前に入力・出力と警告のプレビュー確認を必須にしますか？",
@@ -11021,7 +10877,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         }
                         preview_before_save = preview_choice == IDYES;
                     }
-                    ResetBatchDerivedState(*state);
+                    ResetBatchDerivedState(state->batch);
                     state->batch.cell_folder = dialog.values[0] != 0;
                     state->batch.start_number =
                         static_cast<std::uint32_t>(dialog.values[1]);
@@ -11031,18 +10887,18 @@ LRESULT CALLBACK MainWindowProcedure(
                     state->batch.output_folder = std::move(folder.value);
                     state->batch.basename = std::move(basename.value);
                     state->batch.preview_before_save = preview_before_save;
-                    RefreshBatchPalette(*state);
+                    RefreshBatchPalette(state->batch);
                     UpdateMenuState(*state);
                     return 1;
                 }
                 case IDM_BATCH_FAILURE_CONTINUE:
                 case IDM_BATCH_FAILURE_STOP:
-                    if (state->batch_task == nullptr && !state->batch.loaded_graph) {
-                        ResetBatchDerivedState(*state);
+                    if (state->batch.task == nullptr && !state->batch.loaded_graph) {
+                        ResetBatchDerivedState(state->batch);
                         state->batch.failure_policy = LOWORD(wparam) == IDM_BATCH_FAILURE_STOP
                             ? INKPOD_BATCH_FAILURE_STOP
                             : INKPOD_BATCH_FAILURE_CONTINUE;
-                        RefreshBatchPalette(*state);
+                        RefreshBatchPalette(state->batch);
                         UpdateMenuState(*state);
                         return 1;
                     }
@@ -11071,18 +10927,18 @@ LRESULT CALLBACK MainWindowProcedure(
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
                 case IDM_BATCH_CANCEL:
-                    if (state->batch_task != nullptr
-                        && inkpod_batch_task_cancel(state->batch_task) == INKPOD_STATUS_OK) {
+                    if (state->batch.task != nullptr
+                        && inkpod_batch_task_cancel(state->batch.task) == INKPOD_STATUS_OK) {
                         return 1;
                     }
                     return 0;
                 case IDM_BATCH_SAVE_SET:
                 case IDM_BATCH_LOAD_SET: {
                     const bool save = LOWORD(wparam) == IDM_BATCH_SAVE_SET;
-                    std::wstring path = state->smoke_test
+                    std::wstring path = state->lifetime.smoke_test
                         ? L"inkpod-m7-ui-smoke.inkbatch"
                         : L"";
-                    if (!state->smoke_test
+                    if (!state->lifetime.smoke_test
                         && !ChooseBatchSettingsPath(window, save, path)) {
                         return 0;
                     }
@@ -11095,17 +10951,17 @@ LRESULT CALLBACK MainWindowProcedure(
                         status = BuildBatchGraph(*state);
                         if (status == INKPOD_STATUS_OK) {
                             status = inkpod_batch_graph_save(
-                                state->batch_graph, utf8.data(), utf8.size());
+                                state->batch.graph, utf8.data(), utf8.size());
                         }
                     } else {
                         InkpodBatchGraph* loaded{};
                         status = inkpod_batch_graph_load(
                             utf8.data(), utf8.size(), &loaded);
                         if (status == INKPOD_STATUS_OK) {
-                            inkpod_batch_preview_release(&state->batch_preview);
-                            inkpod_batch_report_release(&state->batch_report);
-                            inkpod_batch_graph_release(&state->batch_graph);
-                            state->batch_graph = loaded;
+                            inkpod_batch_preview_release(&state->batch.preview);
+                            inkpod_batch_report_release(&state->batch.report);
+                            inkpod_batch_graph_release(&state->batch.graph);
+                            state->batch.graph = loaded;
                             state->batch.loaded_graph = true;
                             InkpodBatchGraphInfo info{};
                             info.struct_size = sizeof(info);
@@ -11125,7 +10981,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, save ? L"バッチセット保存" : L"バッチセット読込");
                     }
-                    RefreshBatchPalette(*state);
+                    RefreshBatchPalette(state->batch);
                     UpdateMenuState(*state);
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
@@ -11137,9 +10993,9 @@ LRESULT CALLBACK MainWindowProcedure(
                         dialog.values = {1920, 1080, 96, INKPOD_LAYER_BINARY_COLORING};
                         dialog.value_count = 4U;
                         if (ShowViewOptions(
-                                state->instance,
+                                state->lifetime.instance,
                                 window,
-                                state->smoke_test,
+                                state->lifetime.smoke_test,
                                 dialog) != IDOK
                             || dialog.values[0] <= 0 || dialog.values[1] <= 0
                             || dialog.values[2] <= 0) {
@@ -11291,8 +11147,8 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (!ConfirmDiscard(*state)) {
                         return 0;
                     }
-                    std::wstring path = state->smoke_test ? state->smoke_raster_path : L"";
-                    if (!state->smoke_test && !ChooseCommonRasterPath(window, false, path)) {
+                    std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
+                    if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, false, path)) {
                         return 0;
                     }
                     const InkpodStatus status = ImportCommonRasterFromPath(*state, path);
@@ -11303,16 +11159,16 @@ LRESULT CALLBACK MainWindowProcedure(
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
                 case IDM_FILE_EXPORT_RASTER: {
-                    std::wstring path = state->smoke_test ? state->smoke_raster_path : L"";
-                    if (!state->smoke_test && !ChooseCommonRasterPath(window, true, path)) {
+                    std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
+                    if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, true, path)) {
                         return 0;
                     }
                     ViewOptionsDialogState dialog{};
                     dialog.title = L"ラスター書き出し";
                     dialog.labels[0] = L"白背景を合成 (0/1)";
-                    dialog.values[0] = state->smoke_test ? 1 : 0;
+                    dialog.values[0] = state->lifetime.smoke_test ? 1 : 0;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK) {
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                         return 0;
                     }
                     const InkpodStatus status = ExportCommonRasterToPath(
@@ -11368,7 +11224,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     return 0;
                 }
                 case IDM_FILE_AUTOSAVE_NOW: {
-                    std::wstring path = state->recovery_path;
+                    std::wstring path = state->document.recovery_path;
                     if (path.empty() && !ChooseInkpodPath(window, true, path)) {
                         return 0;
                     }
@@ -11376,7 +11232,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         ShowCoreError(*state, window, L"Recovery保存の予約");
                     } else {
                         try {
-                            state->recovery_path = path;
+                            state->document.recovery_path = path;
                         } catch (const std::bad_alloc&) {
                             ShowCoreError(*state, window, L"Recovery path の保持");
                         }
@@ -11385,7 +11241,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_FILE_OPEN_RECOVERY: {
                     if (ConfirmDiscard(*state)) {
-                        std::wstring path = state->recovery_path;
+                        std::wstring path = state->document.recovery_path;
                         if (ChooseInkpodPath(window, false, path)
                             && OpenRecoveryFromPath(*state, path) != INKPOD_STATUS_OK) {
                             ShowCoreError(*state, window, L"Recoveryを開く");
@@ -11418,7 +11274,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     const bool forward = LOWORD(wparam) == IDM_EDIT_HISTORY_FORWARD;
                     HistoryDialogState dialog{};
                     if (!ConfigureHistoryDialog(*state, forward, dialog)
-                        || ShowHistoryDialog(state->instance, window, dialog) != IDOK) {
+                        || ShowHistoryDialog(state->lifetime.instance, window, dialog) != IDOK) {
                         return 0;
                     }
                     const InkpodStatus status = state->engine == nullptr
@@ -11452,10 +11308,10 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"コピー");
                     } else {
-                        inkpod_clipboard_release(&state->clipboard);
-                        state->clipboard = replacement;
-                        if (!PublishStandardClipboard(window, state->clipboard)
-                            && !state->smoke_test) {
+                        inkpod_clipboard_release(&state->document.clipboard);
+                        state->document.clipboard = replacement;
+                        if (!PublishStandardClipboard(window, state->document.clipboard)
+                            && !state->lifetime.smoke_test) {
                             MessageBoxW(
                                 window,
                                 L"アプリ内コピーは完了しましたが、Windowsクリップボードへ公開できませんでした。",
@@ -11468,7 +11324,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_EDIT_CUT: {
                     SendMessageW(window, WM_COMMAND, IDM_EDIT_COPY, 0);
-                    const InkpodStatus status = state->clipboard == nullptr
+                    const InkpodStatus status = state->document.clipboard == nullptr
                         || state->engine == nullptr
                         ? INKPOD_STATUS_INVALID_STATE
                         : state->engine->Invoke(
@@ -11505,7 +11361,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 1};
                     dialog.value_count = 4U;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK) {
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                         return 0;
                     }
                     TextInputDialogState name{};
@@ -11513,7 +11369,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     name.label = L"名前";
                     name.value = L"Pasted Plane";
                     if (ShowTextInput(
-                            state->instance, window, state->smoke_test, name) != IDOK) {
+                            state->lifetime.instance, window, state->lifetime.smoke_test, name) != IDOK) {
                         return 0;
                     }
                     std::vector<std::uint8_t> utf8;
@@ -11524,7 +11380,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     edit.struct_size = sizeof(edit);
                     edit.operation = INKPOD_TREE_CREATE_PLANE;
                     edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
-                    edit.parent_id = state->active_tree_layer_id;
+                    edit.parent_id = state->panes.active_tree_layer_id;
                     edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
                     edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
                     edit.opacity_milli = static_cast<std::uint32_t>(
@@ -11539,7 +11395,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         status = INKPOD_STATUS_INVALID_STATE;
                     }
                     if (status == INKPOD_STATUS_OK) {
-                        state->active_tree_plane_id = plane_id;
+                        state->panes.active_tree_plane_id = plane_id;
                         RefreshTreePane(*state);
                         status = BeginFloatingPaste(*state, INKPOD_PASTE_ACTIVE_CONVERTED);
                     }
@@ -11587,7 +11443,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_FILTER_LAST: {
                     InkpodDocumentInfo document{};
-                    const InkpodStatus status = state->plane != INKPOD_PLANE_COLOR
+                    const InkpodStatus status = state->tools.active_plane != INKPOD_PLANE_COLOR
                             || !QueryDocument(*state, document)
                         ? INKPOD_STATUS_INVALID_STATE
                         : StartM6Task(
@@ -11622,7 +11478,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     const UINT command = LOWORD(wparam);
                     InkpodDocumentInfo document{};
                     M6FilterJob job{};
-                    if (state->plane != INKPOD_PLANE_COLOR
+                    if (state->tools.active_plane != INKPOD_PLANE_COLOR
                         || !QueryDocument(*state, document)
                         || !ConfigureM6FilterEditor(*state, command, job)) {
                         return 0;
@@ -11657,10 +11513,10 @@ LRESULT CALLBACK MainWindowProcedure(
                     UpdateMenuState(*state);
                     return 0;
                 case IDM_ADJUSTMENT_TOGGLE: {
-                    const bool visible = !state->m6_adjustment_visible;
+                    const bool visible = !state->effects.adjustment_visible;
                     const InkpodStatus status = SetM6AdjustmentVisibility(*state, visible);
                     if (status == INKPOD_STATUS_OK) {
-                        state->m6_adjustment_visible = visible;
+                        state->effects.adjustment_visible = visible;
                     } else {
                         ShowCoreError(*state, window, L"調整レイヤー表示");
                     }
@@ -11672,7 +11528,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     const InkpodStatus status = ApplyTreeEdit(
                         *state,
                         INKPOD_TREE_REORDER_LAYER,
-                        state->m6_adjustment_id,
+                        state->effects.adjustment_id,
                         0U,
                         ignored);
                     if (status != INKPOD_STATUS_OK) {
@@ -11688,7 +11544,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.values = {INKPOD_LAYER_RASTER, 100, 0, 0};
                     dialog.value_count = 2U;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[0] < INKPOD_LAYER_BINARY_COLORING
                         || dialog.values[0] > INKPOD_LAYER_VECTOR_COLORING
                         || dialog.values[1] < 0 || dialog.values[1] > 100) {
@@ -11706,8 +11562,8 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"レイヤーの作成");
                     } else {
-                        state->active_tree_layer_id = layer_id;
-                        state->m3_layer_id = layer_id;
+                        state->panes.active_tree_layer_id = layer_id;
+                        state->document.smoke_layer_id = layer_id;
                         RefreshTreePane(*state);
                     }
                     UpdateMenuState(*state);
@@ -11716,8 +11572,8 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_LAYER_DUPLICATE: {
                     InkpodDocumentInfo info{};
                     std::uint64_t duplicate_id{};
-                    const std::uint64_t source_id = state->active_tree_layer_id != 0U
-                        ? state->active_tree_layer_id
+                    const std::uint64_t source_id = state->panes.active_tree_layer_id != 0U
+                        ? state->panes.active_tree_layer_id
                         : (QueryDocument(*state, info) ? info.layer_id : 0U);
                     const InkpodStatus status = source_id != 0U
                         ? ApplyTreeEdit(
@@ -11730,8 +11586,8 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"レイヤーの複製");
                     } else {
-                        state->m3_layer_id = duplicate_id;
-                        state->active_tree_layer_id = duplicate_id;
+                        state->document.smoke_layer_id = duplicate_id;
+                        state->panes.active_tree_layer_id = duplicate_id;
                         RefreshTreePane(*state);
                     }
                     UpdateMenuState(*state);
@@ -11739,9 +11595,9 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_LAYER_DELETE: {
                     std::uint64_t ignored{};
-                    const std::uint64_t target = state->m3_layer_id != 0U
-                        ? state->m3_layer_id
-                        : state->active_tree_layer_id;
+                    const std::uint64_t target = state->document.smoke_layer_id != 0U
+                        ? state->document.smoke_layer_id
+                        : state->panes.active_tree_layer_id;
                     const InkpodStatus status = target == 0U
                         ? INKPOD_STATUS_INVALID_STATE
                         : ApplyTreeEdit(
@@ -11753,8 +11609,8 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"レイヤーの削除");
                     } else {
-                        state->m3_layer_id = 0U;
-                        state->active_tree_layer_id = 0U;
+                        state->document.smoke_layer_id = 0U;
+                        state->panes.active_tree_layer_id = 0U;
                         RefreshTreePane(*state);
                     }
                     UpdateMenuState(*state);
@@ -11762,10 +11618,10 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_LAYER_MOVE_TOP: {
                     InkpodDocumentInfo info{};
-                    const std::uint64_t target = state->m3_layer_id != 0U
-                        ? state->m3_layer_id
-                        : (state->active_tree_layer_id != 0U
-                                  ? state->active_tree_layer_id
+                    const std::uint64_t target = state->document.smoke_layer_id != 0U
+                        ? state->document.smoke_layer_id
+                        : (state->panes.active_tree_layer_id != 0U
+                                  ? state->panes.active_tree_layer_id
                                   : (QueryDocument(*state, info) ? info.layer_id : 0U));
                     std::uint64_t ignored{};
                     const InkpodStatus status = target == 0U
@@ -11784,10 +11640,10 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_LAYER_MOVE_UP:
                 case IDM_LAYER_MOVE_DOWN: {
-                    const int count = state->layer_list == nullptr
+                    const int count = state->windows.layer_list == nullptr
                         ? 0
-                        : static_cast<int>(SendMessageW(state->layer_list, LB_GETCOUNT, 0, 0));
-                    const int current = static_cast<int>(state->active_tree_layer_index);
+                        : static_cast<int>(SendMessageW(state->windows.layer_list, LB_GETCOUNT, 0, 0));
+                    const int current = static_cast<int>(state->panes.active_tree_layer_index);
                     const int destination = LOWORD(wparam) == IDM_LAYER_MOVE_UP
                         ? std::max(0, current - 1)
                         : std::min(std::max(0, count - 1), current + 1);
@@ -11795,7 +11651,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     const InkpodStatus status = ApplyTreeEdit(
                         *state,
                         INKPOD_TREE_REORDER_LAYER,
-                        state->active_tree_layer_id,
+                        state->panes.active_tree_layer_id,
                         static_cast<std::uint32_t>(destination),
                         ignored);
                     if (status != INKPOD_STATUS_OK) {
@@ -11829,13 +11685,13 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.labels[0] = L"変換先種類 (1-10)";
                     dialog.values[0] = INKPOD_LAYER_RASTER;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK) {
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                         return 0;
                     }
                     InkpodTreeEdit edit{};
                     edit.struct_size = sizeof(edit);
                     edit.operation = INKPOD_TREE_CONVERT_LAYER;
-                    edit.object_id = state->active_tree_layer_id;
+                    edit.object_id = state->panes.active_tree_layer_id;
                     edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
                     std::uint64_t ignored{};
                     const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
@@ -11849,13 +11705,13 @@ LRESULT CALLBACK MainWindowProcedure(
                     InkpodTreeEdit edit{};
                     edit.struct_size = sizeof(edit);
                     edit.operation = INKPOD_TREE_MERGE_LAYER;
-                    edit.object_id = state->active_tree_layer_id;
+                    edit.object_id = state->panes.active_tree_layer_id;
                     std::uint64_t ignored{};
                     const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"同種レイヤーの統合");
                     }
-                    state->active_tree_layer_id = 0U;
+                    state->panes.active_tree_layer_id = 0U;
                     RefreshTreePane(*state);
                     return 0;
                 }
@@ -11901,7 +11757,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"非表示レイヤーの削除");
                     }
-                    state->active_tree_layer_id = 0U;
+                    state->panes.active_tree_layer_id = 0U;
                     RefreshTreePane(*state);
                     return 0;
                 }
@@ -11912,14 +11768,14 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 0};
                     dialog.value_count = 3U;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK) {
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                         return 0;
                     }
                     InkpodTreeEdit edit{};
                     edit.struct_size = sizeof(edit);
                     edit.operation = INKPOD_TREE_CREATE_PLANE;
                     edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
-                    edit.parent_id = state->active_tree_layer_id;
+                    edit.parent_id = state->panes.active_tree_layer_id;
                     edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
                     edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
                     edit.opacity_milli = static_cast<std::uint32_t>(
@@ -11930,7 +11786,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"プレーンの作成");
                     } else {
-                        state->active_tree_plane_id = plane_id;
+                        state->panes.active_tree_plane_id = plane_id;
                     }
                     RefreshTreePane(*state);
                     return 0;
@@ -11944,14 +11800,14 @@ LRESULT CALLBACK MainWindowProcedure(
                         ? INKPOD_TREE_DUPLICATE_PLANE
                         : (command == IDM_PLANE_DELETE ? INKPOD_TREE_DELETE_PLANE
                                                       : INKPOD_TREE_REORDER_PLANE);
-                    std::uint32_t destination = state->active_tree_plane_index;
+                    std::uint32_t destination = state->panes.active_tree_plane_index;
                     if (command == IDM_PLANE_MOVE_UP) {
                         destination = destination == 0U ? 0U : destination - 1U;
                     } else if (command == IDM_PLANE_MOVE_DOWN) {
-                        const int count = state->plane_list == nullptr
+                        const int count = state->windows.plane_list == nullptr
                             ? 0
                             : static_cast<int>(SendMessageW(
-                                  state->plane_list, LB_GETCOUNT, 0, 0));
+                                  state->windows.plane_list, LB_GETCOUNT, 0, 0));
                         destination = static_cast<std::uint32_t>(std::min(
                             std::max(0, count - 1), static_cast<int>(destination) + 1));
                     }
@@ -11959,15 +11815,15 @@ LRESULT CALLBACK MainWindowProcedure(
                     const InkpodStatus status = ApplyTreeEdit(
                         *state,
                         operation,
-                        state->active_tree_plane_id,
+                        state->panes.active_tree_plane_id,
                         destination,
                         object_id);
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"プレーン操作");
                     } else if (command == IDM_PLANE_DUPLICATE) {
-                        state->active_tree_plane_id = object_id;
+                        state->panes.active_tree_plane_id = object_id;
                     } else if (command == IDM_PLANE_DELETE) {
-                        state->active_tree_plane_id = 0U;
+                        state->panes.active_tree_plane_id = 0U;
                     }
                     RefreshTreePane(*state);
                     return 0;
@@ -12005,12 +11861,12 @@ LRESULT CALLBACK MainWindowProcedure(
                         1,
                         0};
                     dialog.value_count = 3U;
-                    if (state->smoke_test) {
+                    if (state->lifetime.smoke_test) {
                         dialog.values[0] = INKPOD_TYPED_PLANE_RASTER;
                         dialog.values[1] = INKPOD_STORAGE_RGBA8;
                     }
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[2] == 0) {
                         return 0;
                     }
@@ -12032,13 +11888,13 @@ LRESULT CALLBACK MainWindowProcedure(
                     InkpodTreeEdit edit{};
                     edit.struct_size = sizeof(edit);
                     edit.operation = INKPOD_TREE_MERGE_PLANE;
-                    edit.object_id = state->active_tree_plane_id;
+                    edit.object_id = state->panes.active_tree_plane_id;
                     std::uint64_t ignored{};
                     const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"同種プレーンの統合");
                     }
-                    state->active_tree_plane_id = 0U;
+                    state->panes.active_tree_plane_id = 0U;
                     RefreshTreePane(*state);
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
@@ -12049,23 +11905,23 @@ LRESULT CALLBACK MainWindowProcedure(
                         ? L"ライトテーブルセットを作成"
                         : L"ライトテーブルセット名";
                     dialog.label = L"名前";
-                    dialog.value = state->smoke_test ? L"Smoke Set" : L"Light Table";
+                    dialog.value = state->lifetime.smoke_test ? L"Smoke Set" : L"Light Table";
                     if (ShowTextInput(
-                            state->instance, window, state->smoke_test, dialog) != IDOK) {
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                         return 0;
                     }
                     InkpodLightTableEdit edit{};
                     edit.operation = LOWORD(wparam) == IDM_LT_SET_NEW
                         ? INKPOD_LIGHT_TABLE_CREATE_SET
                         : INKPOD_LIGHT_TABLE_RENAME_SET;
-                    edit.object_id = state->active_light_table_set_id;
+                    edit.object_id = state->panes.active_light_table_set_id;
                     std::uint64_t object_id{};
                     const InkpodStatus status = ApplyLightTableEdit(
                         *state, edit, dialog.value, object_id);
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"ライトテーブルセット");
                     } else if (object_id != 0U) {
-                        state->active_light_table_set_id = object_id;
+                        state->panes.active_light_table_set_id = object_id;
                     }
                     RefreshLightTablePane(*state);
                     return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -12081,8 +11937,8 @@ LRESULT CALLBACK MainWindowProcedure(
                         : (command == IDM_LT_SET_DELETE
                                ? INKPOD_LIGHT_TABLE_DELETE_SET
                                : INKPOD_LIGHT_TABLE_REORDER_SET);
-                    edit.object_id = state->active_light_table_set_id;
-                    edit.destination_index = state->active_light_table_set_index;
+                    edit.object_id = state->panes.active_light_table_set_id;
+                    edit.destination_index = state->panes.active_light_table_set_index;
                     if (command == IDM_LT_SET_UP && edit.destination_index != 0U) {
                         --edit.destination_index;
                     } else if (command == IDM_LT_SET_DOWN) {
@@ -12093,9 +11949,9 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"ライトテーブルセット操作");
                     } else if (object_id != 0U) {
-                        state->active_light_table_set_id = object_id;
+                        state->panes.active_light_table_set_id = object_id;
                     } else {
-                        state->active_light_table_set_id = 0U;
+                        state->panes.active_light_table_set_id = 0U;
                     }
                     RefreshLightTablePane(*state);
                     return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -12104,9 +11960,9 @@ LRESULT CALLBACK MainWindowProcedure(
                     ViewOptionsDialogState dialog{};
                     dialog.title = L"ライトテーブル全体不透明度";
                     dialog.labels[0] = L"不透明度 (0-100%)";
-                    dialog.values[0] = state->smoke_test ? 50 : 100;
+                    dialog.values[0] = state->lifetime.smoke_test ? 50 : 100;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[0] < 0 || dialog.values[0] > 100) {
                         return 0;
                     }
@@ -12129,8 +11985,8 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_LT_ITEM_ADD:
                 case IDM_LT_ITEM_RELOAD: {
-                    std::wstring path = state->smoke_test ? state->smoke_raster_path : L"";
-                    if (!state->smoke_test && !ChooseCommonRasterPath(window, false, path)) {
+                    std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
+                    if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, false, path)) {
                         return 0;
                     }
                     const InkpodStatus status = AddOrReloadLightTableRaster(
@@ -12148,8 +12004,8 @@ LRESULT CALLBACK MainWindowProcedure(
                     edit.operation = LOWORD(wparam) == IDM_LT_ITEM_DELETE
                         ? INKPOD_LIGHT_TABLE_REMOVE_ITEM
                         : INKPOD_LIGHT_TABLE_REORDER_ITEM;
-                    edit.object_id = state->active_light_table_item_id;
-                    edit.destination_index = state->active_light_table_item_index;
+                    edit.object_id = state->panes.active_light_table_item_id;
+                    edit.destination_index = state->panes.active_light_table_item_index;
                     if (LOWORD(wparam) == IDM_LT_ITEM_UP && edit.destination_index != 0U) {
                         --edit.destination_index;
                     } else if (LOWORD(wparam) == IDM_LT_ITEM_DOWN) {
@@ -12160,7 +12016,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"ライトテーブル項目操作");
                     }
-                    state->active_light_table_item_id = 0U;
+                    state->panes.active_light_table_item_id = 0U;
                     RefreshLightTablePane(*state);
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
@@ -12173,11 +12029,11 @@ LRESULT CALLBACK MainWindowProcedure(
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
                 case IDM_LT_ITEM_MOVE:
-                    if (state->active_light_table_item_id == 0U) {
+                    if (state->panes.active_light_table_item_id == 0U) {
                         return 0;
                     }
-                    state->tool = kInteractionLightTableMove;
-                    state->light_table_move_samples.clear();
+                    state->tools.active_tool = kInteractionLightTableMove;
+                    state->panes.light_table_move_samples.clear();
                     UpdateMenuState(*state);
                     return 1;
                 case IDM_LT_ITEM_SAMPLE: {
@@ -12187,13 +12043,13 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.title = L"ライトテーブル色サンプル";
                     dialog.labels = {L"X", L"Y", nullptr, nullptr};
                     dialog.values = {
-                        state->smoke_test ? document.reference_frame.x : 0,
-                        state->smoke_test ? document.reference_frame.y : 0,
+                        state->lifetime.smoke_test ? document.reference_frame.x : 0,
+                        state->lifetime.smoke_test ? document.reference_frame.y : 0,
                         0,
                         0};
                     dialog.value_count = 2U;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[0] < 0 || dialog.values[1] < 0) {
                         return 0;
                     }
@@ -12210,7 +12066,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         false,
                         false);
                     if (status == INKPOD_STATUS_OK) {
-                        SetDrawingColor(*state, color);
+                        SetDrawingColor(state->tools, color);
                     } else if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"ライトテーブル色サンプル");
                     }
@@ -12218,7 +12074,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_LT_ITEM_SWAP: {
                     InkpodDocumentInfo info{};
-                    const std::uint64_t item_id = state->active_light_table_item_id;
+                    const std::uint64_t item_id = state->panes.active_light_table_item_id;
                     const InkpodStatus status = state->engine->Invoke(
                         [item_id, &info](InkpodCore* core) {
                             info = EmptyDocumentInfo();
@@ -12229,7 +12085,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"ライトテーブルと編集画像の入れ替え");
                     } else {
-                        ResetM3DocumentUiState(*state);
+                        ResetUiForDocumentReplacement(*state);
                         FitCanvas(*state, INKPOD_VIEW_FIT);
                     }
                     RefreshLightTablePane(*state);
@@ -12237,9 +12093,9 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_SEQ_IMPORT: {
                     std::vector<std::wstring> paths;
-                    if (state->smoke_test) {
+                    if (state->lifetime.smoke_test) {
                         try {
-                            paths = state->smoke_sequence_paths;
+                            paths = state->lifetime.smoke_sequence_paths;
                         } catch (const std::bad_alloc&) {
                             return 0;
                         }
@@ -12254,16 +12110,16 @@ LRESULT CALLBACK MainWindowProcedure(
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
                 case IDM_SEQ_EXPORT: {
-                    std::wstring path = state->smoke_test ? state->smoke_raster_path : L"";
-                    if (!state->smoke_test && !ChooseCommonRasterPath(window, true, path)) {
+                    std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
+                    if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, true, path)) {
                         return 0;
                     }
                     ViewOptionsDialogState dialog{};
                     dialog.title = L"連番書き出し";
                     dialog.labels[0] = L"白背景を合成 (0/1)";
-                    dialog.values[0] = state->smoke_test ? 1 : 0;
+                    dialog.values[0] = state->lifetime.smoke_test ? 1 : 0;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK) {
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                         return 0;
                     }
                     const InkpodStatus status = ExportSequenceToPath(
@@ -12291,7 +12147,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"前後セル切替");
                     } else {
-                        ResetM3DocumentUiState(*state);
+                        ResetUiForDocumentReplacement(*state);
                         FitCanvas(*state, INKPOD_VIEW_FIT);
                         RefreshSequencePane(*state);
                     }
@@ -12301,9 +12157,9 @@ LRESULT CALLBACK MainWindowProcedure(
                     ViewOptionsDialogState dialog{};
                     dialog.title = L"セル番号で移動";
                     dialog.labels[0] = L"セル番号";
-                    dialog.values[0] = state->smoke_test ? 3 : 1;
+                    dialog.values[0] = state->lifetime.smoke_test ? 3 : 1;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[0] < 0) {
                         return 0;
                     }
@@ -12333,15 +12189,15 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"セル番号移動");
                     } else {
-                        ResetM3DocumentUiState(*state);
-                        state->active_sequence_index = selected;
+                        ResetUiForDocumentReplacement(*state);
+                        state->animation.active_sequence_index = selected;
                         FitCanvas(*state, INKPOD_VIEW_FIT);
                         RefreshSequencePane(*state);
                     }
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
                 case IDM_SUBPALETTE_SET: {
-                    const std::uint32_t index = state->active_sequence_index;
+                    const std::uint32_t index = state->animation.active_sequence_index;
                     const InkpodStatus status = state->engine->Invoke(
                         [index](InkpodCore* core) {
                             return inkpod_core_subpalette_set(core, index);
@@ -12360,7 +12216,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.values = {0, 0, 0, 0};
                     dialog.value_count = 2U;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[0] < 0 || dialog.values[1] < 0) {
                         return 0;
                     }
@@ -12377,7 +12233,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         false,
                         false);
                     if (status == INKPOD_STATUS_OK) {
-                        SetDrawingColor(*state, color);
+                        SetDrawingColor(state->tools, color);
                     } else if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"サブパレット色サンプル");
                     }
@@ -12388,17 +12244,17 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.title = L"モーションチェック設定";
                     dialog.labels = {L"FPS (8/10/12/24/25/30)", L"ループ (0/1)", L"選択表示 (0/1)", L"LT表示 (0/1)"};
                     dialog.values = {
-                        static_cast<std::int32_t>(state->motion_fps),
-                        (state->motion_flags & INKPOD_MOTION_FLAG_LOOP) != 0U ? 1 : 0,
-                        (state->motion_flags & INKPOD_MOTION_FLAG_INCLUDE_SELECTION) != 0U ? 1 : 0,
-                        (state->motion_flags & INKPOD_MOTION_FLAG_INCLUDE_LIGHT_TABLE) != 0U ? 1 : 0};
+                        static_cast<std::int32_t>(state->animation.motion_fps),
+                        (state->animation.motion_flags & INKPOD_MOTION_FLAG_LOOP) != 0U ? 1 : 0,
+                        (state->animation.motion_flags & INKPOD_MOTION_FLAG_INCLUDE_SELECTION) != 0U ? 1 : 0,
+                        (state->animation.motion_flags & INKPOD_MOTION_FLAG_INCLUDE_LIGHT_TABLE) != 0U ? 1 : 0};
                     dialog.value_count = 4U;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK) {
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                         return 0;
                     }
-                    state->motion_fps = static_cast<std::uint32_t>(dialog.values[0]);
-                    state->motion_flags = (dialog.values[1] != 0 ? INKPOD_MOTION_FLAG_LOOP : 0U)
+                    state->animation.motion_fps = static_cast<std::uint32_t>(dialog.values[0]);
+                    state->animation.motion_flags = (dialog.values[1] != 0 ? INKPOD_MOTION_FLAG_LOOP : 0U)
                         | (dialog.values[2] != 0
                                ? INKPOD_MOTION_FLAG_INCLUDE_SELECTION
                                : 0U)
@@ -12407,8 +12263,8 @@ LRESULT CALLBACK MainWindowProcedure(
                                : 0U);
                     InkpodMotionCheckInput input{
                         sizeof(InkpodMotionCheckInput),
-                        state->motion_fps,
-                        state->motion_flags};
+                        state->animation.motion_fps,
+                        state->animation.motion_flags};
                     InkpodMotionFrame frame{};
                     frame.struct_size = sizeof(frame);
                     const InkpodStatus status = state->engine->Invoke(
@@ -12418,12 +12274,12 @@ LRESULT CALLBACK MainWindowProcedure(
                         false,
                         false);
                     if (status == INKPOD_STATUS_OK) {
-                        state->motion_active = true;
-                        UpdateMotionLabel(*state, frame);
+                        state->animation.motion_active = true;
+                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
                         SetTimer(
                             window,
                             kMotionPlaybackTimer,
-                            std::max<UINT>(1U, 1000U / state->motion_fps),
+                            std::max<UINT>(1U, 1000U / state->animation.motion_fps),
                             nullptr);
                     } else {
                         ShowCoreError(*state, window, L"モーションチェック開始");
@@ -12440,14 +12296,14 @@ LRESULT CALLBACK MainWindowProcedure(
                         false,
                         false);
                     if (status == INKPOD_STATUS_OK) {
-                        UpdateMotionLabel(*state, frame);
-                        if (state->motion_paused) {
+                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+                        if (state->animation.motion_paused) {
                             KillTimer(window, kMotionPlaybackTimer);
                         } else {
                             SetTimer(
                                 window,
                                 kMotionPlaybackTimer,
-                                std::max<UINT>(1U, 1000U / state->motion_fps),
+                                std::max<UINT>(1U, 1000U / state->animation.motion_fps),
                                 nullptr);
                         }
                     } else {
@@ -12470,7 +12326,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         false,
                         false);
                     if (status == INKPOD_STATUS_OK) {
-                        UpdateMotionLabel(*state, frame);
+                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
                     } else {
                         ShowCoreError(*state, window, L"モーションフレーム移動");
                     }
@@ -12511,7 +12367,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         false,
                         false);
                     if (status == INKPOD_STATUS_OK) {
-                        UpdateMotionLabel(*state, frame);
+                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
                     } else {
                         ShowCoreError(*state, window, L"モーション先頭・末尾移動");
                     }
@@ -12524,7 +12380,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_MOTION_FPS_10:
                 case IDM_MOTION_FPS_8: {
                     const UINT command = LOWORD(wparam);
-                    state->motion_fps = command == IDM_MOTION_FPS_30
+                    state->animation.motion_fps = command == IDM_MOTION_FPS_30
                         ? 30U
                         : (command == IDM_MOTION_FPS_25
                                   ? 25U
@@ -12533,14 +12389,14 @@ LRESULT CALLBACK MainWindowProcedure(
                                             : (command == IDM_MOTION_FPS_12
                                                       ? 12U
                                                       : (command == IDM_MOTION_FPS_10 ? 10U : 8U))));
-                    if (!state->motion_active) {
+                    if (!state->animation.motion_active) {
                         UpdateMenuState(*state);
                         return 1;
                     }
                     const InkpodMotionCheckInput input{
                         sizeof(InkpodMotionCheckInput),
-                        state->motion_fps,
-                        state->motion_flags};
+                        state->animation.motion_fps,
+                        state->animation.motion_flags};
                     InkpodMotionFrame frame{};
                     frame.struct_size = sizeof(frame);
                     const InkpodStatus status = state->engine->Invoke(
@@ -12554,11 +12410,11 @@ LRESULT CALLBACK MainWindowProcedure(
                         false,
                         false);
                     if (status == INKPOD_STATUS_OK) {
-                        UpdateMotionLabel(*state, frame);
+                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
                         SetTimer(
                             window,
                             kMotionPlaybackTimer,
-                            std::max<UINT>(1U, 1000U / state->motion_fps),
+                            std::max<UINT>(1U, 1000U / state->animation.motion_fps),
                             nullptr);
                     } else {
                         ShowCoreError(*state, window, L"モーションFPS変更");
@@ -12574,9 +12430,9 @@ LRESULT CALLBACK MainWindowProcedure(
                         false,
                         false);
                     KillTimer(window, kMotionPlaybackTimer);
-                    state->motion_active = false;
-                    state->motion_paused = false;
-                    SetWindowTextW(state->motion_label, L"モーション停止");
+                    state->animation.motion_active = false;
+                    state->animation.motion_paused = false;
+                    SetWindowTextW(state->windows.motion_label, L"モーション停止");
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"モーション停止");
                     }
@@ -12589,7 +12445,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_SELECTION_TRACE:
                 case IDM_SELECTION_WAND: {
                     const UINT command = LOWORD(wparam);
-                    state->selection_shape = command == IDM_SELECTION_ELLIPSE
+                    state->tools.selection_shape = command == IDM_SELECTION_ELLIPSE
                         ? INKPOD_SELECTION_ELLIPSE
                         : (command == IDM_SELECTION_LASSO
                                   ? INKPOD_SELECTION_LASSO
@@ -12600,8 +12456,8 @@ LRESULT CALLBACK MainWindowProcedure(
                                                       : (command == IDM_SELECTION_WAND
                                                                 ? INKPOD_SELECTION_WAND
                                                                 : INKPOD_SELECTION_RECTANGLE))));
-                    state->tool = kInteractionSelection;
-                    state->selection_gesture_samples.clear();
+                    state->tools.active_tool = kInteractionSelection;
+                    state->tools.selection_gesture_samples.clear();
                     if (command == IDM_SELECTION_WAND || command == IDM_SELECTION_TRACE) {
                         ViewOptionsDialogState dialog{};
                         dialog.title = command == IDM_SELECTION_WAND
@@ -12613,14 +12469,14 @@ LRESULT CALLBACK MainWindowProcedure(
                             : std::array<const wchar_t*, 4U>{
                                   L"直径 (px)", nullptr, nullptr, nullptr};
                         dialog.values[0] = command == IDM_SELECTION_WAND
-                            ? state->selection_tolerance
-                            : static_cast<std::int32_t>(state->selection_diameter);
-                        dialog.values[1] = state->selection_gap_close;
+                            ? state->tools.selection_tolerance
+                            : static_cast<std::int32_t>(state->tools.selection_diameter);
+                        dialog.values[1] = state->tools.selection_gap_close;
                         dialog.value_count = command == IDM_SELECTION_WAND ? 2U : 1U;
                         if (ShowViewOptions(
-                                state->instance,
+                                state->lifetime.instance,
                                 window,
-                                state->smoke_test,
+                                state->lifetime.smoke_test,
                                 dialog) != IDOK) {
                             return 0;
                         }
@@ -12630,12 +12486,12 @@ LRESULT CALLBACK MainWindowProcedure(
                                 || dialog.values[1] > UINT16_MAX) {
                                 return 0;
                             }
-                            state->selection_tolerance =
+                            state->tools.selection_tolerance =
                                 static_cast<std::uint16_t>(dialog.values[0]);
-                            state->selection_gap_close =
+                            state->tools.selection_gap_close =
                                 static_cast<std::uint16_t>(dialog.values[1]);
                         } else if (dialog.values[0] > 0) {
-                            state->selection_diameter =
+                            state->tools.selection_diameter =
                                 static_cast<float>(dialog.values[0]);
                         }
                     }
@@ -12646,7 +12502,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_SELECTION_MODE_ADD:
                 case IDM_SELECTION_MODE_SUBTRACT:
                 case IDM_SELECTION_MODE_INTERSECT:
-                    state->selection_operation = LOWORD(wparam) == IDM_SELECTION_MODE_ADD
+                    state->tools.selection_operation = LOWORD(wparam) == IDM_SELECTION_MODE_ADD
                         ? INKPOD_SELECTION_ADD
                         : (LOWORD(wparam) == IDM_SELECTION_MODE_SUBTRACT
                                   ? INKPOD_SELECTION_SUBTRACT
@@ -12710,8 +12566,8 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"選択範囲をレイヤーへ変換");
                     } else {
-                        state->selection_layer_id = layer_id;
-                        state->m3_layer_id = layer_id;
+                        state->document.selection_layer_id = layer_id;
+                        state->document.smoke_layer_id = layer_id;
                     }
                     UpdateMenuState(*state);
                     return 0;
@@ -12725,7 +12581,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         : (command == IDM_SELECTION_LAYER_SUBTRACT
                                   ? INKPOD_SELECTION_LAYER_SUBTRACT
                                   : INKPOD_SELECTION_LAYER_REPLACE);
-                    const std::uint64_t layer_id = state->selection_layer_id;
+                    const std::uint64_t layer_id = state->document.selection_layer_id;
                     const InkpodStatus status = state->engine == nullptr || layer_id == 0U
                         ? INKPOD_STATUS_INVALID_STATE
                         : state->engine->Invoke(
@@ -12790,11 +12646,11 @@ LRESULT CALLBACK MainWindowProcedure(
                             ? L"選択範囲を拡張"
                             : L"選択範囲を縮小";
                         dialog.labels[0] = L"幅 (px)";
-                        dialog.values[0] = state->smoke_test ? 2 : 1;
+                        dialog.values[0] = state->lifetime.smoke_test ? 2 : 1;
                         if (ShowViewOptions(
-                                state->instance,
+                                state->lifetime.instance,
                                 window,
-                                state->smoke_test,
+                                state->lifetime.smoke_test,
                                 dialog) != IDOK
                             || dialog.values[0] <= 0) {
                             return 0;
@@ -12814,7 +12670,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_VIEW_ZOOM_IN:
                 case IDM_VIEW_ZOOM_OUT: {
                     RECT client{};
-                    GetClientRect(state->canvas, &client);
+                    GetClientRect(state->windows.canvas, &client);
                     const double factor = LOWORD(wparam) == IDM_VIEW_ZOOM_IN ? 1.2 : 1.0 / 1.2;
                     if (ApplyView(
                             *state,
@@ -12844,16 +12700,16 @@ LRESULT CALLBACK MainWindowProcedure(
                     ViewOptionsDialogState dialog{};
                     dialog.title = L"表示倍率";
                     dialog.labels[0] = L"倍率 (%)";
-                    dialog.values[0] = state->smoke_test
+                    dialog.values[0] = state->lifetime.smoke_test
                         ? 125
                         : (QuerySnapshotTransform(*state, transform)
                         ? static_cast<std::int32_t>(std::clamp(
                               std::lround(transform.zoom * 100.0), 1L, 6400L))
                         : 100);
                     if (ShowViewOptions(
-                            state->instance,
+                            state->lifetime.instance,
                             window,
-                            state->smoke_test,
+                            state->lifetime.smoke_test,
                             dialog) == IDOK) {
                         const InkpodStatus status = ApplyZoomPercent(
                             *state, static_cast<std::uint32_t>(dialog.values[0]));
@@ -12865,8 +12721,8 @@ LRESULT CALLBACK MainWindowProcedure(
                     return 0;
                 }
                 case IDM_VIEW_BOX_ZOOM:
-                    state->tool = kInteractionBoxZoom;
-                    state->view_gesture_samples.clear();
+                    state->tools.active_tool = kInteractionBoxZoom;
+                    state->view.gesture_samples.clear();
                     UpdateMenuState(*state);
                     return 0;
                 case IDM_VIEW_FLIP_HORIZONTAL:
@@ -12882,10 +12738,10 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"表示反転");
                     } else if (horizontal) {
-                        state->view_flip_horizontal =
-                            !state->view_flip_horizontal;
+                        state->view.flip_horizontal =
+                            !state->view.flip_horizontal;
                     } else {
-                        state->view_flip_vertical = !state->view_flip_vertical;
+                        state->view.flip_vertical = !state->view.flip_vertical;
                     }
                     UpdateMenuState(*state);
                     return 0;
@@ -12898,16 +12754,16 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_VIEW_TRANSPARENT: {
                     const UINT command = LOWORD(wparam);
                     bool* current = command == IDM_VIEW_RULER
-                        ? &state->ruler_visible
+                        ? &state->view.ruler_visible
                         : (command == IDM_VIEW_GUIDES
-                                  ? &state->guides_visible
+                                  ? &state->view.guides_visible
                                   : (command == IDM_VIEW_GRID
-                                            ? &state->grid_visible
+                                            ? &state->view.grid_visible
                                             : (command == IDM_VIEW_SNAP_GUIDES
-                                                      ? &state->snap_guides
+                                                      ? &state->view.snap_guides
                                                       : (command == IDM_VIEW_SNAP_GRID
-                                                                ? &state->snap_grid
-                                                                : &state->transparent_visible))));
+                                                                ? &state->view.snap_grid
+                                                                : &state->view.transparent_visible))));
                     const InkpodViewCommandKind kind = command == IDM_VIEW_RULER
                         ? INKPOD_VIEW_SET_RULER_VISIBLE
                         : (command == IDM_VIEW_GUIDES
@@ -12946,9 +12802,9 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.values[0] = static_cast<std::int32_t>(
                         vertical ? info.width / 2U : info.height / 2U);
                     if (ShowViewOptions(
-                            state->instance,
+                            state->lifetime.instance,
                             window,
-                            state->smoke_test,
+                            state->lifetime.smoke_test,
                             dialog) != IDOK) {
                         return 0;
                     }
@@ -12963,7 +12819,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     return 0;
                 }
                 case IDM_VIEW_GUIDE_MOVE:
-                    state->tool = kInteractionGuideMove;
+                    state->tools.active_tool = kInteractionGuideMove;
                     UpdateMenuState(*state);
                     return 0;
                 case IDM_VIEW_GUIDE_DELETE_ALL: {
@@ -12981,9 +12837,9 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.values = {0, 0, 8, 2};
                     dialog.value_count = 4U;
                     if (ShowViewOptions(
-                            state->instance,
+                            state->lifetime.instance,
                             window,
-                            state->smoke_test,
+                            state->lifetime.smoke_test,
                             dialog) != IDOK) {
                         return 0;
                     }
@@ -13018,62 +12874,62 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"ビューの作成");
                     } else {
-                        state->secondary_view_id = view_id;
-                        state->active_view_id = view_id;
-                        if (state->document_tabs != nullptr) {
+                        state->view.secondary_view_id = view_id;
+                        state->view.active_view_id = view_id;
+                        if (state->windows.document_tabs != nullptr) {
                             TCITEMW item{};
                             item.mask = TCIF_TEXT | TCIF_PARAM;
                             item.pszText = const_cast<wchar_t*>(L"セル [ビュー 2]");
                             item.lParam = static_cast<LPARAM>(view_id);
-                            const int index = TabCtrl_GetItemCount(state->document_tabs);
-                            if (TabCtrl_InsertItem(state->document_tabs, index, &item) >= 0) {
-                                TabCtrl_SetCurSel(state->document_tabs, index);
+                            const int index = TabCtrl_GetItemCount(state->windows.document_tabs);
+                            if (TabCtrl_InsertItem(state->windows.document_tabs, index, &item) >= 0) {
+                                TabCtrl_SetCurSel(state->windows.document_tabs, index);
                             }
                         }
                         state->engine->SetActiveView(view_id);
-                        state->view_flip_horizontal = false;
-                        state->view_flip_vertical = false;
+                        state->view.flip_horizontal = false;
+                        state->view.flip_vertical = false;
                     }
                     UpdateMenuState(*state);
                     return 0;
                 }
                 case IDM_TOOL_PENCIL:
-                    state->tool = INKPOD_TOOL_PENCIL;
+                    state->tools.active_tool = INKPOD_TOOL_PENCIL;
                     UpdateMenuState(*state);
                     return 0;
                 case IDM_TOOL_BRUSH:
-                    state->tool = INKPOD_TOOL_BRUSH;
+                    state->tools.active_tool = INKPOD_TOOL_BRUSH;
                     UpdateMenuState(*state);
                     return 0;
                 case IDM_TOOL_ERASER:
-                    state->tool = INKPOD_TOOL_ERASER;
+                    state->tools.active_tool = INKPOD_TOOL_ERASER;
                     UpdateMenuState(*state);
                     return 0;
                 case IDM_TOOL_FILL:
                 case IDM_TOOL_CLOSED_FILL:
                 case IDM_TOOL_FILL_EXTENSION:
-                    state->tool = kInteractionFill;
-                    state->fill_options.operation = LOWORD(wparam) == IDM_TOOL_CLOSED_FILL
+                    state->tools.active_tool = kInteractionFill;
+                    state->tools.fill_options.operation = LOWORD(wparam) == IDM_TOOL_CLOSED_FILL
                         ? INKPOD_FILL_CLOSED_REGION
                         : (LOWORD(wparam) == IDM_TOOL_FILL_EXTENSION
                                   ? INKPOD_FILL_EXTENSION
                                   : INKPOD_FILL_SEED);
-                    state->fill_gesture_samples.clear();
+                    state->tools.fill_gesture_samples.clear();
                     UpdateMenuState(*state);
                     return 0;
                 case IDM_TOOL_FILL_OPTIONS:
                     if (inkpod::windows::ui::ShowFillOptions(
-                            state->instance,
-                            state->window,
-                            state->smoke_test,
-                            state->fill_options)) {
-                        state->tool = kInteractionFill;
-                        state->fill_gesture_samples.clear();
+                            state->lifetime.instance,
+                            state->windows.window,
+                            state->lifetime.smoke_test,
+                            state->tools.fill_options)) {
+                        state->tools.active_tool = kInteractionFill;
+                        state->tools.fill_gesture_samples.clear();
                         UpdateMenuState(*state);
                     }
                     return 0;
                 case IDM_TOOL_EYEDROPPER:
-                    state->tool = kInteractionEyedropper;
+                    state->tools.active_tool = kInteractionEyedropper;
                     UpdateMenuState(*state);
                     return 0;
                 case IDM_VECTOR_LINE:
@@ -13082,7 +12938,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_VECTOR_ELLIPSE:
                 case IDM_VECTOR_POLYLINE:
                 case IDM_VECTOR_ERASER: {
-                    ClearVectorGeometryPreview(*state);
+                    ClearVectorGeometryPreview(state->tools, state->windows.canvas);
                     TreePaneNode plane{};
                     if (!QueryTreeNode(*state, true, plane)) {
                         return 0;
@@ -13095,7 +12951,7 @@ LRESULT CALLBACK MainWindowProcedure(
                         return 0;
                     }
                     const UINT command = LOWORD(wparam);
-                    state->tool = command == IDM_VECTOR_LINE
+                    state->tools.active_tool = command == IDM_VECTOR_LINE
                         ? kInteractionVectorLine
                         : (command == IDM_VECTOR_CURVE
                                   ? kInteractionVectorCurve
@@ -13112,21 +12968,21 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_VECTOR_ERASE_PARTIAL:
                 case IDM_VECTOR_ERASE_INTERSECTION:
                 case IDM_VECTOR_ERASE_WHOLE:
-                    state->vector_erase_mode = LOWORD(wparam) == IDM_VECTOR_ERASE_INTERSECTION
+                    state->tools.vector_erase_mode = LOWORD(wparam) == IDM_VECTOR_ERASE_INTERSECTION
                         ? INKPOD_VECTOR_ERASE_TO_INTERSECTION
                         : (LOWORD(wparam) == IDM_VECTOR_ERASE_WHOLE
                                   ? INKPOD_VECTOR_ERASE_WHOLE_PATH
                                   : INKPOD_VECTOR_ERASE_PARTIAL);
-                    state->tool = kInteractionVectorEraser;
+                    state->tools.active_tool = kInteractionVectorEraser;
                     UpdateMenuState(*state);
                     return 1;
                 case IDM_VECTOR_CONNECT: {
                     ViewOptionsDialogState dialog{};
                     dialog.title = L"ベクター線つなぎ";
                     dialog.labels[0] = L"最大隙間 (1/1000 px)";
-                    dialog.values[0] = state->smoke_test ? 4000 : 2000;
+                    dialog.values[0] = state->lifetime.smoke_test ? 4000 : 2000;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[0] <= 0) {
                         return 0;
                     }
@@ -13142,10 +12998,10 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.title = L"ベクター線幅修正";
                     dialog.labels = {L"モード (1:太く 2:細く 3:倍率 4:一定)",
                         L"値 (1/1000 px または倍率)", nullptr, nullptr};
-                    dialog.values = {1, state->smoke_test ? 500 : 1000, 0, 0};
+                    dialog.values = {1, state->lifetime.smoke_test ? 500 : 1000, 0, 0};
                     dialog.value_count = 2U;
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[0] < 1 || dialog.values[0] > 4
                         || dialog.values[1] <= 0) {
                         return 0;
@@ -13168,7 +13024,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_VECTOR_SELECT_FILL_BOUNDARY:
                 case IDM_VECTOR_SELECT_FILL: {
                     const UINT command = LOWORD(wparam);
-                    state->vector_selection_mode = command == IDM_VECTOR_SELECT_CUT
+                    state->tools.vector_selection_mode = command == IDM_VECTOR_SELECT_CUT
                         ? INKPOD_VECTOR_SELECT_CUT_BY_SELECTION
                         : (command == IDM_VECTOR_SELECT_CONTAINED
                                   ? INKPOD_VECTOR_SELECT_FULLY_CONTAINED
@@ -13222,8 +13078,8 @@ LRESULT CALLBACK MainWindowProcedure(
                         true,
                         true);
                     if (status == INKPOD_STATUS_OK) {
-                        state->active_tree_layer_id = layer_id;
-                        state->active_tree_plane_id = 0U;
+                        state->panes.active_tree_layer_id = layer_id;
+                        state->panes.active_tree_plane_id = 0U;
                         RefreshTreePane(*state);
                     } else {
                         ShowCoreError(*state, window, L"ベクターをラスタライズ");
@@ -13264,8 +13120,8 @@ LRESULT CALLBACK MainWindowProcedure(
                         true,
                         true);
                     if (status == INKPOD_STATUS_OK) {
-                        state->active_tree_layer_id = target_layer_id;
-                        state->active_tree_plane_id = 0U;
+                        state->panes.active_tree_layer_id = target_layer_id;
+                        state->panes.active_tree_plane_id = 0U;
                         RefreshTreePane(*state);
                     } else {
                         ShowCoreError(*state, window, L"ラスターをベクター化");
@@ -13279,20 +13135,20 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_EFFECT_STAMP:
                 case IDM_EFFECT_DUST:
                 case IDM_EFFECT_ALPHA_GRADIENT:
-                    if (state->plane == INKPOD_PLANE_COLOR
+                    if (state->tools.active_plane == INKPOD_PLANE_COLOR
                         && ConfigureM6Effect(*state, LOWORD(wparam))) {
                         UpdateMenuState(*state);
                     }
                     return 0;
                 case IDM_EFFECT_ALPHA_VIEW: {
-                    const bool enabled = !state->alpha_view;
+                    const bool enabled = !state->effects.alpha_view;
                     const InkpodStatus status = ApplyView(
                         *state,
                         INKPOD_VIEW_SET_ALPHA_VISIBLE,
                         enabled ? 1.0 : 0.0,
                         0.0);
                     if (status == INKPOD_STATUS_OK) {
-                        state->alpha_view = enabled;
+                        state->effects.alpha_view = enabled;
                     } else {
                         ShowCoreError(*state, window, L"アルファ表示");
                     }
@@ -13301,10 +13157,10 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_PLANE_MAIN_LINE:
                 case IDM_PLANE_COLOR: {
-                    state->plane = LOWORD(wparam) == IDM_PLANE_MAIN_LINE
+                    state->tools.active_plane = LOWORD(wparam) == IDM_PLANE_MAIN_LINE
                         ? INKPOD_PLANE_MAIN_LINE
                         : INKPOD_PLANE_COLOR;
-                    const InkpodPlaneKind plane = state->plane;
+                    const InkpodPlaneKind plane = state->tools.active_plane;
                     const InkpodStatus plane_status = state->engine == nullptr
                         ? INKPOD_STATUS_INVALID_STATE
                         : state->engine->Invoke(
@@ -13330,7 +13186,7 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_COLOR_SOURCE_SELECTED:
                 case IDM_COLOR_SOURCE_COMPOSITE:
                 case IDM_COLOR_SOURCE_LIGHT_TABLE:
-                    state->eyedropper_source = LOWORD(wparam) == IDM_COLOR_SOURCE_TOPMOST
+                    state->tools.eyedropper_source = LOWORD(wparam) == IDM_COLOR_SOURCE_TOPMOST
                         ? INKPOD_EYEDROPPER_TOPMOST_NONTRANSPARENT
                         : (LOWORD(wparam) == IDM_COLOR_SOURCE_SELECTED
                                   ? INKPOD_EYEDROPPER_SELECTED_PLANE
@@ -13345,19 +13201,19 @@ LRESULT CALLBACK MainWindowProcedure(
                     std::vector<InkpodColorValue> colors;
                     std::vector<std::wstring> names;
                     try {
-                        colors = state->palette_colors;
-                        names = state->color_chart_names;
+                        colors = state->panes.palette_colors;
+                        names = state->panes.color_chart_names;
                         if (LOWORD(wparam) == IDM_PALETTE_REGISTER) {
                             if (colors.size() >= 4096U) {
                                 return 0;
                             }
-                            colors.push_back(state->drawing_color);
+                            colors.push_back(state->tools.drawing_color);
                             names.push_back(L"Color " + std::to_wstring(colors.size()));
                         } else if (LOWORD(wparam) == IDM_PALETTE_DELETE) {
                             const LRESULT selected = SendMessageW(
-                                state->color_palette_list, LB_GETCURSEL, 0, 0);
+                                state->windows.color_palette_list, LB_GETCURSEL, 0, 0);
                             const std::size_t index = static_cast<std::size_t>(
-                                state->palette_group) * 10U
+                                state->panes.palette_group) * 10U
                                 + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
                             if (selected == LB_ERR || index >= colors.size()) {
                                 return 0;
@@ -13375,24 +13231,24 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"カラーパレット編集");
                     } else {
-                        state->color_chart_names = std::move(names);
+                        state->panes.color_chart_names = std::move(names);
                     }
                     RefreshColorPanes(*state);
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
                 case IDM_PALETTE_NEXT_GROUP:
-                    ++state->palette_group;
+                    ++state->panes.palette_group;
                     RefreshColorPanes(*state);
                     return 1;
                 case IDM_PALETTE_SAVE:
                 case IDM_PALETTE_LOAD: {
                     const bool save = LOWORD(wparam) == IDM_PALETTE_SAVE;
-                    std::wstring path = state->smoke_test ? L"inkpod-palette-smoke.inkpalette" : L"";
-                    if (!state->smoke_test && !ChoosePalettePath(window, save, path)) {
+                    std::wstring path = state->lifetime.smoke_test ? L"inkpod-palette-smoke.inkpalette" : L"";
+                    if (!state->lifetime.smoke_test && !ChoosePalettePath(window, save, path)) {
                         return 0;
                     }
                     if (save) {
-                        return SavePaletteFile(path, state->palette_colors) ? 1 : 0;
+                        return SavePaletteFile(path, state->panes.palette_colors) ? 1 : 0;
                     }
                     std::vector<InkpodColorValue> colors;
                     if (!LoadPaletteFile(path, colors)) {
@@ -13408,11 +13264,11 @@ LRESULT CALLBACK MainWindowProcedure(
                     dialog.labels = {L"最大色数", L"量子化で捨てる下位bit (0-7)", L"preview確認 (1)", nullptr};
                     dialog.values = {256, 2, 1, 0};
                     dialog.value_count = 3U;
-                    if (state->smoke_test) {
+                    if (state->lifetime.smoke_test) {
                         dialog.values = {16, 4, 1, 0};
                     }
                     if (ShowViewOptions(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.values[0] <= 0 || dialog.values[1] < 0
                         || dialog.values[1] > 7 || dialog.values[2] == 0) {
                         return 0;
@@ -13432,8 +13288,8 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"カラーチャート生成");
                     }
-                    state->color_chart_names.clear();
-                    state->color_chart_page = 0U;
+                    state->panes.color_chart_names.clear();
+                    state->panes.color_chart_page = 0U;
                     RefreshColorPanes(*state);
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
@@ -13441,16 +13297,16 @@ LRESULT CALLBACK MainWindowProcedure(
                     TextInputDialogState dialog{};
                     dialog.title = L"カラーチャート検索";
                     dialog.label = L"名前または番号";
-                    dialog.value = state->smoke_test ? L"Smoke" : L"";
+                    dialog.value = state->lifetime.smoke_test ? L"Smoke" : L"";
                     if (ShowTextInput(
-                            state->instance, window, state->smoke_test, dialog) != IDOK) {
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                         return 0;
                     }
                     wchar_t* end{};
                     const unsigned long number = std::wcstoul(dialog.value.c_str(), &end, 10);
                     std::size_t index = SIZE_MAX;
                     if (end != dialog.value.c_str() && *end == L'\0' && number != 0U
-                        && number <= state->palette_colors.size()) {
+                        && number <= state->panes.palette_colors.size()) {
                         index = number - 1U;
                     } else {
                         std::wstring needle = dialog.value;
@@ -13458,8 +13314,8 @@ LRESULT CALLBACK MainWindowProcedure(
                             needle.begin(), needle.end(), needle.begin(),
                             [](wchar_t value) { return std::towlower(value); });
                         for (std::size_t candidate = 0U;
-                             candidate < state->color_chart_names.size(); ++candidate) {
-                            std::wstring name = state->color_chart_names[candidate];
+                             candidate < state->panes.color_chart_names.size(); ++candidate) {
+                            std::wstring name = state->panes.color_chart_names[candidate];
                             std::transform(
                                 name.begin(), name.end(), name.begin(),
                                 [](wchar_t value) { return std::towlower(value); });
@@ -13472,77 +13328,77 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (index == SIZE_MAX) {
                         return 0;
                     }
-                    state->color_chart_page = static_cast<std::uint32_t>(index / 20U);
+                    state->panes.color_chart_page = static_cast<std::uint32_t>(index / 20U);
                     RefreshColorPanes(*state);
                     SendMessageW(
-                        state->color_chart_list, LB_SETCURSEL,
+                        state->windows.color_chart_list, LB_SETCURSEL,
                         static_cast<WPARAM>(index % 20U), 0);
                     return 1;
                 }
                 case IDM_CHART_NEXT: {
-                    if (state->palette_colors.empty()) {
+                    if (state->panes.palette_colors.empty()) {
                         return 0;
                     }
-                    LRESULT selected = SendMessageW(state->color_chart_list, LB_GETCURSEL, 0, 0);
-                    std::size_t index = static_cast<std::size_t>(state->color_chart_page) * 20U
+                    LRESULT selected = SendMessageW(state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
+                    std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page) * 20U
                         + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected) + 1U);
-                    index %= state->palette_colors.size();
-                    state->color_chart_page = static_cast<std::uint32_t>(index / 20U);
+                    index %= state->panes.palette_colors.size();
+                    state->panes.color_chart_page = static_cast<std::uint32_t>(index / 20U);
                     RefreshColorPanes(*state);
                     SendMessageW(
-                        state->color_chart_list, LB_SETCURSEL,
+                        state->windows.color_chart_list, LB_SETCURSEL,
                         static_cast<WPARAM>(index % 20U), 0);
                     return 1;
                 }
                 case IDM_CHART_LOCK:
-                    state->color_chart_locked = !state->color_chart_locked;
+                    state->panes.color_chart_locked = !state->panes.color_chart_locked;
                     UpdateMenuState(*state);
                     return 1;
                 case IDM_CHART_NEXT_PAGE:
-                    ++state->color_chart_page;
+                    ++state->panes.color_chart_page;
                     RefreshColorPanes(*state);
                     return 1;
                 case IDM_CHART_RENAME: {
-                    if (state->color_chart_locked) {
+                    if (state->panes.color_chart_locked) {
                         return 0;
                     }
                     const LRESULT selected = SendMessageW(
-                        state->color_chart_list, LB_GETCURSEL, 0, 0);
-                    const std::size_t index = static_cast<std::size_t>(state->color_chart_page)
+                        state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
+                    const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
                         * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-                    if (selected == LB_ERR || index >= state->color_chart_names.size()) {
+                    if (selected == LB_ERR || index >= state->panes.color_chart_names.size()) {
                         return 0;
                     }
                     TextInputDialogState dialog{};
                     dialog.title = L"カラーチャート名";
                     dialog.label = L"名前";
-                    dialog.value = state->smoke_test ? L"Smoke Color" : state->color_chart_names[index];
+                    dialog.value = state->lifetime.smoke_test ? L"Smoke Color" : state->panes.color_chart_names[index];
                     if (ShowTextInput(
-                            state->instance, window, state->smoke_test, dialog) != IDOK
+                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
                         || dialog.value.empty() || dialog.value.size() > 256U) {
                         return 0;
                     }
                     try {
-                        state->color_chart_names[index] = dialog.value;
+                        state->panes.color_chart_names[index] = dialog.value;
                     } catch (const std::bad_alloc&) {
                         return 0;
                     }
                     RefreshColorPanes(*state);
                     SendMessageW(
-                        state->color_chart_list, LB_SETCURSEL,
+                        state->windows.color_chart_list, LB_SETCURSEL,
                         static_cast<WPARAM>(index % 20U), 0);
                     return 1;
                 }
                 case IDM_CHART_SAVE:
                 case IDM_CHART_LOAD: {
                     const bool save = LOWORD(wparam) == IDM_CHART_SAVE;
-                    std::wstring path = state->smoke_test ? L"inkpod-chart-smoke.inkchart" : L"";
-                    if (!state->smoke_test && !ChooseChartPath(window, save, path)) {
+                    std::wstring path = state->lifetime.smoke_test ? L"inkpod-chart-smoke.inkchart" : L"";
+                    if (!state->lifetime.smoke_test && !ChooseChartPath(window, save, path)) {
                         return 0;
                     }
                     if (save) {
                         return SaveColorChartFile(
-                                   path, state->palette_colors, state->color_chart_names)
+                                   path, state->panes.palette_colors, state->panes.color_chart_names)
                             ? 1
                             : 0;
                     }
@@ -13554,31 +13410,31 @@ LRESULT CALLBACK MainWindowProcedure(
                     const InkpodStatus status = ReplacePalette(*state, colors);
                     if (status == INKPOD_STATUS_OK) {
                         try {
-                            state->color_chart_names = std::move(names);
+                            state->panes.color_chart_names = std::move(names);
                         } catch (const std::bad_alloc&) {
                             return 0;
                         }
-                        state->color_chart_page = 0U;
+                        state->panes.color_chart_page = 0U;
                         RefreshColorPanes(*state);
                     }
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
                 case IDM_CHART_COPY: {
                     const LRESULT selected = SendMessageW(
-                        state->color_chart_list, LB_GETCURSEL, 0, 0);
-                    const std::size_t index = static_cast<std::size_t>(state->color_chart_page)
+                        state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
+                    const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
                         * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-                    if (selected == LB_ERR || index >= state->palette_colors.size()) {
+                    if (selected == LB_ERR || index >= state->panes.palette_colors.size()) {
                         return 0;
                     }
-                    const auto& selected_color = state->palette_colors[index];
+                    const auto& selected_color = state->panes.palette_colors[index];
                     std::array<wchar_t, 384U> text{};
                     _snwprintf_s(
                         text.data(), text.size(), _TRUNCATE,
                         selected_color.depth == INKPOD_COLOR_DEPTH_16
                             ? L"%ls\t#%04X%04X%04X%04X"
                             : L"%ls\t#%02X%02X%02X%02X",
-                        state->color_chart_names[index].c_str(),
+                        state->panes.color_chart_names[index].c_str(),
                         selected_color.red,
                         selected_color.green,
                         selected_color.blue,
@@ -13608,30 +13464,30 @@ LRESULT CALLBACK MainWindowProcedure(
                     return copied ? 1 : 0;
                 }
                 case IDM_CHART_CUT: {
-                    if (state->color_chart_locked
+                    if (state->panes.color_chart_locked
                         || SendMessageW(window, WM_COMMAND, IDM_CHART_COPY, 0) != 1) {
                         return 0;
                     }
                     const LRESULT selected = SendMessageW(
-                        state->color_chart_list, LB_GETCURSEL, 0, 0);
-                    const std::size_t index = static_cast<std::size_t>(state->color_chart_page)
+                        state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
+                    const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
                         * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-                    if (selected == LB_ERR || index >= state->palette_colors.size()) {
+                    if (selected == LB_ERR || index >= state->panes.palette_colors.size()) {
                         return 0;
                     }
-                    std::vector<InkpodColorValue> colors = state->palette_colors;
-                    std::vector<std::wstring> names = state->color_chart_names;
+                    std::vector<InkpodColorValue> colors = state->panes.palette_colors;
+                    std::vector<std::wstring> names = state->panes.color_chart_names;
                     colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
                     names.erase(names.begin() + static_cast<std::ptrdiff_t>(index));
                     const InkpodStatus status = ReplacePalette(*state, colors);
                     if (status == INKPOD_STATUS_OK) {
-                        state->color_chart_names = std::move(names);
+                        state->panes.color_chart_names = std::move(names);
                         RefreshColorPanes(*state);
                     }
                     return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
                 case IDM_CHART_PASTE: {
-                    if (state->color_chart_locked || OpenClipboard(window) == FALSE) {
+                    if (state->panes.color_chart_locked || OpenClipboard(window) == FALSE) {
                         return 0;
                     }
                     HANDLE handle = GetClipboardData(CF_UNICODETEXT);
@@ -13676,8 +13532,8 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (!parsed) {
                         return 0;
                     }
-                    SetDrawingColor(*state, color);
-                    std::vector<InkpodColorValue> colors = state->palette_colors;
+                    SetDrawingColor(state->tools, color);
+                    std::vector<InkpodColorValue> colors = state->panes.palette_colors;
                     if (colors.size() >= 4096U) {
                         return 0;
                     }
@@ -13685,11 +13541,11 @@ LRESULT CALLBACK MainWindowProcedure(
                     const InkpodStatus status = ReplacePalette(*state, colors);
                     if (status == INKPOD_STATUS_OK) {
                         RefreshColorPanes(*state);
-                        state->color_chart_names.back() = pasted_name.empty()
+                        state->panes.color_chart_names.back() = pasted_name.empty()
                             ? L"Pasted"
                             : pasted_name;
-                        state->color_chart_page = static_cast<std::uint32_t>(
-                            (state->palette_colors.size() - 1U) / 20U);
+                        state->panes.color_chart_page = static_cast<std::uint32_t>(
+                            (state->panes.palette_colors.size() - 1U) / 20U);
                         RefreshColorPanes(*state);
                     }
                     return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -13700,21 +13556,21 @@ LRESULT CALLBACK MainWindowProcedure(
                     choose.lStructSize = sizeof(choose);
                     choose.hwndOwner = window;
                     choose.rgbResult = RGB(
-                        (state->color_rgba >> 24) & 0xffU,
-                        (state->color_rgba >> 16) & 0xffU,
-                        (state->color_rgba >> 8) & 0xffU);
+                        (state->tools.color_rgba >> 24) & 0xffU,
+                        (state->tools.color_rgba >> 16) & 0xffU,
+                        (state->tools.color_rgba >> 8) & 0xffU);
                     choose.lpCustColors = custom_colors.data();
                     choose.Flags = CC_FULLOPEN | CC_RGBINIT;
                     if (ChooseColorW(&choose) != FALSE) {
                         SetDrawingColor(
-                            *state,
+                            state->tools,
                             InkpodColorValue{
                                 sizeof(InkpodColorValue),
                                 INKPOD_COLOR_DEPTH_8,
                                 GetRValue(choose.rgbResult),
                                 GetGValue(choose.rgbResult),
                                 GetBValue(choose.rgbResult),
-                                static_cast<std::uint16_t>(state->color_rgba & 0xffU)});
+                                static_cast<std::uint16_t>(state->tools.color_rgba & 0xffU)});
                     }
                     return 0;
                 }
@@ -13737,7 +13593,7 @@ LRESULT CALLBACK MainWindowProcedure(
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"彩色チェック表示");
                     } else {
-                        state->color_check_mode = mode;
+                        state->view.color_check_mode = mode;
                     }
                     UpdateMenuState(*state);
                     return 0;
@@ -13759,9 +13615,9 @@ LRESULT CALLBACK MainWindowProcedure(
                 case IDM_SHORTCUT_EDIT: {
                     ShortcutDialogState dialog_state{};
                     if (ShowShortcutEditor(
-                            state->instance,
+                            state->lifetime.instance,
                             window,
-                            state->smoke_test,
+                            state->lifetime.smoke_test,
                             dialog_state) != IDOK) {
                         return 0;
                     }
@@ -13785,9 +13641,9 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
                 case IDM_HELP_ABOUT:
                     return ShowAboutDialog(
-                               state->instance,
+                               state->lifetime.instance,
                                window,
-                               state->smoke_test)
+                               state->lifetime.smoke_test)
                             == IDOK
                         ? 1
                         : 0;
@@ -13801,23 +13657,23 @@ LRESULT CALLBACK MainWindowProcedure(
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
             if (state != nullptr) {
-                if (state->floating_active && wparam == VK_RETURN) {
+                if (state->tools.floating_active && wparam == VK_RETURN) {
                     SendMessageW(window, WM_COMMAND, IDM_EDIT_FLOATING_COMMIT, 0);
                     return 0;
                 }
-                if (state->floating_active && wparam == VK_ESCAPE) {
+                if (state->tools.floating_active && wparam == VK_ESCAPE) {
                     SendMessageW(window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0);
                     return 0;
                 }
-                if (state->motion_active && wparam == VK_ESCAPE) {
+                if (state->animation.motion_active && wparam == VK_ESCAPE) {
                     SendMessageW(window, WM_COMMAND, IDM_MOTION_STOP, 0);
                     return 0;
                 }
-                if (state->motion_active && wparam == VK_SPACE) {
+                if (state->animation.motion_active && wparam == VK_SPACE) {
                     SendMessageW(window, WM_COMMAND, IDM_MOTION_PAUSE, 0);
                     return 0;
                 }
-                if (state->motion_active
+                if (state->animation.motion_active
                     && (wparam == VK_LEFT || wparam == VK_RIGHT
                         || wparam == VK_HOME || wparam == VK_END)) {
                     const UINT command = wparam == VK_LEFT
@@ -13856,10 +13712,10 @@ LRESULT CALLBACK MainWindowProcedure(
                     const std::size_t digit = wparam == '0'
                         ? 9U
                         : static_cast<std::size_t>(wparam - '1');
-                    const std::size_t index = state->palette_group * 10U + digit;
-                    if (index < state->palette_colors.size()) {
-                        SetDrawingColor(*state, state->palette_colors[index]);
-                        InvalidateRect(state->canvas, nullptr, FALSE);
+                    const std::size_t index = state->panes.palette_group * 10U + digit;
+                    if (index < state->panes.palette_colors.size()) {
+                        SetDrawingColor(state->tools, state->panes.palette_colors[index]);
+                        InvalidateRect(state->windows.canvas, nullptr, FALSE);
                     }
                     return 0;
                 }
@@ -13902,18 +13758,18 @@ LRESULT CALLBACK MainWindowProcedure(
                     || (input->sample_count != 0U && input->samples == nullptr)) {
                     return 0;
                 }
-                if (state->guide_drag_active) {
+                if (state->view.guide_drag_active) {
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        state->guide_drag_active = false;
-                        state->guide_drag_axis = 0U;
-                        state->guide_drag_id = 0U;
+                        state->view.guide_drag_active = false;
+                        state->view.guide_drag_axis = 0U;
+                        state->view.guide_drag_id = 0U;
                     } else if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End
                         && input->sample_count != 0U) {
                         const InkpodStatus status = FinishGuideDrag(
                             *state,
                             input->samples[static_cast<std::size_t>(
                                 input->sample_count - 1U)]);
-                        if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                        if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"ガイド移動");
                         }
                         UpdateMenuState(*state);
@@ -13925,189 +13781,189 @@ LRESULT CALLBACK MainWindowProcedure(
                     && BeginGuideDrag(*state, input->samples[0])) {
                     return 1;
                 }
-                if (state->tool == kInteractionGuideMove) {
+                if (state->tools.active_tool == kInteractionGuideMove) {
                     return 1;
                 }
-                if (state->tool == kInteractionBoxZoom) {
+                if (state->tools.active_tool == kInteractionBoxZoom) {
                     try {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-                            state->view_gesture_samples.clear();
+                            state->view.gesture_samples.clear();
                         }
                         if (input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
                             && input->sample_count != 0U) {
-                            state->view_gesture_samples.insert(
-                                state->view_gesture_samples.end(),
+                            state->view.gesture_samples.insert(
+                                state->view.gesture_samples.end(),
                                 input->samples,
                                 input->samples
                                     + static_cast<std::size_t>(input->sample_count));
                         }
                     } catch (const std::bad_alloc&) {
-                        state->view_gesture_samples.clear();
+                        state->view.gesture_samples.clear();
                         return 0;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        state->view_gesture_samples.clear();
+                        state->view.gesture_samples.clear();
                         return 1;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
-                        const InkpodStatus status = state->view_gesture_samples.size() < 2U
+                        const InkpodStatus status = state->view.gesture_samples.size() < 2U
                             ? INKPOD_STATUS_INVALID_ARGUMENT
                             : ApplyBoxZoomGesture(
                                   *state,
-                                  state->view_gesture_samples.front(),
-                                  state->view_gesture_samples.back());
-                        state->view_gesture_samples.clear();
-                        if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                                  state->view.gesture_samples.front(),
+                                  state->view.gesture_samples.back());
+                        state->view.gesture_samples.clear();
+                        if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"範囲拡大");
                         }
                         UpdateMenuState(*state);
                     }
                     return 1;
                 }
-                if (state->tool == kInteractionEyedropper
+                if (state->tools.active_tool == kInteractionEyedropper
                     && input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin
                     && input->sample_count != 0U) {
                     const InkpodStatus status = EyedropAtDevicePoint(
                         *state, input->samples[0].x, input->samples[0].y);
-                    if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                    if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                         ShowCoreError(*state, window, L"スポイト");
                     }
                     UpdateMenuState(*state);
                     return 1;
                 }
-                if (state->tool == kInteractionEyedropper) {
+                if (state->tools.active_tool == kInteractionEyedropper) {
                     return 1;
                 }
-                if (state->tool == kInteractionFloatingTransform) {
+                if (state->tools.active_tool == kInteractionFloatingTransform) {
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        if (!state->floating_gesture_samples.empty()) {
-                            SetFloatingTransform(*state, state->floating_drag_start);
+                        if (!state->tools.floating_gesture_samples.empty()) {
+                            SetFloatingTransform(*state, state->tools.floating_drag_start);
                         }
-                        state->floating_gesture_samples.clear();
-                        state->floating_drag_mode = 0U;
+                        state->tools.floating_gesture_samples.clear();
+                        state->tools.floating_drag_mode = 0U;
                         return 1;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-                        state->floating_gesture_samples.clear();
+                        state->tools.floating_gesture_samples.clear();
                     }
                     if (input->sample_count != 0U) {
                         try {
-                            state->floating_gesture_samples.push_back(
+                            state->tools.floating_gesture_samples.push_back(
                                 input->samples[static_cast<std::size_t>(input->sample_count - 1U)]);
                         } catch (const std::bad_alloc&) {
-                            state->floating_gesture_samples.clear();
+                            state->tools.floating_gesture_samples.clear();
                             return 0;
                         }
                     }
-                    if (!state->floating_gesture_samples.empty()) {
+                    if (!state->tools.floating_gesture_samples.empty()) {
                         const InkpodStatus status = UpdateFloatingHandleDrag(
                             *state,
-                            state->floating_gesture_samples.front(),
-                            state->floating_gesture_samples.back(),
+                            state->tools.floating_gesture_samples.front(),
+                            state->tools.floating_gesture_samples.back(),
                             input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin);
-                        if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                        if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"フローティングハンドル変形");
                         }
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
-                        state->floating_gesture_samples.clear();
-                        state->floating_drag_mode = 0U;
+                        state->tools.floating_gesture_samples.clear();
+                        state->tools.floating_drag_mode = 0U;
                     }
                     return 1;
                 }
-                if (state->tool == kInteractionLightTableMove) {
+                if (state->tools.active_tool == kInteractionLightTableMove) {
                     try {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-                            state->light_table_move_samples.clear();
+                            state->panes.light_table_move_samples.clear();
                         }
                         if (input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
                             && input->sample_count != 0U) {
-                            state->light_table_move_samples.push_back(
+                            state->panes.light_table_move_samples.push_back(
                                 input->samples[static_cast<std::size_t>(input->sample_count - 1U)]);
                         }
                     } catch (const std::bad_alloc&) {
-                        state->light_table_move_samples.clear();
+                        state->panes.light_table_move_samples.clear();
                         return 0;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        state->light_table_move_samples.clear();
+                        state->panes.light_table_move_samples.clear();
                         return 1;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
                         const InkpodStatus status = MoveLightTableFromCanvas(*state);
-                        state->light_table_move_samples.clear();
-                        if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                        state->panes.light_table_move_samples.clear();
+                        if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"ライトテーブル移動");
                         }
                         RefreshLightTablePane(*state);
                     }
                     return 1;
                 }
-                if (IsVectorCanvasTool(state->tool)) {
+                if (IsVectorCanvasTool(state->tools.active_tool)) {
                     try {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-                            ClearVectorGeometryPreview(*state);
+                            ClearVectorGeometryPreview(state->tools, state->windows.canvas);
                         }
                         if (input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
                             && input->sample_count != 0U) {
-                            if (state->vector_gesture_samples.size()
+                            if (state->tools.vector_gesture_samples.size()
                                 > UINT64_C(1048576) - input->sample_count) {
-                                ClearVectorGeometryPreview(*state);
+                                ClearVectorGeometryPreview(state->tools, state->windows.canvas);
                                 return 0;
                             }
-                            state->vector_gesture_samples.insert(
-                                state->vector_gesture_samples.end(),
+                            state->tools.vector_gesture_samples.insert(
+                                state->tools.vector_gesture_samples.end(),
                                 input->samples,
                                 input->samples
                                     + static_cast<std::size_t>(input->sample_count));
                         }
                     } catch (const std::bad_alloc&) {
-                        ClearVectorGeometryPreview(*state);
+                        ClearVectorGeometryPreview(state->tools, state->windows.canvas);
                         return 0;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        ClearVectorGeometryPreview(*state);
+                        ClearVectorGeometryPreview(state->tools, state->windows.canvas);
                         return 1;
                     }
-                    if (state->tool != kInteractionVectorEraser) {
+                    if (state->tools.active_tool != kInteractionVectorEraser) {
                         UpdateVectorGeometryPreview(*state);
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
                         const InkpodStatus status = FinishVectorCanvasGesture(*state);
-                        if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                        if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"ベクターCanvas操作");
                         }
                         UpdateMenuState(*state);
                     }
                     return 1;
                 }
-                if (state->tool == kInteractionSelection) {
+                if (state->tools.active_tool == kInteractionSelection) {
                     try {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-                            state->selection_gesture_samples.clear();
+                            state->tools.selection_gesture_samples.clear();
                         }
                         if (input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
                             && input->sample_count != 0U) {
-                            state->selection_gesture_samples.insert(
-                                state->selection_gesture_samples.end(),
+                            state->tools.selection_gesture_samples.insert(
+                                state->tools.selection_gesture_samples.end(),
                                 input->samples,
                                 input->samples
                                     + static_cast<std::size_t>(input->sample_count));
                         }
                     } catch (const std::bad_alloc&) {
-                        state->selection_gesture_samples.clear();
+                        state->tools.selection_gesture_samples.clear();
                         return 0;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        state->selection_gesture_samples.clear();
+                        state->tools.selection_gesture_samples.clear();
                         return 1;
                     }
-                    if (state->selection_shape == INKPOD_SELECTION_WAND) {
+                    if (state->tools.selection_shape == INKPOD_SELECTION_WAND) {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
                             const InkpodStatus status = ApplySelectionGesture(
-                                *state, state->selection_gesture_samples);
-                            state->selection_gesture_samples.clear();
-                            if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                                *state, state->tools.selection_gesture_samples);
+                            state->tools.selection_gesture_samples.clear();
+                            if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                                 ShowCoreError(*state, window, L"色の杖");
                             }
                             UpdateMenuState(*state);
@@ -14116,24 +13972,24 @@ LRESULT CALLBACK MainWindowProcedure(
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
                         const InkpodStatus status = ApplySelectionGesture(
-                            *state, state->selection_gesture_samples);
-                        state->selection_gesture_samples.clear();
-                        if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                            *state, state->tools.selection_gesture_samples);
+                        state->tools.selection_gesture_samples.clear();
+                        if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"選択範囲");
                         }
                         UpdateMenuState(*state);
                     }
                     return 1;
                 }
-                if (state->tool == kInteractionFill) {
-                    if (state->fill_options.operation == INKPOD_FILL_SEED) {
+                if (state->tools.active_tool == kInteractionFill) {
+                    if (state->tools.fill_options.operation == INKPOD_FILL_SEED) {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin
                             && input->sample_count != 0U) {
                             const InkpodStatus status = ApplyFillAtDevicePoint(
                                 *state, input->samples[0].x, input->samples[0].y);
                             if (status != INKPOD_STATUS_OK
                                 && status != INKPOD_STATUS_FILL_OVERFLOW
-                                && !state->smoke_test) {
+                                && !state->lifetime.smoke_test) {
                                 ShowCoreError(*state, window, L"フィル");
                             }
                             UpdateMenuState(*state);
@@ -14142,90 +13998,90 @@ LRESULT CALLBACK MainWindowProcedure(
                     }
                     try {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-                            state->fill_gesture_samples.clear();
+                            state->tools.fill_gesture_samples.clear();
                         }
                         if (input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
                             && input->sample_count != 0U) {
-                            state->fill_gesture_samples.insert(
-                                state->fill_gesture_samples.end(),
+                            state->tools.fill_gesture_samples.insert(
+                                state->tools.fill_gesture_samples.end(),
                                 input->samples,
                                 input->samples
                                     + static_cast<std::size_t>(input->sample_count));
                         }
                     } catch (const std::bad_alloc&) {
-                        state->fill_gesture_samples.clear();
+                        state->tools.fill_gesture_samples.clear();
                         return 0;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        state->fill_gesture_samples.clear();
+                        state->tools.fill_gesture_samples.clear();
                         return 1;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
-                        const InkpodStatus status = state->fill_gesture_samples.size() < 2U
+                        const InkpodStatus status = state->tools.fill_gesture_samples.size() < 2U
                             ? INKPOD_STATUS_INVALID_ARGUMENT
                             : ApplyFillAtDeviceRange(
                                   *state,
-                                  state->fill_gesture_samples.front().x,
-                                  state->fill_gesture_samples.front().y,
-                                  state->fill_gesture_samples.back().x,
-                                  state->fill_gesture_samples.back().y,
+                                  state->tools.fill_gesture_samples.front().x,
+                                  state->tools.fill_gesture_samples.front().y,
+                                  state->tools.fill_gesture_samples.back().x,
+                                  state->tools.fill_gesture_samples.back().y,
                                   true);
-                        state->fill_gesture_samples.clear();
+                        state->tools.fill_gesture_samples.clear();
                         if (status != INKPOD_STATUS_OK
                             && status != INKPOD_STATUS_FILL_OVERFLOW
-                            && !state->smoke_test) {
+                            && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"範囲フィル");
                         }
                         UpdateMenuState(*state);
                     }
                     return 1;
                 }
-                const bool m6_interaction = state->tool >= kInteractionM6Gradient
-                    && state->tool <= kInteractionM6AlphaGradient;
+                const bool m6_interaction = state->tools.active_tool >= kInteractionM6Gradient
+                    && state->tools.active_tool <= kInteractionM6AlphaGradient;
                 if (m6_interaction) {
-                    if (state->tool == kInteractionM6Stamp
+                    if (state->tools.active_tool == kInteractionM6Stamp
                         && input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin
                         && input->sample_count != 0U
                         && (GetKeyState(VK_MENU) & 0x8000) != 0) {
-                        state->stamp_source = input->samples[0];
-                        state->stamp_source_valid = true;
-                        state->m6_samples.clear();
+                        state->effects.stamp_source = input->samples[0];
+                        state->effects.stamp_source_valid = true;
+                        state->effects.samples.clear();
                         return 1;
                     }
-                    if (state->m6_task != nullptr) {
+                    if (state->effects.task != nullptr) {
                         return 1;
                     }
                     try {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-                            state->m6_samples.clear();
+                            state->effects.samples.clear();
                         }
                         if (input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
                             && input->sample_count != 0U) {
-                            if (state->m6_samples.size()
+                            if (state->effects.samples.size()
                                 > UINT64_C(1048576) - input->sample_count) {
-                                state->m6_samples.clear();
-                                state->m6_airbrush_active = false;
+                                state->effects.samples.clear();
+                                state->effects.airbrush_active = false;
                                 KillTimer(window, kM6ContinuousSprayTimer);
                                 return 0;
                             }
-                            state->m6_samples.insert(
-                                state->m6_samples.end(),
+                            state->effects.samples.insert(
+                                state->effects.samples.end(),
                                 input->samples,
                                 input->samples + static_cast<std::size_t>(input->sample_count));
                         }
                     } catch (const std::bad_alloc&) {
-                        state->m6_samples.clear();
-                        state->m6_airbrush_active = false;
+                        state->effects.samples.clear();
+                        state->effects.airbrush_active = false;
                         KillTimer(window, kM6ContinuousSprayTimer);
                         return 0;
                     }
-                    if (state->tool == kInteractionM6Airbrush
+                    if (state->tools.active_tool == kInteractionM6Airbrush
                         && input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
                         && input->sample_count != 0U) {
-                        state->m6_airbrush_last =
+                        state->effects.airbrush_last =
                             input->samples[static_cast<std::size_t>(input->sample_count - 1U)];
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-                            state->m6_airbrush_active = true;
+                            state->effects.airbrush_active = true;
                             SetTimer(
                                 window,
                                 kM6ContinuousSprayTimer,
@@ -14234,16 +14090,16 @@ LRESULT CALLBACK MainWindowProcedure(
                         }
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        state->m6_samples.clear();
-                        state->m6_airbrush_active = false;
+                        state->effects.samples.clear();
+                        state->effects.airbrush_active = false;
                         KillTimer(window, kM6ContinuousSprayTimer);
                         return 1;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
-                        state->m6_airbrush_active = false;
+                        state->effects.airbrush_active = false;
                         KillTimer(window, kM6ContinuousSprayTimer);
                         const InkpodStatus status = FinishM6CanvasGesture(*state);
-                        if (status != INKPOD_STATUS_OK && !state->smoke_test) {
+                        if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"M6 Canvas効果");
                         }
                         UpdateMenuState(*state);
@@ -14266,13 +14122,13 @@ LRESULT CALLBACK MainWindowProcedure(
                         break;
                 }
                 event.style = inkpod::app::StrokeStyle{
-                    static_cast<InkpodPaintTool>(state->tool),
-                    state->plane,
+                    static_cast<InkpodPaintTool>(state->tools.active_tool),
+                    state->tools.active_plane,
                     INKPOD_COORDINATE_SPACE_DEVICE,
-                    state->tool == INKPOD_TOOL_PENCIL ? INKPOD_STROKE_FLAG_AUTO_ERASE
+                    state->tools.active_tool == INKPOD_TOOL_PENCIL ? INKPOD_STROKE_FLAG_AUTO_ERASE
                                                       : INKPOD_STROKE_FLAG_PRESSURE_SIZE,
-                    state->color_rgba,
-                    state->tool == INKPOD_TOOL_PENCIL ? 1.0F : state->diameter};
+                    state->tools.color_rgba,
+                    state->tools.active_tool == INKPOD_TOOL_PENCIL ? 1.0F : state->tools.diameter};
                 try {
                     if (input->sample_count != 0U) {
                         event.samples.assign(
@@ -14321,13 +14177,13 @@ LRESULT CALLBACK MainWindowProcedure(
         case kM6TaskCompleted:
             if (state != nullptr) {
                 const InkpodStatus status = static_cast<InkpodStatus>(wparam);
-                const bool prompt = state->m6_preview_prompt;
-                state->m6_preview_prompt = false;
-                if (state->m6_progress != nullptr) {
-                    DestroyWindow(state->m6_progress);
-                    state->m6_progress = nullptr;
+                const bool prompt = state->effects.preview_prompt;
+                state->effects.preview_prompt = false;
+                if (state->effects.progress != nullptr) {
+                    DestroyWindow(state->effects.progress);
+                    state->effects.progress = nullptr;
                 }
-                inkpod_task_release(&state->m6_task);
+                inkpod_task_release(&state->effects.task);
                 if (status == INKPOD_STATUS_OK && prompt && state->engine != nullptr) {
                     const int choice = MessageBoxW(
                         window,
@@ -14357,84 +14213,84 @@ LRESULT CALLBACK MainWindowProcedure(
         case kBatchTaskCompleted:
             if (state != nullptr) {
                 const InkpodStatus status = static_cast<InkpodStatus>(wparam);
-                if (state->batch_progress != nullptr) {
-                    DestroyWindow(state->batch_progress);
-                    state->batch_progress = nullptr;
+                if (state->batch.progress != nullptr) {
+                    DestroyWindow(state->batch.progress);
+                    state->batch.progress = nullptr;
                 }
-                if (state->batch_report != nullptr) {
+                if (state->batch.report != nullptr) {
                     try {
-                        state->batch.last_result = BatchReportSummary(state->batch_report);
+                        state->batch.last_result = BatchReportSummary(state->batch.report);
                     } catch (const std::bad_alloc&) {
                         state->batch.last_result = L"レポート表示用メモリが不足しました";
                     }
                 }
-                inkpod_batch_task_release(&state->batch_task);
-                RefreshBatchPalette(*state);
+                inkpod_batch_task_release(&state->batch.task);
+                RefreshBatchPalette(state->batch);
                 UpdateMenuState(*state);
                 if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED
-                    && !state->smoke_test) {
+                    && !state->lifetime.smoke_test) {
                     ShowCoreError(*state, window, L"バッチ実行");
                 }
             }
             return 0;
         case inkpod::app::kCoreAsyncFailed:
-            if (state != nullptr && !state->smoke_test) {
+            if (state != nullptr && !state->lifetime.smoke_test) {
                 ShowCoreError(*state, window, L"非同期処理");
             }
             return 0;
         case WM_TIMER:
             if (state != nullptr && wparam == kM6ContinuousSprayTimer) {
-                if (state->m6_airbrush_active && state->tool == kInteractionM6Airbrush
-                    && state->m6_task == nullptr) {
+                if (state->effects.airbrush_active && state->tools.active_tool == kInteractionM6Airbrush
+                    && state->effects.task == nullptr) {
                     try {
-                        if (state->m6_samples.size() < UINT64_C(1048576)) {
-                            state->m6_samples.push_back(state->m6_airbrush_last);
+                        if (state->effects.samples.size() < UINT64_C(1048576)) {
+                            state->effects.samples.push_back(state->effects.airbrush_last);
                         } else {
-                            state->m6_airbrush_active = false;
+                            state->effects.airbrush_active = false;
                             KillTimer(window, kM6ContinuousSprayTimer);
                         }
                     } catch (const std::bad_alloc&) {
-                        state->m6_airbrush_active = false;
+                        state->effects.airbrush_active = false;
                         KillTimer(window, kM6ContinuousSprayTimer);
                     }
                 }
                 return 0;
             }
-            if (state != nullptr && wparam == kAutosaveTimer && !state->recovery_path.empty()) {
+            if (state != nullptr && wparam == kAutosaveTimer && !state->document.recovery_path.empty()) {
                 InkpodDocumentInfo info{};
                 if (QueryDocument(*state, info)
                     && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
-                    QueueAutosave(*state, state->recovery_path);
+                    QueueAutosave(*state, state->document.recovery_path);
                 }
                 return 0;
             }
             break;
         case WM_CLOSE:
-            if (state != nullptr && !state->smoke_test && !ConfirmDiscard(*state)) {
+            if (state != nullptr && !state->lifetime.smoke_test && !ConfirmDiscard(*state)) {
                 return 0;
             }
-            if (state != nullptr && state->m6_task != nullptr) {
-                inkpod_task_cancel(state->m6_task);
+            if (state != nullptr && state->effects.task != nullptr) {
+                inkpod_task_cancel(state->effects.task);
             }
-            if (state != nullptr && state->batch_task != nullptr) {
-                inkpod_batch_task_cancel(state->batch_task);
+            if (state != nullptr && state->batch.task != nullptr) {
+                inkpod_batch_task_cancel(state->batch.task);
             }
             if (state != nullptr) {
-                state->m6_airbrush_active = false;
+                state->effects.airbrush_active = false;
                 KillTimer(window, kM6ContinuousSprayTimer);
             }
             ShowWindow(window, SW_HIDE);
             PostQuitMessage(0);
             return 0;
         case inkpod::renderer::kCanvasRenderFailed:
-            if (state == nullptr || !state->smoke_test) {
+            if (state == nullptr || !state->lifetime.smoke_test) {
                 MessageBoxW(
                     window,
                     L"Canvas renderer の描画に失敗しました。",
                     L"inkpod",
                     MB_OK | MB_ICONERROR);
             }
-            if (state == nullptr || !state->smoke_test) {
+            if (state == nullptr || !state->lifetime.smoke_test) {
                 SendMessageW(window, WM_CLOSE, 0, 0);
             }
             return 0;
@@ -14529,9 +14385,9 @@ int APIENTRY wWinMain(
         return 13;
     }
 
-    AppState state{};
-    state.instance = instance;
-    state.smoke_test = command_line != nullptr
+    AppContext state{};
+    state.lifetime.instance = instance;
+    state.lifetime.smoke_test = command_line != nullptr
         && std::wcsstr(command_line, L"--smoke-test") != nullptr;
     HWND window = CreateWindowExW(
         0,
@@ -14552,7 +14408,7 @@ int APIENTRY wWinMain(
 
     InkpodStatus core_status = InitializeCore(state);
     if (core_status != INKPOD_STATUS_OK) {
-        if (!state.smoke_test) {
+        if (!state.lifetime.smoke_test) {
             ShowCoreError(state, window, L"Rust Core の初期化");
         }
         ShutdownCore(state);
@@ -14561,7 +14417,7 @@ int APIENTRY wWinMain(
     }
 
     bool document_initialized{};
-    if (!state.smoke_test) {
+    if (!state.lifetime.smoke_test) {
         std::wstring recovery;
         if (NewestPrivateRecovery(recovery)) {
             const int choice = MessageBoxW(
@@ -14594,7 +14450,7 @@ int APIENTRY wWinMain(
         document_initialized = core_status == INKPOD_STATUS_OK;
     }
     if (core_status != INKPOD_STATUS_OK || !document_initialized) {
-        if (!state.smoke_test) {
+        if (!state.lifetime.smoke_test) {
             ShowCoreError(state, window, L"セルまたはRecoveryの初期化");
         }
         ShutdownCore(state);
@@ -14604,7 +14460,7 @@ int APIENTRY wWinMain(
     UpdateMenuState(state);
 
     int exit_code = 0;
-    if (state.smoke_test) {
+    if (state.lifetime.smoke_test) {
         exit_code = RunM1Smoke(state);
         if (exit_code == 0) {
             exit_code = RunM2Smoke(state);

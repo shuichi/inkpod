@@ -109,6 +109,7 @@ endif()
 
 if(WIN32)
     add_executable(inkpod WIN32
+        apps/windows/app/app_context.h
         apps/windows/app/com_runtime.cpp
         apps/windows/app/main.cpp
         apps/windows/app/core_engine.cpp

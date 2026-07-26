@@ -33,7 +33,7 @@
   Windows application tests remain necessary for algorithmic edge cases and
   failure localization; FFI coverage does not replace them.
 
-## Windows frontend refactoring R0-R1
+## Windows frontend refactoring R0-R2
 
 - R0 is complete. The baseline records 274 defined `IDM_*` values, 273
   production resource commands, and exact ownership of all 273 in the main
@@ -55,6 +55,23 @@
   are unchanged. R1 is `Complete`; the elevated installed-MSIX ABI smoke was
   cancelled at UAC after all non-elevated checks passed, and the user accepted
   that exact recorded external blocker for R1 completion.
+- R2.1-R2.4 are complete. The former flat `AppState` is now the private
+  `AppContext` composition root with lifetime, main-window handles,
+  document-shell, tool, view, pane, animation, effects, and Batch owners plus
+  `CoreEngine`. Initial values and the existing Core metadata cache remain
+  unchanged; no C++ document model was introduced.
+- Document replacement now calls explicit owner reset functions rather than one
+  feature-named reset body silently clearing unrelated state. Effects and Batch
+  progress callbacks receive only their owner state, and drawing color,
+  motion-label, vector-preview, adjustment lookup, Batch palette refresh, and
+  Batch derived-handle helpers use narrow state arguments.
+- `main.cpp` is 14,501 lines and 642,344 bytes after R2, while the 235-line
+  private `app_context.h` contains the state topology. Debug and Release strict
+  builds and all four non-elevated CTest scenarios passed, including the real
+  application `--smoke-test`, `--abi-smoke-test`, and package payload check.
+  The explicitly optional elevated MSIX install/uninstall smoke was not run for
+  R2. Public ABI, file format, menus, GUI behavior, thread assignment, shutdown,
+  and snapshot ownership remain unchanged.
 
 ## User-requested Windows shell and package additions
 
@@ -538,6 +555,8 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R2 state-ownership refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
+| Visual Studio 2026 Developer PowerShell Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Private `AppContext` and all migrated call sites passed `/W4 /WX /permissive-`; final application/ABI/assets/package-payload tests passed 4/4 in Debug (15.21 s) and Release (4.21 s) | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | Shared-ICO About cleanup passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
 | Developer-shell Debug and Release configure/build; non-elevated CTest excluding install smoke | Windows 11 x64, MSVC 19.51 | WIC-free About resource/C++ link and both MSIX assemblies passed; assets, integrated ABI, target-DPI About/application, and package payload passed 4/4 in Debug (17.65 s) and Release (4.12 s) | 2026-07-26 |
 | Non-elevated `ctest --preset windows-x64-release -R m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64 | Stopped at the required administrator guard before certificate/package mutation; the earlier UAC cancellation was not re-prompted, so installed execution remains unverified | 2026-07-26 |

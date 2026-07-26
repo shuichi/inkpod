@@ -135,6 +135,32 @@ samples or stroke boundary/cancel events is not. If input cannot be queued, the
 Canvas cancels capture and enqueues cancellation so a partial stroke cannot
 commit.
 
+## Windows frontend state ownership
+
+The private `apps/windows/app/app_context.h` defines the frontend composition
+root. `AppContext` has no flat feature fields: it composes lifetime, main-window
+handles, document-shell, tool, view, pane, animation, effects, and Batch state,
+plus the owned `CoreEngine`. The header remains below `apps/windows`; none of
+these C++/Win32 types enter the public C API or Rust Core.
+
+`MainWindowHandles` contains only the main frame and child-control `HWND`s.
+`DocumentShellState` owns Windows path/clipboard adapter state and the small
+stable-ID cache used by existing UI and smoke adapters; it is not a second
+document model. Tool, view, pane, and animation members retain only transient UI
+choices and gestures. Effects owns its task/progress handles and adjustment UI
+records. Batch owns its graph/preview/report/task handles together with its
+palette and progress-dialog state, so derived Batch handles can be released
+without access to unrelated application state.
+
+Document replacement is coordinated by `ResetUiForDocumentReplacement`, which
+calls explicit owner resets for document-shell, panes, tools, view, animation,
+and effects before performing the existing tab, active-view, and timer work.
+Progress callbacks receive only `EffectsUiState` or `BatchUiState`; color,
+motion-label, vector-preview, adjustment lookup, Batch palette refresh, and
+Batch derived-handle helpers likewise accept their narrow owner state and any
+explicit window handle they need. Later controller extraction may narrow more
+callers, but it must not reintroduce a broadly shared feature state.
+
 ## Coordinate and DPI contract
 
 Canvas input and rendering use client device pixels:
