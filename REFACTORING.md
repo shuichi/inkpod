@@ -248,7 +248,7 @@ Allowed status values in this table are `Not started`, `In progress`, and
 | R1 | Complete | R0 | Self-contained dialogs and runtime helpers extracted |
 | R2 | Complete | R1 | Application state grouped with explicit ownership |
 | R3 | Complete | R2 | Feature controllers, shell adapters, and panes extracted |
-| R4 | Not started | R3 | Main window procedure reduced to message delegation |
+| R4 | Complete | R3 | Main window procedure reduced to message delegation |
 | R5 | Not started | R4 | Shared, side-effect-free command state implemented |
 | R6 | Not started | R5 | Bootstrap and smoke support separated; final boundaries verified |
 
@@ -541,6 +541,7 @@ Add newest entries first. Keep entries concise and evidence-based.
 
 | Date | Step | Result | Verification | Remaining |
 |---|---|---|---|---|
+| 2026-07-26 | R4 | Complete: standard main chrome creation/layout/class registration moved to a narrow `MainWindow` module; 273 production commands route through 11 feature owners, while lifecycle/notify, keyboard, Canvas, Core/task, and timer/close messages use five named handlers; the top-level procedure is 24 lines | `git diff --check`; command-route structural test 273/273 with no duplicate owners; Rust fmt/clippy/133 tests; strict Debug and Release builds; non-elevated CTest passed 5/5 in both presets, including application, ABI, route-ownership, and package-payload smoke | None for R4; MSIX install/uninstall smoke was omitted as explicitly permitted for this run |
 | 2026-07-26 | R3 | Complete: R3.1-R3.4 implemented; document/clipboard shell adapters, pane model adapters, focused view/fill/selection/vector/floating-paste controllers, and effects/Batch task and graph owners were extracted with explicit CMake sources | `git diff --check`; Rust fmt/clippy/133 tests; strict Debug and Release builds; non-elevated CTest passed 4/4 in both presets, including application, ABI, and package-payload smoke | None for R3; MSIX install/uninstall smoke was omitted as explicitly permitted for this run |
 | 2026-07-26 | R2 | Complete: R2.1-R2.4 implemented; the flat `AppState` became a private composed `AppContext`, document-replacement resets were split by state owner, and effects/Batch callbacks and derived-handle helpers now receive only their owned state | `git diff --check`; Rust fmt/clippy/133 tests; strict Debug and Release builds; non-elevated CTest passed 4/4 in both presets, including application and ABI smoke | None for R2; elevated MSIX install/uninstall smoke was omitted as explicitly permitted for this run |
 | 2026-07-26 | R1 follow-up | About reuses the embedded application ICO through `LoadIconWithScaleDown`; the WIC loader, duplicate Win32 PNG resources, and `windowscodecs` link were removed while Shell STA ownership remains | Rust fmt/clippy/133 tests passed; strict Debug and Release builds passed; non-elevated CTest passed 4/4 in both presets | None for R1; elevated MSIX install smoke still requires an administrator shell |

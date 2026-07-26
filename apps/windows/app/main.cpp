@@ -16,6 +16,7 @@
 #include <cwctype>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -41,6 +42,7 @@
 #include "ui/tools/vector_controller.h"
 #include "ui/effects_controller.h"
 #include "ui/batch_controller.h"
+#include "ui/main_window.h"
 
 int InkpodRunAbiSmoke();
 
@@ -8340,228 +8342,9 @@ LRESULT CALLBACK TreeListSubclassProcedure(
     return DefSubclassProc(window, message, wparam, lparam);
 }
 
-bool CreateMainChrome(AppContext& state) noexcept {
-    const DWORD visible = state.lifetime.smoke_test ? 0U : WS_VISIBLE;
-    state.windows.toolbar = CreateWindowExW(
-        0,
-        TOOLBARCLASSNAMEW,
-        nullptr,
-        WS_CHILD | visible | TBSTYLE_FLAT | TBSTYLE_TOOLTIPS | TBSTYLE_LIST
-            | CCS_NODIVIDER,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_TOOLBAR)),
-        state.lifetime.instance,
-        nullptr);
-    if (state.windows.toolbar == nullptr) {
-        return false;
-    }
-    SendMessageW(state.windows.toolbar, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
-    SendMessageW(state.windows.toolbar, TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_MIXEDBUTTONS);
-    constexpr wchar_t labels[] =
-        L"保存\0全体\0等倍\0範囲\0左右\0上下\0ルーラー\0ガイド\0グリッド\0透明\0";
-    const LRESULT first_string = SendMessageW(
-        state.windows.toolbar,
-        TB_ADDSTRINGW,
-        0,
-        reinterpret_cast<LPARAM>(labels));
-    if (first_string < 0) {
-        return false;
-    }
-    const std::array<UINT, 10U> commands{
-        IDM_FILE_SAVE,
-        IDM_VIEW_FIT,
-        IDM_VIEW_ONE_TO_ONE,
-        IDM_VIEW_BOX_ZOOM,
-        IDM_VIEW_FLIP_HORIZONTAL,
-        IDM_VIEW_FLIP_VERTICAL,
-        IDM_VIEW_RULER,
-        IDM_VIEW_GUIDES,
-        IDM_VIEW_GRID,
-        IDM_VIEW_TRANSPARENT};
-    std::array<TBBUTTON, commands.size()> buttons{};
-    for (std::size_t index = 0; index < buttons.size(); ++index) {
-        buttons[index].iBitmap = I_IMAGENONE;
-        buttons[index].idCommand = static_cast<int>(commands[index]);
-        buttons[index].fsState = TBSTATE_ENABLED;
-        buttons[index].fsStyle = static_cast<BYTE>(
-            BTNS_BUTTON | BTNS_AUTOSIZE | BTNS_SHOWTEXT
-            | (index >= 3U ? BTNS_CHECK : 0U));
-        buttons[index].iString = first_string + static_cast<LRESULT>(index);
-    }
-    if (SendMessageW(
-            state.windows.toolbar,
-            TB_ADDBUTTONS,
-            static_cast<WPARAM>(buttons.size()),
-            reinterpret_cast<LPARAM>(buttons.data())) == FALSE) {
-        return false;
-    }
-    state.windows.zoom_slider = CreateWindowExW(
-        0,
-        TRACKBAR_CLASSW,
-        nullptr,
-        WS_CHILD | visible | TBS_HORZ | TBS_AUTOTICKS | TBS_TOOLTIPS,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_ZOOM_SLIDER)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.status_bar = CreateWindowExW(
-        0,
-        STATUSCLASSNAMEW,
-        nullptr,
-        WS_CHILD | visible | SBARS_SIZEGRIP,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_STATUS)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.document_tabs = CreateWindowExW(
-        0,
-        WC_TABCONTROLW,
-        nullptr,
-        WS_CHILD | visible | WS_CLIPSIBLINGS | WS_TABSTOP,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_DOCUMENT_TABS)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.locator_label = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"STATIC",
-        L"カラーロケーター\r\nX: —  Y: —\r\nH: —  V: —  L: —\r\nRGBA: —",
-        WS_CHILD | visible | SS_LEFT,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LOCATOR)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.layer_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LAYER_LIST)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.plane_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_PLANE_LIST)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.light_table_set_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LT_SET_LIST)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.light_table_item_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LT_ITEM_LIST)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.sequence_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_SEQUENCE_LIST)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.motion_label = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"STATIC",
-        L"モーション停止",
-        WS_CHILD | visible | SS_LEFT,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_MOTION_LABEL)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.color_palette_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_COLOR_PALETTE)),
-        state.lifetime.instance,
-        nullptr);
-    state.windows.color_chart_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        state.windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_COLOR_CHART)),
-        state.lifetime.instance,
-        nullptr);
-    if (state.windows.zoom_slider == nullptr || state.windows.status_bar == nullptr
-        || state.windows.document_tabs == nullptr || state.windows.locator_label == nullptr
-        || state.windows.layer_list == nullptr || state.windows.plane_list == nullptr
-        || state.windows.light_table_set_list == nullptr
-        || state.windows.light_table_item_list == nullptr || state.windows.sequence_list == nullptr
-        || state.windows.motion_label == nullptr || state.windows.color_palette_list == nullptr
-        || state.windows.color_chart_list == nullptr) {
+bool InitializeMainChrome(AppContext& state) noexcept {
+    if (!inkpod::windows::ui::CreateMainChrome(
+            state.windows, state.lifetime.instance, state.lifetime.smoke_test)) {
         return false;
     }
     state.batch.palette_dialog = {
@@ -8588,176 +8371,3327 @@ bool CreateMainChrome(AppContext& state) noexcept {
                reinterpret_cast<DWORD_PTR>(&state)) == FALSE) {
         return false;
     }
-    TCITEMW primary{};
-    primary.mask = TCIF_TEXT | TCIF_PARAM;
-    primary.pszText = const_cast<wchar_t*>(L"セル");
-    primary.lParam = 0;
-    if (TabCtrl_InsertItem(state.windows.document_tabs, 0, &primary) < 0) {
-        return false;
-    }
-    SendMessageW(state.windows.zoom_slider, TBM_SETRANGE, TRUE, MAKELPARAM(1, 800));
-    SendMessageW(state.windows.zoom_slider, TBM_SETTICFREQ, 100, 0);
-    SendMessageW(state.windows.zoom_slider, TBM_SETPOS, TRUE, 100);
     return true;
 }
 
-void LayoutMainChrome(AppContext& state, int width, int height) noexcept {
-    int toolbar_height{};
-    int status_height{};
-    if (!state.lifetime.smoke_test && state.windows.toolbar != nullptr) {
-        SendMessageW(state.windows.toolbar, TB_AUTOSIZE, 0, 0);
-        RECT bounds{};
-        if (GetWindowRect(state.windows.toolbar, &bounds) != FALSE) {
-            toolbar_height = bounds.bottom - bounds.top;
-        }
-        MoveWindow(state.windows.zoom_slider, std::max(0, width - 178), 2, 170, 28, TRUE);
+std::optional<LRESULT> RoutePaneControlCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
     }
-    if (!state.lifetime.smoke_test && state.windows.status_bar != nullptr) {
-        SendMessageW(state.windows.status_bar, WM_SIZE, 0, 0);
-        RECT bounds{};
-        if (GetWindowRect(state.windows.status_bar, &bounds) != FALSE) {
-            status_height = bounds.bottom - bounds.top;
-        }
-        const std::array<int, 3U> parts{
-            std::max(160, width / 4),
-            std::max(320, width / 2),
-            -1};
-        SendMessageW(
-            state.windows.status_bar,
-            SB_SETPARTS,
-            static_cast<WPARAM>(parts.size()),
-            reinterpret_cast<LPARAM>(parts.data()));
+    switch (LOWORD(wparam)) {
+        case IDC_MAIN_LAYER_LIST:
+            if (HIWORD(wparam) == LBN_SELCHANGE && state->windows.layer_list != nullptr) {
+                const LRESULT selected = SendMessageW(
+                    state->windows.layer_list, LB_GETCURSEL, 0, 0);
+                if (selected != LB_ERR) {
+                    const LRESULT id = SendMessageW(
+                        state->windows.layer_list,
+                        LB_GETITEMDATA,
+                        static_cast<WPARAM>(selected),
+                        0);
+                    if (id != LB_ERR) {
+                        state->panes.active_tree_layer_id = static_cast<std::uint64_t>(id);
+                        state->panes.active_tree_layer_index = static_cast<std::uint32_t>(selected);
+                        state->panes.active_tree_plane_id = 0U;
+                        RefreshTreePane(*state);
+                        if (state->panes.active_tree_plane_id != 0U && state->engine != nullptr) {
+                            const std::uint64_t layer_id = state->panes.active_tree_layer_id;
+                            const std::uint64_t plane_id = state->panes.active_tree_plane_id;
+                            state->engine->Invoke(
+                                [layer_id, plane_id](InkpodCore* core) {
+                                    return inkpod_core_set_active_node(
+                                        core, layer_id, plane_id);
+                                },
+                                false,
+                                false);
+                        }
+                    }
+                }
+            }
+            UpdateMenuState(*state);
+            return 0;
+        case IDC_MAIN_PLANE_LIST:
+            if (HIWORD(wparam) == LBN_SELCHANGE && state->windows.plane_list != nullptr) {
+                const LRESULT selected = SendMessageW(
+                    state->windows.plane_list, LB_GETCURSEL, 0, 0);
+                if (selected != LB_ERR) {
+                    const LRESULT id = SendMessageW(
+                        state->windows.plane_list,
+                        LB_GETITEMDATA,
+                        static_cast<WPARAM>(selected),
+                        0);
+                    if (id != LB_ERR && state->engine != nullptr) {
+                        state->panes.active_tree_plane_id = static_cast<std::uint64_t>(id);
+                        state->panes.active_tree_plane_index =
+                            static_cast<std::uint32_t>(selected);
+                        const std::uint64_t layer_id = state->panes.active_tree_layer_id;
+                        const std::uint64_t plane_id = state->panes.active_tree_plane_id;
+                        const InkpodStatus status = state->engine->Invoke(
+                            [layer_id, plane_id](InkpodCore* core) {
+                                return inkpod_core_set_active_node(
+                                    core, layer_id, plane_id);
+                            },
+                            false,
+                            false);
+                        if (status != INKPOD_STATUS_OK) {
+                            ShowCoreError(*state, window, L"プレーン選択");
+                        }
+                    }
+                }
+            }
+            UpdateMenuState(*state);
+            return 0;
+        case IDC_MAIN_LT_SET_LIST:
+            if (HIWORD(wparam) == LBN_SELCHANGE
+                && state->windows.light_table_set_list != nullptr) {
+                const LRESULT selected = SendMessageW(
+                    state->windows.light_table_set_list, LB_GETCURSEL, 0, 0);
+                if (selected != LB_ERR) {
+                    const LRESULT id = SendMessageW(
+                        state->windows.light_table_set_list,
+                        LB_GETITEMDATA,
+                        static_cast<WPARAM>(selected),
+                        0);
+                    if (id != LB_ERR) {
+                        InkpodLightTableEdit edit{};
+                        edit.operation = INKPOD_LIGHT_TABLE_SET_ACTIVE_OPERATION;
+                        edit.object_id = static_cast<std::uint64_t>(id);
+                        std::uint64_t ignored{};
+                        if (ApplyLightTableEdit(*state, edit, {}, ignored)
+                            == INKPOD_STATUS_OK) {
+                            state->panes.active_light_table_set_id = edit.object_id;
+                            state->panes.active_light_table_set_index =
+                                static_cast<std::uint32_t>(selected);
+                            state->panes.active_light_table_item_id = 0U;
+                            RefreshLightTablePane(*state);
+                        }
+                    }
+                }
+            }
+            return 0;
+        case IDC_MAIN_LT_ITEM_LIST:
+            if (HIWORD(wparam) == LBN_SELCHANGE
+                && state->windows.light_table_item_list != nullptr) {
+                const LRESULT selected = SendMessageW(
+                    state->windows.light_table_item_list, LB_GETCURSEL, 0, 0);
+                if (selected != LB_ERR) {
+                    const LRESULT id = SendMessageW(
+                        state->windows.light_table_item_list,
+                        LB_GETITEMDATA,
+                        static_cast<WPARAM>(selected),
+                        0);
+                    if (id != LB_ERR) {
+                        state->panes.active_light_table_item_id =
+                            static_cast<std::uint64_t>(id);
+                        state->panes.active_light_table_item_index =
+                            static_cast<std::uint32_t>(selected);
+                    }
+                }
+            }
+            return 0;
+        case IDC_MAIN_SEQUENCE_LIST:
+            if ((HIWORD(wparam) == LBN_SELCHANGE || HIWORD(wparam) == LBN_DBLCLK)
+                && state->windows.sequence_list != nullptr) {
+                const LRESULT selected = SendMessageW(
+                    state->windows.sequence_list, LB_GETCURSEL, 0, 0);
+                if (selected != LB_ERR) {
+                    state->animation.active_sequence_index =
+                        static_cast<std::uint32_t>(selected);
+                    if (HIWORD(wparam) == LBN_DBLCLK && state->engine != nullptr) {
+                        InkpodDocumentInfo info{};
+                        const std::uint32_t index = state->animation.active_sequence_index;
+                        const InkpodStatus status = state->engine->Invoke(
+                            [index, &info](InkpodCore* core) {
+                                info = EmptyDocumentInfo();
+                                return inkpod_core_sequence_activate(core, index, &info);
+                            },
+                            false,
+                            false);
+                        if (status == INKPOD_STATUS_OK) {
+                            ResetUiForDocumentReplacement(*state);
+                            state->animation.active_sequence_index = index;
+                            FitCanvas(*state, INKPOD_VIEW_FIT);
+                            RefreshSequencePane(*state);
+                        } else {
+                            ShowCoreError(*state, window, L"連番セル切替");
+                        }
+                    }
+                }
+            }
+            return 0;
+        case IDC_MAIN_COLOR_PALETTE:
+        case IDC_MAIN_COLOR_CHART:
+            if (HIWORD(wparam) == LBN_DBLCLK) {
+                const bool chart = LOWORD(wparam) == IDC_MAIN_COLOR_CHART;
+                if (chart && state->panes.color_chart_locked) {
+                    return 0;
+                }
+                HWND list = chart ? state->windows.color_chart_list : state->windows.color_palette_list;
+                const LRESULT selected = SendMessageW(list, LB_GETCURSEL, 0, 0);
+                if (selected != LB_ERR) {
+                    const std::size_t index = chart
+                        ? static_cast<std::size_t>(state->panes.color_chart_page) * 20U
+                            + static_cast<std::size_t>(selected)
+                        : static_cast<std::size_t>(state->panes.palette_group) * 10U
+                            + static_cast<std::size_t>(selected);
+                    if (index < state->panes.palette_colors.size()) {
+                        SetDrawingColor(state->tools, state->panes.palette_colors[index]);
+                    }
+                }
+            }
+            return 0;
+        default:
+            break;
     }
-    int content_left{};
-    int content_top = toolbar_height;
-    int content_width = width;
-    int content_height = std::max(0, height - toolbar_height - status_height);
-    if (!state.lifetime.smoke_test) {
-        constexpr int right_pane_width = 238;
-        constexpr int tabs_height = 28;
-        content_width = std::max(0, width - right_pane_width);
-        if (state.windows.document_tabs != nullptr) {
-            MoveWindow(
-                state.windows.document_tabs,
-                content_left,
-                content_top,
-                content_width,
-                tabs_height,
-                TRUE);
-        }
-        if (state.windows.locator_label != nullptr) {
-            MoveWindow(
-                state.windows.locator_label,
-                content_width + 6,
-                content_top + 6,
-                std::max(0, right_pane_width - 12),
-                70,
-                TRUE);
-        }
-        if (state.windows.motion_label != nullptr) {
-            MoveWindow(
-                state.windows.motion_label,
-                content_width + 6,
-                content_top + 78,
-                std::max(0, right_pane_width - 12),
-                28,
-                TRUE);
-        }
-        const int pane_x = content_width + 6;
-        const int pane_width = std::max(0, right_pane_width - 12);
-        const int lists_top = content_top + 110;
-        const int lists_height = std::max(0, content_height - 116);
-        const int section = std::max(0, (lists_height - 24) / 7);
-        if (state.windows.layer_list != nullptr) {
-            MoveWindow(
-                state.windows.layer_list,
-                pane_x,
-                lists_top,
-                pane_width,
-                section,
-                TRUE);
-        }
-        if (state.windows.plane_list != nullptr) {
-            MoveWindow(
-                state.windows.plane_list,
-                pane_x,
-                lists_top + section + 4,
-                pane_width,
-                section,
-                TRUE);
-        }
-        if (state.windows.light_table_set_list != nullptr) {
-            MoveWindow(
-                state.windows.light_table_set_list,
-                pane_x,
-                lists_top + (section + 4) * 2,
-                pane_width,
-                section,
-                TRUE);
-        }
-        if (state.windows.light_table_item_list != nullptr) {
-            MoveWindow(
-                state.windows.light_table_item_list,
-                pane_x,
-                lists_top + (section + 4) * 3,
-                pane_width,
-                section,
-                TRUE);
-        }
-        if (state.windows.sequence_list != nullptr) {
-            MoveWindow(
-                state.windows.sequence_list,
-                pane_x,
-                lists_top + (section + 4) * 4,
-                pane_width,
-                section,
-                TRUE);
-        }
-        if (state.windows.color_palette_list != nullptr) {
-            MoveWindow(
-                state.windows.color_palette_list,
-                pane_x,
-                lists_top + (section + 4) * 5,
-                pane_width,
-                section,
-                TRUE);
-        }
-        if (state.windows.color_chart_list != nullptr) {
-            MoveWindow(
-                state.windows.color_chart_list,
-                pane_x,
-                lists_top + (section + 4) * 6,
-                pane_width,
-                std::max(0, lists_height - (section + 4) * 6),
-                TRUE);
-        }
-        content_top += tabs_height;
-        content_height = std::max(0, content_height - tabs_height);
-    }
-    if (state.windows.canvas != nullptr) {
-        MoveWindow(
-            state.windows.canvas,
-            content_left,
-            content_top,
-            content_width,
-            content_height,
-            TRUE);
-    }
+    return std::nullopt;
 }
 
-LRESULT CALLBACK MainWindowProcedure(
-    HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<AppContext*>(
-        GetWindowLongPtrW(window, GWLP_USERDATA));
 
-    if (message == WM_NCCREATE) {
-        const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lparam);
-        state = static_cast<AppContext*>(create->lpCreateParams);
-        state->windows.window = window;
-        SetWindowLongPtrW(
-            window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+std::optional<LRESULT> RouteBatchCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
     }
+    switch (LOWORD(wparam)) {
+        case IDM_WINDOW_BATCH:
+            if (state->batch.palette != nullptr) {
+                const bool visible = IsWindowVisible(state->batch.palette) != FALSE;
+                ShowWindow(state->batch.palette, visible ? SW_HIDE : SW_SHOW);
+                if (!visible) {
+                    RefreshBatchPalette(state->batch);
+                    SetForegroundWindow(state->batch.palette);
+                }
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_BATCH_INPUT_FILE:
+        case IDM_BATCH_INPUT_FOLDER:
+        case IDM_BATCH_INPUT_CURRENT: {
+            if (state->batch.task != nullptr || state->batch.loaded_graph) {
+                return 0;
+            }
+            std::wstring path;
+            InkpodBatchInputKind kind = INKPOD_BATCH_INPUT_CURRENT_SEQUENCE;
+            bool accepted = true;
+            if (LOWORD(wparam) == IDM_BATCH_INPUT_FILE) {
+                kind = INKPOD_BATCH_INPUT_FILE;
+                accepted = ChooseInkpodPath(window, false, path);
+            } else if (LOWORD(wparam) == IDM_BATCH_INPUT_FOLDER) {
+                kind = INKPOD_BATCH_INPUT_FOLDER;
+                accepted = ChooseBatchFolder(window, path);
+            }
+            if (!accepted) {
+                return 0;
+            }
+            ResetBatchDerivedState(state->batch);
+            state->batch.input_kind = kind;
+            state->batch.input_path = std::move(path);
+            state->batch.first_cell = 0U;
+            state->batch.last_cell = 0U;
+            RefreshBatchPalette(state->batch);
+            UpdateMenuState(*state);
+            return 1;
+        }
+        case IDM_BATCH_INPUT_RANGE: {
+            if (state->batch.task != nullptr || state->batch.loaded_graph) {
+                return 0;
+            }
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"バッチ入力範囲";
+            dialog.labels = {
+                L"開始セル番号 (0=先頭)",
+                L"終了セル番号 (0=末尾)",
+                nullptr,
+                nullptr};
+            dialog.values = {
+                static_cast<std::int32_t>(state->batch.first_cell),
+                static_cast<std::int32_t>(state->batch.last_cell),
+                0,
+                0};
+            dialog.value_count = 2U;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[0] < 0 || dialog.values[1] < 0
+                || (dialog.values[0] != 0 && dialog.values[1] != 0
+                    && dialog.values[0] > dialog.values[1])) {
+                return 0;
+            }
+            ResetBatchDerivedState(state->batch);
+            state->batch.first_cell =
+                static_cast<std::uint32_t>(dialog.values[0]);
+            state->batch.last_cell =
+                static_cast<std::uint32_t>(dialog.values[1]);
+            RefreshBatchPalette(state->batch);
+            UpdateMenuState(*state);
+            return 1;
+        }
+        case IDM_BATCH_ADD_COLOR_REPLACE:
+        case IDM_BATCH_ADD_CONTINUOUS_FILL:
+        case IDM_BATCH_ADD_SEPARATION:
+        case IDM_BATCH_ADD_VISIBILITY:
+        case IDM_BATCH_ADD_LINE_WIDTH:
+        case IDM_BATCH_ADD_BOUNDARY_AIRBRUSH:
+        case IDM_BATCH_ADD_DUST:
+        case IDM_BATCH_ADD_MIRROR:
+        case IDM_BATCH_ADD_ROTATE:
+        case IDM_BATCH_ADD_RESIZE:
+        case IDM_BATCH_ADD_CONVERT:
+        case IDM_BATCH_ADD_FILTER_SHARPEN_WEAK:
+        case IDM_BATCH_ADD_FILTER_SHARPEN_STRONG:
+        case IDM_BATCH_ADD_FILTER_BLUR_WEAK:
+        case IDM_BATCH_ADD_FILTER_BLUR_STRONG:
+        case IDM_BATCH_ADD_FILTER_GAUSSIAN:
+        case IDM_BATCH_ADD_FILTER_INVERT:
+        case IDM_BATCH_ADD_FILTER_AUTO_CONTRAST:
+        case IDM_BATCH_ADD_FILTER_BRIGHTNESS:
+        case IDM_BATCH_ADD_FILTER_TONE_CURVE:
+        case IDM_BATCH_ADD_FILTER_LEVELS:
+        case IDM_BATCH_ADD_FILTER_HSV:
+        case IDM_BATCH_ADD_FILTER_COLOR_BALANCE:
+        case IDM_BATCH_ADD_FILTER_UNSHARP:
+            if (state->batch.task == nullptr
+                && AddBatchOperation(*state, LOWORD(wparam))) {
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_BATCH_OPERATION_EDIT:
+            if (state->batch.task == nullptr
+                && EditSelectedBatchOperation(*state)) {
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_BATCH_REPLACE_SWAP:
+            if (state->batch.task == nullptr && !state->batch.loaded_graph
+                && state->batch.selected_operation < state->batch.operations.size()) {
+                BatchOperationUi& operation =
+                    state->batch.operations[state->batch.selected_operation];
+                if (operation.kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE
+                    && !operation.color_pairs.empty()) {
+                    for (auto& pair : operation.color_pairs) {
+                        std::swap(pair.old_color, pair.new_color);
+                    }
+                    ResetBatchDerivedState(state->batch);
+                    RefreshBatchPalette(state->batch);
+                    UpdateMenuState(*state);
+                    return 1;
+                }
+            }
+            return 0;
+        case IDM_BATCH_OPERATION_REMOVE:
+            if (state->batch.task == nullptr && !state->batch.loaded_graph
+                && state->batch.selected_operation < state->batch.operations.size()) {
+                state->batch.operations.erase(
+                    state->batch.operations.begin()
+                    + state->batch.selected_operation);
+                if (!state->batch.operations.empty()) {
+                    state->batch.selected_operation = std::min<std::uint32_t>(
+                        state->batch.selected_operation,
+                        static_cast<std::uint32_t>(
+                            state->batch.operations.size() - 1U));
+                } else {
+                    state->batch.selected_operation = 0U;
+                }
+                ResetBatchDerivedState(state->batch);
+                RefreshBatchPalette(state->batch);
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_BATCH_OPERATION_UP:
+        case IDM_BATCH_OPERATION_DOWN:
+            if (state->batch.task == nullptr && !state->batch.loaded_graph
+                && state->batch.selected_operation < state->batch.operations.size()) {
+                const std::uint32_t current = state->batch.selected_operation;
+                const bool up = LOWORD(wparam) == IDM_BATCH_OPERATION_UP;
+                if ((up && current > 0U)
+                    || (!up && current + 1U < state->batch.operations.size())) {
+                    const std::uint32_t target = up ? current - 1U : current + 1U;
+                    std::swap(
+                        state->batch.operations[current],
+                        state->batch.operations[target]);
+                    state->batch.selected_operation = target;
+                    ResetBatchDerivedState(state->batch);
+                    RefreshBatchPalette(state->batch);
+                    UpdateMenuState(*state);
+                    return 1;
+                }
+            }
+            return 0;
+        case IDM_BATCH_OUTPUT_DUPLICATE:
+        case IDM_BATCH_OUTPUT_NEW:
+        case IDM_BATCH_OUTPUT_OVERWRITE:
+            if (state->batch.task == nullptr && !state->batch.loaded_graph) {
+                ResetBatchDerivedState(state->batch);
+                state->batch.output_policy = LOWORD(wparam) == IDM_BATCH_OUTPUT_NEW
+                    ? INKPOD_BATCH_OUTPUT_NEW_SAVE
+                    : (LOWORD(wparam) == IDM_BATCH_OUTPUT_OVERWRITE
+                              ? INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE
+                              : INKPOD_BATCH_OUTPUT_DUPLICATE);
+                RefreshBatchPalette(state->batch);
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_BATCH_OUTPUT_SETTINGS: {
+            if (state->batch.task != nullptr || state->batch.loaded_graph) {
+                return 0;
+            }
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"バッチ出力設定";
+            dialog.labels = {
+                L"cell folder (0/1)",
+                L"開始番号",
+                L"降順 (0/1)",
+                L"file間 wait (ms)"};
+            dialog.values = {
+                state->batch.cell_folder ? 1 : 0,
+                static_cast<std::int32_t>(state->batch.start_number),
+                state->batch.descending ? 1 : 0,
+                static_cast<std::int32_t>(state->batch.wait_milliseconds)};
+            dialog.value_count = 4U;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[0] < 0 || dialog.values[0] > 1
+                || dialog.values[1] < 0
+                || dialog.values[2] < 0 || dialog.values[2] > 1
+                || dialog.values[3] < 0 || dialog.values[3] > 3'600'000) {
+                return 0;
+            }
+            TextInputDialogState folder{};
+            folder.title = L"バッチ出力フォルダー";
+            folder.label = L"空欄は入力と同じ場所";
+            folder.value = state->batch.output_folder;
+            TextInputDialogState basename{};
+            basename.title = L"バッチ出力basename";
+            basename.label = L"空欄は入力名を使用";
+            basename.value = state->batch.basename;
+            if (ShowTextInput(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, folder) != IDOK
+                || ShowTextInput(
+                       state->lifetime.instance, window, state->lifetime.smoke_test, basename) != IDOK) {
+                return 0;
+            }
+            bool preview_before_save = state->batch.preview_before_save;
+            if (!state->lifetime.smoke_test) {
+                const int preview_choice = MessageBoxW(
+                    window,
+                    L"保存前に入力・出力と警告のプレビュー確認を必須にしますか？",
+                    L"バッチ出力設定",
+                    MB_YESNOCANCEL | MB_ICONQUESTION);
+                if (preview_choice == IDCANCEL) {
+                    return 0;
+                }
+                preview_before_save = preview_choice == IDYES;
+            }
+            ResetBatchDerivedState(state->batch);
+            state->batch.cell_folder = dialog.values[0] != 0;
+            state->batch.start_number =
+                static_cast<std::uint32_t>(dialog.values[1]);
+            state->batch.descending = dialog.values[2] != 0;
+            state->batch.wait_milliseconds =
+                static_cast<std::uint32_t>(dialog.values[3]);
+            state->batch.output_folder = std::move(folder.value);
+            state->batch.basename = std::move(basename.value);
+            state->batch.preview_before_save = preview_before_save;
+            RefreshBatchPalette(state->batch);
+            UpdateMenuState(*state);
+            return 1;
+        }
+        case IDM_BATCH_FAILURE_CONTINUE:
+        case IDM_BATCH_FAILURE_STOP:
+            if (state->batch.task == nullptr && !state->batch.loaded_graph) {
+                ResetBatchDerivedState(state->batch);
+                state->batch.failure_policy = LOWORD(wparam) == IDM_BATCH_FAILURE_STOP
+                    ? INKPOD_BATCH_FAILURE_STOP
+                    : INKPOD_BATCH_FAILURE_CONTINUE;
+                RefreshBatchPalette(state->batch);
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_BATCH_PREVIEW: {
+            const InkpodStatus status = PreviewBatch(*state, INKPOD_BATCH_SCOPE_ALL);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"バッチプレビュー");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_BATCH_DRY_RUN:
+        case IDM_BATCH_RUN_CURRENT:
+        case IDM_BATCH_RUN_ALL: {
+            const UINT command = LOWORD(wparam);
+            const InkpodStatus status = StartBatch(
+                *state,
+                command == IDM_BATCH_RUN_CURRENT
+                    ? INKPOD_BATCH_SCOPE_CURRENT
+                    : INKPOD_BATCH_SCOPE_ALL,
+                command == IDM_BATCH_DRY_RUN);
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"バッチ実行");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_BATCH_CANCEL:
+            if (state->batch.task != nullptr
+                && inkpod_batch_task_cancel(state->batch.task) == INKPOD_STATUS_OK) {
+                return 1;
+            }
+            return 0;
+        case IDM_BATCH_SAVE_SET:
+        case IDM_BATCH_LOAD_SET: {
+            const bool save = LOWORD(wparam) == IDM_BATCH_SAVE_SET;
+            std::wstring path = state->lifetime.smoke_test
+                ? L"inkpod-m7-ui-smoke.inkbatch"
+                : L"";
+            if (!state->lifetime.smoke_test
+                && !ChooseBatchSettingsPath(window, save, path)) {
+                return 0;
+            }
+            std::vector<std::uint8_t> utf8;
+            if (!WidePathToUtf8(path, utf8)) {
+                return 0;
+            }
+            InkpodStatus status = INKPOD_STATUS_OK;
+            BatchController controller(
+                state->lifetime,
+                state->windows,
+                state->batch,
+                *state->engine);
+            if (save) {
+                status = controller.SaveGraph(utf8.data(), utf8.size());
+            } else {
+                status = controller.LoadGraph(utf8.data(), utf8.size());
+            }
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, save ? L"バッチセット保存" : L"バッチセット読込");
+            }
+            RefreshBatchPalette(state->batch);
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        default:
+            break;
+    }
+    return std::nullopt;
+}
 
+
+std::optional<LRESULT> RouteDocumentCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
+    }
+    switch (LOWORD(wparam)) {
+        case IDM_FILE_NEW:
+            if (ConfirmDiscard(*state)) {
+                ViewOptionsDialogState dialog{};
+                dialog.title = L"新規セル";
+                dialog.labels = {L"幅 (px)", L"高さ (px)", L"DPI", L"レイヤー種別"};
+                dialog.values = {1920, 1080, 96, INKPOD_LAYER_BINARY_COLORING};
+                dialog.value_count = 4U;
+                if (ShowViewOptions(
+                        state->lifetime.instance,
+                        window,
+                        state->lifetime.smoke_test,
+                        dialog) != IDOK
+                    || dialog.values[0] <= 0 || dialog.values[1] <= 0
+                    || dialog.values[2] <= 0) {
+                    return 0;
+                }
+                InkpodStatus status = CreateCell(
+                    *state,
+                    static_cast<std::uint32_t>(dialog.values[0]),
+                    static_cast<std::uint32_t>(dialog.values[1]),
+                    static_cast<std::uint32_t>(dialog.values[2]) * 1000U);
+                if (status == INKPOD_STATUS_OK
+                    && dialog.values[3] != INKPOD_LAYER_BINARY_COLORING) {
+                    InkpodDocumentInfo info{};
+                    if (QueryDocument(*state, info)) {
+                        InkpodTreeEdit edit{};
+                        edit.struct_size = sizeof(edit);
+                        edit.operation = INKPOD_TREE_CONVERT_LAYER;
+                        edit.object_id = info.layer_id;
+                        edit.kind = static_cast<std::uint32_t>(dialog.values[3]);
+                        status = state->engine->Invoke(
+                            [edit](InkpodCore* core) {
+                                InkpodDispatchResult result{};
+                                result.struct_size = sizeof(result);
+                                std::uint64_t ignored{};
+                                return inkpod_core_tree_edit(
+                                    core, &edit, &result, &ignored);
+                            },
+                            true,
+                            true);
+                    }
+                }
+                if (status != INKPOD_STATUS_OK) {
+                    ShowCoreError(*state, window, L"新規セルの作成");
+                }
+                UpdateMenuState(*state);
+            }
+            return 0;
+        case IDM_CELL_PAPER_SETTINGS:
+        case IDM_CELL_IMAGE_SIZE:
+        case IDM_CELL_RESOLUTION: {
+            const UINT command = LOWORD(wparam);
+            const InkpodStatus status = ResizeDocumentFromDialog(
+                *state,
+                command == IDM_CELL_PAPER_SETTINGS
+                    ? L"用紙設定"
+                    : (command == IDM_CELL_IMAGE_SIZE ? L"画像サイズ" : L"画像解像度"),
+                command == IDM_CELL_RESOLUTION);
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"用紙・画像サイズ変更");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CELL_FIT_CAPTURE_FRAME: {
+            const InkpodStatus status = FitPaperToCaptureFrame(*state);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"撮影フレームに用紙を合わせる");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CELL_MIRROR_VERTICAL:
+        case IDM_CELL_ROTATE_LEFT:
+        case IDM_CELL_ROTATE_RIGHT: {
+            const UINT command = LOWORD(wparam);
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [command](InkpodCore* core) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          if (command == IDM_CELL_MIRROR_VERTICAL) {
+                              return inkpod_core_mirror_document(
+                                  core, INKPOD_MIRROR_VERTICAL, &result);
+                          }
+                          return inkpod_core_rotate_document(
+                              core,
+                              command == IDM_CELL_ROTATE_LEFT
+                                  ? INKPOD_ROTATE_LEFT_90
+                                  : INKPOD_ROTATE_RIGHT_90,
+                              &result);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"画像全体の変形");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CELL_FRAME_HUNDRED:
+        case IDM_CELL_FRAME_REFERENCE:
+        case IDM_CELL_FRAME_DRAWING:
+        case IDM_CELL_FRAME_SAFE:
+        case IDM_CELL_MARGINS: {
+            const InkpodStatus status = EditPaperFrames(*state, LOWORD(wparam));
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"フレーム設定");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_FILE_OPEN:
+            if (ConfirmDiscard(*state)) {
+                std::wstring path;
+                if (ChooseOpenDocumentPath(window, path)) {
+                    if (CommonRasterFormatFromPath(path) != 0U) {
+                        const InkpodStatus status = ImportCommonRasterFromPath(*state, path);
+                        if (status != INKPOD_STATUS_OK) {
+                            ShowCoreError(*state, window, L"一般画像を開く");
+                        }
+                        UpdateMenuState(*state);
+                        return 0;
+                    }
+                    std::wstring recovery;
+                    try {
+                        recovery = path + L".recovery.inkpod";
+                    } catch (const std::bad_alloc&) {
+                        ShowCoreError(*state, window, L"Recovery path の作成");
+                        return 0;
+                    }
+                    InkpodStatus status = INKPOD_STATUS_OK;
+                    if (RecoveryIsNewer(path, recovery)) {
+                        const int choice = MessageBoxW(
+                            window,
+                            L"通常保存より新しいRecoveryがあります。\n\n"
+                            L"はい: Recoveryを開く\nいいえ: Recoveryを破棄\n"
+                            L"キャンセル: 後で判断して通常保存を開く",
+                            L"inkpod Recovery",
+                            MB_YESNOCANCEL | MB_ICONQUESTION);
+                        if (choice == IDYES) {
+                            status = OpenRecoveryFromPath(*state, recovery);
+                        } else {
+                            if (choice == IDNO) {
+                                DeleteFileW(recovery.c_str());
+                            }
+                            status = OpenFromPath(*state, path);
+                        }
+                    } else {
+                        status = OpenFromPath(*state, path);
+                    }
+                    if (status != INKPOD_STATUS_OK) {
+                        ShowCoreError(*state, window, L"開く");
+                    }
+                }
+            }
+            return 0;
+        case IDM_FILE_IMPORT_RASTER: {
+            if (!ConfirmDiscard(*state)) {
+                return 0;
+            }
+            std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
+            if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, false, path)) {
+                return 0;
+            }
+            const InkpodStatus status = ImportCommonRasterFromPath(*state, path);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"一般画像の読み込み");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_FILE_EXPORT_RASTER: {
+            std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
+            if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, true, path)) {
+                return 0;
+            }
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"ラスター書き出し";
+            dialog.labels[0] = L"白背景を合成 (0/1)";
+            dialog.values[0] = state->lifetime.smoke_test ? 1 : 0;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
+                return 0;
+            }
+            const InkpodStatus status = ExportCommonRasterToPath(
+                *state, path, dialog.values[0] != 0);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"一般画像の書き出し");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_FILE_SAVE:
+        case IDM_FILE_SAVE_AS: {
+            const InkpodStatus status = SaveDocument(
+                *state, LOWORD(wparam) == IDM_FILE_SAVE_AS);
+            if (status != INKPOD_STATUS_OK
+                && status != INKPOD_STATUS_INVALID_STATE) {
+                ShowCoreError(*state, window, L"保存");
+            }
+            return 0;
+        }
+        case IDM_FILE_REVERT: {
+            const InkpodStatus revert_status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [](InkpodCore* core) {
+                          InkpodDocumentInfo info = EmptyDocumentInfo();
+                          return inkpod_core_revert(core, &info);
+                      },
+                      false,
+                      false);
+            if (revert_status != INKPOD_STATUS_OK
+                || FitCanvas(*state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"復帰");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_FILE_REVERT_PARTIAL: {
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [](InkpodCore* core) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          return inkpod_core_revert_active_selection(
+                              core, &result);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"レイヤーの部分復帰");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_FILE_AUTOSAVE_NOW: {
+            std::wstring path = state->document.recovery_path;
+            if (path.empty() && !ChooseInkpodPath(window, true, path)) {
+                return 0;
+            }
+            if (!QueueAutosave(*state, path)) {
+                ShowCoreError(*state, window, L"Recovery保存の予約");
+            } else {
+                try {
+                    state->document.recovery_path = path;
+                } catch (const std::bad_alloc&) {
+                    ShowCoreError(*state, window, L"Recovery path の保持");
+                }
+            }
+            return 0;
+        }
+        case IDM_FILE_OPEN_RECOVERY: {
+            if (ConfirmDiscard(*state)) {
+                std::wstring path = state->document.recovery_path;
+                if (ChooseInkpodPath(window, false, path)
+                    && OpenRecoveryFromPath(*state, path) != INKPOD_STATUS_OK) {
+                    ShowCoreError(*state, window, L"Recoveryを開く");
+                }
+            }
+            return 0;
+        }
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteEditCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
+    }
+    switch (LOWORD(wparam)) {
+        case IDM_EDIT_UNDO:
+        case IDM_EDIT_REDO: {
+            const bool redo = LOWORD(wparam) == IDM_EDIT_REDO;
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [redo](InkpodCore* core) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          return redo ? inkpod_core_redo(core, &result)
+                                      : inkpod_core_undo(core, &result);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"履歴操作");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_EDIT_HISTORY_BACK:
+        case IDM_EDIT_HISTORY_FORWARD: {
+            const bool forward = LOWORD(wparam) == IDM_EDIT_HISTORY_FORWARD;
+            HistoryDialogState dialog{};
+            if (!ConfigureHistoryDialog(*state, forward, dialog)
+                || ShowHistoryDialog(state->lifetime.instance, window, dialog) != IDOK) {
+                return 0;
+            }
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [target = dialog.selected_cursor](InkpodCore* core) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          return inkpod_core_history_jump(
+                              core, target, &result);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"複数段階の履歴移動");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_EDIT_COPY: {
+            InkpodClipboard* replacement{};
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [&replacement](InkpodCore* core) {
+                          return inkpod_core_clipboard_copy(
+                              core, &replacement);
+                      },
+                      false,
+                      false);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"コピー");
+            } else {
+                inkpod_clipboard_release(&state->document.clipboard);
+                state->document.clipboard = replacement;
+                if (!PublishStandardClipboard(window, state->document.clipboard)
+                    && !state->lifetime.smoke_test) {
+                    MessageBoxW(
+                        window,
+                        L"アプリ内コピーは完了しましたが、Windowsクリップボードへ公開できませんでした。",
+                        L"inkpod",
+                        MB_OK | MB_ICONWARNING);
+                }
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_EDIT_CUT: {
+            SendMessageW(window, WM_COMMAND, IDM_EDIT_COPY, 0);
+            const InkpodStatus status = state->document.clipboard == nullptr
+                || state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [](InkpodCore* core) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          return inkpod_core_clear_selected_content(core, &result);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"カット");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_EDIT_PASTE:
+        case IDM_EDIT_PASTE_SELECTED: {
+            const InkpodStatus status = BeginFloatingPaste(
+                *state,
+                LOWORD(wparam) == IDM_EDIT_PASTE
+                    ? INKPOD_PASTE_COMPATIBLE
+                    : INKPOD_PASTE_ACTIVE_CONVERTED);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"貼り付け開始");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_EDIT_PASTE_CONVERTED: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"変換してペースト";
+            dialog.labels = {L"プレーン種類 (1-7)", L"色深度/形式 (1-5)", L"不透明度 (%)", L"新規プレーン (1)"};
+            dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 1};
+            dialog.value_count = 4U;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
+                return 0;
+            }
+            TextInputDialogState name{};
+            name.title = L"変換先プレーン";
+            name.label = L"名前";
+            name.value = L"Pasted Plane";
+            if (ShowTextInput(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, name) != IDOK) {
+                return 0;
+            }
+            std::vector<std::uint8_t> utf8;
+            if (!WidePathToUtf8(name.value, utf8)) {
+                return 0;
+            }
+            InkpodTreeEdit edit{};
+            edit.struct_size = sizeof(edit);
+            edit.operation = INKPOD_TREE_CREATE_PLANE;
+            edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
+            edit.parent_id = state->panes.active_tree_layer_id;
+            edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
+            edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
+            edit.opacity_milli = static_cast<std::uint32_t>(
+                std::clamp(dialog.values[2], 0, 100)) * 10U;
+            std::uint64_t plane_id{};
+            InkpodStatus status = INKPOD_STATUS_INVALID_STATE;
+            try {
+                const std::string plane_name(
+                    reinterpret_cast<const char*>(utf8.data()), utf8.size());
+                status = ApplyTreeEditRecord(*state, edit, plane_name, plane_id);
+            } catch (const std::bad_alloc&) {
+                status = INKPOD_STATUS_INVALID_STATE;
+            }
+            if (status == INKPOD_STATUS_OK) {
+                state->panes.active_tree_plane_id = plane_id;
+                RefreshTreePane(*state);
+                status = BeginFloatingPaste(*state, INKPOD_PASTE_ACTIVE_CONVERTED);
+            }
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"変換してペースト");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_EDIT_FLOATING_TRANSFORM: {
+            const InkpodStatus status = ShowFloatingTransformDialog(*state);
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"フローティング変形");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_EDIT_FLOATING_COMMIT:
+        case IDM_EDIT_FLOATING_CANCEL: {
+            const bool commit = LOWORD(wparam) == IDM_EDIT_FLOATING_COMMIT;
+            const InkpodStatus status = EndFloatingPaste(*state, commit);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, commit ? L"貼り付け確定" : L"貼り付け取消");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_EDIT_MIRROR_HORIZONTAL: {
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [](InkpodCore* core) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          return inkpod_core_mirror_document(
+                              core,
+                              INKPOD_MIRROR_HORIZONTAL,
+                              &result);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"画像の左右反転");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteEffectsCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
+    }
+    switch (LOWORD(wparam)) {
+        case IDM_FILTER_LAST: {
+            InkpodDocumentInfo document{};
+            const InkpodStatus status = state->tools.active_plane != INKPOD_PLANE_COLOR
+                    || !QueryDocument(*state, document)
+                ? INKPOD_STATUS_INVALID_STATE
+                : StartM6Task(
+                      *state,
+                      false,
+                      [plane_id = document.color_plane_id](
+                          InkpodCore* core, InkpodTask* task) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          return inkpod_core_filter_apply_last_task(
+                              core, plane_id, task, &result);
+                      });
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"直前のフィルタ");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_FILTER_INVERT:
+        case IDM_FILTER_BLUR_WEAK:
+        case IDM_FILTER_SHARPEN_WEAK:
+        case IDM_FILTER_SHARPEN_STRONG:
+        case IDM_FILTER_BLUR_STRONG:
+        case IDM_FILTER_GAUSSIAN:
+        case IDM_FILTER_AUTO_CONTRAST:
+        case IDM_FILTER_BRIGHTNESS:
+        case IDM_FILTER_TONE_CURVE:
+        case IDM_FILTER_LEVELS:
+        case IDM_FILTER_HSV:
+        case IDM_FILTER_COLOR_BALANCE:
+        case IDM_FILTER_UNSHARP: {
+            const UINT command = LOWORD(wparam);
+            InkpodDocumentInfo document{};
+            M6FilterJob job{};
+            if (state->tools.active_plane != INKPOD_PLANE_COLOR
+                || !QueryDocument(*state, document)
+                || !ConfigureM6FilterEditor(*state, command, job)) {
+                return 0;
+            }
+            job.plane_id = document.color_plane_id;
+            const InkpodStatus status = QueueM6Filter(*state, std::move(job));
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"フィルタ");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_ADJUSTMENT_CREATE:
+        case IDM_ADJUSTMENT_EDIT: {
+            const bool update = LOWORD(wparam) == IDM_ADJUSTMENT_EDIT;
+            M6FilterJob job{};
+            if (!ConfigureM6AdjustmentEditor(*state, job, update)) {
+                return 0;
+            }
+            const InkpodStatus status = CreateOrUpdateM6Adjustment(
+                *state, std::move(job), update);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"調整レイヤー");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_ADJUSTMENT_PREVIOUS:
+        case IDM_ADJUSTMENT_NEXT:
+            SelectM6Adjustment(
+                *state, LOWORD(wparam) == IDM_ADJUSTMENT_NEXT);
+            UpdateMenuState(*state);
+            return 0;
+        case IDM_ADJUSTMENT_TOGGLE: {
+            const bool visible = !state->effects.adjustment_visible;
+            const InkpodStatus status = SetM6AdjustmentVisibility(*state, visible);
+            if (status == INKPOD_STATUS_OK) {
+                state->effects.adjustment_visible = visible;
+            } else {
+                ShowCoreError(*state, window, L"調整レイヤー表示");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_ADJUSTMENT_MOVE_TOP: {
+            std::uint64_t ignored{};
+            const InkpodStatus status = ApplyTreeEdit(
+                *state,
+                INKPOD_TREE_REORDER_LAYER,
+                state->effects.adjustment_id,
+                0U,
+                ignored);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"調整レイヤー移動");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteDocumentPaneCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
+    }
+    switch (LOWORD(wparam)) {
+        case IDM_LAYER_NEW: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"新規レイヤー";
+            dialog.labels = {L"種類 (1-10)", L"不透明度 (%)", nullptr, nullptr};
+            dialog.values = {INKPOD_LAYER_RASTER, 100, 0, 0};
+            dialog.value_count = 2U;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[0] < INKPOD_LAYER_BINARY_COLORING
+                || dialog.values[0] > INKPOD_LAYER_VECTOR_COLORING
+                || dialog.values[1] < 0 || dialog.values[1] > 100) {
+                return 0;
+            }
+            InkpodTreeEdit edit{};
+            edit.struct_size = sizeof(edit);
+            edit.operation = INKPOD_TREE_CREATE_LAYER;
+            edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
+            edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
+            edit.opacity_milli = static_cast<std::uint32_t>(dialog.values[1]) * 10U;
+            std::uint64_t layer_id{};
+            const InkpodStatus status = ApplyTreeEditRecord(
+                *state, edit, "Layer", layer_id);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"レイヤーの作成");
+            } else {
+                state->panes.active_tree_layer_id = layer_id;
+                state->document.smoke_layer_id = layer_id;
+                RefreshTreePane(*state);
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_LAYER_DUPLICATE: {
+            InkpodDocumentInfo info{};
+            std::uint64_t duplicate_id{};
+            const std::uint64_t source_id = state->panes.active_tree_layer_id != 0U
+                ? state->panes.active_tree_layer_id
+                : (QueryDocument(*state, info) ? info.layer_id : 0U);
+            const InkpodStatus status = source_id != 0U
+                ? ApplyTreeEdit(
+                      *state,
+                      INKPOD_TREE_DUPLICATE_LAYER,
+                      source_id,
+                      0U,
+                      duplicate_id)
+                : INKPOD_STATUS_INVALID_STATE;
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"レイヤーの複製");
+            } else {
+                state->document.smoke_layer_id = duplicate_id;
+                state->panes.active_tree_layer_id = duplicate_id;
+                RefreshTreePane(*state);
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_LAYER_DELETE: {
+            std::uint64_t ignored{};
+            const std::uint64_t target = state->document.smoke_layer_id != 0U
+                ? state->document.smoke_layer_id
+                : state->panes.active_tree_layer_id;
+            const InkpodStatus status = target == 0U
+                ? INKPOD_STATUS_INVALID_STATE
+                : ApplyTreeEdit(
+                      *state,
+                      INKPOD_TREE_DELETE_LAYER,
+                      target,
+                      0U,
+                      ignored);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"レイヤーの削除");
+            } else {
+                state->document.smoke_layer_id = 0U;
+                state->panes.active_tree_layer_id = 0U;
+                RefreshTreePane(*state);
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_LAYER_MOVE_TOP: {
+            InkpodDocumentInfo info{};
+            const std::uint64_t target = state->document.smoke_layer_id != 0U
+                ? state->document.smoke_layer_id
+                : (state->panes.active_tree_layer_id != 0U
+                          ? state->panes.active_tree_layer_id
+                          : (QueryDocument(*state, info) ? info.layer_id : 0U));
+            std::uint64_t ignored{};
+            const InkpodStatus status = target == 0U
+                ? INKPOD_STATUS_INVALID_STATE
+                : ApplyTreeEdit(
+                      *state,
+                      INKPOD_TREE_REORDER_LAYER,
+                      target,
+                      0U,
+                      ignored);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"レイヤーの移動");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_LAYER_MOVE_UP:
+        case IDM_LAYER_MOVE_DOWN: {
+            const int count = state->windows.layer_list == nullptr
+                ? 0
+                : static_cast<int>(SendMessageW(state->windows.layer_list, LB_GETCOUNT, 0, 0));
+            const int current = static_cast<int>(state->panes.active_tree_layer_index);
+            const int destination = LOWORD(wparam) == IDM_LAYER_MOVE_UP
+                ? std::max(0, current - 1)
+                : std::min(std::max(0, count - 1), current + 1);
+            std::uint64_t ignored{};
+            const InkpodStatus status = ApplyTreeEdit(
+                *state,
+                INKPOD_TREE_REORDER_LAYER,
+                state->panes.active_tree_layer_id,
+                static_cast<std::uint32_t>(destination),
+                ignored);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"レイヤーの並べ替え");
+            }
+            RefreshTreePane(*state);
+            return 0;
+        }
+        case IDM_LAYER_TOGGLE_VISIBLE:
+        case IDM_LAYER_TOGGLE_EDITABLE:
+        case IDM_LAYER_OPACITY: {
+            const InkpodStatus status = SetSelectedTreeNodeProperties(
+                *state, false, LOWORD(wparam));
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"レイヤープロパティ");
+            }
+            RefreshTreePane(*state);
+            return 0;
+        }
+        case IDM_LAYER_PROPERTIES: {
+            const InkpodStatus status = EditSelectedTreeNodeProperties(*state, false);
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"レイヤープロパティ");
+            }
+            RefreshTreePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_LAYER_CONVERT: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"レイヤー変換";
+            dialog.labels[0] = L"変換先種類 (1-10)";
+            dialog.values[0] = INKPOD_LAYER_RASTER;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
+                return 0;
+            }
+            InkpodTreeEdit edit{};
+            edit.struct_size = sizeof(edit);
+            edit.operation = INKPOD_TREE_CONVERT_LAYER;
+            edit.object_id = state->panes.active_tree_layer_id;
+            edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
+            std::uint64_t ignored{};
+            const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"レイヤー変換");
+            }
+            RefreshTreePane(*state);
+            return 0;
+        }
+        case IDM_LAYER_MERGE: {
+            InkpodTreeEdit edit{};
+            edit.struct_size = sizeof(edit);
+            edit.operation = INKPOD_TREE_MERGE_LAYER;
+            edit.object_id = state->panes.active_tree_layer_id;
+            std::uint64_t ignored{};
+            const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"同種レイヤーの統合");
+            }
+            state->panes.active_tree_layer_id = 0U;
+            RefreshTreePane(*state);
+            return 0;
+        }
+        case IDM_LAYER_DELETE_HIDDEN: {
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [](InkpodCore* core) {
+                          std::vector<std::uint64_t> hidden;
+                          try {
+                              for (std::uint32_t index = 0U; index < 1024U; ++index) {
+                                  InkpodNodeInfo node{};
+                                  node.struct_size = sizeof(node);
+                                  if (inkpod_core_node_get(core, index, UINT32_MAX, &node)
+                                      != INKPOD_STATUS_OK) {
+                                      break;
+                                  }
+                                  if ((node.flags & INKPOD_NODE_VISIBLE) == 0U) {
+                                      hidden.push_back(node.id);
+                                  }
+                              }
+                          } catch (const std::bad_alloc&) {
+                              return INKPOD_STATUS_INVALID_STATE;
+                          }
+                          for (const std::uint64_t id : hidden) {
+                              InkpodTreeEdit edit{};
+                              edit.struct_size = sizeof(edit);
+                              edit.operation = INKPOD_TREE_DELETE_LAYER;
+                              edit.object_id = id;
+                              InkpodDispatchResult result{};
+                              result.struct_size = sizeof(result);
+                              std::uint64_t ignored{};
+                              const InkpodStatus item_status = inkpod_core_tree_edit(
+                                  core, &edit, &result, &ignored);
+                              if (item_status != INKPOD_STATUS_OK) {
+                                  return item_status;
+                              }
+                          }
+                          return INKPOD_STATUS_OK;
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"非表示レイヤーの削除");
+            }
+            state->panes.active_tree_layer_id = 0U;
+            RefreshTreePane(*state);
+            return 0;
+        }
+        case IDM_PLANE_NEW: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"新規プレーン";
+            dialog.labels = {L"種類 (1-7)", L"形式 (1-5)", L"不透明度 (%)", nullptr};
+            dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 0};
+            dialog.value_count = 3U;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
+                return 0;
+            }
+            InkpodTreeEdit edit{};
+            edit.struct_size = sizeof(edit);
+            edit.operation = INKPOD_TREE_CREATE_PLANE;
+            edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
+            edit.parent_id = state->panes.active_tree_layer_id;
+            edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
+            edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
+            edit.opacity_milli = static_cast<std::uint32_t>(
+                std::clamp(dialog.values[2], 0, 100)) * 10U;
+            std::uint64_t plane_id{};
+            const InkpodStatus status = ApplyTreeEditRecord(
+                *state, edit, "Plane", plane_id);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"プレーンの作成");
+            } else {
+                state->panes.active_tree_plane_id = plane_id;
+            }
+            RefreshTreePane(*state);
+            return 0;
+        }
+        case IDM_PLANE_DUPLICATE:
+        case IDM_PLANE_DELETE:
+        case IDM_PLANE_MOVE_UP:
+        case IDM_PLANE_MOVE_DOWN: {
+            const UINT command = LOWORD(wparam);
+            const InkpodTreeOperation operation = command == IDM_PLANE_DUPLICATE
+                ? INKPOD_TREE_DUPLICATE_PLANE
+                : (command == IDM_PLANE_DELETE ? INKPOD_TREE_DELETE_PLANE
+                                              : INKPOD_TREE_REORDER_PLANE);
+            std::uint32_t destination = state->panes.active_tree_plane_index;
+            if (command == IDM_PLANE_MOVE_UP) {
+                destination = destination == 0U ? 0U : destination - 1U;
+            } else if (command == IDM_PLANE_MOVE_DOWN) {
+                const int count = state->windows.plane_list == nullptr
+                    ? 0
+                    : static_cast<int>(SendMessageW(
+                          state->windows.plane_list, LB_GETCOUNT, 0, 0));
+                destination = static_cast<std::uint32_t>(std::min(
+                    std::max(0, count - 1), static_cast<int>(destination) + 1));
+            }
+            std::uint64_t object_id{};
+            const InkpodStatus status = ApplyTreeEdit(
+                *state,
+                operation,
+                state->panes.active_tree_plane_id,
+                destination,
+                object_id);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"プレーン操作");
+            } else if (command == IDM_PLANE_DUPLICATE) {
+                state->panes.active_tree_plane_id = object_id;
+            } else if (command == IDM_PLANE_DELETE) {
+                state->panes.active_tree_plane_id = 0U;
+            }
+            RefreshTreePane(*state);
+            return 0;
+        }
+        case IDM_PLANE_TOGGLE_VISIBLE:
+        case IDM_PLANE_TOGGLE_EDITABLE:
+        case IDM_PLANE_OPACITY: {
+            const InkpodStatus status = SetSelectedTreeNodeProperties(
+                *state, true, LOWORD(wparam));
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"プレーンプロパティ");
+            }
+            RefreshTreePane(*state);
+            return 0;
+        }
+        case IDM_PLANE_PROPERTIES: {
+            const InkpodStatus status = EditSelectedTreeNodeProperties(*state, true);
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"プレーンプロパティ");
+            }
+            RefreshTreePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_PLANE_CONVERT: {
+            TreePaneNode node{};
+            if (!QueryTreeNode(*state, true, node)) {
+                return 0;
+            }
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"プレーン変換（変換損失を確認）";
+            dialog.labels = {L"変換先種類 (1-7)", L"変換先形式 (1-5)", L"損失を確認 (1)", nullptr};
+            dialog.values = {
+                static_cast<std::int32_t>(node.kind),
+                static_cast<std::int32_t>(node.pixel_format),
+                1,
+                0};
+            dialog.value_count = 3U;
+            if (state->lifetime.smoke_test) {
+                dialog.values[0] = INKPOD_TYPED_PLANE_RASTER;
+                dialog.values[1] = INKPOD_STORAGE_RGBA8;
+            }
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[2] == 0) {
+                return 0;
+            }
+            InkpodTreeEdit edit{};
+            edit.struct_size = sizeof(edit);
+            edit.operation = INKPOD_TREE_CONVERT_PLANE;
+            edit.object_id = node.id;
+            edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
+            edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
+            std::uint64_t ignored{};
+            const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"プレーン変換");
+            }
+            RefreshTreePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_PLANE_MERGE: {
+            InkpodTreeEdit edit{};
+            edit.struct_size = sizeof(edit);
+            edit.operation = INKPOD_TREE_MERGE_PLANE;
+            edit.object_id = state->panes.active_tree_plane_id;
+            std::uint64_t ignored{};
+            const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"同種プレーンの統合");
+            }
+            state->panes.active_tree_plane_id = 0U;
+            RefreshTreePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteAnimationCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
+    }
+    switch (LOWORD(wparam)) {
+        case IDM_LT_SET_NEW:
+        case IDM_LT_SET_RENAME: {
+            TextInputDialogState dialog{};
+            dialog.title = LOWORD(wparam) == IDM_LT_SET_NEW
+                ? L"ライトテーブルセットを作成"
+                : L"ライトテーブルセット名";
+            dialog.label = L"名前";
+            dialog.value = state->lifetime.smoke_test ? L"Smoke Set" : L"Light Table";
+            if (ShowTextInput(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
+                return 0;
+            }
+            InkpodLightTableEdit edit{};
+            edit.operation = LOWORD(wparam) == IDM_LT_SET_NEW
+                ? INKPOD_LIGHT_TABLE_CREATE_SET
+                : INKPOD_LIGHT_TABLE_RENAME_SET;
+            edit.object_id = state->panes.active_light_table_set_id;
+            std::uint64_t object_id{};
+            const InkpodStatus status = ApplyLightTableEdit(
+                *state, edit, dialog.value, object_id);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ライトテーブルセット");
+            } else if (object_id != 0U) {
+                state->panes.active_light_table_set_id = object_id;
+            }
+            RefreshLightTablePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_LT_SET_DUPLICATE:
+        case IDM_LT_SET_DELETE:
+        case IDM_LT_SET_UP:
+        case IDM_LT_SET_DOWN: {
+            InkpodLightTableEdit edit{};
+            const UINT command = LOWORD(wparam);
+            edit.operation = command == IDM_LT_SET_DUPLICATE
+                ? INKPOD_LIGHT_TABLE_DUPLICATE_SET
+                : (command == IDM_LT_SET_DELETE
+                       ? INKPOD_LIGHT_TABLE_DELETE_SET
+                       : INKPOD_LIGHT_TABLE_REORDER_SET);
+            edit.object_id = state->panes.active_light_table_set_id;
+            edit.destination_index = state->panes.active_light_table_set_index;
+            if (command == IDM_LT_SET_UP && edit.destination_index != 0U) {
+                --edit.destination_index;
+            } else if (command == IDM_LT_SET_DOWN) {
+                ++edit.destination_index;
+            }
+            std::uint64_t object_id{};
+            const InkpodStatus status = ApplyLightTableEdit(*state, edit, {}, object_id);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ライトテーブルセット操作");
+            } else if (object_id != 0U) {
+                state->panes.active_light_table_set_id = object_id;
+            } else {
+                state->panes.active_light_table_set_id = 0U;
+            }
+            RefreshLightTablePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_LT_GLOBAL_OPACITY: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"ライトテーブル全体不透明度";
+            dialog.labels[0] = L"不透明度 (0-100%)";
+            dialog.values[0] = state->lifetime.smoke_test ? 50 : 100;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[0] < 0 || dialog.values[0] > 100) {
+                return 0;
+            }
+            const std::uint32_t opacity =
+                static_cast<std::uint32_t>(dialog.values[0]) * 10U;
+            const InkpodStatus status = state->engine->Invoke(
+                [opacity](InkpodCore* core) {
+                    InkpodDispatchResult result{};
+                    result.struct_size = sizeof(result);
+                    return inkpod_core_light_table_set_global_opacity(
+                        core, opacity, &result);
+                },
+                true,
+                true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ライトテーブル全体不透明度");
+            }
+            RefreshLightTablePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_LT_ITEM_ADD:
+        case IDM_LT_ITEM_RELOAD: {
+            std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
+            if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, false, path)) {
+                return 0;
+            }
+            const InkpodStatus status = AddOrReloadLightTableRaster(
+                *state, path, LOWORD(wparam) == IDM_LT_ITEM_RELOAD);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ライトテーブル画像");
+            }
+            RefreshLightTablePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_LT_ITEM_DELETE:
+        case IDM_LT_ITEM_UP:
+        case IDM_LT_ITEM_DOWN: {
+            InkpodLightTableEdit edit{};
+            edit.operation = LOWORD(wparam) == IDM_LT_ITEM_DELETE
+                ? INKPOD_LIGHT_TABLE_REMOVE_ITEM
+                : INKPOD_LIGHT_TABLE_REORDER_ITEM;
+            edit.object_id = state->panes.active_light_table_item_id;
+            edit.destination_index = state->panes.active_light_table_item_index;
+            if (LOWORD(wparam) == IDM_LT_ITEM_UP && edit.destination_index != 0U) {
+                --edit.destination_index;
+            } else if (LOWORD(wparam) == IDM_LT_ITEM_DOWN) {
+                ++edit.destination_index;
+            }
+            std::uint64_t ignored{};
+            const InkpodStatus status = ApplyLightTableEdit(*state, edit, {}, ignored);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ライトテーブル項目操作");
+            }
+            state->panes.active_light_table_item_id = 0U;
+            RefreshLightTablePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_LT_ITEM_PROPERTIES: {
+            const InkpodStatus status = EditLightTableItemProperties(*state);
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"ライトテーブル項目プロパティ");
+            }
+            RefreshLightTablePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_LT_ITEM_MOVE:
+            if (state->panes.active_light_table_item_id == 0U) {
+                return 0;
+            }
+            state->tools.active_tool = kInteractionLightTableMove;
+            state->panes.light_table_move_samples.clear();
+            UpdateMenuState(*state);
+            return 1;
+        case IDM_LT_ITEM_SAMPLE: {
+            InkpodDocumentInfo document{};
+            QueryDocument(*state, document);
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"ライトテーブル色サンプル";
+            dialog.labels = {L"X", L"Y", nullptr, nullptr};
+            dialog.values = {
+                state->lifetime.smoke_test ? document.reference_frame.x : 0,
+                state->lifetime.smoke_test ? document.reference_frame.y : 0,
+                0,
+                0};
+            dialog.value_count = 2U;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[0] < 0 || dialog.values[1] < 0) {
+                return 0;
+            }
+            InkpodColorValue color{};
+            color.struct_size = sizeof(color);
+            const InkpodStatus status = state->engine->Invoke(
+                [&color, &dialog](InkpodCore* core) {
+                    return inkpod_core_light_table_sample(
+                        core,
+                        static_cast<std::uint32_t>(dialog.values[0]),
+                        static_cast<std::uint32_t>(dialog.values[1]),
+                        &color);
+                },
+                false,
+                false);
+            if (status == INKPOD_STATUS_OK) {
+                SetDrawingColor(state->tools, color);
+            } else if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ライトテーブル色サンプル");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_LT_ITEM_SWAP: {
+            InkpodDocumentInfo info{};
+            const std::uint64_t item_id = state->panes.active_light_table_item_id;
+            const InkpodStatus status = state->engine->Invoke(
+                [item_id, &info](InkpodCore* core) {
+                    info = EmptyDocumentInfo();
+                    return inkpod_core_light_table_swap(core, item_id, &info);
+                },
+                false,
+                false);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ライトテーブルと編集画像の入れ替え");
+            } else {
+                ResetUiForDocumentReplacement(*state);
+                FitCanvas(*state, INKPOD_VIEW_FIT);
+            }
+            RefreshLightTablePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_SEQ_IMPORT: {
+            std::vector<std::wstring> paths;
+            if (state->lifetime.smoke_test) {
+                try {
+                    paths = state->lifetime.smoke_sequence_paths;
+                } catch (const std::bad_alloc&) {
+                    return 0;
+                }
+            } else if (!ChooseCommonRasterPaths(window, paths)) {
+                return 0;
+            }
+            const InkpodStatus status = ImportSequencePaths(*state, paths);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"連番読み込み");
+            }
+            RefreshSequencePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_SEQ_EXPORT: {
+            std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
+            if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, true, path)) {
+                return 0;
+            }
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"連番書き出し";
+            dialog.labels[0] = L"白背景を合成 (0/1)";
+            dialog.values[0] = state->lifetime.smoke_test ? 1 : 0;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
+                return 0;
+            }
+            const InkpodStatus status = ExportSequenceToPath(
+                *state, path, dialog.values[0] != 0);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"連番書き出し");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_SEQ_PREVIOUS:
+        case IDM_SEQ_NEXT: {
+            const bool next = LOWORD(wparam) == IDM_SEQ_NEXT;
+            InkpodDocumentInfo info{};
+            const InkpodStatus status = state->engine->Invoke(
+                [next, &info](InkpodCore* core) {
+                    info = EmptyDocumentInfo();
+                    return inkpod_core_sequence_step(
+                        core,
+                        next ? INKPOD_SEQUENCE_NEXT : INKPOD_SEQUENCE_PREVIOUS,
+                        INKPOD_SEQUENCE_FLAG_LOOP,
+                        &info);
+                },
+                false,
+                false);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"前後セル切替");
+            } else {
+                ResetUiForDocumentReplacement(*state);
+                FitCanvas(*state, INKPOD_VIEW_FIT);
+                RefreshSequencePane(*state);
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_SEQ_GOTO: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"セル番号で移動";
+            dialog.labels[0] = L"セル番号";
+            dialog.values[0] = state->lifetime.smoke_test ? 3 : 1;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[0] < 0) {
+                return 0;
+            }
+            const std::uint32_t number = static_cast<std::uint32_t>(dialog.values[0]);
+            InkpodDocumentInfo info{};
+            std::uint32_t selected{};
+            const InkpodStatus status = state->engine->Invoke(
+                [number, &info, &selected](InkpodCore* core) {
+                    for (std::uint32_t index = 0U; index < 10000U; ++index) {
+                        InkpodSequenceCellInfo cell{};
+                        cell.struct_size = sizeof(cell);
+                        const InkpodStatus query = inkpod_core_sequence_cell_get(
+                            core, index, &cell);
+                        if (query != INKPOD_STATUS_OK) {
+                            return INKPOD_STATUS_INVALID_ARGUMENT;
+                        }
+                        if (cell.cell_number == number) {
+                            selected = index;
+                            info = EmptyDocumentInfo();
+                            return inkpod_core_sequence_activate(core, index, &info);
+                        }
+                    }
+                    return INKPOD_STATUS_INVALID_ARGUMENT;
+                },
+                false,
+                false);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"セル番号移動");
+            } else {
+                ResetUiForDocumentReplacement(*state);
+                state->animation.active_sequence_index = selected;
+                FitCanvas(*state, INKPOD_VIEW_FIT);
+                RefreshSequencePane(*state);
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_SUBPALETTE_SET: {
+            const std::uint32_t index = state->animation.active_sequence_index;
+            const InkpodStatus status = state->engine->Invoke(
+                [index](InkpodCore* core) {
+                    return inkpod_core_subpalette_set(core, index);
+                },
+                false,
+                false);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"サブパレット登録");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_SUBPALETTE_SAMPLE: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"サブパレット色サンプル";
+            dialog.labels = {L"X", L"Y", nullptr, nullptr};
+            dialog.values = {0, 0, 0, 0};
+            dialog.value_count = 2U;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[0] < 0 || dialog.values[1] < 0) {
+                return 0;
+            }
+            InkpodColorValue color{};
+            color.struct_size = sizeof(color);
+            const InkpodStatus status = state->engine->Invoke(
+                [&dialog, &color](InkpodCore* core) {
+                    return inkpod_core_subpalette_sample(
+                        core,
+                        static_cast<std::uint32_t>(dialog.values[0]),
+                        static_cast<std::uint32_t>(dialog.values[1]),
+                        &color);
+                },
+                false,
+                false);
+            if (status == INKPOD_STATUS_OK) {
+                SetDrawingColor(state->tools, color);
+            } else if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"サブパレット色サンプル");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_MOTION_START: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"モーションチェック設定";
+            dialog.labels = {L"FPS (8/10/12/24/25/30)", L"ループ (0/1)", L"選択表示 (0/1)", L"LT表示 (0/1)"};
+            dialog.values = {
+                static_cast<std::int32_t>(state->animation.motion_fps),
+                (state->animation.motion_flags & INKPOD_MOTION_FLAG_LOOP) != 0U ? 1 : 0,
+                (state->animation.motion_flags & INKPOD_MOTION_FLAG_INCLUDE_SELECTION) != 0U ? 1 : 0,
+                (state->animation.motion_flags & INKPOD_MOTION_FLAG_INCLUDE_LIGHT_TABLE) != 0U ? 1 : 0};
+            dialog.value_count = 4U;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
+                return 0;
+            }
+            state->animation.motion_fps = static_cast<std::uint32_t>(dialog.values[0]);
+            state->animation.motion_flags = (dialog.values[1] != 0 ? INKPOD_MOTION_FLAG_LOOP : 0U)
+                | (dialog.values[2] != 0
+                       ? INKPOD_MOTION_FLAG_INCLUDE_SELECTION
+                       : 0U)
+                | (dialog.values[3] != 0
+                       ? INKPOD_MOTION_FLAG_INCLUDE_LIGHT_TABLE
+                       : 0U);
+            InkpodMotionCheckInput input{
+                sizeof(InkpodMotionCheckInput),
+                state->animation.motion_fps,
+                state->animation.motion_flags};
+            InkpodMotionFrame frame{};
+            frame.struct_size = sizeof(frame);
+            const InkpodStatus status = state->engine->Invoke(
+                [input, &frame](InkpodCore* core) {
+                    return inkpod_core_motion_check_start(core, &input, &frame);
+                },
+                false,
+                false);
+            if (status == INKPOD_STATUS_OK) {
+                state->animation.motion_active = true;
+                UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+                SetTimer(
+                    window,
+                    kMotionPlaybackTimer,
+                    std::max<UINT>(1U, 1000U / state->animation.motion_fps),
+                    nullptr);
+            } else {
+                ShowCoreError(*state, window, L"モーションチェック開始");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_MOTION_PAUSE: {
+            InkpodMotionFrame frame{};
+            frame.struct_size = sizeof(frame);
+            const InkpodStatus status = state->engine->Invoke(
+                [&frame](InkpodCore* core) {
+                    return inkpod_core_motion_check_toggle_pause(core, &frame);
+                },
+                false,
+                false);
+            if (status == INKPOD_STATUS_OK) {
+                UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+                if (state->animation.motion_paused) {
+                    KillTimer(window, kMotionPlaybackTimer);
+                } else {
+                    SetTimer(
+                        window,
+                        kMotionPlaybackTimer,
+                        std::max<UINT>(1U, 1000U / state->animation.motion_fps),
+                        nullptr);
+                }
+            } else {
+                ShowCoreError(*state, window, L"モーション一時停止");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_MOTION_PREVIOUS:
+        case IDM_MOTION_NEXT: {
+            InkpodMotionFrame frame{};
+            frame.struct_size = sizeof(frame);
+            const bool next = LOWORD(wparam) == IDM_MOTION_NEXT;
+            const InkpodStatus status = state->engine->Invoke(
+                [next, &frame](InkpodCore* core) {
+                    return inkpod_core_motion_check_step(
+                        core,
+                        next ? INKPOD_SEQUENCE_NEXT : INKPOD_SEQUENCE_PREVIOUS,
+                        &frame);
+                },
+                false,
+                false);
+            if (status == INKPOD_STATUS_OK) {
+                UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+            } else {
+                ShowCoreError(*state, window, L"モーションフレーム移動");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_MOTION_FIRST:
+        case IDM_MOTION_LAST: {
+            const bool last = LOWORD(wparam) == IDM_MOTION_LAST;
+            InkpodMotionFrame frame{};
+            frame.struct_size = sizeof(frame);
+            const InkpodStatus status = state->engine->Invoke(
+                [last, &frame](InkpodCore* core) {
+                    std::uint32_t count{};
+                    for (; count < 10000U; ++count) {
+                        InkpodSequenceCellInfo cell{};
+                        cell.struct_size = sizeof(cell);
+                        if (inkpod_core_sequence_cell_get(core, count, &cell)
+                            != INKPOD_STATUS_OK) {
+                            break;
+                        }
+                    }
+                    if (count == 0U) {
+                        return INKPOD_STATUS_INVALID_STATE;
+                    }
+                    const std::uint64_t target = last ? count - 1U : 0U;
+                    for (std::uint32_t step = 0U; step < count; ++step) {
+                        const InkpodStatus current = inkpod_core_motion_check_step(
+                            core,
+                            last ? INKPOD_SEQUENCE_NEXT : INKPOD_SEQUENCE_PREVIOUS,
+                            &frame);
+                        if (current != INKPOD_STATUS_OK
+                            || frame.sequence_index == target) {
+                            return current;
+                        }
+                    }
+                    return INKPOD_STATUS_INVALID_STATE;
+                },
+                false,
+                false);
+            if (status == INKPOD_STATUS_OK) {
+                UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+            } else {
+                ShowCoreError(*state, window, L"モーション先頭・末尾移動");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_MOTION_FPS_30:
+        case IDM_MOTION_FPS_25:
+        case IDM_MOTION_FPS_24:
+        case IDM_MOTION_FPS_12:
+        case IDM_MOTION_FPS_10:
+        case IDM_MOTION_FPS_8: {
+            const UINT command = LOWORD(wparam);
+            state->animation.motion_fps = command == IDM_MOTION_FPS_30
+                ? 30U
+                : (command == IDM_MOTION_FPS_25
+                          ? 25U
+                          : (command == IDM_MOTION_FPS_24
+                                    ? 24U
+                                    : (command == IDM_MOTION_FPS_12
+                                              ? 12U
+                                              : (command == IDM_MOTION_FPS_10 ? 10U : 8U))));
+            if (!state->animation.motion_active) {
+                UpdateMenuState(*state);
+                return 1;
+            }
+            const InkpodMotionCheckInput input{
+                sizeof(InkpodMotionCheckInput),
+                state->animation.motion_fps,
+                state->animation.motion_flags};
+            InkpodMotionFrame frame{};
+            frame.struct_size = sizeof(frame);
+            const InkpodStatus status = state->engine->Invoke(
+                [input, &frame](InkpodCore* core) {
+                    InkpodStatus current = inkpod_core_motion_check_stop(core);
+                    if (current == INKPOD_STATUS_OK) {
+                        current = inkpod_core_motion_check_start(core, &input, &frame);
+                    }
+                    return current;
+                },
+                false,
+                false);
+            if (status == INKPOD_STATUS_OK) {
+                UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+                SetTimer(
+                    window,
+                    kMotionPlaybackTimer,
+                    std::max<UINT>(1U, 1000U / state->animation.motion_fps),
+                    nullptr);
+            } else {
+                ShowCoreError(*state, window, L"モーションFPS変更");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_MOTION_STOP: {
+            const InkpodStatus status = state->engine->Invoke(
+                [](InkpodCore* core) {
+                    return inkpod_core_motion_check_stop(core);
+                },
+                false,
+                false);
+            KillTimer(window, kMotionPlaybackTimer);
+            state->animation.motion_active = false;
+            state->animation.motion_paused = false;
+            SetWindowTextW(state->windows.motion_label, L"モーション停止");
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"モーション停止");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteSelectionViewCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
+    }
+    switch (LOWORD(wparam)) {
+        case IDM_SELECTION_RECTANGLE:
+        case IDM_SELECTION_ELLIPSE:
+        case IDM_SELECTION_LASSO:
+        case IDM_SELECTION_POLYLINE:
+        case IDM_SELECTION_TRACE:
+        case IDM_SELECTION_WAND: {
+            const UINT command = LOWORD(wparam);
+            state->tools.selection_shape = command == IDM_SELECTION_ELLIPSE
+                ? INKPOD_SELECTION_ELLIPSE
+                : (command == IDM_SELECTION_LASSO
+                          ? INKPOD_SELECTION_LASSO
+                          : (command == IDM_SELECTION_POLYLINE
+                                    ? INKPOD_SELECTION_POLYLINE
+                                    : (command == IDM_SELECTION_TRACE
+                                              ? INKPOD_SELECTION_TRACE
+                                              : (command == IDM_SELECTION_WAND
+                                                        ? INKPOD_SELECTION_WAND
+                                                        : INKPOD_SELECTION_RECTANGLE))));
+            state->tools.active_tool = kInteractionSelection;
+            state->tools.selection_gesture_samples.clear();
+            if (command == IDM_SELECTION_WAND || command == IDM_SELECTION_TRACE) {
+                ViewOptionsDialogState dialog{};
+                dialog.title = command == IDM_SELECTION_WAND
+                    ? L"色の杖"
+                    : L"選択トレース";
+                dialog.labels = command == IDM_SELECTION_WAND
+                    ? std::array<const wchar_t*, 4U>{
+                          L"許容差", L"隙間", nullptr, nullptr}
+                    : std::array<const wchar_t*, 4U>{
+                          L"直径 (px)", nullptr, nullptr, nullptr};
+                dialog.values[0] = command == IDM_SELECTION_WAND
+                    ? state->tools.selection_tolerance
+                    : static_cast<std::int32_t>(state->tools.selection_diameter);
+                dialog.values[1] = state->tools.selection_gap_close;
+                dialog.value_count = command == IDM_SELECTION_WAND ? 2U : 1U;
+                if (ShowViewOptions(
+                        state->lifetime.instance,
+                        window,
+                        state->lifetime.smoke_test,
+                        dialog) != IDOK) {
+                    return 0;
+                }
+                if (command == IDM_SELECTION_WAND) {
+                    if (dialog.values[0] < 0 || dialog.values[0] > UINT16_MAX
+                        || dialog.values[1] < 0
+                        || dialog.values[1] > UINT16_MAX) {
+                        return 0;
+                    }
+                    state->tools.selection_tolerance =
+                        static_cast<std::uint16_t>(dialog.values[0]);
+                    state->tools.selection_gap_close =
+                        static_cast<std::uint16_t>(dialog.values[1]);
+                } else if (dialog.values[0] > 0) {
+                    state->tools.selection_diameter =
+                        static_cast<float>(dialog.values[0]);
+                }
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_SELECTION_MODE_NEW:
+        case IDM_SELECTION_MODE_ADD:
+        case IDM_SELECTION_MODE_SUBTRACT:
+        case IDM_SELECTION_MODE_INTERSECT:
+            state->tools.selection_operation = LOWORD(wparam) == IDM_SELECTION_MODE_ADD
+                ? INKPOD_SELECTION_ADD
+                : (LOWORD(wparam) == IDM_SELECTION_MODE_SUBTRACT
+                          ? INKPOD_SELECTION_SUBTRACT
+                          : (LOWORD(wparam) == IDM_SELECTION_MODE_INTERSECT
+                                    ? INKPOD_SELECTION_INTERSECT
+                                    : INKPOD_SELECTION_NEW));
+            UpdateMenuState(*state);
+            return 0;
+        case IDM_SELECTION_CLEAR: {
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [](InkpodCore* core) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          return inkpod_core_selection_clear(core, &result);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"選択解除");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_SELECTION_COLOR:
+        case IDM_SELECTION_COLOR_DIFFERENT:
+        case IDM_SELECTION_COLOR_ADD: {
+            const UINT command = LOWORD(wparam);
+            const InkpodStatus status = SelectDrawingColor(
+                *state,
+                command == IDM_SELECTION_COLOR_DIFFERENT,
+                command == IDM_SELECTION_COLOR_ADD ? INKPOD_SELECTION_ADD
+                                                   : INKPOD_SELECTION_NEW);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"描画色の選択");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_SELECTION_TO_LAYER: {
+            static constexpr std::array<std::uint8_t, 13U> name{
+                0xe9, 0x81, 0xb8, 0xe6, 0x8a, 0x9e, 0xe7, 0xaf, 0x84,
+                0xe5, 0x9b, 0xb2, '1'};
+            std::uint64_t layer_id{};
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [&layer_id](InkpodCore* core) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          return inkpod_core_selection_to_layer(
+                              core,
+                              name.data(),
+                              name.size(),
+                              &result,
+                              &layer_id);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"選択範囲をレイヤーへ変換");
+            } else {
+                state->document.selection_layer_id = layer_id;
+                state->document.smoke_layer_id = layer_id;
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_SELECTION_FROM_LAYER:
+        case IDM_SELECTION_LAYER_ADD:
+        case IDM_SELECTION_LAYER_SUBTRACT: {
+            const UINT command = LOWORD(wparam);
+            const std::uint32_t operation = command == IDM_SELECTION_LAYER_ADD
+                ? INKPOD_SELECTION_LAYER_ADD
+                : (command == IDM_SELECTION_LAYER_SUBTRACT
+                          ? INKPOD_SELECTION_LAYER_SUBTRACT
+                          : INKPOD_SELECTION_LAYER_REPLACE);
+            const std::uint64_t layer_id = state->document.selection_layer_id;
+            const InkpodStatus status = state->engine == nullptr || layer_id == 0U
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [layer_id, operation](InkpodCore* core) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          return inkpod_core_selection_from_layer(
+                              core, layer_id, operation, &result);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"選択レイヤー変換");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_SELECTION_ALL: {
+            InkpodDocumentInfo info{};
+            InkpodSelectionInput input{};
+            input.struct_size = sizeof(input);
+            input.shape = INKPOD_SELECTION_RECTANGLE;
+            input.operation = INKPOD_SELECTION_NEW;
+            const bool queried = QueryDocument(*state, info);
+            if (queried) {
+                input.bounds = {
+                    0,
+                    0,
+                    static_cast<std::int32_t>(info.width),
+                    static_cast<std::int32_t>(info.height)};
+            }
+            const InkpodStatus status = !queried || state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [input](InkpodCore* core) {
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          return inkpod_core_apply_selection(
+                              core, &input, &result);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"すべて選択");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_SELECTION_INVERT:
+        case IDM_SELECTION_EXPAND:
+        case IDM_SELECTION_SHRINK: {
+            const std::uint32_t operation =
+                LOWORD(wparam) == IDM_SELECTION_INVERT
+                ? INKPOD_SELECTION_ADJUST_INVERT
+                : (LOWORD(wparam) == IDM_SELECTION_EXPAND
+                          ? INKPOD_SELECTION_ADJUST_EXPAND
+                          : INKPOD_SELECTION_ADJUST_SHRINK);
+            std::uint32_t pixels = 0U;
+            if (operation != INKPOD_SELECTION_ADJUST_INVERT) {
+                ViewOptionsDialogState dialog{};
+                dialog.title = operation == INKPOD_SELECTION_ADJUST_EXPAND
+                    ? L"選択範囲を拡張"
+                    : L"選択範囲を縮小";
+                dialog.labels[0] = L"幅 (px)";
+                dialog.values[0] = state->lifetime.smoke_test ? 2 : 1;
+                if (ShowViewOptions(
+                        state->lifetime.instance,
+                        window,
+                        state->lifetime.smoke_test,
+                        dialog) != IDOK
+                    || dialog.values[0] <= 0) {
+                    return 0;
+                }
+                pixels = static_cast<std::uint32_t>(dialog.values[0]);
+            }
+            const InkpodStatus status = AdjustSelection(
+                *state,
+                operation,
+                pixels);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"選択範囲の変更");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_VIEW_ZOOM_IN:
+        case IDM_VIEW_ZOOM_OUT: {
+            RECT client{};
+            GetClientRect(state->windows.canvas, &client);
+            const double factor = LOWORD(wparam) == IDM_VIEW_ZOOM_IN ? 1.2 : 1.0 / 1.2;
+            if (ApplyView(
+                    *state,
+                    INKPOD_VIEW_ZOOM_AT,
+                    factor,
+                    static_cast<double>(client.right) / 2.0,
+                    static_cast<double>(client.bottom) / 2.0)
+                != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"表示倍率の変更");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_VIEW_FIT:
+        case IDM_VIEW_ONE_TO_ONE:
+            if (FitCanvas(
+                    *state,
+                    LOWORD(wparam) == IDM_VIEW_FIT ? INKPOD_VIEW_FIT
+                                                  : INKPOD_VIEW_ONE_TO_ONE)
+                != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"表示の変更");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        case IDM_VIEW_ZOOM_PERCENT: {
+            InkpodSnapshotTransform transform{};
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"表示倍率";
+            dialog.labels[0] = L"倍率 (%)";
+            dialog.values[0] = state->lifetime.smoke_test
+                ? 125
+                : (QuerySnapshotTransform(*state, transform)
+                ? static_cast<std::int32_t>(std::clamp(
+                      std::lround(transform.zoom * 100.0), 1L, 6400L))
+                : 100);
+            if (ShowViewOptions(
+                    state->lifetime.instance,
+                    window,
+                    state->lifetime.smoke_test,
+                    dialog) == IDOK) {
+                const InkpodStatus status = ApplyZoomPercent(
+                    *state, static_cast<std::uint32_t>(dialog.values[0]));
+                if (status != INKPOD_STATUS_OK) {
+                    ShowCoreError(*state, window, L"数値倍率の変更");
+                }
+                UpdateMenuState(*state);
+            }
+            return 0;
+        }
+        case IDM_VIEW_BOX_ZOOM:
+            state->tools.active_tool = kInteractionBoxZoom;
+            state->view.gesture_samples.clear();
+            UpdateMenuState(*state);
+            return 0;
+        case IDM_VIEW_FLIP_HORIZONTAL:
+        case IDM_VIEW_FLIP_VERTICAL: {
+            const bool horizontal =
+                LOWORD(wparam) == IDM_VIEW_FLIP_HORIZONTAL;
+            const InkpodStatus status = ApplyView(
+                *state,
+                horizontal ? INKPOD_VIEW_FLIP_HORIZONTAL
+                           : INKPOD_VIEW_FLIP_VERTICAL,
+                0.0,
+                0.0);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"表示反転");
+            } else if (horizontal) {
+                state->view.flip_horizontal =
+                    !state->view.flip_horizontal;
+            } else {
+                state->view.flip_vertical = !state->view.flip_vertical;
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_VIEW_RULER:
+        case IDM_VIEW_GUIDES:
+        case IDM_VIEW_GRID:
+        case IDM_VIEW_SNAP_GUIDES:
+        case IDM_VIEW_SNAP_GRID:
+        case IDM_VIEW_TRANSPARENT: {
+            const UINT command = LOWORD(wparam);
+            bool* current = command == IDM_VIEW_RULER
+                ? &state->view.ruler_visible
+                : (command == IDM_VIEW_GUIDES
+                          ? &state->view.guides_visible
+                          : (command == IDM_VIEW_GRID
+                                    ? &state->view.grid_visible
+                                    : (command == IDM_VIEW_SNAP_GUIDES
+                                              ? &state->view.snap_guides
+                                              : (command == IDM_VIEW_SNAP_GRID
+                                                        ? &state->view.snap_grid
+                                                        : &state->view.transparent_visible))));
+            const InkpodViewCommandKind kind = command == IDM_VIEW_RULER
+                ? INKPOD_VIEW_SET_RULER_VISIBLE
+                : (command == IDM_VIEW_GUIDES
+                          ? INKPOD_VIEW_SET_GUIDES_VISIBLE
+                          : (command == IDM_VIEW_GRID
+                                    ? INKPOD_VIEW_SET_GRID_VISIBLE
+                                    : (command == IDM_VIEW_SNAP_GUIDES
+                                              ? INKPOD_VIEW_SET_GUIDE_SNAP_ENABLED
+                                              : (command == IDM_VIEW_SNAP_GRID
+                                                        ? INKPOD_VIEW_SET_GRID_SNAP_ENABLED
+                                                        : INKPOD_VIEW_SET_TRANSPARENT_VISIBLE))));
+            const bool visible = !*current;
+            const InkpodStatus status = ApplyView(
+                *state,
+                kind,
+                visible ? 1.0 : 0.0,
+                0.0);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"表示補助の切替");
+            } else {
+                *current = visible;
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_VIEW_GUIDE_VERTICAL:
+        case IDM_VIEW_GUIDE_HORIZONTAL: {
+            InkpodDocumentInfo info{};
+            if (!QueryDocument(*state, info)) {
+                return 0;
+            }
+            const bool vertical = LOWORD(wparam) == IDM_VIEW_GUIDE_VERTICAL;
+            ViewOptionsDialogState dialog{};
+            dialog.title = vertical ? L"垂直ガイド" : L"水平ガイド";
+            dialog.labels[0] = vertical ? L"X (px)" : L"Y (px)";
+            dialog.values[0] = static_cast<std::int32_t>(
+                vertical ? info.width / 2U : info.height / 2U);
+            if (ShowViewOptions(
+                    state->lifetime.instance,
+                    window,
+                    state->lifetime.smoke_test,
+                    dialog) != IDOK) {
+                return 0;
+            }
+            const InkpodStatus status = AddGuide(
+                *state,
+                vertical ? INKPOD_GUIDE_VERTICAL : INKPOD_GUIDE_HORIZONTAL,
+                dialog.values[0]);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ガイドの追加");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_VIEW_GUIDE_MOVE:
+            state->tools.active_tool = kInteractionGuideMove;
+            UpdateMenuState(*state);
+            return 0;
+        case IDM_VIEW_GUIDE_DELETE_ALL: {
+            const InkpodStatus status = DeleteAllGuides(*state);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ガイドの削除");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_VIEW_GRID_SETTINGS: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"グリッド設定";
+            dialog.labels = {L"X 原点", L"Y 原点", L"間隔 (px)", L"分割数"};
+            dialog.values = {0, 0, 8, 2};
+            dialog.value_count = 4U;
+            if (ShowViewOptions(
+                    state->lifetime.instance,
+                    window,
+                    state->lifetime.smoke_test,
+                    dialog) != IDOK) {
+                return 0;
+            }
+            InkpodGridInput input{};
+            input.struct_size = sizeof(input);
+            input.origin_x = dialog.values[0];
+            input.origin_y = dialog.values[1];
+            input.spacing_x = static_cast<std::uint32_t>(dialog.values[2]);
+            input.spacing_y = static_cast<std::uint32_t>(dialog.values[2]);
+            input.subdivisions = static_cast<std::uint32_t>(dialog.values[3]);
+            const InkpodStatus status = dialog.values[2] <= 0
+                    || dialog.values[3] <= 0
+                ? INKPOD_STATUS_INVALID_ARGUMENT
+                : SetGrid(*state, input);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"グリッド設定");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_VIEW_NEW: {
+            std::uint64_t view_id{};
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [&view_id](InkpodCore* core) {
+                          return inkpod_core_view_create(
+                              core, &view_id);
+                      },
+                      false,
+                      false);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ビューの作成");
+            } else {
+                state->view.secondary_view_id = view_id;
+                state->view.active_view_id = view_id;
+                if (state->windows.document_tabs != nullptr) {
+                    TCITEMW item{};
+                    item.mask = TCIF_TEXT | TCIF_PARAM;
+                    item.pszText = const_cast<wchar_t*>(L"セル [ビュー 2]");
+                    item.lParam = static_cast<LPARAM>(view_id);
+                    const int index = TabCtrl_GetItemCount(state->windows.document_tabs);
+                    if (TabCtrl_InsertItem(state->windows.document_tabs, index, &item) >= 0) {
+                        TabCtrl_SetCurSel(state->windows.document_tabs, index);
+                    }
+                }
+                state->engine->SetActiveView(view_id);
+                state->view.flip_horizontal = false;
+                state->view.flip_vertical = false;
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteToolCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
+    }
+    switch (LOWORD(wparam)) {
+        case IDM_TOOL_PENCIL:
+            state->tools.active_tool = INKPOD_TOOL_PENCIL;
+            UpdateMenuState(*state);
+            return 0;
+        case IDM_TOOL_BRUSH:
+            state->tools.active_tool = INKPOD_TOOL_BRUSH;
+            UpdateMenuState(*state);
+            return 0;
+        case IDM_TOOL_ERASER:
+            state->tools.active_tool = INKPOD_TOOL_ERASER;
+            UpdateMenuState(*state);
+            return 0;
+        case IDM_TOOL_FILL:
+        case IDM_TOOL_CLOSED_FILL:
+        case IDM_TOOL_FILL_EXTENSION:
+            state->tools.active_tool = kInteractionFill;
+            state->tools.fill_options.operation = LOWORD(wparam) == IDM_TOOL_CLOSED_FILL
+                ? INKPOD_FILL_CLOSED_REGION
+                : (LOWORD(wparam) == IDM_TOOL_FILL_EXTENSION
+                          ? INKPOD_FILL_EXTENSION
+                          : INKPOD_FILL_SEED);
+            state->tools.fill_gesture_samples.clear();
+            UpdateMenuState(*state);
+            return 0;
+        case IDM_TOOL_FILL_OPTIONS:
+            if (inkpod::windows::ui::ShowFillOptions(
+                    state->lifetime.instance,
+                    state->windows.window,
+                    state->lifetime.smoke_test,
+                    state->tools.fill_options)) {
+                state->tools.active_tool = kInteractionFill;
+                state->tools.fill_gesture_samples.clear();
+                UpdateMenuState(*state);
+            }
+            return 0;
+        case IDM_TOOL_EYEDROPPER:
+            state->tools.active_tool = kInteractionEyedropper;
+            UpdateMenuState(*state);
+            return 0;
+        case IDM_VECTOR_LINE:
+        case IDM_VECTOR_CURVE:
+        case IDM_VECTOR_RECTANGLE:
+        case IDM_VECTOR_ELLIPSE:
+        case IDM_VECTOR_POLYLINE:
+        case IDM_VECTOR_ERASER: {
+            ClearVectorGeometryPreview(state->tools, state->windows.canvas);
+            TreePaneNode plane{};
+            if (!QueryTreeNode(*state, true, plane)) {
+                return 0;
+            }
+            if (!IsVectorStrokePlane(plane.kind)) {
+                if (state->engine != nullptr) {
+                    state->engine->SetLocalFailure(kVectorStrokePlaneRequired);
+                }
+                UpdateMenuState(*state);
+                return 0;
+            }
+            const UINT command = LOWORD(wparam);
+            state->tools.active_tool = command == IDM_VECTOR_LINE
+                ? kInteractionVectorLine
+                : (command == IDM_VECTOR_CURVE
+                          ? kInteractionVectorCurve
+                          : (command == IDM_VECTOR_RECTANGLE
+                                    ? kInteractionVectorRectangle
+                                    : (command == IDM_VECTOR_ELLIPSE
+                                              ? kInteractionVectorEllipse
+                                              : (command == IDM_VECTOR_POLYLINE
+                                                        ? kInteractionVectorPolyline
+                                                        : kInteractionVectorEraser))));
+            UpdateMenuState(*state);
+            return 1;
+        }
+        case IDM_VECTOR_ERASE_PARTIAL:
+        case IDM_VECTOR_ERASE_INTERSECTION:
+        case IDM_VECTOR_ERASE_WHOLE:
+            state->tools.vector_erase_mode = LOWORD(wparam) == IDM_VECTOR_ERASE_INTERSECTION
+                ? INKPOD_VECTOR_ERASE_TO_INTERSECTION
+                : (LOWORD(wparam) == IDM_VECTOR_ERASE_WHOLE
+                          ? INKPOD_VECTOR_ERASE_WHOLE_PATH
+                          : INKPOD_VECTOR_ERASE_PARTIAL);
+            state->tools.active_tool = kInteractionVectorEraser;
+            UpdateMenuState(*state);
+            return 1;
+        case IDM_VECTOR_CONNECT: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"ベクター線つなぎ";
+            dialog.labels[0] = L"最大隙間 (1/1000 px)";
+            dialog.values[0] = state->lifetime.smoke_test ? 4000 : 2000;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[0] <= 0) {
+                return 0;
+            }
+            const InkpodStatus status = ConnectSelectedVectorPlane(
+                *state, static_cast<float>(dialog.values[0]) / 1000.0F);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ベクター線つなぎ");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_VECTOR_WIDTH: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"ベクター線幅修正";
+            dialog.labels = {L"モード (1:太く 2:細く 3:倍率 4:一定)",
+                L"値 (1/1000 px または倍率)", nullptr, nullptr};
+            dialog.values = {1, state->lifetime.smoke_test ? 500 : 1000, 0, 0};
+            dialog.value_count = 2U;
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[0] < 1 || dialog.values[0] > 4
+                || dialog.values[1] <= 0) {
+                return 0;
+            }
+            const InkpodStatus status = CorrectSelectedVectorWidth(
+                *state,
+                static_cast<InkpodVectorWidthMode>(dialog.values[0]),
+                static_cast<float>(dialog.values[1]) / 1000.0F);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ベクター線幅修正");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_VECTOR_SELECT_CUT:
+        case IDM_VECTOR_SELECT_TOUCH:
+        case IDM_VECTOR_SELECT_CONTAINED:
+        case IDM_VECTOR_SELECT_LINE:
+        case IDM_VECTOR_SELECT_WHOLE_LINE:
+        case IDM_VECTOR_SELECT_INTERSECTION:
+        case IDM_VECTOR_SELECT_FILL_BOUNDARY:
+        case IDM_VECTOR_SELECT_FILL: {
+            const UINT command = LOWORD(wparam);
+            state->tools.vector_selection_mode = command == IDM_VECTOR_SELECT_CUT
+                ? INKPOD_VECTOR_SELECT_CUT_BY_SELECTION
+                : (command == IDM_VECTOR_SELECT_CONTAINED
+                          ? INKPOD_VECTOR_SELECT_FULLY_CONTAINED
+                          : (command == IDM_VECTOR_SELECT_LINE
+                                    ? INKPOD_VECTOR_SELECT_LINE
+                                    : (command == IDM_VECTOR_SELECT_WHOLE_LINE
+                                              ? INKPOD_VECTOR_SELECT_WHOLE_LINE
+                                              : (command == IDM_VECTOR_SELECT_INTERSECTION
+                                                        ? INKPOD_VECTOR_SELECT_TO_INTERSECTION
+                                                        : (command == IDM_VECTOR_SELECT_FILL_BOUNDARY
+                                                                  ? INKPOD_VECTOR_SELECT_FILL_BOUNDARY
+                                                                  : (command == IDM_VECTOR_SELECT_FILL
+                                                                            ? INKPOD_VECTOR_SELECT_FILL
+                                                                            : INKPOD_VECTOR_SELECT_TOUCHING))))));
+            const InkpodStatus status = SelectVectorObjects(*state);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ベクター選択");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_VECTOR_RASTERIZE: {
+            TreePaneNode source{};
+            if (!QueryTreeNode(*state, false, source)
+                || source.kind != INKPOD_LAYER_VECTOR_COLORING) {
+                ShowCoreError(*state, window, L"ベクターをラスタライズ");
+                return 0;
+            }
+            static constexpr std::array<std::uint8_t, 10U> name{
+                'R','a','s','t','e','r','i','z','e','d'};
+            const InkpodVectorRasterizeInput input{
+                sizeof(InkpodVectorRasterizeInput),
+                0U,
+                INKPOD_VECTOR_RASTERIZE_ANTIALIAS,
+                source.id,
+                1U,
+                0U};
+            std::uint64_t layer_id{};
+            const InkpodStatus status = state->engine->Invoke(
+                [input, &layer_id](InkpodCore* core) {
+                    InkpodDispatchResult result{};
+                    result.struct_size = sizeof(result);
+                    return inkpod_core_vector_rasterize_to_layer(
+                        core,
+                        &input,
+                        name.data(),
+                        name.size(),
+                        &result,
+                        &layer_id);
+                },
+                true,
+                true);
+            if (status == INKPOD_STATUS_OK) {
+                state->panes.active_tree_layer_id = layer_id;
+                state->panes.active_tree_plane_id = 0U;
+                RefreshTreePane(*state);
+            } else {
+                ShowCoreError(*state, window, L"ベクターをラスタライズ");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_VECTOR_VECTORIZE: {
+            TreePaneNode source{};
+            if (!QueryTreeNode(*state, true, source)) {
+                return 0;
+            }
+            const std::uint64_t source_plane_id = source.id;
+            std::uint64_t target_layer_id{};
+            const InkpodStatus status = state->engine->Invoke(
+                [source_plane_id, &target_layer_id](InkpodCore* core) {
+                    static constexpr std::array<std::uint8_t, 10U> name{
+                        'V','e','c','t','o','r','i','z','e','d'};
+                    InkpodTreeEdit edit{};
+                    edit.struct_size = sizeof(edit);
+                    edit.operation = INKPOD_TREE_CREATE_LAYER;
+                    edit.kind = INKPOD_LAYER_VECTOR_COLORING;
+                    edit.name_utf8 = name.data();
+                    edit.name_bytes = name.size();
+                    InkpodDispatchResult result{};
+                    result.struct_size = sizeof(result);
+                    InkpodStatus create_status = inkpod_core_tree_edit(
+                        core, &edit, &result, &target_layer_id);
+                    if (create_status != INKPOD_STATUS_OK) {
+                        return create_status;
+                    }
+                    const InkpodRasterVectorizeInput input{
+                        sizeof(InkpodRasterVectorizeInput), 1U, 0U,
+                        source_plane_id, target_layer_id};
+                    std::uint64_t fill_count{};
+                    return inkpod_core_raster_vectorize(
+                        core, &input, &result, &fill_count);
+                },
+                true,
+                true);
+            if (status == INKPOD_STATUS_OK) {
+                state->panes.active_tree_layer_id = target_layer_id;
+                state->panes.active_tree_plane_id = 0U;
+                RefreshTreePane(*state);
+            } else {
+                ShowCoreError(*state, window, L"ラスターをベクター化");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_EFFECT_GRADIENT:
+        case IDM_EFFECT_AIRBRUSH:
+        case IDM_EFFECT_BOUNDARY_AIRBRUSH:
+        case IDM_EFFECT_BLUR:
+        case IDM_EFFECT_STAMP:
+        case IDM_EFFECT_DUST:
+        case IDM_EFFECT_ALPHA_GRADIENT:
+            if (state->tools.active_plane == INKPOD_PLANE_COLOR
+                && ConfigureM6Effect(*state, LOWORD(wparam))) {
+                UpdateMenuState(*state);
+            }
+            return 0;
+        case IDM_EFFECT_ALPHA_VIEW: {
+            const bool enabled = !state->effects.alpha_view;
+            const InkpodStatus status = ApplyView(
+                *state,
+                INKPOD_VIEW_SET_ALPHA_VISIBLE,
+                enabled ? 1.0 : 0.0,
+                0.0);
+            if (status == INKPOD_STATUS_OK) {
+                state->effects.alpha_view = enabled;
+            } else {
+                ShowCoreError(*state, window, L"アルファ表示");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_PLANE_MAIN_LINE:
+        case IDM_PLANE_COLOR: {
+            state->tools.active_plane = LOWORD(wparam) == IDM_PLANE_MAIN_LINE
+                ? INKPOD_PLANE_MAIN_LINE
+                : INKPOD_PLANE_COLOR;
+            const InkpodPlaneKind plane = state->tools.active_plane;
+            const InkpodStatus plane_status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [plane](InkpodCore* core) {
+                          return inkpod_core_set_active_plane(core, plane);
+                      },
+                      false,
+                      true);
+            if (plane_status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"プレーン切替");
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteColorCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
+    }
+    switch (LOWORD(wparam)) {
+        case IDM_COLOR_EDITOR: {
+            const InkpodStatus status = ShowDrawingColorEditor(*state);
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"描画色編集");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_COLOR_SOURCE_TOPMOST:
+        case IDM_COLOR_SOURCE_SELECTED:
+        case IDM_COLOR_SOURCE_COMPOSITE:
+        case IDM_COLOR_SOURCE_LIGHT_TABLE:
+            state->tools.eyedropper_source = LOWORD(wparam) == IDM_COLOR_SOURCE_TOPMOST
+                ? INKPOD_EYEDROPPER_TOPMOST_NONTRANSPARENT
+                : (LOWORD(wparam) == IDM_COLOR_SOURCE_SELECTED
+                          ? INKPOD_EYEDROPPER_SELECTED_PLANE
+                          : (LOWORD(wparam) == IDM_COLOR_SOURCE_LIGHT_TABLE
+                                    ? INKPOD_EYEDROPPER_LIGHT_TABLE_TOPMOST
+                                    : INKPOD_EYEDROPPER_COMPOSITE));
+            UpdateMenuState(*state);
+            return 1;
+        case IDM_PALETTE_REGISTER:
+        case IDM_PALETTE_DELETE:
+        case IDM_PALETTE_CLEAR: {
+            std::vector<InkpodColorValue> colors;
+            std::vector<std::wstring> names;
+            try {
+                colors = state->panes.palette_colors;
+                names = state->panes.color_chart_names;
+                if (LOWORD(wparam) == IDM_PALETTE_REGISTER) {
+                    if (colors.size() >= 4096U) {
+                        return 0;
+                    }
+                    colors.push_back(state->tools.drawing_color);
+                    names.push_back(L"Color " + std::to_wstring(colors.size()));
+                } else if (LOWORD(wparam) == IDM_PALETTE_DELETE) {
+                    const LRESULT selected = SendMessageW(
+                        state->windows.color_palette_list, LB_GETCURSEL, 0, 0);
+                    const std::size_t index = static_cast<std::size_t>(
+                        state->panes.palette_group) * 10U
+                        + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
+                    if (selected == LB_ERR || index >= colors.size()) {
+                        return 0;
+                    }
+                    colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
+                    names.erase(names.begin() + static_cast<std::ptrdiff_t>(index));
+                } else {
+                    colors.clear();
+                    names.clear();
+                }
+            } catch (const std::bad_alloc&) {
+                return 0;
+            }
+            const InkpodStatus status = ReplacePalette(*state, colors);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"カラーパレット編集");
+            } else {
+                state->panes.color_chart_names = std::move(names);
+            }
+            RefreshColorPanes(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_PALETTE_NEXT_GROUP:
+            ++state->panes.palette_group;
+            RefreshColorPanes(*state);
+            return 1;
+        case IDM_PALETTE_SAVE:
+        case IDM_PALETTE_LOAD: {
+            const bool save = LOWORD(wparam) == IDM_PALETTE_SAVE;
+            std::wstring path = state->lifetime.smoke_test ? L"inkpod-palette-smoke.inkpalette" : L"";
+            if (!state->lifetime.smoke_test && !ChoosePalettePath(window, save, path)) {
+                return 0;
+            }
+            if (save) {
+                return SavePaletteFile(path, state->panes.palette_colors) ? 1 : 0;
+            }
+            std::vector<InkpodColorValue> colors;
+            if (!LoadPaletteFile(path, colors)) {
+                return 0;
+            }
+            const InkpodStatus status = ReplacePalette(*state, colors);
+            RefreshColorPanes(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CHART_GENERATE: {
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"セルからカラーチャートを作成";
+            dialog.labels = {L"最大色数", L"量子化で捨てる下位bit (0-7)", L"preview確認 (1)", nullptr};
+            dialog.values = {256, 2, 1, 0};
+            dialog.value_count = 3U;
+            if (state->lifetime.smoke_test) {
+                dialog.values = {16, 4, 1, 0};
+            }
+            if (ShowViewOptions(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.values[0] <= 0 || dialog.values[1] < 0
+                || dialog.values[1] > 7 || dialog.values[2] == 0) {
+                return 0;
+            }
+            const InkpodStatus status = state->engine->Invoke(
+                [&dialog](InkpodCore* core) {
+                    InkpodDispatchResult result{};
+                    result.struct_size = sizeof(result);
+                    return inkpod_core_palette_generate(
+                        core,
+                        static_cast<std::uint32_t>(dialog.values[0]),
+                        static_cast<std::uint32_t>(dialog.values[1]),
+                        &result);
+                },
+                true,
+                true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"カラーチャート生成");
+            }
+            state->panes.color_chart_names.clear();
+            state->panes.color_chart_page = 0U;
+            RefreshColorPanes(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CHART_SEARCH: {
+            TextInputDialogState dialog{};
+            dialog.title = L"カラーチャート検索";
+            dialog.label = L"名前または番号";
+            dialog.value = state->lifetime.smoke_test ? L"Smoke" : L"";
+            if (ShowTextInput(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
+                return 0;
+            }
+            wchar_t* end{};
+            const unsigned long number = std::wcstoul(dialog.value.c_str(), &end, 10);
+            std::size_t index = SIZE_MAX;
+            if (end != dialog.value.c_str() && *end == L'\0' && number != 0U
+                && number <= state->panes.palette_colors.size()) {
+                index = number - 1U;
+            } else {
+                std::wstring needle = dialog.value;
+                std::transform(
+                    needle.begin(), needle.end(), needle.begin(),
+                    [](wchar_t value) { return std::towlower(value); });
+                for (std::size_t candidate = 0U;
+                     candidate < state->panes.color_chart_names.size(); ++candidate) {
+                    std::wstring name = state->panes.color_chart_names[candidate];
+                    std::transform(
+                        name.begin(), name.end(), name.begin(),
+                        [](wchar_t value) { return std::towlower(value); });
+                    if (name.find(needle) != std::wstring::npos) {
+                        index = candidate;
+                        break;
+                    }
+                }
+            }
+            if (index == SIZE_MAX) {
+                return 0;
+            }
+            state->panes.color_chart_page = static_cast<std::uint32_t>(index / 20U);
+            RefreshColorPanes(*state);
+            SendMessageW(
+                state->windows.color_chart_list, LB_SETCURSEL,
+                static_cast<WPARAM>(index % 20U), 0);
+            return 1;
+        }
+        case IDM_CHART_NEXT: {
+            if (state->panes.palette_colors.empty()) {
+                return 0;
+            }
+            LRESULT selected = SendMessageW(state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
+            std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page) * 20U
+                + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected) + 1U);
+            index %= state->panes.palette_colors.size();
+            state->panes.color_chart_page = static_cast<std::uint32_t>(index / 20U);
+            RefreshColorPanes(*state);
+            SendMessageW(
+                state->windows.color_chart_list, LB_SETCURSEL,
+                static_cast<WPARAM>(index % 20U), 0);
+            return 1;
+        }
+        case IDM_CHART_LOCK:
+            state->panes.color_chart_locked = !state->panes.color_chart_locked;
+            UpdateMenuState(*state);
+            return 1;
+        case IDM_CHART_NEXT_PAGE:
+            ++state->panes.color_chart_page;
+            RefreshColorPanes(*state);
+            return 1;
+        case IDM_CHART_RENAME: {
+            if (state->panes.color_chart_locked) {
+                return 0;
+            }
+            const LRESULT selected = SendMessageW(
+                state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
+            const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
+                * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
+            if (selected == LB_ERR || index >= state->panes.color_chart_names.size()) {
+                return 0;
+            }
+            TextInputDialogState dialog{};
+            dialog.title = L"カラーチャート名";
+            dialog.label = L"名前";
+            dialog.value = state->lifetime.smoke_test ? L"Smoke Color" : state->panes.color_chart_names[index];
+            if (ShowTextInput(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
+                || dialog.value.empty() || dialog.value.size() > 256U) {
+                return 0;
+            }
+            try {
+                state->panes.color_chart_names[index] = dialog.value;
+            } catch (const std::bad_alloc&) {
+                return 0;
+            }
+            RefreshColorPanes(*state);
+            SendMessageW(
+                state->windows.color_chart_list, LB_SETCURSEL,
+                static_cast<WPARAM>(index % 20U), 0);
+            return 1;
+        }
+        case IDM_CHART_SAVE:
+        case IDM_CHART_LOAD: {
+            const bool save = LOWORD(wparam) == IDM_CHART_SAVE;
+            std::wstring path = state->lifetime.smoke_test ? L"inkpod-chart-smoke.inkchart" : L"";
+            if (!state->lifetime.smoke_test && !ChooseChartPath(window, save, path)) {
+                return 0;
+            }
+            if (save) {
+                return SaveColorChartFile(
+                           path, state->panes.palette_colors, state->panes.color_chart_names)
+                    ? 1
+                    : 0;
+            }
+            std::vector<InkpodColorValue> colors;
+            std::vector<std::wstring> names;
+            if (!LoadColorChartFile(path, colors, names)) {
+                return 0;
+            }
+            const InkpodStatus status = ReplacePalette(*state, colors);
+            if (status == INKPOD_STATUS_OK) {
+                try {
+                    state->panes.color_chart_names = std::move(names);
+                } catch (const std::bad_alloc&) {
+                    return 0;
+                }
+                state->panes.color_chart_page = 0U;
+                RefreshColorPanes(*state);
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CHART_COPY: {
+            const LRESULT selected = SendMessageW(
+                state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
+            const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
+                * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
+            if (selected == LB_ERR || index >= state->panes.palette_colors.size()) {
+                return 0;
+            }
+            const auto& selected_color = state->panes.palette_colors[index];
+            std::array<wchar_t, 384U> text{};
+            _snwprintf_s(
+                text.data(), text.size(), _TRUNCATE,
+                selected_color.depth == INKPOD_COLOR_DEPTH_16
+                    ? L"%ls\t#%04X%04X%04X%04X"
+                    : L"%ls\t#%02X%02X%02X%02X",
+                state->panes.color_chart_names[index].c_str(),
+                selected_color.red,
+                selected_color.green,
+                selected_color.blue,
+                selected_color.alpha);
+            const SIZE_T bytes = (wcslen(text.data()) + 1U) * sizeof(wchar_t);
+            HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+            if (memory == nullptr) {
+                return 0;
+            }
+            void* destination = GlobalLock(memory);
+            if (destination == nullptr) {
+                GlobalFree(memory);
+                return 0;
+            }
+            std::memcpy(destination, text.data(), bytes);
+            GlobalUnlock(memory);
+            if (OpenClipboard(window) == FALSE) {
+                GlobalFree(memory);
+                return 0;
+            }
+            EmptyClipboard();
+            const bool copied = SetClipboardData(CF_UNICODETEXT, memory) != nullptr;
+            if (!copied) {
+                GlobalFree(memory);
+            }
+            CloseClipboard();
+            return copied ? 1 : 0;
+        }
+        case IDM_CHART_CUT: {
+            if (state->panes.color_chart_locked
+                || SendMessageW(window, WM_COMMAND, IDM_CHART_COPY, 0) != 1) {
+                return 0;
+            }
+            const LRESULT selected = SendMessageW(
+                state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
+            const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
+                * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
+            if (selected == LB_ERR || index >= state->panes.palette_colors.size()) {
+                return 0;
+            }
+            std::vector<InkpodColorValue> colors = state->panes.palette_colors;
+            std::vector<std::wstring> names = state->panes.color_chart_names;
+            colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
+            names.erase(names.begin() + static_cast<std::ptrdiff_t>(index));
+            const InkpodStatus status = ReplacePalette(*state, colors);
+            if (status == INKPOD_STATUS_OK) {
+                state->panes.color_chart_names = std::move(names);
+                RefreshColorPanes(*state);
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CHART_PASTE: {
+            if (state->panes.color_chart_locked || OpenClipboard(window) == FALSE) {
+                return 0;
+            }
+            HANDLE handle = GetClipboardData(CF_UNICODETEXT);
+            const auto* text = handle == nullptr
+                ? nullptr
+                : static_cast<const wchar_t*>(GlobalLock(handle));
+            InkpodColorValue color{};
+            bool parsed{};
+            std::wstring pasted_name = L"Pasted";
+            const wchar_t* marker = text == nullptr ? nullptr : wcsrchr(text, L'#');
+            if (text != nullptr && marker != nullptr) {
+                if (marker > text) {
+                    pasted_name.assign(text, marker);
+                    while (!pasted_name.empty()
+                        && (pasted_name.back() == L'\t'
+                            || iswspace(pasted_name.back()) != 0)) {
+                        pasted_name.pop_back();
+                    }
+                }
+                const std::size_t length = wcslen(marker + 1U);
+                wchar_t* end{};
+                const unsigned long long value = std::wcstoull(marker + 1U, &end, 16);
+                if (end != marker + 1U && *end == L'\0'
+                    && (length == 8U || length == 16U)) {
+                    color.struct_size = sizeof(color);
+                    color.depth = length == 16U
+                        ? INKPOD_COLOR_DEPTH_16
+                        : INKPOD_COLOR_DEPTH_8;
+                    const std::uint64_t mask = length == 16U ? UINT16_MAX : UINT8_MAX;
+                    const unsigned shift = length == 16U ? 16U : 8U;
+                    color.alpha = static_cast<std::uint16_t>(value & mask);
+                    color.blue = static_cast<std::uint16_t>((value >> shift) & mask);
+                    color.green = static_cast<std::uint16_t>((value >> (shift * 2U)) & mask);
+                    color.red = static_cast<std::uint16_t>((value >> (shift * 3U)) & mask);
+                    parsed = true;
+                }
+            }
+            if (text != nullptr) {
+                GlobalUnlock(handle);
+            }
+            CloseClipboard();
+            if (!parsed) {
+                return 0;
+            }
+            SetDrawingColor(state->tools, color);
+            std::vector<InkpodColorValue> colors = state->panes.palette_colors;
+            if (colors.size() >= 4096U) {
+                return 0;
+            }
+            colors.push_back(color);
+            const InkpodStatus status = ReplacePalette(*state, colors);
+            if (status == INKPOD_STATUS_OK) {
+                RefreshColorPanes(*state);
+                state->panes.color_chart_names.back() = pasted_name.empty()
+                    ? L"Pasted"
+                    : pasted_name;
+                state->panes.color_chart_page = static_cast<std::uint32_t>(
+                    (state->panes.palette_colors.size() - 1U) / 20U);
+                RefreshColorPanes(*state);
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_COLOR_CHOOSE: {
+            static std::array<COLORREF, 16> custom_colors{};
+            CHOOSECOLORW choose{};
+            choose.lStructSize = sizeof(choose);
+            choose.hwndOwner = window;
+            choose.rgbResult = RGB(
+                (state->tools.color_rgba >> 24) & 0xffU,
+                (state->tools.color_rgba >> 16) & 0xffU,
+                (state->tools.color_rgba >> 8) & 0xffU);
+            choose.lpCustColors = custom_colors.data();
+            choose.Flags = CC_FULLOPEN | CC_RGBINIT;
+            if (ChooseColorW(&choose) != FALSE) {
+                SetDrawingColor(
+                    state->tools,
+                    InkpodColorValue{
+                        sizeof(InkpodColorValue),
+                        INKPOD_COLOR_DEPTH_8,
+                        GetRValue(choose.rgbResult),
+                        GetGValue(choose.rgbResult),
+                        GetBValue(choose.rgbResult),
+                        static_cast<std::uint16_t>(state->tools.color_rgba & 0xffU)});
+            }
+            return 0;
+        }
+        case IDM_COLOR_CHECK_OFF:
+        case IDM_COLOR_CHECK_LEGACY:
+        case IDM_COLOR_CHECK_NATIVE: {
+            const InkpodColorCheckMode mode = LOWORD(wparam) == IDM_COLOR_CHECK_LEGACY
+                ? INKPOD_COLOR_CHECK_LEGACY_WHITE
+                : (LOWORD(wparam) == IDM_COLOR_CHECK_NATIVE
+                          ? INKPOD_COLOR_CHECK_NATIVE_ALPHA
+                          : INKPOD_COLOR_CHECK_OFF);
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [mode](InkpodCore* core) {
+                          return inkpod_core_set_color_check(core, mode);
+                      },
+                      true,
+                      true);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"彩色チェック表示");
+            } else {
+                state->view.color_check_mode = mode;
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteApplicationCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    if (state == nullptr) {
+        return std::nullopt;
+    }
+    switch (LOWORD(wparam)) {
+        case IDM_SHORTCUT_RESET: {
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [](InkpodCore* core) {
+                          return inkpod_core_shortcut_reset(core);
+                      },
+                      false,
+                      false);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ショートカットの初期化");
+            }
+            return 0;
+        }
+        case IDM_SHORTCUT_EDIT: {
+            ShortcutDialogState dialog_state{};
+            if (ShowShortcutEditor(
+                    state->lifetime.instance,
+                    window,
+                    state->lifetime.smoke_test,
+                    dialog_state) != IDOK) {
+                return 0;
+            }
+            const InkpodStatus status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [dialog_state](InkpodCore* core) {
+                          return inkpod_core_shortcut_rebind(
+                              core,
+                              dialog_state.command_id,
+                              dialog_state.virtual_key,
+                              dialog_state.modifiers);
+                      },
+                      false,
+                      false);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ショートカット編集");
+                return 0;
+            }
+            return 1;
+        }
+        case IDM_HELP_ABOUT:
+            return ShowAboutDialog(
+                       state->lifetime.instance,
+                       window,
+                       state->lifetime.smoke_test)
+                    == IDOK
+                ? 1
+                : 0;
+        case IDM_APP_EXIT:
+            SendMessageW(window, WM_CLOSE, 0, 0);
+            return 0;
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+std::optional<LRESULT> RouteMainWindowCommand(
+    AppContext* state, HWND window, WPARAM wparam, LPARAM lparam) noexcept {
+    using CommandRoute = std::optional<LRESULT> (*)(
+        AppContext*, HWND, WPARAM, LPARAM) noexcept;
+    constexpr std::array<CommandRoute, 11U> routes{
+        RoutePaneControlCommand,
+        RouteBatchCommand,
+        RouteDocumentCommand,
+        RouteEditCommand,
+        RouteEffectsCommand,
+        RouteDocumentPaneCommand,
+        RouteAnimationCommand,
+        RouteSelectionViewCommand,
+        RouteToolCommand,
+        RouteColorCommand,
+        RouteApplicationCommand};
+    for (const CommandRoute route : routes) {
+        if (const auto result = route(state, window, wparam, lparam)) {
+            return result;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<LRESULT> RouteWindowLifecycleMessage(
+    AppContext* state,
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam) noexcept {
     switch (message) {
         case WM_CREATE:
             if (state == nullptr) {
@@ -8765,7 +11699,7 @@ LRESULT CALLBACK MainWindowProcedure(
             }
             state->windows.canvas = inkpod::renderer::CreateCanvasWindow(
                 state->lifetime.instance, window);
-            if (state->windows.canvas == nullptr || !CreateMainChrome(*state)
+            if (state->windows.canvas == nullptr || !InitializeMainChrome(*state)
                 || SetTimer(
                        window,
                        kAutosaveTimer,
@@ -8776,7 +11710,11 @@ LRESULT CALLBACK MainWindowProcedure(
             return 0;
         case WM_SIZE:
             if (state != nullptr) {
-                LayoutMainChrome(*state, LOWORD(lparam), HIWORD(lparam));
+                inkpod::windows::ui::LayoutMainChrome(
+                    state->windows,
+                    state->lifetime.smoke_test,
+                    LOWORD(lparam),
+                    HIWORD(lparam));
             }
             return 0;
         case WM_NOTIFY:
@@ -8855,3161 +11793,20 @@ LRESULT CALLBACK MainWindowProcedure(
                 return 0;
             }
             break;
-        case WM_COMMAND:
-            if (state == nullptr) {
-                break;
-            }
-            switch (LOWORD(wparam)) {
-                case IDC_MAIN_LAYER_LIST:
-                    if (HIWORD(wparam) == LBN_SELCHANGE && state->windows.layer_list != nullptr) {
-                        const LRESULT selected = SendMessageW(
-                            state->windows.layer_list, LB_GETCURSEL, 0, 0);
-                        if (selected != LB_ERR) {
-                            const LRESULT id = SendMessageW(
-                                state->windows.layer_list,
-                                LB_GETITEMDATA,
-                                static_cast<WPARAM>(selected),
-                                0);
-                            if (id != LB_ERR) {
-                                state->panes.active_tree_layer_id = static_cast<std::uint64_t>(id);
-                                state->panes.active_tree_layer_index = static_cast<std::uint32_t>(selected);
-                                state->panes.active_tree_plane_id = 0U;
-                                RefreshTreePane(*state);
-                                if (state->panes.active_tree_plane_id != 0U && state->engine != nullptr) {
-                                    const std::uint64_t layer_id = state->panes.active_tree_layer_id;
-                                    const std::uint64_t plane_id = state->panes.active_tree_plane_id;
-                                    state->engine->Invoke(
-                                        [layer_id, plane_id](InkpodCore* core) {
-                                            return inkpod_core_set_active_node(
-                                                core, layer_id, plane_id);
-                                        },
-                                        false,
-                                        false);
-                                }
-                            }
-                        }
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDC_MAIN_PLANE_LIST:
-                    if (HIWORD(wparam) == LBN_SELCHANGE && state->windows.plane_list != nullptr) {
-                        const LRESULT selected = SendMessageW(
-                            state->windows.plane_list, LB_GETCURSEL, 0, 0);
-                        if (selected != LB_ERR) {
-                            const LRESULT id = SendMessageW(
-                                state->windows.plane_list,
-                                LB_GETITEMDATA,
-                                static_cast<WPARAM>(selected),
-                                0);
-                            if (id != LB_ERR && state->engine != nullptr) {
-                                state->panes.active_tree_plane_id = static_cast<std::uint64_t>(id);
-                                state->panes.active_tree_plane_index =
-                                    static_cast<std::uint32_t>(selected);
-                                const std::uint64_t layer_id = state->panes.active_tree_layer_id;
-                                const std::uint64_t plane_id = state->panes.active_tree_plane_id;
-                                const InkpodStatus status = state->engine->Invoke(
-                                    [layer_id, plane_id](InkpodCore* core) {
-                                        return inkpod_core_set_active_node(
-                                            core, layer_id, plane_id);
-                                    },
-                                    false,
-                                    false);
-                                if (status != INKPOD_STATUS_OK) {
-                                    ShowCoreError(*state, window, L"プレーン選択");
-                                }
-                            }
-                        }
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDC_MAIN_LT_SET_LIST:
-                    if (HIWORD(wparam) == LBN_SELCHANGE
-                        && state->windows.light_table_set_list != nullptr) {
-                        const LRESULT selected = SendMessageW(
-                            state->windows.light_table_set_list, LB_GETCURSEL, 0, 0);
-                        if (selected != LB_ERR) {
-                            const LRESULT id = SendMessageW(
-                                state->windows.light_table_set_list,
-                                LB_GETITEMDATA,
-                                static_cast<WPARAM>(selected),
-                                0);
-                            if (id != LB_ERR) {
-                                InkpodLightTableEdit edit{};
-                                edit.operation = INKPOD_LIGHT_TABLE_SET_ACTIVE_OPERATION;
-                                edit.object_id = static_cast<std::uint64_t>(id);
-                                std::uint64_t ignored{};
-                                if (ApplyLightTableEdit(*state, edit, {}, ignored)
-                                    == INKPOD_STATUS_OK) {
-                                    state->panes.active_light_table_set_id = edit.object_id;
-                                    state->panes.active_light_table_set_index =
-                                        static_cast<std::uint32_t>(selected);
-                                    state->panes.active_light_table_item_id = 0U;
-                                    RefreshLightTablePane(*state);
-                                }
-                            }
-                        }
-                    }
-                    return 0;
-                case IDC_MAIN_LT_ITEM_LIST:
-                    if (HIWORD(wparam) == LBN_SELCHANGE
-                        && state->windows.light_table_item_list != nullptr) {
-                        const LRESULT selected = SendMessageW(
-                            state->windows.light_table_item_list, LB_GETCURSEL, 0, 0);
-                        if (selected != LB_ERR) {
-                            const LRESULT id = SendMessageW(
-                                state->windows.light_table_item_list,
-                                LB_GETITEMDATA,
-                                static_cast<WPARAM>(selected),
-                                0);
-                            if (id != LB_ERR) {
-                                state->panes.active_light_table_item_id =
-                                    static_cast<std::uint64_t>(id);
-                                state->panes.active_light_table_item_index =
-                                    static_cast<std::uint32_t>(selected);
-                            }
-                        }
-                    }
-                    return 0;
-                case IDC_MAIN_SEQUENCE_LIST:
-                    if ((HIWORD(wparam) == LBN_SELCHANGE || HIWORD(wparam) == LBN_DBLCLK)
-                        && state->windows.sequence_list != nullptr) {
-                        const LRESULT selected = SendMessageW(
-                            state->windows.sequence_list, LB_GETCURSEL, 0, 0);
-                        if (selected != LB_ERR) {
-                            state->animation.active_sequence_index =
-                                static_cast<std::uint32_t>(selected);
-                            if (HIWORD(wparam) == LBN_DBLCLK && state->engine != nullptr) {
-                                InkpodDocumentInfo info{};
-                                const std::uint32_t index = state->animation.active_sequence_index;
-                                const InkpodStatus status = state->engine->Invoke(
-                                    [index, &info](InkpodCore* core) {
-                                        info = EmptyDocumentInfo();
-                                        return inkpod_core_sequence_activate(core, index, &info);
-                                    },
-                                    false,
-                                    false);
-                                if (status == INKPOD_STATUS_OK) {
-                                    ResetUiForDocumentReplacement(*state);
-                                    state->animation.active_sequence_index = index;
-                                    FitCanvas(*state, INKPOD_VIEW_FIT);
-                                    RefreshSequencePane(*state);
-                                } else {
-                                    ShowCoreError(*state, window, L"連番セル切替");
-                                }
-                            }
-                        }
-                    }
-                    return 0;
-                case IDC_MAIN_COLOR_PALETTE:
-                case IDC_MAIN_COLOR_CHART:
-                    if (HIWORD(wparam) == LBN_DBLCLK) {
-                        const bool chart = LOWORD(wparam) == IDC_MAIN_COLOR_CHART;
-                        if (chart && state->panes.color_chart_locked) {
-                            return 0;
-                        }
-                        HWND list = chart ? state->windows.color_chart_list : state->windows.color_palette_list;
-                        const LRESULT selected = SendMessageW(list, LB_GETCURSEL, 0, 0);
-                        if (selected != LB_ERR) {
-                            const std::size_t index = chart
-                                ? static_cast<std::size_t>(state->panes.color_chart_page) * 20U
-                                    + static_cast<std::size_t>(selected)
-                                : static_cast<std::size_t>(state->panes.palette_group) * 10U
-                                    + static_cast<std::size_t>(selected);
-                            if (index < state->panes.palette_colors.size()) {
-                                SetDrawingColor(state->tools, state->panes.palette_colors[index]);
-                            }
-                        }
-                    }
-                    return 0;
-                case IDM_WINDOW_BATCH:
-                    if (state->batch.palette != nullptr) {
-                        const bool visible = IsWindowVisible(state->batch.palette) != FALSE;
-                        ShowWindow(state->batch.palette, visible ? SW_HIDE : SW_SHOW);
-                        if (!visible) {
-                            RefreshBatchPalette(state->batch);
-                            SetForegroundWindow(state->batch.palette);
-                        }
-                        UpdateMenuState(*state);
-                        return 1;
-                    }
-                    return 0;
-                case IDM_BATCH_INPUT_FILE:
-                case IDM_BATCH_INPUT_FOLDER:
-                case IDM_BATCH_INPUT_CURRENT: {
-                    if (state->batch.task != nullptr || state->batch.loaded_graph) {
-                        return 0;
-                    }
-                    std::wstring path;
-                    InkpodBatchInputKind kind = INKPOD_BATCH_INPUT_CURRENT_SEQUENCE;
-                    bool accepted = true;
-                    if (LOWORD(wparam) == IDM_BATCH_INPUT_FILE) {
-                        kind = INKPOD_BATCH_INPUT_FILE;
-                        accepted = ChooseInkpodPath(window, false, path);
-                    } else if (LOWORD(wparam) == IDM_BATCH_INPUT_FOLDER) {
-                        kind = INKPOD_BATCH_INPUT_FOLDER;
-                        accepted = ChooseBatchFolder(window, path);
-                    }
-                    if (!accepted) {
-                        return 0;
-                    }
-                    ResetBatchDerivedState(state->batch);
-                    state->batch.input_kind = kind;
-                    state->batch.input_path = std::move(path);
-                    state->batch.first_cell = 0U;
-                    state->batch.last_cell = 0U;
-                    RefreshBatchPalette(state->batch);
-                    UpdateMenuState(*state);
-                    return 1;
-                }
-                case IDM_BATCH_INPUT_RANGE: {
-                    if (state->batch.task != nullptr || state->batch.loaded_graph) {
-                        return 0;
-                    }
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"バッチ入力範囲";
-                    dialog.labels = {
-                        L"開始セル番号 (0=先頭)",
-                        L"終了セル番号 (0=末尾)",
-                        nullptr,
-                        nullptr};
-                    dialog.values = {
-                        static_cast<std::int32_t>(state->batch.first_cell),
-                        static_cast<std::int32_t>(state->batch.last_cell),
-                        0,
-                        0};
-                    dialog.value_count = 2U;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[0] < 0 || dialog.values[1] < 0
-                        || (dialog.values[0] != 0 && dialog.values[1] != 0
-                            && dialog.values[0] > dialog.values[1])) {
-                        return 0;
-                    }
-                    ResetBatchDerivedState(state->batch);
-                    state->batch.first_cell =
-                        static_cast<std::uint32_t>(dialog.values[0]);
-                    state->batch.last_cell =
-                        static_cast<std::uint32_t>(dialog.values[1]);
-                    RefreshBatchPalette(state->batch);
-                    UpdateMenuState(*state);
-                    return 1;
-                }
-                case IDM_BATCH_ADD_COLOR_REPLACE:
-                case IDM_BATCH_ADD_CONTINUOUS_FILL:
-                case IDM_BATCH_ADD_SEPARATION:
-                case IDM_BATCH_ADD_VISIBILITY:
-                case IDM_BATCH_ADD_LINE_WIDTH:
-                case IDM_BATCH_ADD_BOUNDARY_AIRBRUSH:
-                case IDM_BATCH_ADD_DUST:
-                case IDM_BATCH_ADD_MIRROR:
-                case IDM_BATCH_ADD_ROTATE:
-                case IDM_BATCH_ADD_RESIZE:
-                case IDM_BATCH_ADD_CONVERT:
-                case IDM_BATCH_ADD_FILTER_SHARPEN_WEAK:
-                case IDM_BATCH_ADD_FILTER_SHARPEN_STRONG:
-                case IDM_BATCH_ADD_FILTER_BLUR_WEAK:
-                case IDM_BATCH_ADD_FILTER_BLUR_STRONG:
-                case IDM_BATCH_ADD_FILTER_GAUSSIAN:
-                case IDM_BATCH_ADD_FILTER_INVERT:
-                case IDM_BATCH_ADD_FILTER_AUTO_CONTRAST:
-                case IDM_BATCH_ADD_FILTER_BRIGHTNESS:
-                case IDM_BATCH_ADD_FILTER_TONE_CURVE:
-                case IDM_BATCH_ADD_FILTER_LEVELS:
-                case IDM_BATCH_ADD_FILTER_HSV:
-                case IDM_BATCH_ADD_FILTER_COLOR_BALANCE:
-                case IDM_BATCH_ADD_FILTER_UNSHARP:
-                    if (state->batch.task == nullptr
-                        && AddBatchOperation(*state, LOWORD(wparam))) {
-                        UpdateMenuState(*state);
-                        return 1;
-                    }
-                    return 0;
-                case IDM_BATCH_OPERATION_EDIT:
-                    if (state->batch.task == nullptr
-                        && EditSelectedBatchOperation(*state)) {
-                        UpdateMenuState(*state);
-                        return 1;
-                    }
-                    return 0;
-                case IDM_BATCH_REPLACE_SWAP:
-                    if (state->batch.task == nullptr && !state->batch.loaded_graph
-                        && state->batch.selected_operation < state->batch.operations.size()) {
-                        BatchOperationUi& operation =
-                            state->batch.operations[state->batch.selected_operation];
-                        if (operation.kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE
-                            && !operation.color_pairs.empty()) {
-                            for (auto& pair : operation.color_pairs) {
-                                std::swap(pair.old_color, pair.new_color);
-                            }
-                            ResetBatchDerivedState(state->batch);
-                            RefreshBatchPalette(state->batch);
-                            UpdateMenuState(*state);
-                            return 1;
-                        }
-                    }
-                    return 0;
-                case IDM_BATCH_OPERATION_REMOVE:
-                    if (state->batch.task == nullptr && !state->batch.loaded_graph
-                        && state->batch.selected_operation < state->batch.operations.size()) {
-                        state->batch.operations.erase(
-                            state->batch.operations.begin()
-                            + state->batch.selected_operation);
-                        if (!state->batch.operations.empty()) {
-                            state->batch.selected_operation = std::min<std::uint32_t>(
-                                state->batch.selected_operation,
-                                static_cast<std::uint32_t>(
-                                    state->batch.operations.size() - 1U));
-                        } else {
-                            state->batch.selected_operation = 0U;
-                        }
-                        ResetBatchDerivedState(state->batch);
-                        RefreshBatchPalette(state->batch);
-                        UpdateMenuState(*state);
-                        return 1;
-                    }
-                    return 0;
-                case IDM_BATCH_OPERATION_UP:
-                case IDM_BATCH_OPERATION_DOWN:
-                    if (state->batch.task == nullptr && !state->batch.loaded_graph
-                        && state->batch.selected_operation < state->batch.operations.size()) {
-                        const std::uint32_t current = state->batch.selected_operation;
-                        const bool up = LOWORD(wparam) == IDM_BATCH_OPERATION_UP;
-                        if ((up && current > 0U)
-                            || (!up && current + 1U < state->batch.operations.size())) {
-                            const std::uint32_t target = up ? current - 1U : current + 1U;
-                            std::swap(
-                                state->batch.operations[current],
-                                state->batch.operations[target]);
-                            state->batch.selected_operation = target;
-                            ResetBatchDerivedState(state->batch);
-                            RefreshBatchPalette(state->batch);
-                            UpdateMenuState(*state);
-                            return 1;
-                        }
-                    }
-                    return 0;
-                case IDM_BATCH_OUTPUT_DUPLICATE:
-                case IDM_BATCH_OUTPUT_NEW:
-                case IDM_BATCH_OUTPUT_OVERWRITE:
-                    if (state->batch.task == nullptr && !state->batch.loaded_graph) {
-                        ResetBatchDerivedState(state->batch);
-                        state->batch.output_policy = LOWORD(wparam) == IDM_BATCH_OUTPUT_NEW
-                            ? INKPOD_BATCH_OUTPUT_NEW_SAVE
-                            : (LOWORD(wparam) == IDM_BATCH_OUTPUT_OVERWRITE
-                                      ? INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE
-                                      : INKPOD_BATCH_OUTPUT_DUPLICATE);
-                        RefreshBatchPalette(state->batch);
-                        UpdateMenuState(*state);
-                        return 1;
-                    }
-                    return 0;
-                case IDM_BATCH_OUTPUT_SETTINGS: {
-                    if (state->batch.task != nullptr || state->batch.loaded_graph) {
-                        return 0;
-                    }
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"バッチ出力設定";
-                    dialog.labels = {
-                        L"cell folder (0/1)",
-                        L"開始番号",
-                        L"降順 (0/1)",
-                        L"file間 wait (ms)"};
-                    dialog.values = {
-                        state->batch.cell_folder ? 1 : 0,
-                        static_cast<std::int32_t>(state->batch.start_number),
-                        state->batch.descending ? 1 : 0,
-                        static_cast<std::int32_t>(state->batch.wait_milliseconds)};
-                    dialog.value_count = 4U;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[0] < 0 || dialog.values[0] > 1
-                        || dialog.values[1] < 0
-                        || dialog.values[2] < 0 || dialog.values[2] > 1
-                        || dialog.values[3] < 0 || dialog.values[3] > 3'600'000) {
-                        return 0;
-                    }
-                    TextInputDialogState folder{};
-                    folder.title = L"バッチ出力フォルダー";
-                    folder.label = L"空欄は入力と同じ場所";
-                    folder.value = state->batch.output_folder;
-                    TextInputDialogState basename{};
-                    basename.title = L"バッチ出力basename";
-                    basename.label = L"空欄は入力名を使用";
-                    basename.value = state->batch.basename;
-                    if (ShowTextInput(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, folder) != IDOK
-                        || ShowTextInput(
-                               state->lifetime.instance, window, state->lifetime.smoke_test, basename) != IDOK) {
-                        return 0;
-                    }
-                    bool preview_before_save = state->batch.preview_before_save;
-                    if (!state->lifetime.smoke_test) {
-                        const int preview_choice = MessageBoxW(
-                            window,
-                            L"保存前に入力・出力と警告のプレビュー確認を必須にしますか？",
-                            L"バッチ出力設定",
-                            MB_YESNOCANCEL | MB_ICONQUESTION);
-                        if (preview_choice == IDCANCEL) {
-                            return 0;
-                        }
-                        preview_before_save = preview_choice == IDYES;
-                    }
-                    ResetBatchDerivedState(state->batch);
-                    state->batch.cell_folder = dialog.values[0] != 0;
-                    state->batch.start_number =
-                        static_cast<std::uint32_t>(dialog.values[1]);
-                    state->batch.descending = dialog.values[2] != 0;
-                    state->batch.wait_milliseconds =
-                        static_cast<std::uint32_t>(dialog.values[3]);
-                    state->batch.output_folder = std::move(folder.value);
-                    state->batch.basename = std::move(basename.value);
-                    state->batch.preview_before_save = preview_before_save;
-                    RefreshBatchPalette(state->batch);
-                    UpdateMenuState(*state);
-                    return 1;
-                }
-                case IDM_BATCH_FAILURE_CONTINUE:
-                case IDM_BATCH_FAILURE_STOP:
-                    if (state->batch.task == nullptr && !state->batch.loaded_graph) {
-                        ResetBatchDerivedState(state->batch);
-                        state->batch.failure_policy = LOWORD(wparam) == IDM_BATCH_FAILURE_STOP
-                            ? INKPOD_BATCH_FAILURE_STOP
-                            : INKPOD_BATCH_FAILURE_CONTINUE;
-                        RefreshBatchPalette(state->batch);
-                        UpdateMenuState(*state);
-                        return 1;
-                    }
-                    return 0;
-                case IDM_BATCH_PREVIEW: {
-                    const InkpodStatus status = PreviewBatch(*state, INKPOD_BATCH_SCOPE_ALL);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"バッチプレビュー");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_BATCH_DRY_RUN:
-                case IDM_BATCH_RUN_CURRENT:
-                case IDM_BATCH_RUN_ALL: {
-                    const UINT command = LOWORD(wparam);
-                    const InkpodStatus status = StartBatch(
-                        *state,
-                        command == IDM_BATCH_RUN_CURRENT
-                            ? INKPOD_BATCH_SCOPE_CURRENT
-                            : INKPOD_BATCH_SCOPE_ALL,
-                        command == IDM_BATCH_DRY_RUN);
-                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                        ShowCoreError(*state, window, L"バッチ実行");
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_BATCH_CANCEL:
-                    if (state->batch.task != nullptr
-                        && inkpod_batch_task_cancel(state->batch.task) == INKPOD_STATUS_OK) {
-                        return 1;
-                    }
-                    return 0;
-                case IDM_BATCH_SAVE_SET:
-                case IDM_BATCH_LOAD_SET: {
-                    const bool save = LOWORD(wparam) == IDM_BATCH_SAVE_SET;
-                    std::wstring path = state->lifetime.smoke_test
-                        ? L"inkpod-m7-ui-smoke.inkbatch"
-                        : L"";
-                    if (!state->lifetime.smoke_test
-                        && !ChooseBatchSettingsPath(window, save, path)) {
-                        return 0;
-                    }
-                    std::vector<std::uint8_t> utf8;
-                    if (!WidePathToUtf8(path, utf8)) {
-                        return 0;
-                    }
-                    InkpodStatus status = INKPOD_STATUS_OK;
-                    BatchController controller(
-                        state->lifetime,
-                        state->windows,
-                        state->batch,
-                        *state->engine);
-                    if (save) {
-                        status = controller.SaveGraph(utf8.data(), utf8.size());
-                    } else {
-                        status = controller.LoadGraph(utf8.data(), utf8.size());
-                    }
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, save ? L"バッチセット保存" : L"バッチセット読込");
-                    }
-                    RefreshBatchPalette(state->batch);
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_FILE_NEW:
-                    if (ConfirmDiscard(*state)) {
-                        ViewOptionsDialogState dialog{};
-                        dialog.title = L"新規セル";
-                        dialog.labels = {L"幅 (px)", L"高さ (px)", L"DPI", L"レイヤー種別"};
-                        dialog.values = {1920, 1080, 96, INKPOD_LAYER_BINARY_COLORING};
-                        dialog.value_count = 4U;
-                        if (ShowViewOptions(
-                                state->lifetime.instance,
-                                window,
-                                state->lifetime.smoke_test,
-                                dialog) != IDOK
-                            || dialog.values[0] <= 0 || dialog.values[1] <= 0
-                            || dialog.values[2] <= 0) {
-                            return 0;
-                        }
-                        InkpodStatus status = CreateCell(
-                            *state,
-                            static_cast<std::uint32_t>(dialog.values[0]),
-                            static_cast<std::uint32_t>(dialog.values[1]),
-                            static_cast<std::uint32_t>(dialog.values[2]) * 1000U);
-                        if (status == INKPOD_STATUS_OK
-                            && dialog.values[3] != INKPOD_LAYER_BINARY_COLORING) {
-                            InkpodDocumentInfo info{};
-                            if (QueryDocument(*state, info)) {
-                                InkpodTreeEdit edit{};
-                                edit.struct_size = sizeof(edit);
-                                edit.operation = INKPOD_TREE_CONVERT_LAYER;
-                                edit.object_id = info.layer_id;
-                                edit.kind = static_cast<std::uint32_t>(dialog.values[3]);
-                                status = state->engine->Invoke(
-                                    [edit](InkpodCore* core) {
-                                        InkpodDispatchResult result{};
-                                        result.struct_size = sizeof(result);
-                                        std::uint64_t ignored{};
-                                        return inkpod_core_tree_edit(
-                                            core, &edit, &result, &ignored);
-                                    },
-                                    true,
-                                    true);
-                            }
-                        }
-                        if (status != INKPOD_STATUS_OK) {
-                            ShowCoreError(*state, window, L"新規セルの作成");
-                        }
-                        UpdateMenuState(*state);
-                    }
-                    return 0;
-                case IDM_CELL_PAPER_SETTINGS:
-                case IDM_CELL_IMAGE_SIZE:
-                case IDM_CELL_RESOLUTION: {
-                    const UINT command = LOWORD(wparam);
-                    const InkpodStatus status = ResizeDocumentFromDialog(
-                        *state,
-                        command == IDM_CELL_PAPER_SETTINGS
-                            ? L"用紙設定"
-                            : (command == IDM_CELL_IMAGE_SIZE ? L"画像サイズ" : L"画像解像度"),
-                        command == IDM_CELL_RESOLUTION);
-                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                        ShowCoreError(*state, window, L"用紙・画像サイズ変更");
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_CELL_FIT_CAPTURE_FRAME: {
-                    const InkpodStatus status = FitPaperToCaptureFrame(*state);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"撮影フレームに用紙を合わせる");
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_CELL_MIRROR_VERTICAL:
-                case IDM_CELL_ROTATE_LEFT:
-                case IDM_CELL_ROTATE_RIGHT: {
-                    const UINT command = LOWORD(wparam);
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [command](InkpodCore* core) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  if (command == IDM_CELL_MIRROR_VERTICAL) {
-                                      return inkpod_core_mirror_document(
-                                          core, INKPOD_MIRROR_VERTICAL, &result);
-                                  }
-                                  return inkpod_core_rotate_document(
-                                      core,
-                                      command == IDM_CELL_ROTATE_LEFT
-                                          ? INKPOD_ROTATE_LEFT_90
-                                          : INKPOD_ROTATE_RIGHT_90,
-                                      &result);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"画像全体の変形");
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_CELL_FRAME_HUNDRED:
-                case IDM_CELL_FRAME_REFERENCE:
-                case IDM_CELL_FRAME_DRAWING:
-                case IDM_CELL_FRAME_SAFE:
-                case IDM_CELL_MARGINS: {
-                    const InkpodStatus status = EditPaperFrames(*state, LOWORD(wparam));
-                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                        ShowCoreError(*state, window, L"フレーム設定");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_FILE_OPEN:
-                    if (ConfirmDiscard(*state)) {
-                        std::wstring path;
-                        if (ChooseOpenDocumentPath(window, path)) {
-                            if (CommonRasterFormatFromPath(path) != 0U) {
-                                const InkpodStatus status = ImportCommonRasterFromPath(*state, path);
-                                if (status != INKPOD_STATUS_OK) {
-                                    ShowCoreError(*state, window, L"一般画像を開く");
-                                }
-                                UpdateMenuState(*state);
-                                return 0;
-                            }
-                            std::wstring recovery;
-                            try {
-                                recovery = path + L".recovery.inkpod";
-                            } catch (const std::bad_alloc&) {
-                                ShowCoreError(*state, window, L"Recovery path の作成");
-                                return 0;
-                            }
-                            InkpodStatus status = INKPOD_STATUS_OK;
-                            if (RecoveryIsNewer(path, recovery)) {
-                                const int choice = MessageBoxW(
-                                    window,
-                                    L"通常保存より新しいRecoveryがあります。\n\n"
-                                    L"はい: Recoveryを開く\nいいえ: Recoveryを破棄\n"
-                                    L"キャンセル: 後で判断して通常保存を開く",
-                                    L"inkpod Recovery",
-                                    MB_YESNOCANCEL | MB_ICONQUESTION);
-                                if (choice == IDYES) {
-                                    status = OpenRecoveryFromPath(*state, recovery);
-                                } else {
-                                    if (choice == IDNO) {
-                                        DeleteFileW(recovery.c_str());
-                                    }
-                                    status = OpenFromPath(*state, path);
-                                }
-                            } else {
-                                status = OpenFromPath(*state, path);
-                            }
-                            if (status != INKPOD_STATUS_OK) {
-                                ShowCoreError(*state, window, L"開く");
-                            }
-                        }
-                    }
-                    return 0;
-                case IDM_FILE_IMPORT_RASTER: {
-                    if (!ConfirmDiscard(*state)) {
-                        return 0;
-                    }
-                    std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
-                    if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, false, path)) {
-                        return 0;
-                    }
-                    const InkpodStatus status = ImportCommonRasterFromPath(*state, path);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"一般画像の読み込み");
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_FILE_EXPORT_RASTER: {
-                    std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
-                    if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, true, path)) {
-                        return 0;
-                    }
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"ラスター書き出し";
-                    dialog.labels[0] = L"白背景を合成 (0/1)";
-                    dialog.values[0] = state->lifetime.smoke_test ? 1 : 0;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
-                        return 0;
-                    }
-                    const InkpodStatus status = ExportCommonRasterToPath(
-                        *state, path, dialog.values[0] != 0);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"一般画像の書き出し");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_FILE_SAVE:
-                case IDM_FILE_SAVE_AS: {
-                    const InkpodStatus status = SaveDocument(
-                        *state, LOWORD(wparam) == IDM_FILE_SAVE_AS);
-                    if (status != INKPOD_STATUS_OK
-                        && status != INKPOD_STATUS_INVALID_STATE) {
-                        ShowCoreError(*state, window, L"保存");
-                    }
-                    return 0;
-                }
-                case IDM_FILE_REVERT: {
-                    const InkpodStatus revert_status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [](InkpodCore* core) {
-                                  InkpodDocumentInfo info = EmptyDocumentInfo();
-                                  return inkpod_core_revert(core, &info);
-                              },
-                              false,
-                              false);
-                    if (revert_status != INKPOD_STATUS_OK
-                        || FitCanvas(*state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"復帰");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_FILE_REVERT_PARTIAL: {
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [](InkpodCore* core) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  return inkpod_core_revert_active_selection(
-                                      core, &result);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"レイヤーの部分復帰");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_FILE_AUTOSAVE_NOW: {
-                    std::wstring path = state->document.recovery_path;
-                    if (path.empty() && !ChooseInkpodPath(window, true, path)) {
-                        return 0;
-                    }
-                    if (!QueueAutosave(*state, path)) {
-                        ShowCoreError(*state, window, L"Recovery保存の予約");
-                    } else {
-                        try {
-                            state->document.recovery_path = path;
-                        } catch (const std::bad_alloc&) {
-                            ShowCoreError(*state, window, L"Recovery path の保持");
-                        }
-                    }
-                    return 0;
-                }
-                case IDM_FILE_OPEN_RECOVERY: {
-                    if (ConfirmDiscard(*state)) {
-                        std::wstring path = state->document.recovery_path;
-                        if (ChooseInkpodPath(window, false, path)
-                            && OpenRecoveryFromPath(*state, path) != INKPOD_STATUS_OK) {
-                            ShowCoreError(*state, window, L"Recoveryを開く");
-                        }
-                    }
-                    return 0;
-                }
-                case IDM_EDIT_UNDO:
-                case IDM_EDIT_REDO: {
-                    const bool redo = LOWORD(wparam) == IDM_EDIT_REDO;
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [redo](InkpodCore* core) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  return redo ? inkpod_core_redo(core, &result)
-                                              : inkpod_core_undo(core, &result);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"履歴操作");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_EDIT_HISTORY_BACK:
-                case IDM_EDIT_HISTORY_FORWARD: {
-                    const bool forward = LOWORD(wparam) == IDM_EDIT_HISTORY_FORWARD;
-                    HistoryDialogState dialog{};
-                    if (!ConfigureHistoryDialog(*state, forward, dialog)
-                        || ShowHistoryDialog(state->lifetime.instance, window, dialog) != IDOK) {
-                        return 0;
-                    }
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [target = dialog.selected_cursor](InkpodCore* core) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  return inkpod_core_history_jump(
-                                      core, target, &result);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"複数段階の履歴移動");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_EDIT_COPY: {
-                    InkpodClipboard* replacement{};
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [&replacement](InkpodCore* core) {
-                                  return inkpod_core_clipboard_copy(
-                                      core, &replacement);
-                              },
-                              false,
-                              false);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"コピー");
-                    } else {
-                        inkpod_clipboard_release(&state->document.clipboard);
-                        state->document.clipboard = replacement;
-                        if (!PublishStandardClipboard(window, state->document.clipboard)
-                            && !state->lifetime.smoke_test) {
-                            MessageBoxW(
-                                window,
-                                L"アプリ内コピーは完了しましたが、Windowsクリップボードへ公開できませんでした。",
-                                L"inkpod",
-                                MB_OK | MB_ICONWARNING);
-                        }
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_EDIT_CUT: {
-                    SendMessageW(window, WM_COMMAND, IDM_EDIT_COPY, 0);
-                    const InkpodStatus status = state->document.clipboard == nullptr
-                        || state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [](InkpodCore* core) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  return inkpod_core_clear_selected_content(core, &result);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"カット");
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_EDIT_PASTE:
-                case IDM_EDIT_PASTE_SELECTED: {
-                    const InkpodStatus status = BeginFloatingPaste(
-                        *state,
-                        LOWORD(wparam) == IDM_EDIT_PASTE
-                            ? INKPOD_PASTE_COMPATIBLE
-                            : INKPOD_PASTE_ACTIVE_CONVERTED);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"貼り付け開始");
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_EDIT_PASTE_CONVERTED: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"変換してペースト";
-                    dialog.labels = {L"プレーン種類 (1-7)", L"色深度/形式 (1-5)", L"不透明度 (%)", L"新規プレーン (1)"};
-                    dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 1};
-                    dialog.value_count = 4U;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
-                        return 0;
-                    }
-                    TextInputDialogState name{};
-                    name.title = L"変換先プレーン";
-                    name.label = L"名前";
-                    name.value = L"Pasted Plane";
-                    if (ShowTextInput(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, name) != IDOK) {
-                        return 0;
-                    }
-                    std::vector<std::uint8_t> utf8;
-                    if (!WidePathToUtf8(name.value, utf8)) {
-                        return 0;
-                    }
-                    InkpodTreeEdit edit{};
-                    edit.struct_size = sizeof(edit);
-                    edit.operation = INKPOD_TREE_CREATE_PLANE;
-                    edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
-                    edit.parent_id = state->panes.active_tree_layer_id;
-                    edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
-                    edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
-                    edit.opacity_milli = static_cast<std::uint32_t>(
-                        std::clamp(dialog.values[2], 0, 100)) * 10U;
-                    std::uint64_t plane_id{};
-                    InkpodStatus status = INKPOD_STATUS_INVALID_STATE;
-                    try {
-                        const std::string plane_name(
-                            reinterpret_cast<const char*>(utf8.data()), utf8.size());
-                        status = ApplyTreeEditRecord(*state, edit, plane_name, plane_id);
-                    } catch (const std::bad_alloc&) {
-                        status = INKPOD_STATUS_INVALID_STATE;
-                    }
-                    if (status == INKPOD_STATUS_OK) {
-                        state->panes.active_tree_plane_id = plane_id;
-                        RefreshTreePane(*state);
-                        status = BeginFloatingPaste(*state, INKPOD_PASTE_ACTIVE_CONVERTED);
-                    }
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"変換してペースト");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_EDIT_FLOATING_TRANSFORM: {
-                    const InkpodStatus status = ShowFloatingTransformDialog(*state);
-                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                        ShowCoreError(*state, window, L"フローティング変形");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_EDIT_FLOATING_COMMIT:
-                case IDM_EDIT_FLOATING_CANCEL: {
-                    const bool commit = LOWORD(wparam) == IDM_EDIT_FLOATING_COMMIT;
-                    const InkpodStatus status = EndFloatingPaste(*state, commit);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, commit ? L"貼り付け確定" : L"貼り付け取消");
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_EDIT_MIRROR_HORIZONTAL: {
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [](InkpodCore* core) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  return inkpod_core_mirror_document(
-                                      core,
-                                      INKPOD_MIRROR_HORIZONTAL,
-                                      &result);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"画像の左右反転");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_FILTER_LAST: {
-                    InkpodDocumentInfo document{};
-                    const InkpodStatus status = state->tools.active_plane != INKPOD_PLANE_COLOR
-                            || !QueryDocument(*state, document)
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : StartM6Task(
-                              *state,
-                              false,
-                              [plane_id = document.color_plane_id](
-                                  InkpodCore* core, InkpodTask* task) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  return inkpod_core_filter_apply_last_task(
-                                      core, plane_id, task, &result);
-                              });
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"直前のフィルタ");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_FILTER_INVERT:
-                case IDM_FILTER_BLUR_WEAK:
-                case IDM_FILTER_SHARPEN_WEAK:
-                case IDM_FILTER_SHARPEN_STRONG:
-                case IDM_FILTER_BLUR_STRONG:
-                case IDM_FILTER_GAUSSIAN:
-                case IDM_FILTER_AUTO_CONTRAST:
-                case IDM_FILTER_BRIGHTNESS:
-                case IDM_FILTER_TONE_CURVE:
-                case IDM_FILTER_LEVELS:
-                case IDM_FILTER_HSV:
-                case IDM_FILTER_COLOR_BALANCE:
-                case IDM_FILTER_UNSHARP: {
-                    const UINT command = LOWORD(wparam);
-                    InkpodDocumentInfo document{};
-                    M6FilterJob job{};
-                    if (state->tools.active_plane != INKPOD_PLANE_COLOR
-                        || !QueryDocument(*state, document)
-                        || !ConfigureM6FilterEditor(*state, command, job)) {
-                        return 0;
-                    }
-                    job.plane_id = document.color_plane_id;
-                    const InkpodStatus status = QueueM6Filter(*state, std::move(job));
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"フィルタ");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_ADJUSTMENT_CREATE:
-                case IDM_ADJUSTMENT_EDIT: {
-                    const bool update = LOWORD(wparam) == IDM_ADJUSTMENT_EDIT;
-                    M6FilterJob job{};
-                    if (!ConfigureM6AdjustmentEditor(*state, job, update)) {
-                        return 0;
-                    }
-                    const InkpodStatus status = CreateOrUpdateM6Adjustment(
-                        *state, std::move(job), update);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"調整レイヤー");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_ADJUSTMENT_PREVIOUS:
-                case IDM_ADJUSTMENT_NEXT:
-                    SelectM6Adjustment(
-                        *state, LOWORD(wparam) == IDM_ADJUSTMENT_NEXT);
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDM_ADJUSTMENT_TOGGLE: {
-                    const bool visible = !state->effects.adjustment_visible;
-                    const InkpodStatus status = SetM6AdjustmentVisibility(*state, visible);
-                    if (status == INKPOD_STATUS_OK) {
-                        state->effects.adjustment_visible = visible;
-                    } else {
-                        ShowCoreError(*state, window, L"調整レイヤー表示");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_ADJUSTMENT_MOVE_TOP: {
-                    std::uint64_t ignored{};
-                    const InkpodStatus status = ApplyTreeEdit(
-                        *state,
-                        INKPOD_TREE_REORDER_LAYER,
-                        state->effects.adjustment_id,
-                        0U,
-                        ignored);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"調整レイヤー移動");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_LAYER_NEW: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"新規レイヤー";
-                    dialog.labels = {L"種類 (1-10)", L"不透明度 (%)", nullptr, nullptr};
-                    dialog.values = {INKPOD_LAYER_RASTER, 100, 0, 0};
-                    dialog.value_count = 2U;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[0] < INKPOD_LAYER_BINARY_COLORING
-                        || dialog.values[0] > INKPOD_LAYER_VECTOR_COLORING
-                        || dialog.values[1] < 0 || dialog.values[1] > 100) {
-                        return 0;
-                    }
-                    InkpodTreeEdit edit{};
-                    edit.struct_size = sizeof(edit);
-                    edit.operation = INKPOD_TREE_CREATE_LAYER;
-                    edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
-                    edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
-                    edit.opacity_milli = static_cast<std::uint32_t>(dialog.values[1]) * 10U;
-                    std::uint64_t layer_id{};
-                    const InkpodStatus status = ApplyTreeEditRecord(
-                        *state, edit, "Layer", layer_id);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"レイヤーの作成");
-                    } else {
-                        state->panes.active_tree_layer_id = layer_id;
-                        state->document.smoke_layer_id = layer_id;
-                        RefreshTreePane(*state);
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_LAYER_DUPLICATE: {
-                    InkpodDocumentInfo info{};
-                    std::uint64_t duplicate_id{};
-                    const std::uint64_t source_id = state->panes.active_tree_layer_id != 0U
-                        ? state->panes.active_tree_layer_id
-                        : (QueryDocument(*state, info) ? info.layer_id : 0U);
-                    const InkpodStatus status = source_id != 0U
-                        ? ApplyTreeEdit(
-                              *state,
-                              INKPOD_TREE_DUPLICATE_LAYER,
-                              source_id,
-                              0U,
-                              duplicate_id)
-                        : INKPOD_STATUS_INVALID_STATE;
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"レイヤーの複製");
-                    } else {
-                        state->document.smoke_layer_id = duplicate_id;
-                        state->panes.active_tree_layer_id = duplicate_id;
-                        RefreshTreePane(*state);
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_LAYER_DELETE: {
-                    std::uint64_t ignored{};
-                    const std::uint64_t target = state->document.smoke_layer_id != 0U
-                        ? state->document.smoke_layer_id
-                        : state->panes.active_tree_layer_id;
-                    const InkpodStatus status = target == 0U
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : ApplyTreeEdit(
-                              *state,
-                              INKPOD_TREE_DELETE_LAYER,
-                              target,
-                              0U,
-                              ignored);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"レイヤーの削除");
-                    } else {
-                        state->document.smoke_layer_id = 0U;
-                        state->panes.active_tree_layer_id = 0U;
-                        RefreshTreePane(*state);
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_LAYER_MOVE_TOP: {
-                    InkpodDocumentInfo info{};
-                    const std::uint64_t target = state->document.smoke_layer_id != 0U
-                        ? state->document.smoke_layer_id
-                        : (state->panes.active_tree_layer_id != 0U
-                                  ? state->panes.active_tree_layer_id
-                                  : (QueryDocument(*state, info) ? info.layer_id : 0U));
-                    std::uint64_t ignored{};
-                    const InkpodStatus status = target == 0U
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : ApplyTreeEdit(
-                              *state,
-                              INKPOD_TREE_REORDER_LAYER,
-                              target,
-                              0U,
-                              ignored);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"レイヤーの移動");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_LAYER_MOVE_UP:
-                case IDM_LAYER_MOVE_DOWN: {
-                    const int count = state->windows.layer_list == nullptr
-                        ? 0
-                        : static_cast<int>(SendMessageW(state->windows.layer_list, LB_GETCOUNT, 0, 0));
-                    const int current = static_cast<int>(state->panes.active_tree_layer_index);
-                    const int destination = LOWORD(wparam) == IDM_LAYER_MOVE_UP
-                        ? std::max(0, current - 1)
-                        : std::min(std::max(0, count - 1), current + 1);
-                    std::uint64_t ignored{};
-                    const InkpodStatus status = ApplyTreeEdit(
-                        *state,
-                        INKPOD_TREE_REORDER_LAYER,
-                        state->panes.active_tree_layer_id,
-                        static_cast<std::uint32_t>(destination),
-                        ignored);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"レイヤーの並べ替え");
-                    }
-                    RefreshTreePane(*state);
-                    return 0;
-                }
-                case IDM_LAYER_TOGGLE_VISIBLE:
-                case IDM_LAYER_TOGGLE_EDITABLE:
-                case IDM_LAYER_OPACITY: {
-                    const InkpodStatus status = SetSelectedTreeNodeProperties(
-                        *state, false, LOWORD(wparam));
-                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                        ShowCoreError(*state, window, L"レイヤープロパティ");
-                    }
-                    RefreshTreePane(*state);
-                    return 0;
-                }
-                case IDM_LAYER_PROPERTIES: {
-                    const InkpodStatus status = EditSelectedTreeNodeProperties(*state, false);
-                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                        ShowCoreError(*state, window, L"レイヤープロパティ");
-                    }
-                    RefreshTreePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_LAYER_CONVERT: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"レイヤー変換";
-                    dialog.labels[0] = L"変換先種類 (1-10)";
-                    dialog.values[0] = INKPOD_LAYER_RASTER;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
-                        return 0;
-                    }
-                    InkpodTreeEdit edit{};
-                    edit.struct_size = sizeof(edit);
-                    edit.operation = INKPOD_TREE_CONVERT_LAYER;
-                    edit.object_id = state->panes.active_tree_layer_id;
-                    edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
-                    std::uint64_t ignored{};
-                    const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"レイヤー変換");
-                    }
-                    RefreshTreePane(*state);
-                    return 0;
-                }
-                case IDM_LAYER_MERGE: {
-                    InkpodTreeEdit edit{};
-                    edit.struct_size = sizeof(edit);
-                    edit.operation = INKPOD_TREE_MERGE_LAYER;
-                    edit.object_id = state->panes.active_tree_layer_id;
-                    std::uint64_t ignored{};
-                    const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"同種レイヤーの統合");
-                    }
-                    state->panes.active_tree_layer_id = 0U;
-                    RefreshTreePane(*state);
-                    return 0;
-                }
-                case IDM_LAYER_DELETE_HIDDEN: {
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [](InkpodCore* core) {
-                                  std::vector<std::uint64_t> hidden;
-                                  try {
-                                      for (std::uint32_t index = 0U; index < 1024U; ++index) {
-                                          InkpodNodeInfo node{};
-                                          node.struct_size = sizeof(node);
-                                          if (inkpod_core_node_get(core, index, UINT32_MAX, &node)
-                                              != INKPOD_STATUS_OK) {
-                                              break;
-                                          }
-                                          if ((node.flags & INKPOD_NODE_VISIBLE) == 0U) {
-                                              hidden.push_back(node.id);
-                                          }
-                                      }
-                                  } catch (const std::bad_alloc&) {
-                                      return INKPOD_STATUS_INVALID_STATE;
-                                  }
-                                  for (const std::uint64_t id : hidden) {
-                                      InkpodTreeEdit edit{};
-                                      edit.struct_size = sizeof(edit);
-                                      edit.operation = INKPOD_TREE_DELETE_LAYER;
-                                      edit.object_id = id;
-                                      InkpodDispatchResult result{};
-                                      result.struct_size = sizeof(result);
-                                      std::uint64_t ignored{};
-                                      const InkpodStatus item_status = inkpod_core_tree_edit(
-                                          core, &edit, &result, &ignored);
-                                      if (item_status != INKPOD_STATUS_OK) {
-                                          return item_status;
-                                      }
-                                  }
-                                  return INKPOD_STATUS_OK;
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"非表示レイヤーの削除");
-                    }
-                    state->panes.active_tree_layer_id = 0U;
-                    RefreshTreePane(*state);
-                    return 0;
-                }
-                case IDM_PLANE_NEW: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"新規プレーン";
-                    dialog.labels = {L"種類 (1-7)", L"形式 (1-5)", L"不透明度 (%)", nullptr};
-                    dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 0};
-                    dialog.value_count = 3U;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
-                        return 0;
-                    }
-                    InkpodTreeEdit edit{};
-                    edit.struct_size = sizeof(edit);
-                    edit.operation = INKPOD_TREE_CREATE_PLANE;
-                    edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
-                    edit.parent_id = state->panes.active_tree_layer_id;
-                    edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
-                    edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
-                    edit.opacity_milli = static_cast<std::uint32_t>(
-                        std::clamp(dialog.values[2], 0, 100)) * 10U;
-                    std::uint64_t plane_id{};
-                    const InkpodStatus status = ApplyTreeEditRecord(
-                        *state, edit, "Plane", plane_id);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"プレーンの作成");
-                    } else {
-                        state->panes.active_tree_plane_id = plane_id;
-                    }
-                    RefreshTreePane(*state);
-                    return 0;
-                }
-                case IDM_PLANE_DUPLICATE:
-                case IDM_PLANE_DELETE:
-                case IDM_PLANE_MOVE_UP:
-                case IDM_PLANE_MOVE_DOWN: {
-                    const UINT command = LOWORD(wparam);
-                    const InkpodTreeOperation operation = command == IDM_PLANE_DUPLICATE
-                        ? INKPOD_TREE_DUPLICATE_PLANE
-                        : (command == IDM_PLANE_DELETE ? INKPOD_TREE_DELETE_PLANE
-                                                      : INKPOD_TREE_REORDER_PLANE);
-                    std::uint32_t destination = state->panes.active_tree_plane_index;
-                    if (command == IDM_PLANE_MOVE_UP) {
-                        destination = destination == 0U ? 0U : destination - 1U;
-                    } else if (command == IDM_PLANE_MOVE_DOWN) {
-                        const int count = state->windows.plane_list == nullptr
-                            ? 0
-                            : static_cast<int>(SendMessageW(
-                                  state->windows.plane_list, LB_GETCOUNT, 0, 0));
-                        destination = static_cast<std::uint32_t>(std::min(
-                            std::max(0, count - 1), static_cast<int>(destination) + 1));
-                    }
-                    std::uint64_t object_id{};
-                    const InkpodStatus status = ApplyTreeEdit(
-                        *state,
-                        operation,
-                        state->panes.active_tree_plane_id,
-                        destination,
-                        object_id);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"プレーン操作");
-                    } else if (command == IDM_PLANE_DUPLICATE) {
-                        state->panes.active_tree_plane_id = object_id;
-                    } else if (command == IDM_PLANE_DELETE) {
-                        state->panes.active_tree_plane_id = 0U;
-                    }
-                    RefreshTreePane(*state);
-                    return 0;
-                }
-                case IDM_PLANE_TOGGLE_VISIBLE:
-                case IDM_PLANE_TOGGLE_EDITABLE:
-                case IDM_PLANE_OPACITY: {
-                    const InkpodStatus status = SetSelectedTreeNodeProperties(
-                        *state, true, LOWORD(wparam));
-                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                        ShowCoreError(*state, window, L"プレーンプロパティ");
-                    }
-                    RefreshTreePane(*state);
-                    return 0;
-                }
-                case IDM_PLANE_PROPERTIES: {
-                    const InkpodStatus status = EditSelectedTreeNodeProperties(*state, true);
-                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                        ShowCoreError(*state, window, L"プレーンプロパティ");
-                    }
-                    RefreshTreePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_PLANE_CONVERT: {
-                    TreePaneNode node{};
-                    if (!QueryTreeNode(*state, true, node)) {
-                        return 0;
-                    }
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"プレーン変換（変換損失を確認）";
-                    dialog.labels = {L"変換先種類 (1-7)", L"変換先形式 (1-5)", L"損失を確認 (1)", nullptr};
-                    dialog.values = {
-                        static_cast<std::int32_t>(node.kind),
-                        static_cast<std::int32_t>(node.pixel_format),
-                        1,
-                        0};
-                    dialog.value_count = 3U;
-                    if (state->lifetime.smoke_test) {
-                        dialog.values[0] = INKPOD_TYPED_PLANE_RASTER;
-                        dialog.values[1] = INKPOD_STORAGE_RGBA8;
-                    }
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[2] == 0) {
-                        return 0;
-                    }
-                    InkpodTreeEdit edit{};
-                    edit.struct_size = sizeof(edit);
-                    edit.operation = INKPOD_TREE_CONVERT_PLANE;
-                    edit.object_id = node.id;
-                    edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
-                    edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
-                    std::uint64_t ignored{};
-                    const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"プレーン変換");
-                    }
-                    RefreshTreePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_PLANE_MERGE: {
-                    InkpodTreeEdit edit{};
-                    edit.struct_size = sizeof(edit);
-                    edit.operation = INKPOD_TREE_MERGE_PLANE;
-                    edit.object_id = state->panes.active_tree_plane_id;
-                    std::uint64_t ignored{};
-                    const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"同種プレーンの統合");
-                    }
-                    state->panes.active_tree_plane_id = 0U;
-                    RefreshTreePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_LT_SET_NEW:
-                case IDM_LT_SET_RENAME: {
-                    TextInputDialogState dialog{};
-                    dialog.title = LOWORD(wparam) == IDM_LT_SET_NEW
-                        ? L"ライトテーブルセットを作成"
-                        : L"ライトテーブルセット名";
-                    dialog.label = L"名前";
-                    dialog.value = state->lifetime.smoke_test ? L"Smoke Set" : L"Light Table";
-                    if (ShowTextInput(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
-                        return 0;
-                    }
-                    InkpodLightTableEdit edit{};
-                    edit.operation = LOWORD(wparam) == IDM_LT_SET_NEW
-                        ? INKPOD_LIGHT_TABLE_CREATE_SET
-                        : INKPOD_LIGHT_TABLE_RENAME_SET;
-                    edit.object_id = state->panes.active_light_table_set_id;
-                    std::uint64_t object_id{};
-                    const InkpodStatus status = ApplyLightTableEdit(
-                        *state, edit, dialog.value, object_id);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ライトテーブルセット");
-                    } else if (object_id != 0U) {
-                        state->panes.active_light_table_set_id = object_id;
-                    }
-                    RefreshLightTablePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_LT_SET_DUPLICATE:
-                case IDM_LT_SET_DELETE:
-                case IDM_LT_SET_UP:
-                case IDM_LT_SET_DOWN: {
-                    InkpodLightTableEdit edit{};
-                    const UINT command = LOWORD(wparam);
-                    edit.operation = command == IDM_LT_SET_DUPLICATE
-                        ? INKPOD_LIGHT_TABLE_DUPLICATE_SET
-                        : (command == IDM_LT_SET_DELETE
-                               ? INKPOD_LIGHT_TABLE_DELETE_SET
-                               : INKPOD_LIGHT_TABLE_REORDER_SET);
-                    edit.object_id = state->panes.active_light_table_set_id;
-                    edit.destination_index = state->panes.active_light_table_set_index;
-                    if (command == IDM_LT_SET_UP && edit.destination_index != 0U) {
-                        --edit.destination_index;
-                    } else if (command == IDM_LT_SET_DOWN) {
-                        ++edit.destination_index;
-                    }
-                    std::uint64_t object_id{};
-                    const InkpodStatus status = ApplyLightTableEdit(*state, edit, {}, object_id);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ライトテーブルセット操作");
-                    } else if (object_id != 0U) {
-                        state->panes.active_light_table_set_id = object_id;
-                    } else {
-                        state->panes.active_light_table_set_id = 0U;
-                    }
-                    RefreshLightTablePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_LT_GLOBAL_OPACITY: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"ライトテーブル全体不透明度";
-                    dialog.labels[0] = L"不透明度 (0-100%)";
-                    dialog.values[0] = state->lifetime.smoke_test ? 50 : 100;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[0] < 0 || dialog.values[0] > 100) {
-                        return 0;
-                    }
-                    const std::uint32_t opacity =
-                        static_cast<std::uint32_t>(dialog.values[0]) * 10U;
-                    const InkpodStatus status = state->engine->Invoke(
-                        [opacity](InkpodCore* core) {
-                            InkpodDispatchResult result{};
-                            result.struct_size = sizeof(result);
-                            return inkpod_core_light_table_set_global_opacity(
-                                core, opacity, &result);
-                        },
-                        true,
-                        true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ライトテーブル全体不透明度");
-                    }
-                    RefreshLightTablePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_LT_ITEM_ADD:
-                case IDM_LT_ITEM_RELOAD: {
-                    std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
-                    if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, false, path)) {
-                        return 0;
-                    }
-                    const InkpodStatus status = AddOrReloadLightTableRaster(
-                        *state, path, LOWORD(wparam) == IDM_LT_ITEM_RELOAD);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ライトテーブル画像");
-                    }
-                    RefreshLightTablePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_LT_ITEM_DELETE:
-                case IDM_LT_ITEM_UP:
-                case IDM_LT_ITEM_DOWN: {
-                    InkpodLightTableEdit edit{};
-                    edit.operation = LOWORD(wparam) == IDM_LT_ITEM_DELETE
-                        ? INKPOD_LIGHT_TABLE_REMOVE_ITEM
-                        : INKPOD_LIGHT_TABLE_REORDER_ITEM;
-                    edit.object_id = state->panes.active_light_table_item_id;
-                    edit.destination_index = state->panes.active_light_table_item_index;
-                    if (LOWORD(wparam) == IDM_LT_ITEM_UP && edit.destination_index != 0U) {
-                        --edit.destination_index;
-                    } else if (LOWORD(wparam) == IDM_LT_ITEM_DOWN) {
-                        ++edit.destination_index;
-                    }
-                    std::uint64_t ignored{};
-                    const InkpodStatus status = ApplyLightTableEdit(*state, edit, {}, ignored);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ライトテーブル項目操作");
-                    }
-                    state->panes.active_light_table_item_id = 0U;
-                    RefreshLightTablePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_LT_ITEM_PROPERTIES: {
-                    const InkpodStatus status = EditLightTableItemProperties(*state);
-                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                        ShowCoreError(*state, window, L"ライトテーブル項目プロパティ");
-                    }
-                    RefreshLightTablePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_LT_ITEM_MOVE:
-                    if (state->panes.active_light_table_item_id == 0U) {
-                        return 0;
-                    }
-                    state->tools.active_tool = kInteractionLightTableMove;
-                    state->panes.light_table_move_samples.clear();
-                    UpdateMenuState(*state);
-                    return 1;
-                case IDM_LT_ITEM_SAMPLE: {
-                    InkpodDocumentInfo document{};
-                    QueryDocument(*state, document);
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"ライトテーブル色サンプル";
-                    dialog.labels = {L"X", L"Y", nullptr, nullptr};
-                    dialog.values = {
-                        state->lifetime.smoke_test ? document.reference_frame.x : 0,
-                        state->lifetime.smoke_test ? document.reference_frame.y : 0,
-                        0,
-                        0};
-                    dialog.value_count = 2U;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[0] < 0 || dialog.values[1] < 0) {
-                        return 0;
-                    }
-                    InkpodColorValue color{};
-                    color.struct_size = sizeof(color);
-                    const InkpodStatus status = state->engine->Invoke(
-                        [&color, &dialog](InkpodCore* core) {
-                            return inkpod_core_light_table_sample(
-                                core,
-                                static_cast<std::uint32_t>(dialog.values[0]),
-                                static_cast<std::uint32_t>(dialog.values[1]),
-                                &color);
-                        },
-                        false,
-                        false);
-                    if (status == INKPOD_STATUS_OK) {
-                        SetDrawingColor(state->tools, color);
-                    } else if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ライトテーブル色サンプル");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_LT_ITEM_SWAP: {
-                    InkpodDocumentInfo info{};
-                    const std::uint64_t item_id = state->panes.active_light_table_item_id;
-                    const InkpodStatus status = state->engine->Invoke(
-                        [item_id, &info](InkpodCore* core) {
-                            info = EmptyDocumentInfo();
-                            return inkpod_core_light_table_swap(core, item_id, &info);
-                        },
-                        false,
-                        false);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ライトテーブルと編集画像の入れ替え");
-                    } else {
-                        ResetUiForDocumentReplacement(*state);
-                        FitCanvas(*state, INKPOD_VIEW_FIT);
-                    }
-                    RefreshLightTablePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_SEQ_IMPORT: {
-                    std::vector<std::wstring> paths;
-                    if (state->lifetime.smoke_test) {
-                        try {
-                            paths = state->lifetime.smoke_sequence_paths;
-                        } catch (const std::bad_alloc&) {
-                            return 0;
-                        }
-                    } else if (!ChooseCommonRasterPaths(window, paths)) {
-                        return 0;
-                    }
-                    const InkpodStatus status = ImportSequencePaths(*state, paths);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"連番読み込み");
-                    }
-                    RefreshSequencePane(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_SEQ_EXPORT: {
-                    std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
-                    if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, true, path)) {
-                        return 0;
-                    }
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"連番書き出し";
-                    dialog.labels[0] = L"白背景を合成 (0/1)";
-                    dialog.values[0] = state->lifetime.smoke_test ? 1 : 0;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
-                        return 0;
-                    }
-                    const InkpodStatus status = ExportSequenceToPath(
-                        *state, path, dialog.values[0] != 0);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"連番書き出し");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_SEQ_PREVIOUS:
-                case IDM_SEQ_NEXT: {
-                    const bool next = LOWORD(wparam) == IDM_SEQ_NEXT;
-                    InkpodDocumentInfo info{};
-                    const InkpodStatus status = state->engine->Invoke(
-                        [next, &info](InkpodCore* core) {
-                            info = EmptyDocumentInfo();
-                            return inkpod_core_sequence_step(
-                                core,
-                                next ? INKPOD_SEQUENCE_NEXT : INKPOD_SEQUENCE_PREVIOUS,
-                                INKPOD_SEQUENCE_FLAG_LOOP,
-                                &info);
-                        },
-                        false,
-                        false);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"前後セル切替");
-                    } else {
-                        ResetUiForDocumentReplacement(*state);
-                        FitCanvas(*state, INKPOD_VIEW_FIT);
-                        RefreshSequencePane(*state);
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_SEQ_GOTO: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"セル番号で移動";
-                    dialog.labels[0] = L"セル番号";
-                    dialog.values[0] = state->lifetime.smoke_test ? 3 : 1;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[0] < 0) {
-                        return 0;
-                    }
-                    const std::uint32_t number = static_cast<std::uint32_t>(dialog.values[0]);
-                    InkpodDocumentInfo info{};
-                    std::uint32_t selected{};
-                    const InkpodStatus status = state->engine->Invoke(
-                        [number, &info, &selected](InkpodCore* core) {
-                            for (std::uint32_t index = 0U; index < 10000U; ++index) {
-                                InkpodSequenceCellInfo cell{};
-                                cell.struct_size = sizeof(cell);
-                                const InkpodStatus query = inkpod_core_sequence_cell_get(
-                                    core, index, &cell);
-                                if (query != INKPOD_STATUS_OK) {
-                                    return INKPOD_STATUS_INVALID_ARGUMENT;
-                                }
-                                if (cell.cell_number == number) {
-                                    selected = index;
-                                    info = EmptyDocumentInfo();
-                                    return inkpod_core_sequence_activate(core, index, &info);
-                                }
-                            }
-                            return INKPOD_STATUS_INVALID_ARGUMENT;
-                        },
-                        false,
-                        false);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"セル番号移動");
-                    } else {
-                        ResetUiForDocumentReplacement(*state);
-                        state->animation.active_sequence_index = selected;
-                        FitCanvas(*state, INKPOD_VIEW_FIT);
-                        RefreshSequencePane(*state);
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_SUBPALETTE_SET: {
-                    const std::uint32_t index = state->animation.active_sequence_index;
-                    const InkpodStatus status = state->engine->Invoke(
-                        [index](InkpodCore* core) {
-                            return inkpod_core_subpalette_set(core, index);
-                        },
-                        false,
-                        false);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"サブパレット登録");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_SUBPALETTE_SAMPLE: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"サブパレット色サンプル";
-                    dialog.labels = {L"X", L"Y", nullptr, nullptr};
-                    dialog.values = {0, 0, 0, 0};
-                    dialog.value_count = 2U;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[0] < 0 || dialog.values[1] < 0) {
-                        return 0;
-                    }
-                    InkpodColorValue color{};
-                    color.struct_size = sizeof(color);
-                    const InkpodStatus status = state->engine->Invoke(
-                        [&dialog, &color](InkpodCore* core) {
-                            return inkpod_core_subpalette_sample(
-                                core,
-                                static_cast<std::uint32_t>(dialog.values[0]),
-                                static_cast<std::uint32_t>(dialog.values[1]),
-                                &color);
-                        },
-                        false,
-                        false);
-                    if (status == INKPOD_STATUS_OK) {
-                        SetDrawingColor(state->tools, color);
-                    } else if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"サブパレット色サンプル");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_MOTION_START: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"モーションチェック設定";
-                    dialog.labels = {L"FPS (8/10/12/24/25/30)", L"ループ (0/1)", L"選択表示 (0/1)", L"LT表示 (0/1)"};
-                    dialog.values = {
-                        static_cast<std::int32_t>(state->animation.motion_fps),
-                        (state->animation.motion_flags & INKPOD_MOTION_FLAG_LOOP) != 0U ? 1 : 0,
-                        (state->animation.motion_flags & INKPOD_MOTION_FLAG_INCLUDE_SELECTION) != 0U ? 1 : 0,
-                        (state->animation.motion_flags & INKPOD_MOTION_FLAG_INCLUDE_LIGHT_TABLE) != 0U ? 1 : 0};
-                    dialog.value_count = 4U;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
-                        return 0;
-                    }
-                    state->animation.motion_fps = static_cast<std::uint32_t>(dialog.values[0]);
-                    state->animation.motion_flags = (dialog.values[1] != 0 ? INKPOD_MOTION_FLAG_LOOP : 0U)
-                        | (dialog.values[2] != 0
-                               ? INKPOD_MOTION_FLAG_INCLUDE_SELECTION
-                               : 0U)
-                        | (dialog.values[3] != 0
-                               ? INKPOD_MOTION_FLAG_INCLUDE_LIGHT_TABLE
-                               : 0U);
-                    InkpodMotionCheckInput input{
-                        sizeof(InkpodMotionCheckInput),
-                        state->animation.motion_fps,
-                        state->animation.motion_flags};
-                    InkpodMotionFrame frame{};
-                    frame.struct_size = sizeof(frame);
-                    const InkpodStatus status = state->engine->Invoke(
-                        [input, &frame](InkpodCore* core) {
-                            return inkpod_core_motion_check_start(core, &input, &frame);
-                        },
-                        false,
-                        false);
-                    if (status == INKPOD_STATUS_OK) {
-                        state->animation.motion_active = true;
-                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
-                        SetTimer(
-                            window,
-                            kMotionPlaybackTimer,
-                            std::max<UINT>(1U, 1000U / state->animation.motion_fps),
-                            nullptr);
-                    } else {
-                        ShowCoreError(*state, window, L"モーションチェック開始");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_MOTION_PAUSE: {
-                    InkpodMotionFrame frame{};
-                    frame.struct_size = sizeof(frame);
-                    const InkpodStatus status = state->engine->Invoke(
-                        [&frame](InkpodCore* core) {
-                            return inkpod_core_motion_check_toggle_pause(core, &frame);
-                        },
-                        false,
-                        false);
-                    if (status == INKPOD_STATUS_OK) {
-                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
-                        if (state->animation.motion_paused) {
-                            KillTimer(window, kMotionPlaybackTimer);
-                        } else {
-                            SetTimer(
-                                window,
-                                kMotionPlaybackTimer,
-                                std::max<UINT>(1U, 1000U / state->animation.motion_fps),
-                                nullptr);
-                        }
-                    } else {
-                        ShowCoreError(*state, window, L"モーション一時停止");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_MOTION_PREVIOUS:
-                case IDM_MOTION_NEXT: {
-                    InkpodMotionFrame frame{};
-                    frame.struct_size = sizeof(frame);
-                    const bool next = LOWORD(wparam) == IDM_MOTION_NEXT;
-                    const InkpodStatus status = state->engine->Invoke(
-                        [next, &frame](InkpodCore* core) {
-                            return inkpod_core_motion_check_step(
-                                core,
-                                next ? INKPOD_SEQUENCE_NEXT : INKPOD_SEQUENCE_PREVIOUS,
-                                &frame);
-                        },
-                        false,
-                        false);
-                    if (status == INKPOD_STATUS_OK) {
-                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
-                    } else {
-                        ShowCoreError(*state, window, L"モーションフレーム移動");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_MOTION_FIRST:
-                case IDM_MOTION_LAST: {
-                    const bool last = LOWORD(wparam) == IDM_MOTION_LAST;
-                    InkpodMotionFrame frame{};
-                    frame.struct_size = sizeof(frame);
-                    const InkpodStatus status = state->engine->Invoke(
-                        [last, &frame](InkpodCore* core) {
-                            std::uint32_t count{};
-                            for (; count < 10000U; ++count) {
-                                InkpodSequenceCellInfo cell{};
-                                cell.struct_size = sizeof(cell);
-                                if (inkpod_core_sequence_cell_get(core, count, &cell)
-                                    != INKPOD_STATUS_OK) {
-                                    break;
-                                }
-                            }
-                            if (count == 0U) {
-                                return INKPOD_STATUS_INVALID_STATE;
-                            }
-                            const std::uint64_t target = last ? count - 1U : 0U;
-                            for (std::uint32_t step = 0U; step < count; ++step) {
-                                const InkpodStatus current = inkpod_core_motion_check_step(
-                                    core,
-                                    last ? INKPOD_SEQUENCE_NEXT : INKPOD_SEQUENCE_PREVIOUS,
-                                    &frame);
-                                if (current != INKPOD_STATUS_OK
-                                    || frame.sequence_index == target) {
-                                    return current;
-                                }
-                            }
-                            return INKPOD_STATUS_INVALID_STATE;
-                        },
-                        false,
-                        false);
-                    if (status == INKPOD_STATUS_OK) {
-                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
-                    } else {
-                        ShowCoreError(*state, window, L"モーション先頭・末尾移動");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_MOTION_FPS_30:
-                case IDM_MOTION_FPS_25:
-                case IDM_MOTION_FPS_24:
-                case IDM_MOTION_FPS_12:
-                case IDM_MOTION_FPS_10:
-                case IDM_MOTION_FPS_8: {
-                    const UINT command = LOWORD(wparam);
-                    state->animation.motion_fps = command == IDM_MOTION_FPS_30
-                        ? 30U
-                        : (command == IDM_MOTION_FPS_25
-                                  ? 25U
-                                  : (command == IDM_MOTION_FPS_24
-                                            ? 24U
-                                            : (command == IDM_MOTION_FPS_12
-                                                      ? 12U
-                                                      : (command == IDM_MOTION_FPS_10 ? 10U : 8U))));
-                    if (!state->animation.motion_active) {
-                        UpdateMenuState(*state);
-                        return 1;
-                    }
-                    const InkpodMotionCheckInput input{
-                        sizeof(InkpodMotionCheckInput),
-                        state->animation.motion_fps,
-                        state->animation.motion_flags};
-                    InkpodMotionFrame frame{};
-                    frame.struct_size = sizeof(frame);
-                    const InkpodStatus status = state->engine->Invoke(
-                        [input, &frame](InkpodCore* core) {
-                            InkpodStatus current = inkpod_core_motion_check_stop(core);
-                            if (current == INKPOD_STATUS_OK) {
-                                current = inkpod_core_motion_check_start(core, &input, &frame);
-                            }
-                            return current;
-                        },
-                        false,
-                        false);
-                    if (status == INKPOD_STATUS_OK) {
-                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
-                        SetTimer(
-                            window,
-                            kMotionPlaybackTimer,
-                            std::max<UINT>(1U, 1000U / state->animation.motion_fps),
-                            nullptr);
-                    } else {
-                        ShowCoreError(*state, window, L"モーションFPS変更");
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_MOTION_STOP: {
-                    const InkpodStatus status = state->engine->Invoke(
-                        [](InkpodCore* core) {
-                            return inkpod_core_motion_check_stop(core);
-                        },
-                        false,
-                        false);
-                    KillTimer(window, kMotionPlaybackTimer);
-                    state->animation.motion_active = false;
-                    state->animation.motion_paused = false;
-                    SetWindowTextW(state->windows.motion_label, L"モーション停止");
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"モーション停止");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_SELECTION_RECTANGLE:
-                case IDM_SELECTION_ELLIPSE:
-                case IDM_SELECTION_LASSO:
-                case IDM_SELECTION_POLYLINE:
-                case IDM_SELECTION_TRACE:
-                case IDM_SELECTION_WAND: {
-                    const UINT command = LOWORD(wparam);
-                    state->tools.selection_shape = command == IDM_SELECTION_ELLIPSE
-                        ? INKPOD_SELECTION_ELLIPSE
-                        : (command == IDM_SELECTION_LASSO
-                                  ? INKPOD_SELECTION_LASSO
-                                  : (command == IDM_SELECTION_POLYLINE
-                                            ? INKPOD_SELECTION_POLYLINE
-                                            : (command == IDM_SELECTION_TRACE
-                                                      ? INKPOD_SELECTION_TRACE
-                                                      : (command == IDM_SELECTION_WAND
-                                                                ? INKPOD_SELECTION_WAND
-                                                                : INKPOD_SELECTION_RECTANGLE))));
-                    state->tools.active_tool = kInteractionSelection;
-                    state->tools.selection_gesture_samples.clear();
-                    if (command == IDM_SELECTION_WAND || command == IDM_SELECTION_TRACE) {
-                        ViewOptionsDialogState dialog{};
-                        dialog.title = command == IDM_SELECTION_WAND
-                            ? L"色の杖"
-                            : L"選択トレース";
-                        dialog.labels = command == IDM_SELECTION_WAND
-                            ? std::array<const wchar_t*, 4U>{
-                                  L"許容差", L"隙間", nullptr, nullptr}
-                            : std::array<const wchar_t*, 4U>{
-                                  L"直径 (px)", nullptr, nullptr, nullptr};
-                        dialog.values[0] = command == IDM_SELECTION_WAND
-                            ? state->tools.selection_tolerance
-                            : static_cast<std::int32_t>(state->tools.selection_diameter);
-                        dialog.values[1] = state->tools.selection_gap_close;
-                        dialog.value_count = command == IDM_SELECTION_WAND ? 2U : 1U;
-                        if (ShowViewOptions(
-                                state->lifetime.instance,
-                                window,
-                                state->lifetime.smoke_test,
-                                dialog) != IDOK) {
-                            return 0;
-                        }
-                        if (command == IDM_SELECTION_WAND) {
-                            if (dialog.values[0] < 0 || dialog.values[0] > UINT16_MAX
-                                || dialog.values[1] < 0
-                                || dialog.values[1] > UINT16_MAX) {
-                                return 0;
-                            }
-                            state->tools.selection_tolerance =
-                                static_cast<std::uint16_t>(dialog.values[0]);
-                            state->tools.selection_gap_close =
-                                static_cast<std::uint16_t>(dialog.values[1]);
-                        } else if (dialog.values[0] > 0) {
-                            state->tools.selection_diameter =
-                                static_cast<float>(dialog.values[0]);
-                        }
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_SELECTION_MODE_NEW:
-                case IDM_SELECTION_MODE_ADD:
-                case IDM_SELECTION_MODE_SUBTRACT:
-                case IDM_SELECTION_MODE_INTERSECT:
-                    state->tools.selection_operation = LOWORD(wparam) == IDM_SELECTION_MODE_ADD
-                        ? INKPOD_SELECTION_ADD
-                        : (LOWORD(wparam) == IDM_SELECTION_MODE_SUBTRACT
-                                  ? INKPOD_SELECTION_SUBTRACT
-                                  : (LOWORD(wparam) == IDM_SELECTION_MODE_INTERSECT
-                                            ? INKPOD_SELECTION_INTERSECT
-                                            : INKPOD_SELECTION_NEW));
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDM_SELECTION_CLEAR: {
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [](InkpodCore* core) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  return inkpod_core_selection_clear(core, &result);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"選択解除");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_SELECTION_COLOR:
-                case IDM_SELECTION_COLOR_DIFFERENT:
-                case IDM_SELECTION_COLOR_ADD: {
-                    const UINT command = LOWORD(wparam);
-                    const InkpodStatus status = SelectDrawingColor(
-                        *state,
-                        command == IDM_SELECTION_COLOR_DIFFERENT,
-                        command == IDM_SELECTION_COLOR_ADD ? INKPOD_SELECTION_ADD
-                                                           : INKPOD_SELECTION_NEW);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"描画色の選択");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_SELECTION_TO_LAYER: {
-                    static constexpr std::array<std::uint8_t, 13U> name{
-                        0xe9, 0x81, 0xb8, 0xe6, 0x8a, 0x9e, 0xe7, 0xaf, 0x84,
-                        0xe5, 0x9b, 0xb2, '1'};
-                    std::uint64_t layer_id{};
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [&layer_id](InkpodCore* core) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  return inkpod_core_selection_to_layer(
-                                      core,
-                                      name.data(),
-                                      name.size(),
-                                      &result,
-                                      &layer_id);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"選択範囲をレイヤーへ変換");
-                    } else {
-                        state->document.selection_layer_id = layer_id;
-                        state->document.smoke_layer_id = layer_id;
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_SELECTION_FROM_LAYER:
-                case IDM_SELECTION_LAYER_ADD:
-                case IDM_SELECTION_LAYER_SUBTRACT: {
-                    const UINT command = LOWORD(wparam);
-                    const std::uint32_t operation = command == IDM_SELECTION_LAYER_ADD
-                        ? INKPOD_SELECTION_LAYER_ADD
-                        : (command == IDM_SELECTION_LAYER_SUBTRACT
-                                  ? INKPOD_SELECTION_LAYER_SUBTRACT
-                                  : INKPOD_SELECTION_LAYER_REPLACE);
-                    const std::uint64_t layer_id = state->document.selection_layer_id;
-                    const InkpodStatus status = state->engine == nullptr || layer_id == 0U
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [layer_id, operation](InkpodCore* core) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  return inkpod_core_selection_from_layer(
-                                      core, layer_id, operation, &result);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"選択レイヤー変換");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_SELECTION_ALL: {
-                    InkpodDocumentInfo info{};
-                    InkpodSelectionInput input{};
-                    input.struct_size = sizeof(input);
-                    input.shape = INKPOD_SELECTION_RECTANGLE;
-                    input.operation = INKPOD_SELECTION_NEW;
-                    const bool queried = QueryDocument(*state, info);
-                    if (queried) {
-                        input.bounds = {
-                            0,
-                            0,
-                            static_cast<std::int32_t>(info.width),
-                            static_cast<std::int32_t>(info.height)};
-                    }
-                    const InkpodStatus status = !queried || state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [input](InkpodCore* core) {
-                                  InkpodDispatchResult result{};
-                                  result.struct_size = sizeof(result);
-                                  return inkpod_core_apply_selection(
-                                      core, &input, &result);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"すべて選択");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_SELECTION_INVERT:
-                case IDM_SELECTION_EXPAND:
-                case IDM_SELECTION_SHRINK: {
-                    const std::uint32_t operation =
-                        LOWORD(wparam) == IDM_SELECTION_INVERT
-                        ? INKPOD_SELECTION_ADJUST_INVERT
-                        : (LOWORD(wparam) == IDM_SELECTION_EXPAND
-                                  ? INKPOD_SELECTION_ADJUST_EXPAND
-                                  : INKPOD_SELECTION_ADJUST_SHRINK);
-                    std::uint32_t pixels = 0U;
-                    if (operation != INKPOD_SELECTION_ADJUST_INVERT) {
-                        ViewOptionsDialogState dialog{};
-                        dialog.title = operation == INKPOD_SELECTION_ADJUST_EXPAND
-                            ? L"選択範囲を拡張"
-                            : L"選択範囲を縮小";
-                        dialog.labels[0] = L"幅 (px)";
-                        dialog.values[0] = state->lifetime.smoke_test ? 2 : 1;
-                        if (ShowViewOptions(
-                                state->lifetime.instance,
-                                window,
-                                state->lifetime.smoke_test,
-                                dialog) != IDOK
-                            || dialog.values[0] <= 0) {
-                            return 0;
-                        }
-                        pixels = static_cast<std::uint32_t>(dialog.values[0]);
-                    }
-                    const InkpodStatus status = AdjustSelection(
-                        *state,
-                        operation,
-                        pixels);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"選択範囲の変更");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_VIEW_ZOOM_IN:
-                case IDM_VIEW_ZOOM_OUT: {
-                    RECT client{};
-                    GetClientRect(state->windows.canvas, &client);
-                    const double factor = LOWORD(wparam) == IDM_VIEW_ZOOM_IN ? 1.2 : 1.0 / 1.2;
-                    if (ApplyView(
-                            *state,
-                            INKPOD_VIEW_ZOOM_AT,
-                            factor,
-                            static_cast<double>(client.right) / 2.0,
-                            static_cast<double>(client.bottom) / 2.0)
-                        != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"表示倍率の変更");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_VIEW_FIT:
-                case IDM_VIEW_ONE_TO_ONE:
-                    if (FitCanvas(
-                            *state,
-                            LOWORD(wparam) == IDM_VIEW_FIT ? INKPOD_VIEW_FIT
-                                                          : INKPOD_VIEW_ONE_TO_ONE)
-                        != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"表示の変更");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDM_VIEW_ZOOM_PERCENT: {
-                    InkpodSnapshotTransform transform{};
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"表示倍率";
-                    dialog.labels[0] = L"倍率 (%)";
-                    dialog.values[0] = state->lifetime.smoke_test
-                        ? 125
-                        : (QuerySnapshotTransform(*state, transform)
-                        ? static_cast<std::int32_t>(std::clamp(
-                              std::lround(transform.zoom * 100.0), 1L, 6400L))
-                        : 100);
-                    if (ShowViewOptions(
-                            state->lifetime.instance,
-                            window,
-                            state->lifetime.smoke_test,
-                            dialog) == IDOK) {
-                        const InkpodStatus status = ApplyZoomPercent(
-                            *state, static_cast<std::uint32_t>(dialog.values[0]));
-                        if (status != INKPOD_STATUS_OK) {
-                            ShowCoreError(*state, window, L"数値倍率の変更");
-                        }
-                        UpdateMenuState(*state);
-                    }
-                    return 0;
-                }
-                case IDM_VIEW_BOX_ZOOM:
-                    state->tools.active_tool = kInteractionBoxZoom;
-                    state->view.gesture_samples.clear();
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDM_VIEW_FLIP_HORIZONTAL:
-                case IDM_VIEW_FLIP_VERTICAL: {
-                    const bool horizontal =
-                        LOWORD(wparam) == IDM_VIEW_FLIP_HORIZONTAL;
-                    const InkpodStatus status = ApplyView(
-                        *state,
-                        horizontal ? INKPOD_VIEW_FLIP_HORIZONTAL
-                                   : INKPOD_VIEW_FLIP_VERTICAL,
-                        0.0,
-                        0.0);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"表示反転");
-                    } else if (horizontal) {
-                        state->view.flip_horizontal =
-                            !state->view.flip_horizontal;
-                    } else {
-                        state->view.flip_vertical = !state->view.flip_vertical;
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_VIEW_RULER:
-                case IDM_VIEW_GUIDES:
-                case IDM_VIEW_GRID:
-                case IDM_VIEW_SNAP_GUIDES:
-                case IDM_VIEW_SNAP_GRID:
-                case IDM_VIEW_TRANSPARENT: {
-                    const UINT command = LOWORD(wparam);
-                    bool* current = command == IDM_VIEW_RULER
-                        ? &state->view.ruler_visible
-                        : (command == IDM_VIEW_GUIDES
-                                  ? &state->view.guides_visible
-                                  : (command == IDM_VIEW_GRID
-                                            ? &state->view.grid_visible
-                                            : (command == IDM_VIEW_SNAP_GUIDES
-                                                      ? &state->view.snap_guides
-                                                      : (command == IDM_VIEW_SNAP_GRID
-                                                                ? &state->view.snap_grid
-                                                                : &state->view.transparent_visible))));
-                    const InkpodViewCommandKind kind = command == IDM_VIEW_RULER
-                        ? INKPOD_VIEW_SET_RULER_VISIBLE
-                        : (command == IDM_VIEW_GUIDES
-                                  ? INKPOD_VIEW_SET_GUIDES_VISIBLE
-                                  : (command == IDM_VIEW_GRID
-                                            ? INKPOD_VIEW_SET_GRID_VISIBLE
-                                            : (command == IDM_VIEW_SNAP_GUIDES
-                                                      ? INKPOD_VIEW_SET_GUIDE_SNAP_ENABLED
-                                                      : (command == IDM_VIEW_SNAP_GRID
-                                                                ? INKPOD_VIEW_SET_GRID_SNAP_ENABLED
-                                                                : INKPOD_VIEW_SET_TRANSPARENT_VISIBLE))));
-                    const bool visible = !*current;
-                    const InkpodStatus status = ApplyView(
-                        *state,
-                        kind,
-                        visible ? 1.0 : 0.0,
-                        0.0);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"表示補助の切替");
-                    } else {
-                        *current = visible;
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_VIEW_GUIDE_VERTICAL:
-                case IDM_VIEW_GUIDE_HORIZONTAL: {
-                    InkpodDocumentInfo info{};
-                    if (!QueryDocument(*state, info)) {
-                        return 0;
-                    }
-                    const bool vertical = LOWORD(wparam) == IDM_VIEW_GUIDE_VERTICAL;
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = vertical ? L"垂直ガイド" : L"水平ガイド";
-                    dialog.labels[0] = vertical ? L"X (px)" : L"Y (px)";
-                    dialog.values[0] = static_cast<std::int32_t>(
-                        vertical ? info.width / 2U : info.height / 2U);
-                    if (ShowViewOptions(
-                            state->lifetime.instance,
-                            window,
-                            state->lifetime.smoke_test,
-                            dialog) != IDOK) {
-                        return 0;
-                    }
-                    const InkpodStatus status = AddGuide(
-                        *state,
-                        vertical ? INKPOD_GUIDE_VERTICAL : INKPOD_GUIDE_HORIZONTAL,
-                        dialog.values[0]);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ガイドの追加");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_VIEW_GUIDE_MOVE:
-                    state->tools.active_tool = kInteractionGuideMove;
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDM_VIEW_GUIDE_DELETE_ALL: {
-                    const InkpodStatus status = DeleteAllGuides(*state);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ガイドの削除");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_VIEW_GRID_SETTINGS: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"グリッド設定";
-                    dialog.labels = {L"X 原点", L"Y 原点", L"間隔 (px)", L"分割数"};
-                    dialog.values = {0, 0, 8, 2};
-                    dialog.value_count = 4U;
-                    if (ShowViewOptions(
-                            state->lifetime.instance,
-                            window,
-                            state->lifetime.smoke_test,
-                            dialog) != IDOK) {
-                        return 0;
-                    }
-                    InkpodGridInput input{};
-                    input.struct_size = sizeof(input);
-                    input.origin_x = dialog.values[0];
-                    input.origin_y = dialog.values[1];
-                    input.spacing_x = static_cast<std::uint32_t>(dialog.values[2]);
-                    input.spacing_y = static_cast<std::uint32_t>(dialog.values[2]);
-                    input.subdivisions = static_cast<std::uint32_t>(dialog.values[3]);
-                    const InkpodStatus status = dialog.values[2] <= 0
-                            || dialog.values[3] <= 0
-                        ? INKPOD_STATUS_INVALID_ARGUMENT
-                        : SetGrid(*state, input);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"グリッド設定");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_VIEW_NEW: {
-                    std::uint64_t view_id{};
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [&view_id](InkpodCore* core) {
-                                  return inkpod_core_view_create(
-                                      core, &view_id);
-                              },
-                              false,
-                              false);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ビューの作成");
-                    } else {
-                        state->view.secondary_view_id = view_id;
-                        state->view.active_view_id = view_id;
-                        if (state->windows.document_tabs != nullptr) {
-                            TCITEMW item{};
-                            item.mask = TCIF_TEXT | TCIF_PARAM;
-                            item.pszText = const_cast<wchar_t*>(L"セル [ビュー 2]");
-                            item.lParam = static_cast<LPARAM>(view_id);
-                            const int index = TabCtrl_GetItemCount(state->windows.document_tabs);
-                            if (TabCtrl_InsertItem(state->windows.document_tabs, index, &item) >= 0) {
-                                TabCtrl_SetCurSel(state->windows.document_tabs, index);
-                            }
-                        }
-                        state->engine->SetActiveView(view_id);
-                        state->view.flip_horizontal = false;
-                        state->view.flip_vertical = false;
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_TOOL_PENCIL:
-                    state->tools.active_tool = INKPOD_TOOL_PENCIL;
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDM_TOOL_BRUSH:
-                    state->tools.active_tool = INKPOD_TOOL_BRUSH;
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDM_TOOL_ERASER:
-                    state->tools.active_tool = INKPOD_TOOL_ERASER;
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDM_TOOL_FILL:
-                case IDM_TOOL_CLOSED_FILL:
-                case IDM_TOOL_FILL_EXTENSION:
-                    state->tools.active_tool = kInteractionFill;
-                    state->tools.fill_options.operation = LOWORD(wparam) == IDM_TOOL_CLOSED_FILL
-                        ? INKPOD_FILL_CLOSED_REGION
-                        : (LOWORD(wparam) == IDM_TOOL_FILL_EXTENSION
-                                  ? INKPOD_FILL_EXTENSION
-                                  : INKPOD_FILL_SEED);
-                    state->tools.fill_gesture_samples.clear();
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDM_TOOL_FILL_OPTIONS:
-                    if (inkpod::windows::ui::ShowFillOptions(
-                            state->lifetime.instance,
-                            state->windows.window,
-                            state->lifetime.smoke_test,
-                            state->tools.fill_options)) {
-                        state->tools.active_tool = kInteractionFill;
-                        state->tools.fill_gesture_samples.clear();
-                        UpdateMenuState(*state);
-                    }
-                    return 0;
-                case IDM_TOOL_EYEDROPPER:
-                    state->tools.active_tool = kInteractionEyedropper;
-                    UpdateMenuState(*state);
-                    return 0;
-                case IDM_VECTOR_LINE:
-                case IDM_VECTOR_CURVE:
-                case IDM_VECTOR_RECTANGLE:
-                case IDM_VECTOR_ELLIPSE:
-                case IDM_VECTOR_POLYLINE:
-                case IDM_VECTOR_ERASER: {
-                    ClearVectorGeometryPreview(state->tools, state->windows.canvas);
-                    TreePaneNode plane{};
-                    if (!QueryTreeNode(*state, true, plane)) {
-                        return 0;
-                    }
-                    if (!IsVectorStrokePlane(plane.kind)) {
-                        if (state->engine != nullptr) {
-                            state->engine->SetLocalFailure(kVectorStrokePlaneRequired);
-                        }
-                        UpdateMenuState(*state);
-                        return 0;
-                    }
-                    const UINT command = LOWORD(wparam);
-                    state->tools.active_tool = command == IDM_VECTOR_LINE
-                        ? kInteractionVectorLine
-                        : (command == IDM_VECTOR_CURVE
-                                  ? kInteractionVectorCurve
-                                  : (command == IDM_VECTOR_RECTANGLE
-                                            ? kInteractionVectorRectangle
-                                            : (command == IDM_VECTOR_ELLIPSE
-                                                      ? kInteractionVectorEllipse
-                                                      : (command == IDM_VECTOR_POLYLINE
-                                                                ? kInteractionVectorPolyline
-                                                                : kInteractionVectorEraser))));
-                    UpdateMenuState(*state);
-                    return 1;
-                }
-                case IDM_VECTOR_ERASE_PARTIAL:
-                case IDM_VECTOR_ERASE_INTERSECTION:
-                case IDM_VECTOR_ERASE_WHOLE:
-                    state->tools.vector_erase_mode = LOWORD(wparam) == IDM_VECTOR_ERASE_INTERSECTION
-                        ? INKPOD_VECTOR_ERASE_TO_INTERSECTION
-                        : (LOWORD(wparam) == IDM_VECTOR_ERASE_WHOLE
-                                  ? INKPOD_VECTOR_ERASE_WHOLE_PATH
-                                  : INKPOD_VECTOR_ERASE_PARTIAL);
-                    state->tools.active_tool = kInteractionVectorEraser;
-                    UpdateMenuState(*state);
-                    return 1;
-                case IDM_VECTOR_CONNECT: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"ベクター線つなぎ";
-                    dialog.labels[0] = L"最大隙間 (1/1000 px)";
-                    dialog.values[0] = state->lifetime.smoke_test ? 4000 : 2000;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[0] <= 0) {
-                        return 0;
-                    }
-                    const InkpodStatus status = ConnectSelectedVectorPlane(
-                        *state, static_cast<float>(dialog.values[0]) / 1000.0F);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ベクター線つなぎ");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_VECTOR_WIDTH: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"ベクター線幅修正";
-                    dialog.labels = {L"モード (1:太く 2:細く 3:倍率 4:一定)",
-                        L"値 (1/1000 px または倍率)", nullptr, nullptr};
-                    dialog.values = {1, state->lifetime.smoke_test ? 500 : 1000, 0, 0};
-                    dialog.value_count = 2U;
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[0] < 1 || dialog.values[0] > 4
-                        || dialog.values[1] <= 0) {
-                        return 0;
-                    }
-                    const InkpodStatus status = CorrectSelectedVectorWidth(
-                        *state,
-                        static_cast<InkpodVectorWidthMode>(dialog.values[0]),
-                        static_cast<float>(dialog.values[1]) / 1000.0F);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ベクター線幅修正");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_VECTOR_SELECT_CUT:
-                case IDM_VECTOR_SELECT_TOUCH:
-                case IDM_VECTOR_SELECT_CONTAINED:
-                case IDM_VECTOR_SELECT_LINE:
-                case IDM_VECTOR_SELECT_WHOLE_LINE:
-                case IDM_VECTOR_SELECT_INTERSECTION:
-                case IDM_VECTOR_SELECT_FILL_BOUNDARY:
-                case IDM_VECTOR_SELECT_FILL: {
-                    const UINT command = LOWORD(wparam);
-                    state->tools.vector_selection_mode = command == IDM_VECTOR_SELECT_CUT
-                        ? INKPOD_VECTOR_SELECT_CUT_BY_SELECTION
-                        : (command == IDM_VECTOR_SELECT_CONTAINED
-                                  ? INKPOD_VECTOR_SELECT_FULLY_CONTAINED
-                                  : (command == IDM_VECTOR_SELECT_LINE
-                                            ? INKPOD_VECTOR_SELECT_LINE
-                                            : (command == IDM_VECTOR_SELECT_WHOLE_LINE
-                                                      ? INKPOD_VECTOR_SELECT_WHOLE_LINE
-                                                      : (command == IDM_VECTOR_SELECT_INTERSECTION
-                                                                ? INKPOD_VECTOR_SELECT_TO_INTERSECTION
-                                                                : (command == IDM_VECTOR_SELECT_FILL_BOUNDARY
-                                                                          ? INKPOD_VECTOR_SELECT_FILL_BOUNDARY
-                                                                          : (command == IDM_VECTOR_SELECT_FILL
-                                                                                    ? INKPOD_VECTOR_SELECT_FILL
-                                                                                    : INKPOD_VECTOR_SELECT_TOUCHING))))));
-                    const InkpodStatus status = SelectVectorObjects(*state);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ベクター選択");
-                    }
-                    UpdateMenuState(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_VECTOR_RASTERIZE: {
-                    TreePaneNode source{};
-                    if (!QueryTreeNode(*state, false, source)
-                        || source.kind != INKPOD_LAYER_VECTOR_COLORING) {
-                        ShowCoreError(*state, window, L"ベクターをラスタライズ");
-                        return 0;
-                    }
-                    static constexpr std::array<std::uint8_t, 10U> name{
-                        'R','a','s','t','e','r','i','z','e','d'};
-                    const InkpodVectorRasterizeInput input{
-                        sizeof(InkpodVectorRasterizeInput),
-                        0U,
-                        INKPOD_VECTOR_RASTERIZE_ANTIALIAS,
-                        source.id,
-                        1U,
-                        0U};
-                    std::uint64_t layer_id{};
-                    const InkpodStatus status = state->engine->Invoke(
-                        [input, &layer_id](InkpodCore* core) {
-                            InkpodDispatchResult result{};
-                            result.struct_size = sizeof(result);
-                            return inkpod_core_vector_rasterize_to_layer(
-                                core,
-                                &input,
-                                name.data(),
-                                name.size(),
-                                &result,
-                                &layer_id);
-                        },
-                        true,
-                        true);
-                    if (status == INKPOD_STATUS_OK) {
-                        state->panes.active_tree_layer_id = layer_id;
-                        state->panes.active_tree_plane_id = 0U;
-                        RefreshTreePane(*state);
-                    } else {
-                        ShowCoreError(*state, window, L"ベクターをラスタライズ");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_VECTOR_VECTORIZE: {
-                    TreePaneNode source{};
-                    if (!QueryTreeNode(*state, true, source)) {
-                        return 0;
-                    }
-                    const std::uint64_t source_plane_id = source.id;
-                    std::uint64_t target_layer_id{};
-                    const InkpodStatus status = state->engine->Invoke(
-                        [source_plane_id, &target_layer_id](InkpodCore* core) {
-                            static constexpr std::array<std::uint8_t, 10U> name{
-                                'V','e','c','t','o','r','i','z','e','d'};
-                            InkpodTreeEdit edit{};
-                            edit.struct_size = sizeof(edit);
-                            edit.operation = INKPOD_TREE_CREATE_LAYER;
-                            edit.kind = INKPOD_LAYER_VECTOR_COLORING;
-                            edit.name_utf8 = name.data();
-                            edit.name_bytes = name.size();
-                            InkpodDispatchResult result{};
-                            result.struct_size = sizeof(result);
-                            InkpodStatus create_status = inkpod_core_tree_edit(
-                                core, &edit, &result, &target_layer_id);
-                            if (create_status != INKPOD_STATUS_OK) {
-                                return create_status;
-                            }
-                            const InkpodRasterVectorizeInput input{
-                                sizeof(InkpodRasterVectorizeInput), 1U, 0U,
-                                source_plane_id, target_layer_id};
-                            std::uint64_t fill_count{};
-                            return inkpod_core_raster_vectorize(
-                                core, &input, &result, &fill_count);
-                        },
-                        true,
-                        true);
-                    if (status == INKPOD_STATUS_OK) {
-                        state->panes.active_tree_layer_id = target_layer_id;
-                        state->panes.active_tree_plane_id = 0U;
-                        RefreshTreePane(*state);
-                    } else {
-                        ShowCoreError(*state, window, L"ラスターをベクター化");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_EFFECT_GRADIENT:
-                case IDM_EFFECT_AIRBRUSH:
-                case IDM_EFFECT_BOUNDARY_AIRBRUSH:
-                case IDM_EFFECT_BLUR:
-                case IDM_EFFECT_STAMP:
-                case IDM_EFFECT_DUST:
-                case IDM_EFFECT_ALPHA_GRADIENT:
-                    if (state->tools.active_plane == INKPOD_PLANE_COLOR
-                        && ConfigureM6Effect(*state, LOWORD(wparam))) {
-                        UpdateMenuState(*state);
-                    }
-                    return 0;
-                case IDM_EFFECT_ALPHA_VIEW: {
-                    const bool enabled = !state->effects.alpha_view;
-                    const InkpodStatus status = ApplyView(
-                        *state,
-                        INKPOD_VIEW_SET_ALPHA_VISIBLE,
-                        enabled ? 1.0 : 0.0,
-                        0.0);
-                    if (status == INKPOD_STATUS_OK) {
-                        state->effects.alpha_view = enabled;
-                    } else {
-                        ShowCoreError(*state, window, L"アルファ表示");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_PLANE_MAIN_LINE:
-                case IDM_PLANE_COLOR: {
-                    state->tools.active_plane = LOWORD(wparam) == IDM_PLANE_MAIN_LINE
-                        ? INKPOD_PLANE_MAIN_LINE
-                        : INKPOD_PLANE_COLOR;
-                    const InkpodPlaneKind plane = state->tools.active_plane;
-                    const InkpodStatus plane_status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [plane](InkpodCore* core) {
-                                  return inkpod_core_set_active_plane(core, plane);
-                              },
-                              false,
-                              true);
-                    if (plane_status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"プレーン切替");
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_COLOR_EDITOR: {
-                    const InkpodStatus status = ShowDrawingColorEditor(*state);
-                    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
-                        ShowCoreError(*state, window, L"描画色編集");
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_COLOR_SOURCE_TOPMOST:
-                case IDM_COLOR_SOURCE_SELECTED:
-                case IDM_COLOR_SOURCE_COMPOSITE:
-                case IDM_COLOR_SOURCE_LIGHT_TABLE:
-                    state->tools.eyedropper_source = LOWORD(wparam) == IDM_COLOR_SOURCE_TOPMOST
-                        ? INKPOD_EYEDROPPER_TOPMOST_NONTRANSPARENT
-                        : (LOWORD(wparam) == IDM_COLOR_SOURCE_SELECTED
-                                  ? INKPOD_EYEDROPPER_SELECTED_PLANE
-                                  : (LOWORD(wparam) == IDM_COLOR_SOURCE_LIGHT_TABLE
-                                            ? INKPOD_EYEDROPPER_LIGHT_TABLE_TOPMOST
-                                            : INKPOD_EYEDROPPER_COMPOSITE));
-                    UpdateMenuState(*state);
-                    return 1;
-                case IDM_PALETTE_REGISTER:
-                case IDM_PALETTE_DELETE:
-                case IDM_PALETTE_CLEAR: {
-                    std::vector<InkpodColorValue> colors;
-                    std::vector<std::wstring> names;
-                    try {
-                        colors = state->panes.palette_colors;
-                        names = state->panes.color_chart_names;
-                        if (LOWORD(wparam) == IDM_PALETTE_REGISTER) {
-                            if (colors.size() >= 4096U) {
-                                return 0;
-                            }
-                            colors.push_back(state->tools.drawing_color);
-                            names.push_back(L"Color " + std::to_wstring(colors.size()));
-                        } else if (LOWORD(wparam) == IDM_PALETTE_DELETE) {
-                            const LRESULT selected = SendMessageW(
-                                state->windows.color_palette_list, LB_GETCURSEL, 0, 0);
-                            const std::size_t index = static_cast<std::size_t>(
-                                state->panes.palette_group) * 10U
-                                + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-                            if (selected == LB_ERR || index >= colors.size()) {
-                                return 0;
-                            }
-                            colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
-                            names.erase(names.begin() + static_cast<std::ptrdiff_t>(index));
-                        } else {
-                            colors.clear();
-                            names.clear();
-                        }
-                    } catch (const std::bad_alloc&) {
-                        return 0;
-                    }
-                    const InkpodStatus status = ReplacePalette(*state, colors);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"カラーパレット編集");
-                    } else {
-                        state->panes.color_chart_names = std::move(names);
-                    }
-                    RefreshColorPanes(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_PALETTE_NEXT_GROUP:
-                    ++state->panes.palette_group;
-                    RefreshColorPanes(*state);
-                    return 1;
-                case IDM_PALETTE_SAVE:
-                case IDM_PALETTE_LOAD: {
-                    const bool save = LOWORD(wparam) == IDM_PALETTE_SAVE;
-                    std::wstring path = state->lifetime.smoke_test ? L"inkpod-palette-smoke.inkpalette" : L"";
-                    if (!state->lifetime.smoke_test && !ChoosePalettePath(window, save, path)) {
-                        return 0;
-                    }
-                    if (save) {
-                        return SavePaletteFile(path, state->panes.palette_colors) ? 1 : 0;
-                    }
-                    std::vector<InkpodColorValue> colors;
-                    if (!LoadPaletteFile(path, colors)) {
-                        return 0;
-                    }
-                    const InkpodStatus status = ReplacePalette(*state, colors);
-                    RefreshColorPanes(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_CHART_GENERATE: {
-                    ViewOptionsDialogState dialog{};
-                    dialog.title = L"セルからカラーチャートを作成";
-                    dialog.labels = {L"最大色数", L"量子化で捨てる下位bit (0-7)", L"preview確認 (1)", nullptr};
-                    dialog.values = {256, 2, 1, 0};
-                    dialog.value_count = 3U;
-                    if (state->lifetime.smoke_test) {
-                        dialog.values = {16, 4, 1, 0};
-                    }
-                    if (ShowViewOptions(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.values[0] <= 0 || dialog.values[1] < 0
-                        || dialog.values[1] > 7 || dialog.values[2] == 0) {
-                        return 0;
-                    }
-                    const InkpodStatus status = state->engine->Invoke(
-                        [&dialog](InkpodCore* core) {
-                            InkpodDispatchResult result{};
-                            result.struct_size = sizeof(result);
-                            return inkpod_core_palette_generate(
-                                core,
-                                static_cast<std::uint32_t>(dialog.values[0]),
-                                static_cast<std::uint32_t>(dialog.values[1]),
-                                &result);
-                        },
-                        true,
-                        true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"カラーチャート生成");
-                    }
-                    state->panes.color_chart_names.clear();
-                    state->panes.color_chart_page = 0U;
-                    RefreshColorPanes(*state);
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_CHART_SEARCH: {
-                    TextInputDialogState dialog{};
-                    dialog.title = L"カラーチャート検索";
-                    dialog.label = L"名前または番号";
-                    dialog.value = state->lifetime.smoke_test ? L"Smoke" : L"";
-                    if (ShowTextInput(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
-                        return 0;
-                    }
-                    wchar_t* end{};
-                    const unsigned long number = std::wcstoul(dialog.value.c_str(), &end, 10);
-                    std::size_t index = SIZE_MAX;
-                    if (end != dialog.value.c_str() && *end == L'\0' && number != 0U
-                        && number <= state->panes.palette_colors.size()) {
-                        index = number - 1U;
-                    } else {
-                        std::wstring needle = dialog.value;
-                        std::transform(
-                            needle.begin(), needle.end(), needle.begin(),
-                            [](wchar_t value) { return std::towlower(value); });
-                        for (std::size_t candidate = 0U;
-                             candidate < state->panes.color_chart_names.size(); ++candidate) {
-                            std::wstring name = state->panes.color_chart_names[candidate];
-                            std::transform(
-                                name.begin(), name.end(), name.begin(),
-                                [](wchar_t value) { return std::towlower(value); });
-                            if (name.find(needle) != std::wstring::npos) {
-                                index = candidate;
-                                break;
-                            }
-                        }
-                    }
-                    if (index == SIZE_MAX) {
-                        return 0;
-                    }
-                    state->panes.color_chart_page = static_cast<std::uint32_t>(index / 20U);
-                    RefreshColorPanes(*state);
-                    SendMessageW(
-                        state->windows.color_chart_list, LB_SETCURSEL,
-                        static_cast<WPARAM>(index % 20U), 0);
-                    return 1;
-                }
-                case IDM_CHART_NEXT: {
-                    if (state->panes.palette_colors.empty()) {
-                        return 0;
-                    }
-                    LRESULT selected = SendMessageW(state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
-                    std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page) * 20U
-                        + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected) + 1U);
-                    index %= state->panes.palette_colors.size();
-                    state->panes.color_chart_page = static_cast<std::uint32_t>(index / 20U);
-                    RefreshColorPanes(*state);
-                    SendMessageW(
-                        state->windows.color_chart_list, LB_SETCURSEL,
-                        static_cast<WPARAM>(index % 20U), 0);
-                    return 1;
-                }
-                case IDM_CHART_LOCK:
-                    state->panes.color_chart_locked = !state->panes.color_chart_locked;
-                    UpdateMenuState(*state);
-                    return 1;
-                case IDM_CHART_NEXT_PAGE:
-                    ++state->panes.color_chart_page;
-                    RefreshColorPanes(*state);
-                    return 1;
-                case IDM_CHART_RENAME: {
-                    if (state->panes.color_chart_locked) {
-                        return 0;
-                    }
-                    const LRESULT selected = SendMessageW(
-                        state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
-                    const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
-                        * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-                    if (selected == LB_ERR || index >= state->panes.color_chart_names.size()) {
-                        return 0;
-                    }
-                    TextInputDialogState dialog{};
-                    dialog.title = L"カラーチャート名";
-                    dialog.label = L"名前";
-                    dialog.value = state->lifetime.smoke_test ? L"Smoke Color" : state->panes.color_chart_names[index];
-                    if (ShowTextInput(
-                            state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                        || dialog.value.empty() || dialog.value.size() > 256U) {
-                        return 0;
-                    }
-                    try {
-                        state->panes.color_chart_names[index] = dialog.value;
-                    } catch (const std::bad_alloc&) {
-                        return 0;
-                    }
-                    RefreshColorPanes(*state);
-                    SendMessageW(
-                        state->windows.color_chart_list, LB_SETCURSEL,
-                        static_cast<WPARAM>(index % 20U), 0);
-                    return 1;
-                }
-                case IDM_CHART_SAVE:
-                case IDM_CHART_LOAD: {
-                    const bool save = LOWORD(wparam) == IDM_CHART_SAVE;
-                    std::wstring path = state->lifetime.smoke_test ? L"inkpod-chart-smoke.inkchart" : L"";
-                    if (!state->lifetime.smoke_test && !ChooseChartPath(window, save, path)) {
-                        return 0;
-                    }
-                    if (save) {
-                        return SaveColorChartFile(
-                                   path, state->panes.palette_colors, state->panes.color_chart_names)
-                            ? 1
-                            : 0;
-                    }
-                    std::vector<InkpodColorValue> colors;
-                    std::vector<std::wstring> names;
-                    if (!LoadColorChartFile(path, colors, names)) {
-                        return 0;
-                    }
-                    const InkpodStatus status = ReplacePalette(*state, colors);
-                    if (status == INKPOD_STATUS_OK) {
-                        try {
-                            state->panes.color_chart_names = std::move(names);
-                        } catch (const std::bad_alloc&) {
-                            return 0;
-                        }
-                        state->panes.color_chart_page = 0U;
-                        RefreshColorPanes(*state);
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_CHART_COPY: {
-                    const LRESULT selected = SendMessageW(
-                        state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
-                    const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
-                        * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-                    if (selected == LB_ERR || index >= state->panes.palette_colors.size()) {
-                        return 0;
-                    }
-                    const auto& selected_color = state->panes.palette_colors[index];
-                    std::array<wchar_t, 384U> text{};
-                    _snwprintf_s(
-                        text.data(), text.size(), _TRUNCATE,
-                        selected_color.depth == INKPOD_COLOR_DEPTH_16
-                            ? L"%ls\t#%04X%04X%04X%04X"
-                            : L"%ls\t#%02X%02X%02X%02X",
-                        state->panes.color_chart_names[index].c_str(),
-                        selected_color.red,
-                        selected_color.green,
-                        selected_color.blue,
-                        selected_color.alpha);
-                    const SIZE_T bytes = (wcslen(text.data()) + 1U) * sizeof(wchar_t);
-                    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
-                    if (memory == nullptr) {
-                        return 0;
-                    }
-                    void* destination = GlobalLock(memory);
-                    if (destination == nullptr) {
-                        GlobalFree(memory);
-                        return 0;
-                    }
-                    std::memcpy(destination, text.data(), bytes);
-                    GlobalUnlock(memory);
-                    if (OpenClipboard(window) == FALSE) {
-                        GlobalFree(memory);
-                        return 0;
-                    }
-                    EmptyClipboard();
-                    const bool copied = SetClipboardData(CF_UNICODETEXT, memory) != nullptr;
-                    if (!copied) {
-                        GlobalFree(memory);
-                    }
-                    CloseClipboard();
-                    return copied ? 1 : 0;
-                }
-                case IDM_CHART_CUT: {
-                    if (state->panes.color_chart_locked
-                        || SendMessageW(window, WM_COMMAND, IDM_CHART_COPY, 0) != 1) {
-                        return 0;
-                    }
-                    const LRESULT selected = SendMessageW(
-                        state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
-                    const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
-                        * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-                    if (selected == LB_ERR || index >= state->panes.palette_colors.size()) {
-                        return 0;
-                    }
-                    std::vector<InkpodColorValue> colors = state->panes.palette_colors;
-                    std::vector<std::wstring> names = state->panes.color_chart_names;
-                    colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
-                    names.erase(names.begin() + static_cast<std::ptrdiff_t>(index));
-                    const InkpodStatus status = ReplacePalette(*state, colors);
-                    if (status == INKPOD_STATUS_OK) {
-                        state->panes.color_chart_names = std::move(names);
-                        RefreshColorPanes(*state);
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_CHART_PASTE: {
-                    if (state->panes.color_chart_locked || OpenClipboard(window) == FALSE) {
-                        return 0;
-                    }
-                    HANDLE handle = GetClipboardData(CF_UNICODETEXT);
-                    const auto* text = handle == nullptr
-                        ? nullptr
-                        : static_cast<const wchar_t*>(GlobalLock(handle));
-                    InkpodColorValue color{};
-                    bool parsed{};
-                    std::wstring pasted_name = L"Pasted";
-                    const wchar_t* marker = text == nullptr ? nullptr : wcsrchr(text, L'#');
-                    if (text != nullptr && marker != nullptr) {
-                        if (marker > text) {
-                            pasted_name.assign(text, marker);
-                            while (!pasted_name.empty()
-                                && (pasted_name.back() == L'\t'
-                                    || iswspace(pasted_name.back()) != 0)) {
-                                pasted_name.pop_back();
-                            }
-                        }
-                        const std::size_t length = wcslen(marker + 1U);
-                        wchar_t* end{};
-                        const unsigned long long value = std::wcstoull(marker + 1U, &end, 16);
-                        if (end != marker + 1U && *end == L'\0'
-                            && (length == 8U || length == 16U)) {
-                            color.struct_size = sizeof(color);
-                            color.depth = length == 16U
-                                ? INKPOD_COLOR_DEPTH_16
-                                : INKPOD_COLOR_DEPTH_8;
-                            const std::uint64_t mask = length == 16U ? UINT16_MAX : UINT8_MAX;
-                            const unsigned shift = length == 16U ? 16U : 8U;
-                            color.alpha = static_cast<std::uint16_t>(value & mask);
-                            color.blue = static_cast<std::uint16_t>((value >> shift) & mask);
-                            color.green = static_cast<std::uint16_t>((value >> (shift * 2U)) & mask);
-                            color.red = static_cast<std::uint16_t>((value >> (shift * 3U)) & mask);
-                            parsed = true;
-                        }
-                    }
-                    if (text != nullptr) {
-                        GlobalUnlock(handle);
-                    }
-                    CloseClipboard();
-                    if (!parsed) {
-                        return 0;
-                    }
-                    SetDrawingColor(state->tools, color);
-                    std::vector<InkpodColorValue> colors = state->panes.palette_colors;
-                    if (colors.size() >= 4096U) {
-                        return 0;
-                    }
-                    colors.push_back(color);
-                    const InkpodStatus status = ReplacePalette(*state, colors);
-                    if (status == INKPOD_STATUS_OK) {
-                        RefreshColorPanes(*state);
-                        state->panes.color_chart_names.back() = pasted_name.empty()
-                            ? L"Pasted"
-                            : pasted_name;
-                        state->panes.color_chart_page = static_cast<std::uint32_t>(
-                            (state->panes.palette_colors.size() - 1U) / 20U);
-                        RefreshColorPanes(*state);
-                    }
-                    return status == INKPOD_STATUS_OK ? 1 : 0;
-                }
-                case IDM_COLOR_CHOOSE: {
-                    static std::array<COLORREF, 16> custom_colors{};
-                    CHOOSECOLORW choose{};
-                    choose.lStructSize = sizeof(choose);
-                    choose.hwndOwner = window;
-                    choose.rgbResult = RGB(
-                        (state->tools.color_rgba >> 24) & 0xffU,
-                        (state->tools.color_rgba >> 16) & 0xffU,
-                        (state->tools.color_rgba >> 8) & 0xffU);
-                    choose.lpCustColors = custom_colors.data();
-                    choose.Flags = CC_FULLOPEN | CC_RGBINIT;
-                    if (ChooseColorW(&choose) != FALSE) {
-                        SetDrawingColor(
-                            state->tools,
-                            InkpodColorValue{
-                                sizeof(InkpodColorValue),
-                                INKPOD_COLOR_DEPTH_8,
-                                GetRValue(choose.rgbResult),
-                                GetGValue(choose.rgbResult),
-                                GetBValue(choose.rgbResult),
-                                static_cast<std::uint16_t>(state->tools.color_rgba & 0xffU)});
-                    }
-                    return 0;
-                }
-                case IDM_COLOR_CHECK_OFF:
-                case IDM_COLOR_CHECK_LEGACY:
-                case IDM_COLOR_CHECK_NATIVE: {
-                    const InkpodColorCheckMode mode = LOWORD(wparam) == IDM_COLOR_CHECK_LEGACY
-                        ? INKPOD_COLOR_CHECK_LEGACY_WHITE
-                        : (LOWORD(wparam) == IDM_COLOR_CHECK_NATIVE
-                                  ? INKPOD_COLOR_CHECK_NATIVE_ALPHA
-                                  : INKPOD_COLOR_CHECK_OFF);
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [mode](InkpodCore* core) {
-                                  return inkpod_core_set_color_check(core, mode);
-                              },
-                              true,
-                              true);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"彩色チェック表示");
-                    } else {
-                        state->view.color_check_mode = mode;
-                    }
-                    UpdateMenuState(*state);
-                    return 0;
-                }
-                case IDM_SHORTCUT_RESET: {
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [](InkpodCore* core) {
-                                  return inkpod_core_shortcut_reset(core);
-                              },
-                              false,
-                              false);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ショートカットの初期化");
-                    }
-                    return 0;
-                }
-                case IDM_SHORTCUT_EDIT: {
-                    ShortcutDialogState dialog_state{};
-                    if (ShowShortcutEditor(
-                            state->lifetime.instance,
-                            window,
-                            state->lifetime.smoke_test,
-                            dialog_state) != IDOK) {
-                        return 0;
-                    }
-                    const InkpodStatus status = state->engine == nullptr
-                        ? INKPOD_STATUS_INVALID_STATE
-                        : state->engine->Invoke(
-                              [dialog_state](InkpodCore* core) {
-                                  return inkpod_core_shortcut_rebind(
-                                      core,
-                                      dialog_state.command_id,
-                                      dialog_state.virtual_key,
-                                      dialog_state.modifiers);
-                              },
-                              false,
-                              false);
-                    if (status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"ショートカット編集");
-                        return 0;
-                    }
-                    return 1;
-                }
-                case IDM_HELP_ABOUT:
-                    return ShowAboutDialog(
-                               state->lifetime.instance,
-                               window,
-                               state->lifetime.smoke_test)
-                            == IDOK
-                        ? 1
-                        : 0;
-                case IDM_APP_EXIT:
-                    SendMessageW(window, WM_CLOSE, 0, 0);
-                    return 0;
-                default:
-                    break;
-            }
+        default:
             break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteKeyboardMessage(
+    AppContext* state,
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam) noexcept {
+    switch (message) {
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
             if (state != nullptr) {
@@ -12098,6 +11895,20 @@ LRESULT CALLBACK MainWindowProcedure(
                 }
             }
             break;
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteCanvasMessage(
+    AppContext* state,
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam) noexcept {
+    switch (message) {
         case inkpod::renderer::kCanvasPointerMoved:
             if (state != nullptr) {
                 UpdateLocatorDisplay(
@@ -12521,6 +12332,20 @@ LRESULT CALLBACK MainWindowProcedure(
                     static_cast<double>(lparam));
             }
             return 0;
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteCoreNotificationMessage(
+    AppContext* state,
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM) noexcept {
+    switch (message) {
         case inkpod::app::kCoreStateChanged:
             if (state != nullptr) {
                 RefreshTreePane(*state);
@@ -12594,6 +12419,20 @@ LRESULT CALLBACK MainWindowProcedure(
                 ShowCoreError(*state, window, L"非同期処理");
             }
             return 0;
+        default:
+            break;
+    }
+    return std::nullopt;
+}
+
+
+std::optional<LRESULT> RouteTimerAndCloseMessage(
+    AppContext* state,
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam) noexcept {
+    switch (message) {
         case WM_TIMER:
             if (state != nullptr && wparam == kM6ContinuousSprayTimer) {
                 if (state->effects.airbrush_active && state->tools.active_tool == kInteractionM6Airbrush
@@ -12659,34 +12498,54 @@ LRESULT CALLBACK MainWindowProcedure(
         default:
             break;
     }
-    return DefWindowProcW(window, message, wparam, lparam);
+    return std::nullopt;
 }
 
-bool RegisterMainWindowClass(
-    HINSTANCE instance, const wchar_t* class_name) noexcept {
-    const auto app_icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP_ICON));
-    const auto small_icon = reinterpret_cast<HICON>(LoadImageW(
-        instance,
-        MAKEINTRESOURCEW(IDI_APP_ICON),
-        IMAGE_ICON,
-        GetSystemMetrics(SM_CXSMICON),
-        GetSystemMetrics(SM_CYSMICON),
-        LR_DEFAULTCOLOR | LR_SHARED));
-    if (app_icon == nullptr) {
-        return false;
+std::optional<LRESULT> RouteMainWindowMessage(
+    AppContext* state,
+    HWND window,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam) noexcept {
+    using MessageRoute = std::optional<LRESULT> (*)(
+        AppContext*, HWND, UINT, WPARAM, LPARAM) noexcept;
+    constexpr std::array<MessageRoute, 5U> routes{
+        RouteWindowLifecycleMessage,
+        RouteKeyboardMessage,
+        RouteCanvasMessage,
+        RouteCoreNotificationMessage,
+        RouteTimerAndCloseMessage};
+    for (const MessageRoute route : routes) {
+        if (const auto result = route(state, window, message, wparam, lparam)) {
+            return result;
+        }
     }
-    WNDCLASSEXW window_class{};
-    window_class.cbSize = sizeof(window_class);
-    window_class.style = CS_HREDRAW | CS_VREDRAW;
-    window_class.lpfnWndProc = MainWindowProcedure;
-    window_class.hInstance = instance;
-    window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    window_class.hIcon = app_icon;
-    window_class.hbrBackground = nullptr;
-    window_class.lpszMenuName = MAKEINTRESOURCEW(IDR_MAIN_MENU);
-    window_class.lpszClassName = class_name;
-    window_class.hIconSm = small_icon != nullptr ? small_icon : app_icon;
-    return RegisterClassExW(&window_class) != 0;
+    return std::nullopt;
+}
+
+LRESULT CALLBACK MainWindowProcedure(
+    HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<AppContext*>(
+        GetWindowLongPtrW(window, GWLP_USERDATA));
+
+    if (message == WM_NCCREATE) {
+        const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lparam);
+        state = static_cast<AppContext*>(create->lpCreateParams);
+        state->windows.window = window;
+        SetWindowLongPtrW(
+            window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+    }
+
+    if (message == WM_COMMAND) {
+        if (const auto result = RouteMainWindowCommand(
+                state, window, wparam, lparam)) {
+            return *result;
+        }
+    } else if (const auto result = RouteMainWindowMessage(
+                   state, window, message, wparam, lparam)) {
+        return *result;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
 }
 
 }  // namespace
@@ -12737,7 +12596,8 @@ int APIENTRY wWinMain(
         return 12;
     }
     if (!inkpod::renderer::RegisterCanvasClass(instance)
-        || !RegisterMainWindowClass(instance, class_name.data())) {
+        || !inkpod::windows::ui::RegisterMainWindowClass(
+            instance, class_name.data(), MainWindowProcedure)) {
         return 13;
     }
 

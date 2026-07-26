@@ -33,7 +33,7 @@
   Windows application tests remain necessary for algorithmic edge cases and
   failure localization; FFI coverage does not replace them.
 
-## Windows frontend refactoring R0-R3
+## Windows frontend refactoring R0-R4
 
 - R0 is complete. The baseline records 274 defined `IDM_*` values, 273
   production resource commands, and exact ownership of all 273 in the main
@@ -90,6 +90,22 @@
   unchanged. Debug and Release strict builds and all four non-elevated CTest
   scenarios passed in both presets. The explicitly optional MSIX
   install/uninstall smoke was not run.
+- R4 is complete. `apps/windows/ui/main_window.*` now owns main-frame class
+  registration and standard chrome creation/layout through a narrow
+  `MainWindowHandles` API. Feature palettes and Core/controller work remain with
+  their existing owners; no broad replacement controller was introduced.
+- `WM_COMMAND` is routed through 11 named feature owners and the remaining
+  lifecycle/notify, keyboard, Canvas, Core/task notification, and timer/close
+  traffic through five named message handlers. `MainWindowProcedure` is 24
+  physical lines, down from the 3,934-line R0 baseline, and contains only
+  `WM_NCCREATE` normalization, delegation, and the `DefWindowProcW` fallback.
+  `main.cpp` is 12,717 physical lines and 545,096 bytes; its remaining bootstrap
+  and embedded smoke bodies are R6 scope.
+- `inkpod_windows_command_routes` compares the direct route owners against
+  `app.rc` and verifies all 273 production command IDs exactly once. Strict
+  Debug and Release builds and all five non-elevated CTest scenarios passed,
+  including real `--smoke-test`, `--abi-smoke-test`, route ownership, and package
+  payload checks. MSIX install/uninstall smoke was explicitly omitted for R4.
 
 ## User-requested Windows shell and package additions
 
@@ -573,6 +589,8 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R4 main-window routing refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
+| Visual Studio 2026 developer environment Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | `MainWindow`, all 11 command owners, and five message handlers passed `/W4 /WX /permissive-`; route ownership, application, ABI, assets, and package-payload smoke passed 5/5 in final Debug (15.55 s) and Release (4.53 s) runs | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R3 controller/shell/pane extraction passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
 | Visual Studio 2026 developer shell Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | All R3 translation units passed `/W4 /WX /permissive-`; application, ABI, assets, and package-payload smoke passed 4/4 in Debug and Release | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R2 state-ownership refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |

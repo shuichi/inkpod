@@ -168,7 +168,7 @@ clipboard APIs, so neither contains a second document or image implementation.
 `DocumentPanesController` loads tree, light-table, sequence, and locator models
 in batches, while `ColorPanesController` owns palette and color-chart model
 synchronization. Native child-control population remains presentation work for
-the main-window owner until R4.
+the main-window owner.
 
 View/guide/grid, fill, selection, floating-paste, and vector controllers receive
 only `CoreEngine` plus typed command inputs. Effects owns its task/progress and
@@ -178,6 +178,19 @@ captures the long-lived `BatchUiState`, never the temporary routing controller.
 All Core calls retain the prior `CoreEngine::Invoke`/`Enqueue` snapshot and
 document-info refresh flags. No controller invokes renderer APIs or changes the
 Core-engine, renderer-thread, or snapshot queue contracts.
+
+R4 gives that owner an explicit private boundary. `apps/windows/ui/main_window.*`
+registers the frame class and creates/layouts only the standard child controls;
+its API receives `MainWindowHandles`, the instance, visibility policy, and
+geometry rather than `AppContext`. Feature palettes, Core calls, and document
+operations stay outside that module. The 24-line top-level window procedure now
+normalizes `WM_NCCREATE` and delegates commands and other messages. Eleven
+command routes own the document, edit, effects, pane, animation, selection/view,
+tool, color, application, and Batch/control groups. Five message handlers own
+lifecycle/notifications, keyboard, Canvas input, Core/task completion, and
+timer/close behavior. A CMake structural test compares their direct owner cases
+with all 273 production command IDs in `app.rc` and rejects missing or duplicate
+ownership.
 
 ## Coordinate and DPI contract
 
@@ -363,9 +376,10 @@ only a progress query and cancellation callback, while the Batch palette
 receives a typed presentation model plus command/selection callbacks. No dialog
 module receives `AppContext`, calls `CoreEngine`, or invokes a Rust function.
 R3 feature controllers translate those callbacks to their owned UI-thread task
-handles and typed Core operations; `main.cpp` retains command/message routing
-until R4. These boundaries do not change Core/Renderer threads, snapshot
-ownership, shutdown order, the public C ABI, or file formats.
+handles and typed Core operations. R4's main-window routes delegate to those
+same controllers and preserve synchronous value returns and posted-message
+payload lifetimes. These boundaries do not change Core/Renderer threads,
+snapshot ownership, shutdown order, the public C ABI, or file formats.
 
 The hidden Windows smoke path uses the normal UI input adapter, Core queue, ABI,
 format, snapshot sink, and Renderer. It verifies a never-saved private recovery

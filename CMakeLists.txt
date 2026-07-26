@@ -97,6 +97,12 @@ add_test(
             "-DINKPOD_PROJECT_VERSION=${PROJECT_VERSION}"
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_assets.cmake")
 
+add_test(
+    NAME inkpod_windows_command_routes
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_command_routes.cmake")
+
 add_library(inkpod_header_c11 OBJECT tests/header_c11.c)
 target_include_directories(inkpod_header_c11 PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
@@ -130,6 +136,7 @@ if(WIN32)
         apps/windows/ui/tools/vector_controller.cpp
         apps/windows/ui/effects_controller.cpp
         apps/windows/ui/batch_controller.cpp
+        apps/windows/ui/main_window.cpp
         tests/abi_smoke.cpp
         $<TARGET_OBJECTS:inkpod_header_c11>)
     target_include_directories(inkpod PRIVATE

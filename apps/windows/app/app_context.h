@@ -13,6 +13,7 @@
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/main_window.h"
 
 namespace inkpod::app {
 
@@ -70,24 +71,6 @@ struct AppLifetimeState {
     bool smoke_test{};
     std::wstring smoke_raster_path;
     std::vector<std::wstring> smoke_sequence_paths;
-};
-
-struct MainWindowHandles {
-    HWND window{};
-    HWND canvas{};
-    HWND toolbar{};
-    HWND zoom_slider{};
-    HWND status_bar{};
-    HWND document_tabs{};
-    HWND locator_label{};
-    HWND layer_list{};
-    HWND plane_list{};
-    HWND light_table_set_list{};
-    HWND light_table_item_list{};
-    HWND sequence_list{};
-    HWND motion_label{};
-    HWND color_palette_list{};
-    HWND color_chart_list{};
 };
 
 struct DocumentShellState {
