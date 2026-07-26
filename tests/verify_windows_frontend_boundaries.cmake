@@ -8,15 +8,46 @@ set(application_source
 set(smoke_source "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp")
 set(runtime_source
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp")
+set(chrome_source
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window.cpp")
+set(chrome_header
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window.h")
 set(cmake_source "${INKPOD_SOURCE_DIR}/CMakeLists.txt")
 
 foreach(required_source IN ITEMS
         "${main_source}"
         "${application_source}"
         "${smoke_source}"
-        "${runtime_source}")
+        "${runtime_source}"
+        "${chrome_source}"
+        "${chrome_header}")
     if(NOT EXISTS "${required_source}")
-        message(FATAL_ERROR "R6 source is missing: ${required_source}")
+        message(FATAL_ERROR "frontend source is missing: ${required_source}")
+    endif()
+endforeach()
+
+file(READ "${chrome_source}" chrome_text)
+file(READ "${chrome_header}" chrome_header_text)
+string(APPEND chrome_text "${chrome_header_text}")
+foreach(forbidden_chrome_token IN ITEMS
+        "TRACKBAR_CLASSW"
+        "L\"LISTBOX\""
+        "right_pane_width"
+        "zoom_slider"
+        "locator_label"
+        "layer_list"
+        "plane_list"
+        "light_table_set_list"
+        "light_table_item_list"
+        "sequence_list"
+        "motion_label"
+        "color_palette_list"
+        "color_chart_list")
+    string(FIND "${chrome_text}" "${forbidden_chrome_token}" token_offset)
+    if(NOT token_offset LESS 0)
+        message(FATAL_ERROR
+            "MainWindow chrome contains retired persistent UI: "
+            "${forbidden_chrome_token}")
     endif()
 endforeach()
 
@@ -25,7 +56,7 @@ file(STRINGS "${main_source}" main_lines)
 list(LENGTH main_lines main_line_count)
 if(main_line_count GREATER 200)
     message(FATAL_ERROR
-        "R6 main.cpp is no longer startup-only: ${main_line_count} lines")
+        "main.cpp is no longer startup-only: ${main_line_count} lines")
 endif()
 
 foreach(required_main_token IN ITEMS
@@ -37,7 +68,7 @@ foreach(required_main_token IN ITEMS
     string(FIND "${main_text}" "${required_main_token}" token_offset)
     if(token_offset LESS 0)
         message(FATAL_ERROR
-            "R6 main.cpp is missing ${required_main_token}")
+            "main.cpp is missing ${required_main_token}")
     endif()
 endforeach()
 
@@ -47,13 +78,13 @@ foreach(forbidden_main_token IN ITEMS
         "CreateWindowExW"
         "GetMessageW"
         "IDM_"
-        "RunM1Smoke"
+        "RunDrawingPersistenceSmoke"
         "DialogBoxParamW"
         "CreateDialogParamW")
     string(FIND "${main_text}" "${forbidden_main_token}" token_offset)
     if(NOT token_offset LESS 0)
         message(FATAL_ERROR
-            "R6 main.cpp contains non-launch responsibility: "
+            "main.cpp contains non-launch responsibility: "
             "${forbidden_main_token}")
     endif()
 endforeach()
@@ -71,35 +102,42 @@ foreach(required_application_token IN ITEMS
         "${application_text}" "${required_application_token}" token_offset)
     if(token_offset LESS 0)
         message(FATAL_ERROR
-            "R6 Application is missing lifetime responsibility: "
+            "Application is missing lifetime responsibility: "
             "${required_application_token}")
     endif()
 endforeach()
 string(FIND "${application_text}" "IDM_" application_command_offset)
 if(NOT application_command_offset LESS 0)
-    message(FATAL_ERROR "R6 Application contains feature command handling")
+    message(FATAL_ERROR "Application contains feature command handling")
 endif()
 
 file(READ "${smoke_source}" smoke_text)
-foreach(smoke_stage RANGE 1 7)
-    string(FIND "${smoke_text}" "RunM${smoke_stage}Smoke" stage_offset)
-    if(stage_offset LESS 0)
+foreach(required_smoke IN ITEMS
+        "RunDrawingPersistenceSmoke"
+        "RunPaintingRecoverySmoke"
+        "RunDocumentEditingSmoke"
+        "RunProductionWorkflowSmoke"
+        "RunVectorWorkflowSmoke"
+        "RunImageEffectsSmoke"
+        "RunBatchWorkflowSmoke")
+    string(FIND "${smoke_text}" "${required_smoke}" smoke_offset)
+    if(smoke_offset LESS 0)
         message(FATAL_ERROR
-            "R6 app_smoke.cpp is missing M${smoke_stage} smoke")
+            "app_smoke.cpp is missing ${required_smoke}")
     endif()
 endforeach()
 
 file(READ "${runtime_source}" runtime_text)
 foreach(forbidden_runtime_token IN ITEMS
         "wWinMain"
-        "RunM1Smoke"
-        "RunM7Smoke"
+        "RunDrawingPersistenceSmoke"
+        "RunBatchWorkflowSmoke"
         "--smoke-test"
         "--abi-smoke-test")
     string(FIND "${runtime_text}" "${forbidden_runtime_token}" token_offset)
     if(NOT token_offset LESS 0)
         message(FATAL_ERROR
-            "R6 MainWindow runtime contains bootstrap/smoke responsibility: "
+            "MainWindow runtime contains bootstrap/smoke responsibility: "
             "${forbidden_runtime_token}")
     endif()
 endforeach()
@@ -113,10 +151,10 @@ foreach(required_cmake_source IN ITEMS
     string(FIND "${cmake_text}" "${required_cmake_source}" source_offset)
     if(source_offset LESS 0)
         message(FATAL_ERROR
-            "R6 CMake source list is missing ${required_cmake_source}")
+            "CMake source list is missing ${required_cmake_source}")
     endif()
 endforeach()
 
 message(STATUS
-    "Verified R6 startup/application/smoke/MainWindow boundaries; "
+    "Verified startup/application/smoke/MainWindow boundaries; "
     "main.cpp has ${main_line_count} lines")

@@ -1,8 +1,5 @@
 use super::model::*;
-use super::validate::{
-    legacy_main_line_color_for_planes, validate_document, validate_document_metadata,
-    validate_tile_shape,
-};
+use super::validate::{validate_document, validate_document_metadata, validate_tile_shape};
 use crate::adjustment::decode_adjustment_metadata;
 use crate::light_table::decode_light_table_metadata;
 use crate::vector::decode_vector_metadata;
@@ -31,6 +28,9 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
         return Err(FormatError::Unsupported(
             "required container flags are unknown",
         ));
+    }
+    if container_flags & CONTAINER_FLAG_COLOR_METADATA == 0 {
+        return Err(FormatError::Invalid("required color metadata is missing"));
     }
     let manifest_len = reader.u64()?;
     let header_blob_count = reader.u64()?;
@@ -90,37 +90,28 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
     if manifest_blob_count > MAX_BLOBS || header_blob_count != manifest_blob_count as u64 {
         return Err(FormatError::Invalid("blob count is inconsistent"));
     }
-    let (main_line_color, palette) = if container_flags & CONTAINER_FLAG_COLOR_METADATA != 0 {
-        let main_line_color = reader.color_value()?;
-        let palette_count = reader.u32()? as usize;
-        if reader.u32()? != 0 {
-            return Err(FormatError::Unsupported(
-                "color metadata reserved field is not zero",
-            ));
-        }
-        if palette_count > MAX_PALETTE_COLORS {
-            return Err(FormatError::Invalid("palette count exceeds its bound"));
-        }
-        let mut palette = Vec::with_capacity(palette_count);
-        for _ in 0..palette_count {
-            palette.push(reader.color_value()?);
-        }
-        (Some(main_line_color), palette)
-    } else {
-        (None, Vec::new())
-    };
-    let color_metadata_len = if container_flags & CONTAINER_FLAG_COLOR_METADATA != 0 {
-        COLOR_METADATA_FIXED_BYTES
-            .checked_add(
-                palette
-                    .len()
-                    .checked_mul(COLOR_VALUE_BYTES)
-                    .ok_or(FormatError::Invalid("palette manifest overflows"))?,
-            )
-            .ok_or(FormatError::Invalid("color metadata length overflows"))?
-    } else {
-        0
-    };
+    let main_line_color = reader.color_value()?;
+    let palette_count = reader.u32()? as usize;
+    if reader.u32()? != 0 {
+        return Err(FormatError::Unsupported(
+            "color metadata reserved field is not zero",
+        ));
+    }
+    if palette_count > MAX_PALETTE_COLORS {
+        return Err(FormatError::Invalid("palette count exceeds its bound"));
+    }
+    let mut palette = Vec::with_capacity(palette_count);
+    for _ in 0..palette_count {
+        palette.push(reader.color_value()?);
+    }
+    let color_metadata_len = COLOR_METADATA_FIXED_BYTES
+        .checked_add(
+            palette
+                .len()
+                .checked_mul(COLOR_VALUE_BYTES)
+                .ok_or(FormatError::Invalid("palette manifest overflows"))?,
+        )
+        .ok_or(FormatError::Invalid("color metadata length overflows"))?;
     let (document_metadata, document_metadata_len) =
         if container_flags & CONTAINER_FLAG_DOCUMENT_METADATA != 0 {
             let byte_count = reader.u32()? as usize;
@@ -367,10 +358,6 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
         });
     }
 
-    let main_line_color = match main_line_color {
-        Some(color) => color,
-        None => legacy_main_line_color_for_planes(&planes)?,
-    };
     let document = CellFile {
         document_uuid,
         document_id,
@@ -402,7 +389,7 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
 
 fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != b"M3ED" || reader.u32()? != 1 {
+    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 1 {
         return Err(FormatError::Unsupported(
             "document metadata version is not supported",
         ));

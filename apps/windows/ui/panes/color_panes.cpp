@@ -39,6 +39,15 @@ InkpodStatus ColorPanesController::RefreshModel(
         static_cast<std::uint32_t>(
             (colors.size() + chart_page_size - 1U) / chart_page_size));
     panes.color_chart_page %= chart_page_count;
+    if (colors.empty()) {
+        panes.selected_palette_index = 0U;
+        panes.selected_color_chart_index = 0U;
+    } else {
+        const auto last = static_cast<std::uint32_t>(colors.size() - 1U);
+        panes.selected_palette_index = std::min(panes.selected_palette_index, last);
+        panes.selected_color_chart_index = std::min(
+            panes.selected_color_chart_index, last);
+    }
     return INKPOD_STATUS_OK;
 }
 

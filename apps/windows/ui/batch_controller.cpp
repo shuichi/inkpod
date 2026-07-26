@@ -52,7 +52,7 @@ bool WidePathToUtf8(
         == required;
 }
 
-InkpodFilterInput FilterInputFor(const app::M6FilterJob& job) noexcept {
+InkpodFilterInput FilterInputFor(const app::FilterJob& job) noexcept {
     InkpodFilterInput input{};
     input.struct_size = sizeof(input);
     input.kind = job.kind;

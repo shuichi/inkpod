@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const BATCH_GRAPH_VERSION: u32 = 1;
-const MAGIC: [u8; 8] = *b"INKBAT7\0";
+const MAGIC: [u8; 8] = *b"INKBATCH";
 const MAX_BATCH_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_BATCH_INPUTS: usize = 16_384;
 const MAX_BATCH_OPERATIONS: usize = 1_024;

@@ -8,12 +8,12 @@ set(resource_source "${INKPOD_SOURCE_DIR}/apps/windows/app/app.rc")
 file(READ "${main_source}" main_text)
 file(READ "${resource_source}" resource_text)
 
-set(route_begin "std::optional<LRESULT> RoutePaneControlCommand")
+set(route_begin "std::optional<LRESULT> RouteBatchCommand")
 set(route_end "std::optional<LRESULT> RouteMainWindowCommand")
 string(FIND "${main_text}" "${route_begin}" route_begin_offset)
 string(FIND "${main_text}" "${route_end}" route_end_offset)
 if(route_begin_offset LESS 0 OR route_end_offset LESS_EQUAL route_begin_offset)
-    message(FATAL_ERROR "R4 command route boundaries were not found")
+    message(FATAL_ERROR "command route boundaries were not found")
 endif()
 math(EXPR route_length "${route_end_offset} - ${route_begin_offset}")
 string(SUBSTRING "${main_text}" ${route_begin_offset} ${route_length} route_text)
@@ -32,7 +32,7 @@ list(REMOVE_DUPLICATES unique_route_ids)
 list(LENGTH unique_route_ids unique_route_count)
 if(NOT route_count EQUAL unique_route_count)
     message(FATAL_ERROR
-        "R4 command routes contain duplicate owners: ${route_count} cases, "
+        "command routes contain duplicate owners: ${route_count} cases, "
         "${unique_route_count} unique IDs")
 endif()
 
@@ -42,9 +42,9 @@ list(SORT resource_ids)
 list(SORT unique_route_ids)
 if(NOT resource_ids STREQUAL unique_route_ids)
     message(FATAL_ERROR
-        "R4 command routes differ from the production app.rc command set")
+        "command routes differ from the production app.rc command set")
 endif()
 
 list(LENGTH resource_ids production_count)
 message(STATUS
-    "Verified ${production_count} production command IDs with one R4 route owner each")
+    "Verified ${production_count} production command IDs with one route owner each")

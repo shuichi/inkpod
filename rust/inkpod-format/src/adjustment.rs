@@ -8,6 +8,7 @@ use inkpod_image::{
 use std::collections::BTreeSet;
 
 pub const MAX_ADJUSTMENT_LAYERS: usize = 4_096;
+const ADJUSTMENT_METADATA_MAGIC: [u8; 4] = *b"ADJT";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileAdjustmentLayer {
@@ -25,7 +26,7 @@ pub(super) fn encode_adjustment_metadata(
 ) -> Result<Vec<u8>, FormatError> {
     validate_adjustment_metadata(metadata, None)?;
     let mut output = Vec::new();
-    output.extend_from_slice(b"M6AD");
+    output.extend_from_slice(&ADJUSTMENT_METADATA_MAGIC);
     push_u32(&mut output, 1);
     push_u32(&mut output, metadata.adjustments.len() as u32);
     push_u32(&mut output, 0);
@@ -92,7 +93,7 @@ pub(super) fn decode_adjustment_metadata(
     bytes: &[u8],
 ) -> Result<FileAdjustmentMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != b"M6AD" || reader.u32()? != 1 {
+    if reader.take(4)? != ADJUSTMENT_METADATA_MAGIC || reader.u32()? != 1 {
         return Err(FormatError::Unsupported(
             "adjustment metadata version is not supported",
         ));

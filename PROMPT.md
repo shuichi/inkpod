@@ -62,10 +62,10 @@
 main frame は標準的な Windows 11 desktop application とし、次の領域を持たせてください。
 
 - 最上段: menu bar。
-- menu bar の下: zoom、fit、1:1、表示反転、guide/grid、前後セル、保存等の高頻度 command を置く toolbar。
+- menu bar の下: 拡大/縮小、fit、1:1、表示反転、guide/grid、前後セル、保存等の高頻度 command を置く toolbar。常設の zoom slider は置かない。
 - 左側の dock pane: tool palette。選択中 tool は一つだけ明示する。
 - 中央: 一つ以上の document tab と custom Canvas `HWND`。同じ document の multi-view も別 tab/view として開ける。
-- 右側の dock pane: tool options、layer/plane、color palette、color chart、light table、subpalette、file preview を tab または分割 pane で表示する。
+- main frame に常設の右 dock pane は置かず、Canvas を利用可能な横幅全体へ広げる。tool options、layer/plane、color palette、color chart、color locator、light table、cell/sequence、subpalette、file preview は、必要な Core/C ABI の状態を保持したまま、後続作業で独立した modeless floating palette として実装する。再実装までは非表示の placeholder child control も生成しない。
 - 下段: status bar。現在 tool、document 座標、zoom、pixel color、文書寸法、処理進捗、dirty 状態を表示する。
 - modeless palette は表示/非表示と位置復元ができ、high-DPI、keyboard navigation、high contrast を尊重する。
 - menu、toolbar、shortcut、context menu は同じ command ID と enable/checked state を共有し、同じ処理を重複実装しない。
@@ -143,7 +143,7 @@ main frame は標準的な Windows 11 desktop application とし、次の領域�
 
 #### ウィンドウ
 
-- `ツールパレット`、`ツールオプション`、`レイヤー`、`カラー`、`カラーチャート`、`カラーロケーター`、`ライトテーブル`、`サブパレット`、`ファイルプレビュー`、`バッチ` の表示切替。
+- 各 modeless floating palette の実装後は、`ツールパレット`、`ツールオプション`、`レイヤー`、`カラー`、`カラーチャート`、`カラーロケーター`、`ライトテーブル`、`サブパレット`、`ファイルプレビュー`、`バッチ` の表示切替を提供する。
 - `新規セルビュー`: 同じ document を別 viewport で開く。
 - `フルスクリーン`。
 - `パレットの整頓 > 初期位置/現在位置を保存/保存位置へ戻す`。

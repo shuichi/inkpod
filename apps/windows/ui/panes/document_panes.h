@@ -42,8 +42,8 @@ struct SequencePaneCell {
     std::string name;
 };
 
-// Owns the Core-to-pane model adapter. HWND presentation and notification
-// normalization remain with MainWindow until R4.
+// Owns the Core-to-pane model adapter. A future modeless floating palette
+// may bind these records without coupling Core state to an HWND.
 class DocumentPanesController final {
 public:
     explicit DocumentPanesController(app::CoreEngine& engine) noexcept;

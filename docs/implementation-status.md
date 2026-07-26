@@ -16,6 +16,11 @@
   scope decision, administrator package install, installed ABI smoke, and
   uninstall are optional release validation rather than an M8 completion gate;
   all M0-M8 milestones are complete.
+- A post-completion semantic naming cleanup removed milestone labels from all
+  production, test, build, resource, and CI source. The native container is now
+  `.inkpod` v2 with required color metadata and semantic `DOCM`, `LTBL`, `VECT`,
+  and `ADJT` sections; `.inkbatch` uses `INKBATCH`. Pre-v2 files are intentionally
+  unsupported.
 
 ## Post-M8 refactoring regression baseline
 
@@ -80,6 +85,13 @@
   document conversion. Document and color pane controllers load batched Core
   models; color-chart name/page synchronization is owned with the color pane
   model while Win32 list presentation remains in the main window for R4.
+- On 2026-07-26 the main-window chrome was intentionally simplified: the zoom
+  slider and the persistent locator, motion-state, layer/plane, color,
+  light-table, and sequence controls are no longer created. The Canvas now uses
+  the full content width and the status bar owns the persistent zoom readout.
+  Core/C ABI behavior, pane controllers, and synchronized selection state are
+  retained for later modeless floating palettes; a static boundary test rejects
+  reintroduction of the retired child controls.
 - View/guide/grid, fill, selection, floating paste, and vector commands now pass
   typed inputs to focused controllers. Effects owns task creation, progress,
   cancellation, preview apply, and completion posting. Batch owns graph
@@ -181,16 +193,16 @@
 | ARCH-002 | Verified | Core/image/format are safe and frontend-independent | All three domain crates' source/manifest scan, clippy, workspace tests | No Rust Windows dependency |
 | ABI-001 | Verified | ABI v1 retains M0-M6 records and adds bounded M7 graph/input/operation/output records plus immutable graph, preview, report, and thread-safe task handles | All 155 public functions have a direct contract-test reference; header/export parity gate; C11/C++20 layouts and post-M8 integrated ABI/application smoke; Rust short/oversized-stride/misaligned-nested-record, buffer, ownership, cancellation, transaction, and round-trip tests | Caller graph spans are copied on create; nested records are validated before reference creation; borrowed preview/report strings live until their owning handle is released |
 | ABI-002 | Verified | Immutable snapshot owns flat M5 cubic/fill/boundary spans alongside raster/overlay data; ownership remains with the renderer queue | Core zoom invariance; Rust FFI lifetime/count tests; compiled C++ validator/D2D smoke | Vector records remain document-coordinate and snapshot-borrowed |
-| IO-001 (native save) | Verified | `.inkpod` v1 adds bounded optional M3-M6 sections; `M6AD` stores stable adjustment-layer IDs and validated brightness/contrast, curve, or levels parameters while retaining M1-M5 reads | Adjustment order/parameters/composite save-reopen; native round-trip plus missing/duplicate/wrong-layer/invalid-parameter rejection | Blob compression remains optional and disabled |
+| IO-001 (native save) | Verified | `.inkpod` v2 uses bounded semantic `DOCM`, `LTBL`, `VECT`, and `ADJT` sections; adjustment records store stable IDs and validated brightness/contrast, curve, or levels parameters | Adjustment order/parameters/composite save-reopen; native round-trip plus missing/duplicate/wrong-layer/invalid-parameter rejection | Pre-v2 project files are intentionally unsupported; blob compression remains optional and disabled |
 | IO-001 (M2 recovery) | Verified | Atomic autosave leaves the normal savepoint/path untouched; recovery opens dirty, recovered, and pathless; Windows gives never-saved cells a private recovery path, queues timer autosave after an active stroke, and discovers private recovery at startup | Core/FFI recovery tests plus Windows active-stroke autosave, private-path discovery, and normal-vs-recovery smoke | Only the newest private recovery is prompted per launch; defer leaves it intact |
 | IO-002 | Verified | Bounded PNG/TIFF/TGA/BMP codecs are exposed by native Open/Import/Export dialogs; export selects preserved alpha or explicit white, and sequence import/export uses the same validated codec path | Four-format round-trip/alpha/DPI/bounds tests plus Windows PNG export/open/import and sequence import/export menu smoke | DGA/CEL remains `Unknown`; no proprietary layout is inferred |
 | DOC-001 | Verified | Cell creation and native paper, image-size, resolution, 100/reference/drawing/safe-frame, and independent-margin dialogs dispatch transactional Core commands | Metadata/native round-trip, mixed-size frame golden, and Windows creation/frame/margin/size/DPI dialog smoke | — |
-| DOC-002 | Verified | Stable-ID typed layer/plane tree, including vector-coloring topology, is displayed as separate native layer and plane panes and drives the active Core node | Topology/invalid-combination/save-reopen tests, ABI node queries, and Windows pane selection smoke | — |
-| DOC-003 | Verified | Native menus and pane actions provide create, duplicate, delete, drag/button reorder, visibility, editability, opacity, conversion, compatible merge, and hidden-node cleanup | Core raster/vector tree transactions plus Windows menu and real listbox drag smoke | — |
+| DOC-002 | In progress | Stable-ID typed layer/plane topology, active-node state, and batched pane model remain in Core/C ABI and the Windows controller; the former persistent layer/plane controls were removed | Topology/invalid-combination/save-reopen tests, ABI node queries, and Windows model synchronization smoke | Re-expose selection in a modeless floating layer palette |
+| DOC-003 | In progress | Native menu commands retain create, duplicate, delete, reorder, visibility, editability, opacity, conversion, compatible merge, and hidden-node cleanup without a persistent listbox | Core raster/vector tree transactions plus Windows menu reorder smoke | Floating layer palette actions and direct item reordering remain to be implemented |
 | HIST-001 | Verified | Transactions, Undo/Redo, savepoints, whole revert, multi-step history selection, layer/selection partial revert, and preview apply/cancel are available from native UI | Core history/savepoint/preview tests plus title/dirty, multi-step dialog, partial-revert, and M6 preview Windows smoke | — |
-| VIEW-001 | Verified | Canvas zoom/pan/box-zoom gestures, fit, 1:1, numeric/slider zoom, and horizontal/vertical view flips update independent view state | Core mode/resize/box/flip tests; ABI transform flags; Windows gesture/dialog/DPI smoke | Manual viewport resize preserves zoom/pan while recording the new viewport dimensions |
+| VIEW-001 | Verified | Canvas zoom/pan/box-zoom gestures, fit, 1:1, numeric zoom, and horizontal/vertical view flips update independent view state; current zoom is always shown in the status bar | Core mode/resize/box/flip tests; ABI transform flags; Windows gesture/dialog/DPI/status smoke | The former main-window zoom slider is intentionally removed; manual viewport resize preserves zoom/pan while recording the new viewport dimensions |
 | VIEW-002 | Verified | Ruler, guide add/move/delete, grid settings, snap, and transparent view are Core-owned and exposed through native menus/dialogs and renderer overlays | Core persistence/snap tests, snapshot overlay ABI, and Windows guide/grid/ruler/snap/transparency smoke | — |
-| VIEW-003 | Verified | Document tabs create same-document logical views with independent transforms; the locator pane reports document position, selection bounds, and color | Core locator/multi-view tests, ABI same-revision snapshots, and Windows tab/locator smoke | — |
+| VIEW-003 | In progress | Document tabs create same-document logical views with independent transforms; locator sampling remains available through Core/C ABI but its persistent main-window label was removed | Core locator/multi-view tests, ABI same-revision snapshots, and Windows tab smoke | Re-expose locator results in a modeless floating locator palette |
 | PAINT-001 | Verified | pencil/brush/eraser, auto erase, pressure-size, clipped/bounded incremental staging; UI/Input -> Core queue uses mouse fallback and `WM_POINTER` history | Core tool/resource tests; 256-record FFI test; Windows multi-sample live stroke smoke | PAINT-001 scope complete |
 | FILL-001 | Verified | Canvas seed fill uses a native option dialog for tolerance and selection clipping, then dispatches the normalized typed request | Image goldens/properties, Core/FFI transactions, and Windows option-dialog plus Canvas-click smoke | — |
 | FILL-002 | Verified | The fill dialog exposes up to six inclusion/exclusion colors, overflow abort/reporting, gap-close axes/value, and detached matching regions | Inclusion/gap/overflow/cancel/no-op goldens plus Windows option-to-Core smoke | Gap close uses the documented deterministic native axis-bridge rule |
@@ -205,16 +217,16 @@
 | FILTER-001 | Verified | Deterministic fixed sharpen/blur presets, bounded Gaussian/unsharp, channel invert, and alpha-independent auto contrast support RGBA8/16 and selection clipping; all catalog entries use native editor/preview/last-filter paths | Exact 8/16-bit alpha/selection golden; catalog/image tests; Core/FFI/Windows editor smoke; task progress/cancel | Work runs on the Core engine worker while the UI polls/cancels a thread-safe task |
 | FILTER-002 | Verified | Brightness/contrast, RGB/R/G/B Bezier/B-spline curves, levels, HSV, and color balance use documented normalized 16-bit clamp/rounding; native editors expose channel, interpolation, parameters, and curve points | Catalog validation, preview/Undo acceptance, C ABI validation, full workspace and Windows editor tests | Unknown legacy preset byte layouts are not fabricated |
 | EFFECT-001 | Verified | Linear/radial 3–16-stop alpha gradients with dither/45-degree constraint, pressure/fade/spacing/continuous airbrush, boundary-only effect, pen/rectangle/polyline/lasso blur with screen-fixed pressure diameter, and round/square pressure-sensitive offset stamp gestures are connected through Core/C ABI/native Canvas | Boundary acceptance; deterministic gesture/pressure and extreme-coordinate tests; Rust/C++ ABI and Windows editor/gesture smoke | Native algorithms are documented Inkpod semantics, not inferred proprietary kernels |
-| ADJUST-001 | Verified | Stable-ID non-destructive brightness/contrast, levels, and curve layers compose in palette order with visibility/opacity, persist in `M6AD`, and are exposed as multiple selectable/re-editable/reorderable native entries; alpha row edit/gradient and grayscale view preserve RGB | Order/source/opacity/visibility/save-reopen; malformed metadata; alpha RGB-preservation; Rust/C++ ABI and multiple-adjustment Windows smoke | — |
+| ADJUST-001 | Verified | Stable-ID non-destructive brightness/contrast, levels, and curve layers compose in palette order with visibility/opacity, persist in `ADJT`, and are exposed as multiple selectable/re-editable/reorderable native entries; alpha row edit/gradient and grayscale view preserve RGB | Order/source/opacity/visibility/save-reopen; malformed metadata; alpha RGB-preservation; Rust/C++ ABI and multiple-adjustment Windows smoke | — |
 | CLIP-001 | Verified | Cut/Copy and compatible, selected-plane, or converted-plane Paste preserve document coordinates; the adapter publishes/imports the private typed format and standard CF_DIBV5/CF_DIB | Core cross-paper/failure tests, FFI ownership, and Windows private plus DIB-only external-clipboard menu smoke | Standard interchange is bounded to supported 24/32-bit DIB layouts; other Windows formats are ignored safely |
 | XFORM-001 | Verified | Native menus/dialogs separate view-only flips from destructive horizontal/vertical mirror, 90-degree rotation, image/paper size, and resolution changes | Core pixel/frame/guide/history tests and Windows command/dialog revision smoke | — |
 | XFORM-002 | Verified | Floating paste offers dialog and Canvas-handle move/scale/rotate preview, Enter/OK commit, and Esc/Cancel restoration | Core coordinate/scale/rotate/retry/cancel, FFI lifecycle, and Windows dialog/handle gesture smoke | — |
 | SHORT-001 | Verified | The categorized native editor covers 24 menu/tool/other commands; rebind conflict replacement, actual key resolution, and reset use the Core shortcut map | Core/FFI resolve tests plus Windows editor/conflict/reset and real WM_KEY command smoke | — |
 | COLOR-001 | Verified | Native RGB/HSV plus alpha editor preserves straight RGBA8/16 values; eyedropper source menus select active/topmost/composite/light-table sampling | Exact-depth Core/FFI tests and Windows editor/source-selection/Canvas sampling smoke | Display conversion remains explicit BGRA8 and does not replace the stored exact-depth color |
-| COLOR-002 | Verified | Palette, named chart pages/search/edit/save/load, sequence subpalette registration/sampling, and color-check panes are native workflows with 1–0/Tab shortcuts | Palette/chart/subpalette Core tests and Windows pane/menu/shortcut/save-load smoke | Legacy palette/chart byte layouts remain `Unknown`; Inkpod uses documented `.inkpalette`/`.inkchart` files |
-| LT-001 | Verified | Split native set/item panes expose set create/duplicate/delete/rename/reorder, item add/delete/reorder/properties, per-item transform/color/mode/opacity, and global opacity | Set/item transaction/opacity/native round-trip tests plus Windows administration/property smoke | — |
-| LT-002 | Verified | Native controls expose reference-frame alignment, Canvas movement (Shift moves all), boundary/color sampling, reload, and dirty-safe edit-image swap while preserving display state | Mixed-size/reopen/swap goldens, cancellation/read-only fill, ABI, and real Canvas move/reload/sample/swap smoke | — |
-| SEQ-001 | Verified | Native sequence pane/file commands provide natural-order import/export, thumbnails, numbered first/previous/next/last/goto navigation, and gap-safe switching | Natural-order/gap/thumbnail/dirty-switch tests plus Windows file/menu/pane smoke | — |
+| COLOR-002 | In progress | Palette, named chart, sequence subpalette, color-check models, menu commands, and 1–0/Tab shortcuts remain connected; persistent palette/chart controls were removed from the main window | Palette/chart/subpalette Core tests and Windows model/menu/shortcut/save-load smoke | Re-expose palette and chart models in modeless floating palettes; legacy preset layouts remain `Unknown` |
+| LT-001 | In progress | Set/item state and commands for administration, transform, color, mode, per-item opacity, and global opacity remain in Core/C ABI and the Windows controller; persistent split panes were removed | Set/item transaction/opacity/native round-trip tests plus Windows state/command smoke | Re-expose the set and item models in a modeless floating light-table palette |
+| LT-002 | In progress | Reference alignment, Canvas movement, boundary/color sampling, reload, and dirty-safe edit-image swap remain connected without persistent main-window controls | Mixed-size/reopen/swap goldens, cancellation/read-only fill, ABI, and Windows movement/reload/sample/swap smoke | Floating light-table item controls remain to be implemented |
+| SEQ-001 | In progress | File/menu commands retain natural-order import/export and first/previous/next/last/goto switching; sequence model synchronization remains available after removal of the persistent sequence list | Natural-order/gap/thumbnail/dirty-switch tests plus Windows file/menu/model smoke | Re-expose thumbnails and direct cell/sequence selection in a modeless floating palette |
 | SEQ-002 | Verified | Timed motion UI supports 30/25/24/12/10/8 FPS, loop, pause/step/first/last, selection/light-table options, timer playback, and keyboard shortcuts | Core motion loop/pause tests, C ABI state tests, and Windows timer/menu/shortcut smoke | — |
 | BATCH-001 | Verified | Versioned checksummed `.inkbatch` settings persist file/folder/current-sequence selectors, ordered enabled/configure-each-run operations, conjunctive stable-ID/type target selectors, and output/failure policies; a modeless native Batch palette supports add/edit/remove/reorder and save/load | Format checksum/version/bounds/atomic replacement tests, complete operation/filter graph round-trip, FFI copied-span ownership, and Windows `WM_COMMAND`/dialog smoke | Loaded graphs remain immutable handles; editing starts a new UI graph rather than mutating borrowed settings storage |
 | BATCH-002 | Verified | Core and native Batch UI expose color replacement/swap, continuous fill seeds, separation, visibility, four vector line-width modes, all M6 filters, boundary airbrush, dust removal, mirror, 90-degree rotation, resize/DPI, and plane conversion with stable target/missing policy | Complete operation/filter versioned round-trip, Core operation/transaction tests, six named M7 acceptance tests, C ABI nested-record validation, and Windows add/edit/reorder/remove/swap/boundary dry-run smoke | Boundary airbrush starts with the required two colors; operations use documented Inkpod semantics; no proprietary legacy batch preset layout is inferred |
@@ -341,7 +353,7 @@ straight-alpha-safe premultiplied accumulation and deterministic rounding.
 Gradient, pressure-aware airbrush/stamp gestures, screen-fixed pressure blur,
 boundary effect, dust removal, alpha-only row edit/gradient, and alpha grayscale
 view are typed Core/image operations connected through copied/strided C ABI
-records. The versioned `M6AD` section rejects missing, duplicate, invalid, or
+records. The versioned `ADJT` section rejects missing, duplicate, invalid, or
 non-adjustment relationships. The C ABI validates sizes, strides, counts,
 ownership, task state, and work bounds before mutation. Debug and Release
 Windows smoke execute preview cancel/apply/Undo, every native filter/editor
@@ -605,13 +617,13 @@ as dirty/pathless, and then reopens the unchanged normal file.
   vector, and adjustment terminology. `CellFile` fields follow the same naming.
   Core feature areas are further divided into model, operation, validation,
   geometry, codec, and I/O modules where those responsibilities differ.
-- Existing `.inkpod` section magic bytes and flag bit values were preserved so
-  the refactoring does not change on-disk compatibility. Only source identifiers,
-  diagnostics, and API documentation changed.
-- An architecture regression test rejects milestone-numbered production module
-  files and public Rust/C FFI identifiers. The existing surface guard still
-  requires exact header/export parity and a direct test reference for every C ABI
-  function.
+- `.inkpod` is now version 2 and uses semantic section tags; `.inkbatch` uses a
+  semantic magic. The decoder deliberately accepts only the current formats, and
+  the obsolete optional-color and fallback-color branches were removed.
+- An architecture regression test rejects temporary phase labels across Rust,
+  Windows C/C++/resources, tests, CMake, PowerShell, manifests, and CI source.
+  The existing surface guard still requires exact header/export parity and a
+  direct test reference for every C ABI function.
 - `inkpod-core/src/lib.rs` was reduced from 9,042 lines to a 103-line module and
   public re-export index. Public `Core` methods and pure helpers now live in
   document, selection, transform, view, paint, stroke, history, persistence,
@@ -620,8 +632,8 @@ as dirty/pathless, and then reopens the unchanged normal file.
   their crate roots are 45, 49, and 56 lines. FFI ABI records, opaque handles,
   boundary converters, and feature exports are separate, while the header and
   all 155 exported symbol names/layouts remain unchanged.
-- Shared internal state kept its prior effective crate scope; public Rust paths,
-  C ABI values, and on-disk bytes did not change. Unit test bodies are stored
+- Shared internal state kept its prior effective crate scope; public Rust paths
+  and C ABI values did not change. Unit test bodies are stored
   under each crate's `tests/unit/`, with malformed corpus and resilience tests
   retained as integration targets under `tests/`.
 - The architecture guard caps every crate root at 200 lines, rejects inline test
@@ -633,6 +645,8 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| Semantic-label scan; `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | Non-document source has zero M0-M8/R0-R6 labels; semantic-name architecture guard and explicit previous-container-version rejection passed; formatting and clippy passed; Core 64, architecture 5, resilience 1, FFI 19, format 21 plus malformed corpus 2, image 22, and doc-tests passed | 2026-07-26 |
+| Explicit Visual Studio 2026 x64 Developer environment Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E inkpod_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Semantic C++/RC names, application/ABI smoke, command route/state ownership, frontend boundaries, and renamed MSIX payload test passed 8/8 in Debug (14.86 s) and Release (3.97 s) | 2026-07-26 |
 | M8 status/compatibility consistency audit; `git diff --check` | Documentation-only closeout | M8 milestone and all five M8 requirement rows are complete/Verified under the explicitly revised package acceptance scope; administrator install/installed ABI/uninstall remains accurately recorded as optional and unexecuted | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R6 bootstrap/smoke boundary refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
 | Explicit Visual Studio 2026 x64 Developer environment Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Separate `Application`, application smoke, and MainWindow runtime sources passed `/W4 /WX /permissive-`; assets, 273/273 command routes/states, frontend boundaries, focused state, ABI, real M1-M7 application/D2D, and package payload passed 8/8 in Debug (16.53 s) and Release (3.81 s) | 2026-07-26 |

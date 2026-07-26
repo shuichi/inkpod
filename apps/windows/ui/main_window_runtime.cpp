@@ -49,13 +49,13 @@
 namespace inkpod::windows::ui::runtime {
 
 using inkpod::windows::ui::HistoryDialogState;
-using inkpod::windows::ui::M6EditorState;
+using inkpod::windows::ui::EffectEditorState;
 using inkpod::windows::ui::ShortcutDialogState;
 using inkpod::windows::ui::TextInputDialogState;
 using inkpod::windows::ui::ViewOptionsDialogState;
 using inkpod::windows::ui::ShowAboutDialog;
 using inkpod::windows::ui::ShowHistoryDialog;
-using inkpod::windows::ui::ShowM6Editor;
+using inkpod::windows::ui::ShowEffectEditor;
 using inkpod::windows::ui::ShowShortcutEditor;
 using inkpod::windows::ui::ShowTextInput;
 using inkpod::windows::ui::ShowViewOptions;
@@ -66,10 +66,10 @@ using inkpod::app::BatchUiState;
 using inkpod::app::DocumentShellState;
 using inkpod::app::DocumentShellController;
 using inkpod::app::EffectsUiState;
-using inkpod::app::M6AdjustmentUiState;
-using inkpod::app::M6FilterJob;
-using inkpod::app::M6StopValue;
-using inkpod::app::M6ToolOptions;
+using inkpod::app::AdjustmentLayerUiState;
+using inkpod::app::FilterJob;
+using inkpod::app::GradientStopValue;
+using inkpod::app::CanvasEffectOptions;
 using inkpod::app::PaneUiState;
 using inkpod::app::ToolUiState;
 using inkpod::app::ViewUiState;
@@ -102,12 +102,12 @@ using inkpod::windows::ui::tools::kInteractionFill;
 using inkpod::windows::ui::tools::kInteractionFloatingTransform;
 using inkpod::windows::ui::tools::kInteractionGuideMove;
 using inkpod::windows::ui::tools::kInteractionLightTableMove;
-using inkpod::windows::ui::tools::kInteractionM6Airbrush;
-using inkpod::windows::ui::tools::kInteractionM6AlphaGradient;
-using inkpod::windows::ui::tools::kInteractionM6Blur;
-using inkpod::windows::ui::tools::kInteractionM6Dust;
-using inkpod::windows::ui::tools::kInteractionM6Gradient;
-using inkpod::windows::ui::tools::kInteractionM6Stamp;
+using inkpod::windows::ui::tools::kInteractionEffectAirbrush;
+using inkpod::windows::ui::tools::kInteractionEffectAlphaGradient;
+using inkpod::windows::ui::tools::kInteractionEffectBlur;
+using inkpod::windows::ui::tools::kInteractionEffectDust;
+using inkpod::windows::ui::tools::kInteractionEffectGradient;
+using inkpod::windows::ui::tools::kInteractionEffectStamp;
 using inkpod::windows::ui::tools::kInteractionSelection;
 using inkpod::windows::ui::tools::kInteractionVectorCurve;
 using inkpod::windows::ui::tools::kInteractionVectorEllipse;
@@ -117,12 +117,12 @@ using inkpod::windows::ui::tools::kInteractionVectorPolyline;
 using inkpod::windows::ui::tools::kInteractionVectorRectangle;
 constexpr UINT_PTR kAutosaveTimer = 1U;
 constexpr UINT kAutosaveIntervalMilliseconds = 60U * 1000U;
-constexpr UINT kM6TaskCompleted = WM_APP + 0x170U;
+constexpr UINT kEffectTaskCompleted = WM_APP + 0x170U;
 constexpr UINT kBatchTaskCompleted = WM_APP + 0x171U;
-constexpr UINT_PTR kM6ProgressTimer = 1U;
-constexpr UINT_PTR kM6ContinuousSprayTimer = 2U;
+constexpr UINT_PTR kEffectProgressTimer = 1U;
+constexpr UINT_PTR kContinuousSprayTimer = 2U;
 constexpr UINT_PTR kMotionPlaybackTimer = 3U;
-constexpr UINT kM6ContinuousSprayIntervalMilliseconds = 50U;
+constexpr UINT kContinuousSprayIntervalMilliseconds = 50U;
 constexpr wchar_t kVectorStrokePlaneRequired[] =
     L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
 
@@ -263,84 +263,14 @@ void ResetUiForDocumentReplacement(AppContext& state) noexcept {
         state.engine->SetActiveView(0U);
     }
     if (state.windows.window != nullptr) {
-        KillTimer(state.windows.window, kM6ContinuousSprayTimer);
+        KillTimer(state.windows.window, kContinuousSprayTimer);
         KillTimer(state.windows.window, kMotionPlaybackTimer);
     }
     HandleActiveTreePlaneTransition(state);
 }
 
-void UpdateLocatorDisplay(AppContext& state, int device_x, int device_y) noexcept {
-    if (state.engine == nullptr) {
-        return;
-    }
-    InkpodLocatorOutput locator{};
-    locator.struct_size = sizeof(locator);
-    const std::uint64_t view_id = state.view.active_view_id;
-    DocumentPanesController controller(*state.engine);
-    const InkpodStatus status =
-        controller.SampleLocator(view_id, device_x, device_y, locator);
-    if (status != INKPOD_STATUS_OK) {
-        return;
-    }
-    const double diagonal = (locator.flags & INKPOD_LOCATOR_SELECTION_PRESENT) != 0U
-        ? std::hypot(
-              static_cast<double>(locator.selection.width),
-              static_cast<double>(locator.selection.height))
-        : 0.0;
-    std::array<wchar_t, 256U> text{};
-    if ((locator.flags & INKPOD_LOCATOR_COLOR_PRESENT) != 0U) {
-        _snwprintf_s(
-            text.data(),
-            text.size(),
-            _TRUNCATE,
-            L"カラーロケーター\r\nX: %d  Y: %d\r\nH: %d  V: %d  L: %.2f\r\nRGBA%u: %u, %u, %u, %u",
-            locator.document_x,
-            locator.document_y,
-            locator.selection.width,
-            locator.selection.height,
-            diagonal,
-            locator.color.depth,
-            locator.color.red,
-            locator.color.green,
-            locator.color.blue,
-            locator.color.alpha);
-    } else {
-        _snwprintf_s(
-            text.data(),
-            text.size(),
-            _TRUNCATE,
-            L"カラーロケーター\r\nX: %d  Y: %d\r\nH: %d  V: %d  L: %.2f\r\nRGBA: 透明",
-            locator.document_x,
-            locator.document_y,
-            locator.selection.width,
-            locator.selection.height,
-            diagonal);
-    }
-    if (state.windows.locator_label != nullptr) {
-        SetWindowTextW(state.windows.locator_label, text.data());
-    }
-    if (state.windows.status_bar != nullptr) {
-        std::array<wchar_t, 160U> compact{};
-        _snwprintf_s(
-            compact.data(),
-            compact.size(),
-            _TRUNCATE,
-            L"X:%d Y:%d H:%d V:%d L:%.1f",
-            locator.document_x,
-            locator.document_y,
-            locator.selection.width,
-            locator.selection.height,
-            diagonal);
-        SendMessageW(
-            state.windows.status_bar,
-            SB_SETTEXTW,
-            1,
-            reinterpret_cast<LPARAM>(compact.data()));
-    }
-}
-
 bool RefreshTreePane(AppContext& state) noexcept {
-    if (state.engine == nullptr || state.windows.layer_list == nullptr || state.windows.plane_list == nullptr) {
+    if (state.engine == nullptr) {
         return false;
     }
     std::vector<TreePaneNode> layers;
@@ -351,90 +281,27 @@ bool RefreshTreePane(AppContext& state) noexcept {
     const InkpodStatus status = controller.LoadTree(
         requested_layer_id, layers, planes, selected_layer_index);
     if (status != INKPOD_STATUS_OK || layers.empty()) {
+        state.panes.tree_layer_count = 0U;
+        state.panes.tree_plane_count = 0U;
         return false;
-    }
-
-    SendMessageW(state.windows.layer_list, LB_RESETCONTENT, 0, 0);
-    for (const auto& node : layers) {
-        std::wstring name;
-        try {
-            name = LocalizedHistoryLabel(node.name);
-        } catch (const std::bad_alloc&) {
-            return false;
-        }
-        std::array<wchar_t, 320U> label{};
-        _snwprintf_s(
-            label.data(),
-            label.size(),
-            _TRUNCATE,
-            L"%ls%ls %ls  [種類%u / %u%%]",
-            (node.flags & INKPOD_NODE_VISIBLE) != 0U ? L"☑" : L"☐",
-            (node.flags & INKPOD_NODE_EDITABLE) != 0U ? L"✎" : L"—",
-            name.c_str(),
-            node.kind,
-            node.opacity_milli / 10U);
-        const LRESULT item = SendMessageW(
-            state.windows.layer_list,
-            LB_ADDSTRING,
-            0,
-            reinterpret_cast<LPARAM>(label.data()));
-        if (item >= 0) {
-            SendMessageW(
-                state.windows.layer_list,
-                LB_SETITEMDATA,
-                static_cast<WPARAM>(item),
-                static_cast<LPARAM>(node.id));
-        }
     }
     selected_layer_index = std::min<std::uint32_t>(
         selected_layer_index, static_cast<std::uint32_t>(layers.size() - 1U));
-    SendMessageW(state.windows.layer_list, LB_SETCURSEL, selected_layer_index, 0);
     state.panes.active_tree_layer_index = selected_layer_index;
     state.panes.active_tree_layer_id = layers[selected_layer_index].id;
+    state.panes.tree_layer_count = static_cast<std::uint32_t>(layers.size());
 
-    SendMessageW(state.windows.plane_list, LB_RESETCONTENT, 0, 0);
     std::uint32_t selected_plane_index{};
     for (std::size_t index = 0U; index < planes.size(); ++index) {
-        const auto& node = planes[index];
-        std::wstring name;
-        try {
-            name = LocalizedHistoryLabel(node.name);
-        } catch (const std::bad_alloc&) {
-            return false;
-        }
-        std::array<wchar_t, 320U> label{};
-        _snwprintf_s(
-            label.data(),
-            label.size(),
-            _TRUNCATE,
-            L"%ls%ls %ls  [種類%u / 形式%u / %u%%]",
-            (node.flags & INKPOD_NODE_VISIBLE) != 0U ? L"☑" : L"☐",
-            (node.flags & INKPOD_NODE_EDITABLE) != 0U ? L"✎" : L"—",
-            name.c_str(),
-            node.kind,
-            node.pixel_format,
-            node.opacity_milli / 10U);
-        const LRESULT item = SendMessageW(
-            state.windows.plane_list,
-            LB_ADDSTRING,
-            0,
-            reinterpret_cast<LPARAM>(label.data()));
-        if (item >= 0) {
-            SendMessageW(
-                state.windows.plane_list,
-                LB_SETITEMDATA,
-                static_cast<WPARAM>(item),
-                static_cast<LPARAM>(node.id));
-        }
-        if (node.id == state.panes.active_tree_plane_id) {
+        if (planes[index].id == state.panes.active_tree_plane_id) {
             selected_plane_index = static_cast<std::uint32_t>(index);
         }
     }
+    state.panes.tree_plane_count = static_cast<std::uint32_t>(planes.size());
     bool vector_stroke_plane{};
     if (!planes.empty()) {
         selected_plane_index = std::min<std::uint32_t>(
             selected_plane_index, static_cast<std::uint32_t>(planes.size() - 1U));
-        SendMessageW(state.windows.plane_list, LB_SETCURSEL, selected_plane_index, 0);
         state.panes.active_tree_plane_index = selected_plane_index;
         state.panes.active_tree_plane_id = planes[selected_plane_index].id;
         vector_stroke_plane = IsVectorStrokePlane(planes[selected_plane_index].kind);
@@ -448,8 +315,7 @@ bool RefreshTreePane(AppContext& state) noexcept {
 }
 
 bool RefreshLightTablePane(AppContext& state) noexcept {
-    if (state.engine == nullptr || state.windows.light_table_set_list == nullptr
-        || state.windows.light_table_item_list == nullptr) {
+    if (state.engine == nullptr) {
         return false;
     }
     std::vector<LightTablePaneSet> sets;
@@ -457,60 +323,31 @@ bool RefreshLightTablePane(AppContext& state) noexcept {
     DocumentPanesController controller(*state.engine);
     const InkpodStatus status = controller.LoadLightTable(sets, items);
     if (status != INKPOD_STATUS_OK || sets.empty()) {
+        state.panes.light_table_set_count = 0U;
+        state.panes.light_table_item_count = 0U;
         return false;
     }
-    SendMessageW(state.windows.light_table_set_list, LB_RESETCONTENT, 0, 0);
     std::uint32_t selected_set{};
     for (std::size_t index = 0; index < sets.size(); ++index) {
         const auto& set = sets[index];
-        const std::wstring name = LocalizedHistoryLabel(set.name);
-        std::array<wchar_t, 320U> label{};
-        _snwprintf_s(
-            label.data(), label.size(), _TRUNCATE, L"LT %ls%ls [%u件/%u%%]",
-            (set.flags & INKPOD_LIGHT_TABLE_SET_ACTIVE) != 0U ? L"▶ " : L"",
-            name.c_str(), set.item_count, set.opacity_milli / 10U);
-        const LRESULT row = SendMessageW(
-            state.windows.light_table_set_list, LB_ADDSTRING, 0,
-            reinterpret_cast<LPARAM>(label.data()));
-        if (row >= 0) {
-            SendMessageW(
-                state.windows.light_table_set_list, LB_SETITEMDATA, static_cast<WPARAM>(row),
-                static_cast<LPARAM>(set.id));
-        }
         if (set.id == state.panes.active_light_table_set_id
             || (set.flags & INKPOD_LIGHT_TABLE_SET_ACTIVE) != 0U) {
             selected_set = static_cast<std::uint32_t>(index);
         }
     }
-    SendMessageW(state.windows.light_table_set_list, LB_SETCURSEL, selected_set, 0);
     state.panes.active_light_table_set_index = selected_set;
     state.panes.active_light_table_set_id = sets[selected_set].id;
+    state.panes.light_table_set_count = static_cast<std::uint32_t>(sets.size());
 
-    SendMessageW(state.windows.light_table_item_list, LB_RESETCONTENT, 0, 0);
     std::uint32_t selected_item{};
     for (std::size_t index = 0; index < items.size(); ++index) {
         const auto& item = items[index];
-        const std::wstring name = LocalizedHistoryLabel(item.name);
-        std::array<wchar_t, 320U> label{};
-        _snwprintf_s(
-            label.data(), label.size(), _TRUNCATE, L"%ls %ls [%u%%→%u%%]",
-            (item.info.flags & INKPOD_LIGHT_TABLE_ITEM_VISIBLE) != 0U ? L"☑" : L"☐",
-            name.c_str(), item.info.opacity_milli / 10U,
-            item.info.effective_opacity_milli / 10U);
-        const LRESULT row = SendMessageW(
-            state.windows.light_table_item_list, LB_ADDSTRING, 0,
-            reinterpret_cast<LPARAM>(label.data()));
-        if (row >= 0) {
-            SendMessageW(
-                state.windows.light_table_item_list, LB_SETITEMDATA, static_cast<WPARAM>(row),
-                static_cast<LPARAM>(item.info.id));
-        }
         if (item.info.id == state.panes.active_light_table_item_id) {
             selected_item = static_cast<std::uint32_t>(index);
         }
     }
+    state.panes.light_table_item_count = static_cast<std::uint32_t>(items.size());
     if (!items.empty()) {
-        SendMessageW(state.windows.light_table_item_list, LB_SETCURSEL, selected_item, 0);
         state.panes.active_light_table_item_index = selected_item;
         state.panes.active_light_table_item_id = items[selected_item].info.id;
     } else {
@@ -521,16 +358,17 @@ bool RefreshLightTablePane(AppContext& state) noexcept {
 }
 
 bool RefreshSequencePane(AppContext& state) noexcept {
-    if (state.engine == nullptr || state.windows.sequence_list == nullptr) {
+    if (state.engine == nullptr) {
         return false;
     }
     std::vector<SequencePaneCell> cells;
     DocumentPanesController controller(*state.engine);
     const InkpodStatus status = controller.LoadSequence(cells);
-    SendMessageW(state.windows.sequence_list, LB_RESETCONTENT, 0, 0);
     if (status != INKPOD_STATUS_OK) {
+        state.panes.sequence_count = 0U;
         return false;
     }
+    state.panes.sequence_count = static_cast<std::uint32_t>(cells.size());
     if (cells.empty()) {
         state.animation.active_sequence_index = 0U;
         return true;
@@ -543,74 +381,20 @@ bool RefreshSequencePane(AppContext& state) noexcept {
         const auto& cell = cells[index];
         const bool active = cell.info.document_uuid_high == document.document_uuid_high
             && cell.info.document_uuid_low == document.document_uuid_low;
-        const std::wstring name = LocalizedHistoryLabel(cell.name);
-        std::array<wchar_t, 360U> label{};
-        _snwprintf_s(
-            label.data(), label.size(), _TRUNCATE,
-            L"%ls%u: %ls [%ux%u / thumb %ux%u / %016llx]",
-            active ? L"▶ " : L"", cell.info.cell_number, name.c_str(), cell.info.width,
-            cell.info.height, cell.info.thumbnail_width, cell.info.thumbnail_height,
-            static_cast<unsigned long long>(cell.info.thumbnail_checksum));
-        SendMessageW(
-            state.windows.sequence_list, LB_ADDSTRING, 0,
-            reinterpret_cast<LPARAM>(label.data()));
         if (active) {
             selected = static_cast<std::uint32_t>(index);
         }
     }
-    SendMessageW(state.windows.sequence_list, LB_SETCURSEL, selected, 0);
     state.animation.active_sequence_index = selected;
     return true;
 }
 
 bool RefreshColorPanes(AppContext& state) noexcept {
-    if (state.engine == nullptr || state.windows.color_palette_list == nullptr
-        || state.windows.color_chart_list == nullptr) {
+    if (state.engine == nullptr) {
         return false;
     }
     ColorPanesController controller(*state.engine);
-    const InkpodStatus status = controller.RefreshModel(state.panes);
-    if (status != INKPOD_STATUS_OK) {
-        return false;
-    }
-    const auto& colors = state.panes.palette_colors;
-    SendMessageW(state.windows.color_palette_list, LB_RESETCONTENT, 0, 0);
-    const std::size_t start = static_cast<std::size_t>(state.panes.palette_group) * 10U;
-    for (std::size_t index = start; index < std::min(colors.size(), start + 10U); ++index) {
-        const auto& color = colors[index];
-        std::array<wchar_t, 160U> label{};
-        _snwprintf_s(
-            label.data(), label.size(), _TRUNCATE,
-            color.depth == INKPOD_COLOR_DEPTH_16
-                ? L"%zu  RGBA16 #%04X%04X%04X%04X"
-                : L"%zu  RGBA8 #%02X%02X%02X%02X",
-            index + 1U, color.red, color.green, color.blue, color.alpha);
-        SendMessageW(
-            state.windows.color_palette_list, LB_ADDSTRING, 0,
-            reinterpret_cast<LPARAM>(label.data()));
-    }
-    SendMessageW(state.windows.color_chart_list, LB_RESETCONTENT, 0, 0);
-    constexpr std::size_t chart_page_size = 20U;
-    const std::size_t chart_start = static_cast<std::size_t>(state.panes.color_chart_page)
-        * chart_page_size;
-    for (std::size_t index = chart_start;
-         index < std::min(colors.size(), chart_start + chart_page_size);
-         ++index) {
-        const auto& color = colors[index];
-        std::array<wchar_t, 320U> label{};
-        _snwprintf_s(
-            label.data(), label.size(), _TRUNCATE,
-            color.depth == INKPOD_COLOR_DEPTH_16
-                ? L"[%u] %ls  #%04X%04X%04X%04X"
-                : L"[%u] %ls  #%02X%02X%02X%02X",
-            state.panes.color_chart_page + 1U,
-            state.panes.color_chart_names[index].c_str(),
-            color.red, color.green, color.blue, color.alpha);
-        SendMessageW(
-            state.windows.color_chart_list, LB_ADDSTRING, 0,
-            reinterpret_cast<LPARAM>(label.data()));
-    }
-    return true;
+    return controller.RefreshModel(state.panes) == INKPOD_STATUS_OK;
 }
 
 InkpodStatus ReplacePalette(
@@ -622,22 +406,9 @@ InkpodStatus ReplacePalette(
     return controller.ReplacePalette(colors);
 }
 
-void UpdateMotionLabel(
-    AnimationUiState& animation, HWND motion_label, const InkpodMotionFrame& frame) noexcept {
+void UpdateMotionState(
+    AnimationUiState& animation, const InkpodMotionFrame& frame) noexcept {
     animation.motion_paused = (frame.flags & INKPOD_MOTION_FRAME_PAUSED) != 0U;
-    if (motion_label == nullptr) {
-        return;
-    }
-    std::array<wchar_t, 256U> text{};
-    _snwprintf_s(
-        text.data(), text.size(), _TRUNCATE,
-        L"モーション %ls  %u fps  セル%u  frame:%llu  thumb:%016llx",
-        animation.motion_paused ? L"一時停止" : L"再生",
-        animation.motion_fps,
-        frame.cell_number,
-        static_cast<unsigned long long>(frame.sequence_index),
-        static_cast<unsigned long long>(frame.thumbnail_checksum));
-    SetWindowTextW(motion_label, text.data());
 }
 
 std::wstring LocalizedHistoryLabel(const std::string& label) {
@@ -1279,9 +1050,9 @@ bool ParseCurvePoints(
     return points.size() >= 2U && points.size() <= 64U;
 }
 
-bool ParseM6Stops(
+bool ParseGradientStops(
     const std::wstring& text,
-    std::vector<M6StopValue>& stops,
+    std::vector<GradientStopValue>& stops,
     std::size_t minimum_stops = 3U) noexcept {
     stops.clear();
     const wchar_t* cursor = text.c_str();
@@ -1298,7 +1069,7 @@ bool ParseM6Stops(
                 || (*end != L';' && *end != L'\0')) {
                 return false;
             }
-            stops.push_back(M6StopValue{
+            stops.push_back(GradientStopValue{
                 static_cast<std::uint32_t>(position), static_cast<std::uint32_t>(color)});
             cursor = *end == L';' ? end + 1 : end;
         }
@@ -1309,13 +1080,13 @@ bool ParseM6Stops(
         && std::is_sorted(
             stops.begin(),
             stops.end(),
-            [](const M6StopValue& left, const M6StopValue& right) {
+            [](const GradientStopValue& left, const GradientStopValue& right) {
                 return left.position_milli < right.position_milli;
             })
         && stops.front().position_milli == 0U && stops.back().position_milli == 1000U;
 }
 
-InkpodColorValue M6Color(std::uint32_t rgba) noexcept {
+InkpodColorValue ColorFromRgba(std::uint32_t rgba) noexcept {
     return InkpodColorValue{
         sizeof(InkpodColorValue),
         INKPOD_COLOR_DEPTH_8,
@@ -1459,7 +1230,7 @@ InkpodStatus ShowDrawingColorEditor(AppContext& state) noexcept {
     return INKPOD_STATUS_OK;
 }
 
-InkpodFilterInput M6FilterInputFor(const M6FilterJob& job) noexcept {
+InkpodFilterInput FilterInputFor(const FilterJob& job) noexcept {
     InkpodFilterInput input{};
     input.struct_size = sizeof(input);
     input.kind = job.kind;
@@ -1479,11 +1250,11 @@ InkpodFilterInput M6FilterInputFor(const M6FilterJob& job) noexcept {
     return input;
 }
 
-M6AdjustmentUiState* CurrentM6Adjustment(EffectsUiState& effects) noexcept {
+AdjustmentLayerUiState* CurrentAdjustment(EffectsUiState& effects) noexcept {
     const auto found = std::find_if(
         effects.adjustments.begin(),
         effects.adjustments.end(),
-        [&effects](const M6AdjustmentUiState& adjustment) {
+        [&effects](const AdjustmentLayerUiState& adjustment) {
             return adjustment.id == effects.adjustment_id;
         });
     return found == effects.adjustments.end() ? nullptr : &*found;
@@ -1507,7 +1278,7 @@ bool FormatCurvePoints(
     }
 }
 
-InkpodStatus StartM6Task(
+InkpodStatus StartEffectTask(
     AppContext& state,
     bool preview_prompt,
     std::function<InkpodStatus(InkpodCore*, InkpodTask*)> operation) noexcept {
@@ -1517,10 +1288,10 @@ InkpodStatus StartM6Task(
     EffectsController controller(
         state.lifetime, state.windows, state.effects, *state.engine);
     return controller.StartTask(
-        preview_prompt, std::move(operation), kM6TaskCompleted);
+        preview_prompt, std::move(operation), kEffectTaskCompleted);
 }
 
-std::uint32_t M6FilterKindForCommand(UINT command) noexcept {
+std::uint32_t FilterKindForCommand(UINT command) noexcept {
     switch (command) {
         case IDM_FILTER_SHARPEN_WEAK:
             return INKPOD_FILTER_SHARPEN_WEAK;
@@ -1553,13 +1324,13 @@ std::uint32_t M6FilterKindForCommand(UINT command) noexcept {
     }
 }
 
-bool ConfigureM6FilterEditor(
-    AppContext& state, UINT command, M6FilterJob& job) noexcept {
-    job.kind = M6FilterKindForCommand(command);
+bool ConfigureFilterEditor(
+    AppContext& state, UINT command, FilterJob& job) noexcept {
+    job.kind = FilterKindForCommand(command);
     if (job.kind == 0U) {
         return false;
     }
-    M6EditorState editor{};
+    EffectEditorState editor{};
     editor.title = L"フィルタ（選択範囲があればその内側だけに適用）";
     editor.parameter_labels = {
         L"P0 / radius", L"P1 / amount", L"P2", L"P3", L"P4"};
@@ -1585,7 +1356,7 @@ bool ConfigureM6FilterEditor(
     } else if (job.kind == INKPOD_FILTER_UNSHARP_MASK) {
         editor.parameters = {2, 1000, 0, 0, 0};
     }
-    if (ShowM6Editor(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, editor) != IDOK) {
+    if (ShowEffectEditor(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, editor) != IDOK) {
         return false;
     }
     job.channel = editor.channel;
@@ -1606,12 +1377,12 @@ bool ConfigureM6FilterEditor(
     return true;
 }
 
-InkpodStatus QueueM6Filter(AppContext& state, M6FilterJob job) noexcept {
-    return StartM6Task(
+InkpodStatus QueueFilter(AppContext& state, FilterJob job) noexcept {
+    return StartEffectTask(
         state,
         job.preview,
         [job = std::move(job)](InkpodCore* core, InkpodTask* task) {
-            const InkpodFilterInput input = M6FilterInputFor(job);
+            const InkpodFilterInput input = FilterInputFor(job);
             InkpodFilterPreviewInfo preview{};
             preview.struct_size = sizeof(preview);
             InkpodStatus status = inkpod_core_filter_preview_begin_task(
@@ -1628,9 +1399,9 @@ InkpodStatus QueueM6Filter(AppContext& state, M6FilterJob job) noexcept {
         });
 }
 
-bool ConfigureM6AdjustmentEditor(
-    AppContext& state, M6FilterJob& job, bool update) noexcept {
-    M6EditorState editor{};
+bool ConfigureAdjustmentEditor(
+    AppContext& state, FilterJob& job, bool update) noexcept {
+    EffectEditorState editor{};
     editor.title = L"調整レイヤー（作成後も同じ項目から再編集可能）";
     editor.parameter_labels = {
         L"P0 / 明るさ / shadow",
@@ -1658,7 +1429,7 @@ bool ConfigureM6AdjustmentEditor(
     editor.option1_enabled = false;
     editor.option2_enabled = false;
     if (update) {
-        const M6AdjustmentUiState* current = CurrentM6Adjustment(state.effects);
+        const AdjustmentLayerUiState* current = CurrentAdjustment(state.effects);
         if (current == nullptr) {
             return false;
         }
@@ -1675,7 +1446,7 @@ bool ConfigureM6AdjustmentEditor(
             return false;
         }
     }
-    if (ShowM6Editor(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, editor) != IDOK) {
+    if (ShowEffectEditor(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, editor) != IDOK) {
         return false;
     }
     job.kind = editor.channel;
@@ -1696,34 +1467,34 @@ bool ConfigureM6AdjustmentEditor(
     return true;
 }
 
-InkpodStatus CreateOrUpdateM6Adjustment(
-    AppContext& state, M6FilterJob job, bool update) noexcept {
+InkpodStatus CreateOrUpdateAdjustment(
+    AppContext& state, FilterJob job, bool update) noexcept {
     if (state.engine == nullptr || (update && state.effects.adjustment_id == 0U)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const std::uint64_t layer_id = state.effects.adjustment_id;
-    std::shared_ptr<M6AdjustmentUiState> pending;
+    std::shared_ptr<AdjustmentLayerUiState> pending;
     try {
         std::string name;
         if (update) {
-            const M6AdjustmentUiState* current = CurrentM6Adjustment(state.effects);
+            const AdjustmentLayerUiState* current = CurrentAdjustment(state.effects);
             if (current == nullptr) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
             name = current->name;
         } else {
-            name = "M6 Adjustment " + std::to_string(state.effects.adjustments.size() + 1U);
+            name = "Adjustment " + std::to_string(state.effects.adjustments.size() + 1U);
             state.effects.adjustments.reserve(state.effects.adjustments.size() + 1U);
         }
-        pending = std::make_shared<M6AdjustmentUiState>(
-            M6AdjustmentUiState{layer_id, true, std::move(job), std::move(name)});
+        pending = std::make_shared<AdjustmentLayerUiState>(
+            AdjustmentLayerUiState{layer_id, true, std::move(job), std::move(name)});
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     std::uint64_t created_id{};
     const InkpodStatus status = state.engine->Invoke(
         [pending, update, layer_id, &created_id](InkpodCore* core) {
-            const InkpodFilterInput input = M6FilterInputFor(pending->job);
+            const InkpodFilterInput input = FilterInputFor(pending->job);
             InkpodDispatchResult result{};
             result.struct_size = sizeof(result);
             if (update) {
@@ -1745,7 +1516,7 @@ InkpodStatus CreateOrUpdateM6Adjustment(
         state.effects.adjustment_visible = true;
         state.effects.adjustments.push_back(std::move(*pending));
     } else if (status == INKPOD_STATUS_OK) {
-        M6AdjustmentUiState* current = CurrentM6Adjustment(state.effects);
+        AdjustmentLayerUiState* current = CurrentAdjustment(state.effects);
         if (current != nullptr) {
             current->job = std::move(pending->job);
         }
@@ -1753,12 +1524,12 @@ InkpodStatus CreateOrUpdateM6Adjustment(
     return status;
 }
 
-InkpodStatus SetM6AdjustmentVisibility(AppContext& state, bool visible) noexcept {
+InkpodStatus SetAdjustmentVisibility(AppContext& state, bool visible) noexcept {
     if (state.engine == nullptr || state.effects.adjustment_id == 0U) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const std::uint64_t layer_id = state.effects.adjustment_id;
-    M6AdjustmentUiState* current = CurrentM6Adjustment(state.effects);
+    AdjustmentLayerUiState* current = CurrentAdjustment(state.effects);
     if (current == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -1785,14 +1556,14 @@ InkpodStatus SetM6AdjustmentVisibility(AppContext& state, bool visible) noexcept
     return status;
 }
 
-bool SelectM6Adjustment(AppContext& state, bool next) noexcept {
+bool SelectAdjustment(AppContext& state, bool next) noexcept {
     if (state.effects.adjustments.empty()) {
         return false;
     }
     const auto current = std::find_if(
         state.effects.adjustments.begin(),
         state.effects.adjustments.end(),
-        [&state](const M6AdjustmentUiState& adjustment) {
+        [&state](const AdjustmentLayerUiState& adjustment) {
             return adjustment.id == state.effects.adjustment_id;
         });
     std::size_t index = current == state.effects.adjustments.end()
@@ -1809,21 +1580,21 @@ bool SelectM6Adjustment(AppContext& state, bool next) noexcept {
     return true;
 }
 
-std::vector<InkpodGradientStop> M6GradientStops(const std::vector<M6StopValue>& values) {
+std::vector<InkpodGradientStop> GradientStops(const std::vector<GradientStopValue>& values) {
     std::vector<InkpodGradientStop> stops;
     stops.reserve(values.size());
-    for (const M6StopValue& value : values) {
+    for (const GradientStopValue& value : values) {
         stops.push_back(InkpodGradientStop{
             sizeof(InkpodGradientStop),
             0U,
             value.position_milli,
             0U,
-            M6Color(value.rgba)});
+            ColorFromRgba(value.rgba)});
     }
     return stops;
 }
 
-InkpodStatus QueueBoundaryAirbrush(AppContext& state, const M6ToolOptions& options) noexcept {
+InkpodStatus QueueBoundaryAirbrush(AppContext& state, const CanvasEffectOptions& options) noexcept {
     InkpodDocumentInfo document{};
     if (!QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -1831,8 +1602,8 @@ InkpodStatus QueueBoundaryAirbrush(AppContext& state, const M6ToolOptions& optio
     std::vector<InkpodColorValue> colors;
     try {
         colors.reserve(options.stops.size());
-        for (const M6StopValue& stop : options.stops) {
-            colors.push_back(M6Color(stop.rgba));
+        for (const GradientStopValue& stop : options.stops) {
+            colors.push_back(ColorFromRgba(stop.rgba));
         }
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -1865,8 +1636,8 @@ InkpodStatus QueueBoundaryAirbrush(AppContext& state, const M6ToolOptions& optio
         : INKPOD_STATUS_INVALID_STATE;
 }
 
-bool ConfigureM6Effect(AppContext& state, UINT command) noexcept {
-    M6EditorState editor{};
+bool ConfigureCanvasEffect(AppContext& state, UINT command) noexcept {
+    EffectEditorState editor{};
     editor.option1 = false;
     editor.option2 = false;
     editor.channel_labels = {L"ペン", L"矩形", L"折れ線", L"投げ縄", nullptr};
@@ -1898,8 +1669,8 @@ bool ConfigureM6Effect(AppContext& state, UINT command) noexcept {
             editor.mode = INKPOD_GRADIENT_LINEAR;
             editor.option1_label = L"ディザー";
             editor.option2_label = L"45度制約";
-            interaction = command == IDM_EFFECT_GRADIENT ? kInteractionM6Gradient
-                                                         : kInteractionM6AlphaGradient;
+            interaction = command == IDM_EFFECT_GRADIENT ? kInteractionEffectGradient
+                                                         : kInteractionEffectAlphaGradient;
             break;
         case IDM_EFFECT_AIRBRUSH:
             editor.title = L"エアブラシ（Canvasをドラッグ）";
@@ -1913,7 +1684,7 @@ bool ConfigureM6Effect(AppContext& state, UINT command) noexcept {
             editor.option2 = true;
             editor.option1_label = L"筆圧で不透明度";
             editor.option2_label = L"筆圧でサイズ";
-            interaction = kInteractionM6Airbrush;
+            interaction = kInteractionEffectAirbrush;
             break;
         case IDM_EFFECT_BOUNDARY_AIRBRUSH:
             editor.title = L"境界色エアブラシ（現在の選択範囲へ適用）";
@@ -1935,7 +1706,7 @@ bool ConfigureM6Effect(AppContext& state, UINT command) noexcept {
             editor.option1 = true;
             editor.option1_label = L"ペン範囲を筆圧で細くする";
             editor.option2_enabled = false;
-            interaction = kInteractionM6Blur;
+            interaction = kInteractionEffectBlur;
             break;
         case IDM_EFFECT_STAMP:
             editor.title = L"スタンプ（Alt+クリックでsource、次にCanvasをドラッグ）";
@@ -1952,7 +1723,7 @@ bool ConfigureM6Effect(AppContext& state, UINT command) noexcept {
             editor.option2 = true;
             editor.option1_label = L"筆圧で不透明度";
             editor.option2_label = L"筆圧でサイズ";
-            interaction = kInteractionM6Stamp;
+            interaction = kInteractionEffectStamp;
             break;
         case IDM_EFFECT_DUST:
             editor.title = L"ゴミ取り（全体または領域を指定、vector planeは拒否）";
@@ -1980,15 +1751,15 @@ bool ConfigureM6Effect(AppContext& state, UINT command) noexcept {
             editor.option1 = true;
             editor.option1_label = L"プレビューして確認";
             editor.option2_enabled = false;
-            interaction = kInteractionM6Dust;
+            interaction = kInteractionEffectDust;
             break;
         default:
             return false;
     }
-    if (ShowM6Editor(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, editor) != IDOK) {
+    if (ShowEffectEditor(state.lifetime.instance, state.windows.window, state.lifetime.smoke_test, editor) != IDOK) {
         return false;
     }
-    M6ToolOptions options{};
+    CanvasEffectOptions options{};
     options.parameters = editor.parameters;
     options.shape = editor.channel;
     options.mode = editor.mode;
@@ -1997,7 +1768,7 @@ bool ConfigureM6Effect(AppContext& state, UINT command) noexcept {
     if (command == IDM_EFFECT_GRADIENT || command == IDM_EFFECT_ALPHA_GRADIENT
         || command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
         const std::size_t minimum_stops = command == IDM_EFFECT_BOUNDARY_AIRBRUSH ? 2U : 3U;
-        if (!ParseM6Stops(editor.points, options.stops, minimum_stops)) {
+        if (!ParseGradientStops(editor.points, options.stops, minimum_stops)) {
             if (!state.lifetime.smoke_test) {
                 MessageBoxW(
                     state.windows.window,
@@ -2024,7 +1795,7 @@ bool ConfigureM6Effect(AppContext& state, UINT command) noexcept {
     return true;
 }
 
-InkpodStatus QueueM6GradientGesture(
+InkpodStatus QueueGradientGesture(
     AppContext& state, std::vector<InkpodStrokeSample> samples, bool alpha_only) noexcept {
     InkpodDocumentInfo document{};
     if (samples.size() < 2U || !QueryDocument(state, document) || state.engine == nullptr) {
@@ -2032,11 +1803,11 @@ InkpodStatus QueueM6GradientGesture(
     }
     std::vector<InkpodGradientStop> stops;
     try {
-        stops = M6GradientStops(state.effects.options.stops);
+        stops = GradientStops(state.effects.options.stops);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    M6ToolOptions options{};
+    CanvasEffectOptions options{};
     try {
         options = state.effects.options;
     } catch (const std::bad_alloc&) {
@@ -2087,19 +1858,19 @@ InkpodStatus QueueM6GradientGesture(
         : INKPOD_STATUS_INVALID_STATE;
 }
 
-InkpodStatus QueueM6AirbrushGesture(
+InkpodStatus QueueAirbrushGesture(
     AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (samples.empty() || !QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    M6ToolOptions options{};
+    CanvasEffectOptions options{};
     try {
         options = state.effects.options;
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const InkpodColorValue color = M6Color(state.tools.color_rgba);
+    const InkpodColorValue color = ColorFromRgba(state.tools.color_rgba);
     const std::uint64_t plane_id = document.color_plane_id;
     return state.engine->Enqueue(
                [samples = std::move(samples), options, color, plane_id](InkpodCore* core) {
@@ -2132,14 +1903,14 @@ InkpodStatus QueueM6AirbrushGesture(
         : INKPOD_STATUS_INVALID_STATE;
 }
 
-InkpodStatus QueueM6StampGesture(
+InkpodStatus QueueStampGesture(
     AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (!state.effects.stamp_source_valid || samples.empty() || !QueryDocument(state, document)
         || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    M6ToolOptions options{};
+    CanvasEffectOptions options{};
     try {
         options = state.effects.options;
     } catch (const std::bad_alloc&) {
@@ -2177,13 +1948,13 @@ InkpodStatus QueueM6StampGesture(
         : INKPOD_STATUS_INVALID_STATE;
 }
 
-InkpodStatus QueueM6BlurGesture(
+InkpodStatus QueueBlurGesture(
     AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (samples.empty() || !QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    M6ToolOptions options{};
+    CanvasEffectOptions options{};
     try {
         options = state.effects.options;
     } catch (const std::bad_alloc&) {
@@ -2215,13 +1986,13 @@ InkpodStatus QueueM6BlurGesture(
         : INKPOD_STATUS_INVALID_STATE;
 }
 
-InkpodStatus QueueM6Dust(
+InkpodStatus QueueDustRemoval(
     AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (!QueryDocument(state, document)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    M6ToolOptions options{};
+    CanvasEffectOptions options{};
     try {
         options = state.effects.options;
     } catch (const std::bad_alloc&) {
@@ -2229,7 +2000,7 @@ InkpodStatus QueueM6Dust(
     }
     const std::uint64_t plane_id = document.color_plane_id;
     const bool preview = options.option;
-    return StartM6Task(
+    return StartEffectTask(
         state,
         preview,
         [samples = std::move(samples), options, plane_id, preview](
@@ -2259,22 +2030,22 @@ InkpodStatus QueueM6Dust(
         });
 }
 
-InkpodStatus FinishM6CanvasGesture(AppContext& state) noexcept {
+InkpodStatus FinishEffectGesture(AppContext& state) noexcept {
     std::vector<InkpodStrokeSample> samples;
     samples.swap(state.effects.samples);
     switch (state.tools.active_tool) {
-        case kInteractionM6Gradient:
-            return QueueM6GradientGesture(state, std::move(samples), false);
-        case kInteractionM6AlphaGradient:
-            return QueueM6GradientGesture(state, std::move(samples), true);
-        case kInteractionM6Airbrush:
-            return QueueM6AirbrushGesture(state, std::move(samples));
-        case kInteractionM6Blur:
-            return QueueM6BlurGesture(state, std::move(samples));
-        case kInteractionM6Stamp:
-            return QueueM6StampGesture(state, std::move(samples));
-        case kInteractionM6Dust:
-            return QueueM6Dust(state, std::move(samples));
+        case kInteractionEffectGradient:
+            return QueueGradientGesture(state, std::move(samples), false);
+        case kInteractionEffectAlphaGradient:
+            return QueueGradientGesture(state, std::move(samples), true);
+        case kInteractionEffectAirbrush:
+            return QueueAirbrushGesture(state, std::move(samples));
+        case kInteractionEffectBlur:
+            return QueueBlurGesture(state, std::move(samples));
+        case kInteractionEffectStamp:
+            return QueueStampGesture(state, std::move(samples));
+        case kInteractionEffectDust:
+            return QueueDustRemoval(state, std::move(samples));
         default:
             return INKPOD_STATUS_INVALID_STATE;
     }
@@ -2452,11 +2223,6 @@ void UpdateMainWindowStatus(
         SB_SETTEXTW,
         2,
         reinterpret_cast<LPARAM>(document_text.data()));
-    if (has_transform && state.windows.zoom_slider != nullptr) {
-        const auto slider_value = static_cast<LPARAM>(std::clamp(
-            static_cast<int>(std::lround(transform.zoom * 100.0)), 1, 800));
-        SendMessageW(state.windows.zoom_slider, TBM_SETPOS, TRUE, slider_value);
-    }
 }
 
 void UpdateMenuState(AppContext& state) noexcept {
@@ -3919,7 +3685,7 @@ InkpodStatus EditLightTableItemProperties(AppContext& state) noexcept {
     edit.flags = display.values[2] != 0 ? INKPOD_LIGHT_TABLE_ITEM_VISIBLE : 0U;
     edit.opacity_milli = static_cast<std::uint32_t>(display.values[0]) * 10U;
     edit.display_mode = static_cast<std::uint32_t>(display.values[1]);
-    edit.display_color = M6Color(state.tools.color_rgba);
+    edit.display_color = ColorFromRgba(state.tools.color_rgba);
     edit.translate_x_milli = transform.values[0];
     edit.translate_y_milli = transform.values[1];
     edit.scale_x_milli = static_cast<std::uint32_t>(transform.values[2]) * 10U;
@@ -4614,7 +4380,7 @@ InkpodColorValue BatchTransparentColor() noexcept {
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 0U};
 }
 
-UINT BatchFilterCommandToM6(UINT command) noexcept {
+UINT FilterEditorCommandForBatchCommand(UINT command) noexcept {
     switch (command) {
         case IDM_BATCH_ADD_FILTER_SHARPEN_WEAK:
             return IDM_FILTER_SHARPEN_WEAK;
@@ -4661,10 +4427,10 @@ bool AddBatchOperation(AppContext& state, UINT command) noexcept {
     operation.label = BatchOperationLabel(command);
     operation.color_0 = state.tools.drawing_color;
     operation.color_1 = state.tools.drawing_color;
-    const UINT filter_command = BatchFilterCommandToM6(command);
+    const UINT filter_command = FilterEditorCommandForBatchCommand(command);
     if (filter_command != 0U) {
         operation.kind = INKPOD_BATCH_OPERATION_FILTER;
-        if (!ConfigureM6FilterEditor(state, filter_command, operation.filter)) {
+        if (!ConfigureFilterEditor(state, filter_command, operation.filter)) {
             return false;
         }
     } else {
@@ -4774,7 +4540,7 @@ bool AddBatchOperation(AppContext& state, UINT command) noexcept {
     }
 }
 
-UINT M6CommandForFilterKind(std::uint32_t kind) noexcept {
+UINT FilterEditorCommandForKind(std::uint32_t kind) noexcept {
     switch (kind) {
         case INKPOD_FILTER_SHARPEN_WEAK:
             return IDM_FILTER_SHARPEN_WEAK;
@@ -4867,8 +4633,8 @@ bool EditSelectedBatchOperation(AppContext& state) noexcept {
             static_cast<InkpodBatchMissingPolicy>(target.values[2]);
     }
     if (operation.kind == INKPOD_BATCH_OPERATION_FILTER) {
-        const UINT command = M6CommandForFilterKind(operation.filter.kind);
-        if (command == 0U || !ConfigureM6FilterEditor(state, command, operation.filter)) {
+        const UINT command = FilterEditorCommandForKind(operation.filter.kind);
+        if (command == 0U || !ConfigureFilterEditor(state, command, operation.filter)) {
             return false;
         }
     } else if (operation.kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
@@ -5004,54 +4770,6 @@ bool ChooseBatchFolder(HWND owner, std::wstring& selected_path) noexcept {
     return BatchController::ChooseFolder(owner, selected_path);
 }
 
-LRESULT CALLBACK TreeListSubclassProcedure(
-    HWND window,
-    UINT message,
-    WPARAM wparam,
-    LPARAM lparam,
-    UINT_PTR subclass_id,
-    DWORD_PTR reference_data) noexcept {
-    auto* state = reinterpret_cast<AppContext*>(reference_data);
-    if (state == nullptr) {
-        return DefSubclassProc(window, message, wparam, lparam);
-    }
-    if (message == WM_LBUTTONDOWN) {
-        const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
-        SetCapture(window);
-        return result;
-    }
-    if (message == WM_LBUTTONUP && GetCapture() == window) {
-        const LRESULT hit = SendMessageW(window, LB_ITEMFROMPOINT, 0, lparam);
-        const std::uint32_t target = LOWORD(hit);
-        const bool outside = HIWORD(hit) != 0U;
-        const bool plane = subclass_id == 2U;
-        const std::uint32_t start = plane
-            ? state->panes.active_tree_plane_index
-            : state->panes.active_tree_layer_index;
-        ReleaseCapture();
-        const LRESULT count = SendMessageW(window, LB_GETCOUNT, 0, 0);
-        if (!outside && count > 0 && target < static_cast<std::uint32_t>(count)
-            && target != start) {
-            const UINT command = target < start
-                ? (plane ? IDM_PLANE_MOVE_UP : IDM_LAYER_MOVE_UP)
-                : (plane ? IDM_PLANE_MOVE_DOWN : IDM_LAYER_MOVE_DOWN);
-            const std::uint32_t steps = target < start ? start - target : target - start;
-            for (std::uint32_t step = 0U; step < steps; ++step) {
-                SendMessageW(state->windows.window, WM_COMMAND, command, 0);
-            }
-        }
-        return 0;
-    }
-    if (message == WM_KEYDOWN && wparam == VK_ESCAPE && GetCapture() == window) {
-        ReleaseCapture();
-        return 0;
-    }
-    if (message == WM_NCDESTROY) {
-        RemoveWindowSubclass(window, TreeListSubclassProcedure, subclass_id);
-    }
-    return DefSubclassProc(window, message, wparam, lparam);
-}
-
 bool InitializeMainChrome(AppContext& state) noexcept {
     if (!inkpod::windows::ui::CreateMainChrome(
             state.windows, state.lifetime.instance, state.lifetime.smoke_test)) {
@@ -5069,196 +4787,8 @@ bool InitializeMainChrome(AppContext& state) noexcept {
     }
     RefreshBatchPalette(state.batch);
     ShowWindow(state.batch.palette, SW_HIDE);
-    if (SetWindowSubclass(
-            state.windows.layer_list,
-            TreeListSubclassProcedure,
-            1U,
-            reinterpret_cast<DWORD_PTR>(&state)) == FALSE
-        || SetWindowSubclass(
-               state.windows.plane_list,
-               TreeListSubclassProcedure,
-               2U,
-               reinterpret_cast<DWORD_PTR>(&state)) == FALSE) {
-        return false;
-    }
     return true;
 }
-
-std::optional<LRESULT> RoutePaneControlCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
-    if (state == nullptr) {
-        return std::nullopt;
-    }
-    switch (LOWORD(wparam)) {
-        case IDC_MAIN_LAYER_LIST:
-            if (HIWORD(wparam) == LBN_SELCHANGE && state->windows.layer_list != nullptr) {
-                const LRESULT selected = SendMessageW(
-                    state->windows.layer_list, LB_GETCURSEL, 0, 0);
-                if (selected != LB_ERR) {
-                    const LRESULT id = SendMessageW(
-                        state->windows.layer_list,
-                        LB_GETITEMDATA,
-                        static_cast<WPARAM>(selected),
-                        0);
-                    if (id != LB_ERR) {
-                        state->panes.active_tree_layer_id = static_cast<std::uint64_t>(id);
-                        state->panes.active_tree_layer_index = static_cast<std::uint32_t>(selected);
-                        state->panes.active_tree_plane_id = 0U;
-                        RefreshTreePane(*state);
-                        if (state->panes.active_tree_plane_id != 0U && state->engine != nullptr) {
-                            const std::uint64_t layer_id = state->panes.active_tree_layer_id;
-                            const std::uint64_t plane_id = state->panes.active_tree_plane_id;
-                            state->engine->Invoke(
-                                [layer_id, plane_id](InkpodCore* core) {
-                                    return inkpod_core_set_active_node(
-                                        core, layer_id, plane_id);
-                                },
-                                false,
-                                false);
-                        }
-                    }
-                }
-            }
-            UpdateMenuState(*state);
-            return 0;
-        case IDC_MAIN_PLANE_LIST:
-            if (HIWORD(wparam) == LBN_SELCHANGE && state->windows.plane_list != nullptr) {
-                const LRESULT selected = SendMessageW(
-                    state->windows.plane_list, LB_GETCURSEL, 0, 0);
-                if (selected != LB_ERR) {
-                    const LRESULT id = SendMessageW(
-                        state->windows.plane_list,
-                        LB_GETITEMDATA,
-                        static_cast<WPARAM>(selected),
-                        0);
-                    if (id != LB_ERR && state->engine != nullptr) {
-                        state->panes.active_tree_plane_id = static_cast<std::uint64_t>(id);
-                        state->panes.active_tree_plane_index =
-                            static_cast<std::uint32_t>(selected);
-                        const std::uint64_t layer_id = state->panes.active_tree_layer_id;
-                        const std::uint64_t plane_id = state->panes.active_tree_plane_id;
-                        const InkpodStatus status = state->engine->Invoke(
-                            [layer_id, plane_id](InkpodCore* core) {
-                                return inkpod_core_set_active_node(
-                                    core, layer_id, plane_id);
-                            },
-                            false,
-                            false);
-                        if (status != INKPOD_STATUS_OK) {
-                            ShowCoreError(*state, window, L"プレーン選択");
-                        } else {
-                            HandleActiveTreePlaneTransition(*state);
-                        }
-                    }
-                }
-            }
-            UpdateMenuState(*state);
-            return 0;
-        case IDC_MAIN_LT_SET_LIST:
-            if (HIWORD(wparam) == LBN_SELCHANGE
-                && state->windows.light_table_set_list != nullptr) {
-                const LRESULT selected = SendMessageW(
-                    state->windows.light_table_set_list, LB_GETCURSEL, 0, 0);
-                if (selected != LB_ERR) {
-                    const LRESULT id = SendMessageW(
-                        state->windows.light_table_set_list,
-                        LB_GETITEMDATA,
-                        static_cast<WPARAM>(selected),
-                        0);
-                    if (id != LB_ERR) {
-                        InkpodLightTableEdit edit{};
-                        edit.operation = INKPOD_LIGHT_TABLE_SET_ACTIVE_OPERATION;
-                        edit.object_id = static_cast<std::uint64_t>(id);
-                        std::uint64_t ignored{};
-                        if (ApplyLightTableEdit(*state, edit, {}, ignored)
-                            == INKPOD_STATUS_OK) {
-                            state->panes.active_light_table_set_id = edit.object_id;
-                            state->panes.active_light_table_set_index =
-                                static_cast<std::uint32_t>(selected);
-                            state->panes.active_light_table_item_id = 0U;
-                            RefreshLightTablePane(*state);
-                        }
-                    }
-                }
-            }
-            return 0;
-        case IDC_MAIN_LT_ITEM_LIST:
-            if (HIWORD(wparam) == LBN_SELCHANGE
-                && state->windows.light_table_item_list != nullptr) {
-                const LRESULT selected = SendMessageW(
-                    state->windows.light_table_item_list, LB_GETCURSEL, 0, 0);
-                if (selected != LB_ERR) {
-                    const LRESULT id = SendMessageW(
-                        state->windows.light_table_item_list,
-                        LB_GETITEMDATA,
-                        static_cast<WPARAM>(selected),
-                        0);
-                    if (id != LB_ERR) {
-                        state->panes.active_light_table_item_id =
-                            static_cast<std::uint64_t>(id);
-                        state->panes.active_light_table_item_index =
-                            static_cast<std::uint32_t>(selected);
-                    }
-                }
-            }
-            return 0;
-        case IDC_MAIN_SEQUENCE_LIST:
-            if ((HIWORD(wparam) == LBN_SELCHANGE || HIWORD(wparam) == LBN_DBLCLK)
-                && state->windows.sequence_list != nullptr) {
-                const LRESULT selected = SendMessageW(
-                    state->windows.sequence_list, LB_GETCURSEL, 0, 0);
-                if (selected != LB_ERR) {
-                    state->animation.active_sequence_index =
-                        static_cast<std::uint32_t>(selected);
-                    if (HIWORD(wparam) == LBN_DBLCLK && state->engine != nullptr) {
-                        InkpodDocumentInfo info{};
-                        const std::uint32_t index = state->animation.active_sequence_index;
-                        const InkpodStatus status = state->engine->Invoke(
-                            [index, &info](InkpodCore* core) {
-                                info = EmptyDocumentInfo();
-                                return inkpod_core_sequence_activate(core, index, &info);
-                            },
-                            false,
-                            false);
-                        if (status == INKPOD_STATUS_OK) {
-                            ResetUiForDocumentReplacement(*state);
-                            state->animation.active_sequence_index = index;
-                            FitCanvas(*state, INKPOD_VIEW_FIT);
-                            RefreshSequencePane(*state);
-                        } else {
-                            ShowCoreError(*state, window, L"連番セル切替");
-                        }
-                    }
-                }
-            }
-            return 0;
-        case IDC_MAIN_COLOR_PALETTE:
-        case IDC_MAIN_COLOR_CHART:
-            if (HIWORD(wparam) == LBN_DBLCLK) {
-                const bool chart = LOWORD(wparam) == IDC_MAIN_COLOR_CHART;
-                if (chart && state->panes.color_chart_locked) {
-                    return 0;
-                }
-                HWND list = chart ? state->windows.color_chart_list : state->windows.color_palette_list;
-                const LRESULT selected = SendMessageW(list, LB_GETCURSEL, 0, 0);
-                if (selected != LB_ERR) {
-                    const std::size_t index = chart
-                        ? static_cast<std::size_t>(state->panes.color_chart_page) * 20U
-                            + static_cast<std::size_t>(selected)
-                        : static_cast<std::size_t>(state->panes.palette_group) * 10U
-                            + static_cast<std::size_t>(selected);
-                    if (index < state->panes.palette_colors.size()) {
-                        SetDrawingColor(state->tools, state->panes.palette_colors[index]);
-                    }
-                }
-            }
-            return 0;
-        default:
-            break;
-    }
-    return std::nullopt;
-}
-
 
 std::optional<LRESULT> RouteBatchCommand(
     AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
@@ -5558,7 +5088,7 @@ std::optional<LRESULT> RouteBatchCommand(
         case IDM_BATCH_LOAD_SET: {
             const bool save = LOWORD(wparam) == IDM_BATCH_SAVE_SET;
             std::wstring path = state->lifetime.smoke_test
-                ? L"inkpod-m7-ui-smoke.inkbatch"
+                ? L"inkpod-batch-ui-smoke.inkbatch"
                 : L"";
             if (!state->lifetime.smoke_test
                 && !ChooseBatchSettingsPath(window, save, path)) {
@@ -6086,7 +5616,7 @@ std::optional<LRESULT> RouteEffectsCommand(
             const InkpodStatus status = state->tools.active_plane != INKPOD_PLANE_COLOR
                     || !QueryDocument(*state, document)
                 ? INKPOD_STATUS_INVALID_STATE
-                : StartM6Task(
+                : StartEffectTask(
                       *state,
                       false,
                       [plane_id = document.color_plane_id](
@@ -6117,14 +5647,14 @@ std::optional<LRESULT> RouteEffectsCommand(
         case IDM_FILTER_UNSHARP: {
             const UINT command = LOWORD(wparam);
             InkpodDocumentInfo document{};
-            M6FilterJob job{};
+            FilterJob job{};
             if (state->tools.active_plane != INKPOD_PLANE_COLOR
                 || !QueryDocument(*state, document)
-                || !ConfigureM6FilterEditor(*state, command, job)) {
+                || !ConfigureFilterEditor(*state, command, job)) {
                 return 0;
             }
             job.plane_id = document.color_plane_id;
-            const InkpodStatus status = QueueM6Filter(*state, std::move(job));
+            const InkpodStatus status = QueueFilter(*state, std::move(job));
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"フィルタ");
             }
@@ -6134,11 +5664,11 @@ std::optional<LRESULT> RouteEffectsCommand(
         case IDM_ADJUSTMENT_CREATE:
         case IDM_ADJUSTMENT_EDIT: {
             const bool update = LOWORD(wparam) == IDM_ADJUSTMENT_EDIT;
-            M6FilterJob job{};
-            if (!ConfigureM6AdjustmentEditor(*state, job, update)) {
+            FilterJob job{};
+            if (!ConfigureAdjustmentEditor(*state, job, update)) {
                 return 0;
             }
-            const InkpodStatus status = CreateOrUpdateM6Adjustment(
+            const InkpodStatus status = CreateOrUpdateAdjustment(
                 *state, std::move(job), update);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"調整レイヤー");
@@ -6148,13 +5678,13 @@ std::optional<LRESULT> RouteEffectsCommand(
         }
         case IDM_ADJUSTMENT_PREVIOUS:
         case IDM_ADJUSTMENT_NEXT:
-            SelectM6Adjustment(
+            SelectAdjustment(
                 *state, LOWORD(wparam) == IDM_ADJUSTMENT_NEXT);
             UpdateMenuState(*state);
             return 0;
         case IDM_ADJUSTMENT_TOGGLE: {
             const bool visible = !state->effects.adjustment_visible;
-            const InkpodStatus status = SetM6AdjustmentVisibility(*state, visible);
+            const InkpodStatus status = SetAdjustmentVisibility(*state, visible);
             if (status == INKPOD_STATUS_OK) {
                 state->effects.adjustment_visible = visible;
             } else {
@@ -6293,9 +5823,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         }
         case IDM_LAYER_MOVE_UP:
         case IDM_LAYER_MOVE_DOWN: {
-            const int count = state->windows.layer_list == nullptr
-                ? 0
-                : static_cast<int>(SendMessageW(state->windows.layer_list, LB_GETCOUNT, 0, 0));
+            const int count = static_cast<int>(state->panes.tree_layer_count);
             const int current = static_cast<int>(state->panes.active_tree_layer_index);
             const int destination = LOWORD(wparam) == IDM_LAYER_MOVE_UP
                 ? std::max(0, current - 1)
@@ -6457,10 +5985,7 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             if (command == IDM_PLANE_MOVE_UP) {
                 destination = destination == 0U ? 0U : destination - 1U;
             } else if (command == IDM_PLANE_MOVE_DOWN) {
-                const int count = state->windows.plane_list == nullptr
-                    ? 0
-                    : static_cast<int>(SendMessageW(
-                          state->windows.plane_list, LB_GETCOUNT, 0, 0));
+                const int count = static_cast<int>(state->panes.tree_plane_count);
                 destination = static_cast<std::uint32_t>(std::min(
                     std::max(0, count - 1), static_cast<int>(destination) + 1));
             }
@@ -6942,7 +6467,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false);
             if (status == INKPOD_STATUS_OK) {
                 state->animation.motion_active = true;
-                UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+                UpdateMotionState(state->animation, frame);
                 SetTimer(
                     window,
                     kMotionPlaybackTimer,
@@ -6963,7 +6488,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false,
                 false);
             if (status == INKPOD_STATUS_OK) {
-                UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+                UpdateMotionState(state->animation, frame);
                 if (state->animation.motion_paused) {
                     KillTimer(window, kMotionPlaybackTimer);
                 } else {
@@ -6993,7 +6518,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false,
                 false);
             if (status == INKPOD_STATUS_OK) {
-                UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+                UpdateMotionState(state->animation, frame);
             } else {
                 ShowCoreError(*state, window, L"モーションフレーム移動");
             }
@@ -7034,7 +6559,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false,
                 false);
             if (status == INKPOD_STATUS_OK) {
-                UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+                UpdateMotionState(state->animation, frame);
             } else {
                 ShowCoreError(*state, window, L"モーション先頭・末尾移動");
             }
@@ -7077,7 +6602,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false,
                 false);
             if (status == INKPOD_STATUS_OK) {
-                UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
+                UpdateMotionState(state->animation, frame);
                 SetTimer(
                     window,
                     kMotionPlaybackTimer,
@@ -7099,7 +6624,6 @@ std::optional<LRESULT> RouteAnimationCommand(
             KillTimer(window, kMotionPlaybackTimer);
             state->animation.motion_active = false;
             state->animation.motion_paused = false;
-            SetWindowTextW(state->windows.motion_label, L"モーション停止");
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"モーション停止");
             }
@@ -7841,7 +7365,7 @@ std::optional<LRESULT> RouteToolCommand(
         case IDM_EFFECT_DUST:
         case IDM_EFFECT_ALPHA_GRADIENT:
             if (state->tools.active_plane == INKPOD_PLANE_COLOR
-                && ConfigureM6Effect(*state, LOWORD(wparam))) {
+                && ConfigureCanvasEffect(*state, LOWORD(wparam))) {
                 UpdateMenuState(*state);
             }
             return 0;
@@ -7927,13 +7451,13 @@ std::optional<LRESULT> RouteColorCommand(
                     }
                     colors.push_back(state->tools.drawing_color);
                     names.push_back(L"Color " + std::to_wstring(colors.size()));
+                    state->panes.selected_palette_index =
+                        static_cast<std::uint32_t>(colors.size() - 1U);
+                    state->panes.palette_group =
+                        state->panes.selected_palette_index / 10U;
                 } else if (LOWORD(wparam) == IDM_PALETTE_DELETE) {
-                    const LRESULT selected = SendMessageW(
-                        state->windows.color_palette_list, LB_GETCURSEL, 0, 0);
-                    const std::size_t index = static_cast<std::size_t>(
-                        state->panes.palette_group) * 10U
-                        + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-                    if (selected == LB_ERR || index >= colors.size()) {
+                    const std::size_t index = state->panes.selected_palette_index;
+                    if (index >= colors.size()) {
                         return 0;
                     }
                     colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
@@ -7941,6 +7465,8 @@ std::optional<LRESULT> RouteColorCommand(
                 } else {
                     colors.clear();
                     names.clear();
+                    state->panes.selected_palette_index = 0U;
+                    state->panes.selected_color_chart_index = 0U;
                 }
             } catch (const std::bad_alloc&) {
                 return 0;
@@ -7957,6 +7483,11 @@ std::optional<LRESULT> RouteColorCommand(
         case IDM_PALETTE_NEXT_GROUP:
             ++state->panes.palette_group;
             RefreshColorPanes(*state);
+            if (!state->panes.palette_colors.empty()) {
+                state->panes.selected_palette_index = std::min<std::uint32_t>(
+                    state->panes.palette_group * 10U,
+                    static_cast<std::uint32_t>(state->panes.palette_colors.size() - 1U));
+            }
             return 1;
         case IDM_PALETTE_SAVE:
         case IDM_PALETTE_LOAD: {
@@ -8008,6 +7539,7 @@ std::optional<LRESULT> RouteColorCommand(
             }
             state->panes.color_chart_names.clear();
             state->panes.color_chart_page = 0U;
+            state->panes.selected_color_chart_index = 0U;
             RefreshColorPanes(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -8047,25 +7579,20 @@ std::optional<LRESULT> RouteColorCommand(
                 return 0;
             }
             state->panes.color_chart_page = static_cast<std::uint32_t>(index / 20U);
+            state->panes.selected_color_chart_index = static_cast<std::uint32_t>(index);
             RefreshColorPanes(*state);
-            SendMessageW(
-                state->windows.color_chart_list, LB_SETCURSEL,
-                static_cast<WPARAM>(index % 20U), 0);
             return 1;
         }
         case IDM_CHART_NEXT: {
             if (state->panes.palette_colors.empty()) {
                 return 0;
             }
-            LRESULT selected = SendMessageW(state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
-            std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page) * 20U
-                + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected) + 1U);
+            std::size_t index = static_cast<std::size_t>(
+                state->panes.selected_color_chart_index) + 1U;
             index %= state->panes.palette_colors.size();
             state->panes.color_chart_page = static_cast<std::uint32_t>(index / 20U);
+            state->panes.selected_color_chart_index = static_cast<std::uint32_t>(index);
             RefreshColorPanes(*state);
-            SendMessageW(
-                state->windows.color_chart_list, LB_SETCURSEL,
-                static_cast<WPARAM>(index % 20U), 0);
             return 1;
         }
         case IDM_CHART_LOCK:
@@ -8075,16 +7602,18 @@ std::optional<LRESULT> RouteColorCommand(
         case IDM_CHART_NEXT_PAGE:
             ++state->panes.color_chart_page;
             RefreshColorPanes(*state);
+            if (!state->panes.palette_colors.empty()) {
+                state->panes.selected_color_chart_index = std::min<std::uint32_t>(
+                    state->panes.color_chart_page * 20U,
+                    static_cast<std::uint32_t>(state->panes.palette_colors.size() - 1U));
+            }
             return 1;
         case IDM_CHART_RENAME: {
             if (state->panes.color_chart_locked) {
                 return 0;
             }
-            const LRESULT selected = SendMessageW(
-                state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
-            const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
-                * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-            if (selected == LB_ERR || index >= state->panes.color_chart_names.size()) {
+            const std::size_t index = state->panes.selected_color_chart_index;
+            if (index >= state->panes.color_chart_names.size()) {
                 return 0;
             }
             TextInputDialogState dialog{};
@@ -8102,9 +7631,6 @@ std::optional<LRESULT> RouteColorCommand(
                 return 0;
             }
             RefreshColorPanes(*state);
-            SendMessageW(
-                state->windows.color_chart_list, LB_SETCURSEL,
-                static_cast<WPARAM>(index % 20U), 0);
             return 1;
         }
         case IDM_CHART_SAVE:
@@ -8133,16 +7659,14 @@ std::optional<LRESULT> RouteColorCommand(
                     return 0;
                 }
                 state->panes.color_chart_page = 0U;
+                state->panes.selected_color_chart_index = 0U;
                 RefreshColorPanes(*state);
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_CHART_COPY: {
-            const LRESULT selected = SendMessageW(
-                state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
-            const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
-                * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-            if (selected == LB_ERR || index >= state->panes.palette_colors.size()) {
+            const std::size_t index = state->panes.selected_color_chart_index;
+            if (index >= state->panes.palette_colors.size()) {
                 return 0;
             }
             const auto& selected_color = state->panes.palette_colors[index];
@@ -8186,11 +7710,8 @@ std::optional<LRESULT> RouteColorCommand(
                 || SendMessageW(window, WM_COMMAND, IDM_CHART_COPY, 0) != 1) {
                 return 0;
             }
-            const LRESULT selected = SendMessageW(
-                state->windows.color_chart_list, LB_GETCURSEL, 0, 0);
-            const std::size_t index = static_cast<std::size_t>(state->panes.color_chart_page)
-                * 20U + (selected == LB_ERR ? 0U : static_cast<std::size_t>(selected));
-            if (selected == LB_ERR || index >= state->panes.palette_colors.size()) {
+            const std::size_t index = state->panes.selected_color_chart_index;
+            if (index >= state->panes.palette_colors.size()) {
                 return 0;
             }
             std::vector<InkpodColorValue> colors = state->panes.palette_colors;
@@ -8264,6 +7785,8 @@ std::optional<LRESULT> RouteColorCommand(
                     : pasted_name;
                 state->panes.color_chart_page = static_cast<std::uint32_t>(
                     (state->panes.palette_colors.size() - 1U) / 20U);
+                state->panes.selected_color_chart_index = static_cast<std::uint32_t>(
+                    state->panes.palette_colors.size() - 1U);
                 RefreshColorPanes(*state);
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -8391,8 +7914,7 @@ std::optional<LRESULT> RouteMainWindowCommand(
     AppContext* state, HWND window, WPARAM wparam, LPARAM lparam) noexcept {
     using CommandRoute = std::optional<LRESULT> (*)(
         AppContext*, HWND, WPARAM, LPARAM) noexcept;
-    constexpr std::array<CommandRoute, 11U> routes{
-        RoutePaneControlCommand,
+    constexpr std::array<CommandRoute, 10U> routes{
         RouteBatchCommand,
         RouteDocumentCommand,
         RouteEditCommand,
@@ -8415,7 +7937,7 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
     AppContext* state,
     HWND window,
     UINT message,
-    WPARAM wparam,
+    WPARAM,
     LPARAM lparam) noexcept {
     switch (message) {
         case WM_CREATE:
@@ -8482,42 +8004,6 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
                 SWP_NOACTIVATE | SWP_NOZORDER);
             return 0;
         }
-        case WM_HSCROLL:
-            if (state != nullptr && state->windows.zoom_slider != nullptr
-                && reinterpret_cast<HWND>(lparam) == state->windows.zoom_slider) {
-                const int position = static_cast<int>(SendMessageW(
-                    state->windows.zoom_slider, TBM_GETPOS, 0, 0));
-                if (position > 0
-                    && ApplyZoomPercent(*state, static_cast<std::uint32_t>(position))
-                        == INKPOD_STATUS_OK) {
-                    UpdateMenuState(*state);
-                }
-                return 0;
-            }
-            if (state != nullptr && wparam == kMotionPlaybackTimer) {
-                if (state->animation.motion_active && !state->animation.motion_paused && state->engine != nullptr) {
-                    InkpodMotionFrame frame{};
-                    frame.struct_size = sizeof(frame);
-                    const InkpodStatus status = state->engine->Invoke(
-                        [&frame](InkpodCore* core) {
-                            return inkpod_core_motion_check_step(
-                                core, INKPOD_SEQUENCE_NEXT, &frame);
-                        },
-                        false,
-                        false);
-                    if (status == INKPOD_STATUS_OK) {
-                        UpdateMotionLabel(state->animation, state->windows.motion_label, frame);
-                    } else {
-                        state->animation.motion_active = false;
-                        KillTimer(window, kMotionPlaybackTimer);
-                        if (!state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"モーション再生");
-                        }
-                    }
-                }
-                return 0;
-            }
-            break;
         default:
             break;
     }
@@ -8592,6 +8078,8 @@ std::optional<LRESULT> RouteKeyboardMessage(
                         : static_cast<std::size_t>(wparam - '1');
                     const std::size_t index = state->panes.palette_group * 10U + digit;
                     if (index < state->panes.palette_colors.size()) {
+                        state->panes.selected_palette_index =
+                            static_cast<std::uint32_t>(index);
                         SetDrawingColor(state->tools, state->panes.palette_colors[index]);
                         InvalidateRect(state->windows.canvas, nullptr, FALSE);
                     }
@@ -8634,13 +8122,6 @@ std::optional<LRESULT> RouteCanvasMessage(
     WPARAM wparam,
     LPARAM lparam) noexcept {
     switch (message) {
-        case inkpod::renderer::kCanvasPointerMoved:
-            if (state != nullptr) {
-                UpdateLocatorDisplay(
-                    *state, GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
-                return 1;
-            }
-            return 0;
         case inkpod::renderer::kCanvasStrokeReady:
             if (state != nullptr) {
                 const auto* input = reinterpret_cast<
@@ -8928,10 +8409,10 @@ std::optional<LRESULT> RouteCanvasMessage(
                     }
                     return 1;
                 }
-                const bool m6_interaction = state->tools.active_tool >= kInteractionM6Gradient
-                    && state->tools.active_tool <= kInteractionM6AlphaGradient;
-                if (m6_interaction) {
-                    if (state->tools.active_tool == kInteractionM6Stamp
+                const bool effect_interaction = state->tools.active_tool >= kInteractionEffectGradient
+                    && state->tools.active_tool <= kInteractionEffectAlphaGradient;
+                if (effect_interaction) {
+                    if (state->tools.active_tool == kInteractionEffectStamp
                         && input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin
                         && input->sample_count != 0U
                         && (GetKeyState(VK_MENU) & 0x8000) != 0) {
@@ -8953,7 +8434,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                                 > UINT64_C(1048576) - input->sample_count) {
                                 state->effects.samples.clear();
                                 state->effects.airbrush_active = false;
-                                KillTimer(window, kM6ContinuousSprayTimer);
+                                KillTimer(window, kContinuousSprayTimer);
                                 return 0;
                             }
                             state->effects.samples.insert(
@@ -8964,10 +8445,10 @@ std::optional<LRESULT> RouteCanvasMessage(
                     } catch (const std::bad_alloc&) {
                         state->effects.samples.clear();
                         state->effects.airbrush_active = false;
-                        KillTimer(window, kM6ContinuousSprayTimer);
+                        KillTimer(window, kContinuousSprayTimer);
                         return 0;
                     }
-                    if (state->tools.active_tool == kInteractionM6Airbrush
+                    if (state->tools.active_tool == kInteractionEffectAirbrush
                         && input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
                         && input->sample_count != 0U) {
                         state->effects.airbrush_last =
@@ -8976,23 +8457,23 @@ std::optional<LRESULT> RouteCanvasMessage(
                             state->effects.airbrush_active = true;
                             SetTimer(
                                 window,
-                                kM6ContinuousSprayTimer,
-                                kM6ContinuousSprayIntervalMilliseconds,
+                                kContinuousSprayTimer,
+                                kContinuousSprayIntervalMilliseconds,
                                 nullptr);
                         }
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
                         state->effects.samples.clear();
                         state->effects.airbrush_active = false;
-                        KillTimer(window, kM6ContinuousSprayTimer);
+                        KillTimer(window, kContinuousSprayTimer);
                         return 1;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
                         state->effects.airbrush_active = false;
-                        KillTimer(window, kM6ContinuousSprayTimer);
-                        const InkpodStatus status = FinishM6CanvasGesture(*state);
+                        KillTimer(window, kContinuousSprayTimer);
+                        const InkpodStatus status = FinishEffectGesture(*state);
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
-                            ShowCoreError(*state, window, L"M6 Canvas効果");
+                            ShowCoreError(*state, window, L"Canvas効果");
                         }
                         UpdateMenuState(*state);
                     }
@@ -9080,7 +8561,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 UpdateMenuState(*state);
             }
             return 0;
-        case kM6TaskCompleted:
+        case kEffectTaskCompleted:
             if (state != nullptr) {
                 const InkpodStatus status = static_cast<InkpodStatus>(wparam);
                 const bool prompt = state->effects.preview_prompt;
@@ -9094,7 +8575,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     const int choice = MessageBoxW(
                         window,
                         L"Canvasのプレビューを適用しますか？\nキャンセルすると元の状態へ完全に戻ります。",
-                        L"M6 プレビュー",
+                        L"画像処理プレビュー",
                         MB_OKCANCEL | MB_ICONQUESTION);
                     const InkpodStatus preview_status = state->engine->Invoke(
                         [choice](InkpodCore* core) {
@@ -9110,7 +8591,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                         true,
                         true);
                     if (preview_status != INKPOD_STATUS_OK) {
-                        ShowCoreError(*state, window, L"M6プレビューの確定");
+                        ShowCoreError(*state, window, L"画像処理プレビューの確定");
                     }
                 }
                 UpdateMenuState(*state);
@@ -9159,19 +8640,43 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
     LPARAM lparam) noexcept {
     switch (message) {
         case WM_TIMER:
-            if (state != nullptr && wparam == kM6ContinuousSprayTimer) {
-                if (state->effects.airbrush_active && state->tools.active_tool == kInteractionM6Airbrush
+            if (state != nullptr && wparam == kMotionPlaybackTimer) {
+                if (state->animation.motion_active && !state->animation.motion_paused
+                    && state->engine != nullptr) {
+                    InkpodMotionFrame frame{};
+                    frame.struct_size = sizeof(frame);
+                    const InkpodStatus status = state->engine->Invoke(
+                        [&frame](InkpodCore* core) {
+                            return inkpod_core_motion_check_step(
+                                core, INKPOD_SEQUENCE_NEXT, &frame);
+                        },
+                        false,
+                        false);
+                    if (status == INKPOD_STATUS_OK) {
+                        UpdateMotionState(state->animation, frame);
+                    } else {
+                        state->animation.motion_active = false;
+                        KillTimer(window, kMotionPlaybackTimer);
+                        if (!state->lifetime.smoke_test) {
+                            ShowCoreError(*state, window, L"モーション再生");
+                        }
+                    }
+                }
+                return 0;
+            }
+            if (state != nullptr && wparam == kContinuousSprayTimer) {
+                if (state->effects.airbrush_active && state->tools.active_tool == kInteractionEffectAirbrush
                     && state->effects.task == nullptr) {
                     try {
                         if (state->effects.samples.size() < UINT64_C(1048576)) {
                             state->effects.samples.push_back(state->effects.airbrush_last);
                         } else {
                             state->effects.airbrush_active = false;
-                            KillTimer(window, kM6ContinuousSprayTimer);
+                            KillTimer(window, kContinuousSprayTimer);
                         }
                     } catch (const std::bad_alloc&) {
                         state->effects.airbrush_active = false;
-                        KillTimer(window, kM6ContinuousSprayTimer);
+                        KillTimer(window, kContinuousSprayTimer);
                     }
                 }
                 return 0;
@@ -9197,7 +8702,7 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
             }
             if (state != nullptr) {
                 state->effects.airbrush_active = false;
-                KillTimer(window, kM6ContinuousSprayTimer);
+                KillTimer(window, kContinuousSprayTimer);
             }
             ShowWindow(window, SW_HIDE);
             PostQuitMessage(0);
@@ -9216,7 +8721,7 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
             return 0;
         case WM_NCDESTROY:
             KillTimer(window, kAutosaveTimer);
-            KillTimer(window, kM6ContinuousSprayTimer);
+            KillTimer(window, kContinuousSprayTimer);
             KillTimer(window, kMotionPlaybackTimer);
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
             return DefWindowProcW(window, message, wparam, lparam);

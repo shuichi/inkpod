@@ -273,23 +273,23 @@ if(WIN32)
     add_custom_target(inkpod_msix ALL DEPENDS "${INKPOD_MSIX_PATH}")
 
     add_test(
-        NAME m8_windows_msix_payload_smoke
+        NAME inkpod_windows_msix_payload_smoke
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_SOURCE_DIR}/tests/verify_msix.ps1"
                 -PackagePath "${INKPOD_MSIX_PATH}"
                 -ExpectedVersion "${PROJECT_VERSION}.0")
-    set_tests_properties(m8_windows_msix_payload_smoke PROPERTIES
+    set_tests_properties(inkpod_windows_msix_payload_smoke PROPERTIES
         DEPENDS inkpod_windows_assets
         TIMEOUT 60)
 
     add_test(
-        NAME m8_windows_msix_install_uninstall_smoke
+        NAME inkpod_windows_msix_install_uninstall_smoke
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_SOURCE_DIR}/tests/msix_install_smoke.ps1"
                 -PackagePath "${INKPOD_MSIX_PATH}"
                 -ExpectedVersion "${PROJECT_VERSION}.0")
-    set_tests_properties(m8_windows_msix_install_uninstall_smoke PROPERTIES
-        DEPENDS m8_windows_msix_payload_smoke
+    set_tests_properties(inkpod_windows_msix_install_uninstall_smoke PROPERTIES
+        DEPENDS inkpod_windows_msix_payload_smoke
         RUN_SERIAL TRUE
         TIMEOUT 180)
 endif()

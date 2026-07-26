@@ -18,21 +18,21 @@
 
 namespace inkpod::app {
 
-struct M6StopValue {
+struct GradientStopValue {
     std::uint32_t position_milli{};
     std::uint32_t rgba{};
 };
 
-struct M6ToolOptions {
+struct CanvasEffectOptions {
     std::array<std::int32_t, 5U> parameters{};
     std::uint32_t shape{INKPOD_SELECTION_TRACE};
     std::uint32_t mode{};
     bool option{};
     bool option2{};
-    std::vector<M6StopValue> stops;
+    std::vector<GradientStopValue> stops;
 };
 
-struct M6FilterJob {
+struct FilterJob {
     std::uint32_t kind{INKPOD_FILTER_INVERT};
     std::uint32_t channel{INKPOD_FILTER_CHANNEL_RGB};
     std::uint32_t interpolation{INKPOD_CURVE_BEZIER};
@@ -42,10 +42,10 @@ struct M6FilterJob {
     bool preview{};
 };
 
-struct M6AdjustmentUiState {
+struct AdjustmentLayerUiState {
     std::uint64_t id{};
     bool visible{true};
-    M6FilterJob job;
+    FilterJob job;
     std::string name;
 };
 
@@ -63,7 +63,7 @@ struct BatchOperationUi {
     std::vector<InkpodColorValue> colors;
     std::vector<InkpodBatchColorPairInput> color_pairs;
     std::vector<InkpodBatchSeedInput> seeds;
-    M6FilterJob filter;
+    FilterJob filter;
     std::wstring label;
 };
 
@@ -135,17 +135,24 @@ struct ViewUiState {
 struct PaneUiState {
     std::vector<InkpodColorValue> palette_colors;
     std::uint32_t palette_group{};
+    std::uint32_t selected_palette_index{};
     std::vector<std::wstring> color_chart_names;
     std::uint32_t color_chart_page{};
+    std::uint32_t selected_color_chart_index{};
     bool color_chart_locked{};
     std::uint64_t active_tree_layer_id{};
     std::uint64_t active_tree_plane_id{};
     std::uint32_t active_tree_layer_index{};
     std::uint32_t active_tree_plane_index{};
+    std::uint32_t tree_layer_count{};
+    std::uint32_t tree_plane_count{};
     std::uint64_t active_light_table_set_id{};
     std::uint64_t active_light_table_item_id{};
     std::uint32_t active_light_table_set_index{};
     std::uint32_t active_light_table_item_index{};
+    std::uint32_t light_table_set_count{};
+    std::uint32_t light_table_item_count{};
+    std::uint32_t sequence_count{};
     std::vector<InkpodStrokeSample> light_table_move_samples;
 };
 
@@ -160,7 +167,7 @@ struct AnimationUiState {
 struct EffectsUiState {
     std::uint64_t adjustment_id{};
     bool adjustment_visible{true};
-    std::vector<M6AdjustmentUiState> adjustments;
+    std::vector<AdjustmentLayerUiState> adjustments;
     InkpodTask* task{};
     HWND progress{};
     windows::ui::ProgressDialogState progress_dialog{};
@@ -168,7 +175,7 @@ struct EffectsUiState {
     bool alpha_view{};
     bool stamp_source_valid{};
     InkpodStrokeSample stamp_source{};
-    M6ToolOptions options{};
+    CanvasEffectOptions options{};
     std::vector<InkpodStrokeSample> samples;
     bool airbrush_active{};
     InkpodStrokeSample airbrush_last{};

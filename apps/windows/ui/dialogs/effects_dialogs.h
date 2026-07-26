@@ -9,8 +9,8 @@
 
 namespace inkpod::windows::ui {
 
-struct M6EditorState {
-    const wchar_t* title{L"M6 エディター"};
+struct EffectEditorState {
+    const wchar_t* title{L"画像編集"};
     std::array<const wchar_t*, 5U> parameter_labels{L"P0", L"P1", L"P2", L"P3", L"P4"};
     std::array<std::int32_t, 5U> parameters{};
     std::array<const wchar_t*, 5U> channel_labels{};
@@ -31,11 +31,11 @@ struct M6EditorState {
     bool close_immediately{};
 };
 
-INT_PTR ShowM6Editor(
+INT_PTR ShowEffectEditor(
     HINSTANCE instance,
     HWND owner,
     bool close_immediately,
-    M6EditorState& state) noexcept;
+    EffectEditorState& state) noexcept;
 
 struct ProgressDialogInfo {
     std::uint64_t completed_work{};

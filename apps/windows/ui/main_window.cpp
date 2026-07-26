@@ -74,19 +74,6 @@ bool CreateMainChrome(
         return false;
     }
 
-    windows.zoom_slider = CreateWindowExW(
-        0,
-        TRACKBAR_CLASSW,
-        nullptr,
-        WS_CHILD | visible | TBS_HORZ | TBS_AUTOTICKS | TBS_TOOLTIPS,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_ZOOM_SLIDER)),
-        instance,
-        nullptr);
     windows.status_bar = CreateWindowExW(
         0,
         STATUSCLASSNAMEW,
@@ -113,130 +100,7 @@ bool CreateMainChrome(
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_DOCUMENT_TABS)),
         instance,
         nullptr);
-    windows.locator_label = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"STATIC",
-        L"カラーロケーター\r\nX: —  Y: —\r\nH: —  V: —  L: —\r\nRGBA: —",
-        WS_CHILD | visible | SS_LEFT,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LOCATOR)),
-        instance,
-        nullptr);
-    windows.layer_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LAYER_LIST)),
-        instance,
-        nullptr);
-    windows.plane_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_PLANE_LIST)),
-        instance,
-        nullptr);
-    windows.light_table_set_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LT_SET_LIST)),
-        instance,
-        nullptr);
-    windows.light_table_item_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_LT_ITEM_LIST)),
-        instance,
-        nullptr);
-    windows.sequence_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_SEQUENCE_LIST)),
-        instance,
-        nullptr);
-    windows.motion_label = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"STATIC",
-        L"モーション停止",
-        WS_CHILD | visible | SS_LEFT,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_MOTION_LABEL)),
-        instance,
-        nullptr);
-    windows.color_palette_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_COLOR_PALETTE)),
-        instance,
-        nullptr);
-    windows.color_chart_list = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"LISTBOX",
-        nullptr,
-        WS_CHILD | visible | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_COLOR_CHART)),
-        instance,
-        nullptr);
-    if (windows.zoom_slider == nullptr || windows.status_bar == nullptr
-        || windows.document_tabs == nullptr || windows.locator_label == nullptr
-        || windows.layer_list == nullptr || windows.plane_list == nullptr
-        || windows.light_table_set_list == nullptr
-        || windows.light_table_item_list == nullptr || windows.sequence_list == nullptr
-        || windows.motion_label == nullptr || windows.color_palette_list == nullptr
-        || windows.color_chart_list == nullptr) {
+    if (windows.status_bar == nullptr || windows.document_tabs == nullptr) {
         return false;
     }
 
@@ -247,9 +111,6 @@ bool CreateMainChrome(
     if (TabCtrl_InsertItem(windows.document_tabs, 0, &primary) < 0) {
         return false;
     }
-    SendMessageW(windows.zoom_slider, TBM_SETRANGE, TRUE, MAKELPARAM(1, 800));
-    SendMessageW(windows.zoom_slider, TBM_SETTICFREQ, 100, 0);
-    SendMessageW(windows.zoom_slider, TBM_SETPOS, TRUE, 100);
     return true;
 }
 
@@ -266,7 +127,6 @@ void LayoutMainChrome(
         if (GetWindowRect(windows.toolbar, &bounds) != FALSE) {
             toolbar_height = bounds.bottom - bounds.top;
         }
-        MoveWindow(windows.zoom_slider, std::max(0, width - 178), 2, 170, 28, TRUE);
     }
     if (!smoke_test && windows.status_bar != nullptr) {
         SendMessageW(windows.status_bar, WM_SIZE, 0, 0);
@@ -289,9 +149,7 @@ void LayoutMainChrome(
     int content_width = width;
     int content_height = std::max(0, height - toolbar_height - status_height);
     if (!smoke_test) {
-        constexpr int right_pane_width = 238;
         constexpr int tabs_height = 28;
-        content_width = std::max(0, width - right_pane_width);
         if (windows.document_tabs != nullptr) {
             MoveWindow(
                 windows.document_tabs,
@@ -300,51 +158,6 @@ void LayoutMainChrome(
                 content_width,
                 tabs_height,
                 TRUE);
-        }
-        if (windows.locator_label != nullptr) {
-            MoveWindow(
-                windows.locator_label,
-                content_width + 6,
-                content_top + 6,
-                std::max(0, right_pane_width - 12),
-                70,
-                TRUE);
-        }
-        if (windows.motion_label != nullptr) {
-            MoveWindow(
-                windows.motion_label,
-                content_width + 6,
-                content_top + 78,
-                std::max(0, right_pane_width - 12),
-                28,
-                TRUE);
-        }
-        const int pane_x = content_width + 6;
-        const int pane_width = std::max(0, right_pane_width - 12);
-        const int lists_top = content_top + 110;
-        const int lists_height = std::max(0, content_height - 116);
-        const int section = std::max(0, (lists_height - 24) / 7);
-        const std::array<HWND, 7U> panes{
-            windows.layer_list,
-            windows.plane_list,
-            windows.light_table_set_list,
-            windows.light_table_item_list,
-            windows.sequence_list,
-            windows.color_palette_list,
-            windows.color_chart_list};
-        for (std::size_t index = 0; index < panes.size(); ++index) {
-            if (panes[index] != nullptr) {
-                const int pane_height = index + 1U == panes.size()
-                    ? std::max(0, lists_height - (section + 4) * 6)
-                    : section;
-                MoveWindow(
-                    panes[index],
-                    pane_x,
-                    lists_top + (section + 4) * static_cast<int>(index),
-                    pane_width,
-                    pane_height,
-                    TRUE);
-            }
         }
         content_top += tabs_height;
         content_height = std::max(0, content_height - tabs_height);

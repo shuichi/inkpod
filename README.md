@@ -87,3 +87,18 @@ separately:
 cargo test --workspace --all-features --no-run
 cargo test --package inkpod-core --all-features
 ```
+
+## Windows Shell
+
+```mermaid
+flowchart LR
+    Main["main.cpp<br/>起動だけ"] --> App["Application<br/>初期化・終了・message loop"]
+    App --> Window["MainWindow<br/>HWND・layout・message受信"]
+    Window --> Router["CommandRouter"]
+    Router --> Controllers["機能別Controller"]
+    Controllers --> Dialogs["Dialogs / Panes"]
+    Controllers --> Engine["CoreEngine"]
+    Engine --> ABI["Rust C ABI"]
+    Engine --> Sink["Snapshot queue"]
+    Sink --> Renderer["Canvas renderer"]
+```

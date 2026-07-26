@@ -12,6 +12,7 @@ pub const MAX_VECTOR_FILLS: usize = 65_536;
 pub const MAX_VECTOR_BOUNDARIES: usize = 262_144;
 const MAX_VECTOR_WIDTH_MILLI: u32 = 4_096_000;
 const MAX_VECTOR_COORDINATE_MILLI: i64 = 2_000_000_000;
+const VECTOR_METADATA_MAGIC: [u8; 4] = *b"VECT";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileVectorPoint {
@@ -57,7 +58,7 @@ pub(super) fn encode_vector_metadata(
 ) -> Result<Vec<u8>, FormatError> {
     validate_vector_metadata(metadata, None, None, None)?;
     let mut output = Vec::new();
-    output.extend_from_slice(b"M5VT");
+    output.extend_from_slice(&VECTOR_METADATA_MAGIC);
     push_u32(&mut output, 1);
     push_u32(&mut output, metadata.paths.len() as u32);
     push_u32(&mut output, metadata.fills.len() as u32);
@@ -96,7 +97,7 @@ pub(super) fn encode_vector_metadata(
 
 pub(super) fn decode_vector_metadata(bytes: &[u8]) -> Result<FileVectorMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != b"M5VT" || reader.u32()? != 1 {
+    if reader.take(4)? != VECTOR_METADATA_MAGIC || reader.u32()? != 1 {
         return Err(FormatError::Unsupported(
             "vector metadata version is not supported",
         ));

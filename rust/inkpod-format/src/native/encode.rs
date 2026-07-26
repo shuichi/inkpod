@@ -1,17 +1,10 @@
 use super::model::*;
-use super::validate::{legacy_main_line_color, validate_document, validate_document_metadata};
+use super::validate::{validate_document, validate_document_metadata};
 use crate::adjustment::encode_adjustment_metadata;
 use crate::light_table::encode_light_table_metadata;
 use crate::vector::encode_vector_metadata;
 use inkpod_image::{PixelFormat, PixelValue};
 pub fn encode(document: &CellFile) -> Result<Vec<u8>, FormatError> {
-    encode_with_color_metadata(document, true)
-}
-
-pub(crate) fn encode_with_color_metadata(
-    document: &CellFile,
-    include_color_metadata: bool,
-) -> Result<Vec<u8>, FormatError> {
     validate_document(document)?;
     let document_metadata = document
         .document_metadata
@@ -41,26 +34,15 @@ pub(crate) fn encode_with_color_metadata(
     if blob_count > MAX_BLOBS {
         return Err(FormatError::Invalid("too many blobs"));
     }
-    let color_metadata_len = if include_color_metadata {
-        COLOR_METADATA_FIXED_BYTES
-            .checked_add(
-                document
-                    .palette
-                    .len()
-                    .checked_mul(COLOR_VALUE_BYTES)
-                    .ok_or(FormatError::Invalid("palette manifest overflows"))?,
-            )
-            .ok_or(FormatError::Invalid("color metadata length overflows"))?
-    } else {
-        if !document.palette.is_empty()
-            || document.main_line_color != legacy_main_line_color(document)?
-        {
-            return Err(FormatError::Invalid(
-                "legacy v1 manifest cannot store color metadata",
-            ));
-        }
-        0
-    };
+    let color_metadata_len = COLOR_METADATA_FIXED_BYTES
+        .checked_add(
+            document
+                .palette
+                .len()
+                .checked_mul(COLOR_VALUE_BYTES)
+                .ok_or(FormatError::Invalid("palette manifest overflows"))?,
+        )
+        .ok_or(FormatError::Invalid("color metadata length overflows"))?;
     let manifest_len = FIXED_MANIFEST_BYTES
         .checked_add(color_metadata_len)
         .and_then(|value| {
@@ -139,27 +121,27 @@ pub(crate) fn encode_with_color_metadata(
     push_u32(&mut output, FORMAT_VERSION);
     push_u32(
         &mut output,
-        (if include_color_metadata {
-            CONTAINER_FLAG_COLOR_METADATA
-        } else {
-            0
-        }) | if document_metadata.is_some() {
-            CONTAINER_FLAG_DOCUMENT_METADATA
-        } else {
-            0
-        } | if light_table_metadata.is_some() {
-            CONTAINER_FLAG_LIGHT_TABLE_METADATA
-        } else {
-            0
-        } | if vector_metadata.is_some() {
-            CONTAINER_FLAG_VECTOR_METADATA
-        } else {
-            0
-        } | if adjustment_metadata.is_some() {
-            CONTAINER_FLAG_ADJUSTMENT_METADATA
-        } else {
-            0
-        },
+        CONTAINER_FLAG_COLOR_METADATA
+            | if document_metadata.is_some() {
+                CONTAINER_FLAG_DOCUMENT_METADATA
+            } else {
+                0
+            }
+            | if light_table_metadata.is_some() {
+                CONTAINER_FLAG_LIGHT_TABLE_METADATA
+            } else {
+                0
+            }
+            | if vector_metadata.is_some() {
+                CONTAINER_FLAG_VECTOR_METADATA
+            } else {
+                0
+            }
+            | if adjustment_metadata.is_some() {
+                CONTAINER_FLAG_ADJUSTMENT_METADATA
+            } else {
+                0
+            },
     );
     push_u64(&mut output, manifest_len as u64);
     push_u64(&mut output, blob_count as u64);
@@ -193,13 +175,11 @@ pub(crate) fn encode_with_color_metadata(
     push_u32(&mut output, document.planes.len() as u32);
     push_u32(&mut output, blob_count as u32);
 
-    if include_color_metadata {
-        push_color_value(&mut output, document.main_line_color)?;
-        push_u32(&mut output, document.palette.len() as u32);
-        push_u32(&mut output, 0);
-        for color in &document.palette {
-            push_color_value(&mut output, *color)?;
-        }
+    push_color_value(&mut output, document.main_line_color)?;
+    push_u32(&mut output, document.palette.len() as u32);
+    push_u32(&mut output, 0);
+    for color in &document.palette {
+        push_color_value(&mut output, *color)?;
     }
     if let Some(metadata) = &document_metadata {
         push_u32(
@@ -275,7 +255,7 @@ pub(crate) fn encode_with_color_metadata(
 fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, FormatError> {
     validate_document_metadata(metadata, None)?;
     let mut output = Vec::new();
-    output.extend_from_slice(b"M3ED");
+    output.extend_from_slice(&DOCUMENT_METADATA_MAGIC);
     push_u32(&mut output, 1);
     push_u64(&mut output, metadata.active_layer_id);
     push_u64(&mut output, metadata.active_plane_id);

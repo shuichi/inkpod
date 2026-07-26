@@ -444,7 +444,7 @@ For each completed implementation substep:
 git diff --check
 cmake --preset windows-x64-debug
 cmake --build --preset windows-x64-debug
-ctest --preset windows-x64-debug -E m8_windows_msix_install_uninstall_smoke --output-on-failure
+ctest --preset windows-x64-debug -E inkpod_windows_msix_install_uninstall_smoke --output-on-failure
 ```
 
 At each full R-step boundary, also run:
@@ -455,10 +455,10 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cmake --preset windows-x64-release
 cmake --build --preset windows-x64-release
-ctest --preset windows-x64-release -E m8_windows_msix_install_uninstall_smoke --output-on-failure
+ctest --preset windows-x64-release -E inkpod_windows_msix_install_uninstall_smoke --output-on-failure
 ```
 
-The elevated `m8_windows_msix_install_uninstall_smoke` is optional release
+The elevated `inkpod_windows_msix_install_uninstall_smoke` is optional release
 validation. It may be run at R6, or earlier if the packaged executable, embedded
 ABI-smoke route, package layout, or runtime payload changes, but its explicit
 omission does not block R6 or M8 completion. Do not claim it passed when UAC,

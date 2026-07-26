@@ -23,7 +23,7 @@ list(REMOVE_DUPLICATES unique_catalog_ids)
 list(LENGTH unique_catalog_ids unique_catalog_count)
 if(NOT catalog_count EQUAL unique_catalog_count)
     message(FATAL_ERROR
-        "R5 command-state catalog has duplicate owners: ${catalog_count} "
+        "command-state catalog has duplicate owners: ${catalog_count} "
         "entries, ${unique_catalog_count} unique IDs")
 endif()
 
@@ -33,9 +33,9 @@ list(SORT resource_ids)
 list(SORT unique_catalog_ids)
 if(NOT resource_ids STREQUAL unique_catalog_ids)
     message(FATAL_ERROR
-        "R5 command-state catalog differs from the production app.rc command set")
+        "command-state catalog differs from the production app.rc command set")
 endif()
 
 list(LENGTH resource_ids production_count)
 message(STATUS
-    "Verified ${production_count} production command IDs with one R5 state owner each")
+    "Verified ${production_count} production command IDs with one state owner each")

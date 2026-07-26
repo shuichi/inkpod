@@ -1,6 +1,6 @@
 # Native file format
 
-`.inkpod` v1 is a bounded little-endian container. It does not reuse a legacy
+`.inkpod` v2 is a bounded little-endian container. It does not reuse a legacy
 extension and makes no DGA/CEL byte-compatibility claim.
 
 ## Container layout
@@ -16,13 +16,13 @@ binary manifest
   128-bit document UUID plus stable document/layer/main-plane/color-plane IDs
   pixel width/height, X/Y DPI in thousandths, sRGB marker
   100/reference/drawing/safe frame rectangles and margins
-  optional M2 color metadata: exact-depth main-line base color and a bounded
+  required color metadata: exact-depth main-line base color and a bounded
   sequence of exact-depth RGBA8/RGBA16 palette records
-  optional M3 document-editing metadata: typed layer tree/properties, active
+  optional document metadata: typed layer tree/properties, active
   IDs, persistent selection plane, guides, and grid
-  optional M4 production-workflow metadata: light-table sets/items, transforms,
+  optional light-table metadata: sets/items, transforms,
   source identity/revision/DPI/reference frame, and source-plane IDs
-  optional M5 vector metadata: stable paths/fills, cubic control points,
+  optional vector metadata: stable paths/fills, cubic control points,
   endpoint widths, colors, and fill-boundary path IDs
   typed plane descriptors with pixel format and blob ranges
   tile blob descriptors with coordinate, dimensions, format,
@@ -32,20 +32,19 @@ blob area
   compact edge-aware tile bytes in manifest order
 ```
 
-M2 retains exactly one main-line plane and one color plane in the current cell
+The current cell DTO retains exactly one main-line plane and one color plane.
 DTO. The main-line descriptor accepts binary mask, grayscale 8-bit, or
 grayscale 16-bit storage. The color descriptor accepts straight-alpha sRGB
-RGBA8 or RGBA16 storage. Header flag bit 0 advertises the M2 color-metadata
+RGBA8 or RGBA16 storage. Header flag bit 0 marks the required color-metadata
 section. Each color record carries its own 8/16-bit depth; the main-line base
 color and up to 4096 palette entries are serialized little-endian without an
-implicit 8-bit conversion. A flag-0 v1 file from M1 remains readable and
-defaults to an empty palette plus an opaque black base color at the color-plane
-depth. The decoder requires every tile format to equal its plane descriptor.
+implicit 8-bit conversion. The decoder rejects a missing flag and requires every
+tile format to equal its plane descriptor.
 Raster storage is sparse; zero tiles are omitted.
 Tile revision and GPU cache data are runtime state and are not persisted.
 
-Header flag bit 1 advertises the additive M3 metadata section. It starts with
-`"M3ED"` plus section version 1 and contains active layer/plane IDs, the stable
+Header flag bit 1 advertises the document-metadata section. It starts with
+`"DOCM"` plus section version 1 and contains active layer/plane IDs, the stable
 selection-plane ID, bounded layer/guide counts, grid origin/spacing/
 subdivisions, and ordered layer descriptors. Each layer stores its stable ID,
 typed `LayerKind`, visible/editable flags, opacity in thousandths, bounded UTF-8
@@ -55,25 +54,24 @@ so one stable plane ID joins the tree entry to its raster payload. Guide records
 store stable ID, horizontal/vertical axis, and signed document position.
 
 The persistent selection is a normal sparse binary-mask plane referenced by
-`selection_plane_id`; it is not inferred from a UI rectangle. M3 view flips,
+`selection_plane_id`; it is not inferred from a UI rectangle. View flips,
 ruler visibility, locator position, secondary-view transforms, floating paste,
 and shortcut bindings are transient/application state and are not serialized.
-A flag-0 or M2-only v1 file remains readable: Core deterministically upgrades
-its legacy main/color descriptors into one coloring layer and creates an empty
-selection mask without changing the legacy pixel payload.
 
-Header flag bit 2 advertises the additive `"M4WF"` version-1 section. It stores
+Header flag bit 2 advertises the `"LTBL"` version-1 section. It stores
 stable-ID light-table sets, the active set, global opacity, and ordered items.
 Each item stores a stable item/source-plane ID, source UUID/revision/DPI/
 reference frame, visibility, opacity, display mode/color, translation, scale,
 rotation, and bounded UTF-8 name. Source RGBA8/RGBA16 rasters remain in the
 checksummed blob area as typed `LightTable` planes and may differ in dimensions
 from the editing paper. They are read-only: fill derives a temporary boundary
-or sampled color but never writes the source. M1-M3 files open with one empty
-default set. The decoder rejects missing/unreferenced source planes, colliding
-IDs, invalid transforms/opacities/DPI, and M4 without the M3 typed tree.
+or sampled color but never writes the source. Files without light-table
+metadata open with one empty default set. The decoder rejects
+missing/unreferenced source planes, colliding
+IDs, invalid transforms/opacities/DPI, and light-table metadata without the
+typed document tree.
 
-Header flag bit 3 advertises the additive `"M5VT"` version-1 section. Geometry
+Header flag bit 3 advertises the `"VECT"` version-1 section. Geometry
 is stored in document coordinates as signed 32-bit thousandths of a pixel,
 restricted to -2,000,000,000 through 2,000,000,000 thousandths so reopened
 geometry obeys the Core's +/-2,000,000 document-pixel bound;
@@ -87,33 +85,32 @@ or more unique closed boundary-path IDs. The section is bounded to 65,536 paths,
 A vector-coloring layer has exactly one vector-main-line plane, one or more
 color-trace planes, and exactly one vector-fill plane; optional raster planes are
 allowed. Vector plane payload descriptors are empty RGBA8 placeholders because
-geometry lives in `M5VT`, not in raster blobs. The decoder requires M3 typed-tree
-metadata, rejects vector planes without M5 metadata, cross-layer fill boundaries,
+geometry lives in `VECT`, not in raster blobs. The decoder requires typed document
+metadata, rejects vector planes without vector metadata, cross-layer fill boundaries,
 open/discontinuous fill boundaries, missing plane/path references, duplicate or
-cross-M1-M5 stable IDs, unsupported flags/reserved values, excessive counts, and
-trailing section bytes. M1-M4 files remain readable and acquire no vector state.
+cross-section stable IDs, unsupported flags/reserved values, excessive counts,
+and trailing section bytes.
 
-Header flag bit 4 advertises the additive `"M6AD"` version-1 section. Each
-record names one stable-ID M3 adjustment layer and stores exactly one bounded
+Header flag bit 4 advertises the `"ADJT"` version-1 section. Each record names
+one stable-ID adjustment layer and stores exactly one bounded
 brightness/contrast, RGB/R/G/B Bezier or B-spline tone curve, or levels
 operation. Curve inputs/outputs use the full normalized 0..65535 range and are
 strictly ordered from 0 through 65535; levels store input shadow/gamma/highlight
 and output shadow/highlight in the same normalized domain. Adjustment layers
 have no raster payload, so source plane bytes and checksums remain unchanged.
 
-The decoder requires a one-to-one relationship between `M6AD` records and
-zero-plane M3 adjustment layers. It rejects missing or duplicate records,
+The decoder requires a one-to-one relationship between `ADJT` records and
+zero-plane adjustment layers. It rejects missing or duplicate records,
 non-adjustment/wrong layer IDs, invalid channel/interpolation codes, excessive
 layer/curve counts, out-of-range parameters, unknown/reserved values, and
-trailing bytes. M1-M5 files remain readable and acquire no adjustment state.
+trailing bytes.
 
 ## Batch settings format
 
-M7 batch settings use the separate `.inkbatch` extension. Version 1 is a
-bounded little-endian file with a 28-byte header: magic `INKBAT7\0`, graph
-version, body length, and FNV-1a 64-bit body checksum. It does not alter the
-`.inkpod` v1 container or claim compatibility with an undocumented legacy
-batch/preset format.
+Batch settings use the separate `.inkbatch` extension. Version 1 is a bounded
+little-endian file with a 28-byte header: magic `INKBATCH`, graph version, body
+length, and FNV-1a 64-bit body checksum. It does not claim compatibility with
+an undocumented legacy batch/preset format.
 
 The body stores a bounded UTF-8 graph name; one or more file, folder, or
 current-sequence input selectors with optional cell-number ranges; up to 1,024

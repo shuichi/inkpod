@@ -1145,7 +1145,7 @@ int InkpodRunAbiSmoke() {
         return 82;
     }
 
-    const std::string batch_name{"M7 ABI Smoke"};
+    const std::string batch_name{"Batch ABI Smoke"};
     const std::string batch_output{"."};
     const std::string batch_basename{"abi-smoke"};
     InkpodBatchInput batch_input{};
@@ -1245,7 +1245,7 @@ int InkpodRunAbiSmoke() {
         || inkpod_batch_task_release(&batch_task) != INKPOD_STATUS_OK) {
         return 87;
     }
-    const std::string batch_settings{"inkpod-m7-abi-smoke.inkbatch"};
+    const std::string batch_settings{"inkpod-batch-abi-smoke.inkbatch"};
     std::remove(batch_settings.c_str());
     InkpodBatchGraph* loaded_batch_graph{};
     if (inkpod_batch_graph_save(

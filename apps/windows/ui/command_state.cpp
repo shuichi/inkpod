@@ -308,8 +308,8 @@ void ProvideToolCommandStates(
         && input.tool.active_tool != tools::kInteractionFloatingTransform
         && input.tool.active_tool != tools::kInteractionLightTableMove
         && !tools::IsVectorCanvasTool(input.tool.active_tool)
-        && !(input.tool.active_tool >= tools::kInteractionM6Gradient
-            && input.tool.active_tool <= tools::kInteractionM6AlphaGradient);
+        && !(input.tool.active_tool >= tools::kInteractionEffectGradient
+            && input.tool.active_tool <= tools::kInteractionEffectAlphaGradient);
     if (ordinary_tool) {
         SetChecked(states, tool_command, true);
     }

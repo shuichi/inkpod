@@ -275,18 +275,22 @@ fn io_001_manifest_and_blobs_round_trip() {
 }
 
 #[test]
-fn color_metadata_round_trips_and_legacy_v1_defaults_remain_readable() {
+fn previous_container_version_is_rejected() {
+    let mut encoded = encode(&base_fixture()).unwrap();
+    encoded[8..12].copy_from_slice(&(FORMAT_VERSION - 1).to_le_bytes());
+    assert!(matches!(
+        decode(&encoded),
+        Err(FormatError::Unsupported("format version is not supported"))
+    ));
+}
+
+#[test]
+fn color_metadata_round_trips() {
     let mut document = base_fixture();
     document.main_line_color = PixelValue::Rgba16([1_001, 2_002, 3_003, 65_535]);
     let decoded = decode(&encode(&document).unwrap()).unwrap();
     assert_eq!(decoded.main_line_color, document.main_line_color);
     assert_eq!(decoded.palette, document.palette);
-
-    let mut legacy = base_fixture();
-    legacy.palette.clear();
-    legacy.main_line_color = PixelValue::Rgba([0, 0, 0, 255]);
-    let legacy_bytes = encode_with_color_metadata(&legacy, false).unwrap();
-    assert_eq!(decode(&legacy_bytes).unwrap(), legacy);
 }
 
 #[test]

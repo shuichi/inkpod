@@ -57,9 +57,9 @@ using inkpod::app::PublishStandardClipboard;
 using inkpod::app::ReadBoundedFile;
 using inkpod::app::WriteFileAtomically;
 using inkpod::windows::ui::tools::TransitionActiveTool;
-using inkpod::windows::ui::tools::kInteractionM6Airbrush;
+using inkpod::windows::ui::tools::kInteractionEffectAirbrush;
 
-constexpr UINT_PTR kM6ContinuousSprayTimer = 2U;
+constexpr UINT_PTR kContinuousSprayTimer = 2U;
 constexpr wchar_t kVectorStrokePlaneRequired[] =
     L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
 
@@ -90,12 +90,21 @@ bool ResolveConfiguredShortcut(AppContext& state, std::uint32_t virtual_key, std
 bool SamePersistentMetadata(const InkpodDocumentInfo& left, const InkpodDocumentInfo& right) noexcept;
 InkpodStatus SaveToPath(AppContext& state, const std::wstring& path) noexcept;
 
-int RunM1Smoke(AppContext& state) noexcept {
+int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     const HMENU menu = GetMenu(state.windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_HELP_ABOUT, MF_BYCOMMAND) == static_cast<UINT>(-1)
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
         return 29;
+    }
+    inkpod::windows::ui::LayoutMainChrome(state.windows, false, 800, 600);
+    RECT tab_bounds{};
+    RECT canvas_layout_bounds{};
+    if (GetWindowRect(state.windows.document_tabs, &tab_bounds) == FALSE
+        || GetWindowRect(state.windows.canvas, &canvas_layout_bounds) == FALSE
+        || tab_bounds.right - tab_bounds.left != 800
+        || canvas_layout_bounds.right - canvas_layout_bounds.left != 800) {
+        return 715;
     }
     if (state.engine == nullptr
         || MoveWindow(state.windows.canvas, 0, 0, 640, 480, FALSE) == FALSE
@@ -124,8 +133,7 @@ int RunM1Smoke(AppContext& state) noexcept {
             return 701;
         }
     }
-    if (!RefreshSequencePane(state)
-        || SendMessageW(state.windows.sequence_list, LB_GETCOUNT, 0, 0) != 0) {
+    if (!RefreshSequencePane(state) || state.panes.sequence_count != 0U) {
         return 702;
     }
     InkpodSequenceCellInfo missing_sequence_cell{};
@@ -362,7 +370,7 @@ int RunM1Smoke(AppContext& state) noexcept {
         temporary_file.data(),
         temporary_file.size(),
         _TRUNCATE,
-        L"%lsinkpod-m1-smoke-%lu-%llu.inkpod",
+        L"%lsinkpod-drawing-save-smoke-%lu-%llu.inkpod",
         temporary_directory.data(),
         GetCurrentProcessId(),
         static_cast<unsigned long long>(GetTickCount64()));
@@ -509,7 +517,7 @@ int RunM1Smoke(AppContext& state) noexcept {
     return dpi_changed && dpi_transform_stable && device_recovered && rendered ? 0 : 52;
 }
 
-int RunM2Smoke(AppContext& state) noexcept {
+int RunPaintingRecoverySmoke(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return 200;
     }
@@ -815,7 +823,7 @@ int RunM2Smoke(AppContext& state) noexcept {
         normal_buffer.data(),
         normal_buffer.size(),
         _TRUNCATE,
-        L"%lsinkpod-m2-normal-%lu-%llu.inkpod",
+        L"%lsinkpod-painting-normal-%lu-%llu.inkpod",
         temporary_directory.data(),
         GetCurrentProcessId(),
         suffix);
@@ -823,7 +831,7 @@ int RunM2Smoke(AppContext& state) noexcept {
         recovery_buffer.data(),
         recovery_buffer.size(),
         _TRUNCATE,
-        L"%lsinkpod-m2-recovery-%lu-%llu.inkpod",
+        L"%lsinkpod-painting-recovery-%lu-%llu.inkpod",
         temporary_directory.data(),
         GetCurrentProcessId(),
         suffix);
@@ -905,7 +913,7 @@ int RunM2Smoke(AppContext& state) noexcept {
         : 214;
 }
 
-int RunM3Smoke(AppContext& state) noexcept {
+int RunDocumentEditingSmoke(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return 300;
     }
@@ -1046,7 +1054,7 @@ int RunM3Smoke(AppContext& state) noexcept {
         file_buffer.data(),
         file_buffer.size(),
         _TRUNCATE,
-        L"%lsinkpod-m3-%lu-%llu.inkpod",
+        L"%lsinkpod-document-editing-%lu-%llu.inkpod",
         temporary_directory.data(),
         GetCurrentProcessId(),
         static_cast<unsigned long long>(GetTickCount64()));
@@ -1667,12 +1675,14 @@ int RunM3Smoke(AppContext& state) noexcept {
         || primary_pan_x == secondary_pan_x) {
         return 326;
     }
+    UpdateMenuState(state);
+    std::array<wchar_t, 96U> zoom_status{};
     SendMessageW(
-        state.windows.window,
-        inkpod::renderer::kCanvasPointerMoved,
-        0,
-        MAKELPARAM(2, 2));
-    if (state.windows.locator_label == nullptr || GetWindowTextLengthW(state.windows.locator_label) < 20) {
+        state.windows.status_bar,
+        SB_GETTEXTW,
+        1,
+        reinterpret_cast<LPARAM>(zoom_status.data()));
+    if (wcsstr(zoom_status.data(), L"ズーム:") == nullptr) {
         return 358;
     }
 
@@ -1964,7 +1974,7 @@ int RunM3Smoke(AppContext& state) noexcept {
         : 333;
 }
 
-int RunM4Smoke(AppContext& state) noexcept {
+int RunProductionWorkflowSmoke(AppContext& state) noexcept {
     if (state.engine == nullptr
         || CreateCell(state, 32U, 24U, 120000U) != INKPOD_STATUS_OK) {
         return 400;
@@ -1988,7 +1998,7 @@ int RunM4Smoke(AppContext& state) noexcept {
     }
 
     if (SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_NEW, 0) != 0
-        || SendMessageW(state.windows.layer_list, LB_GETCOUNT, 0, 0) < 2) {
+        || state.panes.tree_layer_count < 2U) {
         return 402;
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_VISIBLE, 0);
@@ -1999,7 +2009,7 @@ int RunM4Smoke(AppContext& state) noexcept {
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_CONVERT, 0);
     if (SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_NEW, 0) != 0
-        || SendMessageW(state.windows.plane_list, LB_GETCOUNT, 0, 0) < 2) {
+        || state.panes.tree_plane_count < 2U) {
         return 403;
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_VISIBLE, 0);
@@ -2010,21 +2020,10 @@ int RunM4Smoke(AppContext& state) noexcept {
         return 403;
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
-    SetWindowPos(
-        state.windows.plane_list, nullptr, 0, 0, 220, 160,
-        SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOMOVE);
-    const int plane_item_height = static_cast<int>(SendMessageW(
-        state.windows.plane_list, LB_GETITEMHEIGHT, 0, 0));
-    const std::uint32_t plane_drag_start = state.panes.active_tree_plane_index;
-    if (plane_drag_start != 0U) {
-        SendMessageW(
-            state.windows.plane_list,
-            WM_LBUTTONDOWN,
-            MK_LBUTTON,
-            MAKELPARAM(4, plane_item_height * static_cast<int>(plane_drag_start) + 2));
-        SendMessageW(
-            state.windows.plane_list, WM_LBUTTONUP, 0, MAKELPARAM(4, 2));
-        if (state.panes.active_tree_plane_index != 0U) {
+    const std::uint32_t plane_move_start = state.panes.active_tree_plane_index;
+    if (plane_move_start != 0U) {
+        SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
+        if (state.panes.active_tree_plane_index != plane_move_start - 1U) {
             return 468;
         }
     }
@@ -2037,21 +2036,10 @@ int RunM4Smoke(AppContext& state) noexcept {
         return 403;
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_DUPLICATE, 0);
-    SetWindowPos(
-        state.windows.layer_list, nullptr, 0, 0, 220, 160,
-        SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOMOVE);
-    const int layer_item_height = static_cast<int>(SendMessageW(
-        state.windows.layer_list, LB_GETITEMHEIGHT, 0, 0));
-    const std::uint32_t layer_drag_start = state.panes.active_tree_layer_index;
-    if (layer_drag_start != 0U) {
-        SendMessageW(
-            state.windows.layer_list,
-            WM_LBUTTONDOWN,
-            MK_LBUTTON,
-            MAKELPARAM(4, layer_item_height * static_cast<int>(layer_drag_start) + 2));
-        SendMessageW(
-            state.windows.layer_list, WM_LBUTTONUP, 0, MAKELPARAM(4, 2));
-        if (state.panes.active_tree_layer_index != 0U) {
+    const std::uint32_t layer_move_start = state.panes.active_tree_layer_index;
+    if (layer_move_start != 0U) {
+        SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_MOVE_UP, 0);
+        if (state.panes.active_tree_layer_index != layer_move_start - 1U) {
             return 469;
         }
     }
@@ -2106,7 +2094,7 @@ int RunM4Smoke(AppContext& state) noexcept {
         }
     }
     RefreshColorPanes(state);
-    SendMessageW(state.windows.color_chart_list, LB_SETCURSEL, 0, 0);
+    state.panes.selected_color_chart_index = 0U;
     const std::array<UINT, 4U> chart_navigation_commands{
         IDM_CHART_RENAME, IDM_CHART_SEARCH, IDM_CHART_NEXT, IDM_CHART_NEXT_PAGE};
     for (std::size_t index = 0U; index < chart_navigation_commands.size(); ++index) {
@@ -2116,14 +2104,14 @@ int RunM4Smoke(AppContext& state) noexcept {
         }
     }
     state.panes.color_chart_page = 0U;
+    state.panes.selected_color_chart_index = 0U;
     RefreshColorPanes(state);
-    SendMessageW(state.windows.color_chart_list, LB_SETCURSEL, 0, 0);
     if (SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_SAVE, 0) != 1
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_COPY, 0) != 1
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_PASTE, 0) != 1) {
         return 432;
     }
-    SendMessageW(state.windows.color_chart_list, LB_SETCURSEL, 0, 0);
+    state.panes.selected_color_chart_index = 0U;
     if (SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_CUT, 0) != 1
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_LOAD, 0) != 1
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_LOCK, 0) != 1
@@ -2236,7 +2224,7 @@ int RunM4Smoke(AppContext& state) noexcept {
         return 411;
     }
     RefreshSequencePane(state);
-    if (SendMessageW(state.windows.sequence_list, LB_GETCOUNT, 0, 0) != 3
+    if (state.panes.sequence_count != 3U
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_SUBPALETTE_SET, 0) != 1
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_SUBPALETTE_SAMPLE, 0) != 1
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_GOTO, 0) != 1
@@ -2282,7 +2270,7 @@ int RunM4Smoke(AppContext& state) noexcept {
     return 0;
 }
 
-int RunM5Smoke(AppContext& state) noexcept {
+int RunVectorWorkflowSmoke(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return 500;
     }
@@ -2625,7 +2613,7 @@ int RunM5Smoke(AppContext& state) noexcept {
     return 0;
 }
 
-int RunM6Smoke(AppContext& state) noexcept {
+int RunImageEffectsSmoke(AppContext& state) noexcept {
     if (state.engine == nullptr) {
         return 600;
     }
@@ -2809,7 +2797,7 @@ int RunM6Smoke(AppContext& state) noexcept {
         return 608;
     }
     TransitionActiveTool(
-        state.tools, state.windows.canvas, kInteractionM6Airbrush);
+        state.tools, state.windows.canvas, kInteractionEffectAirbrush);
     state.effects.options.parameters = {4000, 1000, 1000, 750, 0};
     state.effects.options.option = true;
     state.effects.options.option2 = true;
@@ -2829,7 +2817,7 @@ int RunM6Smoke(AppContext& state) noexcept {
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&spray_begin)) != 1
-        || SendMessageW(state.windows.window, WM_TIMER, kM6ContinuousSprayTimer, 0) != 0
+        || SendMessageW(state.windows.window, WM_TIMER, kContinuousSprayTimer, 0) != 0
         || state.effects.samples.size() < 2U
         || SendMessageW(
                state.windows.window,
@@ -2852,9 +2840,9 @@ int RunM6Smoke(AppContext& state) noexcept {
         : 604;
 }
 
-int RunM7Smoke(AppContext& state) noexcept {
-    constexpr wchar_t settings_path[] = L"inkpod-m7-ui-smoke.inkbatch";
-    constexpr wchar_t output_path[] = L"inkpod-m7-windows-smoke_0001.inkpod";
+int RunBatchWorkflowSmoke(AppContext& state) noexcept {
+    constexpr wchar_t settings_path[] = L"inkpod-batch-ui-smoke.inkbatch";
+    constexpr wchar_t output_path[] = L"inkpod-batch-windows-smoke_0001.inkpod";
     const auto cleanup = [&]() noexcept {
         DeleteFileW(settings_path);
         DeleteFileW(output_path);
@@ -2872,7 +2860,7 @@ int RunM7Smoke(AppContext& state) noexcept {
         return 701;
     }
     state.batch.output_folder = L".";
-    state.batch.basename = L"inkpod-m7-windows-smoke";
+    state.batch.basename = L"inkpod-batch-windows-smoke";
     if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_INPUT_CURRENT, 0) != 1
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_INPUT_RANGE, 0) != 1
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OUTPUT_SETTINGS, 0) != 1
@@ -2982,24 +2970,24 @@ int RunM7Smoke(AppContext& state) noexcept {
 namespace inkpod::windows::ui {
 
 int RunApplicationSmoke(app::AppContext& state) noexcept {
-    int exit_code = runtime::RunM1Smoke(state);
+    int exit_code = runtime::RunDrawingPersistenceSmoke(state);
     if (exit_code == 0) {
-        exit_code = runtime::RunM2Smoke(state);
+        exit_code = runtime::RunPaintingRecoverySmoke(state);
     }
     if (exit_code == 0) {
-        exit_code = runtime::RunM3Smoke(state);
+        exit_code = runtime::RunDocumentEditingSmoke(state);
     }
     if (exit_code == 0) {
-        exit_code = runtime::RunM4Smoke(state);
+        exit_code = runtime::RunProductionWorkflowSmoke(state);
     }
     if (exit_code == 0) {
-        exit_code = runtime::RunM5Smoke(state);
+        exit_code = runtime::RunVectorWorkflowSmoke(state);
     }
     if (exit_code == 0) {
-        exit_code = runtime::RunM6Smoke(state);
+        exit_code = runtime::RunImageEffectsSmoke(state);
     }
     if (exit_code == 0) {
-        exit_code = runtime::RunM7Smoke(state);
+        exit_code = runtime::RunBatchWorkflowSmoke(state);
     }
     return exit_code;
 }

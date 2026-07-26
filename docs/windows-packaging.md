@@ -44,12 +44,12 @@ runtime DLLs are explicit CMake dependencies, so changing one rebuilds the
 package while an unchanged second build remains a no-op. `inkpod_msix` can also
 be selected explicitly as a build target.
 
-`m8_windows_msix_payload_smoke` unpacks the produced artifact with `MakeAppx`
+`inkpod_windows_msix_payload_smoke` unpacks the produced artifact with `MakeAppx`
 without elevation and verifies the executable, identity/version, license,
 notices, and required MSVC runtime payload. Hosted CI runs this test for Debug
 and Release.
 
-`m8_windows_msix_install_uninstall_smoke` must run from an elevated Windows 11
+`inkpod_windows_msix_install_uninstall_smoke` must run from an elevated Windows 11
 workstation shell and rejects Windows 10 and Windows Server. It refuses to
 disturb an existing all-users `inkpod` package, copies the
 unsigned build artifact to a private temporary directory, creates a one-day
@@ -70,6 +70,6 @@ test on an elevated clean Windows 11 workstation with:
 
 ```powershell
 ctest --preset windows-x64-release `
-  -R m8_windows_msix_install_uninstall_smoke `
+  -R inkpod_windows_msix_install_uninstall_smoke `
   --output-on-failure
 ```

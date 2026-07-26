@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 
 const MAX_LIGHT_TABLE_SETS: usize = 256;
 const MAX_LIGHT_TABLE_ITEMS: usize = 4_096;
+const LIGHT_TABLE_METADATA_MAGIC: [u8; 4] = *b"LTBL";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LightTableDisplayMode {
@@ -75,7 +76,7 @@ pub(super) fn encode_light_table_metadata(
 ) -> Result<Vec<u8>, FormatError> {
     validate_light_table_metadata(metadata, None)?;
     let mut output = Vec::new();
-    output.extend_from_slice(b"M4WF");
+    output.extend_from_slice(&LIGHT_TABLE_METADATA_MAGIC);
     push_u32(&mut output, 1);
     push_u64(&mut output, metadata.active_set_id);
     push_u32(&mut output, metadata.sets.len() as u32);
@@ -127,7 +128,7 @@ pub(super) fn decode_light_table_metadata(
     bytes: &[u8],
 ) -> Result<FileLightTableMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != b"M4WF" || reader.u32()? != 1 {
+    if reader.take(4)? != LIGHT_TABLE_METADATA_MAGIC || reader.u32()? != 1 {
         return Err(FormatError::Unsupported(
             "light-table metadata version is not supported",
         ));

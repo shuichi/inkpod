@@ -3,7 +3,8 @@ use inkpod_image::{FNV_OFFSET, PixelFormat, PixelValue, TileCoord, fnv_bytes};
 use std::fmt;
 use std::sync::atomic::AtomicU64;
 pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
+pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
 pub(super) const HEADER_BYTES: usize = 32;
 pub(super) const FIXED_MANIFEST_BYTES: usize = 160;
 pub(super) const COLOR_METADATA_FIXED_BYTES: usize = 24;
@@ -222,8 +223,8 @@ pub struct CellFile {
     pub main_line_color: PixelValue,
     pub palette: Vec<PixelValue>,
     pub planes: Vec<FilePlane>,
-    /// Additive document editing metadata. `None` represents a legacy v1 file and is
-    /// upgraded to the legacy one-layer tree by the Core on open.
+    /// Optional typed document metadata. `None` is valid only for the base two-plane
+    /// document representation.
     pub document_metadata: Option<FileDocumentMetadata>,
     /// Additive light-table/workflow metadata. Source rasters are blob-backed
     /// planes referenced by this section and remain outside the editable tree.

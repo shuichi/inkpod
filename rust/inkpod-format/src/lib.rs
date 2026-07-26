@@ -23,6 +23,8 @@ use inkpod_image::{PixelFormat, TileCoord};
 pub use light_table::{
     FileLightTableItem, FileLightTableMetadata, FileLightTableSet, LightTableDisplayMode,
 };
+#[cfg(test)]
+use native::TEMP_SEQUENCE;
 pub use native::{
     CellFile, FORMAT_VERSION, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
     FilePlaneProperties, FileTile, FormatError, FrameMetadata, GuideAxis, LayerKind, Margins,
@@ -33,8 +35,6 @@ use native::{
     MAX_MANIFEST_BYTES, MAX_NODE_NAME_BYTES, MAX_PLANES, Reader, push_color_value, push_i32,
     push_u32, push_u64,
 };
-#[cfg(test)]
-use native::{TEMP_SEQUENCE, encode_with_color_metadata};
 #[cfg(test)]
 use std::fs;
 #[cfg(test)]

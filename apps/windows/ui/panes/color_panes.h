@@ -11,8 +11,8 @@ struct PaneUiState;
 
 namespace inkpod::windows::ui::panes {
 
-// Owns palette/chart Core adaptation. The Win32 list presentation remains in
-// MainWindow until R4, while color values stay Core-owned and copied in batches.
+// Owns palette/chart Core adaptation. A future modeless floating palette may
+// present this state, while color values stay Core-owned and copied in batches.
 class ColorPanesController final {
 public:
     explicit ColorPanesController(app::CoreEngine& engine) noexcept;

@@ -36,7 +36,7 @@ bool ReadSignedDialogValue(
 }
 
 template <std::size_t Count>
-void FillM6Combo(
+void FillEffectCombo(
     HWND combo,
     const std::array<const wchar_t*, Count>& labels,
     const std::array<std::uint32_t, Count>& values,
@@ -58,7 +58,7 @@ void FillM6Combo(
     EnableWindow(combo, count != 0U ? TRUE : FALSE);
 }
 
-std::uint32_t SelectedM6Combo(
+std::uint32_t SelectedEffectCombo(
     HWND dialog, int control, std::uint32_t fallback) noexcept {
     const LRESULT selected = SendDlgItemMessageW(
         dialog, control, CB_GETCURSEL, 0, 0);
@@ -70,32 +70,32 @@ std::uint32_t SelectedM6Combo(
     return value == CB_ERR ? fallback : static_cast<std::uint32_t>(value);
 }
 
-INT_PTR CALLBACK M6EditorDialogProcedure(
+INT_PTR CALLBACK EffectEditorDialogProcedure(
     HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
-    auto* state = reinterpret_cast<M6EditorState*>(
+    auto* state = reinterpret_cast<EffectEditorState*>(
         GetWindowLongPtrW(dialog, GWLP_USERDATA));
     switch (message) {
         case WM_INITDIALOG: {
-            state = reinterpret_cast<M6EditorState*>(lparam);
+            state = reinterpret_cast<EffectEditorState*>(lparam);
             if (state == nullptr) {
                 EndDialog(dialog, IDCANCEL);
                 return TRUE;
             }
             SetWindowLongPtrW(
                 dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            SetDlgItemTextW(dialog, IDC_M6_TITLE, state->title);
+            SetDlgItemTextW(dialog, IDC_EFFECT_TITLE, state->title);
             constexpr std::array<int, 5U> labels{
-                IDC_M6_PARAM0_LABEL,
-                IDC_M6_PARAM1_LABEL,
-                IDC_M6_PARAM2_LABEL,
-                IDC_M6_PARAM3_LABEL,
-                IDC_M6_PARAM4_LABEL};
+                IDC_EFFECT_PARAMETER0_LABEL,
+                IDC_EFFECT_PARAMETER1_LABEL,
+                IDC_EFFECT_PARAMETER2_LABEL,
+                IDC_EFFECT_PARAMETER3_LABEL,
+                IDC_EFFECT_PARAMETER4_LABEL};
             constexpr std::array<int, 5U> edits{
-                IDC_M6_PARAM0,
-                IDC_M6_PARAM1,
-                IDC_M6_PARAM2,
-                IDC_M6_PARAM3,
-                IDC_M6_PARAM4};
+                IDC_EFFECT_PARAMETER0,
+                IDC_EFFECT_PARAMETER1,
+                IDC_EFFECT_PARAMETER2,
+                IDC_EFFECT_PARAMETER3,
+                IDC_EFFECT_PARAMETER4};
             for (std::size_t index = 0; index < edits.size(); ++index) {
                 SetDlgItemTextW(dialog, labels[index], state->parameter_labels[index]);
                 std::array<wchar_t, 32U> value{};
@@ -103,30 +103,30 @@ INT_PTR CALLBACK M6EditorDialogProcedure(
                     value.data(), value.size(), _TRUNCATE, L"%d", state->parameters[index]);
                 SetDlgItemTextW(dialog, edits[index], value.data());
             }
-            FillM6Combo(
-                GetDlgItem(dialog, IDC_M6_CHANNEL),
+            FillEffectCombo(
+                GetDlgItem(dialog, IDC_EFFECT_CHANNEL),
                 state->channel_labels,
                 state->channel_values,
                 state->channel_count,
                 state->channel);
-            FillM6Combo(
-                GetDlgItem(dialog, IDC_M6_MODE),
+            FillEffectCombo(
+                GetDlgItem(dialog, IDC_EFFECT_MODE),
                 state->mode_labels,
                 state->mode_values,
                 state->mode_count,
                 state->mode);
-            SetDlgItemTextW(dialog, IDC_M6_POINTS, state->points.c_str());
-            SetDlgItemTextW(dialog, IDC_M6_OPTION1, state->option1_label);
-            SetDlgItemTextW(dialog, IDC_M6_OPTION2, state->option2_label);
+            SetDlgItemTextW(dialog, IDC_EFFECT_POINTS, state->points.c_str());
+            SetDlgItemTextW(dialog, IDC_EFFECT_OPTION1, state->option1_label);
+            SetDlgItemTextW(dialog, IDC_EFFECT_OPTION2, state->option2_label);
             CheckDlgButton(
-                dialog, IDC_M6_OPTION1, state->option1 ? BST_CHECKED : BST_UNCHECKED);
+                dialog, IDC_EFFECT_OPTION1, state->option1 ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(
-                dialog, IDC_M6_OPTION2, state->option2 ? BST_CHECKED : BST_UNCHECKED);
+                dialog, IDC_EFFECT_OPTION2, state->option2 ? BST_CHECKED : BST_UNCHECKED);
             EnableWindow(
-                GetDlgItem(dialog, IDC_M6_OPTION1),
+                GetDlgItem(dialog, IDC_EFFECT_OPTION1),
                 state->option1_enabled ? TRUE : FALSE);
             EnableWindow(
-                GetDlgItem(dialog, IDC_M6_OPTION2),
+                GetDlgItem(dialog, IDC_EFFECT_OPTION2),
                 state->option2_enabled ? TRUE : FALSE);
             if (state->close_immediately) {
                 PostMessageW(dialog, WM_COMMAND, IDOK, 0);
@@ -139,11 +139,11 @@ INT_PTR CALLBACK M6EditorDialogProcedure(
             }
             if (LOWORD(wparam) == IDOK) {
                 constexpr std::array<int, 5U> edits{
-                    IDC_M6_PARAM0,
-                    IDC_M6_PARAM1,
-                    IDC_M6_PARAM2,
-                    IDC_M6_PARAM3,
-                    IDC_M6_PARAM4};
+                    IDC_EFFECT_PARAMETER0,
+                    IDC_EFFECT_PARAMETER1,
+                    IDC_EFFECT_PARAMETER2,
+                    IDC_EFFECT_PARAMETER3,
+                    IDC_EFFECT_PARAMETER4};
                 for (std::size_t index = 0; index < edits.size(); ++index) {
                     if (!ReadSignedDialogValue(
                             dialog, edits[index], state->parameters[index])) {
@@ -157,14 +157,14 @@ INT_PTR CALLBACK M6EditorDialogProcedure(
                         return TRUE;
                     }
                 }
-                state->channel = SelectedM6Combo(
-                    dialog, IDC_M6_CHANNEL, state->channel);
-                state->mode = SelectedM6Combo(
-                    dialog, IDC_M6_MODE, state->mode);
+                state->channel = SelectedEffectCombo(
+                    dialog, IDC_EFFECT_CHANNEL, state->channel);
+                state->mode = SelectedEffectCombo(
+                    dialog, IDC_EFFECT_MODE, state->mode);
                 std::array<wchar_t, 1024U> points{};
                 GetDlgItemTextW(
                     dialog,
-                    IDC_M6_POINTS,
+                    IDC_EFFECT_POINTS,
                     points.data(),
                     static_cast<int>(points.size()));
                 try {
@@ -173,9 +173,9 @@ INT_PTR CALLBACK M6EditorDialogProcedure(
                     return TRUE;
                 }
                 state->option1 =
-                    IsDlgButtonChecked(dialog, IDC_M6_OPTION1) == BST_CHECKED;
+                    IsDlgButtonChecked(dialog, IDC_EFFECT_OPTION1) == BST_CHECKED;
                 state->option2 =
-                    IsDlgButtonChecked(dialog, IDC_M6_OPTION2) == BST_CHECKED;
+                    IsDlgButtonChecked(dialog, IDC_EFFECT_OPTION2) == BST_CHECKED;
                 EndDialog(dialog, IDOK);
                 return TRUE;
             }
@@ -211,7 +211,7 @@ INT_PTR CALLBACK ProgressDialogProcedure(
                 SetWindowTextW(dialog, state->title);
             }
             SendDlgItemMessageW(
-                dialog, IDC_M6_PROGRESS_BAR, PBM_SETRANGE32, 0, 1000);
+                dialog, IDC_EFFECT_PROGRESS_BAR, PBM_SETRANGE32, 0, 1000);
             SetTimer(dialog, kProgressTimer, 100U, nullptr);
             return TRUE;
         case WM_TIMER:
@@ -224,7 +224,7 @@ INT_PTR CALLBACK ProgressDialogProcedure(
                               1000U,
                               info.completed_work * 1000U / info.total_work);
                     SendDlgItemMessageW(
-                        dialog, IDC_M6_PROGRESS_BAR, PBM_SETPOS, value, 0);
+                        dialog, IDC_EFFECT_PROGRESS_BAR, PBM_SETPOS, value, 0);
                     std::array<wchar_t, 128U> text{};
                     _snwprintf_s(
                         text.data(),
@@ -234,7 +234,7 @@ INT_PTR CALLBACK ProgressDialogProcedure(
                         state->progress_prefix,
                         static_cast<unsigned long long>(info.completed_work),
                         static_cast<unsigned long long>(info.total_work));
-                    SetDlgItemTextW(dialog, IDC_M6_PROGRESS_TEXT, text.data());
+                    SetDlgItemTextW(dialog, IDC_EFFECT_PROGRESS_TEXT, text.data());
                 }
                 return TRUE;
             }
@@ -244,7 +244,7 @@ INT_PTR CALLBACK ProgressDialogProcedure(
                 state->cancel(state->context);
                 EnableWindow(GetDlgItem(dialog, IDCANCEL), FALSE);
                 SetDlgItemTextW(
-                    dialog, IDC_M6_PROGRESS_TEXT, state->cancelling_text);
+                    dialog, IDC_EFFECT_PROGRESS_TEXT, state->cancelling_text);
                 return TRUE;
             }
             break;
@@ -265,19 +265,19 @@ INT_PTR CALLBACK ProgressDialogProcedure(
 
 }  // namespace
 
-INT_PTR ShowM6Editor(
+INT_PTR ShowEffectEditor(
     HINSTANCE instance,
     HWND owner,
     bool close_immediately,
-    M6EditorState& state) noexcept {
+    EffectEditorState& state) noexcept {
     try {
-        M6EditorState candidate = state;
+        EffectEditorState candidate = state;
         candidate.close_immediately = close_immediately;
         const INT_PTR result = DialogBoxParamW(
             instance,
-            MAKEINTRESOURCEW(IDD_M6_EDITOR),
+            MAKEINTRESOURCEW(IDD_EFFECT_EDITOR),
             owner,
-            M6EditorDialogProcedure,
+            EffectEditorDialogProcedure,
             reinterpret_cast<LPARAM>(&candidate));
         if (result == IDOK) {
             state = std::move(candidate);
@@ -292,7 +292,7 @@ HWND CreateProgressDialog(
     HINSTANCE instance, HWND owner, ProgressDialogState& state) noexcept {
     return CreateDialogParamW(
         instance,
-        MAKEINTRESOURCEW(IDD_M6_PROGRESS),
+        MAKEINTRESOURCEW(IDD_EFFECT_PROGRESS),
         owner,
         ProgressDialogProcedure,
         reinterpret_cast<LPARAM>(&state));

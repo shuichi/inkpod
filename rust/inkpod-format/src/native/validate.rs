@@ -2,7 +2,7 @@ use super::model::*;
 use crate::adjustment::validate_adjustment_metadata;
 use crate::light_table::validate_light_table_metadata;
 use crate::vector::validate_vector_metadata;
-use inkpod_image::{MAX_PALETTE_COLORS, PixelFormat, PixelValue, TileCoord};
+use inkpod_image::{MAX_PALETTE_COLORS, PixelFormat, TileCoord};
 use std::collections::BTreeSet;
 pub(super) fn validate_document_metadata(
     metadata: &FileDocumentMetadata,
@@ -508,24 +508,6 @@ pub(super) fn validate_document(document: &CellFile) -> Result<(), FormatError> 
         ));
     }
     Ok(())
-}
-
-pub(super) fn legacy_main_line_color(document: &CellFile) -> Result<PixelValue, FormatError> {
-    legacy_main_line_color_for_planes(&document.planes)
-}
-
-pub(super) fn legacy_main_line_color_for_planes(
-    planes: &[FilePlane],
-) -> Result<PixelValue, FormatError> {
-    let color = planes
-        .iter()
-        .find(|plane| plane.kind == PlaneKind::Color)
-        .ok_or(FormatError::Invalid("color plane is missing"))?;
-    Ok(if color.pixel_format == PixelFormat::StraightRgba16 {
-        PixelValue::Rgba16([0, 0, 0, u16::MAX])
-    } else {
-        PixelValue::Rgba([0, 0, 0, u8::MAX])
-    })
 }
 
 pub(super) fn validate_tile_shape(

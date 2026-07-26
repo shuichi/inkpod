@@ -33,6 +33,83 @@ fn collect_crate_rust_sources(crate_root: &Path) -> Vec<std::path::PathBuf> {
     sources
 }
 
+fn collect_semantically_named_sources(directory: &Path, output: &mut Vec<std::path::PathBuf>) {
+    let mut entries = fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", directory.display()))
+        .map(|entry| entry.expect("failed to read repository entry").path())
+        .collect::<Vec<_>>();
+    entries.sort();
+
+    for path in entries {
+        if path.is_dir() {
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
+            if name == ".git" || name == "target" || name == "out" || name.starts_with("build") {
+                continue;
+            }
+            collect_semantically_named_sources(&path, output);
+            continue;
+        }
+
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        if name == "CMakeLists.txt"
+            || matches!(
+                extension,
+                "c" | "cmake"
+                    | "cpp"
+                    | "h"
+                    | "in"
+                    | "inc"
+                    | "json"
+                    | "manifest"
+                    | "ps1"
+                    | "rc"
+                    | "rs"
+                    | "toml"
+                    | "yaml"
+                    | "yml"
+            )
+        {
+            output.push(path);
+        }
+    }
+}
+
+fn temporary_phase_label(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    for offset in 0..bytes.len().saturating_sub(1) {
+        let prefix = bytes[offset];
+        let digit = bytes[offset + 1];
+        let upper_bound = if prefix == b'M' { b'8' } else { b'6' };
+        if matches!(prefix, b'M' | b'R') && (b'0'..=upper_bound).contains(&digit) {
+            let preceded_by_uppercase = offset > 0 && bytes[offset - 1].is_ascii_uppercase();
+            if !preceded_by_uppercase {
+                return Some(text[offset..offset + 2].to_owned());
+            }
+        }
+
+        if prefix == b'm' && (b'0'..=b'8').contains(&digit) {
+            let preceded_by_alphanumeric = offset > 0 && bytes[offset - 1].is_ascii_alphanumeric();
+            let followed_by_separator = bytes
+                .get(offset + 2)
+                .is_some_and(|value| matches!(value, b'_' | b'-'));
+            if !preceded_by_alphanumeric && followed_by_separator {
+                return Some(text[offset..offset + 2].to_owned());
+            }
+        }
+    }
+    None
+}
+
 #[test]
 fn arch_002_rust_domain_crates_do_not_reference_windows_apis() {
     let forbidden = [
@@ -158,71 +235,33 @@ fn rust_crate_roots_remain_small_indices_and_tests_stay_out_of_src() {
 }
 
 #[test]
-fn public_rust_and_c_ffi_sources_do_not_expose_milestone_names() {
-    let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+fn production_and_test_identifiers_are_semantic() {
+    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("core crate must be below the Rust workspace directory");
+        .and_then(Path::parent)
+        .expect("core crate must be below the repository root");
+    let mut sources = Vec::new();
+    collect_semantically_named_sources(repository_root, &mut sources);
 
-    for crate_name in ["inkpod-core", "inkpod-image", "inkpod-format", "inkpod-ffi"] {
-        let mut sources = Vec::new();
-        collect_rust_sources(&rust_root.join(crate_name).join("src"), &mut sources);
-        for source in sources {
-            let file_name = source
-                .file_name()
-                .and_then(|name| name.to_str())
-                .expect("Rust source file name must be UTF-8");
-            let contents = fs::read_to_string(&source)
-                .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
-            for milestone in 0..=9 {
-                for forbidden_file_name in [
-                    format!("m{milestone}.rs"),
-                    format!("native_m{milestone}.rs"),
-                ] {
-                    assert_ne!(
-                        file_name,
-                        forbidden_file_name,
-                        "{} exposes a milestone as a production module name",
-                        source.display()
-                    );
-                }
-                for forbidden_identifier in [
-                    format!("pub struct FileM{milestone}"),
-                    format!("pub enum FileM{milestone}"),
-                    format!("pub type FileM{milestone}"),
-                    format!("pub struct InkpodM{milestone}"),
-                    format!("pub type InkpodM{milestone}"),
-                    format!("pub const INKPOD_M{milestone}"),
-                    format!("fn inkpod_m{milestone}"),
-                    format!("mod m{milestone};"),
-                ] {
-                    assert!(
-                        !contents.contains(&forbidden_identifier),
-                        "{} exposes milestone identifier {forbidden_identifier}",
-                        source.display()
-                    );
-                }
-            }
-        }
-    }
+    for source in sources {
+        let file_name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("source file name must be UTF-8");
+        assert!(
+            temporary_phase_label(file_name).is_none(),
+            "{} uses a temporary phase label as a file name",
+            source.display()
+        );
 
-    let repository_root = rust_root
-        .parent()
-        .expect("Rust workspace must be below the repository root");
-    let header_path = repository_root.join("include/inkpod/core_ffi.h");
-    let header = fs::read_to_string(&header_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", header_path.display()));
-    for milestone in 0..=9 {
-        for forbidden_identifier in [
-            format!("InkpodM{milestone}"),
-            format!("INKPOD_M{milestone}"),
-            format!("inkpod_m{milestone}"),
-        ] {
-            assert!(
-                !header.contains(&forbidden_identifier),
-                "{} exposes milestone identifier {forbidden_identifier}",
-                header_path.display()
-            );
-        }
+        let contents = fs::read_to_string(&source)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
+        assert!(
+            temporary_phase_label(&contents).is_none(),
+            "{} contains temporary phase label {}",
+            source.display(),
+            temporary_phase_label(&contents).unwrap_or_default()
+        );
     }
 }
 

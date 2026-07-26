@@ -15,7 +15,7 @@ impl TemporaryDirectory {
             "inkpod-test-core-open-{}-{nonce}",
             std::process::id()
         ));
-        fs::create_dir(&path).expect("M8 Core temporary directory must be created");
+        fs::create_dir(&path).expect("resilience-test temporary directory must be created");
         Self(path)
     }
 }
