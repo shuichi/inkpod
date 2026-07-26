@@ -10,6 +10,7 @@
 
 #include "core_engine.h"
 #include "inkpod/core_ffi.h"
+#include "ui/command_state.h"
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
@@ -212,6 +213,7 @@ struct AppContext {
     AnimationUiState animation;
     EffectsUiState effects;
     BatchUiState batch;
+    windows::ui::CommandStateSet command_states;
     std::unique_ptr<CoreEngine> engine;
 };
 

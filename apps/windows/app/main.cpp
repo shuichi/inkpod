@@ -33,11 +33,13 @@
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/command_state.h"
 #include "ui/panes/document_panes.h"
 #include "ui/panes/color_panes.h"
 #include "ui/tools/fill_controller.h"
 #include "ui/tools/floating_paste_controller.h"
 #include "ui/tools/selection_controller.h"
+#include "ui/tools/tool_state.h"
 #include "ui/tools/view_controller.h"
 #include "ui/tools/vector_controller.h"
 #include "ui/effects_controller.h"
@@ -87,26 +89,34 @@ using inkpod::app::ReadBoundedFile;
 using inkpod::app::RecoveryIsNewer;
 using inkpod::app::WidePathToUtf8;
 using inkpod::app::WriteFileAtomically;
-
-constexpr std::uint32_t kInteractionFill = 1001U;
-constexpr std::uint32_t kInteractionEyedropper = 1002U;
-constexpr std::uint32_t kInteractionBoxZoom = 1003U;
-constexpr std::uint32_t kInteractionGuideMove = 1004U;
-constexpr std::uint32_t kInteractionSelection = 1005U;
-constexpr std::uint32_t kInteractionFloatingTransform = 1006U;
-constexpr std::uint32_t kInteractionLightTableMove = 1007U;
-constexpr std::uint32_t kInteractionM6Gradient = 1101U;
-constexpr std::uint32_t kInteractionM6Airbrush = 1102U;
-constexpr std::uint32_t kInteractionM6Blur = 1103U;
-constexpr std::uint32_t kInteractionM6Stamp = 1104U;
-constexpr std::uint32_t kInteractionM6Dust = 1105U;
-constexpr std::uint32_t kInteractionM6AlphaGradient = 1106U;
-constexpr std::uint32_t kInteractionVectorLine = 1201U;
-constexpr std::uint32_t kInteractionVectorCurve = 1202U;
-constexpr std::uint32_t kInteractionVectorRectangle = 1203U;
-constexpr std::uint32_t kInteractionVectorEllipse = 1204U;
-constexpr std::uint32_t kInteractionVectorPolyline = 1205U;
-constexpr std::uint32_t kInteractionVectorEraser = 1206U;
+using inkpod::windows::ui::ApplyCommandStates;
+using inkpod::windows::ui::CommandStateInputs;
+using inkpod::windows::ui::ComputeCommandStates;
+using inkpod::windows::ui::IsCommandEnabled;
+using inkpod::windows::ui::tools::CancelVectorGeometryPreview;
+using inkpod::windows::ui::tools::HandleActivePlaneTransition;
+using inkpod::windows::ui::tools::IsVectorCanvasTool;
+using inkpod::windows::ui::tools::IsVectorStrokePlane;
+using inkpod::windows::ui::tools::TransitionActiveTool;
+using inkpod::windows::ui::tools::kInteractionBoxZoom;
+using inkpod::windows::ui::tools::kInteractionEyedropper;
+using inkpod::windows::ui::tools::kInteractionFill;
+using inkpod::windows::ui::tools::kInteractionFloatingTransform;
+using inkpod::windows::ui::tools::kInteractionGuideMove;
+using inkpod::windows::ui::tools::kInteractionLightTableMove;
+using inkpod::windows::ui::tools::kInteractionM6Airbrush;
+using inkpod::windows::ui::tools::kInteractionM6AlphaGradient;
+using inkpod::windows::ui::tools::kInteractionM6Blur;
+using inkpod::windows::ui::tools::kInteractionM6Dust;
+using inkpod::windows::ui::tools::kInteractionM6Gradient;
+using inkpod::windows::ui::tools::kInteractionM6Stamp;
+using inkpod::windows::ui::tools::kInteractionSelection;
+using inkpod::windows::ui::tools::kInteractionVectorCurve;
+using inkpod::windows::ui::tools::kInteractionVectorEllipse;
+using inkpod::windows::ui::tools::kInteractionVectorEraser;
+using inkpod::windows::ui::tools::kInteractionVectorLine;
+using inkpod::windows::ui::tools::kInteractionVectorPolyline;
+using inkpod::windows::ui::tools::kInteractionVectorRectangle;
 constexpr UINT_PTR kAutosaveTimer = 1U;
 constexpr UINT kAutosaveIntervalMilliseconds = 60U * 1000U;
 constexpr UINT kM6TaskCompleted = WM_APP + 0x170U;
@@ -136,14 +146,20 @@ using inkpod::windows::ui::tools::VectorController;
 using inkpod::windows::ui::BatchController;
 using inkpod::windows::ui::EffectsController;
 bool QueryTreeNode(AppContext& state, bool plane, TreePaneNode& output) noexcept;
-bool IsVectorCanvasTool(std::uint32_t tool) noexcept;
-bool IsVectorStrokePlane(std::uint32_t kind) noexcept;
-void ClearVectorGeometryPreview(ToolUiState& tools, HWND canvas) noexcept;
+
+bool DispatchEnabledCommand(
+    AppContext& state, HWND window, UINT command) noexcept {
+    if (!IsCommandEnabled(state.command_states, command)) {
+        return false;
+    }
+    SendMessageW(window, WM_COMMAND, command, 0);
+    return true;
+}
 
 void DispatchBatchPaletteCommand(void* context, UINT command) noexcept {
     auto* state = static_cast<AppContext*>(context);
     if (state != nullptr && state->windows.window != nullptr) {
-        SendMessageW(state->windows.window, WM_COMMAND, command, 0);
+        DispatchEnabledCommand(*state, state->windows.window, command);
     }
 }
 
@@ -153,6 +169,15 @@ void SelectBatchPaletteOperation(
     if (state != nullptr && !state->batch.loaded_graph) {
         state->batch.selected_operation = selected_index;
     }
+}
+
+void HandleActiveTreePlaneTransition(AppContext& state) noexcept {
+    TreePaneNode active_plane{};
+    HandleActivePlaneTransition(
+        state.tools,
+        state.windows.canvas,
+        QueryTreeNode(state, true, active_plane)
+            && IsVectorStrokePlane(active_plane.kind));
 }
 
 void ResetDocumentShellTransientState(DocumentShellState& document) noexcept {
@@ -243,6 +268,7 @@ void ResetUiForDocumentReplacement(AppContext& state) noexcept {
         KillTimer(state.windows.window, kM6ContinuousSprayTimer);
         KillTimer(state.windows.window, kMotionPlaybackTimer);
     }
+    HandleActiveTreePlaneTransition(state);
 }
 
 void UpdateLocatorDisplay(AppContext& state, int device_x, int device_y) noexcept {
@@ -406,16 +432,20 @@ bool RefreshTreePane(AppContext& state) noexcept {
             selected_plane_index = static_cast<std::uint32_t>(index);
         }
     }
+    bool vector_stroke_plane{};
     if (!planes.empty()) {
         selected_plane_index = std::min<std::uint32_t>(
             selected_plane_index, static_cast<std::uint32_t>(planes.size() - 1U));
         SendMessageW(state.windows.plane_list, LB_SETCURSEL, selected_plane_index, 0);
         state.panes.active_tree_plane_index = selected_plane_index;
         state.panes.active_tree_plane_id = planes[selected_plane_index].id;
+        vector_stroke_plane = IsVectorStrokePlane(planes[selected_plane_index].kind);
     } else {
         state.panes.active_tree_plane_index = 0U;
         state.panes.active_tree_plane_id = 0U;
     }
+    HandleActivePlaneTransition(
+        state.tools, state.windows.canvas, vector_stroke_plane);
     return true;
 }
 
@@ -903,7 +933,8 @@ InkpodStatus BeginFloatingPaste(AppContext& state, std::uint32_t mode) noexcept 
         static_cast<std::int32_t>(view.height)};
     state.tools.floating_transform = InkpodFloatingTransform{
         sizeof(InkpodFloatingTransform), 0U, 0.0, 0.0, 1.0, 1.0, 0.0};
-    state.tools.active_tool = kInteractionFloatingTransform;
+    TransitionActiveTool(
+        state.tools, state.windows.canvas, kInteractionFloatingTransform);
     UpdateFloatingPreview(state);
     return INKPOD_STATUS_OK;
 }
@@ -1095,7 +1126,8 @@ InkpodStatus EndFloatingPaste(AppContext& state, bool commit) noexcept {
         state.tools.floating_bounds = {};
         state.tools.floating_gesture_samples.clear();
         UpdateFloatingPreview(state);
-        state.tools.active_tool = INKPOD_TOOL_PENCIL;
+        TransitionActiveTool(
+            state.tools, state.windows.canvas, INKPOD_TOOL_PENCIL);
     }
     return status;
 }
@@ -1984,10 +2016,11 @@ bool ConfigureM6Effect(AppContext& state, UINT command) noexcept {
         options.parameters[0] = editor.option1 ? 1 : 0;
     }
     state.effects.options = std::move(options);
-    state.tools.active_tool = interaction;
+    TransitionActiveTool(state.tools, state.windows.canvas, interaction);
     state.effects.samples.clear();
     if (command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
-        state.tools.active_tool = INKPOD_TOOL_BRUSH;
+        TransitionActiveTool(
+            state.tools, state.windows.canvas, INKPOD_TOOL_BRUSH);
         return QueueBoundaryAirbrush(state, state.effects.options) == INKPOD_STATUS_OK;
     }
     return true;
@@ -2249,541 +2282,109 @@ InkpodStatus FinishM6CanvasGesture(AppContext& state) noexcept {
     }
 }
 
-void UpdateMenuState(AppContext& state) noexcept {
-    HMENU menu = GetMenu(state.windows.window);
-    if (menu == nullptr) {
-        return;
-    }
-    InkpodDocumentInfo info{};
-    const bool has_document = QueryDocument(state, info);
-    TreePaneNode active_plane{};
-    const bool vector_stroke_plane = has_document
-        && QueryTreeNode(state, true, active_plane)
-        && IsVectorStrokePlane(active_plane.kind);
-    if (!vector_stroke_plane && IsVectorCanvasTool(state.tools.active_tool)) {
-        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
-        state.tools.active_tool = INKPOD_TOOL_PENCIL;
-    }
-    EnableMenuItem(
-        menu,
-        IDM_FILE_SAVE,
-        MF_BYCOMMAND | (has_document ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(
-        menu,
-        IDM_FILE_SAVE_AS,
-        MF_BYCOMMAND | (has_document ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(
-        menu,
-        IDM_FILE_REVERT,
-        MF_BYCOMMAND
-            | (has_document && !state.document.current_path.empty() ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(
-        menu,
-        IDM_FILE_REVERT_PARTIAL,
-        MF_BYCOMMAND
-            | (has_document && !state.document.current_path.empty() ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(
-        menu,
-        IDM_FILE_AUTOSAVE_NOW,
-        MF_BYCOMMAND | (has_document ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(
-        menu,
-        IDM_EDIT_UNDO,
-        MF_BYCOMMAND
-            | (has_document && (info.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) != 0U
-                   ? MF_ENABLED
-                   : MF_GRAYED));
-    EnableMenuItem(
-        menu,
-        IDM_EDIT_REDO,
-        MF_BYCOMMAND
-            | (has_document && (info.flags & INKPOD_DOCUMENT_FLAG_CAN_REDO) != 0U
-                   ? MF_ENABLED
-                   : MF_GRAYED));
-    InkpodHistoryInfo history_info{};
-    std::wstring undo_label;
-    std::wstring redo_label;
-    const bool has_history = has_document
-        && QueryHistoryMenuLabels(
-            state, history_info, undo_label, redo_label);
-    EnableMenuItem(
-        menu,
-        IDM_EDIT_HISTORY_BACK,
-        MF_BYCOMMAND
-            | (has_history && history_info.cursor > 0U ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(
-        menu,
-        IDM_EDIT_HISTORY_FORWARD,
-        MF_BYCOMMAND
-            | (has_history && history_info.cursor < history_info.item_count ? MF_ENABLED
-                                                                            : MF_GRAYED));
-    if (has_history) {
-        ModifyMenuW(
-            menu,
-            IDM_EDIT_UNDO,
-            MF_BYCOMMAND | MF_STRING,
-            IDM_EDIT_UNDO,
-            undo_label.c_str());
-        ModifyMenuW(
-            menu,
-            IDM_EDIT_REDO,
-            MF_BYCOMMAND | MF_STRING,
-            IDM_EDIT_REDO,
-            redo_label.c_str());
-    }
-    for (const UINT command : {
-             IDM_EDIT_COPY,
-             IDM_EDIT_MIRROR_HORIZONTAL,
-             IDM_LAYER_DUPLICATE,
-             IDM_LAYER_MOVE_TOP,
-             IDM_SELECTION_ALL,
-             IDM_SELECTION_CLEAR,
-             IDM_SELECTION_RECTANGLE,
-             IDM_SELECTION_ELLIPSE,
-             IDM_SELECTION_LASSO,
-             IDM_SELECTION_POLYLINE,
-             IDM_SELECTION_TRACE,
-             IDM_SELECTION_WAND,
-             IDM_SELECTION_MODE_NEW,
-             IDM_SELECTION_MODE_ADD,
-             IDM_SELECTION_MODE_SUBTRACT,
-             IDM_SELECTION_MODE_INTERSECT,
-             IDM_SELECTION_COLOR,
-             IDM_SELECTION_COLOR_DIFFERENT,
-             IDM_SELECTION_COLOR_ADD,
-             IDM_SELECTION_TO_LAYER,
-             IDM_SELECTION_INVERT,
-             IDM_SELECTION_EXPAND,
-             IDM_SELECTION_SHRINK,
-             IDM_VIEW_FLIP_HORIZONTAL,
-             IDM_VIEW_FLIP_VERTICAL,
-             IDM_VIEW_ZOOM_PERCENT,
-             IDM_VIEW_BOX_ZOOM,
-             IDM_VIEW_RULER,
-             IDM_VIEW_GUIDES,
-             IDM_VIEW_GRID,
-             IDM_VIEW_SNAP_GUIDES,
-             IDM_VIEW_SNAP_GRID,
-             IDM_VIEW_TRANSPARENT,
-             IDM_VIEW_GUIDE_VERTICAL,
-             IDM_VIEW_GUIDE_HORIZONTAL,
-             IDM_VIEW_GUIDE_MOVE,
-             IDM_VIEW_GUIDE_DELETE_ALL,
-             IDM_VIEW_GRID_SETTINGS,
-             IDM_VIEW_NEW}) {
-        EnableMenuItem(
-            menu, command, MF_BYCOMMAND | (has_document ? MF_ENABLED : MF_GRAYED));
-    }
-    for (const UINT command : {
-             IDM_FILTER_LAST,
-             IDM_FILTER_INVERT,
-             IDM_FILTER_BLUR_WEAK,
-             IDM_FILTER_SHARPEN_WEAK,
-             IDM_FILTER_SHARPEN_STRONG,
-             IDM_FILTER_BLUR_STRONG,
-             IDM_FILTER_GAUSSIAN,
-             IDM_FILTER_AUTO_CONTRAST,
-             IDM_FILTER_BRIGHTNESS,
-             IDM_FILTER_TONE_CURVE,
-             IDM_FILTER_LEVELS,
-             IDM_FILTER_HSV,
-             IDM_FILTER_COLOR_BALANCE,
-             IDM_FILTER_UNSHARP,
-             IDM_EFFECT_GRADIENT,
-             IDM_EFFECT_AIRBRUSH,
-             IDM_EFFECT_BOUNDARY_AIRBRUSH,
-             IDM_EFFECT_BLUR,
-             IDM_EFFECT_STAMP,
-             IDM_EFFECT_DUST,
-             IDM_EFFECT_ALPHA_GRADIENT,
-             IDM_EFFECT_ALPHA_VIEW}) {
-        EnableMenuItem(
-            menu,
-            command,
-            MF_BYCOMMAND
-                | (has_document && state.tools.active_plane == INKPOD_PLANE_COLOR ? MF_ENABLED : MF_GRAYED));
-    }
-    EnableMenuItem(
-        menu,
-        IDM_ADJUSTMENT_CREATE,
-        MF_BYCOMMAND
-            | (has_document && state.tools.active_plane == INKPOD_PLANE_COLOR
-                   ? MF_ENABLED
-                   : MF_GRAYED));
-    for (const UINT command : {
-             IDM_ADJUSTMENT_EDIT,
-             IDM_ADJUSTMENT_TOGGLE,
-             IDM_ADJUSTMENT_MOVE_TOP}) {
-        EnableMenuItem(
-            menu,
-            command,
-            MF_BYCOMMAND | (has_document && state.effects.adjustment_id != 0U ? MF_ENABLED
-                                                                          : MF_GRAYED));
-    }
-    for (const UINT command : {IDM_ADJUSTMENT_PREVIOUS, IDM_ADJUSTMENT_NEXT}) {
-        EnableMenuItem(
-            menu,
-            command,
-            MF_BYCOMMAND
-                | (has_document && state.effects.adjustments.size() > 1U ? MF_ENABLED : MF_GRAYED));
-    }
-    CheckMenuItem(
-        menu,
-        IDM_ADJUSTMENT_TOGGLE,
-        MF_BYCOMMAND | (state.effects.adjustment_visible ? MF_CHECKED : MF_UNCHECKED));
-    CheckMenuItem(
-        menu,
-        IDM_EFFECT_ALPHA_VIEW,
-        MF_BYCOMMAND | (state.effects.alpha_view ? MF_CHECKED : MF_UNCHECKED));
-    const bool paste_available = state.document.clipboard != nullptr
+CommandStateInputs BuildCommandStateInputs(
+    AppContext& state,
+    const InkpodDocumentInfo& info,
+    bool has_document,
+    const InkpodHistoryInfo& history,
+    bool has_history) noexcept {
+    CommandStateInputs inputs{};
+    inputs.document.has_document = has_document;
+    inputs.document.has_saved_path = !state.document.current_path.empty();
+    inputs.document.dirty =
+        has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U;
+
+    inputs.edit.can_undo =
+        has_document && (info.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) != 0U;
+    inputs.edit.can_redo =
+        has_document && (info.flags & INKPOD_DOCUMENT_FLAG_CAN_REDO) != 0U;
+    inputs.edit.can_history_back = has_history && history.cursor > 0U;
+    inputs.edit.can_history_forward =
+        has_history && history.cursor < history.item_count;
+    inputs.edit.clipboard_available = state.document.clipboard != nullptr
         || (InkpodClipboardFormat() != 0U
             && IsClipboardFormatAvailable(InkpodClipboardFormat()) != FALSE);
-    for (const UINT command : {
-             IDM_EDIT_PASTE, IDM_EDIT_PASTE_SELECTED, IDM_EDIT_PASTE_CONVERTED}) {
-        EnableMenuItem(
-            menu,
-            command,
-            MF_BYCOMMAND | (has_document && paste_available && !state.tools.floating_active
-                                  ? MF_ENABLED
-                                  : MF_GRAYED));
-    }
-    for (const UINT command : {
-             IDM_EDIT_FLOATING_TRANSFORM,
-             IDM_EDIT_FLOATING_COMMIT,
-             IDM_EDIT_FLOATING_CANCEL}) {
-        EnableMenuItem(
-            menu,
-            command,
-            MF_BYCOMMAND | (state.tools.floating_active ? MF_ENABLED : MF_GRAYED));
-    }
-    EnableMenuItem(
-        menu,
-        IDM_LAYER_DELETE,
-        MF_BYCOMMAND
-            | (has_document && state.document.smoke_layer_id != 0U ? MF_ENABLED : MF_GRAYED));
-    for (const UINT command : {
-             IDM_SELECTION_FROM_LAYER,
-             IDM_SELECTION_LAYER_ADD,
-             IDM_SELECTION_LAYER_SUBTRACT}) {
-        EnableMenuItem(
-            menu,
-            command,
-            MF_BYCOMMAND
-                | (has_document && state.document.selection_layer_id != 0U ? MF_ENABLED
-                                                                   : MF_GRAYED));
-    }
-    CheckMenuItem(
-        menu,
-        IDM_VIEW_FLIP_HORIZONTAL,
-        MF_BYCOMMAND | (state.view.flip_horizontal ? MF_CHECKED : MF_UNCHECKED));
-    CheckMenuItem(
-        menu,
-        IDM_VIEW_FLIP_VERTICAL,
-        MF_BYCOMMAND | (state.view.flip_vertical ? MF_CHECKED : MF_UNCHECKED));
-    CheckMenuItem(
-        menu,
-        IDM_VIEW_GRID,
-        MF_BYCOMMAND | (state.view.grid_visible ? MF_CHECKED : MF_UNCHECKED));
-    CheckMenuItem(
-        menu,
-        IDM_VIEW_RULER,
-        MF_BYCOMMAND | (state.view.ruler_visible ? MF_CHECKED : MF_UNCHECKED));
-    CheckMenuItem(
-        menu,
-        IDM_VIEW_GUIDES,
-        MF_BYCOMMAND | (state.view.guides_visible ? MF_CHECKED : MF_UNCHECKED));
-    CheckMenuItem(
-        menu,
-        IDM_VIEW_SNAP_GUIDES,
-        MF_BYCOMMAND | (state.view.snap_guides ? MF_CHECKED : MF_UNCHECKED));
-    CheckMenuItem(
-        menu,
-        IDM_VIEW_SNAP_GRID,
-        MF_BYCOMMAND | (state.view.snap_grid ? MF_CHECKED : MF_UNCHECKED));
-    CheckMenuItem(
-        menu,
-        IDM_VIEW_TRANSPARENT,
-        MF_BYCOMMAND | (state.view.transparent_visible ? MF_CHECKED : MF_UNCHECKED));
-    CheckMenuItem(
-        menu,
-        IDM_VIEW_BOX_ZOOM,
-        MF_BYCOMMAND | (state.tools.active_tool == kInteractionBoxZoom ? MF_CHECKED : MF_UNCHECKED));
-    for (const UINT command : {
-             IDM_SELECTION_RECTANGLE,
-             IDM_SELECTION_ELLIPSE,
-             IDM_SELECTION_LASSO,
-             IDM_SELECTION_POLYLINE,
-             IDM_SELECTION_TRACE,
-             IDM_SELECTION_WAND,
-             IDM_SELECTION_MODE_NEW,
-             IDM_SELECTION_MODE_ADD,
-             IDM_SELECTION_MODE_SUBTRACT,
-             IDM_SELECTION_MODE_INTERSECT}) {
-        CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
-    }
-    const UINT selection_shape_command = state.tools.selection_shape == INKPOD_SELECTION_ELLIPSE
-        ? IDM_SELECTION_ELLIPSE
-        : (state.tools.selection_shape == INKPOD_SELECTION_LASSO
-                  ? IDM_SELECTION_LASSO
-                  : (state.tools.selection_shape == INKPOD_SELECTION_POLYLINE
-                            ? IDM_SELECTION_POLYLINE
-                            : (state.tools.selection_shape == INKPOD_SELECTION_TRACE
-                                      ? IDM_SELECTION_TRACE
-                                      : (state.tools.selection_shape == INKPOD_SELECTION_WAND
-                                                ? IDM_SELECTION_WAND
-                                                : IDM_SELECTION_RECTANGLE))));
-    const UINT selection_mode_command = state.tools.selection_operation == INKPOD_SELECTION_ADD
-        ? IDM_SELECTION_MODE_ADD
-        : (state.tools.selection_operation == INKPOD_SELECTION_SUBTRACT
-                  ? IDM_SELECTION_MODE_SUBTRACT
-                  : (state.tools.selection_operation == INKPOD_SELECTION_INTERSECT
-                            ? IDM_SELECTION_MODE_INTERSECT
-                            : IDM_SELECTION_MODE_NEW));
-    CheckMenuItem(
-        menu, selection_shape_command, MF_BYCOMMAND | MF_CHECKED);
-    CheckMenuItem(
-        menu, selection_mode_command, MF_BYCOMMAND | MF_CHECKED);
-    for (const UINT command : {
-             IDM_TOOL_PENCIL, IDM_TOOL_BRUSH, IDM_TOOL_ERASER, IDM_TOOL_FILL,
-             IDM_TOOL_CLOSED_FILL, IDM_TOOL_FILL_EXTENSION, IDM_TOOL_EYEDROPPER,
-             IDM_PLANE_MAIN_LINE, IDM_PLANE_COLOR}) {
-        CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
-    }
-    const UINT tool_command = state.tools.active_tool == INKPOD_TOOL_PENCIL
-        ? IDM_TOOL_PENCIL
-        : (state.tools.active_tool == INKPOD_TOOL_BRUSH
-                  ? IDM_TOOL_BRUSH
-                  : (state.tools.active_tool == INKPOD_TOOL_ERASER
-                            ? IDM_TOOL_ERASER
-                            : (state.tools.active_tool == kInteractionFill
-                                      ? (state.tools.fill_options.operation == INKPOD_FILL_CLOSED_REGION
-                                                ? IDM_TOOL_CLOSED_FILL
-                                                : (state.tools.fill_options.operation
-                                                            == INKPOD_FILL_EXTENSION
-                                                      ? IDM_TOOL_FILL_EXTENSION
-                                                      : IDM_TOOL_FILL))
-                                      : IDM_TOOL_EYEDROPPER)));
-    if (state.tools.active_tool != kInteractionBoxZoom && state.tools.active_tool != kInteractionGuideMove
-        && state.tools.active_tool != kInteractionSelection && state.tools.active_tool != kInteractionFloatingTransform
-        && state.tools.active_tool != kInteractionLightTableMove
-        && !IsVectorCanvasTool(state.tools.active_tool)
-        && !(state.tools.active_tool >= kInteractionM6Gradient
-            && state.tools.active_tool <= kInteractionM6AlphaGradient)) {
-        CheckMenuItem(menu, tool_command, MF_BYCOMMAND | MF_CHECKED);
-    }
-    for (const UINT command : {
-             IDM_VECTOR_LINE, IDM_VECTOR_CURVE, IDM_VECTOR_RECTANGLE,
-             IDM_VECTOR_ELLIPSE, IDM_VECTOR_POLYLINE, IDM_VECTOR_ERASER}) {
-        EnableMenuItem(
-            menu,
-            command,
-            MF_BYCOMMAND | (vector_stroke_plane ? MF_ENABLED : MF_GRAYED));
-        CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
-    }
-    const UINT vector_tool_command = state.tools.active_tool == kInteractionVectorLine
-        ? IDM_VECTOR_LINE
-        : (state.tools.active_tool == kInteractionVectorCurve
-                  ? IDM_VECTOR_CURVE
-                  : (state.tools.active_tool == kInteractionVectorRectangle
-                            ? IDM_VECTOR_RECTANGLE
-                            : (state.tools.active_tool == kInteractionVectorEllipse
-                                      ? IDM_VECTOR_ELLIPSE
-                                      : (state.tools.active_tool == kInteractionVectorPolyline
-                                                ? IDM_VECTOR_POLYLINE
-                                                : IDM_VECTOR_ERASER))));
-    if (IsVectorCanvasTool(state.tools.active_tool)) {
-        CheckMenuItem(menu, vector_tool_command, MF_BYCOMMAND | MF_CHECKED);
-    }
-    for (const UINT command : {
-             IDM_VECTOR_ERASE_PARTIAL,
-             IDM_VECTOR_ERASE_INTERSECTION,
-             IDM_VECTOR_ERASE_WHOLE}) {
-        CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
-    }
-    CheckMenuItem(
-        menu,
-        state.tools.vector_erase_mode == INKPOD_VECTOR_ERASE_TO_INTERSECTION
-            ? IDM_VECTOR_ERASE_INTERSECTION
-            : (state.tools.vector_erase_mode == INKPOD_VECTOR_ERASE_WHOLE_PATH
-                      ? IDM_VECTOR_ERASE_WHOLE
-                      : IDM_VECTOR_ERASE_PARTIAL),
-        MF_BYCOMMAND | MF_CHECKED);
-    CheckMenuItem(
-        menu,
-        state.tools.active_plane == INKPOD_PLANE_MAIN_LINE ? IDM_PLANE_MAIN_LINE : IDM_PLANE_COLOR,
-        MF_BYCOMMAND | MF_CHECKED);
-    for (const UINT command : {
-             IDM_COLOR_CHECK_OFF, IDM_COLOR_CHECK_LEGACY, IDM_COLOR_CHECK_NATIVE}) {
-        CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
-    }
-    const UINT check_command = state.view.color_check_mode == INKPOD_COLOR_CHECK_LEGACY_WHITE
-        ? IDM_COLOR_CHECK_LEGACY
-        : (state.view.color_check_mode == INKPOD_COLOR_CHECK_NATIVE_ALPHA
-                  ? IDM_COLOR_CHECK_NATIVE
-                  : IDM_COLOR_CHECK_OFF);
-    CheckMenuItem(menu, check_command, MF_BYCOMMAND | MF_CHECKED);
-    for (const UINT command : {
-             IDM_COLOR_SOURCE_TOPMOST,
-             IDM_COLOR_SOURCE_SELECTED,
-             IDM_COLOR_SOURCE_COMPOSITE,
-             IDM_COLOR_SOURCE_LIGHT_TABLE}) {
-        CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
-    }
-    const UINT source_command = state.tools.eyedropper_source
-            == INKPOD_EYEDROPPER_TOPMOST_NONTRANSPARENT
-        ? IDM_COLOR_SOURCE_TOPMOST
-        : (state.tools.eyedropper_source == INKPOD_EYEDROPPER_SELECTED_PLANE
-                  ? IDM_COLOR_SOURCE_SELECTED
-                  : (state.tools.eyedropper_source == INKPOD_EYEDROPPER_LIGHT_TABLE_TOPMOST
-                            ? IDM_COLOR_SOURCE_LIGHT_TABLE
-                            : IDM_COLOR_SOURCE_COMPOSITE));
-    CheckMenuItem(menu, source_command, MF_BYCOMMAND | MF_CHECKED);
-    CheckMenuItem(
-        menu,
-        IDM_CHART_LOCK,
-        MF_BYCOMMAND | (state.panes.color_chart_locked ? MF_CHECKED : MF_UNCHECKED));
-    for (const UINT command : {
-             IDM_MOTION_FPS_30, IDM_MOTION_FPS_25, IDM_MOTION_FPS_24,
-             IDM_MOTION_FPS_12, IDM_MOTION_FPS_10, IDM_MOTION_FPS_8}) {
-        CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
-    }
-    const UINT fps_command = state.animation.motion_fps == 30U
-        ? IDM_MOTION_FPS_30
-        : (state.animation.motion_fps == 25U
-                  ? IDM_MOTION_FPS_25
-                  : (state.animation.motion_fps == 24U
-                            ? IDM_MOTION_FPS_24
-                            : (state.animation.motion_fps == 12U
-                                      ? IDM_MOTION_FPS_12
-                                      : (state.animation.motion_fps == 10U
-                                                ? IDM_MOTION_FPS_10
-                                                : IDM_MOTION_FPS_8))));
-    CheckMenuItem(menu, fps_command, MF_BYCOMMAND | MF_CHECKED);
+    inputs.edit.floating_active = state.tools.floating_active;
 
-    const bool batch_idle = state.batch.task == nullptr;
-    const bool batch_has_operations = state.batch.loaded_graph
+    inputs.effects.color_plane_active =
+        state.tools.active_plane == INKPOD_PLANE_COLOR;
+    inputs.effects.adjustment_available = state.effects.adjustment_id != 0U;
+    inputs.effects.multiple_adjustments = state.effects.adjustments.size() > 1U;
+    inputs.effects.adjustment_visible = state.effects.adjustment_visible;
+    inputs.effects.alpha_view = state.effects.alpha_view;
+
+    inputs.document_pane.removable_layer_available =
+        state.document.smoke_layer_id != 0U;
+
+    inputs.animation.motion_fps = state.animation.motion_fps;
+
+    inputs.selection_view.active_tool = state.tools.active_tool;
+    inputs.selection_view.selection_shape = state.tools.selection_shape;
+    inputs.selection_view.selection_operation = state.tools.selection_operation;
+    inputs.selection_view.flip_horizontal = state.view.flip_horizontal;
+    inputs.selection_view.flip_vertical = state.view.flip_vertical;
+    inputs.selection_view.ruler_visible = state.view.ruler_visible;
+    inputs.selection_view.guides_visible = state.view.guides_visible;
+    inputs.selection_view.grid_visible = state.view.grid_visible;
+    inputs.selection_view.snap_guides = state.view.snap_guides;
+    inputs.selection_view.snap_grid = state.view.snap_grid;
+    inputs.selection_view.transparent_visible = state.view.transparent_visible;
+    inputs.selection_view.selection_layer_available =
+        state.document.selection_layer_id != 0U;
+
+    TreePaneNode active_plane{};
+    inputs.tool.vector_stroke_plane = has_document
+        && QueryTreeNode(state, true, active_plane)
+        && IsVectorStrokePlane(active_plane.kind);
+    inputs.tool.active_tool = state.tools.active_tool;
+    inputs.tool.active_plane = state.tools.active_plane;
+    inputs.tool.fill_operation = state.tools.fill_options.operation;
+    inputs.tool.vector_erase_mode = state.tools.vector_erase_mode;
+
+    inputs.color.eyedropper_source = state.tools.eyedropper_source;
+    inputs.color.color_check_mode = state.view.color_check_mode;
+    inputs.color.chart_locked = state.panes.color_chart_locked;
+
+    inputs.batch.idle = state.batch.task == nullptr;
+    inputs.batch.has_operations = state.batch.loaded_graph
         ? state.batch.graph != nullptr
         : !state.batch.operations.empty();
-    CheckMenuItem(
-        menu,
-        IDM_WINDOW_BATCH,
-        MF_BYCOMMAND
-            | (state.batch.palette != nullptr
-                    && IsWindowVisible(state.batch.palette) != FALSE
-                ? MF_CHECKED
-                : MF_UNCHECKED));
-    for (const UINT command : {
-             IDM_BATCH_INPUT_FILE,
-             IDM_BATCH_INPUT_FOLDER,
-             IDM_BATCH_INPUT_CURRENT,
-             IDM_BATCH_INPUT_RANGE,
-             IDM_BATCH_OUTPUT_DUPLICATE,
-             IDM_BATCH_OUTPUT_NEW,
-             IDM_BATCH_OUTPUT_OVERWRITE,
-             IDM_BATCH_OUTPUT_SETTINGS,
-             IDM_BATCH_FAILURE_CONTINUE,
-             IDM_BATCH_FAILURE_STOP,
-             IDM_BATCH_LOAD_SET}) {
-        const bool may_replace_loaded_graph = command == IDM_BATCH_LOAD_SET;
-        EnableMenuItem(
-            menu,
-            command,
-            MF_BYCOMMAND
-                | (batch_idle && (!state.batch.loaded_graph || may_replace_loaded_graph)
-                       ? MF_ENABLED
-                       : MF_GRAYED));
-    }
-    for (const auto& entry : inkpod::windows::ui::BatchPaletteEntries()) {
-        EnableMenuItem(
-            menu,
-            entry.command,
-            MF_BYCOMMAND | (batch_idle && has_document ? MF_ENABLED : MF_GRAYED));
-    }
-    const bool editable_batch_item = batch_idle && !state.batch.loaded_graph
+    inputs.batch.loaded_graph = state.batch.loaded_graph;
+    inputs.batch.editable_item = inputs.batch.idle && !state.batch.loaded_graph
         && state.batch.selected_operation < state.batch.operations.size();
-    for (const UINT command : {
-             IDM_BATCH_OPERATION_EDIT,
-             IDM_BATCH_OPERATION_REMOVE,
-             IDM_BATCH_OPERATION_UP,
-             IDM_BATCH_OPERATION_DOWN,
-             IDM_BATCH_REPLACE_SWAP}) {
-        EnableMenuItem(
-            menu,
-            command,
-            MF_BYCOMMAND | (editable_batch_item ? MF_ENABLED : MF_GRAYED));
-    }
-    for (const UINT command : {
-             IDM_BATCH_PREVIEW,
-             IDM_BATCH_DRY_RUN,
-             IDM_BATCH_RUN_CURRENT,
-             IDM_BATCH_RUN_ALL,
-             IDM_BATCH_SAVE_SET}) {
-        EnableMenuItem(
-            menu,
-            command,
-            MF_BYCOMMAND
-                | (batch_idle && batch_has_operations && has_document
-                       ? MF_ENABLED
-                       : MF_GRAYED));
-    }
-    EnableMenuItem(
-        menu,
-        IDM_BATCH_CANCEL,
-        MF_BYCOMMAND | (!batch_idle ? MF_ENABLED : MF_GRAYED));
-    for (const UINT command : {
-             IDM_BATCH_OUTPUT_DUPLICATE,
-             IDM_BATCH_OUTPUT_NEW,
-             IDM_BATCH_OUTPUT_OVERWRITE,
-             IDM_BATCH_FAILURE_CONTINUE,
-             IDM_BATCH_FAILURE_STOP}) {
-        CheckMenuItem(menu, command, MF_BYCOMMAND | MF_UNCHECKED);
-    }
-    CheckMenuItem(
-        menu,
-        state.batch.output_policy == INKPOD_BATCH_OUTPUT_NEW_SAVE
-            ? IDM_BATCH_OUTPUT_NEW
-            : (state.batch.output_policy == INKPOD_BATCH_OUTPUT_EXPLICIT_OVERWRITE
-                      ? IDM_BATCH_OUTPUT_OVERWRITE
-                      : IDM_BATCH_OUTPUT_DUPLICATE),
-        MF_BYCOMMAND | MF_CHECKED);
-    CheckMenuItem(
-        menu,
-        state.batch.failure_policy == INKPOD_BATCH_FAILURE_STOP
-            ? IDM_BATCH_FAILURE_STOP
-            : IDM_BATCH_FAILURE_CONTINUE,
-        MF_BYCOMMAND | MF_CHECKED);
+    inputs.batch.palette_visible = state.batch.palette != nullptr
+        && IsWindowVisible(state.batch.palette) != FALSE;
+    inputs.batch.output_policy = state.batch.output_policy;
+    inputs.batch.failure_policy = state.batch.failure_policy;
+    return inputs;
+}
 
-    if (state.windows.toolbar != nullptr) {
-        const LPARAM enabled = MAKELPARAM(has_document ? TRUE : FALSE, 0);
-        for (const UINT command : {
-                 IDM_FILE_SAVE,
-                 IDM_VIEW_FIT,
-                 IDM_VIEW_ONE_TO_ONE,
-                 IDM_VIEW_BOX_ZOOM,
-                 IDM_VIEW_FLIP_HORIZONTAL,
-                 IDM_VIEW_FLIP_VERTICAL,
-                 IDM_VIEW_RULER,
-                 IDM_VIEW_GUIDES,
-                 IDM_VIEW_GRID,
-                 IDM_VIEW_TRANSPARENT}) {
-            SendMessageW(state.windows.toolbar, TB_ENABLEBUTTON, command, enabled);
-        }
-        for (const auto& [command, checked] : std::array<std::pair<UINT, bool>, 7U>{
-                 std::pair{IDM_VIEW_BOX_ZOOM, state.tools.active_tool == kInteractionBoxZoom},
-                 std::pair{IDM_VIEW_FLIP_HORIZONTAL, state.view.flip_horizontal},
-                 std::pair{IDM_VIEW_FLIP_VERTICAL, state.view.flip_vertical},
-                 std::pair{IDM_VIEW_RULER, state.view.ruler_visible},
-                 std::pair{IDM_VIEW_GUIDES, state.view.guides_visible},
-                 std::pair{IDM_VIEW_GRID, state.view.grid_visible},
-                 std::pair{IDM_VIEW_TRANSPARENT, state.view.transparent_visible}}) {
-            SendMessageW(
-                state.windows.toolbar,
-                TB_CHECKBUTTON,
-                command,
-                MAKELPARAM(checked ? TRUE : FALSE, 0));
-        }
+void UpdateCommandLabels(
+    HMENU menu,
+    bool has_history,
+    const std::wstring& undo_label,
+    const std::wstring& redo_label) noexcept {
+    if (!has_history) {
+        return;
     }
+    ModifyMenuW(
+        menu,
+        IDM_EDIT_UNDO,
+        MF_BYCOMMAND | MF_STRING,
+        IDM_EDIT_UNDO,
+        undo_label.c_str());
+    ModifyMenuW(
+        menu,
+        IDM_EDIT_REDO,
+        MF_BYCOMMAND | MF_STRING,
+        IDM_EDIT_REDO,
+        redo_label.c_str());
+}
 
+void UpdateMainWindowStatus(
+    AppContext& state,
+    const InkpodDocumentInfo& info,
+    bool has_document) noexcept {
     std::array<wchar_t, 1024> title{};
     const wchar_t* name = state.document.current_path.empty()
         ? ((info.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U ? L"Recovery" : L"無題")
@@ -2796,65 +2397,133 @@ void UpdateMenuState(AppContext& state) noexcept {
         name,
         has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L" *" : L"");
     SetWindowTextW(state.windows.window, title.data());
-    if (state.windows.status_bar != nullptr) {
-        InkpodSnapshotTransform transform{};
-        const bool has_transform = has_document && QuerySnapshotTransform(state, transform);
-        std::array<wchar_t, 96U> tool_text{};
-        const wchar_t* tool_name = state.tools.active_tool == kInteractionBoxZoom
-            ? L"範囲を拡大"
-            : (state.tools.active_tool == kInteractionGuideMove
-                      ? L"ガイド移動"
-                      : (state.tools.active_tool == kInteractionSelection
-                                ? L"選択"
-            : (state.tools.active_tool == kInteractionFill
-                      ? L"フィル"
-                      : (state.tools.active_tool == kInteractionEyedropper
-                                ? L"スポイト"
-                                : (state.tools.active_tool == INKPOD_TOOL_ERASER
-                                          ? L"消しゴム"
-                                          : (state.tools.active_tool == INKPOD_TOOL_BRUSH ? L"ブラシ"
-                                                                              : L"鉛筆"))))));
-        _snwprintf_s(
-            tool_text.data(), tool_text.size(), _TRUNCATE, L"ツール: %ls", tool_name);
-        std::array<wchar_t, 96U> zoom_text{};
-        _snwprintf_s(
-            zoom_text.data(),
-            zoom_text.size(),
-            _TRUNCATE,
-            has_transform ? L"ズーム: %.1f%%" : L"ズーム: --",
-            has_transform ? transform.zoom * 100.0 : 0.0);
-        std::array<wchar_t, 96U> document_text{};
-        _snwprintf_s(
-            document_text.data(),
-            document_text.size(),
-            _TRUNCATE,
-            has_document ? L"%u x %u / %ls" : L"文書なし",
-            has_document ? info.width : 0U,
-            has_document ? info.height : 0U,
-            has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L"変更あり"
-                                                                             : L"保存済み");
-        SendMessageW(
-            state.windows.status_bar,
-            SB_SETTEXTW,
-            0,
-            reinterpret_cast<LPARAM>(tool_text.data()));
-        SendMessageW(
-            state.windows.status_bar,
-            SB_SETTEXTW,
-            1,
-            reinterpret_cast<LPARAM>(zoom_text.data()));
-        SendMessageW(
-            state.windows.status_bar,
-            SB_SETTEXTW,
-            2,
-            reinterpret_cast<LPARAM>(document_text.data()));
-        if (has_transform && state.windows.zoom_slider != nullptr) {
-            const auto slider_value = static_cast<LPARAM>(std::clamp(
-                static_cast<int>(std::lround(transform.zoom * 100.0)), 1, 800));
-            SendMessageW(state.windows.zoom_slider, TBM_SETPOS, TRUE, slider_value);
+    if (state.windows.status_bar == nullptr) {
+        return;
+    }
+
+    InkpodSnapshotTransform transform{};
+    const bool has_transform = has_document && QuerySnapshotTransform(state, transform);
+    std::array<wchar_t, 96U> tool_text{};
+    const wchar_t* tool_name = state.tools.active_tool == kInteractionBoxZoom
+        ? L"範囲を拡大"
+        : (state.tools.active_tool == kInteractionGuideMove
+                  ? L"ガイド移動"
+                  : (state.tools.active_tool == kInteractionSelection
+                            ? L"選択"
+                            : (state.tools.active_tool == kInteractionFill
+                                      ? L"フィル"
+                                      : (state.tools.active_tool == kInteractionEyedropper
+                                                ? L"スポイト"
+                                                : (state.tools.active_tool == INKPOD_TOOL_ERASER
+                                                          ? L"消しゴム"
+                                                          : (state.tools.active_tool
+                                                                    == INKPOD_TOOL_BRUSH
+                                                                ? L"ブラシ"
+                                                                : L"鉛筆"))))));
+    _snwprintf_s(
+        tool_text.data(), tool_text.size(), _TRUNCATE, L"ツール: %ls", tool_name);
+    std::array<wchar_t, 96U> zoom_text{};
+    _snwprintf_s(
+        zoom_text.data(),
+        zoom_text.size(),
+        _TRUNCATE,
+        has_transform ? L"ズーム: %.1f%%" : L"ズーム: --",
+        has_transform ? transform.zoom * 100.0 : 0.0);
+    std::array<wchar_t, 96U> document_text{};
+    _snwprintf_s(
+        document_text.data(),
+        document_text.size(),
+        _TRUNCATE,
+        has_document ? L"%u x %u / %ls" : L"文書なし",
+        has_document ? info.width : 0U,
+        has_document ? info.height : 0U,
+        has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L"変更あり"
+                                                                         : L"保存済み");
+    SendMessageW(
+        state.windows.status_bar,
+        SB_SETTEXTW,
+        0,
+        reinterpret_cast<LPARAM>(tool_text.data()));
+    SendMessageW(
+        state.windows.status_bar,
+        SB_SETTEXTW,
+        1,
+        reinterpret_cast<LPARAM>(zoom_text.data()));
+    SendMessageW(
+        state.windows.status_bar,
+        SB_SETTEXTW,
+        2,
+        reinterpret_cast<LPARAM>(document_text.data()));
+    if (has_transform && state.windows.zoom_slider != nullptr) {
+        const auto slider_value = static_cast<LPARAM>(std::clamp(
+            static_cast<int>(std::lround(transform.zoom * 100.0)), 1, 800));
+        SendMessageW(state.windows.zoom_slider, TBM_SETPOS, TRUE, slider_value);
+    }
+}
+
+void UpdateMenuState(AppContext& state) noexcept {
+    const HMENU menu = GetMenu(state.windows.window);
+    if (menu == nullptr) {
+        return;
+    }
+
+    InkpodDocumentInfo info{};
+    const bool has_document = QueryDocument(state, info);
+    InkpodHistoryInfo history{};
+    std::wstring undo_label;
+    std::wstring redo_label;
+    const bool has_history = has_document
+        && QueryHistoryMenuLabels(state, history, undo_label, redo_label);
+    const CommandStateInputs inputs =
+        BuildCommandStateInputs(state, info, has_document, history, has_history);
+
+    // This is the only state computation. Every interactive surface below reads
+    // the same immutable result; no tool or preview transition happens here.
+    state.command_states = ComputeCommandStates(inputs);
+    UpdateCommandLabels(menu, has_history, undo_label, redo_label);
+    ApplyCommandStates(state.command_states, menu, state.windows.toolbar);
+    UpdateMainWindowStatus(state, info, has_document);
+    DrawMenuBar(state.windows.window);
+}
+
+bool CommandSurfacesMatchComputedState(const AppContext& state) noexcept {
+    const HMENU menu = GetMenu(state.windows.window);
+    if (menu == nullptr) {
+        return false;
+    }
+    for (const auto& command_state : state.command_states) {
+        const UINT menu_state = GetMenuState(menu, command_state.command, MF_BYCOMMAND);
+        if (menu_state == static_cast<UINT>(-1)
+            || ((menu_state & (MF_DISABLED | MF_GRAYED)) == 0U)
+                != command_state.enabled
+            || ((menu_state & MF_CHECKED) != 0U) != command_state.checked) {
+            return false;
+        }
+        if (state.windows.toolbar != nullptr
+            && SendMessageW(
+                   state.windows.toolbar,
+                   TB_COMMANDTOINDEX,
+                   command_state.command,
+                   0)
+                >= 0
+            && ((SendMessageW(
+                     state.windows.toolbar,
+                     TB_ISBUTTONENABLED,
+                     command_state.command,
+                     0)
+                    != FALSE)
+                    != command_state.enabled
+                || (SendMessageW(
+                        state.windows.toolbar,
+                        TB_ISBUTTONCHECKED,
+                        command_state.command,
+                        0)
+                        != FALSE)
+                    != command_state.checked)) {
+            return false;
         }
     }
-    DrawMenuBar(state.windows.window);
+    return true;
 }
 
 InkpodStatus ApplyView(
@@ -3354,29 +3023,6 @@ InkpodStatus EditSelectedTreeNodeProperties(AppContext& state, bool plane) noexc
     }
 }
 
-bool IsVectorCanvasTool(std::uint32_t tool) noexcept {
-    return tool >= kInteractionVectorLine && tool <= kInteractionVectorEraser;
-}
-
-bool IsVectorStrokePlane(std::uint32_t kind) noexcept {
-    return kind == INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE
-        || kind == INKPOD_TYPED_PLANE_COLOR_TRACE;
-}
-
-void ClearVectorGeometryPreview(ToolUiState& tools, HWND canvas) noexcept {
-    tools.vector_gesture_samples.clear();
-    if (canvas == nullptr) {
-        return;
-    }
-    inkpod::renderer::CanvasGeometryPreview preview{};
-    preview.struct_size = sizeof(preview);
-    SendMessageW(
-        canvas,
-        inkpod::renderer::kCanvasSetGeometryPreview,
-        0,
-        reinterpret_cast<LPARAM>(&preview));
-}
-
 bool VectorGestureDocumentPoints(
     AppContext& state,
     const std::vector<InkpodStrokeSample>& samples,
@@ -3597,14 +3243,14 @@ InkpodStatus FinishVectorCanvasGesture(AppContext& state) noexcept {
     std::vector<InkpodVectorCubicSegment> segments;
     bool closed{};
     if (!QueryTreeNode(state, true, plane)) {
-        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
+        CancelVectorGeometryPreview(state.tools, state.windows.canvas);
         return INKPOD_STATUS_INVALID_STATE;
     }
     if (!IsVectorStrokePlane(plane.kind)) {
         if (state.engine != nullptr) {
             state.engine->SetLocalFailure(kVectorStrokePlaneRequired);
         }
-        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
+        CancelVectorGeometryPreview(state.tools, state.windows.canvas);
         return INKPOD_STATUS_INVALID_STATE;
     }
     if (!VectorGestureDocumentPoints(state, state.tools.vector_gesture_samples, points)) {
@@ -3612,7 +3258,7 @@ InkpodStatus FinishVectorCanvasGesture(AppContext& state) noexcept {
             state.engine->SetLocalFailure(
                 L"ベクター描画の入力点を文書座標へ変換できませんでした。");
         }
-        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
+        CancelVectorGeometryPreview(state.tools, state.windows.canvas);
         return INKPOD_STATUS_INVALID_STATE;
     }
     if (state.tools.active_tool == kInteractionVectorEraser) {
@@ -3625,7 +3271,7 @@ InkpodStatus FinishVectorCanvasGesture(AppContext& state) noexcept {
             point.y,
             std::max(0.5F, state.tools.diameter / 2.0F),
             0U};
-        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
+        CancelVectorGeometryPreview(state.tools, state.windows.canvas);
         VectorController controller(*state.engine);
         return controller.Erase(input);
     }
@@ -3634,7 +3280,7 @@ InkpodStatus FinishVectorCanvasGesture(AppContext& state) noexcept {
             state.engine->SetLocalFailure(
                 L"ベクター描画を確定するための入力点が不足しています。");
         }
-        ClearVectorGeometryPreview(state.tools, state.windows.canvas);
+        CancelVectorGeometryPreview(state.tools, state.windows.canvas);
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
     const InkpodVectorPathInput input{
@@ -3648,7 +3294,7 @@ InkpodStatus FinishVectorCanvasGesture(AppContext& state) noexcept {
         sizeof(InkpodVectorCubicSegment)};
     VectorController controller(*state.engine);
     const InkpodStatus status = controller.AddPath(input);
-    ClearVectorGeometryPreview(state.tools, state.windows.canvas);
+    CancelVectorGeometryPreview(state.tools, state.windows.canvas);
     return status;
 }
 
@@ -4975,6 +4621,12 @@ int RunM1Smoke(AppContext& state) noexcept {
     }
     PumpPendingWindowMessages();
     UpdateMenuState(state);
+    if (!CommandSurfacesMatchComputedState(state)) {
+        return 706;
+    }
+    if (DispatchEnabledCommand(state, state.windows.window, IDM_EDIT_UNDO)) {
+        return 714;
+    }
     constexpr std::array<UINT, 6U> vector_draw_commands{
         IDM_VECTOR_LINE,
         IDM_VECTOR_CURVE,
@@ -8072,7 +7724,8 @@ int RunM6Smoke(AppContext& state) noexcept {
                reinterpret_cast<LPARAM>(&spray_bounds)) != 1) {
         return 608;
     }
-    state.tools.active_tool = kInteractionM6Airbrush;
+    TransitionActiveTool(
+        state.tools, state.windows.canvas, kInteractionM6Airbrush);
     state.effects.options.parameters = {4000, 1000, 1000, 750, 0};
     state.effects.options.option = true;
     state.effects.options.option2 = true;
@@ -8436,6 +8089,8 @@ std::optional<LRESULT> RoutePaneControlCommand(
                             false);
                         if (status != INKPOD_STATUS_OK) {
                             ShowCoreError(*state, window, L"プレーン選択");
+                        } else {
+                            HandleActiveTreePlaneTransition(*state);
                         }
                     }
                 }
@@ -9986,7 +9641,8 @@ std::optional<LRESULT> RouteAnimationCommand(
             if (state->panes.active_light_table_item_id == 0U) {
                 return 0;
             }
-            state->tools.active_tool = kInteractionLightTableMove;
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, kInteractionLightTableMove);
             state->panes.light_table_move_samples.clear();
             UpdateMenuState(*state);
             return 1;
@@ -10423,7 +10079,8 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                                               : (command == IDM_SELECTION_WAND
                                                         ? INKPOD_SELECTION_WAND
                                                         : INKPOD_SELECTION_RECTANGLE))));
-            state->tools.active_tool = kInteractionSelection;
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, kInteractionSelection);
             state->tools.selection_gesture_samples.clear();
             if (command == IDM_SELECTION_WAND || command == IDM_SELECTION_TRACE) {
                 ViewOptionsDialogState dialog{};
@@ -10688,7 +10345,8 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             return 0;
         }
         case IDM_VIEW_BOX_ZOOM:
-            state->tools.active_tool = kInteractionBoxZoom;
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, kInteractionBoxZoom);
             state->view.gesture_samples.clear();
             UpdateMenuState(*state);
             return 0;
@@ -10786,7 +10444,8 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             return 0;
         }
         case IDM_VIEW_GUIDE_MOVE:
-            state->tools.active_tool = kInteractionGuideMove;
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, kInteractionGuideMove);
             UpdateMenuState(*state);
             return 0;
         case IDM_VIEW_GUIDE_DELETE_ALL: {
@@ -10874,21 +10533,25 @@ std::optional<LRESULT> RouteToolCommand(
     }
     switch (LOWORD(wparam)) {
         case IDM_TOOL_PENCIL:
-            state->tools.active_tool = INKPOD_TOOL_PENCIL;
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, INKPOD_TOOL_PENCIL);
             UpdateMenuState(*state);
             return 0;
         case IDM_TOOL_BRUSH:
-            state->tools.active_tool = INKPOD_TOOL_BRUSH;
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, INKPOD_TOOL_BRUSH);
             UpdateMenuState(*state);
             return 0;
         case IDM_TOOL_ERASER:
-            state->tools.active_tool = INKPOD_TOOL_ERASER;
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, INKPOD_TOOL_ERASER);
             UpdateMenuState(*state);
             return 0;
         case IDM_TOOL_FILL:
         case IDM_TOOL_CLOSED_FILL:
         case IDM_TOOL_FILL_EXTENSION:
-            state->tools.active_tool = kInteractionFill;
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, kInteractionFill);
             state->tools.fill_options.operation = LOWORD(wparam) == IDM_TOOL_CLOSED_FILL
                 ? INKPOD_FILL_CLOSED_REGION
                 : (LOWORD(wparam) == IDM_TOOL_FILL_EXTENSION
@@ -10903,13 +10566,15 @@ std::optional<LRESULT> RouteToolCommand(
                     state->windows.window,
                     state->lifetime.smoke_test,
                     state->tools.fill_options)) {
-                state->tools.active_tool = kInteractionFill;
+                TransitionActiveTool(
+                    state->tools, state->windows.canvas, kInteractionFill);
                 state->tools.fill_gesture_samples.clear();
                 UpdateMenuState(*state);
             }
             return 0;
         case IDM_TOOL_EYEDROPPER:
-            state->tools.active_tool = kInteractionEyedropper;
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, kInteractionEyedropper);
             UpdateMenuState(*state);
             return 0;
         case IDM_VECTOR_LINE:
@@ -10918,7 +10583,7 @@ std::optional<LRESULT> RouteToolCommand(
         case IDM_VECTOR_ELLIPSE:
         case IDM_VECTOR_POLYLINE:
         case IDM_VECTOR_ERASER: {
-            ClearVectorGeometryPreview(state->tools, state->windows.canvas);
+            CancelVectorGeometryPreview(state->tools, state->windows.canvas);
             TreePaneNode plane{};
             if (!QueryTreeNode(*state, true, plane)) {
                 return 0;
@@ -10931,7 +10596,7 @@ std::optional<LRESULT> RouteToolCommand(
                 return 0;
             }
             const UINT command = LOWORD(wparam);
-            state->tools.active_tool = command == IDM_VECTOR_LINE
+            const std::uint32_t next_tool = command == IDM_VECTOR_LINE
                 ? kInteractionVectorLine
                 : (command == IDM_VECTOR_CURVE
                           ? kInteractionVectorCurve
@@ -10942,6 +10607,8 @@ std::optional<LRESULT> RouteToolCommand(
                                               : (command == IDM_VECTOR_POLYLINE
                                                         ? kInteractionVectorPolyline
                                                         : kInteractionVectorEraser))));
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, next_tool);
             UpdateMenuState(*state);
             return 1;
         }
@@ -10953,7 +10620,8 @@ std::optional<LRESULT> RouteToolCommand(
                 : (LOWORD(wparam) == IDM_VECTOR_ERASE_WHOLE
                           ? INKPOD_VECTOR_ERASE_WHOLE_PATH
                           : INKPOD_VECTOR_ERASE_PARTIAL);
-            state->tools.active_tool = kInteractionVectorEraser;
+            TransitionActiveTool(
+                state->tools, state->windows.canvas, kInteractionVectorEraser);
             UpdateMenuState(*state);
             return 1;
         case IDM_VECTOR_CONNECT: {
@@ -11811,19 +11479,19 @@ std::optional<LRESULT> RouteKeyboardMessage(
         case WM_SYSKEYDOWN:
             if (state != nullptr) {
                 if (state->tools.floating_active && wparam == VK_RETURN) {
-                    SendMessageW(window, WM_COMMAND, IDM_EDIT_FLOATING_COMMIT, 0);
+                    DispatchEnabledCommand(*state, window, IDM_EDIT_FLOATING_COMMIT);
                     return 0;
                 }
                 if (state->tools.floating_active && wparam == VK_ESCAPE) {
-                    SendMessageW(window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0);
+                    DispatchEnabledCommand(*state, window, IDM_EDIT_FLOATING_CANCEL);
                     return 0;
                 }
                 if (state->animation.motion_active && wparam == VK_ESCAPE) {
-                    SendMessageW(window, WM_COMMAND, IDM_MOTION_STOP, 0);
+                    DispatchEnabledCommand(*state, window, IDM_MOTION_STOP);
                     return 0;
                 }
                 if (state->animation.motion_active && wparam == VK_SPACE) {
-                    SendMessageW(window, WM_COMMAND, IDM_MOTION_PAUSE, 0);
+                    DispatchEnabledCommand(*state, window, IDM_MOTION_PAUSE);
                     return 0;
                 }
                 if (state->animation.motion_active
@@ -11834,7 +11502,7 @@ std::optional<LRESULT> RouteKeyboardMessage(
                         : (wparam == VK_RIGHT
                                   ? IDM_MOTION_NEXT
                                   : (wparam == VK_HOME ? IDM_MOTION_FIRST : IDM_MOTION_LAST));
-                    SendMessageW(window, WM_COMMAND, command, 0);
+                    DispatchEnabledCommand(*state, window, command);
                     return 0;
                 }
                 const std::uint32_t modifiers = CurrentShortcutModifiers(lparam);
@@ -11854,11 +11522,11 @@ std::optional<LRESULT> RouteKeyboardMessage(
                                                       : (wparam == '0'
                                                                 ? IDM_MOTION_FPS_10
                                                                 : IDM_MOTION_FPS_8))));
-                    SendMessageW(window, WM_COMMAND, command, 0);
+                    DispatchEnabledCommand(*state, window, command);
                     return 0;
                 }
                 if (modifiers == 0U && wparam == VK_TAB) {
-                    SendMessageW(window, WM_COMMAND, IDM_PALETTE_NEXT_GROUP, 0);
+                    DispatchEnabledCommand(*state, window, IDM_PALETTE_NEXT_GROUP);
                     return 0;
                 }
                 if (modifiers == 0U && wparam >= '0' && wparam <= '9') {
@@ -11878,19 +11546,19 @@ std::optional<LRESULT> RouteKeyboardMessage(
                         static_cast<std::uint32_t>(wparam),
                         modifiers,
                         menu_command)) {
-                    SendMessageW(window, WM_COMMAND, menu_command, 0);
+                    DispatchEnabledCommand(*state, window, menu_command);
                     return 0;
                 }
                 if (modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL && wparam == 'S') {
-                    SendMessageW(window, WM_COMMAND, IDM_FILE_SAVE, 0);
+                    DispatchEnabledCommand(*state, window, IDM_FILE_SAVE);
                     return 0;
                 }
                 if (modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL && wparam == 'N') {
-                    SendMessageW(window, WM_COMMAND, IDM_FILE_NEW, 0);
+                    DispatchEnabledCommand(*state, window, IDM_FILE_NEW);
                     return 0;
                 }
                 if (modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL && wparam == 'O') {
-                    SendMessageW(window, WM_COMMAND, IDM_FILE_OPEN, 0);
+                    DispatchEnabledCommand(*state, window, IDM_FILE_OPEN);
                     return 0;
                 }
             }
@@ -12069,13 +11737,13 @@ std::optional<LRESULT> RouteCanvasMessage(
                 if (IsVectorCanvasTool(state->tools.active_tool)) {
                     try {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-                            ClearVectorGeometryPreview(state->tools, state->windows.canvas);
+                            CancelVectorGeometryPreview(state->tools, state->windows.canvas);
                         }
                         if (input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
                             && input->sample_count != 0U) {
                             if (state->tools.vector_gesture_samples.size()
                                 > UINT64_C(1048576) - input->sample_count) {
-                                ClearVectorGeometryPreview(state->tools, state->windows.canvas);
+                                CancelVectorGeometryPreview(state->tools, state->windows.canvas);
                                 return 0;
                             }
                             state->tools.vector_gesture_samples.insert(
@@ -12085,11 +11753,11 @@ std::optional<LRESULT> RouteCanvasMessage(
                                     + static_cast<std::size_t>(input->sample_count));
                         }
                     } catch (const std::bad_alloc&) {
-                        ClearVectorGeometryPreview(state->tools, state->windows.canvas);
+                        CancelVectorGeometryPreview(state->tools, state->windows.canvas);
                         return 0;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        ClearVectorGeometryPreview(state->tools, state->windows.canvas);
+                        CancelVectorGeometryPreview(state->tools, state->windows.canvas);
                         return 1;
                     }
                     if (state->tools.active_tool != kInteractionVectorEraser) {

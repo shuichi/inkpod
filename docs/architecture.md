@@ -140,8 +140,9 @@ commit.
 The private `apps/windows/app/app_context.h` defines the frontend composition
 root. `AppContext` has no flat feature fields: it composes lifetime, main-window
 handles, document-shell, tool, view, pane, animation, effects, and Batch state,
-plus the owned `CoreEngine`. The header remains below `apps/windows`; none of
-these C++/Win32 types enter the public C API or Rust Core.
+the latest immutable command-state result, plus the owned `CoreEngine`. The
+header remains below `apps/windows`; none of these C++/Win32 types enter the
+public C API or Rust Core.
 
 `MainWindowHandles` contains only the main frame and child-control `HWND`s.
 `DocumentShellState` owns Windows path/clipboard adapter state and the small
@@ -191,6 +192,23 @@ lifecycle/notifications, keyboard, Canvas input, Core/task completion, and
 timer/close behavior. A CMake structural test compares their direct owner cases
 with all 273 production command IDs in `app.rc` and rejects missing or duplicate
 ownership.
+
+R5 separates command queries from transitions. The private
+`apps/windows/ui/command_state.*` module builds a fixed result for all 273
+production command IDs from typed, feature-owned input values. Its providers do
+not call Core or Win32, mutate tools, or clear previews. One application adapter
+caches that result and applies it to the main menu and every matching toolbar
+button; keyboard shortcuts and the Batch palette consult the same cache before
+dispatch. There is currently no separate production context-menu surface.
+`command_state_catalog.inc` assigns every production command exactly one state
+owner, and a CMake structural test compares the catalog with `app.rc`.
+
+Active-tool mutation is independently owned by
+`apps/windows/ui/tools/tool_state.*`. Leaving a vector tool clears its geometry
+preview there, while a non-vector active-plane transition performs the explicit
+pencil fallback. Document replacement, tree refresh, and direct plane selection
+invoke that transition boundary. A command-state refresh itself cannot change
+the active tool, preview samples, Core state, or document state.
 
 ## Coordinate and DPI contract
 
@@ -378,7 +396,8 @@ module receives `AppContext`, calls `CoreEngine`, or invokes a Rust function.
 R3 feature controllers translate those callbacks to their owned UI-thread task
 handles and typed Core operations. R4's main-window routes delegate to those
 same controllers and preserve synchronous value returns and posted-message
-payload lifetimes. These boundaries do not change Core/Renderer threads,
+payload lifetimes. R5's command-state providers and tool-transition owner sit
+above those routes without changing their Core calls. These boundaries do not change Core/Renderer threads,
 snapshot ownership, shutdown order, the public C ABI, or file formats.
 
 The hidden Windows smoke path uses the normal UI input adapter, Core queue, ABI,

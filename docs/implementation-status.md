@@ -33,7 +33,7 @@
   Windows application tests remain necessary for algorithmic edge cases and
   failure localization; FFI coverage does not replace them.
 
-## Windows frontend refactoring R0-R4
+## Windows frontend refactoring R0-R5
 
 - R0 is complete. The baseline records 274 defined `IDM_*` values, 273
   production resource commands, and exact ownership of all 273 in the main
@@ -106,6 +106,26 @@
   Debug and Release builds and all five non-elevated CTest scenarios passed,
   including real `--smoke-test`, `--abi-smoke-test`, route ownership, and package
   payload checks. MSIX install/uninstall smoke was explicitly omitted for R4.
+- R5 is complete. `apps/windows/ui/command_state.*` now computes enabled and
+  checked values through feature-specific, side-effect-free providers. A fixed
+  catalog gives each of all 273 production command IDs exactly one state owner;
+  a structural test compares it with `app.rc` and rejects omissions or
+  duplicates.
+- `AppContext` caches the latest immutable result. The main menu and toolbar,
+  configured and built-in keyboard shortcuts, and the Batch palette consume
+  that same result. Application smoke compares every menu item and every
+  matching toolbar button with the cache. Focused Windows tests cover no
+  document, clean/dirty document equivalence, Undo/Redo and history movement,
+  vector/non-vector planes, floating preview, and ready/running Batch states.
+- Active-tool writes now pass through `tools/tool_state.*`. Vector geometry
+  preview clearing and the pencil fallback happen only during explicit tool or
+  active-plane transitions, including document replacement and pane selection;
+  command-state refresh performs no Core, tool, preview, or document mutation.
+  `main.cpp` is 12,385 physical lines and 531,320 bytes after R5. Public ABI,
+  file formats, GUI commands, thread assignment, shutdown, and snapshot
+  ownership are unchanged. Debug and Release strict builds and all seven
+  non-elevated CTest scenarios passed; optional MSIX install/uninstall smoke was
+  not run.
 
 ## User-requested Windows shell and package additions
 
@@ -589,6 +609,8 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R5 command-state/tool-transition refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
+| Visual Studio 2026 Developer PowerShell Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | Pure providers, transition owner, focused state executable, and application surface-parity/disabled-dispatch assertions passed `/W4 /WX /permissive-`; assets, route ownership, 273/273 state ownership, focused command state, ABI, application, and package payload passed 7/7 in Debug (15.93 s) and Release (4.05 s) | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R4 main-window routing refactor passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |
 | Visual Studio 2026 developer environment Debug and Release configure/build; `ctest --preset windows-x64-{debug,release} -E m8_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 x64, MSVC 19.51 | `MainWindow`, all 11 command owners, and five message handlers passed `/W4 /WX /permissive-`; route ownership, application, ABI, assets, and package-payload smoke passed 5/5 in final Debug (15.55 s) and Release (4.53 s) runs | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 x64, stable Rust | R3 controller/shell/pane extraction passed formatting, zero-warning clippy, and 133 tests: Core 64, architecture 5, resilience 1, FFI 19, format 20 plus malformed corpus 2, and image 22 | 2026-07-26 |

@@ -103,6 +103,12 @@ add_test(
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_command_routes.cmake")
 
+add_test(
+    NAME inkpod_windows_command_state_ownership
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_command_states.cmake")
+
 add_library(inkpod_header_c11 OBJECT tests/header_c11.c)
 target_include_directories(inkpod_header_c11 PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
@@ -114,6 +120,28 @@ if(MSVC)
 endif()
 
 if(WIN32)
+    add_executable(inkpod_windows_command_state_tests
+        apps/windows/ui/command_state.cpp
+        apps/windows/ui/command_state.h
+        apps/windows/ui/command_state_catalog.inc
+        apps/windows/ui/tools/tool_state.cpp
+        apps/windows/ui/tools/tool_state.h
+        tests/windows_command_state.cpp)
+    target_include_directories(inkpod_windows_command_state_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_SOURCE_DIR}/apps/windows/renderer"
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_definitions(inkpod_windows_command_state_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_command_state_tests PRIVATE comctl32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_command_state_tests)
+        target_compile_options(inkpod_windows_command_state_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_command_state
+        COMMAND inkpod_windows_command_state_tests)
+
     add_executable(inkpod WIN32
         apps/windows/app/app_context.h
         apps/windows/app/clipboard_adapter.cpp
@@ -133,7 +161,10 @@ if(WIN32)
         apps/windows/ui/tools/fill_controller.cpp
         apps/windows/ui/tools/selection_controller.cpp
         apps/windows/ui/tools/floating_paste_controller.cpp
+        apps/windows/ui/tools/tool_state.cpp
         apps/windows/ui/tools/vector_controller.cpp
+        apps/windows/ui/command_state.cpp
+        apps/windows/ui/command_state_catalog.inc
         apps/windows/ui/effects_controller.cpp
         apps/windows/ui/batch_controller.cpp
         apps/windows/ui/main_window.cpp
