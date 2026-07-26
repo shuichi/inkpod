@@ -9,6 +9,7 @@
     {
       "name": "windows-x64-debug",
       "displayName": "Windows x64 Debug (MSVC + Ninja)",
+      "description": "Requires an x64-initialized MSVC developer environment; CMake rejects an x86 compiler.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/windows-x64-debug",
       "cacheVariables": {
@@ -23,6 +24,7 @@
     {
       "name": "windows-x64-release",
       "displayName": "Windows x64 Release (MSVC + Ninja)",
+      "description": "Requires an x64-initialized MSVC developer environment; CMake rejects an x86 compiler.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/windows-x64-release",
       "cacheVariables": {
@@ -62,4 +64,3 @@
     }
   ]
 }
-

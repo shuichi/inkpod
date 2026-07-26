@@ -3,6 +3,15 @@ cmake_minimum_required(VERSION 3.25)
 cmake_policy(SET CMP0091 NEW)
 project(inkpod VERSION 0.1.0 LANGUAGES C CXX)
 
+if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR
+        "Inkpod supports only Windows x64, but CMake selected a 32-bit compiler: "
+        "${CMAKE_CXX_COMPILER}. Open an x64 Native Tools Command Prompt or initialize "
+        "VsDevCmd with '-arch=x64 -host_arch=x64', then rerun configuration with "
+        "'cmake --fresh --preset windows-x64-debug' or "
+        "'cmake --fresh --preset windows-x64-release'.")
+endif()
+
 configure_file(
     "${CMAKE_SOURCE_DIR}/apps/windows/app/app_version.h.in"
     "${CMAKE_BINARY_DIR}/generated/app_version.h"

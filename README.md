@@ -30,6 +30,17 @@ rustc --version
 cargo --version
 ```
 
+The Ninja presets use the compiler environment that is already active; the word
+`x64` in a preset name cannot change an x86 Developer Prompt into an x64 one.
+Inkpod rejects a 32-bit compiler during CMake configuration. If a build directory
+was previously configured from an x86 prompt, start an x64 prompt and replace its
+stale compiler cache before building:
+
+```powershell
+cmake --fresh --preset windows-x64-release
+cmake --build --preset windows-x64-release
+```
+
 ## Build and test the Windows application
 
 CMake is the build entry point for the complete application. It invokes Cargo
