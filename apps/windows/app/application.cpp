@@ -16,6 +16,7 @@
 #include "resource.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
+#include "ui/palette_window.h"
 #include "ui/shortcut_controller.h"
 
 namespace inkpod::app {
@@ -58,6 +59,15 @@ InkpodStatus StopCore(AppContext& state) noexcept {
         DestroyWindow(state.batch.progress);
         state.batch.progress = nullptr;
     }
+    if (state.tools.palette != nullptr) {
+        if (!state.lifetime.smoke_test) {
+            windows::ui::SavePaletteWindowPlacement(
+                state.tools.palette,
+                L"ToolPalettePlacement");
+        }
+        DestroyWindow(state.tools.palette);
+        state.tools.palette = nullptr;
+    }
     if (state.batch.palette != nullptr) {
         DestroyWindow(state.batch.palette);
         state.batch.palette = nullptr;
@@ -85,8 +95,18 @@ int RunMessageLoop(AppContext& state) noexcept {
     MSG message{};
     BOOL result{};
     while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (state.batch.palette != nullptr
-            && IsDialogMessageW(state.batch.palette, &message) != FALSE) {
+        bool dialog_message{};
+        const std::array<HWND, 2U> palettes{
+            state.tools.palette,
+            state.batch.palette};
+        for (const HWND palette : palettes) {
+            if (palette != nullptr && IsWindowVisible(palette) != FALSE
+                && IsDialogMessageW(palette, &message) != FALSE) {
+                dialog_message = true;
+                break;
+            }
+        }
+        if (dialog_message) {
             continue;
         }
         if (windows::ui::runtime::PreTranslateKeyboardMessage(state, message)) {
@@ -229,6 +249,10 @@ int Application::Run() {
         exit_code = windows::ui::RunApplicationSmoke(state);
     } else {
         ShowWindow(window, launch_.show_command);
+        if (state.tools.palette != nullptr) {
+            windows::ui::SetPaletteWindowShown(state.tools.palette, true);
+        }
+        windows::ui::runtime::UpdateMenuState(state);
         UpdateWindow(window);
         exit_code = RunMessageLoop(state);
     }

@@ -48,6 +48,7 @@
 #include "ui/batch_controller.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
+#include "ui/palette_window.h"
 
 namespace inkpod::windows::ui::runtime {
 
@@ -262,6 +263,20 @@ void ResetAnimationDocumentState(AnimationUiState& animation) noexcept {
     animation.active_sequence_name.clear();
     animation.motion_active = false;
     animation.motion_paused = false;
+}
+
+void DispatchToolPaletteCommand(void* context, UINT command) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state != nullptr && state->windows.window != nullptr) {
+        DispatchEnabledCommand(*state, state->windows.window, command);
+    }
+}
+
+void NotifyToolPaletteVisibilityChanged(void* context) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state != nullptr && state->windows.window != nullptr) {
+        UpdateMenuState(*state);
+    }
 }
 
 void ResetEffectsDocumentState(EffectsUiState& effects) noexcept {
@@ -2240,6 +2255,8 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.tool.active_plane = state.tools.active_plane;
     inputs.tool.fill_operation = state.tools.fill_options.operation;
     inputs.tool.vector_erase_mode = state.tools.vector_erase_mode;
+    inputs.tool.vector_selection_mode = state.tools.vector_selection_mode;
+    inputs.tool.palette_visible = PaletteWindowIsShown(state.tools.palette);
 
     inputs.color.eyedropper_source = state.tools.eyedropper_source;
     inputs.color.color_check_mode = state.view.color_check_mode;
@@ -2568,6 +2585,7 @@ void UpdateMenuState(AppContext& state) noexcept {
     state.command_states = ComputeCommandStates(inputs);
     UpdateCommandLabels(menu, has_history, undo_label, redo_label);
     ApplyCommandStates(state.command_states, menu);
+    UpdateToolPaletteDialog(state.tools.palette, state.command_states);
     ApplyShortcutLabelsToMenu(menu, state.shortcuts.bindings);
     UpdateMainWindowStatus(state, info, has_document);
     DrawMenuBar(state.windows.window);
@@ -2587,7 +2605,9 @@ bool CommandSurfacesMatchComputedState(const AppContext& state) noexcept {
             return false;
         }
     }
-    return true;
+    return ToolPaletteMatchesCommandState(
+        state.tools.palette,
+        state.command_states);
 }
 
 InkpodStatus ApplyView(
@@ -5087,6 +5107,24 @@ bool InitializeMainChrome(AppContext& state) noexcept {
     }
     RefreshBatchPalette(state.batch);
     ShowWindow(state.batch.palette, SW_HIDE);
+    state.tools.palette_dialog = {
+        &state,
+        DispatchToolPaletteCommand,
+        NotifyToolPaletteVisibilityChanged,
+        0};
+    state.tools.palette = inkpod::windows::ui::CreateToolPaletteDialog(
+        state.lifetime.instance,
+        state.windows.window,
+        state.tools.palette_dialog);
+    if (state.tools.palette == nullptr) {
+        return false;
+    }
+    RestorePaletteWindowPlacement(
+        state.tools.palette,
+        state.windows.window,
+        L"ToolPalettePlacement",
+        !state.lifetime.smoke_test);
+    SetPaletteWindowShown(state.tools.palette, false);
     return true;
 }
 
@@ -7422,6 +7460,18 @@ std::optional<LRESULT> RouteToolCommand(
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
+        case IDM_WINDOW_TOOL_PALETTE:
+            if (state->tools.palette != nullptr) {
+                const bool visible = PaletteWindowIsShown(state->tools.palette);
+                const bool visibility_changed =
+                    SetPaletteWindowShown(state->tools.palette, !visible);
+                if (!visible) {
+                    SetForegroundWindow(state->tools.palette);
+                }
+                UpdateMenuState(*state);
+                return visibility_changed ? 1 : 0;
+            }
+            return 0;
         case IDM_TOOL_PENCIL:
             TransitionActiveTool(
                 state->tools, state->windows.canvas, INKPOD_TOOL_PENCIL);
@@ -8266,12 +8316,17 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
             }
             state->windows.canvas = inkpod::renderer::CreateCanvasWindow(
                 state->lifetime.instance, window);
-            if (state->windows.canvas == nullptr || !InitializeMainChrome(*state)
-                || SetTimer(
-                       window,
-                       kAutosaveTimer,
-                       kAutosaveIntervalMilliseconds,
-                       nullptr) == 0U) {
+            if (state->windows.canvas == nullptr) {
+                return -1;
+            }
+            if (!InitializeMainChrome(*state)) {
+                return -1;
+            }
+            if (SetTimer(
+                    window,
+                    kAutosaveTimer,
+                    kAutosaveIntervalMilliseconds,
+                    nullptr) == 0U) {
                 return -1;
             }
             return 0;

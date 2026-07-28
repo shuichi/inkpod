@@ -14,6 +14,7 @@
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/dialogs/tool_palette.h"
 #include "ui/main_window.h"
 #include "ui/shortcut_controller.h"
 
@@ -113,6 +114,9 @@ struct ToolUiState {
     InkpodVectorEraseMode vector_erase_mode{INKPOD_VECTOR_ERASE_PARTIAL};
     InkpodVectorSelectionMode vector_selection_mode{INKPOD_VECTOR_SELECT_TOUCHING};
     std::vector<std::uint64_t> vector_selected_path_ids;
+
+    HWND palette{};
+    windows::ui::ToolPaletteDialogState palette_dialog{};
 };
 
 struct ViewUiState {

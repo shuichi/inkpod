@@ -59,11 +59,11 @@ main frame は標準的な Windows 11 desktop application とし、次の領域�
 
 - 最上段: menu bar。
 - toolbar は置かない。利用者が実行できる全機能を menu bar の末端項目から呼び出せることを優先する。
-- 左側の dock pane: tool palette。選択中 tool は一つだけ明示する。
+- tool palette は main frame の dock pane にせず、main frame を owner とする独立した modeless floating window にする。`WS_EX_TOOLWINDOW` と `WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME` を使い、選択中 tool は一つだけ明示する。
 - 中央: 一つ以上の document tab と custom Canvas `HWND`。tab label は active sequence cell 名、保存 file 名、`無題セル N`、`復元セル`の順で意味のある識別名を使い、dirty は `*`、同じ document の追加 view は`[ビュー N]`で示す。同じ document の multi-view も別 tab/view として開ける。
 - main frame に常設の右 dock pane は置かず、Canvas を利用可能な横幅全体へ広げる。tool options、layer/plane、color palette、color chart、color locator、light table、cell/sequence、subpalette、file preview は、必要な Core/C ABI の状態を保持したまま、後続作業で独立した modeless floating palette として実装する。再実装までは非表示の placeholder child control も生成しない。
 - 下段: status bar。現在 tool/active plane、document 座標、zoom/view flip/grid、pixel RGBA/selection 寸法、文書寸法/DPI、処理進捗、dirty 状態、複数ストローク入力待ちを短く表示する。
-- modeless palette は表示/非表示と位置復元ができ、high-DPI、keyboard navigation、high contrast を尊重する。
+- modeless palette は閉じる操作で破棄せず非表示にし、menu から再表示できる。終了時に window placement を保存し、起動時は現在の monitor work area を検証してから復元する。各 top-level palette は独立した `WM_DPICHANGED` 処理を持ち、keyboard navigation と high contrast を尊重する。`WS_CHILD`、`WS_EX_TOPMOST`、`WS_EX_PALETTEWINDOW`、`WS_EX_NOACTIVATE` は使わない。
 - menu、shortcut、context menu は同じ command ID と enable/checked state を共有し、同じ処理を重複実装しない。
 - 全の実行可能な menu 末端項目に shortcut を割り当て、menu label に現在の割当を表示する。`Ctrl+S`、`Ctrl+O`、Undo/Redo、clipboard など標準操作は一般的な割当を維持する。描画・選択・塗りなど高頻度操作は、text 入力に focus がないときの single stroke を基本とする。その他は短い prefix-free な multi-stroke を使い、入力待ちを status bar に表示する。
 - 色 palette の `1`–`0`、次 group の `Tab` は数値入力中でない場合の高速操作として保持する。shortcut は検索可能な設定 dialog で最大4 strokeまで再割当てでき、完全一致の衝突は元の割当と交換し、prefix 衝突は拒否する。
@@ -478,7 +478,7 @@ Core の公開 Rust API は C ABI から独立させてください。FFI 用の
 ### Windows frontend
 
 - `wWinMain`、Unicode Win32 API、Common Controls v6、Per-Monitor DPI v2
-- main frame、menu/status bar、modeless layer/plane palette、tool options、custom Canvas child window。toolbar は作成しない
+- main frame、menu/status bar、owned modeless floating tool/layer/plane palette、tool options、custom Canvas child window。toolbar は作成しない
 - Canvas ごとに swap chain を持ち、D3D11/DXGI surface から D2D device context を作る
 - Rust snapshot の raster/vector/text/overlay を Direct2D primitive へ変換する
 - resize、minimize、occlusion、DPI change、theme change、device lost を処理する

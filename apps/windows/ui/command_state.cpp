@@ -275,6 +275,7 @@ void ProvideSelectionViewCommandStates(
 
 void ProvideToolCommandStates(
     const CommandStateInputs& input, CommandStateSet& states) noexcept {
+    SetChecked(states, IDM_WINDOW_TOOL_PALETTE, input.tool.palette_visible);
     SetUnchecked(
         states,
         {IDM_TOOL_PENCIL,
@@ -357,6 +358,37 @@ void ProvideToolCommandStates(
                       ? IDM_VECTOR_ERASE_WHOLE
                       : IDM_VECTOR_ERASE_PARTIAL),
         true);
+    SetUnchecked(
+        states,
+        {IDM_VECTOR_SELECT_CUT,
+         IDM_VECTOR_SELECT_TOUCH,
+         IDM_VECTOR_SELECT_CONTAINED,
+         IDM_VECTOR_SELECT_LINE,
+         IDM_VECTOR_SELECT_WHOLE_LINE,
+         IDM_VECTOR_SELECT_INTERSECTION,
+         IDM_VECTOR_SELECT_FILL_BOUNDARY,
+         IDM_VECTOR_SELECT_FILL});
+    const UINT vector_selection_command =
+        input.tool.vector_selection_mode == INKPOD_VECTOR_SELECT_CUT_BY_SELECTION
+        ? IDM_VECTOR_SELECT_CUT
+        : (input.tool.vector_selection_mode == INKPOD_VECTOR_SELECT_FULLY_CONTAINED
+                  ? IDM_VECTOR_SELECT_CONTAINED
+                  : (input.tool.vector_selection_mode == INKPOD_VECTOR_SELECT_LINE
+                            ? IDM_VECTOR_SELECT_LINE
+                            : (input.tool.vector_selection_mode
+                                          == INKPOD_VECTOR_SELECT_WHOLE_LINE
+                                      ? IDM_VECTOR_SELECT_WHOLE_LINE
+                                      : (input.tool.vector_selection_mode
+                                                    == INKPOD_VECTOR_SELECT_TO_INTERSECTION
+                                                ? IDM_VECTOR_SELECT_INTERSECTION
+                                                : (input.tool.vector_selection_mode
+                                                              == INKPOD_VECTOR_SELECT_FILL_BOUNDARY
+                                                          ? IDM_VECTOR_SELECT_FILL_BOUNDARY
+                                                          : (input.tool.vector_selection_mode
+                                                                        == INKPOD_VECTOR_SELECT_FILL
+                                                                    ? IDM_VECTOR_SELECT_FILL
+                                                                    : IDM_VECTOR_SELECT_TOUCH))))));
+    SetChecked(states, vector_selection_command, true);
     SetChecked(
         states,
         input.tool.active_plane == INKPOD_PLANE_MAIN_LINE ? IDM_PLANE_MAIN_LINE
@@ -376,6 +408,32 @@ void ProvideToolCommandStates(
          IDM_EFFECT_ALPHA_GRADIENT,
          IDM_EFFECT_ALPHA_VIEW},
         effect_available);
+    SetUnchecked(
+        states,
+        {IDM_EFFECT_GRADIENT,
+         IDM_EFFECT_AIRBRUSH,
+         IDM_EFFECT_BOUNDARY_AIRBRUSH,
+         IDM_EFFECT_BLUR,
+         IDM_EFFECT_STAMP,
+         IDM_EFFECT_DUST,
+         IDM_EFFECT_ALPHA_GRADIENT});
+    const UINT effect_command = input.tool.active_tool == tools::kInteractionEffectGradient
+        ? IDM_EFFECT_GRADIENT
+        : (input.tool.active_tool == tools::kInteractionEffectAirbrush
+                  ? IDM_EFFECT_AIRBRUSH
+                  : (input.tool.active_tool == tools::kInteractionEffectBlur
+                            ? IDM_EFFECT_BLUR
+                            : (input.tool.active_tool == tools::kInteractionEffectStamp
+                                      ? IDM_EFFECT_STAMP
+                                      : (input.tool.active_tool == tools::kInteractionEffectDust
+                                                ? IDM_EFFECT_DUST
+                                                : (input.tool.active_tool
+                                                              == tools::kInteractionEffectAlphaGradient
+                                                          ? IDM_EFFECT_ALPHA_GRADIENT
+                                                          : 0U)))));
+    if (effect_command != 0U) {
+        SetChecked(states, effect_command, true);
+    }
     SetChecked(states, IDM_EFFECT_ALPHA_VIEW, input.effects.alpha_view);
 }
 

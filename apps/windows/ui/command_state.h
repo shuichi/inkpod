@@ -30,7 +30,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 273U;
+inline constexpr std::size_t kProductionCommandStateCount = 274U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -84,7 +84,9 @@ struct ToolCommandStateInput {
     InkpodPlaneKind active_plane{INKPOD_PLANE_MAIN_LINE};
     InkpodFillOperation fill_operation{INKPOD_FILL_SEED};
     InkpodVectorEraseMode vector_erase_mode{INKPOD_VECTOR_ERASE_PARTIAL};
+    InkpodVectorSelectionMode vector_selection_mode{INKPOD_VECTOR_SELECT_TOUCHING};
     bool vector_stroke_plane{};
+    bool palette_visible{};
 };
 
 struct ColorCommandStateInput {

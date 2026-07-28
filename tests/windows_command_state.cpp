@@ -22,6 +22,7 @@ using inkpod::windows::ui::IsCommandEnabled;
 using inkpod::windows::ui::MenuCommandCatalog;
 using inkpod::windows::ui::kProductionCommandStateCount;
 using inkpod::windows::ui::tools::HandleActivePlaneTransition;
+using inkpod::windows::ui::tools::kInteractionEffectGradient;
 using inkpod::windows::ui::tools::kInteractionVectorLine;
 
 bool SameStates(const CommandStateSet& left, const CommandStateSet& right) noexcept {
@@ -108,13 +109,16 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
     const auto* save = FindShortcutSequence(shortcuts, IDM_FILE_SAVE);
     const auto* pencil = FindShortcutSequence(shortcuts, IDM_TOOL_PENCIL);
     const auto* batch = FindShortcutSequence(shortcuts, IDM_WINDOW_BATCH);
+    const auto* tool_palette =
+        FindShortcutSequence(shortcuts, IDM_WINDOW_TOOL_PALETTE);
     return save != nullptr && save->stroke_count == 1U
         && save->strokes[0].virtual_key == static_cast<std::uint32_t>('S')
         && save->strokes[0].modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL
         && pencil != nullptr && pencil->stroke_count == 1U
         && pencil->strokes[0].virtual_key == static_cast<std::uint32_t>('P')
         && pencil->strokes[0].modifiers == 0U
-        && batch != nullptr && batch->stroke_count > 1U;
+        && batch != nullptr && batch->stroke_count > 1U
+        && tool_palette != nullptr && tool_palette->stroke_count == 3U;
 }
 
 } // namespace
@@ -131,6 +135,8 @@ int main() {
         || IsCommandEnabled(states, IDM_SELECTION_ALL)
         || IsCommandEnabled(states, IDM_FILTER_INVERT)
         || IsCommandEnabled(states, IDM_BATCH_ADD_COLOR_REPLACE)
+        || !IsCommandEnabled(states, IDM_WINDOW_TOOL_PALETTE)
+        || IsCommandChecked(states, IDM_WINDOW_TOOL_PALETTE)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
         return 1;
     }
@@ -162,10 +168,14 @@ int main() {
 
     inputs.tool.vector_stroke_plane = true;
     inputs.tool.active_tool = kInteractionVectorLine;
+    inputs.tool.vector_selection_mode = INKPOD_VECTOR_SELECT_FILL_BOUNDARY;
+    inputs.tool.palette_visible = true;
     inputs.selection_view.active_tool = kInteractionVectorLine;
     states = ComputeCommandStates(inputs);
     if (!IsCommandEnabled(states, IDM_VECTOR_LINE)
-        || !IsCommandChecked(states, IDM_VECTOR_LINE)) {
+        || !IsCommandChecked(states, IDM_VECTOR_LINE)
+        || !IsCommandChecked(states, IDM_VECTOR_SELECT_FILL_BOUNDARY)
+        || !IsCommandChecked(states, IDM_WINDOW_TOOL_PALETTE)) {
         return 4;
     }
     inputs.tool.vector_stroke_plane = false;
@@ -173,6 +183,14 @@ int main() {
     if (IsCommandEnabled(states, IDM_VECTOR_LINE)
         || inputs.tool.active_tool != kInteractionVectorLine) {
         return 5;
+    }
+
+    inputs.effects.color_plane_active = true;
+    inputs.tool.active_tool = kInteractionEffectGradient;
+    states = ComputeCommandStates(inputs);
+    if (!IsCommandEnabled(states, IDM_EFFECT_GRADIENT)
+        || !IsCommandChecked(states, IDM_EFFECT_GRADIENT)) {
+        return 10;
     }
 
     ToolUiState tools{};

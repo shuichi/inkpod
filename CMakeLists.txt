@@ -254,6 +254,8 @@ if(WIN32)
         apps/windows/ui/dialogs/basic_dialogs.cpp
         apps/windows/ui/dialogs/batch_dialog.cpp
         apps/windows/ui/dialogs/effects_dialogs.cpp
+        apps/windows/ui/dialogs/tool_palette.cpp
+        apps/windows/ui/dialogs/tool_palette.h
         apps/windows/ui/panes/document_panes.cpp
         apps/windows/ui/panes/color_panes.cpp
         apps/windows/ui/tools/view_controller.cpp
@@ -270,6 +272,8 @@ if(WIN32)
         apps/windows/ui/shortcut_controller.h
         apps/windows/ui/effects_controller.cpp
         apps/windows/ui/batch_controller.cpp
+        apps/windows/ui/palette_window.cpp
+        apps/windows/ui/palette_window.h
         apps/windows/ui/main_window.cpp
         apps/windows/ui/main_window_runtime.cpp
         apps/windows/ui/main_window_runtime.h

@@ -84,11 +84,20 @@ coordinate document replacement; callbacks and helpers receive narrow state,
 not the complete context. Cached IDs and metadata support presentation only and
 are not a C++ document model.
 
-The fixed command-state catalog assigns all 273 production commands exactly one
+The fixed command-state catalog assigns all 274 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
 toolbar; every user command remains reachable through a menu leaf.
+
+The Tools palette is an owned top-level `WS_EX_TOOLWINDOW`, not a child or
+topmost window. Its 37 text-only pushlike check buttons flatten the Tools menu
+while forwarding the same command IDs to the explicitly retained main window.
+The cached command-state result drives both menu and button enabled/checked
+state. Closing hides the palette; shutdown saves a versioned `WINDOWPLACEMENT`
+under the per-user Inkpod settings key, and startup validates it against current
+monitor work areas before `SetWindowPlacement`. Palette DPI, scrolling, native
+font replacement, and dialog keyboard routing stay on the UI thread.
 
 The six-part status bar reports tool/plane, zoom/view flags, coordinates,
 RGBA/selection, paper/DPI, and task/shortcut/dirty state. Document tabs use the

@@ -48,6 +48,7 @@
 #include "ui/batch_controller.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
+#include "ui/palette_window.h"
 
 #include "app/app_smoke.h"
 
@@ -165,6 +166,122 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
         return 29;
     }
+    if (state.tools.palette == nullptr
+        || ToolPaletteEntries().size() != kToolPaletteEntryCount
+        || GetDlgItem(state.tools.palette, IDM_TOOL_PENCIL) == nullptr
+        || GetDlgItem(state.tools.palette, IDM_EFFECT_ALPHA_VIEW) == nullptr) {
+        return 727;
+    }
+    const auto palette_style = static_cast<DWORD>(
+        GetWindowLongPtrW(state.tools.palette, GWL_STYLE));
+    const auto palette_extended_style = static_cast<DWORD>(
+        GetWindowLongPtrW(state.tools.palette, GWL_EXSTYLE));
+    constexpr DWORD required_palette_style =
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
+    if ((palette_style & required_palette_style) != required_palette_style
+        || (palette_style & WS_CHILD) != 0U
+        || (palette_extended_style & WS_EX_TOOLWINDOW) == 0U
+        || (palette_extended_style & (WS_EX_TOPMOST | WS_EX_NOACTIVATE)) != 0U
+        || GetWindow(state.tools.palette, GW_OWNER) != state.windows.window
+        || IsWindowVisible(state.tools.palette) != FALSE
+        || GetMenuState(menu, IDM_WINDOW_TOOL_PALETTE, MF_BYCOMMAND)
+            == static_cast<UINT>(-1)) {
+        return 728;
+    }
+    RECT palette_bounds{};
+    const RECT unavailable_bounds{1'000'000, 1'000'000, 1'000'400, 1'000'600};
+    WINDOWPLACEMENT placement{};
+    placement.length = sizeof(placement);
+    if (GetWindowRect(state.tools.palette, &palette_bounds) == FALSE
+        || !PaletteRectIntersectsCurrentMonitor(palette_bounds)
+        || PaletteRectIntersectsCurrentMonitor(unavailable_bounds)
+        || GetWindowPlacement(state.tools.palette, &placement) == FALSE
+        || SetWindowPlacement(state.tools.palette, &placement) == FALSE) {
+        return 729;
+    }
+    SetWindowPos(
+        state.windows.window,
+        nullptr,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER
+            | SWP_SHOWWINDOW);
+    if (IsWindowVisible(state.windows.window) == FALSE) {
+        return 739;
+    }
+    if (PaletteWindowIsShown(state.tools.palette)) {
+        if (SendMessageW(
+                state.windows.window,
+                WM_COMMAND,
+                IDM_WINDOW_TOOL_PALETTE,
+                0) != 1
+            || PaletteWindowIsShown(state.tools.palette)) {
+            return 741;
+        }
+    }
+    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_WINDOW_TOOL_PALETTE, 0) != 1) {
+        return 730;
+    }
+    if (!PaletteWindowIsShown(state.tools.palette)) {
+        return 740;
+    }
+    if (IsWindowVisible(state.tools.palette) == FALSE) {
+        return 736;
+    }
+    if ((GetMenuState(menu, IDM_WINDOW_TOOL_PALETTE, MF_BYCOMMAND) & MF_CHECKED) == 0U) {
+        return 737;
+    }
+    if (!ToolPaletteMatchesCommandState(
+            state.tools.palette,
+            state.command_states)) {
+        return 738;
+    }
+    const HWND brush_button = GetDlgItem(state.tools.palette, IDM_TOOL_BRUSH);
+    if (brush_button == nullptr
+        || (static_cast<DWORD>(GetWindowLongPtrW(brush_button, GWL_STYLE))
+                & BS_TYPEMASK)
+            != BS_CHECKBOX) {
+        return 731;
+    }
+    SetFocus(brush_button);
+    SendMessageW(brush_button, BM_CLICK, 0, 0);
+    if (state.tools.active_tool != INKPOD_TOOL_BRUSH
+        || (GetMenuState(menu, IDM_TOOL_BRUSH, MF_BYCOMMAND) & MF_CHECKED) == 0U
+        || SendMessageW(brush_button, BM_GETCHECK, 0, 0) != BST_CHECKED
+        || !CommandSurfacesMatchComputedState(state)) {
+        return 732;
+    }
+    const UINT palette_dpi = GetDpiForWindow(state.tools.palette);
+    if (GetWindowRect(state.tools.palette, &palette_bounds) == FALSE) {
+        return 733;
+    }
+    SendMessageW(
+        state.tools.palette,
+        WM_DPICHANGED,
+        MAKELPARAM(palette_dpi, palette_dpi),
+        reinterpret_cast<LPARAM>(&palette_bounds));
+    if (GetWindowRect(state.tools.palette, &palette_bounds) == FALSE
+        || !PaletteRectIntersectsCurrentMonitor(palette_bounds)) {
+        return 733;
+    }
+    const HWND pencil_button = GetDlgItem(state.tools.palette, IDM_TOOL_PENCIL);
+    if (pencil_button == nullptr) {
+        return 734;
+    }
+    SendMessageW(pencil_button, BM_CLICK, 0, 0);
+    SendMessageW(state.tools.palette, WM_CLOSE, 0, 0);
+    if (state.tools.active_tool != INKPOD_TOOL_PENCIL
+        || IsWindow(state.tools.palette) == FALSE
+        || IsWindowVisible(state.tools.palette) != FALSE
+        || (GetMenuState(menu, IDM_WINDOW_TOOL_PALETTE, MF_BYCOMMAND) & MF_CHECKED) != 0U
+        || !ToolPaletteMatchesCommandState(
+            state.tools.palette,
+            state.command_states)) {
+        return 735;
+    }
+    ShowWindow(state.windows.window, SW_HIDE);
     inkpod::windows::ui::LayoutMainChrome(state.windows, false, 800, 600);
     RECT tab_bounds{};
     RECT canvas_layout_bounds{};
