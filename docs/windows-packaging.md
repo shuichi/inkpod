@@ -40,10 +40,14 @@ Every Windows CMake build now assembles an unsigned package through the Windows
 SDK `MakeAppx` tool. The artifact is written to
 `build/<preset>/package/inkpod-<version>-<architecture>.msix` and contains `inkpod.exe`, the
 manifest, generated PNG assets, `LICENSE.txt`, `ThirdPartyNotices.txt`, and the
-MSVC toolchain's matching x64 or ARM64 app-local CRT DLLs required by the `/MD` executable. The
-runtime DLLs are explicit CMake dependencies, so changing one rebuilds the
-package while an unchanged second build remains a no-op. `inkpod_msix` can also
-be selected explicitly as a build target.
+MSVC toolchain's matching x64 or ARM64 app-local CRT DLLs required by the `/MD`
+executable. CRT discovery uses the developer environment's `VCToolsRedistDir`
+instead of assuming that the compiler toolset and redistributable directory
+have identical version names. If that variable is unavailable, CMake accepts
+the compiler-version directory or a single unambiguous installed redist and
+rejects multiple candidates. The runtime DLLs are explicit CMake dependencies,
+so changing one rebuilds the package while an unchanged second build remains a
+no-op. `inkpod_msix` can also be selected explicitly as a build target.
 
 `inkpod_windows_msix_payload_smoke` unpacks the produced artifact with `MakeAppx`
 without elevation and verifies the executable, identity/version/architecture, license,

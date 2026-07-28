@@ -320,6 +320,85 @@ fn review_rejects_empty_or_type_mismatched_target_selectors() {
 }
 
 #[test]
+fn review_operation_item_counts_enforce_closed_bounds() {
+    let validate_kind = |kind| {
+        validate_operation(&BatchOperation {
+            version: BATCH_OPERATION_VERSION,
+            enabled: true,
+            configure_each_run: false,
+            target: Some(BatchTargetSelector::color_plane()),
+            kind,
+        })
+    };
+    let assert_invalid = |kind, message| {
+        assert_eq!(
+            validate_kind(kind),
+            Err(CoreError::InvalidArgument(message))
+        );
+    };
+
+    let pair = BatchColorPair {
+        enabled: true,
+        old: PixelValue::Rgba([0; 4]),
+        new: PixelValue::Rgba([1, 2, 3, 4]),
+    };
+    for count in [1, MAX_BATCH_COLOR_PAIRS] {
+        assert!(validate_kind(BatchOperationKind::ColorReplace(vec![pair.clone(); count])).is_ok());
+    }
+    for count in [0, MAX_BATCH_COLOR_PAIRS + 1] {
+        assert_invalid(
+            BatchOperationKind::ColorReplace(vec![pair.clone(); count]),
+            "batch color-pair count is outside bounds",
+        );
+    }
+
+    let seed = BatchSeed {
+        x: 0,
+        y: 0,
+        color: PixelValue::Rgba([0; 4]),
+        tolerance: 0,
+        gap_close: 0,
+        expected_source: None,
+    };
+    for count in [1, MAX_BATCH_SEEDS] {
+        assert!(
+            validate_kind(BatchOperationKind::ContinuousFill(vec![
+                seed.clone();
+                count
+            ]))
+            .is_ok()
+        );
+    }
+    for count in [0, MAX_BATCH_SEEDS + 1] {
+        assert_invalid(
+            BatchOperationKind::ContinuousFill(vec![seed.clone(); count]),
+            "batch fill-seed count is outside bounds",
+        );
+    }
+
+    for count in [1, MAX_BATCH_COLORS] {
+        assert!(
+            validate_kind(BatchOperationKind::Separation(BatchSeparation {
+                colors: vec![PixelValue::Rgba([0; 4]); count],
+                replacement: PixelValue::Rgba([1, 2, 3, 4]),
+                invert: false,
+            }))
+            .is_ok()
+        );
+    }
+    for count in [0, MAX_BATCH_COLORS + 1] {
+        assert_invalid(
+            BatchOperationKind::Separation(BatchSeparation {
+                colors: vec![PixelValue::Rgba([0; 4]); count],
+                replacement: PixelValue::Rgba([1, 2, 3, 4]),
+                invert: false,
+            }),
+            "batch separation color count is outside bounds",
+        );
+    }
+}
+
+#[test]
 fn review_current_scope_selects_the_open_file_instead_of_the_first_file() {
     let directory = temp_directory("current-file-scope");
     let first = directory.join("cell1.inkpod");

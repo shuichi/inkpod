@@ -67,26 +67,26 @@ pub(super) fn validate_operation(operation: &BatchOperation) -> Result<(), CoreE
         }
     }
     match &operation.kind {
-        BatchOperationKind::ColorReplace(pairs) => {
-            if pairs.is_empty() || pairs.len() > MAX_BATCH_COLOR_PAIRS {
-                return Err(CoreError::InvalidArgument(
-                    "batch color-pair count is outside bounds",
-                ));
-            }
+        BatchOperationKind::ColorReplace(pairs)
+            if pairs.is_empty() || pairs.len() > MAX_BATCH_COLOR_PAIRS =>
+        {
+            return Err(CoreError::InvalidArgument(
+                "batch color-pair count is outside bounds",
+            ));
         }
-        BatchOperationKind::ContinuousFill(seeds) => {
-            if seeds.is_empty() || seeds.len() > MAX_BATCH_SEEDS {
-                return Err(CoreError::InvalidArgument(
-                    "batch fill-seed count is outside bounds",
-                ));
-            }
+        BatchOperationKind::ContinuousFill(seeds)
+            if seeds.is_empty() || seeds.len() > MAX_BATCH_SEEDS =>
+        {
+            return Err(CoreError::InvalidArgument(
+                "batch fill-seed count is outside bounds",
+            ));
         }
-        BatchOperationKind::Separation(options) => {
-            if options.colors.is_empty() || options.colors.len() > MAX_BATCH_COLORS {
-                return Err(CoreError::InvalidArgument(
-                    "batch separation color count is outside bounds",
-                ));
-            }
+        BatchOperationKind::Separation(options)
+            if options.colors.is_empty() || options.colors.len() > MAX_BATCH_COLORS =>
+        {
+            return Err(CoreError::InvalidArgument(
+                "batch separation color count is outside bounds",
+            ));
         }
         BatchOperationKind::BoundaryAirbrush(effect)
             if effect.colors.len() < 2 || effect.colors.len() > MAX_BATCH_COLORS =>

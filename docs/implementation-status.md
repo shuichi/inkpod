@@ -37,6 +37,12 @@
   probe, Cargo's MSVC target triple, app-local CRT discovery, generated MSIX
   identity, artifact name, and payload verification instead of leaving those
   boundaries fixed to x64.
+- App-local CRT discovery now treats the MSVC developer environment's
+  `VCToolsRedistDir` as authoritative because hosted and installed Visual Studio
+  layouts can use different compiler-toolset and redistributable version
+  directory names. An unset environment falls back only to an exact-version or
+  single unambiguous installed redist, and a platform-independent CMake fixture
+  covers x64/ARM64, version mismatch, and both fallback paths.
 
 ## Post-M8 refactoring regression baseline
 
@@ -693,6 +699,7 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| Direct `verify_msvc_runtime_discovery.cmake`; macOS CMake configure and `ctest --output-on-failure`; `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features`; `git diff --check` | macOS ARM64, CMake 4.4.0, AppleClang 21, Rust 1.95.0 | Compiler/redist version mismatch (`14.44.35207`/`14.44.35112`), exact ARM64 fallback, and unique installed x64 fallback passed; full CMake configure and all 5 platform-independent CTests passed. Batch item-count validation uses match guards and covers 0/1/4,096/4,097 for color replacement, continuous fill, and separation. Formatting, zero-warning clippy, all 137 Rust tests plus doc-tests, and whitespace validation passed | 2026-07-28 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 ARM64, Rust 1.97.1 ARM64 MSVC | Formatting and zero-warning clippy passed; all 136 unit/integration tests plus doc-tests passed natively on ARM64 | 2026-07-28 |
 | `cmake --fresh/--build --preset windows-arm-{debug,release}`; `ctest --preset windows-arm-{debug,release} -E inkpod_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 ARM64, x64-hosted ARM64-target MSVC 19.51, Rust 1.97.1 ARM64 MSVC | ARM64 compiler probes, strict C11/C++20/Rust builds, app-local ARM64 CRT discovery, and `inkpod-0.1.0-arm64.msix` assembly passed. Assets/routes/state/frontend/ABI/application/D2D/package-payload tests passed 8/8 in Debug (34.11 s) and Release (6.70 s) | 2026-07-28 |
 | x86 Developer environment configure guard; x64 `cmake --fresh --preset windows-x64-release`; strict build and non-elevated CTest | Windows 11 x64, MSVC 19.51 | The reproduced `Hostx86/x86/cl.exe` configuration now stops during configure with an actionable x64/cache message; fresh `Hostx64/x64/cl.exe` configure, standard Release link/MSIX, and all 8 tests passed (4.01 s) | 2026-07-26 |

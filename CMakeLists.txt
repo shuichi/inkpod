@@ -195,6 +195,13 @@ add_test(
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_frontend_boundaries.cmake")
 
+add_test(
+    NAME inkpod_msvc_runtime_discovery
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            "-DINKPOD_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/msvc-runtime-discovery"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_msvc_runtime_discovery.cmake")
+
 add_library(inkpod_header_c11 OBJECT tests/header_c11.c)
 target_include_directories(inkpod_header_c11 PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
@@ -314,27 +321,15 @@ if(WIN32)
     get_filename_component(INKPOD_MSVC_FAMILY_DIR "${INKPOD_MSVC_VERSION_DIR}" DIRECTORY)
     get_filename_component(INKPOD_MSVC_TOOLS_DIR "${INKPOD_MSVC_FAMILY_DIR}" DIRECTORY)
     get_filename_component(INKPOD_VC_DIR "${INKPOD_MSVC_TOOLS_DIR}" DIRECTORY)
-    file(GLOB INKPOD_MSVC_CRT_DIRECTORIES
-        "${INKPOD_VC_DIR}/Redist/MSVC/${INKPOD_MSVC_VERSION}/${INKPOD_MSVC_REDIST_ARCHITECTURE}/Microsoft.VC*.CRT")
-    list(LENGTH INKPOD_MSVC_CRT_DIRECTORIES INKPOD_MSVC_CRT_DIRECTORY_COUNT)
-    if(NOT INKPOD_MSVC_CRT_DIRECTORY_COUNT EQUAL 1)
-        message(FATAL_ERROR
-            "Expected one ${INKPOD_MSVC_REDIST_ARCHITECTURE} MSVC CRT redist "
-            "directory for ${INKPOD_MSVC_VERSION}; "
-            "found ${INKPOD_MSVC_CRT_DIRECTORY_COUNT}")
-    endif()
-    list(GET INKPOD_MSVC_CRT_DIRECTORIES 0 INKPOD_MSVC_CRT_DIRECTORY)
+    include("${CMAKE_SOURCE_DIR}/cmake/InkpodMsvcRuntime.cmake")
+    inkpod_find_msvc_crt_directory(INKPOD_MSVC_CRT_DIRECTORY
+        VC_DIRECTORY "${INKPOD_VC_DIR}"
+        TOOLSET_VERSION "${INKPOD_MSVC_VERSION}"
+        ARCHITECTURE "${INKPOD_MSVC_REDIST_ARCHITECTURE}")
+    message(STATUS
+        "Using ${INKPOD_MSVC_REDIST_ARCHITECTURE} MSVC CRT: "
+        "${INKPOD_MSVC_CRT_DIRECTORY}")
     file(GLOB INKPOD_MSVC_RUNTIME_DLLS "${INKPOD_MSVC_CRT_DIRECTORY}/*.dll")
-    foreach(INKPOD_REQUIRED_RUNTIME IN ITEMS
-            msvcp140.dll
-            vcruntime140.dll
-            vcruntime140_1.dll)
-        if(NOT EXISTS "${INKPOD_MSVC_CRT_DIRECTORY}/${INKPOD_REQUIRED_RUNTIME}")
-            message(FATAL_ERROR
-                "MSVC CRT redist is missing ${INKPOD_REQUIRED_RUNTIME}: "
-                "${INKPOD_MSVC_CRT_DIRECTORY}")
-        endif()
-    endforeach()
     set(INKPOD_MSIX_PATH
         "${CMAKE_BINARY_DIR}/package/inkpod-${PROJECT_VERSION}-${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}.msix")
     add_custom_command(
