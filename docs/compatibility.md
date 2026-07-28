@@ -65,11 +65,11 @@ Representative current platform verification is summarized in
 
 | Item                  | Status  | Fixture / oracle |       Read |      Write | Round-trip | Reason                                                                     |
 | --------------------- | ------- | ---------------: | ---------: | ---------: | ---------: | -------------------------------------------------------------------------- |
-| DGA binary codec | Unknown | 0 fixtures | 0 variants | 0 variants | 0 variants | No rights-cleared fixture and independent oracle |
-| CEL binary codec | Unknown | 0 fixtures | 0 variants | 0 variants | 0 variants | No rights-cleared fixture and independent oracle |
-| Legacy palette preset | Unknown | 0 fixtures | 0 variants | 0 variants | 0 variants | Byte layout is not defined by the internal specification |
-| Legacy chart preset | Unknown | 0 fixtures | 0 variants | 0 variants | 0 variants | Byte layout is not defined by the internal specification |
-| Legacy filter preset | Unknown | 0 fixtures | 0 variants | 0 variants | 0 variants | Byte layout and proprietary kernel semantics are not independently defined |
+| DGA binary codec      | Unknown |       0 fixtures | 0 variants | 0 variants | 0 variants | No rights-cleared fixture and independent oracle                           |
+| CEL binary codec      | Unknown |       0 fixtures | 0 variants | 0 variants | 0 variants | No rights-cleared fixture and independent oracle                           |
+| Legacy palette preset | Unknown |       0 fixtures | 0 variants | 0 variants | 0 variants | Byte layout is not defined by the internal specification                   |
+| Legacy chart preset   | Unknown |       0 fixtures | 0 variants | 0 variants | 0 variants | Byte layout is not defined by the internal specification                   |
+| Legacy filter preset  | Unknown |       0 fixtures | 0 variants | 0 variants | 0 variants | Byte layout and proprietary kernel semantics are not independently defined |
 
 No legacy manual, image, icon, wording, proprietary binary assumption, or
 third-party artwork was used. The matrix records the measured zero scope rather

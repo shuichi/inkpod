@@ -408,19 +408,31 @@ fn acceptance_unverified_legacy_codecs_remain_unknown() {
         "Legacy chart preset",
         "Legacy filter preset",
     ] {
-        let row = compatibility
+        let cells = compatibility
             .lines()
-            .find(|line| line.starts_with(&format!("| {item} |")))
+            .filter_map(|line| {
+                let row = line.trim().strip_prefix('|')?.strip_suffix('|')?;
+                Some(row.split('|').map(str::trim).collect::<Vec<_>>())
+            })
+            .find(|cells| cells.first() == Some(&item))
             .unwrap_or_else(|| panic!("compatibility matrix is missing {item}"));
-        assert!(
-            row.contains("| Unknown |")
-                && row.contains("| 0 fixtures |")
-                && row.contains("| 0 variants | 0 variants | 0 variants |"),
-            "unverified legacy row must record zero measured read/write/round-trip scope: {row}"
+        assert_eq!(
+            cells.get(1..6),
+            Some(
+                [
+                    "Unknown",
+                    "0 fixtures",
+                    "0 variants",
+                    "0 variants",
+                    "0 variants",
+                ]
+                .as_slice()
+            ),
+            "unverified legacy row must record zero measured read/write/round-trip scope: {cells:?}"
         );
         assert!(
-            !row.contains("| Verified |"),
-            "unverified legacy codec must not be marked Verified: {row}"
+            !cells.contains(&"Verified"),
+            "unverified legacy codec must not be marked Verified: {cells:?}"
         );
     }
 }
