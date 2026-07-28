@@ -4,7 +4,7 @@
 
 この指示はリポジトリ全体に適用する。inkpod は、旧 PaintMan のアニメーション彩色ワークフローを、長期保守可能なクロスプラットフォーム設計で再構築するプロジェクトである。
 
-このファイルには、全タスクに常時適用する技術境界、品質基準、作業規律だけを置く。機能仕様、GUI メニュー、要件 ID、M0–M8 の内容と acceptance criteria は `PROMPT.md` を正本とし、ここへ複製しない。実装前に `PROMPT.md` の関連節と `docs/implementation-status.md` を読む。
+このファイルには、全タスクに常時適用する技術境界、品質基準、作業規律だけを置く。維持する機能、GUI メニュー、挙動契約、要件 ID、プロジェクト固有の実装指針は `PROMPT.md` を正本とし、ここへ複製しない。実装前に `PROMPT.md` の関連節を読み、現在状態や既知差分に関係する場合だけ `docs/implementation-status.md` と `docs/compatibility.md` の該当箇所を確認する。
 
 指示が競合する場合の優先順位は、今回のユーザー指示、`AGENTS.md`、`PROMPT.md`、テスト済みの既存契約の順とする。外部の旧製品マニュアルや画像を通常の実装時に参照せず、未確定の proprietary binary 仕様を推測で互換と称しない。旧製品の画像、アイコン、文面、商標表示を複製しない。
 
@@ -149,22 +149,22 @@ ctest --preset <windows-test-preset>
 
 機能を完了扱いできるのは、次をすべて満たす場合だけである。
 
-- UI から Core まで動く縦切り、または明示された Core-only milestone になっている
+- UI から Core まで動く縦切り、または明示された Core-only scope になっている
 - success、no-op、invalid、cancel、Undo/Redo、必要な save/reopen をテストしている
 - ABI ownership、lifetime、thread 規則を文書化している
 - `docs/compatibility.md` の requirement、状態、test、既知差分を更新している
-- `docs/implementation-status.md` の acceptance criteria と検証記録を更新している
+- 現在状態、既知差分、または代表的な直近検証が変わった場合は `docs/implementation-status.md` を更新している
 
-互換状態は `Not started`、`In progress`、`Experimental`、`Verified` のいずれかとし、test がない機能を `Verified` にしない。
+互換状態は `Not started`、`In progress`、`Experimental`、`Verified`、`Blocked` のいずれかとし、外部形式の実測範囲には `Unknown` を使用できる。test がない機能を `Verified` にしない。
 
 ## 10. エージェントの作業手順
 
-1. `git status`、既存差分、`PROMPT.md`、status 文書、対象 code/test を確認する。
-2. ユーザー変更を保護し、`PROMPT.md` と status から依存関係を満たす最初の未完了 milestone を選ぶ。
+1. `git status`、既存差分、`PROMPT.md` の関連節、対象 code/test を確認し、現在状態や既知差分が関係する場合だけ status/compatibility の該当箇所を読む。
+2. ユーザー変更を保護し、今回の依頼に対応する `PROMPT.md` の機能・要件 ID と、status/compatibility に記録された現在状態・既知差分を確認する。
 3. 大きな変更を model/ABI、Core、Windows adapter、test、document の小さな縦切りへ分ける。
-4. 短い計画を示した後、計画だけで止まらず現在 milestone を実装・検証する。
+4. 短い計画を示した後、計画だけで止まらず今回の scope を実装・検証する。
 5. 仕様が決められない場合は `Unknown` として fixture、期待出力、ユーザー判断の必要性を記録し、互換挙動を捏造しない。
-6. format、lint、test、build を実行し、status/compatibility 文書を更新する。
+6. format、lint、test、build を実行し、現在状態、要件 status、既知差分、代表的検証が変わった場合だけ status/compatibility 文書を更新する。
 7. 最終報告では、利用者向け挙動、重要な設計判断、変更 file、検証結果、未検証事項、既知差分を簡潔に示す。
 
 commit、push、PR、外部公開はユーザーが明示的に依頼した場合だけ行う。

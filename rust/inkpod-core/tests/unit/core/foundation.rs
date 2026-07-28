@@ -463,6 +463,87 @@ fn paint_001_brush_eraser_auto_erase_and_pressure_are_transactional() {
 }
 
 #[test]
+fn paint_001_magnified_device_click_matches_the_locator_pixel_cell() {
+    let mut core = Core::new();
+    core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.apply_view(ViewCommand::ZoomAt {
+        factor: 64.0,
+        device_x: 0.0,
+        device_y: 0.0,
+    })
+    .unwrap();
+
+    let erase_at_device = |core: &mut Core, x: f32, y: f32| {
+        let locator = core
+            .locator_sample(None, f64::from(x), f64::from(y))
+            .unwrap();
+        let mut stroke = line_stroke(vec![StrokeSample {
+            x,
+            y,
+            pressure: 1.0,
+        }]);
+        stroke.auto_erase = true;
+        stroke.coordinate_space = CoordinateSpace::Device;
+        core.apply_stroke(&stroke).unwrap();
+        locator
+    };
+
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 3.0,
+        y: 3.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let locator = erase_at_device(&mut core, 3.75 * 64.0, 3.75 * 64.0);
+    assert_eq!((locator.document_x, locator.document_y), (3, 3));
+    assert_eq!(locator.color, Some(PixelValue::Rgba([0, 0, 0, 255])));
+    assert_eq!(
+        core.plane_pixel(ActivePlane::MainLine, 3, 3).unwrap(),
+        PixelValue::Binary(0)
+    );
+    assert_eq!(
+        core.plane_pixel(ActivePlane::MainLine, 4, 4).unwrap(),
+        PixelValue::Binary(0)
+    );
+
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 7.0,
+        y: 7.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let locator = erase_at_device(&mut core, 7.75 * 64.0, 7.75 * 64.0);
+    assert_eq!((locator.document_x, locator.document_y), (7, 7));
+    assert_eq!(
+        core.plane_pixel(ActivePlane::MainLine, 7, 7).unwrap(),
+        PixelValue::Binary(0)
+    );
+
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 2.0,
+        y: 5.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    core.apply_view(ViewCommand::Flip {
+        axis: MirrorAxis::Horizontal,
+    })
+    .unwrap();
+    core.apply_view(ViewCommand::Flip {
+        axis: MirrorAxis::Vertical,
+    })
+    .unwrap();
+    let locator = erase_at_device(&mut core, (8.0 - 2.75) * 64.0, (8.0 - 5.75) * 64.0);
+    assert_eq!((locator.document_x, locator.document_y), (2, 5));
+    assert_eq!(
+        core.plane_pixel(ActivePlane::MainLine, 2, 5).unwrap(),
+        PixelValue::Binary(0)
+    );
+    assert_eq!(core.build_snapshot().tile_count(), 0);
+}
+
+#[test]
 fn abi_002_snapshot_composites_visible_main_line_over_color() {
     let mut core = Core::new();
     core.new_cell(64, 64, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)

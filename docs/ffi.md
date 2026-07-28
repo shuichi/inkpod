@@ -120,16 +120,16 @@ release 後は、handle から得た tile、pixel、guide、vector、文字列�
 
 主な owner と borrowed view の関係は次のとおりである。
 
-| owner | 生成 | borrowed view の有効期間 | 解放 |
-|---|---|---|---|
-| Core | create 成功から destroy まで | Core pointer は owner thread の call 中だけ利用 | Core owner thread |
-| snapshot | build 成功から release まで | tile/pixel/transform/guide/vector view は release まで | 外部同期した任意 thread |
-| clipboard | copy/create 成功から release まで | raster export は caller buffer。内部 payload は公開しない | 外部同期した任意 thread |
-| byte buffer | export 成功から release まで | byte span は release まで | 外部同期した任意 thread |
-| encoded sequence | export 成功から release まで | item name/byte span は release まで | 外部同期した任意 thread |
-| task / batch task | create 成功から release まで | query 値は caller へのコピー | Core call 終了後に任意 thread |
-| batch graph | create/load 成功から release まで | execute/preview 中は graph が生存する必要がある | 外部同期した任意 thread |
-| batch preview/report | Core call の出力から release まで | item の UTF-8 span は親 handle の release まで | 外部同期した任意 thread |
+| owner                | 生成                              | borrowed view の有効期間                                  | 解放                          |
+| -------------------- | --------------------------------- | --------------------------------------------------------- | ----------------------------- |
+| Core                 | create 成功から destroy まで      | Core pointer は owner thread の call 中だけ利用           | Core owner thread             |
+| snapshot             | build 成功から release まで       | tile/pixel/transform/guide/vector view は release まで    | 外部同期した任意 thread       |
+| clipboard            | copy/create 成功から release まで | raster export は caller buffer。内部 payload は公開しない | 外部同期した任意 thread       |
+| byte buffer          | export 成功から release まで      | byte span は release まで                                 | 外部同期した任意 thread       |
+| encoded sequence     | export 成功から release まで      | item name/byte span は release まで                       | 外部同期した任意 thread       |
+| task / batch task    | create 成功から release まで      | query 値は caller へのコピー                              | Core call 終了後に任意 thread |
+| batch graph          | create/load 成功から release まで | execute/preview 中は graph が生存する必要がある           | 外部同期した任意 thread       |
+| batch preview/report | Core call の出力から release まで | item の UTF-8 span は親 handle の release まで            | 外部同期した任意 thread       |
 
 snapshot の raster tile storage は snapshot 側で独立して参照計数されるため、snapshot は作成元 Core より
 長く生存できる。ただし通常の shutdown では Renderer queue を drain して snapshot を先に解放すると、
@@ -176,11 +176,11 @@ status = inkpod_clipboard_render_rgba8(clipboard, &output);
 
 Core が持つ transient editing state は、committed document と分離される。
 
-| 状態 | 開始／更新中の committed revision・dirty・Undo | snapshot | 完了 |
-|---|---|---|---|
-| live stroke | begin/append では不変 | stroke preview を観測できる | end が実変更を高々 1 Undo 単位で commit。cancel は完全復元 |
-| filter/dust preview | begin/update では不変 | transient preview revision を観測できる | apply が 1 Undo 単位で commit。cancel は original base を保持 |
-| floating paste | begin/transform では不変 | floating preview を観測できる | commit が高々 1 Undo 単位。cancel は base を保持 |
+| 状態                | 開始／更新中の committed revision・dirty・Undo | snapshot                                | 完了                                                          |
+| ------------------- | ---------------------------------------------- | --------------------------------------- | ------------------------------------------------------------- |
+| live stroke         | begin/append では不変                          | stroke preview を観測できる             | end が実変更を高々 1 Undo 単位で commit。cancel は完全復元    |
+| filter/dust preview | begin/update では不変                          | transient preview revision を観測できる | apply が 1 Undo 単位で commit。cancel は original base を保持 |
+| floating paste      | begin/transform では不変                       | floating preview を観測できる           | commit が高々 1 Undo 単位。cancel は base を保持              |
 
 1 Core に各 state は高々 1 個であり、live stroke と filter/dust preview は同時に存在できない。
 競合する文書編集、履歴移動、保存、open、layer/plane 操作、別 preview 開始は
@@ -194,16 +194,16 @@ Core は session を無効化するため、frontend は stroke を打ち切り�
 `document_revision` は committed document の識別に使う。view-only 状態は `view_revision`、filter/stroke
 preview の描画更新は snapshot 側の transient revision で区別する。
 
-| 操作の種類 | document revision | dirty | Undo |
-|---|---|---|---|
-| query、snapshot accessor、task、shortcut、view-only 操作 | 不変 | 不変 | 不変 |
-| stroke begin/append、preview begin/update、floating transform | 不変 | 不変 | 不変 |
-| stroke end、preview apply、floating commit | 実変更時に 1 回進む | dirty | 高々 1 単位 |
-| 直接の文書編集 | 実変更時に 1 回進む | dirty | 原則 1 単位 |
-| Undo/Redo/history jump | 結果状態へ進む | savepoint との位置で再計算 | cursor を移動し item は増やさない |
-| 通常保存 | 不変 | 現在位置を savepoint として clean | 不変 |
-| autosave | 不変 | 不変 | 不変 |
-| new/open/import/recovery | 新しい文書情報が正本 | 戻り情報が正本 | 旧 history を引き継がない |
+| 操作の種類                                                    | document revision    | dirty                             | Undo                              |
+| ------------------------------------------------------------- | -------------------- | --------------------------------- | --------------------------------- |
+| query、snapshot accessor、task、shortcut、view-only 操作      | 不変                 | 不変                              | 不変                              |
+| stroke begin/append、preview begin/update、floating transform | 不変                 | 不変                              | 不変                              |
+| stroke end、preview apply、floating commit                    | 実変更時に 1 回進む  | dirty                             | 高々 1 単位                       |
+| 直接の文書編集                                                | 実変更時に 1 回進む  | dirty                             | 原則 1 単位                       |
+| Undo/Redo/history jump                                        | 結果状態へ進む       | savepoint との位置で再計算        | cursor を移動し item は増やさない |
+| 通常保存                                                      | 不変                 | 現在位置を savepoint として clean | 不変                              |
+| autosave                                                      | 不変                 | 不変                              | 不変                              |
+| new/open/import/recovery                                      | 新しい文書情報が正本 | 戻り情報が正本                    | 旧 history を引き継がない         |
 
 no-op の厳密な出力や revision は各関数の Doxygen 契約に従う。frontend は file timestamp ではなく、
 Core が返す document flags と savepoint に基づいて未保存状態を表示する。

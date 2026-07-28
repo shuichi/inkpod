@@ -13,7 +13,7 @@
 
 inkpod は、アニメーション彩色の作業工程を、長期保守しやすい構成で再設計するプロジェクトです。文書状態、画像処理、履歴、保存形式などをプラットフォーム非依存の Rust Core が担い、Windows 11 向けアプリは Win32、Direct3D 11、Direct2D でネイティブに動作します。
 
-M0〜M8 の縦切り実装と検証は完了しています。現在の詳しい実装状況、再公開を進めている一部のフローティングパレット、既知の差分については、[実装状況](docs/implementation-status.md)と[互換性一覧](docs/compatibility.md)を参照してください。
+主要な制作ワークフローは UI から Core まで実装・検証されています。現在の実装概要、再公開を進めている一部のフローティングパレット、既知の差分については、[実装状況](docs/implementation-status.md)と[互換性一覧](docs/compatibility.md)を参照してください。
 
 ## 主な機能
 
@@ -137,7 +137,7 @@ flowchart LR
 ## 仕様と開発情報
 
 - 開発時に常時適用する設計境界と品質基準: [開発ガイド](AGENTS.md)
-- 機能仕様、要件 ID、M0〜M8 の完了条件: [実装仕様](PROMPT.md)
+- 維持する機能、挙動契約、要件 ID、実装指針: [機能・実装仕様](PROMPT.md)
 - 要件ごとの実装状態と検証記録: [実装状況](docs/implementation-status.md)
 - 対応形式と互換性の範囲: [互換性一覧](docs/compatibility.md)
 

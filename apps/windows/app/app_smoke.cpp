@@ -3076,6 +3076,116 @@ int RunBatchWorkflowSmoke(AppContext& state) noexcept {
     return 0;
 }
 
+int RunMagnifiedRasterHitSmoke(AppContext& state) noexcept {
+    if (state.engine == nullptr
+        || CreateCell(state, 8U, 8U, 96'000U) != INKPOD_STATUS_OK) {
+        return 720;
+    }
+    state.tools.active_plane = INKPOD_PLANE_MAIN_LINE;
+    TransitionActiveTool(state.tools, state.windows.canvas, INKPOD_TOOL_PENCIL);
+
+    InkpodDocumentInfo blank = EmptyDocumentInfo();
+    InkpodDocumentInfo seeded = EmptyDocumentInfo();
+    const InkpodStrokeSample source{
+        sizeof(InkpodStrokeSample), 0U, 3.0F, 3.0F, 1.0F, 0U};
+    const InkpodStrokeInput stroke{
+        sizeof(InkpodStrokeInput),
+        INKPOD_TOOL_PENCIL,
+        INKPOD_PLANE_MAIN_LINE,
+        INKPOD_COORDINATE_SPACE_DOCUMENT,
+        INKPOD_FEATURE_NONE,
+        UINT32_C(0x000000ff),
+        1.0F,
+        &source,
+        1U,
+        sizeof(source)};
+    if (!QueryDocument(state, blank)
+        || state.engine->Invoke(
+               [stroke](InkpodCore* core) {
+                   InkpodStatus status = inkpod_core_set_active_plane(
+                       core, INKPOD_PLANE_MAIN_LINE);
+                   InkpodDispatchResult result{};
+                   result.struct_size = sizeof(result);
+                   if (status == INKPOD_STATUS_OK) {
+                       status = inkpod_core_apply_stroke(core, &stroke, &result);
+                   }
+                   return status;
+               },
+               true,
+               true) != INKPOD_STATUS_OK
+        || !QueryDocument(state, seeded)
+        || seeded.main_plane_checksum == blank.main_plane_checksum) {
+        return 721;
+    }
+
+    inkpod::renderer::CanvasDocumentBounds bounds{};
+    RECT client{};
+    if (GetClientRect(state.windows.canvas, &client) == FALSE
+        || SendMessageW(
+               state.windows.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1
+        || SendMessageW(
+               state.windows.canvas,
+               inkpod::renderer::kCanvasGetDocumentBounds,
+               0,
+               reinterpret_cast<LPARAM>(&bounds)) != 1) {
+        return 722;
+    }
+    const double initial_zoom = (bounds.right - bounds.left) / 8.0;
+    if (!std::isfinite(initial_zoom) || initial_zoom <= 0.0
+        || ApplyView(
+               state,
+               INKPOD_VIEW_ZOOM_AT,
+               64.0 / initial_zoom,
+               static_cast<double>(client.right - client.left) / 2.0,
+               static_cast<double>(client.bottom - client.top) / 2.0)
+            != INKPOD_STATUS_OK
+        || SendMessageW(
+               state.windows.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1) {
+        return 722;
+    }
+
+    bounds = {};
+    if (SendMessageW(
+            state.windows.canvas,
+            inkpod::renderer::kCanvasGetDocumentBounds,
+            0,
+            reinterpret_cast<LPARAM>(&bounds)) != 1) {
+        return 723;
+    }
+    const double zoom = (bounds.right - bounds.left) / 8.0;
+    if (std::abs(zoom - 64.0) > 0.001) {
+        return 724;
+    }
+    const int device_x = static_cast<int>(std::lround(bounds.left + 3.75 * zoom));
+    const int device_y = static_cast<int>(std::lround(bounds.top + 3.75 * zoom));
+    if (SendMessageW(
+            state.windows.canvas,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(device_x, device_y)) != 1
+        || SendMessageW(
+               state.windows.canvas,
+               WM_LBUTTONUP,
+               0,
+               MAKELPARAM(device_x, device_y)) != 1
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 725;
+    }
+
+    InkpodDocumentInfo erased = EmptyDocumentInfo();
+    return QueryDocument(state, erased)
+            && erased.document_revision == seeded.document_revision + 1U
+            && erased.main_plane_checksum == blank.main_plane_checksum
+        ? 0
+        : 726;
+}
+
 
 }  // namespace inkpod::windows::ui::runtime
 
@@ -3100,6 +3210,9 @@ int RunApplicationSmoke(app::AppContext& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunBatchWorkflowSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunMagnifiedRasterHitSmoke(state);
     }
     return exit_code;
 }

@@ -146,8 +146,8 @@ required version/flags/types/color space, zero or inconsistent IDs, duplicate
 tile coordinates, mismatched dimensions/pixel formats, truncation, overflow,
 checksum mismatch, duplicate tree/guide IDs, missing active/selection IDs,
 invalid UTF-8/control characters, guide positions outside the document,
- out-of-range opacity/grid values, stable-ID collisions across M3/M4/M5 state,
- and a tree
+out-of-range opacity/grid values, stable-ID collisions across document,
+light-table, and vector state, and a tree
 plane ID that does not correspond one-to-one with a persisted plane payload.
 
 ## Common raster formats
@@ -199,8 +199,8 @@ recovery. Only explicit discard or a successful normal save removes a recovery.
 The format layer also provides bounded modification-time comparison and
 idempotent discard helpers. Core, FFI, and Windows tests verify that recovery
 never changes the normal file bytes/checksum. Normal user-facing save/open
-progress and cancellation UI remain incomplete IO-001 work; this does not
-affect the M2 recovery acceptance case.
+progress and cancellation UI remain a known `IO-001` difference; recovery
+itself retains the contract above.
 
 ## Unknown formats
 
@@ -208,9 +208,9 @@ DGA, CEL, and legacy palette/chart/filter-preset layouts remain `Unknown`. No
 reader or writer is enabled without rights-cleared fixtures and an independent
 expected-result oracle.
 
-## M8 corrupted corpus
+## Corrupted-input regression corpus
 
-The checked-in `rust/inkpod-format/tests/corpus/m8` corpus covers forged native
+The checked-in `rust/inkpod-format/tests/corpus/corrupted` corpus covers forged native
 manifest and batch-body lengths plus malformed/oversized PNG, TIFF, TGA, and BMP
 headers. `acceptance_corrupted_file_corpus_is_bounded_and_non_destructive`
 passes each case through its public byte decoder and, where available, public

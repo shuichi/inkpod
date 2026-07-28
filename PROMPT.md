@@ -1,16 +1,12 @@
-# inkpod 実装用マスタープロンプト
+# inkpod 機能・実装仕様
 
-以下を、このリポジトリで実装を担当する Codex へのプロンプトとして使用する。この文書は一度きりの雛形生成指示ではなく、複数回実行して最初の未完了 milestone から作業を再開できるようにしてある。
+この文書は、inkpod が維持する利用者向け機能、挙動契約、互換性の境界、プロジェクト固有の実装指針を定める恒久仕様である。完了済み工程の進捗、過去の検証ログ、作業再開用プロンプトは含めない。
 
----
-
-あなたは inkpod の principal engineer として、このリポジトリのコードを実際に設計・実装・検証してください。inkpod は、旧 PaintMan のアニメーション彩色ワークフローと合理的な互換性を持つ、長期保守可能な新規アプリケーションです。
-
-最初にリポジトリ直下の `AGENTS.md` を全文読み、その規則をこのタスクの最上位の実装契約として扱ってください。計画や設計案だけで終了せず、コード、テスト、ビルド、必要な文書を変更し、現在の milestone を動く状態まで完成させてください。
+開発作業では、リポジトリ直下の `AGENTS.md` を作業規律と品質基準、本文書を機能と挙動の正本、`docs/architecture.md` を現在の構造、`docs/compatibility.md` を要件ごとの対応状況、`docs/implementation-status.md` を現在状態・既知差分・直近検証の要約として扱う。
 
 ## 目的
 
-最終的に次の構成を実現してください。
+inkpod は次の構成を維持する。
 
 - Rust Core: OS 非依存の文書モデル、画像処理、選択、履歴、連番、バッチ、永続化、描画スナップショット
 - C++/Win32: Windows 11 のアプリケーション、OS 入出力、スレッド、Common Controls、Rust adapter
@@ -458,25 +454,19 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - 未確定事項は新しい安全なnative仕様として定義し、`docs/compatibility.md`へ差分、式、rounding、fixture、testを記録する。
 - 実データとの厳密互換が必要になった時点で、権利上利用可能なfixtureと期待出力を追加し、既存native semanticsを壊さない独立codecとして実装する。
 
-## 今回の開始手順
+## 文書の使い分け
 
-次を順に実行してください。
-
-1. `git status --short`、tracked files、`AGENTS.md`、`docs/implementation-status.md`、既存の build/test 設定を確認する。
-2. ユーザーの未 commit 変更を特定し、関係ない変更を保護する。
-3. `AGENTS.md` の M0-M8 と status 文書を照合し、依存関係を満たす最初の未完了 milestone を今回の主対象にする。
-4. status 文書がまだなければ M0 から開始し、このプロンプトにある status template を作る。
-5. 変更前に短い実装計画を示すが、その後すぐ実装を開始する。
-6. 現在の milestone の acceptance criteria をすべて満たすまで、モデル、ABI、UI adapter、テスト、文書を縦に接続する。
-7. 現在の milestone が完了し、時間と安全な作業が残るなら次の milestone へ進む。後続を雑な stub で埋めるために品質を落とさない。
-
-ユーザーへ設計選択を聞くのは、`AGENTS.md`、この文書の内蔵機能仕様、既存テストから安全に決められず、選択肢によって保存形式や互換性を不可逆に変える場合だけにしてください。ローカルで確認できることを質問しないでください。
+- 新機能や挙動変更では、本文書の関連機能、要件 ID、禁止事項を先に確認する。
+- 実装済み範囲と未対応範囲は `docs/compatibility.md`、現在の主要差分と直近検証は `docs/implementation-status.md` で確認する。
+- 実ファイル、依存関係、所有権、thread 構成の詳細は `docs/architecture.md` を参照し、本文書へ一時的な構造や行数を複製しない。
+- 完了済み工程の根拠が必要な場合は Git 履歴と該当テストを使い、本文書や status 文書へ時系列ログを再追加しない。
+- 仕様と既存テストだけでは安全に決められず、選択によって保存形式や互換性を不可逆に変える場合は、実装前にユーザー判断を求める。
 
 ## 必須アーキテクチャ
 
 ### Rust workspace
 
-最低限、次の責務を分けてください。初期 milestone で空 crate を大量に作る必要はありませんが、循環依存や Win32 型の混入は許可しません。
+次の責務を分離し、循環依存や Win32 型の混入を許可しない。
 
 - `inkpod-image`: raster tile、pixel/color、selection、fill、filter、vector geometry
 - `inkpod-format`: `.inkpod` container、manifest、codec trait、common raster import/export
@@ -519,6 +509,18 @@ Canvas の view transform は client の物理 device pixel を基準とし、`d
 
 最低限、create、dispatch batch、stroke begin/append/end/cancel、snapshot build/view/release、error copy、destroy を提供してください。API 名を変える場合は `docs/ffi.md` へ理由と所有権を記録してください。
 
+### Windows frontend の内部境界
+
+- `main.cpp` は起動 mode の解釈と application runner の呼び出しに限定し、feature command、dialog、pane、smoke scenario を置かない。
+- `Application` は初期化、起動時 recovery、message loop、shutdown 順序を所有する。domain operation は実装しない。
+- main window procedure は `WM_*` の正規化と委譲に限定する。各 command ID は一つの feature owner だけが処理する。
+- command の enabled/checked state は feature ごとの副作用のない query から構築し、menu、shortcut、context menu、存在する palette control が同じ結果を使う。query 中に Core、tool、preview、document を変更しない。
+- controller は担当 state と typed input だけを受け取り、別 controller の private state を直接変更しない。Core 操作は `CoreEngine` を介して Core engine thread へ送る。
+- dialog entry point は dialog 固有の typed initial value と result を使う。dialog module は完全な application state、`CoreEngine`、Rust FFI を受け取らず、Cancel では caller state を変更しない。
+- top-level frontend state は lifetime、window、document shell、tool、view、pane、animation、effects、batch 等の owner state を合成する。完全な context を全関数へ渡したり、C++ 側に第二の document model を作ったりしない。
+- private declaration は `apps/windows` 以下に閉じ、公開 `include/inkpod` API へ出さない。汎用の `helpers.*`、`common.*`、`utils.*` や、全機能を知る巨大 controller を作らない。
+- `--smoke-test` と `--abi-smoke-test` は実製品の UI/Core/renderer/ABI 経路を検証する private entry point として維持する。
+
 ## 要件 ID
 
 `docs/compatibility.md` と test 名で次の ID を使い、実装状況を追跡してください。分割してもよいですが、意味を失わないでください。
@@ -531,6 +533,12 @@ Canvas の view transform は client の物理 device pixel を基準とし、`d
 - `ABI-002`: immutable batched render snapshot
 - `IO-001`: versioned `.inkpod`、atomic save、round-trip、recovery
 - `IO-002`: PNG/TIFF/TGA/BMP import/export と alpha/white background option
+- `WIN-001`: Windows shell、Help/About、DPI/theme/keyboard behavior
+- `COMPAT-001`: rights-cleared fixture/oracle に基づく legacy codec 実測範囲
+- `SAFE-001`: malformed/corrupted input の bounded rejection と非破壊性
+- `PERF-001`: large sparse/COW document と bounded dense workload の benchmark
+- `PKG-001`: x64/ARM64 self-contained MSIX payload と release signing 境界
+- `PORT-001`: Rust workspace の OS 非依存性と次 frontend の adapter gap
 
 ### Document and view
 
@@ -582,181 +590,6 @@ Canvas の view transform は client の物理 device pixel を基準とし、`d
 - `VECTOR-001`: path/variable width/fill/color-trace model と rendering
 - `VECTOR-002`: vector draw/erase/connect/width/select/convert
 
-## 実装 milestone と acceptance criteria
-
-### M0: 基盤
-
-実装内容:
-
-- root `CMakeLists.txt` と `CMakePresets.json`
-- Cargo workspace と最低限の Core/FFI crate
-- `include/inkpod/core_ffi.h`
-- Win32 app shell、manifest、resources、空の Canvas renderer
-- architecture、FFI、file format、compatibility、implementation status 文書
-- Linux/macOS の Rust test と Windows CMake build を含む CI
-
-Acceptance:
-
-- 非 Windows で Rust workspace の format/lint/test が通る
-- Windows CI で x64 Debug または Release が link し、app が main window と Canvas を生成できる
-- CMake の Rust target は入力/出力/byproduct/dependency を正しく宣言し、毎回無条件 rebuild しない
-- create -> empty snapshot -> release -> destroy の C/C++ smoke test が通る
-- Core/FFI error path に panic、leak、二重解放がない
-
-### M1: 保存できる描画 vertical slice
-
-実装内容:
-
-- 2 値彩色 CellDocument、主線 plane、彩色 plane、tiled raster
-- new/open/save/reopen、dirty/savepoint、Undo/Redo
-- raster snapshot と D2D tile cache
-- UI/Input、Core engine、Renderer の三スレッド構成と、描画中 preview snapshot
-- zoom/pan/fit/1:1
-- mouse/pen pencil、eraser、描画色、主線/彩色 mode switch
-- `.inkpod` v1 manifest と blob、atomic save
-
-Acceptance scenarios:
-
-1. 新規 1920x1080 文書を作り、主線へ stroke を描く。
-2. 彩色 mode へ切り替え、主線を表示したまま彩色 plane へ描く。
-3. 彩色操作後も主線 tile の checksum が変わらない。
-4. 1 stroke を 1 回 Undo/Redo できる。
-5. 保存、破棄、再読込後に layer/plane ID、pixel、frame metadata が一致する。
-6. pan/zoom は文書 revision を変更しない。
-7. 連続描画では sample を順序どおり batch/span で Core engine へ渡し、FFI は sample ごとの snapshot call を要求しない。
-8. pointer up 前に stroke preview が一回以上表示される。その間 document revision、dirty、Undo history は変化せず、end は一つの Undo 単位、cancel は開始前の状態へ完全復元する。
-9. UI/Input、Core engine、Renderer の thread ID が異なり、同じ client size/view なら DPI 変更の前後で document の device-pixel bounds が一致する。
-
-### M2: 中核彩色
-
-実装内容:
-
-- 2 値/階調彩色 plane semantics
-- seed fill、tolerance、selection、含み塗り、overflow abort、gap close
-- closed-region fill と fill extension
-- eyedropper sources、8/16 bit palette
-- 純白/透明 check、autosave/recovery
-
-必須 golden cases:
-
-- 完全な閉領域だけが塗られる
-- 1 pixel gap は設定 0 で漏れ、設定 1 で閉じる
-- overflow abort 有効時は外周到達を検出し、画像を 1 pixel も commit しない
-- 含み塗り対象の色トレース線は fill 色へ置換され、対象外の線は残る
-- 階調主線の表示 coverage と基本色スポイトが一致する
-- selection 外を変更しない
-- 16 bit 値が 8 bit へ暗黙量子化されない
-- autosave から復元しても通常保存ファイルを上書きしない
-
-### M3: 文書編集
-
-実装内容:
-
-- typed layer/plane 全操作
-- selection mask、wand/lasso/trace、boolean、expand/shrink、selection layer
-- typed clipboard、coordinate preserving paste、floating transform
-- frame、ruler、guide、grid、snap、flip
-- locator、multi-view、shortcut editor
-
-Acceptance:
-
-- layer reorder/duplicate/delete を Undo/Redo/save/reopen できる
-- 許可されない layer/plane 組合せを Core が拒否する
-- selection boolean は property test を通る
-- 異なる用紙サイズ間 paste でも document origin に対する座標を維持する
-- view flip と destructive mirror を別の履歴・revision として扱う
-- multi-view の一方で編集すると他方の次 snapshot に同じ revision が現れる
-
-### M4: 制作ワークフロー
-
-実装内容:
-
-- cut/cell sequence と thumbnail preview
-- reference frame と margin を含む用紙管理
-- light table、subpalette、前後セル、item swap
-- motion check と連番 import/export
-- PNG/TIFF/TGA/BMP 8/16 bit と alpha
-
-Acceptance:
-
-- 異寸法セルを reference frame で重ねる golden test
-- individual 50% x global 50% = effective 25% opacity
-- light table を fill boundary に使っても参照画像を変更しない
-- 前後セルを入れ替えても unsaved 文書を黙って破棄しない
-- sequence の欠番と自然順を正しく扱う
-- common format round-trip の bit depth/alpha/寸法/DPI を検証する
-
-### M5: ベクター
-
-実装内容:
-
-- cubic path、可変線幅、主線、色トレース、塗り topology
-- vector snapshot と D2D rendering
-- draw、erase partial/intersection/full、connect、width correction
-- vector selection modes と raster/vector conversion
-
-Acceptance:
-
-- zoom しても Core の vector geometry は変化しない
-- partial erase が他 stroke を変更しない
-- intersection erase の切断点が決定的
-- fill topology が save/reopen で維持される
-- rasterize 時の antialias、pixel center、scale を golden test で固定する
-
-### M6: 画像編集
-
-実装内容:
-
-- filter 一式、preview transaction、last filter
-- gradient、airbrush、boundary airbrush effect、blur、stamp
-- adjustment layer と alpha channel edit
-
-Acceptance:
-
-- Cancel で元 tile checksum に戻る
-- Apply は一つの Undo 単位
-- adjustment layer は元 plane を変更せず、順序変更で composite が変わる
-- 8/16 bit、alpha edge、selection edge を golden test する
-- boundary airbrush effect が一様領域を通常 blur のように崩さない
-
-### M7: バッチ
-
-実装内容:
-
-- versioned batch graph と設定保存
-- input selectors、ordered operations、output policy
-- continuous fill、color replacement、separation、visibility、line width、filters/effects
-- preview/dry-run、progress、cancel、failure report
-
-Acceptance:
-
-- dry-run はファイルを書かない
-- 既定 output policy は入力を上書きしない
-- cancel された現在ファイルに一時出力を残さない
-- 一件の失敗を記録し、policy に従って後続を継続または停止する
-- color replacement の old/new 入替を round-trip する
-- continuous fill の seed が別色へ移動した frame を preview で警告する
-
-### M8: 互換性拡張と仕上げ
-
-実装内容:
-
-- 利用可能な実 fixture に基づく legacy codec
-- fuzz、large document benchmark、memory/performance tuning
-- Windows installer/MSIX の選定と packaging
-- Core portability audit と次 frontend 向け API gap
-
-Acceptance:
-
-- legacy codec ごとに read/write/round-trip の実測範囲を compatibility 表へ記載
-- 未検証 codec を `Verified` にしない
-- corrupted file corpus で panic/OOM/overwrite を起こさない
-- CMake が自己完結した Windows package を生成し、非管理者 payload smoke で
-  executable、assets、license、notices、app-local runtime を検証できる
-- 管理者権限を使う package install／installed ABI smoke／uninstall は任意の
-  release-validation とし、M8 の完了条件には含めない
-- Rust crates の Windows import がゼロであることを自動検査する
-
 ## 実装の詳細規則
 
 ### 文書とメモリ
@@ -802,36 +635,14 @@ Acceptance:
 - completion 時に document revision を照合する。
 - cancel と app shutdown で worker lifetime を回収する。
 
-## status 文書の形式
+## 追跡文書の責務
 
-`docs/implementation-status.md` には少なくとも次を含めてください。
-
-```markdown
-# Implementation status
-
-## Current milestone
-
-- Milestone: M0
-- Status: In progress
-- Last verified commit/worktree state: ...
-
-## Requirements
-
-| ID | Status | Implementation | Tests | Notes |
-|---|---|---|---|---|
-| ARCH-001 | In progress | ... | ... | ... |
-
-## Verification
-
-| Command | Platform | Result | Date |
-|---|---|---|---|
-
-## Known gaps and unknowns
-
-- ...
-```
-
-状態は `Not started`, `In progress`, `Experimental`, `Verified`, `Blocked` に限定してください。`Blocked` は具体的な不足 fixture、toolchain、外部判断がある場合だけに使ってください。
+- `docs/compatibility.md` は要件 ID ごとの状態、実装、test、既知差分の正本とする。状態は `Not started`、`In progress`、`Experimental`、`Verified`、`Blocked`、外部形式の実測範囲には `Unknown` を使う。
+- `Verified` は対応する user-facing または明示的な Core-only 契約と再現可能な test がある場合だけに使う。source が移動しただけでは状態を変更しない。
+- `Blocked` は不足 fixture、利用不能な toolchain、外部判断など、具体的な解除条件がある場合だけに使う。
+- `docs/implementation-status.md` は現在の実装状態、既知差分、直近の代表的な検証だけを記録する。完了工程、時系列の作業ログ、古い test count を蓄積しない。
+- `docs/architecture.md` は現在の構造と ownership を説明する。移行前の行数、段階名、進捗表を設計規則として使わない。
+- 過去の詳細は Git 履歴に残し、常時参照する文書へ複製しない。
 
 ## テストと CI
 
@@ -874,26 +685,8 @@ golden image は自作の単純な幾何 fixture を使い、旧製品由来の�
 - 現在の milestone と無関係な全面 rewrite
 - test failure を削除、ignore、過大 tolerance で隠す
 
-## 今回の終了条件
+## 変更の完了条件
 
-最終目標は M0-M8 の全完了ですが、各実行では少なくとも「開始時点で最初に未完了だった milestone」を acceptance criteria まで完成させてください。大きすぎる場合も、その milestone 内でユーザーが実行できる縦切りを完成させ、残項目を具体的な requirement ID とテスト不足として status に残してください。計画だけで終了しないでください。
+変更範囲に対応する success、no-op、invalid、cancel、Undo/Redo、必要な save/reopen を検証し、UI を持つ機能は UI から Core までの実経路へ接続する。diff と既存テスト契約を見直し、未実行の platform 固有検証と理由を明記する。
 
-作業終了前に次を行ってください。
-
-1. diff を見直し、ユーザーの既存変更を壊していないことを確認する。
-2. format/lint/test/build を実行する。
-3. `docs/implementation-status.md` と `docs/compatibility.md` を実態どおり更新する。
-4. 未実行の Windows 専用検証と理由を明記する。
-5. 新規 codec/dependency/unsafe/ABI change があれば、設計と所有権を文書化する。
-
-最終報告は次の順で簡潔に記述してください。
-
-- 利用者が実際にできるようになったこと
-- 主要な設計・ファイル
-- 実行した検証と結果
-- 未対応・Experimental・Blocked の互換性項目
-- 次に着手すべき requirement ID
-
----
-
-このプロンプトを再実行したときは、既に `Verified` の milestone を最初から作り直さず、status とテストを根拠に最初の未完了項目から続行すること。
+要件の状態や既知差分が変わった場合だけ `docs/compatibility.md` を更新し、現在状態または代表的な最新検証が変わった場合だけ `docs/implementation-status.md` を更新する。新規 codec、dependency、`unsafe`、ABI、file-format、ownership の変更は対応する設計文書へ記録する。

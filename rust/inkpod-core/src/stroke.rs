@@ -310,8 +310,8 @@ pub(super) fn stroke_value(
     }
     if stroke.tool == PaintTool::Pencil && stroke.auto_erase {
         let first = samples[0];
-        let x = first.x.round() as i64;
-        let y = first.y.round() as i64;
+        let x = raster_cell_coordinate(first.x);
+        let y = raster_cell_coordinate(first.y);
         if x >= 0
             && y >= 0
             && x < i64::from(document.width)
@@ -364,10 +364,10 @@ impl StrokeStager<'_> {
         else {
             return Ok(());
         };
-        let mut x0 = start.x.round() as i64;
-        let mut y0 = start.y.round() as i64;
-        let x1 = end.x.round() as i64;
-        let y1 = end.y.round() as i64;
+        let mut x0 = raster_cell_coordinate(start.x);
+        let mut y0 = raster_cell_coordinate(start.y);
+        let x1 = raster_cell_coordinate(end.x);
+        let y1 = raster_cell_coordinate(end.y);
         let dx = (x1 - x0).abs();
         let sx = if x0 < x1 { 1 } else { -1 };
         let dy = -(y1 - y0).abs();
@@ -462,6 +462,10 @@ pub(super) fn stroke_maximum_radius(stroke: &Stroke) -> i64 {
     ((stroke.diameter * pressure - 1.0) / 2.0).ceil().max(0.0) as i64
 }
 
+fn raster_cell_coordinate(value: f32) -> i64 {
+    value.floor() as i64
+}
+
 pub(super) fn clip_segment_to_document(
     document: &CellDocument,
     start: StrokeSample,
@@ -475,8 +479,11 @@ pub(super) fn clip_segment_to_document(
     let radius = radius as f64;
     let minimum_x = -radius;
     let minimum_y = -radius;
-    let maximum_x = f64::from(document.width - 1) + radius;
-    let maximum_y = f64::from(document.height - 1) + radius;
+    // Raster cells occupy the half-open document ranges [x, x + 1) and
+    // [y, y + 1). Keep the complete last cell available to a device-space
+    // sample; stage_dab discards the exclusive upper boundary itself.
+    let maximum_x = f64::from(document.width) + radius;
+    let maximum_y = f64::from(document.height) + radius;
     let mut lower = 0.0_f64;
     let mut upper = 1.0_f64;
 
