@@ -32,6 +32,11 @@
   `windows-x64-*` names describe the required target but cannot mutate an already
   active x86 Visual Studio environment; README recovery uses an x64 developer
   shell plus `cmake --fresh --preset ...` to replace a stale compiler cache.
+- Windows Ninja configuration also exposes `windows-arm-debug` and
+  `windows-arm-release`. The selected architecture now drives an MSVC compile
+  probe, Cargo's MSVC target triple, app-local CRT discovery, generated MSIX
+  identity, artifact name, and payload verification instead of leaving those
+  boundaries fixed to x64.
 
 ## Post-M8 refactoring regression baseline
 
@@ -688,6 +693,8 @@ as dirty/pathless, and then reopens the unchanged normal file.
 
 | Command | Platform | Result | Date |
 |---|---|---|---|
+| `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features` | Windows 11 ARM64, Rust 1.97.1 ARM64 MSVC | Formatting and zero-warning clippy passed; all 136 unit/integration tests plus doc-tests passed natively on ARM64 | 2026-07-28 |
+| `cmake --fresh/--build --preset windows-arm-{debug,release}`; `ctest --preset windows-arm-{debug,release} -E inkpod_windows_msix_install_uninstall_smoke --output-on-failure` | Windows 11 ARM64, x64-hosted ARM64-target MSVC 19.51, Rust 1.97.1 ARM64 MSVC | ARM64 compiler probes, strict C11/C++20/Rust builds, app-local ARM64 CRT discovery, and `inkpod-0.1.0-arm64.msix` assembly passed. Assets/routes/state/frontend/ABI/application/D2D/package-payload tests passed 8/8 in Debug (34.11 s) and Release (6.70 s) | 2026-07-28 |
 | x86 Developer environment configure guard; x64 `cmake --fresh --preset windows-x64-release`; strict build and non-elevated CTest | Windows 11 x64, MSVC 19.51 | The reproduced `Hostx86/x86/cl.exe` configuration now stops during configure with an actionable x64/cache message; fresh `Hostx64/x64/cl.exe` configure, standard Release link/MSIX, and all 8 tests passed (4.01 s) | 2026-07-26 |
 | Post-tab-label strict Debug build/CTest; isolated strict Release configure/build/CTest because the normal Release executable was open in the GUI | Windows 11 x64, MSVC 19.51 | Active sequence-cell/saved-file naming, `無題セル 1`/`復元セル`, asynchronous dirty `*`, and `[ビュー 2]` application smoke passed with all existing assets/routes/states/frontend/ABI/package checks: Debug 8/8 (16.26 s), Release 8/8 (4.56 s) | 2026-07-26 |
 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo test --workspace --all-features`; `git diff --check` | Windows 11 x64, stable Rust | Initial GUI command-surface source passed formatting, zero-warning clippy, whitespace validation, and 136 tests: Core 65, architecture 5, resilience 1, FFI 20, format 21 plus malformed corpus 2, image 22, and doc-tests | 2026-07-26 |

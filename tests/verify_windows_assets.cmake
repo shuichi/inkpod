@@ -1,11 +1,17 @@
 if(NOT DEFINED INKPOD_PACKAGE_DIR)
     message(FATAL_ERROR "INKPOD_PACKAGE_DIR is required")
 endif()
+if(NOT DEFINED INKPOD_PACKAGE_MANIFEST)
+    message(FATAL_ERROR "INKPOD_PACKAGE_MANIFEST is required")
+endif()
+if(NOT DEFINED INKPOD_PACKAGE_ARCHITECTURE)
+    message(FATAL_ERROR "INKPOD_PACKAGE_ARCHITECTURE is required")
+endif()
 if(NOT DEFINED INKPOD_PROJECT_VERSION)
     message(FATAL_ERROR "INKPOD_PROJECT_VERSION is required")
 endif()
 
-file(READ "${INKPOD_PACKAGE_DIR}/Package.appxmanifest" package_manifest)
+file(READ "${INKPOD_PACKAGE_MANIFEST}" package_manifest)
 string(
     FIND
     "${package_manifest}"
@@ -18,7 +24,8 @@ if(manifest_version_offset EQUAL -1)
 endif()
 foreach(required_manifest_text IN ITEMS
         "Executable=\"inkpod.exe\""
-        "ProcessorArchitecture=\"x64\""
+        "ProcessorArchitecture=\"${INKPOD_PACKAGE_ARCHITECTURE}\""
+        "MinVersion=\"10.0.18362.0\""
         "Publisher=\"CN=inkpod\"")
     string(FIND "${package_manifest}" "${required_manifest_text}" manifest_text_offset)
     if(manifest_text_offset EQUAL -1)

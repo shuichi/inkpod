@@ -29,23 +29,24 @@ from every generated Windows asset. The checked-in source keeps the squircle
 and artwork geometry intact and omits only that unsupported outer shadow.
 
 `inkpod_windows_assets` verifies the required file set, representative package
-PNG dimensions, ICO directory entries, x64 package identity, executable name, and
-that the four-part MSIX version matches the CMake project version. When changing
-the application version, update both `project(inkpod VERSION ...)` in
-`CMakeLists.txt` and `Identity/@Version` in `Package.appxmanifest`; the last MSIX
-component remains zero.
+PNG dimensions, ICO directory entries, the configured x64 or ARM64 package
+identity, executable name, and that the four-part MSIX version matches the CMake
+project version. CMake materializes an architecture-specific manifest in the
+build directory from the checked-in asset-authoring manifest. When changing the
+application version, update `project(inkpod VERSION ...)` in `CMakeLists.txt`;
+the generated MSIX version's last component remains zero.
 
 Every Windows CMake build now assembles an unsigned package through the Windows
 SDK `MakeAppx` tool. The artifact is written to
-`build/<preset>/package/inkpod-<version>-x64.msix` and contains `inkpod.exe`, the
+`build/<preset>/package/inkpod-<version>-<architecture>.msix` and contains `inkpod.exe`, the
 manifest, generated PNG assets, `LICENSE.txt`, `ThirdPartyNotices.txt`, and the
-MSVC toolchain's x64 app-local CRT DLLs required by the `/MD` executable. The
+MSVC toolchain's matching x64 or ARM64 app-local CRT DLLs required by the `/MD` executable. The
 runtime DLLs are explicit CMake dependencies, so changing one rebuilds the
 package while an unchanged second build remains a no-op. `inkpod_msix` can also
 be selected explicitly as a build target.
 
 `inkpod_windows_msix_payload_smoke` unpacks the produced artifact with `MakeAppx`
-without elevation and verifies the executable, identity/version, license,
+without elevation and verifies the executable, identity/version/architecture, license,
 notices, and required MSVC runtime payload. Hosted CI runs this test for Debug
 and Release.
 
@@ -63,8 +64,8 @@ assertion can retry uninstall instead of orphaning the package. The generated ar
 unsigned; a release publisher must sign it with the organization's protected
 production credential before distribution.
 
-The hosted Windows CI image is Windows Server 2022, so its normal CTest command
-excludes this workstation-only install test while still building the MSIX and
+The hosted Windows x64 CI image is Windows Server 2022, so its normal CTest command
+excludes this workstation-only install test while still building the x64 MSIX and
 running manifest/assets, payload, ABI, and application smoke tests. Run the full package
 test on an elevated clean Windows 11 workstation with:
 

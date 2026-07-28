@@ -3,14 +3,75 @@ cmake_minimum_required(VERSION 3.25)
 cmake_policy(SET CMP0091 NEW)
 project(inkpod VERSION 0.1.0 LANGUAGES C CXX)
 
-if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR
-        "Inkpod supports only Windows x64, but CMake selected a 32-bit compiler: "
-        "${CMAKE_CXX_COMPILER}. Open an x64 Native Tools Command Prompt or initialize "
-        "VsDevCmd with '-arch=x64 -host_arch=x64', then rerun configuration with "
-        "'cmake --fresh --preset windows-x64-debug' or "
-        "'cmake --fresh --preset windows-x64-release'.")
+set(INKPOD_MSIX_PROCESSOR_ARCHITECTURE x64)
+if(WIN32)
+    set(INKPOD_WINDOWS_ARCHITECTURE "x64" CACHE STRING
+        "Windows target architecture (x64 or arm64)")
+    set_property(CACHE INKPOD_WINDOWS_ARCHITECTURE PROPERTY STRINGS x64 arm64)
+    string(TOLOWER
+        "${INKPOD_WINDOWS_ARCHITECTURE}"
+        INKPOD_WINDOWS_ARCHITECTURE_NORMALIZED)
+
+    if(INKPOD_WINDOWS_ARCHITECTURE_NORMALIZED STREQUAL "x64")
+        set(INKPOD_RUST_TARGET_TRIPLE x86_64-pc-windows-msvc)
+        set(INKPOD_MSVC_REDIST_ARCHITECTURE x64)
+        set(INKPOD_MSIX_PROCESSOR_ARCHITECTURE x64)
+        set(INKPOD_WINDOWS_ARCHITECTURE_MACRO _M_X64)
+        set(INKPOD_WINDOWS_PRESET_FAMILY windows-x64)
+    elseif(INKPOD_WINDOWS_ARCHITECTURE_NORMALIZED STREQUAL "arm64")
+        set(INKPOD_RUST_TARGET_TRIPLE aarch64-pc-windows-msvc)
+        set(INKPOD_MSVC_REDIST_ARCHITECTURE arm64)
+        set(INKPOD_MSIX_PROCESSOR_ARCHITECTURE arm64)
+        set(INKPOD_WINDOWS_ARCHITECTURE_MACRO _M_ARM64)
+        set(INKPOD_WINDOWS_PRESET_FAMILY windows-arm)
+    else()
+        message(FATAL_ERROR
+            "INKPOD_WINDOWS_ARCHITECTURE must be 'x64' or 'arm64', not "
+            "'${INKPOD_WINDOWS_ARCHITECTURE}'. Use a checked-in Windows preset.")
+    endif()
+
+    if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR
+            "Inkpod supports only 64-bit Windows targets, but CMake selected a "
+            "32-bit compiler: ${CMAKE_CXX_COMPILER}. Initialize the matching MSVC "
+            "developer environment, then rerun a ${INKPOD_WINDOWS_PRESET_FAMILY} "
+            "preset with '--fresh'.")
+    endif()
+
+    include(CheckCXXSourceCompiles)
+    set(INKPOD_ARCHITECTURE_PROBE_SOURCE
+        "#if !defined(${INKPOD_WINDOWS_ARCHITECTURE_MACRO})\n#error Wrong MSVC target architecture\n#endif\nint main() { return 0; }")
+    set(INKPOD_ARCHITECTURE_PROBE_RESULT
+        "INKPOD_COMPILER_TARGET_IS_${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}")
+    check_cxx_source_compiles(
+        "${INKPOD_ARCHITECTURE_PROBE_SOURCE}"
+        ${INKPOD_ARCHITECTURE_PROBE_RESULT})
+    if(NOT ${INKPOD_ARCHITECTURE_PROBE_RESULT})
+        message(FATAL_ERROR
+            "The ${INKPOD_WINDOWS_PRESET_FAMILY} preset requires an "
+            "${INKPOD_MSIX_PROCESSOR_ARCHITECTURE} MSVC target environment, but "
+            "${CMAKE_CXX_COMPILER} targets another architecture. Initialize "
+            "VsDevCmd with '-arch=${INKPOD_MSVC_REDIST_ARCHITECTURE}', then rerun "
+            "with 'cmake --fresh --preset ${INKPOD_WINDOWS_PRESET_FAMILY}-debug' "
+            "or '${INKPOD_WINDOWS_PRESET_FAMILY}-release'.")
+    endif()
 endif()
+
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/package")
+set(INKPOD_PACKAGE_MANIFEST "${CMAKE_BINARY_DIR}/package/AppxManifest.xml")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/apps/windows/package/Package.appxmanifest"
+    "${INKPOD_PACKAGE_MANIFEST}"
+    COPYONLY)
+file(READ "${INKPOD_PACKAGE_MANIFEST}" INKPOD_PACKAGE_MANIFEST_CONTENT)
+string(REGEX REPLACE
+    "ProcessorArchitecture=\"[^\"]+\"([ \t\r\n]+)Version=\"[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+\""
+    "ProcessorArchitecture=\"${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}\"\\1Version=\"${PROJECT_VERSION}.0\""
+    INKPOD_PACKAGE_MANIFEST_CONTENT
+    "${INKPOD_PACKAGE_MANIFEST_CONTENT}")
+file(WRITE
+    "${INKPOD_PACKAGE_MANIFEST}"
+    "${INKPOD_PACKAGE_MANIFEST_CONTENT}")
 
 configure_file(
     "${CMAKE_SOURCE_DIR}/apps/windows/app/app_version.h.in"
@@ -41,6 +102,13 @@ find_program(
     REQUIRED)
 
 set(INKPOD_CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/cargo-target")
+set(INKPOD_RUST_OUTPUT_DIR "${INKPOD_CARGO_TARGET_DIR}")
+set(INKPOD_CARGO_TARGET_ARGUMENT)
+if(WIN32)
+    set(INKPOD_RUST_OUTPUT_DIR
+        "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_TARGET_TRIPLE}")
+    set(INKPOD_CARGO_TARGET_ARGUMENT --target "${INKPOD_RUST_TARGET_TRIPLE}")
+endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(INKPOD_RUST_PROFILE release)
     set(INKPOD_CARGO_PROFILE_ARGUMENT --release)
@@ -50,12 +118,12 @@ else()
 endif()
 
 if(WIN32)
-    set(INKPOD_RUST_STATICLIB "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_PROFILE}/inkpod_ffi.lib")
+    set(INKPOD_RUST_STATICLIB "${INKPOD_RUST_OUTPUT_DIR}/${INKPOD_RUST_PROFILE}/inkpod_ffi.lib")
 else()
-    set(INKPOD_RUST_STATICLIB "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_PROFILE}/libinkpod_ffi.a")
+    set(INKPOD_RUST_STATICLIB "${INKPOD_RUST_OUTPUT_DIR}/${INKPOD_RUST_PROFILE}/libinkpod_ffi.a")
 endif()
-set(INKPOD_RUST_RLIB "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_PROFILE}/libinkpod_ffi.rlib")
-set(INKPOD_RUST_STAMP "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_PROFILE}/inkpod_ffi.cmake.stamp")
+set(INKPOD_RUST_RLIB "${INKPOD_RUST_OUTPUT_DIR}/${INKPOD_RUST_PROFILE}/libinkpod_ffi.rlib")
+set(INKPOD_RUST_STAMP "${INKPOD_RUST_OUTPUT_DIR}/${INKPOD_RUST_PROFILE}/inkpod_ffi.cmake.stamp")
 
 file(GLOB_RECURSE INKPOD_RUST_SOURCE_INPUTS CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/src/*.rs"
@@ -77,7 +145,8 @@ add_custom_command(
     BYPRODUCTS "${INKPOD_RUST_STATICLIB}" "${INKPOD_RUST_RLIB}"
     COMMAND "${CMAKE_COMMAND}" -E env
             "CARGO_TARGET_DIR=${INKPOD_CARGO_TARGET_DIR}"
-            "${CARGO_EXECUTABLE}" build --locked --package inkpod-ffi ${INKPOD_CARGO_PROFILE_ARGUMENT}
+            "${CARGO_EXECUTABLE}" build --locked --package inkpod-ffi
+            ${INKPOD_CARGO_TARGET_ARGUMENT} ${INKPOD_CARGO_PROFILE_ARGUMENT}
     COMMAND "${CMAKE_COMMAND}" -E touch_nocreate
             "${INKPOD_RUST_STATICLIB}" "${INKPOD_RUST_RLIB}"
     COMMAND "${CMAKE_COMMAND}" -E touch "${INKPOD_RUST_STAMP}"
@@ -103,6 +172,8 @@ add_test(
     NAME inkpod_windows_assets
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_PACKAGE_DIR=${CMAKE_SOURCE_DIR}/apps/windows/package"
+            "-DINKPOD_PACKAGE_MANIFEST=${INKPOD_PACKAGE_MANIFEST}"
+            "-DINKPOD_PACKAGE_ARCHITECTURE=${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}"
             "-DINKPOD_PROJECT_VERSION=${PROJECT_VERSION}"
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_assets.cmake")
 
@@ -244,11 +315,12 @@ if(WIN32)
     get_filename_component(INKPOD_MSVC_TOOLS_DIR "${INKPOD_MSVC_FAMILY_DIR}" DIRECTORY)
     get_filename_component(INKPOD_VC_DIR "${INKPOD_MSVC_TOOLS_DIR}" DIRECTORY)
     file(GLOB INKPOD_MSVC_CRT_DIRECTORIES
-        "${INKPOD_VC_DIR}/Redist/MSVC/${INKPOD_MSVC_VERSION}/x64/Microsoft.VC*.CRT")
+        "${INKPOD_VC_DIR}/Redist/MSVC/${INKPOD_MSVC_VERSION}/${INKPOD_MSVC_REDIST_ARCHITECTURE}/Microsoft.VC*.CRT")
     list(LENGTH INKPOD_MSVC_CRT_DIRECTORIES INKPOD_MSVC_CRT_DIRECTORY_COUNT)
     if(NOT INKPOD_MSVC_CRT_DIRECTORY_COUNT EQUAL 1)
         message(FATAL_ERROR
-            "Expected one x64 MSVC CRT redist directory for ${INKPOD_MSVC_VERSION}; "
+            "Expected one ${INKPOD_MSVC_REDIST_ARCHITECTURE} MSVC CRT redist "
+            "directory for ${INKPOD_MSVC_VERSION}; "
             "found ${INKPOD_MSVC_CRT_DIRECTORY_COUNT}")
     endif()
     list(GET INKPOD_MSVC_CRT_DIRECTORIES 0 INKPOD_MSVC_CRT_DIRECTORY)
@@ -264,13 +336,13 @@ if(WIN32)
         endif()
     endforeach()
     set(INKPOD_MSIX_PATH
-        "${CMAKE_BINARY_DIR}/package/inkpod-${PROJECT_VERSION}-x64.msix")
+        "${CMAKE_BINARY_DIR}/package/inkpod-${PROJECT_VERSION}-${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}.msix")
     add_custom_command(
         OUTPUT "${INKPOD_MSIX_PATH}"
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_SOURCE_DIR}/tests/build_msix.ps1"
                 -Executable "$<TARGET_FILE:inkpod>"
-                -Manifest "${CMAKE_SOURCE_DIR}/apps/windows/package/Package.appxmanifest"
+                -Manifest "${INKPOD_PACKAGE_MANIFEST}"
                 -AssetsDirectory "${CMAKE_SOURCE_DIR}/apps/windows/package/Assets"
                 -License "${CMAKE_SOURCE_DIR}/LICENSE"
                 -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
@@ -279,7 +351,7 @@ if(WIN32)
         DEPENDS
             inkpod
             "${CMAKE_SOURCE_DIR}/tests/build_msix.ps1"
-            "${CMAKE_SOURCE_DIR}/apps/windows/package/Package.appxmanifest"
+            "${INKPOD_PACKAGE_MANIFEST}"
             "${CMAKE_SOURCE_DIR}/LICENSE"
             "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
             ${INKPOD_MSIX_ASSETS}
@@ -293,7 +365,8 @@ if(WIN32)
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_SOURCE_DIR}/tests/verify_msix.ps1"
                 -PackagePath "${INKPOD_MSIX_PATH}"
-                -ExpectedVersion "${PROJECT_VERSION}.0")
+                -ExpectedVersion "${PROJECT_VERSION}.0"
+                -ExpectedArchitecture "${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}")
     set_tests_properties(inkpod_windows_msix_payload_smoke PROPERTIES
         DEPENDS inkpod_windows_assets
         TIMEOUT 60)

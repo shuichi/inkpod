@@ -2,7 +2,10 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PackagePath,
     [Parameter(Mandatory = $true)]
-    [string]$ExpectedVersion
+    [string]$ExpectedVersion,
+    [Parameter(Mandatory = $true)]
+    [ValidateSet('x64', 'arm64')]
+    [string]$ExpectedArchitecture
 )
 
 Set-StrictMode -Version Latest
@@ -60,7 +63,7 @@ try {
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $temporaryDirectory 'AppxManifest.xml')
     foreach ($requiredText in @(
             "Version=`"$ExpectedVersion`"",
-            'ProcessorArchitecture="x64"',
+            "ProcessorArchitecture=`"$ExpectedArchitecture`"",
             'Executable="inkpod.exe"')) {
         if ($manifest.IndexOf($requiredText, [StringComparison]::Ordinal) -lt 0) {
             throw "MSIX manifest is missing $requiredText"

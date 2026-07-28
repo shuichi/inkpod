@@ -4,7 +4,7 @@
       type="win32"
       name="inkpod.desktop"
       version="0.1.0.0"
-      processorArchitecture="amd64" />
+      processorArchitecture="*" />
   <description>inkpod</description>
   <dependency>
     <dependentAssembly>

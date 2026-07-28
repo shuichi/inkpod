@@ -34,13 +34,13 @@ Windows アプリ全体のビルドには、次の環境が必要です。
 - Windows 11
 - Visual Studio 2022 または 2026
   - 「C++ によるデスクトップ開発」ワークロード
-  - x64 MSVC ツールチェーン
+  - x64 または ARM64 MSVC ツールチェーン
   - Windows SDK
 - CMake 3.25 以降
 - Ninja
 - Rust 1.85 以降の stable MSVC ツールチェーン
 
-インストールした Visual Studio の **x64 Native Tools Command Prompt** または **Developer PowerShell** を開き、必要なツールを確認します。
+インストールした Visual Studio の、ビルド対象と同じアーキテクチャで初期化した **Native Tools Command Prompt** または **Developer PowerShell** を開き、必要なツールを確認します。
 
 ```powershell
 cl
@@ -50,7 +50,7 @@ rustc --version
 cargo --version
 ```
 
-Ninja プリセットは、起動中の開発者シェルに設定されたコンパイラー環境を使用します。プリセット名に `x64` が含まれていても、x86 の開発者シェルを x64 に切り替えることはできません。inkpod は CMake の構成時に 32 bit コンパイラーを検出すると停止します。
+Ninja プリセットは、起動中の開発者シェルに設定されたコンパイラー環境を使用します。プリセット名だけでは MSVC 環境を切り替えません。inkpod は CMake の構成時に、x64／ARM64 のプリセットと実際のコンパイラーターゲットが一致しない場合や、32 bit コンパイラーを検出した場合に停止します。
 
 以前に x86 の開発者シェルからビルドディレクトリを構成した場合は、x64 の開発者シェルを開き、古いコンパイラーキャッシュを更新してください。
 
@@ -84,6 +84,16 @@ cmake --preset windows-x64-release
 cmake --build --preset windows-x64-release
 ctest --preset windows-x64-release
 .\build\windows-x64-release\inkpod.exe
+```
+
+ARM64 版では、ARM64 用 MSVC 開発者環境を使用し、Rust ターゲットを一度追加してから `windows-arm-debug` または `windows-arm-release` を指定します。x64 ホストからクロスコンパイルした場合、テストとアプリの実行は ARM64 Windows 環境で行ってください。
+
+```powershell
+rustup target add aarch64-pc-windows-msvc
+cmake --fresh --preset windows-arm-release
+cmake --build --preset windows-arm-release
+ctest --preset windows-arm-release -E inkpod_windows_msix_install_uninstall_smoke
+.\build\windows-arm-release\inkpod.exe
 ```
 
 新規セルは 1920 × 1080 の 2 値彩色セルとして作成されます。UI／入力、単一書き込みの Rust Core エンジン、D3D／D2D 描画は、それぞれ独立したスレッドで動作します。描画中のストロークはペンを離す前からプレビューされ、確定時には 1 回分の「元に戻す」単位として記録されます。

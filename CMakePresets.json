@@ -9,11 +9,12 @@
     {
       "name": "windows-x64-debug",
       "displayName": "Windows x64 Debug (MSVC + Ninja)",
-      "description": "Requires an x64-initialized MSVC developer environment; CMake rejects an x86 compiler.",
+      "description": "Requires an x64-initialized MSVC developer environment; CMake rejects any other target architecture.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/windows-x64-debug",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "INKPOD_WINDOWS_ARCHITECTURE": "x64"
       },
       "condition": {
         "type": "equals",
@@ -24,11 +25,44 @@
     {
       "name": "windows-x64-release",
       "displayName": "Windows x64 Release (MSVC + Ninja)",
-      "description": "Requires an x64-initialized MSVC developer environment; CMake rejects an x86 compiler.",
+      "description": "Requires an x64-initialized MSVC developer environment; CMake rejects any other target architecture.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/windows-x64-release",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "INKPOD_WINDOWS_ARCHITECTURE": "x64"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-arm-debug",
+      "displayName": "Windows ARM64 Debug (MSVC + Ninja)",
+      "description": "Requires an ARM64-initialized MSVC developer environment and the aarch64-pc-windows-msvc Rust target.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/windows-arm-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "INKPOD_WINDOWS_ARCHITECTURE": "arm64"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-arm-release",
+      "displayName": "Windows ARM64 Release (MSVC + Ninja)",
+      "description": "Requires an ARM64-initialized MSVC developer environment and the aarch64-pc-windows-msvc Rust target.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/windows-arm-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "INKPOD_WINDOWS_ARCHITECTURE": "arm64"
       },
       "condition": {
         "type": "equals",
@@ -45,6 +79,14 @@
     {
       "name": "windows-x64-release",
       "configurePreset": "windows-x64-release"
+    },
+    {
+      "name": "windows-arm-debug",
+      "configurePreset": "windows-arm-debug"
+    },
+    {
+      "name": "windows-arm-release",
+      "configurePreset": "windows-arm-release"
     }
   ],
   "testPresets": [
@@ -58,6 +100,20 @@
     {
       "name": "windows-x64-release",
       "configurePreset": "windows-x64-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-arm-debug",
+      "configurePreset": "windows-arm-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-arm-release",
+      "configurePreset": "windows-arm-release",
       "output": {
         "outputOnFailure": true
       }
