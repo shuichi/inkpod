@@ -140,6 +140,18 @@ constexpr UINT kStatusProgressTimerMilliseconds = 100U;
 constexpr UINT kContinuousSprayIntervalMilliseconds = 50U;
 constexpr wchar_t kVectorStrokePlaneRequired[] =
     L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
+constexpr std::array<ViewOptionsDialogState::Choice, 10U> kLayerKindChoices{{
+    {L"2値彩色", INKPOD_LAYER_BINARY_COLORING},
+    {L"階調彩色", INKPOD_LAYER_GRAYSCALE_COLORING},
+    {L"ラスター汎用", INKPOD_LAYER_RASTER},
+    {L"選択範囲", INKPOD_LAYER_SELECTION},
+    {L"フレーム", INKPOD_LAYER_FRAME},
+    {L"消失点", INKPOD_LAYER_VANISHING_POINT},
+    {L"調整", INKPOD_LAYER_ADJUSTMENT},
+    {L"テキスト", INKPOD_LAYER_TEXT},
+    {L"指示", INKPOD_LAYER_ANNOTATION},
+    {L"ベクター彩色", INKPOD_LAYER_VECTOR_COLORING},
+}};
 
 bool QuerySnapshotTransform(
     AppContext& state, InkpodSnapshotTransform& transform) noexcept;
@@ -6011,8 +6023,11 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         case IDM_LAYER_NEW: {
             ViewOptionsDialogState dialog{};
             dialog.title = L"新規レイヤー";
-            dialog.labels = {L"種類 (1-10)", L"不透明度 (%)", nullptr, nullptr};
+            dialog.labels = {L"種類", L"不透明度 (%)", nullptr, nullptr};
             dialog.values = {INKPOD_LAYER_RASTER, 100, 0, 0};
+            dialog.first_value_choices = kLayerKindChoices.data();
+            dialog.first_value_choice_count =
+                static_cast<std::uint32_t>(kLayerKindChoices.size());
             dialog.value_count = 2U;
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
@@ -6151,8 +6166,11 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         case IDM_LAYER_CONVERT: {
             ViewOptionsDialogState dialog{};
             dialog.title = L"レイヤー変換";
-            dialog.labels[0] = L"変換先種類 (1-10)";
+            dialog.labels[0] = L"変換先種類";
             dialog.values[0] = INKPOD_LAYER_RASTER;
+            dialog.first_value_choices = kLayerKindChoices.data();
+            dialog.first_value_choice_count =
+                static_cast<std::uint32_t>(kLayerKindChoices.size());
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                 return 0;

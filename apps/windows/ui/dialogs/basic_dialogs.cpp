@@ -263,7 +263,9 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
         case WM_INITDIALOG: {
             state = reinterpret_cast<ViewOptionsDialogState*>(lparam);
             if (state == nullptr || state->value_count == 0U
-                || state->value_count > label_ids.size()) {
+                || state->value_count > label_ids.size()
+                || (state->first_value_choices == nullptr)
+                    != (state->first_value_choice_count == 0U)) {
                 EndDialog(dialog, IDCANCEL);
                 return TRUE;
             }
@@ -272,10 +274,15 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
             if (state->title != nullptr) {
                 SetWindowTextW(dialog, state->title);
             }
+            const bool first_value_is_choice = state->first_value_choice_count != 0U;
+            const HWND choice_control = GetDlgItem(dialog, IDC_VIEW_VALUE_CHOICE);
+            ShowWindow(choice_control, first_value_is_choice ? SW_SHOW : SW_HIDE);
             for (std::size_t index = 0; index < label_ids.size(); ++index) {
                 const bool visible = index < state->value_count;
                 ShowWindow(GetDlgItem(dialog, label_ids[index]), visible ? SW_SHOW : SW_HIDE);
-                ShowWindow(GetDlgItem(dialog, edit_ids[index]), visible ? SW_SHOW : SW_HIDE);
+                ShowWindow(
+                    GetDlgItem(dialog, edit_ids[index]),
+                    visible && !(index == 0U && first_value_is_choice) ? SW_SHOW : SW_HIDE);
                 if (!visible) {
                     continue;
                 }
@@ -288,6 +295,35 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
                     value.data(), value.size(), _TRUNCATE, L"%d", state->values[index]);
                 SetDlgItemTextW(dialog, edit_ids[index], value.data());
             }
+            if (first_value_is_choice) {
+                int selected = CB_ERR;
+                for (std::uint32_t index = 0U;
+                     index < state->first_value_choice_count;
+                     ++index) {
+                    const auto& choice = state->first_value_choices[index];
+                    if (choice.label == nullptr) {
+                        EndDialog(dialog, IDCANCEL);
+                        return TRUE;
+                    }
+                    const LRESULT added = SendMessageW(
+                        choice_control,
+                        CB_ADDSTRING,
+                        0,
+                        reinterpret_cast<LPARAM>(choice.label));
+                    if (added == CB_ERR || added == CB_ERRSPACE) {
+                        EndDialog(dialog, IDCANCEL);
+                        return TRUE;
+                    }
+                    if (choice.value == state->values[0]) {
+                        selected = static_cast<int>(added);
+                    }
+                }
+                if (selected == CB_ERR
+                    || SendMessageW(choice_control, CB_SETCURSEL, selected, 0) == CB_ERR) {
+                    EndDialog(dialog, IDCANCEL);
+                    return TRUE;
+                }
+            }
             if (state->close_immediately) {
                 PostMessageW(dialog, WM_COMMAND, IDOK, 0);
             }
@@ -299,6 +335,18 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
             }
             if (LOWORD(wparam) == IDOK) {
                 for (std::size_t index = 0; index < state->value_count; ++index) {
+                    if (index == 0U && state->first_value_choice_count != 0U) {
+                        const LRESULT selected = SendDlgItemMessageW(
+                            dialog, IDC_VIEW_VALUE_CHOICE, CB_GETCURSEL, 0, 0);
+                        if (selected == CB_ERR
+                            || static_cast<std::uint64_t>(selected)
+                                >= state->first_value_choice_count) {
+                            return TRUE;
+                        }
+                        state->values[index] =
+                            state->first_value_choices[static_cast<std::size_t>(selected)].value;
+                        continue;
+                    }
                     std::array<wchar_t, 32U> text{};
                     if (GetDlgItemTextW(
                             dialog,

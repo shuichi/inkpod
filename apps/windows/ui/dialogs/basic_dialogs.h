@@ -39,6 +39,12 @@ struct ViewOptionsDialogState {
     const wchar_t* title{};
     std::array<const wchar_t*, 4U> labels{};
     std::array<std::int32_t, 4U> values{};
+    struct Choice {
+        const wchar_t* label{};
+        std::int32_t value{};
+    };
+    const Choice* first_value_choices{};
+    std::uint32_t first_value_choice_count{};
     std::uint32_t value_count{1U};
     bool close_immediately{};
 };
