@@ -275,3 +275,84 @@ pub unsafe extern "C" fn inkpod_core_node_get(
         INKPOD_STATUS_OK
     })
 }
+
+/// Copies an aspect-preserving straight RGBA8 preview of exactly one layer.
+/// A null buffer with zero capacity is a successful size query. The query does
+/// not change selection, visibility, revision, dirty state, or history.
+///
+/// # Safety
+/// `core` must be live on its owner thread. `output` and its advertised pixel
+/// range must be complete, writable, live, and non-overlapping with Core state.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_layer_thumbnail(
+    core: *mut InkpodCore,
+    output: *mut InkpodLayerThumbnailBuffer,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodLayerThumbnailBuffer") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if output.reserved != 0 || output.reserved_2 != 0 || output.feature_flags != 0 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "layer thumbnail contains unsupported flags or reserved values",
+            );
+        }
+        let thumbnail = match core.core.layer_thumbnail(
+            output.layer_id,
+            output.maximum_width,
+            output.maximum_height,
+        ) {
+            Ok(thumbnail) => thumbnail,
+            Err(error) => return map_core_error(error),
+        };
+        output.width = thumbnail.width;
+        output.height = thumbnail.height;
+        output.stride_bytes = thumbnail.stride_bytes;
+        output.revision = thumbnail.revision;
+        output.required_bytes = thumbnail.pixels.len() as u64;
+        if output.pixel_capacity == 0 {
+            if !output.pixels_rgba8.is_null() {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity layer thumbnail buffer must be null",
+                );
+            }
+            return INKPOD_STATUS_OK;
+        }
+        if output.pixels_rgba8.is_null() || output.pixel_capacity > isize::MAX as u64 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "layer thumbnail output storage is invalid",
+            );
+        }
+        if output.pixel_capacity < output.required_bytes {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "layer thumbnail output storage is too small",
+            );
+        }
+        // SAFETY: The caller advertises enough writable, non-overlapping byte storage.
+        unsafe {
+            ptr::copy_nonoverlapping(
+                thumbnail.pixels.as_ptr(),
+                output.pixels_rgba8,
+                thumbnail.pixels.len(),
+            )
+        };
+        INKPOD_STATUS_OK
+    })
+}

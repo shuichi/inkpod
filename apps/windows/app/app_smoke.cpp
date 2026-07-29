@@ -33,6 +33,7 @@
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/dialogs/layer_palette.h"
 #include "ui/command_catalog.h"
 #include "ui/command_state.h"
 #include "ui/shortcut_controller.h"
@@ -168,6 +169,31 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     }
     if (state.tools.palette == nullptr
         || ToolPaletteEntries().size() != kToolPaletteEntryCount
+        || static_cast<std::size_t>(std::count_if(
+               ToolPaletteEntries().begin(),
+               ToolPaletteEntries().end(),
+               [](const ToolPaletteEntry& entry) {
+                   return entry.page == ToolPalettePage::Basic;
+               }))
+            != 8U
+        || static_cast<std::size_t>(std::count_if(
+               ToolPaletteEntries().begin(),
+               ToolPaletteEntries().end(),
+               [](const ToolPaletteEntry& entry) {
+                   return entry.page == ToolPalettePage::Vector;
+               }))
+            != 21U
+        || static_cast<std::size_t>(std::count_if(
+               ToolPaletteEntries().begin(),
+               ToolPaletteEntries().end(),
+               [](const ToolPaletteEntry& entry) {
+                   return entry.page == ToolPalettePage::Effects;
+               }))
+            != 8U
+        || GetDlgItem(state.tools.palette, IDC_TOOL_PALETTE_TAB) == nullptr
+        || TabCtrl_GetItemCount(
+               GetDlgItem(state.tools.palette, IDC_TOOL_PALETTE_TAB))
+            != static_cast<int>(kToolPalettePageCount)
         || GetDlgItem(state.tools.palette, IDM_TOOL_PENCIL) == nullptr
         || GetDlgItem(state.tools.palette, IDM_EFFECT_ALPHA_VIEW) == nullptr) {
         return 727;
@@ -198,6 +224,13 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || GetWindowPlacement(state.tools.palette, &placement) == FALSE
         || SetWindowPlacement(state.tools.palette, &placement) == FALSE) {
         return 729;
+    }
+    const UINT initial_palette_dpi = GetDpiForWindow(state.tools.palette);
+    const int maximum_palette_width = MulDiv(280, initial_palette_dpi, 96);
+    const int maximum_palette_height = MulDiv(340, initial_palette_dpi, 96);
+    if (palette_bounds.right - palette_bounds.left > maximum_palette_width
+        || palette_bounds.bottom - palette_bounds.top > maximum_palette_height) {
+        return 742;
     }
     SetWindowPos(
         state.windows.window,
@@ -238,6 +271,81 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
             state.command_states)) {
         return 738;
     }
+    const HWND palette_tabs =
+        GetDlgItem(state.tools.palette, IDC_TOOL_PALETTE_TAB);
+    const HWND pencil_button = GetDlgItem(state.tools.palette, IDM_TOOL_PENCIL);
+    const HWND vector_button = GetDlgItem(state.tools.palette, IDM_VECTOR_LINE);
+    const HWND effect_button =
+        GetDlgItem(state.tools.palette, IDM_EFFECT_GRADIENT);
+    const auto has_visible_style = [](HWND control) {
+        return control != nullptr
+            && (static_cast<DWORD>(GetWindowLongPtrW(control, GWL_STYLE))
+                    & WS_VISIBLE)
+                != 0U;
+    };
+    if (palette_tabs == nullptr || !has_visible_style(pencil_button)
+        || has_visible_style(vector_button) || has_visible_style(effect_button)) {
+        return 743;
+    }
+    NMHDR tab_notification{};
+    tab_notification.hwndFrom = palette_tabs;
+    tab_notification.idFrom = IDC_TOOL_PALETTE_TAB;
+    tab_notification.code = TCN_SELCHANGE;
+    TabCtrl_SetCurSel(palette_tabs, static_cast<int>(ToolPalettePage::Vector));
+    SendMessageW(
+        state.tools.palette,
+        WM_NOTIFY,
+        IDC_TOOL_PALETTE_TAB,
+        reinterpret_cast<LPARAM>(&tab_notification));
+    if (has_visible_style(pencil_button) || !has_visible_style(vector_button)
+        || has_visible_style(effect_button)) {
+        return 744;
+    }
+    SCROLLINFO vector_scroll{};
+    vector_scroll.cbSize = sizeof(vector_scroll);
+    vector_scroll.fMask = SIF_RANGE | SIF_PAGE;
+    const HWND last_vector_button =
+        GetDlgItem(state.tools.palette, IDM_VECTOR_VECTORIZE);
+    if (GetScrollInfo(state.tools.palette, SB_VERT, &vector_scroll) == FALSE
+        || vector_scroll.nMax + 1 <= static_cast<int>(vector_scroll.nPage)
+        || last_vector_button == nullptr) {
+        return 747;
+    }
+    SetFocus(last_vector_button);
+    if (state.tools.palette_dialog.scroll_position <= 0) {
+        return 748;
+    }
+    TabCtrl_SetCurSel(palette_tabs, static_cast<int>(ToolPalettePage::Effects));
+    SendMessageW(
+        state.tools.palette,
+        WM_NOTIFY,
+        IDC_TOOL_PALETTE_TAB,
+        reinterpret_cast<LPARAM>(&tab_notification));
+    if (has_visible_style(pencil_button) || has_visible_style(vector_button)
+        || !has_visible_style(effect_button)
+        || state.tools.palette_dialog.scroll_position != 0) {
+        return 745;
+    }
+    TabCtrl_SetCurSel(palette_tabs, static_cast<int>(ToolPalettePage::Basic));
+    SendMessageW(
+        state.tools.palette,
+        WM_NOTIFY,
+        IDC_TOOL_PALETTE_TAB,
+        reinterpret_cast<LPARAM>(&tab_notification));
+    LOGFONTW palette_font{};
+    const auto button_font = reinterpret_cast<HFONT>(
+        SendMessageW(pencil_button, WM_GETFONT, 0, 0));
+    if (!has_visible_style(pencil_button) || has_visible_style(vector_button)
+        || has_visible_style(effect_button) || button_font == nullptr
+        || GetObjectW(
+               button_font,
+               static_cast<int>(sizeof(palette_font)),
+               &palette_font)
+            != static_cast<int>(sizeof(palette_font))
+        || palette_font.lfHeight
+            != -MulDiv(5, static_cast<int>(initial_palette_dpi), 72)) {
+        return 746;
+    }
     const HWND brush_button = GetDlgItem(state.tools.palette, IDM_TOOL_BRUSH);
     if (brush_button == nullptr
         || (static_cast<DWORD>(GetWindowLongPtrW(brush_button, GWL_STYLE))
@@ -266,7 +374,6 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || !PaletteRectIntersectsCurrentMonitor(palette_bounds)) {
         return 733;
     }
-    const HWND pencil_button = GetDlgItem(state.tools.palette, IDM_TOOL_PENCIL);
     if (pencil_button == nullptr) {
         return 734;
     }
@@ -280,6 +387,52 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
             state.tools.palette,
             state.command_states)) {
         return 735;
+    }
+    if (state.panes.layer_palette == nullptr
+        || GetDlgItem(state.panes.layer_palette, IDC_LAYER_LIST) == nullptr
+        || GetDlgItem(state.panes.layer_palette, IDM_LAYER_NEW) == nullptr
+        || GetDlgItem(state.panes.layer_palette, IDM_LAYER_PROPERTIES) == nullptr
+        || GetMenuState(menu, IDM_WINDOW_LAYER_PALETTE, MF_BYCOMMAND)
+            == static_cast<UINT>(-1)
+        || IsWindowVisible(state.panes.layer_palette) != FALSE) {
+        return 749;
+    }
+    const auto layer_palette_style = static_cast<DWORD>(
+        GetWindowLongPtrW(state.panes.layer_palette, GWL_STYLE));
+    const auto layer_palette_extended_style = static_cast<DWORD>(
+        GetWindowLongPtrW(state.panes.layer_palette, GWL_EXSTYLE));
+    if ((layer_palette_style & required_palette_style) != required_palette_style
+        || (layer_palette_style & WS_CHILD) != 0U
+        || (layer_palette_extended_style & WS_EX_TOOLWINDOW) == 0U
+        || GetWindow(state.panes.layer_palette, GW_OWNER) != state.windows.window) {
+        return 750;
+    }
+    if (SendMessageW(
+            state.windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_LAYER_PALETTE,
+            0) != 1
+        || !PaletteWindowIsShown(state.panes.layer_palette)
+        || LayerPaletteItemCount(state.panes.layer_palette)
+            != state.panes.tree_layer_count
+        || LayerPaletteSelectedLayer(state.panes.layer_palette)
+            != state.panes.active_tree_layer_id
+        || !LayerPaletteItemHasThumbnail(state.panes.layer_palette, 0U)
+        || (GetMenuState(menu, IDM_WINDOW_LAYER_PALETTE, MF_BYCOMMAND)
+                & MF_CHECKED)
+            == 0U
+        || !LayerPaletteMatchesCommandState(
+            state.panes.layer_palette,
+            state.command_states)) {
+        return 751;
+    }
+    SendMessageW(state.panes.layer_palette, WM_CLOSE, 0, 0);
+    if (IsWindow(state.panes.layer_palette) == FALSE
+        || PaletteWindowIsShown(state.panes.layer_palette)
+        || (GetMenuState(menu, IDM_WINDOW_LAYER_PALETTE, MF_BYCOMMAND)
+                & MF_CHECKED)
+            != 0U) {
+        return 752;
     }
     ShowWindow(state.windows.window, SW_HIDE);
     inkpod::windows::ui::LayoutMainChrome(state.windows, false, 800, 600);
@@ -2222,8 +2375,30 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
     }
 
     if (SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_NEW, 0) != 0
-        || state.panes.tree_layer_count < 2U) {
+        || state.panes.tree_layer_count < 2U
+        || LayerPaletteItemCount(state.panes.layer_palette)
+            != state.panes.tree_layer_count) {
         return 402;
+    }
+    InkpodNodeInfo first_layer{};
+    first_layer.struct_size = sizeof(first_layer);
+    const InkpodStatus first_layer_status = state.engine->Invoke(
+        [&first_layer](InkpodCore* core) {
+            return inkpod_core_node_get(core, 0U, UINT32_MAX, &first_layer);
+        },
+        false,
+        false);
+    const HWND layer_list = GetDlgItem(state.panes.layer_palette, IDC_LAYER_LIST);
+    SendMessageW(layer_list, LB_SETCURSEL, 0, 0);
+    SendMessageW(
+        state.panes.layer_palette,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_LAYER_LIST, LBN_SELCHANGE),
+        reinterpret_cast<LPARAM>(layer_list));
+    if (first_layer_status != INKPOD_STATUS_OK
+        || state.panes.active_tree_layer_id != first_layer.id
+        || LayerPaletteSelectedLayer(state.panes.layer_palette) != first_layer.id) {
+        return 470;
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_VISIBLE, 0);
     SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_EDITABLE, 0);
@@ -2259,10 +2434,20 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
     if (SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MERGE, 0) != 1) {
         return 403;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_DUPLICATE, 0);
+    SendMessageW(
+        GetDlgItem(state.panes.layer_palette, IDM_LAYER_DUPLICATE),
+        BM_CLICK,
+        0,
+        0);
     const std::uint32_t layer_move_start = state.panes.active_tree_layer_index;
     if (layer_move_start != 0U) {
-        SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_MOVE_UP, 0);
+        if (state.panes.layer_palette_dialog.reorder_layer == nullptr) {
+            return 469;
+        }
+        state.panes.layer_palette_dialog.reorder_layer(
+            state.panes.layer_palette_dialog.context,
+            state.panes.active_tree_layer_id,
+            layer_move_start - 1U);
         if (state.panes.active_tree_layer_index != layer_move_start - 1U) {
             return 469;
         }

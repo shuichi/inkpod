@@ -111,6 +111,8 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
     const auto* batch = FindShortcutSequence(shortcuts, IDM_WINDOW_BATCH);
     const auto* tool_palette =
         FindShortcutSequence(shortcuts, IDM_WINDOW_TOOL_PALETTE);
+    const auto* layer_palette =
+        FindShortcutSequence(shortcuts, IDM_WINDOW_LAYER_PALETTE);
     return save != nullptr && save->stroke_count == 1U
         && save->strokes[0].virtual_key == static_cast<std::uint32_t>('S')
         && save->strokes[0].modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL
@@ -118,7 +120,8 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         && pencil->strokes[0].virtual_key == static_cast<std::uint32_t>('P')
         && pencil->strokes[0].modifiers == 0U
         && batch != nullptr && batch->stroke_count > 1U
-        && tool_palette != nullptr && tool_palette->stroke_count == 3U;
+        && tool_palette != nullptr && tool_palette->stroke_count == 3U
+        && layer_palette != nullptr && layer_palette->stroke_count == 3U;
 }
 
 } // namespace
@@ -137,6 +140,8 @@ int main() {
         || IsCommandEnabled(states, IDM_BATCH_ADD_COLOR_REPLACE)
         || !IsCommandEnabled(states, IDM_WINDOW_TOOL_PALETTE)
         || IsCommandChecked(states, IDM_WINDOW_TOOL_PALETTE)
+        || !IsCommandEnabled(states, IDM_WINDOW_LAYER_PALETTE)
+        || IsCommandChecked(states, IDM_WINDOW_LAYER_PALETTE)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
         return 1;
     }
@@ -170,12 +175,14 @@ int main() {
     inputs.tool.active_tool = kInteractionVectorLine;
     inputs.tool.vector_selection_mode = INKPOD_VECTOR_SELECT_FILL_BOUNDARY;
     inputs.tool.palette_visible = true;
+    inputs.document_pane.layer_palette_visible = true;
     inputs.selection_view.active_tool = kInteractionVectorLine;
     states = ComputeCommandStates(inputs);
     if (!IsCommandEnabled(states, IDM_VECTOR_LINE)
         || !IsCommandChecked(states, IDM_VECTOR_LINE)
         || !IsCommandChecked(states, IDM_VECTOR_SELECT_FILL_BOUNDARY)
-        || !IsCommandChecked(states, IDM_WINDOW_TOOL_PALETTE)) {
+        || !IsCommandChecked(states, IDM_WINDOW_TOOL_PALETTE)
+        || !IsCommandChecked(states, IDM_WINDOW_LAYER_PALETTE)) {
         return 4;
     }
     inputs.tool.vector_stroke_plane = false;

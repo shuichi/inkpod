@@ -83,6 +83,7 @@ static_assert(sizeof(InkpodBatchReportItem) == 56U);
 static_assert(sizeof(InkpodSnapshotVectorSegment) == 80U);
 static_assert(sizeof(InkpodSnapshotVectorFill) == 48U);
 static_assert(sizeof(InkpodSnapshotVectorView) == 80U);
+static_assert(sizeof(InkpodLayerThumbnailBuffer) == 80U);
 
 extern "C" int inkpod_header_c11_smoke(void);
 
@@ -407,6 +408,27 @@ int InkpodRunAbiSmoke() {
     if (inkpod_core_node_get(core, 0U, UINT32_MAX, &node) != INKPOD_STATUS_OK
         || node.id != duplicate_layer || node.child_count != 2U) {
         return 36;
+    }
+    InkpodLayerThumbnailBuffer layer_thumbnail{};
+    layer_thumbnail.struct_size = sizeof(layer_thumbnail);
+    layer_thumbnail.layer_id = duplicate_layer;
+    layer_thumbnail.maximum_width = 80U;
+    layer_thumbnail.maximum_height = 60U;
+    if (inkpod_core_layer_thumbnail(core, &layer_thumbnail) != INKPOD_STATUS_OK
+        || layer_thumbnail.width == 0U || layer_thumbnail.height == 0U
+        || layer_thumbnail.width > 80U || layer_thumbnail.height > 60U
+        || layer_thumbnail.stride_bytes != layer_thumbnail.width * 4U
+        || layer_thumbnail.required_bytes
+            != static_cast<std::uint64_t>(layer_thumbnail.stride_bytes)
+                * layer_thumbnail.height) {
+        return 89;
+    }
+    std::vector<std::uint8_t> layer_thumbnail_pixels(
+        static_cast<std::size_t>(layer_thumbnail.required_bytes));
+    layer_thumbnail.pixels_rgba8 = layer_thumbnail_pixels.data();
+    layer_thumbnail.pixel_capacity = layer_thumbnail_pixels.size();
+    if (inkpod_core_layer_thumbnail(core, &layer_thumbnail) != INKPOD_STATUS_OK) {
+        return 90;
     }
     InkpodDocumentInfo before_invalid_tree{};
     before_invalid_tree.struct_size = sizeof(before_invalid_tree);

@@ -8,17 +8,72 @@
 #include "app/core_engine.h"
 
 namespace inkpod::windows::ui::panes {
+namespace {
+
+constexpr std::uint32_t kLayerThumbnailWidth = 80U;
+constexpr std::uint32_t kLayerThumbnailHeight = 60U;
+constexpr std::size_t kLayerThumbnailBytes =
+    static_cast<std::size_t>(kLayerThumbnailWidth) * kLayerThumbnailHeight * 4U;
+
+InkpodStatus LoadLayerThumbnail(
+    InkpodCore* core,
+    TreePaneNode& node) {
+    std::array<std::uint8_t, kLayerThumbnailBytes> rgba{};
+    InkpodLayerThumbnailBuffer output{};
+    output.struct_size = sizeof(output);
+    output.layer_id = node.id;
+    output.maximum_width = kLayerThumbnailWidth;
+    output.maximum_height = kLayerThumbnailHeight;
+    output.pixels_rgba8 = rgba.data();
+    output.pixel_capacity = static_cast<std::uint64_t>(rgba.size());
+    const InkpodStatus status = inkpod_core_layer_thumbnail(core, &output);
+    if (status != INKPOD_STATUS_OK || output.width == 0U || output.height == 0U
+        || output.width > kLayerThumbnailWidth
+        || output.height > kLayerThumbnailHeight
+        || output.required_bytes > static_cast<std::uint64_t>(rgba.size())
+        || output.stride_bytes != output.width * 4U
+        || output.required_bytes
+            != static_cast<std::uint64_t>(output.stride_bytes) * output.height) {
+        return status == INKPOD_STATUS_OK ? INKPOD_STATUS_INVALID_STATE : status;
+    }
+    node.thumbnail_width = output.width;
+    node.thumbnail_height = output.height;
+    node.thumbnail_stride_bytes = output.stride_bytes;
+    node.thumbnail_bgra.resize(static_cast<std::size_t>(output.required_bytes));
+    for (std::uint32_t y = 0U; y < output.height; ++y) {
+        for (std::uint32_t x = 0U; x < output.width; ++x) {
+            const std::size_t offset = static_cast<std::size_t>(y) * output.stride_bytes
+                + static_cast<std::size_t>(x) * 4U;
+            const std::uint32_t alpha = rgba[offset + 3U];
+            const std::uint32_t checker = ((x / 8U) + (y / 8U)) % 2U == 0U ? 248U : 224U;
+            const auto composite = [alpha, checker](std::uint8_t channel) {
+                return static_cast<std::uint8_t>(
+                    (std::uint32_t{channel} * alpha + checker * (255U - alpha) + 127U)
+                    / 255U);
+            };
+            node.thumbnail_bgra[offset] = composite(rgba[offset + 2U]);
+            node.thumbnail_bgra[offset + 1U] = composite(rgba[offset + 1U]);
+            node.thumbnail_bgra[offset + 2U] = composite(rgba[offset]);
+            node.thumbnail_bgra[offset + 3U] = 255U;
+        }
+    }
+    return INKPOD_STATUS_OK;
+}
+
+} // namespace
 
 DocumentPanesController::DocumentPanesController(app::CoreEngine& engine) noexcept
     : engine_(engine) {}
 
 InkpodStatus DocumentPanesController::LoadTree(
     std::uint64_t requested_layer_id,
+    bool include_thumbnails,
     std::vector<TreePaneNode>& layers,
     std::vector<TreePaneNode>& planes,
     std::uint32_t& selected_layer_index) noexcept {
     return engine_.Invoke(
-        [&layers, &planes, requested_layer_id, &selected_layer_index](InkpodCore* core) {
+        [&layers, &planes, requested_layer_id, include_thumbnails, &selected_layer_index](
+            InkpodCore* core) {
             try {
                 layers.clear();
                 planes.clear();
@@ -34,7 +89,7 @@ InkpodStatus DocumentPanesController::LoadTree(
                         != INKPOD_STATUS_OK) {
                         break;
                     }
-                    layers.push_back(TreePaneNode{
+                    TreePaneNode node{
                         info.id,
                         info.parent_id,
                         info.index,
@@ -45,7 +100,14 @@ InkpodStatus DocumentPanesController::LoadTree(
                         info.flags,
                         std::string(
                             reinterpret_cast<const char*>(name.data()),
-                            static_cast<std::size_t>(info.name_bytes))});
+                            static_cast<std::size_t>(info.name_bytes))};
+                    if (include_thumbnails) {
+                        const InkpodStatus thumbnail_status = LoadLayerThumbnail(core, node);
+                        if (thumbnail_status != INKPOD_STATUS_OK) {
+                            return thumbnail_status;
+                        }
+                    }
+                    layers.push_back(std::move(node));
                     if (info.id == requested_layer_id) {
                         selected_layer_index = layer_index;
                     }

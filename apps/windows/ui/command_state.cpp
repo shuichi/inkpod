@@ -143,6 +143,10 @@ void ProvideEffectsCommandStates(
 
 void ProvideDocumentPaneCommandStates(
     const CommandStateInputs& input, CommandStateSet& states) noexcept {
+    SetChecked(
+        states,
+        IDM_WINDOW_LAYER_PALETTE,
+        input.document_pane.layer_palette_visible);
     SetEnabled(
         states,
         {IDM_LAYER_DUPLICATE, IDM_LAYER_MOVE_TOP},

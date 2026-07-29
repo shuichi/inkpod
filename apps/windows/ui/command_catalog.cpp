@@ -85,7 +85,8 @@ const wchar_t* GroupName(UINT command) noexcept {
         case 417: return L"連番・モーション";
         case 418: return L"ベクター";
         case 419:
-            return command == IDM_WINDOW_TOOL_PALETTE || command == IDM_WINDOW_BATCH
+            return command == IDM_WINDOW_TOOL_PALETTE || command == IDM_WINDOW_LAYER_PALETTE
+                    || command == IDM_WINDOW_BATCH
                 ? L"ウィンドウ"
                 : L"バッチ";
         case 420: return L"バッチ項目";
@@ -150,6 +151,9 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
             return true;
         case IDM_WINDOW_TOOL_PALETTE:
             sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'T')});
+            return true;
+        case IDM_WINDOW_LAYER_PALETTE:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'L')});
             return true;
         default: return false;
     }

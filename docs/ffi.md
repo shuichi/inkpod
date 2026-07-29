@@ -172,6 +172,13 @@ status = inkpod_clipboard_render_rgba8(clipboard, &output);
 2 回の call の間に対象 object を変更または解放しない。Core 文書を対象とする query では、必要量取得と
 本取得を同じ Core engine work item 内で行うと revision drift を避けられる。
 
+`inkpod_core_layer_thumbnail` もこの caller-owned buffer 方式を使う。最初の call は
+`InkpodLayerThumbnailBuffer::pixels_rgba8 = NULL`、`pixel_capacity = 0` とし、返された
+`required_bytes` を確保してから同じ stable layer ID と最大寸法で再度呼ぶ。結果は上から下へ packed
+された straight-alpha RGBA8 で、`revision` は生成元の committed document revision である。
+buffer の確保・解放は caller が担い、Core は pointer を保持しない。レイヤー自体が非表示でも内容を
+確認できる一方、プレーンの表示状態とレイヤー／プレーン不透明度は thumbnail に反映される。
+
 ## 編集状態と排他
 
 Core が持つ transient editing state は、committed document と分離される。

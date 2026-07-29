@@ -22,6 +22,10 @@ struct TreePaneNode {
     std::uint32_t child_count{};
     std::uint32_t flags{};
     std::string name;
+    std::uint32_t thumbnail_width{};
+    std::uint32_t thumbnail_height{};
+    std::uint32_t thumbnail_stride_bytes{};
+    std::vector<std::uint8_t> thumbnail_bgra;
 };
 
 struct LightTablePaneSet {
@@ -42,14 +46,15 @@ struct SequencePaneCell {
     std::string name;
 };
 
-// Owns the Core-to-pane model adapter. A future modeless floating palette
-// may bind these records without coupling Core state to an HWND.
+// Owns the Core-to-pane model adapter. Modeless palettes bind these records
+// without coupling Core state to an HWND.
 class DocumentPanesController final {
 public:
     explicit DocumentPanesController(app::CoreEngine& engine) noexcept;
 
     InkpodStatus LoadTree(
         std::uint64_t requested_layer_id,
+        bool include_thumbnails,
         std::vector<TreePaneNode>& layers,
         std::vector<TreePaneNode>& planes,
         std::uint32_t& selected_layer_index) noexcept;

@@ -827,6 +827,42 @@ fn ffi_contract_vector_filter_and_task_state_machines() {
             inkpod_core_vector_correct_width(core, &width, &mut result),
             INKPOD_STATUS_OK
         );
+        let mut thumbnail = InkpodLayerThumbnailBuffer {
+            struct_size: size_of::<InkpodLayerThumbnailBuffer>() as u32,
+            layer_id: vector_layer_id,
+            maximum_width: 4,
+            maximum_height: 4,
+            ..InkpodLayerThumbnailBuffer::default()
+        };
+        assert_eq!(
+            inkpod_core_layer_thumbnail(core, &mut thumbnail),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            (thumbnail.width, thumbnail.height, thumbnail.stride_bytes),
+            (4, 4, 16)
+        );
+        assert_eq!(thumbnail.required_bytes, 64);
+        let mut short_thumbnail_pixels = vec![0_u8; thumbnail.required_bytes as usize - 1];
+        thumbnail.pixels_rgba8 = short_thumbnail_pixels.as_mut_ptr();
+        thumbnail.pixel_capacity = short_thumbnail_pixels.len() as u64;
+        assert_eq!(
+            inkpod_core_layer_thumbnail(core, &mut thumbnail),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        let mut thumbnail_pixels = vec![0_u8; thumbnail.required_bytes as usize];
+        thumbnail.pixels_rgba8 = thumbnail_pixels.as_mut_ptr();
+        thumbnail.pixel_capacity = thumbnail_pixels.len() as u64;
+        assert_eq!(
+            inkpod_core_layer_thumbnail(core, &mut thumbnail),
+            INKPOD_STATUS_OK
+        );
+        assert!(thumbnail_pixels.chunks_exact(4).any(|pixel| pixel[3] != 0));
+        thumbnail.maximum_width = 0;
+        assert_eq!(
+            inkpod_core_layer_thumbnail(core, &mut thumbnail),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
         let erase = InkpodVectorEraseInput {
             struct_size: size_of::<InkpodVectorEraseInput>() as u32,
             mode: INKPOD_VECTOR_ERASE_WHOLE_PATH,

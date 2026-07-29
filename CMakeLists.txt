@@ -254,6 +254,8 @@ if(WIN32)
         apps/windows/ui/dialogs/basic_dialogs.cpp
         apps/windows/ui/dialogs/batch_dialog.cpp
         apps/windows/ui/dialogs/effects_dialogs.cpp
+        apps/windows/ui/dialogs/layer_palette.cpp
+        apps/windows/ui/dialogs/layer_palette.h
         apps/windows/ui/dialogs/tool_palette.cpp
         apps/windows/ui/dialogs/tool_palette.h
         apps/windows/ui/panes/document_panes.cpp

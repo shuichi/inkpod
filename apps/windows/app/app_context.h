@@ -14,6 +14,7 @@
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/dialogs/layer_palette.h"
 #include "ui/dialogs/tool_palette.h"
 #include "ui/main_window.h"
 #include "ui/shortcut_controller.h"
@@ -165,6 +166,8 @@ struct PaneUiState {
     std::uint32_t light_table_item_count{};
     std::uint32_t sequence_count{};
     std::vector<InkpodStrokeSample> light_table_move_samples;
+    HWND layer_palette{};
+    windows::ui::LayerPaletteDialogState layer_palette_dialog{};
 };
 
 struct AnimationUiState {

@@ -33,6 +33,7 @@
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
 #include "ui/dialogs/effects_dialogs.h"
+#include "ui/dialogs/layer_palette.h"
 #include "ui/command_state.h"
 #include "ui/command_catalog.h"
 #include "ui/shortcut_controller.h"
@@ -172,6 +173,13 @@ using inkpod::windows::ui::tools::VectorController;
 using inkpod::windows::ui::BatchController;
 using inkpod::windows::ui::EffectsController;
 bool QueryTreeNode(AppContext& state, bool plane, TreePaneNode& output) noexcept;
+bool RefreshTreePane(AppContext& state) noexcept;
+InkpodStatus ApplyTreeEdit(
+    AppContext& state,
+    InkpodTreeOperation operation,
+    std::uint64_t object_id,
+    std::uint32_t destination_index,
+    std::uint64_t& out_object_id) noexcept;
 
 bool DispatchEnabledCommand(
     AppContext& state, HWND window, UINT command) noexcept {
@@ -279,6 +287,83 @@ void NotifyToolPaletteVisibilityChanged(void* context) noexcept {
     }
 }
 
+void DispatchLayerPaletteCommand(void* context, UINT command) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state != nullptr && state->windows.window != nullptr) {
+        DispatchEnabledCommand(*state, state->windows.window, command);
+    }
+}
+
+void SelectLayerPaletteLayer(void* context, std::uint64_t layer_id) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state == nullptr || state->engine == nullptr || layer_id == 0U) {
+        return;
+    }
+    const std::uint64_t previous_layer_id = state->panes.active_tree_layer_id;
+    const std::uint64_t previous_plane_id = state->panes.active_tree_plane_id;
+    state->panes.active_tree_layer_id = layer_id;
+    state->panes.active_tree_plane_id = 0U;
+    if (!RefreshTreePane(*state) || state->panes.active_tree_plane_id == 0U) {
+        state->panes.active_tree_layer_id = previous_layer_id;
+        state->panes.active_tree_plane_id = previous_plane_id;
+        RefreshTreePane(*state);
+        return;
+    }
+    const std::uint64_t plane_id = state->panes.active_tree_plane_id;
+    const InkpodStatus status = state->engine->Invoke(
+        [layer_id, plane_id](InkpodCore* core) {
+            return inkpod_core_set_active_node(core, layer_id, plane_id);
+        },
+        false,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        state->panes.active_tree_layer_id = previous_layer_id;
+        state->panes.active_tree_plane_id = previous_plane_id;
+        RefreshTreePane(*state);
+        ShowCoreError(*state, state->windows.window, L"レイヤーの選択");
+    } else {
+        TreePaneNode active_plane{};
+        if (QueryTreeNode(*state, true, active_plane)) {
+            state->tools.active_plane =
+                active_plane.kind == INKPOD_TYPED_PLANE_MAIN_LINE
+                ? INKPOD_PLANE_MAIN_LINE
+                : INKPOD_PLANE_COLOR;
+        }
+    }
+    UpdateMenuState(*state);
+}
+
+void ReorderLayerPaletteLayer(
+    void* context,
+    std::uint64_t layer_id,
+    std::uint32_t destination_index) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state == nullptr || layer_id == 0U) {
+        return;
+    }
+    std::uint64_t ignored{};
+    const InkpodStatus status = ApplyTreeEdit(
+        *state,
+        INKPOD_TREE_REORDER_LAYER,
+        layer_id,
+        destination_index,
+        ignored);
+    if (status != INKPOD_STATUS_OK) {
+        ShowCoreError(*state, state->windows.window, L"レイヤーの並べ替え");
+    } else {
+        state->panes.active_tree_layer_id = layer_id;
+        RefreshTreePane(*state);
+    }
+    UpdateMenuState(*state);
+}
+
+void NotifyLayerPaletteVisibilityChanged(void* context) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state != nullptr && state->windows.window != nullptr) {
+        UpdateMenuState(*state);
+    }
+}
+
 void ResetEffectsDocumentState(EffectsUiState& effects) noexcept {
     effects.adjustment_id = 0U;
     effects.adjustment_visible = true;
@@ -326,10 +411,16 @@ bool RefreshTreePane(AppContext& state) noexcept {
     std::uint32_t selected_layer_index{};
     DocumentPanesController controller(*state.engine);
     const InkpodStatus status = controller.LoadTree(
-        requested_layer_id, layers, planes, selected_layer_index);
+        requested_layer_id,
+        PaletteWindowIsShown(state.panes.layer_palette),
+        layers,
+        planes,
+        selected_layer_index);
     if (status != INKPOD_STATUS_OK || layers.empty()) {
         state.panes.tree_layer_count = 0U;
         state.panes.tree_plane_count = 0U;
+        layers.clear();
+        UpdateLayerPaletteDialog(state.panes.layer_palette, layers, 0U);
         return false;
     }
     selected_layer_index = std::min<std::uint32_t>(
@@ -358,6 +449,10 @@ bool RefreshTreePane(AppContext& state) noexcept {
     }
     HandleActivePlaneTransition(
         state.tools, state.windows.canvas, vector_stroke_plane);
+    UpdateLayerPaletteDialog(
+        state.panes.layer_palette,
+        layers,
+        state.panes.active_tree_layer_id);
     return true;
 }
 
@@ -2229,7 +2324,9 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.effects.alpha_view = state.effects.alpha_view;
 
     inputs.document_pane.removable_layer_available =
-        state.document.smoke_layer_id != 0U;
+        state.panes.tree_layer_count > 1U;
+    inputs.document_pane.layer_palette_visible =
+        PaletteWindowIsShown(state.panes.layer_palette);
 
     inputs.animation.motion_fps = state.animation.motion_fps;
 
@@ -2586,6 +2683,9 @@ void UpdateMenuState(AppContext& state) noexcept {
     UpdateCommandLabels(menu, has_history, undo_label, redo_label);
     ApplyCommandStates(state.command_states, menu);
     UpdateToolPaletteDialog(state.tools.palette, state.command_states);
+    UpdateLayerPaletteCommandState(
+        state.panes.layer_palette,
+        state.command_states);
     ApplyShortcutLabelsToMenu(menu, state.shortcuts.bindings);
     UpdateMainWindowStatus(state, info, has_document);
     DrawMenuBar(state.windows.window);
@@ -2606,8 +2706,11 @@ bool CommandSurfacesMatchComputedState(const AppContext& state) noexcept {
         }
     }
     return ToolPaletteMatchesCommandState(
-        state.tools.palette,
-        state.command_states);
+               state.tools.palette,
+               state.command_states)
+        && LayerPaletteMatchesCommandState(
+               state.panes.layer_palette,
+               state.command_states);
 }
 
 InkpodStatus ApplyView(
@@ -5122,10 +5225,37 @@ bool InitializeMainChrome(AppContext& state) noexcept {
     RestorePaletteWindowPlacement(
         state.tools.palette,
         state.windows.window,
-        L"ToolPalettePlacement",
+        L"ToolPalettePlacementV2",
         !state.lifetime.smoke_test);
     SetPaletteWindowShown(state.tools.palette, false);
+    state.panes.layer_palette_dialog = {
+        &state,
+        DispatchLayerPaletteCommand,
+        SelectLayerPaletteLayer,
+        ReorderLayerPaletteLayer,
+        NotifyLayerPaletteVisibilityChanged};
+    state.panes.layer_palette = CreateLayerPaletteDialog(
+        state.lifetime.instance,
+        state.windows.window,
+        state.panes.layer_palette_dialog);
+    if (state.panes.layer_palette == nullptr) {
+        return false;
+    }
+    RestorePaletteWindowPlacement(
+        state.panes.layer_palette,
+        state.windows.window,
+        L"LayerPalettePlacement",
+        !state.lifetime.smoke_test);
+    SetPaletteWindowShown(state.panes.layer_palette, false);
     return true;
+}
+
+void ShowInitialPalettes(AppContext& state) noexcept {
+    SetPaletteWindowShown(state.tools.palette, true);
+    if (SetPaletteWindowShown(state.panes.layer_palette, true)) {
+        RefreshTreePane(state);
+    }
+    UpdateMenuState(state);
 }
 
 std::optional<LRESULT> RouteBatchCommand(
@@ -6058,6 +6188,21 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
+        case IDM_WINDOW_LAYER_PALETTE:
+            if (state->panes.layer_palette != nullptr) {
+                const bool visible =
+                    PaletteWindowIsShown(state->panes.layer_palette);
+                const bool visibility_changed = SetPaletteWindowShown(
+                    state->panes.layer_palette,
+                    !visible);
+                if (!visible) {
+                    RefreshTreePane(*state);
+                    SetForegroundWindow(state->panes.layer_palette);
+                }
+                UpdateMenuState(*state);
+                return visibility_changed ? 1 : 0;
+            }
+            return 0;
         case IDM_LAYER_NEW: {
             ViewOptionsDialogState dialog{};
             dialog.title = L"新規レイヤー";
@@ -6119,9 +6264,9 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         }
         case IDM_LAYER_DELETE: {
             std::uint64_t ignored{};
-            const std::uint64_t target = state->document.smoke_layer_id != 0U
-                ? state->document.smoke_layer_id
-                : state->panes.active_tree_layer_id;
+            const std::uint64_t target = state->panes.active_tree_layer_id != 0U
+                ? state->panes.active_tree_layer_id
+                : state->document.smoke_layer_id;
             const InkpodStatus status = target == 0U
                 ? INKPOD_STATUS_INVALID_STATE
                 : ApplyTreeEdit(
@@ -6133,7 +6278,9 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"レイヤーの削除");
             } else {
-                state->document.smoke_layer_id = 0U;
+                if (state->document.smoke_layer_id == target) {
+                    state->document.smoke_layer_id = 0U;
+                }
                 state->panes.active_tree_layer_id = 0U;
                 RefreshTreePane(*state);
             }

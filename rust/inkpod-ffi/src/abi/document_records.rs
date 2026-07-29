@@ -35,6 +35,25 @@ pub struct InkpodNodeInfo {
 }
 
 #[repr(C)]
+#[derive(Default)]
+pub struct InkpodLayerThumbnailBuffer {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub layer_id: u64,
+    pub maximum_width: u32,
+    pub maximum_height: u32,
+    pub width: u32,
+    pub height: u32,
+    pub stride_bytes: u32,
+    pub reserved_2: u32,
+    pub revision: u64,
+    pub pixels_rgba8: *mut u8,
+    pub pixel_capacity: u64,
+    pub required_bytes: u64,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodSelectionPoint {
     pub struct_size: u32,

@@ -115,6 +115,55 @@ fn acceptance_layer_tree_undo_redo_save_reopen_and_validation() {
 }
 
 #[test]
+fn layer_thumbnail_preserves_aspect_content_and_hidden_layer_preview() {
+    let mut core = Core::new();
+    let created = core
+        .new_cell(8, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_active_plane(ActivePlane::Color).unwrap();
+    core.apply_stroke(&color_stroke(
+        PaintTool::Pencil,
+        1.0,
+        StrokeSample {
+            x: 7.0,
+            y: 3.0,
+            pressure: 1.0,
+        },
+    ))
+    .unwrap();
+
+    let before_visible = core.document_info().unwrap();
+    let visible = core.layer_thumbnail(created.layer_id, 4, 4).unwrap();
+    assert_eq!(
+        (visible.width, visible.height, visible.stride_bytes),
+        (4, 2, 16)
+    );
+    assert_eq!(visible.layer_id, created.layer_id);
+    assert_eq!(
+        visible.revision,
+        core.document_info().unwrap().document_revision
+    );
+    assert_eq!(visible.pixels.len(), 32);
+    assert!(visible.pixels.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert_eq!(core.document_info().unwrap(), before_visible);
+
+    core.set_layer_properties(created.layer_id, false, true, 1_000, "Coloring")
+        .unwrap();
+    let before_hidden = core.document_info().unwrap();
+    let hidden = core.layer_thumbnail(created.layer_id, 4, 4).unwrap();
+    assert_eq!(hidden.pixels, visible.pixels);
+    assert!(matches!(
+        core.layer_thumbnail(created.layer_id, 0, 4),
+        Err(CoreError::InvalidArgument(_))
+    ));
+    assert!(matches!(
+        core.layer_thumbnail(u64::MAX, 4, 4),
+        Err(CoreError::InvalidArgument(_))
+    ));
+    assert_eq!(core.document_info().unwrap(), before_hidden);
+}
+
+#[test]
 fn acceptance_selection_boolean_property_and_authoring_tools() {
     fn mask(bits: u8) -> TileRaster {
         let mut mask = TileRaster::new(8, 1, PixelFormat::BinaryMask8).unwrap();

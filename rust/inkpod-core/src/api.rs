@@ -91,6 +91,20 @@ pub struct LayerInfo {
     pub planes: Vec<PlaneInfo>,
 }
 
+/// A bounded, aspect-preserving, straight-alpha RGBA8 preview of one layer.
+///
+/// The preview is derived without changing visibility, selection, revision, or
+/// history. `pixels` is packed top-to-bottom with `stride_bytes == width * 4`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LayerThumbnail {
+    pub revision: u64,
+    pub layer_id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub stride_bytes: u32,
+    pub pixels: Vec<u8>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SelectionOperation {
     New,

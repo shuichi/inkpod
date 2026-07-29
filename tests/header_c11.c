@@ -23,6 +23,7 @@ _Static_assert(sizeof(InkpodSequenceCellInput) == 120U, "sequence cell layout dr
 _Static_assert(sizeof(InkpodSequenceInput) == 40U, "sequence input layout drift");
 _Static_assert(sizeof(InkpodMotionCheckInput) == 16U, "motion input layout drift");
 _Static_assert(sizeof(InkpodMotionFrame) == 40U, "motion frame layout drift");
+_Static_assert(sizeof(InkpodLayerThumbnailBuffer) == 80U, "layer thumbnail layout drift");
 
 int inkpod_header_c11_smoke(void) {
     InkpodSnapshotView view = {0};

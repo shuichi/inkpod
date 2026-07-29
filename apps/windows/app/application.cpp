@@ -63,10 +63,19 @@ InkpodStatus StopCore(AppContext& state) noexcept {
         if (!state.lifetime.smoke_test) {
             windows::ui::SavePaletteWindowPlacement(
                 state.tools.palette,
-                L"ToolPalettePlacement");
+                L"ToolPalettePlacementV2");
         }
         DestroyWindow(state.tools.palette);
         state.tools.palette = nullptr;
+    }
+    if (state.panes.layer_palette != nullptr) {
+        if (!state.lifetime.smoke_test) {
+            windows::ui::SavePaletteWindowPlacement(
+                state.panes.layer_palette,
+                L"LayerPalettePlacement");
+        }
+        DestroyWindow(state.panes.layer_palette);
+        state.panes.layer_palette = nullptr;
     }
     if (state.batch.palette != nullptr) {
         DestroyWindow(state.batch.palette);
@@ -96,8 +105,9 @@ int RunMessageLoop(AppContext& state) noexcept {
     BOOL result{};
     while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
         bool dialog_message{};
-        const std::array<HWND, 2U> palettes{
+        const std::array<HWND, 3U> palettes{
             state.tools.palette,
+            state.panes.layer_palette,
             state.batch.palette};
         for (const HWND palette : palettes) {
             if (palette != nullptr && IsWindowVisible(palette) != FALSE
@@ -125,7 +135,7 @@ Application::Application(ApplicationLaunch launch) noexcept : launch_(launch) {}
 int Application::Run() {
     INITCOMMONCONTROLSEX controls{};
     controls.dwSize = sizeof(controls);
-    controls.dwICC = ICC_STANDARD_CLASSES | ICC_BAR_CLASSES;
+    controls.dwICC = ICC_STANDARD_CLASSES | ICC_BAR_CLASSES | ICC_TAB_CLASSES;
     if (!InitCommonControlsEx(&controls)) {
         MessageBoxW(
             nullptr,
@@ -249,10 +259,7 @@ int Application::Run() {
         exit_code = windows::ui::RunApplicationSmoke(state);
     } else {
         ShowWindow(window, launch_.show_command);
-        if (state.tools.palette != nullptr) {
-            windows::ui::SetPaletteWindowShown(state.tools.palette, true);
-        }
-        windows::ui::runtime::UpdateMenuState(state);
+        windows::ui::runtime::ShowInitialPalettes(state);
         UpdateWindow(window);
         exit_code = RunMessageLoop(state);
     }

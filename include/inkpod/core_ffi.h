@@ -1347,6 +1347,27 @@ typedef struct InkpodNodeInfo {
     uint64_t name_bytes;
 } InkpodNodeInfo;
 
+/**
+ * @brief 1 layer の縦横比維持 straight RGBA8 thumbnail を受け取る caller-owned buffer。
+ * `maximum_width`/`maximum_height` は 1..256。`pixels_rgba8` は上から下へ packed される。
+ */
+typedef struct InkpodLayerThumbnailBuffer {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t layer_id;
+    uint32_t maximum_width;
+    uint32_t maximum_height;
+    uint32_t width;
+    uint32_t height;
+    uint32_t stride_bytes;
+    uint32_t reserved_2;
+    uint64_t revision;
+    uint8_t* pixels_rgba8;
+    uint64_t pixel_capacity;
+    uint64_t required_bytes;
+} InkpodLayerThumbnailBuffer;
+
 /** @brief selection path の document 座標点 record。 */
 typedef struct InkpodSelectionPoint {
     uint32_t struct_size;
@@ -2132,6 +2153,18 @@ InkpodStatus inkpod_core_node_get(
     uint32_t layer_index,
     uint32_t plane_index,
     InkpodNodeInfo* out_info);
+/**
+ * @brief stable layer ID の内容だけを縮小合成し straight RGBA8 でコピーする。
+ * @par 契約
+ * Core owner thread。`core`/`output` は非 NULL・非重複、構造体は完全サイズ。
+ * capacity 0/NULL は size query。layer 自体が非表示でも内容を表示し、plane visibility と
+ * layer/plane opacity は反映する。成功・失敗とも selection、revision、dirty、Undo は不変。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_layer_thumbnail(
+    InkpodCore* core,
+    InkpodLayerThumbnailBuffer* output);
 /**
  * @brief shape/points/wand 条件から selection mask を new/add/subtract/intersect する。
  * @par 契約
