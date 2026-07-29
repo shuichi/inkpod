@@ -59,6 +59,10 @@ bool HasDiameter(std::uint32_t tool) noexcept {
         || tool == INKPOD_TOOL_ERASER;
 }
 
+bool CanEditDiameter(std::uint32_t tool) noexcept {
+    return tool == INKPOD_TOOL_BRUSH || tool == INKPOD_TOOL_ERASER;
+}
+
 void LayoutPane(HWND pane) noexcept {
     RECT client{};
     if (GetClientRect(pane, &client) == FALSE) {
@@ -145,7 +149,11 @@ void UpdateFont(HWND pane, ToolOptionsPaneState& state) noexcept {
 }
 
 void CommitDiameter(HWND pane, ToolOptionsPaneState& state) noexcept {
-    if (state.updating || state.change_diameter == nullptr) {
+    if (state.updating) {
+        return;
+    }
+    if (!CanEditDiameter(state.active_tool) || state.change_diameter == nullptr) {
+        UpdateToolOptionsPane(pane, state.active_tool, state.diameter);
         return;
     }
     std::array<wchar_t, 64U> text{};
@@ -157,7 +165,8 @@ void CommitDiameter(HWND pane, ToolOptionsPaneState& state) noexcept {
     wchar_t* end{};
     const double value = std::wcstod(text.data(), &end);
     if (end != text.data() && *end == L'\0' && std::isfinite(value)
-        && value >= 0.1 && value <= 2048.0) {
+        && value >= static_cast<double>(kMinimumToolDiameter)
+        && value <= static_cast<double>(kMaximumToolDiameter)) {
         state.change_diameter(state.context, static_cast<float>(value));
     }
     UpdateToolOptionsPane(pane, state.active_tool, state.diameter);
@@ -319,15 +328,26 @@ void UpdateToolOptionsPane(
     state->diameter = diameter;
     SetDlgItemTextW(pane, IDC_TOOL_OPTIONS_LABEL, ToolLabel(active_tool));
     std::array<wchar_t, 32U> value{};
-    swprintf_s(value.data(), value.size(), L"%.1f", static_cast<double>(diameter));
+    const float displayed_diameter = active_tool == INKPOD_TOOL_PENCIL
+        ? kPencilToolDiameter
+        : diameter;
+    swprintf_s(
+        value.data(),
+        value.size(),
+        L"%.1f",
+        static_cast<double>(displayed_diameter));
     SetDlgItemTextW(pane, IDC_TOOL_OPTIONS_DIAMETER, value.data());
     const bool has_diameter = HasDiameter(active_tool);
+    const bool can_edit_diameter = CanEditDiameter(active_tool);
     ShowWindow(
         GetDlgItem(pane, IDC_TOOL_OPTIONS_DIAMETER_LABEL),
         has_diameter ? SW_SHOW : SW_HIDE);
     ShowWindow(
         GetDlgItem(pane, IDC_TOOL_OPTIONS_DIAMETER),
         has_diameter ? SW_SHOW : SW_HIDE);
+    EnableWindow(
+        GetDlgItem(pane, IDC_TOOL_OPTIONS_DIAMETER),
+        can_edit_diameter ? TRUE : FALSE);
     EnableWindow(
         GetDlgItem(pane, IDC_TOOL_OPTIONS_DETAILS),
         DetailsCommand(active_tool) != 0U ? TRUE : FALSE);

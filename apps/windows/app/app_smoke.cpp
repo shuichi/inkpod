@@ -210,9 +210,24 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
             })) {
         return 746;
     }
-    if (GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_DIAMETER)
-            == nullptr) {
+    const HWND diameter_edit =
+        GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_DIAMETER);
+    if (diameter_edit == nullptr) {
         return 747;
+    }
+    const auto diameter_text_is = [&](const wchar_t* expected) noexcept {
+        std::array<wchar_t, 32U> value{};
+        return GetWindowTextW(
+                   diameter_edit,
+                   value.data(),
+                   static_cast<int>(value.size()))
+                > 0
+            && std::wcscmp(value.data(), expected) == 0;
+    };
+    if (state.tools.active_tool != INKPOD_TOOL_PENCIL
+        || IsWindowEnabled(diameter_edit) != FALSE
+        || !diameter_text_is(L"1.0")) {
+        return 750;
     }
     if (GetDlgItem(state.windows.color_pane, IDC_COLOR_TABS) == nullptr
         || GetDlgItem(state.windows.color_pane, IDC_PALETTE_LIST) == nullptr) {
@@ -274,9 +289,40 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     }
     const HWND brush_button = GetDlgItem(state.tools.palette, IDM_TOOL_BRUSH);
     const HWND pencil_button = GetDlgItem(state.tools.palette, IDM_TOOL_PENCIL);
+    const HWND eraser_button = GetDlgItem(state.tools.palette, IDM_TOOL_ERASER);
     SendMessageW(brush_button, BM_CLICK, 0, 0);
     if (state.tools.active_tool != INKPOD_TOOL_BRUSH) {
         return 733;
+    }
+    if (IsWindowEnabled(diameter_edit) == FALSE
+        || !diameter_text_is(L"8.0")) {
+        return 751;
+    }
+    SetWindowTextW(diameter_edit, L"256.0");
+    SendMessageW(
+        state.windows.tool_options,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_TOOL_OPTIONS_DIAMETER, EN_KILLFOCUS),
+        reinterpret_cast<LPARAM>(diameter_edit));
+    if (state.tools.diameter != panes::kMaximumToolDiameter
+        || !diameter_text_is(L"256.0")) {
+        return 752;
+    }
+    SetWindowTextW(diameter_edit, L"256.1");
+    SendMessageW(
+        state.windows.tool_options,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_TOOL_OPTIONS_DIAMETER, EN_KILLFOCUS),
+        reinterpret_cast<LPARAM>(diameter_edit));
+    if (state.tools.diameter != panes::kMaximumToolDiameter
+        || !diameter_text_is(L"256.0")) {
+        return 753;
+    }
+    SendMessageW(eraser_button, BM_CLICK, 0, 0);
+    if (state.tools.active_tool != INKPOD_TOOL_ERASER
+        || IsWindowEnabled(diameter_edit) == FALSE
+        || !diameter_text_is(L"256.0")) {
+        return 754;
     }
     if (!ToolPaletteMatchesCommandState(
             state.tools.palette, state.command_states)) {
@@ -284,6 +330,28 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     }
     if (!CommandSurfacesMatchComputedState(state)) {
         return 745;
+    }
+    SendMessageW(pencil_button, BM_CLICK, 0, 0);
+    if (state.tools.active_tool != INKPOD_TOOL_PENCIL
+        || state.tools.diameter != panes::kMaximumToolDiameter
+        || IsWindowEnabled(diameter_edit) != FALSE
+        || !diameter_text_is(L"1.0")) {
+        return 755;
+    }
+    SendMessageW(brush_button, BM_CLICK, 0, 0);
+    if (state.tools.active_tool != INKPOD_TOOL_BRUSH
+        || IsWindowEnabled(diameter_edit) == FALSE
+        || !diameter_text_is(L"256.0")) {
+        return 756;
+    }
+    SetWindowTextW(diameter_edit, L"8.0");
+    SendMessageW(
+        state.windows.tool_options,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_TOOL_OPTIONS_DIAMETER, EN_KILLFOCUS),
+        reinterpret_cast<LPARAM>(diameter_edit));
+    if (state.tools.diameter != 8.0F || !diameter_text_is(L"8.0")) {
+        return 757;
     }
     SendMessageW(pencil_button, BM_CLICK, 0, 0);
     const LONG initial_canvas_width =

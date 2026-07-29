@@ -6,6 +6,10 @@
 
 namespace inkpod::windows::ui::panes {
 
+inline constexpr float kMinimumToolDiameter = 0.1F;
+inline constexpr float kMaximumToolDiameter = 256.0F;
+inline constexpr float kPencilToolDiameter = 1.0F;
+
 using ToolOptionsCommandCallback = void (*)(void* context, UINT command) noexcept;
 using ToolOptionsDiameterCallback = void (*)(void* context, float diameter) noexcept;
 

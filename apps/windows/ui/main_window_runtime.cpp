@@ -285,8 +285,9 @@ void DispatchToolPaletteCommand(void* context, UINT command) noexcept {
 
 void ChangeToolOptionsDiameter(void* context, float diameter) noexcept {
     auto* state = static_cast<AppContext*>(context);
-    if (state == nullptr || !std::isfinite(diameter) || diameter < 0.1F
-        || diameter > 2048.0F) {
+    if (state == nullptr || !std::isfinite(diameter)
+        || diameter < inkpod::windows::ui::panes::kMinimumToolDiameter
+        || diameter > inkpod::windows::ui::panes::kMaximumToolDiameter) {
         return;
     }
     state->tools.diameter = diameter;
