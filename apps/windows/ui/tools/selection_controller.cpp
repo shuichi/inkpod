@@ -23,6 +23,26 @@ InkpodStatus SelectionController::Apply(
         true);
 }
 
+InkpodStatus SelectionController::ApplyEmpty(
+    InkpodSelectionOperation operation) noexcept {
+    if (operation == INKPOD_SELECTION_ADD
+        || operation == INKPOD_SELECTION_SUBTRACT) {
+        return INKPOD_STATUS_OK;
+    }
+    if (operation != INKPOD_SELECTION_NEW
+        && operation != INKPOD_SELECTION_INTERSECT) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    return engine_.Invoke(
+        [](InkpodCore* core) {
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            return inkpod_core_selection_clear(core, &result);
+        },
+        true,
+        true);
+}
+
 InkpodStatus SelectionController::SelectColor(
     const InkpodColorValue& color,
     bool different,

@@ -17,6 +17,7 @@ public:
     InkpodStatus Apply(
         InkpodSelectionInput input,
         const std::vector<InkpodSelectionPoint>& points) noexcept;
+    InkpodStatus ApplyEmpty(InkpodSelectionOperation operation) noexcept;
     InkpodStatus SelectColor(
         const InkpodColorValue& color,
         bool different,

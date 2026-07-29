@@ -1747,6 +1747,40 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         || locator.selection.height != 4) {
         return 316;
     }
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
+    const std::array<InkpodStrokeSample, 2U> short_lasso_samples{
+        selection_sample(2.0F, 2.0F), selection_sample(3.0F, 3.0F)};
+    if (!send_selection_gesture(short_lasso_samples)) {
+        return 616;
+    }
+    if (!query_selection(locator) || (locator.flags & 1U) != 0U) {
+        return 617;
+    }
+    if (!select_rectangle(IDM_SELECTION_MODE_NEW, 1.0F, 1.0F, 5.0F, 5.0F)) {
+        return 618;
+    }
+    InkpodDocumentInfo before_empty_selection_operation{};
+    if (!QueryDocument(state, before_empty_selection_operation)) {
+        return 619;
+    }
+    for (const UINT mode : {
+             IDM_SELECTION_MODE_ADD, IDM_SELECTION_MODE_SUBTRACT}) {
+        SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
+        SendMessageW(state.windows.window, WM_COMMAND, mode, 0);
+        if (!send_selection_gesture(short_lasso_samples)) {
+            return 620;
+        }
+        InkpodDocumentInfo after_empty_selection_operation{};
+        if (!QueryDocument(state, after_empty_selection_operation)
+            || after_empty_selection_operation.document_revision
+                != before_empty_selection_operation.document_revision
+            || !query_selection(locator) || (locator.flags & 1U) == 0U
+            || locator.selection.x != 1 || locator.selection.y != 1
+            || locator.selection.width != 4 || locator.selection.height != 4) {
+            return 621;
+        }
+    }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_ELLIPSE, 0);
     SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
     const std::array<InkpodStrokeSample, 2U> ellipse_samples{

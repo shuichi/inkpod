@@ -4906,6 +4906,15 @@ InkpodStatus ApplySelectionGesture(
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
+    if ((state.tools.selection_shape == INKPOD_SELECTION_LASSO
+            || state.tools.selection_shape == INKPOD_SELECTION_POLYLINE)
+        && points.size() < 3U) {
+        if (state.engine == nullptr) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        SelectionController controller(*state.engine);
+        return controller.ApplyEmpty(state.tools.selection_operation);
+    }
     InkpodSelectionInput input{};
     input.struct_size = sizeof(input);
     input.shape = state.tools.selection_shape;
