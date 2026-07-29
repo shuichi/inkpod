@@ -106,6 +106,7 @@ using inkpod::windows::ui::CommandStateInputs;
 using inkpod::windows::ui::ComputeCommandStates;
 using inkpod::windows::ui::IsCommandEnabled;
 using inkpod::windows::ui::tools::CancelVectorGeometryPreview;
+using inkpod::windows::ui::tools::CancelSelectionGeometryPreview;
 using inkpod::windows::ui::tools::HandleActivePlaneTransition;
 using inkpod::windows::ui::tools::IsVectorCanvasTool;
 using inkpod::windows::ui::tools::IsVectorStrokePlane;
@@ -509,6 +510,7 @@ void ResetEffectsDocumentState(EffectsUiState& effects) noexcept {
 }
 
 void ResetUiForDocumentReplacement(AppContext& state) noexcept {
+    CancelSelectionGeometryPreview(state.tools, state.windows.canvas);
     ResetDocumentShellTransientState(state.document);
     ResetPaneDocumentState(state.panes);
     ResetToolDocumentState(state.tools);
@@ -3433,6 +3435,101 @@ bool VectorGestureDocumentPoints(
     }
 }
 
+void UpdateSelectionGeometryPreview(AppContext& state) noexcept {
+    inkpod::renderer::CanvasGeometryPreview preview{};
+    preview.struct_size = sizeof(preview);
+    const auto publish_preview = [&state, &preview] {
+        SendMessageW(
+            state.windows.canvas,
+            inkpod::renderer::kCanvasSetGeometryPreview,
+            0,
+            reinterpret_cast<LPARAM>(&preview));
+    };
+    std::vector<InkpodVectorPoint> points;
+    if (!VectorGestureDocumentPoints(
+            state, state.tools.selection_gesture_samples, points)
+        || state.tools.selection_shape == INKPOD_SELECTION_WAND) {
+        publish_preview();
+        return;
+    }
+    preview.active = 1U;
+    const auto append_point = [&preview](InkpodVectorPoint point) {
+        if (preview.point_count < inkpod::renderer::kCanvasGeometryPreviewPoints) {
+            preview.points[preview.point_count++] = point;
+        }
+    };
+    if (state.tools.selection_shape == INKPOD_SELECTION_RECTANGLE) {
+        if (points.size() < 2U) {
+            preview.active = 0U;
+            publish_preview();
+            return;
+        }
+        const float left = std::floor(std::min(points.front().x, points.back().x));
+        const float top = std::floor(std::min(points.front().y, points.back().y));
+        const float right = std::ceil(std::max(points.front().x, points.back().x));
+        const float bottom = std::ceil(std::max(points.front().y, points.back().y));
+        if (left >= right || top >= bottom) {
+            preview.active = 0U;
+            publish_preview();
+            return;
+        }
+        append_point(InkpodVectorPoint{left, top});
+        append_point(InkpodVectorPoint{right, top});
+        append_point(InkpodVectorPoint{right, bottom});
+        append_point(InkpodVectorPoint{left, bottom});
+        preview.closed = 1U;
+    } else if (state.tools.selection_shape == INKPOD_SELECTION_ELLIPSE) {
+        if (points.size() < 2U) {
+            preview.active = 0U;
+            publish_preview();
+            return;
+        }
+        const float left = std::floor(std::min(points.front().x, points.back().x));
+        const float top = std::floor(std::min(points.front().y, points.back().y));
+        const float right = std::ceil(std::max(points.front().x, points.back().x));
+        const float bottom = std::ceil(std::max(points.front().y, points.back().y));
+        if (left >= right || top >= bottom) {
+            preview.active = 0U;
+            publish_preview();
+            return;
+        }
+        const float radius_x = (right - left) / 2.0F;
+        const float radius_y = (bottom - top) / 2.0F;
+        const float center_x = (left + right) / 2.0F;
+        const float center_y = (top + bottom) / 2.0F;
+        constexpr std::uint32_t kEllipsePreviewPoints = 48U;
+        constexpr double kTau = 6.28318530717958647692;
+        for (std::uint32_t index = 0U; index < kEllipsePreviewPoints; ++index) {
+            const double radians = kTau * static_cast<double>(index)
+                / static_cast<double>(kEllipsePreviewPoints);
+            append_point(InkpodVectorPoint{
+                center_x + radius_x * static_cast<float>(std::cos(radians)),
+                center_y + radius_y * static_cast<float>(std::sin(radians))});
+        }
+        preview.closed = 1U;
+    } else {
+        for (const InkpodVectorPoint point : points) {
+            append_point(point);
+        }
+        if (state.tools.selection_shape == INKPOD_SELECTION_LASSO
+            || state.tools.selection_shape == INKPOD_SELECTION_POLYLINE) {
+            if (preview.point_count < 2U) {
+                preview.active = 0U;
+                publish_preview();
+                return;
+            }
+            preview.closed = 1U;
+        } else if (state.tools.selection_shape == INKPOD_SELECTION_TRACE) {
+            preview.stroke_width = std::clamp(
+                state.tools.selection_diameter, 0.001F, 4096.0F);
+        }
+    }
+    if (preview.point_count == 0U) {
+        preview.active = 0U;
+    }
+    publish_preview();
+}
+
 InkpodVectorCubicSegment VectorLineSegment(
     InkpodVectorPoint start, InkpodVectorPoint end, float width) noexcept {
     return InkpodVectorCubicSegment{
@@ -4808,6 +4905,15 @@ InkpodStatus ApplySelectionGesture(
         }
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
+    }
+    if ((state.tools.selection_shape == INKPOD_SELECTION_LASSO
+            || state.tools.selection_shape == INKPOD_SELECTION_POLYLINE)
+        && points.size() < 3U) {
+        if (state.engine == nullptr) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        SelectionController controller(*state.engine);
+        return controller.ApplyEmpty(state.tools.selection_operation);
     }
     InkpodSelectionInput input{};
     input.struct_size = sizeof(input);
@@ -7345,7 +7451,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                                                         : INKPOD_SELECTION_RECTANGLE))));
             TransitionActiveTool(
                 state->tools, state->windows.canvas, kInteractionSelection);
-            state->tools.selection_gesture_samples.clear();
+            CancelSelectionGeometryPreview(state->tools, state->windows.canvas);
             if (command == IDM_SELECTION_WAND || command == IDM_SELECTION_TRACE) {
                 ViewOptionsDialogState dialog{};
                 dialog.title = command == IDM_SELECTION_WAND
@@ -9075,10 +9181,17 @@ std::optional<LRESULT> RouteCanvasMessage(
                 if (state->tools.active_tool == kInteractionSelection) {
                     try {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
-                            state->tools.selection_gesture_samples.clear();
+                            CancelSelectionGeometryPreview(
+                                state->tools, state->windows.canvas);
                         }
                         if (input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel
                             && input->sample_count != 0U) {
+                            if (state->tools.selection_gesture_samples.size()
+                                > UINT64_C(1048576) - input->sample_count) {
+                                CancelSelectionGeometryPreview(
+                                    state->tools, state->windows.canvas);
+                                return 0;
+                            }
                             state->tools.selection_gesture_samples.insert(
                                 state->tools.selection_gesture_samples.end(),
                                 input->samples,
@@ -9086,18 +9199,21 @@ std::optional<LRESULT> RouteCanvasMessage(
                                     + static_cast<std::size_t>(input->sample_count));
                         }
                     } catch (const std::bad_alloc&) {
-                        state->tools.selection_gesture_samples.clear();
+                        CancelSelectionGeometryPreview(
+                            state->tools, state->windows.canvas);
                         return 0;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
-                        state->tools.selection_gesture_samples.clear();
+                        CancelSelectionGeometryPreview(
+                            state->tools, state->windows.canvas);
                         return 1;
                     }
                     if (state->tools.selection_shape == INKPOD_SELECTION_WAND) {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
                             const InkpodStatus status = ApplySelectionGesture(
                                 *state, state->tools.selection_gesture_samples);
-                            state->tools.selection_gesture_samples.clear();
+                            CancelSelectionGeometryPreview(
+                                state->tools, state->windows.canvas);
                             if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                                 ShowCoreError(*state, window, L"色の杖");
                             }
@@ -9105,10 +9221,12 @@ std::optional<LRESULT> RouteCanvasMessage(
                         }
                         return 1;
                     }
+                    UpdateSelectionGeometryPreview(*state);
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
                         const InkpodStatus status = ApplySelectionGesture(
                             *state, state->tools.selection_gesture_samples);
-                        state->tools.selection_gesture_samples.clear();
+                        CancelSelectionGeometryPreview(
+                            state->tools, state->windows.canvas);
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"選択範囲");
                         }

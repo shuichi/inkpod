@@ -298,7 +298,10 @@ public:
 
     HRESULT SetGeometryPreview(const CanvasGeometryPreview& preview) noexcept {
         if (preview.struct_size < sizeof(CanvasGeometryPreview)
-            || preview.point_count > kCanvasGeometryPreviewPoints) {
+            || preview.active > 1U || preview.closed > 1U
+            || preview.point_count > kCanvasGeometryPreviewPoints
+            || !std::isfinite(preview.stroke_width) || preview.stroke_width < 0.0F
+            || preview.stroke_width > 4096.0F || preview.reserved != 0U) {
             return E_INVALIDARG;
         }
         for (std::uint32_t index = 0U; index < preview.point_count; ++index) {
@@ -308,6 +311,12 @@ public:
             }
         }
         geometry_preview_ = preview;
+        return S_OK;
+    }
+
+    HRESULT GetGeometryPreviewForSmokeTest(
+        CanvasGeometryPreview& preview) const noexcept {
+        preview = geometry_preview_;
         return S_OK;
     }
 
@@ -1033,22 +1042,48 @@ private:
     }
 
     HRESULT DrawGeometryPreview() noexcept {
-        if (geometry_preview_.active == 0U || geometry_preview_.point_count < 2U) {
+        if (geometry_preview_.active == 0U || geometry_preview_.point_count == 0U) {
             return S_OK;
         }
         ComPtr<ID2D1SolidColorBrush> shadow;
         ComPtr<ID2D1SolidColorBrush> foreground;
+        const bool region_preview = geometry_preview_.stroke_width > 0.0F;
         HRESULT result = d2d_context_->CreateSolidColorBrush(
-            D2D1::ColorF(0.05F, 0.05F, 0.05F, 0.9F), &shadow);
+            D2D1::ColorF(
+                0.05F, 0.05F, 0.05F, region_preview ? 0.55F : 0.9F),
+            &shadow);
         if (SUCCEEDED(result)) {
             result = d2d_context_->CreateSolidColorBrush(
-                D2D1::ColorF(0.1F, 0.85F, 1.0F, 1.0F), &foreground);
+                D2D1::ColorF(
+                    0.1F, 0.85F, 1.0F, region_preview ? 0.45F : 1.0F),
+                &foreground);
         }
         if (FAILED(result)) {
             return result;
         }
-        const float width = static_cast<float>(std::max(1.0, 1.5 / transform_.zoom));
-        const float shadow_width = width * 2.5F;
+        const float device_width =
+            static_cast<float>(std::max(1.0, 1.5 / transform_.zoom));
+        const float width = region_preview
+            ? std::max(device_width, geometry_preview_.stroke_width)
+            : device_width;
+        const float shadow_width = region_preview
+            ? width + device_width * 2.0F
+            : width * 2.5F;
+        if (geometry_preview_.point_count == 1U) {
+            if (!region_preview) {
+                return S_OK;
+            }
+            const auto center = D2D1::Point2F(
+                geometry_preview_.points[0].x, geometry_preview_.points[0].y);
+            d2d_context_->FillEllipse(
+                D2D1::Ellipse(
+                    center, shadow_width / 2.0F, shadow_width / 2.0F),
+                shadow.Get());
+            d2d_context_->FillEllipse(
+                D2D1::Ellipse(center, width / 2.0F, width / 2.0F),
+                foreground.Get());
+            return S_OK;
+        }
         const auto draw = [&](std::uint32_t first, std::uint32_t second) {
             const auto start = D2D1::Point2F(
                 geometry_preview_.points[first].x, geometry_preview_.points[first].y);
@@ -1458,6 +1493,7 @@ enum class RenderControlKind {
     SimulateDeviceLoss,
     ValidateClosedVectorStroke,
     GetDocumentBounds,
+    GetGeometryPreview,
     SetFloatingPreview,
     SetGeometryPreview,
 };
@@ -1466,6 +1502,7 @@ struct RenderControl {
     RenderControlKind kind{};
     std::shared_ptr<std::promise<HRESULT>> completion;
     CanvasDocumentBounds* out_bounds{};
+    CanvasGeometryPreview* out_geometry_preview{};
     CanvasFloatingPreview floating_preview{};
     CanvasGeometryPreview geometry_preview{};
 };
@@ -1555,7 +1592,8 @@ public:
         RenderControlKind kind,
         CanvasDocumentBounds* out_bounds = nullptr,
         const CanvasFloatingPreview* floating_preview = nullptr,
-        const CanvasGeometryPreview* geometry_preview = nullptr) noexcept {
+        const CanvasGeometryPreview* geometry_preview = nullptr,
+        CanvasGeometryPreview* out_geometry_preview = nullptr) noexcept {
         try {
             auto completion = std::make_shared<std::promise<HRESULT>>();
             auto future = completion->get_future();
@@ -1564,7 +1602,11 @@ public:
                 if (stopping_) {
                     return E_UNEXPECTED;
                 }
-                RenderControl control{kind, completion, out_bounds, {}};
+                RenderControl control{};
+                control.kind = kind;
+                control.completion = completion;
+                control.out_bounds = out_bounds;
+                control.out_geometry_preview = out_geometry_preview;
                 if (floating_preview != nullptr) {
                     control.floating_preview = *floating_preview;
                 }
@@ -1684,6 +1726,14 @@ private:
                                 control_result = E_POINTER;
                             } else {
                                 *control.out_bounds = renderer.DocumentBounds();
+                            }
+                            break;
+                        case RenderControlKind::GetGeometryPreview:
+                            if (control.out_geometry_preview == nullptr) {
+                                control_result = E_POINTER;
+                            } else {
+                                control_result = renderer.GetGeometryPreviewForSmokeTest(
+                                    *control.out_geometry_preview);
                             }
                             break;
                         case RenderControlKind::SetFloatingPreview:
@@ -2131,6 +2181,18 @@ LRESULT CALLBACK CanvasWindowProcedure(
             return host != nullptr && bounds != nullptr
                     && SUCCEEDED(host->Renderer().Invoke(
                         RenderControlKind::GetDocumentBounds, bounds))
+                ? 1
+                : 0;
+        }
+        case kCanvasGetGeometryPreviewForSmokeTest: {
+            auto* preview = reinterpret_cast<CanvasGeometryPreview*>(lparam);
+            return host != nullptr && preview != nullptr
+                    && SUCCEEDED(host->Renderer().Invoke(
+                        RenderControlKind::GetGeometryPreview,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        preview))
                 ? 1
                 : 0;
         }

@@ -1558,6 +1558,16 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
             1.0F,
             0U};
     };
+    const auto query_selection_preview = [&state](
+                                             inkpod::renderer::CanvasGeometryPreview& preview) {
+        preview = {};
+        preview.struct_size = sizeof(preview);
+        return SendMessageW(
+                   state.windows.canvas,
+                   inkpod::renderer::kCanvasGetGeometryPreviewForSmokeTest,
+                   0,
+                   reinterpret_cast<LPARAM>(&preview)) == 1;
+    };
     const auto send_selection_gesture = [&state](const auto& samples) noexcept {
         if (samples.empty()) {
             return false;
@@ -1604,6 +1614,119 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
                    false,
                    false) == INKPOD_STATUS_OK;
     };
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_RECTANGLE, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
+    const std::array<InkpodStrokeSample, 2U> preview_samples{
+        selection_sample(1.0F, 1.0F), selection_sample(5.0F, 6.0F)};
+    const inkpod::renderer::CanvasStrokeEvent preview_begin{
+        inkpod::renderer::CanvasStrokeEventKind::Begin,
+        preview_samples.data(),
+        1U};
+    const inkpod::renderer::CanvasStrokeEvent preview_append{
+        inkpod::renderer::CanvasStrokeEventKind::Append,
+        preview_samples.data() + 1U,
+        1U};
+    InkpodDocumentInfo before_selection_preview{};
+    if (!QueryDocument(state, before_selection_preview)
+        || SendMessageW(
+               state.windows.window,
+               inkpod::renderer::kCanvasStrokeReady,
+               0,
+               reinterpret_cast<LPARAM>(&preview_begin)) != 1
+        || SendMessageW(
+               state.windows.window,
+               inkpod::renderer::kCanvasStrokeReady,
+               0,
+               reinterpret_cast<LPARAM>(&preview_append)) != 1) {
+        return 610;
+    }
+    inkpod::renderer::CanvasGeometryPreview selection_preview{};
+    InkpodDocumentInfo during_selection_preview{};
+    if (!query_selection_preview(selection_preview)
+        || !QueryDocument(state, during_selection_preview)
+        || during_selection_preview.document_revision
+            != before_selection_preview.document_revision
+        || selection_preview.active != 1U || selection_preview.closed != 1U
+        || selection_preview.point_count != 4U
+        || selection_preview.stroke_width != 0.0F) {
+        return 611;
+    }
+    const inkpod::renderer::CanvasStrokeEvent preview_cancel{
+        inkpod::renderer::CanvasStrokeEventKind::Cancel, nullptr, 0U};
+    if (SendMessageW(
+            state.windows.window,
+            inkpod::renderer::kCanvasStrokeReady,
+            0,
+            reinterpret_cast<LPARAM>(&preview_cancel)) != 1
+        || !query_selection_preview(selection_preview)
+        || selection_preview.active != 0U || selection_preview.point_count != 0U) {
+        return 612;
+    }
+    if (SendMessageW(
+            state.windows.window,
+            inkpod::renderer::kCanvasStrokeReady,
+            0,
+            reinterpret_cast<LPARAM>(&preview_begin)) != 1
+        || SendMessageW(
+               state.windows.window,
+               inkpod::renderer::kCanvasStrokeReady,
+               0,
+               reinterpret_cast<LPARAM>(&preview_append)) != 1
+        || !query_selection_preview(selection_preview)
+        || selection_preview.active != 1U) {
+        return 613;
+    }
+    const inkpod::renderer::CanvasStrokeEvent preview_end{
+        inkpod::renderer::CanvasStrokeEventKind::End,
+        preview_samples.data() + 1U,
+        1U};
+    if (SendMessageW(
+            state.windows.window,
+            inkpod::renderer::kCanvasStrokeReady,
+            0,
+            reinterpret_cast<LPARAM>(&preview_end)) != 1
+        || !query_selection_preview(selection_preview)
+        || selection_preview.active != 0U || selection_preview.point_count != 0U) {
+        return 614;
+    }
+    const auto verify_selection_preview = [&](
+                                              UINT command,
+                                              std::uint32_t expected_points,
+                                              bool expected_closed,
+                                              bool expected_region_width) {
+        SendMessageW(state.windows.window, WM_COMMAND, command, 0);
+        if (SendMessageW(
+                state.windows.window,
+                inkpod::renderer::kCanvasStrokeReady,
+                0,
+                reinterpret_cast<LPARAM>(&preview_begin)) != 1
+            || SendMessageW(
+                   state.windows.window,
+                   inkpod::renderer::kCanvasStrokeReady,
+                   0,
+                   reinterpret_cast<LPARAM>(&preview_append)) != 1
+            || !query_selection_preview(selection_preview)
+            || selection_preview.active != 1U
+            || selection_preview.point_count != expected_points
+            || selection_preview.closed != (expected_closed ? 1U : 0U)
+            || (selection_preview.stroke_width > 0.0F) != expected_region_width) {
+            return false;
+        }
+        return SendMessageW(
+                   state.windows.window,
+                   inkpod::renderer::kCanvasStrokeReady,
+                   0,
+                   reinterpret_cast<LPARAM>(&preview_cancel)) == 1
+            && query_selection_preview(selection_preview)
+            && selection_preview.active == 0U
+            && selection_preview.point_count == 0U;
+    };
+    if (!verify_selection_preview(IDM_SELECTION_ELLIPSE, 48U, true, false)
+        || !verify_selection_preview(IDM_SELECTION_LASSO, 2U, true, false)
+        || !verify_selection_preview(IDM_SELECTION_POLYLINE, 2U, true, false)
+        || !verify_selection_preview(IDM_SELECTION_TRACE, 2U, false, true)) {
+        return 615;
+    }
     const auto select_rectangle = [&](UINT mode, float x1, float y1, float x2, float y2) {
         SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_RECTANGLE, 0);
         SendMessageW(state.windows.window, WM_COMMAND, mode, 0);
@@ -1623,6 +1746,40 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         || locator.selection.y != 0 || locator.selection.width != 2
         || locator.selection.height != 4) {
         return 316;
+    }
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
+    const std::array<InkpodStrokeSample, 2U> short_lasso_samples{
+        selection_sample(2.0F, 2.0F), selection_sample(3.0F, 3.0F)};
+    if (!send_selection_gesture(short_lasso_samples)) {
+        return 616;
+    }
+    if (!query_selection(locator) || (locator.flags & 1U) != 0U) {
+        return 617;
+    }
+    if (!select_rectangle(IDM_SELECTION_MODE_NEW, 1.0F, 1.0F, 5.0F, 5.0F)) {
+        return 618;
+    }
+    InkpodDocumentInfo before_empty_selection_operation{};
+    if (!QueryDocument(state, before_empty_selection_operation)) {
+        return 619;
+    }
+    for (const UINT mode : {
+             IDM_SELECTION_MODE_ADD, IDM_SELECTION_MODE_SUBTRACT}) {
+        SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
+        SendMessageW(state.windows.window, WM_COMMAND, mode, 0);
+        if (!send_selection_gesture(short_lasso_samples)) {
+            return 620;
+        }
+        InkpodDocumentInfo after_empty_selection_operation{};
+        if (!QueryDocument(state, after_empty_selection_operation)
+            || after_empty_selection_operation.document_revision
+                != before_empty_selection_operation.document_revision
+            || !query_selection(locator) || (locator.flags & 1U) == 0U
+            || locator.selection.x != 1 || locator.selection.y != 1
+            || locator.selection.width != 4 || locator.selection.height != 4) {
+            return 621;
+        }
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_ELLIPSE, 0);
     SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
