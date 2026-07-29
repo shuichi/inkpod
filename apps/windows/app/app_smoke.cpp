@@ -916,6 +916,40 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
         return 201;
     }
 
+    const auto same_color = [](const InkpodColorValue& left, const InkpodColorValue& right) {
+        return left.depth == right.depth && left.red == right.red
+            && left.green == right.green && left.blue == right.blue
+            && left.alpha == right.alpha;
+    };
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
+    const InkpodColorValue pencil_color = state.tools.drawing_color;
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    const InkpodColorValue fill_command_color{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 1U, 2U, 3U, 255U};
+    if (state.panes.color_pane.change_color == nullptr) {
+        return 231;
+    }
+    state.panes.color_pane.change_color(
+        state.panes.color_pane.context, fill_command_color);
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
+    BOOL valid_red{};
+    const UINT displayed_pencil_red = GetDlgItemInt(
+        state.windows.color_pane, IDC_COLOR_RED, &valid_red, FALSE);
+    if (!same_color(state.tools.drawing_color, pencil_color)
+        || !same_color(state.panes.color_pane.drawing_color, pencil_color)
+        || valid_red == FALSE || displayed_pencil_red != pencil_color.red) {
+        return 231;
+    }
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    valid_red = FALSE;
+    const UINT displayed_fill_red = GetDlgItemInt(
+        state.windows.color_pane, IDC_COLOR_RED, &valid_red, FALSE);
+    if (!same_color(state.tools.drawing_color, fill_command_color)
+        || !same_color(state.panes.color_pane.drawing_color, fill_command_color)
+        || valid_red == FALSE || displayed_fill_red != fill_command_color.red) {
+        return 231;
+    }
+
     std::array<InkpodStrokeSample, 5> boundary_samples{{
         {sizeof(InkpodStrokeSample), 0U, 100.0F, 100.0F, 1.0F, 0U},
         {sizeof(InkpodStrokeSample), 0U, 200.0F, 100.0F, 1.0F, 0U},

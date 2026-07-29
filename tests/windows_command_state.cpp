@@ -22,7 +22,11 @@ using inkpod::windows::ui::IsCommandEnabled;
 using inkpod::windows::ui::MenuCommandCatalog;
 using inkpod::windows::ui::kProductionCommandStateCount;
 using inkpod::windows::ui::tools::HandleActivePlaneTransition;
+using inkpod::windows::ui::tools::SetActiveCommandColor;
+using inkpod::windows::ui::tools::TransitionActiveTool;
+using inkpod::windows::ui::tools::kInteractionEyedropper;
 using inkpod::windows::ui::tools::kInteractionEffectGradient;
+using inkpod::windows::ui::tools::kInteractionFill;
 using inkpod::windows::ui::tools::kInteractionVectorLine;
 
 bool SameStates(const CommandStateSet& left, const CommandStateSet& right) noexcept {
@@ -60,6 +64,13 @@ bool CatalogHasExactlyOneOwner(const CommandStateSet& states) noexcept {
         }
     }
     return states.size() == kProductionCommandStateCount;
+}
+
+bool SameColor(
+    const InkpodColorValue& left, const InkpodColorValue& right) noexcept {
+    return left.depth == right.depth && left.red == right.red
+        && left.green == right.green && left.blue == right.blue
+        && left.alpha == right.alpha;
 }
 
 bool StartsWith(
@@ -204,6 +215,24 @@ int main() {
     }
 
     ToolUiState tools{};
+    const InkpodColorValue pencil_color = tools.drawing_color;
+    TransitionActiveTool(tools, nullptr, kInteractionFill);
+    const InkpodColorValue fill_color{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 10U, 20U, 30U, 255U};
+    SetActiveCommandColor(tools, fill_color);
+    TransitionActiveTool(tools, nullptr, kInteractionEyedropper);
+    const InkpodColorValue sampled_fill_color{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_16, 1000U, 2000U, 3000U, 65535U};
+    SetActiveCommandColor(tools, sampled_fill_color);
+    TransitionActiveTool(tools, nullptr, INKPOD_TOOL_PENCIL);
+    if (!SameColor(tools.drawing_color, pencil_color)) {
+        return 11;
+    }
+    TransitionActiveTool(tools, nullptr, kInteractionFill);
+    if (!SameColor(tools.drawing_color, sampled_fill_color)) {
+        return 12;
+    }
+
     tools.active_tool = kInteractionVectorLine;
     tools.vector_gesture_samples.push_back(InkpodStrokeSample{});
     HandleActivePlaneTransition(tools, nullptr, false);

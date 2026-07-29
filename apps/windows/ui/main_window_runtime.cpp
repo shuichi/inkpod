@@ -175,7 +175,7 @@ using inkpod::windows::ui::BatchController;
 using inkpod::windows::ui::EffectsController;
 bool QueryTreeNode(AppContext& state, bool plane, TreePaneNode& output) noexcept;
 bool RefreshTreePane(AppContext& state) noexcept;
-void SetDrawingColor(ToolUiState& tools, InkpodColorValue color) noexcept;
+void SetDrawingColor(AppContext& state, InkpodColorValue color) noexcept;
 void RefreshDockPaneViews(AppContext& state) noexcept;
 InkpodStatus ApplyTreeEdit(
     AppContext& state,
@@ -305,8 +305,7 @@ void ChangeDockDrawingColor(
     if (state == nullptr) {
         return;
     }
-    SetDrawingColor(state->tools, color);
-    RefreshDockPaneViews(*state);
+    SetDrawingColor(*state, color);
     UpdateMenuState(*state);
 }
 
@@ -323,8 +322,7 @@ void SelectDockColor(
     } else {
         state->panes.palette_group = index / 10U;
     }
-    SetDrawingColor(state->tools, state->panes.palette_colors[index]);
-    RefreshDockPaneViews(*state);
+    SetDrawingColor(*state, state->panes.palette_colors[index]);
     UpdateMenuState(*state);
 }
 
@@ -1499,20 +1497,9 @@ InkpodColorValue ColorFromRgba(std::uint32_t rgba) noexcept {
         static_cast<std::uint16_t>(rgba & 0xffU)};
 }
 
-std::uint32_t ColorToRgba8(const InkpodColorValue& color) noexcept {
-    const auto channel = [&](std::uint16_t value) {
-        return color.depth == INKPOD_COLOR_DEPTH_16
-            ? static_cast<std::uint32_t>((static_cast<std::uint32_t>(value) + 128U) / 257U)
-            : static_cast<std::uint32_t>(value & 0xffU);
-    };
-    return (channel(color.red) << 24U) | (channel(color.green) << 16U)
-        | (channel(color.blue) << 8U) | channel(color.alpha);
-}
-
-void SetDrawingColor(ToolUiState& tools, InkpodColorValue color) noexcept {
-    color.struct_size = sizeof(InkpodColorValue);
-    tools.drawing_color = color;
-    tools.color_rgba = ColorToRgba8(color);
+void SetDrawingColor(AppContext& state, InkpodColorValue color) noexcept {
+    inkpod::windows::ui::tools::SetActiveCommandColor(state.tools, color);
+    RefreshDockPaneViews(state);
 }
 
 InkpodStatus ShowDrawingColorEditor(AppContext& state) noexcept {
@@ -1629,7 +1616,7 @@ InkpodStatus ShowDrawingColorEditor(AppContext& state) noexcept {
         }
         color.alpha = static_cast<std::uint16_t>(values.values[3]);
     }
-    SetDrawingColor(state.tools, color);
+    SetDrawingColor(state, color);
     return INKPOD_STATUS_OK;
 }
 
@@ -4915,7 +4902,7 @@ InkpodStatus EyedropAtDevicePoint(AppContext& state, float device_x, float devic
               false,
               false);
     if (status == INKPOD_STATUS_OK) {
-        SetDrawingColor(state.tools, sampled);
+        SetDrawingColor(state, sampled);
     }
     return status;
 }
@@ -6951,7 +6938,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false,
                 false);
             if (status == INKPOD_STATUS_OK) {
-                SetDrawingColor(state->tools, color);
+                SetDrawingColor(*state, color);
             } else if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"ライトテーブル色サンプル");
             }
@@ -7121,7 +7108,7 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false,
                 false);
             if (status == INKPOD_STATUS_OK) {
-                SetDrawingColor(state->tools, color);
+                SetDrawingColor(*state, color);
             } else if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"サブパレット色サンプル");
             }
@@ -8502,7 +8489,7 @@ std::optional<LRESULT> RouteColorCommand(
             if (!parsed) {
                 return 0;
             }
-            SetDrawingColor(state->tools, color);
+            SetDrawingColor(*state, color);
             std::vector<InkpodColorValue> colors = state->panes.palette_colors;
             if (colors.size() >= 4096U) {
                 return 0;
@@ -8535,7 +8522,7 @@ std::optional<LRESULT> RouteColorCommand(
             choose.Flags = CC_FULLOPEN | CC_RGBINIT;
             if (ChooseColorW(&choose) != FALSE) {
                 SetDrawingColor(
-                    state->tools,
+                    *state,
                     InkpodColorValue{
                         sizeof(InkpodColorValue),
                         INKPOD_COLOR_DEPTH_8,
@@ -8876,7 +8863,7 @@ std::optional<LRESULT> RouteKeyboardMessage(
                     if (index < state->panes.palette_colors.size()) {
                         state->panes.selected_palette_index =
                             static_cast<std::uint32_t>(index);
-                        SetDrawingColor(state->tools, state->panes.palette_colors[index]);
+                        SetDrawingColor(*state, state->panes.palette_colors[index]);
                         InvalidateRect(state->windows.canvas, nullptr, FALSE);
                     }
                     return 0;

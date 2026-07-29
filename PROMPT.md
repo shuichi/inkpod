@@ -296,6 +296,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 ### 10. 色、パレット、チャート、参照画像
 
 - 描画色は sRGB RGBA 8/16 bit を保持し、RGB と HSV editor、alpha 数値/percent 表示を切り替える。
+- 色を使う active command は、鉛筆、ブラシ、フィル、選択、エアブラシ、各ベクター描画 tool ごとに独立した現在色を持つ。command 切替時はその command の現在色を復元し、color editor、swatch、数値欄へ即時反映する。スポイト等の色を持たない一時 tool は直前の色付き command を変更先として維持する。
 - color palette は複数 page/group を持ち、cell click で描画色取得、modifier+click で現在色登録、clear/save/load ができる。
 - 高頻度の10色は `1`から`0`へ割り当て、`Tab`で次の10色 group へ切り替える。shortcut editor で変更可能にする。
 - color chart は色と名前を表形式で管理し、複数 page、検索、次候補、lock、cut/copy/paste、save/load を持つ。旧版の5文字制限は native 形式へ課さない。

@@ -2,13 +2,33 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <cstdint>
+
+#include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
 struct ToolUiState;
 }
 
 namespace inkpod::windows::ui::tools {
+
+enum class ColorCommand : std::uint32_t {
+    Pencil,
+    Brush,
+    Fill,
+    Selection,
+    EffectAirbrush,
+    VectorLine,
+    VectorCurve,
+    VectorRectangle,
+    VectorEllipse,
+    VectorPolyline,
+    Count,
+};
+
+inline constexpr std::size_t kColorCommandCount =
+    static_cast<std::size_t>(ColorCommand::Count);
 
 inline constexpr std::uint32_t kInteractionFill = 1001U;
 inline constexpr std::uint32_t kInteractionEyedropper = 1002U;
@@ -37,6 +57,12 @@ bool IsVectorStrokePlane(std::uint32_t kind) noexcept;
 // cannot retain a geometry preview owned by the prior interaction.
 void TransitionActiveTool(
     app::ToolUiState& tools, HWND canvas, std::uint32_t next_tool) noexcept;
+
+// Updates the color owned by the currently active color-consuming command.
+// Colorless tools (for example eyedropper and eraser) intentionally retain
+// the prior command as their color destination.
+void SetActiveCommandColor(
+    app::ToolUiState& tools, InkpodColorValue color) noexcept;
 
 // Called only by an active-plane transition, never by command-state queries.
 void HandleActivePlaneTransition(

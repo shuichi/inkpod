@@ -20,6 +20,7 @@
 #include "ui/panes/color_dock_pane.h"
 #include "ui/panes/tool_options_pane.h"
 #include "ui/shortcut_controller.h"
+#include "ui/tools/tool_state.h"
 
 namespace inkpod::app {
 
@@ -93,6 +94,12 @@ struct ToolUiState {
     std::uint32_t color_rgba{UINT32_C(0xdc281eff)};
     InkpodColorValue drawing_color{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 220U, 40U, 30U, 255U};
+    windows::ui::tools::ColorCommand active_color_command{
+        windows::ui::tools::ColorCommand::Pencil};
+    std::array<InkpodColorValue, windows::ui::tools::kColorCommandCount>
+        command_colors{};
+    std::array<bool, windows::ui::tools::kColorCommandCount>
+        command_color_initialized{};
     InkpodEyedropperSource eyedropper_source{INKPOD_EYEDROPPER_COMPOSITE};
     float diameter{8.0F};
 
