@@ -16,7 +16,6 @@
 #include "resource.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
-#include "ui/palette_window.h"
 #include "ui/shortcut_controller.h"
 
 namespace inkpod::app {
@@ -59,23 +58,27 @@ InkpodStatus StopCore(AppContext& state) noexcept {
         DestroyWindow(state.batch.progress);
         state.batch.progress = nullptr;
     }
+    if (!state.lifetime.smoke_test) {
+        windows::ui::SaveWorkspaceLayout(
+            state.windows.workspace, L"WorkspaceSessionV2");
+    }
     if (state.tools.palette != nullptr) {
-        if (!state.lifetime.smoke_test) {
-            windows::ui::SavePaletteWindowPlacement(
-                state.tools.palette,
-                L"ToolPalettePlacementV2");
-        }
         DestroyWindow(state.tools.palette);
         state.tools.palette = nullptr;
+        state.windows.tool_palette = nullptr;
+    }
+    if (state.windows.tool_options != nullptr) {
+        DestroyWindow(state.windows.tool_options);
+        state.windows.tool_options = nullptr;
+    }
+    if (state.windows.color_pane != nullptr) {
+        DestroyWindow(state.windows.color_pane);
+        state.windows.color_pane = nullptr;
     }
     if (state.panes.layer_palette != nullptr) {
-        if (!state.lifetime.smoke_test) {
-            windows::ui::SavePaletteWindowPlacement(
-                state.panes.layer_palette,
-                L"LayerPalettePlacement");
-        }
         DestroyWindow(state.panes.layer_palette);
         state.panes.layer_palette = nullptr;
+        state.windows.layer_palette = nullptr;
     }
     if (state.batch.palette != nullptr) {
         DestroyWindow(state.batch.palette);

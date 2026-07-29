@@ -38,7 +38,7 @@ bool SameStates(const CommandStateSet& left, const CommandStateSet& right) noexc
 }
 
 bool CatalogHasExactlyOneOwner(const CommandStateSet& states) noexcept {
-    std::array<std::size_t, 10U> owner_counts{};
+    std::array<std::size_t, 11U> owner_counts{};
     for (std::size_t left = 0; left < states.size(); ++left) {
         if (states[left].command == 0U) {
             return false;
@@ -139,9 +139,12 @@ int main() {
         || IsCommandEnabled(states, IDM_FILTER_INVERT)
         || IsCommandEnabled(states, IDM_BATCH_ADD_COLOR_REPLACE)
         || !IsCommandEnabled(states, IDM_WINDOW_TOOL_PALETTE)
-        || IsCommandChecked(states, IDM_WINDOW_TOOL_PALETTE)
+        || !IsCommandChecked(states, IDM_WINDOW_TOOL_PALETTE)
         || !IsCommandEnabled(states, IDM_WINDOW_LAYER_PALETTE)
-        || IsCommandChecked(states, IDM_WINDOW_LAYER_PALETTE)
+        || !IsCommandChecked(states, IDM_WINDOW_LAYER_PALETTE)
+        || !IsCommandChecked(states, IDM_WINDOW_TOOL_OPTIONS)
+        || !IsCommandChecked(states, IDM_WINDOW_COLOR_PANE)
+        || IsCommandChecked(states, IDM_WORKSPACE_MIRROR)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
         return 1;
     }

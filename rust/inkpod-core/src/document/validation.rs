@@ -158,13 +158,6 @@ pub(crate) fn ensure_editable_plane(
     }
 }
 
-pub(crate) fn ensure_editable_role(
-    document: &CellDocument,
-    role: ActivePlane,
-) -> Result<(), CoreError> {
-    ensure_editable_plane(document, document.plane_for_role(role)?.id)
-}
-
 pub(crate) fn bounded_document_pixels(width: u32, height: u32) -> Result<u64, CoreError> {
     let pixels = u64::from(width)
         .checked_mul(u64::from(height))

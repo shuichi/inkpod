@@ -508,6 +508,16 @@ impl CellDocument {
             ))
     }
 
+    pub(crate) fn plane_for_paint_role(&self, role: ActivePlane) -> Result<&PlaneNode, CoreError> {
+        if role == ActivePlane::Color
+            && let Some(active) = self.plane_by_id(self.active_plane_id)
+            && active.kind == PlaneType::Raster
+        {
+            return Ok(active);
+        }
+        self.plane_for_role(role)
+    }
+
     pub(crate) fn plane_for_role_mut(
         &mut self,
         role: ActivePlane,

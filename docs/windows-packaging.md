@@ -54,8 +54,10 @@ without elevation and verifies the executable, identity/version/architecture, li
 notices, and required MSVC runtime payload. Hosted CI runs this test for Debug
 and Release.
 
-`inkpod_windows_msix_install_uninstall_smoke` must run from an elevated Windows 11
-workstation shell and rejects Windows 10 and Windows Server. It refuses to
+`inkpod_windows_msix_install_uninstall_smoke` is not registered in the default
+CTest set. Configure with `-DINKPOD_ENABLE_ELEVATED_MSIX_TESTS=ON` to register it.
+The test must run from an elevated Windows 11 workstation shell and rejects
+Windows 10 and Windows Server. It refuses to
 disturb an existing all-users `inkpod` package, copies the
 unsigned build artifact to a private temporary directory, creates a one-day
 ephemeral code-signing certificate whose subject matches `Identity/@Publisher`,
@@ -68,12 +70,15 @@ assertion can retry uninstall instead of orphaning the package. The generated ar
 unsigned; a release publisher must sign it with the organization's protected
 production credential before distribution.
 
-The hosted Windows x64 CI image is Windows Server 2022, so its normal CTest command
-excludes this workstation-only install test while still building the x64 MSIX and
-running manifest/assets, payload, ABI, and application smoke tests. Run the full package
-test on an elevated clean Windows 11 workstation with:
+The default CTest set, including hosted Windows x64 CI, builds the MSIX and runs
+manifest/assets, payload, ABI, and application smoke tests without registering
+this administrator-only test. Run the full package test on an elevated clean
+Windows 11 workstation with:
 
 ```powershell
+cmake --fresh --preset windows-x64-release `
+  -DINKPOD_ENABLE_ELEVATED_MSIX_TESTS=ON
+cmake --build --preset windows-x64-release
 ctest --preset windows-x64-release `
   -R inkpod_windows_msix_install_uninstall_smoke `
   --output-on-failure

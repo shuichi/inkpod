@@ -39,6 +39,8 @@
 #include "ui/shortcut_controller.h"
 #include "ui/panes/document_panes.h"
 #include "ui/panes/color_panes.h"
+#include "ui/panes/color_dock_pane.h"
+#include "ui/panes/tool_options_pane.h"
 #include "ui/tools/fill_controller.h"
 #include "ui/tools/floating_paste_controller.h"
 #include "ui/tools/selection_controller.h"
@@ -49,7 +51,6 @@
 #include "ui/batch_controller.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
-#include "ui/palette_window.h"
 
 namespace inkpod::windows::ui::runtime {
 
@@ -174,6 +175,8 @@ using inkpod::windows::ui::BatchController;
 using inkpod::windows::ui::EffectsController;
 bool QueryTreeNode(AppContext& state, bool plane, TreePaneNode& output) noexcept;
 bool RefreshTreePane(AppContext& state) noexcept;
+void SetDrawingColor(ToolUiState& tools, InkpodColorValue color) noexcept;
+void RefreshDockPaneViews(AppContext& state) noexcept;
 InkpodStatus ApplyTreeEdit(
     AppContext& state,
     InkpodTreeOperation operation,
@@ -280,6 +283,72 @@ void DispatchToolPaletteCommand(void* context, UINT command) noexcept {
     }
 }
 
+void ChangeToolOptionsDiameter(void* context, float diameter) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state == nullptr || !std::isfinite(diameter) || diameter < 0.1F
+        || diameter > 2048.0F) {
+        return;
+    }
+    state->tools.diameter = diameter;
+    inkpod::windows::ui::panes::UpdateToolOptionsPane(
+        state->windows.tool_options,
+        state->tools.active_tool,
+        state->tools.diameter);
+    UpdateMenuState(*state);
+}
+
+void ChangeDockDrawingColor(
+    void* context, const InkpodColorValue& color) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state == nullptr) {
+        return;
+    }
+    SetDrawingColor(state->tools, color);
+    RefreshDockPaneViews(*state);
+    UpdateMenuState(*state);
+}
+
+void SelectDockColor(
+    void* context, std::uint32_t index, bool chart) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state == nullptr || index >= state->panes.palette_colors.size()) {
+        return;
+    }
+    state->panes.selected_palette_index = index;
+    if (chart) {
+        state->panes.selected_color_chart_index = index;
+        state->panes.color_chart_page = index / 20U;
+    } else {
+        state->panes.palette_group = index / 10U;
+    }
+    SetDrawingColor(state->tools, state->panes.palette_colors[index]);
+    RefreshDockPaneViews(*state);
+    UpdateMenuState(*state);
+}
+
+void ChangeDockPaletteGroup(void* context, int delta) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state == nullptr) {
+        return;
+    }
+    const std::uint32_t groups = std::max<std::uint32_t>(
+        1U,
+        static_cast<std::uint32_t>(
+            (state->panes.palette_colors.size() + 9U) / 10U));
+    const int current = static_cast<int>(state->panes.palette_group % groups);
+    state->panes.palette_group = static_cast<std::uint32_t>(
+        (current + delta % static_cast<int>(groups) + static_cast<int>(groups))
+        % static_cast<int>(groups));
+    if (!state->panes.palette_colors.empty()) {
+        state->panes.selected_palette_index = std::min<std::uint32_t>(
+            state->panes.palette_group * 10U,
+            static_cast<std::uint32_t>(
+                state->panes.palette_colors.size() - 1U));
+    }
+    RefreshDockPaneViews(*state);
+    UpdateMenuState(*state);
+}
+
 void NotifyToolPaletteVisibilityChanged(void* context) noexcept {
     auto* state = static_cast<AppContext*>(context);
     if (state != nullptr && state->windows.window != nullptr) {
@@ -333,6 +402,38 @@ void SelectLayerPaletteLayer(void* context, std::uint64_t layer_id) noexcept {
     UpdateMenuState(*state);
 }
 
+void SelectLayerPalettePlane(void* context, std::uint64_t plane_id) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state == nullptr || state->engine == nullptr || plane_id == 0U
+        || state->panes.active_tree_layer_id == 0U) {
+        return;
+    }
+    const std::uint64_t previous_plane_id = state->panes.active_tree_plane_id;
+    const std::uint64_t layer_id = state->panes.active_tree_layer_id;
+    state->panes.active_tree_plane_id = plane_id;
+    const InkpodStatus status = state->engine->Invoke(
+        [layer_id, plane_id](InkpodCore* core) {
+            return inkpod_core_set_active_node(core, layer_id, plane_id);
+        },
+        false,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        state->panes.active_tree_plane_id = previous_plane_id;
+        RefreshTreePane(*state);
+        ShowCoreError(*state, state->windows.window, L"プレーンの選択");
+    } else {
+        RefreshTreePane(*state);
+        TreePaneNode active_plane{};
+        if (QueryTreeNode(*state, true, active_plane)) {
+            state->tools.active_plane =
+                active_plane.kind == INKPOD_TYPED_PLANE_MAIN_LINE
+                ? INKPOD_PLANE_MAIN_LINE
+                : INKPOD_PLANE_COLOR;
+        }
+    }
+    UpdateMenuState(*state);
+}
+
 void ReorderLayerPaletteLayer(
     void* context,
     std::uint64_t layer_id,
@@ -355,6 +456,39 @@ void ReorderLayerPaletteLayer(
         RefreshTreePane(*state);
     }
     UpdateMenuState(*state);
+}
+
+void ReorderLayerPalettePlane(
+    void* context,
+    std::uint64_t plane_id,
+    std::uint32_t destination_index) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state == nullptr || plane_id == 0U) {
+        return;
+    }
+    std::uint64_t ignored{};
+    const InkpodStatus status = ApplyTreeEdit(
+        *state,
+        INKPOD_TREE_REORDER_PLANE,
+        plane_id,
+        destination_index,
+        ignored);
+    if (status != INKPOD_STATUS_OK) {
+        ShowCoreError(*state, state->windows.window, L"プレーンの並べ替え");
+    } else {
+        state->panes.active_tree_plane_id = plane_id;
+        RefreshTreePane(*state);
+    }
+    UpdateMenuState(*state);
+}
+
+void ChangeLayerPaletteSplit(void* context, std::uint32_t split_milli) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state == nullptr) {
+        return;
+    }
+    state->windows.workspace.layer_split_milli =
+        std::clamp<std::uint32_t>(split_milli, 200U, 800U);
 }
 
 void NotifyLayerPaletteVisibilityChanged(void* context) noexcept {
@@ -412,7 +546,7 @@ bool RefreshTreePane(AppContext& state) noexcept {
     DocumentPanesController controller(*state.engine);
     const InkpodStatus status = controller.LoadTree(
         requested_layer_id,
-        PaletteWindowIsShown(state.panes.layer_palette),
+        state.windows.workspace.layer_visible,
         layers,
         planes,
         selected_layer_index);
@@ -420,7 +554,14 @@ bool RefreshTreePane(AppContext& state) noexcept {
         state.panes.tree_layer_count = 0U;
         state.panes.tree_plane_count = 0U;
         layers.clear();
-        UpdateLayerPaletteDialog(state.panes.layer_palette, layers, 0U);
+        planes.clear();
+        UpdateLayerPaletteDialog(
+            state.panes.layer_palette,
+            layers,
+            planes,
+            0U,
+            0U,
+            state.windows.workspace.layer_split_milli);
         return false;
     }
     selected_layer_index = std::min<std::uint32_t>(
@@ -452,7 +593,10 @@ bool RefreshTreePane(AppContext& state) noexcept {
     UpdateLayerPaletteDialog(
         state.panes.layer_palette,
         layers,
-        state.panes.active_tree_layer_id);
+        planes,
+        state.panes.active_tree_layer_id,
+        state.panes.active_tree_plane_id,
+        state.windows.workspace.layer_split_milli);
     return true;
 }
 
@@ -618,6 +762,21 @@ bool RefreshColorPanes(AppContext& state) noexcept {
     }
     ColorPanesController controller(*state.engine);
     return controller.RefreshModel(state.panes) == INKPOD_STATUS_OK;
+}
+
+void RefreshDockPaneViews(AppContext& state) noexcept {
+    inkpod::windows::ui::panes::UpdateToolOptionsPane(
+        state.windows.tool_options,
+        state.tools.active_tool,
+        state.tools.diameter);
+    inkpod::windows::ui::panes::UpdateColorDockPane(
+        state.windows.color_pane,
+        state.tools.drawing_color,
+        state.panes.palette_colors,
+        state.panes.color_chart_names,
+        state.panes.palette_group,
+        state.panes.color_chart_page,
+        state.panes.color_chart_locked);
 }
 
 InkpodStatus ReplacePalette(
@@ -2326,7 +2485,7 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.document_pane.removable_layer_available =
         state.panes.tree_layer_count > 1U;
     inputs.document_pane.layer_palette_visible =
-        PaletteWindowIsShown(state.panes.layer_palette);
+        state.windows.workspace.layer_visible;
 
     inputs.animation.motion_fps = state.animation.motion_fps;
 
@@ -2353,7 +2512,7 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.tool.fill_operation = state.tools.fill_options.operation;
     inputs.tool.vector_erase_mode = state.tools.vector_erase_mode;
     inputs.tool.vector_selection_mode = state.tools.vector_selection_mode;
-    inputs.tool.palette_visible = PaletteWindowIsShown(state.tools.palette);
+    inputs.tool.palette_visible = state.windows.workspace.tool_visible;
 
     inputs.color.eyedropper_source = state.tools.eyedropper_source;
     inputs.color.color_check_mode = state.view.color_check_mode;
@@ -2370,6 +2529,12 @@ CommandStateInputs BuildCommandStateInputs(
         && IsWindowVisible(state.batch.palette) != FALSE;
     inputs.batch.output_policy = state.batch.output_policy;
     inputs.batch.failure_policy = state.batch.failure_policy;
+    inputs.workspace.tool_visible = state.windows.workspace.tool_visible;
+    inputs.workspace.tool_options_visible =
+        state.windows.workspace.tool_options_visible;
+    inputs.workspace.color_visible = state.windows.workspace.color_visible;
+    inputs.workspace.layer_visible = state.windows.workspace.layer_visible;
+    inputs.workspace.mirrored = state.windows.workspace.mirrored;
     return inputs;
 }
 
@@ -2686,6 +2851,7 @@ void UpdateMenuState(AppContext& state) noexcept {
     UpdateLayerPaletteCommandState(
         state.panes.layer_palette,
         state.command_states);
+    RefreshDockPaneViews(state);
     ApplyShortcutLabelsToMenu(menu, state.shortcuts.bindings);
     UpdateMainWindowStatus(state, info, has_document);
     DrawMenuBar(state.windows.window);
@@ -5193,7 +5359,21 @@ bool ChooseBatchFolder(HWND owner, std::wstring& selected_path) noexcept {
     return BatchController::ChooseFolder(owner, selected_path);
 }
 
+void RelayoutWorkspace(AppContext& state) noexcept {
+    RECT client{};
+    if (GetClientRect(state.windows.window, &client) != FALSE) {
+        inkpod::windows::ui::LayoutMainChrome(
+            state.windows,
+            state.lifetime.smoke_test,
+            client.right - client.left,
+            client.bottom - client.top);
+    }
+}
+
 bool InitializeMainChrome(AppContext& state) noexcept {
+    if (!state.lifetime.smoke_test) {
+        LoadWorkspaceLayout(state.windows.workspace, L"WorkspaceSessionV2");
+    }
     if (!inkpod::windows::ui::CreateMainChrome(
             state.windows, state.lifetime.instance, state.lifetime.smoke_test)) {
         return false;
@@ -5210,11 +5390,11 @@ bool InitializeMainChrome(AppContext& state) noexcept {
     }
     RefreshBatchPalette(state.batch);
     ShowWindow(state.batch.palette, SW_HIDE);
-    state.tools.palette_dialog = {
-        &state,
-        DispatchToolPaletteCommand,
-        NotifyToolPaletteVisibilityChanged,
-        0};
+    state.tools.palette_dialog = {};
+    state.tools.palette_dialog.context = &state;
+    state.tools.palette_dialog.dispatch_command = DispatchToolPaletteCommand;
+    state.tools.palette_dialog.visibility_changed =
+        NotifyToolPaletteVisibilityChanged;
     state.tools.palette = inkpod::windows::ui::CreateToolPaletteDialog(
         state.lifetime.instance,
         state.windows.window,
@@ -5222,18 +5402,42 @@ bool InitializeMainChrome(AppContext& state) noexcept {
     if (state.tools.palette == nullptr) {
         return false;
     }
-    RestorePaletteWindowPlacement(
-        state.tools.palette,
+    state.windows.tool_palette = state.tools.palette;
+    state.tools.options_pane.context = &state;
+    state.tools.options_pane.dispatch_command = DispatchToolPaletteCommand;
+    state.tools.options_pane.change_diameter = ChangeToolOptionsDiameter;
+    state.tools.options_pane.active_tool = state.tools.active_tool;
+    state.tools.options_pane.diameter = state.tools.diameter;
+    state.windows.tool_options =
+        inkpod::windows::ui::panes::CreateToolOptionsPane(
+            state.lifetime.instance,
+            state.windows.window,
+            state.tools.options_pane);
+    if (state.windows.tool_options == nullptr) {
+        return false;
+    }
+    state.panes.color_pane.context = &state;
+    state.panes.color_pane.dispatch_command = DispatchToolPaletteCommand;
+    state.panes.color_pane.change_color = ChangeDockDrawingColor;
+    state.panes.color_pane.select_color = SelectDockColor;
+    state.panes.color_pane.change_group = ChangeDockPaletteGroup;
+    state.windows.color_pane = inkpod::windows::ui::panes::CreateColorDockPane(
+        state.lifetime.instance,
         state.windows.window,
-        L"ToolPalettePlacementV2",
-        !state.lifetime.smoke_test);
-    SetPaletteWindowShown(state.tools.palette, false);
-    state.panes.layer_palette_dialog = {
-        &state,
-        DispatchLayerPaletteCommand,
-        SelectLayerPaletteLayer,
-        ReorderLayerPaletteLayer,
-        NotifyLayerPaletteVisibilityChanged};
+        state.panes.color_pane);
+    if (state.windows.color_pane == nullptr) {
+        return false;
+    }
+    auto& layer_dialog = state.panes.layer_palette_dialog;
+    layer_dialog.context = &state;
+    layer_dialog.dispatch_command = DispatchLayerPaletteCommand;
+    layer_dialog.select_layer = SelectLayerPaletteLayer;
+    layer_dialog.select_plane = SelectLayerPalettePlane;
+    layer_dialog.reorder_layer = ReorderLayerPaletteLayer;
+    layer_dialog.reorder_plane = ReorderLayerPalettePlane;
+    layer_dialog.change_split = ChangeLayerPaletteSplit;
+    layer_dialog.visibility_changed = NotifyLayerPaletteVisibilityChanged;
+    layer_dialog.split_milli = state.windows.workspace.layer_split_milli;
     state.panes.layer_palette = CreateLayerPaletteDialog(
         state.lifetime.instance,
         state.windows.window,
@@ -5241,20 +5445,16 @@ bool InitializeMainChrome(AppContext& state) noexcept {
     if (state.panes.layer_palette == nullptr) {
         return false;
     }
-    RestorePaletteWindowPlacement(
-        state.panes.layer_palette,
-        state.windows.window,
-        L"LayerPalettePlacement",
-        !state.lifetime.smoke_test);
-    SetPaletteWindowShown(state.panes.layer_palette, false);
+    state.windows.layer_palette = state.panes.layer_palette;
+    RelayoutWorkspace(state);
     return true;
 }
 
 void ShowInitialPalettes(AppContext& state) noexcept {
-    SetPaletteWindowShown(state.tools.palette, true);
-    if (SetPaletteWindowShown(state.panes.layer_palette, true)) {
-        RefreshTreePane(state);
-    }
+    RelayoutWorkspace(state);
+    RefreshColorPanes(state);
+    RefreshDockPaneViews(state);
+    RefreshTreePane(state);
     UpdateMenuState(state);
 }
 
@@ -6190,17 +6390,14 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
     switch (LOWORD(wparam)) {
         case IDM_WINDOW_LAYER_PALETTE:
             if (state->panes.layer_palette != nullptr) {
-                const bool visible =
-                    PaletteWindowIsShown(state->panes.layer_palette);
-                const bool visibility_changed = SetPaletteWindowShown(
-                    state->panes.layer_palette,
-                    !visible);
-                if (!visible) {
+                state->windows.workspace.layer_visible =
+                    !state->windows.workspace.layer_visible;
+                RelayoutWorkspace(*state);
+                if (state->windows.workspace.layer_visible) {
                     RefreshTreePane(*state);
-                    SetForegroundWindow(state->panes.layer_palette);
                 }
                 UpdateMenuState(*state);
-                return visibility_changed ? 1 : 0;
+                return 1;
             }
             return 0;
         case IDM_LAYER_NEW: {
@@ -7609,16 +7806,19 @@ std::optional<LRESULT> RouteToolCommand(
     switch (LOWORD(wparam)) {
         case IDM_WINDOW_TOOL_PALETTE:
             if (state->tools.palette != nullptr) {
-                const bool visible = PaletteWindowIsShown(state->tools.palette);
-                const bool visibility_changed =
-                    SetPaletteWindowShown(state->tools.palette, !visible);
-                if (!visible) {
-                    SetForegroundWindow(state->tools.palette);
-                }
+                state->windows.workspace.tool_visible =
+                    !state->windows.workspace.tool_visible;
+                RelayoutWorkspace(*state);
                 UpdateMenuState(*state);
-                return visibility_changed ? 1 : 0;
+                return 1;
             }
             return 0;
+        case IDM_WINDOW_TOOL_OPTIONS:
+            state->windows.workspace.tool_options_visible =
+                !state->windows.workspace.tool_options_visible;
+            RelayoutWorkspace(*state);
+            UpdateMenuState(*state);
+            return 1;
         case IDM_TOOL_PENCIL:
             TransitionActiveTool(
                 state->tools, state->windows.canvas, INKPOD_TOOL_PENCIL);
@@ -7923,6 +8123,16 @@ std::optional<LRESULT> RouteColorCommand(
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
+        case IDM_WINDOW_COLOR_PANE:
+            state->windows.workspace.color_visible =
+                !state->windows.workspace.color_visible;
+            if (state->windows.workspace.color_visible) {
+                RefreshColorPanes(*state);
+            }
+            RelayoutWorkspace(*state);
+            RefreshDockPaneViews(*state);
+            UpdateMenuState(*state);
+            return 1;
         case IDM_COLOR_EDITOR: {
             const InkpodStatus status = ShowDrawingColorEditor(*state);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
@@ -8358,6 +8568,50 @@ std::optional<LRESULT> RouteApplicationCommand(
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
+        case IDM_WORKSPACE_RESET:
+            ResetWorkspaceLayout(state->windows.workspace);
+            RelayoutWorkspace(*state);
+            RefreshTreePane(*state);
+            RefreshDockPaneViews(*state);
+            UpdateMenuState(*state);
+            return 1;
+        case IDM_WORKSPACE_SAVE: {
+            const bool saved = SaveWorkspaceLayout(
+                state->windows.workspace, L"WorkspaceSavedV2");
+            if (!saved && !state->lifetime.smoke_test) {
+                MessageBoxW(
+                    window,
+                    L"現在のワークスペース配置を保存できませんでした。",
+                    L"inkpod",
+                    MB_OK | MB_ICONWARNING);
+            }
+            return saved ? 1 : 0;
+        }
+        case IDM_WORKSPACE_RESTORE: {
+            WorkspaceLayoutState restored = state->windows.workspace;
+            const bool loaded = LoadWorkspaceLayout(
+                restored, L"WorkspaceSavedV2");
+            if (loaded) {
+                state->windows.workspace = restored;
+                RelayoutWorkspace(*state);
+                RefreshTreePane(*state);
+                RefreshDockPaneViews(*state);
+                UpdateMenuState(*state);
+            } else if (!state->lifetime.smoke_test) {
+                MessageBoxW(
+                    window,
+                    L"保存されたワークスペース配置がありません。",
+                    L"inkpod",
+                    MB_OK | MB_ICONINFORMATION);
+            }
+            return loaded ? 1 : 0;
+        }
+        case IDM_WORKSPACE_MIRROR:
+            state->windows.workspace.mirrored =
+                !state->windows.workspace.mirrored;
+            RelayoutWorkspace(*state);
+            UpdateMenuState(*state);
+            return 1;
         case IDM_SHORTCUT_RESET: {
             const InkpodStatus status = state->engine == nullptr
                 ? INKPOD_STATUS_INVALID_STATE

@@ -85,7 +85,14 @@ const wchar_t* GroupName(UINT command) noexcept {
         case 417: return L"連番・モーション";
         case 418: return L"ベクター";
         case 419:
-            return command == IDM_WINDOW_TOOL_PALETTE || command == IDM_WINDOW_LAYER_PALETTE
+            return command == IDM_WINDOW_TOOL_PALETTE
+                    || command == IDM_WINDOW_LAYER_PALETTE
+                    || command == IDM_WINDOW_TOOL_OPTIONS
+                    || command == IDM_WINDOW_COLOR_PANE
+                    || command == IDM_WORKSPACE_RESET
+                    || command == IDM_WORKSPACE_SAVE
+                    || command == IDM_WORKSPACE_RESTORE
+                    || command == IDM_WORKSPACE_MIRROR
                     || command == IDM_WINDOW_BATCH
                 ? L"ウィンドウ"
                 : L"バッチ";
@@ -154,6 +161,24 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
             return true;
         case IDM_WINDOW_LAYER_PALETTE:
             sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'L')});
+            return true;
+        case IDM_WINDOW_TOOL_OPTIONS:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'O')});
+            return true;
+        case IDM_WINDOW_COLOR_PANE:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'C')});
+            return true;
+        case IDM_WORKSPACE_RESET:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'R')});
+            return true;
+        case IDM_WORKSPACE_SAVE:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'S')});
+            return true;
+        case IDM_WORKSPACE_RESTORE:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'U')});
+            return true;
+        case IDM_WORKSPACE_MIRROR:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'M')});
             return true;
         default: return false;
     }

@@ -12,29 +12,35 @@
 #include <utility>
 
 #include "app/resource.h"
-#include "ui/palette_window.h"
 
 namespace inkpod::windows::ui {
 namespace {
 
 constexpr int kReferenceDpi = 96;
-constexpr int kMargin = 8;
-constexpr int kTileHeight = 92;
-constexpr int kThumbnailWidth = 80;
-constexpr int kThumbnailHeight = 60;
-constexpr int kActionWidth = 44;
+constexpr int kMargin = 6;
+constexpr int kLayerTileHeight = 84;
+constexpr int kPlaneTileHeight = 62;
+constexpr int kThumbnailWidth = 72;
+constexpr int kThumbnailHeight = 54;
+constexpr int kActionWidth = 42;
 constexpr int kButtonHeight = 24;
 constexpr int kButtonGap = 4;
-constexpr int kMinimumWidth = 300;
-constexpr int kMinimumHeight = 260;
-constexpr UINT_PTR kLayerListSubclass = 1U;
-constexpr std::array<UINT, 6U> kActionCommands{
+constexpr UINT_PTR kListSubclass = 1U;
+constexpr UINT_PTR kSplitSubclass = 2U;
+constexpr std::array<UINT, 6U> kLayerActionCommands{
     IDM_LAYER_NEW,
     IDM_LAYER_DUPLICATE,
     IDM_LAYER_DELETE,
     IDM_LAYER_MOVE_UP,
     IDM_LAYER_MOVE_DOWN,
     IDM_LAYER_PROPERTIES};
+constexpr std::array<UINT, 6U> kPlaneActionCommands{
+    IDM_PLANE_NEW,
+    IDM_PLANE_DUPLICATE,
+    IDM_PLANE_DELETE,
+    IDM_PLANE_MOVE_UP,
+    IDM_PLANE_MOVE_DOWN,
+    IDM_PLANE_PROPERTIES};
 
 int ScaleForDpi(int value, UINT dpi) noexcept {
     return MulDiv(
@@ -53,6 +59,10 @@ LayerPaletteDialogState* ListState(HWND list) noexcept {
     return dialog == nullptr ? nullptr : DialogState(dialog);
 }
 
+bool IsPlaneList(HWND list) noexcept {
+    return GetDlgCtrlID(list) == IDC_PLANE_LIST;
+}
+
 const wchar_t* LayerKindLabel(std::uint32_t kind) noexcept {
     switch (kind) {
         case INKPOD_LAYER_BINARY_COLORING: return L"2値彩色";
@@ -65,6 +75,19 @@ const wchar_t* LayerKindLabel(std::uint32_t kind) noexcept {
         case INKPOD_LAYER_TEXT: return L"テキスト";
         case INKPOD_LAYER_ANNOTATION: return L"指示";
         case INKPOD_LAYER_VECTOR_COLORING: return L"ベクター彩色";
+        default: return L"不明";
+    }
+}
+
+const wchar_t* PlaneKindLabel(std::uint32_t kind) noexcept {
+    switch (kind) {
+        case INKPOD_TYPED_PLANE_MAIN_LINE: return L"主線";
+        case INKPOD_TYPED_PLANE_COLOR: return L"彩色";
+        case INKPOD_TYPED_PLANE_COLOR_TRACE: return L"色トレース";
+        case INKPOD_TYPED_PLANE_RASTER: return L"ラスター";
+        case INKPOD_TYPED_PLANE_SELECTION: return L"選択";
+        case INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE: return L"ベクター主線";
+        case INKPOD_TYPED_PLANE_VECTOR_FILL: return L"ベクター塗り";
         default: return L"不明";
     }
 }
@@ -84,86 +107,137 @@ std::wstring Utf8ToWide(const std::string& text) {
         return L"(名称を表示できません)";
     }
     std::wstring output(static_cast<std::size_t>(required), L'\0');
-    if (MultiByteToWideChar(
-            CP_UTF8,
-            MB_ERR_INVALID_CHARS,
-            text.data(),
-            static_cast<int>(text.size()),
-            output.data(),
-            required)
-        != required) {
-        return L"(名称を表示できません)";
-    }
-    return output;
+    return MultiByteToWideChar(
+               CP_UTF8,
+               MB_ERR_INVALID_CHARS,
+               text.data(),
+               static_cast<int>(text.size()),
+               output.data(),
+               required)
+            == required
+        ? output
+        : L"(名称を表示できません)";
 }
 
-void NotifyVisibilityChanged(LayerPaletteDialogState& state) noexcept {
-    if (state.visibility_changed != nullptr) {
-        state.visibility_changed(state.context);
-    }
+const std::vector<LayerPaletteItem>& ItemsFor(
+    const LayerPaletteDialogState& state,
+    bool plane) noexcept {
+    return plane ? state.plane_items : state.items;
 }
 
-void HidePalette(HWND dialog, LayerPaletteDialogState& state) noexcept {
-    SetPaletteWindowShown(dialog, false);
-    NotifyVisibilityChanged(state);
+std::vector<LayerPaletteItem>& ItemsFor(
+    LayerPaletteDialogState& state,
+    bool plane) noexcept {
+    return plane ? state.plane_items : state.items;
 }
 
 void LayoutControls(HWND dialog) noexcept {
+    LayerPaletteDialogState* state = DialogState(dialog);
     RECT client{};
-    if (GetClientRect(dialog, &client) == FALSE) {
+    if (state == nullptr || GetClientRect(dialog, &client) == FALSE) {
         return;
     }
     const UINT dpi = GetDpiForWindow(dialog);
     const int margin = ScaleForDpi(kMargin, dpi);
     const int gap = ScaleForDpi(kButtonGap, dpi);
+    const int label_height = ScaleForDpi(18, dpi);
+    const int split_height = ScaleForDpi(4, dpi);
     const int button_height = ScaleForDpi(kButtonHeight, dpi);
     const int width = std::max(
-        0,
-        static_cast<int>(client.right - client.left) - margin * 2);
-    const int list_height = std::max(
-        0,
-        static_cast<int>(client.bottom - client.top) - margin * 3
-            - button_height);
-    const HWND list = GetDlgItem(dialog, IDC_LAYER_LIST);
-    if (list != nullptr) {
-        SetWindowPos(
-            list,
-            nullptr,
-            margin,
-            margin,
-            width,
-            list_height,
-            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-        SendMessageW(
-            list,
-            LB_SETITEMHEIGHT,
-            0,
-            static_cast<LPARAM>(ScaleForDpi(kTileHeight, dpi)));
+        0, static_cast<int>(client.right) - margin * 2);
+    const int content_height = std::max(
+        0, static_cast<int>(client.bottom) - margin * 3 - button_height);
+    const int available_lists = std::max(
+        0, content_height - label_height * 2 - split_height);
+    int layer_height = static_cast<int>(
+        static_cast<std::int64_t>(available_lists)
+        * std::clamp<std::uint32_t>(state->split_milli, 200U, 800U) / 1000);
+    if (available_lists >= ScaleForDpi(160, dpi)) {
+        layer_height = std::clamp(
+            layer_height,
+            ScaleForDpi(80, dpi),
+            available_lists - ScaleForDpi(80, dpi));
     }
+    int y = margin;
+    SetWindowPos(
+        GetDlgItem(dialog, IDC_LAYER_SECTION),
+        nullptr,
+        margin,
+        y,
+        width,
+        label_height,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    y += label_height;
+    SetWindowPos(
+        GetDlgItem(dialog, IDC_LAYER_LIST),
+        nullptr,
+        margin,
+        y,
+        width,
+        layer_height,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    y += layer_height;
+    SetWindowPos(
+        GetDlgItem(dialog, IDC_LAYER_PLANE_SPLITTER),
+        nullptr,
+        margin,
+        y,
+        width,
+        split_height,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    y += split_height;
+    SetWindowPos(
+        GetDlgItem(dialog, IDC_PLANE_SECTION),
+        nullptr,
+        margin,
+        y,
+        width,
+        label_height,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    y += label_height;
+    const int plane_height = std::max(
+        0, margin + content_height - y);
+    SetWindowPos(
+        GetDlgItem(dialog, IDC_PLANE_LIST),
+        nullptr,
+        margin,
+        y,
+        width,
+        plane_height,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    SendDlgItemMessageW(
+        dialog,
+        IDC_LAYER_LIST,
+        LB_SETITEMHEIGHT,
+        0,
+        ScaleForDpi(kLayerTileHeight, dpi));
+    SendDlgItemMessageW(
+        dialog,
+        IDC_PLANE_LIST,
+        LB_SETITEMHEIGHT,
+        0,
+        ScaleForDpi(kPlaneTileHeight, dpi));
+
     const int button_width = std::max(
         1,
-        (width - gap * (static_cast<int>(kActionCommands.size()) - 1))
-            / static_cast<int>(kActionCommands.size()));
-    const int y = margin * 2 + list_height;
-    for (std::size_t index = 0; index < kActionCommands.size(); ++index) {
-        const HWND button = GetDlgItem(dialog, kActionCommands[index]);
-        if (button != nullptr) {
-            SetWindowPos(
-                button,
-                nullptr,
-                margin + static_cast<int>(index) * (button_width + gap),
-                y,
-                button_width,
-                button_height,
-                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-        }
+        (width - gap * (static_cast<int>(kLayerActionCommands.size()) - 1))
+            / static_cast<int>(kLayerActionCommands.size()));
+    const int button_y = client.bottom - margin - button_height;
+    for (std::size_t index = 0; index < kLayerActionCommands.size(); ++index) {
+        SetWindowPos(
+            GetDlgItem(dialog, static_cast<int>(kLayerActionCommands[index])),
+            nullptr,
+            margin + static_cast<int>(index) * (button_width + gap),
+            button_y,
+            button_width,
+            button_height,
+            SWP_NOACTIVATE | SWP_NOZORDER);
     }
 }
 
 bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {
-    const int height = -MulDiv(9, static_cast<int>(GetDpiForWindow(dialog)), 72);
     const HFONT replacement = CreateFontW(
-        height,
+        -MulDiv(9, static_cast<int>(GetDpiForWindow(dialog)), 72),
         0,
         0,
         0,
@@ -180,20 +254,15 @@ bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {
     if (replacement == nullptr) {
         return false;
     }
-    for (const UINT control : kActionCommands) {
+    for (const UINT control : kLayerActionCommands) {
         SendDlgItemMessageW(
-            dialog,
-            control,
-            WM_SETFONT,
-            reinterpret_cast<WPARAM>(replacement),
-            FALSE);
+            dialog, control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), FALSE);
     }
-    SendDlgItemMessageW(
-        dialog,
-        IDC_LAYER_LIST,
-        WM_SETFONT,
-        reinterpret_cast<WPARAM>(replacement),
-        FALSE);
+    for (const int control : {
+             IDC_LAYER_SECTION, IDC_PLANE_SECTION, IDC_LAYER_LIST, IDC_PLANE_LIST}) {
+        SendDlgItemMessageW(
+            dialog, control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), FALSE);
+    }
     if (state.font != nullptr) {
         DeleteObject(state.font);
     }
@@ -205,26 +274,35 @@ void SelectItem(
     HWND list,
     LayerPaletteDialogState& state,
     int index) noexcept {
-    if (index < 0 || static_cast<std::size_t>(index) >= state.items.size()) {
+    const bool plane = IsPlaneList(list);
+    const auto& items = ItemsFor(state, plane);
+    if (index < 0 || static_cast<std::size_t>(index) >= items.size()) {
         return;
     }
+    state.plane_active = plane;
     SendMessageW(list, LB_SETCURSEL, static_cast<WPARAM>(index), 0);
-    const std::uint64_t layer_id = state.items[static_cast<std::size_t>(index)].id;
-    if (layer_id == state.selected_layer_id) {
+    const std::uint64_t id = items[static_cast<std::size_t>(index)].id;
+    std::uint64_t& selected = plane
+        ? state.selected_plane_id
+        : state.selected_layer_id;
+    if (id == selected) {
         return;
     }
-    state.selected_layer_id = layer_id;
-    if (!state.updating && state.select_layer != nullptr) {
-        state.select_layer(state.context, layer_id);
+    selected = id;
+    if (state.updating) {
+        return;
+    }
+    LayerPaletteSelectionCallback callback = plane
+        ? state.select_plane
+        : state.select_layer;
+    if (callback != nullptr) {
+        callback(state.context, id);
     }
 }
 
 int ItemFromPoint(HWND list, POINT point) noexcept {
     const LRESULT result = SendMessageW(
-        list,
-        LB_ITEMFROMPOINT,
-        0,
-        MAKELPARAM(point.x, point.y));
+        list, LB_ITEMFROMPOINT, 0, MAKELPARAM(point.x, point.y));
     return HIWORD(result) == 0 ? static_cast<int>(LOWORD(result)) : -1;
 }
 
@@ -232,26 +310,35 @@ void DrawThumbnail(
     HDC dc,
     const RECT& bounds,
     const LayerPaletteItem& item,
-    UINT dpi) noexcept {
-    const int requested_width = ScaleForDpi(kThumbnailWidth, dpi);
-    const int requested_height = ScaleForDpi(kThumbnailHeight, dpi);
+    UINT dpi,
+    bool plane) noexcept {
+    const int requested_width = ScaleForDpi(plane ? 42 : kThumbnailWidth, dpi);
+    const int requested_height = ScaleForDpi(plane ? 42 : kThumbnailHeight, dpi);
     RECT frame{
         bounds.left,
-        bounds.top
-            + std::max(
-                0,
-                (static_cast<int>(bounds.bottom - bounds.top)
-                 - requested_height)
-                    / 2),
+        bounds.top + std::max(
+            0,
+            (static_cast<int>(bounds.bottom - bounds.top) - requested_height) / 2),
         bounds.left + requested_width,
         0};
     frame.bottom = frame.top + requested_height;
-    FillRect(dc, &frame, reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
-    FrameRect(dc, &frame, reinterpret_cast<HBRUSH>(COLOR_3DSHADOW + 1));
+    FillRect(dc, &frame, GetSysColorBrush(COLOR_WINDOW));
+    FrameRect(dc, &frame, GetSysColorBrush(COLOR_3DSHADOW));
+    if (plane) {
+        SetBkMode(dc, TRANSPARENT);
+        DrawTextW(
+            dc,
+            PlaneKindLabel(item.kind),
+            -1,
+            &frame,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        return;
+    }
     if (item.thumbnail_width == 0U || item.thumbnail_height == 0U
         || item.thumbnail_stride_bytes != item.thumbnail_width * 4U
         || item.thumbnail_bgra.size()
-            < static_cast<std::size_t>(item.thumbnail_stride_bytes) * item.thumbnail_height) {
+            < static_cast<std::size_t>(item.thumbnail_stride_bytes)
+                * item.thumbnail_height) {
         return;
     }
     const int available_width = std::max(1, requested_width - 2);
@@ -259,8 +346,10 @@ void DrawThumbnail(
     const double scale = std::min(
         static_cast<double>(available_width) / item.thumbnail_width,
         static_cast<double>(available_height) / item.thumbnail_height);
-    const int draw_width = std::max(1, static_cast<int>(item.thumbnail_width * scale + 0.5));
-    const int draw_height = std::max(1, static_cast<int>(item.thumbnail_height * scale + 0.5));
+    const int draw_width = std::max(
+        1, static_cast<int>(item.thumbnail_width * scale + 0.5));
+    const int draw_height = std::max(
+        1, static_cast<int>(item.thumbnail_height * scale + 0.5));
     BITMAPINFO bitmap{};
     bitmap.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bitmap.bmiHeader.biWidth = static_cast<LONG>(item.thumbnail_width);
@@ -269,7 +358,6 @@ void DrawThumbnail(
     bitmap.bmiHeader.biBitCount = 32;
     bitmap.bmiHeader.biCompression = BI_RGB;
     SetStretchBltMode(dc, HALFTONE);
-    SetBrushOrgEx(dc, 0, 0, nullptr);
     StretchDIBits(
         dc,
         frame.left + (requested_width - draw_width) / 2,
@@ -308,41 +396,41 @@ void DrawStatusButton(
         DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 }
 
-void DrawLayerItem(
+void DrawItem(
     const DRAWITEMSTRUCT& draw,
-    const LayerPaletteDialogState& state) noexcept {
+    const LayerPaletteDialogState& state,
+    bool plane) noexcept {
+    const auto& items = ItemsFor(state, plane);
     if (draw.itemID == static_cast<UINT>(-1)
-        || static_cast<std::size_t>(draw.itemID) >= state.items.size()) {
+        || static_cast<std::size_t>(draw.itemID) >= items.size()) {
         return;
     }
-    const LayerPaletteItem& item = state.items[draw.itemID];
+    const LayerPaletteItem& item = items[draw.itemID];
     const bool selected = (draw.itemState & ODS_SELECTED) != 0U;
-    const COLORREF background = GetSysColor(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW);
-    const COLORREF foreground = GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT);
-    const HBRUSH background_brush = CreateSolidBrush(background);
-    if (background_brush != nullptr) {
-        FillRect(draw.hDC, &draw.rcItem, background_brush);
-        DeleteObject(background_brush);
-    }
+    FillRect(
+        draw.hDC,
+        &draw.rcItem,
+        GetSysColorBrush(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW));
     RECT inner = draw.rcItem;
     const UINT dpi = GetDpiForWindow(draw.hwndItem);
     const int margin = ScaleForDpi(kMargin, dpi);
-    InflateRect(&inner, -margin, -ScaleForDpi(5, dpi));
-    DrawThumbnail(draw.hDC, inner, item, dpi);
+    InflateRect(&inner, -margin, -ScaleForDpi(4, dpi));
+    DrawThumbnail(draw.hDC, inner, item, dpi, plane);
 
     const int action_width = ScaleForDpi(kActionWidth, dpi);
-    const int thumbnail_width = ScaleForDpi(kThumbnailWidth, dpi);
+    const int thumbnail_width = ScaleForDpi(plane ? 42 : kThumbnailWidth, dpi);
     RECT text_bounds{
         inner.left + thumbnail_width + margin,
         inner.top,
         inner.right - action_width * 2 - margin,
         inner.bottom};
     SetBkMode(draw.hDC, TRANSPARENT);
-    SetTextColor(draw.hDC, foreground);
-    HFONT old_font = nullptr;
-    if (state.font != nullptr) {
-        old_font = static_cast<HFONT>(SelectObject(draw.hDC, state.font));
-    }
+    SetTextColor(
+        draw.hDC,
+        GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
+    const HGDIOBJ previous = state.font == nullptr
+        ? nullptr
+        : SelectObject(draw.hDC, state.font);
     RECT line = text_bounds;
     line.bottom = line.top + ScaleForDpi(22, dpi);
     DrawTextW(
@@ -352,29 +440,37 @@ void DrawLayerItem(
         &line,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
     std::array<wchar_t, 96U> detail{};
-    _snwprintf_s(
-        detail.data(),
-        detail.size(),
-        _TRUNCATE,
-        L"%ls  |  %u プレーン",
-        LayerKindLabel(item.kind),
-        item.plane_count);
+    if (plane) {
+        _snwprintf_s(
+            detail.data(),
+            detail.size(),
+            _TRUNCATE,
+            L"%ls  |  形式 %u  |  %u.%u%%",
+            PlaneKindLabel(item.kind),
+            item.pixel_format,
+            item.opacity_milli / 10U,
+            item.opacity_milli % 10U);
+    } else {
+        _snwprintf_s(
+            detail.data(),
+            detail.size(),
+            _TRUNCATE,
+            L"%ls  |  %u プレーン  |  %u.%u%%",
+            LayerKindLabel(item.kind),
+            item.plane_count,
+            item.opacity_milli / 10U,
+            item.opacity_milli % 10U);
+    }
     line.top += ScaleForDpi(24, dpi);
     line.bottom = line.top + ScaleForDpi(20, dpi);
-    DrawTextW(draw.hDC, detail.data(), -1, &line, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    _snwprintf_s(
+    DrawTextW(
+        draw.hDC,
         detail.data(),
-        detail.size(),
-        _TRUNCATE,
-        L"不透明度 %u.%u%%  |  上から %u",
-        item.opacity_milli / 10U,
-        item.opacity_milli % 10U,
-        item.index + 1U);
-    line.top += ScaleForDpi(22, dpi);
-    line.bottom = line.top + ScaleForDpi(20, dpi);
-    DrawTextW(draw.hDC, detail.data(), -1, &line, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    if (old_font != nullptr) {
-        SelectObject(draw.hDC, old_font);
+        -1,
+        &line,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    if (previous != nullptr) {
+        SelectObject(draw.hDC, previous);
     }
 
     RECT visible{
@@ -399,9 +495,12 @@ void DrawLayerItem(
         L"編集",
         L"保護",
         (item.flags & INKPOD_NODE_EDITABLE) != 0U);
-
-    FrameRect(draw.hDC, &draw.rcItem, reinterpret_cast<HBRUSH>(COLOR_3DSHADOW + 1));
-    if (state.drop_index == static_cast<int>(draw.itemID)) {
+    FrameRect(
+        draw.hDC,
+        &draw.rcItem,
+        GetSysColorBrush(COLOR_3DSHADOW));
+    if (state.drop_index == static_cast<int>(draw.itemID)
+        && state.drag_list_id == GetDlgCtrlID(draw.hwndItem)) {
         RECT marker = draw.rcItem;
         marker.bottom = marker.top + std::max(2, ScaleForDpi(2, dpi));
         FillRect(draw.hDC, &marker, GetSysColorBrush(COLOR_HIGHLIGHT));
@@ -411,7 +510,7 @@ void DrawLayerItem(
     }
 }
 
-LRESULT CALLBACK LayerListSubclassProcedure(
+LRESULT CALLBACK ListSubclassProcedure(
     HWND list,
     UINT message,
     WPARAM wparam,
@@ -419,36 +518,41 @@ LRESULT CALLBACK LayerListSubclassProcedure(
     UINT_PTR,
     DWORD_PTR) noexcept {
     LayerPaletteDialogState* state = ListState(list);
+    const bool plane = IsPlaneList(list);
     switch (message) {
         case WM_LBUTTONDOWN: {
-            if (state == nullptr) {
-                break;
-            }
+            if (state == nullptr) break;
             const POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
             const int index = ItemFromPoint(list, point);
-            if (index < 0) {
-                break;
-            }
+            if (index < 0) break;
             SelectItem(list, *state, index);
             RECT client{};
             GetClientRect(list, &client);
             const int action_width = ScaleForDpi(kActionWidth, GetDpiForWindow(list));
             if (point.x >= client.right - action_width) {
-                state->dispatch_command(state->context, IDM_LAYER_TOGGLE_EDITABLE);
+                state->dispatch_command(
+                    state->context,
+                    plane ? IDM_PLANE_TOGGLE_EDITABLE
+                          : IDM_LAYER_TOGGLE_EDITABLE);
                 return 0;
             }
             if (point.x >= client.right - action_width * 2) {
-                state->dispatch_command(state->context, IDM_LAYER_TOGGLE_VISIBLE);
+                state->dispatch_command(
+                    state->context,
+                    plane ? IDM_PLANE_TOGGLE_VISIBLE
+                          : IDM_LAYER_TOGGLE_VISIBLE);
                 return 0;
             }
             state->drag_source = index;
             state->drop_index = index;
+            state->drag_list_id = GetDlgCtrlID(list);
             SetCapture(list);
             InvalidateRect(list, nullptr, FALSE);
             break;
         }
         case WM_MOUSEMOVE:
-            if (state != nullptr && GetCapture() == list && state->drag_source >= 0) {
+            if (state != nullptr && GetCapture() == list
+                && state->drag_source >= 0) {
                 const POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
                 const int index = ItemFromPoint(list, point);
                 if (index >= 0 && index != state->drop_index) {
@@ -459,19 +563,25 @@ LRESULT CALLBACK LayerListSubclassProcedure(
             }
             break;
         case WM_LBUTTONUP:
-            if (state != nullptr && GetCapture() == list && state->drag_source >= 0) {
+            if (state != nullptr && GetCapture() == list
+                && state->drag_source >= 0) {
                 const int source = state->drag_source;
                 const int destination = state->drop_index;
                 state->drag_source = -1;
                 state->drop_index = -1;
+                state->drag_list_id = 0;
                 ReleaseCapture();
                 InvalidateRect(list, nullptr, FALSE);
+                const auto& items = ItemsFor(*state, plane);
+                LayerPaletteReorderCallback callback = plane
+                    ? state->reorder_plane
+                    : state->reorder_layer;
                 if (destination >= 0 && source != destination
-                    && static_cast<std::size_t>(source) < state->items.size()
-                    && state->reorder_layer != nullptr) {
-                    state->reorder_layer(
+                    && static_cast<std::size_t>(source) < items.size()
+                    && callback != nullptr) {
+                    callback(
                         state->context,
-                        state->items[static_cast<std::size_t>(source)].id,
+                        items[static_cast<std::size_t>(source)].id,
                         static_cast<std::uint32_t>(destination));
                 }
                 return 0;
@@ -481,16 +591,86 @@ LRESULT CALLBACK LayerListSubclassProcedure(
             if (state != nullptr) {
                 state->drag_source = -1;
                 state->drop_index = -1;
+                state->drag_list_id = 0;
                 InvalidateRect(list, nullptr, FALSE);
             }
             break;
         case WM_NCDESTROY:
-            RemoveWindowSubclass(list, LayerListSubclassProcedure, kLayerListSubclass);
+            RemoveWindowSubclass(list, ListSubclassProcedure, kListSubclass);
             break;
         default:
             break;
     }
     return DefSubclassProc(list, message, wparam, lparam);
+}
+
+LRESULT CALLBACK SplitSubclassProcedure(
+    HWND splitter,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR) noexcept {
+    LayerPaletteDialogState* state = ListState(splitter);
+    const HWND dialog = GetParent(splitter);
+    switch (message) {
+        case WM_LBUTTONDOWN:
+            if (state != nullptr) {
+                GetCursorPos(&state->split_drag_start);
+                state->split_drag_initial = state->split_milli;
+                SetCapture(splitter);
+            }
+            return 0;
+        case WM_MOUSEMOVE:
+            if (state != nullptr && GetCapture() == splitter && dialog != nullptr) {
+                POINT current{};
+                RECT client{};
+                GetCursorPos(&current);
+                GetClientRect(dialog, &client);
+                const int height = std::max(
+                    1, static_cast<int>(client.bottom - client.top));
+                const int delta = static_cast<int>(
+                    static_cast<std::int64_t>(current.y - state->split_drag_start.y)
+                    * 1000 / height);
+                state->split_milli = static_cast<std::uint32_t>(std::clamp(
+                    static_cast<int>(state->split_drag_initial) + delta,
+                    200,
+                    800));
+                LayoutControls(dialog);
+                return 0;
+            }
+            break;
+        case WM_LBUTTONUP:
+            if (state != nullptr && GetCapture() == splitter) {
+                ReleaseCapture();
+                if (state->change_split != nullptr) {
+                    state->change_split(state->context, state->split_milli);
+                }
+            }
+            return 0;
+        case WM_SETCURSOR:
+            SetCursor(LoadCursorW(nullptr, IDC_SIZENS));
+            return TRUE;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(splitter, SplitSubclassProcedure, kSplitSubclass);
+            break;
+        default:
+            break;
+    }
+    return DefSubclassProc(splitter, message, wparam, lparam);
+}
+
+UINT ActiveActionCommand(
+    const LayerPaletteDialogState& state,
+    UINT button_command) noexcept {
+    const auto found = std::find(
+        kLayerActionCommands.begin(), kLayerActionCommands.end(), button_command);
+    if (found == kLayerActionCommands.end()) {
+        return 0U;
+    }
+    const std::size_t index = static_cast<std::size_t>(
+        std::distance(kLayerActionCommands.begin(), found));
+    return state.plane_active ? kPlaneActionCommands[index] : button_command;
 }
 
 INT_PTR CALLBACK LayerPaletteDialogProcedure(
@@ -503,37 +683,52 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
         case WM_INITDIALOG: {
             state = reinterpret_cast<LayerPaletteDialogState*>(lparam);
             if (state == nullptr || state->dispatch_command == nullptr
-                || state->select_layer == nullptr || state->reorder_layer == nullptr
-                || state->visibility_changed == nullptr) {
-                DestroyWindow(dialog);
-                return TRUE;
+                || state->select_layer == nullptr || state->select_plane == nullptr
+                || state->reorder_layer == nullptr || state->reorder_plane == nullptr
+                || state->change_split == nullptr) {
+                return FALSE;
             }
-            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
-            const HWND list = GetDlgItem(dialog, IDC_LAYER_LIST);
-            if (list == nullptr
+            SetWindowLongPtrW(
+                dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            const HINSTANCE instance = reinterpret_cast<HINSTANCE>(
+                GetWindowLongPtrW(dialog, GWLP_HINSTANCE));
+            const HWND splitter = CreateWindowExW(
+                0,
+                L"STATIC",
+                nullptr,
+                WS_CHILD | WS_VISIBLE | SS_NOTIFY,
+                0,
+                0,
+                0,
+                0,
+                dialog,
+                reinterpret_cast<HMENU>(
+                    static_cast<INT_PTR>(IDC_LAYER_PLANE_SPLITTER)),
+                instance,
+                nullptr);
+            const HWND layer_list = GetDlgItem(dialog, IDC_LAYER_LIST);
+            const HWND plane_list = GetDlgItem(dialog, IDC_PLANE_LIST);
+            if (splitter == nullptr || layer_list == nullptr || plane_list == nullptr
                 || SetWindowSubclass(
-                       list,
-                       LayerListSubclassProcedure,
-                       kLayerListSubclass,
-                       0)
+                       layer_list, ListSubclassProcedure, kListSubclass, 0)
+                    == FALSE
+                || SetWindowSubclass(
+                       plane_list, ListSubclassProcedure, kListSubclass, 0)
+                    == FALSE
+                || SetWindowSubclass(
+                       splitter, SplitSubclassProcedure, kSplitSubclass, 0)
                     == FALSE
                 || !UpdatePaletteFont(dialog, *state)) {
-                DestroyWindow(dialog);
-                return TRUE;
+                return FALSE;
             }
             LayoutControls(dialog);
             return TRUE;
         }
         case WM_COMMAND:
-            if (state == nullptr) {
-                break;
-            }
-            if (LOWORD(wparam) == IDCANCEL) {
-                HidePalette(dialog, *state);
-                return TRUE;
-            }
-            if (LOWORD(wparam) == IDC_LAYER_LIST) {
-                const HWND list = GetDlgItem(dialog, IDC_LAYER_LIST);
+            if (state == nullptr) break;
+            if (LOWORD(wparam) == IDC_LAYER_LIST
+                || LOWORD(wparam) == IDC_PLANE_LIST) {
+                const HWND list = GetDlgItem(dialog, LOWORD(wparam));
                 if (HIWORD(wparam) == LBN_SELCHANGE) {
                     SelectItem(
                         list,
@@ -542,25 +737,28 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
                     return TRUE;
                 }
                 if (HIWORD(wparam) == LBN_DBLCLK) {
-                    state->dispatch_command(state->context, IDM_LAYER_PROPERTIES);
+                    state->dispatch_command(
+                        state->context,
+                        LOWORD(wparam) == IDC_PLANE_LIST
+                            ? IDM_PLANE_PROPERTIES
+                            : IDM_LAYER_PROPERTIES);
                     return TRUE;
                 }
             }
-            if (HIWORD(wparam) == BN_CLICKED
-                && std::find(
-                       kActionCommands.begin(),
-                       kActionCommands.end(),
-                       static_cast<UINT>(LOWORD(wparam)))
-                    != kActionCommands.end()) {
-                state->dispatch_command(state->context, LOWORD(wparam));
-                return TRUE;
+            if (HIWORD(wparam) == BN_CLICKED) {
+                const UINT command = ActiveActionCommand(*state, LOWORD(wparam));
+                if (command != 0U) {
+                    state->dispatch_command(state->context, command);
+                    return TRUE;
+                }
             }
             break;
         case WM_DRAWITEM:
-            if (state != nullptr && wparam == IDC_LAYER_LIST) {
+            if (state != nullptr
+                && (wparam == IDC_LAYER_LIST || wparam == IDC_PLANE_LIST)) {
                 const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
                 if (draw != nullptr) {
-                    DrawLayerItem(*draw, *state);
+                    DrawItem(*draw, *state, wparam == IDC_PLANE_LIST);
                 }
                 return TRUE;
             }
@@ -568,37 +766,12 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
         case WM_SIZE:
             LayoutControls(dialog);
             return TRUE;
-        case WM_DPICHANGED: {
-            const auto* bounds = reinterpret_cast<const RECT*>(lparam);
-            if (bounds != nullptr) {
-                SetWindowPos(
-                    dialog,
-                    nullptr,
-                    bounds->left,
-                    bounds->top,
-                    bounds->right - bounds->left,
-                    bounds->bottom - bounds->top,
-                    SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-            }
+        case WM_DPICHANGED_AFTERPARENT:
             if (state != nullptr) {
                 UpdatePaletteFont(dialog, *state);
                 LayoutControls(dialog);
                 InvalidateRect(GetDlgItem(dialog, IDC_LAYER_LIST), nullptr, TRUE);
-            }
-            return TRUE;
-        }
-        case WM_GETMINMAXINFO: {
-            auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
-            if (limits != nullptr) {
-                const UINT dpi = GetDpiForWindow(dialog);
-                limits->ptMinTrackSize.x = ScaleForDpi(kMinimumWidth, dpi);
-                limits->ptMinTrackSize.y = ScaleForDpi(kMinimumHeight, dpi);
-            }
-            return TRUE;
-        }
-        case WM_CLOSE:
-            if (state != nullptr) {
-                HidePalette(dialog, *state);
+                InvalidateRect(GetDlgItem(dialog, IDC_PLANE_LIST), nullptr, TRUE);
             }
             return TRUE;
         case WM_NCDESTROY:
@@ -614,7 +787,57 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
     return FALSE;
 }
 
-} // namespace
+std::vector<LayerPaletteItem> MakeItems(
+    const std::vector<panes::TreePaneNode>& nodes) {
+    std::vector<LayerPaletteItem> items;
+    items.reserve(nodes.size());
+    for (const auto& node : nodes) {
+        items.push_back(LayerPaletteItem{
+            node.id,
+            node.index,
+            node.kind,
+            node.pixel_format,
+            node.opacity_milli,
+            node.child_count,
+            node.flags,
+            Utf8ToWide(node.name),
+            node.thumbnail_width,
+            node.thumbnail_height,
+            node.thumbnail_stride_bytes,
+            node.thumbnail_bgra});
+    }
+    return items;
+}
+
+void PopulateList(
+    HWND list,
+    const std::vector<LayerPaletteItem>& items,
+    std::uint64_t selected_id) noexcept {
+    SendMessageW(list, WM_SETREDRAW, FALSE, 0);
+    SendMessageW(list, LB_RESETCONTENT, 0, 0);
+    int selected_index = -1;
+    for (std::size_t index = 0; index < items.size(); ++index) {
+        const LRESULT added = SendMessageW(
+            list,
+            LB_ADDSTRING,
+            0,
+            reinterpret_cast<LPARAM>(items[index].name.c_str()));
+        if (added == LB_ERR || added == LB_ERRSPACE) {
+            SendMessageW(list, LB_RESETCONTENT, 0, 0);
+            break;
+        }
+        if (items[index].id == selected_id) {
+            selected_index = static_cast<int>(index);
+        }
+    }
+    if (selected_index >= 0) {
+        SendMessageW(list, LB_SETCURSEL, static_cast<WPARAM>(selected_index), 0);
+    }
+    SendMessageW(list, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(list, nullptr, TRUE);
+}
+
+}  // namespace
 
 HWND CreateLayerPaletteDialog(
     HINSTANCE instance,
@@ -631,72 +854,27 @@ HWND CreateLayerPaletteDialog(
 void UpdateLayerPaletteDialog(
     HWND dialog,
     const std::vector<panes::TreePaneNode>& layers,
-    std::uint64_t selected_layer_id) noexcept {
+    const std::vector<panes::TreePaneNode>& planes,
+    std::uint64_t selected_layer_id,
+    std::uint64_t selected_plane_id,
+    std::uint32_t split_milli) noexcept {
     LayerPaletteDialogState* state = DialogState(dialog);
-    const HWND list = dialog == nullptr ? nullptr : GetDlgItem(dialog, IDC_LAYER_LIST);
-    if (state == nullptr || list == nullptr) {
+    if (state == nullptr) {
         return;
     }
     try {
-        std::vector<LayerPaletteItem> items;
-        items.reserve(layers.size());
-        for (const auto& layer : layers) {
-            items.push_back(LayerPaletteItem{
-                layer.id,
-                layer.index,
-                layer.kind,
-                layer.opacity_milli,
-                layer.child_count,
-                layer.flags,
-                Utf8ToWide(layer.name),
-                layer.thumbnail_width,
-                layer.thumbnail_height,
-                layer.thumbnail_stride_bytes,
-                layer.thumbnail_bgra});
-        }
-        const bool selection_unchanged =
-            state->selected_layer_id == selected_layer_id;
         state->updating = true;
-        state->items = std::move(items);
+        state->items = MakeItems(layers);
+        state->plane_items = MakeItems(planes);
         state->selected_layer_id = selected_layer_id;
-        const int previous_top = static_cast<int>(
-            SendMessageW(list, LB_GETTOPINDEX, 0, 0));
-        SendMessageW(list, WM_SETREDRAW, FALSE, 0);
-        SendMessageW(list, LB_RESETCONTENT, 0, 0);
-        int selected_index = -1;
-        bool add_failed{};
-        for (std::size_t index = 0; index < state->items.size(); ++index) {
-            const LRESULT added = SendMessageW(
-                list,
-                LB_ADDSTRING,
-                0,
-                reinterpret_cast<LPARAM>(state->items[index].name.c_str()));
-            if (added == LB_ERR || added == LB_ERRSPACE) {
-                add_failed = true;
-                break;
-            }
-            if (state->items[index].id == selected_layer_id) {
-                selected_index = static_cast<int>(index);
-            }
-        }
-        if (add_failed) {
-            SendMessageW(list, LB_RESETCONTENT, 0, 0);
-            state->items.clear();
-            state->selected_layer_id = 0U;
-        } else if (selected_index >= 0) {
-            SendMessageW(list, LB_SETCURSEL, static_cast<WPARAM>(selected_index), 0);
-        }
-        if (!state->items.empty() && selection_unchanged) {
-            const int maximum_top = static_cast<int>(state->items.size() - 1U);
-            SendMessageW(
-                list,
-                LB_SETTOPINDEX,
-                static_cast<WPARAM>(std::clamp(previous_top, 0, maximum_top)),
-                0);
-        }
-        SendMessageW(list, WM_SETREDRAW, TRUE, 0);
-        InvalidateRect(list, nullptr, TRUE);
+        state->selected_plane_id = selected_plane_id;
+        state->split_milli = std::clamp<std::uint32_t>(split_milli, 200U, 800U);
+        PopulateList(
+            GetDlgItem(dialog, IDC_LAYER_LIST), state->items, selected_layer_id);
+        PopulateList(
+            GetDlgItem(dialog, IDC_PLANE_LIST), state->plane_items, selected_plane_id);
         state->updating = false;
+        LayoutControls(dialog);
     } catch (const std::bad_alloc&) {
         state->updating = false;
     }
@@ -705,12 +883,16 @@ void UpdateLayerPaletteDialog(
 void UpdateLayerPaletteCommandState(
     HWND dialog,
     const CommandStateSet& states) noexcept {
-    if (dialog == nullptr) {
+    LayerPaletteDialogState* palette = DialogState(dialog);
+    if (palette == nullptr) {
         return;
     }
-    for (const UINT command : kActionCommands) {
+    for (std::size_t index = 0; index < kLayerActionCommands.size(); ++index) {
+        const UINT command = palette->plane_active
+            ? kPlaneActionCommands[index]
+            : kLayerActionCommands[index];
         const CommandState* state = FindCommandState(states, command);
-        const HWND button = GetDlgItem(dialog, command);
+        const HWND button = GetDlgItem(dialog, kLayerActionCommands[index]);
         if (state != nullptr && button != nullptr) {
             EnableWindow(button, state->enabled ? TRUE : FALSE);
         }
@@ -720,12 +902,16 @@ void UpdateLayerPaletteCommandState(
 bool LayerPaletteMatchesCommandState(
     HWND dialog,
     const CommandStateSet& states) noexcept {
-    if (dialog == nullptr) {
+    LayerPaletteDialogState* palette = DialogState(dialog);
+    if (palette == nullptr) {
         return false;
     }
-    for (const UINT command : kActionCommands) {
+    for (std::size_t index = 0; index < kLayerActionCommands.size(); ++index) {
+        const UINT command = palette->plane_active
+            ? kPlaneActionCommands[index]
+            : kLayerActionCommands[index];
         const CommandState* state = FindCommandState(states, command);
-        const HWND button = GetDlgItem(dialog, command);
+        const HWND button = GetDlgItem(dialog, kLayerActionCommands[index]);
         if (state == nullptr || button == nullptr
             || (IsWindowEnabled(button) != FALSE) != state->enabled) {
             return false;
@@ -744,6 +930,16 @@ std::uint64_t LayerPaletteSelectedLayer(HWND dialog) noexcept {
     return state == nullptr ? 0U : state->selected_layer_id;
 }
 
+std::size_t LayerPalettePlaneCount(HWND dialog) noexcept {
+    const LayerPaletteDialogState* state = DialogState(dialog);
+    return state == nullptr ? 0U : state->plane_items.size();
+}
+
+std::uint64_t LayerPaletteSelectedPlane(HWND dialog) noexcept {
+    const LayerPaletteDialogState* state = DialogState(dialog);
+    return state == nullptr ? 0U : state->selected_plane_id;
+}
+
 bool LayerPaletteItemHasThumbnail(HWND dialog, std::size_t index) noexcept {
     const LayerPaletteDialogState* state = DialogState(dialog);
     return state != nullptr && index < state->items.size()
@@ -752,4 +948,4 @@ bool LayerPaletteItemHasThumbnail(HWND dialog, std::size_t index) noexcept {
         && !state->items[index].thumbnail_bgra.empty();
 }
 
-} // namespace inkpod::windows::ui
+}  // namespace inkpod::windows::ui

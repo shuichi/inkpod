@@ -92,7 +92,7 @@ ARM64 版では、ARM64 用 MSVC 開発者環境を使用し、Rust ターゲッ
 rustup target add aarch64-pc-windows-msvc
 cmake --fresh --preset windows-arm-release
 cmake --build --preset windows-arm-release
-ctest --preset windows-arm-release -E inkpod_windows_msix_install_uninstall_smoke
+ctest --preset windows-arm-release
 .\build\windows-arm-release\inkpod.exe
 ```
 

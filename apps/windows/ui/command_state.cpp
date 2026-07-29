@@ -555,6 +555,16 @@ void ProvideBatchCommandStates(
         true);
 }
 
+void ProvideWorkspaceCommandStates(
+    const WorkspaceCommandStateInput& input,
+    CommandStateSet& states) noexcept {
+    SetChecked(states, IDM_WINDOW_TOOL_PALETTE, input.tool_visible);
+    SetChecked(states, IDM_WINDOW_TOOL_OPTIONS, input.tool_options_visible);
+    SetChecked(states, IDM_WINDOW_COLOR_PANE, input.color_visible);
+    SetChecked(states, IDM_WINDOW_LAYER_PALETTE, input.layer_visible);
+    SetChecked(states, IDM_WORKSPACE_MIRROR, input.mirrored);
+}
+
 } // namespace
 
 CommandStateSet ComputeCommandStates(const CommandStateInputs& inputs) noexcept {
@@ -569,6 +579,7 @@ CommandStateSet ComputeCommandStates(const CommandStateInputs& inputs) noexcept 
     ProvideSelectionViewCommandStates(inputs, states);
     ProvideToolCommandStates(inputs, states);
     ProvideColorCommandStates(inputs.color, states);
+    ProvideWorkspaceCommandStates(inputs.workspace, states);
     return states;
 }
 

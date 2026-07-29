@@ -1,7 +1,7 @@
 //! Fill, color sampling, palette, and color-check operations.
 
 use super::*;
-use crate::document::ensure_editable_role;
+use crate::document::ensure_editable_plane;
 use crate::selection::{combine_selection_masks, selection_from_rect};
 
 impl Core {
@@ -45,7 +45,14 @@ impl Core {
     ) -> Result<FillOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        ensure_editable_role(document, ActivePlane::Color)?;
+        let target_plane_id = document.plane_for_paint_role(ActivePlane::Color)?.id;
+        ensure_editable_plane(document, target_plane_id)?;
+        let target_raster = &document
+            .plane_by_id(target_plane_id)
+            .ok_or(CoreError::InvalidState(
+                "fill target plane no longer exists",
+            ))?
+            .raster;
         let document_pixels = u64::from(document.width)
             .checked_mul(u64::from(document.height))
             .ok_or(CoreError::InvalidArgument("fill work size overflows"))?;
@@ -123,7 +130,7 @@ impl Core {
                 .ok_or(CoreError::InvalidState(
                     "light-table fill color is unavailable at the seed",
                 ))?;
-            match (document.raster(ActivePlane::Color).format(), sampled) {
+            match (target_raster.format(), sampled) {
                 (PixelFormat::StraightRgba8, PixelValue::Rgba(value)) => PixelValue::Rgba(value),
                 (PixelFormat::StraightRgba16, PixelValue::Rgba16(value)) => {
                     PixelValue::Rgba16(value)
@@ -146,7 +153,7 @@ impl Core {
         let plan = match request.operation {
             FillOperation::Seed => seed_fill_with_cancel(
                 main_line,
-                document.raster(ActivePlane::Color),
+                target_raster,
                 selection.as_ref(),
                 (request.seed_x, request.seed_y),
                 fill_color,
@@ -159,7 +166,7 @@ impl Core {
                 ))?;
                 closed_region_fill_with_cancel(
                     main_line,
-                    document.raster(ActivePlane::Color),
+                    target_raster,
                     operation,
                     fill_color,
                     &options,
@@ -171,7 +178,7 @@ impl Core {
                     "fill extension requires an operation selection",
                 ))?;
                 extend_fill_with_cancel(
-                    document.raster(ActivePlane::Color),
+                    target_raster,
                     operation,
                     (request.seed_x, request.seed_y),
                     request.extension_distance,
@@ -191,7 +198,7 @@ impl Core {
 
         let changed_pixels = u64::try_from(plan.edits.len())
             .map_err(|_| CoreError::InvalidState("fill edit count is not representable"))?;
-        let mut next_color = document.raster(ActivePlane::Color).clone();
+        let mut next_color = target_raster.clone();
         let revision = self.next_document_revision()?;
         let after_state = self.allocate_state()?;
         let mut changes = Vec::with_capacity(plan.edits.len());
@@ -213,12 +220,15 @@ impl Core {
             next_color.remove_tile_if_empty(coord);
         }
         let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
-        let color_plane = document.plane_for_role_mut(ActivePlane::Color)?;
-        let color_plane_id = color_plane.id;
-        color_plane.raster = next_color;
-        document.active_plane_id = color_plane_id;
+        document
+            .plane_by_id_mut(target_plane_id)
+            .ok_or(CoreError::InvalidState(
+                "fill target plane no longer exists",
+            ))?
+            .raster = next_color;
+        document.active_plane_id = target_plane_id;
         self.document_revision = revision;
-        self.commit_pixel_history(color_plane_id, changes, after_state);
+        self.commit_pixel_history(target_plane_id, changes, after_state);
         Ok(FillOutcome {
             dispatch: DispatchOutcome {
                 revision,
@@ -314,7 +324,8 @@ impl Core {
             ));
         }
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        ensure_editable_role(document, ActivePlane::MainLine)?;
+        let main_line_plane_id = document.plane_for_role(ActivePlane::MainLine)?.id;
+        ensure_editable_plane(document, main_line_plane_id)?;
         if !matches!(
             document.raster(ActivePlane::MainLine).format(),
             PixelFormat::Grayscale8 | PixelFormat::Grayscale16

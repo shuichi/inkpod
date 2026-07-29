@@ -57,6 +57,4 @@ jobs:
           if ($output -match 'Assembling unsigned inkpod MSIX') {
             throw 'unchanged build rebuilt the MSIX package'
           }
-      # GitHub's hosted image is Windows Server 2022. The elevated package
-      # install/uninstall acceptance runs separately on a Windows 11 workstation.
-      - run: ctest --preset ${{ matrix.preset }} -E inkpod_windows_msix_install_uninstall_smoke
+      - run: ctest --preset ${{ matrix.preset }}

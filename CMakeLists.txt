@@ -167,6 +167,10 @@ if(WIN32)
 endif()
 
 include(CTest)
+option(
+    INKPOD_ENABLE_ELEVATED_MSIX_TESTS
+    "Register the administrator-only Windows 11 MSIX install/uninstall smoke test"
+    OFF)
 
 add_test(
     NAME inkpod_windows_assets
@@ -237,6 +241,23 @@ if(WIN32)
         NAME inkpod_windows_command_state
         COMMAND inkpod_windows_command_state_tests)
 
+    add_executable(inkpod_windows_workspace_layout_tests
+        apps/windows/ui/workspace_layout.cpp
+        apps/windows/ui/workspace_layout.h
+        tests/windows_workspace_layout.cpp)
+    target_include_directories(inkpod_windows_workspace_layout_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows")
+    target_compile_definitions(inkpod_windows_workspace_layout_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_workspace_layout_tests PRIVATE advapi32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_workspace_layout_tests)
+        target_compile_options(inkpod_windows_workspace_layout_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_workspace_layout
+        COMMAND inkpod_windows_workspace_layout_tests)
+
     add_executable(inkpod WIN32
         apps/windows/app/app_context.h
         apps/windows/app/app_smoke.cpp
@@ -260,6 +281,10 @@ if(WIN32)
         apps/windows/ui/dialogs/tool_palette.h
         apps/windows/ui/panes/document_panes.cpp
         apps/windows/ui/panes/color_panes.cpp
+        apps/windows/ui/panes/color_dock_pane.cpp
+        apps/windows/ui/panes/color_dock_pane.h
+        apps/windows/ui/panes/tool_options_pane.cpp
+        apps/windows/ui/panes/tool_options_pane.h
         apps/windows/ui/tools/view_controller.cpp
         apps/windows/ui/tools/fill_controller.cpp
         apps/windows/ui/tools/selection_controller.cpp
@@ -279,6 +304,8 @@ if(WIN32)
         apps/windows/ui/main_window.cpp
         apps/windows/ui/main_window_runtime.cpp
         apps/windows/ui/main_window_runtime.h
+        apps/windows/ui/workspace_layout.cpp
+        apps/windows/ui/workspace_layout.h
         tests/abi_smoke.cpp
         $<TARGET_OBJECTS:inkpod_header_c11>)
     target_include_directories(inkpod PRIVATE
@@ -372,14 +399,16 @@ if(WIN32)
         DEPENDS inkpod_windows_assets
         TIMEOUT 60)
 
-    add_test(
-        NAME inkpod_windows_msix_install_uninstall_smoke
-        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
-                -File "${CMAKE_SOURCE_DIR}/tests/msix_install_smoke.ps1"
-                -PackagePath "${INKPOD_MSIX_PATH}"
-                -ExpectedVersion "${PROJECT_VERSION}.0")
-    set_tests_properties(inkpod_windows_msix_install_uninstall_smoke PROPERTIES
-        DEPENDS inkpod_windows_msix_payload_smoke
-        RUN_SERIAL TRUE
-        TIMEOUT 180)
+    if(INKPOD_ENABLE_ELEVATED_MSIX_TESTS)
+        add_test(
+            NAME inkpod_windows_msix_install_uninstall_smoke
+            COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                    -File "${CMAKE_SOURCE_DIR}/tests/msix_install_smoke.ps1"
+                    -PackagePath "${INKPOD_MSIX_PATH}"
+                    -ExpectedVersion "${PROJECT_VERSION}.0")
+        set_tests_properties(inkpod_windows_msix_install_uninstall_smoke PROPERTIES
+            DEPENDS inkpod_windows_msix_payload_smoke
+            RUN_SERIAL TRUE
+            TIMEOUT 180)
+    endif()
 endif()

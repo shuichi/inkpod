@@ -15,6 +15,7 @@ struct LayerPaletteItem {
     std::uint64_t id{};
     std::uint32_t index{};
     std::uint32_t kind{};
+    std::uint32_t pixel_format{};
     std::uint32_t opacity_milli{};
     std::uint32_t plane_count{};
     std::uint32_t flags{};
@@ -30,18 +31,30 @@ using LayerPaletteSelectionCallback = void (*)(
     void* context, std::uint64_t layer_id) noexcept;
 using LayerPaletteReorderCallback = void (*)(
     void* context, std::uint64_t layer_id, std::uint32_t destination_index) noexcept;
+using LayerPaletteSplitCallback = void (*)(
+    void* context, std::uint32_t split_milli) noexcept;
 using LayerPaletteVisibilityCallback = void (*)(void* context) noexcept;
 
 struct LayerPaletteDialogState {
     void* context{};
     LayerPaletteCommandCallback dispatch_command{};
     LayerPaletteSelectionCallback select_layer{};
+    LayerPaletteSelectionCallback select_plane{};
     LayerPaletteReorderCallback reorder_layer{};
+    LayerPaletteReorderCallback reorder_plane{};
+    LayerPaletteSplitCallback change_split{};
     LayerPaletteVisibilityCallback visibility_changed{};
     std::vector<LayerPaletteItem> items;
+    std::vector<LayerPaletteItem> plane_items;
     std::uint64_t selected_layer_id{};
+    std::uint64_t selected_plane_id{};
     int drag_source{-1};
     int drop_index{-1};
+    int drag_list_id{};
+    POINT split_drag_start{};
+    std::uint32_t split_drag_initial{550U};
+    std::uint32_t split_milli{550U};
+    bool plane_active{};
     bool updating{};
     HFONT font{};
 };
@@ -54,7 +67,10 @@ HWND CreateLayerPaletteDialog(
 void UpdateLayerPaletteDialog(
     HWND dialog,
     const std::vector<panes::TreePaneNode>& layers,
-    std::uint64_t selected_layer_id) noexcept;
+    const std::vector<panes::TreePaneNode>& planes,
+    std::uint64_t selected_layer_id,
+    std::uint64_t selected_plane_id,
+    std::uint32_t split_milli) noexcept;
 
 void UpdateLayerPaletteCommandState(
     HWND dialog,
@@ -66,6 +82,8 @@ bool LayerPaletteMatchesCommandState(
 
 std::size_t LayerPaletteItemCount(HWND dialog) noexcept;
 std::uint64_t LayerPaletteSelectedLayer(HWND dialog) noexcept;
+std::size_t LayerPalettePlaneCount(HWND dialog) noexcept;
+std::uint64_t LayerPaletteSelectedPlane(HWND dialog) noexcept;
 bool LayerPaletteItemHasThumbnail(HWND dialog, std::size_t index) noexcept;
 
 } // namespace inkpod::windows::ui

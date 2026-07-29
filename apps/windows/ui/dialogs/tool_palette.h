@@ -3,27 +3,18 @@
 #include <windows.h>
 
 #include <array>
-#include <cstdint>
 
 #include "ui/command_state.h"
 
 namespace inkpod::windows::ui {
 
-enum class ToolPalettePage : std::uint8_t {
-    Basic,
-    Vector,
-    Effects,
-};
-
-inline constexpr std::size_t kToolPalettePageCount = 3U;
-
 struct ToolPaletteEntry {
     UINT command;
     const wchar_t* label;
-    ToolPalettePage page;
+    const wchar_t* glyph;
 };
 
-inline constexpr std::size_t kToolPaletteEntryCount = 37U;
+inline constexpr std::size_t kToolPaletteEntryCount = 20U;
 
 using ToolPaletteCommandCallback = void (*)(
     void* context, UINT command) noexcept;
@@ -34,8 +25,8 @@ struct ToolPaletteDialogState {
     ToolPaletteCommandCallback dispatch_command{};
     ToolPaletteVisibilityCallback visibility_changed{};
     int scroll_position{};
-    ToolPalettePage active_page{ToolPalettePage::Basic};
     HFONT font{};
+    HWND tooltip{};
 };
 
 const std::array<ToolPaletteEntry, kToolPaletteEntryCount>&

@@ -1,6 +1,151 @@
 use super::*;
 
 #[test]
+fn selected_raster_layer_receives_stroke_preview_commit_and_history() {
+    let mut core = Core::new();
+    let created = core
+        .new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let original_color_checksum = core.document_info().unwrap().color_plane_checksum;
+    let (_, raster_layer_id) = core.create_layer(LayerKind::Raster, "Raster").unwrap();
+    let raster_plane_id = core
+        .layers()
+        .unwrap()
+        .iter()
+        .find(|layer| layer.id == raster_layer_id)
+        .unwrap()
+        .planes[0]
+        .id;
+    core.set_active_node(raster_layer_id, raster_plane_id)
+        .unwrap();
+
+    let stroke = color_stroke(
+        PaintTool::Brush,
+        3.0,
+        StrokeSample {
+            x: 3.0,
+            y: 4.0,
+            pressure: 1.0,
+        },
+    );
+    core.begin_stroke(&stroke).unwrap();
+    let preview = &core.active_stroke.as_ref().unwrap().preview_document;
+    assert_eq!(
+        core.active_stroke.as_ref().unwrap().plane_id,
+        raster_plane_id
+    );
+    assert_eq!(
+        preview
+            .plane_by_id(raster_plane_id)
+            .unwrap()
+            .raster
+            .pixel(3, 4)
+            .unwrap(),
+        PixelValue::Rgba([12, 34, 56, 255])
+    );
+    assert_eq!(
+        preview
+            .plane_by_id(created.color_plane_id)
+            .unwrap()
+            .raster
+            .checksum(),
+        original_color_checksum
+    );
+
+    core.end_stroke().unwrap();
+    assert_eq!(
+        core.document_info().unwrap().color_plane_checksum,
+        original_color_checksum
+    );
+    assert_eq!(
+        core.document
+            .as_ref()
+            .unwrap()
+            .plane_by_id(raster_plane_id)
+            .unwrap()
+            .raster
+            .pixel(3, 4)
+            .unwrap(),
+        PixelValue::Rgba([12, 34, 56, 255])
+    );
+    core.undo().unwrap();
+    assert_eq!(
+        core.document
+            .as_ref()
+            .unwrap()
+            .plane_by_id(raster_plane_id)
+            .unwrap()
+            .raster
+            .pixel(3, 4)
+            .unwrap(),
+        PixelValue::Rgba([0; 4])
+    );
+    core.redo().unwrap();
+    assert_eq!(
+        core.document
+            .as_ref()
+            .unwrap()
+            .plane_by_id(raster_plane_id)
+            .unwrap()
+            .raster
+            .pixel(3, 4)
+            .unwrap(),
+        PixelValue::Rgba([12, 34, 56, 255])
+    );
+}
+
+#[test]
+fn selected_raster_layer_receives_fill_without_changing_coloring_plane() {
+    let mut core = Core::new();
+    core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let original_color_checksum = core.document_info().unwrap().color_plane_checksum;
+    let (_, raster_layer_id) = core.create_layer(LayerKind::Raster, "Raster").unwrap();
+    let raster_plane_id = core
+        .layers()
+        .unwrap()
+        .iter()
+        .find(|layer| layer.id == raster_layer_id)
+        .unwrap()
+        .planes[0]
+        .id;
+    core.set_active_node(raster_layer_id, raster_plane_id)
+        .unwrap();
+
+    let outcome = core
+        .apply_fill(&fill_request(1, 1, [90, 80, 70, 255]))
+        .unwrap();
+    assert_eq!(outcome.changed_pixels, 16);
+    assert_eq!(
+        core.document_info().unwrap().color_plane_checksum,
+        original_color_checksum
+    );
+    assert_eq!(
+        core.document
+            .as_ref()
+            .unwrap()
+            .plane_by_id(raster_plane_id)
+            .unwrap()
+            .raster
+            .pixel(1, 1)
+            .unwrap(),
+        PixelValue::Rgba([90, 80, 70, 255])
+    );
+    core.undo().unwrap();
+    assert_eq!(
+        core.document
+            .as_ref()
+            .unwrap()
+            .plane_by_id(raster_plane_id)
+            .unwrap()
+            .raster
+            .pixel(1, 1)
+            .unwrap(),
+        PixelValue::Rgba([0; 4])
+    );
+}
+
+#[test]
 fn viewport_resize_refits_only_persistent_fit_or_one_to_one_modes() {
     let mut core = Core::new();
     core.new_cell(200, 100, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)

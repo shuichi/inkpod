@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include "ui/workspace_layout.h"
+
 namespace inkpod::app {
 
 struct MainWindowHandles {
@@ -9,6 +11,14 @@ struct MainWindowHandles {
     HWND canvas{};
     HWND status_bar{};
     HWND document_tabs{};
+    HWND tool_options{};
+    HWND tool_palette{};
+    HWND color_pane{};
+    HWND layer_palette{};
+    HWND tool_splitter{};
+    HWND inspector_splitter{};
+    HWND color_splitter{};
+    windows::ui::WorkspaceLayoutState workspace{};
 };
 
 }
@@ -23,7 +33,7 @@ bool CreateMainChrome(
     bool smoke_test) noexcept;
 
 void LayoutMainChrome(
-    const app::MainWindowHandles& windows,
+    app::MainWindowHandles& windows,
     bool smoke_test,
     int width,
     int height) noexcept;

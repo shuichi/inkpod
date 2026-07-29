@@ -17,6 +17,8 @@
 #include "ui/dialogs/layer_palette.h"
 #include "ui/dialogs/tool_palette.h"
 #include "ui/main_window.h"
+#include "ui/panes/color_dock_pane.h"
+#include "ui/panes/tool_options_pane.h"
 #include "ui/shortcut_controller.h"
 
 namespace inkpod::app {
@@ -118,6 +120,7 @@ struct ToolUiState {
 
     HWND palette{};
     windows::ui::ToolPaletteDialogState palette_dialog{};
+    windows::ui::panes::ToolOptionsPaneState options_pane{};
 };
 
 struct ViewUiState {
@@ -168,6 +171,7 @@ struct PaneUiState {
     std::vector<InkpodStrokeSample> light_table_move_samples;
     HWND layer_palette{};
     windows::ui::LayerPaletteDialogState layer_palette_dialog{};
+    windows::ui::panes::ColorDockPaneState color_pane{};
 };
 
 struct AnimationUiState {

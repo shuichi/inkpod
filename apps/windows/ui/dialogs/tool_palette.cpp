@@ -6,72 +6,44 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstdint>
 
 #include "app/resource.h"
-#include "ui/palette_window.h"
 
 namespace inkpod::windows::ui {
 namespace {
 
 constexpr std::array<ToolPaletteEntry, kToolPaletteEntryCount>
     kToolPaletteEntries{{
-        {IDM_TOOL_PENCIL, L"鉛筆", ToolPalettePage::Basic},
-        {IDM_TOOL_BRUSH, L"ブラシ", ToolPalettePage::Basic},
-        {IDM_TOOL_ERASER, L"消しゴム", ToolPalettePage::Basic},
-        {IDM_TOOL_FILL, L"フィル", ToolPalettePage::Basic},
-        {IDM_TOOL_CLOSED_FILL, L"閉領域フィル", ToolPalettePage::Basic},
-        {IDM_TOOL_FILL_EXTENSION, L"塗りのばし", ToolPalettePage::Basic},
-        {IDM_TOOL_FILL_OPTIONS, L"フィル設定...", ToolPalettePage::Basic},
-        {IDM_TOOL_EYEDROPPER, L"スポイト", ToolPalettePage::Basic},
-        {IDM_VECTOR_LINE, L"描画: 直線", ToolPalettePage::Vector},
-        {IDM_VECTOR_CURVE, L"描画: 曲線", ToolPalettePage::Vector},
-        {IDM_VECTOR_RECTANGLE, L"描画: 長方形", ToolPalettePage::Vector},
-        {IDM_VECTOR_ELLIPSE, L"描画: 楕円", ToolPalettePage::Vector},
-        {IDM_VECTOR_POLYLINE, L"描画: 折れ線", ToolPalettePage::Vector},
-        {IDM_VECTOR_ERASER, L"描画: 消しゴム", ToolPalettePage::Vector},
-        {IDM_VECTOR_ERASE_PARTIAL, L"消去: 触れた部分", ToolPalettePage::Vector},
-        {IDM_VECTOR_ERASE_INTERSECTION, L"消去: 交点まで", ToolPalettePage::Vector},
-        {IDM_VECTOR_ERASE_WHOLE, L"消去: 線全体", ToolPalettePage::Vector},
-        {IDM_VECTOR_CONNECT, L"線つなぎ...", ToolPalettePage::Vector},
-        {IDM_VECTOR_WIDTH, L"線幅修正...", ToolPalettePage::Vector},
-        {IDM_VECTOR_SELECT_CUT, L"選択: 選択範囲で切断", ToolPalettePage::Vector},
-        {IDM_VECTOR_SELECT_TOUCH, L"選択: 一部でも触れる線", ToolPalettePage::Vector},
-        {IDM_VECTOR_SELECT_CONTAINED, L"選択: 完全に含まれる線", ToolPalettePage::Vector},
-        {IDM_VECTOR_SELECT_LINE, L"選択: 線を選択", ToolPalettePage::Vector},
-        {IDM_VECTOR_SELECT_WHOLE_LINE, L"選択: 線全体", ToolPalettePage::Vector},
-        {IDM_VECTOR_SELECT_INTERSECTION, L"選択: 交点まで", ToolPalettePage::Vector},
-        {IDM_VECTOR_SELECT_FILL_BOUNDARY, L"選択: 塗りを囲む線", ToolPalettePage::Vector},
-        {IDM_VECTOR_SELECT_FILL, L"選択: 塗り", ToolPalettePage::Vector},
-        {IDM_VECTOR_RASTERIZE, L"ラスタライズ...", ToolPalettePage::Vector},
-        {IDM_VECTOR_VECTORIZE, L"ベクター化...", ToolPalettePage::Vector},
-        {IDM_EFFECT_GRADIENT, L"グラデーション...", ToolPalettePage::Effects},
-        {IDM_EFFECT_AIRBRUSH, L"エアブラシ...", ToolPalettePage::Effects},
-        {IDM_EFFECT_BOUNDARY_AIRBRUSH, L"境界色エアブラシ...", ToolPalettePage::Effects},
-        {IDM_EFFECT_BLUR, L"ぼかしツール...", ToolPalettePage::Effects},
-        {IDM_EFFECT_STAMP, L"スタンプ...", ToolPalettePage::Effects},
-        {IDM_EFFECT_DUST, L"ゴミ取り...", ToolPalettePage::Effects},
-        {IDM_EFFECT_ALPHA_GRADIENT, L"アルファグラデーション...", ToolPalettePage::Effects},
-        {IDM_EFFECT_ALPHA_VIEW, L"アルファをグレースケール表示", ToolPalettePage::Effects},
+        {IDM_TOOL_PENCIL, L"鉛筆", L"鉛筆"},
+        {IDM_TOOL_BRUSH, L"ブラシ", L"ブラシ"},
+        {IDM_TOOL_ERASER, L"消しゴム", L"消しゴム"},
+        {IDM_TOOL_FILL, L"フィル", L"塗りつぶし"},
+        {IDM_TOOL_CLOSED_FILL, L"閉領域フィル", L"閉領域塗り"},
+        {IDM_TOOL_FILL_EXTENSION, L"塗りのばし", L"塗り延ばし"},
+        {IDM_TOOL_EYEDROPPER, L"スポイト", L"スポイト"},
+        {IDM_VECTOR_LINE, L"直線", L"直線"},
+        {IDM_VECTOR_CURVE, L"曲線", L"曲線"},
+        {IDM_VECTOR_RECTANGLE, L"長方形", L"長方形"},
+        {IDM_VECTOR_ELLIPSE, L"楕円", L"楕円"},
+        {IDM_VECTOR_POLYLINE, L"折れ線", L"折れ線"},
+        {IDM_VECTOR_ERASER, L"ベクター消しゴム", L"線消しゴム"},
+        {IDM_EFFECT_GRADIENT, L"グラデーション", L"グラデーション"},
+        {IDM_EFFECT_AIRBRUSH, L"エアブラシ", L"エアブラシ"},
+        {IDM_EFFECT_BOUNDARY_AIRBRUSH, L"境界色エアブラシ", L"境界ブラシ"},
+        {IDM_EFFECT_BLUR, L"ぼかし", L"ぼかし"},
+        {IDM_EFFECT_STAMP, L"スタンプ", L"スタンプ"},
+        {IDM_EFFECT_DUST, L"ゴミ取り", L"ゴミ取り"},
+        {IDM_EFFECT_ALPHA_GRADIENT, L"アルファグラデーション", L"アルファ階調"},
     }};
 
-constexpr std::array<const wchar_t*, kToolPalettePageCount>
-    kToolPalettePageLabels{{L"基本", L"ベクター", L"効果"}};
-
 constexpr int kReferenceDpi = 96;
-constexpr int kMargin = 5;
-constexpr int kPageInset = 3;
-constexpr int kButtonHeight = 18;
-constexpr int kButtonGap = 2;
-constexpr int kFontSizePoints = 5;
-constexpr int kMinimumWidth = 150;
-constexpr int kMinimumHeight = 130;
+constexpr int kMarginDip = 4;
+constexpr int kButtonWidthDip = 72;
+constexpr int kButtonHeightDip = 34;
+constexpr int kGapDip = 3;
 
 int ScaleForDpi(int value, UINT dpi) noexcept {
-    return MulDiv(
-        value,
-        static_cast<int>(dpi == 0U ? kReferenceDpi : dpi),
-        kReferenceDpi);
+    return MulDiv(value, static_cast<int>(dpi == 0U ? kReferenceDpi : dpi), kReferenceDpi);
 }
 
 ToolPaletteDialogState* DialogState(HWND dialog) noexcept {
@@ -79,226 +51,85 @@ ToolPaletteDialogState* DialogState(HWND dialog) noexcept {
         GetWindowLongPtrW(dialog, GWLP_USERDATA));
 }
 
-std::size_t PageEntryCount(ToolPalettePage page) noexcept {
-    return static_cast<std::size_t>(std::count_if(
+const ToolPaletteEntry* EntryForCommand(UINT command) noexcept {
+    const auto found = std::find_if(
         kToolPaletteEntries.begin(),
         kToolPaletteEntries.end(),
-        [page](const ToolPaletteEntry& entry) { return entry.page == page; }));
-}
-
-int ContentHeight(ToolPalettePage page, UINT dpi) noexcept {
-    const std::size_t count = PageEntryCount(page);
-    if (count == 0U) {
-        return 0;
-    }
-    const int height = ScaleForDpi(kButtonHeight, dpi);
-    const int gap = ScaleForDpi(kButtonGap, dpi);
-    return static_cast<int>(count) * height
-        + static_cast<int>(count - 1U) * gap;
-}
-
-bool PalettePageBounds(
-    HWND dialog,
-    UINT dpi,
-    bool layout_tab,
-    RECT& bounds) noexcept {
-    const HWND tabs = GetDlgItem(dialog, IDC_TOOL_PALETTE_TAB);
-    RECT client{};
-    if (tabs == nullptr || GetClientRect(dialog, &client) == FALSE) {
-        return false;
-    }
-    const int margin = ScaleForDpi(kMargin, dpi);
-    if (layout_tab
-        && SetWindowPos(
-               tabs,
-               HWND_BOTTOM,
-               margin,
-               margin,
-               std::max(0, static_cast<int>(client.right) - margin * 2),
-               std::max(0, static_cast<int>(client.bottom) - margin * 2),
-               SWP_NOACTIVATE | SWP_NOOWNERZORDER)
-            == FALSE) {
-        return false;
-    }
-    if (GetClientRect(tabs, &bounds) == FALSE) {
-        return false;
-    }
-    TabCtrl_AdjustRect(tabs, FALSE, &bounds);
-    MapWindowPoints(tabs, dialog, reinterpret_cast<POINT*>(&bounds), 2);
-    const int inset = ScaleForDpi(kPageInset, dpi);
-    InflateRect(&bounds, -inset, -inset);
-    return bounds.right > bounds.left && bounds.bottom > bounds.top;
-}
-
-void LayoutButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
-    const UINT dpi = GetDpiForWindow(dialog);
-    RECT page_bounds{};
-    if (!PalettePageBounds(dialog, dpi, true, page_bounds)) {
-        return;
-    }
-    const int button_height = ScaleForDpi(kButtonHeight, dpi);
-    const int gap = ScaleForDpi(kButtonGap, dpi);
-    const int viewport_height = page_bounds.bottom - page_bounds.top;
-    const int content_height = ContentHeight(state.active_page, dpi);
-    const int maximum = std::max(0, content_height - viewport_height);
-    state.scroll_position = std::clamp(state.scroll_position, 0, maximum);
-
-    SCROLLINFO scroll{};
-    scroll.cbSize = sizeof(scroll);
-    scroll.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-    scroll.nMin = 0;
-    scroll.nMax = std::max(0, content_height - 1);
-    scroll.nPage = static_cast<UINT>(viewport_height);
-    scroll.nPos = state.scroll_position;
-    SetScrollInfo(dialog, SB_VERT, &scroll, TRUE);
-
-    // Showing or hiding the vertical scrollbar changes the dialog's client
-    // width and can re-enter WM_SIZE. Re-read the final page bounds so the
-    // outer layout pass does not restore a stale, wider button rectangle.
-    if (!PalettePageBounds(dialog, dpi, true, page_bounds)) {
-        return;
-    }
-    const int width = page_bounds.right - page_bounds.left;
-    std::size_t page_index{};
-    for (const auto& entry : kToolPaletteEntries) {
-        const HWND button = GetDlgItem(dialog, entry.command);
-        if (button == nullptr) {
-            continue;
-        }
-        const bool visible = entry.page == state.active_page;
-        const int y = page_bounds.top
-            + static_cast<int>(page_index) * (button_height + gap)
-            - state.scroll_position;
-        SetWindowPos(
-            button,
-            nullptr,
-            page_bounds.left,
-            y,
-            width,
-            button_height,
-            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER
-                | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
-        if (visible) {
-            ++page_index;
-        }
-    }
+        [command](const ToolPaletteEntry& entry) {
+            return entry.command == command;
+        });
+    return found == kToolPaletteEntries.end() ? nullptr : &*found;
 }
 
 void SetScrollPosition(
     HWND dialog,
     ToolPaletteDialogState& state,
-    int position) noexcept {
-    const UINT dpi = GetDpiForWindow(dialog);
-    RECT page_bounds{};
-    if (!PalettePageBounds(dialog, dpi, false, page_bounds)) {
-        return;
-    }
+    int requested) noexcept {
+    SCROLLINFO info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SIF_RANGE | SIF_PAGE;
+    GetScrollInfo(dialog, SB_VERT, &info);
     const int maximum = std::max(
-        0,
-        ContentHeight(state.active_page, dpi)
-            - static_cast<int>(page_bounds.bottom - page_bounds.top));
-    const int next = std::clamp(position, 0, maximum);
-    if (next == state.scroll_position) {
+        0, info.nMax - static_cast<int>(info.nPage) + 1);
+    state.scroll_position = std::clamp(requested, 0, maximum);
+    SetScrollPos(dialog, SB_VERT, state.scroll_position, TRUE);
+}
+
+void LayoutButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
+    RECT client{};
+    if (GetClientRect(dialog, &client) == FALSE) {
         return;
     }
-    state.scroll_position = next;
-    LayoutButtons(dialog, state);
-    InvalidateRect(dialog, nullptr, TRUE);
-}
+    const UINT dpi = GetDpiForWindow(dialog);
+    const int margin = ScaleForDpi(kMarginDip, dpi);
+    const int button_width = ScaleForDpi(kButtonWidthDip, dpi);
+    const int button_height = ScaleForDpi(kButtonHeightDip, dpi);
+    const int gap = ScaleForDpi(kGapDip, dpi);
+    const int viewport = std::max(
+        0, static_cast<int>(client.bottom) - margin * 2);
+    const int content = static_cast<int>(kToolPaletteEntries.size())
+        * (button_height + gap) - gap;
+    SCROLLINFO scroll{};
+    scroll.cbSize = sizeof(scroll);
+    scroll.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    scroll.nMin = 0;
+    scroll.nMax = std::max(0, content - 1);
+    scroll.nPage = static_cast<UINT>(viewport);
+    scroll.nPos = state.scroll_position;
+    SetScrollInfo(dialog, SB_VERT, &scroll, TRUE);
+    SetScrollPosition(dialog, state, state.scroll_position);
 
-void EnsureButtonVisible(
-    HWND dialog,
-    ToolPaletteDialogState& state,
-    HWND button) noexcept {
-    RECT page_bounds{};
-    RECT bounds{};
-    if (button == nullptr
-        || !PalettePageBounds(
-            dialog, GetDpiForWindow(dialog), false, page_bounds)
-        || GetWindowRect(button, &bounds) == FALSE) {
-        return;
-    }
-    MapWindowPoints(nullptr, dialog, reinterpret_cast<POINT*>(&bounds), 2);
-    if (bounds.top < page_bounds.top) {
-        SetScrollPosition(
-            dialog,
-            state,
-            state.scroll_position + bounds.top - page_bounds.top);
-    } else if (bounds.bottom > page_bounds.bottom) {
-        SetScrollPosition(
-            dialog,
-            state,
-            state.scroll_position + bounds.bottom - page_bounds.bottom);
-    }
-}
-
-bool InitializeTabs(HWND dialog, ToolPaletteDialogState& state) noexcept {
-    const HWND tabs = GetDlgItem(dialog, IDC_TOOL_PALETTE_TAB);
-    if (tabs == nullptr) {
-        return false;
-    }
-    for (std::size_t index = 0; index < kToolPalettePageLabels.size(); ++index) {
-        TCITEMW item{};
-        item.mask = TCIF_TEXT;
-        item.pszText = const_cast<wchar_t*>(kToolPalettePageLabels[index]);
-        if (TabCtrl_InsertItem(tabs, static_cast<int>(index), &item) < 0) {
-            return false;
-        }
-    }
-    TabCtrl_SetCurSel(tabs, 0);
-    if (TabCtrl_GetCurSel(tabs) != 0) {
-        return false;
-    }
-    state.active_page = ToolPalettePage::Basic;
-    state.scroll_position = 0;
-    return true;
-}
-
-bool CreateButtons(HWND dialog) noexcept {
-    const HINSTANCE instance = reinterpret_cast<HINSTANCE>(
-        GetWindowLongPtrW(dialog, GWLP_HINSTANCE));
-    const HFONT font = reinterpret_cast<HFONT>(
-        SendMessageW(dialog, WM_GETFONT, 0, 0));
+    GetClientRect(dialog, &client);
+    const int available_width = std::max(
+        0, static_cast<int>(client.right) - margin * 2);
+    const int actual_width = std::min(button_width, available_width);
+    const int x = margin + std::max(0, (available_width - actual_width) / 2);
+    int y = margin - state.scroll_position;
     for (const auto& entry : kToolPaletteEntries) {
-        const HWND button = CreateWindowExW(
-            0,
-            L"BUTTON",
-            entry.label,
-            WS_CHILD | WS_TABSTOP | WS_CLIPSIBLINGS | BS_CHECKBOX
-                | BS_PUSHLIKE | BS_LEFT | BS_VCENTER | BS_NOTIFY,
-            0,
-            0,
-            0,
-            0,
-            dialog,
-            reinterpret_cast<HMENU>(static_cast<INT_PTR>(entry.command)),
-            instance,
-            nullptr);
-        if (button == nullptr) {
-            return false;
+        const HWND control = GetDlgItem(dialog, static_cast<int>(entry.command));
+        if (control != nullptr) {
+            SetWindowPos(
+                control,
+                nullptr,
+                x,
+                y,
+                actual_width,
+                button_height,
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
         }
-        SendMessageW(
-            button,
-            WM_SETFONT,
-            reinterpret_cast<WPARAM>(font),
-            FALSE);
+        y += button_height + gap;
     }
-    return true;
 }
 
-bool UpdatePaletteFont(
-    HWND dialog,
-    ToolPaletteDialogState& state) noexcept {
+bool UpdatePaletteFont(HWND dialog, ToolPaletteDialogState& state) noexcept {
     const int height = -MulDiv(
-        kFontSizePoints,
-        static_cast<int>(GetDpiForWindow(dialog)),
-        72);
+        7, static_cast<int>(GetDpiForWindow(dialog)), 72);
     const HFONT replacement = CreateFontW(
         height,
         0,
         0,
         0,
-        FW_NORMAL,
+        FW_SEMIBOLD,
         FALSE,
         FALSE,
         FALSE,
@@ -311,21 +142,10 @@ bool UpdatePaletteFont(
     if (replacement == nullptr) {
         return false;
     }
-    SendMessageW(
-        dialog,
-        WM_SETFONT,
-        reinterpret_cast<WPARAM>(replacement),
-        FALSE);
-    SendDlgItemMessageW(
-        dialog,
-        IDC_TOOL_PALETTE_TAB,
-        WM_SETFONT,
-        reinterpret_cast<WPARAM>(replacement),
-        FALSE);
     for (const auto& entry : kToolPaletteEntries) {
         SendDlgItemMessageW(
             dialog,
-            entry.command,
+            static_cast<int>(entry.command),
             WM_SETFONT,
             reinterpret_cast<WPARAM>(replacement),
             FALSE);
@@ -337,15 +157,97 @@ bool UpdatePaletteFont(
     return true;
 }
 
-void NotifyVisibilityChanged(ToolPaletteDialogState& state) noexcept {
-    if (state.visibility_changed != nullptr) {
-        state.visibility_changed(state.context);
+bool CreateButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
+    const HINSTANCE instance = reinterpret_cast<HINSTANCE>(
+        GetWindowLongPtrW(dialog, GWLP_HINSTANCE));
+    state.tooltip = CreateWindowExW(
+        WS_EX_TOPMOST,
+        TOOLTIPS_CLASSW,
+        nullptr,
+        WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        dialog,
+        nullptr,
+        instance,
+        nullptr);
+    if (state.tooltip == nullptr) {
+        return false;
     }
+    for (const auto& entry : kToolPaletteEntries) {
+        const HWND button = CreateWindowExW(
+            0,
+            L"BUTTON",
+            entry.label,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+            0,
+            0,
+            0,
+            0,
+            dialog,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(entry.command)),
+            instance,
+            nullptr);
+        if (button == nullptr) {
+            return false;
+        }
+        TOOLINFOW tool{};
+        tool.cbSize = sizeof(tool);
+        tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+        tool.hwnd = dialog;
+        tool.uId = reinterpret_cast<UINT_PTR>(button);
+        tool.lpszText = const_cast<wchar_t*>(entry.label);
+        SendMessageW(
+            state.tooltip,
+            TTM_ADDTOOLW,
+            0,
+            reinterpret_cast<LPARAM>(&tool));
+    }
+    return true;
 }
 
-void HidePalette(HWND dialog, ToolPaletteDialogState& state) noexcept {
-    SetPaletteWindowShown(dialog, false);
-    NotifyVisibilityChanged(state);
+void DrawToolButton(const DRAWITEMSTRUCT& draw) noexcept {
+    const ToolPaletteEntry* entry = EntryForCommand(draw.CtlID);
+    if (entry == nullptr) {
+        return;
+    }
+    const bool disabled = (draw.itemState & ODS_DISABLED) != 0U;
+    const bool pressed = (draw.itemState & ODS_SELECTED) != 0U;
+    const bool checked = GetWindowLongPtrW(draw.hwndItem, GWLP_USERDATA) != 0;
+    const int background = checked || pressed ? COLOR_HIGHLIGHT : COLOR_BTNFACE;
+    const int foreground = disabled
+        ? COLOR_GRAYTEXT
+        : (checked || pressed ? COLOR_HIGHLIGHTTEXT : COLOR_BTNTEXT);
+    FillRect(
+        draw.hDC,
+        &draw.rcItem,
+        GetSysColorBrush(background));
+    FrameRect(
+        draw.hDC,
+        &draw.rcItem,
+        GetSysColorBrush(checked ? COLOR_HIGHLIGHT : COLOR_3DSHADOW));
+    SetBkMode(draw.hDC, TRANSPARENT);
+    SetTextColor(draw.hDC, GetSysColor(foreground));
+    const HFONT font = reinterpret_cast<HFONT>(
+        SendMessageW(draw.hwndItem, WM_GETFONT, 0, 0));
+    const HGDIOBJ previous = font == nullptr ? nullptr : SelectObject(draw.hDC, font);
+    RECT text = draw.rcItem;
+    DrawTextW(
+        draw.hDC,
+        entry->glyph,
+        -1,
+        &text,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    if (previous != nullptr) {
+        SelectObject(draw.hDC, previous);
+    }
+    if ((draw.itemState & ODS_FOCUS) != 0U) {
+        RECT focus = draw.rcItem;
+        InflateRect(&focus, -3, -3);
+        DrawFocusRect(draw.hDC, &focus);
+    }
 }
 
 INT_PTR CALLBACK ToolPaletteDialogProcedure(
@@ -359,58 +261,30 @@ INT_PTR CALLBACK ToolPaletteDialogProcedure(
             state = reinterpret_cast<ToolPaletteDialogState*>(lparam);
             if (state == nullptr || state->dispatch_command == nullptr
                 || state->visibility_changed == nullptr) {
-                DestroyWindow(dialog);
-                return TRUE;
+                return FALSE;
             }
             SetWindowLongPtrW(
-                dialog,
-                GWLP_USERDATA,
-                reinterpret_cast<LONG_PTR>(state));
-            if (!InitializeTabs(dialog, *state) || !CreateButtons(dialog)
+                dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            if (!CreateButtons(dialog, *state)
                 || !UpdatePaletteFont(dialog, *state)) {
-                DestroyWindow(dialog);
-                return TRUE;
+                return FALSE;
             }
             LayoutButtons(dialog, *state);
             return TRUE;
         case WM_COMMAND:
-            if (state == nullptr) {
-                break;
-            }
-            if (LOWORD(wparam) == IDCANCEL) {
-                HidePalette(dialog, *state);
-                return TRUE;
-            }
-            if (HIWORD(wparam) == BN_CLICKED) {
+            if (state != nullptr && HIWORD(wparam) == BN_CLICKED
+                && EntryForCommand(LOWORD(wparam)) != nullptr) {
                 state->dispatch_command(state->context, LOWORD(wparam));
                 return TRUE;
             }
-            if (HIWORD(wparam) == BN_SETFOCUS) {
-                EnsureButtonVisible(
-                    dialog,
-                    *state,
-                    reinterpret_cast<HWND>(lparam));
-                return TRUE;
-            }
             break;
-        case WM_NOTIFY:
-            if (state != nullptr) {
-                const auto* notification =
-                    reinterpret_cast<const NMHDR*>(lparam);
-                if (notification != nullptr
-                    && notification->idFrom == IDC_TOOL_PALETTE_TAB
-                    && notification->code == TCN_SELCHANGE) {
-                    const int selection =
-                        TabCtrl_GetCurSel(notification->hwndFrom);
-                    if (selection >= 0
-                        && selection < static_cast<int>(kToolPalettePageCount)) {
-                        state->active_page =
-                            static_cast<ToolPalettePage>(selection);
-                        state->scroll_position = 0;
-                        LayoutButtons(dialog, *state);
-                    }
-                    return TRUE;
+        case WM_DRAWITEM:
+            if (EntryForCommand(static_cast<UINT>(wparam)) != nullptr) {
+                const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+                if (draw != nullptr) {
+                    DrawToolButton(*draw);
                 }
+                return TRUE;
             }
             break;
         case WM_SIZE:
@@ -420,84 +294,49 @@ INT_PTR CALLBACK ToolPaletteDialogProcedure(
             return TRUE;
         case WM_VSCROLL:
             if (state != nullptr) {
-                SCROLLINFO scroll{};
-                scroll.cbSize = sizeof(scroll);
-                scroll.fMask = SIF_ALL;
-                GetScrollInfo(dialog, SB_VERT, &scroll);
-                int next = state->scroll_position;
+                SCROLLINFO info{};
+                info.cbSize = sizeof(info);
+                info.fMask = SIF_ALL;
+                GetScrollInfo(dialog, SB_VERT, &info);
+                int requested = state->scroll_position;
                 switch (LOWORD(wparam)) {
-                    case SB_LINEUP:
-                        next -= ScaleForDpi(
-                            kButtonHeight,
-                            GetDpiForWindow(dialog));
-                        break;
-                    case SB_LINEDOWN:
-                        next += ScaleForDpi(
-                            kButtonHeight,
-                            GetDpiForWindow(dialog));
-                        break;
-                    case SB_PAGEUP: next -= static_cast<int>(scroll.nPage); break;
-                    case SB_PAGEDOWN: next += static_cast<int>(scroll.nPage); break;
-                    case SB_THUMBPOSITION:
-                    case SB_THUMBTRACK: next = scroll.nTrackPos; break;
-                    case SB_TOP: next = scroll.nMin; break;
-                    case SB_BOTTOM: next = scroll.nMax; break;
+                    case SB_LINEUP: requested -= ScaleForDpi(18, GetDpiForWindow(dialog)); break;
+                    case SB_LINEDOWN: requested += ScaleForDpi(18, GetDpiForWindow(dialog)); break;
+                    case SB_PAGEUP: requested -= static_cast<int>(info.nPage); break;
+                    case SB_PAGEDOWN: requested += static_cast<int>(info.nPage); break;
+                    case SB_THUMBTRACK: requested = info.nTrackPos; break;
                     default: return TRUE;
                 }
-                SetScrollPosition(dialog, *state, next);
+                SetScrollPosition(dialog, *state, requested);
+                LayoutButtons(dialog, *state);
             }
             return TRUE;
         case WM_MOUSEWHEEL:
             if (state != nullptr) {
                 const int delta = GET_WHEEL_DELTA_WPARAM(wparam);
-                const int line = ScaleForDpi(
-                    kButtonHeight + kButtonGap,
-                    GetDpiForWindow(dialog));
                 SetScrollPosition(
                     dialog,
                     *state,
-                    state->scroll_position - (delta / WHEEL_DELTA) * line * 3);
-            }
-            return TRUE;
-        case WM_DPICHANGED: {
-            const auto* bounds = reinterpret_cast<const RECT*>(lparam);
-            if (bounds != nullptr) {
-                SetWindowPos(
-                    dialog,
-                    nullptr,
-                    bounds->left,
-                    bounds->top,
-                    bounds->right - bounds->left,
-                    bounds->bottom - bounds->top,
-                    SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-            }
-            if (state != nullptr) {
-                UpdatePaletteFont(dialog, *state);
+                    state->scroll_position
+                        - (delta / WHEEL_DELTA)
+                            * ScaleForDpi(36, GetDpiForWindow(dialog)));
                 LayoutButtons(dialog, *state);
             }
             return TRUE;
-        }
-        case WM_GETMINMAXINFO: {
-            auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
-            if (limits != nullptr) {
-                const UINT dpi = GetDpiForWindow(dialog);
-                limits->ptMinTrackSize.x = ScaleForDpi(kMinimumWidth, dpi);
-                limits->ptMinTrackSize.y = ScaleForDpi(kMinimumHeight, dpi);
-            }
-            return TRUE;
-        }
-        case WM_CLOSE:
+        case WM_DPICHANGED_AFTERPARENT:
             if (state != nullptr) {
-                HidePalette(dialog, *state);
+                UpdatePaletteFont(dialog, *state);
+                LayoutButtons(dialog, *state);
             }
             return TRUE;
         case WM_NCDESTROY:
             if (state != nullptr && state->font != nullptr) {
                 DeleteObject(state->font);
                 state->font = nullptr;
+                state->tooltip = nullptr;
             }
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
-            return TRUE;
+            break;
         default:
             break;
     }
@@ -530,17 +369,14 @@ void UpdateToolPaletteDialog(
         return;
     }
     for (const auto& entry : kToolPaletteEntries) {
-        const HWND button = GetDlgItem(dialog, entry.command);
         const CommandState* state = FindCommandState(states, entry.command);
-        if (button == nullptr || state == nullptr) {
-            continue;
+        const HWND control = GetDlgItem(dialog, static_cast<int>(entry.command));
+        if (state != nullptr && control != nullptr) {
+            EnableWindow(control, state->enabled ? TRUE : FALSE);
+            SetWindowLongPtrW(
+                control, GWLP_USERDATA, state->checked ? 1 : 0);
+            InvalidateRect(control, nullptr, TRUE);
         }
-        EnableWindow(button, state->enabled ? TRUE : FALSE);
-        SendMessageW(
-            button,
-            BM_SETCHECK,
-            state->checked ? BST_CHECKED : BST_UNCHECKED,
-            0);
     }
 }
 
@@ -551,11 +387,11 @@ bool ToolPaletteMatchesCommandState(
         return false;
     }
     for (const auto& entry : kToolPaletteEntries) {
-        const HWND button = GetDlgItem(dialog, entry.command);
         const CommandState* state = FindCommandState(states, entry.command);
-        if (button == nullptr || state == nullptr
-            || (IsWindowEnabled(button) != FALSE) != state->enabled
-            || (SendMessageW(button, BM_GETCHECK, 0, 0) == BST_CHECKED)
+        const HWND control = GetDlgItem(dialog, static_cast<int>(entry.command));
+        if (state == nullptr || control == nullptr
+            || (IsWindowEnabled(control) != FALSE) != state->enabled
+            || (GetWindowLongPtrW(control, GWLP_USERDATA) != 0)
                 != state->checked) {
             return false;
         }

@@ -1,7 +1,7 @@
 //! Interactive and one-shot stroke operations.
 
 use super::*;
-use crate::document::ensure_editable_role;
+use crate::document::ensure_editable_plane;
 use crate::view::{device_to_document, stroke_coordinate_is_supported};
 
 impl Core {
@@ -24,7 +24,8 @@ impl Core {
         }
         validate_stroke(stroke)?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-        ensure_editable_role(&document, stroke.plane)?;
+        let plane_id = document.plane_for_paint_role(stroke.plane)?.id;
+        ensure_editable_plane(&document, plane_id)?;
         let samples = document_samples_for_view(
             self.view,
             stroke.coordinate_space,
@@ -32,12 +33,13 @@ impl Core {
             document.width,
             document.height,
         )?;
-        let desired = stroke_value(stroke, &document, &samples)?;
+        let desired = stroke_value(stroke, &document, plane_id, &samples)?;
         let preview_revision = self.allocate_preview_revision()?;
         let mut settings = stroke.clone();
         settings.samples.clear();
         let mut session = StrokeSession {
             stroke: settings,
+            plane_id,
             desired,
             preview_document: document,
             changes: BTreeMap::new(),
@@ -91,9 +93,14 @@ impl Core {
         let after_state = self.allocate_state()?;
         let revision = self.next_document_revision()?;
         let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
-        let plane_id = document.plane_for_role(session.stroke.plane)?.id;
+        let plane_id = session.plane_id;
         document.active_plane_id = plane_id;
-        let raster = document.raster_mut(session.stroke.plane);
+        let raster = &mut document
+            .plane_by_id_mut(plane_id)
+            .ok_or(CoreError::InvalidState(
+                "stroke target plane no longer exists",
+            ))?
+            .raster;
         let mut changes = Vec::with_capacity(session.changes.len());
         let mut touched_tiles = BTreeSet::new();
         for ((x, y), change) in session.changes {
@@ -160,7 +167,13 @@ impl StrokeSession {
             self.work,
         )?;
 
-        let raster = self.preview_document.raster_mut(self.stroke.plane);
+        let raster = &mut self
+            .preview_document
+            .plane_by_id_mut(self.plane_id)
+            .ok_or(CoreError::InvalidState(
+                "stroke target plane no longer exists",
+            ))?
+            .raster;
         let mut touched_tiles = BTreeSet::new();
         for ((x, y), after) in staged {
             let current = raster.pixel(x, y)?;
@@ -278,9 +291,16 @@ pub(super) fn validate_stroke_samples(samples: &[StrokeSample]) -> Result<(), Co
 pub(super) fn stroke_value(
     stroke: &Stroke,
     document: &CellDocument,
+    plane_id: u64,
     samples: &[StrokeSample],
 ) -> Result<PixelValue, CoreError> {
-    let format = document.raster(stroke.plane).format();
+    let raster = &document
+        .plane_by_id(plane_id)
+        .ok_or(CoreError::InvalidState(
+            "stroke target plane no longer exists",
+        ))?
+        .raster;
+    let format = raster.format();
     let (draw_value, erase_value) = match (stroke.plane, format) {
         (ActivePlane::MainLine, PixelFormat::BinaryMask8) => {
             (PixelValue::Binary(255), PixelValue::Binary(0))
@@ -316,7 +336,7 @@ pub(super) fn stroke_value(
             && y >= 0
             && x < i64::from(document.width)
             && y < i64::from(document.height)
-            && document.raster(stroke.plane).pixel(x as u32, y as u32)? == draw_value
+            && raster.pixel(x as u32, y as u32)? == draw_value
         {
             return Ok(erase_value);
         }
@@ -524,6 +544,7 @@ pub(super) fn clip_segment_to_document(
 #[derive(Clone, Debug)]
 pub(super) struct StrokeSession {
     pub(super) stroke: Stroke,
+    pub(super) plane_id: u64,
     pub(super) desired: PixelValue,
     pub(super) preview_document: CellDocument,
     pub(super) changes: BTreeMap<(u32, u32), PixelChange>,

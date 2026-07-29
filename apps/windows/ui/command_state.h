@@ -20,6 +20,7 @@ enum class CommandStateOwner : std::uint8_t {
     SelectionView,
     Tool,
     Color,
+    Workspace,
     Application,
 };
 
@@ -30,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 275U;
+inline constexpr std::size_t kProductionCommandStateCount = 281U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -106,6 +107,14 @@ struct BatchCommandStateInput {
     InkpodBatchFailurePolicy failure_policy{INKPOD_BATCH_FAILURE_CONTINUE};
 };
 
+struct WorkspaceCommandStateInput {
+    bool tool_visible{true};
+    bool tool_options_visible{true};
+    bool color_visible{true};
+    bool layer_visible{true};
+    bool mirrored{};
+};
+
 struct CommandStateInputs {
     DocumentCommandStateInput document;
     EditCommandStateInput edit;
@@ -116,6 +125,7 @@ struct CommandStateInputs {
     ToolCommandStateInput tool;
     ColorCommandStateInput color;
     BatchCommandStateInput batch;
+    WorkspaceCommandStateInput workspace;
 };
 
 CommandStateSet ComputeCommandStates(const CommandStateInputs& inputs) noexcept;
