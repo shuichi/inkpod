@@ -1025,3 +1025,47 @@ fn sample_layer_raster(
     composite[3] = ((u32::from(composite[3]) * layer.opacity_milli + 500) / 1_000) as u8;
     Ok(composite)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn revision_overflow_does_not_consume_a_vector_id() {
+        let mut core = Core::new();
+        core.new_cell(4, 4, 96_000, 96_000).unwrap();
+        let (_, layer_id) = core
+            .create_layer(LayerKind::VectorColoring, "Vector")
+            .unwrap();
+        let main_plane_id = core
+            .layers()
+            .unwrap()
+            .into_iter()
+            .find(|layer| layer.id == layer_id)
+            .unwrap()
+            .planes
+            .into_iter()
+            .find(|plane| plane.kind == PlaneType::VectorMainLine)
+            .unwrap()
+            .id;
+        let next_id = core.next_id;
+        core.document_revision = u64::MAX;
+        let path = VectorPathInput {
+            segments: vec![VectorCubicSegment {
+                p0: PointF32 { x: 0.0, y: 3.0 },
+                p1: PointF32 { x: 1.0, y: 3.0 },
+                p2: PointF32 { x: 2.0, y: 3.0 },
+                p3: PointF32 { x: 3.0, y: 3.0 },
+                width_start: 1.0,
+                width_end: 1.0,
+            }],
+            color: PixelValue::Rgba([0, 0, 0, 255]),
+            closed: false,
+        };
+        assert_eq!(
+            core.vector_add_path(main_plane_id, path),
+            Err(CoreError::InvalidState("document revision overflow"))
+        );
+        assert_eq!(core.next_id, next_id);
+    }
+}

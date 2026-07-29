@@ -72,3 +72,21 @@ pub(crate) fn paste_value(
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgba16_paste_uses_source_over() {
+        assert_eq!(
+            paste_value(
+                PixelValue::Rgba16([u16::MAX, 0, 0, u16::MAX]),
+                PixelValue::Rgba16([0, 0, u16::MAX, 32_768]),
+                PlaneType::Raster,
+            )
+            .unwrap(),
+            PixelValue::Rgba16([32_767, 0, 32_768, u16::MAX])
+        );
+    }
+}

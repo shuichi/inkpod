@@ -45,10 +45,13 @@ platform UUID at document creation, but Core persists it without acquiring an OS
 dependency.
 
 Each crate root is limited to module declarations and stable public re-exports.
-Responsibility-specific modules contain implementation, and tests live outside
-production `src` bodies. Architecture tests enforce small roots, recursive CMake
-tracking, ABI header/export parity, direct contract-test references, and the
-absence of Windows dependencies throughout the Rust workspace.
+Responsibility-specific modules contain implementation. `inkpod-core` keeps
+fine-grained tests of private invariants in `#[cfg(test)]` modules beside that
+implementation, while public Core workflows run as a separate multi-module
+integration-test target below `tests`. Architecture tests enforce small roots,
+`cfg(test)` gating, recursive CMake tracking, ABI header/export parity, direct
+contract-test references, and the absence of Windows dependencies throughout
+the Rust workspace.
 
 ## Windows frontend ownership
 

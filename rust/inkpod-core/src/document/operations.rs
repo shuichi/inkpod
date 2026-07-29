@@ -660,3 +660,20 @@ pub(crate) fn validate_node_name(name: &str) -> Result<(), CoreError> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_plane_id_remains_valid_after_deleting_a_duplicate_layer() {
+        let mut core = Core::new();
+        let created = core.new_cell(1, 1, 96_000, 96_000).unwrap();
+        let (_, duplicate) = core.duplicate_layer(created.layer_id).unwrap();
+        core.create_layer(LayerKind::Frame, "Frame").unwrap();
+        core.delete_layer(duplicate).unwrap();
+
+        let document = core.document.as_ref().unwrap();
+        assert!(document.plane_by_id(document.active_plane_id).is_some());
+    }
+}

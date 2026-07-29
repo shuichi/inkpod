@@ -130,3 +130,117 @@ pub(super) const fn empty_pixel(format: PixelFormat) -> PixelValue {
         PixelFormat::PremultipliedBgra8 => PixelValue::Rgba([0; 4]),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn validate_kind(kind: BatchOperationKind) -> Result<(), CoreError> {
+        validate_operation(&BatchOperation {
+            version: BATCH_OPERATION_VERSION,
+            enabled: true,
+            configure_each_run: false,
+            target: Some(BatchTargetSelector::color_plane()),
+            kind,
+        })
+    }
+
+    #[test]
+    fn rejects_empty_target_selector() {
+        let operation = BatchOperation {
+            version: BATCH_OPERATION_VERSION,
+            enabled: true,
+            configure_each_run: false,
+            target: Some(BatchTargetSelector {
+                layer_id: None,
+                plane_id: None,
+                layer_kind: None,
+                plane_kind: None,
+                missing_policy: BatchMissingTargetPolicy::Skip,
+            }),
+            kind: BatchOperationKind::ColorReplace(vec![BatchColorPair {
+                enabled: true,
+                old: PixelValue::Rgba([0; 4]),
+                new: PixelValue::Rgba([1, 2, 3, 4]),
+            }]),
+        };
+        assert_eq!(
+            validate_operation(&operation),
+            Err(CoreError::InvalidArgument(
+                "batch target layer selector is empty"
+            ))
+        );
+    }
+
+    #[test]
+    fn operation_item_counts_enforce_closed_bounds() {
+        let assert_invalid = |kind, message| {
+            assert_eq!(
+                validate_kind(kind),
+                Err(CoreError::InvalidArgument(message))
+            );
+        };
+
+        let pair = BatchColorPair {
+            enabled: true,
+            old: PixelValue::Rgba([0; 4]),
+            new: PixelValue::Rgba([1, 2, 3, 4]),
+        };
+        for count in [1, MAX_BATCH_COLOR_PAIRS] {
+            assert!(
+                validate_kind(BatchOperationKind::ColorReplace(vec![pair.clone(); count])).is_ok()
+            );
+        }
+        for count in [0, MAX_BATCH_COLOR_PAIRS + 1] {
+            assert_invalid(
+                BatchOperationKind::ColorReplace(vec![pair.clone(); count]),
+                "batch color-pair count is outside bounds",
+            );
+        }
+
+        let seed = BatchSeed {
+            x: 0,
+            y: 0,
+            color: PixelValue::Rgba([0; 4]),
+            tolerance: 0,
+            gap_close: 0,
+            expected_source: None,
+        };
+        for count in [1, MAX_BATCH_SEEDS] {
+            assert!(
+                validate_kind(BatchOperationKind::ContinuousFill(vec![
+                    seed.clone();
+                    count
+                ]))
+                .is_ok()
+            );
+        }
+        for count in [0, MAX_BATCH_SEEDS + 1] {
+            assert_invalid(
+                BatchOperationKind::ContinuousFill(vec![seed.clone(); count]),
+                "batch fill-seed count is outside bounds",
+            );
+        }
+
+        for count in [1, MAX_BATCH_COLORS] {
+            assert!(
+                validate_kind(BatchOperationKind::Separation(BatchSeparation {
+                    colors: vec![PixelValue::Rgba([0; 4]); count],
+                    replacement: PixelValue::Rgba([1, 2, 3, 4]),
+                    invert: false,
+                }))
+                .is_ok()
+            );
+        }
+        for count in [0, MAX_BATCH_COLORS + 1] {
+            assert_invalid(
+                BatchOperationKind::Separation(BatchSeparation {
+                    colors: vec![PixelValue::Rgba([0; 4]); count],
+                    replacement: PixelValue::Rgba([1, 2, 3, 4]),
+                    invert: false,
+                }),
+                "batch separation color count is outside bounds",
+            );
+        }
+    }
+}

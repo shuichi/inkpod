@@ -193,3 +193,43 @@ pub(crate) struct FloatingSelection {
 }
 
 pub(crate) type StagedPixels = BTreeMap<(u32, u32), PixelValue>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mask(bits: u8) -> TileRaster {
+        let mut mask = TileRaster::new(8, 1, PixelFormat::BinaryMask8).unwrap();
+        for x in 0..8 {
+            if bits & (1 << x) != 0 {
+                mask.set_pixel(x, 0, PixelValue::Binary(255), 1).unwrap();
+            }
+        }
+        mask
+    }
+
+    #[test]
+    fn selection_boolean_property_covers_all_masks() {
+        for left in 0_u8..=u8::MAX {
+            for right in [0_u8, 0x55, 0xaa, u8::MAX] {
+                let left_mask = mask(left);
+                let right_mask = mask(right);
+                for (operation, expected) in [
+                    (SelectionOperation::New, right),
+                    (SelectionOperation::Add, left | right),
+                    (SelectionOperation::Subtract, left & !right),
+                    (SelectionOperation::Intersect, left & right),
+                ] {
+                    let combined =
+                        combine_selection_masks(&left_mask, &right_mask, operation, 2).unwrap();
+                    for x in 0..8 {
+                        assert_eq!(
+                            matches!(combined.pixel(x, 0).unwrap(), PixelValue::Binary(255)),
+                            expected & (1 << x) != 0
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

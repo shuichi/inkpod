@@ -124,3 +124,27 @@ pub(super) fn preview_info(
         preview_revision,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blur_pen_pressure_varies_the_screen_fixed_region() {
+        let samples = [
+            StrokeSample {
+                x: 1.0,
+                y: 1.0,
+                pressure: 0.25,
+            },
+            StrokeSample {
+                x: 5.0,
+                y: 1.0,
+                pressure: 1.0,
+            },
+        ];
+        assert!(!pressure_trace_contains(1.0, 2.0, &samples, 4.0));
+        assert!(pressure_trace_contains(5.0, 2.0, &samples, 4.0));
+        assert!(pressure_trace_contains(3.0, 1.0, &samples, 4.0));
+    }
+}

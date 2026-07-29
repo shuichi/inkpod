@@ -181,7 +181,7 @@ fn arch_002_rust_domain_crates_do_not_reference_windows_apis() {
 }
 
 #[test]
-fn rust_crate_roots_remain_small_indices_and_tests_stay_out_of_src() {
+fn rust_crate_roots_remain_small_indices_and_cmake_tracks_sources() {
     let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("core crate must be below the Rust workspace directory");
@@ -196,21 +196,6 @@ fn rust_crate_roots_remain_small_indices_and_tests_stay_out_of_src() {
             "{} must remain a small module/re-export index",
             library_path.display()
         );
-
-        let mut production_sources = Vec::new();
-        collect_rust_sources(&source_root, &mut production_sources);
-        for source in production_sources {
-            let contents = fs::read_to_string(&source)
-                .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
-            for inline_test_token in ["#[test]", "mod tests {"] {
-                assert!(
-                    !contents.contains(inline_test_token),
-                    "{} contains inline test code; tests belong below {}/tests",
-                    source.display(),
-                    crate_root.display()
-                );
-            }
-        }
     }
 
     let repository_root = rust_root
@@ -231,6 +216,37 @@ fn rust_crate_roots_remain_small_indices_and_tests_stay_out_of_src() {
             "{} does not recursively track {expected}",
             cmake_path.display()
         );
+    }
+}
+
+#[test]
+fn inline_test_modules_are_cfg_test_gated() {
+    let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("core crate must be below the Rust workspace directory");
+    for crate_name in ["inkpod-core", "inkpod-image", "inkpod-format", "inkpod-ffi"] {
+        let source_root = rust_root.join(crate_name).join("src");
+        let mut production_sources = Vec::new();
+        collect_rust_sources(&source_root, &mut production_sources);
+        for source in production_sources {
+            let contents = fs::read_to_string(&source)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
+            let lines = contents.lines().collect::<Vec<_>>();
+            for (index, line) in lines.iter().enumerate() {
+                if !line.trim_start().starts_with("mod tests") {
+                    continue;
+                }
+                assert!(
+                    lines[..index]
+                        .iter()
+                        .rev()
+                        .take(3)
+                        .any(|candidate| candidate.trim() == "#[cfg(test)]"),
+                    "{} declares a test module without #[cfg(test)]",
+                    source.display()
+                );
+            }
+        }
     }
 }
 

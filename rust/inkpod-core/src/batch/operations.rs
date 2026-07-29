@@ -414,3 +414,32 @@ pub(super) fn cancelled_item(
         message: "cancelled before atomic commit".to_owned(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type_mismatched_target_selector_is_skipped() {
+        let mut core = Core::new();
+        core.new_cell(2, 2, 96_000, 96_000).unwrap();
+        let layers = core.layers().unwrap();
+        let coloring = layers
+            .iter()
+            .find(|layer| layer.kind == LayerKind::BinaryColoring)
+            .unwrap();
+        let color_plane = coloring
+            .planes
+            .iter()
+            .find(|plane| plane.kind == PlaneType::Color)
+            .unwrap();
+        let selector = BatchTargetSelector {
+            layer_id: Some(coloring.id),
+            plane_id: Some(color_plane.id),
+            layer_kind: Some(LayerKind::VectorColoring),
+            plane_kind: Some(PlaneType::Color),
+            missing_policy: BatchMissingTargetPolicy::Skip,
+        };
+        assert_eq!(resolve_target(&core, &selector).unwrap(), None);
+    }
+}

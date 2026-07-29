@@ -34,7 +34,3 @@ pub use model::{
     VectorPathInfo, VectorPathInput, VectorRaster, VectorSelectionMode, VectorSelectionRange,
     VectorSelectionResult, VectorWidthMode,
 };
-
-#[cfg(test)]
-#[path = "../../tests/unit/vector_state.rs"]
-mod tests;

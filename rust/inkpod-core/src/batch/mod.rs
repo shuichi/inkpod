@@ -68,12 +68,3 @@ pub use model::{
     BatchRunOptions, BatchRunReport, BatchRunScope, BatchSeed, BatchSeparation,
     BatchTargetSelector,
 };
-
-#[cfg(test)]
-use operations::resolve_target;
-#[cfg(test)]
-use validation::validate_operation;
-
-#[cfg(test)]
-#[path = "../../tests/unit/batch.rs"]
-mod tests;

@@ -98,7 +98,3 @@ pub use inkpod_image::{
     InclusionMode, Levels, MAX_CURVE_POINTS, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS,
     MAX_RASTER_DIMENSION, PixelFormat, PixelValue, Stamp, StampGesture, StampShape, TileRaster,
 };
-
-#[cfg(test)]
-#[path = "../tests/unit/core/mod.rs"]
-mod tests;

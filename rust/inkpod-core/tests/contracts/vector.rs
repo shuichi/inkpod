@@ -92,7 +92,7 @@ fn acceptance_zoom_never_changes_core_vector_geometry() {
         snapshot_after.vector_segments()
     );
     assert_eq!(snapshot_before.vector_segments().len(), 1);
-    assert_ne!(snapshot_before.view().zoom, snapshot_after.view().zoom);
+    assert_ne!(snapshot_before.view().zoom(), snapshot_after.view().zoom());
 }
 
 #[test]
@@ -302,8 +302,8 @@ fn vector_rasterize_to_document_creates_one_undoable_rgba_layer() {
     let (outcome, raster_layer_id) = core
         .rasterize_vector_layer_to_document(layer_id, true, "Rasterized")
         .unwrap();
-    assert_eq!(outcome.accepted_commands, 1);
-    assert!(outcome.revision > revision);
+    assert_eq!(outcome.accepted_commands(), 1);
+    assert!(outcome.revision() > revision);
     let layers = core.layers().unwrap();
     assert_eq!(layers.len(), layer_count + 1);
     let raster_layer = layers
@@ -444,34 +444,31 @@ fn vector_002_connect_width_select_and_raster_vector_conversion_are_transactiona
         core.document_info().unwrap().document_revision,
         before_empty_conversion
     );
-    core.document
-        .as_mut()
-        .unwrap()
-        .layers
-        .iter_mut()
-        .find(|layer| layer.id == layer_id)
-        .unwrap()
-        .editable = false;
+    core.set_layer_properties(layer_id, true, false, 1_000, "Vector")
+        .unwrap();
     assert!(matches!(
         core.vectorize_raster_plane(raster_plane_id, layer_id, 1),
         Err(CoreError::InvalidState(_))
     ));
-    core.document
-        .as_mut()
-        .unwrap()
-        .layers
-        .iter_mut()
-        .find(|layer| layer.id == layer_id)
-        .unwrap()
-        .editable = true;
-    core.document
-        .as_mut()
-        .unwrap()
-        .plane_by_id_mut(raster_plane_id)
-        .unwrap()
-        .raster
-        .set_pixel(0, 0, PixelValue::Rgba([7, 8, 9, 255]), 99)
+    core.set_layer_properties(layer_id, true, true, 1_000, "Vector")
         .unwrap();
+    core.set_active_node(raster_layer_id, raster_plane_id)
+        .unwrap();
+    core.apply_stroke(&Stroke {
+        tool: PaintTool::Pencil,
+        plane: ActivePlane::Color,
+        color: [7, 8, 9, 255],
+        diameter: 1.0,
+        auto_erase: false,
+        pressure_size: false,
+        coordinate_space: CoordinateSpace::Document,
+        samples: vec![StrokeSample {
+            x: 0.0,
+            y: 0.0,
+            pressure: 1.0,
+        }],
+    })
+    .unwrap();
     let before_revision = core.document_info().unwrap().document_revision;
     let (outcome, fill_ids) = core
         .vectorize_raster_plane(raster_plane_id, layer_id, 1)
@@ -482,17 +479,6 @@ fn vector_002_connect_width_select_and_raster_vector_conversion_are_transactiona
     assert_eq!(core.vector_fills().unwrap().len(), 0);
     core.redo().unwrap();
     assert_eq!(core.vector_fills().unwrap().len(), 1);
-
-    let next_id = core.next_id;
-    core.document_revision = u64::MAX;
-    assert!(matches!(
-        core.vector_add_path(
-            main_id,
-            vector_line((0.0, 3.0), (3.0, 3.0), 1.0, 1.0, [0, 0, 0, 255]),
-        ),
-        Err(CoreError::InvalidState("document revision overflow"))
-    ));
-    assert_eq!(core.next_id, next_id);
 }
 
 #[test]

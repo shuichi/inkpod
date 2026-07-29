@@ -238,7 +238,7 @@ fn failed_live_append_discards_preview_without_partial_commit() {
         y: 32.0,
         pressure: 1.0,
     };
-    core.begin_stroke(&color_stroke(PaintTool::Brush, MAX_BRUSH_DIAMETER, first))
+    core.begin_stroke(&color_stroke(PaintTool::Brush, 256.0, first))
         .unwrap();
     let excessive = vec![first; 300];
     assert!(matches!(

@@ -316,74 +316,11 @@ fn autosave_recovery_never_inherits_or_overwrites_normal_path() {
 }
 
 #[test]
-fn grayscale_eyedropper_and_color_check_are_view_only() {
-    let mut core = Core::new();
-    core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
-        .unwrap();
-    let document = core.document.as_mut().unwrap();
-    document.layers[0].kind = LayerKind::GrayscaleColoring;
-    document.layers[0].planes[0].raster = TileRaster::new(4, 4, PixelFormat::Grayscale8).unwrap();
-    document.layers[0].planes[0]
-        .raster
-        .set_pixel(1, 1, PixelValue::Grayscale8(128), 2)
-        .unwrap();
-    document.active_plane_id = document.layers[0].planes[0].id;
-    let line_color = PixelValue::Rgba16([1_001, 2_002, 3_003, 65_535]);
-    core.set_main_line_color(line_color).unwrap();
-    assert_eq!(
-        core.eyedropper(EyedropperSource::SelectedPlane, 1, 1)
-            .unwrap(),
-        line_color
-    );
-    let normal_snapshot = core.build_snapshot();
-    let normal_tile_revision = normal_snapshot.tiles()[0].tile_revision();
-    let before = core.document_info().unwrap();
-    core.set_color_check(Some(ColorCheckMode::NativeAlpha))
-        .unwrap();
-    let after = core.document_info().unwrap();
-    assert_eq!(after.document_revision, before.document_revision);
-    assert_eq!(after.main_plane_checksum, before.main_plane_checksum);
-    assert!(after.view_revision > before.view_revision);
-    let check_snapshot = core.build_snapshot();
-    assert_eq!(
-        check_snapshot.feature_flags(),
-        SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA
-    );
-    assert_ne!(
-        check_snapshot.tiles()[0].tile_revision(),
-        normal_tile_revision
-    );
-
-    let palette = [
-        PixelValue::Rgba([12, 34, 56, 255]),
-        PixelValue::Rgba16([1, 257, 32_769, 65_534]),
-    ];
-    core.replace_palette(&palette).unwrap();
-    assert_eq!(core.palette().unwrap(), palette);
-    core.undo().unwrap();
-    assert!(core.palette().unwrap().is_empty());
-    core.redo().unwrap();
-    assert_eq!(core.palette().unwrap(), palette);
-
-    let path = std::env::temp_dir().join(format!(
-        "inkpod-core-test-color-metadata-{}-{}.inkpod",
-        std::process::id(),
-        core.document_info().unwrap().document_revision
-    ));
-    core.save(&path).unwrap();
-    let mut reopened = Core::new();
-    reopened.open(&path).unwrap();
-    assert_eq!(reopened.main_line_color().unwrap(), line_color);
-    assert_eq!(reopened.palette().unwrap(), palette);
-    fs::remove_file(path).unwrap();
-}
-
-#[test]
 fn fill_rejects_oversized_documents_before_materializing_selection() {
     let mut core = Core::new();
     core.new_cell(
-        inkpod_image::MAX_RASTER_DIMENSION,
-        inkpod_image::MAX_RASTER_DIMENSION,
+        MAX_RASTER_DIMENSION,
+        MAX_RASTER_DIMENSION,
         DEFAULT_DPI_MILLI,
         DEFAULT_DPI_MILLI,
     )
@@ -392,8 +329,8 @@ fn fill_rejects_oversized_documents_before_materializing_selection() {
     request.selection = Some(RectI32 {
         x: 0,
         y: 0,
-        width: i32::try_from(inkpod_image::MAX_RASTER_DIMENSION).unwrap(),
-        height: i32::try_from(inkpod_image::MAX_RASTER_DIMENSION).unwrap(),
+        width: i32::try_from(MAX_RASTER_DIMENSION).unwrap(),
+        height: i32::try_from(MAX_RASTER_DIMENSION).unwrap(),
     });
     assert!(matches!(
         core.apply_fill(&request),
@@ -616,7 +553,7 @@ fn invalid_view_and_excessive_stroke_work_do_not_commit_partial_state() {
 
     let mut excessive = color_stroke(
         PaintTool::Brush,
-        MAX_BRUSH_DIAMETER,
+        256.0,
         StrokeSample {
             x: 32.0,
             y: 32.0,

@@ -21,11 +21,5 @@ mod operations;
 mod preview;
 mod tools;
 
-#[cfg(test)]
-use helpers::pressure_trace_contains;
 pub(crate) use model::FilterPreview;
 pub use model::FilterPreviewInfo;
-
-#[cfg(test)]
-#[path = "../../tests/unit/effects.rs"]
-mod tests;

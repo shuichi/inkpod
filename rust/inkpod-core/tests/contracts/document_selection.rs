@@ -3,8 +3,7 @@ use super::*;
 #[test]
 fn selected_raster_layer_receives_stroke_preview_commit_and_history() {
     let mut core = Core::new();
-    let created = core
-        .new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+    core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
     let original_color_checksum = core.document_info().unwrap().color_plane_checksum;
     let (_, raster_layer_id) = core.create_layer(LayerKind::Raster, "Raster").unwrap();
@@ -29,26 +28,12 @@ fn selected_raster_layer_receives_stroke_preview_commit_and_history() {
         },
     );
     core.begin_stroke(&stroke).unwrap();
-    let preview = &core.active_stroke.as_ref().unwrap().preview_document;
+    let preview = core.build_snapshot();
+    let tile = &preview.tiles()[0];
+    let offset = 4 * tile.stride_bytes() as usize + 3 * 4;
+    assert_eq!(&tile.pixels()[offset..offset + 4], &[56, 34, 12, 255]);
     assert_eq!(
-        core.active_stroke.as_ref().unwrap().plane_id,
-        raster_plane_id
-    );
-    assert_eq!(
-        preview
-            .plane_by_id(raster_plane_id)
-            .unwrap()
-            .raster
-            .pixel(3, 4)
-            .unwrap(),
-        PixelValue::Rgba([12, 34, 56, 255])
-    );
-    assert_eq!(
-        preview
-            .plane_by_id(created.color_plane_id)
-            .unwrap()
-            .raster
-            .checksum(),
+        core.document_info().unwrap().color_plane_checksum,
         original_color_checksum
     );
 
@@ -57,41 +42,17 @@ fn selected_raster_layer_receives_stroke_preview_commit_and_history() {
         core.document_info().unwrap().color_plane_checksum,
         original_color_checksum
     );
-    assert_eq!(
-        core.document
-            .as_ref()
-            .unwrap()
-            .plane_by_id(raster_plane_id)
-            .unwrap()
-            .raster
-            .pixel(3, 4)
-            .unwrap(),
-        PixelValue::Rgba([12, 34, 56, 255])
-    );
+    let committed = core.build_snapshot();
+    let tile = &committed.tiles()[0];
+    let offset = 4 * tile.stride_bytes() as usize + 3 * 4;
+    assert_eq!(&tile.pixels()[offset..offset + 4], &[56, 34, 12, 255]);
     core.undo().unwrap();
-    assert_eq!(
-        core.document
-            .as_ref()
-            .unwrap()
-            .plane_by_id(raster_plane_id)
-            .unwrap()
-            .raster
-            .pixel(3, 4)
-            .unwrap(),
-        PixelValue::Rgba([0; 4])
-    );
+    assert_eq!(core.build_snapshot().tile_count(), 0);
     core.redo().unwrap();
-    assert_eq!(
-        core.document
-            .as_ref()
-            .unwrap()
-            .plane_by_id(raster_plane_id)
-            .unwrap()
-            .raster
-            .pixel(3, 4)
-            .unwrap(),
-        PixelValue::Rgba([12, 34, 56, 255])
-    );
+    let redone = core.build_snapshot();
+    let tile = &redone.tiles()[0];
+    let offset = 4 * tile.stride_bytes() as usize + 3 * 4;
+    assert_eq!(&tile.pixels()[offset..offset + 4], &[56, 34, 12, 255]);
 }
 
 #[test]
@@ -120,29 +81,12 @@ fn selected_raster_layer_receives_fill_without_changing_coloring_plane() {
         core.document_info().unwrap().color_plane_checksum,
         original_color_checksum
     );
-    assert_eq!(
-        core.document
-            .as_ref()
-            .unwrap()
-            .plane_by_id(raster_plane_id)
-            .unwrap()
-            .raster
-            .pixel(1, 1)
-            .unwrap(),
-        PixelValue::Rgba([90, 80, 70, 255])
-    );
+    let filled = core.build_snapshot();
+    let tile = &filled.tiles()[0];
+    let offset = tile.stride_bytes() as usize + 4;
+    assert_eq!(&tile.pixels()[offset..offset + 4], &[70, 80, 90, 255]);
     core.undo().unwrap();
-    assert_eq!(
-        core.document
-            .as_ref()
-            .unwrap()
-            .plane_by_id(raster_plane_id)
-            .unwrap()
-            .raster
-            .pixel(1, 1)
-            .unwrap(),
-        PixelValue::Rgba([0; 4])
-    );
+    assert_eq!(core.build_snapshot().tile_count(), 0);
 }
 
 #[test]
@@ -265,7 +209,9 @@ fn required_singleton_and_incompatible_plane_operations_do_not_mutate_document()
     let created = core
         .new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
-    let before = core.document.clone();
+    let before_info = core.document_info().unwrap();
+    let before_layers = core.layers().unwrap();
+    let before_snapshot = core.build_snapshot();
     let revision = core.document_info().unwrap().document_revision;
 
     assert_eq!(
@@ -274,7 +220,9 @@ fn required_singleton_and_incompatible_plane_operations_do_not_mutate_document()
             "required singleton planes cannot be duplicated"
         ))
     );
-    assert_eq!(core.document, before);
+    assert_eq!(core.document_info().unwrap(), before_info);
+    assert_eq!(core.layers().unwrap(), before_layers);
+    assert_eq!(core.build_snapshot(), before_snapshot);
     assert_eq!(core.document_info().unwrap().document_revision, revision);
 
     assert_eq!(
@@ -283,7 +231,9 @@ fn required_singleton_and_incompatible_plane_operations_do_not_mutate_document()
             "only planes with compatible type and pixel format can merge"
         ))
     );
-    assert_eq!(core.document, before);
+    assert_eq!(core.document_info().unwrap(), before_info);
+    assert_eq!(core.layers().unwrap(), before_layers);
+    assert_eq!(core.build_snapshot(), before_snapshot);
     assert_eq!(core.document_info().unwrap().document_revision, revision);
 }
 
@@ -337,38 +287,7 @@ fn layer_thumbnail_preserves_aspect_content_and_hidden_layer_preview() {
 }
 
 #[test]
-fn acceptance_selection_boolean_property_and_authoring_tools() {
-    fn mask(bits: u8) -> TileRaster {
-        let mut mask = TileRaster::new(8, 1, PixelFormat::BinaryMask8).unwrap();
-        for x in 0..8 {
-            if bits & (1 << x) != 0 {
-                mask.set_pixel(x, 0, PixelValue::Binary(255), 1).unwrap();
-            }
-        }
-        mask
-    }
-    for left in 0_u8..=u8::MAX {
-        for right in [0_u8, 0x55, 0xaa, u8::MAX] {
-            let left_mask = mask(left);
-            let right_mask = mask(right);
-            for (operation, expected) in [
-                (SelectionOperation::New, right),
-                (SelectionOperation::Add, left | right),
-                (SelectionOperation::Subtract, left & !right),
-                (SelectionOperation::Intersect, left & right),
-            ] {
-                let combined =
-                    combine_selection_masks(&left_mask, &right_mask, operation, 2).unwrap();
-                for x in 0..8 {
-                    assert_eq!(
-                        matches!(combined.pixel(x, 0).unwrap(), PixelValue::Binary(255)),
-                        expected & (1 << x) != 0
-                    );
-                }
-            }
-        }
-    }
-
+fn acceptance_selection_authoring_tools() {
     let mut core = Core::new();
     core.new_cell(12, 12, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
@@ -815,19 +734,33 @@ fn tree_order_merge_names_and_active_ids_remain_consistent() {
     .unwrap();
     let (_, top) = core.duplicate_layer(created.layer_id).unwrap();
     core.reorder_layer(top, 0).unwrap();
-    {
-        let document = core.document.as_mut().unwrap();
-        let top_color = document.layers[0]
-            .planes
-            .iter_mut()
-            .find(|plane| plane.kind == PlaneType::Color)
-            .unwrap();
-        top_color
-            .raster
-            .set_pixel(0, 0, PixelValue::Rgba([0, 0, 255, 128]), 99)
-            .unwrap();
-    }
-    core.render_cache.clear();
+    let top_color = core
+        .layers()
+        .unwrap()
+        .into_iter()
+        .find(|layer| layer.id == top)
+        .unwrap()
+        .planes
+        .into_iter()
+        .find(|plane| plane.kind == PlaneType::Color)
+        .unwrap()
+        .id;
+    core.set_active_node(top, top_color).unwrap();
+    core.apply_stroke(&Stroke {
+        tool: PaintTool::Pencil,
+        plane: ActivePlane::Color,
+        color: [0, 0, 255, 128],
+        diameter: 1.0,
+        auto_erase: false,
+        pressure_size: false,
+        coordinate_space: CoordinateSpace::Document,
+        samples: vec![StrokeSample {
+            x: 0.0,
+            y: 0.0,
+            pressure: 1.0,
+        }],
+    })
+    .unwrap();
     assert_eq!(core.build_snapshot().tiles()[0].pixels(), [156, 17, 6, 255]);
     core.merge_layer_into_below(top).unwrap();
     assert_eq!(core.layers().unwrap().len(), 1);
@@ -835,16 +768,6 @@ fn tree_order_merge_names_and_active_ids_remain_consistent() {
         core.plane_pixel(ActivePlane::Color, 0, 0).unwrap(),
         PixelValue::Rgba([6, 17, 156, 255])
     );
-    assert_eq!(
-        paste_value(
-            PixelValue::Rgba16([u16::MAX, 0, 0, u16::MAX]),
-            PixelValue::Rgba16([0, 0, u16::MAX, 32_768]),
-            PlaneType::Raster,
-        )
-        .unwrap(),
-        PixelValue::Rgba16([32_767, 0, 32_768, u16::MAX])
-    );
-
     let (_, raster_layer) = core.create_layer(LayerKind::Raster, "Raster").unwrap();
     let raster_plane = core
         .layers()
@@ -872,13 +795,6 @@ fn tree_order_merge_names_and_active_ids_remain_consistent() {
     core.create_layer(LayerKind::Frame, "Frame").unwrap();
     core.delete_layer(duplicate_coloring).unwrap();
     assert!(core.document_info().is_ok());
-    assert!(
-        core.document
-            .as_ref()
-            .unwrap()
-            .plane_by_id(core.document.as_ref().unwrap().active_plane_id)
-            .is_some()
-    );
 }
 
 #[test]

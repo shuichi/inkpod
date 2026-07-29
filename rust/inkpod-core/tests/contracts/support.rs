@@ -1,11 +1,15 @@
-use super::*;
-use crate::selection::{combine_selection_masks, paste_value};
-use std::fs;
-use std::sync::atomic::{AtomicU64, Ordering};
+use inkpod_core::*;
 
-static TEST_PATH_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+pub(crate) use inkpod_format::{BATCH_GRAPH_VERSION, CommonRaster};
+pub(crate) use std::collections::BTreeSet;
+pub(crate) use std::fs;
+pub(crate) use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
+pub(crate) use std::sync::atomic::Ordering;
 
-fn line_stroke(samples: Vec<StrokeSample>) -> Stroke {
+pub(crate) static TEST_PATH_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+pub(crate) fn line_stroke(samples: Vec<StrokeSample>) -> Stroke {
     Stroke {
         tool: PaintTool::Pencil,
         plane: ActivePlane::MainLine,
@@ -18,7 +22,7 @@ fn line_stroke(samples: Vec<StrokeSample>) -> Stroke {
     }
 }
 
-fn color_stroke(tool: PaintTool, diameter: f32, sample: StrokeSample) -> Stroke {
+pub(crate) fn color_stroke(tool: PaintTool, diameter: f32, sample: StrokeSample) -> Stroke {
     Stroke {
         tool,
         plane: ActivePlane::Color,
@@ -31,7 +35,7 @@ fn color_stroke(tool: PaintTool, diameter: f32, sample: StrokeSample) -> Stroke 
     }
 }
 
-fn fill_request(seed_x: u32, seed_y: u32, color: [u8; 4]) -> FillRequest {
+pub(crate) fn fill_request(seed_x: u32, seed_y: u32, color: [u8; 4]) -> FillRequest {
     FillRequest {
         operation: FillOperation::Seed,
         seed_x,
@@ -49,9 +53,3 @@ fn fill_request(seed_x: u32, seed_y: u32, color: [u8; 4]) -> FillRequest {
         extension_distance: 0,
     }
 }
-
-mod animation;
-mod document;
-mod foundation;
-mod history_stroke;
-mod vector;
