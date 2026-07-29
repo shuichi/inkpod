@@ -212,7 +212,14 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     }
     const HWND diameter_edit =
         GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_DIAMETER);
-    if (diameter_edit == nullptr) {
+    const HWND erase_target_label =
+        GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_TARGET_LABEL);
+    const HWND erase_main_line =
+        GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_TARGET_MAIN_LINE);
+    const HWND erase_color =
+        GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_TARGET_COLOR);
+    if (diameter_edit == nullptr || erase_target_label == nullptr
+        || erase_main_line == nullptr || erase_color == nullptr) {
         return 747;
     }
     const auto diameter_text_is = [&](const wchar_t* expected) noexcept {
@@ -226,7 +233,10 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     };
     if (state.tools.active_tool != INKPOD_TOOL_PENCIL
         || IsWindowEnabled(diameter_edit) != FALSE
-        || !diameter_text_is(L"1.0")) {
+        || !diameter_text_is(L"1.0")
+        || IsWindowVisible(erase_target_label) != FALSE
+        || IsWindowVisible(erase_main_line) != FALSE
+        || IsWindowVisible(erase_color) != FALSE) {
         return 750;
     }
     if (GetDlgItem(state.windows.color_pane, IDC_COLOR_TABS) == nullptr
@@ -332,8 +342,34 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     SendMessageW(eraser_button, BM_CLICK, 0, 0);
     if (state.tools.active_tool != INKPOD_TOOL_ERASER
         || IsWindowEnabled(diameter_edit) == FALSE
-        || !diameter_text_is(L"256.0")) {
+        || !diameter_text_is(L"256.0")
+        || IsWindowVisible(erase_target_label) == FALSE
+        || IsWindowVisible(erase_main_line) == FALSE
+        || IsWindowVisible(erase_color) == FALSE
+        || SendMessageW(erase_main_line, BM_GETCHECK, 0, 0) != BST_CHECKED
+        || SendMessageW(erase_color, BM_GETCHECK, 0, 0) != BST_UNCHECKED) {
         return 754;
+    }
+    SendMessageW(erase_color, BM_CLICK, 0, 0);
+    InkpodDocumentInfo erase_target_info = EmptyDocumentInfo();
+    if (state.tools.active_plane != INKPOD_PLANE_COLOR
+        || SendMessageW(erase_main_line, BM_GETCHECK, 0, 0) != BST_UNCHECKED
+        || SendMessageW(erase_color, BM_GETCHECK, 0, 0) != BST_CHECKED
+        || !QueryDocument(state, erase_target_info)
+        || erase_target_info.active_plane != INKPOD_PLANE_COLOR
+        || state.panes.active_tree_layer_id != erase_target_info.layer_id
+        || state.panes.active_tree_plane_id != erase_target_info.color_plane_id) {
+        return 760;
+    }
+    SendMessageW(erase_main_line, BM_CLICK, 0, 0);
+    if (state.tools.active_plane != INKPOD_PLANE_MAIN_LINE
+        || SendMessageW(erase_main_line, BM_GETCHECK, 0, 0) != BST_CHECKED
+        || SendMessageW(erase_color, BM_GETCHECK, 0, 0) != BST_UNCHECKED
+        || !QueryDocument(state, erase_target_info)
+        || erase_target_info.active_plane != INKPOD_PLANE_MAIN_LINE
+        || state.panes.active_tree_layer_id != erase_target_info.layer_id
+        || state.panes.active_tree_plane_id != erase_target_info.main_plane_id) {
+        return 761;
     }
     if (!ToolPaletteMatchesCommandState(
             state.tools.palette, state.command_states)) {

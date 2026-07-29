@@ -294,6 +294,7 @@ void ChangeToolOptionsDiameter(void* context, float diameter) noexcept {
     inkpod::windows::ui::panes::UpdateToolOptionsPane(
         state->windows.tool_options,
         state->tools.active_tool,
+        state->tools.active_plane,
         state->tools.diameter);
     UpdateMenuState(*state);
 }
@@ -769,6 +770,7 @@ void RefreshDockPaneViews(AppContext& state) noexcept {
     inkpod::windows::ui::panes::UpdateToolOptionsPane(
         state.windows.tool_options,
         state.tools.active_tool,
+        state.tools.active_plane,
         state.tools.diameter);
     inkpod::windows::ui::panes::UpdateColorDockPane(
         state.windows.color_pane,
@@ -5443,6 +5445,7 @@ bool InitializeMainChrome(AppContext& state) noexcept {
     state.tools.options_pane.dispatch_command = DispatchToolPaletteCommand;
     state.tools.options_pane.change_diameter = ChangeToolOptionsDiameter;
     state.tools.options_pane.active_tool = state.tools.active_tool;
+    state.tools.options_pane.active_plane = state.tools.active_plane;
     state.tools.options_pane.diameter = state.tools.diameter;
     state.windows.tool_options =
         inkpod::windows::ui::panes::CreateToolOptionsPane(
@@ -8094,10 +8097,9 @@ std::optional<LRESULT> RouteToolCommand(
         }
         case IDM_PLANE_MAIN_LINE:
         case IDM_PLANE_COLOR: {
-            state->tools.active_plane = LOWORD(wparam) == IDM_PLANE_MAIN_LINE
+            const InkpodPlaneKind plane = LOWORD(wparam) == IDM_PLANE_MAIN_LINE
                 ? INKPOD_PLANE_MAIN_LINE
                 : INKPOD_PLANE_COLOR;
-            const InkpodPlaneKind plane = state->tools.active_plane;
             const InkpodStatus plane_status = state->engine == nullptr
                 ? INKPOD_STATUS_INVALID_STATE
                 : state->engine->Invoke(
@@ -8108,6 +8110,17 @@ std::optional<LRESULT> RouteToolCommand(
                       true);
             if (plane_status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"プレーン切替");
+            } else {
+                state->tools.active_plane = plane;
+                InkpodDocumentInfo info = EmptyDocumentInfo();
+                if (QueryDocument(*state, info)) {
+                    state->panes.active_tree_layer_id = info.layer_id;
+                    state->panes.active_tree_plane_id =
+                        plane == INKPOD_PLANE_MAIN_LINE
+                        ? info.main_plane_id
+                        : info.color_plane_id;
+                    RefreshTreePane(*state);
+                }
             }
             UpdateMenuState(*state);
             return 0;

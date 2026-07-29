@@ -72,6 +72,8 @@ void LayoutPane(HWND pane) noexcept {
     const int margin = ScaleForDpi(8, dpi);
     const int row = ScaleForDpi(24, dpi);
     const int tool_width = ScaleForDpi(150, dpi);
+    const int target_label_width = ScaleForDpi(70, dpi);
+    const int target_button_width = ScaleForDpi(58, dpi);
     const int diameter_label_width = ScaleForDpi(54, dpi);
     const int edit_width = ScaleForDpi(72, dpi);
     const int details_width = ScaleForDpi(78, dpi);
@@ -87,6 +89,37 @@ void LayoutPane(HWND pane) noexcept {
         row,
         SWP_NOACTIVATE | SWP_NOZORDER);
     x += tool_width + margin;
+    auto* state = reinterpret_cast<ToolOptionsPaneState*>(
+        GetWindowLongPtrW(pane, GWLP_USERDATA));
+    if (state != nullptr && state->active_tool == INKPOD_TOOL_ERASER) {
+        SetWindowPos(
+            GetDlgItem(pane, IDC_TOOL_OPTIONS_TARGET_LABEL),
+            nullptr,
+            x,
+            y,
+            target_label_width,
+            row,
+            SWP_NOACTIVATE | SWP_NOZORDER);
+        x += target_label_width;
+        SetWindowPos(
+            GetDlgItem(pane, IDC_TOOL_OPTIONS_TARGET_MAIN_LINE),
+            nullptr,
+            x,
+            y,
+            target_button_width,
+            row,
+            SWP_NOACTIVATE | SWP_NOZORDER);
+        x += target_button_width;
+        SetWindowPos(
+            GetDlgItem(pane, IDC_TOOL_OPTIONS_TARGET_COLOR),
+            nullptr,
+            x,
+            y,
+            target_button_width,
+            row,
+            SWP_NOACTIVATE | SWP_NOZORDER);
+        x += target_button_width + margin;
+    }
     SetWindowPos(
         GetDlgItem(pane, IDC_TOOL_OPTIONS_DIAMETER_LABEL),
         nullptr,
@@ -138,7 +171,10 @@ void UpdateFont(HWND pane, ToolOptionsPaneState& state) noexcept {
              IDC_TOOL_OPTIONS_LABEL,
              IDC_TOOL_OPTIONS_DIAMETER_LABEL,
              IDC_TOOL_OPTIONS_DIAMETER,
-             IDC_TOOL_OPTIONS_DETAILS}) {
+             IDC_TOOL_OPTIONS_DETAILS,
+             IDC_TOOL_OPTIONS_TARGET_LABEL,
+             IDC_TOOL_OPTIONS_TARGET_MAIN_LINE,
+             IDC_TOOL_OPTIONS_TARGET_COLOR}) {
         SendDlgItemMessageW(
             pane, control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), TRUE);
     }
@@ -153,7 +189,8 @@ void CommitDiameter(HWND pane, ToolOptionsPaneState& state) noexcept {
         return;
     }
     if (!CanEditDiameter(state.active_tool) || state.change_diameter == nullptr) {
-        UpdateToolOptionsPane(pane, state.active_tool, state.diameter);
+        UpdateToolOptionsPane(
+            pane, state.active_tool, state.active_plane, state.diameter);
         return;
     }
     std::array<wchar_t, 64U> text{};
@@ -169,7 +206,8 @@ void CommitDiameter(HWND pane, ToolOptionsPaneState& state) noexcept {
         && value <= static_cast<double>(kMaximumToolDiameter)) {
         state.change_diameter(state.context, static_cast<float>(value));
     }
-    UpdateToolOptionsPane(pane, state.active_tool, state.diameter);
+    UpdateToolOptionsPane(
+        pane, state.active_tool, state.active_plane, state.diameter);
 }
 
 LRESULT CALLBACK PaneSubclassProcedure(
@@ -203,6 +241,17 @@ LRESULT CALLBACK PaneSubclassProcedure(
                 && HIWORD(wparam) == BN_CLICKED) {
                 const UINT command = DetailsCommand(state->active_tool);
                 if (command != 0U && state->dispatch_command != nullptr) {
+                    state->dispatch_command(state->context, command);
+                }
+                return 0;
+            }
+            if ((LOWORD(wparam) == IDC_TOOL_OPTIONS_TARGET_MAIN_LINE
+                    || LOWORD(wparam) == IDC_TOOL_OPTIONS_TARGET_COLOR)
+                && HIWORD(wparam) == BN_CLICKED) {
+                const UINT command = LOWORD(wparam) == IDC_TOOL_OPTIONS_TARGET_MAIN_LINE
+                    ? IDM_PLANE_MAIN_LINE
+                    : IDM_PLANE_COLOR;
+                if (state->dispatch_command != nullptr) {
                     state->dispatch_command(state->context, command);
                 }
                 return 0;
@@ -300,6 +349,30 @@ HWND CreateToolOptionsPane(
                L"詳細...",
                WS_TABSTOP | BS_PUSHBUTTON,
                IDC_TOOL_OPTIONS_DETAILS)
+            == nullptr
+        || CreateControl(
+               instance,
+               pane,
+               L"STATIC",
+               L"消去対象",
+               SS_LEFT | SS_CENTERIMAGE,
+               IDC_TOOL_OPTIONS_TARGET_LABEL)
+            == nullptr
+        || CreateControl(
+               instance,
+               pane,
+               L"BUTTON",
+               L"主線",
+               WS_TABSTOP | WS_GROUP | BS_AUTORADIOBUTTON | BS_PUSHLIKE,
+               IDC_TOOL_OPTIONS_TARGET_MAIN_LINE)
+            == nullptr
+        || CreateControl(
+               instance,
+               pane,
+               L"BUTTON",
+               L"彩色",
+               WS_TABSTOP | BS_AUTORADIOBUTTON | BS_PUSHLIKE,
+               IDC_TOOL_OPTIONS_TARGET_COLOR)
             == nullptr) {
         if (pane != nullptr) {
             DestroyWindow(pane);
@@ -314,13 +387,15 @@ HWND CreateToolOptionsPane(
     SetWindowLongPtrW(
         pane, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
     UpdateFont(pane, state);
-    UpdateToolOptionsPane(pane, state.active_tool, state.diameter);
+    UpdateToolOptionsPane(
+        pane, state.active_tool, state.active_plane, state.diameter);
     return pane;
 }
 
 void UpdateToolOptionsPane(
     HWND pane,
     std::uint32_t active_tool,
+    InkpodPlaneKind active_plane,
     float diameter) noexcept {
     auto* state = pane == nullptr
         ? nullptr
@@ -333,6 +408,7 @@ void UpdateToolOptionsPane(
         && state->active_tool == active_tool && CanEditDiameter(active_tool);
     state->updating = true;
     state->active_tool = active_tool;
+    state->active_plane = active_plane;
     state->diameter = diameter;
     SetDlgItemTextW(pane, IDC_TOOL_OPTIONS_LABEL, ToolLabel(active_tool));
     std::array<wchar_t, 32U> value{};
@@ -361,6 +437,27 @@ void UpdateToolOptionsPane(
     EnableWindow(
         GetDlgItem(pane, IDC_TOOL_OPTIONS_DETAILS),
         DetailsCommand(active_tool) != 0U ? TRUE : FALSE);
+    const bool show_erase_target = active_tool == INKPOD_TOOL_ERASER;
+    for (const int control : {
+             IDC_TOOL_OPTIONS_TARGET_LABEL,
+             IDC_TOOL_OPTIONS_TARGET_MAIN_LINE,
+             IDC_TOOL_OPTIONS_TARGET_COLOR}) {
+        ShowWindow(
+            GetDlgItem(pane, control), show_erase_target ? SW_SHOW : SW_HIDE);
+    }
+    SendDlgItemMessageW(
+        pane,
+        IDC_TOOL_OPTIONS_TARGET_MAIN_LINE,
+        BM_SETCHECK,
+        active_plane == INKPOD_PLANE_MAIN_LINE ? BST_CHECKED : BST_UNCHECKED,
+        0);
+    SendDlgItemMessageW(
+        pane,
+        IDC_TOOL_OPTIONS_TARGET_COLOR,
+        BM_SETCHECK,
+        active_plane == INKPOD_PLANE_COLOR ? BST_CHECKED : BST_UNCHECKED,
+        0);
+    LayoutPane(pane);
     state->updating = false;
 }
 

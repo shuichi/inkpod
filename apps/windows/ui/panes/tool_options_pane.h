@@ -4,6 +4,8 @@
 
 #include <cstdint>
 
+#include "inkpod/core_ffi.h"
+
 namespace inkpod::windows::ui::panes {
 
 inline constexpr float kMinimumToolDiameter = 0.1F;
@@ -18,6 +20,7 @@ struct ToolOptionsPaneState {
     ToolOptionsCommandCallback dispatch_command{};
     ToolOptionsDiameterCallback change_diameter{};
     std::uint32_t active_tool{};
+    InkpodPlaneKind active_plane{INKPOD_PLANE_MAIN_LINE};
     float diameter{8.0F};
     HFONT font{};
     bool updating{};
@@ -32,6 +35,7 @@ HWND CreateToolOptionsPane(
 void UpdateToolOptionsPane(
     HWND pane,
     std::uint32_t active_tool,
+    InkpodPlaneKind active_plane,
     float diameter) noexcept;
 
 }  // namespace inkpod::windows::ui::panes

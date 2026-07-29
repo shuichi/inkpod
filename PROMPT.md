@@ -250,6 +250,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 
 #### 消しゴム
 
+- tool options の先頭に `消去対象: 主線 / 彩色` を常時明示し、選択中の layer/plane、menu の主線/彩色 command、status bar と双方向に同期する。消しゴム選択だけでは対象を自動変更しない。
 - shape、太さ、zoom に対して screen size を維持するか、pressure を太さへ反映するかを選ぶ。
 - raster は cursor footprint 内を透明/背景へ消す。
 - vector は `触れた部分だけ`、`触れた線の交点まで`、`触れた線全体` の三 mode を持つ。切断端は不必要に丸めない。
