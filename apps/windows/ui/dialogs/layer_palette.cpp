@@ -117,10 +117,13 @@ void LayoutControls(HWND dialog) noexcept {
     const int margin = ScaleForDpi(kMargin, dpi);
     const int gap = ScaleForDpi(kButtonGap, dpi);
     const int button_height = ScaleForDpi(kButtonHeight, dpi);
-    const int width = std::max(0, client.right - client.left - margin * 2);
+    const int width = std::max(
+        0,
+        static_cast<int>(client.right - client.left) - margin * 2);
     const int list_height = std::max(
         0,
-        client.bottom - client.top - margin * 3 - button_height);
+        static_cast<int>(client.bottom - client.top) - margin * 3
+            - button_height);
     const HWND list = GetDlgItem(dialog, IDC_LAYER_LIST);
     if (list != nullptr) {
         SetWindowPos(
@@ -234,7 +237,12 @@ void DrawThumbnail(
     const int requested_height = ScaleForDpi(kThumbnailHeight, dpi);
     RECT frame{
         bounds.left,
-        bounds.top + std::max(0, (bounds.bottom - bounds.top - requested_height) / 2),
+        bounds.top
+            + std::max(
+                0,
+                (static_cast<int>(bounds.bottom - bounds.top)
+                 - requested_height)
+                    / 2),
         bounds.left + requested_width,
         0};
     frame.bottom = frame.top + requested_height;

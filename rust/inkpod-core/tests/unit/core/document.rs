@@ -115,6 +115,34 @@ fn acceptance_layer_tree_undo_redo_save_reopen_and_validation() {
 }
 
 #[test]
+fn required_singleton_and_incompatible_plane_operations_do_not_mutate_document() {
+    let mut core = Core::new();
+    let created = core
+        .new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let before = core.document.clone();
+    let revision = core.document_info().unwrap().document_revision;
+
+    assert_eq!(
+        core.duplicate_plane(created.main_plane_id),
+        Err(CoreError::InvalidState(
+            "required singleton planes cannot be duplicated"
+        ))
+    );
+    assert_eq!(core.document, before);
+    assert_eq!(core.document_info().unwrap().document_revision, revision);
+
+    assert_eq!(
+        core.merge_plane_into_below(created.main_plane_id),
+        Err(CoreError::InvalidArgument(
+            "only planes with compatible type and pixel format can merge"
+        ))
+    );
+    assert_eq!(core.document, before);
+    assert_eq!(core.document_info().unwrap().document_revision, revision);
+}
+
+#[test]
 fn layer_thumbnail_preserves_aspect_content_and_hidden_layer_preview() {
     let mut core = Core::new();
     let created = core

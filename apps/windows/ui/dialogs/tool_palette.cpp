@@ -109,13 +109,14 @@ bool PalettePageBounds(
     }
     const int margin = ScaleForDpi(kMargin, dpi);
     if (layout_tab
-        && MoveWindow(
+        && SetWindowPos(
                tabs,
+               HWND_BOTTOM,
                margin,
                margin,
                std::max(0, static_cast<int>(client.right) - margin * 2),
                std::max(0, static_cast<int>(client.bottom) - margin * 2),
-               TRUE)
+               SWP_NOACTIVATE | SWP_NOOWNERZORDER)
             == FALSE) {
         return false;
     }
@@ -151,6 +152,12 @@ void LayoutButtons(HWND dialog, ToolPaletteDialogState& state) noexcept {
     scroll.nPos = state.scroll_position;
     SetScrollInfo(dialog, SB_VERT, &scroll, TRUE);
 
+    // Showing or hiding the vertical scrollbar changes the dialog's client
+    // width and can re-enter WM_SIZE. Re-read the final page bounds so the
+    // outer layout pass does not restore a stale, wider button rectangle.
+    if (!PalettePageBounds(dialog, dpi, true, page_bounds)) {
+        return;
+    }
     const int width = page_bounds.right - page_bounds.left;
     std::size_t page_index{};
     for (const auto& entry : kToolPaletteEntries) {

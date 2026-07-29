@@ -283,9 +283,75 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
                     & WS_VISIBLE)
                 != 0U;
     };
-    if (palette_tabs == nullptr || !has_visible_style(pencil_button)
-        || has_visible_style(vector_button) || has_visible_style(effect_button)) {
+    const auto precedes_in_z_order = [](HWND front, HWND back) {
+        if (front == nullptr || back == nullptr
+            || GetParent(front) != GetParent(back)) {
+            return false;
+        }
+        for (HWND sibling = GetWindow(GetParent(front), GW_CHILD);
+             sibling != nullptr;
+             sibling = GetWindow(sibling, GW_HWNDNEXT)) {
+            if (sibling == front) {
+                return true;
+            }
+            if (sibling == back) {
+                return false;
+            }
+        }
+        return false;
+    };
+    const auto page_visibility_matches = [&](ToolPalettePage page) {
+        return std::all_of(
+            ToolPaletteEntries().begin(),
+            ToolPaletteEntries().end(),
+            [&](const ToolPaletteEntry& entry) {
+                const HWND button =
+                    GetDlgItem(state.tools.palette, entry.command);
+                const bool expected_visible = entry.page == page;
+                return button != nullptr
+                    && has_visible_style(button) == expected_visible
+                    && (!expected_visible
+                        || precedes_in_z_order(button, palette_tabs));
+            });
+    };
+    const auto button_page_error = [&](HWND button) {
+        RECT tab_bounds{};
+        RECT tab_header_bounds{};
+        RECT button_bounds{};
+        if (button == nullptr
+            || GetWindowRect(palette_tabs, &tab_bounds) == FALSE
+            || TabCtrl_GetItemRect(
+                   palette_tabs, 0, &tab_header_bounds)
+                == FALSE
+            || GetWindowRect(button, &button_bounds) == FALSE) {
+            return 1;
+        }
+        MapWindowPoints(
+            palette_tabs,
+            nullptr,
+            reinterpret_cast<POINT*>(&tab_header_bounds),
+            2);
+        if (button_bounds.right <= button_bounds.left
+            || button_bounds.bottom <= button_bounds.top) {
+            return 2;
+        }
+        if (button_bounds.left < tab_bounds.left) {
+            return 3;
+        }
+        if (button_bounds.top < tab_header_bounds.bottom) {
+            return 4;
+        }
+        if (button_bounds.right > tab_bounds.right) {
+            return 5;
+        }
+        return button_bounds.bottom > tab_bounds.bottom ? 6 : 0;
+    };
+    if (palette_tabs == nullptr
+        || !page_visibility_matches(ToolPalettePage::Basic)) {
         return 743;
+    }
+    if (button_page_error(pencil_button) != 0) {
+        return 753;
     }
     NMHDR tab_notification{};
     tab_notification.hwndFrom = palette_tabs;
@@ -297,9 +363,12 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         WM_NOTIFY,
         IDC_TOOL_PALETTE_TAB,
         reinterpret_cast<LPARAM>(&tab_notification));
-    if (has_visible_style(pencil_button) || !has_visible_style(vector_button)
-        || has_visible_style(effect_button)) {
+    if (!page_visibility_matches(ToolPalettePage::Vector)) {
         return 744;
+    }
+    const int vector_page_error = button_page_error(vector_button);
+    if (vector_page_error != 0) {
+        return 760 + vector_page_error;
     }
     SCROLLINFO vector_scroll{};
     vector_scroll.cbSize = sizeof(vector_scroll);
@@ -321,10 +390,12 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         WM_NOTIFY,
         IDC_TOOL_PALETTE_TAB,
         reinterpret_cast<LPARAM>(&tab_notification));
-    if (has_visible_style(pencil_button) || has_visible_style(vector_button)
-        || !has_visible_style(effect_button)
+    if (!page_visibility_matches(ToolPalettePage::Effects)
         || state.tools.palette_dialog.scroll_position != 0) {
         return 745;
+    }
+    if (button_page_error(effect_button) != 0) {
+        return 755;
     }
     TabCtrl_SetCurSel(palette_tabs, static_cast<int>(ToolPalettePage::Basic));
     SendMessageW(
@@ -335,8 +406,8 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     LOGFONTW palette_font{};
     const auto button_font = reinterpret_cast<HFONT>(
         SendMessageW(pencil_button, WM_GETFONT, 0, 0));
-    if (!has_visible_style(pencil_button) || has_visible_style(vector_button)
-        || has_visible_style(effect_button) || button_font == nullptr
+    if (!page_visibility_matches(ToolPalettePage::Basic)
+        || button_font == nullptr
         || GetObjectW(
                button_font,
                static_cast<int>(sizeof(palette_font)),
@@ -345,6 +416,9 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || palette_font.lfHeight
             != -MulDiv(5, static_cast<int>(initial_palette_dpi), 72)) {
         return 746;
+    }
+    if (button_page_error(pencil_button) != 0) {
+        return 756;
     }
     const HWND brush_button = GetDlgItem(state.tools.palette, IDM_TOOL_BRUSH);
     if (brush_button == nullptr
@@ -2380,6 +2454,13 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
             != state.panes.tree_layer_count) {
         return 402;
     }
+    const std::uint64_t raster_layer_id = state.panes.active_tree_layer_id;
+    const std::uint64_t raster_plane_id = state.panes.active_tree_plane_id;
+    if (raster_layer_id == 0U || raster_plane_id == 0U
+        || state.panes.tree_plane_count != 1U
+        || state.panes.active_tree_plane_index != 0U) {
+        return 770;
+    }
     InkpodNodeInfo first_layer{};
     first_layer.struct_size = sizeof(first_layer);
     const InkpodStatus first_layer_status = state.engine->Invoke(
@@ -2400,6 +2481,19 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         || LayerPaletteSelectedLayer(state.panes.layer_palette) != first_layer.id) {
         return 470;
     }
+    if (state.panes.layer_palette_dialog.select_layer == nullptr) {
+        return 771;
+    }
+    state.panes.layer_palette_dialog.select_layer(
+        state.panes.layer_palette_dialog.context,
+        raster_layer_id);
+    if (state.panes.active_tree_layer_id != raster_layer_id
+        || LayerPaletteSelectedLayer(state.panes.layer_palette) != raster_layer_id
+        || state.panes.tree_plane_count != 1U
+        || state.panes.active_tree_plane_id != raster_plane_id
+        || state.panes.active_tree_plane_index != 0U) {
+        return 771;
+    }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_VISIBLE, 0);
     SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_EDITABLE, 0);
     SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_OPACITY, 0);
@@ -2407,32 +2501,77 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         return 402;
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_CONVERT, 0);
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_NEW, 0) != 0
-        || state.panes.tree_plane_count < 2U) {
-        return 403;
+    const std::uint32_t plane_count_before_create = state.panes.tree_plane_count;
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_NEW, 0);
+    if (state.panes.tree_plane_count != plane_count_before_create + 1U
+        || state.panes.active_tree_plane_id == 0U
+        || state.panes.active_tree_plane_id == raster_plane_id
+        || state.panes.active_tree_plane_index != plane_count_before_create) {
+        return 772;
     }
+    const std::uint64_t created_plane_id = state.panes.active_tree_plane_id;
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_VISIBLE, 0);
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_EDITABLE, 0);
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_OPACITY, 0);
     if (SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_PROPERTIES, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_CONVERT, 0) != 1) {
-        return 403;
+        || SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_CONVERT, 0) != 1
+        || state.panes.tree_plane_count != plane_count_before_create + 1U
+        || state.panes.active_tree_plane_id != created_plane_id) {
+        return 773;
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
+    if (state.panes.tree_plane_count != plane_count_before_create + 2U
+        || state.panes.active_tree_plane_id == 0U
+        || state.panes.active_tree_plane_id == created_plane_id
+        || state.panes.active_tree_plane_index != plane_count_before_create + 1U) {
+        return 774;
+    }
+    const std::uint64_t duplicated_plane_id = state.panes.active_tree_plane_id;
     const std::uint32_t plane_move_start = state.panes.active_tree_plane_index;
-    if (plane_move_start != 0U) {
-        SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
-        if (state.panes.active_tree_plane_index != plane_move_start - 1U) {
-            return 468;
-        }
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
+    if (plane_move_start == 0U
+        || state.panes.active_tree_plane_index != plane_move_start - 1U
+        || state.panes.active_tree_plane_id != duplicated_plane_id) {
+        return 775;
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
+    if (state.panes.active_tree_plane_index != 0U
+        || state.panes.active_tree_plane_id != duplicated_plane_id) {
+        return 776;
+    }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_DOWN, 0);
+    if (state.panes.active_tree_plane_index != 1U
+        || state.panes.active_tree_plane_id != duplicated_plane_id) {
+        return 777;
+    }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_DELETE, 0);
+    if (state.panes.tree_plane_count != plane_count_before_create + 1U
+        || state.panes.active_tree_plane_id != raster_plane_id
+        || state.panes.active_tree_plane_index != 0U) {
+        return 778;
+    }
+    const std::uint64_t merge_destination_plane_id =
+        state.panes.active_tree_plane_id;
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
+    if (state.panes.tree_plane_count != plane_count_before_create + 2U
+        || state.panes.active_tree_plane_id == 0U
+        || state.panes.active_tree_plane_id == merge_destination_plane_id
+        || state.panes.active_tree_plane_index != 1U) {
+        return 779;
+    }
+    const std::uint64_t merge_source_plane_id = state.panes.active_tree_plane_id;
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
+    if (state.panes.active_tree_plane_index != 0U
+        || state.panes.active_tree_plane_id != merge_source_plane_id) {
+        return 780;
+    }
     if (SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MERGE, 0) != 1) {
-        return 403;
+        return 781;
+    }
+    if (state.panes.tree_plane_count != plane_count_before_create + 1U
+        || state.panes.active_tree_plane_id != merge_destination_plane_id
+        || state.panes.active_tree_plane_index != 0U) {
+        return 782;
     }
     SendMessageW(
         GetDlgItem(state.panes.layer_palette, IDM_LAYER_DUPLICATE),
