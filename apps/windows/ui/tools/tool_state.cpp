@@ -108,10 +108,29 @@ void CancelVectorGeometryPreview(
         reinterpret_cast<LPARAM>(&preview));
 }
 
+void CancelSelectionGeometryPreview(
+    app::ToolUiState& tools, HWND canvas) noexcept {
+    tools.selection_gesture_samples.clear();
+    if (canvas == nullptr) {
+        return;
+    }
+    renderer::CanvasGeometryPreview preview{};
+    preview.struct_size = sizeof(preview);
+    SendMessageW(
+        canvas,
+        renderer::kCanvasSetGeometryPreview,
+        0,
+        reinterpret_cast<LPARAM>(&preview));
+}
+
 void TransitionActiveTool(
     app::ToolUiState& tools, HWND canvas, std::uint32_t next_tool) noexcept {
     if (tools.active_tool != next_tool && IsVectorCanvasTool(tools.active_tool)) {
         CancelVectorGeometryPreview(tools, canvas);
+    }
+    if (tools.active_tool != next_tool
+        && tools.active_tool == kInteractionSelection) {
+        CancelSelectionGeometryPreview(tools, canvas);
     }
     ColorCommand next_color_command{};
     if (ColorCommandForTool(next_tool, next_color_command)

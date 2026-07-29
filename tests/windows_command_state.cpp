@@ -27,6 +27,7 @@ using inkpod::windows::ui::tools::TransitionActiveTool;
 using inkpod::windows::ui::tools::kInteractionEyedropper;
 using inkpod::windows::ui::tools::kInteractionEffectGradient;
 using inkpod::windows::ui::tools::kInteractionFill;
+using inkpod::windows::ui::tools::kInteractionSelection;
 using inkpod::windows::ui::tools::kInteractionVectorLine;
 
 bool SameStates(const CommandStateSet& left, const CommandStateSet& right) noexcept {
@@ -231,6 +232,13 @@ int main() {
     TransitionActiveTool(tools, nullptr, kInteractionFill);
     if (!SameColor(tools.drawing_color, sampled_fill_color)) {
         return 12;
+    }
+
+    TransitionActiveTool(tools, nullptr, kInteractionSelection);
+    tools.selection_gesture_samples.push_back(InkpodStrokeSample{});
+    TransitionActiveTool(tools, nullptr, kInteractionFill);
+    if (!tools.selection_gesture_samples.empty()) {
+        return 13;
     }
 
     tools.active_tool = kInteractionVectorLine;

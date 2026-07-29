@@ -22,6 +22,7 @@ inline constexpr UINT kCanvasPointerMoved = WM_APP + 0x12AU;
 inline constexpr UINT kCanvasSetFloatingPreview = WM_APP + 0x12BU;
 inline constexpr UINT kCanvasSetGeometryPreview = WM_APP + 0x12CU;
 inline constexpr UINT kCanvasValidateClosedVectorStroke = WM_APP + 0x12DU;
+inline constexpr UINT kCanvasGetGeometryPreviewForSmokeTest = WM_APP + 0x12EU;
 inline constexpr std::size_t kCanvasGeometryPreviewPoints = 128U;
 
 struct CanvasDocumentBounds {
@@ -43,6 +44,8 @@ struct CanvasGeometryPreview {
     std::uint32_t active;
     std::uint32_t point_count;
     std::uint32_t closed;
+    float stroke_width;
+    std::uint32_t reserved;
     InkpodVectorPoint points[kCanvasGeometryPreviewPoints];
 };
 
