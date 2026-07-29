@@ -298,22 +298,33 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || !diameter_text_is(L"8.0")) {
         return 751;
     }
-    SetWindowTextW(diameter_edit, L"256.0");
+    SetFocus(diameter_edit);
+    SetWindowTextW(diameter_edit, L"20.0");
+    UpdateMenuState(state);
+    if (GetFocus() != diameter_edit || state.tools.diameter != 8.0F
+        || !diameter_text_is(L"20.0")) {
+        return 758;
+    }
     SendMessageW(
-        state.windows.tool_options,
-        WM_COMMAND,
-        MAKEWPARAM(IDC_TOOL_OPTIONS_DIAMETER, EN_KILLFOCUS),
-        reinterpret_cast<LPARAM>(diameter_edit));
+        state.windows.canvas,
+        WM_LBUTTONDOWN,
+        MK_LBUTTON,
+        MAKELPARAM(0, 0));
+    if (GetFocus() != state.windows.canvas || state.tools.diameter != 20.0F
+        || !diameter_text_is(L"20.0")) {
+        return 759;
+    }
+    ReleaseCapture();
+    SetFocus(diameter_edit);
+    SetWindowTextW(diameter_edit, L"256.0");
+    SetFocus(state.windows.canvas);
     if (state.tools.diameter != panes::kMaximumToolDiameter
         || !diameter_text_is(L"256.0")) {
         return 752;
     }
+    SetFocus(diameter_edit);
     SetWindowTextW(diameter_edit, L"256.1");
-    SendMessageW(
-        state.windows.tool_options,
-        WM_COMMAND,
-        MAKEWPARAM(IDC_TOOL_OPTIONS_DIAMETER, EN_KILLFOCUS),
-        reinterpret_cast<LPARAM>(diameter_edit));
+    SetFocus(state.windows.canvas);
     if (state.tools.diameter != panes::kMaximumToolDiameter
         || !diameter_text_is(L"256.0")) {
         return 753;
@@ -344,12 +355,9 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || !diameter_text_is(L"256.0")) {
         return 756;
     }
+    SetFocus(diameter_edit);
     SetWindowTextW(diameter_edit, L"8.0");
-    SendMessageW(
-        state.windows.tool_options,
-        WM_COMMAND,
-        MAKEWPARAM(IDC_TOOL_OPTIONS_DIAMETER, EN_KILLFOCUS),
-        reinterpret_cast<LPARAM>(diameter_edit));
+    SetFocus(state.windows.canvas);
     if (state.tools.diameter != 8.0F || !diameter_text_is(L"8.0")) {
         return 757;
     }

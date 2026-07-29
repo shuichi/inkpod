@@ -1995,6 +1995,7 @@ LRESULT CALLBACK CanvasWindowProcedure(
         }
         case WM_LBUTTONDOWN:
             if (host != nullptr && !host->PointerStrokeActive()) {
+                SetFocus(window);
                 SetCapture(window);
                 return host->BeginMouse(
                            static_cast<float>(GET_X_LPARAM(lparam)),
@@ -2045,6 +2046,7 @@ LRESULT CALLBACK CanvasWindowProcedure(
             return 0;
         case WM_MBUTTONDOWN:
             if (host != nullptr) {
+                SetFocus(window);
                 host->panning = true;
                 host->last_pan_point = POINT{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
                 SetCapture(window);
@@ -2084,6 +2086,7 @@ LRESULT CALLBACK CanvasWindowProcedure(
             }
             const UINT32 pointer_id = GET_POINTERID_WPARAM(wparam);
             if (message == WM_POINTERDOWN) {
+                SetFocus(window);
                 SetCapture(window);
                 return host->BeginPointer(pointer_id, samples) ? 1 : 0;
             }

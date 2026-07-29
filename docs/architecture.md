@@ -90,22 +90,32 @@ Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
 toolbar; every user command remains reachable through a menu leaf.
 
-The default workspace uses main-frame `WS_CHILD` panes: a narrow 20-command
-tool strip on the left, active-tool options above the center, and a right
-inspector split between color/palette/chart and layer/plane tiles. Buttons
-forward the same command IDs as menus, and the cached command-state result drives
-both surfaces. Pane widths, vertical ratios, visibility, and mirroring are stored
-as bounded 96-DPI values in a versioned per-user record; startup restores the
-last session, while explicit commands reset, save, restore, or mirror the layout.
-Mouse and keyboard splitters, DPI/font updates, and dialog navigation remain on
-the UI thread. Hiding a pane immediately returns its area to the Canvas.
+The canonical workspace uses fixed main-frame `WS_CHILD` panes. At the 96-DPI
+reset baseline, active-tool options occupy the full-width top 40 DIP; the body
+places an 80-DIP, single-column 20-command tool strip on the left, document tabs
+and Canvas in the center, and a 320-DIP inspector on the right. The inspector
+stacks color/palette/chart above layer/plane at a 32:68 ratio, while the lower
+pane stacks layer above plane at 55:45. Four-DIP splitters separate each major
+region. The tool buttons are 72 x 34 DIP and use 7-point, meaningful single-word
+Japanese labels instead of one-character abbreviations. Buttons forward the same
+command IDs as menus, and the cached command-state result drives both surfaces.
+
+Pane widths, vertical ratios, visibility, and mirroring are stored as bounded
+96-DPI values in a versioned per-user record; startup restores the last session,
+while explicit commands reset, save, restore, or mirror the layout. Mirroring
+exchanges the tool and inspector sides without moving the full-width options or
+status regions. Mouse and keyboard splitters, DPI/font updates, and dialog
+navigation remain on the UI thread. Hiding a pane immediately returns its area
+to the Canvas, and narrow windows temporarily suppress the inspector before
+reducing the 320-DIP minimum Canvas width. The four primary panes remain docked;
+only secondary feature palettes may use separate modeless frames.
 
 The six-part status bar reports tool/plane, zoom/view flags, coordinates,
 RGBA/selection, paper/DPI, and task/shortcut/dirty state. Document tabs use the
 sequence-cell name, saved filename, recovery/untitled fallback, dirty marker,
 and logical view number. Locator sampling is asynchronous and discards stale
-generations. Floating palette presentation that is not yet exposed is tracked in
-`implementation-status.md`, while its Core/C ABI models remain owned here.
+generations. Secondary palette presentation that is not yet exposed is tracked
+in `implementation-status.md`, while its Core/C ABI models remain owned here.
 
 ## Thread and snapshot model
 

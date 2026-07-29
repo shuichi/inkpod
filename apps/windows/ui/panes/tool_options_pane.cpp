@@ -189,7 +189,13 @@ LRESULT CALLBACK PaneSubclassProcedure(
                 break;
             }
             if (LOWORD(wparam) == IDC_TOOL_OPTIONS_DIAMETER
+                && HIWORD(wparam) == EN_SETFOCUS) {
+                state->editing = true;
+                return 0;
+            }
+            if (LOWORD(wparam) == IDC_TOOL_OPTIONS_DIAMETER
                 && HIWORD(wparam) == EN_KILLFOCUS) {
+                state->editing = false;
                 CommitDiameter(pane, *state);
                 return 0;
             }
@@ -323,6 +329,8 @@ void UpdateToolOptionsPane(
     if (state == nullptr) {
         return;
     }
+    const bool preserve_diameter_edit = state->editing
+        && state->active_tool == active_tool && CanEditDiameter(active_tool);
     state->updating = true;
     state->active_tool = active_tool;
     state->diameter = diameter;
@@ -336,7 +344,9 @@ void UpdateToolOptionsPane(
         value.size(),
         L"%.1f",
         static_cast<double>(displayed_diameter));
-    SetDlgItemTextW(pane, IDC_TOOL_OPTIONS_DIAMETER, value.data());
+    if (!preserve_diameter_edit) {
+        SetDlgItemTextW(pane, IDC_TOOL_OPTIONS_DIAMETER, value.data());
+    }
     const bool has_diameter = HasDiameter(active_tool);
     const bool can_edit_diameter = CanEditDiameter(active_tool);
     ShowWindow(

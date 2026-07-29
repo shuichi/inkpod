@@ -21,6 +21,7 @@ struct ToolOptionsPaneState {
     float diameter{8.0F};
     HFONT font{};
     bool updating{};
+    bool editing{};
 };
 
 HWND CreateToolOptionsPane(
