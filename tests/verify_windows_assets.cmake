@@ -26,7 +26,10 @@ foreach(required_manifest_text IN ITEMS
         "Executable=\"inkpod.exe\""
         "ProcessorArchitecture=\"${INKPOD_PACKAGE_ARCHITECTURE}\""
         "MinVersion=\"10.0.18362.0\""
-        "Publisher=\"CN=inkpod\"")
+        "Publisher=\"CN=inkpod\""
+        "Category=\"windows.fileTypeAssociation\""
+        "<uap:FileTypeAssociation Name=\"inkpod\">"
+        "<uap:FileType>.inkpod</uap:FileType>")
     string(FIND "${package_manifest}" "${required_manifest_text}" manifest_text_offset)
     if(manifest_text_offset EQUAL -1)
         message(FATAL_ERROR

@@ -4594,6 +4594,41 @@ InkpodStatus OpenRecoveryFromPath(AppContext& state, const std::wstring& path) n
     return view_status;
 }
 
+InkpodStatus OpenDocumentFromPath(
+    AppContext& state, const std::wstring& path) noexcept {
+    if (CommonRasterFormatFromPath(path) != 0U) {
+        const InkpodStatus status = ImportCommonRasterFromPath(state, path);
+        if (status == INKPOD_STATUS_OK) {
+            UpdateMenuState(state);
+        }
+        return status;
+    }
+    std::wstring recovery;
+    try {
+        recovery = path + L".recovery.inkpod";
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (!RecoveryIsNewer(path, recovery)) {
+        return OpenFromPath(state, path);
+    }
+
+    const int choice = MessageBoxW(
+        state.windows.window,
+        L"通常保存より新しいRecoveryがあります。\n\n"
+        L"はい: Recoveryを開く\nいいえ: Recoveryを破棄\n"
+        L"キャンセル: 後で判断して通常保存を開く",
+        L"inkpod Recovery",
+        MB_YESNOCANCEL | MB_ICONQUESTION);
+    if (choice == IDYES) {
+        return OpenRecoveryFromPath(state, recovery);
+    }
+    if (choice == IDNO) {
+        DeleteFileW(recovery.c_str());
+    }
+    return OpenFromPath(state, path);
+}
+
 bool QueueAutosave(AppContext& state, const std::wstring& path) noexcept {
     if (state.engine == nullptr) {
         return false;
@@ -5915,41 +5950,7 @@ std::optional<LRESULT> RouteDocumentCommand(
             if (ConfirmDiscard(*state)) {
                 std::wstring path;
                 if (ChooseOpenDocumentPath(window, path)) {
-                    if (CommonRasterFormatFromPath(path) != 0U) {
-                        const InkpodStatus status = ImportCommonRasterFromPath(*state, path);
-                        if (status != INKPOD_STATUS_OK) {
-                            ShowCoreError(*state, window, L"一般画像を開く");
-                        }
-                        UpdateMenuState(*state);
-                        return 0;
-                    }
-                    std::wstring recovery;
-                    try {
-                        recovery = path + L".recovery.inkpod";
-                    } catch (const std::bad_alloc&) {
-                        ShowCoreError(*state, window, L"Recovery path の作成");
-                        return 0;
-                    }
-                    InkpodStatus status = INKPOD_STATUS_OK;
-                    if (RecoveryIsNewer(path, recovery)) {
-                        const int choice = MessageBoxW(
-                            window,
-                            L"通常保存より新しいRecoveryがあります。\n\n"
-                            L"はい: Recoveryを開く\nいいえ: Recoveryを破棄\n"
-                            L"キャンセル: 後で判断して通常保存を開く",
-                            L"inkpod Recovery",
-                            MB_YESNOCANCEL | MB_ICONQUESTION);
-                        if (choice == IDYES) {
-                            status = OpenRecoveryFromPath(*state, recovery);
-                        } else {
-                            if (choice == IDNO) {
-                                DeleteFileW(recovery.c_str());
-                            }
-                            status = OpenFromPath(*state, path);
-                        }
-                    } else {
-                        status = OpenFromPath(*state, path);
-                    }
+                    const InkpodStatus status = OpenDocumentFromPath(*state, path);
                     if (status != INKPOD_STATUS_OK) {
                         ShowCoreError(*state, window, L"開く");
                     }

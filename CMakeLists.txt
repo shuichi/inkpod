@@ -217,6 +217,23 @@ if(MSVC)
 endif()
 
 if(WIN32)
+    add_executable(inkpod_windows_launch_options_tests
+        apps/windows/app/launch_options.cpp
+        apps/windows/app/launch_options.h
+        tests/windows_launch_options.cpp)
+    target_include_directories(inkpod_windows_launch_options_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows")
+    target_compile_definitions(inkpod_windows_launch_options_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_launch_options_tests PRIVATE shell32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_launch_options_tests)
+        target_compile_options(inkpod_windows_launch_options_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_launch_options
+        COMMAND inkpod_windows_launch_options_tests)
+
     add_executable(inkpod_windows_command_state_tests
         apps/windows/ui/command_catalog.cpp
         apps/windows/ui/command_catalog.h
@@ -269,6 +286,8 @@ if(WIN32)
         apps/windows/app/main.cpp
         apps/windows/app/core_engine.cpp
         apps/windows/app/document_shell.cpp
+        apps/windows/app/launch_options.cpp
+        apps/windows/app/launch_options.h
         apps/windows/app/app.rc
         apps/windows/renderer/canvas.cpp
         apps/windows/ui/dialogs/about_dialog.cpp

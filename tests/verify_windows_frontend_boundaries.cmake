@@ -5,6 +5,8 @@ endif()
 set(main_source "${INKPOD_SOURCE_DIR}/apps/windows/app/main.cpp")
 set(application_source
     "${INKPOD_SOURCE_DIR}/apps/windows/app/application.cpp")
+set(launch_source
+    "${INKPOD_SOURCE_DIR}/apps/windows/app/launch_options.cpp")
 set(smoke_source "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp")
 set(runtime_source
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp")
@@ -17,6 +19,7 @@ set(cmake_source "${INKPOD_SOURCE_DIR}/CMakeLists.txt")
 foreach(required_source IN ITEMS
         "${main_source}"
         "${application_source}"
+        "${launch_source}"
         "${smoke_source}"
         "${runtime_source}"
         "${chrome_source}"
@@ -62,14 +65,26 @@ endif()
 
 foreach(required_main_token IN ITEMS
         "application.h"
-        "ParseLaunchMode"
-        "--smoke-test"
-        "--abi-smoke-test"
-        "Application({")
+        "launch_options.h"
+        "ParseProcessLaunchOptions"
+        "ApplicationLaunch")
     string(FIND "${main_text}" "${required_main_token}" token_offset)
     if(token_offset LESS 0)
         message(FATAL_ERROR
             "main.cpp is missing ${required_main_token}")
+    endif()
+endforeach()
+
+file(READ "${launch_source}" launch_text)
+foreach(required_launch_token IN ITEMS
+        "CommandLineToArgvW"
+        "ParseLaunchArguments"
+        "--smoke-test"
+        "--abi-smoke-test")
+    string(FIND "${launch_text}" "${required_launch_token}" token_offset)
+    if(token_offset LESS 0)
+        message(FATAL_ERROR
+            "launch_options.cpp is missing ${required_launch_token}")
     endif()
 endforeach()
 
@@ -95,6 +110,8 @@ foreach(required_application_token IN ITEMS
         "InitCommonControlsEx"
         "ComApartment"
         "NewestPrivateRecovery"
+        "launch_.document_path"
+        "OpenDocumentFromPath"
         "CreateDefaultCell"
         "RunMessageLoop"
         "RunApplicationSmoke"
@@ -147,6 +164,7 @@ file(READ "${cmake_source}" cmake_text)
 foreach(required_cmake_source IN ITEMS
         "apps/windows/app/app_smoke.cpp"
         "apps/windows/app/application.cpp"
+        "apps/windows/app/launch_options.cpp"
         "apps/windows/app/main.cpp"
         "apps/windows/ui/command_catalog.cpp"
         "apps/windows/ui/shortcut_controller.cpp"

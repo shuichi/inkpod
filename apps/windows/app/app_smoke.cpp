@@ -740,7 +740,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         return 49;
     }
     if (CreateDefaultCell(state) != INKPOD_STATUS_OK
-        || OpenFromPath(state, path) != INKPOD_STATUS_OK) {
+        || OpenDocumentFromPath(state, path) != INKPOD_STATUS_OK) {
         DeleteFileW(path.c_str());
         return 50;
     }

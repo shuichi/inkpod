@@ -44,6 +44,16 @@
         Square44x44Logo="Assets\AppList.png">
         <uap:DefaultTile Wide310x150Logo="Assets\WideTile.png" />
       </uap:VisualElements>
+      <Extensions>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="inkpod">
+            <uap:DisplayName>inkpod セル</uap:DisplayName>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.inkpod</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+      </Extensions>
     </Application>
   </Applications>
 

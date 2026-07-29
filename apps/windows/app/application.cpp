@@ -5,6 +5,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "app_context.h"
 #include "app_smoke.h"
@@ -133,7 +134,8 @@ int RunMessageLoop(AppContext& state) noexcept {
 
 }  // namespace
 
-Application::Application(ApplicationLaunch launch) noexcept : launch_(launch) {}
+Application::Application(ApplicationLaunch launch) noexcept
+    : launch_(std::move(launch)) {}
 
 int Application::Run() {
     INITCOMMONCONTROLSEX controls{};
@@ -212,7 +214,13 @@ int Application::Run() {
     }
 
     bool document_initialized{};
-    if (!launch_.smoke_test) {
+    if (!launch_.document_path.empty()) {
+        core_status = windows::ui::runtime::OpenDocumentFromPath(
+            state, launch_.document_path);
+        document_initialized = core_status == INKPOD_STATUS_OK;
+    }
+    if (core_status == INKPOD_STATUS_OK && !document_initialized
+        && !launch_.smoke_test) {
         std::wstring recovery;
         if (NewestPrivateRecovery(recovery)) {
             const int choice = MessageBoxW(
@@ -249,7 +257,11 @@ int Application::Run() {
     if (core_status != INKPOD_STATUS_OK || !document_initialized) {
         if (!launch_.smoke_test) {
             windows::ui::runtime::ShowCoreError(
-                state, window, L"セルまたはRecoveryの初期化");
+                state,
+                window,
+                launch_.document_path.empty()
+                    ? L"セルまたはRecoveryの初期化"
+                    : L"起動ファイルを開く");
         }
         StopCore(state);
         DestroyWindow(window);

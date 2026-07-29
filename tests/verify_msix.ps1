@@ -64,7 +64,10 @@ try {
     foreach ($requiredText in @(
             "Version=`"$ExpectedVersion`"",
             "ProcessorArchitecture=`"$ExpectedArchitecture`"",
-            'Executable="inkpod.exe"')) {
+            'Executable="inkpod.exe"',
+            'Category="windows.fileTypeAssociation"',
+            '<uap:FileTypeAssociation Name="inkpod">',
+            '<uap:FileType>.inkpod</uap:FileType>')) {
         if ($manifest.IndexOf($requiredText, [StringComparison]::Ordinal) -lt 0) {
             throw "MSIX manifest is missing $requiredText"
         }

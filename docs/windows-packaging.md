@@ -36,6 +36,13 @@ build directory from the checked-in asset-authoring manifest. When changing the
 application version, update `project(inkpod VERSION ...)` in `CMakeLists.txt`;
 the generated MSIX version's last component remains zero.
 
+The manifest registers `.inkpod` as the `inkpod` file type. The executable uses
+`CommandLineToArgvW` so a shell launch can pass one quoted Unicode path, then
+opens it through the same native/raster and Recovery-aware path as the File
+menu. An unpackaged build does not write per-user registry associations: it can
+be selected through Windows **Open with**, while an installed MSIX supplies the
+file-type registration and Windows retains control of the default-app choice.
+
 Every Windows CMake build now assembles an unsigned package through the Windows
 SDK `MakeAppx` tool. The artifact is written to
 `build/<preset>/package/inkpod-<version>-<architecture>.msix` and contains `inkpod.exe`, the
@@ -51,8 +58,8 @@ no-op. `inkpod_msix` can also be selected explicitly as a build target.
 
 `inkpod_windows_msix_payload_smoke` unpacks the produced artifact with `MakeAppx`
 without elevation and verifies the executable, identity/version/architecture, license,
-notices, and required MSVC runtime payload. Hosted CI runs this test for Debug
-and Release.
+notices, `.inkpod` association, and required MSVC runtime payload. Hosted CI runs
+this test for Debug and Release.
 
 `inkpod_windows_msix_install_uninstall_smoke` is not registered in the default
 CTest set. Configure with `-DINKPOD_ENABLE_ELEVATED_MSIX_TESTS=ON` to register it.
