@@ -351,6 +351,26 @@ impl Core {
         edit.commit(self)
     }
 
+    /// Validates one prospective plane append without changing document state.
+    pub fn validate_plane_creation(
+        &self,
+        layer_id: u64,
+        kind: PlaneType,
+        format: PixelFormat,
+    ) -> Result<(), CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let layer_id = LayerId::from_raw(layer_id);
+        let layer = document
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)
+            .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+        if layer.planes.len() >= MAX_PLANES_PER_LAYER {
+            return Err(CoreError::InvalidState("plane limit reached"));
+        }
+        validate_layer_kind_with_candidate(layer.kind, &layer.planes, kind, format)
+    }
+
     /// Appends and activates a plane in the identified layer.
     ///
     /// Kind/format must be allowed by the layer topology. Success is one undoable
@@ -758,5 +778,70 @@ mod tests {
 
         let document = core.document.as_ref().unwrap();
         assert!(document.plane_by_id(document.active_plane_id).is_some());
+    }
+
+    #[test]
+    fn plane_creation_validation_is_read_only_and_matches_layer_topology() {
+        let mut core = Core::new();
+        let created = core.new_cell(4, 4, 96_000, 96_000).unwrap();
+        let before = core.document.clone();
+        let before_revision = core.document_revision;
+        let before_next_id = core.next_id;
+
+        assert!(
+            core.validate_plane_creation(
+                created.layer_id,
+                PlaneType::Raster,
+                PixelFormat::StraightRgba8,
+            )
+            .is_ok()
+        );
+        assert!(
+            core.validate_plane_creation(
+                created.layer_id,
+                PlaneType::Raster,
+                PixelFormat::BinaryMask8,
+            )
+            .is_err()
+        );
+        assert!(
+            core.validate_plane_creation(
+                created.layer_id,
+                PlaneType::Selection,
+                PixelFormat::BinaryMask8,
+            )
+            .is_err()
+        );
+        assert!(
+            core.validate_plane_creation(
+                created.layer_id,
+                PlaneType::MainLine,
+                PixelFormat::BinaryMask8,
+            )
+            .is_err()
+        );
+        assert_eq!(core.document, before);
+        assert_eq!(core.document_revision, before_revision);
+        assert_eq!(core.next_id, before_next_id);
+
+        let (_, raster_layer_id) = core
+            .create_layer(LayerKind::Raster, "Additional Raster")
+            .unwrap();
+        assert!(
+            core.validate_plane_creation(
+                raster_layer_id,
+                PlaneType::Raster,
+                PixelFormat::StraightRgba16,
+            )
+            .is_ok()
+        );
+        assert!(
+            core.validate_plane_creation(
+                raster_layer_id,
+                PlaneType::Color,
+                PixelFormat::StraightRgba8,
+            )
+            .is_err()
+        );
     }
 }

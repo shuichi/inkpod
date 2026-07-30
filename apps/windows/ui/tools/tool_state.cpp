@@ -11,6 +11,15 @@ std::size_t ColorIndex(ColorCommand command) noexcept {
     return static_cast<std::size_t>(command);
 }
 
+InkpodColorValue DefaultCommandColor(ColorCommand command) noexcept {
+    if (command == ColorCommand::Pencil) {
+        return InkpodColorValue{
+            sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
+    }
+    return InkpodColorValue{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 220U, 40U, 30U, 255U};
+}
+
 bool ColorCommandForTool(
     std::uint32_t tool, ColorCommand& command) noexcept {
     switch (tool) {
@@ -75,7 +84,7 @@ void ActivateColorCommand(
 
     const std::size_t next = ColorIndex(next_command);
     if (!tools.command_color_initialized[next]) {
-        tools.command_colors[next] = tools.drawing_color;
+        tools.command_colors[next] = DefaultCommandColor(next_command);
         tools.command_color_initialized[next] = true;
     }
     tools.active_color_command = next_command;

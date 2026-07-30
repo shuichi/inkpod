@@ -146,6 +146,7 @@ snapshot の raster tile storage は snapshot 側で独立して参照計数さ�
 - `INKPOD_STATUS_FILL_OVERFLOW` は漏れ候補座標を返すが、文書を変更しない。
 - cancelled batch execution は `INKPOD_STATUS_CANCELLED` と owned report を同時に返すことがある。
 - error-message copy の失敗は written byte 数を 0 にし、同じ thread の diagnostic を保持する。
+- `inkpod_core_validate_plane_creation` は UI の確定前に種類と形式を検査する owner-thread 限定の読み取り専用 query である。成功・失敗のどちらでも文書、stable ID、revision、dirty、history を変更しない。実際の `inkpod_core_tree_edit` も同じ制約を再検証するため、query 後に状態が変わっても不正な作成は commit されない。
 
 Rust panic は ABI 境界で捕捉され `INKPOD_STATUS_PANIC` になる。C++ exception も ABI を越えさせない。
 

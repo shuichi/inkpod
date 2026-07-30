@@ -23,6 +23,8 @@ struct ColorDockPaneState {
     ColorPaneValueCallback change_color{};
     ColorPaneSelectionCallback select_color{};
     ColorPaneGroupCallback change_group{};
+    InkpodColorValue main_line_color{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
     InkpodColorValue drawing_color{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
     std::vector<InkpodColorValue> colors;
@@ -42,6 +44,7 @@ HWND CreateColorDockPane(
 
 void UpdateColorDockPane(
     HWND pane,
+    const InkpodColorValue& main_line_color,
     const InkpodColorValue& drawing_color,
     const std::vector<InkpodColorValue>& colors,
     const std::vector<std::wstring>& names,

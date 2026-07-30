@@ -1552,6 +1552,43 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
         );
         assert_eq!(node.id, duplicate);
         assert_eq!(node.child_count, 2);
+        assert_eq!(
+            inkpod_core_get_document_info(core, &mut info),
+            INKPOD_STATUS_OK
+        );
+        let revision_before_plane_validation = info.document_revision;
+        assert_eq!(
+            inkpod_core_validate_plane_creation(
+                ptr::null_mut(),
+                base_layer,
+                INKPOD_TYPED_PLANE_RASTER,
+                INKPOD_STORAGE_RGBA8,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_validate_plane_creation(
+                core,
+                base_layer,
+                INKPOD_TYPED_PLANE_RASTER,
+                INKPOD_STORAGE_RGBA8,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_validate_plane_creation(
+                core,
+                base_layer,
+                INKPOD_TYPED_PLANE_SELECTION,
+                INKPOD_STORAGE_BINARY8,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_get_document_info(core, &mut info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(info.document_revision, revision_before_plane_validation);
         let revision_before_invalid_tree = result.revision;
         let invalid_name = b"Invalid selection";
         let invalid_plane = InkpodTreeEdit {

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
@@ -159,12 +160,79 @@ bool ReadDocumentTabLabel(HWND tabs, int index, std::wstring& output) noexcept {
     return true;
 }
 
+struct ViewOptionsValidationProbe {
+    std::uint32_t calls{};
+    bool saw_expected_values{};
+};
+
+const wchar_t* RejectViewOptionsForSmoke(
+    void* context,
+    const std::array<std::int32_t, 4U>& values,
+    std::uint32_t value_count) noexcept {
+    auto* probe = static_cast<ViewOptionsValidationProbe*>(context);
+    if (probe != nullptr) {
+        ++probe->calls;
+        probe->saw_expected_values = value_count == 2U
+            && values[0] == INKPOD_TYPED_PLANE_RASTER
+            && values[1] == INKPOD_STORAGE_RGBA8;
+    }
+    return L"smoke validation rejection";
+}
+
 int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     const HMENU menu = GetMenu(state.windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_HELP_ABOUT, MF_BYCOMMAND) == static_cast<UINT>(-1)
         || SendMessageW(state.windows.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
         return 29;
+    }
+    constexpr std::array<ViewOptionsDialogState::Choice, 2U> plane_kind_choices{{
+        {L"主線", INKPOD_TYPED_PLANE_MAIN_LINE},
+        {L"ラスター", INKPOD_TYPED_PLANE_RASTER},
+    }};
+    constexpr std::array<ViewOptionsDialogState::Choice, 2U> plane_format_choices{{
+        {L"2値", INKPOD_STORAGE_BINARY8},
+        {L"RGBA", INKPOD_STORAGE_RGBA8},
+    }};
+    ViewOptionsDialogState dropdown_dialog{};
+    dropdown_dialog.title = L"共通ダイアログ smoke";
+    dropdown_dialog.labels = {L"種類", L"形式", L"不透明度", nullptr};
+    dropdown_dialog.values = {
+        INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 75, 0};
+    dropdown_dialog.choices[0] = plane_kind_choices.data();
+    dropdown_dialog.choice_counts[0] =
+        static_cast<std::uint32_t>(plane_kind_choices.size());
+    dropdown_dialog.choices[1] = plane_format_choices.data();
+    dropdown_dialog.choice_counts[1] =
+        static_cast<std::uint32_t>(plane_format_choices.size());
+    dropdown_dialog.value_count = 3U;
+    dropdown_dialog.close_immediately = true;
+    if (ShowViewOptions(
+            state.lifetime.instance,
+            state.windows.window,
+            true,
+            dropdown_dialog)
+            != IDOK
+        || dropdown_dialog.values[0] != INKPOD_TYPED_PLANE_RASTER
+        || dropdown_dialog.values[1] != INKPOD_STORAGE_RGBA8
+        || dropdown_dialog.values[2] != 75
+        || !dropdown_dialog.centered_on_owner) {
+        return 830;
+    }
+    ViewOptionsValidationProbe validation_probe{};
+    ViewOptionsDialogState rejected_dialog = dropdown_dialog;
+    rejected_dialog.value_count = 2U;
+    rejected_dialog.validation_context = &validation_probe;
+    rejected_dialog.validate = RejectViewOptionsForSmoke;
+    if (ShowViewOptions(
+            state.lifetime.instance,
+            state.windows.window,
+            true,
+            rejected_dialog)
+            != IDCANCEL
+        || validation_probe.calls != 1U
+        || !validation_probe.saw_expected_values) {
+        return 831;
     }
     if (SendMessageW(
             state.windows.window, WM_COMMAND, IDM_WORKSPACE_RESET, 0)
@@ -239,9 +307,73 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || IsWindowVisible(erase_color) != FALSE) {
         return 750;
     }
+    const HWND main_line_label =
+        GetDlgItem(state.windows.color_pane, IDC_COLOR_MAIN_LINE_LABEL);
+    const HWND main_line_swatch =
+        GetDlgItem(state.windows.color_pane, IDC_COLOR_MAIN_LINE_SWATCH);
+    const HWND drawing_label =
+        GetDlgItem(state.windows.color_pane, IDC_COLOR_DRAWING_LABEL);
     if (GetDlgItem(state.windows.color_pane, IDC_COLOR_TABS) == nullptr
-        || GetDlgItem(state.windows.color_pane, IDC_PALETTE_LIST) == nullptr) {
+        || GetDlgItem(state.windows.color_pane, IDC_PALETTE_LIST) == nullptr
+        || main_line_label == nullptr || main_line_swatch == nullptr
+        || drawing_label == nullptr) {
         return 748;
+    }
+    const auto is_opaque_black = [](const InkpodColorValue& color) noexcept {
+        return color.depth == INKPOD_COLOR_DEPTH_8 && color.red == 0U
+            && color.green == 0U && color.blue == 0U && color.alpha == 255U;
+    };
+    std::array<wchar_t, 64U> main_line_text{};
+    std::array<wchar_t, 64U> drawing_text{};
+    GetWindowTextW(
+        main_line_label,
+        main_line_text.data(),
+        static_cast<int>(main_line_text.size()));
+    GetWindowTextW(
+        drawing_label,
+        drawing_text.data(),
+        static_cast<int>(drawing_text.size()));
+    if (!is_opaque_black(state.tools.drawing_color)
+        || state.tools.color_rgba != UINT32_C(0x000000ff)
+        || !is_opaque_black(state.panes.main_line_color)
+        || !is_opaque_black(state.panes.color_pane.main_line_color)
+        || std::wcsstr(main_line_text.data(), L"主線色") == nullptr
+        || std::wcsstr(main_line_text.data(), L"#000000FF") == nullptr
+        || std::wcsstr(drawing_text.data(), L"彩色用描画色") == nullptr
+        || std::wcsstr(drawing_text.data(), L"#000000FF") == nullptr) {
+        return 762;
+    }
+    const InkpodColorValue alternate_main_line{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 17U, 34U, 51U, 255U};
+    const auto same_color = [](
+                                const InkpodColorValue& left,
+                                const InkpodColorValue& right) noexcept {
+        return left.depth == right.depth && left.red == right.red
+            && left.green == right.green && left.blue == right.blue
+            && left.alpha == right.alpha;
+    };
+    state.panes.main_line_color = alternate_main_line;
+    UpdateMenuState(state);
+    GetWindowTextW(
+        main_line_label,
+        main_line_text.data(),
+        static_cast<int>(main_line_text.size()));
+    if (!same_color(state.panes.main_line_color, alternate_main_line)
+        || !same_color(state.panes.color_pane.main_line_color, alternate_main_line)
+        || std::wcsstr(main_line_text.data(), L"#112233FF") == nullptr) {
+        return 763;
+    }
+    state.panes.main_line_color = InkpodColorValue{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
+    UpdateMenuState(state);
+    GetWindowTextW(
+        main_line_label,
+        main_line_text.data(),
+        static_cast<int>(main_line_text.size()));
+    if (!is_opaque_black(state.panes.main_line_color)
+        || !is_opaque_black(state.panes.color_pane.main_line_color)
+        || std::wcsstr(main_line_text.data(), L"#000000FF") == nullptr) {
+        return 764;
     }
     if (GetDlgItem(state.panes.layer_palette, IDC_LAYER_LIST) == nullptr
         || GetDlgItem(state.panes.layer_palette, IDC_PLANE_LIST) == nullptr
@@ -924,9 +1056,12 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
     SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
     const InkpodColorValue pencil_color = state.tools.drawing_color;
     SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    const InkpodColorValue default_fill_color{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 220U, 40U, 30U, 255U};
     const InkpodColorValue fill_command_color{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 1U, 2U, 3U, 255U};
-    if (state.panes.color_pane.change_color == nullptr) {
+    if (!same_color(state.tools.drawing_color, default_fill_color)
+        || state.panes.color_pane.change_color == nullptr) {
         return 231;
     }
     state.panes.color_pane.change_color(
@@ -935,18 +1070,31 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
     BOOL valid_red{};
     const UINT displayed_pencil_red = GetDlgItemInt(
         state.windows.color_pane, IDC_COLOR_RED, &valid_red, FALSE);
+    std::array<wchar_t, 64U> color_label{};
+    GetDlgItemTextW(
+        state.windows.color_pane,
+        IDC_COLOR_DRAWING_LABEL,
+        color_label.data(),
+        static_cast<int>(color_label.size()));
     if (!same_color(state.tools.drawing_color, pencil_color)
         || !same_color(state.panes.color_pane.drawing_color, pencil_color)
-        || valid_red == FALSE || displayed_pencil_red != pencil_color.red) {
+        || valid_red == FALSE || displayed_pencil_red != pencil_color.red
+        || std::wcsstr(color_label.data(), L"#000000FF") == nullptr) {
         return 231;
     }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
     valid_red = FALSE;
     const UINT displayed_fill_red = GetDlgItemInt(
         state.windows.color_pane, IDC_COLOR_RED, &valid_red, FALSE);
+    GetDlgItemTextW(
+        state.windows.color_pane,
+        IDC_COLOR_DRAWING_LABEL,
+        color_label.data(),
+        static_cast<int>(color_label.size()));
     if (!same_color(state.tools.drawing_color, fill_command_color)
         || !same_color(state.panes.color_pane.drawing_color, fill_command_color)
-        || valid_red == FALSE || displayed_fill_red != fill_command_color.red) {
+        || valid_red == FALSE || displayed_fill_red != fill_command_color.red
+        || std::wcsstr(color_label.data(), L"#010203FF") == nullptr) {
         return 231;
     }
 
@@ -1004,8 +1152,47 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
     if (!QueryDocument(state, after_fill)
         || after_fill.document_revision != before_fill.document_revision + 1U
         || after_fill.main_plane_checksum != before_fill.main_plane_checksum
-        || after_fill.color_plane_checksum == before_fill.color_plane_checksum) {
+        || after_fill.color_plane_checksum == before_fill.color_plane_checksum
+        || after_fill.active_plane != INKPOD_PLANE_COLOR
+        || state.tools.active_plane != INKPOD_PLANE_COLOR
+        || state.panes.active_tree_layer_id != before_fill.layer_id
+        || state.panes.active_tree_plane_id != before_fill.color_plane_id
+        || LayerPaletteSelectedLayer(state.panes.layer_palette) != before_fill.layer_id
+        || LayerPaletteSelectedPlane(state.panes.layer_palette)
+            != before_fill.color_plane_id) {
         return 205;
+    }
+    if (state.panes.layer_palette_dialog.select_plane == nullptr) {
+        return 791;
+    }
+    state.panes.layer_palette_dialog.select_plane(
+        state.panes.layer_palette_dialog.context,
+        before_fill.main_plane_id);
+    if (state.tools.active_plane != INKPOD_PLANE_MAIN_LINE
+        || state.panes.active_tree_plane_id != before_fill.main_plane_id
+        || LayerPaletteSelectedPlane(state.panes.layer_palette)
+            != before_fill.main_plane_id) {
+        return 791;
+    }
+    if (SendMessageW(
+            state.windows.canvas,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(fill_x, fill_y)) != 1) {
+        return 792;
+    }
+    SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
+    InkpodDocumentInfo after_noop_fill{};
+    if (!QueryDocument(state, after_noop_fill)
+        || after_noop_fill.document_revision != after_fill.document_revision
+        || after_noop_fill.main_plane_checksum != after_fill.main_plane_checksum
+        || after_noop_fill.color_plane_checksum != after_fill.color_plane_checksum
+        || after_noop_fill.active_plane != INKPOD_PLANE_MAIN_LINE
+        || state.tools.active_plane != INKPOD_PLANE_MAIN_LINE
+        || state.panes.active_tree_plane_id != before_fill.main_plane_id
+        || LayerPaletteSelectedPlane(state.panes.layer_palette)
+            != before_fill.main_plane_id) {
+        return 792;
     }
 
     const std::uint32_t fill_color = state.tools.color_rgba;
@@ -2637,6 +2824,65 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         || state.panes.active_tree_plane_index != 0U) {
         return 771;
     }
+    state.tools.fill_options = FillToolOptions{};
+    state.tools.fill_options.overflow_abort = false;
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    const InkpodColorValue generic_fill_color{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 90U, 80U, 70U, 255U};
+    inkpod::windows::ui::tools::SetActiveCommandColor(
+        state.tools, generic_fill_color);
+    inkpod::renderer::CanvasDocumentBounds generic_bounds{};
+    InkpodDocumentInfo before_generic_fill{};
+    if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK
+        || !QueryDocument(state, before_generic_fill)
+        || SendMessageW(
+               state.windows.canvas,
+               inkpod::renderer::kCanvasGetDocumentBounds,
+               0,
+               reinterpret_cast<LPARAM>(&generic_bounds)) != 1) {
+        return 793;
+    }
+    const double generic_zoom =
+        (generic_bounds.right - generic_bounds.left)
+        / static_cast<double>(before_generic_fill.width);
+    const int generic_fill_x = static_cast<int>(
+        std::lround(generic_bounds.left + generic_zoom));
+    const int generic_fill_y = static_cast<int>(
+        std::lround(generic_bounds.top + generic_zoom));
+    if (SendMessageW(
+            state.windows.canvas,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(generic_fill_x, generic_fill_y)) != 1) {
+        return 794;
+    }
+    SendMessageW(
+        state.windows.canvas,
+        WM_LBUTTONUP,
+        0,
+        MAKELPARAM(generic_fill_x, generic_fill_y));
+    InkpodDocumentInfo after_generic_fill{};
+    if (!QueryDocument(state, after_generic_fill)) {
+        return 795;
+    }
+    if (after_generic_fill.document_revision
+        != before_generic_fill.document_revision + 1U) {
+        return 796;
+    }
+    if (after_generic_fill.color_plane_checksum
+        != before_generic_fill.color_plane_checksum) {
+        return 797;
+    }
+    if (state.tools.active_plane != INKPOD_PLANE_COLOR) {
+        return 798;
+    }
+    if (state.panes.active_tree_layer_id != raster_layer_id
+        || state.panes.active_tree_plane_id != raster_plane_id
+        || LayerPaletteSelectedLayer(state.panes.layer_palette) != raster_layer_id
+        || LayerPaletteSelectedPlane(state.panes.layer_palette) != raster_plane_id) {
+        return 799;
+    }
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
     bool selected_raster_changed{};
     bool coloring_plane_unchanged{};
     const InkpodStatus selected_raster_stroke_status = state.engine->Invoke(
@@ -2717,6 +2963,23 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         return 772;
     }
     const std::uint64_t created_plane_id = state.panes.active_tree_plane_id;
+    InkpodNodeInfo created_plane{};
+    created_plane.struct_size = sizeof(created_plane);
+    const std::uint32_t created_layer_index = state.panes.active_tree_layer_index;
+    const std::uint32_t created_plane_index = state.panes.active_tree_plane_index;
+    const InkpodStatus created_plane_status = state.engine->Invoke(
+        [created_layer_index, created_plane_index, &created_plane](InkpodCore* core) {
+            return inkpod_core_node_get(
+                core, created_layer_index, created_plane_index, &created_plane);
+        },
+        false,
+        false);
+    if (created_plane_status != INKPOD_STATUS_OK
+        || created_plane.id != created_plane_id
+        || created_plane.kind != INKPOD_TYPED_PLANE_RASTER
+        || created_plane.pixel_format != INKPOD_STORAGE_RGBA8) {
+        return 832;
+    }
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_VISIBLE, 0);
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_EDITABLE, 0);
     SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_OPACITY, 0);
@@ -3861,6 +4124,9 @@ int RunApplicationSmoke(app::AppContext& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunMagnifiedRasterHitSmoke(state);
+    }
+    if (exit_code != 0) {
+        std::fprintf(stderr, "inkpod application smoke failed: %d\n", exit_code);
     }
     return exit_code;
 }

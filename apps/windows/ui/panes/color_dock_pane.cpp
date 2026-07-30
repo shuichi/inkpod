@@ -38,8 +38,41 @@ COLORREF ColorRef(const InkpodColorValue& color) noexcept {
         Channel8(color, color.blue));
 }
 
+void SetColorLabel(
+    HWND pane,
+    int control,
+    const wchar_t* name,
+    const InkpodColorValue& color) noexcept {
+    std::array<wchar_t, 64U> text{};
+    if (color.depth == INKPOD_COLOR_DEPTH_16) {
+        swprintf_s(
+            text.data(),
+            text.size(),
+            L"%ls  #%04X%04X%04X%04X",
+            name,
+            static_cast<unsigned>(color.red),
+            static_cast<unsigned>(color.green),
+            static_cast<unsigned>(color.blue),
+            static_cast<unsigned>(color.alpha));
+    } else {
+        swprintf_s(
+            text.data(),
+            text.size(),
+            L"%ls  #%02X%02X%02X%02X",
+            name,
+            static_cast<unsigned>(color.red),
+            static_cast<unsigned>(color.green),
+            static_cast<unsigned>(color.blue),
+            static_cast<unsigned>(color.alpha));
+    }
+    SetDlgItemTextW(pane, control, text.data());
+}
+
 void ShowTabControls(HWND pane, int tab) noexcept {
     for (const int control : {
+             IDC_COLOR_MAIN_LINE_LABEL,
+             IDC_COLOR_MAIN_LINE_SWATCH,
+             IDC_COLOR_DRAWING_LABEL,
              IDC_COLOR_SWATCH,
              IDC_COLOR_RED,
              IDC_COLOR_GREEN,
@@ -78,26 +111,54 @@ void LayoutPane(HWND pane) noexcept {
         SWP_NOACTIVATE | SWP_NOZORDER);
     RECT content{margin * 2, margin + tabs_height, client.right - margin * 2,
                  client.bottom - margin * 2};
-    const int swatch = ScaleForDpi(48, dpi);
+    const int swatch = row;
+    const int label_width = std::max(
+        0, static_cast<int>(content.right - content.left) - swatch - gap);
     SetWindowPos(
-        GetDlgItem(pane, IDC_COLOR_SWATCH),
+        GetDlgItem(pane, IDC_COLOR_MAIN_LINE_LABEL),
         nullptr,
         content.left,
+        content.top,
+        label_width,
+        row,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    SetWindowPos(
+        GetDlgItem(pane, IDC_COLOR_MAIN_LINE_SWATCH),
+        nullptr,
+        content.right - swatch,
         content.top,
         swatch,
         swatch,
         SWP_NOACTIVATE | SWP_NOZORDER);
-    int x = content.left + swatch + gap;
+    const int drawing_top = content.top + row + gap;
+    SetWindowPos(
+        GetDlgItem(pane, IDC_COLOR_DRAWING_LABEL),
+        nullptr,
+        content.left,
+        drawing_top,
+        label_width,
+        row,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    SetWindowPos(
+        GetDlgItem(pane, IDC_COLOR_SWATCH),
+        nullptr,
+        content.right - swatch,
+        drawing_top,
+        swatch,
+        swatch,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    const int fields_top = drawing_top + row + gap;
+    int x = content.left;
     const int field_width = std::max(
         ScaleForDpi(38, dpi),
-        (static_cast<int>(content.right) - x - gap * 3) / 4);
+        (static_cast<int>(content.right - content.left) - gap * 3) / 4);
     for (const int control : {
              IDC_COLOR_RED, IDC_COLOR_GREEN, IDC_COLOR_BLUE, IDC_COLOR_ALPHA}) {
         SetWindowPos(
             GetDlgItem(pane, control),
             nullptr,
             x,
-            content.top,
+            fields_top,
             field_width,
             row,
             SWP_NOACTIVATE | SWP_NOZORDER);
@@ -106,8 +167,8 @@ void LayoutPane(HWND pane) noexcept {
     SetWindowPos(
         GetDlgItem(pane, IDC_COLOR_APPLY),
         nullptr,
-        content.left + swatch + gap,
-        content.top + row + gap,
+        content.left,
+        fields_top + row + gap,
         ScaleForDpi(78, dpi),
         row,
         SWP_NOACTIVATE | SWP_NOZORDER);
@@ -168,6 +229,8 @@ void UpdateFont(HWND pane, ColorDockPaneState& state) noexcept {
     }
     for (const int control : {
              IDC_COLOR_TABS,
+             IDC_COLOR_MAIN_LINE_LABEL,
+             IDC_COLOR_DRAWING_LABEL,
              IDC_COLOR_RED,
              IDC_COLOR_GREEN,
              IDC_COLOR_BLUE,
@@ -377,10 +440,15 @@ LRESULT CALLBACK PaneSubclassProcedure(
             if (state == nullptr) {
                 break;
             }
-            if (wparam == IDC_COLOR_SWATCH) {
+            if (wparam == IDC_COLOR_MAIN_LINE_SWATCH
+                || wparam == IDC_COLOR_SWATCH) {
                 const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
                 if (draw != nullptr) {
-                    DrawSwatch(*draw, state->drawing_color);
+                    DrawSwatch(
+                        *draw,
+                        wparam == IDC_COLOR_MAIN_LINE_SWATCH
+                            ? state->main_line_color
+                            : state->drawing_color);
                 }
                 return TRUE;
             }
@@ -498,7 +566,31 @@ HWND CreateColorDockPane(
         IDC_COLOR_TABS);
     const bool controls_created = tabs != nullptr
         && CreateControl(
-               instance, pane, L"STATIC", nullptr, SS_OWNERDRAW, IDC_COLOR_SWATCH)
+               instance,
+               pane,
+               L"STATIC",
+               L"主線色",
+               SS_LEFT | SS_CENTERIMAGE | SS_ENDELLIPSIS,
+               IDC_COLOR_MAIN_LINE_LABEL)
+            != nullptr
+        && CreateControl(
+               instance,
+               pane,
+               L"STATIC",
+               L"主線色",
+               SS_OWNERDRAW,
+               IDC_COLOR_MAIN_LINE_SWATCH)
+            != nullptr
+        && CreateControl(
+               instance,
+               pane,
+               L"STATIC",
+               L"彩色用描画色",
+               SS_LEFT | SS_CENTERIMAGE | SS_ENDELLIPSIS,
+               IDC_COLOR_DRAWING_LABEL)
+            != nullptr
+        && CreateControl(
+               instance, pane, L"STATIC", L"彩色用描画色", SS_OWNERDRAW, IDC_COLOR_SWATCH)
             != nullptr
         && CreateControl(
                instance, pane, L"EDIT", L"0", WS_BORDER | WS_TABSTOP | ES_NUMBER,
@@ -571,6 +663,7 @@ HWND CreateColorDockPane(
 
 void UpdateColorDockPane(
     HWND pane,
+    const InkpodColorValue& main_line_color,
     const InkpodColorValue& drawing_color,
     const std::vector<InkpodColorValue>& colors,
     const std::vector<std::wstring>& names,
@@ -588,12 +681,18 @@ void UpdateColorDockPane(
         return;
     }
     state->updating = true;
+    state->main_line_color = main_line_color;
     state->drawing_color = drawing_color;
     state->palette_group = palette_group;
     state->chart_page = chart_page;
     state->chart_locked = chart_locked;
+    SetColorLabel(
+        pane, IDC_COLOR_MAIN_LINE_LABEL, L"主線色", main_line_color);
+    SetColorLabel(
+        pane, IDC_COLOR_DRAWING_LABEL, L"彩色用描画色", drawing_color);
     SetColorFields(pane, drawing_color);
     PopulateLists(pane, *state);
+    InvalidateRect(GetDlgItem(pane, IDC_COLOR_MAIN_LINE_SWATCH), nullptr, TRUE);
     InvalidateRect(GetDlgItem(pane, IDC_COLOR_SWATCH), nullptr, TRUE);
     state->updating = false;
 }

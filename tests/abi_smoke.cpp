@@ -432,6 +432,8 @@ int InkpodRunAbiSmoke() {
     }
     InkpodDocumentInfo before_invalid_tree{};
     before_invalid_tree.struct_size = sizeof(before_invalid_tree);
+    InkpodDocumentInfo after_plane_validation{};
+    after_plane_validation.struct_size = sizeof(after_plane_validation);
     InkpodDocumentInfo after_invalid_tree{};
     after_invalid_tree.struct_size = sizeof(after_invalid_tree);
     constexpr std::array<std::uint8_t, 17> invalid_plane_name{
@@ -445,7 +447,31 @@ int InkpodRunAbiSmoke() {
     invalid_plane.name_utf8 = invalid_plane_name.data();
     invalid_plane.name_bytes = invalid_plane_name.size();
     if (inkpod_core_get_document_info(core, &before_invalid_tree) != INKPOD_STATUS_OK
-        || inkpod_core_tree_edit(core, &invalid_plane, &dispatch, &tree_object_id)
+        || inkpod_core_validate_plane_creation(
+               nullptr,
+               document.layer_id,
+               INKPOD_TYPED_PLANE_RASTER,
+               INKPOD_STORAGE_RGBA8)
+            != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_core_validate_plane_creation(
+               core,
+               document.layer_id,
+               INKPOD_TYPED_PLANE_RASTER,
+               INKPOD_STORAGE_RGBA8)
+            != INKPOD_STATUS_OK
+        || inkpod_core_validate_plane_creation(
+               core,
+               document.layer_id,
+               INKPOD_TYPED_PLANE_SELECTION,
+               INKPOD_STORAGE_BINARY8)
+            != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_core_get_document_info(core, &after_plane_validation)
+            != INKPOD_STATUS_OK
+        || after_plane_validation.document_revision
+            != before_invalid_tree.document_revision) {
+        return 94;
+    }
+    if (inkpod_core_tree_edit(core, &invalid_plane, &dispatch, &tree_object_id)
             != INKPOD_STATUS_INVALID_ARGUMENT
         || inkpod_core_get_document_info(core, &after_invalid_tree) != INKPOD_STATUS_OK
         || after_invalid_tree.document_revision != before_invalid_tree.document_revision) {

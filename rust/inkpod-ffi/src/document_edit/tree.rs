@@ -1,5 +1,45 @@
 use super::*;
 
+/// Validates one prospective plane append without changing Core state.
+///
+/// # Safety
+/// `core` must be a live handle used on its owner thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_validate_plane_creation(
+    core: *mut InkpodCore,
+    layer_id: u64,
+    kind: u32,
+    pixel_format: u32,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "plane creation validation core pointer is null or misaligned",
+            );
+        }
+        // SAFETY: The caller supplies a complete live Core handle.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let kind = match parse_plane_type(kind) {
+            Ok(kind) => kind,
+            Err(status) => return status,
+        };
+        let format = match parse_storage_format(pixel_format) {
+            Ok(format) => format,
+            Err(status) => return status,
+        };
+        match core.core.validate_plane_creation(layer_id, kind, format) {
+            Ok(()) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Applies one typed layer/plane edit. Name bytes are borrowed only for the
 /// call. `out_object_id` receives a created/duplicated ID or zero.
 ///

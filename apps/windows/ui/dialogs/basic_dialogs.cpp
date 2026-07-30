@@ -24,6 +24,64 @@ constexpr std::array<int, 4U> kShortcutHotkeyControls{
     IDC_SHORTCUT_HOTKEY3,
     IDC_SHORTCUT_HOTKEY4};
 
+bool CenterModalDialogOnOwner(HWND dialog) noexcept {
+    if (dialog == nullptr) {
+        return false;
+    }
+    HWND owner = GetWindow(dialog, GW_OWNER);
+    if (owner != nullptr) {
+        const HWND root = GetAncestor(owner, GA_ROOT);
+        if (root != nullptr) {
+            owner = root;
+        }
+    }
+    const HWND monitor_source = owner == nullptr ? dialog : owner;
+    const HMONITOR monitor = MonitorFromWindow(monitor_source, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO monitor_info{sizeof(monitor_info)};
+    RECT dialog_bounds{};
+    if (monitor == nullptr || GetMonitorInfoW(monitor, &monitor_info) == FALSE
+        || GetWindowRect(dialog, &dialog_bounds) == FALSE) {
+        return false;
+    }
+    RECT anchor = monitor_info.rcWork;
+    if (owner != nullptr && IsIconic(owner) == FALSE) {
+        RECT owner_bounds{};
+        if (GetWindowRect(owner, &owner_bounds) != FALSE) {
+            anchor = owner_bounds;
+        }
+    }
+    const LONG width = dialog_bounds.right - dialog_bounds.left;
+    const LONG height = dialog_bounds.bottom - dialog_bounds.top;
+    const LONG work_width = monitor_info.rcWork.right - monitor_info.rcWork.left;
+    const LONG work_height = monitor_info.rcWork.bottom - monitor_info.rcWork.top;
+    const LONG maximum_x =
+        std::max(monitor_info.rcWork.left, monitor_info.rcWork.right - width);
+    const LONG maximum_y =
+        std::max(monitor_info.rcWork.top, monitor_info.rcWork.bottom - height);
+    const LONG centered_x = anchor.left + ((anchor.right - anchor.left) - width) / 2;
+    const LONG centered_y = anchor.top + ((anchor.bottom - anchor.top) - height) / 2;
+    const LONG x = width >= work_width
+        ? monitor_info.rcWork.left
+        : std::clamp(centered_x, monitor_info.rcWork.left, maximum_x);
+    const LONG y = height >= work_height
+        ? monitor_info.rcWork.top
+        : std::clamp(centered_y, monitor_info.rcWork.top, maximum_y);
+    if (SetWindowPos(
+            dialog,
+            nullptr,
+            static_cast<int>(x),
+            static_cast<int>(y),
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE)
+        == FALSE) {
+        return false;
+    }
+    RECT centered_bounds{};
+    return GetWindowRect(dialog, &centered_bounds) != FALSE && centered_bounds.left == x
+        && centered_bounds.top == y;
+}
+
 WORD ShortcutHotkey(const InkpodShortcutStroke& stroke) noexcept {
     BYTE flags{};
     if ((stroke.modifiers & INKPOD_SHORTCUT_MODIFIER_CONTROL) != 0U) {
@@ -259,13 +317,25 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
         IDC_VIEW_VALUE2,
         IDC_VIEW_VALUE3,
         IDC_VIEW_VALUE4};
+    constexpr std::array<int, 4U> choice_ids{
+        IDC_VIEW_VALUE_CHOICE,
+        IDC_VIEW_VALUE2_CHOICE,
+        IDC_VIEW_VALUE3_CHOICE,
+        IDC_VIEW_VALUE4_CHOICE};
     switch (message) {
         case WM_INITDIALOG: {
             state = reinterpret_cast<ViewOptionsDialogState*>(lparam);
-            if (state == nullptr || state->value_count == 0U
-                || state->value_count > label_ids.size()
-                || (state->first_value_choices == nullptr)
-                    != (state->first_value_choice_count == 0U)) {
+            bool invalid = state == nullptr || state->value_count == 0U
+                || state->value_count > label_ids.size();
+            if (!invalid) {
+                for (std::size_t index = 0U; index < label_ids.size(); ++index) {
+                    invalid = invalid
+                        || (state->choices[index] == nullptr)
+                            != (state->choice_counts[index] == 0U)
+                        || (index >= state->value_count && state->choice_counts[index] != 0U);
+                }
+            }
+            if (invalid) {
                 EndDialog(dialog, IDCANCEL);
                 return TRUE;
             }
@@ -274,15 +344,16 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
             if (state->title != nullptr) {
                 SetWindowTextW(dialog, state->title);
             }
-            const bool first_value_is_choice = state->first_value_choice_count != 0U;
-            const HWND choice_control = GetDlgItem(dialog, IDC_VIEW_VALUE_CHOICE);
-            ShowWindow(choice_control, first_value_is_choice ? SW_SHOW : SW_HIDE);
             for (std::size_t index = 0; index < label_ids.size(); ++index) {
                 const bool visible = index < state->value_count;
+                const bool value_is_choice = visible && state->choice_counts[index] != 0U;
                 ShowWindow(GetDlgItem(dialog, label_ids[index]), visible ? SW_SHOW : SW_HIDE);
                 ShowWindow(
                     GetDlgItem(dialog, edit_ids[index]),
-                    visible && !(index == 0U && first_value_is_choice) ? SW_SHOW : SW_HIDE);
+                    visible && !value_is_choice ? SW_SHOW : SW_HIDE);
+                ShowWindow(
+                    GetDlgItem(dialog, choice_ids[index]),
+                    value_is_choice ? SW_SHOW : SW_HIDE);
                 if (!visible) {
                     continue;
                 }
@@ -294,13 +365,15 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
                 _snwprintf_s(
                     value.data(), value.size(), _TRUNCATE, L"%d", state->values[index]);
                 SetDlgItemTextW(dialog, edit_ids[index], value.data());
-            }
-            if (first_value_is_choice) {
+                if (!value_is_choice) {
+                    continue;
+                }
+                const HWND choice_control = GetDlgItem(dialog, choice_ids[index]);
                 int selected = CB_ERR;
-                for (std::uint32_t index = 0U;
-                     index < state->first_value_choice_count;
-                     ++index) {
-                    const auto& choice = state->first_value_choices[index];
+                for (std::uint32_t choice_index = 0U;
+                     choice_index < state->choice_counts[index];
+                     ++choice_index) {
+                    const auto& choice = state->choices[index][choice_index];
                     if (choice.label == nullptr) {
                         EndDialog(dialog, IDCANCEL);
                         return TRUE;
@@ -314,7 +387,7 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
                         EndDialog(dialog, IDCANCEL);
                         return TRUE;
                     }
-                    if (choice.value == state->values[0]) {
+                    if (choice.value == state->values[index]) {
                         selected = static_cast<int>(added);
                     }
                 }
@@ -324,6 +397,7 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
                     return TRUE;
                 }
             }
+            state->centered_on_owner = CenterModalDialogOnOwner(dialog);
             if (state->close_immediately) {
                 PostMessageW(dialog, WM_COMMAND, IDOK, 0);
             }
@@ -334,17 +408,18 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
                 break;
             }
             if (LOWORD(wparam) == IDOK) {
+                std::array<std::int32_t, 4U> candidate_values = state->values;
                 for (std::size_t index = 0; index < state->value_count; ++index) {
-                    if (index == 0U && state->first_value_choice_count != 0U) {
+                    if (state->choice_counts[index] != 0U) {
                         const LRESULT selected = SendDlgItemMessageW(
-                            dialog, IDC_VIEW_VALUE_CHOICE, CB_GETCURSEL, 0, 0);
+                            dialog, choice_ids[index], CB_GETCURSEL, 0, 0);
                         if (selected == CB_ERR
                             || static_cast<std::uint64_t>(selected)
-                                >= state->first_value_choice_count) {
+                                >= state->choice_counts[index]) {
                             return TRUE;
                         }
-                        state->values[index] =
-                            state->first_value_choices[static_cast<std::size_t>(selected)].value;
+                        candidate_values[index] =
+                            state->choices[index][static_cast<std::size_t>(selected)].value;
                         continue;
                     }
                     std::array<wchar_t, 32U> text{};
@@ -369,7 +444,24 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
                         }
                         return TRUE;
                     }
-                    state->values[index] = static_cast<std::int32_t>(value);
+                    candidate_values[index] = static_cast<std::int32_t>(value);
+                }
+                state->values = candidate_values;
+                const wchar_t* validation_error = state->validate == nullptr
+                    ? nullptr
+                    : state->validate(
+                          state->validation_context, state->values, state->value_count);
+                if (validation_error != nullptr) {
+                    if (state->close_immediately) {
+                        EndDialog(dialog, IDCANCEL);
+                    } else {
+                        MessageBoxW(
+                            dialog,
+                            validation_error,
+                            state->title == nullptr ? L"inkpod" : state->title,
+                            MB_OK | MB_ICONWARNING);
+                    }
+                    return TRUE;
                 }
                 EndDialog(dialog, IDOK);
                 return TRUE;

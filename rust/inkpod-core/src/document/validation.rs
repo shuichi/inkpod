@@ -31,63 +31,74 @@ pub(crate) fn validate_plane_format(kind: PlaneType, format: PixelFormat) -> Res
     }
 }
 
-pub(crate) fn validate_layer_kind(kind: LayerKind, planes: &[PlaneNode]) -> Result<(), CoreError> {
-    for plane in planes {
-        validate_plane_format(plane.kind, plane.raster.format())?;
+fn plane_type_index(kind: PlaneType) -> usize {
+    match kind {
+        PlaneType::MainLine => 0,
+        PlaneType::Color => 1,
+        PlaneType::Raster => 2,
+        PlaneType::Selection => 3,
+        PlaneType::VectorMainLine => 4,
+        PlaneType::ColorTrace => 5,
+        PlaneType::VectorFill => 6,
     }
-    let count = |kind| planes.iter().filter(|plane| plane.kind == kind).count();
+}
+
+fn validate_layer_entries(
+    kind: LayerKind,
+    entries: impl IntoIterator<Item = (PlaneType, PixelFormat)>,
+) -> Result<(), CoreError> {
+    let mut counts = [0_usize; 7];
+    let mut plane_count = 0_usize;
+    let mut main_line_format = None;
+    let mut all_raster = true;
+    let mut all_selection = true;
+    let mut all_vector_compatible = true;
+    for (plane_kind, format) in entries {
+        validate_plane_format(plane_kind, format)?;
+        counts[plane_type_index(plane_kind)] += 1;
+        plane_count += 1;
+        if plane_kind == PlaneType::MainLine {
+            main_line_format = Some(format);
+        }
+        all_raster &= plane_kind == PlaneType::Raster;
+        all_selection &= plane_kind == PlaneType::Selection;
+        all_vector_compatible &= matches!(
+            plane_kind,
+            PlaneType::VectorMainLine
+                | PlaneType::ColorTrace
+                | PlaneType::VectorFill
+                | PlaneType::Raster
+        );
+    }
+    let count = |plane_kind| counts[plane_type_index(plane_kind)];
     let valid = match kind {
         LayerKind::BinaryColoring => {
             count(PlaneType::MainLine) == 1
                 && count(PlaneType::Color) == 1
                 && count(PlaneType::Selection) == 0
-                && planes
-                    .iter()
-                    .find(|plane| plane.kind == PlaneType::MainLine)
-                    .is_some_and(|plane| plane.raster.format() == PixelFormat::BinaryMask8)
+                && main_line_format == Some(PixelFormat::BinaryMask8)
         }
         LayerKind::GrayscaleColoring => {
             count(PlaneType::MainLine) == 1
                 && count(PlaneType::Color) == 1
                 && count(PlaneType::Selection) == 0
-                && planes
-                    .iter()
-                    .find(|plane| plane.kind == PlaneType::MainLine)
-                    .is_some_and(|plane| {
-                        matches!(
-                            plane.raster.format(),
-                            PixelFormat::Grayscale8 | PixelFormat::Grayscale16
-                        )
-                    })
+                && main_line_format.is_some_and(|format| {
+                    matches!(format, PixelFormat::Grayscale8 | PixelFormat::Grayscale16)
+                })
         }
-        LayerKind::Raster => {
-            !planes.is_empty() && planes.iter().all(|plane| plane.kind == PlaneType::Raster)
-        }
-        LayerKind::Selection => {
-            !planes.is_empty()
-                && planes
-                    .iter()
-                    .all(|plane| plane.kind == PlaneType::Selection)
-        }
+        LayerKind::Raster => plane_count != 0 && all_raster,
+        LayerKind::Selection => plane_count != 0 && all_selection,
         LayerKind::VectorColoring => {
             count(PlaneType::VectorMainLine) == 1
                 && count(PlaneType::ColorTrace) >= 1
                 && count(PlaneType::VectorFill) == 1
-                && planes.iter().all(|plane| {
-                    matches!(
-                        plane.kind,
-                        PlaneType::VectorMainLine
-                            | PlaneType::ColorTrace
-                            | PlaneType::VectorFill
-                            | PlaneType::Raster
-                    )
-                })
+                && all_vector_compatible
         }
         LayerKind::Frame
         | LayerKind::VanishingPoint
         | LayerKind::Adjustment
         | LayerKind::Text
-        | LayerKind::Annotation => planes.is_empty(),
+        | LayerKind::Annotation => plane_count == 0,
     };
     if valid {
         Ok(())
@@ -96,6 +107,30 @@ pub(crate) fn validate_layer_kind(kind: LayerKind, planes: &[PlaneNode]) -> Resu
             "layer and plane types form a disallowed combination",
         ))
     }
+}
+
+pub(crate) fn validate_layer_kind(kind: LayerKind, planes: &[PlaneNode]) -> Result<(), CoreError> {
+    validate_layer_entries(
+        kind,
+        planes
+            .iter()
+            .map(|plane| (plane.kind, plane.raster.format())),
+    )
+}
+
+pub(crate) fn validate_layer_kind_with_candidate(
+    layer_kind: LayerKind,
+    planes: &[PlaneNode],
+    candidate_kind: PlaneType,
+    candidate_format: PixelFormat,
+) -> Result<(), CoreError> {
+    validate_layer_entries(
+        layer_kind,
+        planes
+            .iter()
+            .map(|plane| (plane.kind, plane.raster.format()))
+            .chain(std::iter::once((candidate_kind, candidate_format))),
+    )
 }
 
 pub(crate) fn unique_layer_name(layers: &[LayerNode], requested: &str) -> String {

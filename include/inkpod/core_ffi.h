@@ -2126,6 +2126,18 @@ InkpodStatus inkpod_core_apply_view(
     InkpodDocumentInfo* out_info);
 
 /**
+ * @brief layer へ plane kind/storage format を追加できるか読み取り専用で検証する。
+ * @par 契約
+ * Core owner thread。`core` は非 NULL。成功・失敗とも document、stable ID、revision、dirty、history は不変。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_validate_plane_creation(
+    InkpodCore* core,
+    uint64_t layer_id,
+    InkpodTypedPlaneKind kind,
+    InkpodStoragePixelFormat pixel_format);
+/**
  * @brief typed layer/plane tree を作成・複製・削除・並替・変換・統合する。
  * @par 契約
  * Core owner thread。`core`/`input`/`result`/`out_object_id` は非 NULL・非重複。

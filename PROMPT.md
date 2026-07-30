@@ -209,6 +209,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - 複製名は一意にする。削除は Undo 可能とし、必須 plane を最後の一枚まで削除できないよう validation する。
 - 同種統合は同じ種類だけを対象にし、plane color 等の互換条件が異なるものを黙って統合しない。
 - property dialog では name、type、opacity、plane color 等を編集し、type conversion は損失内容を事前表示する。
+- 新規プレーンでは種類と形式を番号入力にせず、列挙値に対応する文字列を標準コンボボックスから選ぶ。全候補は選択可能とし、OK 時に選択中レイヤーの topology 制約を Core で再検証する。使用できない組み合わせはエラーを表示してダイアログを閉じない。
 
 ### 7. 用紙とフレーム
 
@@ -296,7 +297,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 ### 10. 色、パレット、チャート、参照画像
 
 - 描画色は sRGB RGBA 8/16 bit を保持し、RGB と HSV editor、alpha 数値/percent 表示を切り替える。
-- 色を使う active command は、鉛筆、ブラシ、フィル、選択、エアブラシ、各ベクター描画 tool ごとに独立した現在色を持つ。command 切替時はその command の現在色を復元し、color editor、swatch、数値欄へ即時反映する。スポイト等の色を持たない一時 tool は直前の色付き command を変更先として維持する。
+- 色を使う active command は、鉛筆、ブラシ、フィル、選択、エアブラシ、各ベクター描画 tool ごとに独立した現在色を持つ。鉛筆の既定色は黒、その他の彩色用 command の既定色は彩色用の初期色とする。command 切替時はその command の現在色を復元し、color editor、swatch、数値欄へ即時反映する。color pane は文書の主線色と active command の彩色用描画色を別のラベルと swatch で常時区別する。スポイト等の色を持たない一時 tool は直前の色付き command を変更先として維持する。
 - color palette は複数 page/group を持ち、cell click で描画色取得、modifier+click で現在色登録、clear/save/load ができる。
 - 高頻度の10色は `1`から`0`へ割り当て、`Tab`で次の10色 group へ切り替える。shortcut editor で変更可能にする。
 - color chart は色と名前を表形式で管理し、複数 page、検索、次候補、lock、cut/copy/paste、save/load を持つ。旧版の5文字制限は native 形式へ課さない。
@@ -313,6 +314,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - selection があればその内側だけを処理する。
 - `ライトテーブルの境界線を参照` は参照画像の線を仮想的な read-only 境界にする。
 - `ライトテーブルの色を使用` は seed の document 座標に対応する最上位参照色を描画色として使う。
+- pixel 変更を commit した fill は Core が確定した実際の対象 plane を active selection とし、plane pane、menu、status を同期する。主線から通常彩色 plane へ塗った場合は彩色を選択し、active な汎用 raster plane へ塗った場合はその安定 ID を維持する。0 pixel の no-op、cancel、failure では active selection を変更しない。
 
 #### 含み塗り
 
@@ -489,6 +491,7 @@ Core の公開 Rust API は C ABI から独立させてください。FFI 用の
 - resize、minimize、occlusion、DPI change、theme change、device lost を処理する
 - file picker、drag and drop、clipboard、known folder、message loop は C++ に閉じ込める
 - pen/mouse/touch を正規化して input batch として Rust へ渡す
+- 数値入力と選択肢を共有する modal dialog は選択肢ごとに標準コンボボックスを使い、owner の main window 中央へ配置して monitor の work area 内に収める
 
 Direct2D resource を Rust に渡したり、C++ で document state を別に持ったりしないでください。
 

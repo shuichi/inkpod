@@ -14,12 +14,19 @@ ColorPanesController::ColorPanesController(app::CoreEngine& engine) noexcept
 
 InkpodStatus ColorPanesController::RefreshModel(
     app::PaneUiState& panes) noexcept {
+    InkpodColorValue main_line_color{};
+    main_line_color.struct_size = sizeof(main_line_color);
+    InkpodStatus status = LoadMainLineColor(main_line_color);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
     std::vector<InkpodColorValue> colors;
-    const InkpodStatus status = LoadPalette(colors);
+    status = LoadPalette(colors);
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
     try {
+        panes.main_line_color = main_line_color;
         panes.palette_colors = colors;
         const std::size_t previous_names = panes.color_chart_names.size();
         panes.color_chart_names.resize(colors.size());
@@ -78,6 +85,16 @@ InkpodStatus ColorPanesController::LoadPalette(
             output.color_capacity = colors.size();
             output.color_stride_bytes = sizeof(InkpodColorValue);
             return inkpod_core_palette_get(core, &output);
+        },
+        false,
+        false);
+}
+
+InkpodStatus ColorPanesController::LoadMainLineColor(
+    InkpodColorValue& color) noexcept {
+    return engine_.Invoke(
+        [&color](InkpodCore* core) {
+            return inkpod_core_get_main_line_color(core, &color);
         },
         false,
         false);

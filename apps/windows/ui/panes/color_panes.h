@@ -23,6 +23,7 @@ public:
 
 private:
     InkpodStatus LoadPalette(std::vector<InkpodColorValue>& colors) noexcept;
+    InkpodStatus LoadMainLineColor(InkpodColorValue& color) noexcept;
 
     app::CoreEngine& engine_;
 };

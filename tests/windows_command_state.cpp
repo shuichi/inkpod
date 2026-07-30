@@ -216,8 +216,18 @@ int main() {
     }
 
     ToolUiState tools{};
+    const InkpodColorValue black{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
     const InkpodColorValue pencil_color = tools.drawing_color;
+    if (!SameColor(pencil_color, black) || tools.color_rgba != UINT32_C(0x000000ff)) {
+        return 11;
+    }
     TransitionActiveTool(tools, nullptr, kInteractionFill);
+    const InkpodColorValue default_coloring_color{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 220U, 40U, 30U, 255U};
+    if (!SameColor(tools.drawing_color, default_coloring_color)) {
+        return 12;
+    }
     const InkpodColorValue fill_color{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 10U, 20U, 30U, 255U};
     SetActiveCommandColor(tools, fill_color);
@@ -227,11 +237,11 @@ int main() {
     SetActiveCommandColor(tools, sampled_fill_color);
     TransitionActiveTool(tools, nullptr, INKPOD_TOOL_PENCIL);
     if (!SameColor(tools.drawing_color, pencil_color)) {
-        return 11;
+        return 13;
     }
     TransitionActiveTool(tools, nullptr, kInteractionFill);
     if (!SameColor(tools.drawing_color, sampled_fill_color)) {
-        return 12;
+        return 14;
     }
 
     TransitionActiveTool(tools, nullptr, kInteractionSelection);

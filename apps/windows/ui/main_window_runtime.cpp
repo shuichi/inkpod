@@ -157,6 +157,108 @@ constexpr std::array<ViewOptionsDialogState::Choice, 10U> kLayerKindChoices{{
     {L"ベクター彩色", INKPOD_LAYER_VECTOR_COLORING},
 }};
 
+struct PlaneDialogChoiceStorage {
+    std::array<std::wstring, 7U> kind_labels;
+    std::array<std::wstring, 5U> format_labels;
+    std::array<ViewOptionsDialogState::Choice, 7U> kind_choices;
+    std::array<ViewOptionsDialogState::Choice, 5U> format_choices;
+    std::wstring validation_error;
+};
+
+template <std::size_t Count>
+bool LoadViewOptionChoices(
+    HINSTANCE instance,
+    const std::array<std::pair<UINT, std::int32_t>, Count>& specifications,
+    std::array<std::wstring, Count>& labels,
+    std::array<ViewOptionsDialogState::Choice, Count>& choices) noexcept {
+    try {
+        for (std::size_t index = 0U; index < Count; ++index) {
+            std::array<wchar_t, 128U> buffer{};
+            const int length = LoadStringW(
+                instance,
+                specifications[index].first,
+                buffer.data(),
+                static_cast<int>(buffer.size()));
+            if (length <= 0) {
+                return false;
+            }
+            labels[index].assign(buffer.data(), static_cast<std::size_t>(length));
+            choices[index] = {
+                labels[index].c_str(), specifications[index].second};
+        }
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return true;
+}
+
+bool LoadPlaneDialogChoices(
+    HINSTANCE instance, PlaneDialogChoiceStorage& storage) noexcept {
+    static constexpr std::array<std::pair<UINT, std::int32_t>, 7U> kind_specs{{
+        {IDS_PLANE_KIND_MAIN_LINE, INKPOD_TYPED_PLANE_MAIN_LINE},
+        {IDS_PLANE_KIND_COLOR, INKPOD_TYPED_PLANE_COLOR},
+        {IDS_PLANE_KIND_RASTER, INKPOD_TYPED_PLANE_RASTER},
+        {IDS_PLANE_KIND_SELECTION, INKPOD_TYPED_PLANE_SELECTION},
+        {IDS_PLANE_KIND_VECTOR_MAIN_LINE, INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE},
+        {IDS_PLANE_KIND_COLOR_TRACE, INKPOD_TYPED_PLANE_COLOR_TRACE},
+        {IDS_PLANE_KIND_VECTOR_FILL, INKPOD_TYPED_PLANE_VECTOR_FILL},
+    }};
+    static constexpr std::array<std::pair<UINT, std::int32_t>, 5U> format_specs{{
+        {IDS_STORAGE_BINARY8, INKPOD_STORAGE_BINARY8},
+        {IDS_STORAGE_GRAYSCALE8, INKPOD_STORAGE_GRAYSCALE8},
+        {IDS_STORAGE_GRAYSCALE16, INKPOD_STORAGE_GRAYSCALE16},
+        {IDS_STORAGE_RGBA8, INKPOD_STORAGE_RGBA8},
+        {IDS_STORAGE_RGBA16, INKPOD_STORAGE_RGBA16},
+    }};
+    std::array<wchar_t, 160U> error{};
+    const int error_length = LoadStringW(
+        instance,
+        IDS_PLANE_CREATION_INVALID,
+        error.data(),
+        static_cast<int>(error.size()));
+    if (error_length <= 0
+        || !LoadViewOptionChoices(
+            instance, kind_specs, storage.kind_labels, storage.kind_choices)
+        || !LoadViewOptionChoices(
+            instance, format_specs, storage.format_labels, storage.format_choices)) {
+        return false;
+    }
+    try {
+        storage.validation_error.assign(
+            error.data(), static_cast<std::size_t>(error_length));
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return true;
+}
+
+struct PlaneCreationValidationContext {
+    inkpod::app::CoreEngine* engine{};
+    std::uint64_t layer_id{};
+    const wchar_t* error_message{};
+};
+
+const wchar_t* ValidatePlaneCreationOptions(
+    void* context,
+    const std::array<std::int32_t, 4U>& values,
+    std::uint32_t value_count) noexcept {
+    const auto* validation = static_cast<const PlaneCreationValidationContext*>(context);
+    if (validation == nullptr || validation->engine == nullptr
+        || validation->layer_id == 0U || validation->error_message == nullptr
+        || value_count < 2U) {
+        return L"プレーン作成条件を検証できません。";
+    }
+    const InkpodStatus status = validation->engine->Invoke(
+        [layer_id = validation->layer_id,
+         kind = static_cast<InkpodTypedPlaneKind>(values[0]),
+         format = static_cast<InkpodStoragePixelFormat>(values[1])](InkpodCore* core) {
+            return inkpod_core_validate_plane_creation(core, layer_id, kind, format);
+        },
+        false,
+        false);
+    return status == INKPOD_STATUS_OK ? nullptr : validation->error_message;
+}
+
 bool QuerySnapshotTransform(
     AppContext& state, InkpodSnapshotTransform& transform) noexcept;
 bool QueryDocument(AppContext& state, InkpodDocumentInfo& info) noexcept;
@@ -774,6 +876,7 @@ void RefreshDockPaneViews(AppContext& state) noexcept {
         state.tools.diameter);
     inkpod::windows::ui::panes::UpdateColorDockPane(
         state.windows.color_pane,
+        state.panes.main_line_color,
         state.tools.drawing_color,
         state.panes.palette_colors,
         state.panes.color_chart_names,
@@ -4837,8 +4940,13 @@ InkpodStatus ApplyFillAtDeviceRange(
     FillController controller(*state.engine);
     const InkpodStatus status =
         controller.Apply(input, inclusion_colors, fill_result);
-    if (status == INKPOD_STATUS_OK) {
+    if (status == INKPOD_STATUS_OK && fill_result.changed_pixel_count != 0U) {
         state.tools.active_plane = INKPOD_PLANE_COLOR;
+        if (info.active_plane == INKPOD_PLANE_MAIN_LINE) {
+            state.panes.active_tree_layer_id = info.layer_id;
+            state.panes.active_tree_plane_id = info.color_plane_id;
+        }
+        RefreshTreePane(state);
     }
     if (status == INKPOD_STATUS_FILL_OVERFLOW && !state.lifetime.smoke_test
         && (fill_result.flags & INKPOD_FILL_RESULT_FLAG_LEAK_CANDIDATE) != 0U) {
@@ -6503,8 +6611,8 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             dialog.title = L"新規レイヤー";
             dialog.labels = {L"種類", L"不透明度 (%)", nullptr, nullptr};
             dialog.values = {INKPOD_LAYER_RASTER, 100, 0, 0};
-            dialog.first_value_choices = kLayerKindChoices.data();
-            dialog.first_value_choice_count =
+            dialog.choices[0] = kLayerKindChoices.data();
+            dialog.choice_counts[0] =
                 static_cast<std::uint32_t>(kLayerKindChoices.size());
             dialog.value_count = 2U;
             if (ShowViewOptions(
@@ -6648,8 +6756,8 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             dialog.title = L"レイヤー変換";
             dialog.labels[0] = L"変換先種類";
             dialog.values[0] = INKPOD_LAYER_RASTER;
-            dialog.first_value_choices = kLayerKindChoices.data();
-            dialog.first_value_choice_count =
+            dialog.choices[0] = kLayerKindChoices.data();
+            dialog.choice_counts[0] =
                 static_cast<std::uint32_t>(kLayerKindChoices.size());
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
@@ -6729,10 +6837,33 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             return 0;
         }
         case IDM_PLANE_NEW: {
+            PlaneDialogChoiceStorage choice_storage{};
+            if (!LoadPlaneDialogChoices(state->lifetime.instance, choice_storage)) {
+                if (!state->lifetime.smoke_test) {
+                    MessageBoxW(
+                        window,
+                        L"プレーンの選択肢を読み込めませんでした。",
+                        L"新規プレーン",
+                        MB_OK | MB_ICONERROR);
+                }
+                return 0;
+            }
+            PlaneCreationValidationContext validation{
+                state->engine.get(),
+                state->panes.active_tree_layer_id,
+                choice_storage.validation_error.c_str()};
             ViewOptionsDialogState dialog{};
             dialog.title = L"新規プレーン";
-            dialog.labels = {L"種類 (1-7)", L"形式 (1-5)", L"不透明度 (%)", nullptr};
+            dialog.labels = {L"種類", L"形式", L"不透明度 (%)", nullptr};
             dialog.values = {INKPOD_TYPED_PLANE_RASTER, INKPOD_STORAGE_RGBA8, 100, 0};
+            dialog.choices[0] = choice_storage.kind_choices.data();
+            dialog.choice_counts[0] =
+                static_cast<std::uint32_t>(choice_storage.kind_choices.size());
+            dialog.choices[1] = choice_storage.format_choices.data();
+            dialog.choice_counts[1] =
+                static_cast<std::uint32_t>(choice_storage.format_choices.size());
+            dialog.validation_context = &validation;
+            dialog.validate = ValidatePlaneCreationOptions;
             dialog.value_count = 3U;
             if (ShowViewOptions(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {

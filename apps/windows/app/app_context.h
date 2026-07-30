@@ -91,9 +91,9 @@ struct DocumentShellState {
 struct ToolUiState {
     std::uint32_t active_tool{INKPOD_TOOL_PENCIL};
     InkpodPlaneKind active_plane{INKPOD_PLANE_MAIN_LINE};
-    std::uint32_t color_rgba{UINT32_C(0xdc281eff)};
+    std::uint32_t color_rgba{UINT32_C(0x000000ff)};
     InkpodColorValue drawing_color{
-        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 220U, 40U, 30U, 255U};
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
     windows::ui::tools::ColorCommand active_color_command{
         windows::ui::tools::ColorCommand::Pencil};
     std::array<InkpodColorValue, windows::ui::tools::kColorCommandCount>
@@ -155,6 +155,8 @@ struct ViewUiState {
 };
 
 struct PaneUiState {
+    InkpodColorValue main_line_color{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
     std::vector<InkpodColorValue> palette_colors;
     std::uint32_t palette_group{};
     std::uint32_t selected_palette_index{};

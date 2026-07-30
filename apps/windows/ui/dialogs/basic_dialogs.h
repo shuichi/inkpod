@@ -43,10 +43,17 @@ struct ViewOptionsDialogState {
         const wchar_t* label{};
         std::int32_t value{};
     };
-    const Choice* first_value_choices{};
-    std::uint32_t first_value_choice_count{};
+    using ValidationCallback = const wchar_t* (*)(
+        void* context,
+        const std::array<std::int32_t, 4U>& values,
+        std::uint32_t value_count) noexcept;
+    std::array<const Choice*, 4U> choices{};
+    std::array<std::uint32_t, 4U> choice_counts{};
+    void* validation_context{};
+    ValidationCallback validate{};
     std::uint32_t value_count{1U};
     bool close_immediately{};
+    bool centered_on_owner{};
 };
 
 INT_PTR ShowViewOptions(
