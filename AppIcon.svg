@@ -9,29 +9,29 @@
      color-interpolation-filters="sRGB"
      shape-rendering="geometricPrecision">
   <!-- ================================================================
-       アニメ向け 色彩描画ツール アプリアイコン (最終版)
+       アニメ向け 色彩描画ツール アプリアイコン (パープル版)
        macOS 26 Tahoe / Liquid Glass 準拠 (1024x1024, 連続角丸 squircle)
-       グレー基調の下地 + 拡大したインク瓶(スペクトラムインク)
+       パープル基調の下地 + 拡大したインク瓶(スペクトラムインク)
        瓶の拡大率は #artwork 内の transform scale(1.6) で調整可能
        ================================================================ -->
   <defs>
-    <linearGradient id="baseGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EDEDF0"/><stop offset="0.35" stop-color="#DFDFE3"/><stop offset="0.70" stop-color="#CFCFD4"/><stop offset="1" stop-color="#BCBCC2"/></linearGradient>
-    <radialGradient id="specular" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.55"/><stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.10"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
-    <linearGradient id="rimGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.85"/><stop offset="0.40" stop-color="#FFFFFF" stop-opacity="0.10"/><stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.14"/></linearGradient>
-    <filter id="iconShadow" x="-25%" y="-25%" width="150%" height="150%"><feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#1A1A1F" flood-opacity="0.30"/></filter>
+    <linearGradient id="baseGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9570D9"/><stop offset="0.35" stop-color="#8158C7"/><stop offset="0.70" stop-color="#6842A6"/><stop offset="1" stop-color="#513183"/></linearGradient>
+    <radialGradient id="specular" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.34"/><stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.07"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+    <linearGradient id="rimGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.78"/><stop offset="0.40" stop-color="#FFFFFF" stop-opacity="0.12"/><stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.20"/></linearGradient>
+    <filter id="iconShadow" x="-25%" y="-25%" width="150%" height="150%"><feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#241640" flood-opacity="0.32"/></filter>
     <clipPath id="iconClip"><path d="M 584 0 c 114.8108 0 172.2161 0 216.0681 22.3437 a 205.0000 205.0000 0 0 1 89.5883 89.5883 c 22.3437 43.8519 22.3437 101.2573 22.3437 216.0681 L 912 584 c 0 114.8108 0 172.2161 -22.3437 216.0681 a 205.0000 205.0000 0 0 1 -89.5883 89.5883 c -43.8519 22.3437 -101.2573 22.3437 -216.0681 22.3437 L 328 912 c -114.8108 0 -172.2161 0 -216.0681 -22.3437 a 205.0000 205.0000 0 0 1 -89.5883 -89.5883 c -22.3437 -43.8519 -22.3437 -101.2573 -22.3437 -216.0681 L 0 328 c 0 -114.8108 0 -172.2161 22.3437 -216.0681 a 205.0000 205.0000 0 0 1 89.5883 -89.5883 c 43.8519 -22.3437 101.2573 -22.3437 216.0681 -22.3437 Z"/></clipPath>
 
-    <!-- インク: スペクトラム(紫→青→シアン→緑→黄→赤の対角グラデーション) -->
-    <linearGradient id="inkRainbow" x1="0.08" y1="0.05" x2="0.92" y2="1"><stop offset="0" stop-color="#A64BFF"/><stop offset="0.20" stop-color="#4F6BFF"/><stop offset="0.40" stop-color="#23C0FF"/><stop offset="0.58" stop-color="#22E0A6"/><stop offset="0.78" stop-color="#FFD23D"/><stop offset="1" stop-color="#FF5B3D"/></linearGradient>
-    <linearGradient id="inkDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#101018" stop-opacity="0.32"/></linearGradient>
-    <linearGradient id="glassBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#CCD3DB" stop-opacity="0.95"/><stop offset="0.5" stop-color="#BFC8D2" stop-opacity="0.93"/><stop offset="1" stop-color="#A9B4BF" stop-opacity="0.92"/></linearGradient>
-    <linearGradient id="bottleRim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/><stop offset="0.35" stop-color="#FFFFFF" stop-opacity="0.25"/><stop offset="0.7" stop-color="#7C858F" stop-opacity="0.25"/><stop offset="1" stop-color="#3A4048" stop-opacity="0.45"/></linearGradient>
-    <linearGradient id="capGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3A424C"/><stop offset="0.5" stop-color="#252B32"/><stop offset="1" stop-color="#171B20"/></linearGradient>
+    <!-- インク: スペクトラム(マゼンタ→青→シアン→緑→黄→赤の対角グラデーション) -->
+    <linearGradient id="inkRainbow" x1="0.08" y1="0.05" x2="0.92" y2="1"><stop offset="0" stop-color="#FF5FD5"/><stop offset="0.20" stop-color="#4F6BFF"/><stop offset="0.40" stop-color="#23C0FF"/><stop offset="0.58" stop-color="#22E0A6"/><stop offset="0.78" stop-color="#FFD23D"/><stop offset="1" stop-color="#FF5B3D"/></linearGradient>
+    <linearGradient id="inkDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#140F22" stop-opacity="0.32"/></linearGradient>
+    <linearGradient id="glassBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4E1F0" stop-opacity="0.96"/><stop offset="0.5" stop-color="#D1CCE2" stop-opacity="0.94"/><stop offset="1" stop-color="#B5AECB" stop-opacity="0.92"/></linearGradient>
+    <linearGradient id="bottleRim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/><stop offset="0.35" stop-color="#FFFFFF" stop-opacity="0.25"/><stop offset="0.7" stop-color="#837C96" stop-opacity="0.25"/><stop offset="1" stop-color="#3D3550" stop-opacity="0.45"/></linearGradient>
+    <linearGradient id="capGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#443C55" stop-opacity="1"/><stop offset="0.5" stop-color="#2C2539" stop-opacity="1"/><stop offset="1" stop-color="#1B1524"/></linearGradient>
     <clipPath id="bottleClip"><path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z"/></clipPath>
     <filter id="bottleShadow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="13"/></filter>
   </defs>
 
-  <!-- ▼ 下地(squircle + グレーグラデ + 光沢 + リム + ソフトシャドウ) -->
+  <!-- ▼ 下地(squircle + パープルグラデ + 光沢 + リム + ソフトシャドウ) -->
   <g id="icon-body"><g transform="translate(56,56)">
     <path id="iconShape" d="M 584 0 c 114.8108 0 172.2161 0 216.0681 22.3437 a 205.0000 205.0000 0 0 1 89.5883 89.5883 c 22.3437 43.8519 22.3437 101.2573 22.3437 216.0681 L 912 584 c 0 114.8108 0 172.2161 -22.3437 216.0681 a 205.0000 205.0000 0 0 1 -89.5883 89.5883 c -43.8519 22.3437 -101.2573 22.3437 -216.0681 22.3437 L 328 912 c -114.8108 0 -172.2161 0 -216.0681 -22.3437 a 205.0000 205.0000 0 0 1 -89.5883 -89.5883 c -22.3437 -43.8519 -22.3437 -101.2573 -22.3437 -216.0681 L 0 328 c 0 -114.8108 0 -172.2161 22.3437 -216.0681 a 205.0000 205.0000 0 0 1 89.5883 -89.5883 c 43.8519 -22.3437 101.2573 -22.3437 216.0681 -22.3437 Z" fill="url(#baseGradient)"/>
     <g clip-path="url(#iconClip)"><ellipse cx="456" cy="146" rx="365" ry="219" fill="url(#specular)"/></g>
@@ -41,7 +41,7 @@
   <!-- ▼ アイコン内容: インク瓶(scale で拡大。編集はこのグループ内で) -->
   <g id="artwork" transform="translate(56,56)">
     <!-- 接地シャドウ(拡大した瓶に合わせつつ、下地内側にクリップ) -->
-    <g clip-path="url(#iconClip)"><g transform="translate(456,510) scale(1.6) translate(-456,-510)"><path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="#0E1116" opacity="0.26" filter="url(#bottleShadow)" transform="translate(6,18)"/></g></g>
+    <g clip-path="url(#iconClip)"><g transform="translate(456,510) scale(1.6) translate(-456,-510)"><path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="#1F0F3C" opacity="0.34" filter="url(#bottleShadow)" transform="translate(6,18)"/></g></g>
     <!-- 瓶本体(中心基準で scale) -->
     <g transform="translate(456,510) scale(1.6) translate(-456,-510)">
       <path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="url(#glassBody)"/>
@@ -57,10 +57,10 @@
         <ellipse cx="372" cy="430" rx="34" ry="20" fill="#FFFFFF" opacity="0.35" transform="rotate(-32 372 430)"/>
       </g>
       <path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="none" stroke="url(#bottleRim)" stroke-width="2.4"/>
-      <path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="none" stroke="#7C858F" stroke-opacity="0.35" stroke-width="1.1"/>
+      <path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="none" stroke="#7A7290" stroke-opacity="0.35" stroke-width="1.1"/>
       <rect x="380" y="300" width="152" height="74" rx="22" fill="url(#capGrad)"/>
-      <rect x="396" y="311" width="120" height="12" rx="6" fill="#5B6570" opacity="0.55"/>
-      <rect x="380" y="364" width="152" height="10" rx="5" fill="#0F1216" opacity="0.5"/>
+      <rect x="396" y="311" width="120" height="12" rx="6" fill="#6A6280" opacity="0.55"/>
+      <rect x="380" y="364" width="152" height="10" rx="5" fill="#130E1C" opacity="0.5"/>
     </g>
   </g>
 
