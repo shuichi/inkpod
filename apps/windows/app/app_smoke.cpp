@@ -280,13 +280,16 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     }
     const HWND diameter_edit =
         GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_DIAMETER);
+    const HWND diameter_label =
+        GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_DIAMETER_LABEL);
     const HWND erase_target_label =
         GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_TARGET_LABEL);
     const HWND erase_main_line =
         GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_TARGET_MAIN_LINE);
     const HWND erase_color =
         GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_TARGET_COLOR);
-    if (diameter_edit == nullptr || erase_target_label == nullptr
+    if (diameter_edit == nullptr || diameter_label == nullptr
+        || erase_target_label == nullptr
         || erase_main_line == nullptr || erase_color == nullptr) {
         return 747;
     }
@@ -299,6 +302,41 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
                 > 0
             && std::wcscmp(value.data(), expected) == 0;
     };
+    RECT diameter_label_bounds{};
+    RECT diameter_edit_bounds{};
+    const HFONT diameter_label_font = reinterpret_cast<HFONT>(
+        SendMessageW(diameter_label, WM_GETFONT, 0, 0));
+    const HFONT diameter_edit_font = reinterpret_cast<HFONT>(
+        SendMessageW(diameter_edit, WM_GETFONT, 0, 0));
+    LOGFONTW diameter_label_font_info{};
+    LOGFONTW diameter_edit_font_info{};
+    if (GetWindowRect(diameter_label, &diameter_label_bounds) == FALSE
+        || GetWindowRect(diameter_edit, &diameter_edit_bounds) == FALSE
+        || diameter_label_font == nullptr || diameter_edit_font == nullptr
+        || GetObjectW(
+               diameter_label_font,
+               static_cast<int>(sizeof(diameter_label_font_info)),
+               &diameter_label_font_info)
+            != static_cast<int>(sizeof(diameter_label_font_info))
+        || GetObjectW(
+               diameter_edit_font,
+               static_cast<int>(sizeof(diameter_edit_font_info)),
+               &diameter_edit_font_info)
+            != static_cast<int>(sizeof(diameter_edit_font_info))
+        || diameter_edit_bounds.bottom - diameter_edit_bounds.top
+            >= diameter_label_bounds.bottom - diameter_label_bounds.top
+        || (diameter_edit_bounds.top + diameter_edit_bounds.bottom)
+                - (diameter_label_bounds.top + diameter_label_bounds.bottom)
+            < -1
+        || (diameter_edit_bounds.top + diameter_edit_bounds.bottom)
+                - (diameter_label_bounds.top + diameter_label_bounds.bottom)
+            > 1
+        || diameter_label_font_info.lfHeight >= 0
+        || diameter_edit_font_info.lfHeight >= 0
+        || diameter_edit_font_info.lfHeight
+            <= diameter_label_font_info.lfHeight) {
+        return 765;
+    }
     if (state.tools.active_tool != INKPOD_TOOL_PENCIL
         || IsWindowEnabled(diameter_edit) != FALSE
         || !diameter_text_is(L"1.0")

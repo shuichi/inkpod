@@ -23,6 +23,7 @@ struct ToolOptionsPaneState {
     InkpodPlaneKind active_plane{INKPOD_PLANE_MAIN_LINE};
     float diameter{8.0F};
     HFONT font{};
+    HFONT edit_font{};
     bool updating{};
     bool editing{};
 };

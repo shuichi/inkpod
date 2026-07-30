@@ -20,6 +20,52 @@ int ScaleForDpi(int value, UINT dpi) noexcept {
     return MulDiv(value, static_cast<int>(dpi == 0U ? 96U : dpi), 96);
 }
 
+HFONT CreatePaneFont(HWND pane, int point_size) noexcept {
+    const UINT dpi = GetDpiForWindow(pane);
+    return CreateFontW(
+        -MulDiv(point_size, static_cast<int>(dpi == 0U ? 96U : dpi), 72),
+        0,
+        0,
+        0,
+        FW_NORMAL,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI");
+}
+
+int EditControlHeight(HWND pane, HFONT font, UINT dpi) noexcept {
+    const int fallback = ScaleForDpi(20, dpi);
+    if (font == nullptr) {
+        return fallback;
+    }
+    const HDC dc = GetDC(pane);
+    if (dc == nullptr) {
+        return fallback;
+    }
+    const HGDIOBJ previous = SelectObject(dc, font);
+    TEXTMETRICW metrics{};
+    const bool measured = previous != nullptr
+        && GetTextMetricsW(dc, &metrics) != FALSE;
+    if (previous != nullptr) {
+        SelectObject(dc, previous);
+    }
+    ReleaseDC(pane, dc);
+    if (!measured) {
+        return fallback;
+    }
+    const UINT effective_dpi = dpi == 0U ? 96U : dpi;
+    const int border = std::max(
+        1, GetSystemMetricsForDpi(SM_CYBORDER, effective_dpi));
+    const int padding = ScaleForDpi(2, dpi);
+    return metrics.tmHeight + 2 * (border + padding);
+}
+
 const wchar_t* ToolLabel(std::uint32_t tool) noexcept {
     if (tool == INKPOD_TOOL_PENCIL) return L"鉛筆";
     if (tool == INKPOD_TOOL_BRUSH) return L"ブラシ";
@@ -71,6 +117,12 @@ void LayoutPane(HWND pane) noexcept {
     const UINT dpi = GetDpiForWindow(pane);
     const int margin = ScaleForDpi(8, dpi);
     const int row = ScaleForDpi(24, dpi);
+    auto* state = reinterpret_cast<ToolOptionsPaneState*>(
+        GetWindowLongPtrW(pane, GWLP_USERDATA));
+    const int edit_height = std::min(
+        row,
+        EditControlHeight(
+            pane, state == nullptr ? nullptr : state->edit_font, dpi));
     const int tool_width = ScaleForDpi(150, dpi);
     const int target_label_width = ScaleForDpi(70, dpi);
     const int target_button_width = ScaleForDpi(58, dpi);
@@ -80,6 +132,7 @@ void LayoutPane(HWND pane) noexcept {
     int x = margin;
     const int y = std::max(
         0, (static_cast<int>(client.bottom) - row) / 2);
+    const int edit_y = y + (row - edit_height) / 2;
     SetWindowPos(
         GetDlgItem(pane, IDC_TOOL_OPTIONS_LABEL),
         nullptr,
@@ -89,8 +142,6 @@ void LayoutPane(HWND pane) noexcept {
         row,
         SWP_NOACTIVATE | SWP_NOZORDER);
     x += tool_width + margin;
-    auto* state = reinterpret_cast<ToolOptionsPaneState*>(
-        GetWindowLongPtrW(pane, GWLP_USERDATA));
     if (state != nullptr && state->active_tool == INKPOD_TOOL_ERASER) {
         SetWindowPos(
             GetDlgItem(pane, IDC_TOOL_OPTIONS_TARGET_LABEL),
@@ -133,9 +184,9 @@ void LayoutPane(HWND pane) noexcept {
         GetDlgItem(pane, IDC_TOOL_OPTIONS_DIAMETER),
         nullptr,
         x,
-        y,
+        edit_y,
         edit_width,
-        row,
+        edit_height,
         SWP_NOACTIVATE | SWP_NOZORDER);
     x += edit_width + margin;
     SetWindowPos(
@@ -149,28 +200,20 @@ void LayoutPane(HWND pane) noexcept {
 }
 
 void UpdateFont(HWND pane, ToolOptionsPaneState& state) noexcept {
-    const HFONT replacement = CreateFontW(
-        -MulDiv(9, static_cast<int>(GetDpiForWindow(pane)), 72),
-        0,
-        0,
-        0,
-        FW_NORMAL,
-        FALSE,
-        FALSE,
-        FALSE,
-        DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_DONTCARE,
-        L"Segoe UI");
-    if (replacement == nullptr) {
+    const HFONT replacement = CreatePaneFont(pane, 9);
+    const HFONT edit_replacement = CreatePaneFont(pane, 8);
+    if (replacement == nullptr || edit_replacement == nullptr) {
+        if (replacement != nullptr) {
+            DeleteObject(replacement);
+        }
+        if (edit_replacement != nullptr) {
+            DeleteObject(edit_replacement);
+        }
         return;
     }
     for (const int control : {
              IDC_TOOL_OPTIONS_LABEL,
              IDC_TOOL_OPTIONS_DIAMETER_LABEL,
-             IDC_TOOL_OPTIONS_DIAMETER,
              IDC_TOOL_OPTIONS_DETAILS,
              IDC_TOOL_OPTIONS_TARGET_LABEL,
              IDC_TOOL_OPTIONS_TARGET_MAIN_LINE,
@@ -178,10 +221,20 @@ void UpdateFont(HWND pane, ToolOptionsPaneState& state) noexcept {
         SendDlgItemMessageW(
             pane, control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), TRUE);
     }
+    SendDlgItemMessageW(
+        pane,
+        IDC_TOOL_OPTIONS_DIAMETER,
+        WM_SETFONT,
+        reinterpret_cast<WPARAM>(edit_replacement),
+        TRUE);
     if (state.font != nullptr) {
         DeleteObject(state.font);
     }
+    if (state.edit_font != nullptr) {
+        DeleteObject(state.edit_font);
+    }
     state.font = replacement;
+    state.edit_font = edit_replacement;
 }
 
 void CommitDiameter(HWND pane, ToolOptionsPaneState& state) noexcept {
@@ -264,9 +317,15 @@ LRESULT CALLBACK PaneSubclassProcedure(
             }
             return 0;
         case WM_NCDESTROY:
-            if (state != nullptr && state->font != nullptr) {
-                DeleteObject(state->font);
-                state->font = nullptr;
+            if (state != nullptr) {
+                if (state->font != nullptr) {
+                    DeleteObject(state->font);
+                    state->font = nullptr;
+                }
+                if (state->edit_font != nullptr) {
+                    DeleteObject(state->edit_font);
+                    state->edit_font = nullptr;
+                }
             }
             RemoveWindowSubclass(pane, PaneSubclassProcedure, kPaneSubclass);
             break;
