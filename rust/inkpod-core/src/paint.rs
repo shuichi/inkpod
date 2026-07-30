@@ -5,10 +5,15 @@ use crate::document::ensure_editable_plane;
 use crate::selection::{combine_selection_masks, selection_from_rect};
 
 impl Core {
+    /// Applies a fill atomically to the active editable raster plane.
     pub fn apply_fill(&mut self, request: &FillRequest) -> Result<FillOutcome, CoreError> {
         self.apply_fill_with_cancel(request, || false)
     }
 
+    /// Applies a fill with optional visible light-table boundary/color sampling.
+    ///
+    /// Success creates at most one history entry; a zero-pixel result is a no-op.
+    /// Invalid input and fill failure leave document state unchanged.
     pub fn apply_fill_with_light_table(
         &mut self,
         request: &FillRequest,
@@ -18,6 +23,10 @@ impl Core {
         self.apply_fill_internal(request, use_boundary, use_sampled_color, || false)
     }
 
+    /// Applies a light-table-aware fill with cooperative cancellation.
+    ///
+    /// The callback may be invoked repeatedly. Cancellation returns
+    /// [`CoreError::Cancelled`] and never commits partial pixels, revision, or history.
     pub fn apply_fill_with_light_table_and_cancel(
         &mut self,
         request: &FillRequest,
@@ -28,6 +37,9 @@ impl Core {
         self.apply_fill_internal(request, use_boundary, use_sampled_color, is_cancelled)
     }
 
+    /// Applies a fill with cooperative cancellation and no light-table sampling.
+    ///
+    /// Cancellation and failure are atomic; a successful change is one undo unit.
     pub fn apply_fill_with_cancel(
         &mut self,
         request: &FillRequest,
@@ -72,7 +84,7 @@ impl Core {
                 &document.selection,
                 &operation,
                 SelectionOperation::Intersect,
-                self.document_revision,
+                self.document_revision.get(),
             )?),
             (true, None) => Some(document.selection.clone()),
             (false, operation) => operation,
@@ -108,7 +120,7 @@ impl Core {
                                 ));
                             }
                         };
-                        raster.set_pixel(x, y, boundary, self.document_revision)?;
+                        raster.set_pixel(x, y, boundary, self.document_revision.get())?;
                     }
                 }
             }
@@ -189,7 +201,7 @@ impl Core {
         if plan.edits.is_empty() {
             return Ok(FillOutcome {
                 dispatch: DispatchOutcome {
-                    revision: self.document_revision,
+                    revision: self.document_revision.get(),
                     accepted_commands: 1,
                 },
                 changed_pixels: 0,
@@ -204,7 +216,7 @@ impl Core {
         let mut changes = Vec::with_capacity(plan.edits.len());
         let mut touched = BTreeSet::new();
         for edit in plan.edits {
-            next_color.set_pixel(edit.x, edit.y, edit.after, revision)?;
+            next_color.set_pixel(edit.x, edit.y, edit.after, revision.get())?;
             touched.insert(TileCoord {
                 x: edit.x / TILE_SIZE,
                 y: edit.y / TILE_SIZE,
@@ -231,13 +243,16 @@ impl Core {
         self.commit_pixel_history(target_plane_id, changes, after_state);
         Ok(FillOutcome {
             dispatch: DispatchOutcome {
-                revision,
+                revision: revision.get(),
                 accepted_commands: 1,
             },
             changed_pixels,
         })
     }
 
+    /// Samples a color at one in-bounds document pixel from the requested source.
+    ///
+    /// Sampling is read-only and does not affect revisions, history, or dirty state.
     pub fn eyedropper(
         &self,
         source: EyedropperSource,
@@ -270,6 +285,7 @@ impl Core {
         ))
     }
 
+    /// Borrows palette colors for the lifetime of the Core borrow.
     pub fn palette(&self) -> Result<&[PixelValue], CoreError> {
         Ok(self
             .document
@@ -279,6 +295,10 @@ impl Core {
             .colors())
     }
 
+    /// Atomically replaces the document palette.
+    ///
+    /// An identical palette is a no-op; a change is one undoable edit. Invalid
+    /// formats or palette limits fail without partial replacement.
     pub fn replace_palette(&mut self, colors: &[PixelValue]) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let mut after = Palette::default();
@@ -292,22 +312,14 @@ impl Core {
             .palette
             .clone();
         if before == after {
-            return Ok(DispatchOutcome {
-                revision: self.document_revision,
-                accepted_commands: 1,
-            });
+            return Ok(self.noop_outcome());
         }
-        let revision = self.next_document_revision()?;
-        let after_state = self.allocate_state()?;
-        self.document.as_mut().ok_or(CoreError::NoDocument)?.palette = after.clone();
-        self.document_revision = revision;
-        self.commit_history_change(HistoryChange::Palette { before, after }, after_state);
-        Ok(DispatchOutcome {
-            revision,
-            accepted_commands: 1,
-        })
+        let mut edit = self.begin_document_edit()?;
+        edit.working_mut().palette = after;
+        edit.commit_palette(self)
     }
 
+    /// Returns the straight-alpha RGBA main-line display color.
     pub fn main_line_color(&self) -> Result<PixelValue, CoreError> {
         Ok(self
             .document
@@ -316,6 +328,9 @@ impl Core {
             .main_line_color)
     }
 
+    /// Replaces the main-line display color as one undoable metadata edit.
+    ///
+    /// Only RGBA values are accepted; identical color is a no-op.
     pub fn set_main_line_color(&mut self, color: PixelValue) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         if color.rgba16().is_none() {
@@ -336,32 +351,17 @@ impl Core {
         }
         let before = document.main_line_color;
         if before == color {
-            return Ok(DispatchOutcome {
-                revision: self.document_revision,
-                accepted_commands: 1,
-            });
+            return Ok(self.noop_outcome());
         }
-        let revision = self.next_document_revision()?;
-        let after_state = self.allocate_state()?;
-        self.document
-            .as_mut()
-            .ok_or(CoreError::NoDocument)?
-            .main_line_color = color;
-        self.document_revision = revision;
-        self.render_cache.clear();
-        self.commit_history_change(
-            HistoryChange::MainLineColor {
-                before,
-                after: color,
-            },
-            after_state,
-        );
-        Ok(DispatchOutcome {
-            revision,
-            accepted_commands: 1,
-        })
+        let mut edit = self.begin_document_edit()?;
+        edit.working_mut().main_line_color = color;
+        edit.commit_main_line_color(self)
     }
 
+    /// Selects a non-destructive color-check render mode.
+    ///
+    /// A change advances only view revision and invalidates render cache; document
+    /// revision, history, dirty state, and savepoint are unchanged.
     pub fn set_color_check(
         &mut self,
         mode: Option<ColorCheckMode>,
@@ -375,7 +375,7 @@ impl Core {
             self.view.revision = self
                 .view
                 .revision
-                .checked_add(1)
+                .checked_next()
                 .ok_or(CoreError::InvalidState("view revision overflow"))?;
             self.render_cache.clear();
         }

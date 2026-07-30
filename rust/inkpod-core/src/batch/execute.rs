@@ -7,6 +7,11 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 impl Core {
+    /// Expands inputs and derives output paths/warnings without writing outputs.
+    ///
+    /// The graph is fully validated and source documents may be decoded for
+    /// inspection, but the active Core document, revision, history, and dirty state
+    /// are unchanged.
     pub fn batch_preview(
         &self,
         graph: &BatchGraph,
@@ -60,9 +65,9 @@ impl Core {
                     };
                     let document = working.document.as_ref().ok_or(CoreError::NoDocument)?;
                     let plane = document
-                        .plane_by_id(plane_id.ok_or(CoreError::InvalidArgument(
-                            "continuous fill requires a plane selector",
-                        ))?)
+                        .plane_by_id(PlaneId::from_raw(plane_id.ok_or(
+                            CoreError::InvalidArgument("continuous fill requires a plane selector"),
+                        )?))
                         .ok_or(CoreError::InvalidState("batch target plane disappeared"))?;
                     for (seed_index, seed) in seeds.iter().enumerate() {
                         let actual = plane.raster.pixel(seed.x, seed.y)?;
@@ -94,6 +99,12 @@ impl Core {
         Ok(BatchPreview { items })
     }
 
+    /// Executes a validated graph using isolated working Core instances.
+    ///
+    /// `progress(completed, total)` may return `false` to cancel before the next
+    /// commit/output boundary. Failed, cancelled, and stale operations never publish
+    /// partial working documents; already completed output files are reported and
+    /// are not rolled back. This method never mutates the receiver's active document.
     pub fn batch_execute(
         &self,
         graph: &BatchGraph,

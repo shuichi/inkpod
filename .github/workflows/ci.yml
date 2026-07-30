@@ -25,6 +25,8 @@ jobs:
       - run: cargo test --workspace --all-features
       - if: matrix.os == 'ubuntu-latest'
         run: cargo bench -p inkpod-image --bench large_document -- --quick
+      - if: matrix.os == 'ubuntu-latest'
+        run: cargo bench -p inkpod-core --bench core_workflows -- --quick
 
   windows:
     name: Windows (${{ matrix.preset }})

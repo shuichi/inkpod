@@ -220,6 +220,74 @@ fn rust_crate_roots_remain_small_indices_and_cmake_tracks_sources() {
 }
 
 #[test]
+fn core_responsibility_modules_remain_split_and_declarative() {
+    let core_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source_root = core_root.join("src");
+
+    for legacy_path in [
+        "vector/operations.rs",
+        "batch/codec.rs",
+        "transform.rs",
+        "view.rs",
+    ] {
+        assert!(
+            !source_root.join(legacy_path).exists(),
+            "legacy Core monolith must not return: {legacy_path}"
+        );
+    }
+
+    for module_path in [
+        "vector/path_operations.rs",
+        "vector/selection.rs",
+        "vector/rasterization.rs",
+        "vector/vectorization.rs",
+        "vector/thumbnail.rs",
+        "batch/codec/codes.rs",
+        "batch/codec/operation.rs",
+        "batch/codec/filter.rs",
+        "batch/codec/payload.rs",
+        "transform/document.rs",
+        "transform/raster.rs",
+        "transform/frame.rs",
+        "transform/numeric.rs",
+        "view/commands.rs",
+        "view/coordinates.rs",
+        "view/guides.rs",
+        "view/secondary.rs",
+        "view/shortcuts.rs",
+    ] {
+        assert!(
+            source_root.join(module_path).is_file(),
+            "Core responsibility module is missing: {module_path}"
+        );
+    }
+
+    for index_path in [
+        "vector/mod.rs",
+        "batch/codec/mod.rs",
+        "transform/mod.rs",
+        "view/mod.rs",
+    ] {
+        let path = source_root.join(index_path);
+        let contents = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        assert!(
+            !contents.contains("impl Core")
+                && !contents.lines().any(|line| {
+                    let line = line.trim_start();
+                    line.starts_with("fn ")
+                        || line.starts_with("pub fn ")
+                        || line.starts_with("pub(super) fn ")
+                        || line.starts_with("pub(crate) fn ")
+                        || line.starts_with("pub(in ") && line.contains(" fn ")
+                }),
+            "{} must remain a declarative module index",
+            path.display()
+        );
+    }
+}
+
+#[test]
 fn inline_test_modules_are_cfg_test_gated() {
     let rust_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

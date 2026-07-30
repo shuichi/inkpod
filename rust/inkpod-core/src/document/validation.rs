@@ -126,7 +126,7 @@ pub(crate) fn unique_plane_name(planes: &[PlaneNode], requested: &str) -> String
 
 pub(crate) fn find_plane_indices(
     document: &CellDocument,
-    plane_id: u64,
+    plane_id: PlaneId,
 ) -> Result<(usize, usize), CoreError> {
     document
         .layers
@@ -144,7 +144,7 @@ pub(crate) fn find_plane_indices(
 
 pub(crate) fn ensure_editable_plane(
     document: &CellDocument,
-    plane_id: u64,
+    plane_id: PlaneId,
 ) -> Result<(), CoreError> {
     let (layer_index, plane_index) = find_plane_indices(document, plane_id)?;
     if !document.layers[layer_index].editable
@@ -168,5 +168,72 @@ pub(crate) fn bounded_document_pixels(width: u32, height: u32) -> Result<u64, Co
         ))
     } else {
         Ok(pixels)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plane(id: u64, kind: PlaneType, format: PixelFormat) -> PlaneNode {
+        PlaneNode {
+            id: PlaneId::from_raw(id),
+            kind,
+            name: format!("Plane {id}"),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            raster: TileRaster::new(4, 4, format).unwrap(),
+        }
+    }
+
+    #[test]
+    fn layer_topology_rejects_missing_duplicate_and_incompatible_required_planes() {
+        let main = plane(1, PlaneType::MainLine, PixelFormat::BinaryMask8);
+        let color = plane(2, PlaneType::Color, PixelFormat::StraightRgba8);
+        assert!(validate_layer_kind(LayerKind::BinaryColoring, &[main.clone(), color]).is_ok());
+        assert!(
+            validate_layer_kind(LayerKind::BinaryColoring, std::slice::from_ref(&main)).is_err()
+        );
+        assert!(validate_layer_kind(LayerKind::BinaryColoring, &[main.clone(), main]).is_err());
+        assert!(validate_plane_format(PlaneType::MainLine, PixelFormat::StraightRgba8).is_err());
+    }
+
+    #[test]
+    fn new_document_has_unique_stable_ids_and_valid_active_references() {
+        let document = CellDocument::new(
+            DocumentIds {
+                document: DocumentId::from_raw(1),
+                layer: LayerId::from_raw(2),
+                main_plane: PlaneId::from_raw(3),
+                color_plane: PlaneId::from_raw(4),
+                selection_plane: PlaneId::from_raw(5),
+                light_table_set: LightTableSetId::from_raw(6),
+            },
+            7,
+            PaperSpec {
+                width: 4,
+                height: 4,
+                dpi_x_milli: DEFAULT_DPI_MILLI,
+                dpi_y_milli: DEFAULT_DPI_MILLI,
+            },
+        )
+        .unwrap();
+        let mut ids = BTreeSet::new();
+        assert!(ids.insert(document.id.get()));
+        assert!(ids.insert(document.selection_plane_id.get()));
+        for layer in &document.layers {
+            assert!(ids.insert(layer.id.get()));
+            for plane in &layer.planes {
+                assert!(ids.insert(plane.id.get()));
+            }
+        }
+        assert!(
+            document
+                .layers
+                .iter()
+                .any(|layer| layer.id == document.active_layer_id)
+        );
+        assert!(document.plane_by_id(document.active_plane_id).is_some());
     }
 }

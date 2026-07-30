@@ -4,26 +4,40 @@ use crate::persistence::{file_plane_to_raster, raster_to_file_plane};
 use inkpod_format::{FileLightTableItem, FileLightTableMetadata, FileLightTableSet};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Owned tightly packed raster bytes accepted by animation import helpers.
 pub struct RgbaRasterBytes {
+    /// Raster width in pixels.
     pub width: u32,
+    /// Raster height in pixels.
     pub height: u32,
+    /// Pixel encoding represented by `pixels`.
     pub pixel_format: PixelFormat,
+    /// Optional horizontal resolution in thousandths of a DPI.
     pub dpi_x_milli: Option<u32>,
+    /// Optional vertical resolution in thousandths of a DPI.
     pub dpi_y_milli: Option<u32>,
+    /// Tightly packed top-to-bottom pixel bytes in `pixel_format`.
     pub pixels: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Validated immutable raster source used by a light-table item.
 pub struct LightTableSource {
+    /// Persistent UUID of the source document.
     pub document_uuid: u128,
+    /// Nonzero source content revision used for cache invalidation.
     pub source_revision: u64,
+    /// Reference frame in source document pixels used for alignment.
     pub reference_frame: RectI32,
+    /// Horizontal source resolution in thousandths of a DPI.
     pub dpi_x_milli: u32,
+    /// Vertical source resolution in thousandths of a DPI.
     pub dpi_y_milli: u32,
     pub(super) raster: TileRaster,
 }
 
 impl LightTableSource {
+    /// Validates and converts owned tightly packed raster bytes into a source.
     pub fn from_rgba_bytes(
         document_uuid: u128,
         source_revision: u64,
@@ -41,6 +55,10 @@ impl LightTableSource {
         Self::from_common_raster(document_uuid, source_revision, reference_frame, &raster)
     }
 
+    /// Validates and copies a common raster into a tiled light-table source.
+    ///
+    /// UUID and revision must be nonzero and the reference frame must have positive
+    /// dimensions. Failure returns no partially constructed source.
     pub fn from_common_raster(
         document_uuid: u128,
         source_revision: u64,
@@ -64,50 +82,76 @@ impl LightTableSource {
         })
     }
 
+    /// Returns source width in pixels.
     #[must_use]
     pub const fn width(&self) -> u32 {
         self.raster.width()
     }
 
+    /// Returns source height in pixels.
     #[must_use]
     pub const fn height(&self) -> u32 {
         self.raster.height()
     }
 
+    /// Returns the source pixel format.
     #[must_use]
     pub const fn pixel_format(&self) -> PixelFormat {
         self.raster.format()
     }
 }
 
+/// Complete input for a new light-table item.
 pub struct LightTableItemInput {
+    /// User-visible item name.
     pub name: String,
+    /// Owned immutable source raster and identity.
     pub source: LightTableSource,
+    /// Whether the item is individually visible.
     pub visible: bool,
+    /// Item opacity in `0..=1000` before set opacity is applied.
     pub opacity_milli: u32,
+    /// Color/display treatment.
     pub display_mode: LightTableDisplayMode,
+    /// Straight-alpha display color used by non-color modes.
     pub display_color: PixelValue,
+    /// Horizontal document translation in thousandths of a pixel.
     pub translate_x_milli: i32,
+    /// Vertical document translation in thousandths of a pixel.
     pub translate_y_milli: i32,
+    /// Positive horizontal scale in thousandths (`1000 == 1.0`).
     pub scale_x_milli: u32,
+    /// Positive vertical scale in thousandths (`1000 == 1.0`).
     pub scale_y_milli: u32,
+    /// Clockwise rotation in thousandths of a degree.
     pub rotation_milli_degrees: i32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Mutable display properties of an existing light-table item.
 pub struct LightTableItemProperties {
+    /// Whether the item is individually visible.
     pub visible: bool,
+    /// Item opacity in `0..=1000` before set opacity is applied.
     pub opacity_milli: u32,
+    /// Color/display treatment.
     pub display_mode: LightTableDisplayMode,
+    /// Straight-alpha display color used by non-color modes.
     pub display_color: PixelValue,
+    /// Horizontal document translation in thousandths of a pixel.
     pub translate_x_milli: i32,
+    /// Vertical document translation in thousandths of a pixel.
     pub translate_y_milli: i32,
+    /// Positive horizontal scale in thousandths (`1000 == 1.0`).
     pub scale_x_milli: u32,
+    /// Positive vertical scale in thousandths (`1000 == 1.0`).
     pub scale_y_milli: u32,
+    /// Clockwise rotation in thousandths of a degree.
     pub rotation_milli_degrees: i32,
 }
 
 impl LightTableItemInput {
+    /// Creates a visible, fully opaque, untransformed color-mode item.
     #[must_use]
     pub fn new(name: impl Into<String>, source: LightTableSource) -> Self {
         Self {
@@ -127,37 +171,59 @@ impl LightTableItemInput {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Public metadata for one item in the active light-table set.
 pub struct LightTableItemInfo {
+    /// Stable item ID, valid until removal.
     pub id: u64,
+    /// Stable internal source-plane ID used by persistence and rendering.
     pub source_plane_id: u64,
+    /// User-visible item name.
     pub name: String,
+    /// Persistent UUID of the source document.
     pub source_document_uuid: u128,
+    /// Source revision used for reload/cache comparison.
     pub source_revision: u64,
+    /// Whether the item is individually visible.
     pub visible: bool,
+    /// Item opacity in `0..=1000`.
     pub opacity_milli: u32,
+    /// Combined item/set opacity in `0..=1000`.
     pub effective_opacity_milli: u32,
+    /// Color/display treatment.
     pub display_mode: LightTableDisplayMode,
+    /// Straight-alpha display color.
     pub display_color: PixelValue,
+    /// Horizontal document translation in thousandths of a pixel.
     pub translate_x_milli: i32,
+    /// Vertical document translation in thousandths of a pixel.
     pub translate_y_milli: i32,
+    /// Horizontal scale in thousandths.
     pub scale_x_milli: u32,
+    /// Vertical scale in thousandths.
     pub scale_y_milli: u32,
+    /// Clockwise rotation in thousandths of a degree.
     pub rotation_milli_degrees: i32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Public metadata for one light-table set.
 pub struct LightTableSetInfo {
+    /// Stable set ID, valid until deletion.
     pub id: u64,
+    /// User-visible set name.
     pub name: String,
+    /// Whether this is the active set.
     pub active: bool,
+    /// Set opacity in `0..=1000`.
     pub global_opacity_milli: u32,
+    /// Number of contained items.
     pub item_count: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct LightTableItem {
-    pub(super) id: u64,
-    pub(super) source_plane_id: u64,
+    pub(super) id: LightTableItemId,
+    pub(super) source_plane_id: PlaneId,
     pub(super) name: String,
     pub(super) source: LightTableSource,
     pub(super) visible: bool,
@@ -173,7 +239,7 @@ pub(super) struct LightTableItem {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct LightTableSet {
-    pub(super) id: u64,
+    pub(super) id: LightTableSetId,
     pub(super) name: String,
     pub(super) global_opacity_milli: u32,
     pub(super) items: Vec<LightTableItem>,
@@ -181,12 +247,12 @@ pub(super) struct LightTableSet {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LightTableState {
-    pub(super) active_set_id: u64,
+    pub(super) active_set_id: LightTableSetId,
     pub(super) sets: Vec<LightTableSet>,
 }
 
 impl LightTableState {
-    pub(crate) fn new(default_set_id: u64) -> Self {
+    pub(crate) fn new(default_set_id: LightTableSetId) -> Self {
         Self {
             active_set_id: default_set_id,
             sets: vec![LightTableSet {
@@ -212,10 +278,10 @@ impl LightTableState {
         self.sets
             .iter()
             .flat_map(|set| {
-                std::iter::once(set.id).chain(
+                std::iter::once(set.id.get()).chain(
                     set.items
                         .iter()
-                        .flat_map(|item| [item.id, item.source_plane_id]),
+                        .flat_map(|item| [item.id.get(), item.source_plane_id.get()]),
                 )
             })
             .max()
@@ -252,7 +318,7 @@ impl LightTableState {
             .flat_map(|set| set.items.iter())
             .map(|item| {
                 raster_to_file_plane(
-                    item.source_plane_id,
+                    item.source_plane_id.get(),
                     FilePlaneKind::LightTable,
                     &item.source.raster,
                 )
@@ -262,20 +328,20 @@ impl LightTableState {
 
     pub(crate) fn to_file(&self) -> FileLightTableMetadata {
         FileLightTableMetadata {
-            active_set_id: self.active_set_id,
+            active_set_id: self.active_set_id.get(),
             sets: self
                 .sets
                 .iter()
                 .map(|set| FileLightTableSet {
-                    id: set.id,
+                    id: set.id.get(),
                     name: set.name.clone(),
                     global_opacity_milli: set.global_opacity_milli,
                     items: set
                         .items
                         .iter()
                         .map(|item| FileLightTableItem {
-                            id: item.id,
-                            source_plane_id: item.source_plane_id,
+                            id: item.id.get(),
+                            source_plane_id: item.source_plane_id.get(),
                             source_document_uuid: item.source.document_uuid.to_le_bytes(),
                             source_revision: item.source.source_revision,
                             source_reference_frame: item.source.reference_frame,
@@ -301,8 +367,8 @@ impl LightTableState {
     pub(crate) fn from_file(
         metadata: Option<&FileLightTableMetadata>,
         planes: &[FilePlane],
-        revision: u64,
-        legacy_set_id: u64,
+        revision: DocumentRevision,
+        legacy_set_id: LightTableSetId,
     ) -> Result<Self, CoreError> {
         let Some(metadata) = metadata else {
             return Ok(Self::new(legacy_set_id));
@@ -323,8 +389,8 @@ impl LightTableState {
                     ));
                 }
                 items.push(LightTableItem {
-                    id: item.id,
-                    source_plane_id: item.source_plane_id,
+                    id: LightTableItemId::from_raw(item.id),
+                    source_plane_id: PlaneId::from_raw(item.source_plane_id),
                     name: item.name.clone(),
                     source: LightTableSource {
                         document_uuid: u128::from_le_bytes(item.source_document_uuid),
@@ -332,7 +398,7 @@ impl LightTableState {
                         reference_frame: item.source_reference_frame,
                         dpi_x_milli: item.source_dpi_x_milli,
                         dpi_y_milli: item.source_dpi_y_milli,
-                        raster: file_plane_to_raster(plane, revision)?,
+                        raster: file_plane_to_raster(plane, revision.get())?,
                     },
                     visible: item.visible,
                     opacity_milli: item.opacity_milli,
@@ -346,14 +412,14 @@ impl LightTableState {
                 });
             }
             sets.push(LightTableSet {
-                id: set.id,
+                id: LightTableSetId::from_raw(set.id),
                 name: set.name.clone(),
                 global_opacity_milli: set.global_opacity_milli,
                 items,
             });
         }
         Ok(Self {
-            active_set_id: metadata.active_set_id,
+            active_set_id: LightTableSetId::from_raw(metadata.active_set_id),
             sets,
         })
     }
@@ -566,4 +632,110 @@ fn display_item_pixel(
         }
     }
     Ok(rgba)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: u64, source: LightTableSource) -> LightTableItem {
+        LightTableItem {
+            id: LightTableItemId::from_raw(id),
+            source_plane_id: PlaneId::from_raw(id + 100),
+            name: format!("Item {id}"),
+            source,
+            visible: true,
+            opacity_milli: 1_000,
+            display_mode: LightTableDisplayMode::Color,
+            display_color: PixelValue::Rgba([0, 0, 0, 255]),
+            translate_x_milli: 0,
+            translate_y_milli: 0,
+            scale_x_milli: 1_000,
+            scale_y_milli: 1_000,
+            rotation_milli_degrees: 0,
+        }
+    }
+
+    fn source(uuid: u128, frame: RectI32, pixels: Vec<u8>) -> LightTableSource {
+        LightTableSource::from_rgba_bytes(
+            uuid,
+            1,
+            frame,
+            RgbaRasterBytes {
+                width: 3,
+                height: 3,
+                pixel_format: PixelFormat::StraightRgba8,
+                dpi_x_milli: Some(DEFAULT_DPI_MILLI),
+                dpi_y_milli: Some(DEFAULT_DPI_MILLI),
+                pixels,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn reference_frame_alignment_and_topmost_item_order_are_stable() {
+        let mut aligned_pixels = vec![0_u8; 3 * 3 * 4];
+        let center_offset = 16;
+        aligned_pixels[center_offset..center_offset + 4].copy_from_slice(&[10, 20, 30, 255]);
+        let aligned = item(
+            1,
+            source(
+                1,
+                RectI32 {
+                    x: 1,
+                    y: 1,
+                    width: 3,
+                    height: 3,
+                },
+                aligned_pixels,
+            ),
+        );
+        let top = item(
+            2,
+            source(
+                2,
+                RectI32 {
+                    x: 1,
+                    y: 1,
+                    width: 3,
+                    height: 3,
+                },
+                [200, 100, 50, 255].repeat(9),
+            ),
+        );
+        let state = LightTableState {
+            active_set_id: LightTableSetId::from_raw(9),
+            sets: vec![LightTableSet {
+                id: LightTableSetId::from_raw(9),
+                name: "Default".to_owned(),
+                global_opacity_milli: 1_000,
+                items: vec![top, aligned],
+            }],
+        };
+        let destination = RectI32 {
+            x: 4,
+            y: 4,
+            width: 3,
+            height: 3,
+        };
+        assert_eq!(
+            state.sample(destination, 4, 4).unwrap(),
+            Some(PixelValue::Rgba([200, 100, 50, 255]))
+        );
+        let aligned_only = LightTableState {
+            active_set_id: LightTableSetId::from_raw(9),
+            sets: vec![LightTableSet {
+                id: LightTableSetId::from_raw(9),
+                name: "Default".to_owned(),
+                global_opacity_milli: 1_000,
+                items: vec![state.sets[0].items[1].clone()],
+            }],
+        };
+        assert_eq!(
+            aligned_only.sample(destination, 4, 4).unwrap(),
+            Some(PixelValue::Rgba([10, 20, 30, 255]))
+        );
+        assert_eq!(aligned_only.sample(destination, 3, 3).unwrap(), None);
+    }
 }

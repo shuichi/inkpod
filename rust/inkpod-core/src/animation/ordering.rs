@@ -64,3 +64,34 @@ fn digit_run_end(bytes: &[u8], start: usize) -> usize {
     }
     end
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn natural_cell_order_handles_gaps_zero_padding_case_and_large_numbers() {
+        let mut names = vec![
+            "cell10.png",
+            "Cell2.png",
+            "cell0002.png",
+            "cell1.png",
+            "cell999999999999999999999999.png",
+            "cell20.png",
+        ];
+        names.sort_by(|left, right| natural_cmp(left, right));
+        assert_eq!(
+            names,
+            vec![
+                "cell1.png",
+                "Cell2.png",
+                "cell0002.png",
+                "cell10.png",
+                "cell20.png",
+                "cell999999999999999999999999.png",
+            ]
+        );
+        assert_eq!(parse_cell_number("cut-A-0042.tga"), Some(42));
+        assert_eq!(parse_cell_number("no-number"), None);
+    }
+}

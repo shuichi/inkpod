@@ -3,15 +3,33 @@
 use super::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Recoverable error returned by public Core operations.
+///
+/// Public operations do not panic for invalid caller input. An error means that
+/// no partial document, history, revision, dirty, or savepoint change was committed.
 pub enum CoreError {
+    /// The operation requires an open document.
     NoDocument,
+    /// A supplied value, ID, range, or combination is invalid.
     InvalidArgument(&'static str),
+    /// Current Core state does not permit the requested operation.
     InvalidState(&'static str),
+    /// A raster allocation or pixel operation failed.
     Raster(RasterError),
+    /// A bounded fill operation failed.
     Fill(FillError),
-    FillOverflow { x: u32, y: u32 },
+    /// A fill configured to abort at the image edge overflowed.
+    FillOverflow {
+        /// Edge x-coordinate in document pixels.
+        x: u32,
+        /// Edge y-coordinate in document pixels.
+        y: u32,
+    },
+    /// Cancellation was observed before the transaction commit point.
     Cancelled,
+    /// A sequence switch was refused because the current document is dirty.
     UnsavedChanges,
+    /// Native-format validation, decode, or encode failed.
     Format(String),
 }
 

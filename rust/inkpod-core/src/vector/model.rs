@@ -1,114 +1,185 @@
 use super::geometry::*;
 use super::*;
 
+/// A cubic vector segment stored in document coordinates.
+///
+/// View zoom, pan, flip, and OS DPI are applied only by the renderer and never
+/// mutate these control points or document-space widths.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VectorCubicSegment {
+    /// Segment start point in document pixels.
     pub p0: PointF32,
+    /// First cubic control point in document pixels.
     pub p1: PointF32,
+    /// Second cubic control point in document pixels.
     pub p2: PointF32,
+    /// Segment end point in document pixels.
     pub p3: PointF32,
+    /// Positive stroke width at `p0`, in document pixels.
     pub width_start: f32,
+    /// Positive stroke width at `p3`, in document pixels.
     pub width_end: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Caller-owned geometry and appearance for a new vector path.
 pub struct VectorPathInput {
+    /// Ordered, contiguous cubic segments in document coordinates.
     pub segments: Vec<VectorCubicSegment>,
+    /// Straight-alpha path color.
     pub color: PixelValue,
+    /// Whether the final point connects back to the first.
     pub closed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Public metadata and owned geometry for one vector path.
 pub struct VectorPathInfo {
+    /// Stable path ID, valid until the path is erased or its layer is removed.
     pub id: u64,
+    /// Stable owning plane ID.
     pub plane_id: u64,
+    /// Ordered cubic segments in document coordinates.
     pub segments: Vec<VectorCubicSegment>,
+    /// Straight-alpha path color.
     pub color: PixelValue,
+    /// Whether the path is closed.
     pub closed: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Public metadata for a vector fill bounded by paths.
 pub struct VectorFillInfo {
+    /// Stable fill ID, valid until the fill is deleted or its layer is removed.
     pub id: u64,
+    /// Stable owning plane ID.
     pub plane_id: u64,
+    /// Straight-alpha fill color.
     pub color: PixelValue,
+    /// Ordered stable IDs of boundary paths.
     pub boundary_path_ids: Vec<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Extent of a vector eraser operation.
 pub enum VectorEraseMode {
+    /// Removes only the hit portion and retains remaining path pieces.
     Partial,
+    /// Removes from the hit to the nearest intersection.
     ToIntersection,
+    /// Removes every path touched by the eraser.
     WholePath,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+/// Operation applied to vector stroke widths.
 pub enum VectorWidthMode {
+    /// Adds the supplied document-pixel width.
     Add(f32),
+    /// Subtracts the supplied document-pixel width.
     Subtract(f32),
+    /// Multiplies widths by the supplied positive factor.
     Scale(f32),
+    /// Sets a constant positive document-pixel width.
     Constant(f32),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Hit-testing rule used to select vector paths and fills.
 pub enum VectorSelectionMode {
+    /// Selects only ranges inside and cuts at the selection boundary.
     CutBySelection,
+    /// Selects paths touching the selection.
     Touching,
+    /// Selects paths fully contained by the selection.
     FullyContained,
+    /// Selects hit path ranges.
     Line,
+    /// Selects whole hit paths.
     WholeLine,
+    /// Selects from a hit to the nearest intersection.
     ToIntersection,
+    /// Selects paths used as fill boundaries.
     FillBoundary,
+    /// Selects fills inside the selection.
     Fill,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Parametric selected range on one vector path.
 pub struct VectorSelectionRange {
+    /// Stable path ID.
     pub path_id: u64,
+    /// Start parameter in millionths of the full path (`0..=1_000_000`).
     pub start_million: u32,
+    /// End parameter in millionths of the full path (`0..=1_000_000`).
     pub end_million: u32,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// Deterministically ordered vector selection result.
 pub struct VectorSelectionResult {
+    /// Selected path ranges.
     pub path_ranges: Vec<VectorSelectionRange>,
+    /// Stable IDs of selected fills.
     pub fill_ids: Vec<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Owned straight-alpha RGBA8 rasterization of vector content.
 pub struct VectorRaster {
+    /// Raster width in pixels.
     pub width: u32,
+    /// Raster height in pixels.
     pub height: u32,
+    /// Byte distance between adjacent rows.
     pub stride_bytes: u32,
+    /// Top-to-bottom straight-alpha RGBA8 bytes.
     pub pixels: Vec<u8>,
 }
 
+/// One immutable document-coordinate vector segment in a render snapshot.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderVectorSegment {
+    /// Stable source path ID.
     pub path_id: u64,
+    /// Stable source plane ID.
     pub plane_id: u64,
+    /// Deterministic stacking order within the snapshot.
     pub z_order: u32,
+    /// Zero-based index within the path.
     pub segment_index: u32,
+    /// Total number of segments in the path.
     pub segment_count: u32,
+    /// Straight-alpha RGBA8 stroke color.
     pub color_rgba: [u8; 4],
+    /// Whether the source path is closed.
     pub closed: bool,
+    /// Whether the source plane is currently visible.
     pub stroke_visible: bool,
+    /// Document-coordinate cubic geometry and widths.
     pub cubic: VectorCubicSegment,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// One immutable document-coordinate vector fill in a render snapshot.
 pub struct RenderVectorFill {
+    /// Stable source fill ID.
     pub fill_id: u64,
+    /// Stable source plane ID.
     pub plane_id: u64,
+    /// Deterministic stacking order within the snapshot.
     pub z_order: u32,
+    /// Straight-alpha RGBA8 fill color.
     pub color_rgba: [u8; 4],
+    /// Stable source path IDs forming the boundary.
     pub boundary_path_ids: Vec<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct VectorPath {
-    pub(super) id: u64,
-    pub(super) plane_id: u64,
+    pub(super) id: VectorPathId,
+    pub(super) plane_id: PlaneId,
     pub(super) color: PixelValue,
     pub(super) closed: bool,
     pub(super) segments: Vec<VectorSegment>,
@@ -116,10 +187,10 @@ pub(super) struct VectorPath {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct VectorFill {
-    pub(super) id: u64,
-    pub(super) plane_id: u64,
+    pub(super) id: VectorFillId,
+    pub(super) plane_id: PlaneId,
     pub(super) color: PixelValue,
-    pub(super) boundary_path_ids: Vec<u64>,
+    pub(super) boundary_path_ids: Vec<VectorPathId>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -163,8 +234,8 @@ impl VectorState {
                 .paths
                 .iter()
                 .map(|path| FileVectorPath {
-                    id: path.id,
-                    plane_id: path.plane_id,
+                    id: path.id.get(),
+                    plane_id: path.plane_id.get(),
                     color: path.color,
                     closed: path.closed,
                     segments: path
@@ -185,10 +256,10 @@ impl VectorState {
                 .fills
                 .iter()
                 .map(|fill| FileVectorFill {
-                    id: fill.id,
-                    plane_id: fill.plane_id,
+                    id: fill.id.get(),
+                    plane_id: fill.plane_id.get(),
                     color: fill.color,
-                    boundary_path_ids: fill.boundary_path_ids.clone(),
+                    boundary_path_ids: fill.boundary_path_ids.iter().map(|id| id.get()).collect(),
                 })
                 .collect(),
         })
@@ -200,8 +271,8 @@ impl VectorState {
                 .paths
                 .iter()
                 .map(|path| VectorPath {
-                    id: path.id,
-                    plane_id: path.plane_id,
+                    id: VectorPathId::from_raw(path.id),
+                    plane_id: PlaneId::from_raw(path.plane_id),
                     color: path.color,
                     closed: path.closed,
                     segments: path
@@ -222,10 +293,15 @@ impl VectorState {
                 .fills
                 .iter()
                 .map(|fill| VectorFill {
-                    id: fill.id,
-                    plane_id: fill.plane_id,
+                    id: VectorFillId::from_raw(fill.id),
+                    plane_id: PlaneId::from_raw(fill.plane_id),
                     color: fill.color,
-                    boundary_path_ids: fill.boundary_path_ids.clone(),
+                    boundary_path_ids: fill
+                        .boundary_path_ids
+                        .iter()
+                        .copied()
+                        .map(VectorPathId::from_raw)
+                        .collect(),
                 })
                 .collect(),
         })
@@ -234,8 +310,8 @@ impl VectorState {
     pub(crate) fn maximum_id(&self) -> u64 {
         self.paths
             .iter()
-            .map(|path| path.id)
-            .chain(self.fills.iter().map(|fill| fill.id))
+            .map(|path| path.id.get())
+            .chain(self.fills.iter().map(|fill| fill.id.get()))
             .max()
             .unwrap_or(0)
     }
@@ -303,7 +379,7 @@ impl VectorState {
             .min(MAX_VECTOR_BOUNDARIES - boundaries))
     }
 
-    pub(crate) fn remove_plane(&mut self, plane_id: u64) {
+    pub(crate) fn remove_plane(&mut self, plane_id: PlaneId) {
         let removed: BTreeSet<_> = self
             .paths
             .iter()
@@ -320,7 +396,7 @@ impl VectorState {
         });
     }
 
-    pub(crate) fn remove_layer(&mut self, document: &CellDocument, layer_id: u64) {
+    pub(crate) fn remove_layer(&mut self, document: &CellDocument, layer_id: LayerId) {
         if let Some(layer) = document.layers.iter().find(|layer| layer.id == layer_id) {
             for plane in &layer.planes {
                 self.remove_plane(plane.id);
@@ -328,7 +404,11 @@ impl VectorState {
         }
     }
 
-    pub(crate) fn duplicate_planes(&mut self, plane_map: &BTreeMap<u64, u64>, next_id: &mut u64) {
+    pub(crate) fn duplicate_planes(
+        &mut self,
+        plane_map: &BTreeMap<PlaneId, PlaneId>,
+        next_id: &mut StableIdCursor,
+    ) {
         let source_paths: Vec<_> = self
             .paths
             .iter()
@@ -338,7 +418,7 @@ impl VectorState {
         let mut path_map = BTreeMap::new();
         for mut path in source_paths {
             let source_id = path.id;
-            path.id = take_id(next_id);
+            path.id = next_id.take_vector_path();
             path.plane_id = plane_map[&path.plane_id];
             path_map.insert(source_id, path.id);
             self.paths.push(path);
@@ -350,7 +430,7 @@ impl VectorState {
             .cloned()
             .collect();
         for mut fill in source_fills {
-            fill.id = take_id(next_id);
+            fill.id = next_id.take_vector_fill();
             fill.plane_id = plane_map[&fill.plane_id];
             fill.boundary_path_ids = fill
                 .boundary_path_ids
@@ -363,7 +443,7 @@ impl VectorState {
         }
     }
 
-    pub(crate) fn reassign_plane(&mut self, old_plane_id: u64, new_plane_id: u64) {
+    pub(crate) fn reassign_plane(&mut self, old_plane_id: PlaneId, new_plane_id: PlaneId) {
         for path in self
             .paths
             .iter_mut()
@@ -403,11 +483,11 @@ impl VectorState {
                     .find(|plane| plane.id == fill.plane_id)
                     .expect("matched vector fill plane");
                 fills.push(RenderVectorFill {
-                    fill_id: fill.id,
-                    plane_id: fill.plane_id,
+                    fill_id: fill.id.get(),
+                    plane_id: fill.plane_id.get(),
                     z_order: z_order as u32,
                     color_rgba: display_color(fill.color, layer.opacity_milli, plane.opacity_milli),
-                    boundary_path_ids: fill.boundary_path_ids.clone(),
+                    boundary_path_ids: fill.boundary_path_ids.iter().map(|id| id.get()).collect(),
                 });
             }
             // Match raster coloring semantics: color-trace planes paint first
@@ -419,8 +499,8 @@ impl VectorState {
                             display_color(path.color, layer.opacity_milli, plane.opacity_milli);
                         for (index, segment) in path.segments.iter().enumerate() {
                             segments.push(RenderVectorSegment {
-                                path_id: path.id,
-                                plane_id: path.plane_id,
+                                path_id: path.id.get(),
+                                plane_id: path.plane_id.get(),
                                 z_order: z_order as u32,
                                 segment_index: index as u32,
                                 segment_count: path.segments.len() as u32,

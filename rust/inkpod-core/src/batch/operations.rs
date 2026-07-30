@@ -151,6 +151,8 @@ pub(super) fn apply_color_replacement(
     pairs: &[BatchColorPair],
     progress: &mut impl FnMut(u64, u64) -> bool,
 ) -> Result<(), CoreError> {
+    let plane_id = PlaneId::from_raw(plane_id);
+    let base_revision = core.document_revision;
     let before = core.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
     let source = before
         .plane_by_id(plane_id)
@@ -184,7 +186,7 @@ pub(super) fn apply_color_replacement(
                 .map(|pair| pair.new)
             {
                 ensure_pixel_matches_format(replacement, raster.format())?;
-                raster.set_pixel(x, y, replacement, revision)?;
+                raster.set_pixel(x, y, replacement, revision.get())?;
                 touched.insert(TileCoord {
                     x: x / TILE_SIZE,
                     y: y / TILE_SIZE,
@@ -195,7 +197,7 @@ pub(super) fn apply_color_replacement(
     for coord in touched {
         raster.remove_tile_if_empty(coord);
     }
-    core.commit_document_edit_with_revision(before, after, revision)?;
+    core.commit_deferred_document_edit(before, after, base_revision, revision)?;
     Ok(())
 }
 
@@ -205,6 +207,8 @@ pub(super) fn apply_separation(
     options: &BatchSeparation,
     progress: &mut impl FnMut(u64, u64) -> bool,
 ) -> Result<(), CoreError> {
+    let plane_id = PlaneId::from_raw(plane_id);
+    let base_revision = core.document_revision;
     let before = core.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
     let source = before
         .plane_by_id(plane_id)
@@ -230,11 +234,11 @@ pub(super) fn apply_separation(
                 x,
                 y,
                 if selected { options.replacement } else { empty },
-                revision,
+                revision.get(),
             )?;
         }
     }
-    core.commit_document_edit_with_revision(before, after, revision)?;
+    core.commit_deferred_document_edit(before, after, base_revision, revision)?;
     Ok(())
 }
 
@@ -307,8 +311,8 @@ pub(super) fn working_core(source: &BatchSource) -> Result<Core, CoreError> {
 
 pub(super) fn core_from_document(document: CellDocument) -> Core {
     let mut core = Core::new();
-    core.next_id = document.max_stable_id().saturating_add(1).max(1);
-    core.document_revision = 1;
+    core.next_id = StableIdCursor::from_next_raw(document.max_stable_id().saturating_add(1));
+    core.document_revision = DocumentRevision::from_raw(1);
     core.document = Some(document);
     core.reset_history(true);
     core

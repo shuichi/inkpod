@@ -3,6 +3,10 @@ use super::sequence::*;
 use super::*;
 
 impl Core {
+    /// Installs validated sequence sources in deterministic natural-name order.
+    ///
+    /// This changes sequence-only state, clears motion/subpalette state, and does
+    /// not change the active document, revision, history, dirty state, or savepoint.
     pub fn set_sequence(&mut self, mut cells: Vec<SequenceCellSource>) -> Result<(), CoreError> {
         if cells.is_empty() || cells.len() > MAX_SEQUENCE_CELLS {
             return Err(CoreError::InvalidArgument(
@@ -38,6 +42,9 @@ impl Core {
         Ok(())
     }
 
+    /// Decodes named common-raster files and atomically installs them as a sequence.
+    ///
+    /// Any decode or validation failure retains the previous sequence state.
     pub fn import_sequence(
         &mut self,
         format: CommonRasterFormat,
@@ -59,6 +66,7 @@ impl Core {
         self.set_sequence(cells)
     }
 
+    /// Returns owned metadata and thumbnails in natural sequence order.
     pub fn sequence_cells(&self) -> Result<Vec<SequenceCellInfo>, CoreError> {
         let sequence = self
             .sequence
@@ -80,6 +88,10 @@ impl Core {
             .collect()
     }
 
+    /// Activates the adjacent sequence cell, optionally wrapping at the ends.
+    ///
+    /// Dirty documents and active strokes are rejected. Endpoint no-op keeps the
+    /// current document; a switch installs a clean document and resets history/view.
     pub fn sequence_step(
         &mut self,
         direction: SequenceDirection,
@@ -119,6 +131,10 @@ impl Core {
         self.sequence_activate(target)
     }
 
+    /// Activates a sequence cell by zero-based natural-order index.
+    ///
+    /// The current index is a no-op. Dirty/invalid switches do not replace the active
+    /// document; success establishes a clean savepoint with reset history and view.
     pub fn sequence_activate(&mut self, target: usize) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
         if self.document_info()?.dirty {
@@ -154,6 +170,7 @@ impl Core {
         self.document_info()
     }
 
+    /// Encodes every installed sequence source without mutating Core state.
     pub fn export_sequence(
         &self,
         format: CommonRasterFormat,
@@ -177,6 +194,7 @@ impl Core {
             .collect()
     }
 
+    /// Registers one sequence cell as the read-only subpalette sampling source.
     pub fn set_subpalette_cell(&mut self, index: usize) -> Result<(), CoreError> {
         let sequence = self
             .sequence
@@ -191,6 +209,7 @@ impl Core {
         Ok(())
     }
 
+    /// Samples the registered subpalette cell at an in-bounds source pixel.
     pub fn subpalette_sample(&self, x: u32, y: u32) -> Result<PixelValue, CoreError> {
         let sequence = self
             .sequence
@@ -202,6 +221,9 @@ impl Core {
         Ok(sequence.cells[index].raster.pixel(x, y)?)
     }
 
+    /// Starts sequence motion-check playback using a supported FPS.
+    ///
+    /// Playback state is transient and does not change document revisions/history.
     pub fn motion_check_start(
         &mut self,
         config: MotionCheckConfig,
@@ -224,6 +246,7 @@ impl Core {
         self.motion_frame()
     }
 
+    /// Moves motion-check playback one frame in the requested direction.
     pub fn motion_check_step(
         &mut self,
         direction: SequenceDirection,
@@ -265,6 +288,7 @@ impl Core {
         self.motion_frame()
     }
 
+    /// Toggles motion-check pause state and returns the current frame.
     pub fn motion_check_toggle_pause(&mut self) -> Result<MotionFrame, CoreError> {
         let state = self
             .motion_check
@@ -274,6 +298,7 @@ impl Core {
         self.motion_frame()
     }
 
+    /// Stops motion-check playback; calling it while stopped is a no-op.
     pub fn motion_check_stop(&mut self) {
         self.motion_check = None;
     }
@@ -303,15 +328,15 @@ impl Core {
     fn document_from_sequence_source(
         &mut self,
         source: &SequenceCellSource,
-        _revision: u64,
+        _revision: DocumentRevision,
     ) -> Result<CellDocument, CoreError> {
         let ids = DocumentIds {
-            document: self.allocate_id(),
-            layer: self.allocate_id(),
-            main_plane: self.allocate_id(),
-            color_plane: self.allocate_id(),
-            selection_plane: self.allocate_id(),
-            light_table_set: self.allocate_id(),
+            document: self.next_id.take_document(),
+            layer: self.next_id.take_layer(),
+            main_plane: self.next_id.take_plane(),
+            color_plane: self.next_id.take_plane(),
+            selection_plane: self.next_id.take_plane(),
+            light_table_set: self.next_id.take_light_table_set(),
         };
         let mut document = CellDocument::new(
             ids,

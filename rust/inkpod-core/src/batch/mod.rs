@@ -8,6 +8,7 @@ use super::{
     RotateDirection, TILE_SIZE, TileCoord, VectorWidthMode,
 };
 use crate::animation::{SequenceCellSource, parse_cell_number};
+use crate::identity::*;
 use inkpod_format::{
     BATCH_GRAPH_VERSION, FileBatchGraph, FileBatchInput, FileBatchOperation, FileBatchOutput,
     FileBatchTarget, read_batch_graph, save_batch_graph_atomic,
@@ -16,6 +17,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Version required in every [`BatchOperation`] payload.
 pub const BATCH_OPERATION_VERSION: u32 = 1;
 const MAX_BATCH_COLOR_PAIRS: usize = 4_096;
 const MAX_BATCH_SEEDS: usize = 4_096;

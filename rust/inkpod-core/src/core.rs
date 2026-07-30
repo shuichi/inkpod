@@ -9,48 +9,51 @@ impl Default for Core {
 }
 
 impl Core {
+    pub(super) fn allocate_layer_id(&mut self) -> LayerId {
+        self.next_id.take_layer()
+    }
+
+    pub(super) fn allocate_plane_id(&mut self) -> PlaneId {
+        self.next_id.take_plane()
+    }
+
+    pub(super) fn allocate_guide_id(&mut self) -> GuideId {
+        self.next_id.take_guide()
+    }
+
+    pub(super) fn allocate_light_table_set_id(&mut self) -> LightTableSetId {
+        self.next_id.take_light_table_set()
+    }
+
+    pub(super) fn allocate_light_table_item_id(&mut self) -> LightTableItemId {
+        self.next_id.take_light_table_item()
+    }
+
+    /// Creates an empty single-writer Core with no open document.
     #[must_use]
     pub fn new() -> Self {
         let shortcuts = default_shortcuts();
         Self {
             document: None,
-            document_revision: 0,
-            view: ViewState {
-                zoom: 1.0,
-                pan_x: 0.0,
-                pan_y: 0.0,
-                revision: 0,
-                mode: ViewMode::Manual,
-                flip_horizontal: false,
-                flip_vertical: false,
-                ruler_visible: false,
-                guides_visible: true,
-                grid_visible: false,
-                snap_enabled: false,
-                guide_snap_enabled: false,
-                grid_snap_enabled: false,
-                transparent_view: true,
-                alpha_view: false,
-                viewport_width: 1.0,
-                viewport_height: 1.0,
-            },
+            document_revision: DocumentRevision::from_raw(0),
+            view: ViewState::default(),
             history: Vec::new(),
             history_cursor: 0,
-            current_state: 0,
-            next_state: 1,
+            current_state: HistoryStateId::from_raw(0),
+            next_state: HistoryStateId::from_raw(1),
             savepoint: None,
-            next_id: 1,
+            next_id: StableIdCursor::first(),
             current_path: None,
             recovered: false,
             active_stroke: None,
             filter_preview: None,
             last_filter: None,
             render_cache: BTreeMap::new(),
-            next_render_tile_revision: 1,
-            next_preview_revision: 1_u64 << 63,
+            next_render_tile_revision: RenderRevision::from_raw(1),
+            next_preview_revision: PreviewRevision::from_raw(1_u64 << 63),
             color_check: None,
             secondary_views: BTreeMap::new(),
-            next_view_id: 1,
+            next_view_id: ViewId::from_raw(1),
             floating: None,
             shortcut_defaults: shortcuts.clone(),
             shortcuts,
@@ -60,14 +63,23 @@ impl Core {
         }
     }
 
+    /// Accepts a batch of lightweight commands without mutating document state.
+    ///
+    /// The current command vocabulary contains only [`Command::NoOp`], so the
+    /// document revision, history, dirty state, and savepoint remain unchanged.
     #[must_use]
     pub fn dispatch(&mut self, commands: &[Command]) -> DispatchOutcome {
         DispatchOutcome {
-            revision: self.document_revision,
+            revision: self.document_revision.get(),
             accepted_commands: commands.len() as u64,
         }
     }
 
+    /// Replaces the current document with a blank cell using a generated UUID.
+    ///
+    /// Dimensions and DPI must satisfy the image limits. Success cancels active
+    /// transient sessions, resets history and view state, and establishes a clean
+    /// in-memory savepoint. Validation failure leaves the current document intact.
     pub fn new_cell(
         &mut self,
         width: u32,
@@ -75,10 +87,15 @@ impl Core {
         dpi_x_milli: u32,
         dpi_y_milli: u32,
     ) -> Result<DocumentInfo, CoreError> {
-        let uuid = (u128::from(0x494e_4b50_4f44_4d31_u64) << 64) | u128::from(self.next_id);
+        let uuid =
+            (u128::from(0x494e_4b50_4f44_4d31_u64) << 64) | u128::from(self.next_id.next_raw());
         self.new_cell_with_uuid(width, height, dpi_x_milli, dpi_y_milli, uuid)
     }
 
+    /// Replaces the current document with a blank cell using `document_uuid`.
+    ///
+    /// This has the same revision, history, dirty, and cancellation semantics as
+    /// [`Core::new_cell`], while allowing a caller-controlled persistent UUID.
     pub fn new_cell_with_uuid(
         &mut self,
         width: u32,
@@ -92,12 +109,12 @@ impl Core {
         self.last_filter = None;
         self.render_cache.clear();
         let ids = DocumentIds {
-            document: self.allocate_id(),
-            layer: self.allocate_id(),
-            main_plane: self.allocate_id(),
-            color_plane: self.allocate_id(),
-            selection_plane: self.allocate_id(),
-            light_table_set: self.allocate_id(),
+            document: self.next_id.take_document(),
+            layer: self.next_id.take_layer(),
+            main_plane: self.next_id.take_plane(),
+            color_plane: self.next_id.take_plane(),
+            selection_plane: self.next_id.take_plane(),
+            light_table_set: self.next_id.take_light_table_set(),
         };
         let document = CellDocument::new(
             ids,
@@ -133,25 +150,25 @@ impl Core {
 #[derive(Debug)]
 pub struct Core {
     pub(super) document: Option<CellDocument>,
-    pub(super) document_revision: u64,
+    pub(super) document_revision: DocumentRevision,
     pub(super) view: ViewState,
     pub(super) history: Vec<HistoryEntry>,
     pub(super) history_cursor: usize,
-    pub(super) current_state: u64,
-    pub(super) next_state: u64,
-    pub(super) savepoint: Option<u64>,
-    pub(super) next_id: u64,
+    pub(super) current_state: HistoryStateId,
+    pub(super) next_state: HistoryStateId,
+    pub(super) savepoint: Option<HistoryStateId>,
+    pub(super) next_id: StableIdCursor,
     pub(super) current_path: Option<PathBuf>,
     pub(super) recovered: bool,
     pub(super) active_stroke: Option<StrokeSession>,
     pub(super) filter_preview: Option<effects::FilterPreview>,
     pub(super) last_filter: Option<Filter>,
     pub(super) render_cache: BTreeMap<TileCoord, RenderTile>,
-    pub(super) next_render_tile_revision: u64,
-    pub(super) next_preview_revision: u64,
+    pub(super) next_render_tile_revision: RenderRevision,
+    pub(super) next_preview_revision: PreviewRevision,
     pub(super) color_check: Option<ColorCheckMode>,
-    pub(super) secondary_views: BTreeMap<u64, ViewState>,
-    pub(super) next_view_id: u64,
+    pub(super) secondary_views: BTreeMap<ViewId, ViewState>,
+    pub(super) next_view_id: ViewId,
     pub(super) floating: Option<FloatingSelection>,
     pub(super) shortcut_defaults: BTreeMap<u32, Vec<ShortcutStroke>>,
     pub(super) shortcuts: BTreeMap<u32, Vec<ShortcutStroke>>,
@@ -160,66 +177,193 @@ pub struct Core {
     pub(super) subpalette_index: Option<usize>,
 }
 
-impl Core {
-    pub(super) fn allocate_id(&mut self) -> u64 {
-        let id = self.next_id;
-        self.next_id = self.next_id.saturating_add(1).max(1);
-        id
-    }
+/// One synchronous document edit staged independently from the live Core state.
+///
+/// Only `working` is exposed mutably. Committing consumes the edit, verifies
+/// that its base revision is still current, and publishes document, history,
+/// revision, and cache changes as one operation.
+#[derive(Debug)]
+pub(super) struct DocumentEdit {
+    before: CellDocument,
+    working: CellDocument,
+    base_revision: DocumentRevision,
+    commit_revision: DocumentRevision,
+}
 
-    pub(super) const fn noop_outcome(&self) -> DispatchOutcome {
-        DispatchOutcome {
-            revision: self.document_revision,
-            accepted_commands: 1,
-        }
-    }
+#[derive(Clone, Copy, Debug)]
+enum DocumentEditHistory {
+    Document,
+    Palette,
+    MainLineColor,
+}
 
-    pub(super) fn commit_document_edit(
-        &mut self,
-        before: CellDocument,
-        after: CellDocument,
-    ) -> Result<DispatchOutcome, CoreError> {
-        let revision = self.next_document_revision()?;
-        self.commit_document_edit_with_revision(before, after, revision)
-    }
-
-    pub(super) fn commit_document_edit_with_revision(
-        &mut self,
-        before: CellDocument,
-        after: CellDocument,
-        revision: u64,
-    ) -> Result<DispatchOutcome, CoreError> {
-        if before == after {
-            return Ok(self.noop_outcome());
-        }
-        let after_state = self.allocate_state()?;
-        self.document = Some(after.clone());
-        self.document_revision = revision;
-        self.render_cache.clear();
-        self.commit_history_change(
-            HistoryChange::Document {
-                before: Box::new(before),
-                after: Box::new(after),
-            },
-            after_state,
-        );
-        Ok(DispatchOutcome {
-            revision,
-            accepted_commands: 1,
+impl DocumentEdit {
+    fn begin(core: &Core) -> Result<Self, CoreError> {
+        let before = core.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        Ok(Self {
+            working: before.clone(),
+            before,
+            base_revision: core.document_revision,
+            commit_revision: core.next_document_revision()?,
         })
     }
 
-    pub(super) fn next_document_revision(&self) -> Result<u64, CoreError> {
+    fn from_staged(
+        before: CellDocument,
+        working: CellDocument,
+        base_revision: DocumentRevision,
+        commit_revision: DocumentRevision,
+    ) -> Self {
+        Self {
+            before,
+            working,
+            base_revision,
+            commit_revision,
+        }
+    }
+
+    pub(super) const fn working_mut(&mut self) -> &mut CellDocument {
+        &mut self.working
+    }
+
+    pub(super) const fn documents(&mut self) -> (&CellDocument, &mut CellDocument) {
+        (&self.before, &mut self.working)
+    }
+
+    pub(super) const fn revision(&self) -> DocumentRevision {
+        self.commit_revision
+    }
+
+    pub(super) fn commit(self, core: &mut Core) -> Result<DispatchOutcome, CoreError> {
+        self.commit_with_history(core, DocumentEditHistory::Document)
+    }
+
+    pub(super) fn commit_palette(self, core: &mut Core) -> Result<DispatchOutcome, CoreError> {
+        self.commit_with_history(core, DocumentEditHistory::Palette)
+    }
+
+    pub(super) fn commit_main_line_color(
+        self,
+        core: &mut Core,
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.commit_with_history(core, DocumentEditHistory::MainLineColor)
+    }
+
+    fn commit_with_history(
+        self,
+        core: &mut Core,
+        history: DocumentEditHistory,
+    ) -> Result<DispatchOutcome, CoreError> {
+        if core.document_revision != self.base_revision {
+            return Err(CoreError::InvalidState(
+                "document edit base revision is stale",
+            ));
+        }
+        if self.base_revision.checked_next() != Some(self.commit_revision) {
+            return Err(CoreError::InvalidState(
+                "document edit commit revision does not follow its base",
+            ));
+        }
+        match history {
+            DocumentEditHistory::Palette => {
+                let mut expected = self.before.clone();
+                expected.palette = self.working.palette.clone();
+                if expected != self.working {
+                    return Err(CoreError::InvalidState(
+                        "palette edit changed unrelated document state",
+                    ));
+                }
+            }
+            DocumentEditHistory::MainLineColor => {
+                let mut expected = self.before.clone();
+                expected.main_line_color = self.working.main_line_color;
+                if expected != self.working {
+                    return Err(CoreError::InvalidState(
+                        "main-line color edit changed unrelated document state",
+                    ));
+                }
+            }
+            DocumentEditHistory::Document => {}
+        }
+        if self.before == self.working {
+            return Ok(core.noop_outcome());
+        }
+
+        let after_state = core.allocate_state()?;
+        let change = match history {
+            DocumentEditHistory::Document => HistoryChange::Document {
+                before: Box::new(self.before),
+                after: Box::new(self.working.clone()),
+            },
+            DocumentEditHistory::Palette => HistoryChange::Palette {
+                before: self.before.palette,
+                after: self.working.palette.clone(),
+            },
+            DocumentEditHistory::MainLineColor => HistoryChange::MainLineColor {
+                before: self.before.main_line_color,
+                after: self.working.main_line_color,
+            },
+        };
+
+        core.document = Some(self.working);
+        core.document_revision = self.commit_revision;
+        if !matches!(history, DocumentEditHistory::Palette) {
+            core.render_cache.clear();
+        }
+        core.commit_history_change(change, after_state);
+        Ok(DispatchOutcome {
+            revision: self.commit_revision.get(),
+            accepted_commands: 1,
+        })
+    }
+}
+
+impl Core {
+    pub(super) const fn noop_outcome(&self) -> DispatchOutcome {
+        DispatchOutcome {
+            revision: self.document_revision.get(),
+            accepted_commands: 1,
+        }
+    }
+
+    pub(super) fn begin_document_edit(&self) -> Result<DocumentEdit, CoreError> {
+        DocumentEdit::begin(self)
+    }
+
+    /// Publishes work staged by an explicitly excluded session, cancellable,
+    /// reload, or potentially long-running path through the same atomic
+    /// commit boundary without changing that path's ownership design.
+    pub(super) fn commit_deferred_document_edit(
+        &mut self,
+        before: CellDocument,
+        working: CellDocument,
+        base_revision: DocumentRevision,
+        commit_revision: DocumentRevision,
+    ) -> Result<DispatchOutcome, CoreError> {
+        DocumentEdit::from_staged(before, working, base_revision, commit_revision).commit(self)
+    }
+
+    pub(super) fn commit_deferred_document_edit_current(
+        &mut self,
+        before: CellDocument,
+        working: CellDocument,
+    ) -> Result<DispatchOutcome, CoreError> {
+        let base_revision = self.document_revision;
+        let commit_revision = self.next_document_revision()?;
+        self.commit_deferred_document_edit(before, working, base_revision, commit_revision)
+    }
+
+    pub(super) fn next_document_revision(&self) -> Result<DocumentRevision, CoreError> {
         self.document_revision
-            .checked_add(1)
+            .checked_next()
             .ok_or(CoreError::InvalidState("document revision overflow"))
     }
 
-    pub(super) fn allocate_preview_revision(&mut self) -> Result<u64, CoreError> {
+    pub(super) fn allocate_preview_revision(&mut self) -> Result<PreviewRevision, CoreError> {
         let revision = self.next_preview_revision;
         self.next_preview_revision = self
             .next_preview_revision
-            .checked_add(1)
+            .checked_next()
             .ok_or(CoreError::InvalidState("preview revision overflow"))?;
         Ok(revision)
     }
@@ -234,11 +378,11 @@ impl Core {
         }
     }
 
-    pub(super) fn allocate_state(&mut self) -> Result<u64, CoreError> {
+    pub(super) fn allocate_state(&mut self) -> Result<HistoryStateId, CoreError> {
         let state = self.next_state;
         self.next_state = self
             .next_state
-            .checked_add(1)
+            .checked_next()
             .ok_or(CoreError::InvalidState("history state overflow"))?;
         Ok(state)
     }
@@ -247,12 +391,12 @@ impl Core {
         self.history.clear();
         self.history_cursor = 0;
         self.current_state = self.next_state;
-        self.next_state = self.next_state.saturating_add(1);
+        self.next_state = self.next_state.saturating_next();
         self.savepoint = saved.then_some(self.current_state);
     }
 
     pub(super) fn reset_view(&mut self) {
-        let revision = self.view.revision.saturating_add(1);
+        let revision = self.view.revision.saturating_next();
         self.view = ViewState {
             revision,
             ..ViewState::default()
@@ -261,14 +405,18 @@ impl Core {
 
     pub(super) fn commit_pixel_history(
         &mut self,
-        plane_id: u64,
+        plane_id: PlaneId,
         changes: Vec<PixelChange>,
-        after_state: u64,
+        after_state: HistoryStateId,
     ) {
         self.commit_history_change(HistoryChange::Pixels { plane_id, changes }, after_state);
     }
 
-    pub(super) fn commit_history_change(&mut self, change: HistoryChange, after_state: u64) {
+    pub(super) fn commit_history_change(
+        &mut self,
+        change: HistoryChange,
+        after_state: HistoryStateId,
+    ) {
         self.history.truncate(self.history_cursor);
         let before_state = self.current_state;
         self.history.push(HistoryEntry {
@@ -284,7 +432,7 @@ impl Core {
         &mut self,
         entry: &HistoryEntry,
         use_after: bool,
-        revision: u64,
+        revision: DocumentRevision,
     ) -> Result<(), CoreError> {
         let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
         match &entry.change {
@@ -304,7 +452,7 @@ impl Core {
                         } else {
                             change.before
                         },
-                        revision,
+                        revision.get(),
                     )?;
                     touched.insert(TileCoord {
                         x: change.x / TILE_SIZE,
@@ -336,5 +484,191 @@ impl Core {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn initialized_core() -> Core {
+        let mut core = Core::new();
+        core.new_cell(4, 4, 96_000, 96_000).unwrap();
+        core
+    }
+
+    #[test]
+    fn unchanged_transaction_preserves_revision_history_state_and_cache() {
+        let mut core = initialized_core();
+        let _ = core.build_snapshot();
+        let before_revision = core.document_revision;
+        let before_history = core.history.clone();
+        let before_state = core.current_state;
+        let before_next_state = core.next_state;
+        let before_cache = core.render_cache.clone();
+
+        let edit = core.begin_document_edit().unwrap();
+        let outcome = edit.commit(&mut core).unwrap();
+
+        assert_eq!(outcome.revision, before_revision.get());
+        assert_eq!(core.document_revision, before_revision);
+        assert_eq!(core.history.len(), before_history.len());
+        assert_eq!(core.current_state, before_state);
+        assert_eq!(core.next_state, before_next_state);
+        assert_eq!(core.render_cache, before_cache);
+    }
+
+    #[test]
+    fn changed_transaction_commits_once_and_undo_redo_uses_the_right_sides() {
+        let mut core = initialized_core();
+        let _ = core.build_snapshot();
+        let before = core.document.clone().unwrap();
+        let before_revision = core.document_revision;
+        let mut edit = core.begin_document_edit().unwrap();
+        edit.working_mut().grid.origin_x = 7;
+        let expected = edit.working_mut().clone();
+
+        let outcome = edit.commit(&mut core).unwrap();
+
+        assert_eq!(
+            outcome.revision,
+            before_revision.checked_next().unwrap().get()
+        );
+        assert_eq!(core.history.len(), 1);
+        assert_eq!(core.history_cursor, 1);
+        assert!(core.render_cache.is_empty());
+        assert_eq!(core.document.as_ref(), Some(&expected));
+
+        core.undo().unwrap();
+        assert_eq!(core.document.as_ref(), Some(&before));
+        core.redo().unwrap();
+        assert_eq!(core.document.as_ref(), Some(&expected));
+    }
+
+    #[test]
+    fn stale_and_overflow_failures_publish_no_partial_state() {
+        let mut stale_core = initialized_core();
+        let _ = stale_core.build_snapshot();
+        let mut stale_edit = stale_core.begin_document_edit().unwrap();
+        stale_edit.working_mut().grid.origin_y = 9;
+        stale_core.document_revision = stale_core.document_revision.checked_next().unwrap();
+        let stale_document = stale_core.document.clone();
+        let stale_history_len = stale_core.history.len();
+        let stale_next_state = stale_core.next_state;
+        let stale_cache = stale_core.render_cache.clone();
+
+        assert!(matches!(
+            stale_edit.commit(&mut stale_core),
+            Err(CoreError::InvalidState(
+                "document edit base revision is stale"
+            ))
+        ));
+        assert_eq!(stale_core.document, stale_document);
+        assert_eq!(stale_core.history.len(), stale_history_len);
+        assert_eq!(stale_core.next_state, stale_next_state);
+        assert_eq!(stale_core.render_cache, stale_cache);
+
+        let mut history_overflow_core = initialized_core();
+        let _ = history_overflow_core.build_snapshot();
+        let mut overflow_edit = history_overflow_core.begin_document_edit().unwrap();
+        overflow_edit.working_mut().grid.origin_x = 11;
+        history_overflow_core.next_state = HistoryStateId::from_raw(u64::MAX);
+        let overflow_document = history_overflow_core.document.clone();
+        let overflow_revision = history_overflow_core.document_revision;
+        let overflow_cache = history_overflow_core.render_cache.clone();
+
+        assert!(matches!(
+            overflow_edit.commit(&mut history_overflow_core),
+            Err(CoreError::InvalidState("history state overflow"))
+        ));
+        assert_eq!(history_overflow_core.document, overflow_document);
+        assert_eq!(history_overflow_core.document_revision, overflow_revision);
+        assert_eq!(history_overflow_core.history.len(), 0);
+        assert_eq!(
+            history_overflow_core.next_state,
+            HistoryStateId::from_raw(u64::MAX)
+        );
+        assert_eq!(history_overflow_core.render_cache, overflow_cache);
+
+        let mut revision_overflow_core = initialized_core();
+        revision_overflow_core.document_revision = DocumentRevision::from_raw(u64::MAX);
+        let revision_document = revision_overflow_core.document.clone();
+        let revision_history = revision_overflow_core.history.clone();
+        assert!(matches!(
+            revision_overflow_core.begin_document_edit(),
+            Err(CoreError::InvalidState("document revision overflow"))
+        ));
+        assert_eq!(revision_overflow_core.document, revision_document);
+        assert_eq!(revision_overflow_core.history.len(), revision_history.len());
+    }
+
+    #[test]
+    fn commit_after_undo_truncates_the_redo_branch() {
+        let mut core = initialized_core();
+        for origin in [1, 2] {
+            let mut edit = core.begin_document_edit().unwrap();
+            edit.working_mut().grid.origin_x = origin;
+            edit.commit(&mut core).unwrap();
+        }
+        core.undo().unwrap();
+        assert_eq!(core.history_cursor, 1);
+
+        let mut edit = core.begin_document_edit().unwrap();
+        edit.working_mut().grid.origin_y = 3;
+        edit.commit(&mut core).unwrap();
+
+        assert_eq!(core.history.len(), 2);
+        assert_eq!(core.history_cursor, 2);
+        assert!(core.redo().is_err());
+    }
+
+    #[test]
+    fn specialized_metadata_commits_preserve_history_labels_and_cache_policy() {
+        let mut core = initialized_core();
+        let _ = core.build_snapshot();
+        let cache = core.render_cache.clone();
+        let mut palette_edit = core.begin_document_edit().unwrap();
+        palette_edit
+            .working_mut()
+            .palette
+            .push(PixelValue::Rgba([1, 2, 3, 255]))
+            .unwrap();
+
+        palette_edit.commit_palette(&mut core).unwrap();
+
+        assert_eq!(core.history_entries()[0].label, "Palette edit");
+        assert_eq!(core.render_cache, cache);
+
+        let mut color_edit = core.begin_document_edit().unwrap();
+        color_edit.working_mut().main_line_color = PixelValue::Rgba([4, 5, 6, 255]);
+        color_edit.commit_main_line_color(&mut core).unwrap();
+
+        assert_eq!(core.history_entries()[1].label, "Main-line color");
+        assert!(core.render_cache.is_empty());
+    }
+
+    #[test]
+    fn specialized_metadata_commit_rejects_unrelated_working_changes() {
+        let mut core = initialized_core();
+        let before = core.document.clone();
+        let before_revision = core.document_revision;
+        let before_state = core.next_state;
+        let mut edit = core.begin_document_edit().unwrap();
+        edit.working_mut().grid.origin_x = 1;
+        edit.working_mut()
+            .palette
+            .push(PixelValue::Rgba([1; 4]))
+            .unwrap();
+
+        assert!(matches!(
+            edit.commit_palette(&mut core),
+            Err(CoreError::InvalidState(
+                "palette edit changed unrelated document state"
+            ))
+        ));
+        assert_eq!(core.document, before);
+        assert_eq!(core.document_revision, before_revision);
+        assert_eq!(core.next_state, before_state);
+        assert!(core.history.is_empty());
     }
 }

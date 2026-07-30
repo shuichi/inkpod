@@ -2,25 +2,38 @@ use super::raster::{common_to_tile_raster, thumbnail_for_raster};
 use super::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Small owned straight-alpha RGBA8 preview of a sequence cell.
 pub struct Thumbnail {
+    /// Preview width in pixels.
     pub width: u32,
+    /// Preview height in pixels.
     pub height: u32,
+    /// Tightly packed top-to-bottom straight-alpha RGBA8 bytes.
     pub rgba8: Vec<u8>,
+    /// Deterministic checksum of `rgba8` and geometry.
     pub checksum: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Validated immutable flattened source for one sequence cell.
 pub struct SequenceCellSource {
+    /// User-visible name containing a parseable trailing cell number.
     pub name: String,
+    /// Parsed cell number used for natural ordering and navigation.
     pub cell_number: u32,
+    /// Persistent nonzero document UUID.
     pub document_uuid: u128,
+    /// Horizontal resolution in thousandths of a DPI.
     pub dpi_x_milli: u32,
+    /// Vertical resolution in thousandths of a DPI.
     pub dpi_y_milli: u32,
+    /// Paper/frame alignment metadata in source document pixels.
     pub frames: FrameMetadata,
     pub(crate) raster: TileRaster,
 }
 
 impl SequenceCellSource {
+    /// Validates and converts owned tightly packed raster bytes into a sequence cell.
     pub fn from_rgba_bytes(
         name: impl Into<String>,
         document_uuid: u128,
@@ -37,6 +50,9 @@ impl SequenceCellSource {
         Self::from_common_raster(name, document_uuid, &raster)
     }
 
+    /// Validates and copies a common raster into a sequence cell.
+    ///
+    /// The name must contain a cell number and UUID must be nonzero.
     pub fn from_common_raster(
         name: impl Into<String>,
         document_uuid: u128,
@@ -83,18 +99,26 @@ impl SequenceCellSource {
         })
     }
 
+    /// Generates a bounded aspect-preserving thumbnail without mutating the source.
     pub fn thumbnail(&self) -> Result<Thumbnail, CoreError> {
         thumbnail_for_raster(&self.raster)
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Public sequence-cell metadata with an owned thumbnail.
 pub struct SequenceCellInfo {
+    /// User-visible source name.
     pub name: String,
+    /// Parsed cell number.
     pub cell_number: u32,
+    /// Persistent document UUID.
     pub document_uuid: u128,
+    /// Source width in pixels.
     pub width: u32,
+    /// Source height in pixels.
     pub height: u32,
+    /// Bounded preview image.
     pub thumbnail: Thumbnail,
 }
 
@@ -105,16 +129,24 @@ pub(crate) struct SequenceState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Relative direction used for sequence navigation.
 pub enum SequenceDirection {
+    /// Selects the preceding cell in natural order.
     Previous,
+    /// Selects the following cell in natural order.
     Next,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Playback and composition settings for motion check.
 pub struct MotionCheckConfig {
+    /// Playback rate in frames per second.
     pub fps: u32,
+    /// Whether playback wraps at sequence ends.
     pub loop_playback: bool,
+    /// Whether selection visualization is included.
     pub include_selection: bool,
+    /// Whether light-table compositing is included.
     pub include_light_table: bool,
 }
 
@@ -130,14 +162,23 @@ impl Default for MotionCheckConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// One immutable frame returned by motion-check playback.
 pub struct MotionFrame {
+    /// Zero-based index in natural sequence order.
     pub sequence_index: usize,
+    /// Parsed source cell number.
     pub cell_number: u32,
+    /// User-visible source name.
     pub name: String,
+    /// Owned bounded preview for this frame.
     pub thumbnail: Thumbnail,
+    /// Current paused state.
     pub paused: bool,
+    /// Configured frames per second.
     pub fps: u32,
+    /// Whether selection visualization is included.
     pub include_selection: bool,
+    /// Whether light-table compositing is included.
     pub include_light_table: bool,
 }
 

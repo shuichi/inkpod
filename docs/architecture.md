@@ -46,12 +46,17 @@ dependency.
 
 Each crate root is limited to module declarations and stable public re-exports.
 Responsibility-specific modules contain implementation. `inkpod-core` keeps
+vector path/selection/rasterization/conversion/thumbnail work, Batch codec
+codes/operations/filters/payloads, destructive transform orchestration/raster/
+frame/numeric helpers, and view commands/coordinates/guides/secondary views/
+shortcuts in separate modules; their `mod.rs` files remain declarative indices.
+`inkpod-core` keeps
 fine-grained tests of private invariants in `#[cfg(test)]` modules beside that
 implementation, while public Core workflows run as a separate multi-module
 integration-test target below `tests`. Architecture tests enforce small roots,
-`cfg(test)` gating, recursive CMake tracking, ABI header/export parity, direct
-contract-test references, and the absence of Windows dependencies throughout
-the Rust workspace.
+the responsibility split, `cfg(test)` gating, recursive CMake tracking, ABI
+header/export parity, direct contract-test references, and the absence of
+Windows dependencies throughout the Rust workspace.
 
 ## Windows frontend ownership
 
@@ -158,6 +163,15 @@ not a second Canvas transform. DPI notification alone does not move or resize th
 document. Fit uses current client-device dimensions; manual pan/zoom survives
 viewport resize.
 
+Core keeps document points/sizes/rectangles, device points/sizes/offsets, and
+zoom as distinct private types. Public Rust commands and state accessors retain
+their established scalar/record shapes, and C ABI v2 retains the same fixed
+layout; those boundaries validate and convert before calling the typed
+`ViewTransform`. Locator sampling, guide/grid snapping, and stroke/effect input
+use document points after their single `CoordinateSpace` conversion. Snapshot
+raster origins/sizes are likewise typed internally, while raster, vector, and
+overlay output coordinates remain document-space public records.
+
 View flips are snapshot transform flags around the document extent and do not
 change document pixels or history. Destructive mirror transforms raster,
 selection, frame, and guide state in one Core transaction. Raster hit
@@ -179,11 +193,41 @@ movement, new, and open advance document revision. Pan, zoom, fit, viewport
 resize, view flip, and other semantic view changes advance only view revision.
 Plane selection changes neither.
 
-Document edits stage validated candidate state before replacing committed state.
-Sparse tile allocations are shared through copy-on-write, so history can retain
-before/after document owners without eager full-image copies. A new edit after
-Undo discards the redo branch. A unique history-state token identifies the normal
-savepoint and drives dirty state independently of file timestamps.
+Core-owned identities use distinct internal newtypes for documents, layers,
+planes, vector paths/fills, light-table sets/items, and secondary views. History
+state plus document, view, render-cache, and preview revisions are separate
+tokens with their own increment policy. A typed cursor allocates the one
+document-wide stable-ID namespace through domain-specific methods; there is no
+conversion between identity domains. Public Rust records, C ABI v2 records, and
+`.inkpod` DTOs intentionally retain their established `u64` representation and
+convert only at those boundaries. The public `Guide` slice and
+`LightTableSource` input value remain raw compatibility boundary objects because
+changing their stored field types would break the existing Rust API; Core still
+allocates guide identities through `GuideId`, and no private layer/plane/vector
+lookup accepts either boundary value as another identity kind. Pure raster-
+building helpers are the documented revision exception: their raw value is
+passed directly to `inkpod-image` tile mutation APIs and may originate from a
+committed `DocumentRevision` or an uncommitted `PreviewRevision`; no Core-owned
+state stores that value without its semantic newtype.
+
+Immediate synchronous document edits use one internal owning transaction. It
+keeps immutable `before` and mutable `working` documents plus base and commit
+revisions; only an explicit consuming commit may publish the working document.
+Commit rejects a stale base and revision/history overflow before changing live
+state, treats an unchanged working document as a no-op, and otherwise updates the
+document, revision, one history entry, and render-cache invalidation together.
+Palette and main-line-color edits retain their existing history labels and cache
+policy through constrained transaction commit modes. Sparse tile allocations are
+shared through copy-on-write, so history can retain before/after document owners
+without eager full-image copies. A new edit after Undo discards the redo branch.
+A unique history-state token identifies the normal savepoint and drives dirty
+state independently of file timestamps.
+
+Preview/session, floating-selection, cancellable Batch/effect, external reload,
+and potentially long-running raster/vector conversion paths retain their
+specialized staging ownership. Their completed candidate state passes through
+the same stale-checked atomic publish boundary; cancel or failure drops the
+candidate without changing committed document, history, revision, or cache.
 
 - Stroke begin/append changes only a preview document. Snapshots may show that
   preview while committed revision, dirty, savepoint, and history remain fixed.
@@ -230,9 +274,13 @@ sandboxed future frontend still needs byte/stream I/O, platform UUID/file
 authority, font/GPU resource resolution, clipboard, and picker adapters; those
 are frontend extensions, not reasons to add Windows dependencies to Core.
 
-The `large_document` benchmark exercises maximum-dimension sparse allocation,
-distributed writes, copy-on-write isolation, and a bounded dense filter workload.
-It reports resource and timing data without a machine-specific pass threshold.
+The `large_document` image benchmark exercises maximum-dimension sparse
+allocation, distributed writes, copy-on-write isolation, and a bounded dense
+filter workload. The `core_workflows` benchmark separately covers sparse and
+dirty-tile snapshots, view-only cache reuse, Undo/Redo, light-table composition,
+vector snapshot/rasterization, and in-memory Batch preview/dry-run. Both expose
+fixed quick/full inputs and semantic counters/checksums; timing is reported
+without a machine-specific pass threshold.
 
 ## Initialization and shutdown
 

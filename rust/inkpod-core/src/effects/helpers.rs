@@ -3,18 +3,19 @@ use super::*;
 pub(super) fn pressure_trace_contains(
     x: f64,
     y: f64,
-    samples: &[StrokeSample],
+    samples: &[DocumentStrokeSample],
     diameter: f64,
 ) -> bool {
     if samples.len() == 1 {
         let radius = diameter * f64::from(samples[0].pressure.clamp(0.0, 1.0)) / 2.0;
-        return (x - f64::from(samples[0].x)).hypot(y - f64::from(samples[0].y)) <= radius;
+        return (x - f64::from(samples[0].point.x)).hypot(y - f64::from(samples[0].point.y))
+            <= radius;
     }
     samples.windows(2).any(|segment| {
-        let start_x = f64::from(segment[0].x);
-        let start_y = f64::from(segment[0].y);
-        let dx = f64::from(segment[1].x) - start_x;
-        let dy = f64::from(segment[1].y) - start_y;
+        let start_x = f64::from(segment[0].point.x);
+        let start_y = f64::from(segment[0].point.y);
+        let dx = f64::from(segment[1].point.x) - start_x;
+        let dy = f64::from(segment[1].point.y) - start_y;
         let length_squared = dx.mul_add(dx, dy * dy);
         let t = if length_squared <= f64::EPSILON {
             0.0
@@ -31,12 +32,14 @@ pub(super) fn pressure_trace_contains(
     })
 }
 
-pub(super) fn effect_samples(samples: Vec<StrokeSample>) -> Result<Vec<EffectSample>, CoreError> {
+pub(super) fn effect_samples(
+    samples: Vec<DocumentStrokeSample>,
+) -> Result<Vec<EffectSample>, CoreError> {
     samples
         .into_iter()
         .map(|sample| {
-            let x = (f64::from(sample.x) * 1_000.0).round();
-            let y = (f64::from(sample.y) * 1_000.0).round();
+            let x = (f64::from(sample.point.x) * 1_000.0).round();
+            let y = (f64::from(sample.point.y) * 1_000.0).round();
             if !(i64::MIN as f64..=i64::MAX as f64).contains(&x)
                 || !(i64::MIN as f64..=i64::MAX as f64).contains(&y)
             {
@@ -57,7 +60,7 @@ pub(super) fn effect_samples(samples: Vec<StrokeSample>) -> Result<Vec<EffectSam
 
 pub(super) fn editable_color_plane(
     document: &CellDocument,
-    plane_id: u64,
+    plane_id: PlaneId,
 ) -> Result<&super::PlaneNode, CoreError> {
     let layer = document
         .layers
@@ -87,14 +90,15 @@ pub(super) fn editable_color_plane(
 
 pub(super) fn filter_document_with_progress(
     base: &CellDocument,
-    plane_id: u64,
+    plane_id: PlaneId,
     filter: &Filter,
-    revision: u64,
+    revision: RenderRevision,
     progress: &mut impl FnMut(u64, u64) -> bool,
 ) -> Result<CellDocument, CoreError> {
     let plane = editable_color_plane(base, plane_id)?;
     let selection = (base.selection.allocated_tile_count() != 0).then_some(&base.selection);
-    let raster = apply_filter_with_progress(&plane.raster, selection, filter, revision, progress)?;
+    let raster =
+        apply_filter_with_progress(&plane.raster, selection, filter, revision.get(), progress)?;
     let mut preview = base.clone();
     preview
         .plane_by_id_mut(plane_id)
@@ -104,13 +108,13 @@ pub(super) fn filter_document_with_progress(
 }
 
 pub(super) fn preview_info(
-    plane_id: u64,
+    plane_id: PlaneId,
     base: &CellDocument,
     preview: &CellDocument,
-    preview_revision: u64,
+    preview_revision: PreviewRevision,
 ) -> Result<FilterPreviewInfo, CoreError> {
     Ok(FilterPreviewInfo {
-        plane_id,
+        plane_id: plane_id.get(),
         base_checksum: base
             .plane_by_id(plane_id)
             .ok_or(CoreError::InvalidState("preview plane disappeared"))?
@@ -121,25 +125,24 @@ pub(super) fn preview_info(
             .ok_or(CoreError::InvalidState("preview plane disappeared"))?
             .raster
             .checksum(),
-        preview_revision,
+        preview_revision: preview_revision.get(),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DocumentPointF32;
 
     #[test]
     fn blur_pen_pressure_varies_the_screen_fixed_region() {
         let samples = [
-            StrokeSample {
-                x: 1.0,
-                y: 1.0,
+            DocumentStrokeSample {
+                point: DocumentPointF32 { x: 1.0, y: 1.0 },
                 pressure: 0.25,
             },
-            StrokeSample {
-                x: 5.0,
-                y: 1.0,
+            DocumentStrokeSample {
+                point: DocumentPointF32 { x: 5.0, y: 1.0 },
                 pressure: 1.0,
             },
         ];

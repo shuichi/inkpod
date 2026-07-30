@@ -5,6 +5,7 @@ use super::{
     PixelFormat, PixelValue, PlaneNode, PlaneType, PointF32, RectI32, TileRaster,
 };
 use crate::document::{unique_layer_name, validate_node_name};
+use crate::identity::*;
 use inkpod_format::{
     FileVectorFill, FileVectorMetadata, FileVectorPath, FileVectorPoint, FileVectorSegment,
     MAX_VECTOR_BOUNDARIES, MAX_VECTOR_FILLS, MAX_VECTOR_PATHS, MAX_VECTOR_SEGMENTS,
@@ -26,7 +27,11 @@ const MAX_VECTOR_RASTER_PIXELS: u64 = 16_777_216;
 
 mod geometry;
 mod model;
-mod operations;
+mod path_operations;
+mod rasterization;
+mod selection;
+mod thumbnail;
+mod vectorization;
 
 pub(crate) use model::VectorState;
 pub use model::{

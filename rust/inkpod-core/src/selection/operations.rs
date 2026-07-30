@@ -1,42 +1,54 @@
 use super::*;
 
 impl Core {
+    /// Combines a document-space shape with the current selection.
+    ///
+    /// Success is one undoable document edit; an unchanged mask is a no-op.
+    /// Invalid geometry or allocation failure leaves the prior mask intact.
     pub fn apply_selection(
         &mut self,
         shape: &SelectionShape,
         operation: SelectionOperation,
     ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-        let revision = self.next_document_revision()?;
-        let candidate = selection_mask_for_shape(&before, shape, revision)?;
-        let mut after = before.clone();
+        let mut edit = self.begin_document_edit()?;
+        let revision = edit.revision();
+        let (before, after) = edit.documents();
+        let candidate = selection_mask_for_shape(before, shape, revision.get())?;
         after.selection =
-            combine_selection_masks(&before.selection, &candidate, operation, revision)?;
-        self.commit_document_edit_with_revision(before, after, revision)
+            combine_selection_masks(&before.selection, &candidate, operation, revision.get())?;
+        edit.commit(self)
     }
 
+    /// Inverts selection coverage across the whole document as one undoable edit.
     pub fn invert_selection(&mut self) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-        let revision = self.next_document_revision()?;
-        let mut after = before.clone();
-        after.selection = invert_selection_mask(&before.selection, revision)?;
-        self.commit_document_edit_with_revision(before, after, revision)
+        let mut edit = self.begin_document_edit()?;
+        let revision = edit.revision();
+        let (before, after) = edit.documents();
+        after.selection = invert_selection_mask(&before.selection, revision.get())?;
+        edit.commit(self)
     }
 
+    /// Clears the current selection as one undoable edit.
+    ///
+    /// An already-empty selection is a no-op.
     pub fn clear_selection(&mut self) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-        if mask_bounds(&before.selection)?.is_none() {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        if mask_bounds(&document.selection)?.is_none() {
             return Ok(self.noop_outcome());
         }
-        let revision = self.next_document_revision()?;
-        let mut after = before.clone();
-        after.selection = TileRaster::new(before.width, before.height, PixelFormat::BinaryMask8)?;
-        self.commit_document_edit_with_revision(before, after, revision)
+        let empty = TileRaster::new(document.width, document.height, PixelFormat::BinaryMask8)?;
+        let mut edit = self.begin_document_edit()?;
+        edit.working_mut().selection = empty;
+        edit.commit(self)
     }
 
+    /// Expands a selection by positive pixels or contracts it by negative pixels.
+    ///
+    /// The magnitude is bounded to 4096 document pixels. Success is one undoable
+    /// edit; invalid input or processing failure is atomic.
     pub fn resize_selection(&mut self, pixels: i32) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         if pixels == i32::MIN || pixels.unsigned_abs() > 4_096 {
@@ -44,13 +56,17 @@ impl Core {
                 "selection expansion is outside its bound",
             ));
         }
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-        let revision = self.next_document_revision()?;
-        let mut after = before.clone();
-        after.selection = morphology_selection(&before.selection, pixels, revision)?;
-        self.commit_document_edit_with_revision(before, after, revision)
+        let mut edit = self.begin_document_edit()?;
+        let revision = edit.revision();
+        let (before, after) = edit.documents();
+        after.selection = morphology_selection(&before.selection, pixels, revision.get())?;
+        edit.commit(self)
     }
 
+    /// Selects active-plane pixels by color similarity or difference.
+    ///
+    /// `tolerance` is an inclusive channel tolerance. The candidate mask is combined
+    /// using `operation` and committed as one undoable edit.
     pub fn select_color(
         &mut self,
         color: PixelValue,
@@ -59,37 +75,47 @@ impl Core {
         operation: SelectionOperation,
     ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let mut edit = self.begin_document_edit()?;
+        let revision = edit.revision();
+        let (before, after) = edit.documents();
         let source = before
             .plane_by_id(before.active_plane_id)
             .ok_or(CoreError::InvalidState("active plane is missing"))?;
-        let revision = self.next_document_revision()?;
         let candidate =
-            color_selection_mask(&source.raster, color, tolerance, different, revision)?;
-        let mut after = before.clone();
+            color_selection_mask(&source.raster, color, tolerance, different, revision.get())?;
         after.selection =
-            combine_selection_masks(&before.selection, &candidate, operation, revision)?;
-        self.commit_document_edit_with_revision(before, after, revision)
+            combine_selection_masks(&before.selection, &candidate, operation, revision.get())?;
+        edit.commit(self)
     }
 
+    /// Returns the smallest half-open document rectangle containing selection coverage.
+    ///
+    /// Returns `None` for an empty selection without mutating Core state.
     pub fn selection_bounds(&self) -> Result<Option<RectI32>, CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         mask_bounds(&document.selection)
     }
 
+    /// Copies the current selection mask into a new selection layer.
+    ///
+    /// Success is one undoable edit and returns the stable ID of the new layer.
     pub fn selection_to_layer(&mut self, name: &str) -> Result<(DispatchOutcome, u64), CoreError> {
         self.ensure_no_active_stroke()?;
         validate_node_name(name)?;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-        if before.layers.len() >= MAX_LAYERS {
-            return Err(CoreError::InvalidState("layer limit reached"));
-        }
-        if mask_bounds(&before.selection)?.is_none() {
-            return Err(CoreError::InvalidState("selection is empty"));
-        }
-        let layer_id = self.allocate_id();
-        let plane_id = self.allocate_id();
-        let mut after = before.clone();
+        let selection = {
+            let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+            if document.layers.len() >= MAX_LAYERS {
+                return Err(CoreError::InvalidState("layer limit reached"));
+            }
+            if mask_bounds(&document.selection)?.is_none() {
+                return Err(CoreError::InvalidState("selection is empty"));
+            }
+            document.selection.clone()
+        };
+        let layer_id = self.allocate_layer_id();
+        let plane_id = self.allocate_plane_id();
+        let mut edit = self.begin_document_edit()?;
+        let after = edit.working_mut();
         after.layers.push(LayerNode {
             id: layer_id,
             kind: LayerKind::Selection,
@@ -104,22 +130,29 @@ impl Core {
                 visible: true,
                 editable: true,
                 opacity_milli: 1_000,
-                raster: before.selection.clone(),
+                raster: selection,
             }],
         });
         after.active_layer_id = layer_id;
         after.active_plane_id = plane_id;
-        let outcome = self.commit_document_edit(before, after)?;
-        Ok((outcome, layer_id))
+        let outcome = edit.commit(self)?;
+        Ok((outcome, layer_id.get()))
     }
 
+    /// Combines a selection layer's mask with the current selection.
+    ///
+    /// The source layer remains unchanged. Success is one undoable edit and an
+    /// unchanged result is a no-op.
     pub fn selection_from_layer(
         &mut self,
         layer_id: u64,
         operation: SelectionLayerOperation,
     ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let layer_id = LayerId::from_raw(layer_id);
+        let mut edit = self.begin_document_edit()?;
+        let revision = edit.revision();
+        let (before, after) = edit.documents();
         let layer = before
             .layers
             .iter()
@@ -132,22 +165,24 @@ impl Core {
             .ok_or(CoreError::InvalidArgument(
                 "layer does not contain a selection plane",
             ))?;
-        let revision = self.next_document_revision()?;
         let selection_operation = match operation {
             SelectionLayerOperation::Replace => SelectionOperation::New,
             SelectionLayerOperation::Add => SelectionOperation::Add,
             SelectionLayerOperation::Subtract => SelectionOperation::Subtract,
         };
-        let mut after = before.clone();
         after.selection = combine_selection_masks(
             &before.selection,
             &mask.raster,
             selection_operation,
-            revision,
+            revision.get(),
         )?;
-        self.commit_document_edit_with_revision(before, after, revision)
+        edit.commit(self)
     }
 
+    /// Copies selected pixels from the active raster plane into an owned payload.
+    ///
+    /// Coordinates and half-open bounds remain in document space. The query does
+    /// not change revision, history, selection, or dirty state.
     pub fn copy_selection(&self) -> Result<ClipboardPayload, CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let bounds = mask_bounds(&document.selection)?
@@ -192,6 +227,10 @@ impl Core {
         })
     }
 
+    /// Starts a floating paste after validating payload plane compatibility.
+    ///
+    /// This stages an isolated preview and does not change document revision,
+    /// history, or dirty state until [`Core::commit_floating`]. Failure is atomic.
     pub fn begin_paste(&mut self, payload: &ClipboardPayload) -> Result<(), CoreError> {
         self.ensure_no_active_stroke()?;
         if self.floating.is_some() {
@@ -273,6 +312,10 @@ impl Core {
         Ok(())
     }
 
+    /// Starts a floating paste converted to the active plane's pixel format.
+    ///
+    /// Conversion is fully staged; failure leaves the document and any prior
+    /// revision/history state unchanged.
     pub fn begin_paste_to_active_converted(
         &mut self,
         payload: &ClipboardPayload,
@@ -310,6 +353,10 @@ impl Core {
         Ok(())
     }
 
+    /// Clears selected pixels on the active editable plane.
+    ///
+    /// Empty selection or already-clear pixels are a no-op. A real change is one
+    /// undoable document edit; failures do not publish partial clearing.
     pub fn clear_selected_content(&mut self) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
@@ -343,7 +390,7 @@ impl Core {
         for (x, y) in coordinates {
             let before = plane.raster.pixel(x, y)?;
             if before != zero {
-                plane.raster.set_pixel(x, y, zero, revision)?;
+                plane.raster.set_pixel(x, y, zero, revision.get())?;
                 changes.push(PixelChange {
                     x,
                     y,
@@ -358,11 +405,15 @@ impl Core {
         self.document_revision = revision;
         self.commit_pixel_history(plane_id, changes, after_state);
         Ok(DispatchOutcome {
-            revision,
+            revision: revision.get(),
             accepted_commands: 1,
         })
     }
 
+    /// Replaces the transform of the active floating-paste preview.
+    ///
+    /// Values must be finite with nonzero bounded scales. This does not commit
+    /// document, revision, history, or dirty state.
     pub fn set_floating_transform(
         &mut self,
         transform: FloatingTransform,
@@ -375,10 +426,15 @@ impl Core {
         Ok(())
     }
 
+    /// Discards the floating-paste preview and restores the unmodified base state.
     pub fn cancel_floating(&mut self) {
         self.floating = None;
     }
 
+    /// Atomically applies the active floating paste as one undoable edit.
+    ///
+    /// Success clears the preview. Validation or raster failure keeps the live
+    /// document unchanged so the caller may adjust or cancel the preview.
     pub fn commit_floating(&mut self) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let floating = self
@@ -510,7 +566,7 @@ impl Core {
             let before = plane.raster.pixel(x, y)?;
             let after = paste_value(before, source_value, plane.kind)?;
             if before != after {
-                plane.raster.set_pixel(x, y, after, revision)?;
+                plane.raster.set_pixel(x, y, after, revision.get())?;
                 changes.push(PixelChange {
                     x,
                     y,
@@ -528,7 +584,7 @@ impl Core {
         self.commit_pixel_history(floating.destination_plane_id, changes, after_state);
         self.floating = None;
         Ok(DispatchOutcome {
-            revision,
+            revision: revision.get(),
             accepted_commands: 1,
         })
     }

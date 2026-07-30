@@ -4,7 +4,18 @@ use super::*;
 use crate::document::ensure_editable_plane;
 use crate::view::{device_to_document, stroke_coordinate_is_supported};
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct DocumentStrokeSample {
+    pub(super) point: DocumentPointF32,
+    pub(super) pressure: f32,
+}
+
 impl Core {
+    /// Applies a complete stroke as one atomic history entry.
+    ///
+    /// This convenience method begins, previews, and ends a stroke. An error after
+    /// begin discards that preview; validation errors publish no new session. The
+    /// live document, revision, history, and dirty state remain unchanged.
     pub fn apply_stroke(&mut self, stroke: &Stroke) -> Result<DispatchOutcome, CoreError> {
         self.begin_stroke(stroke)?;
         match self.end_stroke() {
@@ -16,6 +27,10 @@ impl Core {
         }
     }
 
+    /// Begins an isolated stroke preview transaction.
+    ///
+    /// Initial samples are validated and rendered into preview state. No document
+    /// revision or history entry is committed until [`Core::end_stroke`].
     pub fn begin_stroke(&mut self, stroke: &Stroke) -> Result<(), CoreError> {
         if self.active_stroke.is_some() {
             return Err(CoreError::InvalidState(
@@ -53,6 +68,10 @@ impl Core {
         Ok(())
     }
 
+    /// Appends ordered samples to the active stroke preview.
+    ///
+    /// Samples use the coordinate space declared at begin time. Failure preserves
+    /// the live document and discards the failed preview session.
     pub fn append_stroke(&mut self, samples: &[StrokeSample]) -> Result<(), CoreError> {
         if samples.is_empty() {
             return Err(CoreError::InvalidArgument(
@@ -79,13 +98,17 @@ impl Core {
         }
     }
 
+    /// Commits the active stroke as one undoable edit.
+    ///
+    /// A stroke that changed no pixels is a no-op. Stale revision or validation
+    /// failure does not publish preview pixels into the live document.
     pub fn end_stroke(&mut self) -> Result<DispatchOutcome, CoreError> {
         let session = self.active_stroke.take().ok_or(CoreError::InvalidState(
             "there is no active stroke transaction",
         ))?;
         if session.changes.is_empty() {
             return Ok(DispatchOutcome {
-                revision: self.document_revision,
+                revision: self.document_revision.get(),
                 accepted_commands: 1,
             });
         }
@@ -104,7 +127,7 @@ impl Core {
         let mut changes = Vec::with_capacity(session.changes.len());
         let mut touched_tiles = BTreeSet::new();
         for ((x, y), change) in session.changes {
-            raster.set_pixel(x, y, change.after, revision)?;
+            raster.set_pixel(x, y, change.after, revision.get())?;
             touched_tiles.insert(TileCoord {
                 x: x / TILE_SIZE,
                 y: y / TILE_SIZE,
@@ -117,15 +140,17 @@ impl Core {
         self.document_revision = revision;
         self.commit_pixel_history(plane_id, changes, after_state);
         Ok(DispatchOutcome {
-            revision,
+            revision: revision.get(),
             accepted_commands: 1,
         })
     }
 
+    /// Discards the active stroke preview without changing live document state.
     pub fn cancel_stroke(&mut self) {
         self.active_stroke = None;
     }
 
+    /// Reports whether a stroke preview transaction is active.
     #[must_use]
     pub const fn stroke_is_active(&self) -> bool {
         self.active_stroke.is_some()
@@ -137,8 +162,8 @@ impl Core {
 impl StrokeSession {
     fn append_document_samples(
         &mut self,
-        samples: &[StrokeSample],
-        preview_revision: u64,
+        samples: &[DocumentStrokeSample],
+        preview_revision: PreviewRevision,
     ) -> Result<(), CoreError> {
         let next_count = self
             .sample_count
@@ -149,7 +174,7 @@ impl StrokeSession {
                 "stroke sample count is outside bounds",
             ));
         }
-        validate_stroke_samples(samples)?;
+        validate_document_stroke_samples(samples)?;
 
         let mut raster_samples =
             Vec::with_capacity(samples.len() + usize::from(self.last_sample.is_some()));
@@ -157,12 +182,10 @@ impl StrokeSession {
             raster_samples.push(last);
         }
         raster_samples.extend_from_slice(samples);
-        let mut incremental = self.stroke.clone();
-        incremental.samples = raster_samples;
         let (staged, work) = stage_stroke_pixels_with_work(
             &self.preview_document,
-            &incremental,
-            &incremental.samples,
+            &self.stroke,
+            &raster_samples,
             self.desired,
             self.work,
         )?;
@@ -184,7 +207,7 @@ impl StrokeSession {
                 .changes
                 .get(&(x, y))
                 .map_or(current, |change| change.before);
-            raster.set_pixel(x, y, after, preview_revision)?;
+            raster.set_pixel(x, y, after, preview_revision.get())?;
             let coord = TileCoord {
                 x: x / TILE_SIZE,
                 y: y / TILE_SIZE,
@@ -221,32 +244,35 @@ pub(super) fn document_samples_for_view(
     samples: &[StrokeSample],
     width: u32,
     height: u32,
-) -> Result<Vec<StrokeSample>, CoreError> {
+) -> Result<Vec<DocumentStrokeSample>, CoreError> {
     validate_stroke_samples(samples)?;
     match coordinate_space {
-        CoordinateSpace::Document => Ok(samples.to_vec()),
+        CoordinateSpace::Document => samples
+            .iter()
+            .map(|sample| {
+                Ok(DocumentStrokeSample {
+                    point: DocumentPointF32::new(sample.x, sample.y)?,
+                    pressure: sample.pressure,
+                })
+            })
+            .collect(),
         CoordinateSpace::Device => {
-            if view.zoom <= 0.0 {
-                return Err(CoreError::InvalidState("view zoom is invalid"));
-            }
+            let document_size = DocumentSizeU32::new(width, height);
             samples
                 .iter()
                 .map(|sample| {
-                    let (x, y) = device_to_document(
-                        view,
-                        width,
-                        height,
-                        f64::from(sample.x),
-                        f64::from(sample.y),
-                    )?;
-                    if !stroke_coordinate_is_supported(x) || !stroke_coordinate_is_supported(y) {
+                    let device_point =
+                        DevicePointF64::new(f64::from(sample.x), f64::from(sample.y))?;
+                    let point = device_to_document(view, document_size, device_point);
+                    if !stroke_coordinate_is_supported(point.x)
+                        || !stroke_coordinate_is_supported(point.y)
+                    {
                         return Err(CoreError::InvalidArgument(
                             "device-to-document stroke coordinate is outside bounds",
                         ));
                     }
-                    Ok(StrokeSample {
-                        x: x as f32,
-                        y: y as f32,
+                    Ok(DocumentStrokeSample {
+                        point: DocumentPointF32::new(point.x as f32, point.y as f32)?,
                         pressure: sample.pressure,
                     })
                 })
@@ -288,11 +314,27 @@ pub(super) fn validate_stroke_samples(samples: &[StrokeSample]) -> Result<(), Co
     Ok(())
 }
 
+fn validate_document_stroke_samples(samples: &[DocumentStrokeSample]) -> Result<(), CoreError> {
+    if samples.iter().any(|sample| {
+        !sample.point.x.is_finite()
+            || !sample.point.y.is_finite()
+            || sample.point.x.abs() > MAX_STROKE_COORDINATE
+            || sample.point.y.abs() > MAX_STROKE_COORDINATE
+            || !sample.pressure.is_finite()
+            || !(0.0..=1.0).contains(&sample.pressure)
+    }) {
+        return Err(CoreError::InvalidArgument(
+            "document stroke sample contains invalid values",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn stroke_value(
     stroke: &Stroke,
     document: &CellDocument,
-    plane_id: u64,
-    samples: &[StrokeSample],
+    plane_id: PlaneId,
+    samples: &[DocumentStrokeSample],
 ) -> Result<PixelValue, CoreError> {
     let raster = &document
         .plane_by_id(plane_id)
@@ -330,8 +372,8 @@ pub(super) fn stroke_value(
     }
     if stroke.tool == PaintTool::Pencil && stroke.auto_erase {
         let first = samples[0];
-        let x = raster_cell_coordinate(first.x);
-        let y = raster_cell_coordinate(first.y);
+        let x = raster_cell_coordinate(first.point.x);
+        let y = raster_cell_coordinate(first.point.y);
         if x >= 0
             && y >= 0
             && x < i64::from(document.width)
@@ -347,7 +389,7 @@ pub(super) fn stroke_value(
 pub(super) fn stage_stroke_pixels_with_work(
     document: &CellDocument,
     stroke: &Stroke,
-    samples: &[StrokeSample],
+    samples: &[DocumentStrokeSample],
     value: PixelValue,
     initial_work: u64,
 ) -> Result<(StagedPixels, u64), CoreError> {
@@ -355,7 +397,7 @@ pub(super) fn stage_stroke_pixels_with_work(
         document,
         stroke,
         value,
-        maximum_radius: stroke_maximum_radius(stroke),
+        maximum_radius: stroke_maximum_radius(stroke, samples),
         work: initial_work,
         staged: BTreeMap::new(),
     };
@@ -378,16 +420,20 @@ struct StrokeStager<'a> {
 }
 
 impl StrokeStager<'_> {
-    fn stage_segment(&mut self, start: StrokeSample, end: StrokeSample) -> Result<(), CoreError> {
+    fn stage_segment(
+        &mut self,
+        start: DocumentStrokeSample,
+        end: DocumentStrokeSample,
+    ) -> Result<(), CoreError> {
         let Some((start, end)) =
             clip_segment_to_document(self.document, start, end, self.maximum_radius)
         else {
             return Ok(());
         };
-        let mut x0 = raster_cell_coordinate(start.x);
-        let mut y0 = raster_cell_coordinate(start.y);
-        let x1 = raster_cell_coordinate(end.x);
-        let y1 = raster_cell_coordinate(end.y);
+        let mut x0 = raster_cell_coordinate(start.point.x);
+        let mut y0 = raster_cell_coordinate(start.point.y);
+        let x1 = raster_cell_coordinate(end.point.x);
+        let y1 = raster_cell_coordinate(end.point.y);
         let dx = (x1 - x0).abs();
         let sx = if x0 < x1 { 1 } else { -1 };
         let dy = -(y1 - y0).abs();
@@ -466,13 +512,12 @@ impl StrokeStager<'_> {
     }
 }
 
-pub(super) fn stroke_maximum_radius(stroke: &Stroke) -> i64 {
+pub(super) fn stroke_maximum_radius(stroke: &Stroke, samples: &[DocumentStrokeSample]) -> i64 {
     if stroke.tool == PaintTool::Pencil {
         return 0;
     }
     let pressure = if stroke.pressure_size {
-        stroke
-            .samples
+        samples
             .iter()
             .map(|sample| sample.pressure)
             .fold(0.01_f32, f32::max)
@@ -488,14 +533,14 @@ fn raster_cell_coordinate(value: f32) -> i64 {
 
 pub(super) fn clip_segment_to_document(
     document: &CellDocument,
-    start: StrokeSample,
-    end: StrokeSample,
+    start: DocumentStrokeSample,
+    end: DocumentStrokeSample,
     radius: i64,
-) -> Option<(StrokeSample, StrokeSample)> {
-    let start_x = f64::from(start.x);
-    let start_y = f64::from(start.y);
-    let delta_x = f64::from(end.x) - start_x;
-    let delta_y = f64::from(end.y) - start_y;
+) -> Option<(DocumentStrokeSample, DocumentStrokeSample)> {
+    let start_x = f64::from(start.point.x);
+    let start_y = f64::from(start.point.y);
+    let delta_x = f64::from(end.point.x) - start_x;
+    let delta_y = f64::from(end.point.y) - start_y;
     let radius = radius as f64;
     let minimum_x = -radius;
     let minimum_y = -radius;
@@ -533,9 +578,11 @@ pub(super) fn clip_segment_to_document(
         }
     }
 
-    let interpolate = |ratio: f64| StrokeSample {
-        x: (start_x + delta_x * ratio) as f32,
-        y: (start_y + delta_y * ratio) as f32,
+    let interpolate = |ratio: f64| DocumentStrokeSample {
+        point: DocumentPointF32 {
+            x: (start_x + delta_x * ratio) as f32,
+            y: (start_y + delta_y * ratio) as f32,
+        },
         pressure: start.pressure + (end.pressure - start.pressure) * ratio as f32,
     };
     Some((interpolate(lower), interpolate(upper)))
@@ -544,12 +591,12 @@ pub(super) fn clip_segment_to_document(
 #[derive(Clone, Debug)]
 pub(super) struct StrokeSession {
     pub(super) stroke: Stroke,
-    pub(super) plane_id: u64,
+    pub(super) plane_id: PlaneId,
     pub(super) desired: PixelValue,
     pub(super) preview_document: CellDocument,
     pub(super) changes: BTreeMap<(u32, u32), PixelChange>,
-    pub(super) last_sample: Option<StrokeSample>,
+    pub(super) last_sample: Option<DocumentStrokeSample>,
     pub(super) sample_count: usize,
     pub(super) work: u64,
-    pub(super) preview_revision: u64,
+    pub(super) preview_revision: PreviewRevision,
 }

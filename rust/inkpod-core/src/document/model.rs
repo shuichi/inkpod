@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PlaneNode {
-    pub(crate) id: u64,
+    pub(crate) id: PlaneId,
     pub(crate) kind: PlaneType,
     pub(crate) name: String,
     pub(crate) visible: bool,
@@ -14,7 +14,7 @@ pub(crate) struct PlaneNode {
 impl PlaneNode {
     pub(crate) fn info(&self) -> PlaneInfo {
         PlaneInfo {
-            id: self.id,
+            id: self.id.get(),
             kind: self.kind,
             pixel_format: self.raster.format(),
             name: self.name.clone(),
@@ -27,7 +27,7 @@ impl PlaneNode {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LayerNode {
-    pub(crate) id: u64,
+    pub(crate) id: LayerId,
     pub(crate) kind: LayerKind,
     pub(crate) name: String,
     pub(crate) visible: bool,
@@ -39,7 +39,7 @@ pub(crate) struct LayerNode {
 impl LayerNode {
     pub(crate) fn info(&self) -> LayerInfo {
         LayerInfo {
-            id: self.id,
+            id: self.id.get(),
             kind: self.kind,
             name: self.name.clone(),
             visible: self.visible,
@@ -53,7 +53,7 @@ impl LayerNode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CellDocument {
     pub(crate) uuid: u128,
-    pub(crate) id: u64,
+    pub(crate) id: DocumentId,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) dpi_x_milli: u32,
@@ -62,25 +62,25 @@ pub(crate) struct CellDocument {
     pub(crate) main_line_color: PixelValue,
     pub(crate) palette: Palette,
     pub(crate) layers: Vec<LayerNode>,
-    pub(crate) active_layer_id: u64,
-    pub(crate) active_plane_id: u64,
-    pub(crate) selection_plane_id: u64,
+    pub(crate) active_layer_id: LayerId,
+    pub(crate) active_plane_id: PlaneId,
+    pub(crate) selection_plane_id: PlaneId,
     pub(crate) selection: TileRaster,
     pub(crate) guides: Vec<Guide>,
     pub(crate) grid: GridConfig,
     pub(crate) light_table: animation::LightTableState,
     pub(crate) vector: vector::VectorState,
-    pub(crate) adjustments: BTreeMap<u64, Adjustment>,
+    pub(crate) adjustments: BTreeMap<LayerId, Adjustment>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DocumentIds {
-    pub(crate) document: u64,
-    pub(crate) layer: u64,
-    pub(crate) main_plane: u64,
-    pub(crate) color_plane: u64,
-    pub(crate) selection_plane: u64,
-    pub(crate) light_table_set: u64,
+    pub(crate) document: DocumentId,
+    pub(crate) layer: LayerId,
+    pub(crate) main_plane: PlaneId,
+    pub(crate) color_plane: PlaneId,
+    pub(crate) selection_plane: PlaneId,
+    pub(crate) light_table_set: LightTableSetId,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -185,20 +185,22 @@ impl CellDocument {
             .layers
             .iter()
             .flat_map(|layer| layer.planes.iter())
-            .map(|plane| raster_to_file_plane(plane.id, plane.kind.file_kind(), &plane.raster))
+            .map(|plane| {
+                raster_to_file_plane(plane.id.get(), plane.kind.file_kind(), &plane.raster)
+            })
             .collect();
         planes.push(raster_to_file_plane(
-            self.selection_plane_id,
+            self.selection_plane_id.get(),
             FilePlaneKind::Selection,
             &self.selection,
         ));
         planes.extend(self.light_table.file_planes());
         CellFile {
             document_uuid: self.uuid.to_le_bytes(),
-            document_id: self.id,
-            layer_id,
-            main_plane_id,
-            color_plane_id,
+            document_id: self.id.get(),
+            layer_id: layer_id.get(),
+            main_plane_id: main_plane_id.get(),
+            color_plane_id: color_plane_id.get(),
             width: self.width,
             height: self.height,
             dpi_x_milli: self.dpi_x_milli,
@@ -208,14 +210,14 @@ impl CellDocument {
             palette: self.palette.colors().to_vec(),
             planes,
             document_metadata: Some(FileDocumentMetadata {
-                active_layer_id: self.active_layer_id,
-                active_plane_id: self.active_plane_id,
-                selection_plane_id: self.selection_plane_id,
+                active_layer_id: self.active_layer_id.get(),
+                active_plane_id: self.active_plane_id.get(),
+                selection_plane_id: self.selection_plane_id.get(),
                 layers: self
                     .layers
                     .iter()
                     .map(|layer| FileLayer {
-                        id: layer.id,
+                        id: layer.id.get(),
                         kind: layer.kind,
                         name: layer.name.clone(),
                         visible: layer.visible,
@@ -225,7 +227,7 @@ impl CellDocument {
                             .planes
                             .iter()
                             .map(|plane| FilePlaneProperties {
-                                id: plane.id,
+                                id: plane.id.get(),
                                 name: plane.name.clone(),
                                 visible: plane.visible,
                                 editable: plane.editable,
@@ -262,7 +264,7 @@ impl CellDocument {
                     .adjustments
                     .iter()
                     .map(|(layer_id, adjustment)| FileAdjustmentLayer {
-                        layer_id: *layer_id,
+                        layer_id: layer_id.get(),
                         adjustment: adjustment.clone(),
                     })
                     .collect(),
@@ -270,7 +272,7 @@ impl CellDocument {
         }
     }
 
-    pub(crate) fn from_file(file: CellFile, revision: u64) -> Result<Self, CoreError> {
+    pub(crate) fn from_file(file: CellFile, revision: DocumentRevision) -> Result<Self, CoreError> {
         let main_file = file
             .planes
             .iter()
@@ -297,18 +299,18 @@ impl CellDocument {
                             .find(|plane| plane.id == properties.id)
                             .ok_or(CoreError::InvalidState("layer plane payload is missing"))?;
                         planes.push(PlaneNode {
-                            id: properties.id,
+                            id: PlaneId::from_raw(properties.id),
                             kind: PlaneType::from_file(payload.kind),
                             name: properties.name.clone(),
                             visible: properties.visible,
                             editable: properties.editable,
                             opacity_milli: properties.opacity_milli,
-                            raster: file_plane_to_raster(payload, revision)?,
+                            raster: file_plane_to_raster(payload, revision.get())?,
                         });
                     }
                     validate_layer_kind(layer.kind, &planes)?;
                     layers.push(LayerNode {
-                        id: layer.id,
+                        id: LayerId::from_raw(layer.id),
                         kind: layer.kind,
                         name: layer.name.clone(),
                         visible: layer.visible,
@@ -324,10 +326,10 @@ impl CellDocument {
                     .ok_or(CoreError::InvalidState("selection payload is missing"))?;
                 (
                     layers,
-                    metadata.active_layer_id,
-                    metadata.active_plane_id,
-                    metadata.selection_plane_id,
-                    file_plane_to_raster(selection_file, revision)?,
+                    LayerId::from_raw(metadata.active_layer_id),
+                    PlaneId::from_raw(metadata.active_plane_id),
+                    PlaneId::from_raw(metadata.selection_plane_id),
+                    file_plane_to_raster(selection_file, revision.get())?,
                     metadata
                         .guides
                         .iter()
@@ -365,7 +367,7 @@ impl CellDocument {
                 };
                 (
                     vec![LayerNode {
-                        id: file.layer_id,
+                        id: LayerId::from_raw(file.layer_id),
                         kind: layer_kind,
                         name: "Coloring Layer".to_owned(),
                         visible: true,
@@ -373,28 +375,28 @@ impl CellDocument {
                         opacity_milli: 1_000,
                         planes: vec![
                             PlaneNode {
-                                id: file.main_plane_id,
+                                id: PlaneId::from_raw(file.main_plane_id),
                                 kind: PlaneType::MainLine,
                                 name: "Main Line".to_owned(),
                                 visible: true,
                                 editable: true,
                                 opacity_milli: 1_000,
-                                raster: file_plane_to_raster(main_file, revision)?,
+                                raster: file_plane_to_raster(main_file, revision.get())?,
                             },
                             PlaneNode {
-                                id: file.color_plane_id,
+                                id: PlaneId::from_raw(file.color_plane_id),
                                 kind: PlaneType::Color,
                                 name: "Color".to_owned(),
                                 visible: true,
                                 editable: true,
                                 opacity_milli: 1_000,
-                                raster: file_plane_to_raster(color_file, revision)?,
+                                raster: file_plane_to_raster(color_file, revision.get())?,
                             },
                         ],
                     }],
-                    file.layer_id,
-                    file.main_plane_id,
-                    selection_plane_id,
+                    LayerId::from_raw(file.layer_id),
+                    PlaneId::from_raw(file.main_plane_id),
+                    PlaneId::from_raw(selection_plane_id),
                     TileRaster::new(file.width, file.height, PixelFormat::BinaryMask8)?,
                     Vec::new(),
                     GridConfig::default(),
@@ -411,7 +413,7 @@ impl CellDocument {
                     .map(|layer| layer.id)
                     .chain(metadata.guides.iter().map(|guide| guide.id))
             }))
-            .chain([file.document_id, selection_plane_id])
+            .chain([file.document_id, selection_plane_id.get()])
             .max()
             .unwrap_or(0)
             .checked_add(1)
@@ -420,7 +422,7 @@ impl CellDocument {
             file.light_table_metadata.as_ref(),
             &file.planes,
             revision,
-            legacy_light_table_set_id,
+            LightTableSetId::from_raw(legacy_light_table_set_id),
         )?;
         let vector = vector::VectorState::from_file(file.vector_metadata.as_ref());
         let adjustments = file
@@ -430,13 +432,13 @@ impl CellDocument {
                 metadata
                     .adjustments
                     .iter()
-                    .map(|layer| (layer.layer_id, layer.adjustment.clone()))
+                    .map(|layer| (LayerId::from_raw(layer.layer_id), layer.adjustment.clone()))
                     .collect()
             })
             .unwrap_or_default();
         Ok(Self {
             uuid: u128::from_le_bytes(file.document_uuid),
-            id: file.document_id,
+            id: DocumentId::from_raw(file.document_id),
             width: file.width,
             height: file.height,
             dpi_x_milli: file.dpi_x_milli,
@@ -473,7 +475,7 @@ impl CellDocument {
             .expect("validated coloring document must retain a coloring layer")
     }
 
-    pub(crate) fn primary_ids(&self) -> (u64, u64, u64) {
+    pub(crate) fn primary_ids(&self) -> (LayerId, PlaneId, PlaneId) {
         let layer = self.primary_layer();
         let main = layer
             .planes
@@ -571,14 +573,14 @@ impl CellDocument {
             })
     }
 
-    pub(crate) fn plane_by_id(&self, id: u64) -> Option<&PlaneNode> {
+    pub(crate) fn plane_by_id(&self, id: PlaneId) -> Option<&PlaneNode> {
         self.layers
             .iter()
             .flat_map(|layer| layer.planes.iter())
             .find(|plane| plane.id == id)
     }
 
-    pub(crate) fn plane_by_id_mut(&mut self, id: u64) -> Option<&mut PlaneNode> {
+    pub(crate) fn plane_by_id_mut(&mut self, id: PlaneId) -> Option<&mut PlaneNode> {
         self.layers
             .iter_mut()
             .flat_map(|layer| layer.planes.iter_mut())
@@ -589,12 +591,13 @@ impl CellDocument {
         self.layers
             .iter()
             .flat_map(|layer| {
-                std::iter::once(layer.id).chain(layer.planes.iter().map(|plane| plane.id))
+                std::iter::once(layer.id.get())
+                    .chain(layer.planes.iter().map(|plane| plane.id.get()))
             })
             .chain(self.guides.iter().map(|guide| guide.id))
             .chain([self.light_table.maximum_id()])
             .chain([self.vector.maximum_id()])
-            .chain([self.id, self.selection_plane_id])
+            .chain([self.id.get(), self.selection_plane_id.get()])
             .max()
             .unwrap_or(0)
     }

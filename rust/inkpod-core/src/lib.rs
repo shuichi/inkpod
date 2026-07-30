@@ -1,13 +1,39 @@
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
+//! Platform-independent document, editing, history, and rendering state for inkpod.
+//!
+//! [`Core`] is a single-writer state machine. Document-changing operations are
+//! transactional: a successful change advances the document revision and creates
+//! one history entry, a semantic no-op leaves those values unchanged, and an error
+//! never publishes partial state. View-only operations advance the view revision
+//! without changing document history or dirty/savepoint state.
+//!
+//! Stable object identifiers are unique within a [`Core`] instance and remain
+//! valid for the lifetime of the referenced object. Public coordinates are in
+//! document pixels unless an item explicitly says that it uses device pixels.
+//!
+//! # Example
+//!
+//! ```
+//! use inkpod_core::{Core, DEFAULT_DPI_MILLI};
+//!
+//! let mut core = Core::new();
+//! let document = core.new_cell(64, 48, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)?;
+//! assert_eq!((document.width, document.height), (64, 48));
+//! assert!(!document.dirty);
+//! # Ok::<(), inkpod_core::CoreError>(())
+//! ```
 
 mod animation;
 mod api;
 mod batch;
+mod coordinate;
 mod core;
 mod document;
 mod effects;
 mod error;
 mod history;
+mod identity;
 mod paint;
 mod persistence;
 mod selection;
@@ -42,8 +68,10 @@ pub use vector::{
     VectorSelectionResult, VectorWidthMode,
 };
 
+pub(crate) use coordinate::*;
 use document::{CellDocument, DocumentIds, LayerNode, PaperSpec, PlaneNode};
 use history::{HistoryChange, HistoryEntry, PixelChange};
+pub(crate) use identity::*;
 use persistence::{file_plane_to_raster, raster_to_file_plane};
 use selection::{FloatingSelection, StagedPixels};
 use stroke::StrokeSession;
@@ -64,19 +92,33 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Feature bits supported by this version of the Rust Core API.
 pub const CORE_FEATURES: u64 = 1;
+/// Snapshot feature bit indicating legacy-white color-check rendering.
 pub const SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE: u64 = 1 << 0;
+/// Snapshot feature bit indicating native-alpha color-check rendering.
 pub const SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA: u64 = 1 << 1;
+/// Default horizontal and vertical resolution in thousandths of a DPI.
 pub const DEFAULT_DPI_MILLI: u32 = 96_000;
+/// Maximum number of layers accepted in one document.
 pub const MAX_LAYERS: usize = 4_096;
+/// Maximum number of planes accepted in one layer.
 pub const MAX_PLANES_PER_LAYER: usize = 4_096;
+/// Maximum number of document guides.
 pub const MAX_GUIDES: usize = 4_096;
+/// Maximum number of configured shortcut commands.
 pub const MAX_SHORTCUTS: usize = 1_024;
+/// Maximum number of key strokes in one shortcut sequence.
 pub const MAX_SHORTCUT_STROKES: usize = 4;
+/// Shortcut modifier bit for the Control key.
 pub const SHORTCUT_MODIFIER_CONTROL: u32 = 1 << 0;
+/// Shortcut modifier bit for the Shift key.
 pub const SHORTCUT_MODIFIER_SHIFT: u32 = 1 << 1;
+/// Shortcut modifier bit for the Alt key.
 pub const SHORTCUT_MODIFIER_ALT: u32 = 1 << 2;
+/// Shortcut modifier bit distinguishing extended virtual keys.
 pub const SHORTCUT_MODIFIER_EXTENDED: u32 = 1 << 3;
+/// Mask containing every supported shortcut modifier bit.
 pub const SHORTCUT_MODIFIER_MASK: u32 = SHORTCUT_MODIFIER_CONTROL
     | SHORTCUT_MODIFIER_SHIFT
     | SHORTCUT_MODIFIER_ALT

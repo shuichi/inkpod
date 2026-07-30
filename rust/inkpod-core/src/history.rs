@@ -4,6 +4,10 @@ use super::*;
 use crate::selection::mask_bounds;
 
 impl Core {
+    /// Reverts the most recently applied history entry.
+    ///
+    /// Success advances document revision and moves the history cursor by one.
+    /// The operation is rejected during a stroke or when no entry is available.
     pub fn undo(&mut self) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         if self.history_cursor == 0 {
@@ -16,11 +20,15 @@ impl Core {
         self.current_state = entry.before_state;
         self.document_revision = revision;
         Ok(DispatchOutcome {
-            revision,
+            revision: revision.get(),
             accepted_commands: 1,
         })
     }
 
+    /// Reapplies the next history entry.
+    ///
+    /// Success advances document revision and moves the history cursor by one.
+    /// The operation is rejected during a stroke or when no redo entry exists.
     pub fn redo(&mut self) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let Some(entry) = self.history.get(self.history_cursor).cloned() else {
@@ -32,11 +40,12 @@ impl Core {
         self.current_state = entry.after_state;
         self.document_revision = revision;
         Ok(DispatchOutcome {
-            revision,
+            revision: revision.get(),
             accepted_commands: 1,
         })
     }
 
+    /// Returns owned metadata for every history entry in chronological order.
     #[must_use]
     pub fn history_entries(&self) -> Vec<HistoryEntryInfo> {
         self.history
@@ -55,11 +64,17 @@ impl Core {
             .collect()
     }
 
+    /// Returns the cursor separating applied entries from redo entries.
     #[must_use]
     pub const fn history_cursor(&self) -> usize {
         self.history_cursor
     }
 
+    /// Moves directly to a history cursor by applying undo or redo entries.
+    ///
+    /// The valid range is `0..=history_entries().len()`. The current cursor is a
+    /// no-op; a real move advances document revision once and preserves savepoint
+    /// identity so dirty state follows the selected history state.
     pub fn jump_history(&mut self, target_cursor: usize) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         if target_cursor > self.history.len() {
@@ -86,11 +101,16 @@ impl Core {
         }
         self.document_revision = revision;
         Ok(DispatchOutcome {
-            revision,
+            revision: revision.get(),
             accepted_commands,
         })
     }
 
+    /// Restores the selected pixels of the active plane from the normal-save file.
+    ///
+    /// The saved document must match the open document and the selection must be
+    /// non-empty. Unchanged pixels are a no-op; a change is one undoable edit.
+    /// Read/validation failure leaves live document state untouched.
     pub fn revert_active_plane_selection(&mut self) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let path = self
@@ -169,7 +189,7 @@ impl Core {
             .raster;
         let mut touched = BTreeSet::new();
         for change in &changes {
-            raster.set_pixel(change.x, change.y, change.after, revision)?;
+            raster.set_pixel(change.x, change.y, change.after, revision.get())?;
             touched.insert(TileCoord {
                 x: change.x / TILE_SIZE,
                 y: change.y / TILE_SIZE,
@@ -181,7 +201,7 @@ impl Core {
         self.document_revision = revision;
         self.commit_pixel_history(active_plane_id, changes, after_state);
         Ok(DispatchOutcome {
-            revision,
+            revision: revision.get(),
             accepted_commands: 1,
         })
     }
@@ -198,7 +218,7 @@ pub(super) struct PixelChange {
 #[derive(Clone, Debug)]
 pub(super) enum HistoryChange {
     Pixels {
-        plane_id: u64,
+        plane_id: PlaneId,
         changes: Vec<PixelChange>,
     },
     Palette {
@@ -218,13 +238,17 @@ pub(super) enum HistoryChange {
 #[derive(Clone, Debug)]
 pub(super) struct HistoryEntry {
     pub(super) change: HistoryChange,
-    pub(super) before_state: u64,
-    pub(super) after_state: u64,
+    pub(super) before_state: HistoryStateId,
+    pub(super) after_state: HistoryStateId,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Read-only metadata for one history entry.
 pub struct HistoryEntryInfo {
+    /// Zero-based position in the history list.
     pub index: usize,
+    /// Whether this entry is before the current history cursor.
     pub applied: bool,
+    /// Stable user-facing category label for the change.
     pub label: &'static str,
 }

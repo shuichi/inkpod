@@ -7,8 +7,9 @@ use super::{
     PointF32, RectI32, SelectionOperation, SelectionShape, Stamp, StampGesture, StrokeSample,
 };
 use crate::document::{unique_layer_name, validate_node_name};
+use crate::identity::*;
 use crate::selection::{combine_selection_masks, selection_mask_for_shape};
-use crate::stroke::document_samples_for_view;
+use crate::stroke::{DocumentStrokeSample, document_samples_for_view};
 use inkpod_image::{
     TileRaster, apply_airbrush, apply_airbrush_gesture, apply_alpha_gradient,
     apply_boundary_airbrush, apply_dust_removal, apply_filter, apply_filter_with_progress,

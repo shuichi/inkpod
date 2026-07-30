@@ -2,6 +2,10 @@ use super::raster::*;
 use super::*;
 
 impl Core {
+    /// Decodes a common raster and replaces the active document with a clean cell.
+    ///
+    /// UUID must be nonzero. Success resets history, savepoint, view, sequence, and
+    /// transient sessions; decode/validation failure leaves the current document intact.
     pub fn import_common_raster(
         &mut self,
         format: CommonRasterFormat,
@@ -16,12 +20,12 @@ impl Core {
         }
         let raster = decode_common_raster(format, bytes)?;
         let ids = DocumentIds {
-            document: self.allocate_id(),
-            layer: self.allocate_id(),
-            main_plane: self.allocate_id(),
-            color_plane: self.allocate_id(),
-            selection_plane: self.allocate_id(),
-            light_table_set: self.allocate_id(),
+            document: self.next_id.take_document(),
+            layer: self.next_id.take_layer(),
+            main_plane: self.next_id.take_plane(),
+            color_plane: self.next_id.take_plane(),
+            selection_plane: self.next_id.take_plane(),
+            light_table_set: self.next_id.take_light_table_set(),
         };
         let mut document = CellDocument::new(
             ids,
@@ -34,7 +38,7 @@ impl Core {
             },
         )?;
         document.plane_for_role_mut(ActivePlane::Color)?.raster =
-            common_to_tile_raster(&raster, self.document_revision.max(1))?;
+            common_to_tile_raster(&raster, self.document_revision.get().max(1))?;
         let revision = self.next_document_revision()?;
         self.document = Some(document);
         self.document_revision = revision;
@@ -50,13 +54,16 @@ impl Core {
         self.document_info()
     }
 
+    /// Flattens the active document and encodes it into a common raster format.
+    ///
+    /// The query does not advance revisions, history, dirty state, or savepoint.
     pub fn export_common_raster(
         &self,
         format: CommonRasterFormat,
         composite_white: bool,
     ) -> Result<Vec<u8>, CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let flattened = flatten_document(document, self.document_revision.max(1))?;
+        let flattened = flatten_document(document, self.document_revision.get().max(1))?;
         let raster = tile_to_common(
             &flattened,
             Some(document.dpi_x_milli),
@@ -65,6 +72,10 @@ impl Core {
         Ok(encode_common_raster(format, &raster, composite_white)?)
     }
 
+    /// Quantizes visible composite colors into a replacement document palette.
+    ///
+    /// Success follows [`Core::replace_palette`] history/no-op semantics. Exceeding
+    /// configured bounds fails before palette commit.
     pub fn generate_palette_from_document(
         &mut self,
         maximum_colors: usize,
@@ -81,7 +92,7 @@ impl Core {
             ));
         }
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let flattened = flatten_document(document, self.document_revision.max(1))?;
+        let flattened = flatten_document(document, self.document_revision.get().max(1))?;
         let mask = u8::MAX << quantization_bits;
         let mut unique = BTreeSet::new();
         for y in 0..flattened.height() {
@@ -110,15 +121,17 @@ impl Core {
         self.replace_palette(&colors)
     }
 
+    /// Replaces paper/frame metadata as one undoable document edit.
+    ///
+    /// All frames and margins are validated against document dimensions first.
     pub fn update_paper_frames(
         &mut self,
         frames: FrameMetadata,
     ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         validate_frames(self.document.as_ref().ok_or(CoreError::NoDocument)?, frames)?;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-        let mut after = before.clone();
-        after.frames = frames;
-        self.commit_document_edit(before, after)
+        let mut edit = self.begin_document_edit()?;
+        edit.working_mut().frames = frames;
+        edit.commit(self)
     }
 }

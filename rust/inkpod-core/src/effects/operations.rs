@@ -4,7 +4,7 @@ use super::*;
 impl Core {
     pub(super) fn apply_masked_raster_operation<F>(
         &mut self,
-        plane_id: u64,
+        plane_id: PlaneId,
         shape: &SelectionShape,
         operation: F,
     ) -> Result<DispatchOutcome, CoreError>
@@ -12,36 +12,30 @@ impl Core {
         F: FnOnce(&TileRaster, &TileRaster, u64) -> Result<TileRaster, inkpod_image::RasterError>,
     {
         self.ensure_no_active_stroke()?;
-        let base_revision = self.document_revision;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-        let revision = self.next_document_revision()?;
-        let plane = editable_color_plane(&before, plane_id)?;
-        let mut mask = selection_mask_for_shape(&before, shape, revision)?;
+        let mut edit = self.begin_document_edit()?;
+        let revision = edit.revision();
+        let (before, after) = edit.documents();
+        let plane = editable_color_plane(before, plane_id)?;
+        let mut mask = selection_mask_for_shape(before, shape, revision.get())?;
         if before.selection.allocated_tile_count() != 0 {
             mask = combine_selection_masks(
                 &before.selection,
                 &mask,
                 SelectionOperation::Intersect,
-                revision,
+                revision.get(),
             )?;
         }
-        let raster = operation(&plane.raster, &mask, revision)?;
-        if self.document_revision != base_revision {
-            return Err(CoreError::InvalidState(
-                "masked image-edit base revision became stale",
-            ));
-        }
-        let mut after = before.clone();
+        let raster = operation(&plane.raster, &mask, revision.get())?;
         after
             .plane_by_id_mut(plane_id)
             .ok_or(CoreError::InvalidState("operation plane disappeared"))?
             .raster = raster;
-        self.commit_document_edit_with_revision(before, after, revision)
+        edit.commit(self)
     }
 
     pub(super) fn apply_raster_operation<F>(
         &mut self,
-        plane_id: u64,
+        plane_id: PlaneId,
         operation: F,
     ) -> Result<DispatchOutcome, CoreError>
     where
@@ -52,35 +46,30 @@ impl Core {
         ) -> Result<TileRaster, inkpod_image::RasterError>,
     {
         self.ensure_no_active_stroke()?;
-        let base_revision = self.document_revision;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-        let revision = self.next_document_revision()?;
-        let plane = editable_color_plane(&before, plane_id)?;
+        let mut edit = self.begin_document_edit()?;
+        let revision = edit.revision();
+        let (before, after) = edit.documents();
+        let plane = editable_color_plane(before, plane_id)?;
         let selection = (before.selection.allocated_tile_count() != 0).then_some(&before.selection);
-        let raster = operation(&plane.raster, selection, revision)?;
-        if self.document_revision != base_revision {
-            return Err(CoreError::InvalidState(
-                "image-edit base revision became stale",
-            ));
-        }
-        let mut after = before.clone();
+        let raster = operation(&plane.raster, selection, revision.get())?;
         after
             .plane_by_id_mut(plane_id)
             .ok_or(CoreError::InvalidState("operation plane disappeared"))?
             .raster = raster;
-        self.commit_document_edit_with_revision(before, after, revision)
+        edit.commit(self)
     }
 
     pub(super) fn apply_blur_tool_mask_to_plane(
         &mut self,
-        plane_id: u64,
+        plane_id: PlaneId,
         mut mask: TileRaster,
         radius: u32,
         strength_milli: u32,
     ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
-        let base_revision = self.document_revision;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let mut edit = self.begin_document_edit()?;
+        let revision = edit.revision();
+        let (before, after) = edit.documents();
         if mask.width() != before.width
             || mask.height() != before.height
             || mask.format() != PixelFormat::BinaryMask8
@@ -89,14 +78,13 @@ impl Core {
                 "blur pressure mask does not match the document",
             ));
         }
-        let revision = self.next_document_revision()?;
-        let plane = editable_color_plane(&before, plane_id)?;
+        let plane = editable_color_plane(before, plane_id)?;
         if before.selection.allocated_tile_count() != 0 {
             mask = combine_selection_masks(
                 &before.selection,
                 &mask,
                 SelectionOperation::Intersect,
-                revision,
+                revision.get(),
             )?;
         }
         let raster = apply_filter(
@@ -106,19 +94,13 @@ impl Core {
                 radius,
                 strength_milli,
             },
-            revision,
+            revision.get(),
         )?;
-        if self.document_revision != base_revision {
-            return Err(CoreError::InvalidState(
-                "blur-tool base revision became stale",
-            ));
-        }
-        let mut after = before.clone();
         after
             .plane_by_id_mut(plane_id)
             .ok_or(CoreError::InvalidState("operation plane disappeared"))?
             .raster = raster;
-        self.commit_document_edit_with_revision(before, after, revision)
+        edit.commit(self)
     }
 
     pub(super) fn pressure_trace_mask_for_view(
@@ -134,7 +116,7 @@ impl Core {
         } else {
             *self
                 .secondary_views
-                .get(&view_id)
+                .get(&ViewId::from_raw(view_id))
                 .ok_or(CoreError::InvalidArgument("view ID does not exist"))?
         };
         let samples = document_samples_for_view(
@@ -149,7 +131,7 @@ impl Core {
         }
         let diameter = match coordinate_space {
             CoordinateSpace::Document => f64::from(diameter),
-            CoordinateSpace::Device => f64::from(diameter) / view.zoom,
+            CoordinateSpace::Device => f64::from(diameter) / view.zoom.get(),
         };
         if !diameter.is_finite() || diameter <= 0.0 || diameter > 4_096.0 {
             return Err(CoreError::InvalidArgument("blur pen diameter is invalid"));
@@ -163,7 +145,12 @@ impl Core {
                     &samples,
                     diameter,
                 ) {
-                    mask.set_pixel(x, y, super::PixelValue::Binary(255), self.document_revision)?;
+                    mask.set_pixel(
+                        x,
+                        y,
+                        super::PixelValue::Binary(255),
+                        self.document_revision.get(),
+                    )?;
                 }
             }
         }
@@ -184,7 +171,7 @@ impl Core {
         } else {
             *self
                 .secondary_views
-                .get(&view_id)
+                .get(&ViewId::from_raw(view_id))
                 .ok_or(CoreError::InvalidArgument("view ID does not exist"))?
         };
         let samples = document_samples_for_view(
@@ -197,15 +184,15 @@ impl Core {
         let points: Vec<_> = samples
             .iter()
             .map(|sample| PointF32 {
-                x: sample.x,
-                y: sample.y,
+                x: sample.point.x,
+                y: sample.point.y,
             })
             .collect();
         match kind {
             EffectRegionKind::Trace => {
                 let diameter = match coordinate_space {
                     CoordinateSpace::Document => diameter,
-                    CoordinateSpace::Device => (f64::from(diameter) / view.zoom) as f32,
+                    CoordinateSpace::Device => (f64::from(diameter) / view.zoom.get()) as f32,
                 };
                 Ok(SelectionShape::Trace { points, diameter })
             }

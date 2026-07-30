@@ -7,15 +7,22 @@ use super::codec::{
 use super::validation::{validate_component, validate_operation, validate_path};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Source category expanded by a batch graph.
 pub enum BatchInputKind {
+    /// One native document file.
     File,
+    /// Native document files in one folder.
     Folder,
+    /// Cells currently installed in Core sequence state.
     CurrentSequence,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// One bounded batch input source and optional inclusive cell-number range.
 pub struct BatchInputSelector {
+    /// Source category.
     pub kind: BatchInputKind,
+    /// UTF-8 file/folder path; empty only for current-sequence input.
     pub path: String,
     /// Zero means unbounded.
     pub first_cell: u32,
@@ -24,6 +31,7 @@ pub struct BatchInputSelector {
 }
 
 impl BatchInputSelector {
+    /// Creates an unbounded single-file selector.
     #[must_use]
     pub fn file(path: impl Into<String>) -> Self {
         Self {
@@ -34,6 +42,7 @@ impl BatchInputSelector {
         }
     }
 
+    /// Creates an unbounded selector for current Core sequence state.
     #[must_use]
     pub fn current_sequence() -> Self {
         Self {
@@ -46,21 +55,31 @@ impl BatchInputSelector {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Behavior when an operation target cannot be resolved in an input document.
 pub enum BatchMissingTargetPolicy {
+    /// Skip the operation for that item.
     Skip,
+    /// Fail the batch item.
     Error,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Optional stable-ID and semantic filters used to select a batch target plane.
 pub struct BatchTargetSelector {
+    /// Exact stable layer ID, when known across all inputs.
     pub layer_id: Option<u64>,
+    /// Exact stable plane ID, when known across all inputs.
     pub plane_id: Option<u64>,
+    /// Required semantic layer kind.
     pub layer_kind: Option<LayerKind>,
+    /// Required semantic plane kind.
     pub plane_kind: Option<PlaneType>,
+    /// Policy when no plane matches all supplied filters.
     pub missing_policy: BatchMissingTargetPolicy,
 }
 
 impl BatchTargetSelector {
+    /// Selects the color plane of a binary-coloring layer and errors if absent.
     #[must_use]
     pub const fn color_plane() -> Self {
         Self {
@@ -74,60 +93,100 @@ impl BatchTargetSelector {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// One optionally enabled exact color replacement.
 pub struct BatchColorPair {
+    /// Whether this pair participates in the operation.
     pub enabled: bool,
+    /// Source pixel value.
     pub old: PixelValue,
+    /// Replacement pixel value.
     pub new: PixelValue,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// One document-pixel seed used by continuous batch fill.
 pub struct BatchSeed {
+    /// Seed x-coordinate in document pixels.
     pub x: u32,
+    /// Seed y-coordinate in document pixels.
     pub y: u32,
+    /// Straight-alpha fill color.
     pub color: PixelValue,
+    /// Inclusive channel tolerance.
     pub tolerance: u16,
+    /// Maximum bounded gap-closing distance.
     pub gap_close: u8,
+    /// Optional guard color that must match the source seed.
     pub expected_source: Option<PixelValue>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Palette of colors separated into a replacement value.
 pub struct BatchSeparation {
+    /// Source colors to match.
     pub colors: Vec<PixelValue>,
+    /// Replacement pixel value.
     pub replacement: PixelValue,
+    /// Whether matching logic is inverted.
     pub invert: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Operation payload supported by a batch graph.
 pub enum BatchOperationKind {
+    /// Replaces enabled exact color pairs.
     ColorReplace(Vec<BatchColorPair>),
+    /// Applies ordered seed-fill requests.
     ContinuousFill(Vec<BatchSeed>),
+    /// Separates matching colors.
     Separation(BatchSeparation),
+    /// Sets target visibility.
     Visibility {
+        /// New visibility state.
         visible: bool,
     },
+    /// Changes vector stroke width.
     LineWidth(VectorWidthMode),
+    /// Applies an image filter.
     Filter(Filter),
+    /// Applies boundary-aware airbrush settings.
     BoundaryAirbrush(BoundaryAirbrush),
+    /// Removes bounded dust regions.
     DustRemoval(DustRemoval),
+    /// Mirrors the document.
     Mirror(MirrorAxis),
+    /// Rotates the document by 90 degrees.
     Rotate90(RotateDirection),
+    /// Resizes the document.
     Resize(DocumentResize),
+    /// Converts a raster plane.
     ConvertPlane {
+        /// Destination semantic plane kind.
         destination_kind: PlaneType,
+        /// Destination pixel format.
         destination_format: PixelFormat,
     },
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Versioned, optionally enabled operation in a batch graph.
 pub struct BatchOperation {
+    /// Must equal [`BATCH_OPERATION_VERSION`].
     pub version: u32,
+    /// Whether execution includes this operation.
     pub enabled: bool,
+    /// Whether a frontend must request parameters for every run.
     pub configure_each_run: bool,
+    /// Optional plane target selector.
     pub target: Option<BatchTargetSelector>,
+    /// Operation-specific payload.
     pub kind: BatchOperationKind,
 }
 
 impl BatchOperation {
+    /// Swaps old/new values in every color-replacement pair.
+    ///
+    /// Non-color-replacement operations return an error without mutation.
     pub fn swap_color_replacements(&mut self) -> Result<(), CoreError> {
         let BatchOperationKind::ColorReplace(pairs) = &mut self.kind else {
             return Err(CoreError::InvalidArgument(
@@ -142,28 +201,45 @@ impl BatchOperation {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Policy used to derive or authorize batch output paths.
 pub enum BatchOutputPolicy {
+    /// Writes a duplicate without replacing the input.
     Duplicate,
+    /// Writes a newly named normal-save output.
     NewSave,
+    /// Explicitly authorizes replacement of the input path.
     ExplicitOverwrite,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Batch behavior after an individual item fails.
 pub enum BatchFailurePolicy {
+    /// Record the failure and continue with later items.
     Continue,
+    /// Stop before processing the next item.
     Stop,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Output naming, confirmation, pacing, and failure settings for a batch graph.
 pub struct BatchOutputSettings {
+    /// Output-path policy.
     pub policy: BatchOutputPolicy,
+    /// Optional output folder path.
     pub folder: String,
+    /// Whether each input receives a cell subfolder.
     pub cell_folder: bool,
+    /// Optional output basename.
     pub basename: String,
+    /// First generated numeric suffix.
     pub start_number: u32,
+    /// Whether generated numbers descend.
     pub descending: bool,
+    /// Behavior after item failure.
     pub failure_policy: BatchFailurePolicy,
+    /// Bounded delay between items, in milliseconds.
     pub wait_milliseconds: u32,
+    /// Whether execution requires preview confirmation before saving.
     pub preview_before_save: bool,
 }
 
@@ -184,24 +260,37 @@ impl Default for BatchOutputSettings {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Complete versioned batch-processing graph.
 pub struct BatchGraph {
+    /// Native batch graph version.
     pub version: u32,
+    /// User-visible graph name.
     pub name: String,
+    /// Ordered input selectors.
     pub inputs: Vec<BatchInputSelector>,
+    /// Ordered operations applied to each input.
     pub operations: Vec<BatchOperation>,
+    /// Output and failure settings.
     pub output: BatchOutputSettings,
 }
 
 impl BatchGraph {
+    /// Validates and atomically writes the graph to `path`.
+    ///
+    /// The destination is not partially replaced on validation or I/O failure.
     pub fn save(&self, path: &Path) -> Result<(), CoreError> {
         save_batch_graph_atomic(path, &self.to_file()?)?;
         Ok(())
     }
 
+    /// Reads and fully validates a batch graph from `path`.
     pub fn load(path: &Path) -> Result<Self, CoreError> {
         Self::from_file(read_batch_graph(path)?)
     }
 
+    /// Validates graph versions, bounds, paths, targets, and operation payloads.
+    ///
+    /// This is a read-only check and does not access input documents.
     pub fn validate(&self) -> Result<(), CoreError> {
         if self.version != BATCH_GRAPH_VERSION {
             return Err(CoreError::InvalidArgument(
@@ -330,54 +419,82 @@ impl BatchGraph {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Subset of expanded batch inputs to process.
 pub enum BatchRunScope {
+    /// Processes only the first/current expanded item.
     Current,
+    /// Processes every expanded item.
     All,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Per-run controls independent of persistent graph settings.
 pub struct BatchRunOptions {
+    /// Expanded-input scope.
     pub scope: BatchRunScope,
+    /// Whether to validate and simulate without writing outputs.
     pub dry_run: bool,
+    /// Whether a required preview has been explicitly confirmed.
     pub preview_confirmed: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Planned input/output mapping and warnings for one batch item.
 pub struct BatchPreviewItem {
+    /// Stable display label for the expanded input.
     pub input_name: String,
+    /// Derived output path, or `None` when no output would be written.
     pub output_path: Option<PathBuf>,
+    /// Non-fatal validation or overwrite warnings.
     pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Read-only expansion and validation preview for a batch run.
 pub struct BatchPreview {
+    /// Preview items in deterministic execution order.
     pub items: Vec<BatchPreviewItem>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Terminal result class for one batch item.
 pub enum BatchItemOutcome {
+    /// All enabled operations and output completed.
     Succeeded,
+    /// Policy intentionally skipped the item.
     Skipped,
+    /// Validation, processing, or output failed.
     Failed,
+    /// Cancellation was observed before item commit/output completion.
     Cancelled,
+    /// Dry-run validation completed without output.
     DryRun,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Terminal report entry for one expanded batch item.
 pub struct BatchItemResult {
+    /// Stable display label for the input.
     pub input_name: String,
+    /// Attempted or planned output path.
     pub output_path: Option<PathBuf>,
+    /// Terminal result class.
     pub outcome: BatchItemOutcome,
+    /// Human-readable diagnostic or status text.
     pub message: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Complete deterministic report for a batch execution.
 pub struct BatchRunReport {
+    /// Item results in execution order.
     pub items: Vec<BatchItemResult>,
+    /// Whether cancellation stopped the run.
     pub cancelled: bool,
 }
 
 impl BatchRunReport {
+    /// Counts items whose terminal outcome is [`BatchItemOutcome::Failed`].
     #[must_use]
     pub fn failure_count(&self) -> usize {
         self.items

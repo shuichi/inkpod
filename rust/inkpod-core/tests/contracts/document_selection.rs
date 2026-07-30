@@ -137,6 +137,146 @@ fn viewport_resize_refits_only_persistent_fit_or_one_to_one_modes() {
 }
 
 #[test]
+fn view_coordinate_pan_viewport_and_invalid_results_preserve_document_state() {
+    let mut core = Core::new();
+    core.new_cell(8, 6, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let document_before = core.document_info().unwrap();
+
+    let one_pixel = core
+        .apply_view(ViewCommand::OneToOne {
+            viewport_width: 1.0,
+            viewport_height: 1.0,
+        })
+        .unwrap();
+    assert_eq!(one_pixel.viewport_width(), 1.0);
+    assert_eq!(one_pixel.viewport_height(), 1.0);
+
+    core.apply_view(ViewCommand::PanBy {
+        device_dx: 12.0,
+        device_dy: 7.0,
+    })
+    .unwrap();
+    let signed = core
+        .apply_view(ViewCommand::PanBy {
+            device_dx: -15.0,
+            device_dy: -11.0,
+        })
+        .unwrap();
+    assert_eq!((signed.pan_x(), signed.pan_y()), (-6.5, -6.5));
+
+    let before_noop = core.view_state();
+    let noop = core
+        .apply_view(ViewCommand::PanBy {
+            device_dx: 0.0,
+            device_dy: 0.0,
+        })
+        .unwrap();
+    assert_eq!(noop.revision(), before_noop.revision());
+
+    core.apply_view(ViewCommand::PanBy {
+        device_dx: 6.5,
+        device_dy: 6.5,
+    })
+    .unwrap();
+    let bounded = core
+        .apply_view(ViewCommand::PanBy {
+            device_dx: 16_777_216.0,
+            device_dy: -16_777_216.0,
+        })
+        .unwrap();
+    assert_eq!(bounded.pan_x(), 16_777_216.0);
+    assert_eq!(bounded.pan_y(), -16_777_216.0);
+
+    let before_invalid = core.view_state();
+    assert!(
+        core.apply_view(ViewCommand::PanBy {
+            device_dx: 1.0,
+            device_dy: 0.0,
+        })
+        .is_err()
+    );
+    assert!(
+        core.apply_view(ViewCommand::Fit {
+            viewport_width: f64::MAX,
+            viewport_height: f64::MAX,
+        })
+        .is_err()
+    );
+    assert!(
+        core.apply_view(ViewCommand::ViewportResized {
+            viewport_width: 0.0,
+            viewport_height: 10.0,
+        })
+        .is_err()
+    );
+    assert_eq!(core.view_state(), before_invalid);
+
+    let document_after = core.document_info().unwrap();
+    assert_eq!(
+        document_after.document_revision,
+        document_before.document_revision
+    );
+    assert_eq!(document_after.dirty, document_before.dirty);
+    assert_eq!(document_after.can_undo, document_before.can_undo);
+    assert_eq!(document_after.can_redo, document_before.can_redo);
+}
+
+#[test]
+fn view_coordinate_hit_testing_is_half_open_and_independent_of_document_dpi() {
+    let mut standard_dpi = Core::new();
+    standard_dpi.new_cell(8, 6, 96_000, 96_000).unwrap();
+    let mut high_dpi = Core::new();
+    high_dpi.new_cell(8, 6, 300_000, 300_000).unwrap();
+
+    for core in [&mut standard_dpi, &mut high_dpi] {
+        core.apply_view(ViewCommand::Fit {
+            viewport_width: 512.0,
+            viewport_height: 384.0,
+        })
+        .unwrap();
+    }
+    assert_eq!(standard_dpi.view_state(), high_dpi.view_state());
+
+    for core in [&mut standard_dpi, &mut high_dpi] {
+        core.apply_view(ViewCommand::OneToOne {
+            viewport_width: 8.0,
+            viewport_height: 6.0,
+        })
+        .unwrap();
+        core.apply_view(ViewCommand::PanBy {
+            device_dx: 9.0,
+            device_dy: -7.0,
+        })
+        .unwrap();
+    }
+    assert_eq!(standard_dpi.view_state(), high_dpi.view_state());
+
+    let view = standard_dpi.view_state();
+    let device = |document_x: f64, document_y: f64| {
+        (
+            document_x.mul_add(view.zoom(), view.pan_x()),
+            document_y.mul_add(view.zoom(), view.pan_y()),
+        )
+    };
+    for (document_x, document_y, expected) in [
+        (0.0, 0.0, (0, 0)),
+        (7.999_999, 5.999_999, (7, 5)),
+        (8.0, 6.0, (8, 6)),
+        (-0.000_001, -0.000_001, (-1, -1)),
+    ] {
+        let (device_x, device_y) = device(document_x, document_y);
+        let standard = standard_dpi
+            .locator_sample(None, device_x, device_y)
+            .unwrap();
+        let high = high_dpi.locator_sample(None, device_x, device_y).unwrap();
+        assert_eq!((standard.document_x, standard.document_y), expected);
+        assert_eq!((high.document_x, high.document_y), expected);
+        assert_eq!(standard.color, high.color);
+    }
+}
+
+#[test]
 fn acceptance_layer_tree_undo_redo_save_reopen_and_validation() {
     let mut core = Core::new();
     let created = core

@@ -9,5 +9,12 @@ license.workspace = true
 inkpod-format = { path = "../inkpod-format" }
 inkpod-image = { path = "../inkpod-image" }
 
+[dev-dependencies]
+proptest = { version = "1.11.0", default-features = false, features = ["std"] }
+
+[[bench]]
+name = "core_workflows"
+harness = false
+
 [lints]
 workspace = true

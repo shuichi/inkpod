@@ -2,8 +2,8 @@ use super::model::*;
 use super::*;
 
 pub(super) fn fixed_path(
-    id: u64,
-    plane_id: u64,
+    id: VectorPathId,
+    plane_id: PlaneId,
     input: VectorPathInput,
 ) -> Result<VectorPath, CoreError> {
     if input.segments.is_empty() || input.segments.len() > MAX_VECTOR_SEGMENTS {
@@ -81,9 +81,9 @@ pub(super) fn fixed_width(width: f32) -> Result<u32, CoreError> {
 
 pub(super) fn ensure_vector_stroke_plane(
     document: &CellDocument,
-    plane_id: u64,
+    plane_id: PlaneId,
     editable: bool,
-) -> Result<u64, CoreError> {
+) -> Result<LayerId, CoreError> {
     let layer_id = vector_layer_for_plane(document, plane_id)?;
     let layer = document
         .layers
@@ -113,9 +113,9 @@ pub(super) fn ensure_vector_stroke_plane(
 
 pub(super) fn ensure_vector_fill_plane(
     document: &CellDocument,
-    plane_id: u64,
+    plane_id: PlaneId,
     editable: bool,
-) -> Result<u64, CoreError> {
+) -> Result<LayerId, CoreError> {
     let layer_id = vector_layer_for_plane(document, plane_id)?;
     let layer = document
         .layers
@@ -142,8 +142,8 @@ pub(super) fn ensure_vector_fill_plane(
 
 pub(super) fn vector_layer_for_plane(
     document: &CellDocument,
-    plane_id: u64,
-) -> Result<u64, CoreError> {
+    plane_id: PlaneId,
+) -> Result<LayerId, CoreError> {
     document
         .layers
         .iter()
@@ -157,8 +157,8 @@ pub(super) fn vector_layer_for_plane(
 
 pub(super) fn path_info(path: &VectorPath) -> VectorPathInfo {
     VectorPathInfo {
-        id: path.id,
-        plane_id: path.plane_id,
+        id: path.id.get(),
+        plane_id: path.plane_id.get(),
         segments: path.segments.iter().copied().map(public_segment).collect(),
         color: path.color,
         closed: path.closed,
@@ -310,7 +310,7 @@ pub(super) fn remaining_pieces(
     path: &VectorPath,
     start: f64,
     end: f64,
-    next_id: &mut u64,
+    next_id: &mut StableIdCursor,
 ) -> Vec<VectorPath> {
     let mut pieces = Vec::new();
     if start > 1.0e-9 {
@@ -325,9 +325,7 @@ pub(super) fn remaining_pieces(
             suffix.id = if pieces.is_empty() {
                 path.id
             } else {
-                let id = *next_id;
-                *next_id = next_id.saturating_add(1).max(1);
-                id
+                next_id.take_vector_path()
             };
             suffix.closed = false;
             pieces.push(suffix);
@@ -410,7 +408,7 @@ pub(super) fn endpoint_width(path: &VectorPath, end: bool) -> u32 {
 
 pub(super) fn endpoint_is_unconnected(
     paths: &[&VectorPath],
-    path_id: u64,
+    path_id: VectorPathId,
     point: FixedPoint,
 ) -> bool {
     paths.iter().all(|other| {
@@ -467,15 +465,15 @@ pub(super) fn width_transform(
 pub(super) fn selection_range(path: &VectorPath, start: f64, end: f64) -> VectorSelectionRange {
     let total = path_length_t(path);
     VectorSelectionRange {
-        path_id: path.id,
+        path_id: path.id.get(),
         start_million: ((start / total).clamp(0.0, 1.0) * 1_000_000.0).round() as u32,
         end_million: ((end / total).clamp(0.0, 1.0) * 1_000_000.0).round() as u32,
     }
 }
 
-pub(super) fn full_selection(path_id: u64) -> VectorSelectionRange {
+pub(super) fn full_selection(path_id: VectorPathId) -> VectorSelectionRange {
     VectorSelectionRange {
-        path_id,
+        path_id: path_id.get(),
         start_million: 0,
         end_million: 1_000_000,
     }
@@ -586,10 +584,4 @@ pub(super) fn squared_distance(left: (f64, f64), right: (f64, f64)) -> f64 {
 
 pub(super) fn lerp(left: f64, right: f64, amount: f64) -> f64 {
     vector_lerp(left, right, amount)
-}
-
-pub(super) fn take_id(next_id: &mut u64) -> u64 {
-    let id = *next_id;
-    *next_id = next_id.saturating_add(1).max(1);
-    id
 }
