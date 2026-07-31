@@ -235,6 +235,7 @@ InkpodStatus BatchController::Preview(InkpodBatchRunScope scope) noexcept {
 }
 
 InkpodStatus BatchController::Start(
+    const app::CommandContext& context,
     InkpodBatchRunScope scope,
     bool dry_run,
     UINT completion_message) noexcept {
@@ -309,8 +310,10 @@ InkpodStatus BatchController::Start(
         return INKPOD_STATUS_INVALID_STATE;
     }
     ShowWindow(batch_.progress, SW_SHOW);
+    batch_.completion_context = context;
     const HWND window = windows_.window;
     if (!engine_.Enqueue(
+            context,
             [batch, scope, flags](InkpodCore* core) {
                 return inkpod_core_batch_execute(
                     core,
@@ -323,12 +326,17 @@ InkpodStatus BatchController::Start(
             true,
             true,
             true,
-            [window, completion_message](InkpodStatus completion_status) {
-                PostMessageW(window, completion_message, completion_status, 0);
+            [window, completion_message, context](InkpodStatus completion_status) {
+                const LPARAM generation = context.generation.has_value()
+                    ? static_cast<LPARAM>(context.generation->Value())
+                    : 0;
+                PostMessageW(
+                    window, completion_message, completion_status, generation);
             })) {
         DestroyWindow(batch_.progress);
         batch_.progress = nullptr;
         inkpod_batch_task_release(&batch_.task);
+        batch_.completion_context = {};
         return INKPOD_STATUS_INVALID_STATE;
     }
     return INKPOD_STATUS_OK;

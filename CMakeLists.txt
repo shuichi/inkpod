@@ -3,6 +3,14 @@ cmake_minimum_required(VERSION 3.25)
 cmake_policy(SET CMP0091 NEW)
 project(inkpod VERSION 0.1.0 LANGUAGES C CXX)
 
+# MSVC 19.51 can emit UTF-8 /showIncludes text while CMake 4.4 decodes it
+# through the active Japanese code page. Repair that detected prefix so Ninja
+# records header dependencies instead of silently retaining stale objects.
+if(MSVC AND CMAKE_GENERATOR MATCHES "^Ninja"
+        AND CMAKE_CL_SHOWINCLUDES_PREFIX MATCHES "^繝")
+    set(CMAKE_CL_SHOWINCLUDES_PREFIX "メモ: インクルード ファイル:  ")
+endif()
+
 set(INKPOD_MSIX_PROCESSOR_ARCHITECTURE x64)
 if(WIN32)
     set(INKPOD_WINDOWS_ARCHITECTURE "x64" CACHE STRING
@@ -200,6 +208,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_frontend_boundaries.cmake")
 
 add_test(
+    NAME inkpod_windows_command_context_boundaries
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_command_context.cmake")
+
+add_test(
     NAME inkpod_msvc_runtime_discovery
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -258,6 +272,23 @@ if(WIN32)
         NAME inkpod_windows_command_state
         COMMAND inkpod_windows_command_state_tests)
 
+    add_executable(inkpod_windows_command_context_tests
+        apps/windows/app/command_context.cpp
+        apps/windows/app/command_context.h
+        apps/windows/app/identity.h
+        tests/windows_command_context.cpp)
+    target_include_directories(inkpod_windows_command_context_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows")
+    target_compile_definitions(inkpod_windows_command_context_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_command_context_tests)
+        target_compile_options(inkpod_windows_command_context_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_command_context
+        COMMAND inkpod_windows_command_context_tests)
+
     add_executable(inkpod_windows_workspace_layout_tests
         apps/windows/ui/workspace_layout.cpp
         apps/windows/ui/workspace_layout.h
@@ -277,6 +308,9 @@ if(WIN32)
 
     add_executable(inkpod WIN32
         apps/windows/app/app_context.h
+        apps/windows/app/command_context.cpp
+        apps/windows/app/command_context.h
+        apps/windows/app/identity.h
         apps/windows/app/app_smoke.cpp
         apps/windows/app/app_smoke.h
         apps/windows/app/application.cpp

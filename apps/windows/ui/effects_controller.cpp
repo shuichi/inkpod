@@ -14,6 +14,7 @@ EffectsController::EffectsController(
     : lifetime_(lifetime), windows_(windows), effects_(effects), engine_(engine) {}
 
 InkpodStatus EffectsController::StartTask(
+    const app::CommandContext& context,
     bool preview_prompt,
     Operation operation,
     UINT completion_message) noexcept {
@@ -47,6 +48,7 @@ InkpodStatus EffectsController::StartTask(
     }
 
     effects_.task = task;
+    effects_.completion_context = context;
     effects_.preview_prompt = preview_prompt;
     effects_.progress_dialog = {
         &effects_,
@@ -64,19 +66,25 @@ InkpodStatus EffectsController::StartTask(
     ShowWindow(effects_.progress, SW_SHOW);
     const HWND window = windows_.window;
     if (!engine_.Enqueue(
+            context,
             [task, operation = std::move(operation)](InkpodCore* core) {
                 return operation(core, task);
             },
             true,
             true,
             true,
-            [window, completion_message](InkpodStatus completion_status) {
-                PostMessageW(window, completion_message, completion_status, 0);
+            [window, completion_message, context](InkpodStatus completion_status) {
+                const LPARAM generation = context.generation.has_value()
+                    ? static_cast<LPARAM>(context.generation->Value())
+                    : 0;
+                PostMessageW(
+                    window, completion_message, completion_status, generation);
             })) {
         DestroyWindow(effects_.progress);
         effects_.progress = nullptr;
         inkpod_task_release(&effects_.task);
         effects_.preview_prompt = false;
+        effects_.completion_context = {};
         return INKPOD_STATUS_INVALID_STATE;
     }
     return INKPOD_STATUS_OK;

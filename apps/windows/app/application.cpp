@@ -22,6 +22,25 @@
 namespace inkpod::app {
 namespace {
 
+bool InitializeFrontendRouting(AppContext& state) noexcept {
+    state.routing.targets.Initialize();
+    const auto tool = state.routing.targets.RegisterPane();
+    const auto tool_options = state.routing.targets.RegisterPane();
+    const auto color = state.routing.targets.RegisterPane();
+    const auto layer = state.routing.targets.RegisterPane();
+    const auto batch = state.routing.targets.RegisterPane();
+    if (!tool.has_value() || !tool_options.has_value() || !color.has_value()
+        || !layer.has_value() || !batch.has_value()) {
+        return false;
+    }
+    state.routing.tool_pane = tool.value();
+    state.routing.tool_options_pane = tool_options.value();
+    state.routing.color_pane = color.value();
+    state.routing.layer_pane = layer.value();
+    state.routing.batch_pane = batch.value();
+    return true;
+}
+
 InkpodStatus StartCore(AppContext& state) noexcept {
     try {
         state.engine = std::make_unique<CoreEngine>();
@@ -34,6 +53,8 @@ InkpodStatus StartCore(AppContext& state) noexcept {
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
+    state.engine->SetCommandGeneration(
+        state.routing.targets.CurrentGeneration());
     return windows::ui::InitializeShortcuts(
         *state.engine, state.shortcuts, !state.lifetime.smoke_test);
 }
@@ -101,6 +122,8 @@ InkpodStatus StopCore(AppContext& state) noexcept {
             return status;
         }
     }
+    state.routing.timers.Clear();
+    state.routing.targets.InvalidateAll();
     return INKPOD_STATUS_OK;
 }
 
@@ -185,6 +208,9 @@ int Application::Run() {
     AppContext state{};
     state.lifetime.instance = launch_.instance;
     state.lifetime.smoke_test = launch_.smoke_test;
+    if (!InitializeFrontendRouting(state)) {
+        return 14;
+    }
     HWND window = CreateWindowExW(
         0,
         class_name.data(),

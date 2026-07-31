@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Proposed |
+| 状態 | Active。G0、G1 完了、G2 未着手 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -381,6 +381,12 @@ G0 仕様と基準固定
 - 全 user-visible operation に command、target scope、dirty/close 契約がある。
 - 実装前 baseline の成功数と既知差分が追跡可能である。
 
+### 完了記録
+
+2026-07-31 に G0 を完了した。`PROMPT.md` へ複数 workspace window、複数文書 tab、最大二つの editor group、制約付き dock、pane scope、session lifecycle、発行時 command target の契約を反映し、`WIN-002`、`VIEW-004`、`WORKSPACE-001`、`WORKSPACE-002`、`SESSION-001` を `docs/compatibility.md` へ追加した。
+
+実装前 baseline は `docs/gui-modernization-baseline.md` に固定した。単一 window/group の native smoke、281 production command、ABI v2 の 161 functions、Rust 177 tests と 1 doctest、Windows x64 Debug configure/build、CTest 11/11、既知差分を追跡できる。G0 では製品 code と C ABI を変更しておらず、これを G1 着手前の回帰基準とする。
+
 ---
 
 ## G1. frontend ID と CommandContext の導入
@@ -411,6 +417,12 @@ G0 仕様と基準固定
 - visible behavior は従来と同じである。
 - document/view を操作する command handler に暗黙の global active pointer がない。
 - command state と command execution が同じ target 解決規則を使う。
+
+### 完了記録
+
+2026-07-31 に G1 を完了した。frontend の workspace window、document session、document view、editor group、Canvas、pane、job、generation を非互換の strong ID にし、UI/Input thread 所有の target registry と pointer-free な `CommandContext` を導入した。現在の menu、shortcut、pane button と main-window `WM_COMMAND` の入口は `IssueCommand` で発行時 target を確定する。今後追加する context menu もこの入口を使う。G1 で未接続の context-menu UI は新設していない。command state と execution は同じ owner-to-scope 解決を使う。
+
+filter/effect、Batch、autosave、Canvas effect gesture、locator は発行時 context の copy を queue と completion へ渡し、document/view の置換・close、job 終了、generation 不一致で別 target へ fallback しない。timer、drag、posted notification は generation 付き token に移行し、locator は value token と bounded result queue によって raw C++ pointer の `LPARAM` 渡しを廃止した。C ABI は変更していない。strong ID 誤用、focus 変更、view close、document 置換、NULL/unknown/missing/stale、token 世代、従来の native GUI 操作は unit、structural、application smoke で回帰保護する。次の実装対象は G2 である。
 
 ---
 

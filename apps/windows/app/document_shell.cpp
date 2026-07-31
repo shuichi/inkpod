@@ -225,12 +225,15 @@ InkpodStatus DocumentShellController::ExportCommonRaster(
         : INKPOD_STATUS_IO_ERROR;
 }
 
-bool DocumentShellController::QueueAutosave(const std::wstring& path) noexcept {
+bool DocumentShellController::QueueAutosave(
+    const CommandContext& context,
+    const std::wstring& path) noexcept {
     std::vector<std::uint8_t> utf8;
     if (!WidePathToUtf8(path, utf8)) {
         return false;
     }
     return engine_.Enqueue(
+        context,
         [utf8](InkpodCore* core) {
             InkpodDocumentInfo info = EmptyDocumentInfo();
             return inkpod_core_autosave(core, utf8.data(), utf8.size(), &info);

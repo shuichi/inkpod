@@ -78,6 +78,12 @@ using inkpod::app::AdjustmentLayerUiState;
 using inkpod::app::FilterJob;
 using inkpod::app::GradientStopValue;
 using inkpod::app::CanvasEffectOptions;
+using inkpod::app::CommandContext;
+using inkpod::app::CommandResolveStatus;
+using inkpod::app::CommandTargetScope;
+using inkpod::app::CommandTimerKind;
+using inkpod::app::DocumentViewId;
+using inkpod::app::LocatorAsyncResult;
 using inkpod::app::PaneUiState;
 using inkpod::app::ToolUiState;
 using inkpod::app::ViewUiState;
@@ -104,6 +110,8 @@ using inkpod::windows::ui::ResetShortcuts;
 using inkpod::windows::ui::ResolveShortcutStroke;
 using inkpod::windows::ui::CommandStateInputs;
 using inkpod::windows::ui::ComputeCommandStates;
+using inkpod::windows::ui::CommandStateOwner;
+using inkpod::windows::ui::FindCommandState;
 using inkpod::windows::ui::IsCommandEnabled;
 using inkpod::windows::ui::tools::CancelVectorGeometryPreview;
 using inkpod::windows::ui::tools::CancelSelectionGeometryPreview;
@@ -130,20 +138,77 @@ using inkpod::windows::ui::tools::kInteractionVectorEraser;
 using inkpod::windows::ui::tools::kInteractionVectorLine;
 using inkpod::windows::ui::tools::kInteractionVectorPolyline;
 using inkpod::windows::ui::tools::kInteractionVectorRectangle;
-constexpr UINT_PTR kAutosaveTimer = 1U;
 constexpr UINT kAutosaveIntervalMilliseconds = 60U * 1000U;
 constexpr UINT kEffectTaskCompleted = WM_APP + 0x170U;
 constexpr UINT kBatchTaskCompleted = WM_APP + 0x171U;
-constexpr UINT_PTR kEffectProgressTimer = 1U;
-constexpr UINT_PTR kContinuousSprayTimer = 2U;
-constexpr UINT_PTR kMotionPlaybackTimer = 3U;
-constexpr UINT_PTR kShortcutSequenceTimer = 4U;
 constexpr UINT kShortcutSequenceTimerMilliseconds = 100U;
-constexpr UINT_PTR kStatusProgressTimer = 5U;
 constexpr UINT kStatusProgressTimerMilliseconds = 100U;
 constexpr UINT kContinuousSprayIntervalMilliseconds = 50U;
 constexpr wchar_t kVectorStrokePlaneRequired[] =
     L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
+
+constexpr CommandTargetScope TargetScopeForOwner(
+    CommandStateOwner owner) noexcept {
+    return owner == CommandStateOwner::Workspace
+            || owner == CommandStateOwner::Application
+        ? inkpod::app::kWorkspaceCommandScope
+        : inkpod::app::kDocumentViewCommandScope;
+}
+
+bool ArmCommandTimer(
+    AppContext& state,
+    HWND window,
+    CommandTimerKind kind,
+    UINT interval) noexcept {
+    if (const auto current = state.routing.timers.Find(kind)) {
+        KillTimer(window, static_cast<UINT_PTR>(current->value));
+        (void)state.routing.timers.Disarm(kind);
+    }
+    const auto token = state.routing.timers.Arm(
+        kind, state.routing.targets.Capture());
+    if (SetTimer(
+            window,
+            static_cast<UINT_PTR>(token.value),
+            interval,
+            nullptr)
+        == 0U) {
+        (void)state.routing.timers.Disarm(kind);
+        return false;
+    }
+    return true;
+}
+
+void DisarmCommandTimer(
+    AppContext& state,
+    HWND window,
+    CommandTimerKind kind) noexcept {
+    if (const auto token = state.routing.timers.Find(kind)) {
+        KillTimer(window, static_cast<UINT_PTR>(token->value));
+    }
+    (void)state.routing.timers.Disarm(kind);
+}
+
+std::optional<inkpod::app::CommandTimerToken> ResolveCommandTimer(
+    AppContext& state,
+    HWND window,
+    WPARAM timer_id) noexcept {
+    const auto token = state.routing.timers.Resolve(
+        static_cast<std::uint64_t>(timer_id));
+    if (!token.has_value()) {
+        return std::nullopt;
+    }
+    const CommandTargetScope scope =
+        token->kind == CommandTimerKind::ShortcutSequence
+        ? inkpod::app::kWorkspaceCommandScope
+        : inkpod::app::kDocumentViewCommandScope;
+    if (state.routing.targets.Resolve(token->context, scope)
+        == CommandResolveStatus::Ok) {
+        return token;
+    }
+    KillTimer(window, static_cast<UINT_PTR>(token->value));
+    (void)state.routing.timers.Disarm(token->kind);
+    return std::nullopt;
+}
 constexpr std::array<ViewOptionsDialogState::Choice, 10U> kLayerKindChoices{{
     {L"2値彩色", INKPOD_LAYER_BINARY_COLORING},
     {L"階調彩色", INKPOD_LAYER_GRAYSCALE_COLORING},
@@ -288,19 +353,32 @@ InkpodStatus ApplyTreeEdit(
     std::uint32_t destination_index,
     std::uint64_t& out_object_id) noexcept;
 
+std::optional<LRESULT> IssueCommand(
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM lparam,
+    std::optional<inkpod::app::PaneInstanceId> pane = std::nullopt) noexcept;
+
 bool DispatchEnabledCommand(
-    AppContext& state, HWND window, UINT command) noexcept {
+    AppContext& state,
+    HWND window,
+    UINT command,
+    std::optional<inkpod::app::PaneInstanceId> pane = std::nullopt) noexcept {
     if (!IsCommandEnabled(state.command_states, command)) {
         return false;
     }
-    SendMessageW(window, WM_COMMAND, command, 0);
-    return true;
+    return IssueCommand(&state, window, command, 0, pane).has_value();
 }
 
 void DispatchBatchPaletteCommand(void* context, UINT command) noexcept {
     auto* state = static_cast<AppContext*>(context);
     if (state != nullptr && state->windows.window != nullptr) {
-        DispatchEnabledCommand(*state, state->windows.window, command);
+        DispatchEnabledCommand(
+            *state,
+            state->windows.window,
+            command,
+            state->routing.batch_pane);
     }
 }
 
@@ -365,12 +443,20 @@ void ResetViewDocumentState(ViewUiState& view) noexcept {
     view.snap_grid = false;
     view.transparent_visible = true;
     ++view.locator_generation;
+    view.locator_pending_token = 0U;
     view.locator_valid = false;
     view.locator = {};
     view.gesture_samples.clear();
     view.guide_drag_active = false;
     view.guide_drag_axis = 0U;
     view.guide_drag_id = 0U;
+    view.identity_bindings.fill({});
+    view.identity_binding_count = 0U;
+    view.active_drag.reset();
+    {
+        std::lock_guard lock(view.locator_results_mutex);
+        view.locator_results.clear();
+    }
 }
 
 void ResetAnimationDocumentState(AnimationUiState& animation) noexcept {
@@ -383,7 +469,11 @@ void ResetAnimationDocumentState(AnimationUiState& animation) noexcept {
 void DispatchToolPaletteCommand(void* context, UINT command) noexcept {
     auto* state = static_cast<AppContext*>(context);
     if (state != nullptr && state->windows.window != nullptr) {
-        DispatchEnabledCommand(*state, state->windows.window, command);
+        DispatchEnabledCommand(
+            *state,
+            state->windows.window,
+            command,
+            state->routing.tool_pane);
     }
 }
 
@@ -480,7 +570,11 @@ void NotifyToolPaletteVisibilityChanged(void* context) noexcept {
 void DispatchLayerPaletteCommand(void* context, UINT command) noexcept {
     auto* state = static_cast<AppContext*>(context);
     if (state != nullptr && state->windows.window != nullptr) {
-        DispatchEnabledCommand(*state, state->windows.window, command);
+        DispatchEnabledCommand(
+            *state,
+            state->windows.window,
+            command,
+            state->routing.layer_pane);
     }
 }
 
@@ -627,9 +721,29 @@ void ResetEffectsDocumentState(EffectsUiState& effects) noexcept {
     effects.stamp_source_valid = false;
     effects.samples.clear();
     effects.airbrush_active = false;
+    effects.gesture_context.reset();
+}
+
+std::optional<DocumentViewId> FrontendViewForCoreView(
+    const ViewUiState& view,
+    std::uint64_t core_view_id) noexcept {
+    for (std::size_t index = 0U; index < view.identity_binding_count; ++index) {
+        if (view.identity_bindings[index].core_view_id == core_view_id) {
+            return view.identity_bindings[index].frontend_view_id;
+        }
+    }
+    return std::nullopt;
 }
 
 void ResetUiForDocumentReplacement(AppContext& state) noexcept {
+    const auto document_session = state.routing.targets.ReplaceDocument();
+    (void)document_session;
+    const DocumentViewId initial_view =
+        state.routing.targets.ActiveDocumentView();
+    if (state.engine != nullptr) {
+        state.engine->SetCommandGeneration(
+            state.routing.targets.CurrentGeneration());
+    }
     CancelSelectionGeometryPreview(state.tools, state.windows.canvas);
     ResetDocumentShellTransientState(state.document);
     ResetPaneDocumentState(state.panes);
@@ -637,6 +751,8 @@ void ResetUiForDocumentReplacement(AppContext& state) noexcept {
     ResetViewDocumentState(state.view);
     ResetAnimationDocumentState(state.animation);
     ResetEffectsDocumentState(state.effects);
+    state.view.identity_bindings[0] = {0U, initial_view};
+    state.view.identity_binding_count = 1U;
     if (state.windows.document_tabs != nullptr) {
         TabCtrl_DeleteAllItems(state.windows.document_tabs);
         TCITEMW item{};
@@ -650,9 +766,17 @@ void ResetUiForDocumentReplacement(AppContext& state) noexcept {
         state.engine->SetActiveView(0U);
     }
     if (state.windows.window != nullptr) {
-        KillTimer(state.windows.window, kContinuousSprayTimer);
-        KillTimer(state.windows.window, kMotionPlaybackTimer);
-        KillTimer(state.windows.window, kShortcutSequenceTimer);
+        DisarmCommandTimer(
+            state, state.windows.window, CommandTimerKind::ContinuousSpray);
+        DisarmCommandTimer(
+            state, state.windows.window, CommandTimerKind::MotionPlayback);
+        DisarmCommandTimer(
+            state, state.windows.window, CommandTimerKind::ShortcutSequence);
+        ArmCommandTimer(
+            state,
+            state.windows.window,
+            CommandTimerKind::Autosave,
+            kAutosaveIntervalMilliseconds);
     }
     HandleActiveTreePlaneTransition(state);
 }
@@ -831,14 +955,9 @@ bool RefreshSequencePane(AppContext& state) noexcept {
     return true;
 }
 
-struct LocatorAsyncResult {
-    std::uint64_t generation{};
-    InkpodStatus status{INKPOD_STATUS_INVALID_STATE};
-    InkpodLocatorOutput output{};
-};
-
 void QueueLocatorSample(AppContext& state) noexcept {
-    if (state.engine == nullptr || state.view.locator_pending) {
+    if (state.engine == nullptr
+        || state.view.locator_pending_token.load(std::memory_order_acquire) != 0U) {
         return;
     }
     std::shared_ptr<LocatorAsyncResult> result;
@@ -847,14 +966,25 @@ void QueueLocatorSample(AppContext& state) noexcept {
     } catch (const std::bad_alloc&) {
         return;
     }
-    result->generation = state.view.locator_generation;
+    const CommandContext context = state.routing.targets.Capture();
+    if (state.routing.targets.Resolve(
+            context, inkpod::app::kDocumentViewCommandScope)
+        != CommandResolveStatus::Ok) {
+        return;
+    }
+    result->token = state.routing.tokens.IssueNotification(
+        state.routing.targets.CurrentGeneration());
+    result->context = context;
+    result->sample_generation = state.view.locator_generation;
     result->output.struct_size = sizeof(InkpodLocatorOutput);
     const std::uint64_t view_id = state.view.active_view_id;
     const double device_x = static_cast<double>(state.view.pointer_device_x);
     const double device_y = static_cast<double>(state.view.pointer_device_y);
     const HWND window = state.windows.window;
-    state.view.locator_pending = true;
+    state.view.locator_pending_token.store(
+        result->token.value, std::memory_order_release);
     if (!state.engine->Enqueue(
+            context,
             [result, view_id, device_x, device_y](InkpodCore* core) {
                 return inkpod_core_locator_sample(
                     core, view_id, device_x, device_y, &result->output);
@@ -862,19 +992,45 @@ void QueueLocatorSample(AppContext& state) noexcept {
             false,
             false,
             false,
-            [result, window](InkpodStatus status) {
+            [result, window, &state](InkpodStatus status) {
                 result->status = status;
-                auto* delivery = new (std::nothrow) LocatorAsyncResult(*result);
-                if (delivery == nullptr
-                    || PostMessageW(
-                           window,
-                           kLocatorSampleReady,
-                           0,
-                           reinterpret_cast<LPARAM>(delivery)) == FALSE) {
-                    delete delivery;
+                try {
+                    std::lock_guard lock(state.view.locator_results_mutex);
+                    if (state.view.locator_results.size() >= 8U) {
+                        state.view.locator_results.pop_front();
+                    }
+                    state.view.locator_results.push_back(*result);
+                } catch (const std::bad_alloc&) {
+                    std::uint64_t expected = result->token.value;
+                    (void)state.view.locator_pending_token.compare_exchange_strong(
+                        expected, 0U, std::memory_order_acq_rel);
+                    return;
+                }
+                if (PostMessageW(
+                        window,
+                        kLocatorSampleReady,
+                        static_cast<WPARAM>(result->token.value),
+                        static_cast<LPARAM>(result->token.generation.Value()))
+                    == FALSE) {
+                    std::lock_guard lock(state.view.locator_results_mutex);
+                    const auto found = std::find_if(
+                        state.view.locator_results.begin(),
+                        state.view.locator_results.end(),
+                        [token = result->token](const LocatorAsyncResult& pending) {
+                            return pending.token.value == token.value
+                                && pending.token.generation == token.generation;
+                        });
+                    if (found != state.view.locator_results.end()) {
+                        state.view.locator_results.erase(found);
+                    }
+                    std::uint64_t expected = result->token.value;
+                    (void)state.view.locator_pending_token.compare_exchange_strong(
+                        expected, 0U, std::memory_order_acq_rel);
                 }
             })) {
-        state.view.locator_pending = false;
+        std::uint64_t expected = result->token.value;
+        (void)state.view.locator_pending_token.compare_exchange_strong(
+            expected, 0U, std::memory_order_acq_rel);
     }
 }
 
@@ -1793,15 +1949,32 @@ bool FormatCurvePoints(
 
 InkpodStatus StartEffectTask(
     AppContext& state,
+    const CommandContext& issued_context,
     bool preview_prompt,
     std::function<InkpodStatus(InkpodCore*, InkpodTask*)> operation) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
+    const auto job = state.routing.targets.BeginJob();
+    if (!job.has_value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    CommandContext context = issued_context;
+    context.job = job;
+    state.effects.job_id = job;
     EffectsController controller(
         state.lifetime, state.windows, state.effects, *state.engine);
-    return controller.StartTask(
-        preview_prompt, std::move(operation), kEffectTaskCompleted);
+    const InkpodStatus status = controller.StartTask(
+        context,
+        preview_prompt,
+        std::move(operation),
+        kEffectTaskCompleted);
+    if (status != INKPOD_STATUS_OK || state.lifetime.smoke_test) {
+        (void)state.routing.targets.EndJob(job.value());
+        state.effects.job_id.reset();
+        state.effects.completion_context = {};
+    }
+    return status;
 }
 
 std::uint32_t FilterKindForCommand(UINT command) noexcept {
@@ -1890,9 +2063,13 @@ bool ConfigureFilterEditor(
     return true;
 }
 
-InkpodStatus QueueFilter(AppContext& state, FilterJob job) noexcept {
+InkpodStatus QueueFilter(
+    AppContext& state,
+    const CommandContext& context,
+    FilterJob job) noexcept {
     return StartEffectTask(
         state,
+        context,
         job.preview,
         [job = std::move(job)](InkpodCore* core, InkpodTask* task) {
             const InkpodFilterInput input = FilterInputFor(job);
@@ -2107,7 +2284,10 @@ std::vector<InkpodGradientStop> GradientStops(const std::vector<GradientStopValu
     return stops;
 }
 
-InkpodStatus QueueBoundaryAirbrush(AppContext& state, const CanvasEffectOptions& options) noexcept {
+InkpodStatus QueueBoundaryAirbrush(
+    AppContext& state,
+    const CommandContext& context,
+    const CanvasEffectOptions& options) noexcept {
     InkpodDocumentInfo document{};
     if (!QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -2125,6 +2305,7 @@ InkpodStatus QueueBoundaryAirbrush(AppContext& state, const CanvasEffectOptions&
     const std::uint32_t strength = static_cast<std::uint32_t>(options.parameters[1]);
     const std::uint64_t plane_id = document.color_plane_id;
     return state.engine->Enqueue(
+               context,
                [colors = std::move(colors), width, strength, plane_id](InkpodCore* core) {
                    InkpodBoundaryAirbrushInput input{};
                    input.struct_size = sizeof(input);
@@ -2149,7 +2330,10 @@ InkpodStatus QueueBoundaryAirbrush(AppContext& state, const CanvasEffectOptions&
         : INKPOD_STATUS_INVALID_STATE;
 }
 
-bool ConfigureCanvasEffect(AppContext& state, UINT command) noexcept {
+bool ConfigureCanvasEffect(
+    AppContext& state,
+    const CommandContext& context,
+    UINT command) noexcept {
     EffectEditorState editor{};
     editor.option1 = false;
     editor.option2 = false;
@@ -2303,13 +2487,17 @@ bool ConfigureCanvasEffect(AppContext& state, UINT command) noexcept {
     if (command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
         TransitionActiveTool(
             state.tools, state.windows.canvas, INKPOD_TOOL_BRUSH);
-        return QueueBoundaryAirbrush(state, state.effects.options) == INKPOD_STATUS_OK;
+        return QueueBoundaryAirbrush(state, context, state.effects.options)
+            == INKPOD_STATUS_OK;
     }
     return true;
 }
 
 InkpodStatus QueueGradientGesture(
-    AppContext& state, std::vector<InkpodStrokeSample> samples, bool alpha_only) noexcept {
+    AppContext& state,
+    const CommandContext& context,
+    std::vector<InkpodStrokeSample> samples,
+    bool alpha_only) noexcept {
     InkpodDocumentInfo document{};
     if (samples.size() < 2U || !QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -2328,6 +2516,7 @@ InkpodStatus QueueGradientGesture(
     }
     const std::uint64_t plane_id = document.color_plane_id;
     return state.engine->Enqueue(
+               context,
                [samples = std::move(samples), stops = std::move(stops), options, plane_id, alpha_only](
                    InkpodCore* core) {
                    InkpodLocatorOutput start{};
@@ -2372,7 +2561,9 @@ InkpodStatus QueueGradientGesture(
 }
 
 InkpodStatus QueueAirbrushGesture(
-    AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    AppContext& state,
+    const CommandContext& context,
+    std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (samples.empty() || !QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -2386,6 +2577,7 @@ InkpodStatus QueueAirbrushGesture(
     const InkpodColorValue color = ColorFromRgba(state.tools.color_rgba);
     const std::uint64_t plane_id = document.color_plane_id;
     return state.engine->Enqueue(
+               context,
                [samples = std::move(samples), options, color, plane_id](InkpodCore* core) {
                    InkpodAirbrushGestureInput input{};
                    input.struct_size = sizeof(input);
@@ -2417,7 +2609,9 @@ InkpodStatus QueueAirbrushGesture(
 }
 
 InkpodStatus QueueStampGesture(
-    AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    AppContext& state,
+    const CommandContext& context,
+    std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (!state.effects.stamp_source_valid || samples.empty() || !QueryDocument(state, document)
         || state.engine == nullptr) {
@@ -2432,6 +2626,7 @@ InkpodStatus QueueStampGesture(
     const InkpodStrokeSample source = state.effects.stamp_source;
     const std::uint64_t plane_id = document.color_plane_id;
     return state.engine->Enqueue(
+               context,
                [samples = std::move(samples), options, source, plane_id](InkpodCore* core) {
                    InkpodStampGestureInput input{};
                    input.struct_size = sizeof(input);
@@ -2462,7 +2657,9 @@ InkpodStatus QueueStampGesture(
 }
 
 InkpodStatus QueueBlurGesture(
-    AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    AppContext& state,
+    const CommandContext& context,
+    std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (samples.empty() || !QueryDocument(state, document) || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -2475,6 +2672,7 @@ InkpodStatus QueueBlurGesture(
     }
     const std::uint64_t plane_id = document.color_plane_id;
     return state.engine->Enqueue(
+               context,
                [samples = std::move(samples), options, plane_id](InkpodCore* core) {
                    InkpodBlurToolInput input{};
                    input.struct_size = sizeof(input);
@@ -2500,7 +2698,9 @@ InkpodStatus QueueBlurGesture(
 }
 
 InkpodStatus QueueDustRemoval(
-    AppContext& state, std::vector<InkpodStrokeSample> samples) noexcept {
+    AppContext& state,
+    const CommandContext& context,
+    std::vector<InkpodStrokeSample> samples) noexcept {
     InkpodDocumentInfo document{};
     if (!QueryDocument(state, document)) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -2515,6 +2715,7 @@ InkpodStatus QueueDustRemoval(
     const bool preview = options.option;
     return StartEffectTask(
         state,
+        context,
         preview,
         [samples = std::move(samples), options, plane_id, preview](
             InkpodCore* core, InkpodTask* task) {
@@ -2543,22 +2744,24 @@ InkpodStatus QueueDustRemoval(
         });
 }
 
-InkpodStatus FinishEffectGesture(AppContext& state) noexcept {
+InkpodStatus FinishEffectGesture(
+    AppContext& state,
+    const CommandContext& context) noexcept {
     std::vector<InkpodStrokeSample> samples;
     samples.swap(state.effects.samples);
     switch (state.tools.active_tool) {
         case kInteractionEffectGradient:
-            return QueueGradientGesture(state, std::move(samples), false);
+            return QueueGradientGesture(state, context, std::move(samples), false);
         case kInteractionEffectAlphaGradient:
-            return QueueGradientGesture(state, std::move(samples), true);
+            return QueueGradientGesture(state, context, std::move(samples), true);
         case kInteractionEffectAirbrush:
-            return QueueAirbrushGesture(state, std::move(samples));
+            return QueueAirbrushGesture(state, context, std::move(samples));
         case kInteractionEffectBlur:
-            return QueueBlurGesture(state, std::move(samples));
+            return QueueBlurGesture(state, context, std::move(samples));
         case kInteractionEffectStamp:
-            return QueueStampGesture(state, std::move(samples));
+            return QueueStampGesture(state, context, std::move(samples));
         case kInteractionEffectDust:
-            return QueueDustRemoval(state, std::move(samples));
+            return QueueDustRemoval(state, context, std::move(samples));
         default:
             return INKPOD_STATUS_INVALID_STATE;
     }
@@ -2898,17 +3101,19 @@ void UpdateMainWindowStatus(
     std::array<wchar_t, 192U> state_text{};
     const bool has_progress = FormatTaskProgressStatus(state, state_text);
     if (has_progress) {
-        SetTimer(
+        ArmCommandTimer(
+            state,
             state.windows.window,
-            kStatusProgressTimer,
-            kStatusProgressTimerMilliseconds,
-            nullptr);
+            CommandTimerKind::StatusProgress,
+            kStatusProgressTimerMilliseconds);
     } else if (!state.shortcuts.pending_text.empty()) {
-        KillTimer(state.windows.window, kStatusProgressTimer);
+        DisarmCommandTimer(
+            state, state.windows.window, CommandTimerKind::StatusProgress);
         wcsncpy_s(
             state_text.data(), state_text.size(), state.shortcuts.pending_text.c_str(), _TRUNCATE);
     } else {
-        KillTimer(state.windows.window, kStatusProgressTimer);
+        DisarmCommandTimer(
+            state, state.windows.window, CommandTimerKind::StatusProgress);
         wcscpy_s(
             state_text.data(),
             state_text.size(),
@@ -2958,6 +3163,16 @@ void UpdateMenuState(AppContext& state) noexcept {
     // This is the only state computation. Every interactive surface below reads
     // the same immutable result; no tool or preview transition happens here.
     state.command_states = ComputeCommandStates(inputs);
+    const CommandContext command_context = state.routing.targets.Capture();
+    state.routing.command_state_context = command_context;
+    for (auto& command_state : state.command_states) {
+        const CommandTargetScope required =
+            TargetScopeForOwner(command_state.owner);
+        if (state.routing.targets.Resolve(command_context, required)
+            != CommandResolveStatus::Ok) {
+            command_state.enabled = false;
+        }
+    }
     UpdateCommandLabels(menu, has_history, undo_label, redo_label);
     ApplyCommandStates(state.command_states, menu);
     UpdateToolPaletteDialog(state.tools.palette, state.command_states);
@@ -4836,12 +5051,15 @@ InkpodStatus OpenDocumentFromPath(
     return OpenFromPath(state, path);
 }
 
-bool QueueAutosave(AppContext& state, const std::wstring& path) noexcept {
+bool QueueAutosave(
+    AppContext& state,
+    const CommandContext& context,
+    const std::wstring& path) noexcept {
     if (state.engine == nullptr) {
         return false;
     }
     DocumentShellController shell(state.document, *state.engine);
-    return shell.QueueAutosave(path);
+    return shell.QueueAutosave(context, path);
 }
 
 InkpodStatus ApplyFillAtDeviceRange(
@@ -5574,14 +5792,29 @@ InkpodStatus PreviewBatch(AppContext& state, InkpodBatchRunScope scope) noexcept
 
 InkpodStatus StartBatch(
     AppContext& state,
+    const CommandContext& issued_context,
     InkpodBatchRunScope scope,
     bool dry_run) noexcept {
     if (state.engine == nullptr || state.batch.task != nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
+    const auto job = state.routing.targets.BeginJob();
+    if (!job.has_value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    CommandContext context = issued_context;
+    context.job = job;
+    state.batch.job_id = job;
     BatchController controller(
         state.lifetime, state.windows, state.batch, *state.engine);
-    return controller.Start(scope, dry_run, kBatchTaskCompleted);
+    const InkpodStatus status = controller.Start(
+        context, scope, dry_run, kBatchTaskCompleted);
+    if (status != INKPOD_STATUS_OK || state.lifetime.smoke_test) {
+        (void)state.routing.targets.EndJob(job.value());
+        state.batch.job_id.reset();
+        state.batch.completion_context = {};
+    }
+    return status;
 }
 
 bool ChooseBatchSettingsPath(
@@ -5718,7 +5951,11 @@ void ShowInitialPalettes(AppContext& state) noexcept {
 }
 
 std::optional<LRESULT> RouteBatchCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM,
+    const CommandContext& context) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -5995,6 +6232,7 @@ std::optional<LRESULT> RouteBatchCommand(
             const UINT command = LOWORD(wparam);
             const InkpodStatus status = StartBatch(
                 *state,
+                context,
                 command == IDM_BATCH_RUN_CURRENT
                     ? INKPOD_BATCH_SCOPE_CURRENT
                     : INKPOD_BATCH_SCOPE_ALL,
@@ -6051,7 +6289,11 @@ std::optional<LRESULT> RouteBatchCommand(
 
 
 std::optional<LRESULT> RouteDocumentCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM,
+    const CommandContext& context) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -6265,7 +6507,7 @@ std::optional<LRESULT> RouteDocumentCommand(
             if (path.empty() && !ChooseInkpodPath(window, true, path)) {
                 return 0;
             }
-            if (!QueueAutosave(*state, path)) {
+            if (!QueueAutosave(*state, context, path)) {
                 ShowCoreError(*state, window, L"Recovery保存の予約");
             } else {
                 try {
@@ -6294,7 +6536,11 @@ std::optional<LRESULT> RouteDocumentCommand(
 
 
 std::optional<LRESULT> RouteEditCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM,
+    const CommandContext& context) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -6373,7 +6619,8 @@ std::optional<LRESULT> RouteEditCommand(
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_EDIT_CUT: {
-            SendMessageW(window, WM_COMMAND, IDM_EDIT_COPY, 0);
+            (void)RouteEditCommand(
+                state, window, IDM_EDIT_COPY, 0, context);
             const InkpodStatus status = state->document.clipboard == nullptr
                 || state->engine == nullptr
                 ? INKPOD_STATUS_INVALID_STATE
@@ -6499,7 +6746,11 @@ std::optional<LRESULT> RouteEditCommand(
 
 
 std::optional<LRESULT> RouteEffectsCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM,
+    const CommandContext& context) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -6511,6 +6762,7 @@ std::optional<LRESULT> RouteEffectsCommand(
                 ? INKPOD_STATUS_INVALID_STATE
                 : StartEffectTask(
                       *state,
+                      context,
                       false,
                       [plane_id = document.color_plane_id](
                           InkpodCore* core, InkpodTask* task) {
@@ -6547,7 +6799,8 @@ std::optional<LRESULT> RouteEffectsCommand(
                 return 0;
             }
             job.plane_id = document.color_plane_id;
-            const InkpodStatus status = QueueFilter(*state, std::move(job));
+            const InkpodStatus status = QueueFilter(
+                *state, context, std::move(job));
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"フィルタ");
             }
@@ -6608,7 +6861,11 @@ std::optional<LRESULT> RouteEffectsCommand(
 
 
 std::optional<LRESULT> RouteDocumentPaneCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM,
+    const CommandContext&) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -7020,7 +7277,11 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
 
 
 std::optional<LRESULT> RouteAnimationCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM,
+    const CommandContext&) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -7407,11 +7668,11 @@ std::optional<LRESULT> RouteAnimationCommand(
             if (status == INKPOD_STATUS_OK) {
                 state->animation.motion_active = true;
                 UpdateMotionState(state->animation, frame);
-                SetTimer(
+                ArmCommandTimer(
+                    *state,
                     window,
-                    kMotionPlaybackTimer,
-                    std::max<UINT>(1U, 1000U / state->animation.motion_fps),
-                    nullptr);
+                    CommandTimerKind::MotionPlayback,
+                    std::max<UINT>(1U, 1000U / state->animation.motion_fps));
             } else {
                 ShowCoreError(*state, window, L"モーションチェック開始");
             }
@@ -7429,13 +7690,14 @@ std::optional<LRESULT> RouteAnimationCommand(
             if (status == INKPOD_STATUS_OK) {
                 UpdateMotionState(state->animation, frame);
                 if (state->animation.motion_paused) {
-                    KillTimer(window, kMotionPlaybackTimer);
+                    DisarmCommandTimer(
+                        *state, window, CommandTimerKind::MotionPlayback);
                 } else {
-                    SetTimer(
+                    ArmCommandTimer(
+                        *state,
                         window,
-                        kMotionPlaybackTimer,
-                        std::max<UINT>(1U, 1000U / state->animation.motion_fps),
-                        nullptr);
+                        CommandTimerKind::MotionPlayback,
+                        std::max<UINT>(1U, 1000U / state->animation.motion_fps));
                 }
             } else {
                 ShowCoreError(*state, window, L"モーション一時停止");
@@ -7542,11 +7804,11 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false);
             if (status == INKPOD_STATUS_OK) {
                 UpdateMotionState(state->animation, frame);
-                SetTimer(
+                ArmCommandTimer(
+                    *state,
                     window,
-                    kMotionPlaybackTimer,
-                    std::max<UINT>(1U, 1000U / state->animation.motion_fps),
-                    nullptr);
+                    CommandTimerKind::MotionPlayback,
+                    std::max<UINT>(1U, 1000U / state->animation.motion_fps));
             } else {
                 ShowCoreError(*state, window, L"モーションFPS変更");
             }
@@ -7560,7 +7822,8 @@ std::optional<LRESULT> RouteAnimationCommand(
                 },
                 false,
                 false);
-            KillTimer(window, kMotionPlaybackTimer);
+            DisarmCommandTimer(
+                *state, window, CommandTimerKind::MotionPlayback);
             state->animation.motion_active = false;
             state->animation.motion_paused = false;
             if (status != INKPOD_STATUS_OK) {
@@ -7576,7 +7839,11 @@ std::optional<LRESULT> RouteAnimationCommand(
 
 
 std::optional<LRESULT> RouteSelectionViewCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM,
+    const CommandContext&) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -8007,6 +8274,16 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             return 0;
         }
         case IDM_VIEW_NEW: {
+            const auto frontend_view = state->routing.targets.AddDocumentView();
+            if (!frontend_view.has_value()
+                || state->view.identity_binding_count
+                    >= state->view.identity_bindings.size()) {
+                if (frontend_view.has_value()) {
+                    (void)state->routing.targets.RemoveDocumentView(
+                        frontend_view.value());
+                }
+                return 0;
+            }
             std::uint64_t view_id{};
             const InkpodStatus status = state->engine == nullptr
                 ? INKPOD_STATUS_INVALID_STATE
@@ -8018,8 +8295,13 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                       false,
                       false);
             if (status != INKPOD_STATUS_OK) {
+                (void)state->routing.targets.RemoveDocumentView(
+                    frontend_view.value());
                 ShowCoreError(*state, window, L"ビューの作成");
             } else {
+                state->view.identity_bindings[
+                    state->view.identity_binding_count++] = {
+                    view_id, frontend_view.value()};
                 state->view.secondary_view_id = view_id;
                 state->view.active_view_id = view_id;
                 if (state->windows.document_tabs != nullptr) {
@@ -8047,7 +8329,11 @@ std::optional<LRESULT> RouteSelectionViewCommand(
 
 
 std::optional<LRESULT> RouteToolCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM,
+    const CommandContext& context) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -8319,7 +8605,7 @@ std::optional<LRESULT> RouteToolCommand(
         case IDM_EFFECT_DUST:
         case IDM_EFFECT_ALPHA_GRADIENT:
             if (state->tools.active_plane == INKPOD_PLANE_COLOR
-                && ConfigureCanvasEffect(*state, LOWORD(wparam))) {
+                && ConfigureCanvasEffect(*state, context, LOWORD(wparam))) {
                 UpdateMenuState(*state);
             }
             return 0;
@@ -8376,7 +8662,11 @@ std::optional<LRESULT> RouteToolCommand(
 
 
 std::optional<LRESULT> RouteColorCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM,
+    const CommandContext& context) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -8681,7 +8971,10 @@ std::optional<LRESULT> RouteColorCommand(
         }
         case IDM_CHART_CUT: {
             if (state->panes.color_chart_locked
-                || SendMessageW(window, WM_COMMAND, IDM_CHART_COPY, 0) != 1) {
+                || RouteColorCommand(
+                       state, window, IDM_CHART_COPY, 0, context)
+                        .value_or(0)
+                    != 1) {
                 return 0;
             }
             const std::size_t index = state->panes.selected_color_chart_index;
@@ -8821,7 +9114,11 @@ std::optional<LRESULT> RouteColorCommand(
 
 
 std::optional<LRESULT> RouteApplicationCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM,
+    const CommandContext&) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -8940,9 +9237,13 @@ std::optional<LRESULT> RouteApplicationCommand(
 }
 
 std::optional<LRESULT> RouteMainWindowCommand(
-    AppContext* state, HWND window, WPARAM wparam, LPARAM lparam) noexcept {
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM lparam,
+    const CommandContext& context) noexcept {
     using CommandRoute = std::optional<LRESULT> (*)(
-        AppContext*, HWND, WPARAM, LPARAM) noexcept;
+        AppContext*, HWND, WPARAM, LPARAM, const CommandContext&) noexcept;
     constexpr std::array<CommandRoute, 10U> routes{
         RouteBatchCommand,
         RouteDocumentCommand,
@@ -8955,11 +9256,79 @@ std::optional<LRESULT> RouteMainWindowCommand(
         RouteColorCommand,
         RouteApplicationCommand};
     for (const CommandRoute route : routes) {
-        if (const auto result = route(state, window, wparam, lparam)) {
+        if (const auto result = route(state, window, wparam, lparam, context)) {
             return result;
         }
     }
     return std::nullopt;
+}
+
+CommandTargetScope TargetScopeForCommand(
+    const AppContext& state,
+    UINT command) noexcept {
+    const auto* command_state = FindCommandState(state.command_states, command);
+    if (command_state == nullptr) {
+        return CommandTargetScope::None;
+    }
+    return TargetScopeForOwner(command_state->owner);
+}
+
+std::optional<inkpod::app::PaneInstanceId> PaneForCommandSource(
+    const AppContext& state,
+    LPARAM lparam) noexcept {
+    const HWND source = reinterpret_cast<HWND>(lparam);
+    if (source == nullptr) {
+        return std::nullopt;
+    }
+    const auto belongs_to = [source](HWND pane) noexcept {
+        return pane != nullptr
+            && (source == pane || IsChild(pane, source) != FALSE);
+    };
+    if (belongs_to(state.windows.tool_palette)) {
+        return state.routing.tool_pane;
+    }
+    if (belongs_to(state.windows.tool_options)) {
+        return state.routing.tool_options_pane;
+    }
+    if (belongs_to(state.windows.color_pane)) {
+        return state.routing.color_pane;
+    }
+    if (belongs_to(state.windows.layer_palette)) {
+        return state.routing.layer_pane;
+    }
+    if (belongs_to(state.batch.palette)) {
+        return state.routing.batch_pane;
+    }
+    return std::nullopt;
+}
+
+std::optional<LRESULT> IssueCommand(
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM lparam,
+    std::optional<inkpod::app::PaneInstanceId> pane) noexcept {
+    if (state == nullptr) {
+        return LRESULT{0};
+    }
+    const UINT command = LOWORD(wparam);
+    const auto* command_state = FindCommandState(state->command_states, command);
+    if (command_state == nullptr) {
+        return LRESULT{0};
+    }
+    if (!pane.has_value()) {
+        pane = PaneForCommandSource(*state, lparam);
+    }
+    const CommandContext context = state->routing.targets.Capture(pane);
+    const CommandTargetScope required = TargetScopeForCommand(*state, command);
+    if (required == CommandTargetScope::None
+        || state->routing.targets.Resolve(
+               inkpod::app::CommandRequest{command, context}, required)
+            != CommandResolveStatus::Ok) {
+        return LRESULT{0};
+    }
+    return RouteMainWindowCommand(state, window, wparam, lparam, context)
+        .value_or(0);
 }
 
 std::optional<LRESULT> RouteWindowLifecycleMessage(
@@ -8979,13 +9348,6 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
                 return -1;
             }
             if (!InitializeMainChrome(*state)) {
-                return -1;
-            }
-            if (SetTimer(
-                    window,
-                    kAutosaveTimer,
-                    kAutosaveIntervalMilliseconds,
-                    nullptr) == 0U) {
                 return -1;
             }
             return 0;
@@ -9009,7 +9371,16 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
                     item.mask = TCIF_PARAM;
                     if (selected >= 0
                         && TabCtrl_GetItem(state->windows.document_tabs, selected, &item) != FALSE) {
-                        state->view.active_view_id = static_cast<std::uint64_t>(item.lParam);
+                        const std::uint64_t core_view_id =
+                            static_cast<std::uint64_t>(item.lParam);
+                        const auto frontend_view = FrontendViewForCoreView(
+                            state->view, core_view_id);
+                        if (!frontend_view.has_value()
+                            || !state->routing.targets.ActivateDocumentView(
+                                frontend_view.value())) {
+                            return 0;
+                        }
+                        state->view.active_view_id = core_view_id;
                         if (state->engine != nullptr) {
                             state->engine->SetActiveView(state->view.active_view_id);
                         }
@@ -9057,7 +9428,8 @@ std::optional<LRESULT> RouteKeyboardMessage(
             if (state != nullptr) {
                 if (!state->shortcuts.pending_strokes.empty() && wparam == VK_ESCAPE) {
                     ClearPendingShortcut(state->shortcuts);
-                    KillTimer(window, kShortcutSequenceTimer);
+                    DisarmCommandTimer(
+                        *state, window, CommandTimerKind::ShortcutSequence);
                     UpdateMenuState(*state);
                     return 0;
                 }
@@ -9095,15 +9467,16 @@ std::optional<LRESULT> RouteKeyboardMessage(
                     InkpodShortcutStroke{static_cast<std::uint32_t>(wparam), modifiers},
                     menu_command);
                 if (shortcut_match == INKPOD_SHORTCUT_MATCH_PREFIX) {
-                    SetTimer(
+                    ArmCommandTimer(
+                        *state,
                         window,
-                        kShortcutSequenceTimer,
-                        kShortcutSequenceTimerMilliseconds,
-                        nullptr);
+                        CommandTimerKind::ShortcutSequence,
+                        kShortcutSequenceTimerMilliseconds);
                     UpdateMenuState(*state);
                     return 0;
                 }
-                KillTimer(window, kShortcutSequenceTimer);
+                DisarmCommandTimer(
+                    *state, window, CommandTimerKind::ShortcutSequence);
                 if (shortcut_match == INKPOD_SHORTCUT_MATCH_EXACT) {
                     const UINT resolved_command = ShortcutMenuCommand(menu_command);
                     if (resolved_command != 0U) {
@@ -9454,6 +9827,29 @@ std::optional<LRESULT> RouteCanvasMessage(
                     if (state->effects.task != nullptr) {
                         return 1;
                     }
+                    if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
+                        const CommandContext context =
+                            state->routing.targets.Capture();
+                        if (state->routing.targets.Resolve(
+                                context,
+                                inkpod::app::kDocumentViewCommandScope)
+                            != CommandResolveStatus::Ok) {
+                            return 0;
+                        }
+                        state->effects.gesture_context = context;
+                    }
+                    if (!state->effects.gesture_context.has_value()
+                        || state->routing.targets.Resolve(
+                               state->effects.gesture_context.value(),
+                               inkpod::app::kDocumentViewCommandScope)
+                            != CommandResolveStatus::Ok) {
+                        state->effects.samples.clear();
+                        state->effects.airbrush_active = false;
+                        state->effects.gesture_context.reset();
+                        DisarmCommandTimer(
+                            *state, window, CommandTimerKind::ContinuousSpray);
+                        return 0;
+                    }
                     try {
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
                             state->effects.samples.clear();
@@ -9464,7 +9860,11 @@ std::optional<LRESULT> RouteCanvasMessage(
                                 > UINT64_C(1048576) - input->sample_count) {
                                 state->effects.samples.clear();
                                 state->effects.airbrush_active = false;
-                                KillTimer(window, kContinuousSprayTimer);
+                                state->effects.gesture_context.reset();
+                                DisarmCommandTimer(
+                                    *state,
+                                    window,
+                                    CommandTimerKind::ContinuousSpray);
                                 return 0;
                             }
                             state->effects.samples.insert(
@@ -9475,7 +9875,9 @@ std::optional<LRESULT> RouteCanvasMessage(
                     } catch (const std::bad_alloc&) {
                         state->effects.samples.clear();
                         state->effects.airbrush_active = false;
-                        KillTimer(window, kContinuousSprayTimer);
+                        state->effects.gesture_context.reset();
+                        DisarmCommandTimer(
+                            *state, window, CommandTimerKind::ContinuousSpray);
                         return 0;
                     }
                     if (state->tools.active_tool == kInteractionEffectAirbrush
@@ -9485,23 +9887,30 @@ std::optional<LRESULT> RouteCanvasMessage(
                             input->samples[static_cast<std::size_t>(input->sample_count - 1U)];
                         if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
                             state->effects.airbrush_active = true;
-                            SetTimer(
+                            ArmCommandTimer(
+                                *state,
                                 window,
-                                kContinuousSprayTimer,
-                                kContinuousSprayIntervalMilliseconds,
-                                nullptr);
+                                CommandTimerKind::ContinuousSpray,
+                                kContinuousSprayIntervalMilliseconds);
                         }
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
                         state->effects.samples.clear();
                         state->effects.airbrush_active = false;
-                        KillTimer(window, kContinuousSprayTimer);
+                        state->effects.gesture_context.reset();
+                        DisarmCommandTimer(
+                            *state, window, CommandTimerKind::ContinuousSpray);
                         return 1;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
                         state->effects.airbrush_active = false;
-                        KillTimer(window, kContinuousSprayTimer);
-                        const InkpodStatus status = FinishEffectGesture(*state);
+                        DisarmCommandTimer(
+                            *state, window, CommandTimerKind::ContinuousSpray);
+                        const CommandContext context =
+                            state->effects.gesture_context.value();
+                        state->effects.gesture_context.reset();
+                        const InkpodStatus status = FinishEffectGesture(
+                            *state, context);
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"Canvas効果");
                         }
@@ -9510,6 +9919,26 @@ std::optional<LRESULT> RouteCanvasMessage(
                     return 1;
                 }
                 inkpod::app::StrokeEvent event{};
+                if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
+                    const CommandContext context =
+                        state->routing.targets.Capture();
+                    if (state->routing.targets.Resolve(
+                            context, inkpod::app::kDocumentViewCommandScope)
+                        != CommandResolveStatus::Ok) {
+                        return 0;
+                    }
+                    state->view.active_drag =
+                        state->routing.tokens.IssueDrag(context);
+                }
+                if (!state->view.active_drag.has_value()
+                    || state->routing.targets.Resolve(
+                           state->view.active_drag->context,
+                           inkpod::app::kDocumentViewCommandScope)
+                        != CommandResolveStatus::Ok) {
+                    state->view.active_drag.reset();
+                    return 0;
+                }
+                event.context = state->view.active_drag->context;
                 switch (input->kind) {
                     case inkpod::renderer::CanvasStrokeEventKind::Begin:
                         event.kind = inkpod::app::StrokeEventKind::Begin;
@@ -9541,7 +9970,13 @@ std::optional<LRESULT> RouteCanvasMessage(
                 } catch (const std::bad_alloc&) {
                     return 0;
                 }
-                return state->engine->EnqueueStroke(std::move(event)) ? 1 : 0;
+                const bool queued = state->engine->EnqueueStroke(std::move(event));
+                if (!queued
+                    || input->kind == inkpod::renderer::CanvasStrokeEventKind::End
+                    || input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
+                    state->view.active_drag.reset();
+                }
+                return queued ? 1 : 0;
             }
             return 0;
         case inkpod::renderer::kCanvasViewGesture:
@@ -9591,7 +10026,9 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
     LPARAM lparam) noexcept {
     switch (message) {
         case inkpod::app::kCoreStateChanged:
-            if (state != nullptr) {
+            if (state != nullptr
+                && static_cast<std::uint64_t>(lparam)
+                    == state->routing.targets.CurrentGeneration().Value()) {
                 RefreshTreePane(*state);
                 RefreshLightTablePane(*state);
                 RefreshSequencePane(*state);
@@ -9600,16 +10037,45 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
             }
             return 0;
         case kLocatorSampleReady: {
-            std::unique_ptr<LocatorAsyncResult> result(
-                reinterpret_cast<LocatorAsyncResult*>(lparam));
-            if (state != nullptr && result != nullptr) {
-                state->view.locator_pending = false;
-                if (result->status == INKPOD_STATUS_OK
-                    && result->generation == state->view.locator_generation) {
+            std::optional<LocatorAsyncResult> result;
+            if (state != nullptr) {
+                std::lock_guard lock(state->view.locator_results_mutex);
+                const auto found = std::find_if(
+                    state->view.locator_results.begin(),
+                    state->view.locator_results.end(),
+                    [wparam, lparam](const LocatorAsyncResult& pending) {
+                        return pending.token.value
+                                == static_cast<std::uint64_t>(wparam)
+                            && pending.token.generation.Value()
+                                == static_cast<std::uint64_t>(lparam);
+                    });
+                if (found != state->view.locator_results.end()) {
+                    result = std::move(*found);
+                    state->view.locator_results.erase(found);
+                }
+            }
+            if (state != nullptr && result.has_value()) {
+                std::uint64_t expected = result->token.value;
+                const bool was_pending =
+                    state->view.locator_pending_token.compare_exchange_strong(
+                        expected, 0U, std::memory_order_acq_rel);
+                const bool target_current =
+                    state->routing.targets.Resolve(
+                        result->context,
+                        inkpod::app::kDocumentViewCommandScope)
+                        == CommandResolveStatus::Ok
+                    && result->context.document_view.has_value()
+                    && result->context.document_view.value()
+                        == state->routing.targets.ActiveDocumentView();
+                if (was_pending && target_current
+                    && result->status == INKPOD_STATUS_OK
+                    && result->sample_generation == state->view.locator_generation) {
                     state->view.locator = result->output;
                     state->view.locator_valid = true;
                     UpdateLocatorStatus(*state);
-                } else if (result->generation != state->view.locator_generation) {
+                } else if (was_pending && (!target_current
+                    || result->sample_generation
+                        != state->view.locator_generation)) {
                     QueueLocatorSample(*state);
                 }
             }
@@ -9618,6 +10084,22 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
         case kEffectTaskCompleted:
             if (state != nullptr) {
                 const InkpodStatus status = static_cast<InkpodStatus>(wparam);
+                const CommandContext completion_context =
+                    state->effects.completion_context;
+                const bool target_current = completion_context.generation.has_value()
+                    && completion_context.generation->Value()
+                        == static_cast<std::uint64_t>(lparam)
+                    && state->routing.targets.Resolve(
+                           completion_context,
+                           inkpod::app::kDocumentViewCommandScope
+                               | CommandTargetScope::Job)
+                        == CommandResolveStatus::Ok;
+                const bool document_current =
+                    state->routing.targets.Resolve(
+                        completion_context,
+                        inkpod::app::kDocumentSessionCommandScope
+                            | CommandTargetScope::Job)
+                    == CommandResolveStatus::Ok;
                 const bool prompt = state->effects.preview_prompt;
                 state->effects.preview_prompt = false;
                 if (state->effects.progress != nullptr) {
@@ -9625,12 +10107,15 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     state->effects.progress = nullptr;
                 }
                 inkpod_task_release(&state->effects.task);
-                if (status == INKPOD_STATUS_OK && prompt && state->engine != nullptr) {
-                    const int choice = MessageBoxW(
-                        window,
-                        L"Canvasのプレビューを適用しますか？\nキャンセルすると元の状態へ完全に戻ります。",
-                        L"画像処理プレビュー",
-                        MB_OKCANCEL | MB_ICONQUESTION);
+                if (status == INKPOD_STATUS_OK && prompt && document_current
+                    && state->engine != nullptr) {
+                    const int choice = target_current
+                        ? MessageBoxW(
+                              window,
+                              L"Canvasのプレビューを適用しますか？\nキャンセルすると元の状態へ完全に戻ります。",
+                              L"画像処理プレビュー",
+                              MB_OKCANCEL | MB_ICONQUESTION)
+                        : IDCANCEL;
                     const InkpodStatus preview_status = state->engine->Invoke(
                         [choice](InkpodCore* core) {
                             if (choice == IDOK) {
@@ -9648,34 +10133,62 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                         ShowCoreError(*state, window, L"画像処理プレビューの確定");
                     }
                 }
+                if (state->effects.job_id.has_value()) {
+                    (void)state->routing.targets.EndJob(
+                        state->effects.job_id.value());
+                }
+                state->effects.job_id.reset();
+                state->effects.completion_context = {};
                 UpdateMenuState(*state);
             }
             return 0;
         case kBatchTaskCompleted:
             if (state != nullptr) {
                 const InkpodStatus status = static_cast<InkpodStatus>(wparam);
+                const CommandContext completion_context =
+                    state->batch.completion_context;
+                const bool target_current = completion_context.generation.has_value()
+                    && completion_context.generation->Value()
+                        == static_cast<std::uint64_t>(lparam)
+                    && state->routing.targets.Resolve(
+                           completion_context,
+                           inkpod::app::kDocumentViewCommandScope
+                               | CommandTargetScope::Job)
+                        == CommandResolveStatus::Ok;
                 if (state->batch.progress != nullptr) {
                     DestroyWindow(state->batch.progress);
                     state->batch.progress = nullptr;
                 }
-                if (state->batch.report != nullptr) {
+                if (target_current && state->batch.report != nullptr) {
                     try {
                         state->batch.last_result = BatchReportSummary(state->batch.report);
                     } catch (const std::bad_alloc&) {
                         state->batch.last_result = L"レポート表示用メモリが不足しました";
                     }
+                } else if (!target_current) {
+                    inkpod_batch_report_release(&state->batch.report);
                 }
                 inkpod_batch_task_release(&state->batch.task);
+                if (state->batch.job_id.has_value()) {
+                    (void)state->routing.targets.EndJob(
+                        state->batch.job_id.value());
+                }
+                state->batch.job_id.reset();
+                state->batch.completion_context = {};
                 RefreshBatchPalette(state->batch);
                 UpdateMenuState(*state);
-                if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED
+                if (target_current && status != INKPOD_STATUS_OK
+                    && status != INKPOD_STATUS_CANCELLED
                     && !state->lifetime.smoke_test) {
                     ShowCoreError(*state, window, L"バッチ実行");
                 }
             }
             return 0;
         case inkpod::app::kCoreAsyncFailed:
-            if (state != nullptr && !state->lifetime.smoke_test) {
+            if (state != nullptr
+                && static_cast<std::uint64_t>(lparam)
+                    == state->routing.targets.CurrentGeneration().Value()
+                && !state->lifetime.smoke_test) {
                 ShowCoreError(*state, window, L"非同期処理");
             }
             return 0;
@@ -9693,8 +10206,16 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
     WPARAM wparam,
     LPARAM lparam) noexcept {
     switch (message) {
-        case WM_TIMER:
-            if (state != nullptr && wparam == kStatusProgressTimer) {
+        case WM_TIMER: {
+            if (state == nullptr) {
+                return 0;
+            }
+            const auto token = ResolveCommandTimer(*state, window, wparam);
+            if (!token.has_value()) {
+                return 0;
+            }
+            switch (token->kind) {
+            case CommandTimerKind::StatusProgress: {
                 std::array<wchar_t, 192U> progress{};
                 if (FormatTaskProgressStatus(*state, progress)) {
                     SendMessageW(
@@ -9703,20 +10224,21 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
                         5,
                         reinterpret_cast<LPARAM>(progress.data()));
                 } else {
-                    KillTimer(window, kStatusProgressTimer);
+                    DisarmCommandTimer(
+                        *state, window, CommandTimerKind::StatusProgress);
                 }
                 return 0;
             }
-            if (state != nullptr && wparam == kShortcutSequenceTimer) {
+            case CommandTimerKind::ShortcutSequence:
                 if (state->shortcuts.pending_deadline == 0U
                     || GetTickCount64() >= state->shortcuts.pending_deadline) {
-                    KillTimer(window, kShortcutSequenceTimer);
+                    DisarmCommandTimer(
+                        *state, window, CommandTimerKind::ShortcutSequence);
                     ClearPendingShortcut(state->shortcuts);
                     UpdateMenuState(*state);
                 }
                 return 0;
-            }
-            if (state != nullptr && wparam == kMotionPlaybackTimer) {
+            case CommandTimerKind::MotionPlayback:
                 if (state->animation.motion_active && !state->animation.motion_paused
                     && state->engine != nullptr) {
                     InkpodMotionFrame frame{};
@@ -9732,15 +10254,15 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
                         UpdateMotionState(state->animation, frame);
                     } else {
                         state->animation.motion_active = false;
-                        KillTimer(window, kMotionPlaybackTimer);
+                        DisarmCommandTimer(
+                            *state, window, CommandTimerKind::MotionPlayback);
                         if (!state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"モーション再生");
                         }
                     }
                 }
                 return 0;
-            }
-            if (state != nullptr && wparam == kContinuousSprayTimer) {
+            case CommandTimerKind::ContinuousSpray:
                 if (state->effects.airbrush_active && state->tools.active_tool == kInteractionEffectAirbrush
                     && state->effects.task == nullptr) {
                     try {
@@ -9748,24 +10270,35 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
                             state->effects.samples.push_back(state->effects.airbrush_last);
                         } else {
                             state->effects.airbrush_active = false;
-                            KillTimer(window, kContinuousSprayTimer);
+                            DisarmCommandTimer(
+                                *state,
+                                window,
+                                CommandTimerKind::ContinuousSpray);
                         }
                     } catch (const std::bad_alloc&) {
                         state->effects.airbrush_active = false;
-                        KillTimer(window, kContinuousSprayTimer);
+                        DisarmCommandTimer(
+                            *state, window, CommandTimerKind::ContinuousSpray);
                     }
                 }
                 return 0;
-            }
-            if (state != nullptr && wparam == kAutosaveTimer && !state->document.recovery_path.empty()) {
-                InkpodDocumentInfo info{};
-                if (QueryDocument(*state, info)
-                    && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
-                    QueueAutosave(*state, state->document.recovery_path);
+            case CommandTimerKind::Autosave:
+                if (!state->document.recovery_path.empty()) {
+                    InkpodDocumentInfo info{};
+                    if (QueryDocument(*state, info)
+                        && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+                        QueueAutosave(
+                            *state,
+                            token->context,
+                            state->document.recovery_path);
+                    }
                 }
                 return 0;
+            case CommandTimerKind::EffectProgress:
+                return 0;
             }
-            break;
+            return 0;
+        }
         case WM_CLOSE:
             if (state != nullptr && !state->lifetime.smoke_test && !ConfirmDiscard(*state)) {
                 return 0;
@@ -9778,7 +10311,8 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
             }
             if (state != nullptr) {
                 state->effects.airbrush_active = false;
-                KillTimer(window, kContinuousSprayTimer);
+                DisarmCommandTimer(
+                    *state, window, CommandTimerKind::ContinuousSpray);
             }
             ShowWindow(window, SW_HIDE);
             PostQuitMessage(0);
@@ -9796,11 +10330,16 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
             }
             return 0;
         case WM_NCDESTROY:
-            KillTimer(window, kAutosaveTimer);
-            KillTimer(window, kContinuousSprayTimer);
-            KillTimer(window, kMotionPlaybackTimer);
-            KillTimer(window, kShortcutSequenceTimer);
-            KillTimer(window, kStatusProgressTimer);
+            if (state != nullptr) {
+                for (const CommandTimerKind kind : {
+                         CommandTimerKind::Autosave,
+                         CommandTimerKind::ContinuousSpray,
+                         CommandTimerKind::MotionPlayback,
+                         CommandTimerKind::ShortcutSequence,
+                         CommandTimerKind::StatusProgress}) {
+                    DisarmCommandTimer(*state, window, kind);
+                }
+            }
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
             return DefWindowProcW(window, message, wparam, lparam);
         default:
@@ -9873,7 +10412,7 @@ LRESULT CALLBACK MainWindowProcedure(
     }
 
     if (message == WM_COMMAND) {
-        if (const auto result = RouteMainWindowCommand(
+        if (const auto result = IssueCommand(
                 state, window, wparam, lparam)) {
             return *result;
         }

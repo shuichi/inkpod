@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "command_context.h"
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
@@ -23,7 +24,9 @@ public:
     InkpodStatus ImportCommonRaster(const std::wstring& path) noexcept;
     InkpodStatus ExportCommonRaster(
         const std::wstring& path, bool composite_white) noexcept;
-    bool QueueAutosave(const std::wstring& path) noexcept;
+    bool QueueAutosave(
+        const CommandContext& context,
+        const std::wstring& path) noexcept;
 
 private:
     DocumentShellState& state_;

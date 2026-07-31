@@ -92,6 +92,28 @@ coordinate document replacement; callbacks and helpers receive narrow state,
 not the complete context. Cached IDs and metadata support presentation only and
 are not a C++ document model.
 
+The UI/Input thread owns the frontend target registry. Workspace window,
+document session, document view, editor group, Canvas, pane, job, and generation
+identities are non-interchangeable strong types in one monotonic frontend value
+namespace; they are distinct from Core-local IDs. Menu, shortcut, pane-button,
+and main-window `WM_COMMAND` entry points converge on `IssueCommand`, which also
+serves context-menu commands as those surfaces are added. It captures a
+pointer-free `CommandContext` before routing. Command state and execution use
+the same owner-to-target-scope mapping. Missing scope, unknown command, stale
+generation, closed view/pane/job, and document replacement are rejected without
+falling back to the currently active view.
+
+Asynchronous Core work receives a copy of the issue-time context. Filter/effect,
+Batch, autosave, Canvas effect gesture, and locator completions validate that
+copy before changing UI state; a stale preview in the still-current document is
+cancelled instead of committed. Timer, drag, and posted-notification tokens are
+monotonic values bound to a context/generation. Locator results are copied into
+a bounded mutex-protected queue and posted by value token, while an atomic
+pending token makes enqueue, allocation, replacement, and `PostMessage` failure
+drop only the matching request. No C++ or Rust-owned object pointer is placed in
+`WPARAM` or `LPARAM`. G1 retains one workspace, one document session, one editor
+group, and one Canvas; their ownership is split in G2 and later milestones.
+
 The fixed command-state catalog assigns all 281 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette

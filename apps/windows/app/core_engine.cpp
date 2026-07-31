@@ -58,6 +58,7 @@ std::wstring ReadCoreErrorOnCurrentThread() {
 }
 
 struct SyncWork {
+    CommandContext context;
     std::function<InkpodStatus(InkpodCore*)> operation;
     bool publish_snapshot{};
     bool refresh_document_info{};
@@ -121,6 +122,7 @@ struct CoreEngine::Impl final {
             if (event.kind == StrokeEventKind::Append && !work.empty()) {
                 if (auto* pending = std::get_if<StrokeEvent>(&work.back());
                     pending != nullptr && pending->kind == StrokeEventKind::Append
+                    && pending->context == event.context
                     && pending->samples.size()
                             <= kMaximumStrokeSamples - std::min(
                                    kMaximumStrokeSamples, event.samples.size())) {
@@ -158,6 +160,7 @@ struct CoreEngine::Impl final {
             auto completion = std::make_shared<std::promise<InkpodStatus>>();
             auto future = completion->get_future();
             if (!Push(SyncWork{
+                    CurrentContext(),
                     std::move(operation),
                     publish_snapshot,
                     refresh_document_info,
@@ -175,12 +178,14 @@ struct CoreEngine::Impl final {
     }
 
     bool Enqueue(
+        const CommandContext& context,
         std::function<InkpodStatus(InkpodCore*)> operation,
         bool publish_snapshot,
         bool refresh_document_info,
         bool defer_during_active_stroke,
         std::function<void(InkpodStatus)> completion) noexcept {
         return Push(SyncWork{
+            context,
             std::move(operation),
             publish_snapshot,
             refresh_document_info,
@@ -231,7 +236,12 @@ struct CoreEngine::Impl final {
             last_error = L"Core error text allocation failed";
         }
         if (asynchronous) {
-            PostMessageW(owner, kCoreAsyncFailed, status, 0);
+            PostMessageW(
+                owner,
+                kCoreAsyncFailed,
+                status,
+                static_cast<LPARAM>(command_generation.load(
+                    std::memory_order_acquire)));
         }
     }
 
@@ -245,7 +255,12 @@ struct CoreEngine::Impl final {
                 document_info = info;
                 has_document_info = true;
             }
-            PostMessageW(owner, kCoreStateChanged, 0, 0);
+            PostMessageW(
+                owner,
+                kCoreStateChanged,
+                0,
+                static_cast<LPARAM>(command_generation.load(
+                    std::memory_order_acquire)));
         }
         return status;
     }
@@ -287,6 +302,9 @@ struct CoreEngine::Impl final {
     }
 
     void ProcessStroke(InkpodCore* core, StrokeEvent event) noexcept {
+        if (!ContextIsCurrent(event.context)) {
+            return;
+        }
         InkpodStatus status = INKPOD_STATUS_OK;
         switch (event.kind) {
             case StrokeEventKind::Begin: {
@@ -368,7 +386,9 @@ struct CoreEngine::Impl final {
     }
 
     void ProcessSync(InkpodCore* core, SyncWork item) noexcept {
-        InkpodStatus status = item.operation(core);
+        InkpodStatus status = ContextIsCurrent(item.context)
+            ? item.operation(core)
+            : INKPOD_STATUS_CANCELLED;
         if (status == INKPOD_STATUS_OK && item.refresh_document_info) {
             status = RefreshDocumentInfo(core);
         }
@@ -432,6 +452,7 @@ struct CoreEngine::Impl final {
                             auto* pending_append = std::get_if<StrokeEvent>(&work.front());
                             if (pending_append == nullptr
                                 || pending_append->kind != StrokeEventKind::Append
+                                || pending_append->context != stroke->context
                                 || stroke->samples.size()
                                         > kMaximumStrokeSamples - std::min(
                                                kMaximumStrokeSamples,
@@ -508,6 +529,21 @@ struct CoreEngine::Impl final {
     std::chrono::steady_clock::time_point next_preview_frame{};
     std::uint64_t active_sample_count{};
     std::atomic<std::uint64_t> active_view_id{};
+    std::atomic<std::uint64_t> command_generation{1U};
+
+    [[nodiscard]] CommandContext CurrentContext() const noexcept {
+        CommandContext context{};
+        context.generation = Generation(
+            command_generation.load(std::memory_order_acquire));
+        return context;
+    }
+
+    [[nodiscard]] bool ContextIsCurrent(
+        const CommandContext& context) const noexcept {
+        return context.generation.has_value()
+            && context.generation->Value()
+                == command_generation.load(std::memory_order_acquire);
+    }
 };
 
 CoreEngine::CoreEngine() = default;
@@ -552,6 +588,7 @@ InkpodStatus CoreEngine::Invoke(
 }
 
 bool CoreEngine::Enqueue(
+    const CommandContext& context,
     std::function<InkpodStatus(InkpodCore*)> operation,
     bool publish_snapshot,
     bool refresh_document_info,
@@ -559,6 +596,7 @@ bool CoreEngine::Enqueue(
     std::function<void(InkpodStatus)> completion) noexcept {
     return impl_ != nullptr
         && impl_->Enqueue(
+            context,
             std::move(operation),
             publish_snapshot,
             refresh_document_info,
@@ -584,6 +622,13 @@ InkpodStatus CoreEngine::SetActiveView(std::uint64_t view_id) noexcept {
     }
     impl_->active_view_id.store(view_id, std::memory_order_release);
     return FlushPreview();
+}
+
+void CoreEngine::SetCommandGeneration(Generation generation) noexcept {
+    if (impl_ != nullptr && generation) {
+        impl_->command_generation.store(
+            generation.Value(), std::memory_order_release);
+    }
 }
 
 bool CoreEngine::GetDocumentInfo(InkpodDocumentInfo& info) const noexcept {

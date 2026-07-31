@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "app/command_context.h"
 #include "dialogs/effects_dialogs.h"
 #include "inkpod/core_ffi.h"
 
@@ -24,6 +25,7 @@ public:
 
     InkpodStatus Preview(InkpodBatchRunScope scope) noexcept;
     InkpodStatus Start(
+        const app::CommandContext& context,
         InkpodBatchRunScope scope,
         bool dry_run,
         UINT completion_message) noexcept;

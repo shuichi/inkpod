@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include "app/command_context.h"
 #include "dialogs/effects_dialogs.h"
 #include "inkpod/core_ffi.h"
 
@@ -25,6 +26,7 @@ public:
         app::CoreEngine& engine) noexcept;
 
     InkpodStatus StartTask(
+        const app::CommandContext& context,
         bool preview_prompt,
         Operation operation,
         UINT completion_message) noexcept;

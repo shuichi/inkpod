@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "command_context.h"
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::renderer {
@@ -38,6 +39,7 @@ struct StrokeStyle {
 
 struct StrokeEvent {
     StrokeEventKind kind{StrokeEventKind::Cancel};
+    CommandContext context;
     StrokeStyle style{};
     std::vector<InkpodStrokeSample> samples;
 };
@@ -64,6 +66,7 @@ public:
         bool publish_snapshot,
         bool refresh_document_info) noexcept;
     bool Enqueue(
+        const CommandContext& context,
         std::function<InkpodStatus(InkpodCore*)> operation,
         bool publish_snapshot,
         bool refresh_document_info,
@@ -73,6 +76,7 @@ public:
     InkpodStatus WaitIdle() noexcept;
     InkpodStatus FlushPreview() noexcept;
     InkpodStatus SetActiveView(std::uint64_t view_id) noexcept;
+    void SetCommandGeneration(Generation generation) noexcept;
 
     bool GetDocumentInfo(InkpodDocumentInfo& info) const noexcept;
     std::wstring LastError() const;

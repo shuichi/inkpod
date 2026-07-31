@@ -3,11 +3,16 @@
 #include <windows.h>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <deque>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "command_context.h"
 #include "core_engine.h"
 #include "inkpod/core_ffi.h"
 #include "ui/command_state.h"
@@ -46,6 +51,19 @@ struct FilterJob {
     std::vector<InkpodCurvePoint> points;
     std::uint64_t plane_id{};
     bool preview{};
+};
+
+struct DocumentViewIdentityBinding {
+    std::uint64_t core_view_id{};
+    DocumentViewId frontend_view_id{};
+};
+
+struct LocatorAsyncResult {
+    PostedNotificationToken token;
+    CommandContext context;
+    std::uint64_t sample_generation{};
+    InkpodStatus status{INKPOD_STATUS_INVALID_STATE};
+    InkpodLocatorOutput output{};
 };
 
 struct AdjustmentLayerUiState {
@@ -145,13 +163,18 @@ struct ViewUiState {
     std::int32_t pointer_device_x{};
     std::int32_t pointer_device_y{};
     std::uint64_t locator_generation{};
-    bool locator_pending{};
+    std::atomic_uint64_t locator_pending_token{};
     bool locator_valid{};
     InkpodLocatorOutput locator{};
     std::vector<InkpodStrokeSample> gesture_samples;
     bool guide_drag_active{};
     std::uint32_t guide_drag_axis{};
     std::uint64_t guide_drag_id{};
+    std::array<DocumentViewIdentityBinding, 64U> identity_bindings{};
+    std::size_t identity_binding_count{};
+    std::optional<DragToken> active_drag;
+    std::mutex locator_results_mutex;
+    std::deque<LocatorAsyncResult> locator_results;
 };
 
 struct PaneUiState {
@@ -207,6 +230,9 @@ struct EffectsUiState {
     std::vector<InkpodStrokeSample> samples;
     bool airbrush_active{};
     InkpodStrokeSample airbrush_last{};
+    std::optional<CommandContext> gesture_context;
+    std::optional<JobSessionId> job_id;
+    CommandContext completion_context;
 };
 
 struct BatchUiState {
@@ -236,6 +262,20 @@ struct BatchUiState {
     InkpodBatchTask* task{};
     HWND progress{};
     windows::ui::ProgressDialogState progress_dialog{};
+    std::optional<JobSessionId> job_id;
+    CommandContext completion_context;
+};
+
+struct FrontendRoutingState {
+    CommandTargetRegistry targets;
+    CommandTimerRegistry timers;
+    FrontendTokenSource tokens;
+    CommandContext command_state_context;
+    PaneInstanceId tool_pane{};
+    PaneInstanceId tool_options_pane{};
+    PaneInstanceId color_pane{};
+    PaneInstanceId layer_pane{};
+    PaneInstanceId batch_pane{};
 };
 
 struct AppContext {
@@ -250,6 +290,7 @@ struct AppContext {
     BatchUiState batch;
     windows::ui::ShortcutUiState shortcuts;
     windows::ui::CommandStateSet command_states;
+    FrontendRoutingState routing;
     std::unique_ptr<CoreEngine> engine;
 };
 

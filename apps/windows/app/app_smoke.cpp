@@ -61,16 +61,26 @@ using inkpod::app::NewestPrivateRecovery;
 using inkpod::app::PublishStandardClipboard;
 using inkpod::app::ReadBoundedFile;
 using inkpod::app::WriteFileAtomically;
+using inkpod::app::CommandTimerKind;
 using inkpod::windows::ui::tools::TransitionActiveTool;
 using inkpod::windows::ui::tools::kInteractionEffectAirbrush;
 
-constexpr UINT_PTR kContinuousSprayTimer = 2U;
 constexpr wchar_t kVectorStrokePlaneRequired[] =
     L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
 
 bool CommandSurfacesMatchComputedState(const AppContext& state) noexcept;
 InkpodStatus CreateCell(AppContext& state, std::uint32_t width, std::uint32_t height, std::uint32_t dpi_milli) noexcept;
-bool DispatchEnabledCommand(AppContext& state, HWND window, UINT command) noexcept;
+bool DispatchEnabledCommand(
+    AppContext& state,
+    HWND window,
+    UINT command,
+    std::optional<inkpod::app::PaneInstanceId> pane = std::nullopt) noexcept;
+std::optional<LRESULT> IssueCommand(
+    AppContext* state,
+    HWND window,
+    WPARAM wparam,
+    LPARAM lparam,
+    std::optional<inkpod::app::PaneInstanceId> pane) noexcept;
 InkpodDocumentInfo EmptyDocumentInfo() noexcept;
 InkpodStatus ApplyView(
     AppContext& state,
@@ -85,7 +95,10 @@ InkpodStatus OpenFromPath(AppContext& state, const std::wstring& path) noexcept;
 void PumpPendingWindowMessages() noexcept;
 bool QueryDocument(AppContext& state, InkpodDocumentInfo& info) noexcept;
 bool QueryLightTableItem(AppContext& state, std::uint32_t index, InkpodLightTableItemInfo& output) noexcept;
-bool QueueAutosave(AppContext& state, const std::wstring& path) noexcept;
+bool QueueAutosave(
+    AppContext& state,
+    const inkpod::app::CommandContext& context,
+    const std::wstring& path) noexcept;
 bool RefreshColorPanes(AppContext& state) noexcept;
 bool RefreshLightTablePane(AppContext& state) noexcept;
 bool RefreshSequencePane(AppContext& state) noexcept;
@@ -801,7 +814,8 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     const std::wstring initial_recovery_path = state.document.recovery_path;
     std::wstring discovered_recovery;
     if (initial_recovery_path.empty()
-        || !QueueAutosave(state, initial_recovery_path)
+        || !QueueAutosave(
+               state, state.routing.targets.Capture(), initial_recovery_path)
         || state.engine->WaitIdle() != INKPOD_STATUS_OK
         || GetFileAttributesW(initial_recovery_path.c_str()) == INVALID_FILE_ATTRIBUTES
         || !NewestPrivateRecovery(discovered_recovery)
@@ -859,7 +873,10 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     if (state.engine->FlushPreview() != INKPOD_STATUS_OK) {
         return 33;
     }
-    if (!QueueAutosave(state, active_stroke_recovery_path)) {
+    if (!QueueAutosave(
+            state,
+            state.routing.targets.Capture(),
+            active_stroke_recovery_path)) {
         return 219;
     }
     PumpPendingWindowMessages();
@@ -1604,7 +1621,8 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
             },
             true,
             true) != INKPOD_STATUS_OK
-        || !QueueAutosave(state, recovery_path)
+        || !QueueAutosave(
+               state, state.routing.targets.Capture(), recovery_path)
         || state.engine->WaitIdle() != INKPOD_STATUS_OK
         || GetFileAttributesW(normal_path.c_str()) == INVALID_FILE_ATTRIBUTES
         || GetFileAttributesW(recovery_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -3970,8 +3988,17 @@ int RunImageEffectsSmoke(AppContext& state) noexcept {
             state.windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
-            reinterpret_cast<LPARAM>(&spray_begin)) != 1
-        || SendMessageW(state.windows.window, WM_TIMER, kContinuousSprayTimer, 0) != 0
+            reinterpret_cast<LPARAM>(&spray_begin)) != 1) {
+        return 609;
+    }
+    const auto spray_timer = state.routing.timers.Find(
+        CommandTimerKind::ContinuousSpray);
+    if (!spray_timer.has_value()
+        || SendMessageW(
+               state.windows.window,
+               WM_TIMER,
+               static_cast<WPARAM>(spray_timer->value),
+               0) != 0
         || state.effects.samples.size() < 2U
         || SendMessageW(
                state.windows.window,
@@ -4228,13 +4255,62 @@ int RunMagnifiedRasterHitSmoke(AppContext& state) noexcept {
         : 726;
 }
 
+int RunCommandContextSmoke(AppContext& state) noexcept {
+    using inkpod::app::CommandContext;
+    using inkpod::app::CommandResolveStatus;
+    using inkpod::app::Generation;
+
+    const CommandContext context = state.routing.targets.Capture();
+    if (state.routing.targets.Resolve(
+            context, inkpod::app::kDocumentViewCommandScope)
+        != CommandResolveStatus::Ok) {
+        return 727;
+    }
+    CommandContext missing = context;
+    missing.document_view.reset();
+    if (state.routing.targets.Resolve(
+            missing, inkpod::app::kDocumentViewCommandScope)
+        != CommandResolveStatus::MissingScope) {
+        return 728;
+    }
+    CommandContext stale = context;
+    stale.generation = Generation(
+        state.routing.targets.CurrentGeneration().Value() + 1U);
+    if (state.routing.targets.Resolve(
+            stale, inkpod::app::kDocumentViewCommandScope)
+        != CommandResolveStatus::StaleGeneration) {
+        return 729;
+    }
+    InkpodDocumentInfo before = EmptyDocumentInfo();
+    InkpodDocumentInfo after = EmptyDocumentInfo();
+    if (!QueryDocument(state, before)
+        || SendMessageW(state.windows.window, WM_COMMAND, UINT16_MAX, 0) != 0
+        || !QueryDocument(state, after)
+        || before.document_revision != after.document_revision
+        || before.main_plane_checksum != after.main_plane_checksum
+        || IssueCommand(
+               nullptr,
+               state.windows.window,
+               IDM_EDIT_UNDO,
+               0,
+               std::nullopt)
+                .value_or(1)
+            != 0) {
+        return 730;
+    }
+    return 0;
+}
+
 
 }  // namespace inkpod::windows::ui::runtime
 
 namespace inkpod::windows::ui {
 
 int RunApplicationSmoke(app::AppContext& state) noexcept {
-    int exit_code = runtime::RunDrawingPersistenceSmoke(state);
+    int exit_code = runtime::RunCommandContextSmoke(state);
+    if (exit_code == 0) {
+        exit_code = runtime::RunDrawingPersistenceSmoke(state);
+    }
     if (exit_code == 0) {
         exit_code = runtime::RunPaintingRecoverySmoke(state);
     }
