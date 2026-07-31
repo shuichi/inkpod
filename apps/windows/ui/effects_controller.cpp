@@ -1,6 +1,7 @@
 #include "effects_controller.h"
 
-#include "app/app_context.h"
+#include "app/frontend_state.h"
+#include "ui/main_window.h"
 #include "app/core_engine.h"
 #include "inkpod/core_ffi.h"
 
@@ -9,9 +10,14 @@ namespace inkpod::windows::ui {
 EffectsController::EffectsController(
     app::AppLifetimeState& lifetime,
     app::MainWindowHandles& windows,
+    HWND& progress,
     app::EffectsUiState& effects,
     app::CoreEngine& engine) noexcept
-    : lifetime_(lifetime), windows_(windows), effects_(effects), engine_(engine) {}
+    : lifetime_(lifetime),
+      windows_(windows),
+      progress_(progress),
+      effects_(effects),
+      engine_(engine) {}
 
 InkpodStatus EffectsController::StartTask(
     const app::CommandContext& context,
@@ -57,13 +63,13 @@ InkpodStatus EffectsController::StartTask(
         nullptr,
         L"処理中...",
         L"キャンセル中..."};
-    effects_.progress = CreateProgressDialog(
+    progress_ = CreateProgressDialog(
         lifetime_.instance, windows_.window, effects_.progress_dialog);
-    if (effects_.progress == nullptr) {
+    if (progress_ == nullptr) {
         inkpod_task_release(&effects_.task);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    ShowWindow(effects_.progress, SW_SHOW);
+    ShowWindow(progress_, SW_SHOW);
     const HWND window = windows_.window;
     if (!engine_.Enqueue(
             context,
@@ -80,8 +86,8 @@ InkpodStatus EffectsController::StartTask(
                 PostMessageW(
                     window, completion_message, completion_status, generation);
             })) {
-        DestroyWindow(effects_.progress);
-        effects_.progress = nullptr;
+        DestroyWindow(progress_);
+        progress_ = nullptr;
         inkpod_task_release(&effects_.task);
         effects_.preview_prompt = false;
         effects_.completion_context = {};

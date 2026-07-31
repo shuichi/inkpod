@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-#include "app/app_context.h"
+#include "app/application_host.h"
 #include "canvas.h"
 #include "app/clipboard_adapter.h"
 #include "app/core_engine.h"
@@ -55,7 +55,7 @@
 
 namespace inkpod::windows::ui::runtime {
 
-using inkpod::app::AppContext;
+using inkpod::app::ApplicationHost;
 using inkpod::app::InkpodClipboardFormat;
 using inkpod::app::NewestPrivateRecovery;
 using inkpod::app::PublishStandardClipboard;
@@ -68,45 +68,45 @@ using inkpod::windows::ui::tools::kInteractionEffectAirbrush;
 constexpr wchar_t kVectorStrokePlaneRequired[] =
     L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
 
-bool CommandSurfacesMatchComputedState(const AppContext& state) noexcept;
-InkpodStatus CreateCell(AppContext& state, std::uint32_t width, std::uint32_t height, std::uint32_t dpi_milli) noexcept;
+bool CommandSurfacesMatchComputedState(const ApplicationHost& state) noexcept;
+InkpodStatus CreateCell(ApplicationHost& state, std::uint32_t width, std::uint32_t height, std::uint32_t dpi_milli) noexcept;
 bool DispatchEnabledCommand(
-    AppContext& state,
+    ApplicationHost& state,
     HWND window,
     UINT command,
     std::optional<inkpod::app::PaneInstanceId> pane = std::nullopt) noexcept;
 std::optional<LRESULT> IssueCommand(
-    AppContext* state,
+    ApplicationHost* state,
     HWND window,
     WPARAM wparam,
     LPARAM lparam,
     std::optional<inkpod::app::PaneInstanceId> pane) noexcept;
 InkpodDocumentInfo EmptyDocumentInfo() noexcept;
 InkpodStatus ApplyView(
-    AppContext& state,
+    ApplicationHost& state,
     InkpodViewCommandKind kind,
     double value1,
     double value2,
     double value3 = 0.0,
     double value4 = 0.0) noexcept;
-InkpodStatus FinishVectorCanvasGesture(AppContext& state) noexcept;
-InkpodStatus FitCanvas(AppContext& state, InkpodViewCommandKind kind) noexcept;
-InkpodStatus OpenFromPath(AppContext& state, const std::wstring& path) noexcept;
+InkpodStatus FinishVectorCanvasGesture(ApplicationHost& state) noexcept;
+InkpodStatus FitCanvas(ApplicationHost& state, InkpodViewCommandKind kind) noexcept;
+InkpodStatus OpenFromPath(ApplicationHost& state, const std::wstring& path) noexcept;
 void PumpPendingWindowMessages() noexcept;
-bool QueryDocument(AppContext& state, InkpodDocumentInfo& info) noexcept;
-bool QueryLightTableItem(AppContext& state, std::uint32_t index, InkpodLightTableItemInfo& output) noexcept;
+bool QueryDocument(ApplicationHost& state, InkpodDocumentInfo& info) noexcept;
+bool QueryLightTableItem(ApplicationHost& state, std::uint32_t index, InkpodLightTableItemInfo& output) noexcept;
 bool QueueAutosave(
-    AppContext& state,
+    ApplicationHost& state,
     const inkpod::app::CommandContext& context,
     const std::wstring& path) noexcept;
-bool RefreshColorPanes(AppContext& state) noexcept;
-bool RefreshLightTablePane(AppContext& state) noexcept;
-bool RefreshSequencePane(AppContext& state) noexcept;
-bool RefreshTreePane(AppContext& state) noexcept;
-void ResetUiForDocumentReplacement(AppContext& state) noexcept;
-bool ResolveConfiguredShortcut(AppContext& state, std::uint32_t virtual_key, std::uint32_t modifiers, UINT& menu_command) noexcept;
+bool RefreshColorPanes(ApplicationHost& state) noexcept;
+bool RefreshLightTablePane(ApplicationHost& state) noexcept;
+bool RefreshSequencePane(ApplicationHost& state) noexcept;
+bool RefreshTreePane(ApplicationHost& state) noexcept;
+void ResetUiForDocumentReplacement(ApplicationHost& state) noexcept;
+bool ResolveConfiguredShortcut(ApplicationHost& state, std::uint32_t virtual_key, std::uint32_t modifiers, UINT& menu_command) noexcept;
 bool SamePersistentMetadata(const InkpodDocumentInfo& left, const InkpodDocumentInfo& right) noexcept;
-InkpodStatus SaveToPath(AppContext& state, const std::wstring& path) noexcept;
+InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexcept;
 
 bool MenuLeavesHaveAssignedShortcuts(
     HMENU menu,
@@ -192,11 +192,11 @@ const wchar_t* RejectViewOptionsForSmoke(
     return L"smoke validation rejection";
 }
 
-int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
-    const HMENU menu = GetMenu(state.windows.window);
+int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
+    const HMENU menu = GetMenu(state.Workspace().windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_HELP_ABOUT, MF_BYCOMMAND) == static_cast<UINT>(-1)
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
         return 29;
     }
     constexpr std::array<ViewOptionsDialogState::Choice, 2U> plane_kind_choices{{
@@ -222,7 +222,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     dropdown_dialog.close_immediately = true;
     if (ShowViewOptions(
             state.lifetime.instance,
-            state.windows.window,
+            state.Workspace().windows.window,
             true,
             dropdown_dialog)
             != IDOK
@@ -239,7 +239,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     rejected_dialog.validate = RejectViewOptionsForSmoke;
     if (ShowViewOptions(
             state.lifetime.instance,
-            state.windows.window,
+            state.Workspace().windows.window,
             true,
             rejected_dialog)
             != IDCANCEL
@@ -248,24 +248,24 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         return 831;
     }
     if (SendMessageW(
-            state.windows.window, WM_COMMAND, IDM_WORKSPACE_RESET, 0)
+            state.Workspace().windows.window, WM_COMMAND, IDM_WORKSPACE_RESET, 0)
             != 1
-        || state.tools.palette == nullptr
-        || state.windows.tool_options == nullptr
-        || state.windows.color_pane == nullptr
-        || state.panes.layer_palette == nullptr) {
+        || state.Workspace().tools.palette == nullptr
+        || state.Workspace().windows.tool_options == nullptr
+        || state.Workspace().windows.color_pane == nullptr
+        || state.Workspace().panes.layer_palette == nullptr) {
         return 727;
     }
     const std::array<HWND, 4U> workspace_panes{
-        state.tools.palette,
-        state.windows.tool_options,
-        state.windows.color_pane,
-        state.panes.layer_palette};
+        state.Workspace().tools.palette,
+        state.Workspace().windows.tool_options,
+        state.Workspace().windows.color_pane,
+        state.Workspace().panes.layer_palette};
     for (const HWND pane : workspace_panes) {
         const auto style = static_cast<DWORD>(
             GetWindowLongPtrW(pane, GWL_STYLE));
         if ((style & WS_CHILD) == 0U
-            || GetParent(pane) != state.windows.window) {
+            || GetParent(pane) != state.Workspace().windows.window) {
             return 728;
         }
     }
@@ -277,7 +277,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
             ToolPaletteEntries().begin(),
             ToolPaletteEntries().end(),
             [&](const ToolPaletteEntry& entry) {
-                const HWND button = GetDlgItem(state.tools.palette, entry.command);
+                const HWND button = GetDlgItem(state.Workspace().tools.palette, entry.command);
                 const auto glyph_length =
                     entry.glyph == nullptr ? 0U : std::wcslen(entry.glyph);
                 return glyph_length >= 2U && glyph_length <= 8U
@@ -292,15 +292,15 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         return 746;
     }
     const HWND diameter_edit =
-        GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_DIAMETER);
+        GetDlgItem(state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_DIAMETER);
     const HWND diameter_label =
-        GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_DIAMETER_LABEL);
+        GetDlgItem(state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_DIAMETER_LABEL);
     const HWND erase_target_label =
-        GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_TARGET_LABEL);
+        GetDlgItem(state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_TARGET_LABEL);
     const HWND erase_main_line =
-        GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_TARGET_MAIN_LINE);
+        GetDlgItem(state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_TARGET_MAIN_LINE);
     const HWND erase_color =
-        GetDlgItem(state.windows.tool_options, IDC_TOOL_OPTIONS_TARGET_COLOR);
+        GetDlgItem(state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_TARGET_COLOR);
     if (diameter_edit == nullptr || diameter_label == nullptr
         || erase_target_label == nullptr
         || erase_main_line == nullptr || erase_color == nullptr) {
@@ -350,7 +350,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
             <= diameter_label_font_info.lfHeight) {
         return 765;
     }
-    if (state.tools.active_tool != INKPOD_TOOL_PENCIL
+    if (state.Workspace().tools.active_tool != INKPOD_TOOL_PENCIL
         || IsWindowEnabled(diameter_edit) != FALSE
         || !diameter_text_is(L"1.0")
         || IsWindowVisible(erase_target_label) != FALSE
@@ -359,19 +359,19 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         return 750;
     }
     const HWND main_line_label =
-        GetDlgItem(state.windows.color_pane, IDC_COLOR_MAIN_LINE_LABEL);
+        GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_MAIN_LINE_LABEL);
     const HWND main_line_swatch =
-        GetDlgItem(state.windows.color_pane, IDC_COLOR_MAIN_LINE_SWATCH);
+        GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_MAIN_LINE_SWATCH);
     const HWND drawing_swatch =
-        GetDlgItem(state.windows.color_pane, IDC_COLOR_SWATCH);
+        GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_SWATCH);
     const HWND drawing_label =
-        GetDlgItem(state.windows.color_pane, IDC_COLOR_DRAWING_LABEL);
+        GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_DRAWING_LABEL);
     const HWND color_picker =
-        GetDlgItem(state.windows.color_pane, IDC_COLOR_PICKER);
+        GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_PICKER);
     const HWND color_eyedropper =
-        GetDlgItem(state.windows.color_pane, IDC_COLOR_EYEDROPPER);
-    if (GetDlgItem(state.windows.color_pane, IDC_COLOR_TABS) == nullptr
-        || GetDlgItem(state.windows.color_pane, IDC_PALETTE_LIST) == nullptr
+        GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_EYEDROPPER);
+    if (GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_TABS) == nullptr
+        || GetDlgItem(state.Workspace().windows.color_pane, IDC_PALETTE_LIST) == nullptr
         || main_line_label == nullptr || main_line_swatch == nullptr
         || drawing_swatch == nullptr
         || drawing_label == nullptr || color_picker == nullptr
@@ -390,7 +390,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || combined_swatch_bounds.right - combined_swatch_bounds.left
             <= combined_swatch_bounds.bottom - combined_swatch_bounds.top
         || (GetWindowLongPtrW(drawing_swatch, GWL_STYLE) & WS_VISIBLE) != 0
-        || state.panes.color_pane.change_main_line_color == nullptr
+        || state.Workspace().panes.color_pane.change_main_line_color == nullptr
         || (GetWindowLongPtrW(color_eyedropper, GWL_STYLE) & BS_TYPEMASK)
             == BS_OWNERDRAW
         || std::wcscmp(eyedropper_text.data(), L"スポイト") != 0) {
@@ -422,10 +422,10 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         color_picker,
         picker_text.data(),
         static_cast<int>(picker_text.size()));
-    if (!is_opaque_black(state.tools.drawing_color)
-        || state.tools.color_rgba != UINT32_C(0x000000ff)
-        || !is_opaque_black(state.panes.main_line_color)
-        || !is_opaque_black(state.panes.color_pane.main_line_color)
+    if (!is_opaque_black(state.Workspace().tools.drawing_color)
+        || state.Workspace().tools.color_rgba != UINT32_C(0x000000ff)
+        || !is_opaque_black(state.Workspace().panes.main_line_color)
+        || !is_opaque_black(state.Workspace().panes.color_pane.main_line_color)
         || std::wcsstr(main_line_text.data(), L"主線色") == nullptr
         || std::wcsstr(main_line_text.data(), L"#000000FF") == nullptr
         || std::wcsstr(drawing_text.data(), L"彩色用描画色") == nullptr
@@ -445,7 +445,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         MAKELPARAM(
             (swatch_client.right - swatch_client.left) * 29 / 100,
             (swatch_client.bottom - swatch_client.top) * 34 / 100));
-    if (!state.panes.color_pane.picker_targets_main_line) {
+    if (!state.Workspace().panes.color_pane.picker_targets_main_line) {
         return 785;
     }
     SendMessageW(
@@ -455,21 +455,21 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         MAKELPARAM(
             (swatch_client.right - swatch_client.left) * 64 / 100,
             (swatch_client.bottom - swatch_client.top) * 62 / 100));
-    if (state.panes.color_pane.picker_targets_main_line) {
+    if (state.Workspace().panes.color_pane.picker_targets_main_line) {
         return 787;
     }
-    const InkpodColorValue picker_original_color = state.tools.drawing_color;
+    const InkpodColorValue picker_original_color = state.Workspace().tools.drawing_color;
     SendMessageW(color_picker, WM_KEYDOWN, VK_UP, 0);
-    if (state.tools.drawing_color.depth != INKPOD_COLOR_DEPTH_8
-        || state.tools.drawing_color.red == 0U
-        || state.tools.drawing_color.red != state.tools.drawing_color.green
-        || state.tools.drawing_color.green != state.tools.drawing_color.blue
-        || state.tools.drawing_color.alpha != UINT8_MAX) {
+    if (state.Workspace().tools.drawing_color.depth != INKPOD_COLOR_DEPTH_8
+        || state.Workspace().tools.drawing_color.red == 0U
+        || state.Workspace().tools.drawing_color.red != state.Workspace().tools.drawing_color.green
+        || state.Workspace().tools.drawing_color.green != state.Workspace().tools.drawing_color.blue
+        || state.Workspace().tools.drawing_color.alpha != UINT8_MAX) {
         return 766;
     }
-    state.panes.color_pane.change_color(
-        state.panes.color_pane.context, picker_original_color);
-    if (!is_opaque_black(state.tools.drawing_color)) {
+    state.Workspace().panes.color_pane.change_color(
+        state.Workspace().panes.color_pane.context, picker_original_color);
+    if (!is_opaque_black(state.Workspace().tools.drawing_color)) {
         return 767;
     }
     const InkpodColorValue picker_rgba16{
@@ -479,54 +479,54 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         32768U,
         0U,
         32768U};
-    state.panes.color_pane.change_color(
-        state.panes.color_pane.context, picker_rgba16);
+    state.Workspace().panes.color_pane.change_color(
+        state.Workspace().panes.color_pane.context, picker_rgba16);
     SendMessageW(color_picker, WM_KEYDOWN, VK_RIGHT, 0);
-    if (state.tools.drawing_color.depth != INKPOD_COLOR_DEPTH_16
-        || state.tools.drawing_color.alpha != picker_rgba16.alpha) {
+    if (state.Workspace().tools.drawing_color.depth != INKPOD_COLOR_DEPTH_16
+        || state.Workspace().tools.drawing_color.alpha != picker_rgba16.alpha) {
         return 769;
     }
-    state.panes.color_pane.change_color(
-        state.panes.color_pane.context, picker_original_color);
+    state.Workspace().panes.color_pane.change_color(
+        state.Workspace().panes.color_pane.context, picker_original_color);
     SendMessageW(color_eyedropper, BM_CLICK, 0, 0);
-    if (state.tools.active_tool
+    if (state.Workspace().tools.active_tool
         != inkpod::windows::ui::tools::kInteractionEyedropper) {
         return 768;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
     const InkpodColorValue alternate_main_line{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 17U, 34U, 51U, 255U};
-    state.panes.main_line_color = alternate_main_line;
+    state.Workspace().panes.main_line_color = alternate_main_line;
     UpdateMenuState(state);
     GetWindowTextW(
         main_line_label,
         main_line_text.data(),
         static_cast<int>(main_line_text.size()));
-    if (!same_color(state.panes.main_line_color, alternate_main_line)
-        || !same_color(state.panes.color_pane.main_line_color, alternate_main_line)
+    if (!same_color(state.Workspace().panes.main_line_color, alternate_main_line)
+        || !same_color(state.Workspace().panes.color_pane.main_line_color, alternate_main_line)
         || std::wcsstr(main_line_text.data(), L"#112233FF") == nullptr) {
         return 763;
     }
-    state.panes.main_line_color = InkpodColorValue{
+    state.Workspace().panes.main_line_color = InkpodColorValue{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
     UpdateMenuState(state);
     GetWindowTextW(
         main_line_label,
         main_line_text.data(),
         static_cast<int>(main_line_text.size()));
-    if (!is_opaque_black(state.panes.main_line_color)
-        || !is_opaque_black(state.panes.color_pane.main_line_color)
+    if (!is_opaque_black(state.Workspace().panes.main_line_color)
+        || !is_opaque_black(state.Workspace().panes.color_pane.main_line_color)
         || std::wcsstr(main_line_text.data(), L"#000000FF") == nullptr) {
         return 764;
     }
-    if (GetDlgItem(state.panes.layer_palette, IDC_LAYER_LIST) == nullptr
-        || GetDlgItem(state.panes.layer_palette, IDC_PLANE_LIST) == nullptr
-        || GetDlgItem(state.panes.layer_palette, IDC_LAYER_PLANE_SPLITTER)
+    if (GetDlgItem(state.Workspace().panes.layer_palette, IDC_LAYER_LIST) == nullptr
+        || GetDlgItem(state.Workspace().panes.layer_palette, IDC_PLANE_LIST) == nullptr
+        || GetDlgItem(state.Workspace().panes.layer_palette, IDC_LAYER_PLANE_SPLITTER)
             == nullptr) {
         return 749;
     }
     SetWindowPos(
-        state.windows.window,
+        state.Workspace().windows.window,
         nullptr,
         0,
         0,
@@ -534,11 +534,11 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         1'000,
         SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
     RECT client{};
-    if (GetClientRect(state.windows.window, &client) == FALSE) {
+    if (GetClientRect(state.Workspace().windows.window, &client) == FALSE) {
         return 730;
     }
     LayoutMainChrome(
-        state.windows,
+        state.Workspace().windows,
         false,
         client.right - client.left,
         client.bottom - client.top);
@@ -546,11 +546,11 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     const auto checked = [&](UINT command) {
         return (GetMenuState(menu, command, MF_BYCOMMAND) & MF_CHECKED) != 0U;
     };
-    if (!state.windows.workspace.tool_visible
-        || !state.windows.workspace.tool_options_visible
-        || !state.windows.workspace.color_visible
-        || !state.windows.workspace.layer_visible
-        || state.windows.workspace.mirrored
+    if (!state.Workspace().windows.workspace.tool_visible
+        || !state.Workspace().windows.workspace.tool_options_visible
+        || !state.Workspace().windows.workspace.color_visible
+        || !state.Workspace().windows.workspace.layer_visible
+        || state.Workspace().windows.workspace.mirrored
         || !checked(IDM_WINDOW_TOOL_PALETTE)
         || !checked(IDM_WINDOW_TOOL_OPTIONS)
         || !checked(IDM_WINDOW_COLOR_PANE)
@@ -561,10 +561,10 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     RECT workspace_canvas_bounds{};
     RECT color_bounds{};
     RECT layer_bounds{};
-    if (GetWindowRect(state.tools.palette, &tool_bounds) == FALSE
-        || GetWindowRect(state.windows.canvas, &workspace_canvas_bounds) == FALSE
-        || GetWindowRect(state.windows.color_pane, &color_bounds) == FALSE
-        || GetWindowRect(state.panes.layer_palette, &layer_bounds) == FALSE) {
+    if (GetWindowRect(state.Workspace().tools.palette, &tool_bounds) == FALSE
+        || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds) == FALSE
+        || GetWindowRect(state.Workspace().windows.color_pane, &color_bounds) == FALSE
+        || GetWindowRect(state.Workspace().panes.layer_palette, &layer_bounds) == FALSE) {
         return 732;
     }
     if (tool_bounds.right > workspace_canvas_bounds.left
@@ -573,11 +573,11 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || color_bounds.right != layer_bounds.right) {
         return 732;
     }
-    const HWND brush_button = GetDlgItem(state.tools.palette, IDM_TOOL_BRUSH);
-    const HWND pencil_button = GetDlgItem(state.tools.palette, IDM_TOOL_PENCIL);
-    const HWND eraser_button = GetDlgItem(state.tools.palette, IDM_TOOL_ERASER);
+    const HWND brush_button = GetDlgItem(state.Workspace().tools.palette, IDM_TOOL_BRUSH);
+    const HWND pencil_button = GetDlgItem(state.Workspace().tools.palette, IDM_TOOL_PENCIL);
+    const HWND eraser_button = GetDlgItem(state.Workspace().tools.palette, IDM_TOOL_ERASER);
     SendMessageW(brush_button, BM_CLICK, 0, 0);
-    if (state.tools.active_tool != INKPOD_TOOL_BRUSH) {
+    if (state.Workspace().tools.active_tool != INKPOD_TOOL_BRUSH) {
         return 733;
     }
     if (IsWindowEnabled(diameter_edit) == FALSE
@@ -587,36 +587,36 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     SetFocus(diameter_edit);
     SetWindowTextW(diameter_edit, L"20.0");
     UpdateMenuState(state);
-    if (GetFocus() != diameter_edit || state.tools.diameter != 8.0F
+    if (GetFocus() != diameter_edit || state.Workspace().tools.diameter != 8.0F
         || !diameter_text_is(L"20.0")) {
         return 758;
     }
     SendMessageW(
-        state.windows.canvas,
+        state.Workspace().windows.canvas,
         WM_LBUTTONDOWN,
         MK_LBUTTON,
         MAKELPARAM(0, 0));
-    if (GetFocus() != state.windows.canvas || state.tools.diameter != 20.0F
+    if (GetFocus() != state.Workspace().windows.canvas || state.Workspace().tools.diameter != 20.0F
         || !diameter_text_is(L"20.0")) {
         return 759;
     }
     ReleaseCapture();
     SetFocus(diameter_edit);
     SetWindowTextW(diameter_edit, L"256.0");
-    SetFocus(state.windows.canvas);
-    if (state.tools.diameter != panes::kMaximumToolDiameter
+    SetFocus(state.Workspace().windows.canvas);
+    if (state.Workspace().tools.diameter != panes::kMaximumToolDiameter
         || !diameter_text_is(L"256.0")) {
         return 752;
     }
     SetFocus(diameter_edit);
     SetWindowTextW(diameter_edit, L"256.1");
-    SetFocus(state.windows.canvas);
-    if (state.tools.diameter != panes::kMaximumToolDiameter
+    SetFocus(state.Workspace().windows.canvas);
+    if (state.Workspace().tools.diameter != panes::kMaximumToolDiameter
         || !diameter_text_is(L"256.0")) {
         return 753;
     }
     SendMessageW(eraser_button, BM_CLICK, 0, 0);
-    if (state.tools.active_tool != INKPOD_TOOL_ERASER
+    if (state.Workspace().tools.active_tool != INKPOD_TOOL_ERASER
         || IsWindowEnabled(diameter_edit) == FALSE
         || !diameter_text_is(L"256.0")
         || IsWindowVisible(erase_target_label) == FALSE
@@ -628,133 +628,133 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     }
     SendMessageW(erase_color, BM_CLICK, 0, 0);
     InkpodDocumentInfo erase_target_info = EmptyDocumentInfo();
-    if (state.tools.active_plane != INKPOD_PLANE_COLOR
+    if (state.Workspace().tools.active_plane != INKPOD_PLANE_COLOR
         || SendMessageW(erase_main_line, BM_GETCHECK, 0, 0) != BST_UNCHECKED
         || SendMessageW(erase_color, BM_GETCHECK, 0, 0) != BST_CHECKED
         || !QueryDocument(state, erase_target_info)
         || erase_target_info.active_plane != INKPOD_PLANE_COLOR
-        || state.panes.active_tree_layer_id != erase_target_info.layer_id
-        || state.panes.active_tree_plane_id != erase_target_info.color_plane_id) {
+        || state.Workspace().panes.active_tree_layer_id != erase_target_info.layer_id
+        || state.Workspace().panes.active_tree_plane_id != erase_target_info.color_plane_id) {
         return 760;
     }
     SendMessageW(erase_main_line, BM_CLICK, 0, 0);
-    if (state.tools.active_plane != INKPOD_PLANE_MAIN_LINE
+    if (state.Workspace().tools.active_plane != INKPOD_PLANE_MAIN_LINE
         || SendMessageW(erase_main_line, BM_GETCHECK, 0, 0) != BST_CHECKED
         || SendMessageW(erase_color, BM_GETCHECK, 0, 0) != BST_UNCHECKED
         || !QueryDocument(state, erase_target_info)
         || erase_target_info.active_plane != INKPOD_PLANE_MAIN_LINE
-        || state.panes.active_tree_layer_id != erase_target_info.layer_id
-        || state.panes.active_tree_plane_id != erase_target_info.main_plane_id) {
+        || state.Workspace().panes.active_tree_layer_id != erase_target_info.layer_id
+        || state.Workspace().panes.active_tree_plane_id != erase_target_info.main_plane_id) {
         return 761;
     }
     if (!ToolPaletteMatchesCommandState(
-            state.tools.palette, state.command_states)) {
+            state.Workspace().tools.palette, state.Workspace().command_states)) {
         return 744;
     }
     if (!CommandSurfacesMatchComputedState(state)) {
         return 745;
     }
     SendMessageW(pencil_button, BM_CLICK, 0, 0);
-    if (state.tools.active_tool != INKPOD_TOOL_PENCIL
-        || state.tools.diameter != panes::kMaximumToolDiameter
+    if (state.Workspace().tools.active_tool != INKPOD_TOOL_PENCIL
+        || state.Workspace().tools.diameter != panes::kMaximumToolDiameter
         || IsWindowEnabled(diameter_edit) != FALSE
         || !diameter_text_is(L"1.0")) {
         return 755;
     }
     SendMessageW(brush_button, BM_CLICK, 0, 0);
-    if (state.tools.active_tool != INKPOD_TOOL_BRUSH
+    if (state.Workspace().tools.active_tool != INKPOD_TOOL_BRUSH
         || IsWindowEnabled(diameter_edit) == FALSE
         || !diameter_text_is(L"256.0")) {
         return 756;
     }
     SetFocus(diameter_edit);
     SetWindowTextW(diameter_edit, L"8.0");
-    SetFocus(state.windows.canvas);
-    if (state.tools.diameter != 8.0F || !diameter_text_is(L"8.0")) {
+    SetFocus(state.Workspace().windows.canvas);
+    if (state.Workspace().tools.diameter != 8.0F || !diameter_text_is(L"8.0")) {
         return 757;
     }
     SendMessageW(pencil_button, BM_CLICK, 0, 0);
     const LONG initial_canvas_width =
         workspace_canvas_bounds.right - workspace_canvas_bounds.left;
     if (SendMessageW(
-            state.windows.window, WM_COMMAND, IDM_WINDOW_TOOL_PALETTE, 0)
+            state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_TOOL_PALETTE, 0)
             != 1
-        || state.windows.workspace.tool_visible
+        || state.Workspace().windows.workspace.tool_visible
         || checked(IDM_WINDOW_TOOL_PALETTE)
-        || IsWindowVisible(state.tools.palette) != FALSE
-        || GetWindowRect(state.windows.canvas, &workspace_canvas_bounds) == FALSE
+        || IsWindowVisible(state.Workspace().tools.palette) != FALSE
+        || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds) == FALSE
         || workspace_canvas_bounds.right - workspace_canvas_bounds.left
             <= initial_canvas_width) {
         return 734;
     }
     if (SendMessageW(
-            state.windows.window, WM_COMMAND, IDM_WINDOW_TOOL_PALETTE, 0)
+            state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_TOOL_PALETTE, 0)
             != 1
-        || !state.windows.workspace.tool_visible
+        || !state.Workspace().windows.workspace.tool_visible
         || !checked(IDM_WINDOW_TOOL_PALETTE)) {
         return 735;
     }
     if (SendMessageW(
-            state.windows.window, WM_COMMAND, IDM_WINDOW_TOOL_OPTIONS, 0)
+            state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_TOOL_OPTIONS, 0)
             != 1
-        || state.windows.workspace.tool_options_visible
+        || state.Workspace().windows.workspace.tool_options_visible
         || checked(IDM_WINDOW_TOOL_OPTIONS)
         || SendMessageW(
-            state.windows.window, WM_COMMAND, IDM_WINDOW_TOOL_OPTIONS, 0)
+            state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_TOOL_OPTIONS, 0)
             != 1) {
         return 736;
     }
     if (SendMessageW(
-            state.windows.window, WM_COMMAND, IDM_WINDOW_COLOR_PANE, 0)
+            state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_COLOR_PANE, 0)
             != 1
-        || state.windows.workspace.color_visible
+        || state.Workspace().windows.workspace.color_visible
         || SendMessageW(
-            state.windows.window, WM_COMMAND, IDM_WINDOW_LAYER_PALETTE, 0)
+            state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_LAYER_PALETTE, 0)
             != 1
-        || state.windows.workspace.layer_visible
-        || GetWindowRect(state.windows.canvas, &workspace_canvas_bounds) == FALSE
+        || state.Workspace().windows.workspace.layer_visible
+        || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds) == FALSE
         || workspace_canvas_bounds.right - workspace_canvas_bounds.left
             <= initial_canvas_width) {
         return 737;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_WINDOW_COLOR_PANE, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_WINDOW_LAYER_PALETTE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_COLOR_PANE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_LAYER_PALETTE, 0);
     if (SendMessageW(
-            state.windows.window, WM_COMMAND, IDM_WORKSPACE_MIRROR, 0)
+            state.Workspace().windows.window, WM_COMMAND, IDM_WORKSPACE_MIRROR, 0)
             != 1
-        || !state.windows.workspace.mirrored
+        || !state.Workspace().windows.workspace.mirrored
         || !checked(IDM_WORKSPACE_MIRROR)
-        || GetWindowRect(state.tools.palette, &tool_bounds) == FALSE
-        || GetWindowRect(state.windows.canvas, &workspace_canvas_bounds) == FALSE
-        || GetWindowRect(state.windows.color_pane, &color_bounds) == FALSE
+        || GetWindowRect(state.Workspace().tools.palette, &tool_bounds) == FALSE
+        || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds) == FALSE
+        || GetWindowRect(state.Workspace().windows.color_pane, &color_bounds) == FALSE
         || color_bounds.right > workspace_canvas_bounds.left
         || workspace_canvas_bounds.right > tool_bounds.left) {
         return 738;
     }
-    if (LayerPaletteItemCount(state.panes.layer_palette)
-            != state.panes.tree_layer_count
-        || LayerPalettePlaneCount(state.panes.layer_palette)
-            != state.panes.tree_plane_count
-        || LayerPaletteSelectedLayer(state.panes.layer_palette)
-            != state.panes.active_tree_layer_id
-        || LayerPaletteSelectedPlane(state.panes.layer_palette)
-            != state.panes.active_tree_plane_id
+    if (LayerPaletteItemCount(state.Workspace().panes.layer_palette)
+            != state.Workspace().panes.tree_layer_count
+        || LayerPalettePlaneCount(state.Workspace().panes.layer_palette)
+            != state.Workspace().panes.tree_plane_count
+        || LayerPaletteSelectedLayer(state.Workspace().panes.layer_palette)
+            != state.Workspace().panes.active_tree_layer_id
+        || LayerPaletteSelectedPlane(state.Workspace().panes.layer_palette)
+            != state.Workspace().panes.active_tree_plane_id
         || !LayerPaletteMatchesCommandState(
-            state.panes.layer_palette, state.command_states)) {
+            state.Workspace().panes.layer_palette, state.Workspace().command_states)) {
         return 739;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_WORKSPACE_RESET, 0);
-    ShowWindow(state.windows.window, SW_HIDE);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WORKSPACE_RESET, 0);
+    ShowWindow(state.Workspace().windows.window, SW_HIDE);
 
     if (state.engine == nullptr
-        || MoveWindow(state.windows.canvas, 0, 0, 640, 480, FALSE) == FALSE
+        || MoveWindow(state.Workspace().windows.canvas, 0, 0, 640, 480, FALSE) == FALSE
         || FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
         return 30;
     }
     PumpPendingWindowMessages();
     UpdateMenuState(state);
     std::wstring tab_label;
-    if (!ReadDocumentTabLabel(state.windows.document_tabs, 0, tab_label)
+    if (!ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, tab_label)
         || tab_label != L"無題セル 1") {
         return 716;
     }
@@ -763,11 +763,11 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || !MenuLeavesHaveAssignedShortcuts(
             menu, state.shortcuts.bindings, shortcut_leaf_count)
         || shortcut_leaf_count < windows::ui::MenuCommandCatalog().size()
-        || FindWindowExW(state.windows.window, nullptr, TOOLBARCLASSNAMEW, nullptr) != nullptr
-        || SendMessageW(state.windows.status_bar, SB_GETPARTS, 0, 0) != 6) {
+        || FindWindowExW(state.Workspace().windows.window, nullptr, TOOLBARCLASSNAMEW, nullptr) != nullptr
+        || SendMessageW(state.Workspace().windows.status_bar, SB_GETPARTS, 0, 0) != 6) {
         return 706;
     }
-    if (DispatchEnabledCommand(state, state.windows.window, IDM_EDIT_UNDO)) {
+    if (DispatchEnabledCommand(state, state.Workspace().windows.window, IDM_EDIT_UNDO)) {
         return 714;
     }
     constexpr std::array<UINT, 6U> vector_draw_commands{
@@ -784,7 +784,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
             return 701;
         }
     }
-    if (!RefreshSequencePane(state) || state.panes.sequence_count != 0U) {
+    if (!RefreshSequencePane(state) || state.Workspace().panes.sequence_count != 0U) {
         return 702;
     }
     InkpodSequenceCellInfo missing_sequence_cell{};
@@ -804,14 +804,14 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || state.engine->LastError() != kVectorStrokePlaneRequired) {
         return 704;
     }
-    const std::uint32_t initial_tool = state.tools.active_tool;
+    const std::uint32_t initial_tool = state.Workspace().tools.active_tool;
     for (const UINT command : vector_draw_commands) {
-        if (SendMessageW(state.windows.window, WM_COMMAND, command, 0) != 0
-            || state.tools.active_tool != initial_tool) {
+        if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0) != 0
+            || state.Workspace().tools.active_tool != initial_tool) {
             return 705;
         }
     }
-    const std::wstring initial_recovery_path = state.document.recovery_path;
+    const std::wstring initial_recovery_path = state.Document().shell.recovery_path;
     std::wstring discovered_recovery;
     if (initial_recovery_path.empty()
         || !QueueAutosave(
@@ -836,14 +836,14 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     const DWORD ui_thread = GetCurrentThreadId();
     const DWORD core_thread = state.engine->ThreadId();
     const DWORD renderer_thread = static_cast<DWORD>(SendMessageW(
-        state.windows.canvas, inkpod::renderer::kCanvasGetRendererThreadId, 0, 0));
+        state.Workspace().windows.canvas, inkpod::renderer::kCanvasGetRendererThreadId, 0, 0));
     if (core_thread == 0U || renderer_thread == 0U || core_thread == ui_thread
         || renderer_thread == ui_thread || core_thread == renderer_thread) {
         return 31;
     }
     inkpod::renderer::CanvasDocumentBounds document_bounds{};
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&document_bounds))
@@ -860,15 +860,15 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     if (!QueryDocument(state, before_line)
         || (before_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
         || GetWindowTextW(
-               state.windows.window, initial_title.data(), static_cast<int>(initial_title.size())) == 0
+               state.Workspace().windows.window, initial_title.data(), static_cast<int>(initial_title.size())) == 0
         || std::wcscmp(initial_title.data(), L"無題 - inkpod") != 0) {
         return 32;
     }
     const auto frames_before = static_cast<std::uint64_t>(SendMessageW(
-        state.windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
-    SendMessageW(state.windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 100));
+        state.Workspace().windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
+    SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 100));
     for (int x = 90; x <= 240; x += 15) {
-        SendMessageW(state.windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 120));
+        SendMessageW(state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 120));
     }
     if (state.engine->FlushPreview() != INKPOD_STATUS_OK) {
         return 33;
@@ -880,12 +880,12 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         return 219;
     }
     PumpPendingWindowMessages();
-    if (SendMessageW(state.windows.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
+    if (SendMessageW(state.Workspace().windows.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
         return 34;
     }
     InkpodDocumentInfo during_line{};
     const auto frames_during = static_cast<std::uint64_t>(SendMessageW(
-        state.windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
+        state.Workspace().windows.canvas, inkpod::renderer::kCanvasGetPresentedFrameCount, 0, 0));
     if (!QueryDocument(state, during_line)) {
         return 130;
     }
@@ -902,7 +902,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     if (frames_during <= frames_before) {
         return 134;
     }
-    if (SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(250, 120)) != 1) {
+    if (SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(250, 120)) != 1) {
         return 36;
     }
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
@@ -920,15 +920,15 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || after_line.main_plane_checksum == before_line.main_plane_checksum
         || (after_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
         || (after_line.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U
-        || !ReadDocumentTabLabel(state.windows.document_tabs, 0, tab_label)
+        || !ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, tab_label)
         || tab_label != L"無題セル 1 *") {
         return 38;
     }
     const std::uint64_t line_checksum = after_line.main_plane_checksum;
 
-    SendMessageW(state.windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 150));
-    SendMessageW(state.windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(180, 150));
-    SendMessageW(state.windows.canvas, WM_CAPTURECHANGED, 0, 0);
+    SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 150));
+    SendMessageW(state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(180, 150));
+    SendMessageW(state.Workspace().windows.canvas, WM_CAPTURECHANGED, 0, 0);
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
         return 54;
     }
@@ -939,7 +939,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         return 55;
     }
 
-    state.tools.active_plane = INKPOD_PLANE_COLOR;
+    state.Workspace().tools.active_plane = INKPOD_PLANE_COLOR;
     if (state.engine->Invoke(
             [](InkpodCore* core) {
                 return inkpod_core_set_active_plane(core, INKPOD_PLANE_COLOR);
@@ -949,11 +949,11 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         != INKPOD_STATUS_OK) {
         return 39;
     }
-    SendMessageW(state.windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 180));
+    SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 180));
     for (int x = 115; x <= 260; x += 15) {
-        SendMessageW(state.windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 190));
+        SendMessageW(state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 190));
     }
-    if (SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(270, 190)) != 1) {
+    if (SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(270, 190)) != 1) {
         return 40;
     }
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
@@ -999,13 +999,13 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     }
 
     const std::uint64_t revision_before_view = after_redo.document_revision;
-    SendMessageW(state.windows.canvas, WM_MBUTTONDOWN, MK_MBUTTON, MAKELPARAM(300, 220));
-    SendMessageW(state.windows.canvas, WM_MOUSEMOVE, MK_MBUTTON, MAKELPARAM(320, 230));
-    SendMessageW(state.windows.canvas, WM_MBUTTONUP, 0, MAKELPARAM(320, 230));
+    SendMessageW(state.Workspace().windows.canvas, WM_MBUTTONDOWN, MK_MBUTTON, MAKELPARAM(300, 220));
+    SendMessageW(state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_MBUTTON, MAKELPARAM(320, 230));
+    SendMessageW(state.Workspace().windows.canvas, WM_MBUTTONUP, 0, MAKELPARAM(320, 230));
     RECT canvas_bounds{};
-    GetWindowRect(state.windows.canvas, &canvas_bounds);
+    GetWindowRect(state.Workspace().windows.canvas, &canvas_bounds);
     SendMessageW(
-        state.windows.canvas,
+        state.Workspace().windows.canvas,
         WM_MOUSEWHEEL,
         MAKEWPARAM(0, WHEEL_DELTA),
         MAKELPARAM(canvas_bounds.left + 320, canvas_bounds.top + 240));
@@ -1039,7 +1039,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
     const std::wstring expected_saved_tab = path_separator == std::wstring::npos
         ? path
         : path.substr(path_separator + 1U);
-    if (!ReadDocumentTabLabel(state.windows.document_tabs, 0, tab_label)
+    if (!ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, tab_label)
         || tab_label != expected_saved_tab) {
         DeleteFileW(path.c_str());
         return 717;
@@ -1106,15 +1106,15 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         DeleteFileW(path.c_str());
         return 217;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_FILE_REVERT_PARTIAL, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_FILE_REVERT_PARTIAL, 0);
     InkpodDocumentInfo partially_reverted{};
     if (!QueryDocument(state, partially_reverted)
         || partially_reverted.color_plane_checksum != reopened.color_plane_checksum) {
         DeleteFileW(path.c_str());
         return 241;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_HISTORY_BACK, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_HISTORY_BACK, 0);
     InkpodHistoryInfo smoke_history{};
     smoke_history.struct_size = sizeof(smoke_history);
     if (state.engine->Invoke(
@@ -1127,7 +1127,7 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         DeleteFileW(path.c_str());
         return 219;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_HISTORY_FORWARD, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_HISTORY_FORWARD, 0);
     if (state.engine->Invoke(
             [&smoke_history](InkpodCore* core) {
                 return inkpod_core_history_info(core, &smoke_history);
@@ -1145,23 +1145,23 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         DeleteFileW(path.c_str());
         return 220;
     }
-    state.tools.active_plane = INKPOD_PLANE_MAIN_LINE;
+    state.Workspace().tools.active_plane = INKPOD_PLANE_MAIN_LINE;
     DeleteFileW(path.c_str());
 
     inkpod::renderer::CanvasDocumentBounds before_dpi_bounds{};
     inkpod::renderer::CanvasDocumentBounds after_dpi_bounds{};
     const bool bounds_before_dpi = SendMessageW(
-                                       state.windows.canvas,
+                                       state.Workspace().windows.canvas,
                                        inkpod::renderer::kCanvasGetDocumentBounds,
                                        0,
                                        reinterpret_cast<LPARAM>(&before_dpi_bounds)) == 1;
     const bool dpi_changed = SendMessageW(
-                                 state.windows.canvas,
+                                 state.Workspace().windows.canvas,
                                  WM_DPICHANGED_AFTERPARENT,
                                  0,
                                  0) == 1;
     const bool bounds_after_dpi = SendMessageW(
-                                      state.windows.canvas,
+                                      state.Workspace().windows.canvas,
                                       inkpod::renderer::kCanvasGetDocumentBounds,
                                       0,
                                       reinterpret_cast<LPARAM>(&after_dpi_bounds)) == 1;
@@ -1171,23 +1171,23 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         && std::abs(before_dpi_bounds.right - after_dpi_bounds.right) <= 0.01
         && std::abs(before_dpi_bounds.bottom - after_dpi_bounds.bottom) <= 0.01;
     const bool device_recovered = SendMessageW(
-                                      state.windows.canvas,
+                                      state.Workspace().windows.canvas,
                                       inkpod::renderer::kCanvasSimulateDeviceLoss,
                                       0,
                                       0) == 1;
     const bool rendered = SendMessageW(
-                              state.windows.canvas,
+                              state.Workspace().windows.canvas,
                               inkpod::renderer::kCanvasRenderOnce,
                               0,
                               0) == 1;
     return dpi_changed && dpi_transform_stable && device_recovered && rendered ? 0 : 52;
 }
 
-int RunPaintingRecoverySmoke(AppContext& state) noexcept {
+int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr) {
         return 200;
     }
-    const HMENU menu = GetMenu(state.windows.window);
+    const HMENU menu = GetMenu(state.Workspace().windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_TOOL_FILL, MF_BYCOMMAND) == static_cast<UINT>(-1)
         || GetMenuState(menu, IDM_TOOL_EYEDROPPER, MF_BYCOMMAND) == static_cast<UINT>(-1)
@@ -1201,46 +1201,46 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
             && left.green == right.green && left.blue == right.blue
             && left.alpha == right.alpha;
     };
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
-    const InkpodColorValue pencil_color = state.tools.drawing_color;
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
+    const InkpodColorValue pencil_color = state.Workspace().tools.drawing_color;
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
     const InkpodColorValue default_fill_color{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 220U, 40U, 30U, 255U};
     const InkpodColorValue fill_command_color{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 1U, 2U, 3U, 255U};
-    if (!same_color(state.tools.drawing_color, default_fill_color)
-        || state.panes.color_pane.change_color == nullptr) {
+    if (!same_color(state.Workspace().tools.drawing_color, default_fill_color)
+        || state.Workspace().panes.color_pane.change_color == nullptr) {
         return 231;
     }
-    state.panes.color_pane.change_color(
-        state.panes.color_pane.context, fill_command_color);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
+    state.Workspace().panes.color_pane.change_color(
+        state.Workspace().panes.color_pane.context, fill_command_color);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
     BOOL valid_red{};
     const UINT displayed_pencil_red = GetDlgItemInt(
-        state.windows.color_pane, IDC_COLOR_RED, &valid_red, FALSE);
+        state.Workspace().windows.color_pane, IDC_COLOR_RED, &valid_red, FALSE);
     std::array<wchar_t, 64U> color_label{};
     GetDlgItemTextW(
-        state.windows.color_pane,
+        state.Workspace().windows.color_pane,
         IDC_COLOR_DRAWING_LABEL,
         color_label.data(),
         static_cast<int>(color_label.size()));
-    if (!same_color(state.tools.drawing_color, pencil_color)
-        || !same_color(state.panes.color_pane.drawing_color, pencil_color)
+    if (!same_color(state.Workspace().tools.drawing_color, pencil_color)
+        || !same_color(state.Workspace().panes.color_pane.drawing_color, pencil_color)
         || valid_red == FALSE || displayed_pencil_red != pencil_color.red
         || std::wcsstr(color_label.data(), L"#000000FF") == nullptr) {
         return 231;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
     valid_red = FALSE;
     const UINT displayed_fill_red = GetDlgItemInt(
-        state.windows.color_pane, IDC_COLOR_RED, &valid_red, FALSE);
+        state.Workspace().windows.color_pane, IDC_COLOR_RED, &valid_red, FALSE);
     GetDlgItemTextW(
-        state.windows.color_pane,
+        state.Workspace().windows.color_pane,
         IDC_COLOR_DRAWING_LABEL,
         color_label.data(),
         static_cast<int>(color_label.size()));
-    if (!same_color(state.tools.drawing_color, fill_command_color)
-        || !same_color(state.panes.color_pane.drawing_color, fill_command_color)
+    if (!same_color(state.Workspace().tools.drawing_color, fill_command_color)
+        || !same_color(state.Workspace().panes.color_pane.drawing_color, fill_command_color)
         || valid_red == FALSE || displayed_fill_red != fill_command_color.red
         || std::wcsstr(color_label.data(), L"#010203FF") == nullptr) {
         return 231;
@@ -1278,7 +1278,7 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, before_fill)
         || SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&bounds)) != 1) {
@@ -1287,85 +1287,85 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
     const double zoom = (bounds.right - bounds.left) / static_cast<double>(before_fill.width);
     const int fill_x = static_cast<int>(std::lround(bounds.left + 150.0 * zoom));
     const int fill_y = static_cast<int>(std::lround(bounds.top + 150.0 * zoom));
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(fill_x, fill_y)) != 1) {
         return 204;
     }
-    SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
+    SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
     InkpodDocumentInfo after_fill{};
     if (!QueryDocument(state, after_fill)
         || after_fill.document_revision != before_fill.document_revision + 1U
         || after_fill.main_plane_checksum != before_fill.main_plane_checksum
         || after_fill.color_plane_checksum == before_fill.color_plane_checksum
         || after_fill.active_plane != INKPOD_PLANE_COLOR
-        || state.tools.active_plane != INKPOD_PLANE_COLOR
-        || state.panes.active_tree_layer_id != before_fill.layer_id
-        || state.panes.active_tree_plane_id != before_fill.color_plane_id
-        || LayerPaletteSelectedLayer(state.panes.layer_palette) != before_fill.layer_id
-        || LayerPaletteSelectedPlane(state.panes.layer_palette)
+        || state.Workspace().tools.active_plane != INKPOD_PLANE_COLOR
+        || state.Workspace().panes.active_tree_layer_id != before_fill.layer_id
+        || state.Workspace().panes.active_tree_plane_id != before_fill.color_plane_id
+        || LayerPaletteSelectedLayer(state.Workspace().panes.layer_palette) != before_fill.layer_id
+        || LayerPaletteSelectedPlane(state.Workspace().panes.layer_palette)
             != before_fill.color_plane_id) {
         return 205;
     }
-    if (state.panes.layer_palette_dialog.select_plane == nullptr) {
+    if (state.Workspace().panes.layer_palette_dialog.select_plane == nullptr) {
         return 791;
     }
-    state.panes.layer_palette_dialog.select_plane(
-        state.panes.layer_palette_dialog.context,
+    state.Workspace().panes.layer_palette_dialog.select_plane(
+        state.Workspace().panes.layer_palette_dialog.context,
         before_fill.main_plane_id);
-    if (state.tools.active_plane != INKPOD_PLANE_MAIN_LINE
-        || state.panes.active_tree_plane_id != before_fill.main_plane_id
-        || LayerPaletteSelectedPlane(state.panes.layer_palette)
+    if (state.Workspace().tools.active_plane != INKPOD_PLANE_MAIN_LINE
+        || state.Workspace().panes.active_tree_plane_id != before_fill.main_plane_id
+        || LayerPaletteSelectedPlane(state.Workspace().panes.layer_palette)
             != before_fill.main_plane_id) {
         return 791;
     }
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(fill_x, fill_y)) != 1) {
         return 792;
     }
-    SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
+    SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
     InkpodDocumentInfo after_noop_fill{};
     if (!QueryDocument(state, after_noop_fill)
         || after_noop_fill.document_revision != after_fill.document_revision
         || after_noop_fill.main_plane_checksum != after_fill.main_plane_checksum
         || after_noop_fill.color_plane_checksum != after_fill.color_plane_checksum
         || after_noop_fill.active_plane != INKPOD_PLANE_MAIN_LINE
-        || state.tools.active_plane != INKPOD_PLANE_MAIN_LINE
-        || state.panes.active_tree_plane_id != before_fill.main_plane_id
-        || LayerPaletteSelectedPlane(state.panes.layer_palette)
+        || state.Workspace().tools.active_plane != INKPOD_PLANE_MAIN_LINE
+        || state.Workspace().panes.active_tree_plane_id != before_fill.main_plane_id
+        || LayerPaletteSelectedPlane(state.Workspace().panes.layer_palette)
             != before_fill.main_plane_id) {
         return 792;
     }
 
-    const std::uint32_t fill_color = state.tools.color_rgba;
-    state.tools.color_rgba = UINT32_C(0x010203ff);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_EYEDROPPER, 0);
+    const std::uint32_t fill_color = state.Workspace().tools.color_rgba;
+    state.Workspace().tools.color_rgba = UINT32_C(0x010203ff);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_EYEDROPPER, 0);
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(fill_x, fill_y)) != 1
-        || state.tools.color_rgba != fill_color) {
+        || state.Workspace().tools.color_rgba != fill_color) {
         return 206;
     }
-    SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
+    SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(fill_x, fill_y));
 
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
-    state.tools.color_rgba = fill_color;
-    state.tools.fill_options.operation = INKPOD_FILL_CLOSED_REGION;
-    state.tools.fill_options.tolerance = 257U;
-    state.tools.fill_options.gap_close = 1U;
-    state.tools.fill_options.extension_distance = 2U;
-    state.tools.fill_options.detached_regions = true;
-    state.tools.fill_options.overflow_abort = true;
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0) != 0
-        || state.tools.fill_options.operation != INKPOD_FILL_CLOSED_REGION) {
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    state.Workspace().tools.color_rgba = fill_color;
+    state.Workspace().tools.fill_options.operation = INKPOD_FILL_CLOSED_REGION;
+    state.Workspace().tools.fill_options.tolerance = 257U;
+    state.Workspace().tools.fill_options.gap_close = 1U;
+    state.Workspace().tools.fill_options.extension_distance = 2U;
+    state.Workspace().tools.fill_options.detached_regions = true;
+    state.Workspace().tools.fill_options.overflow_abort = true;
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0) != 0
+        || state.Workspace().tools.fill_options.operation != INKPOD_FILL_CLOSED_REGION) {
         return 221;
     }
     const auto device_x = [&](double document_x) {
@@ -1376,15 +1376,15 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
     };
     const auto canvas_drag = [&state](int x1, int y1, int x2, int y2) {
         if (SendMessageW(
-                state.windows.canvas,
+                state.Workspace().windows.canvas,
                 WM_LBUTTONDOWN,
                 MK_LBUTTON,
                 MAKELPARAM(x1, y1)) != 1) {
             return false;
         }
         SendMessageW(
-            state.windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x2, y2));
-        SendMessageW(state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(x2, y2));
+            state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x2, y2));
+        SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(x2, y2));
         return true;
     };
     InkpodDocumentInfo before_closed{};
@@ -1446,10 +1446,10 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
     }
     InkpodDocumentInfo before_extension{};
     QueryDocument(state, before_extension);
-    state.tools.fill_options.operation = INKPOD_FILL_EXTENSION;
-    state.tools.fill_options.extension_distance = 3U;
-    state.tools.fill_options.detached_regions = false;
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0);
+    state.Workspace().tools.fill_options.operation = INKPOD_FILL_EXTENSION;
+    state.Workspace().tools.fill_options.extension_distance = 3U;
+    state.Workspace().tools.fill_options.detached_regions = false;
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0);
     if (!canvas_drag(
             extension_left,
             extension_top,
@@ -1479,22 +1479,22 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
             true) != INKPOD_STATUS_OK) {
         return 227;
     }
-    state.tools.fill_options.operation = INKPOD_FILL_SEED;
-    state.tools.fill_options.use_document_selection = true;
-    state.tools.fill_options.overflow_abort = false;
-    state.tools.fill_options.gap_close = 0U;
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0);
+    state.Workspace().tools.fill_options.operation = INKPOD_FILL_SEED;
+    state.Workspace().tools.fill_options.use_document_selection = true;
+    state.Workspace().tools.fill_options.overflow_abort = false;
+    state.Workspace().tools.fill_options.gap_close = 0U;
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_FILL_OPTIONS, 0);
     const int selected_x = device_x(304.0);
     const int selected_y = device_y(304.0);
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(selected_x, selected_y)) != 1) {
         return 228;
     }
     SendMessageW(
-        state.windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(selected_x, selected_y));
+        state.Workspace().windows.canvas, WM_LBUTTONUP, 0, MAKELPARAM(selected_x, selected_y));
     InkpodColorValue selected_fill{};
     selected_fill.struct_size = sizeof(selected_fill);
     InkpodColorValue outside_fill{};
@@ -1524,7 +1524,7 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
         || outside_fill_status != INKPOD_STATUS_INVALID_STATE) {
         return 229;
     }
-    state.tools.fill_options = {};
+    state.Workspace().tools.fill_options = {};
 
     InkpodDocumentInfo before_check{};
     if (!QueryDocument(state, before_check)) {
@@ -1532,7 +1532,7 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
     }
     const std::uint64_t revision_before_check = before_check.document_revision;
     const std::uint64_t view_before_check = before_check.view_revision;
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_COLOR_CHECK_NATIVE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_COLOR_CHECK_NATIVE, 0);
     InkpodDocumentInfo during_check{};
     std::uint64_t check_features{};
     const InkpodStatus check_snapshot_status = state.engine->Invoke(
@@ -1560,10 +1560,10 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
         || check_features != INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA
         || during_check.document_revision != revision_before_check
         || during_check.view_revision <= view_before_check
-        || SendMessageW(state.windows.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
+        || SendMessageW(state.Workspace().windows.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
         return 207;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_COLOR_CHECK_OFF, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_COLOR_CHECK_OFF, 0);
 
     std::array<wchar_t, MAX_PATH> temporary_directory{};
     if (GetTempPathW(
@@ -1648,7 +1648,7 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
         && (recovered.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U
         && (recovered.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
         && recovered.color_plane_checksum == autosaved.color_plane_checksum
-        && state.document.current_path.empty();
+        && state.Document().shell.current_path.empty();
     const InkpodStatus revert_status = state.engine->Invoke(
         [](InkpodCore* core) {
             InkpodDocumentInfo info = EmptyDocumentInfo();
@@ -1669,11 +1669,11 @@ int RunPaintingRecoverySmoke(AppContext& state) noexcept {
         : 214;
 }
 
-int RunDocumentEditingSmoke(AppContext& state) noexcept {
+int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr) {
         return 300;
     }
-    const HMENU menu = GetMenu(state.windows.window);
+    const HMENU menu = GetMenu(state.Workspace().windows.window);
     for (const UINT command : {
              IDM_EDIT_COPY,
              IDM_EDIT_PASTE,
@@ -1744,14 +1744,14 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     if (!QueryDocument(state, initial)) {
         return 304;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_DUPLICATE, 0);
-    const std::uint64_t duplicate_id = state.document.smoke_layer_id;
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_DUPLICATE, 0);
+    const std::uint64_t duplicate_id = state.Document().shell.smoke_layer_id;
     InkpodDocumentInfo duplicated{};
     if (duplicate_id == 0U || !QueryDocument(state, duplicated)
         || duplicated.document_revision != initial.document_revision + 1U) {
         return 305;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_MOVE_TOP, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_MOVE_TOP, 0);
     InkpodNodeInfo top_layer{};
     top_layer.struct_size = sizeof(top_layer);
     const InkpodStatus top_status = state.engine->Invoke(
@@ -1765,13 +1765,13 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         return 306;
     }
 
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_DELETE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_DELETE, 0);
     InkpodDocumentInfo after_delete{};
     if (!QueryDocument(state, after_delete)
         || (after_delete.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U) {
         return 307;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
     top_layer = {};
     top_layer.struct_size = sizeof(top_layer);
     if (state.engine->Invoke(
@@ -1784,7 +1784,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         || top_layer.id != duplicate_id) {
         return 308;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
     top_layer = {};
     top_layer.struct_size = sizeof(top_layer);
     if (state.engine->Invoke(
@@ -1797,7 +1797,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         || top_layer.id == duplicate_id) {
         return 309;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
 
     std::array<wchar_t, MAX_PATH> temporary_directory{};
     if (GetTempPathW(
@@ -1875,7 +1875,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
 
     inkpod::renderer::CanvasDocumentBounds selection_canvas_bounds{};
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&selection_canvas_bounds)) != 1) {
@@ -1899,7 +1899,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         preview = {};
         preview.struct_size = sizeof(preview);
         return SendMessageW(
-                   state.windows.canvas,
+                   state.Workspace().windows.canvas,
                    inkpod::renderer::kCanvasGetGeometryPreviewForSmokeTest,
                    0,
                    reinterpret_cast<LPARAM>(&preview)) == 1;
@@ -1911,7 +1911,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         const inkpod::renderer::CanvasStrokeEvent begin{
             inkpod::renderer::CanvasStrokeEventKind::Begin, samples.data(), 1U};
         if (SendMessageW(
-                state.windows.window,
+                state.Workspace().windows.window,
                 inkpod::renderer::kCanvasStrokeReady,
                 0,
                 reinterpret_cast<LPARAM>(&begin)) != 1) {
@@ -1923,7 +1923,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
                 samples.data() + 1U,
                 samples.size() - 2U};
             if (SendMessageW(
-                    state.windows.window,
+                    state.Workspace().windows.window,
                     inkpod::renderer::kCanvasStrokeReady,
                     0,
                     reinterpret_cast<LPARAM>(&append)) != 1) {
@@ -1935,7 +1935,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
             samples.data() + samples.size() - 1U,
             1U};
         return SendMessageW(
-                   state.windows.window,
+                   state.Workspace().windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&end)) == 1;
@@ -1950,8 +1950,8 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
                    false,
                    false) == INKPOD_STATUS_OK;
     };
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_RECTANGLE, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_RECTANGLE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
     const std::array<InkpodStrokeSample, 2U> preview_samples{
         selection_sample(1.0F, 1.0F), selection_sample(5.0F, 6.0F)};
     const inkpod::renderer::CanvasStrokeEvent preview_begin{
@@ -1965,12 +1965,12 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     InkpodDocumentInfo before_selection_preview{};
     if (!QueryDocument(state, before_selection_preview)
         || SendMessageW(
-               state.windows.window,
+               state.Workspace().windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&preview_begin)) != 1
         || SendMessageW(
-               state.windows.window,
+               state.Workspace().windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&preview_append)) != 1) {
@@ -1990,7 +1990,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     const inkpod::renderer::CanvasStrokeEvent preview_cancel{
         inkpod::renderer::CanvasStrokeEventKind::Cancel, nullptr, 0U};
     if (SendMessageW(
-            state.windows.window,
+            state.Workspace().windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&preview_cancel)) != 1
@@ -1999,12 +1999,12 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         return 612;
     }
     if (SendMessageW(
-            state.windows.window,
+            state.Workspace().windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&preview_begin)) != 1
         || SendMessageW(
-               state.windows.window,
+               state.Workspace().windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&preview_append)) != 1
@@ -2017,7 +2017,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         preview_samples.data() + 1U,
         1U};
     if (SendMessageW(
-            state.windows.window,
+            state.Workspace().windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&preview_end)) != 1
@@ -2030,14 +2030,14 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
                                               std::uint32_t expected_points,
                                               bool expected_closed,
                                               bool expected_region_width) {
-        SendMessageW(state.windows.window, WM_COMMAND, command, 0);
+        SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0);
         if (SendMessageW(
-                state.windows.window,
+                state.Workspace().windows.window,
                 inkpod::renderer::kCanvasStrokeReady,
                 0,
                 reinterpret_cast<LPARAM>(&preview_begin)) != 1
             || SendMessageW(
-                   state.windows.window,
+                   state.Workspace().windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&preview_append)) != 1
@@ -2049,7 +2049,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
             return false;
         }
         return SendMessageW(
-                   state.windows.window,
+                   state.Workspace().windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&preview_cancel)) == 1
@@ -2064,8 +2064,8 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         return 615;
     }
     const auto select_rectangle = [&](UINT mode, float x1, float y1, float x2, float y2) {
-        SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_RECTANGLE, 0);
-        SendMessageW(state.windows.window, WM_COMMAND, mode, 0);
+        SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_RECTANGLE, 0);
+        SendMessageW(state.Workspace().windows.window, WM_COMMAND, mode, 0);
         const std::array<InkpodStrokeSample, 2U> samples{
             selection_sample(x1, y1), selection_sample(x2, y2)};
         return send_selection_gesture(samples);
@@ -2083,8 +2083,8 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         || locator.selection.height != 4) {
         return 316;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
     const std::array<InkpodStrokeSample, 2U> short_lasso_samples{
         selection_sample(2.0F, 2.0F), selection_sample(3.0F, 3.0F)};
     if (!send_selection_gesture(short_lasso_samples)) {
@@ -2102,8 +2102,8 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     }
     for (const UINT mode : {
              IDM_SELECTION_MODE_ADD, IDM_SELECTION_MODE_SUBTRACT}) {
-        SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
-        SendMessageW(state.windows.window, WM_COMMAND, mode, 0);
+        SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
+        SendMessageW(state.Workspace().windows.window, WM_COMMAND, mode, 0);
         if (!send_selection_gesture(short_lasso_samples)) {
             return 620;
         }
@@ -2117,14 +2117,14 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
             return 621;
         }
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_ELLIPSE, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_ELLIPSE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
     const std::array<InkpodStrokeSample, 2U> ellipse_samples{
         selection_sample(1.0F, 1.0F), selection_sample(7.0F, 7.0F)};
     if (!send_selection_gesture(ellipse_samples)) {
         return 357;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_LASSO, 0);
     const std::array<InkpodStrokeSample, 3U> lasso_samples{
         selection_sample(0.0F, 0.0F),
         selection_sample(7.0F, 0.0F),
@@ -2132,7 +2132,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     if (!send_selection_gesture(lasso_samples)) {
         return 345;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_POLYLINE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_POLYLINE, 0);
     const std::array<InkpodStrokeSample, 3U> polyline_samples{
         selection_sample(1.0F, 1.0F),
         selection_sample(7.0F, 1.0F),
@@ -2140,27 +2140,27 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     if (!send_selection_gesture(polyline_samples)) {
         return 346;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_TRACE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_TRACE, 0);
     const std::array<InkpodStrokeSample, 2U> trace_samples{
         selection_sample(0.5F, 7.5F), selection_sample(7.5F, 0.5F)};
     if (!send_selection_gesture(trace_samples)) {
         return 347;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_WAND, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_WAND, 0);
     const std::array<InkpodStrokeSample, 1U> wand_samples{
         selection_sample(4.0F, 4.0F)};
     if (!send_selection_gesture(wand_samples) || !query_selection(locator)
         || (locator.flags & 1U) == 0U) {
         return 348;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_INVERT, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_EXPAND, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_SHRINK, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_INVERT, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_EXPAND, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_SHRINK, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
     if (!query_selection(locator) || (locator.flags & 1U) != 0U) {
         return 349;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_ALL, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_ALL, 0);
     if (!query_selection(locator) || (locator.flags & 1U) == 0U
         || locator.selection.width != 8 || locator.selection.height != 8) {
         return 350;
@@ -2190,46 +2190,46 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
             true) != INKPOD_STATUS_OK) {
         return 317;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_COLOR, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_COLOR, 0);
     if (!query_selection(locator) || (locator.flags & 1U) == 0U
         || locator.selection.x != 6 || locator.selection.y != 6
         || locator.selection.width != 1 || locator.selection.height != 1) {
         return 351;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_COLOR_DIFFERENT, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_COLOR_DIFFERENT, 0);
     if (!query_selection(locator) || (locator.flags & 1U) == 0U
         || locator.selection.width != 8 || locator.selection.height != 8) {
         return 352;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_COLOR_ADD, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_TO_LAYER, 0);
-    if (state.document.selection_layer_id == 0U) {
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_COLOR_ADD, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_TO_LAYER, 0);
+    if (state.Document().shell.selection_layer_id == 0U) {
         return 353;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_FROM_LAYER, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_FROM_LAYER, 0);
     if (!query_selection(locator) || (locator.flags & 1U) == 0U) {
         return 354;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LAYER_ADD, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SELECTION_LAYER_SUBTRACT, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_LAYER_ADD, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_LAYER_SUBTRACT, 0);
     if (!query_selection(locator) || (locator.flags & 1U) != 0U) {
         return 355;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MAIN_LINE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_MAIN_LINE, 0);
     if (!select_rectangle(IDM_SELECTION_MODE_NEW, 6.0F, 6.0F, 7.0F, 7.0F)) {
         return 356;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_COPY, 0);
-    if (state.document.clipboard == nullptr
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_COPY, 0);
+    if (state.clipboard == nullptr
         || IsClipboardFormatAvailable(CF_DIBV5) == FALSE
         || IsClipboardFormatAvailable(InkpodClipboardFormat()) == FALSE
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_CUT, 0) != 1) {
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_CUT, 0) != 1) {
         return 318;
     }
     std::vector<std::uint8_t> external_dib;
-    if (OpenClipboard(state.windows.window) == FALSE) {
+    if (OpenClipboard(state.Workspace().windows.window) == FALSE) {
         return 367;
     }
     HANDLE dib_handle = GetClipboardData(CF_DIBV5);
@@ -2262,7 +2262,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     }
     std::memcpy(external_destination, external_dib.data(), external_dib.size());
     GlobalUnlock(external_handle);
-    if (OpenClipboard(state.windows.window) == FALSE) {
+    if (OpenClipboard(state.Workspace().windows.window) == FALSE) {
         GlobalFree(external_handle);
         return 370;
     }
@@ -2272,21 +2272,21 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         GlobalFree(external_handle);
     }
     CloseClipboard();
-    InkpodClipboard* private_clipboard = state.document.clipboard;
-    state.document.clipboard = nullptr;
+    InkpodClipboard* private_clipboard = state.clipboard;
+    state.clipboard = nullptr;
     int external_failure{};
     if (!external_published) {
         external_failure = 371;
-    } else if (SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1) {
+    } else if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1) {
         external_failure = 372;
-    } else if (!state.tools.floating_active) {
+    } else if (!state.Workspace().tools.floating_active) {
         external_failure = 373;
-    } else if (SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1) {
+    } else if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1) {
         external_failure = 374;
     }
-    inkpod_clipboard_release(&state.document.clipboard);
-    state.document.clipboard = private_clipboard;
-    PublishStandardClipboard(state.windows.window, state.document.clipboard);
+    inkpod_clipboard_release(&state.clipboard);
+    state.clipboard = private_clipboard;
+    PublishStandardClipboard(state.Workspace().windows.window, state.clipboard);
     if (external_failure != 0) {
         return external_failure;
     }
@@ -2314,21 +2314,21 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     ResetUiForDocumentReplacement(state);
     if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK
         || !RefreshTreePane(state)
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_PASTE_SELECTED, 0) != 1
-        || !state.tools.floating_active
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_PASTE_CONVERTED, 0) != 1
-        || !state.tools.floating_active
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_TRANSFORM, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1) {
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_PASTE_SELECTED, 0) != 1
+        || !state.Workspace().tools.floating_active
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_PASTE_CONVERTED, 0) != 1
+        || !state.Workspace().tools.floating_active
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_FLOATING_TRANSFORM, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_PASTE, 0) != 1) {
         return 358;
     }
     inkpod::renderer::CanvasDocumentBounds floating_canvas{};
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&floating_canvas)) != 1) {
@@ -2348,16 +2348,16 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     const inkpod::renderer::CanvasStrokeEvent floating_finish{
         inkpod::renderer::CanvasStrokeEventKind::End, &floating_end, 1U};
     if (SendMessageW(
-            state.windows.window,
+            state.Workspace().windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&floating_begin)) != 1
         || SendMessageW(
-               state.windows.window,
+               state.Workspace().windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&floating_finish)) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1) {
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1) {
         return 359;
     }
     const InkpodFloatingTransform floating{
@@ -2371,7 +2371,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     const InkpodStatus paste_status = state.engine->Invoke(
         [&state, floating](InkpodCore* core) {
             InkpodStatus status = inkpod_core_paste_begin(
-                core, state.document.clipboard);
+                core, state.clipboard);
             if (status == INKPOD_STATUS_OK) {
                 status = inkpod_core_floating_transform(core, &floating);
             }
@@ -2410,7 +2410,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     if (!QueryDocument(state, before_flip)) {
         return 321;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_FLIP_HORIZONTAL, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_FLIP_HORIZONTAL, 0);
     InkpodDocumentInfo after_flip{};
     InkpodSnapshotTransform transform{};
     transform.struct_size = sizeof(transform);
@@ -2439,7 +2439,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         return 322;
     }
     SendMessageW(
-        state.windows.window, WM_COMMAND, IDM_EDIT_MIRROR_HORIZONTAL, 0);
+        state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_MIRROR_HORIZONTAL, 0);
     InkpodDocumentInfo after_mirror{};
     if (!QueryDocument(state, after_mirror)
         || after_mirror.document_revision
@@ -2448,7 +2448,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         || (after_mirror.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) == 0U) {
         return 323;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
 
     const std::array<UINT, 6U> document_transform_commands{
         IDM_CELL_MIRROR_VERTICAL,
@@ -2459,7 +2459,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         IDM_CELL_PAPER_SETTINGS};
     for (std::size_t index = 0U; index < document_transform_commands.size(); ++index) {
         if (SendMessageW(
-                state.windows.window, WM_COMMAND, document_transform_commands[index], 0) != 1) {
+                state.Workspace().windows.window, WM_COMMAND, document_transform_commands[index], 0) != 1) {
             return 360 + static_cast<int>(index);
         }
     }
@@ -2471,12 +2471,12 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         return 366;
     }
 
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_NEW, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_NEW, 0);
     std::wstring secondary_tab_label;
-    if (state.view.secondary_view_id == 0U || state.view.active_view_id != state.view.secondary_view_id
-        || state.windows.document_tabs == nullptr
-        || TabCtrl_GetItemCount(state.windows.document_tabs) != 2
-        || !ReadDocumentTabLabel(state.windows.document_tabs, 1, secondary_tab_label)
+    if (state.ActiveView().presentation.secondary_view_id == 0U || state.ActiveView().presentation.active_view_id != state.ActiveView().presentation.secondary_view_id
+        || state.Workspace().windows.document_tabs == nullptr
+        || TabCtrl_GetItemCount(state.Workspace().windows.document_tabs) != 2
+        || !ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 1, secondary_tab_label)
         || secondary_tab_label.find(L"[ビュー 2]") == std::wstring::npos) {
         return 324;
     }
@@ -2488,7 +2488,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         0.0,
         0.0,
         0.0};
-    const std::uint64_t secondary_view_id = state.view.secondary_view_id;
+    const std::uint64_t secondary_view_id = state.ActiveView().presentation.secondary_view_id;
     if (state.engine->Invoke(
             [secondary_view_id, secondary_pan](InkpodCore* core) {
                 return inkpod_core_view_apply(
@@ -2594,7 +2594,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     UpdateMenuState(state);
     std::array<wchar_t, 96U> zoom_status{};
     SendMessageW(
-        state.windows.status_bar,
+        state.Workspace().windows.status_bar,
         SB_GETTEXTW,
         1,
         reinterpret_cast<LPARAM>(zoom_status.data()));
@@ -2643,11 +2643,11 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
             shortcut_menu_command)) {
         return 328;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_GRID_SETTINGS, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_GUIDE_VERTICAL, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_GRID_SETTINGS, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_GUIDE_VERTICAL, 0);
     const auto query_guide_count = [&state]() noexcept {
         std::uint64_t count = UINT64_MAX;
-        const std::uint64_t view_id = state.view.active_view_id;
+        const std::uint64_t view_id = state.ActiveView().presentation.active_view_id;
         const InkpodStatus status = state.engine->Invoke(
             [view_id, &count](InkpodCore* core) {
                 const InkpodSnapshotOptions options{
@@ -2675,16 +2675,16 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     if (query_guide_count() != 1U) {
         return 341;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_RULER, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_GRID, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_SNAP_GUIDES, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_SNAP_GRID, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_TRANSPARENT, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_ZOOM_PERCENT, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_BOX_ZOOM, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_RULER, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_GRID, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_SNAP_GUIDES, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_SNAP_GRID, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_TRANSPARENT, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_ZOOM_PERCENT, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_BOX_ZOOM, 0);
     inkpod::renderer::CanvasDocumentBounds box_bounds{};
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&box_bounds)) != 1) {
@@ -2718,12 +2718,12 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         box_samples.data() + 1U,
         1U};
     if (SendMessageW(
-            state.windows.window,
+            state.Workspace().windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&box_begin)) != 1
         || SendMessageW(
-               state.windows.window,
+               state.Workspace().windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&box_end)) != 1) {
@@ -2731,7 +2731,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     }
     inkpod::renderer::CanvasDocumentBounds guide_bounds{};
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&guide_bounds)) != 1) {
@@ -2746,12 +2746,12 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         const inkpod::renderer::CanvasStrokeEvent end_event{
             inkpod::renderer::CanvasStrokeEventKind::End, &end_sample, 1U};
         return SendMessageW(
-                   state.windows.window,
+                   state.Workspace().windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&begin_event)) == 1
             && SendMessageW(
-                   state.windows.window,
+                   state.Workspace().windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&end_event)) == 1;
@@ -2771,7 +2771,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     if (query_guide_count() != 2U) {
         return 342;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_VIEW_GUIDE_MOVE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_GUIDE_MOVE, 0);
     if (!send_guide_drag(
             guide_sample(guide_x1, guide_y),
             guide_sample(guide_x3, guide_y))) {
@@ -2789,7 +2789,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         return 344;
     }
     if (SendMessageW(
-            state.windows.window, WM_COMMAND, IDM_SHORTCUT_EDIT, 0) != 1) {
+            state.Workspace().windows.window, WM_COMMAND, IDM_SHORTCUT_EDIT, 0) != 1) {
         return 329;
     }
     if (!ResolveConfiguredShortcut(
@@ -2805,7 +2805,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
             shortcut_menu_command)) {
         return 330;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_SHORTCUT_RESET, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SHORTCUT_RESET, 0);
     if (!ResolveConfiguredShortcut(
             state,
             static_cast<std::uint32_t>('Z'),
@@ -2816,9 +2816,9 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
     }
     locator = {};
     locator.struct_size = sizeof(locator);
-    const std::uint64_t active_view_id = state.view.active_view_id;
-    if (!state.view.grid_visible || !state.view.ruler_visible || !state.view.snap_guides
-        || !state.view.snap_grid || state.view.transparent_visible
+    const std::uint64_t active_view_id = state.ActiveView().presentation.active_view_id;
+    if (!state.ActiveView().presentation.grid_visible || !state.ActiveView().presentation.ruler_visible || !state.ActiveView().presentation.snap_guides
+        || !state.ActiveView().presentation.snap_grid || state.ActiveView().presentation.transparent_visible
         || state.engine->Invoke(
                [active_view_id, &locator](InkpodCore* core) {
                    return inkpod_core_locator_sample(
@@ -2896,7 +2896,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
             : 340 + static_cast<int>(std::min<std::uint64_t>(smoke_guide_count, 10U));
     }
     return SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasRenderOnce,
                0,
                0) == 1
@@ -2904,7 +2904,7 @@ int RunDocumentEditingSmoke(AppContext& state) noexcept {
         : 333;
 }
 
-int RunProductionWorkflowSmoke(AppContext& state) noexcept {
+int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr
         || CreateCell(state, 32U, 24U, 120000U) != INKPOD_STATUS_OK) {
         return 400;
@@ -2916,7 +2916,7 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
              IDM_CELL_FRAME_DRAWING,
              IDM_CELL_FRAME_SAFE,
              IDM_CELL_MARGINS}) {
-        SendMessageW(state.windows.window, WM_COMMAND, command, 0);
+        SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0);
     }
     InkpodDocumentInfo paper{};
     if (!QueryDocument(state, paper) || paper.width != 32U || paper.height != 24U
@@ -2927,17 +2927,17 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         return 401;
     }
 
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_NEW, 0) != 0
-        || state.panes.tree_layer_count < 2U
-        || LayerPaletteItemCount(state.panes.layer_palette)
-            != state.panes.tree_layer_count) {
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_NEW, 0) != 0
+        || state.Workspace().panes.tree_layer_count < 2U
+        || LayerPaletteItemCount(state.Workspace().panes.layer_palette)
+            != state.Workspace().panes.tree_layer_count) {
         return 402;
     }
-    const std::uint64_t raster_layer_id = state.panes.active_tree_layer_id;
-    const std::uint64_t raster_plane_id = state.panes.active_tree_plane_id;
+    const std::uint64_t raster_layer_id = state.Workspace().panes.active_tree_layer_id;
+    const std::uint64_t raster_plane_id = state.Workspace().panes.active_tree_plane_id;
     if (raster_layer_id == 0U || raster_plane_id == 0U
-        || state.panes.tree_plane_count != 1U
-        || state.panes.active_tree_plane_index != 0U) {
+        || state.Workspace().panes.tree_plane_count != 1U
+        || state.Workspace().panes.active_tree_plane_index != 0U) {
         return 770;
     }
     InkpodNodeInfo first_layer{};
@@ -2948,44 +2948,44 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         },
         false,
         false);
-    const HWND layer_list = GetDlgItem(state.panes.layer_palette, IDC_LAYER_LIST);
+    const HWND layer_list = GetDlgItem(state.Workspace().panes.layer_palette, IDC_LAYER_LIST);
     SendMessageW(layer_list, LB_SETCURSEL, 0, 0);
     SendMessageW(
-        state.panes.layer_palette,
+        state.Workspace().panes.layer_palette,
         WM_COMMAND,
         MAKEWPARAM(IDC_LAYER_LIST, LBN_SELCHANGE),
         reinterpret_cast<LPARAM>(layer_list));
     if (first_layer_status != INKPOD_STATUS_OK
-        || state.panes.active_tree_layer_id != first_layer.id
-        || LayerPaletteSelectedLayer(state.panes.layer_palette) != first_layer.id) {
+        || state.Workspace().panes.active_tree_layer_id != first_layer.id
+        || LayerPaletteSelectedLayer(state.Workspace().panes.layer_palette) != first_layer.id) {
         return 470;
     }
-    if (state.panes.layer_palette_dialog.select_layer == nullptr) {
+    if (state.Workspace().panes.layer_palette_dialog.select_layer == nullptr) {
         return 771;
     }
-    state.panes.layer_palette_dialog.select_layer(
-        state.panes.layer_palette_dialog.context,
+    state.Workspace().panes.layer_palette_dialog.select_layer(
+        state.Workspace().panes.layer_palette_dialog.context,
         raster_layer_id);
-    if (state.panes.active_tree_layer_id != raster_layer_id
-        || LayerPaletteSelectedLayer(state.panes.layer_palette) != raster_layer_id
-        || state.panes.tree_plane_count != 1U
-        || state.panes.active_tree_plane_id != raster_plane_id
-        || state.panes.active_tree_plane_index != 0U) {
+    if (state.Workspace().panes.active_tree_layer_id != raster_layer_id
+        || LayerPaletteSelectedLayer(state.Workspace().panes.layer_palette) != raster_layer_id
+        || state.Workspace().panes.tree_plane_count != 1U
+        || state.Workspace().panes.active_tree_plane_id != raster_plane_id
+        || state.Workspace().panes.active_tree_plane_index != 0U) {
         return 771;
     }
-    state.tools.fill_options = FillToolOptions{};
-    state.tools.fill_options.overflow_abort = false;
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
+    state.Workspace().tools.fill_options = FillToolOptions{};
+    state.Workspace().tools.fill_options.overflow_abort = false;
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
     const InkpodColorValue generic_fill_color{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 90U, 80U, 70U, 255U};
     inkpod::windows::ui::tools::SetActiveCommandColor(
-        state.tools, generic_fill_color);
+        state.Workspace().tools, generic_fill_color);
     inkpod::renderer::CanvasDocumentBounds generic_bounds{};
     InkpodDocumentInfo before_generic_fill{};
     if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK
         || !QueryDocument(state, before_generic_fill)
         || SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&generic_bounds)) != 1) {
@@ -2999,14 +2999,14 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
     const int generic_fill_y = static_cast<int>(
         std::lround(generic_bounds.top + generic_zoom));
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(generic_fill_x, generic_fill_y)) != 1) {
         return 794;
     }
     SendMessageW(
-        state.windows.canvas,
+        state.Workspace().windows.canvas,
         WM_LBUTTONUP,
         0,
         MAKELPARAM(generic_fill_x, generic_fill_y));
@@ -3022,16 +3022,16 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         != before_generic_fill.color_plane_checksum) {
         return 797;
     }
-    if (state.tools.active_plane != INKPOD_PLANE_COLOR) {
+    if (state.Workspace().tools.active_plane != INKPOD_PLANE_COLOR) {
         return 798;
     }
-    if (state.panes.active_tree_layer_id != raster_layer_id
-        || state.panes.active_tree_plane_id != raster_plane_id
-        || LayerPaletteSelectedLayer(state.panes.layer_palette) != raster_layer_id
-        || LayerPaletteSelectedPlane(state.panes.layer_palette) != raster_plane_id) {
+    if (state.Workspace().panes.active_tree_layer_id != raster_layer_id
+        || state.Workspace().panes.active_tree_plane_id != raster_plane_id
+        || LayerPaletteSelectedLayer(state.Workspace().panes.layer_palette) != raster_layer_id
+        || LayerPaletteSelectedPlane(state.Workspace().panes.layer_palette) != raster_plane_id) {
         return 799;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
     bool selected_raster_changed{};
     bool coloring_plane_unchanged{};
     const InkpodStatus selected_raster_stroke_status = state.engine->Invoke(
@@ -3096,26 +3096,26 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         || !coloring_plane_unchanged) {
         return 790;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_VISIBLE, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_EDITABLE, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_OPACITY, 0);
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_PROPERTIES, 0) != 1) {
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_VISIBLE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_TOGGLE_EDITABLE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_OPACITY, 0);
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_PROPERTIES, 0) != 1) {
         return 402;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_CONVERT, 0);
-    const std::uint32_t plane_count_before_create = state.panes.tree_plane_count;
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_NEW, 0);
-    if (state.panes.tree_plane_count != plane_count_before_create + 1U
-        || state.panes.active_tree_plane_id == 0U
-        || state.panes.active_tree_plane_id == raster_plane_id
-        || state.panes.active_tree_plane_index != plane_count_before_create) {
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_CONVERT, 0);
+    const std::uint32_t plane_count_before_create = state.Workspace().panes.tree_plane_count;
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_NEW, 0);
+    if (state.Workspace().panes.tree_plane_count != plane_count_before_create + 1U
+        || state.Workspace().panes.active_tree_plane_id == 0U
+        || state.Workspace().panes.active_tree_plane_id == raster_plane_id
+        || state.Workspace().panes.active_tree_plane_index != plane_count_before_create) {
         return 772;
     }
-    const std::uint64_t created_plane_id = state.panes.active_tree_plane_id;
+    const std::uint64_t created_plane_id = state.Workspace().panes.active_tree_plane_id;
     InkpodNodeInfo created_plane{};
     created_plane.struct_size = sizeof(created_plane);
-    const std::uint32_t created_layer_index = state.panes.active_tree_layer_index;
-    const std::uint32_t created_plane_index = state.panes.active_tree_plane_index;
+    const std::uint32_t created_layer_index = state.Workspace().panes.active_tree_layer_index;
+    const std::uint32_t created_plane_index = state.Workspace().panes.active_tree_plane_index;
     const InkpodStatus created_plane_status = state.engine->Invoke(
         [created_layer_index, created_plane_index, &created_plane](InkpodCore* core) {
             return inkpod_core_node_get(
@@ -3129,90 +3129,90 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         || created_plane.pixel_format != INKPOD_STORAGE_RGBA8) {
         return 832;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_VISIBLE, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_EDITABLE, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_OPACITY, 0);
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_PROPERTIES, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_CONVERT, 0) != 1
-        || state.panes.tree_plane_count != plane_count_before_create + 1U
-        || state.panes.active_tree_plane_id != created_plane_id) {
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_VISIBLE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_TOGGLE_EDITABLE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_OPACITY, 0);
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_PROPERTIES, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_CONVERT, 0) != 1
+        || state.Workspace().panes.tree_plane_count != plane_count_before_create + 1U
+        || state.Workspace().panes.active_tree_plane_id != created_plane_id) {
         return 773;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
-    if (state.panes.tree_plane_count != plane_count_before_create + 2U
-        || state.panes.active_tree_plane_id == 0U
-        || state.panes.active_tree_plane_id == created_plane_id
-        || state.panes.active_tree_plane_index != plane_count_before_create + 1U) {
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
+    if (state.Workspace().panes.tree_plane_count != plane_count_before_create + 2U
+        || state.Workspace().panes.active_tree_plane_id == 0U
+        || state.Workspace().panes.active_tree_plane_id == created_plane_id
+        || state.Workspace().panes.active_tree_plane_index != plane_count_before_create + 1U) {
         return 774;
     }
-    const std::uint64_t duplicated_plane_id = state.panes.active_tree_plane_id;
-    const std::uint32_t plane_move_start = state.panes.active_tree_plane_index;
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
+    const std::uint64_t duplicated_plane_id = state.Workspace().panes.active_tree_plane_id;
+    const std::uint32_t plane_move_start = state.Workspace().panes.active_tree_plane_index;
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
     if (plane_move_start == 0U
-        || state.panes.active_tree_plane_index != plane_move_start - 1U
-        || state.panes.active_tree_plane_id != duplicated_plane_id) {
+        || state.Workspace().panes.active_tree_plane_index != plane_move_start - 1U
+        || state.Workspace().panes.active_tree_plane_id != duplicated_plane_id) {
         return 775;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
-    if (state.panes.active_tree_plane_index != 0U
-        || state.panes.active_tree_plane_id != duplicated_plane_id) {
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
+    if (state.Workspace().panes.active_tree_plane_index != 0U
+        || state.Workspace().panes.active_tree_plane_id != duplicated_plane_id) {
         return 776;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_DOWN, 0);
-    if (state.panes.active_tree_plane_index != 1U
-        || state.panes.active_tree_plane_id != duplicated_plane_id) {
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_MOVE_DOWN, 0);
+    if (state.Workspace().panes.active_tree_plane_index != 1U
+        || state.Workspace().panes.active_tree_plane_id != duplicated_plane_id) {
         return 777;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_DELETE, 0);
-    if (state.panes.tree_plane_count != plane_count_before_create + 1U
-        || state.panes.active_tree_plane_id != raster_plane_id
-        || state.panes.active_tree_plane_index != 0U) {
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_DELETE, 0);
+    if (state.Workspace().panes.tree_plane_count != plane_count_before_create + 1U
+        || state.Workspace().panes.active_tree_plane_id != raster_plane_id
+        || state.Workspace().panes.active_tree_plane_index != 0U) {
         return 778;
     }
     const std::uint64_t merge_destination_plane_id =
-        state.panes.active_tree_plane_id;
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
-    if (state.panes.tree_plane_count != plane_count_before_create + 2U
-        || state.panes.active_tree_plane_id == 0U
-        || state.panes.active_tree_plane_id == merge_destination_plane_id
-        || state.panes.active_tree_plane_index != 1U) {
+        state.Workspace().panes.active_tree_plane_id;
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_DUPLICATE, 0);
+    if (state.Workspace().panes.tree_plane_count != plane_count_before_create + 2U
+        || state.Workspace().panes.active_tree_plane_id == 0U
+        || state.Workspace().panes.active_tree_plane_id == merge_destination_plane_id
+        || state.Workspace().panes.active_tree_plane_index != 1U) {
         return 779;
     }
-    const std::uint64_t merge_source_plane_id = state.panes.active_tree_plane_id;
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
-    if (state.panes.active_tree_plane_index != 0U
-        || state.panes.active_tree_plane_id != merge_source_plane_id) {
+    const std::uint64_t merge_source_plane_id = state.Workspace().panes.active_tree_plane_id;
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_MOVE_UP, 0);
+    if (state.Workspace().panes.active_tree_plane_index != 0U
+        || state.Workspace().panes.active_tree_plane_id != merge_source_plane_id) {
         return 780;
     }
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_MERGE, 0) != 1) {
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_MERGE, 0) != 1) {
         return 781;
     }
-    if (state.panes.tree_plane_count != plane_count_before_create + 1U
-        || state.panes.active_tree_plane_id != merge_destination_plane_id
-        || state.panes.active_tree_plane_index != 0U) {
+    if (state.Workspace().panes.tree_plane_count != plane_count_before_create + 1U
+        || state.Workspace().panes.active_tree_plane_id != merge_destination_plane_id
+        || state.Workspace().panes.active_tree_plane_index != 0U) {
         return 782;
     }
     SendMessageW(
-        GetDlgItem(state.panes.layer_palette, IDM_LAYER_DUPLICATE),
+        GetDlgItem(state.Workspace().panes.layer_palette, IDM_LAYER_DUPLICATE),
         BM_CLICK,
         0,
         0);
-    const std::uint32_t layer_move_start = state.panes.active_tree_layer_index;
+    const std::uint32_t layer_move_start = state.Workspace().panes.active_tree_layer_index;
     if (layer_move_start != 0U) {
-        if (state.panes.layer_palette_dialog.reorder_layer == nullptr) {
+        if (state.Workspace().panes.layer_palette_dialog.reorder_layer == nullptr) {
             return 469;
         }
-        state.panes.layer_palette_dialog.reorder_layer(
-            state.panes.layer_palette_dialog.context,
-            state.panes.active_tree_layer_id,
+        state.Workspace().panes.layer_palette_dialog.reorder_layer(
+            state.Workspace().panes.layer_palette_dialog.context,
+            state.Workspace().panes.active_tree_layer_id,
             layer_move_start - 1U);
-        if (state.panes.active_tree_layer_index != layer_move_start - 1U) {
+        if (state.Workspace().panes.active_tree_layer_index != layer_move_start - 1U) {
             return 469;
         }
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_MOVE_UP, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_MOVE_DOWN, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_LAYER_MERGE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_MOVE_UP, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_MOVE_DOWN, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_MERGE, 0);
 
     if (CreateCell(state, 12U, 10U, 96000U) != INKPOD_STATUS_OK) {
         return 404;
@@ -3223,9 +3223,9 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         return 405;
     }
     DeleteFileW(state.lifetime.smoke_raster_path.c_str());
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_FILE_EXPORT_RASTER, 0) != 1
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_FILE_EXPORT_RASTER, 0) != 1
         || GetFileAttributesW(state.lifetime.smoke_raster_path.c_str()) == INVALID_FILE_ATTRIBUTES
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_FILE_IMPORT_RASTER, 0) != 1) {
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_FILE_IMPORT_RASTER, 0) != 1) {
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 406;
@@ -3240,8 +3240,8 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         state.lifetime.smoke_raster_path.clear();
         return 407;
     }
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_COLOR_EDITOR, 0) != 1
-        || state.tools.drawing_color.depth != INKPOD_COLOR_DEPTH_16) {
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_COLOR_EDITOR, 0) != 1
+        || state.Workspace().tools.drawing_color.depth != INKPOD_COLOR_DEPTH_16) {
         return 430;
     }
     const std::array<UINT, 10U> color_commands{
@@ -3256,33 +3256,33 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         IDM_PALETTE_NEXT_GROUP,
         IDM_CHART_GENERATE};
     for (std::size_t index = 0U; index < color_commands.size(); ++index) {
-        if (SendMessageW(state.windows.window, WM_COMMAND, color_commands[index], 0) != 1) {
+        if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, color_commands[index], 0) != 1) {
             return 434 + static_cast<int>(index);
         }
     }
     RefreshColorPanes(state);
-    state.panes.selected_color_chart_index = 0U;
+    state.Workspace().panes.selected_color_chart_index = 0U;
     const std::array<UINT, 4U> chart_navigation_commands{
         IDM_CHART_RENAME, IDM_CHART_SEARCH, IDM_CHART_NEXT, IDM_CHART_NEXT_PAGE};
     for (std::size_t index = 0U; index < chart_navigation_commands.size(); ++index) {
         if (SendMessageW(
-                state.windows.window, WM_COMMAND, chart_navigation_commands[index], 0) != 1) {
+                state.Workspace().windows.window, WM_COMMAND, chart_navigation_commands[index], 0) != 1) {
             return 450 + static_cast<int>(index);
         }
     }
-    state.panes.color_chart_page = 0U;
-    state.panes.selected_color_chart_index = 0U;
+    state.Workspace().panes.color_chart_page = 0U;
+    state.Workspace().panes.selected_color_chart_index = 0U;
     RefreshColorPanes(state);
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_SAVE, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_COPY, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_PASTE, 0) != 1) {
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_CHART_SAVE, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_CHART_COPY, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_CHART_PASTE, 0) != 1) {
         return 432;
     }
-    state.panes.selected_color_chart_index = 0U;
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_CUT, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_LOAD, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_LOCK, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_CHART_LOCK, 0) != 1) {
+    state.Workspace().panes.selected_color_chart_index = 0U;
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_CHART_CUT, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_CHART_LOAD, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_CHART_LOCK, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_CHART_LOCK, 0) != 1) {
         return 433;
     }
     DeleteFileW(L"inkpod-palette-smoke.inkpalette");
@@ -3304,14 +3304,14 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         IDM_LT_ITEM_RELOAD};
     for (std::size_t index = 0U; index < light_table_commands.size(); ++index) {
         if (SendMessageW(
-                state.windows.window, WM_COMMAND, light_table_commands[index], 0) != 1) {
+                state.Workspace().windows.window, WM_COMMAND, light_table_commands[index], 0) != 1) {
             DeleteFileW(state.lifetime.smoke_raster_path.c_str());
             state.lifetime.smoke_raster_path.clear();
             return 414 + static_cast<int>(index);
         }
     }
     InkpodLightTableItemInfo light_item{};
-    if (!QueryLightTableItem(state, state.panes.active_light_table_item_index, light_item)
+    if (!QueryLightTableItem(state, state.Workspace().panes.active_light_table_item_index, light_item)
         || light_item.opacity_milli != 500U
         || light_item.effective_opacity_milli != 250U
         || light_item.translate_x_milli != 1000
@@ -3321,9 +3321,9 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
         return 408;
     }
     inkpod::renderer::CanvasDocumentBounds light_canvas{};
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_LT_ITEM_MOVE, 0) != 1
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LT_ITEM_MOVE, 0) != 1
         || SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&light_canvas)) != 1) {
@@ -3342,16 +3342,16 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
     const inkpod::renderer::CanvasStrokeEvent light_end{
         inkpod::renderer::CanvasStrokeEventKind::End, &light_move_end, 1U};
     if (SendMessageW(
-            state.windows.window,
+            state.Workspace().windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&light_begin)) != 1
         || SendMessageW(
-               state.windows.window,
+               state.Workspace().windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&light_end)) != 1
-        || !QueryLightTableItem(state, state.panes.active_light_table_item_index, light_item)
+        || !QueryLightTableItem(state, state.Workspace().panes.active_light_table_item_index, light_item)
         || (light_item.translate_x_milli == 1000
             && light_item.translate_y_milli == -1000)) {
         return 471;
@@ -3359,7 +3359,7 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
     const std::wstring swap_save = L"inkpod-lt-smoke.inkpod";
     DeleteFileW(swap_save.c_str());
     if (SaveToPath(state, swap_save) != INKPOD_STATUS_OK
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_LT_ITEM_SWAP, 0) != 1) {
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LT_ITEM_SWAP, 0) != 1) {
         DeleteFileW(swap_save.c_str());
         DeleteFileW((swap_save + L".recovery.inkpod").c_str());
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
@@ -3387,41 +3387,41 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
             return 410;
         }
     }
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_IMPORT, 0) != 1) {
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_IMPORT, 0) != 1) {
         return 411;
     }
     RefreshSequencePane(state);
-    if (state.panes.sequence_count != 3U
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_SUBPALETTE_SET, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_SUBPALETTE_SAMPLE, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_GOTO, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_NEXT, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_START, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_NEXT, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_PAUSE, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_PAUSE, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_PREVIOUS, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FIRST, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_LAST, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_30, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_25, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_24, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_12, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_10, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_FPS_8, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_MOTION_STOP, 0) != 1) {
+    if (state.Workspace().panes.sequence_count != 3U
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SUBPALETTE_SET, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SUBPALETTE_SAMPLE, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_GOTO, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_NEXT, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_START, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_NEXT, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_PAUSE, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_PAUSE, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_PREVIOUS, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_FIRST, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_LAST, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_FPS_30, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_FPS_25, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_FPS_24, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_FPS_12, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_FPS_10, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_FPS_8, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_MOTION_STOP, 0) != 1) {
         return 412;
     }
     std::wstring active_cell_tab;
-    if (!ReadDocumentTabLabel(state.windows.document_tabs, 0, active_cell_tab)
+    if (!ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, active_cell_tab)
         || active_cell_tab != L"cell3.png") {
         return 718;
     }
     DeleteFileW(state.lifetime.smoke_raster_path.c_str());
     state.lifetime.smoke_raster_path = L"inkpod-sequence-export.png";
     DeleteFileW(state.lifetime.smoke_raster_path.c_str());
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_SEQ_EXPORT, 0) != 1
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_EXPORT, 0) != 1
         || GetFileAttributesW(L"inkpod-sequence-export-cell1.png")
             == INVALID_FILE_ATTRIBUTES
         || GetFileAttributesW(L"inkpod-sequence-export-cell3.png")
@@ -3442,7 +3442,7 @@ int RunProductionWorkflowSmoke(AppContext& state) noexcept {
     return 0;
 }
 
-int RunVectorWorkflowSmoke(AppContext& state) noexcept {
+int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr) {
         return 500;
     }
@@ -3648,22 +3648,22 @@ int RunVectorWorkflowSmoke(AppContext& state) noexcept {
         return 504;
     }
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             inkpod::renderer::kCanvasRenderOnce,
             0,
             0) != 1) {
         return 505;
     }
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             inkpod::renderer::kCanvasValidateClosedVectorStroke,
             0,
             0) != 1) {
         return 507;
     }
 
-    state.panes.active_tree_layer_id = vector_layer_id;
-    state.panes.active_tree_plane_id = vector_trace_plane_id;
+    state.Workspace().panes.active_tree_layer_id = vector_layer_id;
+    state.Workspace().panes.active_tree_plane_id = vector_trace_plane_id;
     if (!RefreshTreePane(state)) {
         return 506;
     }
@@ -3671,7 +3671,7 @@ int RunVectorWorkflowSmoke(AppContext& state) noexcept {
     for (const UINT command : {
              IDM_VECTOR_LINE, IDM_VECTOR_CURVE, IDM_VECTOR_RECTANGLE,
              IDM_VECTOR_ELLIPSE, IDM_VECTOR_POLYLINE, IDM_VECTOR_ERASER}) {
-        const UINT command_state = GetMenuState(GetMenu(state.windows.window), command, MF_BYCOMMAND);
+        const UINT command_state = GetMenuState(GetMenu(state.Workspace().windows.window), command, MF_BYCOMMAND);
         if (command_state == static_cast<UINT>(-1)
             || (command_state & (MF_DISABLED | MF_GRAYED)) != 0U) {
             return 508;
@@ -3681,7 +3681,7 @@ int RunVectorWorkflowSmoke(AppContext& state) noexcept {
     InkpodDocumentInfo document{};
     if (!QueryDocument(state, document)
         || SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&canvas_bounds)) != 1) {
@@ -3699,7 +3699,7 @@ int RunVectorWorkflowSmoke(AppContext& state) noexcept {
             0U};
     };
     const auto gesture = [&](UINT command, const std::array<InkpodStrokeSample, 4U>& samples) {
-        if (SendMessageW(state.windows.window, WM_COMMAND, command, 0) != 1) {
+        if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0) != 1) {
             return false;
         }
         const inkpod::renderer::CanvasStrokeEvent begin{
@@ -3709,17 +3709,17 @@ int RunVectorWorkflowSmoke(AppContext& state) noexcept {
         const inkpod::renderer::CanvasStrokeEvent end{
             inkpod::renderer::CanvasStrokeEventKind::End, samples.data() + 3U, 1U};
         return SendMessageW(
-                   state.windows.window,
+                   state.Workspace().windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&begin)) == 1
             && SendMessageW(
-                   state.windows.window,
+                   state.Workspace().windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&append)) == 1
             && SendMessageW(
-                   state.windows.window,
+                   state.Workspace().windows.window,
                    inkpod::renderer::kCanvasStrokeReady,
                    0,
                    reinterpret_cast<LPARAM>(&end)) == 1;
@@ -3754,14 +3754,14 @@ int RunVectorWorkflowSmoke(AppContext& state) noexcept {
         IDM_VECTOR_SELECT_FILL};
     for (std::size_t index = 0U; index < selection_commands.size(); ++index) {
         const UINT command = selection_commands[index];
-        if (SendMessageW(state.windows.window, WM_COMMAND, command, 0) != 1) {
+        if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0) != 1) {
             return 520 + static_cast<int>(index);
         }
     }
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_SELECT_TOUCH, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_WIDTH, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_CONNECT, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_ERASE_WHOLE, 0) != 1) {
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_SELECT_TOUCH, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_WIDTH, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_CONNECT, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_ERASE_WHOLE, 0) != 1) {
         return 509;
     }
     const inkpod::renderer::CanvasStrokeEvent erase_begin{
@@ -3769,23 +3769,23 @@ int RunVectorWorkflowSmoke(AppContext& state) noexcept {
     const inkpod::renderer::CanvasStrokeEvent erase_end{
         inkpod::renderer::CanvasStrokeEventKind::End, line_samples.data() + 2U, 1U};
     if (SendMessageW(
-            state.windows.window,
+            state.Workspace().windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&erase_begin)) != 1
         || SendMessageW(
-               state.windows.window,
+               state.Workspace().windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&erase_end)) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_RASTERIZE, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_VECTOR_VECTORIZE, 0) != 1) {
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_RASTERIZE, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_VECTORIZE, 0) != 1) {
         return 510;
     }
     return 0;
 }
 
-int RunImageEffectsSmoke(AppContext& state) noexcept {
+int RunImageEffectsSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr) {
         return 600;
     }
@@ -3927,49 +3927,49 @@ int RunImageEffectsSmoke(AppContext& state) noexcept {
         || !adjustment_preserved_source || !effect_connected) {
         return 601;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_PLANE_COLOR, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_COLOR, 0);
     InkpodDocumentInfo before_menu = EmptyDocumentInfo();
     InkpodDocumentInfo after_menu = EmptyDocumentInfo();
-    HMENU menu = GetMenu(state.windows.window);
+    HMENU menu = GetMenu(state.Workspace().windows.window);
     if (menu == nullptr || !QueryDocument(state, before_menu)
         || GetMenuState(menu, IDM_FILTER_LAST, MF_BYCOMMAND) == static_cast<UINT>(-1)) {
         return 602;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_FILTER_LAST, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_FILTER_LAST, 0);
     if (!QueryDocument(state, after_menu)
         || after_menu.color_plane_checksum == before_menu.color_plane_checksum) {
         return 603;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
     if (state.effects.adjustments.size() != 2U
         || state.effects.adjustments[0].id == state.effects.adjustments[1].id) {
         return 605;
     }
     const std::uint64_t newest_adjustment = state.effects.adjustment_id;
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_PREVIOUS, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_PREVIOUS, 0);
     if (state.effects.adjustment_id == newest_adjustment) {
         return 606;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_EDIT, 0);
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_TOGGLE, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_EDIT, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_TOGGLE, 0);
     if (state.effects.adjustment_visible) {
         return 607;
     }
-    SendMessageW(state.windows.window, WM_COMMAND, IDM_ADJUSTMENT_MOVE_TOP, 0);
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_MOVE_TOP, 0);
     InkpodDocumentInfo before_spray = EmptyDocumentInfo();
     InkpodDocumentInfo after_spray = EmptyDocumentInfo();
     inkpod::renderer::CanvasDocumentBounds spray_bounds{};
     if (!QueryDocument(state, before_spray)
         || SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&spray_bounds)) != 1) {
         return 608;
     }
     TransitionActiveTool(
-        state.tools, state.windows.canvas, kInteractionEffectAirbrush);
+        state.Workspace().tools, state.Workspace().windows.canvas, kInteractionEffectAirbrush);
     state.effects.options.parameters = {4000, 1000, 1000, 750, 0};
     state.effects.options.option = true;
     state.effects.options.option2 = true;
@@ -3985,7 +3985,7 @@ int RunImageEffectsSmoke(AppContext& state) noexcept {
     const inkpod::renderer::CanvasStrokeEvent spray_end{
         inkpod::renderer::CanvasStrokeEventKind::End, &spray_sample, 1U};
     if (SendMessageW(
-            state.windows.window,
+            state.Workspace().windows.window,
             inkpod::renderer::kCanvasStrokeReady,
             0,
             reinterpret_cast<LPARAM>(&spray_begin)) != 1) {
@@ -3995,13 +3995,13 @@ int RunImageEffectsSmoke(AppContext& state) noexcept {
         CommandTimerKind::ContinuousSpray);
     if (!spray_timer.has_value()
         || SendMessageW(
-               state.windows.window,
+               state.Workspace().windows.window,
                WM_TIMER,
                static_cast<WPARAM>(spray_timer->value),
                0) != 0
         || state.effects.samples.size() < 2U
         || SendMessageW(
-               state.windows.window,
+               state.Workspace().windows.window,
                inkpod::renderer::kCanvasStrokeReady,
                0,
                reinterpret_cast<LPARAM>(&spray_end)) != 1
@@ -4013,7 +4013,7 @@ int RunImageEffectsSmoke(AppContext& state) noexcept {
         return 609;
     }
     return SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasRenderOnce,
                0,
                0) == 1
@@ -4021,7 +4021,7 @@ int RunImageEffectsSmoke(AppContext& state) noexcept {
         : 604;
 }
 
-int RunBatchWorkflowSmoke(AppContext& state) noexcept {
+int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
     constexpr wchar_t settings_path[] = L"inkpod-batch-ui-smoke.inkbatch";
     constexpr wchar_t output_path[] = L"inkpod-batch-windows-smoke_0001.inkpod";
     const auto cleanup = [&]() noexcept {
@@ -4029,23 +4029,23 @@ int RunBatchWorkflowSmoke(AppContext& state) noexcept {
         DeleteFileW(output_path);
     };
     cleanup();
-    if (state.engine == nullptr || state.batch.palette == nullptr) {
+    if (state.engine == nullptr || state.Workspace().batch_palette == nullptr) {
         return 700;
     }
-    HMENU menu = GetMenu(state.windows.window);
+    HMENU menu = GetMenu(state.Workspace().windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_WINDOW_BATCH, MF_BYCOMMAND) == static_cast<UINT>(-1)
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
-        || IsWindowVisible(state.batch.palette) == FALSE) {
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
+        || IsWindowVisible(state.Workspace().batch_palette) == FALSE) {
         cleanup();
         return 701;
     }
     state.batch.output_folder = L".";
     state.batch.basename = L"inkpod-batch-windows-smoke";
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_INPUT_CURRENT, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_INPUT_RANGE, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OUTPUT_SETTINGS, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_ADD_COLOR_REPLACE, 0) != 1
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_INPUT_CURRENT, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_INPUT_RANGE, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OUTPUT_SETTINGS, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_ADD_COLOR_REPLACE, 0) != 1
         || state.batch.operations.size() != 1U
         || state.batch.operations[0].color_pairs.size() != 1U) {
         cleanup();
@@ -4053,7 +4053,7 @@ int RunBatchWorkflowSmoke(AppContext& state) noexcept {
     }
     const InkpodColorValue old_before = state.batch.operations[0].color_pairs[0].old_color;
     const InkpodColorValue new_before = state.batch.operations[0].color_pairs[0].new_color;
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_REPLACE_SWAP, 0) != 1) {
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_REPLACE_SWAP, 0) != 1) {
         cleanup();
         return 703;
     }
@@ -4063,39 +4063,39 @@ int RunBatchWorkflowSmoke(AppContext& state) noexcept {
         cleanup();
         return 704;
     }
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, 0) != 1
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_ADD_BOUNDARY_AIRBRUSH, 0) != 1
         || state.batch.operations.size() != 2U
         || state.batch.operations.back().colors.size() < 2U
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
         || state.batch.report == nullptr
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
         || state.batch.operations.size() != 1U) {
         cleanup();
         return 705;
     }
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_ADD_MIRROR, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OPERATION_UP, 0) != 1
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_ADD_MIRROR, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_UP, 0) != 1
         || state.batch.operations.front().kind != INKPOD_BATCH_OPERATION_MIRROR
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OPERATION_DOWN, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OPERATION_EDIT, 0) != 1
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_DOWN, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_EDIT, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
         || state.batch.operations.size() != 1U
         || state.batch.operations[0].kind != INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
         cleanup();
         return 706;
     }
     const LRESULT input_count = SendDlgItemMessageW(
-        state.batch.palette, IDC_BATCH_INPUTS, LB_GETCOUNT, 0, 0);
+        state.Workspace().batch_palette, IDC_BATCH_INPUTS, LB_GETCOUNT, 0, 0);
     const LRESULT operation_count = SendDlgItemMessageW(
-        state.batch.palette, IDC_BATCH_OPERATIONS, LB_GETCOUNT, 0, 0);
+        state.Workspace().batch_palette, IDC_BATCH_OPERATIONS, LB_GETCOUNT, 0, 0);
     if (input_count != 1 || operation_count != 1
-        || GetDlgItem(state.batch.palette, IDC_BATCH_OUTPUT) == nullptr) {
+        || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_OUTPUT) == nullptr) {
         cleanup();
         return 707;
     }
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_SAVE_SET, 0) != 1
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_SAVE_SET, 0) != 1
         || GetFileAttributesW(settings_path) == INVALID_FILE_ATTRIBUTES
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_LOAD_SET, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_LOAD_SET, 0) != 1
         || !state.batch.loaded_graph || state.batch.graph == nullptr) {
         cleanup();
         return 708;
@@ -4109,9 +4109,9 @@ int RunBatchWorkflowSmoke(AppContext& state) noexcept {
         cleanup();
         return 709;
     }
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_PREVIEW, 0) != 1
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_PREVIEW, 0) != 1
         || state.batch.preview == nullptr
-        || SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
         || state.batch.report == nullptr
         || GetFileAttributesW(output_path) != INVALID_FILE_ATTRIBUTES) {
         cleanup();
@@ -4129,15 +4129,15 @@ int RunBatchWorkflowSmoke(AppContext& state) noexcept {
         cleanup();
         return 711;
     }
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_BATCH_RUN_CURRENT, 0) != 1
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_RUN_CURRENT, 0) != 1
         || GetFileAttributesW(output_path) == INVALID_FILE_ATTRIBUTES
         || inkpod_batch_report_get_info(state.batch.report, &report_info) != INKPOD_STATUS_OK
         || report_info.failure_count != 0U) {
         cleanup();
         return 712;
     }
-    if (SendMessageW(state.windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
-        || IsWindowVisible(state.batch.palette) != FALSE) {
+    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
+        || IsWindowVisible(state.Workspace().batch_palette) != FALSE) {
         cleanup();
         return 713;
     }
@@ -4145,13 +4145,13 @@ int RunBatchWorkflowSmoke(AppContext& state) noexcept {
     return 0;
 }
 
-int RunMagnifiedRasterHitSmoke(AppContext& state) noexcept {
+int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr
         || CreateCell(state, 8U, 8U, 96'000U) != INKPOD_STATUS_OK) {
         return 720;
     }
-    state.tools.active_plane = INKPOD_PLANE_MAIN_LINE;
-    TransitionActiveTool(state.tools, state.windows.canvas, INKPOD_TOOL_PENCIL);
+    state.Workspace().tools.active_plane = INKPOD_PLANE_MAIN_LINE;
+    TransitionActiveTool(state.Workspace().tools, state.Workspace().windows.canvas, INKPOD_TOOL_PENCIL);
 
     InkpodDocumentInfo blank = EmptyDocumentInfo();
     InkpodDocumentInfo seeded = EmptyDocumentInfo();
@@ -4189,14 +4189,14 @@ int RunMagnifiedRasterHitSmoke(AppContext& state) noexcept {
 
     inkpod::renderer::CanvasDocumentBounds bounds{};
     RECT client{};
-    if (GetClientRect(state.windows.canvas, &client) == FALSE
+    if (GetClientRect(state.Workspace().windows.canvas, &client) == FALSE
         || SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasRenderOnce,
                0,
                0) != 1
         || SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasGetDocumentBounds,
                0,
                reinterpret_cast<LPARAM>(&bounds)) != 1) {
@@ -4212,7 +4212,7 @@ int RunMagnifiedRasterHitSmoke(AppContext& state) noexcept {
                static_cast<double>(client.bottom - client.top) / 2.0)
             != INKPOD_STATUS_OK
         || SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                inkpod::renderer::kCanvasRenderOnce,
                0,
                0) != 1) {
@@ -4221,7 +4221,7 @@ int RunMagnifiedRasterHitSmoke(AppContext& state) noexcept {
 
     bounds = {};
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             inkpod::renderer::kCanvasGetDocumentBounds,
             0,
             reinterpret_cast<LPARAM>(&bounds)) != 1) {
@@ -4234,12 +4234,12 @@ int RunMagnifiedRasterHitSmoke(AppContext& state) noexcept {
     const int device_x = static_cast<int>(std::lround(bounds.left + 3.75 * zoom));
     const int device_y = static_cast<int>(std::lround(bounds.top + 3.75 * zoom));
     if (SendMessageW(
-            state.windows.canvas,
+            state.Workspace().windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
             MAKELPARAM(device_x, device_y)) != 1
         || SendMessageW(
-               state.windows.canvas,
+               state.Workspace().windows.canvas,
                WM_LBUTTONUP,
                0,
                MAKELPARAM(device_x, device_y)) != 1
@@ -4255,7 +4255,7 @@ int RunMagnifiedRasterHitSmoke(AppContext& state) noexcept {
         : 726;
 }
 
-int RunCommandContextSmoke(AppContext& state) noexcept {
+int RunCommandContextSmoke(ApplicationHost& state) noexcept {
     using inkpod::app::CommandContext;
     using inkpod::app::CommandResolveStatus;
     using inkpod::app::Generation;
@@ -4284,13 +4284,13 @@ int RunCommandContextSmoke(AppContext& state) noexcept {
     InkpodDocumentInfo before = EmptyDocumentInfo();
     InkpodDocumentInfo after = EmptyDocumentInfo();
     if (!QueryDocument(state, before)
-        || SendMessageW(state.windows.window, WM_COMMAND, UINT16_MAX, 0) != 0
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, UINT16_MAX, 0) != 0
         || !QueryDocument(state, after)
         || before.document_revision != after.document_revision
         || before.main_plane_checksum != after.main_plane_checksum
         || IssueCommand(
                nullptr,
-               state.windows.window,
+               state.Workspace().windows.window,
                IDM_EDIT_UNDO,
                0,
                std::nullopt)
@@ -4306,8 +4306,21 @@ int RunCommandContextSmoke(AppContext& state) noexcept {
 
 namespace inkpod::windows::ui {
 
-int RunApplicationSmoke(app::AppContext& state) noexcept {
-    int exit_code = runtime::RunCommandContextSmoke(state);
+int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
+    const auto context = state.routing.targets.Capture();
+    int exit_code = state.Workspace().application != &state
+            || state.Workspace().id != state.routing.targets.Workspace()
+            || state.Workspace().windows.window == nullptr
+            || state.Document().id != state.routing.targets.DocumentSession()
+            || state.Document().Core() != state.engine.get()
+            || state.Document().ActiveView() == nullptr
+            || !context.document_view.has_value()
+            || state.Document().ActiveView()->id != context.document_view.value()
+        ? 731
+        : 0;
+    if (exit_code == 0) {
+        exit_code = runtime::RunCommandContextSmoke(state);
+    }
     if (exit_code == 0) {
         exit_code = runtime::RunDrawingPersistenceSmoke(state);
     }

@@ -14,7 +14,7 @@
 #include <new>
 #include <utility>
 
-#include "app_context.h"
+#include "frontend_state.h"
 #include "core_engine.h"
 
 namespace inkpod::app {

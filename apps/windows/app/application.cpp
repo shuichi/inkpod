@@ -4,10 +4,11 @@
 
 #include <array>
 #include <memory>
+#include <new>
 #include <string>
 #include <utility>
 
-#include "app_context.h"
+#include "application_host.h"
 #include "app_smoke.h"
 #include "com_runtime.h"
 #include "core_engine.h"
@@ -22,8 +23,10 @@
 namespace inkpod::app {
 namespace {
 
-bool InitializeFrontendRouting(AppContext& state) noexcept {
-    state.routing.targets.Initialize();
+bool InitializeFrontendRouting(ApplicationHost& state) noexcept {
+    if (!state.InitializeOwners()) {
+        return false;
+    }
     const auto tool = state.routing.targets.RegisterPane();
     const auto tool_options = state.routing.targets.RegisterPane();
     const auto color = state.routing.targets.RegisterPane();
@@ -31,6 +34,7 @@ bool InitializeFrontendRouting(AppContext& state) noexcept {
     const auto batch = state.routing.targets.RegisterPane();
     if (!tool.has_value() || !tool_options.has_value() || !color.has_value()
         || !layer.has_value() || !batch.has_value()) {
+        state.ClearOwners();
         return false;
     }
     state.routing.tool_pane = tool.value();
@@ -41,27 +45,27 @@ bool InitializeFrontendRouting(AppContext& state) noexcept {
     return true;
 }
 
-InkpodStatus StartCore(AppContext& state) noexcept {
+InkpodStatus StartCore(ApplicationHost& state) noexcept {
     try {
         state.engine = std::make_unique<CoreEngine>();
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus status = state.engine->Start(
-        renderer::GetCanvasSnapshotSink(state.windows.canvas),
-        state.windows.window);
+        renderer::GetCanvasSnapshotSink(state.Workspace().windows.canvas),
+        state.Workspace().windows.window);
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
     state.engine->SetCommandGeneration(
         state.routing.targets.CurrentGeneration());
+    state.Document().BindCore(state.engine.get());
     return windows::ui::InitializeShortcuts(
         *state.engine, state.shortcuts, !state.lifetime.smoke_test);
 }
 
-InkpodStatus StopCore(AppContext& state) noexcept {
-    const InkpodStatus clipboard_status =
-        inkpod_clipboard_release(&state.document.clipboard);
+InkpodStatus StopCore(ApplicationHost& state) noexcept {
+    const InkpodStatus clipboard_status = inkpod_clipboard_release(&state.clipboard);
     if (state.effects.task != nullptr) {
         inkpod_task_cancel(state.effects.task);
     }
@@ -69,42 +73,43 @@ InkpodStatus StopCore(AppContext& state) noexcept {
         inkpod_batch_task_cancel(state.batch.task);
     }
     if (state.engine != nullptr) {
+        state.Document().BindCore(nullptr);
         state.engine->Stop();
         state.engine.reset();
     }
-    if (state.effects.progress != nullptr) {
-        DestroyWindow(state.effects.progress);
-        state.effects.progress = nullptr;
+    if (state.Workspace().effects_progress != nullptr) {
+        DestroyWindow(state.Workspace().effects_progress);
+        state.Workspace().effects_progress = nullptr;
     }
-    if (state.batch.progress != nullptr) {
-        DestroyWindow(state.batch.progress);
-        state.batch.progress = nullptr;
+    if (state.Workspace().batch_progress != nullptr) {
+        DestroyWindow(state.Workspace().batch_progress);
+        state.Workspace().batch_progress = nullptr;
     }
     if (!state.lifetime.smoke_test) {
         windows::ui::SaveWorkspaceLayout(
-            state.windows.workspace, L"WorkspaceSessionV2");
+            state.Workspace().windows.workspace, L"WorkspaceSessionV2");
     }
-    if (state.tools.palette != nullptr) {
-        DestroyWindow(state.tools.palette);
-        state.tools.palette = nullptr;
-        state.windows.tool_palette = nullptr;
+    if (state.Workspace().tools.palette != nullptr) {
+        DestroyWindow(state.Workspace().tools.palette);
+        state.Workspace().tools.palette = nullptr;
+        state.Workspace().windows.tool_palette = nullptr;
     }
-    if (state.windows.tool_options != nullptr) {
-        DestroyWindow(state.windows.tool_options);
-        state.windows.tool_options = nullptr;
+    if (state.Workspace().windows.tool_options != nullptr) {
+        DestroyWindow(state.Workspace().windows.tool_options);
+        state.Workspace().windows.tool_options = nullptr;
     }
-    if (state.windows.color_pane != nullptr) {
-        DestroyWindow(state.windows.color_pane);
-        state.windows.color_pane = nullptr;
+    if (state.Workspace().windows.color_pane != nullptr) {
+        DestroyWindow(state.Workspace().windows.color_pane);
+        state.Workspace().windows.color_pane = nullptr;
     }
-    if (state.panes.layer_palette != nullptr) {
-        DestroyWindow(state.panes.layer_palette);
-        state.panes.layer_palette = nullptr;
-        state.windows.layer_palette = nullptr;
+    if (state.Workspace().panes.layer_palette != nullptr) {
+        DestroyWindow(state.Workspace().panes.layer_palette);
+        state.Workspace().panes.layer_palette = nullptr;
+        state.Workspace().windows.layer_palette = nullptr;
     }
-    if (state.batch.palette != nullptr) {
-        DestroyWindow(state.batch.palette);
-        state.batch.palette = nullptr;
+    if (state.Workspace().batch_palette != nullptr) {
+        DestroyWindow(state.Workspace().batch_palette);
+        state.Workspace().batch_palette = nullptr;
     }
     const InkpodStatus task_status = inkpod_task_release(&state.effects.task);
     const InkpodStatus batch_task_status = inkpod_batch_task_release(&state.batch.task);
@@ -127,15 +132,15 @@ InkpodStatus StopCore(AppContext& state) noexcept {
     return INKPOD_STATUS_OK;
 }
 
-int RunMessageLoop(AppContext& state) noexcept {
+int RunMessageLoop(ApplicationHost& state) noexcept {
     MSG message{};
     BOOL result{};
     while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
         bool dialog_message{};
         const std::array<HWND, 3U> palettes{
-            state.tools.palette,
-            state.panes.layer_palette,
-            state.batch.palette};
+            state.Workspace().tools.palette,
+            state.Workspace().panes.layer_palette,
+            state.Workspace().batch_palette};
         for (const HWND palette : palettes) {
             if (palette != nullptr && IsWindowVisible(palette) != FALSE
                 && IsDialogMessageW(palette, &message) != FALSE) {
@@ -159,6 +164,8 @@ int RunMessageLoop(AppContext& state) noexcept {
 
 Application::Application(ApplicationLaunch launch) noexcept
     : launch_(std::move(launch)) {}
+
+Application::~Application() = default;
 
 int Application::Run() {
     INITCOMMONCONTROLSEX controls{};
@@ -205,10 +212,16 @@ int Application::Run() {
         return 13;
     }
 
-    AppContext state{};
+    try {
+        host_ = std::make_unique<ApplicationHost>();
+    } catch (const std::bad_alloc&) {
+        return 14;
+    }
+    ApplicationHost& state = *host_;
     state.lifetime.instance = launch_.instance;
     state.lifetime.smoke_test = launch_.smoke_test;
     if (!InitializeFrontendRouting(state)) {
+        host_.reset();
         return 14;
     }
     HWND window = CreateWindowExW(
@@ -223,8 +236,10 @@ int Application::Run() {
         nullptr,
         nullptr,
         launch_.instance,
-        &state);
+        &state.Workspace());
     if (window == nullptr) {
+        state.ClearOwners();
+        host_.reset();
         return 14;
     }
 
@@ -236,6 +251,8 @@ int Application::Run() {
         }
         StopCore(state);
         DestroyWindow(window);
+        state.ClearOwners();
+        host_.reset();
         return 15;
     }
 
@@ -291,6 +308,8 @@ int Application::Run() {
         }
         StopCore(state);
         DestroyWindow(window);
+        state.ClearOwners();
+        host_.reset();
         return 16;
     }
     windows::ui::runtime::UpdateMenuState(state);
@@ -307,6 +326,8 @@ int Application::Run() {
 
     core_status = StopCore(state);
     DestroyWindow(window);
+    state.ClearOwners();
+    host_.reset();
     if (core_status != INKPOD_STATUS_OK && exit_code == 0) {
         return 18;
     }

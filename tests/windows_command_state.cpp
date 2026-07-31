@@ -1,7 +1,7 @@
 #include <array>
 #include <cstdint>
 
-#include "app/app_context.h"
+#include "app/frontend_state.h"
 #include "app/resource.h"
 #include "ui/command_catalog.h"
 #include "ui/command_state.h"

@@ -20,6 +20,8 @@ public:
     BatchController(
         app::AppLifetimeState& lifetime,
         app::MainWindowHandles& windows,
+        HWND& progress,
+        HWND& palette,
         app::BatchUiState& batch,
         app::CoreEngine& engine) noexcept;
 
@@ -37,7 +39,7 @@ public:
     static bool QueryProgress(
         void* context, ProgressDialogInfo& output) noexcept;
     static void CancelProgress(void* context) noexcept;
-    static void RefreshPalette(app::BatchUiState& batch) noexcept;
+    static void RefreshPalette(app::BatchUiState& batch, HWND palette) noexcept;
     static void ResetDerivedState(app::BatchUiState& batch) noexcept;
     static std::wstring ReportSummary(const InkpodBatchReport* report);
     static bool ChooseFolder(HWND owner, std::wstring& selected_path) noexcept;
@@ -47,6 +49,8 @@ private:
 
     app::AppLifetimeState& lifetime_;
     app::MainWindowHandles& windows_;
+    HWND& progress_;
+    HWND& palette_;
     app::BatchUiState& batch_;
     app::CoreEngine& engine_;
 };

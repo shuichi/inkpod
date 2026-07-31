@@ -214,6 +214,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_command_context.cmake")
 
 add_test(
+    NAME inkpod_windows_application_host_boundaries
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_application_host.cmake")
+
+add_test(
     NAME inkpod_msvc_runtime_discovery
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -306,11 +312,40 @@ if(WIN32)
         NAME inkpod_windows_workspace_layout
         COMMAND inkpod_windows_workspace_layout_tests)
 
+    add_executable(inkpod_windows_owner_model_tests
+        apps/windows/app/application_owner_graph.h
+        apps/windows/app/document_session.cpp
+        apps/windows/app/document_session.h
+        apps/windows/app/frontend_state.h
+        apps/windows/app/workspace_window.cpp
+        apps/windows/app/workspace_window.h
+        tests/windows_owner_model.cpp)
+    target_include_directories(inkpod_windows_owner_model_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_definitions(inkpod_windows_owner_model_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_owner_model_tests PRIVATE comctl32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_owner_model_tests)
+        target_compile_options(inkpod_windows_owner_model_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_owner_model
+        COMMAND inkpod_windows_owner_model_tests)
+
     add_executable(inkpod WIN32
-        apps/windows/app/app_context.h
+        apps/windows/app/application_host.cpp
+        apps/windows/app/application_host.h
+        apps/windows/app/application_owner_graph.h
         apps/windows/app/command_context.cpp
         apps/windows/app/command_context.h
+        apps/windows/app/document_session.cpp
+        apps/windows/app/document_session.h
+        apps/windows/app/frontend_state.h
         apps/windows/app/identity.h
+        apps/windows/app/workspace_window.cpp
+        apps/windows/app/workspace_window.h
         apps/windows/app/app_smoke.cpp
         apps/windows/app/app_smoke.h
         apps/windows/app/application.cpp
@@ -355,8 +390,15 @@ if(WIN32)
         apps/windows/ui/palette_window.cpp
         apps/windows/ui/palette_window.h
         apps/windows/ui/main_window.cpp
+        apps/windows/ui/main_window_command_router.cpp
+        apps/windows/ui/main_window_document_presenter.cpp
+        apps/windows/ui/main_window_input_router.cpp
+        apps/windows/ui/main_window_procedure.cpp
         apps/windows/ui/main_window_runtime.cpp
         apps/windows/ui/main_window_runtime.h
+        apps/windows/ui/main_window_runtime_internal.h
+        apps/windows/ui/main_window_status_presenter.cpp
+        apps/windows/ui/main_window_status_presenter.h
         apps/windows/ui/workspace_layout.cpp
         apps/windows/ui/workspace_layout.h
         tests/abi_smoke.cpp

@@ -9,7 +9,7 @@ file(READ "${main_source}" main_text)
 file(READ "${resource_source}" resource_text)
 
 set(route_begin "std::optional<LRESULT> RouteBatchCommand")
-set(route_end "std::optional<LRESULT> RouteMainWindowCommand")
+set(route_end "std::optional<LRESULT> RouteWindowLifecycleMessage")
 string(FIND "${main_text}" "${route_begin}" route_begin_offset)
 string(FIND "${main_text}" "${route_end}" route_end_offset)
 if(route_begin_offset LESS 0 OR route_end_offset LESS_EQUAL route_begin_offset)

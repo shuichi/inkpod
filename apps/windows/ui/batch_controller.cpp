@@ -10,7 +10,8 @@
 #include <utility>
 #include <vector>
 
-#include "app/app_context.h"
+#include "app/frontend_state.h"
+#include "ui/main_window.h"
 #include "app/core_engine.h"
 #include "dialogs/batch_dialog.h"
 
@@ -77,9 +78,16 @@ InkpodFilterInput FilterInputFor(const app::FilterJob& job) noexcept {
 BatchController::BatchController(
     app::AppLifetimeState& lifetime,
     app::MainWindowHandles& windows,
+    HWND& progress,
+    HWND& palette,
     app::BatchUiState& batch,
     app::CoreEngine& engine) noexcept
-    : lifetime_(lifetime), windows_(windows), batch_(batch), engine_(engine) {}
+    : lifetime_(lifetime),
+      windows_(windows),
+      progress_(progress),
+      palette_(palette),
+      batch_(batch),
+      engine_(engine) {}
 
 InkpodStatus BatchController::BuildGraph() noexcept {
     if (batch_.loaded_graph && batch_.graph != nullptr) {
@@ -230,7 +238,7 @@ InkpodStatus BatchController::Preview(InkpodBatchRunScope scope) noexcept {
             }
         }
     }
-    RefreshPalette(batch_);
+    RefreshPalette(batch_, palette_);
     return status;
 }
 
@@ -292,7 +300,7 @@ InkpodStatus BatchController::Start(
             }
         }
         inkpod_batch_task_release(&batch_.task);
-        RefreshPalette(batch_);
+        RefreshPalette(batch_, palette_);
         return status;
     }
 
@@ -303,13 +311,13 @@ InkpodStatus BatchController::Start(
         L"バッチ実行",
         L"バッチ処理中...",
         L"キャンセル中..."};
-    batch_.progress = CreateProgressDialog(
+    progress_ = CreateProgressDialog(
         lifetime_.instance, windows_.window, batch_.progress_dialog);
-    if (batch_.progress == nullptr) {
+    if (progress_ == nullptr) {
         inkpod_batch_task_release(&batch_.task);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    ShowWindow(batch_.progress, SW_SHOW);
+    ShowWindow(progress_, SW_SHOW);
     batch_.completion_context = context;
     const HWND window = windows_.window;
     if (!engine_.Enqueue(
@@ -333,8 +341,8 @@ InkpodStatus BatchController::Start(
                 PostMessageW(
                     window, completion_message, completion_status, generation);
             })) {
-        DestroyWindow(batch_.progress);
-        batch_.progress = nullptr;
+        DestroyWindow(progress_);
+        progress_ = nullptr;
         inkpod_batch_task_release(&batch_.task);
         batch_.completion_context = {};
         return INKPOD_STATUS_INVALID_STATE;
@@ -402,8 +410,9 @@ void BatchController::CancelProgress(void* context) noexcept {
     }
 }
 
-void BatchController::RefreshPalette(app::BatchUiState& batch) noexcept {
-    if (batch.palette == nullptr) {
+void BatchController::RefreshPalette(
+    app::BatchUiState& batch, HWND palette) noexcept {
+    if (palette == nullptr) {
         return;
     }
     BatchPaletteView view{};
@@ -477,7 +486,7 @@ void BatchController::RefreshPalette(app::BatchUiState& batch) noexcept {
     } catch (const std::bad_alloc&) {
         return;
     }
-    UpdateBatchPaletteDialog(batch.palette, view);
+    UpdateBatchPaletteDialog(palette, view);
 }
 
 void BatchController::ResetDerivedState(app::BatchUiState& batch) noexcept {

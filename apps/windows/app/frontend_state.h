@@ -4,16 +4,15 @@
 
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "command_context.h"
-#include "core_engine.h"
 #include "inkpod/core_ffi.h"
 #include "ui/command_state.h"
 #include "ui/dialogs/basic_dialogs.h"
@@ -21,7 +20,6 @@
 #include "ui/dialogs/effects_dialogs.h"
 #include "ui/dialogs/layer_palette.h"
 #include "ui/dialogs/tool_palette.h"
-#include "ui/main_window.h"
 #include "ui/panes/color_dock_pane.h"
 #include "ui/panes/tool_options_pane.h"
 #include "ui/shortcut_controller.h"
@@ -51,11 +49,6 @@ struct FilterJob {
     std::vector<InkpodCurvePoint> points;
     std::uint64_t plane_id{};
     bool preview{};
-};
-
-struct DocumentViewIdentityBinding {
-    std::uint64_t core_view_id{};
-    DocumentViewId frontend_view_id{};
 };
 
 struct LocatorAsyncResult {
@@ -101,7 +94,6 @@ struct AppLifetimeState {
 struct DocumentShellState {
     std::wstring current_path;
     std::wstring recovery_path;
-    InkpodClipboard* clipboard{};
     std::uint64_t smoke_layer_id{};
     std::uint64_t selection_layer_id{};
 };
@@ -170,8 +162,6 @@ struct ViewUiState {
     bool guide_drag_active{};
     std::uint32_t guide_drag_axis{};
     std::uint64_t guide_drag_id{};
-    std::array<DocumentViewIdentityBinding, 64U> identity_bindings{};
-    std::size_t identity_binding_count{};
     std::optional<DragToken> active_drag;
     std::mutex locator_results_mutex;
     std::deque<LocatorAsyncResult> locator_results;
@@ -220,7 +210,6 @@ struct EffectsUiState {
     bool adjustment_visible{true};
     std::vector<AdjustmentLayerUiState> adjustments;
     InkpodTask* task{};
-    HWND progress{};
     windows::ui::ProgressDialogState progress_dialog{};
     bool preview_prompt{};
     bool alpha_view{};
@@ -254,13 +243,11 @@ struct BatchUiState {
     bool loaded_graph{};
     std::wstring last_result;
 
-    HWND palette{};
     windows::ui::BatchPaletteDialogState palette_dialog{};
     InkpodBatchGraph* graph{};
     InkpodBatchPreview* preview{};
     InkpodBatchReport* report{};
     InkpodBatchTask* task{};
-    HWND progress{};
     windows::ui::ProgressDialogState progress_dialog{};
     std::optional<JobSessionId> job_id;
     CommandContext completion_context;
@@ -276,22 +263,6 @@ struct FrontendRoutingState {
     PaneInstanceId color_pane{};
     PaneInstanceId layer_pane{};
     PaneInstanceId batch_pane{};
-};
-
-struct AppContext {
-    AppLifetimeState lifetime;
-    MainWindowHandles windows;
-    DocumentShellState document;
-    ToolUiState tools;
-    ViewUiState view;
-    PaneUiState panes;
-    AnimationUiState animation;
-    EffectsUiState effects;
-    BatchUiState batch;
-    windows::ui::ShortcutUiState shortcuts;
-    windows::ui::CommandStateSet command_states;
-    FrontendRoutingState routing;
-    std::unique_ptr<CoreEngine> engine;
 };
 
 } // namespace inkpod::app

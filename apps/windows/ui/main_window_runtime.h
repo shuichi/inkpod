@@ -7,7 +7,7 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
-struct AppContext;
+class ApplicationHost;
 }
 
 namespace inkpod::windows::ui::runtime {
@@ -17,17 +17,17 @@ LRESULT CALLBACK MainWindowProcedure(
 
 // Application bootstrap uses these existing UI-coordinated document paths so
 // startup follows the same reset, Fit, and command-state behavior as commands.
-InkpodStatus CreateDefaultCell(app::AppContext& state) noexcept;
+InkpodStatus CreateDefaultCell(app::ApplicationHost& state) noexcept;
 InkpodStatus OpenDocumentFromPath(
-    app::AppContext& state, const std::wstring& path) noexcept;
+    app::ApplicationHost& state, const std::wstring& path) noexcept;
 InkpodStatus OpenRecoveryFromPath(
-    app::AppContext& state, const std::wstring& path) noexcept;
-void UpdateMenuState(app::AppContext& state) noexcept;
-void ShowInitialPalettes(app::AppContext& state) noexcept;
+    app::ApplicationHost& state, const std::wstring& path) noexcept;
+void UpdateMenuState(app::ApplicationHost& state) noexcept;
+void ShowInitialPalettes(app::ApplicationHost& state) noexcept;
 void ShowCoreError(
-    const app::AppContext& state,
+    const app::ApplicationHost& state,
     HWND owner,
     const wchar_t* operation) noexcept;
-bool PreTranslateKeyboardMessage(app::AppContext& state, const MSG& message) noexcept;
+bool PreTranslateKeyboardMessage(app::ApplicationHost& state, const MSG& message) noexcept;
 
 }  // namespace inkpod::windows::ui::runtime

@@ -2,9 +2,12 @@
 
 #include <windows.h>
 
+#include <memory>
 #include <string>
 
 namespace inkpod::app {
+
+class ApplicationHost;
 
 struct ApplicationLaunch {
     HINSTANCE instance{};
@@ -16,11 +19,13 @@ struct ApplicationLaunch {
 class Application final {
 public:
     explicit Application(ApplicationLaunch launch) noexcept;
+    ~Application();
 
     int Run();
 
 private:
     ApplicationLaunch launch_;
+    std::unique_ptr<ApplicationHost> host_;
 };
 
 }  // namespace inkpod::app

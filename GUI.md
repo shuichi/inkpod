@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1 完了、G2 未着手 |
+| 状態 | Active。G0、G1、G2 完了、G3 未着手 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -460,6 +460,12 @@ filter/effect、Batch、autosave、Canvas effect gesture、locator は発行時 
 - `wWinMain` の stack-local object lifetime に Core、Canvas、document の一意性を依存しない。
 - window procedure から process-global service へは `ApplicationHost` の明示 API 経由で到達する。
 - 現行 layout と操作に利用者向け差分がない。
+
+### 完了記録
+
+2026-07-31 に G2 を完了した。heap 所有の `ApplicationHost` を process composition root とし、一件ずつを保持する `WorkspaceWindowRegistry` と `DocumentRegistry`、window-local `WorkspaceWindow`、Core binding と file/recovery shell を持つ `DocumentSession`、Core view ID と presentation state を持つ `DocumentView` を導入した。top-level `HWND` の `GWLP_USERDATA` は `WorkspaceWindow` だけを保持し、window procedure はその明示的な `application` link を通して process service へ到達する。旧 `AppContext` は同じ milestone で除去した。
+
+`main_window_runtime.cpp` の所有者入口を window procedure、command router、input router、document presenter、status presenter に分割した。現段階の registry は一 window、一 document であり、一つの Core engine thread と Canvas ごとの renderer thread は従来どおりである。複数 Core handle の `CoreHost` は G3、共有 renderer thread と複数 `CanvasSurface` の `RendererHost` は G4 で行い、G2 ではその実装を先取りしていない。owner model test は workspace/document の各 allocation failure、invalid initialization、置換失敗時の旧 owner 保持、view 追加/切替/破棄、逆順 clear と live allocation の復帰を検証し、structural gate と native x64 smoke は owner boundary、従来の open/edit/Undo/Redo/save/reopen、window close、DPI、device lost を検証する。C ABI と利用者向け layout/操作は変更していない。
 
 ---
 

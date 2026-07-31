@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <new>
 
-#include "app/app_context.h"
+#include "app/frontend_state.h"
 #include "app/core_engine.h"
 
 namespace inkpod::windows::ui::panes {

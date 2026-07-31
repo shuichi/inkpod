@@ -70,9 +70,9 @@ main -> Application -> MainWindow/controllers -> CoreEngine -> C ABI
 
 - `main.cpp` parses launch mode and invokes `Application`; it contains no
   feature command, dialog, pane, message-loop, or smoke-scenario implementation.
-- `Application` owns Common Controls and COM initialization, resource/class
-  registration, window construction, Core-engine startup, recovery/default-cell
-  choice, the message loop, and ordered shutdown.
+- `Application` performs Common Controls and COM initialization, resource/class
+  registration, window construction, recovery/default-cell choice, the message
+  loop, and ordered shutdown through its heap-owned `ApplicationHost`.
 - MainWindow owns standard chrome, message normalization, presentation adapters,
   and command routing. Each production command ID has exactly one route owner.
 - Feature controllers receive typed inputs and only the state/services they own.
@@ -85,12 +85,38 @@ main -> Application -> MainWindow/controllers -> CoreEngine -> C ABI
 - The renderer is reached only through Canvas and the snapshot sink; controllers
   never call renderer APIs.
 
-`AppContext` is the private composition root for lifetime, window handles,
-document shell, tools, views, panes, animation, effects, Batch, the latest
-immutable command-state result, and `CoreEngine`. Owner-specific reset functions
-coordinate document replacement; callbacks and helpers receive narrow state,
-not the complete context. Cached IDs and metadata support presentation only and
-are not a C++ document model.
+`ApplicationHost` is the process-lifetime composition root. It owns global
+shortcut and clipboard state, the frontend routing/token registries, job state,
+the current `CoreEngine`, and single-entry workspace/document registries. The
+single-entry registries intentionally preserve the existing one-window,
+one-document behavior while making the future multiplicity boundary explicit.
+`WorkspaceWindow` owns the top-level `HWND`, all child/control handles,
+window-local command/menu/status presentation, pane handles, tool presentation,
+and layout state. `DocumentSession` owns the file/recovery shell and an explicit
+non-owning binding to its Core engine. Its `DocumentView` values bind strong
+frontend view identities to Core-local view IDs and exclusively own view
+presentation state such as flip, guide/grid display, pointer/locator state, and
+gesture presentation. All views in the session therefore share one Core handle,
+history, dirty state, and savepoint while retaining independent presentation.
+Cached IDs and metadata support presentation only and are not a C++ document
+model.
+
+The top-level window stores only its `WorkspaceWindow*` in `GWLP_USERDATA`.
+The window procedure reaches process services through the workspace's explicit
+`ApplicationHost*` link; it does not reinterpret the stored value as an
+application-global context. Construction is process host, workspace, document,
+view, window, then Core binding. Shutdown unbinds and stops Core work, destroys
+window-local controls and the top-level window, then clears document and
+workspace owners before releasing the application host. Registry initialization
+uses candidate ownership so invalid input or allocation failure leaves the
+previous owner intact, and a failed later owner creation unwinds earlier owners.
+
+The main-window responsibility entries are physically separated into window
+procedure, command router, keyboard/input router, document presenter, and status
+presenter translation units. The remaining runtime helpers are internal to
+those owner-facing entry points. G2 retains one `CoreEngine`, one Canvas, and the
+Canvas-owned renderer thread; multi-Core `CoreHost` and shared multi-surface
+`RendererHost` migrations are G3 and G4 respectively.
 
 The UI/Input thread owns the frontend target registry. Workspace window,
 document session, document view, editor group, Canvas, pane, job, and generation
@@ -111,8 +137,9 @@ monotonic values bound to a context/generation. Locator results are copied into
 a bounded mutex-protected queue and posted by value token, while an atomic
 pending token makes enqueue, allocation, replacement, and `PostMessage` failure
 drop only the matching request. No C++ or Rust-owned object pointer is placed in
-`WPARAM` or `LPARAM`. G1 retains one workspace, one document session, one editor
-group, and one Canvas; their ownership is split in G2 and later milestones.
+`WPARAM` or `LPARAM`. G2 retains one workspace, one document session, one editor
+group, and one Canvas behind the now-explicit owner boundaries; later milestones
+increase those registries and hosts without restoring an implicit active object.
 
 The fixed command-state catalog assigns all 281 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or

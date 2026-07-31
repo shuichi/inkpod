@@ -12,6 +12,8 @@ set(engine_header
     "${INKPOD_SOURCE_DIR}/apps/windows/app/core_engine.h")
 set(runtime_source
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp")
+set(command_router_source
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_command_router.cpp")
 set(effect_source
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/effects_controller.cpp")
 set(batch_source
@@ -24,6 +26,7 @@ foreach(required_source IN ITEMS
         "${context_source}"
         "${engine_header}"
         "${runtime_source}"
+        "${command_router_source}"
         "${effect_source}"
         "${batch_source}")
     if(NOT EXISTS "${required_source}")
@@ -81,6 +84,8 @@ foreach(required_context_contract IN ITEMS
 endforeach()
 
 file(READ "${runtime_source}" runtime_text)
+file(READ "${command_router_source}" command_router_text)
+string(APPEND runtime_text "\n${command_router_text}")
 foreach(required_runtime_contract IN ITEMS
         "IssueCommand("
         "TargetScopeForOwner"
@@ -99,7 +104,7 @@ foreach(required_runtime_contract IN ITEMS
 endforeach()
 
 string(REGEX MATCHALL
-    "Route[A-Za-z]+Command\\([^\\{]*const CommandContext&"
+    "Route[A-Za-z]+Command\\([^\\{]*const (app::)?CommandContext&"
     context_route_matches
     "${runtime_text}")
 list(LENGTH context_route_matches context_route_count)

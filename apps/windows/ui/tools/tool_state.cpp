@@ -1,6 +1,6 @@
 #include "tool_state.h"
 
-#include "app/app_context.h"
+#include "app/frontend_state.h"
 #include "canvas.h"
 #include "inkpod/core_ffi.h"
 
