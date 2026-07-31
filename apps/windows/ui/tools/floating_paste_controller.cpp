@@ -1,10 +1,10 @@
 #include "floating_paste_controller.h"
 
-#include "app/core_engine.h"
+#include "app/core_host.h"
 
 namespace inkpod::windows::ui::tools {
 
-FloatingPasteController::FloatingPasteController(app::CoreEngine& engine) noexcept
+FloatingPasteController::FloatingPasteController(app::CoreHost& engine) noexcept
     : engine_(engine) {}
 
 InkpodStatus FloatingPasteController::Begin(

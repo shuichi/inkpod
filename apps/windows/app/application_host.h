@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include "core_engine.h"
+#include "core_host.h"
 #include "document_session.h"
 #include "workspace_window.h"
 
@@ -23,6 +23,7 @@ public:
         DocumentSessionId id,
         Generation generation,
         DocumentViewId initial_view) noexcept;
+    void DetachCoreSessions() noexcept;
 
     AppLifetimeState lifetime{};
     EffectsUiState effects{};
@@ -30,7 +31,7 @@ public:
     windows::ui::ShortcutUiState shortcuts{};
     FrontendRoutingState routing{};
     InkpodClipboard* clipboard{};
-    std::unique_ptr<CoreEngine> engine;
+    std::unique_ptr<CoreHost> engine;
 
 private:
     WorkspaceWindowRegistry workspaces_;

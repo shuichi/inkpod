@@ -7,7 +7,7 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
-class CoreEngine;
+class CoreHost;
 struct AppLifetimeState;
 struct BatchUiState;
 struct MainWindowHandles;
@@ -23,7 +23,7 @@ public:
         HWND& progress,
         HWND& palette,
         app::BatchUiState& batch,
-        app::CoreEngine& engine) noexcept;
+        app::CoreHost& engine) noexcept;
 
     InkpodStatus Preview(InkpodBatchRunScope scope) noexcept;
     InkpodStatus Start(
@@ -52,7 +52,7 @@ private:
     HWND& progress_;
     HWND& palette_;
     app::BatchUiState& batch_;
-    app::CoreEngine& engine_;
+    app::CoreHost& engine_;
 };
 
 } // namespace inkpod::windows::ui

@@ -11,12 +11,12 @@
 
 namespace inkpod::app {
 
-class CoreEngine;
+class CoreHost;
 struct DocumentShellState;
 
 class DocumentShellController final {
 public:
-    DocumentShellController(DocumentShellState& state, CoreEngine& engine) noexcept;
+    DocumentShellController(DocumentShellState& state, CoreHost& engine) noexcept;
 
     InkpodStatus Save(const std::wstring& path) noexcept;
     InkpodStatus Open(const std::wstring& path) noexcept;
@@ -30,7 +30,7 @@ public:
 
 private:
     DocumentShellState& state_;
-    CoreEngine& engine_;
+    CoreHost& engine_;
 };
 
 bool WidePathToUtf8(

@@ -6,14 +6,14 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
-class CoreEngine;
+class CoreHost;
 }
 
 namespace inkpod::windows::ui::tools {
 
 class VectorController final {
 public:
-    explicit VectorController(app::CoreEngine& engine) noexcept;
+    explicit VectorController(app::CoreHost& engine) noexcept;
 
     InkpodStatus AddPath(const InkpodVectorPathInput& input) noexcept;
     InkpodStatus Erase(const InkpodVectorEraseInput& input) noexcept;
@@ -24,7 +24,7 @@ public:
     InkpodStatus CorrectWidth(const InkpodVectorWidthInput& input) noexcept;
 
 private:
-    app::CoreEngine& engine_;
+    app::CoreHost& engine_;
 };
 
 } // namespace inkpod::windows::ui::tools

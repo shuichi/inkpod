@@ -5,7 +5,7 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
-class CoreEngine;
+class CoreHost;
 struct PaneUiState;
 }
 
@@ -15,7 +15,7 @@ namespace inkpod::windows::ui::panes {
 // present this state, while color values stay Core-owned and copied in batches.
 class ColorPanesController final {
 public:
-    explicit ColorPanesController(app::CoreEngine& engine) noexcept;
+    explicit ColorPanesController(app::CoreHost& engine) noexcept;
 
     InkpodStatus RefreshModel(app::PaneUiState& panes) noexcept;
     InkpodStatus ReplacePalette(
@@ -26,7 +26,7 @@ private:
     InkpodStatus LoadPalette(std::vector<InkpodColorValue>& colors) noexcept;
     InkpodStatus LoadMainLineColor(InkpodColorValue& color) noexcept;
 
-    app::CoreEngine& engine_;
+    app::CoreHost& engine_;
 };
 
 } // namespace inkpod::windows::ui::panes

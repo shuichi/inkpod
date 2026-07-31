@@ -9,7 +9,7 @@
 
 namespace inkpod::app {
 
-class CoreEngine;
+class CoreHost;
 
 struct DocumentView final {
     DocumentViewId id{};
@@ -26,8 +26,8 @@ public:
     Generation generation{};
     DocumentShellState shell{};
 
-    void BindCore(CoreEngine* engine) noexcept;
-    [[nodiscard]] CoreEngine* Core() const noexcept;
+    void BindCore(CoreHost* host) noexcept;
+    [[nodiscard]] CoreHost* Core() const noexcept;
 
     void ResetViews(
         DocumentViewId initial_view,
@@ -50,7 +50,7 @@ public:
     [[nodiscard]] std::size_t ViewCount() const noexcept;
 
 private:
-    CoreEngine* core_{};
+    CoreHost* core_{};
     std::array<DocumentView, kMaximumViews> views_{};
     std::array<bool, kMaximumViews> view_used_{};
     std::size_t view_count_{};
@@ -59,18 +59,33 @@ private:
 
 class DocumentRegistry final {
 public:
+    static constexpr std::size_t kMaximumSessions = 64U;
+
     [[nodiscard]] bool InitializePlaceholder(Generation generation) noexcept;
     [[nodiscard]] bool Replace(
         DocumentSessionId id,
         Generation generation,
         DocumentViewId initial_view,
-        CoreEngine* core) noexcept;
+        CoreHost* core) noexcept;
+    [[nodiscard]] bool Add(
+        DocumentSessionId id,
+        Generation generation,
+        DocumentViewId initial_view,
+        CoreHost* core) noexcept;
+    [[nodiscard]] bool Remove(DocumentSessionId id) noexcept;
+    [[nodiscard]] bool Activate(DocumentSessionId id) noexcept;
+    [[nodiscard]] DocumentSession* Find(DocumentSessionId id) noexcept;
+    [[nodiscard]] const DocumentSession* Find(DocumentSessionId id) const noexcept;
+    void ClearCoreBindings() noexcept;
     void Clear() noexcept;
     [[nodiscard]] DocumentSession* Current() noexcept;
     [[nodiscard]] const DocumentSession* Current() const noexcept;
+    [[nodiscard]] std::size_t Count() const noexcept;
 
 private:
-    std::unique_ptr<DocumentSession> current_;
+    std::array<std::unique_ptr<DocumentSession>, kMaximumSessions> sessions_{};
+    std::size_t current_index_{kMaximumSessions};
+    std::size_t count_{};
 };
 
 }  // namespace inkpod::app

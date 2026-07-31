@@ -5,11 +5,11 @@
 #include <new>
 
 #include "app/frontend_state.h"
-#include "app/core_engine.h"
+#include "app/core_host.h"
 
 namespace inkpod::windows::ui::panes {
 
-ColorPanesController::ColorPanesController(app::CoreEngine& engine) noexcept
+ColorPanesController::ColorPanesController(app::CoreHost& engine) noexcept
     : engine_(engine) {}
 
 InkpodStatus ColorPanesController::RefreshModel(

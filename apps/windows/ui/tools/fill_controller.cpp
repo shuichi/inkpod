@@ -1,10 +1,10 @@
 #include "fill_controller.h"
 
-#include "app/core_engine.h"
+#include "app/core_host.h"
 
 namespace inkpod::windows::ui::tools {
 
-FillController::FillController(app::CoreEngine& engine) noexcept : engine_(engine) {}
+FillController::FillController(app::CoreHost& engine) noexcept : engine_(engine) {}
 
 InkpodStatus FillController::Apply(
     InkpodFillInput input,

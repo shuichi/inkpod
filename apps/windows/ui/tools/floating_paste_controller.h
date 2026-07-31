@@ -5,14 +5,14 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
-class CoreEngine;
+class CoreHost;
 }
 
 namespace inkpod::windows::ui::tools {
 
 class FloatingPasteController final {
 public:
-    explicit FloatingPasteController(app::CoreEngine& engine) noexcept;
+    explicit FloatingPasteController(app::CoreHost& engine) noexcept;
 
     InkpodStatus Begin(
         const InkpodClipboard* clipboard, std::uint32_t mode) noexcept;
@@ -20,7 +20,7 @@ public:
     InkpodStatus Finish(bool commit) noexcept;
 
 private:
-    app::CoreEngine& engine_;
+    app::CoreHost& engine_;
 };
 
 } // namespace inkpod::windows::ui::tools

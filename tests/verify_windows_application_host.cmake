@@ -35,7 +35,7 @@ file(READ "${APP_DIR}/application_host.h" HOST)
 foreach(REQUIRED IN ITEMS
         "WorkspaceWindowRegistry"
         "DocumentRegistry"
-        "std::unique_ptr<CoreEngine>"
+        "std::unique_ptr<CoreHost>"
         "InkpodClipboard\\* clipboard")
     if(NOT HOST MATCHES "${REQUIRED}")
         message(FATAL_ERROR "ApplicationHost is missing ownership: ${REQUIRED}")
@@ -54,7 +54,7 @@ foreach(REQUIRED IN ITEMS
         "class DocumentSession"
         "struct DocumentView"
         "ViewUiState presentation"
-        "CoreEngine\\* core_"
+        "CoreHost\\* core_"
         "DocumentSessionId id"
         "Generation generation")
     if(NOT DOCUMENT MATCHES "${REQUIRED}")

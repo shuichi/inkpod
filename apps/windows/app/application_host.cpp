@@ -57,10 +57,34 @@ bool ApplicationHost::ReplaceDocumentSession(
     DocumentViewId initial_view) noexcept {
     if (id != routing.targets.DocumentSession()
         || generation != routing.targets.CurrentGeneration()
-        || initial_view != routing.targets.ActiveDocumentView()) {
+        || initial_view != routing.targets.ActiveDocumentView()
+        || engine == nullptr) {
         return false;
     }
-    return documents_.Replace(id, generation, initial_view, engine.get());
+    DocumentSession& current = Document();
+    const DocumentSessionId old_id = current.id;
+    const Generation old_generation = current.generation;
+    const bool had_core = old_id && old_generation
+        && engine->HasSession(old_id, old_generation);
+    const InkpodStatus binding_status = had_core
+        ? engine->RebindSession(old_id, old_generation, id, generation)
+        : engine->CreateSession(id, generation);
+    if (binding_status != INKPOD_STATUS_OK) {
+        return false;
+    }
+    if (!documents_.Replace(id, generation, initial_view, engine.get())) {
+        if (had_core) {
+            (void)engine->RebindSession(id, generation, old_id, old_generation);
+        } else {
+            (void)engine->CloseSession(id, generation);
+        }
+        return false;
+    }
+    return engine->SetActiveSession(id, generation);
+}
+
+void ApplicationHost::DetachCoreSessions() noexcept {
+    documents_.ClearCoreBindings();
 }
 
 }  // namespace inkpod::app

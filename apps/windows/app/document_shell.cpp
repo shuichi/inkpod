@@ -15,7 +15,7 @@
 #include <utility>
 
 #include "frontend_state.h"
-#include "core_engine.h"
+#include "core_host.h"
 
 namespace inkpod::app {
 namespace {
@@ -69,7 +69,7 @@ bool RecoveryDirectory(std::wstring& output) noexcept {
 } // namespace
 
 DocumentShellController::DocumentShellController(
-    DocumentShellState& state, CoreEngine& engine) noexcept
+    DocumentShellState& state, CoreHost& engine) noexcept
     : state_(state), engine_(engine) {}
 
 InkpodStatus DocumentShellController::Save(const std::wstring& path) noexcept {

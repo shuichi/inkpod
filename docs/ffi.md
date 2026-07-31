@@ -65,6 +65,13 @@ ABI v2 は、公開名から実装時のマイルストーン番号を除いた�
 保存／open、snapshot 構築、destroy は、すべて Core を作成した Core engine thread から呼ぶ。
 違反は `INKPOD_STATUS_WRONG_THREAD` となり、handle や出力の所有権は移動しない。
 
+Windows frontend の `CoreHost` は複数の `InkpodCore` owner 変数を一つの Core engine thread 上に
+保持する。各 owner は `DocumentSessionId` と `Generation` の組で選択し、work item は投入時にその組を
+値で確定する。同じ数値の Core-local document/view ID や revision は session をまたいだ routing key に
+しない。session close は先に新規投入を拒否し、受理済み work と live stroke を解決してから、作成した
+同じ thread 上で該当 owner だけを destroy する。この frontend registry は C ABI や Rust handle の
+ownership 契約を変更しない。
+
 例外は immutable handle と atomic task である。
 
 - snapshot の accessor と release は任意 thread で呼べる。同じ snapshot の参照と release は外部同期する。
@@ -232,8 +239,9 @@ InkpodCore* core = nullptr;
 Check(inkpod_core_create(&config, &core));
 ```
 
-`core` owner 変数は Core engine object が一意に保持する。raw Core pointer を UI message の
-`WPARAM`/`LPARAM` に積まない。
+各 `core` owner 変数は CoreHost の session entry が一意に保持する。raw Core pointer を UI message の
+`WPARAM`/`LPARAM` に積まず、UI 通知は session ID/generation を含む bounded queue の value token で
+取り出す。
 
 ### 2. new または open
 

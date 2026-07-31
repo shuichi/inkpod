@@ -9,7 +9,7 @@ set(context_header
 set(context_source
     "${INKPOD_SOURCE_DIR}/apps/windows/app/command_context.cpp")
 set(engine_header
-    "${INKPOD_SOURCE_DIR}/apps/windows/app/core_engine.h")
+    "${INKPOD_SOURCE_DIR}/apps/windows/app/core_host.h")
 set(runtime_source
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp")
 set(command_router_source
@@ -133,7 +133,8 @@ file(READ "${engine_header}" engine_text)
 foreach(required_engine_contract IN ITEMS
         "CommandContext context"
         "const CommandContext& context"
-        "SetCommandGeneration")
+        "DocumentSessionId session"
+        "Generation generation")
     string(FIND
         "${engine_text}" "${required_engine_contract}" contract_offset)
     if(contract_offset LESS 0)

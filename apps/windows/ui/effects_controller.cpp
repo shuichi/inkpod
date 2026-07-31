@@ -2,7 +2,7 @@
 
 #include "app/frontend_state.h"
 #include "ui/main_window.h"
-#include "app/core_engine.h"
+#include "app/core_host.h"
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::windows::ui {
@@ -12,7 +12,7 @@ EffectsController::EffectsController(
     app::MainWindowHandles& windows,
     HWND& progress,
     app::EffectsUiState& effects,
-    app::CoreEngine& engine) noexcept
+    app::CoreHost& engine) noexcept
     : lifetime_(lifetime),
       windows_(windows),
       progress_(progress),

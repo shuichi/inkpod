@@ -76,10 +76,10 @@ bool HasCompleteCatalog(std::span<const InkpodShortcutSequence> bindings) noexce
 }
 
 InkpodStatus SetCoreBindings(
-    app::CoreEngine& engine,
+    app::CoreHost& engine,
     std::span<const InkpodShortcutSequence> bindings,
     bool defaults) noexcept {
-    return engine.Invoke(
+    return engine.InvokeAll(
         [bindings, defaults](InkpodCore* core) {
             return defaults
                 ? inkpod_core_shortcut_defaults_set(
@@ -91,8 +91,38 @@ InkpodStatus SetCoreBindings(
         false);
 }
 
+InkpodStatus UpdateSessionInitializer(
+    app::CoreHost& engine,
+    std::span<const InkpodShortcutSequence> defaults,
+    std::span<const InkpodShortcutSequence> bindings) noexcept {
+    try {
+        std::vector<InkpodShortcutSequence> default_copy(defaults.begin(), defaults.end());
+        std::vector<InkpodShortcutSequence> binding_copy(bindings.begin(), bindings.end());
+        engine.SetSessionInitializer(
+            [defaults = std::move(default_copy), current = std::move(binding_copy)](
+                InkpodCore* core) {
+                InkpodStatus status = inkpod_core_shortcut_defaults_set(
+                    core,
+                    defaults.data(),
+                    defaults.size(),
+                    sizeof(InkpodShortcutSequence));
+                if (status == INKPOD_STATUS_OK) {
+                    status = inkpod_core_shortcut_sequences_set(
+                        core,
+                        current.data(),
+                        current.size(),
+                        sizeof(InkpodShortcutSequence));
+                }
+                return status;
+            });
+        return INKPOD_STATUS_OK;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+}
+
 InkpodStatus CopyCoreBindings(
-    app::CoreEngine& engine,
+    app::CoreHost& engine,
     std::vector<InkpodShortcutSequence>& bindings) noexcept {
     std::uint64_t count{};
     InkpodStatus status = engine.Invoke(
@@ -246,16 +276,18 @@ void UpdatePendingText(ShortcutUiState& state) noexcept {
 }  // namespace
 
 InkpodStatus InitializeShortcuts(
-    app::CoreEngine& engine,
+    app::CoreHost& engine,
     ShortcutUiState& state,
     bool load_persisted) noexcept {
     std::vector<InkpodShortcutSequence> defaults;
+    std::vector<InkpodShortcutSequence> catalog_defaults;
     try {
         defaults = BuildDefaultShortcutSequences();
+        catalog_defaults = defaults;
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    InkpodStatus status = SetCoreBindings(engine, defaults, true);
+    InkpodStatus status = SetCoreBindings(engine, catalog_defaults, true);
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
@@ -269,15 +301,20 @@ InkpodStatus InitializeShortcuts(
         }
     }
     state.bindings = std::move(defaults);
+    status = UpdateSessionInitializer(
+        engine, catalog_defaults, state.bindings);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
     ClearPendingShortcut(state);
     return INKPOD_STATUS_OK;
 }
 
 InkpodStatus ResetShortcuts(
-    app::CoreEngine& engine,
+    app::CoreHost& engine,
     ShortcutUiState& state,
     bool persist) noexcept {
-    const InkpodStatus status = engine.Invoke(
+    const InkpodStatus status = engine.InvokeAll(
         [](InkpodCore* core) { return inkpod_core_shortcut_reset(core); }, false, false);
     if (status != INKPOD_STATUS_OK) {
         return status;
@@ -288,6 +325,17 @@ InkpodStatus ResetShortcuts(
         return copy_status;
     }
     state.bindings = std::move(bindings);
+    std::vector<InkpodShortcutSequence> defaults;
+    try {
+        defaults = BuildDefaultShortcutSequences();
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const InkpodStatus initializer_status = UpdateSessionInitializer(
+        engine, defaults, state.bindings);
+    if (initializer_status != INKPOD_STATUS_OK) {
+        return initializer_status;
+    }
     ClearPendingShortcut(state);
     if (persist && !SavePersistedShortcuts(state.bindings)) {
         return INKPOD_STATUS_IO_ERROR;
@@ -296,7 +344,7 @@ InkpodStatus ResetShortcuts(
 }
 
 InkpodStatus RebindShortcut(
-    app::CoreEngine& engine,
+    app::CoreHost& engine,
     ShortcutUiState& state,
     const InkpodShortcutSequence& replacement,
     bool persist) noexcept {
@@ -339,6 +387,17 @@ InkpodStatus RebindShortcut(
         return status;
     }
     state.bindings = std::move(candidate);
+    std::vector<InkpodShortcutSequence> defaults;
+    try {
+        defaults = BuildDefaultShortcutSequences();
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const InkpodStatus initializer_status = UpdateSessionInitializer(
+        engine, defaults, state.bindings);
+    if (initializer_status != INKPOD_STATUS_OK) {
+        return initializer_status;
+    }
     ClearPendingShortcut(state);
     if (persist && !SavePersistedShortcuts(state.bindings)) {
         return INKPOD_STATUS_IO_ERROR;

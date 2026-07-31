@@ -5,14 +5,14 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
-class CoreEngine;
+class CoreHost;
 }
 
 namespace inkpod::windows::ui::tools {
 
 class FillController final {
 public:
-    explicit FillController(app::CoreEngine& engine) noexcept;
+    explicit FillController(app::CoreHost& engine) noexcept;
 
     InkpodStatus Apply(
         InkpodFillInput input,
@@ -20,7 +20,7 @@ public:
         InkpodFillResult& result) noexcept;
 
 private:
-    app::CoreEngine& engine_;
+    app::CoreHost& engine_;
 };
 
 } // namespace inkpod::windows::ui::tools

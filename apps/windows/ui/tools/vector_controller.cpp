@@ -4,11 +4,11 @@
 #include <cstddef>
 #include <new>
 
-#include "app/core_engine.h"
+#include "app/core_host.h"
 
 namespace inkpod::windows::ui::tools {
 
-VectorController::VectorController(app::CoreEngine& engine) noexcept
+VectorController::VectorController(app::CoreHost& engine) noexcept
     : engine_(engine) {}
 
 InkpodStatus VectorController::AddPath(

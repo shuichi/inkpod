@@ -11,7 +11,7 @@
 #include "application_host.h"
 #include "app_smoke.h"
 #include "com_runtime.h"
-#include "core_engine.h"
+#include "core_host.h"
 #include "document_shell.h"
 #include "inkpod/core_ffi.h"
 #include "renderer/canvas.h"
@@ -47,7 +47,7 @@ bool InitializeFrontendRouting(ApplicationHost& state) noexcept {
 
 InkpodStatus StartCore(ApplicationHost& state) noexcept {
     try {
-        state.engine = std::make_unique<CoreEngine>();
+        state.engine = std::make_unique<CoreHost>();
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -57,9 +57,13 @@ InkpodStatus StartCore(ApplicationHost& state) noexcept {
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
-    state.engine->SetCommandGeneration(
-        state.routing.targets.CurrentGeneration());
-    state.Document().BindCore(state.engine.get());
+    const DocumentSessionId session = state.routing.targets.ReplaceDocument();
+    if (!state.ReplaceDocumentSession(
+            session,
+            state.routing.targets.CurrentGeneration(),
+            state.routing.targets.ActiveDocumentView())) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
     return windows::ui::InitializeShortcuts(
         *state.engine, state.shortcuts, !state.lifetime.smoke_test);
 }
@@ -73,7 +77,7 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
         inkpod_batch_task_cancel(state.batch.task);
     }
     if (state.engine != nullptr) {
-        state.Document().BindCore(nullptr);
+        state.DetachCoreSessions();
         state.engine->Stop();
         state.engine.reset();
     }

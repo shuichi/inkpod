@@ -5,14 +5,14 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
-class CoreEngine;
+class CoreHost;
 }
 
 namespace inkpod::windows::ui::tools {
 
 class SelectionController final {
 public:
-    explicit SelectionController(app::CoreEngine& engine) noexcept;
+    explicit SelectionController(app::CoreHost& engine) noexcept;
 
     InkpodStatus Apply(
         InkpodSelectionInput input,
@@ -24,7 +24,7 @@ public:
         InkpodSelectionOperation operation) noexcept;
 
 private:
-    app::CoreEngine& engine_;
+    app::CoreHost& engine_;
 };
 
 } // namespace inkpod::windows::ui::tools

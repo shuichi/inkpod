@@ -5,14 +5,14 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
-class CoreEngine;
+class CoreHost;
 }
 
 namespace inkpod::windows::ui::tools {
 
 class ViewController final {
 public:
-    explicit ViewController(app::CoreEngine& engine) noexcept;
+    explicit ViewController(app::CoreHost& engine) noexcept;
 
     InkpodStatus Apply(
         std::uint64_t view_id, const InkpodViewInput& input) noexcept;
@@ -26,7 +26,7 @@ public:
     InkpodStatus SetGrid(const InkpodGridInput& input) noexcept;
 
 private:
-    app::CoreEngine& engine_;
+    app::CoreHost& engine_;
 };
 
 } // namespace inkpod::windows::ui::tools

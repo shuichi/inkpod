@@ -26,7 +26,7 @@
 #include "app/application_host.h"
 #include "canvas.h"
 #include "app/clipboard_adapter.h"
-#include "app/core_engine.h"
+#include "app/core_host.h"
 #include "app/document_shell.h"
 #include "inkpod/core_ffi.h"
 #include "app/resource.h"

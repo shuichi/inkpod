@@ -7,7 +7,7 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
-class CoreEngine;
+class CoreHost;
 }
 
 namespace inkpod::windows::ui::panes {
@@ -50,7 +50,7 @@ struct SequencePaneCell {
 // without coupling Core state to an HWND.
 class DocumentPanesController final {
 public:
-    explicit DocumentPanesController(app::CoreEngine& engine) noexcept;
+    explicit DocumentPanesController(app::CoreHost& engine) noexcept;
 
     InkpodStatus LoadTree(
         std::uint64_t requested_layer_id,
@@ -69,7 +69,7 @@ public:
         InkpodLocatorOutput& output) noexcept;
 
 private:
-    app::CoreEngine& engine_;
+    app::CoreHost& engine_;
 };
 
 } // namespace inkpod::windows::ui::panes

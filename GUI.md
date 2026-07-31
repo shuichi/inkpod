@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1、G2 完了、G3 未着手 |
+| 状態 | Active。G0、G1、G2、G3 完了、G4 未着手 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -512,6 +512,14 @@ DocumentSessionId -> CoreEntry {
 - 同時に二つ以上の `DocumentSession` を作成、操作、保存、破棄できる。
 - C ABI ownership と thread 規則に変更がない、または必要な変更が header、Rust、test、`docs/ffi.md` で同時に完成している。
 - GUI はまだ一文書表示でもよいが、backend ownership は複数文書対応になっている。
+
+### 完了記録
+
+2026-08-01 に G3 を完了した。`CoreEngine` を複数 Core handle を所有する `CoreHost` へ置き換え、一つの長寿命 owner thread 上で `DocumentSessionId` と generation を key に create、command/input、snapshot、save、close、destroy を順序付ける bounded session registry を導入した。session ごとに Core-local view、stroke/sequence/pending state、document info、metric、ABI 呼び出し直後に copy した diagnostic を分離し、同じ Core-local ID/revision が異なる session で発生しても混線しない。close は新規 work を先に拒否し、受理済み work と live stroke を解決してから owner thread 上で handle を destroy する。UI 通知は session/generation/context を保持する pointer-free queue token とし、stale generation は再解決せず破棄する。
+
+`DocumentRegistry` は複数 `DocumentSession` を保持でき、各 session は一つの非所有 `CoreHost` binding を持つ。application-global shortcut 設定は `ApplicationHost` を正本にし、既存 Core への一括同期と新規 Core initializer の両方を接続した。G3 の可視 UI は従来どおり一文書、一 Canvas であり、inactive session の snapshot はその Canvas へ publish しない。共有 renderer thread と session/view/canvas envelope は G4 とし、長時間処理が一つの CoreHost lane 上で直列になる制約は既知差分として残す。
+
+C ABI は変更していない。二 Core の同値 local ID/revision、edit/dirty/savepoint/Undo/Redo/save-reopen の分離、invalid/cancel/save failure の隔離、close race、stale generation、owner-thread destroy、global initializer、pointer-free notification を native CoreHost test で検証した。2026-08-01 の Windows 11 x64 Debug strict build と CTest 17/17、Rust 177 tests と 1 doctest、format、clippy、whitespace check はすべて成功した。
 
 ---
 

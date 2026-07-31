@@ -7,7 +7,7 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
-class CoreEngine;
+class CoreHost;
 struct AppLifetimeState;
 struct EffectsUiState;
 struct MainWindowHandles;
@@ -24,7 +24,7 @@ public:
         app::MainWindowHandles& windows,
         HWND& progress,
         app::EffectsUiState& effects,
-        app::CoreEngine& engine) noexcept;
+        app::CoreHost& engine) noexcept;
 
     InkpodStatus StartTask(
         const app::CommandContext& context,
@@ -41,7 +41,7 @@ private:
     app::MainWindowHandles& windows_;
     HWND& progress_;
     app::EffectsUiState& effects_;
-    app::CoreEngine& engine_;
+    app::CoreHost& engine_;
 };
 
 } // namespace inkpod::windows::ui

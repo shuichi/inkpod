@@ -220,6 +220,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_application_host.cmake")
 
 add_test(
+    NAME inkpod_windows_core_host_boundaries
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_core_host.cmake")
+
+add_test(
     NAME inkpod_msvc_runtime_discovery
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -334,6 +340,29 @@ if(WIN32)
         NAME inkpod_windows_owner_model
         COMMAND inkpod_windows_owner_model_tests)
 
+    add_executable(inkpod_windows_core_host_tests
+        apps/windows/app/core_host.cpp
+        apps/windows/app/core_host.h
+        apps/windows/app/command_context.h
+        apps/windows/app/identity.h
+        tests/windows_core_host.cpp)
+    target_include_directories(inkpod_windows_core_host_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_SOURCE_DIR}/apps/windows/renderer"
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_definitions(inkpod_windows_core_host_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_core_host_tests PRIVATE
+        inkpod_ffi_static
+        user32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_core_host_tests)
+        target_compile_options(inkpod_windows_core_host_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_core_host
+        COMMAND inkpod_windows_core_host_tests)
+
     add_executable(inkpod WIN32
         apps/windows/app/application_host.cpp
         apps/windows/app/application_host.h
@@ -353,7 +382,7 @@ if(WIN32)
         apps/windows/app/clipboard_adapter.cpp
         apps/windows/app/com_runtime.cpp
         apps/windows/app/main.cpp
-        apps/windows/app/core_engine.cpp
+        apps/windows/app/core_host.cpp
         apps/windows/app/document_shell.cpp
         apps/windows/app/launch_options.cpp
         apps/windows/app/launch_options.h

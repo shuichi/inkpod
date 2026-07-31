@@ -5,7 +5,7 @@
 #include <new>
 #include <utility>
 
-#include "app/core_engine.h"
+#include "app/core_host.h"
 
 namespace inkpod::windows::ui::panes {
 namespace {
@@ -62,7 +62,7 @@ InkpodStatus LoadLayerThumbnail(
 
 } // namespace
 
-DocumentPanesController::DocumentPanesController(app::CoreEngine& engine) noexcept
+DocumentPanesController::DocumentPanesController(app::CoreHost& engine) noexcept
     : engine_(engine) {}
 
 InkpodStatus DocumentPanesController::LoadTree(

@@ -1,10 +1,10 @@
 #include "selection_controller.h"
 
-#include "app/core_engine.h"
+#include "app/core_host.h"
 
 namespace inkpod::windows::ui::tools {
 
-SelectionController::SelectionController(app::CoreEngine& engine) noexcept
+SelectionController::SelectionController(app::CoreHost& engine) noexcept
     : engine_(engine) {}
 
 InkpodStatus SelectionController::Apply(

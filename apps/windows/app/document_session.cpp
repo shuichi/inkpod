@@ -47,11 +47,11 @@ void InitializeView(
 
 }  // namespace
 
-void DocumentSession::BindCore(CoreEngine* engine) noexcept {
-    core_ = engine;
+void DocumentSession::BindCore(CoreHost* host) noexcept {
+    core_ = host;
 }
 
-CoreEngine* DocumentSession::Core() const noexcept {
+CoreHost* DocumentSession::Core() const noexcept {
     return core_;
 }
 
@@ -166,13 +166,18 @@ bool DocumentRegistry::InitializePlaceholder(Generation generation) noexcept {
     if (!generation) {
         return false;
     }
+    std::unique_ptr<DocumentSession> candidate;
     try {
-        current_ = std::make_unique<DocumentSession>();
+        candidate = std::make_unique<DocumentSession>();
     } catch (const std::bad_alloc&) {
         return false;
     }
-    current_->generation = generation;
-    current_->ResetViews({}, generation);
+    candidate->generation = generation;
+    candidate->ResetViews({}, generation);
+    Clear();
+    sessions_[0] = std::move(candidate);
+    current_index_ = 0U;
+    count_ = 1U;
     return true;
 }
 
@@ -180,34 +185,129 @@ bool DocumentRegistry::Replace(
     DocumentSessionId id,
     Generation generation,
     DocumentViewId initial_view,
-    CoreEngine* core) noexcept {
-    if (!id || !generation || !initial_view) {
+    CoreHost* core) noexcept {
+    if (!id || !generation || !initial_view || core == nullptr) {
         return false;
     }
-    if (current_ == nullptr) {
-        try {
-            current_ = std::make_unique<DocumentSession>();
-        } catch (const std::bad_alloc&) {
-            return false;
-        }
+    DocumentSession* current = Current();
+    const DocumentSession* duplicate = Find(id);
+    if (duplicate != nullptr && duplicate != current) {
+        return false;
     }
-    current_->id = id;
-    current_->generation = generation;
-    current_->BindCore(core);
-    current_->ResetViews(initial_view, generation);
+    if (current == nullptr) {
+        return Add(id, generation, initial_view, core);
+    }
+    current->id = id;
+    current->generation = generation;
+    current->BindCore(core);
+    current->ResetViews(initial_view, generation);
     return true;
 }
 
+bool DocumentRegistry::Add(
+    DocumentSessionId id,
+    Generation generation,
+    DocumentViewId initial_view,
+    CoreHost* core) noexcept {
+    if (!id || !generation || !initial_view || core == nullptr
+        || count_ >= sessions_.size() || Find(id) != nullptr) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < sessions_.size(); ++index) {
+        if (sessions_[index] != nullptr) {
+            continue;
+        }
+        try {
+            sessions_[index] = std::make_unique<DocumentSession>();
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+        sessions_[index]->id = id;
+        sessions_[index]->generation = generation;
+        sessions_[index]->BindCore(core);
+        sessions_[index]->ResetViews(initial_view, generation);
+        current_index_ = index;
+        ++count_;
+        return true;
+    }
+    return false;
+}
+
+bool DocumentRegistry::Remove(DocumentSessionId id) noexcept {
+    for (std::size_t index = 0U; index < sessions_.size(); ++index) {
+        if (sessions_[index] == nullptr || sessions_[index]->id != id) {
+            continue;
+        }
+        sessions_[index].reset();
+        --count_;
+        if (current_index_ == index) {
+            current_index_ = kMaximumSessions;
+            for (std::size_t candidate = 0U; candidate < sessions_.size(); ++candidate) {
+                if (sessions_[candidate] != nullptr) {
+                    current_index_ = candidate;
+                    break;
+                }
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+bool DocumentRegistry::Activate(DocumentSessionId id) noexcept {
+    for (std::size_t index = 0U; index < sessions_.size(); ++index) {
+        if (sessions_[index] != nullptr && sessions_[index]->id == id) {
+            current_index_ = index;
+            return true;
+        }
+    }
+    return false;
+}
+
+DocumentSession* DocumentRegistry::Find(DocumentSessionId id) noexcept {
+    return const_cast<DocumentSession*>(
+        static_cast<const DocumentRegistry&>(*this).Find(id));
+}
+
+const DocumentSession* DocumentRegistry::Find(DocumentSessionId id) const noexcept {
+    for (const auto& session : sessions_) {
+        if (session != nullptr && session->id == id) {
+            return session.get();
+        }
+    }
+    return nullptr;
+}
+
+void DocumentRegistry::ClearCoreBindings() noexcept {
+    for (auto& session : sessions_) {
+        if (session != nullptr) {
+            session->BindCore(nullptr);
+        }
+    }
+}
+
 void DocumentRegistry::Clear() noexcept {
-    current_.reset();
+    for (auto& session : sessions_) {
+        session.reset();
+    }
+    current_index_ = kMaximumSessions;
+    count_ = 0U;
 }
 
 DocumentSession* DocumentRegistry::Current() noexcept {
-    return current_.get();
+    return current_index_ < sessions_.size()
+        ? sessions_[current_index_].get()
+        : nullptr;
 }
 
 const DocumentSession* DocumentRegistry::Current() const noexcept {
-    return current_.get();
+    return current_index_ < sessions_.size()
+        ? sessions_[current_index_].get()
+        : nullptr;
+}
+
+std::size_t DocumentRegistry::Count() const noexcept {
+    return count_;
 }
 
 }  // namespace inkpod::app

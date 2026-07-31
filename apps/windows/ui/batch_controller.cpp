@@ -12,7 +12,7 @@
 
 #include "app/frontend_state.h"
 #include "ui/main_window.h"
-#include "app/core_engine.h"
+#include "app/core_host.h"
 #include "dialogs/batch_dialog.h"
 
 namespace inkpod::windows::ui {
@@ -81,7 +81,7 @@ BatchController::BatchController(
     HWND& progress,
     HWND& palette,
     app::BatchUiState& batch,
-    app::CoreEngine& engine) noexcept
+    app::CoreHost& engine) noexcept
     : lifetime_(lifetime),
       windows_(windows),
       progress_(progress),

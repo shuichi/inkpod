@@ -5,11 +5,11 @@
 #include <new>
 #include <vector>
 
-#include "app/core_engine.h"
+#include "app/core_host.h"
 
 namespace inkpod::windows::ui::tools {
 
-ViewController::ViewController(app::CoreEngine& engine) noexcept : engine_(engine) {}
+ViewController::ViewController(app::CoreHost& engine) noexcept : engine_(engine) {}
 
 InkpodStatus ViewController::Apply(
     std::uint64_t view_id, const InkpodViewInput& input) noexcept {

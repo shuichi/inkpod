@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "app/core_engine.h"
+#include "app/core_host.h"
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::windows::ui {
@@ -19,17 +19,17 @@ struct ShortcutUiState {
 };
 
 InkpodStatus InitializeShortcuts(
-    app::CoreEngine& engine,
+    app::CoreHost& engine,
     ShortcutUiState& state,
     bool load_persisted) noexcept;
 
 InkpodStatus ResetShortcuts(
-    app::CoreEngine& engine,
+    app::CoreHost& engine,
     ShortcutUiState& state,
     bool persist) noexcept;
 
 InkpodStatus RebindShortcut(
-    app::CoreEngine& engine,
+    app::CoreHost& engine,
     ShortcutUiState& state,
     const InkpodShortcutSequence& replacement,
     bool persist) noexcept;

@@ -44,6 +44,7 @@ void operator delete(void* allocation, std::size_t) noexcept {
 namespace {
 
 using inkpod::app::ApplicationHost;
+using inkpod::app::CoreHost;
 using inkpod::app::DocumentRegistry;
 using inkpod::app::DocumentSessionId;
 using inkpod::app::DocumentViewId;
@@ -116,6 +117,7 @@ bool TestOwnerGraphFailureUnwind() {
 
 bool TestDocumentAndViewLifetime() {
     DocumentRegistry registry;
+    auto* core = reinterpret_cast<CoreHost*>(static_cast<std::uintptr_t>(1U));
     if (!registry.InitializePlaceholder(Generation{1U})
         || registry.Current() == nullptr
         || registry.Current()->ViewCount() != 1U) {
@@ -136,7 +138,7 @@ bool TestDocumentAndViewLifetime() {
             DocumentSessionId{11U},
             Generation{3U},
             DocumentViewId{17U},
-            nullptr)) {
+            core)) {
         return false;
     }
     auto* document = registry.Current();
@@ -146,6 +148,7 @@ bool TestDocumentAndViewLifetime() {
         || document->ActiveView() == nullptr
         || document->ActiveView()->id != DocumentViewId{17U}
         || document->ActiveView()->core_view_id != 0U
+        || document->Core() != core
         || document->shell.current_path != L"C:\\work\\cell.inkpod") {
         return false;
     }
@@ -180,8 +183,34 @@ bool TestDocumentAndViewLifetime() {
         || document->RemoveView(DocumentViewId{17U})) {
         return false;
     }
+    if (!registry.Add(
+            DocumentSessionId{13U},
+            Generation{4U},
+            DocumentViewId{23U},
+            core)
+        || registry.Count() != 2U
+        || registry.Current() == nullptr
+        || registry.Current()->id != DocumentSessionId{13U}
+        || registry.Add(
+            DocumentSessionId{13U},
+            Generation{5U},
+            DocumentViewId{29U},
+            core)
+        || !registry.Activate(DocumentSessionId{11U})
+        || registry.Current() != document
+        || registry.Find(DocumentSessionId{13U}) == nullptr) {
+        return false;
+    }
+    registry.ClearCoreBindings();
+    if (registry.Current()->Core() != nullptr
+        || registry.Find(DocumentSessionId{13U})->Core() != nullptr
+        || !registry.Remove(DocumentSessionId{13U})
+        || registry.Count() != 1U
+        || registry.Remove(DocumentSessionId{13U})) {
+        return false;
+    }
     registry.Clear();
-    return registry.Current() == nullptr;
+    return registry.Current() == nullptr && registry.Count() == 0U;
 }
 
 bool TestWorkspaceLifetime() {

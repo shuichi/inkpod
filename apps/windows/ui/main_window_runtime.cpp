@@ -25,7 +25,7 @@
 #include "app/application_host.h"
 #include "canvas.h"
 #include "app/clipboard_adapter.h"
-#include "app/core_engine.h"
+#include "app/core_host.h"
 #include "app/document_shell.h"
 #include "inkpod/core_ffi.h"
 #include "app/resource.h"
@@ -76,6 +76,7 @@ using inkpod::app::BatchUiState;
 using inkpod::app::DocumentShellState;
 using inkpod::app::DocumentShellController;
 using inkpod::app::EffectsUiState;
+using inkpod::app::Generation;
 using inkpod::app::AdjustmentLayerUiState;
 using inkpod::app::FilterJob;
 using inkpod::app::GradientStopValue;
@@ -292,7 +293,7 @@ bool LoadPlaneDialogChoices(
 }
 
 struct PlaneCreationValidationContext {
-    inkpod::app::CoreEngine* engine{};
+    inkpod::app::CoreHost* engine{};
     std::uint64_t layer_id{};
     const wchar_t* error_message{};
 };
@@ -726,10 +727,6 @@ void ResetUiForDocumentReplacement(ApplicationHost& state) noexcept {
             initial_view)) {
         state.routing.targets.InvalidateAll();
         return;
-    }
-    if (state.engine != nullptr) {
-        state.engine->SetCommandGeneration(
-            state.routing.targets.CurrentGeneration());
     }
     CancelSelectionGeometryPreview(state.Workspace().tools, state.Workspace().windows.canvas);
     ResetDocumentShellTransientState(state.Document().shell);
@@ -9929,9 +9926,22 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
     LPARAM lparam) noexcept {
     switch (message) {
         case inkpod::app::kCoreStateChanged:
-            if (state != nullptr
-                && static_cast<std::uint64_t>(lparam)
-                    == state->routing.targets.CurrentGeneration().Value()) {
+            if (state != nullptr && state->engine != nullptr) {
+                inkpod::app::CoreNotification notification{};
+                const bool received = state->engine->TakeNotification(
+                    static_cast<std::uint64_t>(wparam),
+                    Generation(static_cast<std::uint64_t>(lparam)),
+                    notification);
+                const bool target_current = received
+                    && notification.kind
+                        == inkpod::app::CoreNotificationKind::StateChanged
+                    && state->routing.targets.Resolve(
+                           notification.context,
+                           inkpod::app::kDocumentSessionCommandScope)
+                        == CommandResolveStatus::Ok;
+                if (!target_current) {
+                    return 0;
+                }
                 RefreshTreePane(*state);
                 RefreshLightTablePane(*state);
                 RefreshSequencePane(*state);
@@ -10088,11 +10098,22 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
             }
             return 0;
         case inkpod::app::kCoreAsyncFailed:
-            if (state != nullptr
-                && static_cast<std::uint64_t>(lparam)
-                    == state->routing.targets.CurrentGeneration().Value()
-                && !state->lifetime.smoke_test) {
-                ShowCoreError(*state, window, L"非同期処理");
+            if (state != nullptr && state->engine != nullptr) {
+                inkpod::app::CoreNotification notification{};
+                const bool received = state->engine->TakeNotification(
+                    static_cast<std::uint64_t>(wparam),
+                    Generation(static_cast<std::uint64_t>(lparam)),
+                    notification);
+                const bool target_current = received
+                    && notification.kind
+                        == inkpod::app::CoreNotificationKind::AsyncFailed
+                    && state->routing.targets.Resolve(
+                           notification.context,
+                           inkpod::app::kDocumentSessionCommandScope)
+                        == CommandResolveStatus::Ok;
+                if (target_current && !state->lifetime.smoke_test) {
+                    ShowCoreError(*state, window, L"非同期処理");
+                }
             }
             return 0;
         default:
