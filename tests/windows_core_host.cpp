@@ -564,7 +564,7 @@ int wmain() {
         return 18;
     }
     operation_started.get_future().wait();
-    auto close_future = std::async(std::launch::async, [&host] {
+    auto close_future = std::async(std::launch::async, [&host, second, generation] {
         return host.CloseSession(second, generation);
     });
     bool close_started{};

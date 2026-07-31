@@ -34,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         preset: [windows-x64-debug, windows-x64-release]
-    runs-on: windows-2022
+    runs-on: windows-2025-vs2026
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -43,6 +43,13 @@ jobs:
       - uses: TheMrMilchmann/setup-msvc-dev@v4
         with:
           arch: x64
+      - name: Verify Visual Studio 2026 toolchain
+        shell: pwsh
+        run: |
+          if ($env:VisualStudioVersion -notlike '18.*') {
+            throw "Expected Visual Studio 2026, got '$env:VisualStudioVersion'"
+          }
+          where.exe cl
       - run: cmake --preset ${{ matrix.preset }}
       - run: cmake --build --preset ${{ matrix.preset }}
       - name: Verify unchanged build does not rebuild Rust or MSIX
