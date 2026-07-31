@@ -7,6 +7,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <condition_variable>
 #include <cmath>
@@ -18,10 +19,12 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace inkpod::renderer {
@@ -37,6 +40,8 @@ constexpr std::uint64_t kMaximumVectorFills = 65536U;
 constexpr std::uint64_t kMaximumVectorBoundaries = 262144U;
 constexpr std::uint64_t kMaximumOverlayLines = 8192U;
 constexpr std::size_t kMaximumPointerHistory = 256U;
+constexpr std::size_t kMaximumPendingCanvasInput = 64U;
+constexpr std::uint64_t kMaximumStrokeSamples = UINT64_C(1048576);
 constexpr std::uint32_t kVectorSamplesPerSegment = 24U;
 constexpr float kVectorMiterLimit = 4.0F;
 
@@ -49,19 +54,147 @@ struct CachedTile {
     ComPtr<ID2D1Bitmap1> bitmap;
 };
 
-class CanvasRenderer final {
+class SharedRendererDevice final {
 public:
-    explicit CanvasRenderer(HWND window) noexcept : window_(window) {}
+    HRESULT Initialize() noexcept {
+        Discard();
+        constexpr D3D_FEATURE_LEVEL feature_levels[] = {
+            D3D_FEATURE_LEVEL_11_1,
+            D3D_FEATURE_LEVEL_11_0,
+            D3D_FEATURE_LEVEL_10_1,
+            D3D_FEATURE_LEVEL_10_0,
+        };
+        UINT creation_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+#if defined(_DEBUG)
+        creation_flags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+        D3D_FEATURE_LEVEL selected_level{};
+        HRESULT result = D3D11CreateDevice(
+            nullptr,
+            D3D_DRIVER_TYPE_HARDWARE,
+            nullptr,
+            creation_flags,
+            feature_levels,
+            ARRAYSIZE(feature_levels),
+            D3D11_SDK_VERSION,
+            &d3d_device_,
+            &selected_level,
+            &d3d_context_);
+        if (FAILED(result) && (creation_flags & D3D11_CREATE_DEVICE_DEBUG) != 0U) {
+            creation_flags &= ~D3D11_CREATE_DEVICE_DEBUG;
+            result = D3D11CreateDevice(
+                nullptr,
+                D3D_DRIVER_TYPE_HARDWARE,
+                nullptr,
+                creation_flags,
+                feature_levels,
+                ARRAYSIZE(feature_levels),
+                D3D11_SDK_VERSION,
+                &d3d_device_,
+                &selected_level,
+                &d3d_context_);
+        }
+        if (FAILED(result)) {
+            result = D3D11CreateDevice(
+                nullptr,
+                D3D_DRIVER_TYPE_WARP,
+                nullptr,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                feature_levels,
+                ARRAYSIZE(feature_levels),
+                D3D11_SDK_VERSION,
+                &d3d_device_,
+                &selected_level,
+                &d3d_context_);
+        }
+        if (FAILED(result)) {
+            return result;
+        }
+        result = d3d_device_.As(&dxgi_device_);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<IDXGIAdapter> adapter;
+        result = dxgi_device_->GetAdapter(&adapter);
+        if (FAILED(result)) {
+            return result;
+        }
+        result = adapter->GetParent(IID_PPV_ARGS(&dxgi_factory_));
+        if (FAILED(result)) {
+            return result;
+        }
+        D2D1_FACTORY_OPTIONS factory_options{};
+        result = D2D1CreateFactory(
+            D2D1_FACTORY_TYPE_SINGLE_THREADED,
+            __uuidof(ID2D1Factory1),
+            &factory_options,
+            reinterpret_cast<void**>(d2d_factory_.GetAddressOf()));
+        if (FAILED(result)) {
+            return result;
+        }
+        result = d2d_factory_->CreateDevice(dxgi_device_.Get(), &d2d_device_);
+        if (SUCCEEDED(result)) {
+            ++generation_;
+        }
+        return result;
+    }
 
-    ~CanvasRenderer() {
+    void Discard() noexcept {
+        d2d_device_.Reset();
+        d2d_factory_.Reset();
+        dxgi_factory_.Reset();
+        dxgi_device_.Reset();
+        d3d_context_.Reset();
+        d3d_device_.Reset();
+    }
+
+    [[nodiscard]] ID3D11Device* D3dDevice() const noexcept {
+        return d3d_device_.Get();
+    }
+
+    [[nodiscard]] IDXGIFactory2* DxgiFactory() const noexcept {
+        return dxgi_factory_.Get();
+    }
+
+    [[nodiscard]] ID2D1Device* D2dDevice() const noexcept {
+        return d2d_device_.Get();
+    }
+
+    [[nodiscard]] ID2D1Factory1* D2dFactory() const noexcept {
+        return d2d_factory_.Get();
+    }
+
+    [[nodiscard]] std::uint64_t Generation() const noexcept {
+        return generation_;
+    }
+
+private:
+    ComPtr<ID3D11Device> d3d_device_;
+    ComPtr<ID3D11DeviceContext> d3d_context_;
+    ComPtr<IDXGIDevice> dxgi_device_;
+    ComPtr<IDXGIFactory2> dxgi_factory_;
+    ComPtr<ID2D1Factory1> d2d_factory_;
+    ComPtr<ID2D1Device> d2d_device_;
+    std::uint64_t generation_{};
+};
+
+class CanvasSurface final {
+public:
+    CanvasSurface(
+        HWND window,
+        HWND owner_window,
+        SharedRendererDevice& shared) noexcept
+        : window_(window), owner_window_(owner_window), shared_(shared) {}
+
+    ~CanvasSurface() {
         if (snapshot_ != nullptr) {
             inkpod_snapshot_release(&snapshot_);
         }
-        DiscardDeviceResources();
+        DiscardSurfaceResources();
     }
 
     HRESULT Initialize() noexcept {
-        return CreateDeviceResources();
+        return CreateSurfaceResources();
     }
 
     HRESULT Resize(UINT width, UINT height) noexcept {
@@ -69,7 +202,7 @@ public:
             return S_OK;
         }
         if (!swap_chain_) {
-            return CreateDeviceResources();
+            return CreateSurfaceResources();
         }
 
         d2d_context_->SetTarget(nullptr);
@@ -80,9 +213,6 @@ public:
             height,
             DXGI_FORMAT_UNKNOWN,
             DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
-        if (IsDeviceLost(result)) {
-            return RecreateAfterDeviceLoss();
-        }
         if (FAILED(result)) {
             return result;
         }
@@ -100,7 +230,7 @@ public:
             }
         }
         if (!d2d_context_ || !target_bitmap_) {
-            const HRESULT create_result = CreateDeviceResources();
+            const HRESULT create_result = CreateSurfaceResources();
             if (FAILED(create_result)) {
                 return create_result;
             }
@@ -215,19 +345,13 @@ public:
         }
 
         HRESULT result = d2d_context_->EndDraw();
-        if (result == D2DERR_RECREATE_TARGET) {
-            return RecreateAfterDeviceLoss();
-        }
         if (FAILED(result)) {
             return result;
         }
 
         result = swap_chain_->Present(1U, 0U);
         if (result == DXGI_STATUS_OCCLUDED) {
-            return S_OK;
-        }
-        if (IsDeviceLost(result)) {
-            return RecreateAfterDeviceLoss();
+            return result;
         }
         return result;
     }
@@ -274,7 +398,7 @@ public:
 
     HRESULT DpiChanged() noexcept {
         if (!swap_chain_ || !d2d_context_) {
-            return CreateDeviceResources();
+            return CreateSurfaceResources();
         }
         d2d_context_->SetTarget(nullptr);
         target_bitmap_.Reset();
@@ -321,8 +445,32 @@ public:
     }
 
     HRESULT SimulateDeviceLossForSmokeTest() noexcept {
-        DiscardDeviceResources();
-        return RecreateAfterDeviceLoss();
+        DiscardSurfaceResources();
+        return DXGI_ERROR_DEVICE_RESET;
+    }
+
+    HRESULT RecreateAfterSharedDeviceReset() noexcept {
+        const HRESULT result = CreateSurfaceResources();
+        return SUCCEEDED(result) ? RebuildTileCache() : result;
+    }
+
+    void DiscardForDeviceReset() noexcept {
+        DiscardSurfaceResources();
+    }
+
+    void ClearSnapshot() noexcept {
+        if (snapshot_ != nullptr) {
+            inkpod_snapshot_release(&snapshot_);
+        }
+        snapshot_view_ = {};
+        transform_ = {};
+        overlay_ = {};
+        vectors_ = {};
+        tile_cache_.clear();
+    }
+
+    void SetTileBudget(std::size_t tile_budget) noexcept {
+        tile_budget_ = std::max<std::size_t>(1U, tile_budget);
     }
 
     HRESULT ValidateClosedVectorStrokeForSmokeTest() noexcept {
@@ -651,7 +799,7 @@ private:
         const std::unordered_map<std::uint64_t, VectorPathSpan>& paths,
         ID2D1SolidColorBrush* brush) noexcept {
         ComPtr<ID2D1PathGeometry> geometry;
-        HRESULT result = d2d_factory_->CreatePathGeometry(&geometry);
+        HRESULT result = shared_.D2dFactory()->CreatePathGeometry(&geometry);
         if (FAILED(result)) {
             return result;
         }
@@ -806,7 +954,7 @@ private:
                 }
             }
             geometry.Reset();
-            HRESULT result = d2d_factory_->CreatePathGeometry(&geometry);
+            HRESULT result = shared_.D2dFactory()->CreatePathGeometry(&geometry);
             if (FAILED(result)) {
                 return result;
             }
@@ -1184,10 +1332,6 @@ private:
         return S_OK;
     }
 
-    static bool IsDeviceLost(HRESULT result) noexcept {
-        return result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET;
-    }
-
     HRESULT RebuildTileCache() noexcept {
         if (!d2d_context_) {
             return E_UNEXPECTED;
@@ -1197,6 +1341,7 @@ private:
             return S_OK;
         }
         if (snapshot_view_.tile_count > kMaximumSnapshotTiles
+            || snapshot_view_.tile_count > tile_budget_
             || (snapshot_view_.feature_flags
                     & ~(INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE
                         | INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA))
@@ -1285,78 +1430,12 @@ private:
         }
     }
 
-    HRESULT CreateDeviceResources() noexcept {
-        DiscardDeviceResources();
-
-        constexpr D3D_FEATURE_LEVEL feature_levels[] = {
-            D3D_FEATURE_LEVEL_11_1,
-            D3D_FEATURE_LEVEL_11_0,
-            D3D_FEATURE_LEVEL_10_1,
-            D3D_FEATURE_LEVEL_10_0,
-        };
-        UINT creation_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-#if defined(_DEBUG)
-        creation_flags |= D3D11_CREATE_DEVICE_DEBUG;
-#endif
-        D3D_FEATURE_LEVEL selected_level{};
-        HRESULT result = D3D11CreateDevice(
-            nullptr,
-            D3D_DRIVER_TYPE_HARDWARE,
-            nullptr,
-            creation_flags,
-            feature_levels,
-            ARRAYSIZE(feature_levels),
-            D3D11_SDK_VERSION,
-            &d3d_device_,
-            &selected_level,
-            &d3d_context_);
-        if (FAILED(result) && (creation_flags & D3D11_CREATE_DEVICE_DEBUG) != 0U) {
-            creation_flags &= ~D3D11_CREATE_DEVICE_DEBUG;
-            result = D3D11CreateDevice(
-                nullptr,
-                D3D_DRIVER_TYPE_HARDWARE,
-                nullptr,
-                creation_flags,
-                feature_levels,
-                ARRAYSIZE(feature_levels),
-                D3D11_SDK_VERSION,
-                &d3d_device_,
-                &selected_level,
-                &d3d_context_);
+    HRESULT CreateSurfaceResources() noexcept {
+        DiscardSurfaceResources();
+        if (shared_.D3dDevice() == nullptr || shared_.DxgiFactory() == nullptr
+            || shared_.D2dDevice() == nullptr) {
+            return E_UNEXPECTED;
         }
-        if (FAILED(result)) {
-            result = D3D11CreateDevice(
-                nullptr,
-                D3D_DRIVER_TYPE_WARP,
-                nullptr,
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                feature_levels,
-                ARRAYSIZE(feature_levels),
-                D3D11_SDK_VERSION,
-                &d3d_device_,
-                &selected_level,
-                &d3d_context_);
-        }
-        if (FAILED(result)) {
-            return result;
-        }
-
-        ComPtr<IDXGIDevice> dxgi_device;
-        result = d3d_device_.As(&dxgi_device);
-        if (FAILED(result)) {
-            return result;
-        }
-        ComPtr<IDXGIAdapter> adapter;
-        result = dxgi_device->GetAdapter(&adapter);
-        if (FAILED(result)) {
-            return result;
-        }
-        ComPtr<IDXGIFactory2> dxgi_factory;
-        result = adapter->GetParent(IID_PPV_ARGS(&dxgi_factory));
-        if (FAILED(result)) {
-            return result;
-        }
-
         DXGI_SWAP_CHAIN_DESC1 swap_chain_description{};
         swap_chain_description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         swap_chain_description.SampleDesc.Count = 1U;
@@ -1366,8 +1445,8 @@ private:
         swap_chain_description.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         swap_chain_description.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
         swap_chain_description.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
-        result = dxgi_factory->CreateSwapChainForHwnd(
-            d3d_device_.Get(),
+        HRESULT result = shared_.DxgiFactory()->CreateSwapChainForHwnd(
+            shared_.D3dDevice(),
             window_,
             &swap_chain_description,
             nullptr,
@@ -1389,26 +1468,12 @@ private:
         if (frame_latency_waitable_ == nullptr) {
             return HRESULT_FROM_WIN32(GetLastError());
         }
-        result = dxgi_factory->MakeWindowAssociation(
-            GetAncestor(window_, GA_ROOT), DXGI_MWA_NO_ALT_ENTER);
+        result = shared_.DxgiFactory()->MakeWindowAssociation(
+            owner_window_, DXGI_MWA_NO_ALT_ENTER);
         if (FAILED(result)) {
             return result;
         }
-
-        D2D1_FACTORY_OPTIONS factory_options{};
-        result = D2D1CreateFactory(
-            D2D1_FACTORY_TYPE_SINGLE_THREADED,
-            __uuidof(ID2D1Factory1),
-            &factory_options,
-            reinterpret_cast<void**>(d2d_factory_.GetAddressOf()));
-        if (FAILED(result)) {
-            return result;
-        }
-        result = d2d_factory_->CreateDevice(dxgi_device.Get(), &d2d_device_);
-        if (FAILED(result)) {
-            return result;
-        }
-        result = d2d_device_->CreateDeviceContext(
+        result = shared_.D2dDevice()->CreateDeviceContext(
             D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &d2d_context_);
         if (FAILED(result)) {
             return result;
@@ -1439,18 +1504,7 @@ private:
         return result;
     }
 
-    HRESULT RecreateAfterDeviceLoss() noexcept {
-        HRESULT result = CreateDeviceResources();
-        if (SUCCEEDED(result)) {
-            result = RebuildTileCache();
-        }
-        if (SUCCEEDED(result)) {
-            InvalidateRect(window_, nullptr, FALSE);
-        }
-        return result;
-    }
-
-    void DiscardDeviceResources() noexcept {
+    void DiscardSurfaceResources() noexcept {
         if (frame_latency_waitable_ != nullptr) {
             CloseHandle(frame_latency_waitable_);
             frame_latency_waitable_ = nullptr;
@@ -1461,14 +1515,12 @@ private:
         }
         target_bitmap_.Reset();
         d2d_context_.Reset();
-        d2d_device_.Reset();
-        d2d_factory_.Reset();
         swap_chain_.Reset();
-        d3d_context_.Reset();
-        d3d_device_.Reset();
     }
 
     HWND window_{};
+    HWND owner_window_{};
+    SharedRendererDevice& shared_;
     InkpodSnapshot* snapshot_{};
     InkpodSnapshotView snapshot_view_{};
     InkpodSnapshotTransform transform_{};
@@ -1477,17 +1529,19 @@ private:
     CanvasFloatingPreview floating_preview_{};
     CanvasGeometryPreview geometry_preview_{};
     std::unordered_map<std::uint64_t, CachedTile> tile_cache_;
-    ComPtr<ID3D11Device> d3d_device_;
-    ComPtr<ID3D11DeviceContext> d3d_context_;
     ComPtr<IDXGISwapChain1> swap_chain_;
-    ComPtr<ID2D1Factory1> d2d_factory_;
-    ComPtr<ID2D1Device> d2d_device_;
     ComPtr<ID2D1DeviceContext> d2d_context_;
     ComPtr<ID2D1Bitmap1> target_bitmap_;
     HANDLE frame_latency_waitable_{};
+    std::size_t tile_budget_{kMaximumSnapshotTiles};
 };
 
-enum class RenderControlKind {
+enum class HostControlKind {
+    Register,
+    Unregister,
+    Bind,
+    Resize,
+    Visibility,
     Render,
     DpiChanged,
     SimulateDeviceLoss,
@@ -1498,33 +1552,73 @@ enum class RenderControlKind {
     SetGeometryPreview,
 };
 
-struct RenderControl {
-    RenderControlKind kind{};
-    std::shared_ptr<std::promise<HRESULT>> completion;
+struct HostControl {
+    HostControlKind kind{};
+    app::CanvasId canvas{};
+    app::Generation surface_generation{};
+    SnapshotRoute route{};
+    HWND window{};
+    HWND owner_window{};
+    UINT width{};
+    UINT height{};
+    bool visible{};
     CanvasDocumentBounds* out_bounds{};
     CanvasGeometryPreview* out_geometry_preview{};
     CanvasFloatingPreview floating_preview{};
     CanvasGeometryPreview geometry_preview{};
+    std::shared_ptr<std::promise<HRESULT>> completion;
 };
 
-class RenderThread final {
-public:
-    explicit RenderThread(HWND window) noexcept : window_(window) {}
+using HostWork = std::variant<HostControl, SnapshotEnvelope>;
 
-    ~RenderThread() {
+struct SurfaceRecord {
+    app::CanvasId canvas{};
+    app::Generation generation{};
+    HWND window{};
+    HWND owner_window{};
+    SnapshotRoute route{};
+    bool visible{true};
+    bool occluded{};
+    std::uint64_t presented_frames{};
+    std::unique_ptr<CanvasSurface> surface;
+};
+
+struct PublishedSurface {
+    app::CanvasId canvas{};
+    app::Generation generation{};
+    SnapshotRoute route{};
+    bool visible{};
+    bool occluded{};
+    std::uint64_t presented_frames{};
+};
+
+class RendererHostState final {
+public:
+    ~RendererHostState() {
         Stop();
     }
-
-    RenderThread(const RenderThread&) = delete;
-    RenderThread& operator=(const RenderThread&) = delete;
 
     HRESULT Start() noexcept {
         try {
             auto ready = std::make_shared<std::promise<HRESULT>>();
             auto future = ready->get_future();
+            {
+                std::lock_guard lock(mutex_);
+                if (worker_.joinable()) {
+                    return E_UNEXPECTED;
+                }
+                stopping_ = false;
+                running_ = true;
+            }
             worker_ = std::thread([this, ready] { Run(ready); });
-            return future.get();
+            const HRESULT result = future.get();
+            if (FAILED(result) && worker_.joinable()) {
+                worker_.join();
+            }
+            return result;
         } catch (const std::system_error&) {
+            return E_FAIL;
+        } catch (const std::future_error&) {
             return E_FAIL;
         } catch (const std::bad_alloc&) {
             return E_OUTOFMEMORY;
@@ -1534,275 +1628,686 @@ public:
     void Stop() noexcept {
         {
             std::lock_guard lock(mutex_);
+            if (!worker_.joinable()) {
+                running_ = false;
+                stopping_ = true;
+                return;
+            }
             stopping_ = true;
         }
         wake_.notify_one();
-        if (worker_.joinable()) {
-            worker_.join();
-        }
-        if (pending_snapshot_ != nullptr) {
-            inkpod_snapshot_release(&pending_snapshot_);
+        worker_.join();
+        std::lock_guard lock(mutex_);
+        running_ = false;
+        published_.clear();
+    }
+
+    HRESULT Invoke(HostControl control) noexcept {
+        SnapshotEnvelope discarded{};
+        try {
+            auto completion = std::make_shared<std::promise<HRESULT>>();
+            auto future = completion->get_future();
+            control.completion = completion;
+            {
+                std::lock_guard lock(mutex_);
+                if (!running_ || stopping_ || work_.size() >= kMaximumHostWork) {
+                    return E_UNEXPECTED;
+                }
+                const bool supersedes_surface =
+                    control.kind == HostControlKind::Bind
+                    || control.kind == HostControlKind::Unregister;
+                if (supersedes_surface) {
+                    const auto pending = std::find_if(
+                        work_.begin(), work_.end(), [&control](HostWork& item) {
+                            const auto* snapshot = std::get_if<SnapshotEnvelope>(&item);
+                            return snapshot != nullptr
+                                && snapshot->route.canvas == control.canvas
+                                && snapshot->route.surface_generation
+                                    == control.surface_generation;
+                        });
+                    if (pending != work_.end()) {
+                        discarded = std::exchange(
+                            std::get<SnapshotEnvelope>(*pending), {});
+                        work_.erase(pending);
+                    }
+                    work_.emplace_front(std::move(control));
+                } else {
+                    work_.emplace_back(std::move(control));
+                }
+            }
+            ReleaseEnvelope(discarded);
+            wake_.notify_one();
+            return future.get();
+        } catch (const std::future_error&) {
+            ReleaseEnvelope(discarded);
+            return E_FAIL;
+        } catch (const std::bad_alloc&) {
+            ReleaseEnvelope(discarded);
+            return E_OUTOFMEMORY;
         }
     }
 
-    bool SetSnapshot(InkpodSnapshot* snapshot) noexcept {
-        if (snapshot == nullptr) {
+    void Post(HostControl control) noexcept {
+        try {
+            {
+                std::lock_guard lock(mutex_);
+                if (control.kind == HostControlKind::Visibility && !control.visible) {
+                    const auto published = FindPublishedLocked(
+                        control.canvas, control.surface_generation);
+                    if (published != published_.end()) {
+                        published->visible = false;
+                    }
+                }
+                if (!running_ || stopping_
+                    || work_.size() >= kMaximumNoncriticalHostWork) {
+                    return;
+                }
+                work_.emplace_back(std::move(control));
+            }
+            wake_.notify_one();
+        } catch (const std::bad_alloc&) {
+        }
+    }
+
+    bool Submit(SnapshotEnvelope envelope) noexcept {
+        if (envelope.snapshot == nullptr || !envelope.route) {
+            ReleaseEnvelope(envelope);
             return false;
         }
-        InkpodSnapshot* replaced{};
+        SnapshotEnvelope replaced{};
         bool accepted{};
-        {
-            std::lock_guard lock(mutex_);
-            if (stopping_) {
-                replaced = snapshot;
-            } else {
-                replaced = std::exchange(pending_snapshot_, snapshot);
-                accepted = true;
+        try {
+            {
+                std::lock_guard lock(mutex_);
+                const auto status = FindPublishedLocked(envelope.route.canvas,
+                    envelope.route.surface_generation);
+                if (!running_ || stopping_ || status == published_.end()
+                    || status->route != envelope.route || !status->visible
+                    || status->occluded) {
+                    accepted = false;
+                } else {
+                    const auto pending = std::find_if(
+                        work_.begin(), work_.end(), [&envelope](HostWork& item) {
+                            const auto* snapshot = std::get_if<SnapshotEnvelope>(&item);
+                            return snapshot != nullptr
+                                && snapshot->route.canvas == envelope.route.canvas
+                                && snapshot->route.surface_generation
+                                    == envelope.route.surface_generation;
+                        });
+                    if (pending != work_.end()) {
+                        replaced = std::exchange(
+                            std::get<SnapshotEnvelope>(*pending), envelope);
+                        accepted = true;
+                    } else if (work_.size() < kMaximumNoncriticalHostWork) {
+                        work_.emplace_back(envelope);
+                        envelope.snapshot = nullptr;
+                        accepted = true;
+                    }
+                }
             }
+        } catch (const std::bad_alloc&) {
+            accepted = false;
         }
-        if (replaced != nullptr) {
-            inkpod_snapshot_release(&replaced);
-        }
+        ReleaseEnvelope(replaced);
         if (!accepted) {
+            ReleaseEnvelope(envelope);
             return false;
         }
         wake_.notify_one();
         return true;
     }
 
-    void Resize(UINT width, UINT height) noexcept {
-        {
-            std::lock_guard lock(mutex_);
-            pending_width_ = width;
-            pending_height_ = height;
-            resize_pending_ = true;
+    bool SurfaceAcceptsSnapshots(const SnapshotRoute& route) const noexcept {
+        if (!route) {
+            return false;
         }
-        wake_.notify_one();
-    }
-
-    void RequestRender() noexcept {
-        {
-            std::lock_guard lock(mutex_);
-            render_pending_ = true;
-        }
-        wake_.notify_one();
-    }
-
-    HRESULT Invoke(
-        RenderControlKind kind,
-        CanvasDocumentBounds* out_bounds = nullptr,
-        const CanvasFloatingPreview* floating_preview = nullptr,
-        const CanvasGeometryPreview* geometry_preview = nullptr,
-        CanvasGeometryPreview* out_geometry_preview = nullptr) noexcept {
-        try {
-            auto completion = std::make_shared<std::promise<HRESULT>>();
-            auto future = completion->get_future();
-            {
-                std::lock_guard lock(mutex_);
-                if (stopping_) {
-                    return E_UNEXPECTED;
-                }
-                RenderControl control{};
-                control.kind = kind;
-                control.completion = completion;
-                control.out_bounds = out_bounds;
-                control.out_geometry_preview = out_geometry_preview;
-                if (floating_preview != nullptr) {
-                    control.floating_preview = *floating_preview;
-                }
-                if (geometry_preview != nullptr) {
-                    control.geometry_preview = *geometry_preview;
-                }
-                controls_.push_back(control);
-            }
-            wake_.notify_one();
-            return future.get();
-        } catch (const std::future_error&) {
-            return E_FAIL;
-        } catch (const std::bad_alloc&) {
-            return E_OUTOFMEMORY;
-        }
+        std::lock_guard lock(mutex_);
+        const auto found = FindPublishedLocked(route.canvas, route.surface_generation);
+        return running_ && !stopping_ && found != published_.cend()
+            && found->route == route && found->visible && !found->occluded;
     }
 
     DWORD ThreadId() const noexcept {
-        return thread_id_;
+        return thread_id_.load(std::memory_order_acquire);
     }
 
-    std::uint64_t PresentedFrameCount() const noexcept {
+    std::uint64_t PresentedFrameCount(
+        app::CanvasId canvas, app::Generation generation) const noexcept {
         std::lock_guard lock(mutex_);
-        return presented_frames_;
+        const auto found = FindPublishedLocked(canvas, generation);
+        return found == published_.cend() ? 0U : found->presented_frames;
+    }
+
+    std::size_t SurfaceCount() const noexcept {
+        std::lock_guard lock(mutex_);
+        return published_.size();
+    }
+
+    std::uint64_t DeviceGeneration() const noexcept {
+        return device_generation_.load(std::memory_order_acquire);
+    }
+
+    void SetQueuePausedForSmokeTest(bool paused) noexcept {
+        {
+            std::lock_guard lock(mutex_);
+            queue_paused_for_smoke_test_ = paused;
+        }
+        wake_.notify_one();
+    }
+
+    bool WaitQueueIdleForSmokeTest() noexcept {
+        std::unique_lock lock(mutex_);
+        if (!running_ || stopping_ || queue_paused_for_smoke_test_) {
+            return false;
+        }
+        queue_idle_.wait(lock, [this] {
+            return stopping_ || work_.empty();
+        });
+        return !stopping_;
     }
 
 private:
-    void ReportFailure(HRESULT result) const noexcept {
-        PostMessageW(
-            GetParent(window_),
-            kCanvasRenderFailed,
-            static_cast<WPARAM>(result),
-            0);
+    static constexpr std::size_t kMaximumHostWork = 256U;
+    static constexpr std::size_t kReservedHostControlWork = 8U;
+    static constexpr std::size_t kMaximumNoncriticalHostWork =
+        kMaximumHostWork - kReservedHostControlWork;
+
+    static void ReleaseEnvelope(SnapshotEnvelope& envelope) noexcept {
+        if (envelope.snapshot != nullptr) {
+            inkpod_snapshot_release(&envelope.snapshot);
+        }
     }
 
-    HRESULT RenderAndCount(CanvasRenderer& renderer) noexcept {
-        const HRESULT result = renderer.Render();
-        if (result == S_OK) {
-            std::lock_guard lock(mutex_);
-            ++presented_frames_;
+    static bool IsDeviceLoss(HRESULT result) noexcept {
+        return result == D2DERR_RECREATE_TARGET
+            || result == DXGI_ERROR_DEVICE_HUNG
+            || result == DXGI_ERROR_DEVICE_REMOVED
+            || result == DXGI_ERROR_DEVICE_RESET
+            || result == DXGI_ERROR_DRIVER_INTERNAL_ERROR;
+    }
+
+    auto FindPublishedLocked(app::CanvasId canvas, app::Generation generation) noexcept {
+        return std::find_if(published_.begin(), published_.end(),
+            [canvas, generation](const PublishedSurface& surface) {
+                return surface.canvas == canvas && surface.generation == generation;
+            });
+    }
+
+    auto FindPublishedLocked(
+        app::CanvasId canvas, app::Generation generation) const noexcept {
+        return std::find_if(published_.cbegin(), published_.cend(),
+            [canvas, generation](const PublishedSurface& surface) {
+                return surface.canvas == canvas && surface.generation == generation;
+            });
+    }
+
+    auto FindSurface(app::CanvasId canvas, app::Generation generation) noexcept {
+        return std::find_if(surfaces_.begin(), surfaces_.end(),
+            [canvas, generation](const SurfaceRecord& surface) {
+                return surface.canvas == canvas && surface.generation == generation;
+            });
+    }
+
+    void PublishSurface(const SurfaceRecord& surface) noexcept {
+        std::lock_guard lock(mutex_);
+        const auto found = FindPublishedLocked(surface.canvas, surface.generation);
+        const PublishedSurface value{
+            surface.canvas,
+            surface.generation,
+            surface.route,
+            surface.visible,
+            surface.occluded,
+            surface.presented_frames};
+        if (found == published_.end()) {
+            try {
+                published_.push_back(value);
+            } catch (const std::bad_alloc&) {
+            }
+        } else {
+            *found = value;
+        }
+    }
+
+    void RemovePublished(app::CanvasId canvas, app::Generation generation) noexcept {
+        std::lock_guard lock(mutex_);
+        const auto found = FindPublishedLocked(canvas, generation);
+        if (found != published_.end()) {
+            published_.erase(found);
+        }
+    }
+
+    void UpdateTileBudgets() noexcept {
+        const std::size_t per_surface = std::max<std::size_t>(
+            1U, static_cast<std::size_t>(kMaximumSnapshotTiles) / std::max<std::size_t>(1U, surfaces_.size()));
+        for (auto& surface : surfaces_) {
+            surface.surface->SetTileBudget(per_surface);
+        }
+    }
+
+    HRESULT RecoverDevice() noexcept {
+        for (auto& surface : surfaces_) {
+            surface.surface->DiscardForDeviceReset();
+        }
+        const HRESULT initialize = shared_.Initialize();
+        if (FAILED(initialize)) {
+            return initialize;
+        }
+        device_generation_.store(shared_.Generation(), std::memory_order_release);
+        for (auto& surface : surfaces_) {
+            const HRESULT result = surface.surface->RecreateAfterSharedDeviceReset();
+            if (FAILED(result)) {
+                return result;
+            }
+            surface.occluded = false;
+            PublishSurface(surface);
+        }
+        return S_OK;
+    }
+
+    HRESULT NormalizeResult(SurfaceRecord& surface, HRESULT result) noexcept {
+        if (IsDeviceLoss(result)) {
+            result = RecoverDevice();
+        }
+        if (result == DXGI_STATUS_OCCLUDED) {
+            surface.occluded = true;
+            PublishSurface(surface);
+            return S_OK;
+        }
+        if (result == S_OK && surface.occluded) {
+            surface.occluded = false;
+            PublishSurface(surface);
         }
         return result;
     }
 
-    void Run(const std::shared_ptr<std::promise<HRESULT>>& ready) noexcept {
-        thread_id_ = GetCurrentThreadId();
-        CanvasRenderer renderer(window_);
-        const HRESULT initialize = renderer.Initialize();
-        ready->set_value(initialize);
-        if (FAILED(initialize)) {
-            return;
+    HRESULT RenderAndCount(SurfaceRecord& surface) noexcept {
+        HRESULT result = surface.surface->Render();
+        const bool presented = result == S_OK;
+        result = NormalizeResult(surface, result);
+        if (SUCCEEDED(result) && presented) {
+            ++surface.presented_frames;
+            PublishSurface(surface);
         }
+        return result;
+    }
 
-        for (;;) {
-            InkpodSnapshot* snapshot{};
-            UINT width{};
-            UINT height{};
-            bool resize{};
-            bool render{};
-            std::deque<RenderControl> controls;
-            {
-                std::unique_lock lock(mutex_);
-                wake_.wait(lock, [this] {
-                    return stopping_ || pending_snapshot_ != nullptr || resize_pending_
-                        || render_pending_ || !controls_.empty();
-                });
-                if (stopping_) {
-                    snapshot = std::exchange(pending_snapshot_, nullptr);
-                    controls.swap(controls_);
-                    lock.unlock();
-                    if (snapshot != nullptr) {
-                        inkpod_snapshot_release(&snapshot);
-                    }
-                    for (auto& control : controls) {
-                        control.completion->set_value(E_ABORT);
-                    }
-                    break;
-                }
-                snapshot = std::exchange(pending_snapshot_, nullptr);
-                resize = std::exchange(resize_pending_, false);
-                width = pending_width_;
-                height = pending_height_;
-                render = std::exchange(render_pending_, false);
-                controls.swap(controls_);
-            }
+    void ReportFailure(const SurfaceRecord& surface, HRESULT result) const noexcept {
+        PostMessageW(
+            surface.owner_window,
+            kCanvasRenderFailed,
+            static_cast<WPARAM>(result),
+            static_cast<LPARAM>(surface.generation.Value()));
+    }
 
-            HRESULT result = S_OK;
-            if (snapshot != nullptr) {
-                result = renderer.SetSnapshot(snapshot);
-                render = SUCCEEDED(result);
+    HRESULT ProcessSnapshot(SnapshotEnvelope& envelope) noexcept {
+        const auto found = FindSurface(
+            envelope.route.canvas, envelope.route.surface_generation);
+        if (found == surfaces_.end() || found->route != envelope.route
+            || !found->visible || found->occluded) {
+            ReleaseEnvelope(envelope);
+            return S_FALSE;
+        }
+        InkpodSnapshotView view{};
+        view.struct_size = sizeof(view);
+        InkpodSnapshotTransform transform{};
+        transform.struct_size = sizeof(transform);
+        if (inkpod_snapshot_get_view(envelope.snapshot, &view) != INKPOD_STATUS_OK
+            || inkpod_snapshot_get_transform(envelope.snapshot, &transform)
+                != INKPOD_STATUS_OK
+            || view.revision != envelope.document_revision
+            || transform.view_revision != envelope.view_revision) {
+            ReleaseEnvelope(envelope);
+            return E_INVALIDARG;
+        }
+        HRESULT result = found->surface->SetSnapshot(envelope.snapshot);
+        envelope.snapshot = nullptr;
+        result = NormalizeResult(*found, result);
+        if (SUCCEEDED(result) && found->visible) {
+            result = RenderAndCount(*found);
+        }
+        return result;
+    }
+
+    HRESULT ProcessControl(HostControl& control) noexcept {
+        if (control.kind == HostControlKind::Register) {
+            if (!control.canvas || !control.surface_generation
+                || control.window == nullptr || control.owner_window == nullptr
+                || FindSurface(control.canvas, control.surface_generation) != surfaces_.end()) {
+                return E_INVALIDARG;
             }
-            if (SUCCEEDED(result) && resize) {
-                result = renderer.Resize(width, height);
-                render = SUCCEEDED(result);
-            }
-            for (auto& control : controls) {
-                HRESULT control_result = result;
-                if (SUCCEEDED(control_result)) {
-                    switch (control.kind) {
-                        case RenderControlKind::Render:
-                            control_result = RenderAndCount(renderer);
-                            render = false;
-                            break;
-                        case RenderControlKind::DpiChanged:
-                            control_result = renderer.DpiChanged();
-                            render = SUCCEEDED(control_result);
-                            break;
-                        case RenderControlKind::SimulateDeviceLoss:
-                            control_result = renderer.SimulateDeviceLossForSmokeTest();
-                            render = SUCCEEDED(control_result);
-                            break;
-                        case RenderControlKind::ValidateClosedVectorStroke:
-                            control_result = renderer.ValidateClosedVectorStrokeForSmokeTest();
-                            break;
-                        case RenderControlKind::GetDocumentBounds:
-                            if (control.out_bounds == nullptr) {
-                                control_result = E_POINTER;
-                            } else {
-                                *control.out_bounds = renderer.DocumentBounds();
-                            }
-                            break;
-                        case RenderControlKind::GetGeometryPreview:
-                            if (control.out_geometry_preview == nullptr) {
-                                control_result = E_POINTER;
-                            } else {
-                                control_result = renderer.GetGeometryPreviewForSmokeTest(
-                                    *control.out_geometry_preview);
-                            }
-                            break;
-                        case RenderControlKind::SetFloatingPreview:
-                            control_result = renderer.SetFloatingPreview(
-                                control.floating_preview);
-                            render = SUCCEEDED(control_result);
-                            break;
-                        case RenderControlKind::SetGeometryPreview:
-                            control_result = renderer.SetGeometryPreview(
-                                control.geometry_preview);
-                            render = SUCCEEDED(control_result);
-                            break;
-                    }
+            try {
+                SurfaceRecord surface{};
+                surface.canvas = control.canvas;
+                surface.generation = control.surface_generation;
+                surface.window = control.window;
+                surface.owner_window = control.owner_window;
+                surface.surface = std::make_unique<CanvasSurface>(
+                    control.window, control.owner_window, shared_);
+                const HRESULT initialize = surface.surface->Initialize();
+                if (FAILED(initialize)) {
+                    return initialize;
                 }
-                control.completion->set_value(control_result);
-                if (FAILED(control_result)) {
-                    result = control_result;
+                surfaces_.push_back(std::move(surface));
+                UpdateTileBudgets();
+                PublishSurface(surfaces_.back());
+                return S_OK;
+            } catch (const std::bad_alloc&) {
+                return E_OUTOFMEMORY;
+            }
+        }
+        const auto found = FindSurface(control.canvas, control.surface_generation);
+        if (found == surfaces_.end()) {
+            return E_INVALIDARG;
+        }
+        if (control.kind == HostControlKind::Unregister) {
+            RemovePublished(found->canvas, found->generation);
+            surfaces_.erase(found);
+            UpdateTileBudgets();
+            return S_OK;
+        }
+        SurfaceRecord& surface = *found;
+        HRESULT result = S_OK;
+        bool render{};
+        switch (control.kind) {
+            case HostControlKind::Bind:
+                if (!control.route || control.route.canvas != surface.canvas
+                    || control.route.surface_generation != surface.generation) {
+                    return E_INVALIDARG;
                 }
-            }
-            if (SUCCEEDED(result) && render) {
-                result = RenderAndCount(renderer);
-            }
-            if (FAILED(result)) {
-                ReportFailure(result);
+                surface.surface->ClearSnapshot();
+                surface.route = control.route;
+                surface.occluded = false;
+                PublishSurface(surface);
+                break;
+            case HostControlKind::Resize:
+                result = surface.surface->Resize(control.width, control.height);
+                render = surface.visible;
+                break;
+            case HostControlKind::Visibility:
+                surface.visible = control.visible;
+                if (surface.visible) {
+                    surface.occluded = false;
+                    render = true;
+                }
+                PublishSurface(surface);
+                break;
+            case HostControlKind::Render:
+                render = surface.visible;
+                break;
+            case HostControlKind::DpiChanged:
+                result = surface.surface->DpiChanged();
+                render = surface.visible;
+                break;
+            case HostControlKind::SimulateDeviceLoss:
+                result = surface.surface->SimulateDeviceLossForSmokeTest();
+                render = surface.visible;
+                break;
+            case HostControlKind::ValidateClosedVectorStroke:
+                result = surface.surface->ValidateClosedVectorStrokeForSmokeTest();
+                break;
+            case HostControlKind::GetDocumentBounds:
+                if (control.out_bounds == nullptr) {
+                    result = E_POINTER;
+                } else {
+                    *control.out_bounds = surface.surface->DocumentBounds();
+                }
+                break;
+            case HostControlKind::GetGeometryPreview:
+                if (control.out_geometry_preview == nullptr) {
+                    result = E_POINTER;
+                } else {
+                    result = surface.surface->GetGeometryPreviewForSmokeTest(
+                        *control.out_geometry_preview);
+                }
+                break;
+            case HostControlKind::SetFloatingPreview:
+                result = surface.surface->SetFloatingPreview(control.floating_preview);
+                render = surface.visible;
+                break;
+            case HostControlKind::SetGeometryPreview:
+                result = surface.surface->SetGeometryPreview(control.geometry_preview);
+                render = surface.visible;
+                break;
+            case HostControlKind::Register:
+            case HostControlKind::Unregister:
+                break;
+        }
+        result = NormalizeResult(surface, result);
+        if (SUCCEEDED(result) && render) {
+            result = RenderAndCount(surface);
+        }
+        return result;
+    }
+
+    void AbortWork(std::deque<HostWork>& work) noexcept {
+        for (auto& item : work) {
+            if (auto* envelope = std::get_if<SnapshotEnvelope>(&item)) {
+                ReleaseEnvelope(*envelope);
+            } else {
+                auto& control = std::get<HostControl>(item);
+                if (control.completion != nullptr) {
+                    control.completion->set_value(E_ABORT);
+                }
             }
         }
     }
 
-    HWND window_{};
+    void Run(const std::shared_ptr<std::promise<HRESULT>>& ready) noexcept {
+        thread_id_.store(GetCurrentThreadId(), std::memory_order_release);
+        const HRESULT initialize = shared_.Initialize();
+        device_generation_.store(shared_.Generation(), std::memory_order_release);
+        ready->set_value(initialize);
+        if (FAILED(initialize)) {
+            std::lock_guard lock(mutex_);
+            running_ = false;
+            stopping_ = true;
+            return;
+        }
+        for (;;) {
+            HostWork item;
+            {
+                std::unique_lock lock(mutex_);
+                wake_.wait(lock, [this] {
+                    return stopping_
+                        || (!queue_paused_for_smoke_test_ && !work_.empty());
+                });
+                if (stopping_) {
+                    std::deque<HostWork> abandoned;
+                    abandoned.swap(work_);
+                    lock.unlock();
+                    AbortWork(abandoned);
+                    break;
+                }
+                item = std::move(work_.front());
+                work_.pop_front();
+                if (work_.empty()) {
+                    queue_idle_.notify_all();
+                }
+            }
+            HRESULT result{};
+            SurfaceRecord* failure_surface{};
+            if (auto* envelope = std::get_if<SnapshotEnvelope>(&item)) {
+                const auto found = FindSurface(
+                    envelope->route.canvas, envelope->route.surface_generation);
+                failure_surface = found == surfaces_.end() ? nullptr : &*found;
+                result = ProcessSnapshot(*envelope);
+            } else {
+                auto& control = std::get<HostControl>(item);
+                const auto found = FindSurface(control.canvas, control.surface_generation);
+                failure_surface = found == surfaces_.end() ? nullptr : &*found;
+                result = ProcessControl(control);
+                if (control.completion != nullptr) {
+                    control.completion->set_value(result);
+                }
+            }
+            if (FAILED(result) && result != E_INVALIDARG && failure_surface != nullptr) {
+                ReportFailure(*failure_surface, result);
+            }
+        }
+        surfaces_.clear();
+        shared_.Discard();
+        device_generation_.store(0U, std::memory_order_release);
+        thread_id_.store(0U, std::memory_order_release);
+    }
+
     mutable std::mutex mutex_;
     std::condition_variable wake_;
+    std::condition_variable queue_idle_;
     std::thread worker_;
-    bool stopping_{};
-    InkpodSnapshot* pending_snapshot_{};
-    UINT pending_width_{};
-    UINT pending_height_{};
-    bool resize_pending_{};
-    bool render_pending_{};
-    std::deque<RenderControl> controls_;
-    DWORD thread_id_{};
-    std::uint64_t presented_frames_{};
+    bool stopping_{true};
+    bool running_{};
+    bool queue_paused_for_smoke_test_{};
+    std::deque<HostWork> work_;
+    std::vector<PublishedSurface> published_;
+    std::vector<SurfaceRecord> surfaces_;
+    SharedRendererDevice shared_;
+    std::atomic<DWORD> thread_id_{};
+    std::atomic<std::uint64_t> device_generation_{};
 };
 
 class CanvasHost final : public CanvasSnapshotSink {
 public:
-    explicit CanvasHost(HWND window) noexcept : window_(window), renderer_(window) {}
+    CanvasHost(
+        HWND window,
+        HWND owner_window,
+        RendererHost& renderer,
+        app::CanvasId canvas,
+        app::Generation surface_generation) noexcept
+        : window_(window),
+          owner_window_(owner_window),
+          renderer_(renderer),
+          canvas_(canvas),
+          surface_generation_(surface_generation) {}
 
     HRESULT Initialize() noexcept {
-        return renderer_.Start();
+        return renderer_.RegisterSurface(
+            canvas_, surface_generation_, window_, owner_window_);
     }
 
-    bool Submit(InkpodSnapshot* snapshot) noexcept override {
-        return renderer_.SetSnapshot(snapshot);
+    ~CanvasHost() override {
+        renderer_.UnregisterSurface(canvas_, surface_generation_);
+    }
+
+    bool Bind(
+        app::DocumentSessionId document_session,
+        app::DocumentViewId document_view,
+        app::Generation document_generation) noexcept {
+        const SnapshotRoute route{
+            document_session,
+            document_view,
+            canvas_,
+            document_generation,
+            surface_generation_};
+        if (FAILED(renderer_.BindSurface(route))) {
+            return false;
+        }
+        std::lock_guard lock(route_mutex_);
+        route_ = route;
+        return true;
+    }
+
+    SnapshotRoute Route() const noexcept override {
+        std::lock_guard lock(route_mutex_);
+        return route_;
+    }
+
+    bool AcceptsSnapshots() const noexcept override {
+        const SnapshotRoute route = Route();
+        return renderer_.SurfaceAcceptsSnapshots(route);
+    }
+
+    bool Submit(SnapshotEnvelope envelope) noexcept override {
+        const SnapshotRoute route = Route();
+        if (!route || envelope.route != route) {
+            if (envelope.snapshot != nullptr) {
+                inkpod_snapshot_release(&envelope.snapshot);
+            }
+            return false;
+        }
+        return renderer_.Submit(envelope);
     }
 
     bool SendStroke(
         CanvasStrokeEventKind kind,
         const InkpodStrokeSample* samples,
         std::uint64_t sample_count) noexcept {
-        const CanvasStrokeEvent event{
-            kind,
-            sample_count == 0U ? nullptr : samples,
-            sample_count};
-        return SendMessageW(
-                   GetParent(window_),
-                   kCanvasStrokeReady,
-                   0,
-                   reinterpret_cast<LPARAM>(&event))
-            == 1;
+        if (sample_count > kMaximumStrokeSamples
+            || (sample_count != 0U && samples == nullptr)) {
+            return false;
+        }
+        OwnedCanvasStrokeEvent event{};
+        event.kind = kind;
+        try {
+            if (sample_count != 0U) {
+                event.samples.assign(
+                    samples, samples + static_cast<std::size_t>(sample_count));
+            }
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+        const std::uint64_t token = QueueStroke(std::move(event));
+        if (token == 0U) {
+            return false;
+        }
+        const LRESULT result = SendMessageW(
+            GetParent(window_),
+            kCanvasStrokeReady,
+            static_cast<WPARAM>(token),
+            static_cast<LPARAM>(surface_generation_.Value()));
+        DiscardStroke(token);
+        return result == 1;
+    }
+
+    bool SendGesture(const CanvasViewGesture& gesture) noexcept {
+        const std::uint64_t token = QueueGesture(gesture);
+        if (token == 0U) {
+            return false;
+        }
+        const LRESULT result = SendMessageW(
+            GetParent(window_),
+            kCanvasViewGesture,
+            static_cast<WPARAM>(token),
+            static_cast<LPARAM>(surface_generation_.Value()));
+        DiscardGesture(token);
+        return result == 1;
+    }
+
+    bool TakeStroke(
+        std::uint64_t token,
+        app::Generation surface_generation,
+        OwnedCanvasStrokeEvent& event) noexcept {
+        if (token == 0U || surface_generation != surface_generation_) {
+            return false;
+        }
+        std::lock_guard lock(input_mutex_);
+        const auto found = std::find_if(
+            pending_strokes_.begin(), pending_strokes_.end(),
+            [token](const PendingStroke& pending) { return pending.token == token; });
+        if (found == pending_strokes_.end()) {
+            return false;
+        }
+        event = std::move(found->event);
+        pending_strokes_.erase(found);
+        return true;
+    }
+
+    bool TakeGesture(
+        std::uint64_t token,
+        app::Generation surface_generation,
+        CanvasViewGesture& gesture) noexcept {
+        if (token == 0U || surface_generation != surface_generation_) {
+            return false;
+        }
+        std::lock_guard lock(input_mutex_);
+        const auto found = std::find_if(
+            pending_gestures_.begin(), pending_gestures_.end(),
+            [token](const PendingGesture& pending) { return pending.token == token; });
+        if (found == pending_gestures_.end()) {
+            return false;
+        }
+        gesture = found->gesture;
+        pending_gestures_.erase(found);
+        return true;
     }
 
     bool SendStroke(
@@ -1908,8 +2413,16 @@ public:
         active_pointer_id_ = 0U;
     }
 
-    RenderThread& Renderer() noexcept {
+    RendererHost& Renderer() noexcept {
         return renderer_;
+    }
+
+    app::CanvasId Canvas() const noexcept {
+        return canvas_;
+    }
+
+    app::Generation SurfaceGeneration() const noexcept {
+        return surface_generation_;
     }
 
     bool PointerStrokeActive() const noexcept {
@@ -1920,20 +2433,81 @@ public:
     bool panning{};
 
 private:
+    struct PendingStroke {
+        std::uint64_t token{};
+        OwnedCanvasStrokeEvent event;
+    };
+
+    struct PendingGesture {
+        std::uint64_t token{};
+        CanvasViewGesture gesture{};
+    };
+
+    std::uint64_t NextInputToken() noexcept {
+        ++next_input_token_;
+        if (next_input_token_ == 0U) {
+            ++next_input_token_;
+        }
+        return next_input_token_;
+    }
+
+    std::uint64_t QueueStroke(OwnedCanvasStrokeEvent event) noexcept {
+        std::lock_guard lock(input_mutex_);
+        if (pending_strokes_.size() >= kMaximumPendingCanvasInput) {
+            return 0U;
+        }
+        const std::uint64_t token = NextInputToken();
+        try {
+            pending_strokes_.push_back(PendingStroke{token, std::move(event)});
+        } catch (const std::bad_alloc&) {
+            return 0U;
+        }
+        return token;
+    }
+
+    std::uint64_t QueueGesture(const CanvasViewGesture& gesture) noexcept {
+        std::lock_guard lock(input_mutex_);
+        if (pending_gestures_.size() >= kMaximumPendingCanvasInput) {
+            return 0U;
+        }
+        const std::uint64_t token = NextInputToken();
+        try {
+            pending_gestures_.push_back(PendingGesture{token, gesture});
+        } catch (const std::bad_alloc&) {
+            return 0U;
+        }
+        return token;
+    }
+
+    void DiscardStroke(std::uint64_t token) noexcept {
+        std::lock_guard lock(input_mutex_);
+        std::erase_if(
+            pending_strokes_,
+            [token](const PendingStroke& pending) { return pending.token == token; });
+    }
+
+    void DiscardGesture(std::uint64_t token) noexcept {
+        std::lock_guard lock(input_mutex_);
+        std::erase_if(
+            pending_gestures_,
+            [token](const PendingGesture& pending) { return pending.token == token; });
+    }
+
     HWND window_{};
-    RenderThread renderer_;
+    HWND owner_window_{};
+    RendererHost& renderer_;
+    app::CanvasId canvas_{};
+    app::Generation surface_generation_{};
+    mutable std::mutex route_mutex_;
+    SnapshotRoute route_{};
+    std::mutex input_mutex_;
+    std::deque<PendingStroke> pending_strokes_;
+    std::deque<PendingGesture> pending_gestures_;
+    std::uint64_t next_input_token_{};
     bool stroke_active_{};
     bool pointer_stroke_{};
     UINT32 active_pointer_id_{};
 };
-
-void ReportRenderFailure(HWND window, HRESULT result) noexcept {
-    PostMessageW(
-        GetParent(window),
-        kCanvasRenderFailed,
-        static_cast<WPARAM>(result),
-        0);
-}
 
 bool PenSamples(
     HWND window,
@@ -1988,6 +2562,13 @@ bool PenSamples(
     }
 }
 
+struct CanvasCreateParameters {
+    RendererHost* renderer;
+    app::CanvasId canvas;
+    app::Generation surface_generation;
+    HWND owner_window;
+};
+
 LRESULT CALLBACK CanvasWindowProcedure(
     HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
     auto* host = reinterpret_cast<CanvasHost*>(
@@ -1995,7 +2576,22 @@ LRESULT CALLBACK CanvasWindowProcedure(
 
     switch (message) {
         case WM_CREATE: {
-            auto* created = new (std::nothrow) CanvasHost(window);
+            const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lparam);
+            const auto* parameters = create == nullptr
+                ? nullptr
+                : static_cast<const CanvasCreateParameters*>(create->lpCreateParams);
+            if (parameters == nullptr || parameters->renderer == nullptr
+                || !parameters->canvas || !parameters->surface_generation
+                || parameters->owner_window == nullptr) {
+                SetLastError(ERROR_INVALID_PARAMETER);
+                return -1;
+            }
+            auto* created = new (std::nothrow) CanvasHost(
+                window,
+                parameters->owner_window,
+                *parameters->renderer,
+                parameters->canvas,
+                parameters->surface_generation);
             if (created == nullptr) {
                 SetLastError(ERROR_NOT_ENOUGH_MEMORY);
                 return -1;
@@ -2011,37 +2607,47 @@ LRESULT CALLBACK CanvasWindowProcedure(
             return 0;
         }
         case WM_SIZE:
-            if (host != nullptr && wparam != SIZE_MINIMIZED) {
+            if (host != nullptr) {
                 host->CancelStroke();
-                const UINT width = LOWORD(lparam);
-                const UINT height = HIWORD(lparam);
-                host->Renderer().Resize(width, height);
-                PostMessageW(
-                    GetParent(window),
-                    kCanvasViewportChanged,
-                    static_cast<WPARAM>(width),
-                    static_cast<LPARAM>(height));
+                host->Renderer().SetVisible(
+                    host->Canvas(), host->SurfaceGeneration(), wparam != SIZE_MINIMIZED);
+                if (wparam != SIZE_MINIMIZED) {
+                    const UINT width = LOWORD(lparam);
+                    const UINT height = HIWORD(lparam);
+                    host->Renderer().Resize(
+                        host->Canvas(), host->SurfaceGeneration(), width, height);
+                    PostMessageW(
+                        GetParent(window),
+                        kCanvasViewportChanged,
+                        static_cast<WPARAM>(width),
+                        static_cast<LPARAM>(height));
+                }
             }
             return 0;
+        case WM_SHOWWINDOW:
+            if (host != nullptr) {
+                host->Renderer().SetVisible(
+                    host->Canvas(), host->SurfaceGeneration(), wparam != FALSE);
+            }
+            break;
         case WM_PAINT: {
             PAINTSTRUCT paint{};
             BeginPaint(window, &paint);
             EndPaint(window, &paint);
             if (host != nullptr) {
-                host->Renderer().RequestRender();
+                host->Renderer().RequestRender(
+                    host->Canvas(), host->SurfaceGeneration());
             }
             return 0;
         }
         case WM_ERASEBKGND:
             return 1;
         case WM_DPICHANGED_AFTERPARENT: {
-            const HRESULT result = host == nullptr
-                ? E_UNEXPECTED
-                : host->Renderer().Invoke(RenderControlKind::DpiChanged);
-            if (FAILED(result)) {
-                ReportRenderFailure(window, result);
+            if (host != nullptr) {
+                host->Renderer().DpiChanged(
+                    host->Canvas(), host->SurfaceGeneration());
             }
-            return SUCCEEDED(result) ? 1 : 0;
+            return host == nullptr ? 0 : 1;
         }
         case WM_LBUTTONDOWN:
             if (host != nullptr && !host->PointerStrokeActive()) {
@@ -2078,11 +2684,7 @@ LRESULT CALLBACK CanvasWindowProcedure(
                     static_cast<double>(current.y - host->last_pan_point.y),
                     0.0};
                 host->last_pan_point = current;
-                return SendMessageW(
-                    GetParent(window),
-                    kCanvasViewGesture,
-                    0,
-                    reinterpret_cast<LPARAM>(&gesture));
+                return host->SendGesture(gesture) ? 1 : 0;
             }
             return 0;
         case WM_LBUTTONUP:
@@ -2118,11 +2720,7 @@ LRESULT CALLBACK CanvasWindowProcedure(
                 factor,
                 static_cast<double>(point.x),
                 static_cast<double>(point.y)};
-            return SendMessageW(
-                GetParent(window),
-                kCanvasViewGesture,
-                0,
-                reinterpret_cast<LPARAM>(&gesture));
+            return host == nullptr || !host->SendGesture(gesture) ? 0 : 1;
         }
         case WM_POINTERDOWN:
         case WM_POINTERUPDATE:
@@ -2155,63 +2753,38 @@ LRESULT CALLBACK CanvasWindowProcedure(
             return 0;
         case kCanvasRenderOnce:
             return host != nullptr
-                    && SUCCEEDED(host->Renderer().Invoke(RenderControlKind::Render))
+                    && SUCCEEDED(host->Renderer().RenderOnce(
+                        host->Canvas(), host->SurfaceGeneration()))
                 ? 1
                 : 0;
         case kCanvasSimulateDeviceLoss:
             return host != nullptr
-                    && SUCCEEDED(
-                        host->Renderer().Invoke(RenderControlKind::SimulateDeviceLoss))
+                    && SUCCEEDED(host->Renderer().SimulateDeviceLoss(
+                        host->Canvas(), host->SurfaceGeneration()))
                 ? 1
                 : 0;
         case kCanvasValidateClosedVectorStroke:
             return host != nullptr
-                    && SUCCEEDED(host->Renderer().Invoke(
-                        RenderControlKind::ValidateClosedVectorStroke))
+                    && SUCCEEDED(host->Renderer().ValidateClosedVectorStroke(
+                        host->Canvas(), host->SurfaceGeneration()))
                 ? 1
                 : 0;
+        case kCanvasClearGeometryPreview: {
+            CanvasGeometryPreview preview{};
+            preview.struct_size = sizeof(preview);
+            return host != nullptr
+                    && SUCCEEDED(host->Renderer().SetGeometryPreview(
+                        host->Canvas(), host->SurfaceGeneration(), preview))
+                ? 1
+                : 0;
+        }
         case kCanvasGetRendererThreadId:
             return host == nullptr ? 0 : static_cast<LRESULT>(host->Renderer().ThreadId());
         case kCanvasGetPresentedFrameCount:
             return host == nullptr
                 ? 0
-                : static_cast<LRESULT>(host->Renderer().PresentedFrameCount());
-        case kCanvasGetDocumentBounds: {
-            auto* bounds = reinterpret_cast<CanvasDocumentBounds*>(lparam);
-            return host != nullptr && bounds != nullptr
-                    && SUCCEEDED(host->Renderer().Invoke(
-                        RenderControlKind::GetDocumentBounds, bounds))
-                ? 1
-                : 0;
-        }
-        case kCanvasGetGeometryPreviewForSmokeTest: {
-            auto* preview = reinterpret_cast<CanvasGeometryPreview*>(lparam);
-            return host != nullptr && preview != nullptr
-                    && SUCCEEDED(host->Renderer().Invoke(
-                        RenderControlKind::GetGeometryPreview,
-                        nullptr,
-                        nullptr,
-                        nullptr,
-                        preview))
-                ? 1
-                : 0;
-        }
-        case kCanvasSetFloatingPreview: {
-            const auto* preview = reinterpret_cast<const CanvasFloatingPreview*>(lparam);
-            return host != nullptr && preview != nullptr
-                    && SUCCEEDED(host->Renderer().Invoke(
-                        RenderControlKind::SetFloatingPreview, nullptr, preview))
-                ? 1
-                : 0;
-        }
-        case kCanvasSetGeometryPreview: {
-            const auto* preview = reinterpret_cast<const CanvasGeometryPreview*>(lparam);
-            return host != nullptr && preview != nullptr
-                    && SUCCEEDED(host->Renderer().Invoke(
-                        RenderControlKind::SetGeometryPreview, nullptr, nullptr, preview))
-                ? 1
-                : 0;
-        }
+                : static_cast<LRESULT>(host->Renderer().PresentedFrameCount(
+                      host->Canvas(), host->SurfaceGeneration()));
         case WM_NCDESTROY:
             SetWindowLongPtrW(window, GWLP_USERDATA, 0);
             delete host;
@@ -2224,6 +2797,283 @@ LRESULT CALLBACK CanvasWindowProcedure(
 
 }  // namespace
 
+struct RendererHost::Impl final {
+    RendererHostState state;
+};
+
+RendererHost::RendererHost() noexcept = default;
+
+RendererHost::~RendererHost() {
+    Stop();
+}
+
+HRESULT RendererHost::Start() noexcept {
+    if (impl_ != nullptr) {
+        return E_UNEXPECTED;
+    }
+    try {
+        auto candidate = std::make_unique<Impl>();
+        const HRESULT result = candidate->state.Start();
+        if (FAILED(result)) {
+            return result;
+        }
+        impl_ = std::move(candidate);
+        return S_OK;
+    } catch (const std::bad_alloc&) {
+        return E_OUTOFMEMORY;
+    }
+}
+
+void RendererHost::Stop() noexcept {
+    if (impl_ != nullptr) {
+        impl_->state.Stop();
+        impl_.reset();
+    }
+}
+
+HRESULT RendererHost::RegisterSurface(
+    app::CanvasId canvas,
+    app::Generation surface_generation,
+    HWND window,
+    HWND owner_window) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::Register;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    control.window = window;
+    control.owner_window = owner_window;
+    return impl_->state.Invoke(std::move(control));
+}
+
+void RendererHost::UnregisterSurface(
+    app::CanvasId canvas,
+    app::Generation surface_generation) noexcept {
+    if (impl_ == nullptr) {
+        return;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::Unregister;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    (void)impl_->state.Invoke(std::move(control));
+}
+
+HRESULT RendererHost::BindSurface(const SnapshotRoute& route) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::Bind;
+    control.canvas = route.canvas;
+    control.surface_generation = route.surface_generation;
+    control.route = route;
+    return impl_->state.Invoke(std::move(control));
+}
+
+bool RendererHost::SurfaceAcceptsSnapshots(const SnapshotRoute& route) const noexcept {
+    return impl_ != nullptr && impl_->state.SurfaceAcceptsSnapshots(route);
+}
+
+bool RendererHost::Submit(SnapshotEnvelope envelope) noexcept {
+    if (impl_ != nullptr) {
+        return impl_->state.Submit(envelope);
+    }
+    if (envelope.snapshot != nullptr) {
+        inkpod_snapshot_release(&envelope.snapshot);
+    }
+    return false;
+}
+
+void RendererHost::Resize(
+    app::CanvasId canvas,
+    app::Generation surface_generation,
+    UINT width,
+    UINT height) noexcept {
+    if (impl_ == nullptr) {
+        return;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::Resize;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    control.width = width;
+    control.height = height;
+    impl_->state.Post(std::move(control));
+}
+
+void RendererHost::SetVisible(
+    app::CanvasId canvas,
+    app::Generation surface_generation,
+    bool visible) noexcept {
+    if (impl_ == nullptr) {
+        return;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::Visibility;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    control.visible = visible;
+    impl_->state.Post(std::move(control));
+}
+
+void RendererHost::RequestRender(
+    app::CanvasId canvas,
+    app::Generation surface_generation) noexcept {
+    if (impl_ == nullptr) {
+        return;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::Render;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    impl_->state.Post(std::move(control));
+}
+
+void RendererHost::DpiChanged(
+    app::CanvasId canvas,
+    app::Generation surface_generation) noexcept {
+    if (impl_ == nullptr) {
+        return;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::DpiChanged;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    impl_->state.Post(std::move(control));
+}
+
+HRESULT RendererHost::RenderOnce(
+    app::CanvasId canvas,
+    app::Generation surface_generation) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::Render;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    return impl_->state.Invoke(std::move(control));
+}
+
+HRESULT RendererHost::SimulateDeviceLoss(
+    app::CanvasId canvas,
+    app::Generation surface_generation) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::SimulateDeviceLoss;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    return impl_->state.Invoke(std::move(control));
+}
+
+HRESULT RendererHost::ValidateClosedVectorStroke(
+    app::CanvasId canvas,
+    app::Generation surface_generation) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::ValidateClosedVectorStroke;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    return impl_->state.Invoke(std::move(control));
+}
+
+HRESULT RendererHost::GetDocumentBounds(
+    app::CanvasId canvas,
+    app::Generation surface_generation,
+    CanvasDocumentBounds& bounds) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::GetDocumentBounds;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    control.out_bounds = &bounds;
+    return impl_->state.Invoke(std::move(control));
+}
+
+HRESULT RendererHost::GetGeometryPreview(
+    app::CanvasId canvas,
+    app::Generation surface_generation,
+    CanvasGeometryPreview& preview) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::GetGeometryPreview;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    control.out_geometry_preview = &preview;
+    return impl_->state.Invoke(std::move(control));
+}
+
+HRESULT RendererHost::SetFloatingPreview(
+    app::CanvasId canvas,
+    app::Generation surface_generation,
+    const CanvasFloatingPreview& preview) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::SetFloatingPreview;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    control.floating_preview = preview;
+    return impl_->state.Invoke(std::move(control));
+}
+
+HRESULT RendererHost::SetGeometryPreview(
+    app::CanvasId canvas,
+    app::Generation surface_generation,
+    const CanvasGeometryPreview& preview) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::SetGeometryPreview;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    control.geometry_preview = preview;
+    return impl_->state.Invoke(std::move(control));
+}
+
+DWORD RendererHost::ThreadId() const noexcept {
+    return impl_ == nullptr ? 0U : impl_->state.ThreadId();
+}
+
+std::uint64_t RendererHost::PresentedFrameCount(
+    app::CanvasId canvas,
+    app::Generation surface_generation) const noexcept {
+    return impl_ == nullptr
+        ? 0U
+        : impl_->state.PresentedFrameCount(canvas, surface_generation);
+}
+
+std::size_t RendererHost::SurfaceCount() const noexcept {
+    return impl_ == nullptr ? 0U : impl_->state.SurfaceCount();
+}
+
+std::uint64_t RendererHost::DeviceGeneration() const noexcept {
+    return impl_ == nullptr ? 0U : impl_->state.DeviceGeneration();
+}
+
+void RendererHost::SetQueuePausedForSmokeTest(bool paused) noexcept {
+    if (impl_ != nullptr) {
+        impl_->state.SetQueuePausedForSmokeTest(paused);
+    }
+}
+
+bool RendererHost::WaitQueueIdleForSmokeTest() noexcept {
+    return impl_ != nullptr && impl_->state.WaitQueueIdleForSmokeTest();
+}
+
 bool RegisterCanvasClass(HINSTANCE instance) noexcept {
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
@@ -2235,9 +3085,19 @@ bool RegisterCanvasClass(HINSTANCE instance) noexcept {
     return RegisterClassExW(&window_class) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
 }
 
-HWND CreateCanvasWindow(HINSTANCE instance, HWND parent) noexcept {
+HWND CreateCanvasWindow(
+    HINSTANCE instance,
+    HWND parent,
+    RendererHost& renderer,
+    app::CanvasId canvas,
+    app::Generation surface_generation) noexcept {
     RECT client{};
     GetClientRect(parent, &client);
+    const CanvasCreateParameters parameters{
+        &renderer,
+        canvas,
+        surface_generation,
+        GetAncestor(parent, GA_ROOT)};
     return CreateWindowExW(
         0,
         kCanvasClassName,
@@ -2250,13 +3110,96 @@ HWND CreateCanvasWindow(HINSTANCE instance, HWND parent) noexcept {
         parent,
         nullptr,
         instance,
-        nullptr);
+        const_cast<CanvasCreateParameters*>(&parameters));
 }
 
 CanvasSnapshotSink* GetCanvasSnapshotSink(HWND canvas) noexcept {
     auto* host = reinterpret_cast<CanvasHost*>(
         GetWindowLongPtrW(canvas, GWLP_USERDATA));
     return host;
+}
+
+bool BindCanvasSnapshotSink(
+    HWND canvas,
+    app::DocumentSessionId document_session,
+    app::DocumentViewId document_view,
+    app::Generation document_generation) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr
+        && host->Bind(document_session, document_view, document_generation);
+}
+
+bool TakeCanvasStrokeEvent(
+    HWND canvas,
+    std::uint64_t token,
+    app::Generation surface_generation,
+    OwnedCanvasStrokeEvent& event) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr && host->TakeStroke(token, surface_generation, event);
+}
+
+bool TakeCanvasViewGesture(
+    HWND canvas,
+    std::uint64_t token,
+    app::Generation surface_generation,
+    CanvasViewGesture& gesture) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr && host->TakeGesture(token, surface_generation, gesture);
+}
+
+bool SubmitCanvasStrokeEvent(
+    HWND canvas,
+    CanvasStrokeEventKind kind,
+    const InkpodStrokeSample* samples,
+    std::uint64_t sample_count) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr && host->SendStroke(kind, samples, sample_count);
+}
+
+bool SubmitCanvasStrokeEvent(
+    HWND canvas, const CanvasStrokeEvent& event) noexcept {
+    return SubmitCanvasStrokeEvent(
+        canvas, event.kind, event.samples, event.sample_count);
+}
+
+bool GetCanvasDocumentBounds(
+    HWND canvas, CanvasDocumentBounds& bounds) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr
+        && SUCCEEDED(host->Renderer().GetDocumentBounds(
+            host->Canvas(), host->SurfaceGeneration(), bounds));
+}
+
+bool GetCanvasGeometryPreview(
+    HWND canvas, CanvasGeometryPreview& preview) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr
+        && SUCCEEDED(host->Renderer().GetGeometryPreview(
+            host->Canvas(), host->SurfaceGeneration(), preview));
+}
+
+bool SetCanvasFloatingPreview(
+    HWND canvas, const CanvasFloatingPreview& preview) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr
+        && SUCCEEDED(host->Renderer().SetFloatingPreview(
+            host->Canvas(), host->SurfaceGeneration(), preview));
+}
+
+bool SetCanvasGeometryPreview(
+    HWND canvas, const CanvasGeometryPreview& preview) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr
+        && SUCCEEDED(host->Renderer().SetGeometryPreview(
+            host->Canvas(), host->SurfaceGeneration(), preview));
 }
 
 }  // namespace inkpod::renderer

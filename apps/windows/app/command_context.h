@@ -97,6 +97,7 @@ public:
     [[nodiscard]] Generation CurrentGeneration() const noexcept;
     [[nodiscard]] WorkspaceWindowId Workspace() const noexcept;
     [[nodiscard]] EditorGroupId EditorGroup() const noexcept;
+    [[nodiscard]] CanvasId Canvas() const noexcept;
     [[nodiscard]] DocumentSessionId DocumentSession() const noexcept;
     [[nodiscard]] DocumentViewId ActiveDocumentView() const noexcept;
 

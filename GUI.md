@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1、G2、G3 完了、G4 未着手 |
+| 状態 | Active。G0、G1、G2、G3、G4 完了、G5 未着手 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -555,6 +555,39 @@ C ABI は変更していない。二 Core の同値 local ID/revision、edit/dir
 - 一 process で複数 Canvas を同時描画できる。
 - device resource は共有され、非表示 tab 数に比例して swap chain と renderer thread が増えない。
 - document state は device lost から独立している。
+
+### 完了記録
+
+2026-08-01 に G4 を完了した。`ApplicationHost` 所有の一つの
+`RendererHost` が Core より先に一つの renderer thread を開始し、共有
+D3D11/DXGI/Direct2D device/factory、device generation、upload cache budget と
+複数 `CanvasSurface` registry を owner thread 上で管理する。各 surface は
+swap chain、D2D target/context、size、visibility/occlusion、retained snapshot、
+surface generation だけを所有し、旧 Canvas ごとの `RenderThread` と device
+所有は同じ milestone で除去した。
+
+CoreHost からの snapshot は session、frontend view、Canvas、document/surface
+generation、document/view revision を持つ `SnapshotEnvelope` で渡す。完全な
+routing key と snapshot accessor の revision が一致する場合だけ bind 済み
+surface が受理し、rebind、hidden/occluded、pending replacement、queue full、
+surface close、RendererHost shutdown の全経路で Rust owner を一度だけ解放
+する。device lost は全 surface の旧 GPU resource を先に破棄し、共有 device
+を再生成して retained snapshot から全 surface を復元するため、Core document
+state を破棄しない。C ABI は変更していない。
+
+Canvas の stroke と view gesture も Canvas 所有の bounded queue へ payload を
+copy し、workspace `HWND` へは token と surface generation の値だけを通知する。
+document bounds と preview は pointer payload を持つ custom message ではなく
+型付き Canvas API を使うため、`WPARAM`/`LPARAM` は C++ object を所有しない。
+
+G4 native test は二つの Canvas と異なる session/view snapshot、同一 renderer
+thread、rebind stale rejection、queue replacement/full failure、visibility、
+resize/DPI isolation、surface close/shutdown、host-wide device lost recovery を
+検証する。structural gate は ApplicationHost ownership、旧 RenderThread 不在、
+共有 device/factory、envelope/revision routing、Canvas input の value-only
+notification を固定する。Windows 11 の x64
+Debug と ARM64 Debug は strict build と CTest 19/19 を完了した。可視 GUI は
+意図どおり一 window、一 group、一 Canvas のままであり、次の対象は G5 である。
 
 ---
 

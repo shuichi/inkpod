@@ -108,13 +108,7 @@ void CancelVectorGeometryPreview(
     if (canvas == nullptr) {
         return;
     }
-    renderer::CanvasGeometryPreview preview{};
-    preview.struct_size = sizeof(preview);
-    SendMessageW(
-        canvas,
-        renderer::kCanvasSetGeometryPreview,
-        0,
-        reinterpret_cast<LPARAM>(&preview));
+    SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0);
 }
 
 void CancelSelectionGeometryPreview(
@@ -123,13 +117,7 @@ void CancelSelectionGeometryPreview(
     if (canvas == nullptr) {
         return;
     }
-    renderer::CanvasGeometryPreview preview{};
-    preview.struct_size = sizeof(preview);
-    SendMessageW(
-        canvas,
-        renderer::kCanvasSetGeometryPreview,
-        0,
-        reinterpret_cast<LPARAM>(&preview));
+    SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0);
 }
 
 void TransitionActiveTool(

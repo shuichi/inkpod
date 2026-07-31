@@ -64,8 +64,10 @@ The private dependency direction is:
 
 ```text
 main -> Application -> MainWindow/controllers -> CoreHost -> C ABI
-                         |
-                         +-> Canvas snapshot sink -> Renderer
+                         |                         |
+                         |                         +-> SnapshotEnvelope queue
+                         |                                      |
+                         +-> Canvas HWND -> RendererHost -> CanvasSurface
 ```
 
 - `main.cpp` parses launch mode and invokes `Application`; it contains no
@@ -87,9 +89,10 @@ main -> Application -> MainWindow/controllers -> CoreHost -> C ABI
 
 `ApplicationHost` is the process-lifetime composition root. It owns global
 shortcut and clipboard state, the frontend routing/token registries, job state,
-one `CoreHost`, a single-entry workspace registry, and a bounded multi-entry
-document registry. The UI intentionally keeps one active document visible at
-G3, while the ownership model can hold multiple independent sessions.
+one `CoreHost`, one `RendererHost`, a single-entry workspace registry, and a
+bounded multi-entry document registry. The UI intentionally keeps one active
+document and one Canvas visible at G4, while both the document and renderer
+ownership models can hold multiple independent entries.
 `WorkspaceWindow` owns the top-level `HWND`, all child/control handles,
 window-local command/menu/status presentation, pane handles, tool presentation,
 and layout state. `DocumentSession` owns the file/recovery shell and an explicit
@@ -106,11 +109,14 @@ The top-level window stores only its `WorkspaceWindow*` in `GWLP_USERDATA`.
 The window procedure reaches process services through the workspace's explicit
 `ApplicationHost*` link; it does not reinterpret the stored value as an
 application-global context. Construction is process host, workspace, document,
-view, window, CoreHost thread, then session Core binding. Shutdown rejects new
-session work, unbinds the session shells, drains accepted work, cancels live
-strokes, and destroys every Core handle on the CoreHost owner thread. It then
-destroys window-local controls and the top-level window and clears document and
-workspace owners before releasing the application host. Registry initialization
+view, RendererHost thread, window/Canvas surface registration, CoreHost thread,
+then session Core/surface binding. Shutdown rejects new session work, unbinds
+the session shells, drains accepted work, cancels live strokes, and destroys
+every Core handle on the CoreHost owner thread. It then stops RendererHost,
+which releases pending and retained snapshots and destroys every CanvasSurface
+and shared GPU resource on the renderer thread, before destroying window-local
+controls and the top-level window. Document and workspace owners are cleared
+before releasing the application host. Registry initialization
 uses candidate ownership so invalid input or allocation failure leaves the
 previous owner intact, and a failed later owner creation unwinds earlier owners.
 
@@ -128,10 +134,27 @@ previously accepted work, cancels a live stroke, and destroys the handle on the
 owner thread. Long operations still share this single lane and may delay other
 sessions; worker/revision splitting remains measurement-driven G13 work.
 
-G3 still has one Canvas and the Canvas-owned renderer thread. Only the active
-session may submit a snapshot to that Canvas, so an inactive session cannot be
-drawn into the visible document. The shared multi-surface `RendererHost` and
-session/view/canvas snapshot envelope are G4.
+`ApplicationHost` owns one `RendererHost` and starts it before any Canvas or
+Core. Its single renderer thread owns a shared D3D11 device/immediate context,
+DXGI factory, Direct2D factory/device, device generation, and upload-cache
+budget. Each registered `CanvasSurface` owns only its Canvas `HWND` binding,
+swap chain, frame-latency handle, Direct2D device context/target, retained
+snapshot, overlays, and tile cache. Canvas creation/destruction on the UI thread
+performs a synchronous register/unregister handshake; resize, DPI, visibility,
+paint, and preview work is queued by strong `CanvasId` plus surface generation.
+There is no per-Canvas renderer thread or per-Canvas D3D/D2D device.
+
+CoreHost publishes through a `SnapshotEnvelope` containing document session,
+frontend view, Canvas, document generation, surface generation, document
+revision, and view revision. RendererHost accepts it only when the complete
+route equals the current surface binding and the snapshot accessors confirm both
+revisions. Rebind clears the old retained snapshot before accepting the new
+route. Stale, hidden, occluded, queue-full, replaced, closed, and shutdown paths
+all consume the Rust snapshot owner exactly once. Device loss first discards all
+surface GPU resources, recreates the shared device, then reconstructs every
+surface cache from its retained immutable snapshot; Core document state is not
+involved. G4 retains one visible Canvas only because document tabs and a second
+EditorGroup are G5 and G6 UI work, not because renderer ownership is singular.
 
 The UI/Input thread owns the frontend target registry. Workspace window,
 document session, document view, editor group, Canvas, pane, job, and generation
@@ -154,7 +177,11 @@ pending token makes enqueue, allocation, replacement, and `PostMessage` failure
 drop only the matching request. Core state/failure notification records likewise
 carry session ID, generation, copied context, and status in a bounded host queue;
 the window message carries only a value token and generation. No C++ or
-Rust-owned object pointer is placed in `WPARAM` or `LPARAM`. G3 retains one
+Rust-owned object pointer is placed in `WPARAM` or `LPARAM`. Canvas stroke and
+view-gesture payloads follow the same rule: `CanvasHost` owns them in bounded
+queues until the workspace takes the matching token plus surface generation.
+Document-bound and preview queries use typed Canvas APIs rather than output
+pointers in custom messages. G4 retains one
 workspace, one active document tab, one editor group, and one Canvas behind the
 now-multi-session backend; later milestones expose that multiplicity without
 restoring an implicit active object.
@@ -204,16 +231,21 @@ The Windows frontend has three distinct long-lived threads:
    single writer, preserves stroke order, batches samples, creates frame-paced
    preview snapshots, executes Core operations, and posts value-only UI
    notifications. Core never calls a C++ callback while holding its state.
-3. The Renderer thread owns D3D11, DXGI, Direct2D, swap-chain, bitmap-cache, and
-   frame-latency objects. It consumes the newest immutable snapshot, uploads
-   changed tile revisions, and presents independently of input dispatch.
+3. The RendererHost thread owns the shared D3D11/DXGI/Direct2D device graph and
+   every registered CanvasSurface's swap chain, target, bitmap cache, and
+   frame-latency object. It validates route/revision envelopes, consumes the
+   newest immutable snapshot per surface, uploads changed tile revisions, and
+   presents independently of input dispatch.
 
-Snapshots move through a thread-safe C++ ownership queue, never as naked Rust
-pointers in window-message parameters. The sink assumes release responsibility
-on enqueue success and failure. Replaced pending frames are released; the current
-snapshot is retained for device recovery. Render frames may be dropped, but input
-samples and stroke begin/end/cancel events may not. Queue failure cancels capture
-and the Core stroke so partial work cannot commit.
+Snapshots move through a bounded thread-safe C++ ownership queue, never as naked
+Rust pointers in window-message parameters. The sink assumes release
+responsibility on enqueue success and failure. A newer pending envelope replaces
+only the older undrawn envelope for the same Canvas; different surfaces remain
+independent. Hidden/minimized/occluded surfaces reject new snapshot builds and
+skip Present until visibility/paint requests resume them. The current snapshot
+is retained for device recovery. Render frames may be dropped, but input samples
+and stroke begin/end/cancel events may not. Queue failure cancels capture and the
+Core stroke so partial work cannot commit.
 
 ## Coordinate, DPI, and rendering contract
 
@@ -351,9 +383,11 @@ without a machine-specific pass threshold.
 
 ## Initialization and shutdown
 
-Application initializes Common Controls, COM, the main window/Canvas and Renderer,
-then starts the Core engine. Core creation and initial document/snapshot work occur
-on the Core thread. Shutdown stops and joins Core work before destroying Canvas
-and joining Renderer, so no sink or notification target outlives its owner. A
-renderer-held snapshot may outlive Core until Canvas destruction because it owns
-its borrowed storage and is released by the Rust snapshot release function.
+Application initializes Common Controls, COM, frontend owners, and RendererHost;
+it then creates the main window/Canvas surface and starts CoreHost. Core creation
+and initial document/snapshot work occur on the Core thread. Shutdown stops and
+joins Core work before stopping and joining RendererHost, then destroys the
+Canvas `HWND`; the stopped Canvas unregister is a safe no-op. No sink or
+notification target outlives its owner. A renderer-held snapshot may outlive
+Core until RendererHost shutdown because it independently owns all borrowed
+storage and is released by the Rust snapshot release function.

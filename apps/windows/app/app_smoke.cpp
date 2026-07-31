@@ -842,12 +842,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 31;
     }
     inkpod::renderer::CanvasDocumentBounds document_bounds{};
-    if (SendMessageW(
-            state.Workspace().windows.canvas,
-            inkpod::renderer::kCanvasGetDocumentBounds,
-            0,
-            reinterpret_cast<LPARAM>(&document_bounds))
-            != 1
+    if (!inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, document_bounds)
         || std::abs(document_bounds.left - 16.0) > 0.01
         || std::abs(document_bounds.top - 69.0) > 0.01
         || std::abs(document_bounds.right - 624.0) > 0.01
@@ -1150,21 +1146,15 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
 
     inkpod::renderer::CanvasDocumentBounds before_dpi_bounds{};
     inkpod::renderer::CanvasDocumentBounds after_dpi_bounds{};
-    const bool bounds_before_dpi = SendMessageW(
-                                       state.Workspace().windows.canvas,
-                                       inkpod::renderer::kCanvasGetDocumentBounds,
-                                       0,
-                                       reinterpret_cast<LPARAM>(&before_dpi_bounds)) == 1;
+    const bool bounds_before_dpi = inkpod::renderer::GetCanvasDocumentBounds(
+        state.Workspace().windows.canvas, before_dpi_bounds);
     const bool dpi_changed = SendMessageW(
                                  state.Workspace().windows.canvas,
                                  WM_DPICHANGED_AFTERPARENT,
                                  0,
                                  0) == 1;
-    const bool bounds_after_dpi = SendMessageW(
-                                      state.Workspace().windows.canvas,
-                                      inkpod::renderer::kCanvasGetDocumentBounds,
-                                      0,
-                                      reinterpret_cast<LPARAM>(&after_dpi_bounds)) == 1;
+    const bool bounds_after_dpi = inkpod::renderer::GetCanvasDocumentBounds(
+        state.Workspace().windows.canvas, after_dpi_bounds);
     const bool dpi_transform_stable = bounds_before_dpi && bounds_after_dpi
         && std::abs(before_dpi_bounds.left - after_dpi_bounds.left) <= 0.01
         && std::abs(before_dpi_bounds.top - after_dpi_bounds.top) <= 0.01
@@ -1277,11 +1267,8 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
     InkpodDocumentInfo before_fill{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, before_fill)
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&bounds)) != 1) {
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, bounds)) {
         return 203;
     }
     const double zoom = (bounds.right - bounds.left) / static_cast<double>(before_fill.width);
@@ -1874,11 +1861,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     }
 
     inkpod::renderer::CanvasDocumentBounds selection_canvas_bounds{};
-    if (SendMessageW(
-            state.Workspace().windows.canvas,
-            inkpod::renderer::kCanvasGetDocumentBounds,
-            0,
-            reinterpret_cast<LPARAM>(&selection_canvas_bounds)) != 1) {
+    if (!inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, selection_canvas_bounds)) {
         return 315;
     }
     const auto selection_sample = [&selection_canvas_bounds](float x, float y) {
@@ -1898,11 +1882,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
                                              inkpod::renderer::CanvasGeometryPreview& preview) {
         preview = {};
         preview.struct_size = sizeof(preview);
-        return SendMessageW(
-                   state.Workspace().windows.canvas,
-                   inkpod::renderer::kCanvasGetGeometryPreviewForSmokeTest,
-                   0,
-                   reinterpret_cast<LPARAM>(&preview)) == 1;
+        return inkpod::renderer::GetCanvasGeometryPreview(
+            state.Workspace().windows.canvas, preview);
     };
     const auto send_selection_gesture = [&state](const auto& samples) noexcept {
         if (samples.empty()) {
@@ -1910,11 +1891,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         }
         const inkpod::renderer::CanvasStrokeEvent begin{
             inkpod::renderer::CanvasStrokeEventKind::Begin, samples.data(), 1U};
-        if (SendMessageW(
-                state.Workspace().windows.window,
-                inkpod::renderer::kCanvasStrokeReady,
-                0,
-                reinterpret_cast<LPARAM>(&begin)) != 1) {
+        if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+                state.Workspace().windows.canvas, begin)) {
             return false;
         }
         if (samples.size() > 2U) {
@@ -1922,11 +1900,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
                 inkpod::renderer::CanvasStrokeEventKind::Append,
                 samples.data() + 1U,
                 samples.size() - 2U};
-            if (SendMessageW(
-                    state.Workspace().windows.window,
-                    inkpod::renderer::kCanvasStrokeReady,
-                    0,
-                    reinterpret_cast<LPARAM>(&append)) != 1) {
+            if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+                    state.Workspace().windows.canvas, append)) {
                 return false;
             }
         }
@@ -1934,11 +1909,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
             inkpod::renderer::CanvasStrokeEventKind::End,
             samples.data() + samples.size() - 1U,
             1U};
-        return SendMessageW(
-                   state.Workspace().windows.window,
-                   inkpod::renderer::kCanvasStrokeReady,
-                   0,
-                   reinterpret_cast<LPARAM>(&end)) == 1;
+        return inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, end);
     };
     const auto query_selection = [&state](InkpodLocatorOutput& output) noexcept {
         output = {};
@@ -1964,16 +1936,10 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         1U};
     InkpodDocumentInfo before_selection_preview{};
     if (!QueryDocument(state, before_selection_preview)
-        || SendMessageW(
-               state.Workspace().windows.window,
-               inkpod::renderer::kCanvasStrokeReady,
-               0,
-               reinterpret_cast<LPARAM>(&preview_begin)) != 1
-        || SendMessageW(
-               state.Workspace().windows.window,
-               inkpod::renderer::kCanvasStrokeReady,
-               0,
-               reinterpret_cast<LPARAM>(&preview_append)) != 1) {
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+               state.Workspace().windows.canvas, preview_begin)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+               state.Workspace().windows.canvas, preview_append)) {
         return 610;
     }
     inkpod::renderer::CanvasGeometryPreview selection_preview{};
@@ -1989,25 +1955,16 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     }
     const inkpod::renderer::CanvasStrokeEvent preview_cancel{
         inkpod::renderer::CanvasStrokeEventKind::Cancel, nullptr, 0U};
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            inkpod::renderer::kCanvasStrokeReady,
-            0,
-            reinterpret_cast<LPARAM>(&preview_cancel)) != 1
+    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, preview_cancel)
         || !query_selection_preview(selection_preview)
         || selection_preview.active != 0U || selection_preview.point_count != 0U) {
         return 612;
     }
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            inkpod::renderer::kCanvasStrokeReady,
-            0,
-            reinterpret_cast<LPARAM>(&preview_begin)) != 1
-        || SendMessageW(
-               state.Workspace().windows.window,
-               inkpod::renderer::kCanvasStrokeReady,
-               0,
-               reinterpret_cast<LPARAM>(&preview_append)) != 1
+    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, preview_begin)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+               state.Workspace().windows.canvas, preview_append)
         || !query_selection_preview(selection_preview)
         || selection_preview.active != 1U) {
         return 613;
@@ -2016,11 +1973,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         inkpod::renderer::CanvasStrokeEventKind::End,
         preview_samples.data() + 1U,
         1U};
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            inkpod::renderer::kCanvasStrokeReady,
-            0,
-            reinterpret_cast<LPARAM>(&preview_end)) != 1
+    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, preview_end)
         || !query_selection_preview(selection_preview)
         || selection_preview.active != 0U || selection_preview.point_count != 0U) {
         return 614;
@@ -2031,16 +1985,10 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
                                               bool expected_closed,
                                               bool expected_region_width) {
         SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0);
-        if (SendMessageW(
-                state.Workspace().windows.window,
-                inkpod::renderer::kCanvasStrokeReady,
-                0,
-                reinterpret_cast<LPARAM>(&preview_begin)) != 1
-            || SendMessageW(
-                   state.Workspace().windows.window,
-                   inkpod::renderer::kCanvasStrokeReady,
-                   0,
-                   reinterpret_cast<LPARAM>(&preview_append)) != 1
+        if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+                state.Workspace().windows.canvas, preview_begin)
+            || !inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, preview_append)
             || !query_selection_preview(selection_preview)
             || selection_preview.active != 1U
             || selection_preview.point_count != expected_points
@@ -2048,11 +1996,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
             || (selection_preview.stroke_width > 0.0F) != expected_region_width) {
             return false;
         }
-        return SendMessageW(
-                   state.Workspace().windows.window,
-                   inkpod::renderer::kCanvasStrokeReady,
-                   0,
-                   reinterpret_cast<LPARAM>(&preview_cancel)) == 1
+        return inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, preview_cancel)
             && query_selection_preview(selection_preview)
             && selection_preview.active == 0U
             && selection_preview.point_count == 0U;
@@ -2327,11 +2272,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         return 358;
     }
     inkpod::renderer::CanvasDocumentBounds floating_canvas{};
-    if (SendMessageW(
-            state.Workspace().windows.canvas,
-            inkpod::renderer::kCanvasGetDocumentBounds,
-            0,
-            reinterpret_cast<LPARAM>(&floating_canvas)) != 1) {
+    if (!inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, floating_canvas)) {
         return 359;
     }
     const double floating_zoom = (floating_canvas.right - floating_canvas.left) / 4.0;
@@ -2347,16 +2289,10 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         inkpod::renderer::CanvasStrokeEventKind::Begin, &floating_start, 1U};
     const inkpod::renderer::CanvasStrokeEvent floating_finish{
         inkpod::renderer::CanvasStrokeEventKind::End, &floating_end, 1U};
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            inkpod::renderer::kCanvasStrokeReady,
-            0,
-            reinterpret_cast<LPARAM>(&floating_begin)) != 1
-        || SendMessageW(
-               state.Workspace().windows.window,
-               inkpod::renderer::kCanvasStrokeReady,
-               0,
-               reinterpret_cast<LPARAM>(&floating_finish)) != 1
+    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, floating_begin)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+               state.Workspace().windows.canvas, floating_finish)
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1) {
         return 359;
     }
@@ -2683,11 +2619,8 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_ZOOM_PERCENT, 0);
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_BOX_ZOOM, 0);
     inkpod::renderer::CanvasDocumentBounds box_bounds{};
-    if (SendMessageW(
-            state.Workspace().windows.canvas,
-            inkpod::renderer::kCanvasGetDocumentBounds,
-            0,
-            reinterpret_cast<LPARAM>(&box_bounds)) != 1) {
+    if (!inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, box_bounds)) {
         return 329;
     }
     const std::array<InkpodStrokeSample, 2U> box_samples{
@@ -2717,24 +2650,15 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         inkpod::renderer::CanvasStrokeEventKind::End,
         box_samples.data() + 1U,
         1U};
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            inkpod::renderer::kCanvasStrokeReady,
-            0,
-            reinterpret_cast<LPARAM>(&box_begin)) != 1
-        || SendMessageW(
-               state.Workspace().windows.window,
-               inkpod::renderer::kCanvasStrokeReady,
-               0,
-               reinterpret_cast<LPARAM>(&box_end)) != 1) {
+    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, box_begin)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+               state.Workspace().windows.canvas, box_end)) {
         return 329;
     }
     inkpod::renderer::CanvasDocumentBounds guide_bounds{};
-    if (SendMessageW(
-            state.Workspace().windows.canvas,
-            inkpod::renderer::kCanvasGetDocumentBounds,
-            0,
-            reinterpret_cast<LPARAM>(&guide_bounds)) != 1) {
+    if (!inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, guide_bounds)) {
         return 329;
     }
     const double guide_zoom = (guide_bounds.right - guide_bounds.left) / 4.0;
@@ -2745,16 +2669,10 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
             inkpod::renderer::CanvasStrokeEventKind::Begin, &begin_sample, 1U};
         const inkpod::renderer::CanvasStrokeEvent end_event{
             inkpod::renderer::CanvasStrokeEventKind::End, &end_sample, 1U};
-        return SendMessageW(
-                   state.Workspace().windows.window,
-                   inkpod::renderer::kCanvasStrokeReady,
-                   0,
-                   reinterpret_cast<LPARAM>(&begin_event)) == 1
-            && SendMessageW(
-                   state.Workspace().windows.window,
-                   inkpod::renderer::kCanvasStrokeReady,
-                   0,
-                   reinterpret_cast<LPARAM>(&end_event)) == 1;
+        return inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, begin_event)
+            && inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, end_event);
     };
     const auto guide_sample = [](float x, float y) {
         return InkpodStrokeSample{
@@ -2984,11 +2902,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     InkpodDocumentInfo before_generic_fill{};
     if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK
         || !QueryDocument(state, before_generic_fill)
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&generic_bounds)) != 1) {
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, generic_bounds)) {
         return 793;
     }
     const double generic_zoom =
@@ -3322,11 +3237,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     }
     inkpod::renderer::CanvasDocumentBounds light_canvas{};
     if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LT_ITEM_MOVE, 0) != 1
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&light_canvas)) != 1) {
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, light_canvas)) {
         return 470;
     }
     const InkpodStrokeSample light_move_start{
@@ -3341,16 +3253,10 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         inkpod::renderer::CanvasStrokeEventKind::Begin, &light_move_start, 1U};
     const inkpod::renderer::CanvasStrokeEvent light_end{
         inkpod::renderer::CanvasStrokeEventKind::End, &light_move_end, 1U};
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            inkpod::renderer::kCanvasStrokeReady,
-            0,
-            reinterpret_cast<LPARAM>(&light_begin)) != 1
-        || SendMessageW(
-               state.Workspace().windows.window,
-               inkpod::renderer::kCanvasStrokeReady,
-               0,
-               reinterpret_cast<LPARAM>(&light_end)) != 1
+    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, light_begin)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+               state.Workspace().windows.canvas, light_end)
         || !QueryLightTableItem(state, state.Workspace().panes.active_light_table_item_index, light_item)
         || (light_item.translate_x_milli == 1000
             && light_item.translate_y_milli == -1000)) {
@@ -3680,11 +3586,8 @@ int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
     inkpod::renderer::CanvasDocumentBounds canvas_bounds{};
     InkpodDocumentInfo document{};
     if (!QueryDocument(state, document)
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&canvas_bounds)) != 1) {
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, canvas_bounds)) {
         return 506;
     }
     const double canvas_zoom = (canvas_bounds.right - canvas_bounds.left)
@@ -3708,21 +3611,12 @@ int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
             inkpod::renderer::CanvasStrokeEventKind::Append, samples.data() + 1U, 2U};
         const inkpod::renderer::CanvasStrokeEvent end{
             inkpod::renderer::CanvasStrokeEventKind::End, samples.data() + 3U, 1U};
-        return SendMessageW(
-                   state.Workspace().windows.window,
-                   inkpod::renderer::kCanvasStrokeReady,
-                   0,
-                   reinterpret_cast<LPARAM>(&begin)) == 1
-            && SendMessageW(
-                   state.Workspace().windows.window,
-                   inkpod::renderer::kCanvasStrokeReady,
-                   0,
-                   reinterpret_cast<LPARAM>(&append)) == 1
-            && SendMessageW(
-                   state.Workspace().windows.window,
-                   inkpod::renderer::kCanvasStrokeReady,
-                   0,
-                   reinterpret_cast<LPARAM>(&end)) == 1;
+        return inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, begin)
+            && inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, append)
+            && inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, end);
     };
     const std::array<InkpodStrokeSample, 4U> line_samples{
         sample(4.0F, 8.0F), sample(5.0F, 8.0F),
@@ -3768,16 +3662,10 @@ int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
         inkpod::renderer::CanvasStrokeEventKind::Begin, line_samples.data() + 2U, 1U};
     const inkpod::renderer::CanvasStrokeEvent erase_end{
         inkpod::renderer::CanvasStrokeEventKind::End, line_samples.data() + 2U, 1U};
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            inkpod::renderer::kCanvasStrokeReady,
-            0,
-            reinterpret_cast<LPARAM>(&erase_begin)) != 1
-        || SendMessageW(
-               state.Workspace().windows.window,
-               inkpod::renderer::kCanvasStrokeReady,
-               0,
-               reinterpret_cast<LPARAM>(&erase_end)) != 1
+    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, erase_begin)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+               state.Workspace().windows.canvas, erase_end)
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_RASTERIZE, 0) != 1
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_VECTORIZE, 0) != 1) {
         return 510;
@@ -3961,11 +3849,8 @@ int RunImageEffectsSmoke(ApplicationHost& state) noexcept {
     InkpodDocumentInfo after_spray = EmptyDocumentInfo();
     inkpod::renderer::CanvasDocumentBounds spray_bounds{};
     if (!QueryDocument(state, before_spray)
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&spray_bounds)) != 1) {
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, spray_bounds)) {
         return 608;
     }
     TransitionActiveTool(
@@ -3984,11 +3869,8 @@ int RunImageEffectsSmoke(ApplicationHost& state) noexcept {
         inkpod::renderer::CanvasStrokeEventKind::Begin, &spray_sample, 1U};
     const inkpod::renderer::CanvasStrokeEvent spray_end{
         inkpod::renderer::CanvasStrokeEventKind::End, &spray_sample, 1U};
-    if (SendMessageW(
-            state.Workspace().windows.window,
-            inkpod::renderer::kCanvasStrokeReady,
-            0,
-            reinterpret_cast<LPARAM>(&spray_begin)) != 1) {
+    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, spray_begin)) {
         return 609;
     }
     const auto spray_timer = state.routing.timers.Find(
@@ -4000,11 +3882,8 @@ int RunImageEffectsSmoke(ApplicationHost& state) noexcept {
                static_cast<WPARAM>(spray_timer->value),
                0) != 0
         || state.effects.samples.size() < 2U
-        || SendMessageW(
-               state.Workspace().windows.window,
-               inkpod::renderer::kCanvasStrokeReady,
-               0,
-               reinterpret_cast<LPARAM>(&spray_end)) != 1
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+               state.Workspace().windows.canvas, spray_end)
         || state.engine->Invoke(
                [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
             != INKPOD_STATUS_OK
@@ -4195,11 +4074,8 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
                inkpod::renderer::kCanvasRenderOnce,
                0,
                0) != 1
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&bounds)) != 1) {
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, bounds)) {
         return 722;
     }
     const double initial_zoom = (bounds.right - bounds.left) / 8.0;
@@ -4220,11 +4096,8 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
     }
 
     bounds = {};
-    if (SendMessageW(
-            state.Workspace().windows.canvas,
-            inkpod::renderer::kCanvasGetDocumentBounds,
-            0,
-            reinterpret_cast<LPARAM>(&bounds)) != 1) {
+    if (!inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, bounds)) {
         return 723;
     }
     const double zoom = (bounds.right - bounds.left) / 8.0;

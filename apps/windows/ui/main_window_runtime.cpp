@@ -1323,11 +1323,8 @@ void UpdateFloatingPreview(ApplicationHost& state) noexcept {
     preview.active = state.Workspace().tools.floating_active ? 1U : 0U;
     preview.bounds = state.Workspace().tools.floating_bounds;
     preview.transform = state.Workspace().tools.floating_transform;
-    SendMessageW(
-        state.Workspace().windows.canvas,
-        inkpod::renderer::kCanvasSetFloatingPreview,
-        0,
-        reinterpret_cast<LPARAM>(&preview));
+    inkpod::renderer::SetCanvasFloatingPreview(
+        state.Workspace().windows.canvas, preview);
 }
 
 InkpodStatus BeginFloatingPaste(ApplicationHost& state, std::uint32_t mode) noexcept {
@@ -1446,11 +1443,8 @@ InkpodStatus UpdateFloatingHandleDrag(
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds canvas{};
     if (!state.Workspace().tools.floating_active || !QueryDocument(state, info)
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&canvas)) != 1
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, canvas)
         || info.width == 0U || info.height == 0U) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -3248,11 +3242,8 @@ InkpodStatus ApplyBoxZoomGesture(
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, info)
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&bounds)) != 1
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, bounds)
         || info.width == 0U || info.height == 0U) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -3426,11 +3417,8 @@ InkpodStatus FinishGuideDrag(
     RECT client{};
     if (!QueryDocument(state, info)
         || GetClientRect(state.Workspace().windows.canvas, &client) == FALSE
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&bounds)) != 1) {
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, bounds)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const bool outside_canvas = sample.x < 0.0F || sample.y < 0.0F
@@ -3680,11 +3668,8 @@ bool VectorGestureDocumentPoints(
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (samples.empty() || !QueryDocument(state, info) || info.width == 0U || info.height == 0U
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&bounds)) != 1) {
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, bounds)) {
         return false;
     }
     const double zoom = (bounds.right - bounds.left) / static_cast<double>(info.width);
@@ -3744,11 +3729,8 @@ void UpdateSelectionGeometryPreview(ApplicationHost& state) noexcept {
     inkpod::renderer::CanvasGeometryPreview preview{};
     preview.struct_size = sizeof(preview);
     const auto publish_preview = [&state, &preview] {
-        SendMessageW(
-            state.Workspace().windows.canvas,
-            inkpod::renderer::kCanvasSetGeometryPreview,
-            0,
-            reinterpret_cast<LPARAM>(&preview));
+        inkpod::renderer::SetCanvasGeometryPreview(
+            state.Workspace().windows.canvas, preview);
     };
     std::vector<InkpodVectorPoint> points;
     if (!VectorGestureDocumentPoints(
@@ -3975,11 +3957,8 @@ void UpdateVectorGeometryPreview(ApplicationHost& state) noexcept {
                 a * segment.p0.y + b * segment.p1.y + c * segment.p2.y + d * segment.p3.y};
         }
     }
-    SendMessageW(
-        state.Workspace().windows.canvas,
-        inkpod::renderer::kCanvasSetGeometryPreview,
-        0,
-        reinterpret_cast<LPARAM>(&preview));
+    inkpod::renderer::SetCanvasGeometryPreview(
+        state.Workspace().windows.canvas, preview);
 }
 
 InkpodStatus FinishVectorCanvasGesture(ApplicationHost& state) noexcept {
@@ -4683,11 +4662,8 @@ InkpodStatus MoveLightTableFromCanvas(ApplicationHost& state) noexcept {
     InkpodDocumentInfo document{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, document) || document.width == 0U
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&bounds)) != 1) {
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, bounds)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const double zoom = (bounds.right - bounds.left) / static_cast<double>(document.width);
@@ -5041,11 +5017,8 @@ InkpodStatus ApplyFillAtDeviceRange(
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, info)
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&bounds)) != 1
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, bounds)
         || info.width == 0U || info.height == 0U) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -5179,11 +5152,8 @@ InkpodStatus ApplySelectionGesture(
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (samples.empty() || !QueryDocument(state, info)
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&bounds)) != 1
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, bounds)
         || info.width == 0U || info.height == 0U) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -5291,11 +5261,8 @@ InkpodStatus EyedropAtDevicePoint(ApplicationHost& state, float device_x, float 
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (!QueryDocument(state, info)
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               inkpod::renderer::kCanvasGetDocumentBounds,
-               0,
-               reinterpret_cast<LPARAM>(&bounds)) != 1
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+               state.Workspace().windows.canvas, bounds)
         || info.width == 0U || info.height == 0U) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -9240,8 +9207,15 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
             if (state == nullptr) {
                 return -1;
             }
+            if (state->renderer == nullptr) {
+                return -1;
+            }
             state->Workspace().windows.canvas = inkpod::renderer::CreateCanvasWindow(
-                state->lifetime.instance, window);
+                state->lifetime.instance,
+                window,
+                *state->renderer,
+                state->routing.targets.Canvas(),
+                state->routing.targets.CurrentGeneration());
             if (state->Workspace().windows.canvas == nullptr) {
                 return -1;
             }
@@ -9415,9 +9389,20 @@ std::optional<LRESULT> RouteCanvasMessage(
     switch (message) {
         case inkpod::renderer::kCanvasStrokeReady:
             if (state != nullptr) {
-                const auto* input = reinterpret_cast<
-                    const inkpod::renderer::CanvasStrokeEvent*>(lparam);
-                if (input == nullptr || state->engine == nullptr
+                inkpod::renderer::OwnedCanvasStrokeEvent owned_input{};
+                if (!inkpod::renderer::TakeCanvasStrokeEvent(
+                        state->Workspace().windows.canvas,
+                        static_cast<std::uint64_t>(wparam),
+                        Generation(static_cast<std::uint64_t>(lparam)),
+                        owned_input)) {
+                    return 0;
+                }
+                const inkpod::renderer::CanvasStrokeEvent input_view{
+                    owned_input.kind,
+                    owned_input.samples.empty() ? nullptr : owned_input.samples.data(),
+                    static_cast<std::uint64_t>(owned_input.samples.size())};
+                const auto* input = &input_view;
+                if (state->engine == nullptr
                     || input->sample_count > UINT64_C(1048576)
                     || (input->sample_count != 0U && input->samples == nullptr)) {
                     return 0;
@@ -9881,15 +9866,18 @@ std::optional<LRESULT> RouteCanvasMessage(
             return 0;
         case inkpod::renderer::kCanvasViewGesture:
             if (state != nullptr) {
-                const auto* gesture = reinterpret_cast<
-                    const inkpod::renderer::CanvasViewGesture*>(lparam);
-                if (gesture != nullptr
+                inkpod::renderer::CanvasViewGesture gesture{};
+                if (inkpod::renderer::TakeCanvasViewGesture(
+                        state->Workspace().windows.canvas,
+                        static_cast<std::uint64_t>(wparam),
+                        Generation(static_cast<std::uint64_t>(lparam)),
+                        gesture)
                     && ApplyView(
                            *state,
-                           gesture->kind,
-                           gesture->value1,
-                           gesture->value2,
-                           gesture->value3) == INKPOD_STATUS_OK) {
+                           gesture.kind,
+                           gesture.value1,
+                           gesture.value2,
+                           gesture.value3) == INKPOD_STATUS_OK) {
                     return 1;
                 }
             }

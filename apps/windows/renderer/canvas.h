@@ -4,8 +4,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
-#include "inkpod/core_ffi.h"
+#include "renderer_host.h"
 
 namespace inkpod::renderer {
 
@@ -17,38 +18,9 @@ inline constexpr UINT kCanvasViewGesture = WM_APP + 0x125U;
 inline constexpr UINT kCanvasViewportChanged = WM_APP + 0x126U;
 inline constexpr UINT kCanvasGetRendererThreadId = WM_APP + 0x127U;
 inline constexpr UINT kCanvasGetPresentedFrameCount = WM_APP + 0x128U;
-inline constexpr UINT kCanvasGetDocumentBounds = WM_APP + 0x129U;
 inline constexpr UINT kCanvasPointerMoved = WM_APP + 0x12AU;
-inline constexpr UINT kCanvasSetFloatingPreview = WM_APP + 0x12BU;
-inline constexpr UINT kCanvasSetGeometryPreview = WM_APP + 0x12CU;
 inline constexpr UINT kCanvasValidateClosedVectorStroke = WM_APP + 0x12DU;
-inline constexpr UINT kCanvasGetGeometryPreviewForSmokeTest = WM_APP + 0x12EU;
-inline constexpr std::size_t kCanvasGeometryPreviewPoints = 128U;
-
-struct CanvasDocumentBounds {
-    double left;
-    double top;
-    double right;
-    double bottom;
-};
-
-struct CanvasFloatingPreview {
-    std::uint32_t struct_size;
-    std::uint32_t active;
-    InkpodFrameRect bounds;
-    InkpodFloatingTransform transform;
-};
-
-struct CanvasGeometryPreview {
-    std::uint32_t struct_size;
-    std::uint32_t active;
-    std::uint32_t point_count;
-    std::uint32_t closed;
-    float stroke_width;
-    std::uint32_t reserved;
-    InkpodVectorPoint points[kCanvasGeometryPreviewPoints];
-};
-
+inline constexpr UINT kCanvasClearGeometryPreview = WM_APP + 0x12FU;
 enum class CanvasStrokeEventKind : std::uint32_t {
     Begin,
     Append,
@@ -62,6 +34,11 @@ struct CanvasStrokeEvent {
     std::uint64_t sample_count;
 };
 
+struct OwnedCanvasStrokeEvent {
+    CanvasStrokeEventKind kind{};
+    std::vector<InkpodStrokeSample> samples;
+};
+
 struct CanvasViewGesture {
     InkpodViewCommandKind kind;
     double value1;
@@ -71,18 +48,58 @@ struct CanvasViewGesture {
 
 class CanvasSnapshotSink {
 public:
-    /* Consumes the Rust owner on every call. The sink releases it after a
-     * rejected enqueue, pending replacement, renderer replacement, or stop. */
-    virtual bool Submit(InkpodSnapshot* snapshot) noexcept = 0;
+    [[nodiscard]] virtual SnapshotRoute Route() const noexcept = 0;
+    [[nodiscard]] virtual bool AcceptsSnapshots() const noexcept = 0;
+    /* Consumes the Rust owner on every call. */
+    virtual bool Submit(SnapshotEnvelope envelope) noexcept = 0;
 
 protected:
     virtual ~CanvasSnapshotSink() = default;
 };
 
 bool RegisterCanvasClass(HINSTANCE instance) noexcept;
-HWND CreateCanvasWindow(HINSTANCE instance, HWND parent) noexcept;
+HWND CreateCanvasWindow(
+    HINSTANCE instance,
+    HWND parent,
+    RendererHost& renderer,
+    app::CanvasId canvas,
+    app::Generation surface_generation) noexcept;
 /* Call on the UI thread after Canvas creation. The sink remains valid until
  * WM_NCDESTROY; callers must stop producer threads before destroying Canvas. */
 CanvasSnapshotSink* GetCanvasSnapshotSink(HWND canvas) noexcept;
+bool BindCanvasSnapshotSink(
+    HWND canvas,
+    app::DocumentSessionId document_session,
+    app::DocumentViewId document_view,
+    app::Generation document_generation) noexcept;
+/* Custom HWND notifications carry only token + generation values. The receiver
+ * takes the owned payload from the Canvas that issued the notification. */
+bool TakeCanvasStrokeEvent(
+    HWND canvas,
+    std::uint64_t token,
+    app::Generation surface_generation,
+    OwnedCanvasStrokeEvent& event) noexcept;
+bool TakeCanvasViewGesture(
+    HWND canvas,
+    std::uint64_t token,
+    app::Generation surface_generation,
+    CanvasViewGesture& gesture) noexcept;
+/* The following typed helpers are UI/Input-thread-only and do not transfer
+ * ownership of CanvasHost or RendererHost. */
+bool SubmitCanvasStrokeEvent(
+    HWND canvas,
+    CanvasStrokeEventKind kind,
+    const InkpodStrokeSample* samples,
+    std::uint64_t sample_count) noexcept;
+bool SubmitCanvasStrokeEvent(
+    HWND canvas, const CanvasStrokeEvent& event) noexcept;
+bool GetCanvasDocumentBounds(
+    HWND canvas, CanvasDocumentBounds& bounds) noexcept;
+bool GetCanvasGeometryPreview(
+    HWND canvas, CanvasGeometryPreview& preview) noexcept;
+bool SetCanvasFloatingPreview(
+    HWND canvas, const CanvasFloatingPreview& preview) noexcept;
+bool SetCanvasGeometryPreview(
+    HWND canvas, const CanvasGeometryPreview& preview) noexcept;
 
 }  // namespace inkpod::renderer

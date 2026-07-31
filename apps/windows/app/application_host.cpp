@@ -3,6 +3,7 @@
 #include <cassert>
 
 #include "application_owner_graph.h"
+#include "renderer/canvas.h"
 
 namespace inkpod::app {
 
@@ -80,7 +81,15 @@ bool ApplicationHost::ReplaceDocumentSession(
         }
         return false;
     }
-    return engine->SetActiveSession(id, generation);
+    if (!engine->SetActiveSession(id, generation)) {
+        return false;
+    }
+    return Workspace().windows.canvas == nullptr
+        || renderer::BindCanvasSnapshotSink(
+            Workspace().windows.canvas,
+            id,
+            initial_view,
+            generation);
 }
 
 void ApplicationHost::DetachCoreSessions() noexcept {

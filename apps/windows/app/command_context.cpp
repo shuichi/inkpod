@@ -236,6 +236,10 @@ EditorGroupId CommandTargetRegistry::EditorGroup() const noexcept {
     return editor_group_;
 }
 
+CanvasId CommandTargetRegistry::Canvas() const noexcept {
+    return canvas_;
+}
+
 DocumentSessionId CommandTargetRegistry::DocumentSession() const noexcept {
     return document_session_;
 }

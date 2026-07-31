@@ -15,6 +15,7 @@
 namespace {
 
 using inkpod::app::CommandContext;
+using inkpod::app::CanvasId;
 using inkpod::app::CoreHost;
 using inkpod::app::CoreNotification;
 using inkpod::app::CoreNotificationKind;
@@ -26,15 +27,38 @@ using inkpod::app::StrokeEventKind;
 
 class SnapshotSink final : public inkpod::renderer::CanvasSnapshotSink {
 public:
-    bool Submit(InkpodSnapshot* snapshot) noexcept override {
-        if (snapshot == nullptr) {
+    void Bind(DocumentSessionId session, Generation generation) noexcept {
+        route_ = inkpod::renderer::SnapshotRoute{
+            session,
+            inkpod::app::DocumentViewId(21U),
+            CanvasId(31U),
+            generation,
+            Generation(1U)};
+    }
+
+    inkpod::renderer::SnapshotRoute Route() const noexcept override {
+        return route_;
+    }
+
+    bool AcceptsSnapshots() const noexcept override {
+        return static_cast<bool>(route_);
+    }
+
+    bool Submit(inkpod::renderer::SnapshotEnvelope envelope) noexcept override {
+        if (envelope.snapshot == nullptr || envelope.route != route_) {
+            if (envelope.snapshot != nullptr) {
+                inkpod_snapshot_release(&envelope.snapshot);
+            }
             return false;
         }
         ++submitted;
-        return inkpod_snapshot_release(&snapshot) == INKPOD_STATUS_OK;
+        return inkpod_snapshot_release(&envelope.snapshot) == INKPOD_STATUS_OK;
     }
 
     std::atomic<std::uint64_t> submitted{};
+
+private:
+    inkpod::renderer::SnapshotRoute route_{};
 };
 
 InkpodDocumentInfo EmptyDocumentInfo() noexcept {
@@ -191,6 +215,7 @@ int wmain() {
     constexpr DocumentSessionId second{12U};
     constexpr DocumentSessionId third{13U};
     constexpr Generation generation{7U};
+    sink.Bind(first, generation);
     if (host.CreateSession({}, generation) != INKPOD_STATUS_INVALID_ARGUMENT
         || host.CreateSession(first, generation) != INKPOD_STATUS_OK
         || host.CreateSession(second, generation) != INKPOD_STATUS_OK

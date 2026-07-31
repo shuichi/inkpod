@@ -4,6 +4,7 @@
 
 #include "core_host.h"
 #include "document_session.h"
+#include "renderer/renderer_host.h"
 #include "workspace_window.h"
 
 namespace inkpod::app {
@@ -32,6 +33,7 @@ public:
     FrontendRoutingState routing{};
     InkpodClipboard* clipboard{};
     std::unique_ptr<CoreHost> engine;
+    std::unique_ptr<renderer::RendererHost> renderer;
 
 private:
     WorkspaceWindowRegistry workspaces_;

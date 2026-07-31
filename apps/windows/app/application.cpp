@@ -45,6 +45,19 @@ bool InitializeFrontendRouting(ApplicationHost& state) noexcept {
     return true;
 }
 
+HRESULT StartRenderer(ApplicationHost& state) noexcept {
+    try {
+        state.renderer = std::make_unique<renderer::RendererHost>();
+    } catch (const std::bad_alloc&) {
+        return E_OUTOFMEMORY;
+    }
+    const HRESULT result = state.renderer->Start();
+    if (FAILED(result)) {
+        state.renderer.reset();
+    }
+    return result;
+}
+
 InkpodStatus StartCore(ApplicationHost& state) noexcept {
     try {
         state.engine = std::make_unique<CoreHost>();
@@ -80,6 +93,9 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
         state.DetachCoreSessions();
         state.engine->Stop();
         state.engine.reset();
+    }
+    if (state.renderer != nullptr) {
+        state.renderer->Stop();
     }
     if (state.Workspace().effects_progress != nullptr) {
         DestroyWindow(state.Workspace().effects_progress);
@@ -228,6 +244,11 @@ int Application::Run() {
         host_.reset();
         return 14;
     }
+    if (FAILED(StartRenderer(state))) {
+        state.ClearOwners();
+        host_.reset();
+        return 15;
+    }
     HWND window = CreateWindowExW(
         0,
         class_name.data(),
@@ -242,6 +263,7 @@ int Application::Run() {
         launch_.instance,
         &state.Workspace());
     if (window == nullptr) {
+        state.renderer->Stop();
         state.ClearOwners();
         host_.reset();
         return 14;

@@ -630,9 +630,13 @@ struct CoreHost::Impl final {
     }
 
     InkpodStatus PublishSnapshot(CoreEntry& entry, bool preview) noexcept {
-        // G3 still has one visible Canvas. Never send an inactive session to
-        // that Canvas; G4 replaces this with a canvas/session envelope.
         if (!IsActive(entry.binding)) {
+            return INKPOD_STATUS_OK;
+        }
+        const renderer::SnapshotRoute route = canvas->Route();
+        if (!route || route.document_session != entry.binding.session
+            || route.document_generation != entry.binding.generation
+            || !canvas->AcceptsSnapshots()) {
             return INKPOD_STATUS_OK;
         }
         const InkpodSnapshotOptions options{
@@ -645,7 +649,21 @@ struct CoreHost::Impl final {
         if (status != INKPOD_STATUS_OK) {
             return status;
         }
-        if (!canvas->Submit(snapshot)) {
+        InkpodSnapshotView snapshot_view{};
+        snapshot_view.struct_size = sizeof(snapshot_view);
+        InkpodSnapshotTransform transform{};
+        transform.struct_size = sizeof(transform);
+        if (inkpod_snapshot_get_view(snapshot, &snapshot_view) != INKPOD_STATUS_OK
+            || inkpod_snapshot_get_transform(snapshot, &transform) != INKPOD_STATUS_OK) {
+            inkpod_snapshot_release(&snapshot);
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        renderer::SnapshotEnvelope envelope{
+            route,
+            snapshot_view.revision,
+            transform.view_revision,
+            snapshot};
+        if (!canvas->Submit(envelope)) {
             return INKPOD_STATUS_INVALID_STATE;
         }
         if (preview) {
