@@ -119,4 +119,16 @@ InkpodStatus ColorPanesController::ReplacePalette(
         true);
 }
 
+InkpodStatus ColorPanesController::SetMainLineColor(
+    const InkpodColorValue& color) noexcept {
+    return engine_.Invoke(
+        [&color](InkpodCore* core) {
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            return inkpod_core_set_main_line_color(core, &color, &result);
+        },
+        true,
+        true);
+}
+
 } // namespace inkpod::windows::ui::panes

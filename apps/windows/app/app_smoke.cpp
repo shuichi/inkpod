@@ -349,20 +349,54 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         GetDlgItem(state.windows.color_pane, IDC_COLOR_MAIN_LINE_LABEL);
     const HWND main_line_swatch =
         GetDlgItem(state.windows.color_pane, IDC_COLOR_MAIN_LINE_SWATCH);
+    const HWND drawing_swatch =
+        GetDlgItem(state.windows.color_pane, IDC_COLOR_SWATCH);
     const HWND drawing_label =
         GetDlgItem(state.windows.color_pane, IDC_COLOR_DRAWING_LABEL);
+    const HWND color_picker =
+        GetDlgItem(state.windows.color_pane, IDC_COLOR_PICKER);
+    const HWND color_eyedropper =
+        GetDlgItem(state.windows.color_pane, IDC_COLOR_EYEDROPPER);
     if (GetDlgItem(state.windows.color_pane, IDC_COLOR_TABS) == nullptr
         || GetDlgItem(state.windows.color_pane, IDC_PALETTE_LIST) == nullptr
         || main_line_label == nullptr || main_line_swatch == nullptr
-        || drawing_label == nullptr) {
+        || drawing_swatch == nullptr
+        || drawing_label == nullptr || color_picker == nullptr
+        || color_eyedropper == nullptr
+        || (GetWindowLongPtrW(color_picker, GWL_STYLE) & WS_VISIBLE) == 0
+        || (GetWindowLongPtrW(color_eyedropper, GWL_STYLE) & WS_VISIBLE) == 0) {
         return 748;
+    }
+    RECT combined_swatch_bounds{};
+    std::array<wchar_t, 32U> eyedropper_text{};
+    GetWindowTextW(
+        color_eyedropper,
+        eyedropper_text.data(),
+        static_cast<int>(eyedropper_text.size()));
+    if (GetWindowRect(main_line_swatch, &combined_swatch_bounds) == FALSE
+        || combined_swatch_bounds.right - combined_swatch_bounds.left
+            <= combined_swatch_bounds.bottom - combined_swatch_bounds.top
+        || (GetWindowLongPtrW(drawing_swatch, GWL_STYLE) & WS_VISIBLE) != 0
+        || state.panes.color_pane.change_main_line_color == nullptr
+        || (GetWindowLongPtrW(color_eyedropper, GWL_STYLE) & BS_TYPEMASK)
+            == BS_OWNERDRAW
+        || std::wcscmp(eyedropper_text.data(), L"スポイト") != 0) {
+        return 783;
     }
     const auto is_opaque_black = [](const InkpodColorValue& color) noexcept {
         return color.depth == INKPOD_COLOR_DEPTH_8 && color.red == 0U
             && color.green == 0U && color.blue == 0U && color.alpha == 255U;
     };
+    const auto same_color = [](
+                                const InkpodColorValue& left,
+                                const InkpodColorValue& right) noexcept {
+        return left.depth == right.depth && left.red == right.red
+            && left.green == right.green && left.blue == right.blue
+            && left.alpha == right.alpha;
+    };
     std::array<wchar_t, 64U> main_line_text{};
     std::array<wchar_t, 64U> drawing_text{};
+    std::array<wchar_t, 64U> picker_text{};
     GetWindowTextW(
         main_line_label,
         main_line_text.data(),
@@ -371,6 +405,10 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         drawing_label,
         drawing_text.data(),
         static_cast<int>(drawing_text.size()));
+    GetWindowTextW(
+        color_picker,
+        picker_text.data(),
+        static_cast<int>(picker_text.size()));
     if (!is_opaque_black(state.tools.drawing_color)
         || state.tools.color_rgba != UINT32_C(0x000000ff)
         || !is_opaque_black(state.panes.main_line_color)
@@ -378,18 +416,73 @@ int RunDrawingPersistenceSmoke(AppContext& state) noexcept {
         || std::wcsstr(main_line_text.data(), L"主線色") == nullptr
         || std::wcsstr(main_line_text.data(), L"#000000FF") == nullptr
         || std::wcsstr(drawing_text.data(), L"彩色用描画色") == nullptr
-        || std::wcsstr(drawing_text.data(), L"#000000FF") == nullptr) {
+        || std::wcsstr(drawing_text.data(), L"#000000FF") == nullptr
+        || std::wcsstr(picker_text.data(), L"色相") == nullptr
+        || std::wcsstr(picker_text.data(), L"不透明度") == nullptr) {
         return 762;
     }
+    RECT swatch_client{};
+    if (GetClientRect(main_line_swatch, &swatch_client) == FALSE) {
+        return 784;
+    }
+    SendMessageW(
+        main_line_swatch,
+        WM_LBUTTONDOWN,
+        MK_LBUTTON,
+        MAKELPARAM(
+            (swatch_client.right - swatch_client.left) * 29 / 100,
+            (swatch_client.bottom - swatch_client.top) * 34 / 100));
+    if (!state.panes.color_pane.picker_targets_main_line) {
+        return 785;
+    }
+    SendMessageW(
+        main_line_swatch,
+        WM_LBUTTONDOWN,
+        MK_LBUTTON,
+        MAKELPARAM(
+            (swatch_client.right - swatch_client.left) * 64 / 100,
+            (swatch_client.bottom - swatch_client.top) * 62 / 100));
+    if (state.panes.color_pane.picker_targets_main_line) {
+        return 787;
+    }
+    const InkpodColorValue picker_original_color = state.tools.drawing_color;
+    SendMessageW(color_picker, WM_KEYDOWN, VK_UP, 0);
+    if (state.tools.drawing_color.depth != INKPOD_COLOR_DEPTH_8
+        || state.tools.drawing_color.red == 0U
+        || state.tools.drawing_color.red != state.tools.drawing_color.green
+        || state.tools.drawing_color.green != state.tools.drawing_color.blue
+        || state.tools.drawing_color.alpha != UINT8_MAX) {
+        return 766;
+    }
+    state.panes.color_pane.change_color(
+        state.panes.color_pane.context, picker_original_color);
+    if (!is_opaque_black(state.tools.drawing_color)) {
+        return 767;
+    }
+    const InkpodColorValue picker_rgba16{
+        sizeof(InkpodColorValue),
+        INKPOD_COLOR_DEPTH_16,
+        UINT16_MAX,
+        32768U,
+        0U,
+        32768U};
+    state.panes.color_pane.change_color(
+        state.panes.color_pane.context, picker_rgba16);
+    SendMessageW(color_picker, WM_KEYDOWN, VK_RIGHT, 0);
+    if (state.tools.drawing_color.depth != INKPOD_COLOR_DEPTH_16
+        || state.tools.drawing_color.alpha != picker_rgba16.alpha) {
+        return 769;
+    }
+    state.panes.color_pane.change_color(
+        state.panes.color_pane.context, picker_original_color);
+    SendMessageW(color_eyedropper, BM_CLICK, 0, 0);
+    if (state.tools.active_tool
+        != inkpod::windows::ui::tools::kInteractionEyedropper) {
+        return 768;
+    }
+    SendMessageW(state.windows.window, WM_COMMAND, IDM_TOOL_PENCIL, 0);
     const InkpodColorValue alternate_main_line{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 17U, 34U, 51U, 255U};
-    const auto same_color = [](
-                                const InkpodColorValue& left,
-                                const InkpodColorValue& right) noexcept {
-        return left.depth == right.depth && left.red == right.red
-            && left.green == right.green && left.blue == right.blue
-            && left.alpha == right.alpha;
-    };
     state.panes.main_line_color = alternate_main_line;
     UpdateMenuState(state);
     GetWindowTextW(

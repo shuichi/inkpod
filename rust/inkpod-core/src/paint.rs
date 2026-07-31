@@ -343,10 +343,10 @@ impl Core {
         ensure_editable_plane(document, main_line_plane_id)?;
         if !matches!(
             document.raster(ActivePlane::MainLine).format(),
-            PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+            PixelFormat::BinaryMask8 | PixelFormat::Grayscale8 | PixelFormat::Grayscale16
         ) {
             return Err(CoreError::InvalidState(
-                "main-line base color is editable only for a grayscale main plane",
+                "main-line base color requires a binary or grayscale main plane",
             ));
         }
         let before = document.main_line_color;
@@ -387,6 +387,21 @@ impl Core {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn binary_main_line_color_is_editable_and_undoable() {
+        let mut core = Core::new();
+        core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+            .unwrap();
+        let original = core.main_line_color().unwrap();
+        let replacement = PixelValue::Rgba([17, 34, 51, 255]);
+        core.set_main_line_color(replacement).unwrap();
+        assert_eq!(core.main_line_color().unwrap(), replacement);
+        core.undo().unwrap();
+        assert_eq!(core.main_line_color().unwrap(), original);
+        core.redo().unwrap();
+        assert_eq!(core.main_line_color().unwrap(), replacement);
+    }
 
     #[test]
     fn grayscale_eyedropper_and_color_check_are_view_only() {

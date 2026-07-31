@@ -279,6 +279,7 @@ using inkpod::windows::ui::EffectsController;
 bool QueryTreeNode(AppContext& state, bool plane, TreePaneNode& output) noexcept;
 bool RefreshTreePane(AppContext& state) noexcept;
 void SetDrawingColor(AppContext& state, InkpodColorValue color) noexcept;
+bool RefreshColorPanes(AppContext& state) noexcept;
 void RefreshDockPaneViews(AppContext& state) noexcept;
 InkpodStatus ApplyTreeEdit(
     AppContext& state,
@@ -408,8 +409,25 @@ void ChangeDockDrawingColor(
     if (state == nullptr) {
         return;
     }
-    SetDrawingColor(*state, color);
-    UpdateMenuState(*state);
+    inkpod::windows::ui::tools::SetActiveCommandColor(state->tools, color);
+    inkpod::windows::ui::panes::UpdateColorDockPaneDrawingColor(
+        state->windows.color_pane, state->tools.drawing_color);
+}
+
+void ChangeDockMainLineColor(
+    void* context, const InkpodColorValue& color) noexcept {
+    auto* state = static_cast<AppContext*>(context);
+    if (state == nullptr || state->engine == nullptr) {
+        return;
+    }
+    ColorPanesController controller(*state->engine);
+    if (controller.SetMainLineColor(color) == INKPOD_STATUS_OK) {
+        state->panes.main_line_color = color;
+    } else {
+        RefreshColorPanes(*state);
+    }
+    inkpod::windows::ui::panes::UpdateColorDockPaneMainLineColor(
+        state->windows.color_pane, state->panes.main_line_color);
 }
 
 void SelectDockColor(
@@ -5659,6 +5677,7 @@ bool InitializeMainChrome(AppContext& state) noexcept {
     state.panes.color_pane.context = &state;
     state.panes.color_pane.dispatch_command = DispatchToolPaletteCommand;
     state.panes.color_pane.change_color = ChangeDockDrawingColor;
+    state.panes.color_pane.change_main_line_color = ChangeDockMainLineColor;
     state.panes.color_pane.select_color = SelectDockColor;
     state.panes.color_pane.change_group = ChangeDockPaletteGroup;
     state.windows.color_pane = inkpod::windows::ui::panes::CreateColorDockPane(

@@ -1875,10 +1875,10 @@ InkpodStatus inkpod_core_palette_generate(
     InkpodDispatchResult* result);
 
 /**
- * @brief grayscale main-line の exact-depth base color を設定する。
+ * @brief binary/grayscale main-line の exact-depth base color を設定する。
  * @par 契約
  * Core owner thread。3 pointer は非 NULL・非重複、`color` は完全な `struct_size` で borrowed。
- * binary main-line は拒否する。成功時は 1 metadata/Undo transaction、失敗時不変。stroke/preview 中は不可。
+ * 成功時は 1 metadata/Undo transaction、失敗時不変。stroke/preview 中は不可。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`NO_DOCUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
@@ -1887,7 +1887,7 @@ InkpodStatus inkpod_core_set_main_line_color(
     const InkpodColorValue* color,
     InkpodDispatchResult* result);
 /**
- * @brief grayscale main-line の base color をコピーする。
+ * @brief binary/grayscale main-line の base color をコピーする。
  * @par 契約
  * Core owner thread。`core` と完全サイズの `out_color` は非 NULL・非重複。成功時だけ出力を初期化し、
  * revision、dirty、Undo、stroke/preview を変えない。

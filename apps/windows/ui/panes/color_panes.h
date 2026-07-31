@@ -20,6 +20,7 @@ public:
     InkpodStatus RefreshModel(app::PaneUiState& panes) noexcept;
     InkpodStatus ReplacePalette(
         const std::vector<InkpodColorValue>& colors) noexcept;
+    InkpodStatus SetMainLineColor(const InkpodColorValue& color) noexcept;
 
 private:
     InkpodStatus LoadPalette(std::vector<InkpodColorValue>& colors) noexcept;
