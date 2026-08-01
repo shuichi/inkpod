@@ -236,6 +236,9 @@ void ProvideSelectionViewCommandStates(
           IDM_VIEW_GUIDE_DELETE_ALL,
           IDM_VIEW_GRID_SETTINGS,
           IDM_VIEW_NEW,
+          IDM_EDITOR_SPLIT_RIGHT,
+          IDM_EDITOR_SPLIT_DOWN,
+          IDM_EDITOR_NEW_VIEW_OTHER_GROUP,
           IDM_DOCUMENT_CLOSE},
         input.document.has_document);
     SetEnabled(
@@ -248,6 +251,13 @@ void ProvideSelectionViewCommandStates(
         input.document.has_document
             && (input.selection_view.document_count > 1U
                 || input.selection_view.view_count > 1U));
+    SetEnabled(
+        states,
+        {IDM_EDITOR_MOVE_OTHER_GROUP,
+         IDM_EDITOR_GROUP_CLOSE,
+         IDM_EDITOR_GROUP_NEXT},
+        input.document.has_document
+            && input.selection_view.editor_group_count == 2U);
     SetEnabled(
         states,
         {IDM_SELECTION_FROM_LAYER, IDM_SELECTION_LAYER_ADD,

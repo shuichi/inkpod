@@ -326,6 +326,8 @@ if(WIN32)
 
     add_executable(inkpod_windows_owner_model_tests
         apps/windows/app/application_owner_graph.h
+        apps/windows/app/editor_area.cpp
+        apps/windows/app/editor_area.h
         apps/windows/app/document_identity.cpp
         apps/windows/app/document_identity.h
         apps/windows/app/document_session.cpp
@@ -403,6 +405,8 @@ if(WIN32)
         apps/windows/app/application_host.cpp
         apps/windows/app/application_host.h
         apps/windows/app/application_owner_graph.h
+        apps/windows/app/editor_area.cpp
+        apps/windows/app/editor_area.h
         apps/windows/app/command_context.cpp
         apps/windows/app/command_context.h
         apps/windows/app/document_identity.cpp

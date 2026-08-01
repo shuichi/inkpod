@@ -7,7 +7,7 @@ the resource sources of truth; this file is not a second registry.
 ## Current surface
 
 - `resource.h` defines 294 unique `IDM_*` values.
-- `app.rc` references 293 unique production command IDs through 300 actionable
+- `app.rc` references 299 unique production command IDs through 306 actionable
   menu/control occurrences. `IDM_EFFECT_DUST` intentionally appears in two menus;
   six Layer commands appear in both the menu and fixed inspector. Every duplicate
   entry point shares one route and state.
@@ -23,7 +23,7 @@ the resource sources of truth; this file is not a second registry.
 document, edit, effects, document-pane, animation, selection/view, tool, color,
 workspace, and application owners. Every production ID is handled exactly once.
 
-`apps/windows/ui/command_state_catalog.inc` independently assigns the same 293
+`apps/windows/ui/command_state_catalog.inc` independently assigns the same 299
 commands exactly one enabled/checked-state owner. Pure state providers feed one
 cached result used by menus, shortcuts, and palette entry points; querying state
 does not mutate Core, tools, previews, or documents.
@@ -36,7 +36,7 @@ test, so this prose inventory does not need manual handler lists.
 
 - Layer and Plane commands are nested under Cell; shortcut settings are under
   Edit > Settings.
-- All 293 production commands have a command-unique, prefix-free sequence of one
+- All 299 production commands have a command-unique, prefix-free sequence of one
   to four strokes, and every menu-leaf occurrence displays its active binding.
 - Conventional file/edit commands retain standard Ctrl combinations. Frequent
   drawing, fill, eyedropper, selection, gradient, and airbrush tools use single

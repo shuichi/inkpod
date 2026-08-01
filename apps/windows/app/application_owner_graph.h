@@ -10,8 +10,11 @@ inline bool InitializeOwnerGraph(
     DocumentRegistry& documents,
     ApplicationHost* application,
     WorkspaceWindowId workspace,
+    EditorGroupId editor_group,
+    CanvasId canvas,
     Generation generation) noexcept {
-    if (!workspaces.Initialize(application, workspace, generation)) {
+    if (!workspaces.Initialize(
+            application, workspace, editor_group, canvas, generation)) {
         return false;
     }
     if (!documents.InitializePlaceholder(generation)) {

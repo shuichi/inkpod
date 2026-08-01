@@ -67,6 +67,11 @@ struct CommandRequest {
     CommandContext context;
 };
 
+struct EditorGroupBinding {
+    EditorGroupId group{};
+    CanvasId canvas{};
+};
+
 // Owned and mutated only by the UI/Input thread. Captured CommandContext values
 // are immutable pointer-free copies that may cross queues and outlive focus.
 class CommandTargetRegistry final {
@@ -80,8 +85,15 @@ public:
         DocumentSessionId document, DocumentViewId view) noexcept;
     bool RemoveDocument(DocumentSessionId document) noexcept;
     [[nodiscard]] std::optional<DocumentViewId> AddDocumentView() noexcept;
+    [[nodiscard]] std::optional<DocumentViewId> AddDocumentViewTo(
+        EditorGroupId group) noexcept;
     bool ActivateDocumentView(DocumentViewId view) noexcept;
     bool RemoveDocumentView(DocumentViewId view) noexcept;
+    [[nodiscard]] std::optional<EditorGroupBinding> AddEditorGroup() noexcept;
+    bool ActivateEditorGroup(EditorGroupId group) noexcept;
+    bool MoveDocumentView(
+        DocumentViewId view, EditorGroupId destination) noexcept;
+    bool RemoveEditorGroup(EditorGroupId group) noexcept;
 
     [[nodiscard]] std::optional<PaneInstanceId> RegisterPane() noexcept;
     bool UnregisterPane(PaneInstanceId pane) noexcept;
@@ -102,12 +114,16 @@ public:
     [[nodiscard]] WorkspaceWindowId Workspace() const noexcept;
     [[nodiscard]] EditorGroupId EditorGroup() const noexcept;
     [[nodiscard]] CanvasId Canvas() const noexcept;
+    [[nodiscard]] CanvasId CanvasForGroup(EditorGroupId group) const noexcept;
+    [[nodiscard]] EditorGroupId GroupForView(DocumentViewId view) const noexcept;
+    [[nodiscard]] std::size_t EditorGroupCount() const noexcept;
     [[nodiscard]] DocumentSessionId DocumentSession() const noexcept;
     [[nodiscard]] DocumentViewId ActiveDocumentView() const noexcept;
 
 private:
     static constexpr std::size_t kMaximumDocuments = 64U;
     static constexpr std::size_t kMaximumViews = 64U;
+    static constexpr std::size_t kMaximumEditorGroups = 2U;
     static constexpr std::size_t kMaximumPanes = 32U;
     static constexpr std::size_t kMaximumJobs = 16U;
 
@@ -131,12 +147,27 @@ private:
         JobSessionId job{};
         DocumentSessionId document{};
     };
+    struct EditorGroupTarget final {
+        EditorGroupId group{};
+        CanvasId canvas{};
+        std::array<DocumentViewId, kMaximumViews> views{};
+        std::size_t view_count{};
+        DocumentViewId active_view{};
+    };
 
     [[nodiscard]] DocumentTarget* FindDocument(
         DocumentSessionId document) noexcept;
     [[nodiscard]] const DocumentTarget* FindDocument(
         DocumentSessionId document) const noexcept;
     [[nodiscard]] const DocumentTarget* FindDocumentForView(
+        DocumentViewId view) const noexcept;
+    [[nodiscard]] EditorGroupTarget* FindEditorGroup(
+        EditorGroupId group) noexcept;
+    [[nodiscard]] const EditorGroupTarget* FindEditorGroup(
+        EditorGroupId group) const noexcept;
+    [[nodiscard]] EditorGroupTarget* FindEditorGroupForView(
+        DocumentViewId view) noexcept;
+    [[nodiscard]] const EditorGroupTarget* FindEditorGroupForView(
         DocumentViewId view) const noexcept;
     [[nodiscard]] bool ContainsView(DocumentViewId view) const noexcept;
     [[nodiscard]] bool ContainsPane(PaneInstanceId pane) const noexcept;
@@ -145,8 +176,9 @@ private:
     std::uint64_t next_id_{1U};
     Generation generation_{};
     WorkspaceWindowId workspace_{};
-    EditorGroupId editor_group_{};
-    CanvasId canvas_{};
+    std::array<EditorGroupTarget, kMaximumEditorGroups> editor_groups_{};
+    std::size_t editor_group_count_{};
+    EditorGroupId active_editor_group_{};
     DocumentSessionId active_document_{};
     std::array<DocumentTarget, kMaximumDocuments> documents_{};
     std::size_t document_count_{};

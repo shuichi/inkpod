@@ -15,6 +15,7 @@ using inkpod::app::CommandTimerKind;
 using inkpod::app::CommandTimerRegistry;
 using inkpod::app::DocumentSessionId;
 using inkpod::app::DocumentViewId;
+using inkpod::app::EditorGroupId;
 using inkpod::app::Generation;
 using inkpod::app::JobSessionId;
 using inkpod::app::PaneInstanceId;
@@ -157,6 +158,54 @@ bool GenerationTaggedTokensNeverRetarget() {
             == CommandResolveStatus::StaleGeneration;
 }
 
+bool EditorGroupsRouteCapturedViewsWithoutRetargeting() {
+    CommandTargetRegistry registry;
+    registry.Initialize();
+    const DocumentSessionId document = registry.ReplaceDocument();
+    const DocumentViewId first_view = registry.ActiveDocumentView();
+    const EditorGroupId first_group = registry.EditorGroup();
+    const CommandContext first = registry.Capture();
+    const auto second_group = registry.AddEditorGroup();
+    if (!document || !first_view || !first_group || !second_group.has_value()
+        || second_group->group == first_group
+        || second_group->canvas == registry.CanvasForGroup(first_group)
+        || registry.EditorGroupCount() != 2U
+        || registry.AddEditorGroup().has_value()) {
+        return false;
+    }
+    const auto second_view = registry.AddDocumentViewTo(second_group->group);
+    if (!second_view.has_value() || second_view.value() == first_view
+        || registry.GroupForView(first_view) != first_group
+        || registry.GroupForView(second_view.value()) != second_group->group) {
+        return false;
+    }
+    const CommandContext second = registry.Capture();
+    if (registry.Resolve(first, kDocumentViewCommandScope)
+            != CommandResolveStatus::Ok
+        || registry.Resolve(second, kDocumentViewCommandScope)
+            != CommandResolveStatus::Ok
+        || !registry.ActivateEditorGroup(first_group)
+        || registry.ActiveDocumentView() != first_view
+        || registry.Resolve(second, kDocumentViewCommandScope)
+            != CommandResolveStatus::Ok) {
+        return false;
+    }
+
+    if (!registry.MoveDocumentView(first_view, second_group->group)
+        || registry.GroupForView(first_view) != second_group->group
+        || registry.Resolve(first, kDocumentViewCommandScope)
+            != CommandResolveStatus::StaleTarget
+        || !registry.RemoveEditorGroup(first_group)
+        || registry.EditorGroupCount() != 1U
+        || registry.GroupForView(first_view) != second_group->group
+        || registry.GroupForView(second_view.value()) != second_group->group
+        || registry.RemoveEditorGroup(second_group->group)) {
+        return false;
+    }
+    return registry.Resolve(second, kDocumentViewCommandScope)
+        == CommandResolveStatus::Ok;
+}
+
 }  // namespace
 
 int main() {
@@ -167,6 +216,7 @@ int main() {
             && InvalidRequestsAreRejected()
             && PaneAndJobTargetsDoNotFallback()
             && GenerationTaggedTokensNeverRetarget()
+            && EditorGroupsRouteCapturedViewsWithoutRetargeting()
         ? EXIT_SUCCESS
         : EXIT_FAILURE;
 }

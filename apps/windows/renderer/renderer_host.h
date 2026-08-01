@@ -87,6 +87,9 @@ public:
         app::CanvasId canvas,
         app::Generation surface_generation) noexcept;
     HRESULT BindSurface(const SnapshotRoute& route) noexcept;
+    HRESULT UnbindSurface(
+        app::CanvasId canvas,
+        app::Generation surface_generation) noexcept;
     [[nodiscard]] bool SurfaceAcceptsSnapshots(const SnapshotRoute& route) const noexcept;
 
     // Consumes envelope.snapshot on every path.

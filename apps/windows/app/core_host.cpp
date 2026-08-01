@@ -20,6 +20,7 @@ namespace inkpod::app {
 namespace {
 
 constexpr std::size_t kMaximumSessions = 64U;
+constexpr std::size_t kMaximumFrontendViews = kMaximumSessions * 64U;
 constexpr std::size_t kMaximumQueuedWork = 4096U;
 constexpr std::size_t kReservedStrokeControlWork = 64U;
 constexpr std::size_t kMaximumNotifications = 256U;
@@ -134,17 +135,26 @@ struct CoreEntry {
     std::chrono::steady_clock::time_point next_preview_frame{};
 };
 
+struct FrontendViewBinding {
+    SessionBinding session;
+    DocumentViewId frontend_view{};
+    std::uint64_t core_view_id{};
+};
+
 }  // namespace
 
 struct CoreHost::Impl final {
     explicit Impl(renderer::CanvasSnapshotSink* canvas_window, HWND owner_window) noexcept
-        : canvas(canvas_window), owner(owner_window) {}
+        : initial_canvas(canvas_window), owner(owner_window) {}
 
     InkpodStatus Start() noexcept {
         try {
             {
                 std::lock_guard lock(state_mutex);
                 published.reserve(kMaximumSessions);
+                frontend_views.reserve(kMaximumFrontendViews);
+                snapshot_sinks.reserve(2U);
+                snapshot_sinks.push_back(initial_canvas);
                 notifications.clear();
             }
             entries.reserve(kMaximumSessions);
@@ -179,6 +189,8 @@ struct CoreHost::Impl final {
         {
             std::lock_guard lock(state_mutex);
             published.clear();
+            frontend_views.clear();
+            snapshot_sinks.clear();
             notifications.clear();
             active = {};
         }
@@ -269,6 +281,9 @@ struct CoreHost::Impl final {
             return INKPOD_STATUS_INVALID_STATE;
         }
         old->binding = new_binding;
+        std::erase_if(frontend_views, [old_binding](const FrontendViewBinding& view) {
+            return view.session == old_binding;
+        });
         old->state.generation = new_binding.generation;
         old->state.accepting_work = true;
         if (active == old_binding) {
@@ -301,6 +316,9 @@ struct CoreHost::Impl final {
         if (found != published.end()) {
             published.erase(found);
         }
+        std::erase_if(frontend_views, [binding](const FrontendViewBinding& view) {
+            return view.session == binding;
+        });
         if (active == binding) {
             active = published.empty() ? SessionBinding{} : published.front().binding;
         }
@@ -314,6 +332,86 @@ struct CoreHost::Impl final {
             return false;
         }
         active = binding;
+        return true;
+    }
+
+    bool RegisterSnapshotSink(renderer::CanvasSnapshotSink* sink) noexcept {
+        if (sink == nullptr) {
+            return false;
+        }
+        std::lock_guard lock(state_mutex);
+        if (std::find(snapshot_sinks.cbegin(), snapshot_sinks.cend(), sink)
+                != snapshot_sinks.cend()
+            || snapshot_sinks.size() >= 2U) {
+            return false;
+        }
+        try {
+            snapshot_sinks.push_back(sink);
+            return true;
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
+
+    bool UnregisterSnapshotSink(renderer::CanvasSnapshotSink* sink) noexcept {
+        if (sink == nullptr) {
+            return false;
+        }
+        std::lock_guard lock(state_mutex);
+        const auto found = std::find(snapshot_sinks.begin(), snapshot_sinks.end(), sink);
+        if (found == snapshot_sinks.end()) {
+            return false;
+        }
+        snapshot_sinks.erase(found);
+        return true;
+    }
+
+    bool RegisterDocumentView(
+        SessionBinding binding,
+        DocumentViewId frontend_view,
+        std::uint64_t core_view_id) noexcept {
+        if (!binding || !frontend_view) {
+            return false;
+        }
+        std::lock_guard lock(state_mutex);
+        const auto session = FindPublishedLocked(binding);
+        if (session == published.end() || !session->state.accepting_work
+            || frontend_views.size() >= kMaximumFrontendViews) {
+            return false;
+        }
+        const auto duplicate = std::find_if(
+            frontend_views.cbegin(),
+            frontend_views.cend(),
+            [binding, frontend_view, core_view_id](const FrontendViewBinding& view) {
+                return view.frontend_view == frontend_view
+                    || (view.session == binding && view.core_view_id == core_view_id);
+            });
+        if (duplicate != frontend_views.cend()) {
+            return false;
+        }
+        try {
+            frontend_views.push_back(
+                FrontendViewBinding{binding, frontend_view, core_view_id});
+            return true;
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
+
+    bool UnregisterDocumentView(
+        SessionBinding binding,
+        DocumentViewId frontend_view) noexcept {
+        std::lock_guard lock(state_mutex);
+        const auto found = std::find_if(
+            frontend_views.begin(),
+            frontend_views.end(),
+            [binding, frontend_view](const FrontendViewBinding& view) {
+                return view.session == binding && view.frontend_view == frontend_view;
+            });
+        if (found == frontend_views.end()) {
+            return false;
+        }
+        frontend_views.erase(found);
         return true;
     }
 
@@ -630,50 +728,68 @@ struct CoreHost::Impl final {
     }
 
     InkpodStatus PublishSnapshot(CoreEntry& entry, bool preview) noexcept {
-        if (!IsActive(entry.binding)) {
-            return INKPOD_STATUS_OK;
-        }
-        const renderer::SnapshotRoute route = canvas->Route();
-        if (!route || route.document_session != entry.binding.session
-            || route.document_generation != entry.binding.generation
-            || !canvas->AcceptsSnapshots()) {
-            return INKPOD_STATUS_OK;
-        }
+        std::lock_guard lock(state_mutex);
         const InkpodSnapshotOptions options{
             sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
-        InkpodSnapshot* snapshot{};
-        const InkpodStatus status = entry.active_view_id == 0U
-            ? inkpod_core_build_snapshot(entry.core, &options, &snapshot)
-            : inkpod_core_build_snapshot_for_view(
-                  entry.core, entry.active_view_id, &options, &snapshot);
-        if (status != INKPOD_STATUS_OK) {
-            return status;
-        }
-        InkpodSnapshotView snapshot_view{};
-        snapshot_view.struct_size = sizeof(snapshot_view);
-        InkpodSnapshotTransform transform{};
-        transform.struct_size = sizeof(transform);
-        if (inkpod_snapshot_get_view(snapshot, &snapshot_view) != INKPOD_STATUS_OK
-            || inkpod_snapshot_get_transform(snapshot, &transform) != INKPOD_STATUS_OK) {
-            inkpod_snapshot_release(&snapshot);
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-        renderer::SnapshotEnvelope envelope{
-            route,
-            snapshot_view.revision,
-            transform.view_revision,
-            snapshot};
-        if (!canvas->Submit(envelope)) {
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-        if (preview) {
-            std::lock_guard lock(state_mutex);
-            const auto found = FindPublishedLocked(entry.binding);
-            if (found != published.end()) {
-                ++found->metrics.preview_snapshots;
+        InkpodStatus result = INKPOD_STATUS_OK;
+        std::uint64_t published_count{};
+        for (renderer::CanvasSnapshotSink* sink : snapshot_sinks) {
+            if (sink == nullptr) {
+                continue;
+            }
+            const renderer::SnapshotRoute route = sink->Route();
+            if (!route || route.document_session != entry.binding.session
+                || route.document_generation != entry.binding.generation
+                || !sink->AcceptsSnapshots()) {
+                continue;
+            }
+            const auto mapped = std::find_if(
+                frontend_views.cbegin(),
+                frontend_views.cend(),
+                [&entry, &route](const FrontendViewBinding& view) {
+                    return view.session == entry.binding
+                        && view.frontend_view == route.document_view;
+                });
+            if (mapped == frontend_views.cend()) {
+                continue;
+            }
+            const std::uint64_t core_view_id = mapped->core_view_id;
+            InkpodSnapshot* snapshot{};
+            const InkpodStatus status = core_view_id == 0U
+                ? inkpod_core_build_snapshot(entry.core, &options, &snapshot)
+                : inkpod_core_build_snapshot_for_view(
+                      entry.core, core_view_id, &options, &snapshot);
+            if (status != INKPOD_STATUS_OK) {
+                return status;
+            }
+            InkpodSnapshotView snapshot_view{};
+            snapshot_view.struct_size = sizeof(snapshot_view);
+            InkpodSnapshotTransform transform{};
+            transform.struct_size = sizeof(transform);
+            if (inkpod_snapshot_get_view(snapshot, &snapshot_view) != INKPOD_STATUS_OK
+                || inkpod_snapshot_get_transform(snapshot, &transform)
+                    != INKPOD_STATUS_OK) {
+                inkpod_snapshot_release(&snapshot);
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            renderer::SnapshotEnvelope envelope{
+                route,
+                snapshot_view.revision,
+                transform.view_revision,
+                snapshot};
+            if (!sink->Submit(envelope)) {
+                result = INKPOD_STATUS_INVALID_STATE;
+            } else {
+                ++published_count;
             }
         }
-        return INKPOD_STATUS_OK;
+        if (preview && published_count != 0U) {
+            const auto found = FindPublishedLocked(entry.binding);
+            if (found != published.end()) {
+                found->metrics.preview_snapshots += published_count;
+            }
+        }
+        return result;
     }
 
     InkpodStatus AppendSamples(
@@ -1251,7 +1367,7 @@ struct CoreHost::Impl final {
         return true;
     }
 
-    renderer::CanvasSnapshotSink* canvas{};
+    renderer::CanvasSnapshotSink* initial_canvas{};
     HWND owner{};
 
     mutable std::mutex mutex;
@@ -1265,6 +1381,8 @@ struct CoreHost::Impl final {
 
     mutable std::mutex state_mutex;
     std::vector<PublishedSession> published;
+    std::vector<FrontendViewBinding> frontend_views;
+    std::vector<renderer::CanvasSnapshotSink*> snapshot_sinks;
     SessionBinding active{};
     std::wstring host_error{L"CoreHost is not running"};
     std::deque<CoreNotification> notifications;
@@ -1468,6 +1586,35 @@ InkpodStatus CoreHost::SetActiveView(std::uint64_t view_id) noexcept {
         return INKPOD_STATUS_INVALID_STATE;
     }
     return impl_->SetActiveView(binding.value(), view_id);
+}
+
+bool CoreHost::RegisterSnapshotSink(
+    renderer::CanvasSnapshotSink* canvas) noexcept {
+    return impl_ != nullptr && impl_->RegisterSnapshotSink(canvas);
+}
+
+bool CoreHost::UnregisterSnapshotSink(
+    renderer::CanvasSnapshotSink* canvas) noexcept {
+    return impl_ != nullptr && impl_->UnregisterSnapshotSink(canvas);
+}
+
+bool CoreHost::RegisterDocumentView(
+    DocumentSessionId session,
+    Generation generation,
+    DocumentViewId frontend_view,
+    std::uint64_t core_view_id) noexcept {
+    return impl_ != nullptr
+        && impl_->RegisterDocumentView(
+            SessionBinding{session, generation}, frontend_view, core_view_id);
+}
+
+bool CoreHost::UnregisterDocumentView(
+    DocumentSessionId session,
+    Generation generation,
+    DocumentViewId frontend_view) noexcept {
+    return impl_ != nullptr
+        && impl_->UnregisterDocumentView(
+            SessionBinding{session, generation}, frontend_view);
 }
 
 bool CoreHost::GetDocumentInfo(InkpodDocumentInfo& info) const noexcept {

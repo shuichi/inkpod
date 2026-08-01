@@ -18,6 +18,7 @@ inline constexpr UINT kCanvasViewGesture = WM_APP + 0x125U;
 inline constexpr UINT kCanvasViewportChanged = WM_APP + 0x126U;
 inline constexpr UINT kCanvasGetRendererThreadId = WM_APP + 0x127U;
 inline constexpr UINT kCanvasGetPresentedFrameCount = WM_APP + 0x128U;
+inline constexpr UINT kCanvasActivated = WM_APP + 0x129U;
 inline constexpr UINT kCanvasPointerMoved = WM_APP + 0x12AU;
 inline constexpr UINT kCanvasValidateClosedVectorStroke = WM_APP + 0x12DU;
 inline constexpr UINT kCanvasClearGeometryPreview = WM_APP + 0x12FU;
@@ -72,6 +73,7 @@ bool BindCanvasSnapshotSink(
     app::DocumentSessionId document_session,
     app::DocumentViewId document_view,
     app::Generation document_generation) noexcept;
+bool UnbindCanvasSnapshotSink(HWND canvas) noexcept;
 void CancelCanvasStroke(HWND canvas) noexcept;
 /* Custom HWND notifications carry only token + generation values. The receiver
  * takes the owned payload from the Canvas that issued the notification. */

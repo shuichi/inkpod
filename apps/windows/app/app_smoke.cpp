@@ -4658,6 +4658,451 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
     return 0;
 }
 
+int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
+    using inkpod::app::DocumentSessionId;
+    using inkpod::app::DocumentViewId;
+    using inkpod::app::EditorSplitOrientation;
+    using inkpod::app::Generation;
+
+    auto& editors = state.Workspace().editors;
+    auto* first_group = editors.Active();
+    if (state.engine == nullptr || state.renderer == nullptr
+        || first_group == nullptr || editors.GroupCount() != 1U
+        || state.routing.targets.EditorGroupCount() != 1U
+        || state.renderer->SurfaceCount() != 1U) {
+        return 750;
+    }
+    const auto first_group_id = first_group->id;
+    const auto first_canvas_id = first_group->canvas_id;
+    const HWND first_canvas = first_group->canvas;
+    const DocumentSessionId shared_session = state.Document().id;
+    const Generation shared_generation = state.Document().generation;
+    const DocumentViewId first_view = state.ActiveView().id;
+    const std::size_t original_view_count = state.Document().ViewCount();
+
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDITOR_SPLIT_RIGHT,
+            0) != 1) {
+        return 751;
+    }
+    PumpPendingWindowMessages();
+    auto* second_group = editors.Active();
+    if (second_group == nullptr || second_group->id == first_group_id
+        || editors.GroupCount() != 2U
+        || editors.Orientation() != EditorSplitOrientation::Vertical
+        || state.routing.targets.EditorGroupCount() != 2U
+        || state.renderer->SurfaceCount() != 2U
+        || state.Document().id != shared_session
+        || state.Document().ViewCount() != original_view_count + 1U
+        || second_group->canvas == nullptr
+        || second_group->canvas == first_canvas
+        || state.Workspace().windows.canvas != second_group->canvas
+        || state.Workspace().windows.document_tabs
+            != second_group->document_tabs) {
+        return 752;
+    }
+    const auto second_group_id = second_group->id;
+    const HWND second_canvas = second_group->canvas;
+    const DocumentViewId second_view = second_group->ActiveView();
+    const auto* first_document_view = state.Document().FindView(first_view);
+    const auto* second_document_view = state.Document().FindView(second_view);
+    if (!second_view || first_document_view == nullptr
+        || second_document_view == nullptr
+        || first_document_view->core_view_id == second_document_view->core_view_id
+        || state.routing.targets.GroupForView(first_view) != first_group_id
+        || state.routing.targets.GroupForView(second_view) != second_group_id) {
+        return 753;
+    }
+
+    const bool first_flip_presentation =
+        first_document_view->presentation.flip_horizontal;
+    const auto query_transform = [&state, shared_session, shared_generation](
+                                     std::uint64_t core_view,
+                                     InkpodSnapshotTransform& transform) noexcept {
+        transform = {};
+        transform.struct_size = sizeof(transform);
+        const InkpodStatus status = state.engine->Invoke(
+                   shared_session,
+                   shared_generation,
+                   [core_view, &transform](InkpodCore* core) {
+                       const InkpodSnapshotOptions options{
+                           sizeof(InkpodSnapshotOptions),
+                           0U,
+                           INKPOD_FEATURE_NONE};
+                       InkpodSnapshot* snapshot{};
+                       const InkpodStatus built = core_view == 0U
+                           ? inkpod_core_build_snapshot(
+                                 core, &options, &snapshot)
+                           : inkpod_core_build_snapshot_for_view(
+                                 core, core_view, &options, &snapshot);
+                       if (built != INKPOD_STATUS_OK) {
+                           return built;
+                       }
+                       const InkpodStatus read =
+                           inkpod_snapshot_get_transform(snapshot, &transform);
+                       const InkpodStatus released =
+                           inkpod_snapshot_release(&snapshot);
+                       return read == INKPOD_STATUS_OK ? released : read;
+                   },
+                   false,
+                   false);
+        if (status != INKPOD_STATUS_OK) {
+            std::fprintf(
+                stderr,
+                "G6 transform query failed: core_view=%llu status=%u\n",
+                static_cast<unsigned long long>(core_view),
+                static_cast<unsigned int>(status));
+        }
+        return status == INKPOD_STATUS_OK;
+    };
+    InkpodSnapshotTransform first_before_flip{};
+    InkpodSnapshotTransform second_before_flip{};
+    InkpodSnapshotTransform first_after_flip{};
+    InkpodSnapshotTransform second_after_flip{};
+    if (!query_transform(first_document_view->core_view_id, first_before_flip)) {
+        return 774;
+    }
+    if (!query_transform(second_document_view->core_view_id, second_before_flip)) {
+        return 775;
+    }
+    if (SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_VIEW_FLIP_HORIZONTAL,
+               0) != 0
+        || !state.ActiveView().presentation.flip_horizontal) {
+        return 754;
+    }
+    if (!query_transform(first_document_view->core_view_id, first_after_flip)
+        || !query_transform(second_document_view->core_view_id, second_after_flip)
+        || (first_before_flip.flags
+            & INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL)
+            != (first_after_flip.flags
+                & INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL)
+        || (second_before_flip.flags
+            & INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL)
+            == (second_after_flip.flags
+                & INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL)) {
+        return 755;
+    }
+
+    SendMessageW(first_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(second_canvas), 0);
+    if (editors.Active() == nullptr || editors.Active()->id != first_group_id
+        || state.ActiveView().id != first_view
+        || state.ActiveView().presentation.flip_horizontal
+            != first_flip_presentation) {
+        return 756;
+    }
+    SendMessageW(second_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(first_canvas), 0);
+    if (editors.Active() == nullptr || editors.Active()->id != second_group_id
+        || state.ActiveView().id != second_view
+        || !state.ActiveView().presentation.flip_horizontal) {
+        return 757;
+    }
+    SetFocus(state.Workspace().windows.tool_palette);
+    if (editors.Active() == nullptr || editors.Active()->id != second_group_id
+        || state.ActiveView().id != second_view) {
+        return 782;
+    }
+    const HWND first_tabs = editors.Find(first_group_id)->document_tabs;
+    SetFocus(first_tabs);
+    NMHDR first_tab_focus{};
+    first_tab_focus.hwndFrom = first_tabs;
+    first_tab_focus.idFrom = IDC_MAIN_DOCUMENT_TABS;
+    first_tab_focus.code = NM_SETFOCUS;
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_NOTIFY,
+        first_tab_focus.idFrom,
+        reinterpret_cast<LPARAM>(&first_tab_focus));
+    if (editors.Active() == nullptr || editors.Active()->id != first_group_id
+        || state.ActiveView().id != first_view
+        || editors.Active()->focus_history != first_tabs) {
+        return 783;
+    }
+    SendMessageW(second_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(first_canvas), 0);
+
+    InkpodDocumentInfo before_edit = EmptyDocumentInfo();
+    InkpodDocumentInfo after_edit = EmptyDocumentInfo();
+    const InkpodStrokeSample shared_sample{
+        sizeof(InkpodStrokeSample), 0U, 9.0F, 9.0F, 1.0F, 0U};
+    const InkpodSelectionInput shared_selection{
+        sizeof(InkpodSelectionInput),
+        INKPOD_SELECTION_RECTANGLE,
+        INKPOD_SELECTION_NEW,
+        INKPOD_FEATURE_NONE,
+        {3, 4, 7, 5},
+        nullptr,
+        0U,
+        0U};
+    const auto query_selection = [&state, shared_session, shared_generation](
+                                     InkpodLocatorOutput& output) noexcept {
+        output = {};
+        output.struct_size = sizeof(output);
+        return state.engine->Invoke(
+                   shared_session,
+                   shared_generation,
+                   [&output](InkpodCore* core) {
+                       return inkpod_core_locator_sample(
+                           core, 0U, 0.0, 0.0, &output);
+                   },
+                   false,
+                   false)
+            == INKPOD_STATUS_OK;
+    };
+    InkpodLocatorOutput before_selection{};
+    if (!QueryDocument(state, before_edit)) {
+        return 776;
+    }
+    if (!query_selection(before_selection)
+        || (before_selection.flags & INKPOD_LOCATOR_SELECTION_PRESENT) != 0U) {
+        return 779;
+    }
+    const InkpodStatus shared_edit_status = state.engine->Invoke(
+        shared_session,
+        shared_generation,
+        [shared_selection](InkpodCore* core) {
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            return inkpod_core_apply_selection(
+                core, &shared_selection, &result);
+        },
+        true,
+        true);
+    if (shared_edit_status != INKPOD_STATUS_OK) {
+        std::fprintf(
+            stderr,
+            "G6 shared edit failed: status=%u\n",
+            static_cast<unsigned int>(shared_edit_status));
+        return 777;
+    }
+    if (!QueryDocument(state, after_edit)) {
+        return 778;
+    }
+    InkpodLocatorOutput after_selection{};
+    if (after_edit.document_revision != before_edit.document_revision + 1U
+        || !query_selection(after_selection)
+        || (after_selection.flags & INKPOD_LOCATOR_SELECTION_PRESENT) == 0U) {
+        std::fprintf(
+            stderr,
+            "G6 shared edit mismatch: revisions=%llu/%llu selection_flags=%u\n",
+            static_cast<unsigned long long>(before_edit.document_revision),
+            static_cast<unsigned long long>(after_edit.document_revision),
+            static_cast<unsigned int>(after_selection.flags));
+        return 758;
+    }
+    SendMessageW(first_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(second_canvas), 0);
+    InkpodDocumentInfo shared_from_first = EmptyDocumentInfo();
+    InkpodLocatorOutput selection_from_first{};
+    if (!QueryDocument(state, shared_from_first)
+        || shared_from_first.document_revision != after_edit.document_revision
+        || !query_selection(selection_from_first)
+        || (selection_from_first.flags & INKPOD_LOCATOR_SELECTION_PRESENT) == 0U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_EDIT_UNDO,
+               0) != 0) {
+        return 759;
+    }
+    InkpodDocumentInfo undone = EmptyDocumentInfo();
+    InkpodLocatorOutput undone_selection{};
+    if (!QueryDocument(state, undone)
+        || !query_selection(undone_selection)
+        || (undone_selection.flags & INKPOD_LOCATOR_SELECTION_PRESENT) != 0U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_EDIT_REDO,
+               0) != 0) {
+        return 760;
+    }
+    InkpodDocumentInfo redone = EmptyDocumentInfo();
+    InkpodLocatorOutput redone_selection{};
+    if (!QueryDocument(state, redone)
+        || !query_selection(redone_selection)
+        || (redone_selection.flags & INKPOD_LOCATOR_SELECTION_PRESENT) == 0U) {
+        return 761;
+    }
+
+    SendMessageW(second_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(first_canvas), 0);
+    InkpodDocumentInfo before_cancel = EmptyDocumentInfo();
+    if (!QueryDocument(state, before_cancel)
+        || !renderer::SubmitCanvasStrokeEvent(
+            second_canvas,
+            renderer::CanvasStrokeEventKind::Begin,
+            &shared_sample,
+            1U)) {
+        return 762;
+    }
+    SendMessageW(first_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(second_canvas), 0);
+    InkpodDocumentInfo after_cancel = EmptyDocumentInfo();
+    if (state.engine->WaitIdle(shared_session, shared_generation)
+            != INKPOD_STATUS_OK
+        || !QueryDocument(state, after_cancel)
+        || after_cancel.document_revision != before_cancel.document_revision) {
+        return 763;
+    }
+
+    SendMessageW(second_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(first_canvas), 0);
+    const InkpodDocumentInfo shared_before_other_document = after_cancel;
+    if (CreateCell(state, 40U, 30U, 96000U) != INKPOD_STATUS_OK
+        || state.Document().id == shared_session
+        || editors.Active() == nullptr
+        || editors.Active()->id != second_group_id) {
+        return 764;
+    }
+    const DocumentSessionId isolated_session = state.Document().id;
+    const Generation isolated_generation = state.Document().generation;
+    if (state.engine->Invoke(
+            isolated_session,
+            isolated_generation,
+            [shared_selection](InkpodCore* core) {
+                InkpodDispatchResult result{};
+                result.struct_size = sizeof(result);
+                return inkpod_core_apply_selection(
+                    core, &shared_selection, &result);
+            },
+            true,
+            true) != INKPOD_STATUS_OK) {
+        return 765;
+    }
+    SendMessageW(first_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(second_canvas), 0);
+    InkpodDocumentInfo shared_after_other_document = EmptyDocumentInfo();
+    if (!QueryDocument(state, shared_after_other_document)
+        || shared_after_other_document.document_revision
+            != shared_before_other_document.document_revision) {
+        return 766;
+    }
+    state.lifetime.smoke_dirty_prompt_choice = IDNO;
+    SendMessageW(second_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(first_canvas), 0);
+    if (state.Document().id != isolated_session) {
+        return 780;
+    }
+    const LRESULT isolated_close = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_DOCUMENT_CLOSE,
+        0);
+    if (isolated_close != 1) {
+        std::fprintf(
+            stderr,
+            "G6 isolated document close failed: result=%lld active=%llu expected=%llu\n",
+            static_cast<long long>(isolated_close),
+            static_cast<unsigned long long>(state.Document().id.Value()),
+            static_cast<unsigned long long>(isolated_session.Value()));
+        return 781;
+    }
+    if (state.engine->HasSession(isolated_session, isolated_generation)
+        || state.Documents().Find(isolated_session) != nullptr
+        || state.Document().id != shared_session) {
+        std::fprintf(
+            stderr,
+            "G6 isolated close residue: engine=%d registry=%d active=%llu shared=%llu\n",
+            state.engine->HasSession(isolated_session, isolated_generation) ? 1 : 0,
+            state.Documents().Find(isolated_session) != nullptr ? 1 : 0,
+            static_cast<unsigned long long>(state.Document().id.Value()),
+            static_cast<unsigned long long>(shared_session.Value()));
+        return 767;
+    }
+
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDITOR_SPLIT_DOWN,
+            0) != 1
+        || editors.Orientation() != EditorSplitOrientation::Horizontal) {
+        return 768;
+    }
+    editors.SetSplitRatioMilli(1U);
+    RECT client{};
+    if (editors.SplitRatioMilli() != 200U
+        || GetClientRect(state.Workspace().windows.window, &client) == FALSE) {
+        return 769;
+    }
+    LayoutMainChrome(
+        state.Workspace().windows,
+        state.lifetime.smoke_test,
+        client.right - client.left,
+        client.bottom - client.top);
+    editors.SetSplitRatioMilli(999U);
+    if (editors.SplitRatioMilli() != 800U) {
+        return 770;
+    }
+    LayoutMainChrome(
+        state.Workspace().windows,
+        state.lifetime.smoke_test,
+        client.right - client.left,
+        client.bottom - client.top);
+    editors.SetSplitRatioMilli(500U);
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_SIZE,
+        SIZE_RESTORED,
+        MAKELPARAM(client.right - client.left, client.bottom - client.top));
+    SendMessageW(second_canvas, WM_DPICHANGED_AFTERPARENT, 0, 0);
+    if (editors.GroupCount() != 2U || state.renderer->SurfaceCount() != 2U
+        || IsWindow(first_canvas) == FALSE || IsWindow(second_canvas) == FALSE) {
+        return 784;
+    }
+
+    const std::size_t before_move_views = state.Document().ViewCount();
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDITOR_MOVE_OTHER_GROUP,
+            0) != 1
+        || state.Document().ViewCount() != before_move_views
+        || editors.Active() == nullptr
+        || editors.Active()->id != first_group_id
+        || editors.Find(second_group_id) == nullptr
+        || editors.Find(second_group_id)->ViewCount() != 0U
+        || renderer::GetCanvasSnapshotSink(second_canvas)->AcceptsSnapshots()) {
+        return 771;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDITOR_NEW_VIEW_OTHER_GROUP,
+            0) != 1
+        || state.Document().ViewCount() != before_move_views + 1U
+        || editors.Active() == nullptr
+        || editors.Active()->id != second_group_id
+        || editors.Active()->ViewCount() != 1U
+        || !renderer::GetCanvasSnapshotSink(second_canvas)->AcceptsSnapshots()) {
+        return 772;
+    }
+    const std::size_t before_close_views = state.Document().ViewCount();
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDITOR_GROUP_NEXT,
+            0) != 1
+        || editors.Active() == nullptr
+        || editors.Active()->id != first_group_id
+        || editors.Active()->focus_history != first_tabs
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_EDITOR_GROUP_CLOSE,
+               0) != 1
+        || editors.GroupCount() != 1U
+        || editors.Orientation() != EditorSplitOrientation::None
+        || state.routing.targets.EditorGroupCount() != 1U
+        || state.renderer->SurfaceCount() != 1U
+        || state.Document().ViewCount() != before_close_views
+        || editors.Active() == nullptr
+        || editors.Active()->id != second_group_id
+        || state.Workspace().windows.canvas != editors.Active()->canvas
+        || state.routing.targets.Canvas() != editors.Active()->canvas_id
+        || editors.FindByCanvas(first_canvas_id) != nullptr) {
+        return 773;
+    }
+    return 0;
+}
+
 int RunCommandContextSmoke(ApplicationHost& state) noexcept {
     using inkpod::app::CommandContext;
     using inkpod::app::CommandResolveStatus;
@@ -4750,6 +5195,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunMultiDocumentTabSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunSplitEditorGroupSmoke(state);
     }
     if (exit_code != 0) {
         std::fprintf(stderr, "inkpod application smoke failed: %d\n", exit_code);

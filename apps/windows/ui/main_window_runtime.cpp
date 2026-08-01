@@ -82,12 +82,16 @@ using inkpod::app::AdjustmentLayerUiState;
 using inkpod::app::FilterJob;
 using inkpod::app::GradientStopValue;
 using inkpod::app::CanvasEffectOptions;
+using inkpod::app::CanvasId;
 using inkpod::app::CommandContext;
 using inkpod::app::CommandResolveStatus;
 using inkpod::app::CommandTargetScope;
 using inkpod::app::CommandTimerKind;
 using inkpod::app::DocumentSessionId;
+using inkpod::app::DocumentSession;
 using inkpod::app::DocumentViewId;
+using inkpod::app::EditorGroupId;
+using inkpod::app::EditorSplitOrientation;
 using inkpod::app::LocatorAsyncResult;
 using inkpod::app::PaneUiState;
 using inkpod::app::ToolUiState;
@@ -787,6 +791,287 @@ bool ActivateDocumentTab(
     }
     UpdateMenuState(state);
     return true;
+}
+
+void RelayoutEditorArea(ApplicationHost& state) noexcept {
+    RECT client{};
+    if (state.Workspace().windows.window != nullptr
+        && GetClientRect(state.Workspace().windows.window, &client) != FALSE) {
+        inkpod::windows::ui::LayoutMainChrome(
+            state.Workspace().windows,
+            state.lifetime.smoke_test,
+            client.right - client.left,
+            client.bottom - client.top);
+    }
+}
+
+bool ActivateEditorGroup(
+    ApplicationHost& state,
+    EditorGroupId group_id) noexcept {
+    auto* group = state.Workspace().editors.Find(group_id);
+    if (group == nullptr) {
+        return false;
+    }
+    auto* previous = state.Workspace().editors.Active();
+    const HWND focused = GetFocus();
+    const auto owns_focus = [](
+                                const inkpod::app::EditorGroup* owner,
+                                HWND target) noexcept {
+        return owner != nullptr && target != nullptr
+            && (target == owner->canvas || target == owner->document_tabs
+                || (owner->canvas != nullptr
+                    && IsChild(owner->canvas, target) != FALSE)
+                || (owner->document_tabs != nullptr
+                    && IsChild(owner->document_tabs, target) != FALSE));
+    };
+    if (previous == group
+        && state.routing.targets.ActiveDocumentView() == group->ActiveView()) {
+        if (owns_focus(group, focused)) {
+            group->focus_history = focused;
+        }
+        return true;
+    }
+    if (owns_focus(previous, focused)) {
+        previous->focus_history = focused;
+    }
+    if (group->ActiveView()) {
+        const bool activated = ActivateDocumentTab(state, group->ActiveView());
+        if (activated && owns_focus(group, focused)) {
+            group->focus_history = focused;
+        }
+        return activated;
+    }
+    renderer::CancelCanvasStroke(previous == nullptr ? nullptr : previous->canvas);
+    const bool activated = state.Workspace().editors.Activate(group_id)
+        && state.routing.targets.ActivateEditorGroup(group_id);
+    if (activated) {
+        if (owns_focus(group, focused)) {
+            group->focus_history = focused;
+        }
+        inkpod::windows::ui::SyncActiveEditorHandles(
+            state.Workspace().windows);
+        UpdateMenuState(state);
+    }
+    return activated;
+}
+
+bool CreateDocumentViewInGroup(
+    ApplicationHost& state,
+    EditorGroupId destination,
+    HWND error_owner) noexcept {
+    if (state.engine == nullptr || state.Documents().Current() == nullptr
+        || state.Workspace().editors.Find(destination) == nullptr) {
+        return false;
+    }
+    const CommandContext previous = state.routing.targets.Capture();
+    DocumentSession& document = state.Document();
+    const auto frontend_view = state.routing.targets.AddDocumentViewTo(destination);
+    if (!frontend_view.has_value()
+        || document.ViewCount() >= inkpod::app::DocumentSession::kMaximumViews) {
+        if (frontend_view.has_value()) {
+            (void)state.routing.targets.RemoveDocumentView(frontend_view.value());
+        }
+        return false;
+    }
+    std::uint64_t core_view_id{};
+    const InkpodStatus status = state.engine->Invoke(
+        document.id,
+        document.generation,
+        [&core_view_id](InkpodCore* core) {
+            return inkpod_core_view_create(core, &core_view_id);
+        },
+        false,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        (void)state.routing.targets.RemoveDocumentView(frontend_view.value());
+        if (previous.document_session.has_value()
+            && previous.document_view.has_value()) {
+            (void)state.routing.targets.ActivateDocument(
+                previous.document_session.value(), previous.document_view.value());
+        }
+        ShowCoreError(state, error_owner, L"ビューの作成");
+        return false;
+    }
+    const bool registered = document.AddView(
+            frontend_view.value(),
+            state.routing.targets.CurrentGeneration(),
+            core_view_id)
+        && state.engine->RegisterDocumentView(
+            document.id,
+            document.generation,
+            frontend_view.value(),
+            core_view_id)
+        && state.Workspace().editors.AddView(
+            destination, frontend_view.value());
+    if (!registered || !state.ActivateDocumentView(frontend_view.value())) {
+        (void)state.engine->Invoke(
+            document.id,
+            document.generation,
+            [core_view_id](InkpodCore* core) {
+                return inkpod_core_view_close(core, core_view_id);
+            },
+            false,
+            false);
+        (void)state.Workspace().editors.RemoveView(frontend_view.value());
+        (void)state.engine->UnregisterDocumentView(
+            document.id, document.generation, frontend_view.value());
+        (void)document.RemoveView(frontend_view.value());
+        (void)state.routing.targets.RemoveDocumentView(frontend_view.value());
+        if (previous.document_view.has_value()) {
+            (void)state.ActivateDocumentView(previous.document_view.value());
+        }
+        return false;
+    }
+    state.ActiveView().presentation.secondary_view_id = core_view_id;
+    state.ActiveView().presentation.active_view_id = core_view_id;
+    state.ActiveView().presentation.flip_horizontal = false;
+    state.ActiveView().presentation.flip_vertical = false;
+    UpdateMenuState(state);
+    return true;
+}
+
+bool SplitEditorArea(
+    ApplicationHost& state,
+    EditorSplitOrientation orientation,
+    HWND error_owner) noexcept {
+    auto& editors = state.Workspace().editors;
+    if (editors.GroupCount() == 2U) {
+        const bool changed = editors.SetOrientation(orientation);
+        if (changed) {
+            RelayoutEditorArea(state);
+            UpdateMenuState(state);
+        }
+        return changed;
+    }
+    if (state.renderer == nullptr || state.engine == nullptr) {
+        return false;
+    }
+    const EditorGroupId previous_group = state.routing.targets.EditorGroup();
+    const auto binding = state.routing.targets.AddEditorGroup();
+    if (!binding.has_value()
+        || !editors.Split(
+            binding->group,
+            binding->canvas,
+            state.routing.targets.CurrentGeneration(),
+            orientation)) {
+        if (binding.has_value()) {
+            (void)state.routing.targets.RemoveEditorGroup(binding->group);
+        }
+        return false;
+    }
+    auto* group = editors.Find(binding->group);
+    if (group == nullptr
+        || !inkpod::windows::ui::CreateEditorGroupTabs(
+            state.Workspace().windows,
+            *group,
+            state.lifetime.instance,
+            state.lifetime.smoke_test)) {
+        EditorGroupId ignored{};
+        (void)editors.MergeAndRemove(binding->group, ignored);
+        (void)state.routing.targets.RemoveEditorGroup(binding->group);
+        return false;
+    }
+    group->canvas = renderer::CreateCanvasWindow(
+        state.lifetime.instance,
+        state.Workspace().windows.window,
+        *state.renderer,
+        binding->canvas,
+        state.routing.targets.CurrentGeneration());
+    renderer::CanvasSnapshotSink* sink = renderer::GetCanvasSnapshotSink(group->canvas);
+    if (group->canvas == nullptr || sink == nullptr
+        || !state.engine->RegisterSnapshotSink(sink)
+        || !CreateDocumentViewInGroup(state, binding->group, error_owner)) {
+        if (sink != nullptr) {
+            (void)state.engine->UnregisterSnapshotSink(sink);
+        }
+        if (group->canvas != nullptr) {
+            DestroyWindow(group->canvas);
+        }
+        if (group->document_tabs != nullptr) {
+            DestroyWindow(group->document_tabs);
+        }
+        EditorGroupId ignored{};
+        (void)editors.MergeAndRemove(binding->group, ignored);
+        (void)state.routing.targets.RemoveEditorGroup(binding->group);
+        (void)ActivateEditorGroup(state, previous_group);
+        inkpod::windows::ui::SyncActiveEditorHandles(
+            state.Workspace().windows);
+        RelayoutEditorArea(state);
+        return false;
+    }
+    inkpod::windows::ui::SyncActiveEditorHandles(state.Workspace().windows);
+    RelayoutEditorArea(state);
+    return true;
+}
+
+bool MoveActiveViewToOtherGroup(ApplicationHost& state) noexcept {
+    auto& editors = state.Workspace().editors;
+    auto* source = editors.Active();
+    auto* target = source == nullptr ? nullptr : editors.Other(source->id);
+    const DocumentViewId view = source == nullptr ? DocumentViewId{} : source->ActiveView();
+    if (source == nullptr || target == nullptr || !view) {
+        return false;
+    }
+    const EditorGroupId source_id = source->id;
+    const EditorGroupId target_id = target->id;
+    renderer::CancelCanvasStroke(source->canvas);
+    if (!editors.MoveView(view, target_id)) {
+        return false;
+    }
+    if (!state.routing.targets.MoveDocumentView(view, target_id)) {
+        (void)editors.MoveView(view, source_id);
+        return false;
+    }
+    source = editors.Find(source_id);
+    if (source != nullptr && source->ActiveView()) {
+        const auto* source_document = state.Documents().FindByView(source->ActiveView());
+        if (source_document != nullptr) {
+            (void)renderer::BindCanvasSnapshotSink(
+                source->canvas,
+                source_document->id,
+                source->ActiveView(),
+                source_document->generation);
+        }
+    } else if (source != nullptr) {
+        (void)renderer::UnbindCanvasSnapshotSink(source->canvas);
+    }
+    const bool activated = state.ActivateDocumentView(view);
+    if (activated) {
+        UpdateMenuState(state);
+    }
+    return activated;
+}
+
+bool CloseActiveEditorGroup(ApplicationHost& state) noexcept {
+    auto& editors = state.Workspace().editors;
+    auto* closing = editors.Active();
+    if (closing == nullptr || editors.GroupCount() != 2U || state.engine == nullptr) {
+        return false;
+    }
+    const EditorGroupId closing_id = closing->id;
+    const HWND closing_canvas = closing->canvas;
+    const HWND closing_tabs = closing->document_tabs;
+    renderer::CanvasSnapshotSink* sink = renderer::GetCanvasSnapshotSink(closing_canvas);
+    renderer::CancelCanvasStroke(closing_canvas);
+    if (sink == nullptr || !state.engine->UnregisterSnapshotSink(sink)) {
+        return false;
+    }
+    EditorGroupId survivor{};
+    if (!editors.MergeAndRemove(closing_id, survivor)
+        || !state.routing.targets.RemoveEditorGroup(closing_id)) {
+        (void)state.engine->RegisterSnapshotSink(sink);
+        return false;
+    }
+    DestroyWindow(closing_canvas);
+    DestroyWindow(closing_tabs);
+    inkpod::windows::ui::SyncActiveEditorHandles(state.Workspace().windows);
+    const auto* active = editors.Active();
+    const bool activated = active != nullptr && active->ActiveView()
+        ? state.ActivateDocumentView(active->ActiveView())
+        : ActivateEditorGroup(state, survivor);
+    RelayoutEditorArea(state);
+    UpdateMenuState(state);
+    return activated;
 }
 
 bool RefreshTreePane(ApplicationHost& state) noexcept {
@@ -2830,6 +3115,8 @@ CommandStateInputs BuildCommandStateInputs(
         state.Document().shell.selection_layer_id != 0U;
     inputs.selection_view.document_count = state.Documents().Count();
     inputs.selection_view.view_count = state.Document().ViewCount();
+    inputs.selection_view.editor_group_count =
+        state.Workspace().editors.GroupCount();
 
     TreePaneNode active_plane{};
     inputs.tool.vector_stroke_plane = has_document
@@ -3002,43 +3289,51 @@ void UpdateDocumentTabLabels(
     ApplicationHost& state,
     const InkpodDocumentInfo& info,
     bool has_document) noexcept {
-    if (state.Workspace().windows.document_tabs == nullptr) {
-        return;
-    }
     static_assert(sizeof(LPARAM) >= sizeof(std::uint64_t));
-    int tab_index{};
-    int selected_index{-1};
     try {
-        for (std::size_t session_index = 0U;
-             session_index < state.Documents().Count();
-             ++session_index) {
-            const auto* document = state.Documents().SessionAt(session_index);
-            if (document == nullptr) {
+        for (std::size_t group_index = 0U;
+             group_index < state.Workspace().editors.GroupCount();
+             ++group_index) {
+            const auto* group = state.Workspace().editors.GroupAt(group_index);
+            if (group == nullptr || group->document_tabs == nullptr) {
                 continue;
             }
-            InkpodDocumentInfo document_info = EmptyDocumentInfo();
-            const bool document_available = document == state.Documents().Current()
-                ? (document_info = info, has_document)
-                : state.engine != nullptr
-                    && state.engine->GetDocumentInfo(
-                        document->id, document->generation, document_info);
-            const std::wstring base_name = DocumentTabBaseName(
-                state, *document, document_info, document_available);
-            const wchar_t* dirty = document_available
-                    && (document_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
-                ? L" *"
-                : L"";
-            for (std::size_t view_index = 0U;
-                 view_index < document->ViewCount();
-                 ++view_index) {
-                const auto* view = document->ViewAt(view_index);
-                if (view == nullptr) {
+            int tab_index{};
+            int selected_index{-1};
+            for (std::size_t placement_index = 0U;
+                 placement_index < group->ViewCount();
+                 ++placement_index) {
+                const DocumentViewId placed_view = group->ViewAt(placement_index);
+                const auto* document = state.Documents().FindByView(placed_view);
+                const auto* view = document == nullptr
+                    ? nullptr
+                    : document->FindView(placed_view);
+                if (document == nullptr || view == nullptr) {
                     continue;
                 }
+                InkpodDocumentInfo document_info = EmptyDocumentInfo();
+                const bool document_available = document == state.Documents().Current()
+                    ? (document_info = info, has_document)
+                    : state.engine != nullptr
+                        && state.engine->GetDocumentInfo(
+                            document->id, document->generation, document_info);
+                const std::wstring base_name = DocumentTabBaseName(
+                    state, *document, document_info, document_available);
+                const wchar_t* dirty = document_available
+                        && (document_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+                    ? L" *"
+                    : L"";
+                std::size_t document_view_index{};
+                for (; document_view_index < document->ViewCount();
+                     ++document_view_index) {
+                    if (document->ViewAt(document_view_index) == view) {
+                        break;
+                    }
+                }
                 std::wstring label = base_name;
-                if (view_index != 0U) {
+                if (document_view_index != 0U) {
                     label += L" [ビュー ";
-                    label += std::to_wstring(view_index + 1U);
+                    label += std::to_wstring(document_view_index + 1U);
                     label += L"]";
                 }
                 label += dirty;
@@ -3047,37 +3342,35 @@ void UpdateDocumentTabLabels(
                 item.pszText = label.data();
                 item.lParam = static_cast<LPARAM>(view->id.Value());
                 const int current_count = TabCtrl_GetItemCount(
-                    state.Workspace().windows.document_tabs);
+                    group->document_tabs);
                 const bool updated = tab_index < current_count
                     ? TabCtrl_SetItem(
-                        state.Workspace().windows.document_tabs,
+                        group->document_tabs,
                         tab_index,
                         &item) != FALSE
                     : TabCtrl_InsertItem(
-                        state.Workspace().windows.document_tabs,
+                        group->document_tabs,
                         tab_index,
                         &item) >= 0;
                 if (!updated) {
                     return;
                 }
-                if (document == state.Documents().Current()
-                    && view == document->ActiveView()) {
+                if (view->id == group->ActiveView()) {
                     selected_index = tab_index;
                 }
                 ++tab_index;
             }
+            for (int index = TabCtrl_GetItemCount(group->document_tabs) - 1;
+                 index >= tab_index;
+                 --index) {
+                TabCtrl_DeleteItem(group->document_tabs, index);
+            }
+            if (selected_index >= 0) {
+                TabCtrl_SetCurSel(group->document_tabs, selected_index);
+            }
         }
     } catch (const std::bad_alloc&) {
         return;
-    }
-    for (int index = TabCtrl_GetItemCount(state.Workspace().windows.document_tabs) - 1;
-         index >= tab_index;
-         --index) {
-        TabCtrl_DeleteItem(state.Workspace().windows.document_tabs, index);
-    }
-    if (selected_index >= 0) {
-        TabCtrl_SetCurSel(
-            state.Workspace().windows.document_tabs, selected_index);
     }
 }
 
@@ -5699,12 +5992,27 @@ bool CloseActiveDocument(ApplicationHost& state) noexcept {
     }
     const DocumentSessionId closing = state.Document().id;
     DocumentViewId replacement{};
-    for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
-        const auto* candidate = state.Documents().SessionAt(index);
-        if (candidate != nullptr && candidate->id != closing
-            && candidate->ActiveView() != nullptr) {
-            replacement = candidate->ActiveView()->id;
-            break;
+    const auto* active_group = state.Workspace().editors.Active();
+    if (active_group != nullptr) {
+        for (std::size_t index = 0U;
+             index < active_group->ViewCount();
+             ++index) {
+            const DocumentViewId view = active_group->ViewAt(index);
+            const DocumentSession* candidate = state.Documents().FindByView(view);
+            if (candidate != nullptr && candidate->id != closing) {
+                replacement = view;
+                break;
+            }
+        }
+    }
+    if (!replacement) {
+        for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
+            const auto* candidate = state.Documents().SessionAt(index);
+            if (candidate != nullptr && candidate->id != closing
+                && candidate->ActiveView() != nullptr) {
+                replacement = candidate->ActiveView()->id;
+                break;
+            }
         }
     }
     if (!state.CloseDocumentSession(closing)) {
@@ -6227,7 +6535,10 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         LoadWorkspaceLayout(state.Workspace().windows.workspace, L"WorkspaceSessionV2");
     }
     if (!inkpod::windows::ui::CreateMainChrome(
-            state.Workspace().windows, state.lifetime.instance, state.lifetime.smoke_test)) {
+            state.Workspace().windows,
+            state.Workspace().editors,
+            state.lifetime.instance,
+            state.lifetime.smoke_test)) {
         return false;
     }
     state.batch.palette_dialog = {
@@ -8695,66 +9006,55 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             return CloseActiveView(*state) ? 1 : 0;
         case IDM_DOCUMENT_CLOSE:
             return CloseActiveDocument(*state) ? 1 : 0;
-        case IDM_VIEW_NEW: {
-            const auto frontend_view = state->routing.targets.AddDocumentView();
-            if (!frontend_view.has_value()
-                || state->Document().ViewCount()
-                    >= inkpod::app::DocumentSession::kMaximumViews) {
-                if (frontend_view.has_value()) {
-                    (void)state->routing.targets.RemoveDocumentView(
-                        frontend_view.value());
-                }
+        case IDM_VIEW_NEW:
+            return CreateDocumentViewInGroup(
+                *state, state->routing.targets.EditorGroup(), window)
+                ? 1
+                : 0;
+        case IDM_EDITOR_SPLIT_RIGHT:
+            return SplitEditorArea(
+                *state, EditorSplitOrientation::Vertical, window)
+                ? 1
+                : 0;
+        case IDM_EDITOR_SPLIT_DOWN:
+            return SplitEditorArea(
+                *state, EditorSplitOrientation::Horizontal, window)
+                ? 1
+                : 0;
+        case IDM_EDITOR_MOVE_OTHER_GROUP:
+            return MoveActiveViewToOtherGroup(*state) ? 1 : 0;
+        case IDM_EDITOR_NEW_VIEW_OTHER_GROUP: {
+            const auto* active = state->Workspace().editors.Active();
+            const auto* other = active == nullptr
+                ? nullptr
+                : state->Workspace().editors.Other(active->id);
+            if (other == nullptr) {
+                return SplitEditorArea(
+                    *state, EditorSplitOrientation::Vertical, window)
+                    ? 1
+                    : 0;
+            }
+            return CreateDocumentViewInGroup(*state, other->id, window) ? 1 : 0;
+        }
+        case IDM_EDITOR_GROUP_CLOSE:
+            return CloseActiveEditorGroup(*state) ? 1 : 0;
+        case IDM_EDITOR_GROUP_NEXT: {
+            const auto* active = state->Workspace().editors.Active();
+            const auto* other = active == nullptr
+                ? nullptr
+                : state->Workspace().editors.Other(active->id);
+            if (other == nullptr || !ActivateEditorGroup(*state, other->id)) {
                 return 0;
             }
-            std::uint64_t view_id{};
-            const InkpodStatus status = state->engine == nullptr
-                ? INKPOD_STATUS_INVALID_STATE
-                : state->engine->Invoke(
-                      [&view_id](InkpodCore* core) {
-                          return inkpod_core_view_create(
-                              core, &view_id);
-                      },
-                      false,
-                      false);
-            if (status != INKPOD_STATUS_OK) {
-                (void)state->routing.targets.RemoveDocumentView(
-                    frontend_view.value());
-                ShowCoreError(*state, window, L"ビューの作成");
-                UpdateMenuState(*state);
-                return 0;
+            const auto* activated = state->Workspace().editors.Active();
+            const HWND focus_target = activated == nullptr
+                ? nullptr
+                : (activated->focus_history != nullptr
+                       ? activated->focus_history
+                       : activated->canvas);
+            if (focus_target != nullptr) {
+                SetFocus(focus_target);
             }
-            const bool registered = state->Document().AddView(
-                frontend_view.value(),
-                state->routing.targets.CurrentGeneration(),
-                view_id);
-            if (!registered) {
-                (void)state->engine->Invoke(
-                    [view_id](InkpodCore* core) {
-                        return inkpod_core_view_close(core, view_id);
-                    },
-                    false,
-                    false);
-                (void)state->routing.targets.RemoveDocumentView(
-                    frontend_view.value());
-                return 0;
-            }
-            state->ActiveView().presentation.secondary_view_id = view_id;
-            state->ActiveView().presentation.active_view_id = view_id;
-            state->ActiveView().presentation.flip_horizontal = false;
-            state->ActiveView().presentation.flip_vertical = false;
-            if (!state->ActivateDocumentView(frontend_view.value())) {
-                (void)state->engine->Invoke(
-                    [view_id](InkpodCore* core) {
-                        return inkpod_core_view_close(core, view_id);
-                    },
-                    false,
-                    false);
-                (void)state->Document().RemoveView(frontend_view.value());
-                (void)state->routing.targets.RemoveDocumentView(
-                    frontend_view.value());
-                return 0;
-            }
-            UpdateMenuState(*state);
             return 1;
         }
         default:
@@ -9695,6 +9995,10 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
             if (state->Workspace().windows.canvas == nullptr) {
                 return -1;
             }
+            if (auto* group = state->Workspace().editors.Active(); group != nullptr) {
+                group->canvas = state->Workspace().windows.canvas;
+                group->focus_history = group->canvas;
+            }
             if (!InitializeMainChrome(*state)) {
                 return -1;
             }
@@ -9709,20 +10013,33 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
             }
             return 0;
         case WM_NOTIFY:
-            if (state != nullptr && state->Workspace().windows.document_tabs != nullptr) {
+            if (state != nullptr) {
                 const auto* notification = reinterpret_cast<const NMHDR*>(lparam);
-                if (notification != nullptr
-                    && notification->hwndFrom == state->Workspace().windows.document_tabs
-                    && notification->code == TCN_SELCHANGE) {
-                    const int selected = TabCtrl_GetCurSel(state->Workspace().windows.document_tabs);
+                for (std::size_t index = 0U;
+                     notification != nullptr
+                         && index < state->Workspace().editors.GroupCount();
+                     ++index) {
+                    auto* group = state->Workspace().editors.GroupAt(index);
+                    if (group == nullptr
+                        || notification->hwndFrom != group->document_tabs
+                        || (notification->code != TCN_SELCHANGE
+                            && notification->code != NM_SETFOCUS)) {
+                        continue;
+                    }
+                    if (notification->code == NM_SETFOCUS) {
+                        group->focus_history = group->document_tabs;
+                    }
+                    const int selected = TabCtrl_GetCurSel(group->document_tabs);
                     TCITEMW item{};
                     item.mask = TCIF_PARAM;
                     if (selected >= 0
-                        && TabCtrl_GetItem(state->Workspace().windows.document_tabs, selected, &item) != FALSE) {
+                        && TabCtrl_GetItem(group->document_tabs, selected, &item) != FALSE) {
                         (void)ActivateDocumentTab(
                             *state,
                             DocumentViewId{
                                 static_cast<std::uint64_t>(item.lParam)});
+                    } else {
+                        (void)ActivateEditorGroup(*state, group->id);
                     }
                     return 0;
                 }
@@ -9847,11 +10164,23 @@ std::optional<LRESULT> RouteCanvasMessage(
         case inkpod::renderer::kCanvasStrokeReady:
             if (state != nullptr) {
                 inkpod::renderer::OwnedCanvasStrokeEvent owned_input{};
-                if (!inkpod::renderer::TakeCanvasStrokeEvent(
-                        state->Workspace().windows.canvas,
-                        static_cast<std::uint64_t>(wparam),
-                        Generation(static_cast<std::uint64_t>(lparam)),
-                        owned_input)) {
+                inkpod::app::EditorGroup* source_group{};
+                for (std::size_t index = 0U;
+                     index < state->Workspace().editors.GroupCount();
+                     ++index) {
+                    auto* candidate = state->Workspace().editors.GroupAt(index);
+                    if (candidate != nullptr
+                        && inkpod::renderer::TakeCanvasStrokeEvent(
+                            candidate->canvas,
+                            static_cast<std::uint64_t>(wparam),
+                            Generation(static_cast<std::uint64_t>(lparam)),
+                            owned_input)) {
+                        source_group = candidate;
+                        break;
+                    }
+                }
+                if (source_group == nullptr
+                    || !ActivateEditorGroup(*state, source_group->id)) {
                     return 0;
                 }
                 const inkpod::renderer::CanvasStrokeEvent input_view{
@@ -10324,36 +10653,91 @@ std::optional<LRESULT> RouteCanvasMessage(
         case inkpod::renderer::kCanvasViewGesture:
             if (state != nullptr) {
                 inkpod::renderer::CanvasViewGesture gesture{};
-                if (inkpod::renderer::TakeCanvasViewGesture(
-                        state->Workspace().windows.canvas,
-                        static_cast<std::uint64_t>(wparam),
-                        Generation(static_cast<std::uint64_t>(lparam)),
-                        gesture)
-                    && ApplyView(
-                           *state,
-                           gesture.kind,
-                           gesture.value1,
-                           gesture.value2,
-                           gesture.value3) == INKPOD_STATUS_OK) {
-                    return 1;
+                for (std::size_t index = 0U;
+                     index < state->Workspace().editors.GroupCount();
+                     ++index) {
+                    auto* group = state->Workspace().editors.GroupAt(index);
+                    if (group != nullptr
+                        && inkpod::renderer::TakeCanvasViewGesture(
+                            group->canvas,
+                            static_cast<std::uint64_t>(wparam),
+                            Generation(static_cast<std::uint64_t>(lparam)),
+                            gesture)
+                        && ActivateEditorGroup(*state, group->id)
+                        && ApplyView(
+                               *state,
+                               gesture.kind,
+                               gesture.value1,
+                               gesture.value2,
+                               gesture.value3) == INKPOD_STATUS_OK) {
+                        return 1;
+                    }
+                }
+            }
+            return 0;
+        case inkpod::renderer::kCanvasActivated:
+            if (state != nullptr) {
+                const CanvasId canvas{static_cast<std::uint64_t>(wparam)};
+                auto* group = state->Workspace().editors.FindByCanvas(canvas);
+                if (group != nullptr
+                    && group->generation
+                        == Generation(static_cast<std::uint64_t>(lparam))) {
+                    return ActivateEditorGroup(*state, group->id) ? 1 : 0;
                 }
             }
             return 0;
         case inkpod::renderer::kCanvasViewportChanged:
-            if (state != nullptr && state->engine != nullptr && wparam != 0U && lparam != 0) {
-                ApplyView(
-                    *state,
-                    INKPOD_VIEW_VIEWPORT_RESIZED,
-                    static_cast<double>(wparam),
-                    static_cast<double>(lparam));
+            if (state != nullptr && state->engine != nullptr && wparam != 0U) {
+                const CanvasId canvas{static_cast<std::uint64_t>(wparam)};
+                const auto* group = state->Workspace().editors.FindByCanvas(canvas);
+                auto* document = group == nullptr
+                    ? nullptr
+                    : state->Documents().FindByView(group->ActiveView());
+                auto* view = document == nullptr
+                    ? nullptr
+                    : document->FindView(group->ActiveView());
+                if (view != nullptr) {
+                    const InkpodViewInput input{
+                        sizeof(InkpodViewInput),
+                        INKPOD_VIEW_VIEWPORT_RESIZED,
+                        0U,
+                        static_cast<double>(LOWORD(lparam)),
+                        static_cast<double>(HIWORD(lparam)),
+                        0.0,
+                        0.0};
+                    (void)state->engine->Invoke(
+                        document->id,
+                        document->generation,
+                        [core_view_id = view->core_view_id, input](InkpodCore* core) {
+                            InkpodDocumentInfo ignored{};
+                            ignored.struct_size = sizeof(ignored);
+                            return core_view_id == 0U
+                                ? inkpod_core_apply_view(core, &input, &ignored)
+                                : inkpod_core_view_apply(core, core_view_id, &input);
+                        },
+                        true,
+                        false);
+                }
             }
             return 0;
         case inkpod::renderer::kCanvasPointerMoved:
             if (state != nullptr) {
-                state->ActiveView().presentation.pointer_device_x = GET_X_LPARAM(lparam);
-                state->ActiveView().presentation.pointer_device_y = GET_Y_LPARAM(lparam);
-                ++state->ActiveView().presentation.locator_generation;
-                QueueLocatorSample(*state);
+                const CanvasId canvas{static_cast<std::uint64_t>(wparam)};
+                const auto* group = state->Workspace().editors.FindByCanvas(canvas);
+                auto* document = group == nullptr
+                    ? nullptr
+                    : state->Documents().FindByView(group->ActiveView());
+                auto* view = document == nullptr
+                    ? nullptr
+                    : document->FindView(group->ActiveView());
+                if (view != nullptr) {
+                    view->presentation.pointer_device_x = GET_X_LPARAM(lparam);
+                    view->presentation.pointer_device_y = GET_Y_LPARAM(lparam);
+                    ++view->presentation.locator_generation;
+                    if (group == state->Workspace().editors.Active()) {
+                        QueueLocatorSample(*state);
+                    }
+                }
             }
             return 1;
         default:

@@ -178,6 +178,12 @@ int main() {
         || IsCommandEnabled(states, IDM_VIEW_CLOSE)
         || IsCommandEnabled(states, IDM_TAB_NEXT)
         || IsCommandEnabled(states, IDM_TAB_PREVIOUS)
+        || IsCommandEnabled(states, IDM_EDITOR_SPLIT_RIGHT)
+        || IsCommandEnabled(states, IDM_EDITOR_SPLIT_DOWN)
+        || IsCommandEnabled(states, IDM_EDITOR_MOVE_OTHER_GROUP)
+        || IsCommandEnabled(states, IDM_EDITOR_NEW_VIEW_OTHER_GROUP)
+        || IsCommandEnabled(states, IDM_EDITOR_GROUP_CLOSE)
+        || IsCommandEnabled(states, IDM_EDITOR_GROUP_NEXT)
         || IsCommandEnabled(states, IDM_FILE_RECENT_1)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
         return 1;
@@ -197,6 +203,12 @@ int main() {
         || !IsCommandEnabled(states, IDM_FILE_REVERT)
         || !IsCommandEnabled(states, IDM_DOCUMENT_CLOSE)
         || !IsCommandEnabled(states, IDM_VIEW_CLOSE)
+        || !IsCommandEnabled(states, IDM_EDITOR_SPLIT_RIGHT)
+        || !IsCommandEnabled(states, IDM_EDITOR_SPLIT_DOWN)
+        || !IsCommandEnabled(states, IDM_EDITOR_NEW_VIEW_OTHER_GROUP)
+        || IsCommandEnabled(states, IDM_EDITOR_MOVE_OTHER_GROUP)
+        || IsCommandEnabled(states, IDM_EDITOR_GROUP_CLOSE)
+        || IsCommandEnabled(states, IDM_EDITOR_GROUP_NEXT)
         || IsCommandEnabled(states, IDM_TAB_NEXT)
         || IsCommandEnabled(states, IDM_TAB_PREVIOUS)) {
         return 2;
@@ -226,6 +238,18 @@ int main() {
         return 16;
     }
     inputs.selection_view.view_count = 1U;
+
+    inputs.selection_view.editor_group_count = 2U;
+    states = ComputeCommandStates(inputs);
+    if (!IsCommandEnabled(states, IDM_EDITOR_SPLIT_RIGHT)
+        || !IsCommandEnabled(states, IDM_EDITOR_SPLIT_DOWN)
+        || !IsCommandEnabled(states, IDM_EDITOR_MOVE_OTHER_GROUP)
+        || !IsCommandEnabled(states, IDM_EDITOR_NEW_VIEW_OTHER_GROUP)
+        || !IsCommandEnabled(states, IDM_EDITOR_GROUP_CLOSE)
+        || !IsCommandEnabled(states, IDM_EDITOR_GROUP_NEXT)) {
+        return 18;
+    }
+    inputs.selection_view.editor_group_count = 1U;
 
     inputs.edit.can_undo = true;
     inputs.edit.can_redo = false;

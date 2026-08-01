@@ -122,6 +122,24 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
         case IDM_TAB_PREVIOUS:
             sequence = Sequence(command, {Stroke(VK_TAB, control | shift)});
             return true;
+        case IDM_EDITOR_SPLIT_RIGHT:
+            sequence = Sequence(command, {Stroke(VK_RIGHT, control | alt)});
+            return true;
+        case IDM_EDITOR_SPLIT_DOWN:
+            sequence = Sequence(command, {Stroke(VK_DOWN, control | alt)});
+            return true;
+        case IDM_EDITOR_MOVE_OTHER_GROUP:
+            sequence = Sequence(command, {Stroke(L'M', control | alt)});
+            return true;
+        case IDM_EDITOR_NEW_VIEW_OTHER_GROUP:
+            sequence = Sequence(command, {Stroke(L'N', control | alt)});
+            return true;
+        case IDM_EDITOR_GROUP_CLOSE:
+            sequence = Sequence(command, {Stroke(L'W', control | alt)});
+            return true;
+        case IDM_EDITOR_GROUP_NEXT:
+            sequence = Sequence(command, {Stroke(VK_F6, control)});
+            return true;
         case IDM_EDIT_UNDO: sequence = Sequence(command, {Stroke(L'Z', control)}); return true;
         case IDM_EDIT_REDO: sequence = Sequence(command, {Stroke(L'Y', control)}); return true;
         case IDM_EDIT_CUT: sequence = Sequence(command, {Stroke(L'X', control)}); return true;

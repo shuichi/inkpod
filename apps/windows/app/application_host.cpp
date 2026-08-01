@@ -16,6 +16,8 @@ bool ApplicationHost::InitializeOwners() noexcept {
         documents_,
         this,
         routing.targets.Workspace(),
+        routing.targets.EditorGroup(),
+        routing.targets.Canvas(),
         generation);
 }
 
@@ -74,7 +76,10 @@ bool ApplicationHost::ReplaceDocumentSession(
     if (binding_status != INKPOD_STATUS_OK) {
         return false;
     }
-    if (!documents_.Replace(id, generation, initial_view, engine.get())) {
+    if (!engine->RegisterDocumentView(id, generation, initial_view, 0U)
+        || !documents_.Replace(id, generation, initial_view, engine.get())
+        || !Workspace().editors.ResetViews(initial_view)) {
+        (void)engine->UnregisterDocumentView(id, generation, initial_view);
         if (had_core) {
             (void)engine->RebindSession(id, generation, old_id, old_generation);
         } else {
@@ -117,11 +122,18 @@ ApplicationHost::AddDocumentSession() noexcept {
         routing.targets.CurrentGeneration()};
     if (engine->CreateSession(binding.session, binding.generation)
             != INKPOD_STATUS_OK
+        || !engine->RegisterDocumentView(
+            binding.session, binding.generation, binding.view, 0U)
         || !documents_.Add(
             binding.session,
             binding.generation,
             binding.view,
-            engine.get())) {
+            engine.get())
+        || !Workspace().editors.AddView(
+            routing.targets.EditorGroup(), binding.view)) {
+        (void)engine->UnregisterDocumentView(
+            binding.session, binding.generation, binding.view);
+        (void)documents_.Remove(binding.session);
         (void)engine->CloseSession(binding.session, binding.generation);
         (void)routing.targets.RemoveDocument(binding.session);
         if (previous.document_session.has_value()
@@ -133,6 +145,7 @@ ApplicationHost::AddDocumentSession() noexcept {
         return std::nullopt;
     }
     if (!ActivateDocumentView(binding.view)) {
+        (void)Workspace().editors.RemoveView(binding.view);
         (void)documents_.Remove(binding.session);
         (void)engine->CloseSession(binding.session, binding.generation);
         (void)routing.targets.RemoveDocument(binding.session);
@@ -148,18 +161,22 @@ ApplicationHost::AddDocumentSession() noexcept {
 bool ApplicationHost::ActivateDocumentView(DocumentViewId view) noexcept {
     DocumentSession* document = documents_.FindByView(view);
     DocumentView* target = document == nullptr ? nullptr : document->FindView(view);
-    if (document == nullptr || target == nullptr || engine == nullptr) {
+    EditorGroup* target_group = Workspace().editors.FindByView(view);
+    if (document == nullptr || target == nullptr || target_group == nullptr
+        || engine == nullptr) {
         return false;
     }
     DocumentSession* previous_document = documents_.Current();
     DocumentView* previous_view = previous_document == nullptr
         ? nullptr
         : previous_document->ActiveView();
-    renderer::CancelCanvasStroke(Workspace().windows.canvas);
+    EditorGroup* previous_group = Workspace().editors.Active();
+    renderer::CancelCanvasStroke(
+        previous_group == nullptr ? nullptr : previous_group->canvas);
     if (!engine->SetActiveSession(document->id, document->generation)
-        || (Workspace().windows.canvas != nullptr
+        || (target_group->canvas != nullptr
             && !renderer::BindCanvasSnapshotSink(
-                Workspace().windows.canvas,
+                target_group->canvas,
                 document->id,
                 target->id,
                 document->generation))
@@ -167,9 +184,9 @@ bool ApplicationHost::ActivateDocumentView(DocumentViewId view) noexcept {
         if (previous_document != nullptr && previous_view != nullptr) {
             (void)engine->SetActiveSession(
                 previous_document->id, previous_document->generation);
-            if (Workspace().windows.canvas != nullptr) {
+            if (previous_group != nullptr && previous_group->canvas != nullptr) {
                 (void)renderer::BindCanvasSnapshotSink(
-                    Workspace().windows.canvas,
+                    previous_group->canvas,
                     previous_document->id,
                     previous_view->id,
                     previous_document->generation);
@@ -178,9 +195,16 @@ bool ApplicationHost::ActivateDocumentView(DocumentViewId view) noexcept {
         }
         return false;
     }
-    return documents_.Activate(document->id)
+    const bool activated = Workspace().editors.Activate(target_group->id)
+        && target_group->ActivateView(view)
+        && documents_.Activate(document->id)
         && document->ActivateView(view)
         && routing.targets.ActivateDocument(document->id, view);
+    if (activated) {
+        Workspace().windows.canvas = target_group->canvas;
+        Workspace().windows.document_tabs = target_group->document_tabs;
+    }
+    return activated;
 }
 
 bool ApplicationHost::CloseDocumentView(DocumentViewId view) noexcept {
@@ -209,11 +233,23 @@ bool ApplicationHost::CloseDocumentView(DocumentViewId view) noexcept {
         false,
         false);
     if (status != INKPOD_STATUS_OK
+        || !engine->UnregisterDocumentView(
+            document->id, document->generation, view)
+        || !Workspace().editors.RemoveView(view)
         || !document->RemoveView(view)
         || !routing.targets.RemoveDocumentView(view)) {
         return false;
     }
-    return replacement && ActivateDocumentView(replacement);
+    EditorGroup* active_group = Workspace().editors.Active();
+    if (active_group != nullptr && active_group->ActiveView()) {
+        replacement = active_group->ActiveView();
+    } else if (Workspace().editors.GroupCount() == 2U && active_group != nullptr) {
+        const EditorGroup* other = Workspace().editors.Other(active_group->id);
+        if (other != nullptr) {
+            replacement = other->ActiveView();
+        }
+    }
+    return !replacement || ActivateDocumentView(replacement);
 }
 
 bool ApplicationHost::CloseDocumentSession(DocumentSessionId session) noexcept {
@@ -228,8 +264,52 @@ bool ApplicationHost::CloseDocumentSession(DocumentSessionId session) noexcept {
     if (engine->CloseSession(session, generation) != INKPOD_STATUS_OK) {
         return false;
     }
-    return documents_.Remove(session)
-        && routing.targets.RemoveDocument(session);
+    for (std::size_t index = document->ViewCount(); index > 0U; --index) {
+        const DocumentView* view = document->ViewAt(index - 1U);
+        if (view != nullptr) {
+            (void)Workspace().editors.RemoveView(view->id);
+        }
+    }
+    if (!documents_.Remove(session)
+        || !routing.targets.RemoveDocument(session)) {
+        return false;
+    }
+    for (std::size_t index = 0U;
+         index < Workspace().editors.GroupCount();
+         ++index) {
+        EditorGroup* group = Workspace().editors.GroupAt(index);
+        const DocumentSession* remaining = group == nullptr
+            ? nullptr
+            : documents_.FindByView(group->ActiveView());
+        if (group == nullptr || group->canvas == nullptr) {
+            continue;
+        }
+        if (remaining == nullptr) {
+            (void)renderer::UnbindCanvasSnapshotSink(group->canvas);
+        } else {
+            (void)renderer::BindCanvasSnapshotSink(
+                group->canvas,
+                remaining->id,
+                group->ActiveView(),
+                remaining->generation);
+        }
+    }
+    EditorGroup* active_group = Workspace().editors.Active();
+    DocumentViewId replacement = active_group == nullptr
+        ? DocumentViewId{}
+        : active_group->ActiveView();
+    if (!replacement) {
+        for (std::size_t index = 0U;
+             index < Workspace().editors.GroupCount();
+             ++index) {
+            const EditorGroup* group = Workspace().editors.GroupAt(index);
+            if (group != nullptr && group->ActiveView()) {
+                replacement = group->ActiveView();
+                break;
+            }
+        }
+    }
+    return !replacement || ActivateDocumentView(replacement);
 }
 
 std::uint32_t ApplicationHost::IssueUntitledNumber() noexcept {

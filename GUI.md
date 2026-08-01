@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1、G2、G3、G4 完了、G5 未着手 |
+| 状態 | Active。G0、G1、G2、G3、G4、G5、G6 完了、G7 未着手 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -690,6 +690,36 @@ window、一 editor group、一 Canvas、複数 document tab であり、分割�
 - 左右と上下の二分割を menu/keyboard だけで作成、操作、解消できる。
 - 同一文書の複数 view が history と dirty を共有し、表示状態を分離する。
 - 一 group mode の描画性能と操作性に目立つ回帰がない。
+
+### 完了記録
+
+2026-08-01 に G6 を完了した。UI/Input thread 所有の bounded `EditorArea` は
+一つまたは二つの `EditorGroup`、左右/上下 orientation、200〜800 milli に clamp
+した split ratio を保持する。各 group は frontend の strong group/Canvas ID、tab
+control、active `DocumentViewId`、focus history、可視 Canvas slot を所有し、非表示
+tab ごとの Canvas は作らない。splitter は drag 中の layout を約 16 ms 単位に
+coalesce し、release 時に最終 layout と Canvas redraw を確定する。
+
+Window menu と共通 command/state/shortcut catalog に、右分割、下分割、別 group
+へ移動、別 group に新しい view、次 group、group close を接続した。move は既存
+`DocumentView` を移し、新しい view は同じ `DocumentSession` の Core-local logical
+view を作る。group close は snapshot sink を解除してから Canvas を破棄し、全 view
+を残る group へ移すため dirty document を閉じない。Canvas/tab focus または明示
+command だけが active group を変更し、mouse hover は target を変更しない。
+
+一つの `DocumentSession` は引き続き一つの `InkpodCore` handle を共有する。
+`CoreHost` は frontend view ID を primary または secondary Core view ID へ写像し、
+session/generation が一致する各可視 Canvas sink に view ごとの immutable snapshot
+を fan-out する。同一文書の view は document/history/dirty/savepoint を共有し、
+zoom/pan/flip と presentation だけを分離する。別文書は session namespace で分離
+する。Core create/operation/destroy、GPU resource/Present、HWND/Common Controls の
+thread 所有境界と C ABI v2 は変更していない。
+
+pure/native tests は EditorArea の invalid/no-op/split/clamp/move/merge、二 group の
+capture 済み `CommandContext` と stale rejection、primary/secondary view snapshot
+fan-out、Canvas unbind、同一文書の独立 flip と共有 selection/Undo/Redo、別文書
+分離、Canvas/tab/pane focus、active stroke cancel、split right/down、resize/DPI、
+move/new-view/group close、および一 group の既存 workflow を検証する。
 
 ---
 

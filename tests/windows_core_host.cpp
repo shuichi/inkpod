@@ -27,11 +27,15 @@ using inkpod::app::StrokeEventKind;
 
 class SnapshotSink final : public inkpod::renderer::CanvasSnapshotSink {
 public:
-    void Bind(DocumentSessionId session, Generation generation) noexcept {
+    void Bind(
+        DocumentSessionId session,
+        Generation generation,
+        inkpod::app::DocumentViewId view = inkpod::app::DocumentViewId{21U},
+        CanvasId canvas = CanvasId{31U}) noexcept {
         route_ = inkpod::renderer::SnapshotRoute{
             session,
-            inkpod::app::DocumentViewId(21U),
-            CanvasId(31U),
+            view,
+            canvas,
             generation,
             Generation(1U)};
     }
@@ -51,11 +55,25 @@ public:
             }
             return false;
         }
+        InkpodSnapshotView view{};
+        view.struct_size = sizeof(view);
+        InkpodSnapshotTransform transform{};
+        transform.struct_size = sizeof(transform);
+        if (inkpod_snapshot_get_view(envelope.snapshot, &view) != INKPOD_STATUS_OK
+            || inkpod_snapshot_get_transform(envelope.snapshot, &transform)
+                != INKPOD_STATUS_OK) {
+            inkpod_snapshot_release(&envelope.snapshot);
+            return false;
+        }
+        last_revision.store(view.revision, std::memory_order_release);
+        last_pan_x.store(transform.pan_x, std::memory_order_release);
         ++submitted;
         return inkpod_snapshot_release(&envelope.snapshot) == INKPOD_STATUS_OK;
     }
 
     std::atomic<std::uint64_t> submitted{};
+    std::atomic<std::uint64_t> last_revision{};
+    std::atomic<double> last_pan_x{};
 
 private:
     inkpod::renderer::SnapshotRoute route_{};
@@ -188,6 +206,8 @@ bool DrainNotifications(
 
 int wmain() {
     SnapshotSink sink;
+    SnapshotSink second_sink;
+    SnapshotSink rejected_sink;
     HWND owner = CreateWindowExW(
         0,
         L"STATIC",
@@ -256,6 +276,59 @@ int wmain() {
         host.Stop();
         DestroyWindow(owner);
         return 4;
+    }
+
+    constexpr inkpod::app::DocumentViewId first_frontend_view{21U};
+    constexpr inkpod::app::DocumentViewId second_frontend_view{22U};
+    std::uint64_t second_core_view{};
+    const InkpodViewInput second_pan{
+        sizeof(InkpodViewInput),
+        INKPOD_VIEW_PAN_BY,
+        0U,
+        5.0,
+        0.0,
+        0.0,
+        0.0};
+    second_sink.Bind(
+        first, generation, second_frontend_view, CanvasId{32U});
+    if (host.Invoke(
+            first,
+            generation,
+            [&second_core_view, &second_pan](InkpodCore* core) {
+                const InkpodStatus created =
+                    inkpod_core_view_create(core, &second_core_view);
+                return created == INKPOD_STATUS_OK
+                    ? inkpod_core_view_apply(core, second_core_view, &second_pan)
+                    : created;
+            },
+            false,
+            false)
+            != INKPOD_STATUS_OK
+        || !host.RegisterDocumentView(
+            first, generation, first_frontend_view, 0U)
+        || !host.RegisterDocumentView(
+            first, generation, second_frontend_view, second_core_view)
+        || !host.RegisterSnapshotSink(&second_sink)
+        || host.RegisterSnapshotSink(&second_sink)
+        || host.RegisterSnapshotSink(&rejected_sink)
+        || host.RegisterDocumentView(
+            first, generation, second_frontend_view, second_core_view)
+        || host.Invoke(
+               first,
+               generation,
+               [](InkpodCore*) { return INKPOD_STATUS_OK; },
+               true,
+               false)
+            != INKPOD_STATUS_OK
+        || sink.submitted.load(std::memory_order_acquire) == 0U
+        || second_sink.submitted.load(std::memory_order_acquire) == 0U
+        || sink.last_revision.load(std::memory_order_acquire)
+            != second_sink.last_revision.load(std::memory_order_acquire)
+        || sink.last_pan_x.load(std::memory_order_acquire)
+            == second_sink.last_pan_x.load(std::memory_order_acquire)) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 22;
     }
 
     InkpodDocumentInfo first_info = EmptyDocumentInfo();
@@ -327,6 +400,42 @@ int wmain() {
         host.Stop();
         DestroyWindow(owner);
         return 7;
+    }
+    if (sink.last_revision.load(std::memory_order_acquire)
+            != second_sink.last_revision.load(std::memory_order_acquire)) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 23;
+    }
+    const std::uint64_t second_sink_before_unmap =
+        second_sink.submitted.load(std::memory_order_acquire);
+    if (!host.UnregisterDocumentView(
+            first, generation, second_frontend_view)
+        || host.UnregisterDocumentView(
+            first, generation, second_frontend_view)
+        || host.Invoke(
+               first,
+               generation,
+               [](InkpodCore*) { return INKPOD_STATUS_OK; },
+               true,
+               false)
+            != INKPOD_STATUS_OK
+        || second_sink.submitted.load(std::memory_order_acquire)
+            != second_sink_before_unmap
+        || !host.UnregisterSnapshotSink(&second_sink)
+        || host.UnregisterSnapshotSink(&second_sink)
+        || host.Invoke(
+               first,
+               generation,
+               [second_core_view](InkpodCore* core) {
+                   return inkpod_core_view_close(core, second_core_view);
+               },
+               false,
+               false)
+            != INKPOD_STATUS_OK) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 23;
     }
     first_info = EmptyDocumentInfo();
     second_info = EmptyDocumentInfo();

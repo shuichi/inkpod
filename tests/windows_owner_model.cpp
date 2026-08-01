@@ -54,6 +54,9 @@ using inkpod::app::DocumentRegistry;
 using inkpod::app::DocumentIdentity;
 using inkpod::app::DocumentSessionId;
 using inkpod::app::DocumentViewId;
+using inkpod::app::EditorArea;
+using inkpod::app::EditorGroupId;
+using inkpod::app::EditorSplitOrientation;
 using inkpod::app::Generation;
 using inkpod::app::RecentDocumentList;
 using inkpod::app::WorkspaceWindowId;
@@ -193,6 +196,8 @@ bool TestOwnerGraphFailureUnwind() {
                 documents,
                 owner,
                 WorkspaceWindowId{3U},
+                EditorGroupId{4U},
+                inkpod::app::CanvasId{5U},
                 Generation{5U})
             || workspaces.Current() != nullptr
             || documents.Current() != nullptr
@@ -210,6 +215,8 @@ bool TestOwnerGraphFailureUnwind() {
                 documents,
                 owner,
                 WorkspaceWindowId{7U},
+                EditorGroupId{8U},
+                inkpod::app::CanvasId{9U},
                 Generation{11U})
             || workspaces.Current() != nullptr
             || documents.Current() != nullptr
@@ -226,6 +233,8 @@ bool TestOwnerGraphFailureUnwind() {
                 documents,
                 owner,
                 WorkspaceWindowId{13U},
+                EditorGroupId{14U},
+                inkpod::app::CanvasId{15U},
                 Generation{17U})
             || workspaces.Current() == nullptr
             || documents.Current() == nullptr
@@ -343,11 +352,31 @@ bool TestDocumentAndViewLifetime() {
 bool TestWorkspaceLifetime() {
     WorkspaceWindowRegistry registry;
     auto* owner = reinterpret_cast<ApplicationHost*>(&registry);
-    if (registry.Initialize(nullptr, WorkspaceWindowId{5U}, Generation{7U})
-        || registry.Initialize(owner, {}, Generation{7U})
-        || registry.Initialize(owner, WorkspaceWindowId{5U}, {})
+    if (registry.Initialize(
+            nullptr,
+            WorkspaceWindowId{5U},
+            EditorGroupId{6U},
+            inkpod::app::CanvasId{7U},
+            Generation{7U})
+        || registry.Initialize(
+            owner, {}, EditorGroupId{6U}, inkpod::app::CanvasId{7U}, Generation{7U})
+        || registry.Initialize(
+            owner, WorkspaceWindowId{5U}, {}, inkpod::app::CanvasId{7U}, Generation{7U})
+        || registry.Initialize(
+            owner, WorkspaceWindowId{5U}, EditorGroupId{6U}, {}, Generation{7U})
+        || registry.Initialize(
+            owner,
+            WorkspaceWindowId{5U},
+            EditorGroupId{6U},
+            inkpod::app::CanvasId{7U},
+            {})
         || registry.Current() != nullptr
-        || !registry.Initialize(owner, WorkspaceWindowId{5U}, Generation{7U})
+        || !registry.Initialize(
+            owner,
+            WorkspaceWindowId{5U},
+            EditorGroupId{6U},
+            inkpod::app::CanvasId{7U},
+            Generation{7U})
         || registry.Current() == nullptr
         || registry.Current()->application != owner
         || registry.Current()->id != WorkspaceWindowId{5U}
@@ -356,12 +385,18 @@ bool TestWorkspaceLifetime() {
     }
     registry.Current()->windows.window = reinterpret_cast<HWND>(
         static_cast<std::uintptr_t>(31U));
-    if (registry.Initialize(owner, {}, Generation{10U})
+    if (registry.Initialize(
+            owner, {}, EditorGroupId{8U}, inkpod::app::CanvasId{9U}, Generation{10U})
         || registry.Current()->id != WorkspaceWindowId{5U}
         || registry.Current()->windows.window == nullptr) {
         return false;
     }
-    if (!registry.Initialize(owner, WorkspaceWindowId{9U}, Generation{10U})
+    if (!registry.Initialize(
+            owner,
+            WorkspaceWindowId{9U},
+            EditorGroupId{10U},
+            inkpod::app::CanvasId{11U},
+            Generation{10U})
         || registry.Current() == nullptr
         || registry.Current()->id != WorkspaceWindowId{9U}
         || registry.Current()->windows.window != nullptr) {
@@ -369,6 +404,68 @@ bool TestWorkspaceLifetime() {
     }
     registry.Clear();
     return registry.Current() == nullptr;
+}
+
+bool TestEditorAreaLifetimeAndSplit() {
+    EditorArea editors;
+    const EditorGroupId first_group{1U};
+    const EditorGroupId second_group{2U};
+    const DocumentViewId first_view{11U};
+    const DocumentViewId second_view{12U};
+    const DocumentViewId third_view{13U};
+    if (editors.Initialize({}, inkpod::app::CanvasId{1U}, Generation{1U})
+        || !editors.Initialize(
+            first_group, inkpod::app::CanvasId{21U}, Generation{31U})
+        || !editors.AddView(first_group, first_view)
+        || !editors.AddView(first_group, second_view)
+        || editors.AddView(first_group, first_view)
+        || editors.Split(
+            second_group,
+            inkpod::app::CanvasId{22U},
+            Generation{32U},
+            EditorSplitOrientation::None)
+        || !editors.Split(
+            second_group,
+            inkpod::app::CanvasId{22U},
+            Generation{32U},
+            EditorSplitOrientation::Vertical)
+        || editors.GroupCount() != 2U
+        || editors.Orientation() != EditorSplitOrientation::Vertical
+        || !editors.AddView(second_group, third_view)
+        || !editors.Activate(first_group)
+        || editors.Active() == nullptr
+        || editors.Active()->ActiveView() != second_view) {
+        return false;
+    }
+
+    editors.SetSplitRatioMilli(1U);
+    if (editors.SplitRatioMilli() != 200U
+        || !editors.SetOrientation(EditorSplitOrientation::Horizontal)
+        || editors.Orientation() != EditorSplitOrientation::Horizontal
+        || !editors.MoveView(second_view, second_group)
+        || editors.FindByView(second_view) == nullptr
+        || editors.FindByView(second_view)->id != second_group
+        || editors.MoveView(second_view, second_group)) {
+        return false;
+    }
+    editors.SetSplitRatioMilli(999U);
+    if (editors.SplitRatioMilli() != 800U) {
+        return false;
+    }
+
+    EditorGroupId survivor{};
+    if (!editors.MergeAndRemove(second_group, survivor)
+        || survivor != first_group
+        || editors.GroupCount() != 1U
+        || editors.Orientation() != EditorSplitOrientation::None
+        || editors.FindByView(first_view) == nullptr
+        || editors.FindByView(second_view) == nullptr
+        || editors.FindByView(third_view) == nullptr
+        || editors.MergeAndRemove(first_group, survivor)) {
+        return false;
+    }
+    editors.Clear();
+    return editors.GroupCount() == 0U && editors.Active() == nullptr;
 }
 
 }  // namespace
@@ -393,6 +490,10 @@ int main() {
     if (!TestWorkspaceLifetime()) {
         std::cerr << "workspace ownership test failed\n";
         return 5;
+    }
+    if (!TestEditorAreaLifetimeAndSplit()) {
+        std::cerr << "editor area split ownership test failed\n";
+        return 6;
     }
     return 0;
 }

@@ -42,6 +42,7 @@ foreach(REQUIRED IN ITEMS
         "RegisterSurface("
         "UnregisterSurface("
         "BindSurface("
+        "UnbindSurface("
         "SurfaceAcceptsSnapshots("
         "bool Submit(SnapshotEnvelope envelope)"
         "DeviceGeneration()")
@@ -67,6 +68,8 @@ foreach(REQUIRED IN ITEMS
         "transform.view_revision != envelope.view_revision"
         "TakeCanvasStrokeEvent("
         "TakeCanvasViewGesture("
+        "kCanvasActivated"
+        "static_cast<WPARAM>(host->Canvas().Value())"
         "static_cast<WPARAM>(token)"
         "static_cast<LPARAM>(surface_generation_.Value())"
         "const bool supersedes_surface"
@@ -117,10 +120,13 @@ endforeach()
 
 file(READ "${CORE_SOURCE}" CORE)
 foreach(REQUIRED IN ITEMS
-        "const renderer::SnapshotRoute route = canvas->Route()"
-        "canvas->AcceptsSnapshots()"
+        "for (renderer::CanvasSnapshotSink* sink : snapshot_sinks)"
+        "const renderer::SnapshotRoute route = sink->Route()"
+        "sink->AcceptsSnapshots()"
+        "view.frontend_view == route.document_view"
+        "inkpod_core_build_snapshot_for_view"
         "renderer::SnapshotEnvelope envelope"
-        "canvas->Submit(envelope)")
+        "sink->Submit(envelope)")
     string(FIND "${CORE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "CoreHost snapshot envelope integration is missing: ${REQUIRED}")
@@ -137,6 +143,8 @@ foreach(REQUIRED IN ITEMS
         "host.Submit(stale)"
         "host.SetQueuePausedForSmokeTest(true)"
         "first_sink->Submit(queue_failure)"
+        "UnbindCanvasSnapshotSink("
+        "host.Submit(unbound_stale)"
         "first_canvas_window.Reset()"
         "host.Stop()")
     string(FIND "${TEST}" "${REQUIRED}" OFFSET)

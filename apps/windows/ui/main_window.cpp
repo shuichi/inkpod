@@ -50,6 +50,22 @@ void RelayoutFromSplitter(app::MainWindowHandles& windows) noexcept {
     }
 }
 
+int EditorExtent(const app::MainWindowHandles& windows) noexcept {
+    if (windows.editors == nullptr) {
+        return 0;
+    }
+    const UINT dpi = windows.window == nullptr ? 96U : GetDpiForWindow(windows.window);
+    const WorkspaceLayoutRects layout = ComputeWorkspaceLayout(
+        windows.workspace.last_client_width,
+        windows.workspace.last_client_height,
+        0,
+        dpi,
+        windows.workspace);
+    return windows.editors->Orientation() == app::EditorSplitOrientation::Horizontal
+        ? layout.canvas.bottom - layout.document_tabs.top
+        : layout.document_tabs.right - layout.document_tabs.left;
+}
+
 LRESULT CALLBACK SplitterSubclassProcedure(
     HWND splitter,
     UINT message,
@@ -70,6 +86,12 @@ LRESULT CALLBACK SplitterSubclassProcedure(
             layout.drag_tool_width_dip = layout.tool_width_dip;
             layout.drag_inspector_width_dip = layout.inspector_width_dip;
             layout.drag_color_split_milli = layout.color_split_milli;
+            if (control == IDC_EDITOR_GROUP_SPLITTER && windows->editors != nullptr) {
+                windows->editors->drag_start = layout.drag_start;
+                windows->editors->drag_ratio_milli =
+                    windows->editors->SplitRatioMilli();
+                windows->editors->last_drag_layout_tick = 0U;
+            }
             SetCapture(splitter);
             SetFocus(splitter);
             return 0;
@@ -81,7 +103,22 @@ LRESULT CALLBACK SplitterSubclassProcedure(
                     ? 96U
                     : GetDpiForWindow(windows->window);
                 const int delta_x_dip = PixelsToDip(current.x - layout.drag_start.x, dpi);
-                if (control == IDC_WORKSPACE_TOOL_SPLITTER) {
+                if (control == IDC_EDITOR_GROUP_SPLITTER
+                    && windows->editors != nullptr) {
+                    const int extent = EditorExtent(*windows);
+                    const int delta = windows->editors->Orientation()
+                            == app::EditorSplitOrientation::Horizontal
+                        ? current.y - windows->editors->drag_start.y
+                        : current.x - windows->editors->drag_start.x;
+                    if (extent > 0) {
+                        windows->editors->SetSplitRatioMilli(
+                            static_cast<std::uint32_t>(std::clamp(
+                                static_cast<int>(windows->editors->drag_ratio_milli)
+                                    + delta * 1000 / extent,
+                                200,
+                                800)));
+                    }
+                } else if (control == IDC_WORKSPACE_TOOL_SPLITTER) {
                     layout.tool_width_dip = std::clamp(
                         layout.drag_tool_width_dip
                             + (layout.mirrored ? -delta_x_dip : delta_x_dip),
@@ -106,7 +143,15 @@ LRESULT CALLBACK SplitterSubclassProcedure(
                             150,
                             700));
                 }
-                RelayoutFromSplitter(*windows);
+                const std::uint64_t now = GetTickCount64();
+                if (control != IDC_EDITOR_GROUP_SPLITTER
+                    || windows->editors == nullptr
+                    || now - windows->editors->last_drag_layout_tick >= 16U) {
+                    if (windows->editors != nullptr) {
+                        windows->editors->last_drag_layout_tick = now;
+                    }
+                    RelayoutFromSplitter(*windows);
+                }
                 return 0;
             }
             break;
@@ -115,6 +160,17 @@ LRESULT CALLBACK SplitterSubclassProcedure(
                 ReleaseCapture();
             }
             layout.drag_control = 0;
+            RelayoutFromSplitter(*windows);
+            if (windows->editors != nullptr) {
+                for (std::size_t index = 0U;
+                     index < windows->editors->GroupCount();
+                     ++index) {
+                    const auto* group = windows->editors->GroupAt(index);
+                    if (group != nullptr && group->canvas != nullptr) {
+                        InvalidateRect(group->canvas, nullptr, FALSE);
+                    }
+                }
+            }
             return 0;
         case WM_CAPTURECHANGED:
             layout.drag_control = 0;
@@ -126,7 +182,15 @@ LRESULT CALLBACK SplitterSubclassProcedure(
             if (direction == 0) {
                 break;
             }
-            if (control == IDC_WORKSPACE_TOOL_SPLITTER) {
+            if (control == IDC_EDITOR_GROUP_SPLITTER
+                && windows->editors != nullptr) {
+                windows->editors->SetSplitRatioMilli(
+                    static_cast<std::uint32_t>(std::clamp(
+                        static_cast<int>(windows->editors->SplitRatioMilli())
+                            + direction * 20,
+                        200,
+                        800)));
+            } else if (control == IDC_WORKSPACE_TOOL_SPLITTER) {
                 layout.tool_width_dip = std::clamp(
                     layout.tool_width_dip
                         + direction * (layout.mirrored ? -4 : 4),
@@ -151,7 +215,13 @@ LRESULT CALLBACK SplitterSubclassProcedure(
         case WM_SETCURSOR:
             SetCursor(LoadCursorW(
                 nullptr,
-                control == IDC_WORKSPACE_COLOR_SPLITTER ? IDC_SIZENS : IDC_SIZEWE));
+                control == IDC_WORKSPACE_COLOR_SPLITTER
+                        || (control == IDC_EDITOR_GROUP_SPLITTER
+                            && windows->editors != nullptr
+                            && windows->editors->Orientation()
+                                == app::EditorSplitOrientation::Horizontal)
+                    ? IDC_SIZENS
+                    : IDC_SIZEWE));
             return TRUE;
         case WM_NCDESTROY:
             RemoveWindowSubclass(splitter, SplitterSubclassProcedure, kSplitterSubclass);
@@ -193,9 +263,11 @@ HWND CreateSplitter(
 
 bool CreateMainChrome(
     app::MainWindowHandles& windows,
+    app::EditorArea& editors,
     HINSTANCE instance,
     bool smoke_test) noexcept {
     const DWORD visible = smoke_test ? 0U : WS_VISIBLE;
+    windows.editors = &editors;
     windows.status_bar = CreateWindowExW(
         0,
         STATUSCLASSNAMEW,
@@ -209,19 +281,13 @@ bool CreateMainChrome(
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_STATUS)),
         instance,
         nullptr);
-    windows.document_tabs = CreateWindowExW(
-        0,
-        WC_TABCONTROLW,
-        nullptr,
-        WS_CHILD | visible | WS_CLIPSIBLINGS | WS_TABSTOP,
-        0,
-        0,
-        0,
-        0,
-        windows.window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_MAIN_DOCUMENT_TABS)),
-        instance,
-        nullptr);
+    app::EditorGroup* primary_group = editors.GroupAt(0U);
+    if (primary_group == nullptr
+        || !CreateEditorGroupTabs(windows, *primary_group, instance, smoke_test)) {
+        return false;
+    }
+    windows.document_tabs = primary_group->document_tabs;
+    windows.canvas = primary_group->canvas;
     if (windows.status_bar == nullptr || windows.document_tabs == nullptr) {
         return false;
     }
@@ -231,8 +297,10 @@ bool CreateMainChrome(
         windows, instance, IDC_WORKSPACE_INSPECTOR_SPLITTER);
     windows.color_splitter = CreateSplitter(
         windows, instance, IDC_WORKSPACE_COLOR_SPLITTER);
+    editors.splitter = CreateSplitter(
+        windows, instance, IDC_EDITOR_GROUP_SPLITTER);
     if (windows.tool_splitter == nullptr || windows.inspector_splitter == nullptr
-        || windows.color_splitter == nullptr) {
+        || windows.color_splitter == nullptr || editors.splitter == nullptr) {
         return false;
     }
 
@@ -245,6 +313,127 @@ bool CreateMainChrome(
     }
     return true;
 }
+
+bool CreateEditorGroupTabs(
+    app::MainWindowHandles& windows,
+    app::EditorGroup& group,
+    HINSTANCE instance,
+    bool smoke_test) noexcept {
+    if (group.document_tabs != nullptr || windows.window == nullptr) {
+        return false;
+    }
+    const DWORD visible = smoke_test ? 0U : WS_VISIBLE;
+    const int control = &group == windows.editors->GroupAt(0U)
+        ? IDC_MAIN_DOCUMENT_TABS
+        : IDC_MAIN_DOCUMENT_TABS_SECONDARY;
+    group.document_tabs = CreateWindowExW(
+        0,
+        WC_TABCONTROLW,
+        nullptr,
+        WS_CHILD | visible | WS_CLIPSIBLINGS | WS_TABSTOP,
+        0,
+        0,
+        0,
+        0,
+        windows.window,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(control)),
+        instance,
+        nullptr);
+    return group.document_tabs != nullptr;
+}
+
+void SyncActiveEditorHandles(app::MainWindowHandles& windows) noexcept {
+    const app::EditorGroup* active = windows.editors == nullptr
+        ? nullptr
+        : windows.editors->Active();
+    windows.document_tabs = active == nullptr ? nullptr : active->document_tabs;
+    windows.canvas = active == nullptr ? nullptr : active->canvas;
+}
+
+namespace {
+
+void PlaceEditorGroup(
+    app::EditorGroup& group,
+    const RECT& bounds,
+    int tab_height,
+    bool show_tabs) noexcept {
+    RECT tabs = bounds;
+    tabs.bottom = std::min(bounds.bottom, bounds.top + tab_height);
+    RECT canvas = bounds;
+    canvas.top = tabs.bottom;
+    PlaceChild(group.document_tabs, tabs, show_tabs);
+    PlaceChild(group.canvas, canvas, true);
+}
+
+void LayoutEditorArea(
+    app::MainWindowHandles& windows,
+    const WorkspaceLayoutRects& layout,
+    bool smoke_test,
+    UINT dpi) noexcept {
+    app::EditorArea* editors = windows.editors;
+    if (editors == nullptr || editors->GroupCount() == 0U) {
+        return;
+    }
+    app::EditorGroup* first = editors->GroupAt(0U);
+    if (first == nullptr) {
+        return;
+    }
+    const int tab_height = std::max(
+        0L, layout.canvas.top - layout.document_tabs.top);
+    const RECT editor_bounds{
+        layout.document_tabs.left,
+        layout.document_tabs.top,
+        layout.document_tabs.right,
+        layout.canvas.bottom};
+    if (editors->GroupCount() == 1U) {
+        PlaceEditorGroup(*first, editor_bounds, tab_height, !smoke_test);
+        PlaceChild(editors->splitter, {}, false);
+        return;
+    }
+    app::EditorGroup* second = editors->GroupAt(1U);
+    if (second == nullptr) {
+        return;
+    }
+    const int splitter_size = std::max(1, MulDiv(4, static_cast<int>(dpi), 96));
+    const int minimum_canvas = std::max(1, MulDiv(160, static_cast<int>(dpi), 96));
+    RECT first_bounds = editor_bounds;
+    RECT second_bounds = editor_bounds;
+    RECT splitter_bounds{};
+    const bool horizontal = editors->Orientation()
+        == app::EditorSplitOrientation::Horizontal;
+    const int extent = horizontal
+        ? editor_bounds.bottom - editor_bounds.top
+        : editor_bounds.right - editor_bounds.left;
+    const int usable = std::max(0, extent - splitter_size);
+    const int minimum = std::min(minimum_canvas, usable / 2);
+    const int first_extent = std::clamp(
+        static_cast<int>(
+            static_cast<std::int64_t>(usable) * editors->SplitRatioMilli() / 1000),
+        minimum,
+        std::max(minimum, usable - minimum));
+    if (horizontal) {
+        first_bounds.bottom = editor_bounds.top + first_extent;
+        splitter_bounds = RECT{
+            editor_bounds.left,
+            first_bounds.bottom,
+            editor_bounds.right,
+            first_bounds.bottom + splitter_size};
+        second_bounds.top = splitter_bounds.bottom;
+    } else {
+        first_bounds.right = editor_bounds.left + first_extent;
+        splitter_bounds = RECT{
+            first_bounds.right,
+            editor_bounds.top,
+            first_bounds.right + splitter_size,
+            editor_bounds.bottom};
+        second_bounds.left = splitter_bounds.right;
+    }
+    PlaceEditorGroup(*first, first_bounds, tab_height, !smoke_test);
+    PlaceChild(editors->splitter, splitter_bounds, true);
+    PlaceEditorGroup(*second, second_bounds, tab_height, !smoke_test);
+}
+
+}  // namespace
 
 void LayoutMainChrome(
     app::MainWindowHandles& windows,
@@ -311,11 +500,7 @@ void LayoutMainChrome(
         windows.layer_palette,
         layout.layer,
         windows.workspace.layer_visible);
-    PlaceChild(
-        windows.document_tabs,
-        layout.document_tabs,
-        !smoke_test);
-    PlaceChild(windows.canvas, layout.canvas, true);
+    LayoutEditorArea(windows, layout, smoke_test, dpi);
 }
 
 bool RegisterMainWindowClass(

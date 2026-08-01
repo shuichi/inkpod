@@ -134,6 +134,17 @@ public:
         Generation generation) noexcept;
     InkpodStatus FlushPreview() noexcept;
     InkpodStatus SetActiveView(std::uint64_t view_id) noexcept;
+    bool RegisterSnapshotSink(renderer::CanvasSnapshotSink* canvas) noexcept;
+    bool UnregisterSnapshotSink(renderer::CanvasSnapshotSink* canvas) noexcept;
+    bool RegisterDocumentView(
+        DocumentSessionId session,
+        Generation generation,
+        DocumentViewId frontend_view,
+        std::uint64_t core_view_id) noexcept;
+    bool UnregisterDocumentView(
+        DocumentSessionId session,
+        Generation generation,
+        DocumentViewId frontend_view) noexcept;
 
     bool GetDocumentInfo(InkpodDocumentInfo& info) const noexcept;
     bool GetDocumentInfo(

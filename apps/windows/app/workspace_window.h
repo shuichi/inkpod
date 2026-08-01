@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include "editor_area.h"
 #include "frontend_state.h"
 #include "ui/main_window.h"
 
@@ -14,6 +15,7 @@ struct WorkspaceWindow final {
     WorkspaceWindowId id{};
     Generation generation{};
     MainWindowHandles windows{};
+    EditorArea editors{};
     ToolUiState tools{};
     PaneUiState panes{};
     AnimationUiState animation{};
@@ -28,6 +30,8 @@ public:
     [[nodiscard]] bool Initialize(
         ApplicationHost* application,
         WorkspaceWindowId id,
+        EditorGroupId editor_group,
+        CanvasId canvas,
         Generation generation) noexcept;
     void Clear() noexcept;
     [[nodiscard]] WorkspaceWindow* Current() noexcept;

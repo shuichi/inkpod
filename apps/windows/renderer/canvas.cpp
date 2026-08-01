@@ -1540,6 +1540,7 @@ enum class HostControlKind {
     Register,
     Unregister,
     Bind,
+    Unbind,
     Resize,
     Visibility,
     Render,
@@ -1655,6 +1656,7 @@ public:
                 }
                 const bool supersedes_surface =
                     control.kind == HostControlKind::Bind
+                    || control.kind == HostControlKind::Unbind
                     || control.kind == HostControlKind::Unregister;
                 if (supersedes_surface) {
                     const auto pending = std::find_if(
@@ -2019,6 +2021,12 @@ private:
                 surface.occluded = false;
                 PublishSurface(surface);
                 break;
+            case HostControlKind::Unbind:
+                surface.surface->ClearSnapshot();
+                surface.route = {};
+                surface.occluded = false;
+                PublishSurface(surface);
+                break;
             case HostControlKind::Resize:
                 result = surface.surface->Resize(control.width, control.height);
                 render = surface.visible;
@@ -2203,6 +2211,15 @@ public:
         }
         std::lock_guard lock(route_mutex_);
         route_ = route;
+        return true;
+    }
+
+    bool Unbind() noexcept {
+        if (FAILED(renderer_.UnbindSurface(canvas_, surface_generation_))) {
+            return false;
+        }
+        std::lock_guard lock(route_mutex_);
+        route_ = {};
         return true;
     }
 
@@ -2619,8 +2636,8 @@ LRESULT CALLBACK CanvasWindowProcedure(
                     PostMessageW(
                         GetParent(window),
                         kCanvasViewportChanged,
-                        static_cast<WPARAM>(width),
-                        static_cast<LPARAM>(height));
+                        static_cast<WPARAM>(host->Canvas().Value()),
+                        MAKELPARAM(width, height));
                 }
             }
             return 0;
@@ -2642,6 +2659,15 @@ LRESULT CALLBACK CanvasWindowProcedure(
         }
         case WM_ERASEBKGND:
             return 1;
+        case WM_SETFOCUS:
+            if (host != nullptr) {
+                SendMessageW(
+                    GetParent(window),
+                    kCanvasActivated,
+                    static_cast<WPARAM>(host->Canvas().Value()),
+                    static_cast<LPARAM>(host->SurfaceGeneration().Value()));
+            }
+            return 0;
         case WM_DPICHANGED_AFTERPARENT: {
             if (host != nullptr) {
                 host->Renderer().DpiChanged(
@@ -2665,7 +2691,9 @@ LRESULT CALLBACK CanvasWindowProcedure(
                 PostMessageW(
                     GetParent(window),
                     kCanvasPointerMoved,
-                    0,
+                    host == nullptr
+                        ? 0
+                        : static_cast<WPARAM>(host->Canvas().Value()),
                     MAKELPARAM(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)));
             }
             if (host != nullptr && (wparam & MK_LBUTTON) != 0U
@@ -2870,6 +2898,19 @@ HRESULT RendererHost::BindSurface(const SnapshotRoute& route) noexcept {
     control.canvas = route.canvas;
     control.surface_generation = route.surface_generation;
     control.route = route;
+    return impl_->state.Invoke(std::move(control));
+}
+
+HRESULT RendererHost::UnbindSurface(
+    app::CanvasId canvas,
+    app::Generation surface_generation) noexcept {
+    if (impl_ == nullptr || !canvas || !surface_generation) {
+        return E_INVALIDARG;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::Unbind;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
     return impl_->state.Invoke(std::move(control));
 }
 
@@ -3128,6 +3169,12 @@ bool BindCanvasSnapshotSink(
         GetWindowLongPtrW(canvas, GWLP_USERDATA));
     return host != nullptr
         && host->Bind(document_session, document_view, document_generation);
+}
+
+bool UnbindCanvasSnapshotSink(HWND canvas) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr && host->Unbind();
 }
 
 void CancelCanvasStroke(HWND canvas) noexcept {

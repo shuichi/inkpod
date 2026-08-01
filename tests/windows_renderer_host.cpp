@@ -292,6 +292,25 @@ int Run() {
         return 16;
     }
 
+    const inkpod::renderer::SnapshotRoute before_unbind = first_sink->Route();
+    inkpod::renderer::SnapshotEnvelope unbound_stale{};
+    inkpod::renderer::CanvasDocumentBounds unbound_bounds{};
+    if (!rebound_core.Build(before_unbind, unbound_stale)
+        || !inkpod::renderer::UnbindCanvasSnapshotSink(
+            first_canvas_window.window_)
+        || first_sink->AcceptsSnapshots() || first_sink->Route()
+        || host.Submit(unbound_stale)
+        || FAILED(host.GetDocumentBounds(
+            first_canvas, first_surface_generation, unbound_bounds))
+        || unbound_bounds.right != 0.0 || unbound_bounds.bottom != 0.0
+        || !inkpod::renderer::BindCanvasSnapshotSink(
+            first_canvas_window.window_,
+            DocumentSessionId(203U),
+            DocumentViewId(303U),
+            Generation(22U))) {
+        return 29;
+    }
+
     const inkpod::renderer::SnapshotRoute stopped_route = first_sink->Route();
     inkpod::renderer::SnapshotEnvelope close_pending{};
     if (!replacement_core.Build(first_sink->Route(), close_pending)

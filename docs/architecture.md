@@ -90,9 +90,10 @@ main -> Application -> MainWindow/controllers -> CoreHost -> C ABI
 `ApplicationHost` is the process-lifetime composition root. It owns global
 shortcut and clipboard state, the frontend routing/token registries, job state,
 one `CoreHost`, one `RendererHost`, a single-entry workspace registry, and a
-bounded multi-entry document registry. The G5 UI exposes those document entries
-as multiple tabs while keeping one active view and one Canvas visible in its
-single editor group.
+bounded multi-entry document registry. The G6 UI exposes those document entries
+as tabs in one or two `EditorGroup` values. Each visible group owns one tab
+control, active frontend view, focus history, Canvas slot, and Canvas identity;
+inactive tabs do not own Canvas surfaces.
 `WorkspaceWindow` owns the top-level `HWND`, all child/control handles,
 window-local command/menu/status presentation, pane handles, tool presentation,
 and layout state. `DocumentSession` owns the file/recovery shell and an explicit
@@ -164,9 +165,9 @@ route. Stale, hidden, occluded, queue-full, replaced, closed, and shutdown paths
 all consume the Rust snapshot owner exactly once. Device loss first discards all
 surface GPU resources, recreates the shared device, then reconstructs every
 surface cache from its retained immutable snapshot; Core document state is not
-involved. G5 retains one visible Canvas because surfaces follow visible editor
-groups rather than the number of open or inactive tabs. A second EditorGroup is
-G6 work, not a renderer-ownership limitation.
+involved. G6 retains one Canvas surface per visible editor group, up to two,
+rather than per open or inactive tab. Closing a group unregisters its snapshot
+sink before destroying its Canvas and moves its views to the surviving group.
 
 The UI/Input thread owns the frontend target registry. Workspace window,
 document session, document view, editor group, Canvas, pane, job, and generation
@@ -193,15 +194,20 @@ Rust-owned object pointer is placed in `WPARAM` or `LPARAM`. Canvas stroke and
 view-gesture payloads follow the same rule: `CanvasHost` owns them in bounded
 queues until the workspace takes the matching token plus surface generation.
 Document-bound and preview queries use typed Canvas APIs rather than output
-pointers in custom messages. G5 exposes one workspace with multiple document
-tabs, one editor group, and one Canvas. Tab activation first cancels the old
-stroke/preview, selects the session, binds the Canvas route, and selects the
-Core view before refreshing pane, menu, status, title, and autosave presentation.
+pointers in custom messages. G6 exposes one workspace with one or two editor
+groups and one Canvas per visible group. Focus or explicit group activation
+first cancels the prior group's live stroke, then selects the captured frontend
+view, session, Canvas route, and Core-local view before refreshing pane, menu,
+status, title, and autosave presentation. Mouse hover does not activate a group.
+`CoreHost` maps frontend view IDs to Core-local view IDs and builds one immutable
+snapshot for each matching visible Canvas; the primary view uses the primary
+snapshot path and secondary views retain independent zoom/pan/flip state. All
+views of a session still share its document, history, dirty state, and savepoint.
 Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 293 production commands exactly one
+The fixed command-state catalog assigns all 299 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
