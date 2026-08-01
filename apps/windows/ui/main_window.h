@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "app/editor_area.h"
+#include "ui/dock_host.h"
 #include "ui/workspace_layout.h"
 
 namespace inkpod::app {
@@ -18,11 +19,9 @@ struct MainWindowHandles {
     HWND tool_palette{};
     HWND color_pane{};
     HWND layer_palette{};
-    HWND tool_splitter{};
-    HWND inspector_splitter{};
-    HWND color_splitter{};
     EditorArea* editors{};
     windows::ui::WorkspaceLayoutState workspace{};
+    windows::ui::DockHost dock_host{};
 };
 
 }

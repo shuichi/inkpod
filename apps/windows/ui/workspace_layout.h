@@ -4,41 +4,26 @@
 
 #include <cstdint>
 
+#include "dock_layout.h"
+
 namespace inkpod::windows::ui {
 
 struct WorkspaceLayoutState {
-    bool tool_visible{true};
-    bool tool_options_visible{true};
-    bool color_visible{true};
-    bool layer_visible{true};
-    bool mirrored{};
-    int tool_width_dip{80};
-    int inspector_width_dip{320};
-    int tool_options_height_dip{40};
-    std::uint32_t color_split_milli{320U};
+    DockLayoutModel dock{};
+    // This is the internal layer/plane split inside the Layer pane, not a dock
+    // geometry value.
     std::uint32_t layer_split_milli{550U};
 
-    // Transient drag/layout state. These values are never persisted.
-    int drag_control{};
-    POINT drag_start{};
-    int drag_tool_width_dip{};
-    int drag_inspector_width_dip{};
-    std::uint32_t drag_color_split_milli{};
+    // Transient measurement only. These values are never persisted.
     int last_client_width{};
     int last_client_height{};
-    int last_body_height{};
 };
 
 struct WorkspaceLayoutRects {
-    RECT tool_options{};
-    RECT tool{};
-    RECT tool_splitter{};
+    DockLayoutGeometry dock{};
+    RECT editor{};
     RECT document_tabs{};
     RECT canvas{};
-    RECT inspector_splitter{};
-    RECT color{};
-    RECT color_splitter{};
-    RECT layer{};
 };
 
 int ScaleWorkspaceDip(int value, UINT dpi) noexcept;

@@ -1085,7 +1085,8 @@ bool RefreshTreePane(ApplicationHost& state) noexcept {
     DocumentPanesController controller(*state.engine);
     const InkpodStatus status = controller.LoadTree(
         requested_layer_id,
-        state.Workspace().windows.workspace.layer_visible,
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Layer),
         layers,
         planes,
         selected_layer_index);
@@ -3096,7 +3097,8 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.document_pane.removable_layer_available =
         state.Workspace().panes.tree_layer_count > 1U;
     inputs.document_pane.layer_palette_visible =
-        state.Workspace().windows.workspace.layer_visible;
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Layer);
 
     inputs.animation.motion_fps = state.Workspace().animation.motion_fps;
 
@@ -3127,7 +3129,9 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.tool.fill_operation = state.Workspace().tools.fill_options.operation;
     inputs.tool.vector_erase_mode = state.Workspace().tools.vector_erase_mode;
     inputs.tool.vector_selection_mode = state.Workspace().tools.vector_selection_mode;
-    inputs.tool.palette_visible = state.Workspace().windows.workspace.tool_visible;
+    inputs.tool.palette_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Tool);
 
     inputs.color.eyedropper_source = state.Workspace().tools.eyedropper_source;
     inputs.color.color_check_mode = state.ActiveView().presentation.color_check_mode;
@@ -3144,12 +3148,20 @@ CommandStateInputs BuildCommandStateInputs(
         && IsWindowVisible(state.Workspace().batch_palette) != FALSE;
     inputs.batch.output_policy = state.batch.output_policy;
     inputs.batch.failure_policy = state.batch.failure_policy;
-    inputs.workspace.tool_visible = state.Workspace().windows.workspace.tool_visible;
+    inputs.workspace.tool_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Tool);
     inputs.workspace.tool_options_visible =
-        state.Workspace().windows.workspace.tool_options_visible;
-    inputs.workspace.color_visible = state.Workspace().windows.workspace.color_visible;
-    inputs.workspace.layer_visible = state.Workspace().windows.workspace.layer_visible;
-    inputs.workspace.mirrored = state.Workspace().windows.workspace.mirrored;
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::ToolOptions);
+    inputs.workspace.color_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Color);
+    inputs.workspace.layer_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Layer);
+    inputs.workspace.mirrored =
+        state.Workspace().windows.workspace.dock.Mirrored();
     return inputs;
 }
 
@@ -6530,6 +6542,18 @@ void RelayoutWorkspace(ApplicationHost& state) noexcept {
     }
 }
 
+void NotifyDockHostChanged(void* context) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state == nullptr) {
+        return;
+    }
+    RelayoutWorkspace(*state);
+    RefreshColorPanes(*state);
+    RefreshDockPaneViews(*state);
+    RefreshTreePane(*state);
+    UpdateMenuState(*state);
+}
+
 bool InitializeMainChrome(ApplicationHost& state) noexcept {
     if (!state.lifetime.smoke_test) {
         LoadWorkspaceLayout(state.Workspace().windows.workspace, L"WorkspaceSessionV2");
@@ -6611,6 +6635,18 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         return false;
     }
     state.Workspace().windows.layer_palette = state.Workspace().panes.layer_palette;
+    state.Workspace().windows.dock_host.SetChangedCallback(
+        NotifyDockHostChanged, &state);
+    if (!state.Workspace().windows.dock_host.AttachPane(
+            DockPaneType::Tool, state.Workspace().windows.tool_palette)
+        || !state.Workspace().windows.dock_host.AttachPane(
+            DockPaneType::ToolOptions, state.Workspace().windows.tool_options)
+        || !state.Workspace().windows.dock_host.AttachPane(
+            DockPaneType::Color, state.Workspace().windows.color_pane)
+        || !state.Workspace().windows.dock_host.AttachPane(
+            DockPaneType::Layer, state.Workspace().windows.layer_palette)) {
+        return false;
+    }
     RelayoutWorkspace(state);
     return true;
 }
@@ -7579,13 +7615,16 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
     switch (LOWORD(wparam)) {
         case IDM_WINDOW_LAYER_PALETTE:
             if (state->Workspace().panes.layer_palette != nullptr) {
-                state->Workspace().windows.workspace.layer_visible =
-                    !state->Workspace().windows.workspace.layer_visible;
-                RelayoutWorkspace(*state);
-                if (state->Workspace().windows.workspace.layer_visible) {
+                const DockResult result =
+                    state->Workspace().windows.dock_host.TogglePane(
+                        DockPaneType::Layer);
+                if (result != DockResult::Ok) {
+                    return 0;
+                }
+                if (state->Workspace().windows.workspace.dock.IsPaneVisible(
+                        DockPaneType::Layer)) {
                     RefreshTreePane(*state);
                 }
-                UpdateMenuState(*state);
                 return 1;
             }
             return 0;
@@ -9076,19 +9115,19 @@ std::optional<LRESULT> RouteToolCommand(
     switch (LOWORD(wparam)) {
         case IDM_WINDOW_TOOL_PALETTE:
             if (state->Workspace().tools.palette != nullptr) {
-                state->Workspace().windows.workspace.tool_visible =
-                    !state->Workspace().windows.workspace.tool_visible;
-                RelayoutWorkspace(*state);
-                UpdateMenuState(*state);
-                return 1;
+                return state->Workspace().windows.dock_host.TogglePane(
+                           DockPaneType::Tool)
+                        == DockResult::Ok
+                    ? 1
+                    : 0;
             }
             return 0;
         case IDM_WINDOW_TOOL_OPTIONS:
-            state->Workspace().windows.workspace.tool_options_visible =
-                !state->Workspace().windows.workspace.tool_options_visible;
-            RelayoutWorkspace(*state);
-            UpdateMenuState(*state);
-            return 1;
+            return state->Workspace().windows.dock_host.TogglePane(
+                       DockPaneType::ToolOptions)
+                    == DockResult::Ok
+                ? 1
+                : 0;
         case IDM_TOOL_PENCIL:
             TransitionActiveTool(
                 state->Workspace().tools, state->Workspace().windows.canvas, INKPOD_TOOL_PENCIL);
@@ -9408,14 +9447,15 @@ std::optional<LRESULT> RouteColorCommand(
     }
     switch (LOWORD(wparam)) {
         case IDM_WINDOW_COLOR_PANE:
-            state->Workspace().windows.workspace.color_visible =
-                !state->Workspace().windows.workspace.color_visible;
-            if (state->Workspace().windows.workspace.color_visible) {
+            if (state->Workspace().windows.dock_host.TogglePane(
+                    DockPaneType::Color)
+                != DockResult::Ok) {
+                return 0;
+            }
+            if (state->Workspace().windows.workspace.dock.IsPaneVisible(
+                    DockPaneType::Color)) {
                 RefreshColorPanes(*state);
             }
-            RelayoutWorkspace(*state);
-            RefreshDockPaneViews(*state);
-            UpdateMenuState(*state);
             return 1;
         case IDM_COLOR_EDITOR: {
             const InkpodStatus status = ShowDrawingColorEditor(*state);
@@ -9898,8 +9938,8 @@ std::optional<LRESULT> RouteApplicationCommand(
             return loaded ? 1 : 0;
         }
         case IDM_WORKSPACE_MIRROR:
-            state->Workspace().windows.workspace.mirrored =
-                !state->Workspace().windows.workspace.mirrored;
+            state->Workspace().windows.workspace.dock.SetMirrored(
+                !state->Workspace().windows.workspace.dock.Mirrored());
             RelayoutWorkspace(*state);
             UpdateMenuState(*state);
             return 1;

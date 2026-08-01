@@ -59,6 +59,10 @@ BEGIN
     IDS_STORAGE_RGBA8 "RGBA（8 bit/チャンネル）"
     IDS_STORAGE_RGBA16 "RGBA（16 bit/チャンネル）"
     IDS_PLANE_CREATION_INVALID "選択した種類と形式の組み合わせは、選択中のレイヤーでは使用できません。"
+    IDS_DOCK_PANE_TOOL "ツールパレット"
+    IDS_DOCK_PANE_TOOL_OPTIONS "ツールオプション"
+    IDS_DOCK_PANE_COLOR "カラー"
+    IDS_DOCK_PANE_LAYER "レイヤー／プレーン"
 END
 
 IDR_MAIN_MENU MENU

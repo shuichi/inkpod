@@ -213,25 +213,38 @@ Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
 toolbar; every user command remains reachable through a menu leaf.
 
-The canonical workspace uses fixed main-frame `WS_CHILD` panes. At the 96-DPI
-reset baseline, active-tool options occupy the full-width top 40 DIP; the body
-places an 80-DIP, single-column 20-command tool strip on the left, document tabs
-and Canvas in the center, and a 320-DIP inspector on the right. The inspector
-stacks color/palette/chart above layer/plane at a 32:68 ratio, while the lower
-pane stacks layer above plane at 55:45. Four-DIP splitters separate each major
-region. The tool buttons are 72 x 34 DIP and use 7-point, meaningful single-word
-Japanese labels instead of one-character abbreviations. Buttons forward the same
-command IDs as menus, and the cached command-state result drives both surfaces.
+The canonical workspace is represented by an HWND-free, fixed-capacity
+`DockLayoutModel`. Four primary `PaneDescriptor` records give tool, tool options,
+color, and layer stable type IDs and localized resource titles, default and
+allowed zones, target scope, multiplicity, float/auto-hide capability, and
+minimum/preferred sizes. The model permits only `TopContext`, `Left`, `Right`,
+and `Bottom` stacks around the central `EditorArea`, plus floating and hidden
+placements. A stack is either tabbed or split in one direction; recursive/free
+dock trees cannot be represented. At the 96-DPI reset baseline, active-tool
+options occupy the top 40 DIP, the 80-DIP tool strip is left, and the 320-DIP
+color/layer stack is right at 32:68. The layer pane retains its internal 55:45
+layer/plane split. Tool buttons remain 72 x 34 DIP with meaningful single-word
+Japanese labels, forward the menu command IDs, and consume the same cached
+command state.
 
-Pane widths, vertical ratios, visibility, and mirroring are stored as bounded
-96-DPI values in a versioned per-user record; startup restores the last session,
-while explicit commands reset, save, restore, or mirror the layout. Mirroring
-exchanges the tool and inspector sides without moving the full-width options or
-status regions. Mouse and keyboard splitters, DPI/font updates, and dialog
-navigation remain on the UI thread. Hiding a pane immediately returns its area
-to the Canvas, and narrow windows temporarily suppress the inspector before
-reducing the 320-DIP minimum Canvas width. The four primary panes remain docked;
-only secondary feature palettes may use separate modeless frames.
+`WorkspaceWindow` owns one UI-thread `DockHost`, which applies the pure geometry
+to the existing primary pane child windows. Docked content is parented to the
+main frame; floating content is reparented into an ordinary main-window-owned
+top-level frame and returns to the same child HWND when docked. Drag preview is
+limited to descriptor-allowed zones. Standard tab controls, mouse/keyboard
+splitters, pane context menus, and the Window menu provide tab/split, dock,
+float, hide, restore, and reset without retargeting a document command. Floating
+close maps to hide, preserving the pane's controller state. All HWND and Common
+Controls activity remains on the UI/Input thread; Core and renderer ownership is
+unchanged.
+
+Pane zones, order, ratios, floating placement, visibility, and mirroring are
+stored as bounded 96-DPI values in the per-user version 3 workspace record. A
+validated migration reads the prior fixed-layout version 2 record. Device-pixel
+conversion occurs once at the DockHost platform boundary. Narrow layouts may
+temporarily suppress lower-priority panes in computed geometry, without mutating
+or saving that adaptation. Named presets, general monitor recovery, and
+secondary-pane auto-hide remain later workspace work.
 
 The six-part status bar reports tool/plane, zoom/view flags, coordinates,
 RGBA/selection, paper/DPI, and task/shortcut/dirty state. Document tabs use the

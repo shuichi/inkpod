@@ -1,34 +1,30 @@
 #include "workspace_layout.h"
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace inkpod::windows::ui {
 namespace {
 
 constexpr wchar_t kSettingsKey[] = L"Software\\Inkpod";
 constexpr std::uint32_t kMagic = UINT32_C(0x4c574b49);
-constexpr std::uint32_t kVersion = 2U;
+constexpr std::uint32_t kVersion = 3U;
 constexpr int kReferenceDpi = 96;
-constexpr int kSplitterDip = 4;
 constexpr int kTabsHeightDip = 28;
-constexpr int kMinimumCanvasWidthDip = 320;
-constexpr int kMinimumToolWidthDip = 80;
-constexpr int kMaximumToolWidthDip = 160;
-constexpr int kMinimumInspectorWidthDip = 240;
-constexpr int kMaximumInspectorWidthDip = 640;
-constexpr int kMinimumColorHeightDip = 120;
-constexpr int kMinimumLayerHeightDip = 180;
 
-constexpr std::uint32_t kToolVisible = UINT32_C(1) << 0U;
-constexpr std::uint32_t kToolOptionsVisible = UINT32_C(1) << 1U;
-constexpr std::uint32_t kColorVisible = UINT32_C(1) << 2U;
-constexpr std::uint32_t kLayerVisible = UINT32_C(1) << 3U;
-constexpr std::uint32_t kMirrored = UINT32_C(1) << 4U;
-constexpr std::uint32_t kKnownFlags = kToolVisible | kToolOptionsVisible
-    | kColorVisible | kLayerVisible | kMirrored;
+constexpr std::uint32_t kLegacyToolVisible = UINT32_C(1) << 0U;
+constexpr std::uint32_t kLegacyToolOptionsVisible = UINT32_C(1) << 1U;
+constexpr std::uint32_t kLegacyColorVisible = UINT32_C(1) << 2U;
+constexpr std::uint32_t kLegacyLayerVisible = UINT32_C(1) << 3U;
+constexpr std::uint32_t kLegacyMirrored = UINT32_C(1) << 4U;
+constexpr std::uint32_t kLegacyKnownFlags = kLegacyToolVisible
+    | kLegacyToolOptionsVisible | kLegacyColorVisible | kLegacyLayerVisible
+    | kLegacyMirrored;
 
-struct PersistedWorkspaceLayout {
+struct LegacyPersistedWorkspaceLayoutV2 {
     std::uint32_t magic;
     std::uint32_t version;
     std::uint32_t struct_size;
@@ -40,27 +36,180 @@ struct PersistedWorkspaceLayout {
     std::uint32_t layer_split_milli;
 };
 
-bool ValidPersistedLayout(const PersistedWorkspaceLayout& value) noexcept {
-    return value.magic == kMagic && value.version == kVersion
-        && value.struct_size == sizeof(value) && (value.flags & ~kKnownFlags) == 0U
-        && value.tool_width_dip >= kMinimumToolWidthDip
-        && value.tool_width_dip <= kMaximumToolWidthDip
-        && value.inspector_width_dip >= kMinimumInspectorWidthDip
-        && value.inspector_width_dip <= kMaximumInspectorWidthDip
+struct PersistedDockPane {
+    std::uint32_t type;
+    std::uint32_t zone;
+    std::uint32_t restore_zone;
+    std::uint32_t order;
+    std::uint32_t split_weight;
+    std::int32_t floating_x_dip;
+    std::int32_t floating_y_dip;
+    std::int32_t floating_width_dip;
+    std::int32_t floating_height_dip;
+};
+
+struct PersistedDockZone {
+    std::uint32_t mode;
+    std::uint32_t active_tab;
+    std::int32_t extent_dip;
+};
+
+struct PersistedWorkspaceLayoutV3 {
+    std::uint32_t magic;
+    std::uint32_t version;
+    std::uint32_t struct_size;
+    std::uint32_t flags;
+    std::uint32_t pane_count;
+    std::uint32_t zone_count;
+    std::uint32_t layer_split_milli;
+    std::uint32_t reserved;
+    std::array<PersistedDockPane, kDockPaneCount> panes;
+    std::array<PersistedDockZone, kDockedZoneCount> zones;
+};
+
+RECT ToRect(const DockRect& value) noexcept {
+    return RECT{
+        value.x,
+        value.y,
+        value.x + std::max(0, value.width),
+        value.y + std::max(0, value.height)};
+}
+
+bool ValidLegacyLayout(const LegacyPersistedWorkspaceLayoutV2& value) noexcept {
+    return value.magic == kMagic && value.version == 2U
+        && value.struct_size == sizeof(value)
+        && (value.flags & ~kLegacyKnownFlags) == 0U
+        && value.tool_width_dip >= 80 && value.tool_width_dip <= 160
+        && value.inspector_width_dip >= 240 && value.inspector_width_dip <= 640
         && value.tool_options_height_dip >= 28
         && value.tool_options_height_dip <= 96
         && value.color_split_milli >= 150U && value.color_split_milli <= 700U
         && value.layer_split_milli >= 200U && value.layer_split_milli <= 800U;
 }
 
-RECT MakeRect(int left, int top, int width, int height) noexcept {
-    return RECT{left, top, left + std::max(0, width), top + std::max(0, height)};
+bool LoadLegacyLayout(
+    WorkspaceLayoutState& state,
+    const LegacyPersistedWorkspaceLayoutV2& value) noexcept {
+    if (!ValidLegacyLayout(value)) {
+        return false;
+    }
+    WorkspaceLayoutState candidate{};
+    static_cast<void>(candidate.dock.SetZoneExtentDip(
+        DockZone::Left, value.tool_width_dip));
+    static_cast<void>(candidate.dock.SetZoneExtentDip(
+        DockZone::Right, value.inspector_width_dip));
+    static_cast<void>(candidate.dock.SetZoneExtentDip(
+        DockZone::TopContext, value.tool_options_height_dip));
+    DockPanePlacement* color = candidate.dock.Pane(DockPaneType::Color);
+    DockPanePlacement* layer = candidate.dock.Pane(DockPaneType::Layer);
+    if (color == nullptr || layer == nullptr) {
+        return false;
+    }
+    color->split_weight = value.color_split_milli;
+    layer->split_weight = 1000U - value.color_split_milli;
+    if ((value.flags & kLegacyToolVisible) == 0U) {
+        static_cast<void>(candidate.dock.HidePane(DockPaneType::Tool));
+    }
+    if ((value.flags & kLegacyToolOptionsVisible) == 0U) {
+        static_cast<void>(candidate.dock.HidePane(DockPaneType::ToolOptions));
+    }
+    if ((value.flags & kLegacyColorVisible) == 0U) {
+        static_cast<void>(candidate.dock.HidePane(DockPaneType::Color));
+    }
+    if ((value.flags & kLegacyLayerVisible) == 0U) {
+        static_cast<void>(candidate.dock.HidePane(DockPaneType::Layer));
+    }
+    candidate.dock.SetMirrored((value.flags & kLegacyMirrored) != 0U);
+    candidate.layer_split_milli = value.layer_split_milli;
+    state = candidate;
+    return true;
+}
+
+bool DecodeCurrentLayout(
+    WorkspaceLayoutState& state,
+    const PersistedWorkspaceLayoutV3& value) noexcept {
+    if (value.magic != kMagic || value.version != kVersion
+        || value.struct_size != sizeof(value) || value.flags > 1U
+        || value.pane_count != kDockPaneCount
+        || value.zone_count != kDockedZoneCount
+        || value.layer_split_milli < 200U
+        || value.layer_split_milli > 800U || value.reserved != 0U) {
+        return false;
+    }
+    DockLayoutRecord record{};
+    record.mirrored = value.flags;
+    for (std::size_t index = 0U; index < value.panes.size(); ++index) {
+        const PersistedDockPane& source = value.panes[index];
+        record.panes[index] = DockPanePlacement{
+            static_cast<DockPaneType>(source.type),
+            static_cast<DockZone>(source.zone),
+            static_cast<DockZone>(source.restore_zone),
+            static_cast<std::uint8_t>(source.order),
+            source.split_weight,
+            DockFloatingPlacement{
+                source.floating_x_dip,
+                source.floating_y_dip,
+                source.floating_width_dip,
+                source.floating_height_dip},
+            true};
+    }
+    for (std::size_t index = 0U; index < value.zones.size(); ++index) {
+        const PersistedDockZone& source = value.zones[index];
+        record.zones[index] = DockZoneState{
+            static_cast<DockStackMode>(source.mode),
+            static_cast<DockPaneType>(source.active_tab),
+            source.extent_dip};
+    }
+    WorkspaceLayoutState candidate{};
+    if (!candidate.dock.LoadRecord(record)) {
+        return false;
+    }
+    candidate.layer_split_milli = value.layer_split_milli;
+    state = candidate;
+    return true;
+}
+
+PersistedWorkspaceLayoutV3 EncodeCurrentLayout(
+    const WorkspaceLayoutState& state) noexcept {
+    PersistedWorkspaceLayoutV3 value{};
+    value.magic = kMagic;
+    value.version = kVersion;
+    value.struct_size = sizeof(value);
+    value.flags = state.dock.Mirrored() ? 1U : 0U;
+    value.pane_count = static_cast<std::uint32_t>(kDockPaneCount);
+    value.zone_count = static_cast<std::uint32_t>(kDockedZoneCount);
+    value.layer_split_milli = state.layer_split_milli;
+    const DockLayoutRecord record = state.dock.ToRecord();
+    for (std::size_t index = 0U; index < value.panes.size(); ++index) {
+        const DockPanePlacement& source = record.panes[index];
+        value.panes[index] = PersistedDockPane{
+            static_cast<std::uint32_t>(source.type),
+            static_cast<std::uint32_t>(source.zone),
+            static_cast<std::uint32_t>(source.restore_zone),
+            source.order,
+            source.split_weight,
+            source.floating.x_dip,
+            source.floating.y_dip,
+            source.floating.width_dip,
+            source.floating.height_dip};
+    }
+    for (std::size_t index = 0U; index < value.zones.size(); ++index) {
+        const DockZoneState& source = record.zones[index];
+        value.zones[index] = PersistedDockZone{
+            static_cast<std::uint32_t>(source.mode),
+            static_cast<std::uint32_t>(source.active_tab),
+            source.extent_dip};
+    }
+    return value;
 }
 
 }  // namespace
 
 int ScaleWorkspaceDip(int value, UINT dpi) noexcept {
-    return MulDiv(value, static_cast<int>(dpi == 0U ? kReferenceDpi : dpi), kReferenceDpi);
+    return MulDiv(
+        value,
+        static_cast<int>(dpi == 0U ? kReferenceDpi : dpi),
+        kReferenceDpi);
 }
 
 WorkspaceLayoutRects ComputeWorkspaceLayout(
@@ -70,129 +219,27 @@ WorkspaceLayoutRects ComputeWorkspaceLayout(
     UINT dpi,
     const WorkspaceLayoutState& state) noexcept {
     WorkspaceLayoutRects output{};
-    client_width = std::max(0, client_width);
-    client_height = std::max(0, client_height - std::max(0, status_height));
-    const int splitter = ScaleWorkspaceDip(kSplitterDip, dpi);
-    const int tabs_height = ScaleWorkspaceDip(kTabsHeightDip, dpi);
-    const int options_height = state.tool_options_visible
-        ? ScaleWorkspaceDip(state.tool_options_height_dip, dpi)
-        : 0;
-    if (state.tool_options_visible) {
-        output.tool_options = MakeRect(0, 0, client_width, options_height);
-    }
-
-    const int body_top = options_height;
-    const int body_height = std::max(0, client_height - body_top);
-    int tool_width = state.tool_visible
-        ? ScaleWorkspaceDip(
-              std::clamp(
-                  state.tool_width_dip,
-                  kMinimumToolWidthDip,
-                  kMaximumToolWidthDip),
-              dpi)
-        : 0;
-    int inspector_width = (state.color_visible || state.layer_visible)
-        ? ScaleWorkspaceDip(
-              std::clamp(
-                  state.inspector_width_dip,
-                  kMinimumInspectorWidthDip,
-                  kMaximumInspectorWidthDip),
-              dpi)
-        : 0;
-    const int tool_gap = tool_width > 0 ? splitter : 0;
-    const int inspector_gap = inspector_width > 0 ? splitter : 0;
-    const int minimum_canvas = ScaleWorkspaceDip(kMinimumCanvasWidthDip, dpi);
-    const int available_sides = std::max(0, client_width - minimum_canvas);
-    if (tool_width + tool_gap + inspector_width + inspector_gap > available_sides) {
-        inspector_width = std::max(
-            0,
-            std::min(
-                inspector_width,
-                available_sides - tool_width - tool_gap - inspector_gap));
-    }
-    if (inspector_width > 0
-        && inspector_width < ScaleWorkspaceDip(kMinimumInspectorWidthDip, dpi)) {
-        inspector_width = 0;
-    }
-
-    int center_left{};
-    int center_right = client_width;
-    int inspector_left{};
-    if (!state.mirrored) {
-        if (tool_width > 0) {
-            output.tool = MakeRect(0, body_top, tool_width, body_height);
-            output.tool_splitter = MakeRect(
-                tool_width, body_top, splitter, body_height);
-            center_left = tool_width + splitter;
-        }
-        if (inspector_width > 0) {
-            inspector_left = client_width - inspector_width;
-            output.inspector_splitter = MakeRect(
-                inspector_left - splitter, body_top, splitter, body_height);
-            center_right = inspector_left - splitter;
-        }
-    } else {
-        if (inspector_width > 0) {
-            inspector_left = 0;
-            output.inspector_splitter = MakeRect(
-                inspector_width, body_top, splitter, body_height);
-            center_left = inspector_width + splitter;
-        }
-        if (tool_width > 0) {
-            const int tool_left = client_width - tool_width;
-            output.tool_splitter = MakeRect(
-                tool_left - splitter, body_top, splitter, body_height);
-            output.tool = MakeRect(tool_left, body_top, tool_width, body_height);
-            center_right = tool_left - splitter;
-        }
-    }
-
-    const int center_width = std::max(0, center_right - center_left);
-    output.document_tabs = MakeRect(
-        center_left, body_top, center_width, std::min(tabs_height, body_height));
-    output.canvas = MakeRect(
-        center_left,
-        body_top + std::min(tabs_height, body_height),
-        center_width,
-        std::max(0, body_height - tabs_height));
-
-    if (inspector_width <= 0) {
-        return output;
-    }
-    const int inspector_top = body_top;
-    if (state.color_visible && state.layer_visible) {
-        const int minimum_color = ScaleWorkspaceDip(kMinimumColorHeightDip, dpi);
-        const int minimum_layer = ScaleWorkspaceDip(kMinimumLayerHeightDip, dpi);
-        const int available_height = std::max(0, body_height - splitter);
-        int color_height = static_cast<int>(
-            static_cast<std::int64_t>(available_height)
-            * std::clamp<std::uint32_t>(state.color_split_milli, 150U, 700U)
-            / 1000);
-        if (available_height >= minimum_color + minimum_layer) {
-            color_height = std::clamp(
-                color_height, minimum_color, available_height - minimum_layer);
-        } else {
-            color_height = std::min(available_height, minimum_color);
-        }
-        output.color = MakeRect(
-            inspector_left, inspector_top, inspector_width, color_height);
-        output.color_splitter = MakeRect(
-            inspector_left,
-            inspector_top + color_height,
-            inspector_width,
-            splitter);
-        output.layer = MakeRect(
-            inspector_left,
-            inspector_top + color_height + splitter,
-            inspector_width,
-            std::max(0, available_height - color_height));
-    } else if (state.color_visible) {
-        output.color = MakeRect(
-            inspector_left, inspector_top, inspector_width, body_height);
-    } else if (state.layer_visible) {
-        output.layer = MakeRect(
-            inspector_left, inspector_top, inspector_width, body_height);
-    }
+    const int available_height = std::max(
+        0, client_height - std::max(0, status_height));
+    output.dock = ComputeDockLayout(
+        state.dock,
+        std::max(0, client_width),
+        available_height,
+        dpi);
+    output.editor = ToRect(output.dock.editor);
+    const int tab_height = std::min(
+        std::max(0, output.dock.editor.height),
+        ScaleWorkspaceDip(kTabsHeightDip, dpi));
+    output.document_tabs = RECT{
+        output.editor.left,
+        output.editor.top,
+        output.editor.right,
+        output.editor.top + tab_height};
+    output.canvas = RECT{
+        output.editor.left,
+        output.editor.top + tab_height,
+        output.editor.right,
+        output.editor.bottom};
     return output;
 }
 
@@ -206,55 +253,43 @@ bool LoadWorkspaceLayout(
     if (value_name == nullptr || *value_name == L'\0') {
         return false;
     }
-    PersistedWorkspaceLayout value{};
+    std::array<BYTE, sizeof(PersistedWorkspaceLayoutV3)> bytes{};
     DWORD type{};
-    DWORD size = sizeof(value);
+    DWORD size = static_cast<DWORD>(bytes.size());
     const LSTATUS status = RegGetValueW(
         HKEY_CURRENT_USER,
         kSettingsKey,
         value_name,
         RRF_RT_REG_BINARY,
         &type,
-        &value,
+        bytes.data(),
         &size);
-    if (status != ERROR_SUCCESS || type != REG_BINARY || size != sizeof(value)
-        || !ValidPersistedLayout(value)) {
+    if (status != ERROR_SUCCESS || type != REG_BINARY) {
         return false;
     }
-    state.tool_visible = (value.flags & kToolVisible) != 0U;
-    state.tool_options_visible = (value.flags & kToolOptionsVisible) != 0U;
-    state.color_visible = (value.flags & kColorVisible) != 0U;
-    state.layer_visible = (value.flags & kLayerVisible) != 0U;
-    state.mirrored = (value.flags & kMirrored) != 0U;
-    state.tool_width_dip = value.tool_width_dip;
-    state.inspector_width_dip = value.inspector_width_dip;
-    state.tool_options_height_dip = value.tool_options_height_dip;
-    state.color_split_milli = value.color_split_milli;
-    state.layer_split_milli = value.layer_split_milli;
-    return true;
+    if (size == sizeof(PersistedWorkspaceLayoutV3)) {
+        PersistedWorkspaceLayoutV3 value{};
+        std::memcpy(&value, bytes.data(), sizeof(value));
+        return DecodeCurrentLayout(state, value);
+    }
+    if (size == sizeof(LegacyPersistedWorkspaceLayoutV2)) {
+        LegacyPersistedWorkspaceLayoutV2 value{};
+        std::memcpy(&value, bytes.data(), sizeof(value));
+        return LoadLegacyLayout(state, value);
+    }
+    return false;
 }
 
 bool SaveWorkspaceLayout(
     const WorkspaceLayoutState& state,
     const wchar_t* value_name) noexcept {
-    if (value_name == nullptr || *value_name == L'\0') {
+    if (value_name == nullptr || *value_name == L'\0'
+        || state.layer_split_milli < 200U || state.layer_split_milli > 800U) {
         return false;
     }
-    PersistedWorkspaceLayout value{};
-    value.magic = kMagic;
-    value.version = kVersion;
-    value.struct_size = sizeof(value);
-    value.flags = (state.tool_visible ? kToolVisible : 0U)
-        | (state.tool_options_visible ? kToolOptionsVisible : 0U)
-        | (state.color_visible ? kColorVisible : 0U)
-        | (state.layer_visible ? kLayerVisible : 0U)
-        | (state.mirrored ? kMirrored : 0U);
-    value.tool_width_dip = state.tool_width_dip;
-    value.inspector_width_dip = state.inspector_width_dip;
-    value.tool_options_height_dip = state.tool_options_height_dip;
-    value.color_split_milli = state.color_split_milli;
-    value.layer_split_milli = state.layer_split_milli;
-    if (!ValidPersistedLayout(value)) {
+    const PersistedWorkspaceLayoutV3 value = EncodeCurrentLayout(state);
+    WorkspaceLayoutState validation{};
+    if (!DecodeCurrentLayout(validation, value)) {
         return false;
     }
     HKEY key{};

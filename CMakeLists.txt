@@ -232,6 +232,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_renderer_host.cmake")
 
 add_test(
+    NAME inkpod_windows_dock_host_boundaries
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_dock_host.cmake")
+
+add_test(
     NAME inkpod_msvc_runtime_discovery
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -308,6 +314,8 @@ if(WIN32)
         COMMAND inkpod_windows_command_context_tests)
 
     add_executable(inkpod_windows_workspace_layout_tests
+        apps/windows/ui/dock_layout.cpp
+        apps/windows/ui/dock_layout.h
         apps/windows/ui/workspace_layout.cpp
         apps/windows/ui/workspace_layout.h
         tests/windows_workspace_layout.cpp)
@@ -337,6 +345,10 @@ if(WIN32)
         apps/windows/app/frontend_state.h
         apps/windows/app/workspace_window.cpp
         apps/windows/app/workspace_window.h
+        apps/windows/ui/dock_layout.cpp
+        apps/windows/ui/dock_layout.h
+        apps/windows/ui/dock_host.cpp
+        apps/windows/ui/dock_host.h
         tests/windows_owner_model.cpp)
     target_include_directories(inkpod_windows_owner_model_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/apps/windows"
@@ -463,6 +475,10 @@ if(WIN32)
         apps/windows/ui/batch_controller.cpp
         apps/windows/ui/palette_window.cpp
         apps/windows/ui/palette_window.h
+        apps/windows/ui/dock_layout.cpp
+        apps/windows/ui/dock_layout.h
+        apps/windows/ui/dock_host.cpp
+        apps/windows/ui/dock_host.h
         apps/windows/ui/main_window.cpp
         apps/windows/ui/main_window_command_router.cpp
         apps/windows/ui/main_window_document_presenter.cpp

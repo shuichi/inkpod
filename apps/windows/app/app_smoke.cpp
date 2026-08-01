@@ -610,11 +610,15 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     const auto checked = [&](UINT command) {
         return (GetMenuState(menu, command, MF_BYCOMMAND) & MF_CHECKED) != 0U;
     };
-    if (!state.Workspace().windows.workspace.tool_visible
-        || !state.Workspace().windows.workspace.tool_options_visible
-        || !state.Workspace().windows.workspace.color_visible
-        || !state.Workspace().windows.workspace.layer_visible
-        || state.Workspace().windows.workspace.mirrored
+    if (!state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Tool)
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::ToolOptions)
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Color)
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Layer)
+        || state.Workspace().windows.workspace.dock.Mirrored()
         || !checked(IDM_WINDOW_TOOL_PALETTE)
         || !checked(IDM_WINDOW_TOOL_OPTIONS)
         || !checked(IDM_WINDOW_COLOR_PANE)
@@ -743,7 +747,8 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (SendMessageW(
             state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_TOOL_PALETTE, 0)
             != 1
-        || state.Workspace().windows.workspace.tool_visible
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Tool)
         || checked(IDM_WINDOW_TOOL_PALETTE)
         || IsWindowVisible(state.Workspace().tools.palette) != FALSE
         || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds) == FALSE
@@ -754,14 +759,16 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (SendMessageW(
             state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_TOOL_PALETTE, 0)
             != 1
-        || !state.Workspace().windows.workspace.tool_visible
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Tool)
         || !checked(IDM_WINDOW_TOOL_PALETTE)) {
         return 735;
     }
     if (SendMessageW(
             state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_TOOL_OPTIONS, 0)
             != 1
-        || state.Workspace().windows.workspace.tool_options_visible
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::ToolOptions)
         || checked(IDM_WINDOW_TOOL_OPTIONS)
         || SendMessageW(
             state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_TOOL_OPTIONS, 0)
@@ -771,11 +778,13 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (SendMessageW(
             state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_COLOR_PANE, 0)
             != 1
-        || state.Workspace().windows.workspace.color_visible
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Color)
         || SendMessageW(
             state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_LAYER_PALETTE, 0)
             != 1
-        || state.Workspace().windows.workspace.layer_visible
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Layer)
         || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds) == FALSE
         || workspace_canvas_bounds.right - workspace_canvas_bounds.left
             <= initial_canvas_width) {
@@ -783,10 +792,115 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_COLOR_PANE, 0);
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_LAYER_PALETTE, 0);
+    const std::array<DockPaneType, 4U> dock_pane_types{
+        DockPaneType::Tool,
+        DockPaneType::ToolOptions,
+        DockPaneType::Color,
+        DockPaneType::Layer};
+    for (const DockPaneType type : dock_pane_types) {
+        HWND content = state.Workspace().windows.dock_host.ContentWindow(type);
+        if (content == nullptr
+            || state.Workspace().windows.dock_host.FloatPane(type)
+                != DockResult::Ok) {
+            return 832;
+        }
+        const HWND floating =
+            state.Workspace().windows.dock_host.FloatingWindow(type);
+        wchar_t floating_title[128]{};
+        const auto extended_style = floating == nullptr
+            ? DWORD_PTR{}
+            : static_cast<DWORD_PTR>(GetWindowLongPtrW(floating, GWL_EXSTYLE));
+        if (floating == nullptr || GetParent(content) != floating
+            || GetWindowTextW(
+                   floating,
+                   floating_title,
+                   static_cast<int>(std::size(floating_title)))
+                <= 0
+            || GetWindow(floating, GW_OWNER) != state.Workspace().windows.window
+            || IsWindowVisible(floating) == FALSE
+            || GetClassLongPtrW(floating, GCLP_HBRBACKGROUND)
+                != reinterpret_cast<ULONG_PTR>(GetSysColorBrush(COLOR_BTNFACE))
+            || (extended_style & (WS_EX_TOPMOST | WS_EX_NOACTIVATE)) != 0U
+            || (extended_style & WS_EX_PALETTEWINDOW)
+                == WS_EX_PALETTEWINDOW
+            || state.Workspace().windows.dock_host.HidePane(type)
+                != DockResult::Ok
+            || IsWindowVisible(floating) != FALSE
+            || state.Workspace().windows.dock_host.RestorePane(type)
+                != DockResult::Ok
+            || GetParent(content) != state.Workspace().windows.window
+            || !state.Workspace().windows.workspace.dock.IsPaneDocked(type)) {
+            return 833;
+        }
+        SendMessageW(floating, WM_THEMECHANGED, 0, 0);
+        SendMessageW(floating, WM_SETTINGCHANGE, 0, 0);
+        SendMessageW(floating, WM_CANCELMODE, 0, 0);
+        if (state.Workspace().windows.dock_host.PreviewVisible()) {
+            return 835;
+        }
+    }
+    if (state.Workspace().windows.dock_host.DockPane(
+            DockPaneType::Color, DockZone::Left)
+            != DockResult::Ok
+        || state.Workspace().windows.workspace.dock.PaneCount(DockZone::Left)
+            != 2U
+        || state.Workspace().windows.dock_host.SetZoneMode(
+               DockZone::Left, DockStackMode::Tabs)
+            != DockResult::Ok) {
+        return 834;
+    }
+    HWND dock_tabs =
+        state.Workspace().windows.dock_host.TabWindow(DockZone::Left);
+    const DockZoneState* left_zone =
+        state.Workspace().windows.workspace.dock.Zone(DockZone::Left);
+    if (dock_tabs == nullptr || left_zone == nullptr
+        || TabCtrl_GetItemCount(dock_tabs) != 2
+        || (GetWindowLongPtrW(dock_tabs, GWL_STYLE) & WS_TABSTOP) == 0
+        || left_zone->active_tab != DockPaneType::Tool) {
+        return 836;
+    }
+    SetFocus(dock_tabs);
+    SendMessageW(dock_tabs, WM_KEYDOWN, VK_RIGHT, 0);
+    SendMessageW(dock_tabs, WM_KEYUP, VK_RIGHT, 0);
+    if (state.Workspace().windows.workspace.dock.Zone(DockZone::Left)
+            ->active_tab
+        != DockPaneType::Color
+        || state.Workspace().windows.dock_host.SetZoneMode(
+               DockZone::Left, DockStackMode::Split)
+            != DockResult::Ok) {
+        return 837;
+    }
+    HWND dock_splitter = state.Workspace().windows.dock_host.SplitterWindow(
+        DockZone::Left, DockSplitterKind::StackBoundary);
+    wchar_t splitter_name[64]{};
+    const std::uint32_t tool_weight_before =
+        state.Workspace().windows.workspace.dock.Pane(DockPaneType::Tool)
+            ->split_weight;
+    if (dock_splitter == nullptr
+        || (GetWindowLongPtrW(dock_splitter, GWL_STYLE) & WS_TABSTOP) == 0
+        || GetWindowTextW(
+               dock_splitter,
+               splitter_name,
+               static_cast<int>(std::size(splitter_name)))
+            <= 0) {
+        return 838;
+    }
+    SetFocus(dock_splitter);
+    SendMessageW(dock_splitter, WM_KEYDOWN, VK_DOWN, 0);
+    if (state.Workspace().windows.workspace.dock.Pane(DockPaneType::Tool)
+            ->split_weight
+        <= tool_weight_before
+        || state.Workspace().windows.dock_host.ResetPane(DockPaneType::Color)
+            != DockResult::Ok
+        || state.Workspace().windows.workspace.dock.Pane(DockPaneType::Color)
+                ->zone
+            != DockZone::Right) {
+        return 839;
+    }
     if (SendMessageW(
             state.Workspace().windows.window, WM_COMMAND, IDM_WORKSPACE_MIRROR, 0)
             != 1
-        || !state.Workspace().windows.workspace.mirrored
+        || !state.Workspace().windows.workspace.dock.Mirrored()
         || !checked(IDM_WORKSPACE_MIRROR)
         || GetWindowRect(state.Workspace().tools.palette, &tool_bounds) == FALSE
         || GetWindowRect(state.Workspace().windows.canvas, &workspace_canvas_bounds) == FALSE

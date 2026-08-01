@@ -9,7 +9,7 @@ the resource sources of truth; this file is not a second registry.
 - `resource.h` defines 294 unique `IDM_*` values.
 - `app.rc` references 299 unique production command IDs through 306 actionable
   menu/control occurrences. `IDM_EFFECT_DUST` intentionally appears in two menus;
-  six Layer commands appear in both the menu and fixed inspector. Every duplicate
+  six Layer commands appear in both the menu and dockable Layer pane. Every duplicate
   entry point shares one route and state.
 - `IDM_BATCH_OPERATION_ADD` is the only defined but unreferenced value. It is a
   reserved aggregate ID; the UI uses 24 concrete `IDM_BATCH_ADD_*` commands.

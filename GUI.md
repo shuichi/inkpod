@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1、G2、G3、G4、G5、G6 完了、G7 未着手 |
+| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7 完了、G8 未着手 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -756,6 +756,33 @@ move/new-view/group close、および一 group の既存 workflow を検証す�
 - primary pane の全機能が dock、float、hide、restore 後も動作する。
 - 完全自由 dock tree を作らず、layout model の状態数が bounded である。
 - 固定 layout 専用の geometry code が除去される。
+
+### 完了記録
+
+2026-08-02 に G7 を完了した。HWND 非依存で固定長の `DockLayoutModel` は、
+resource title、stable pane type ID、default/allowed zone、target scope、multiplicity、
+float/autohide 可否、minimum/preferred size を持つ四つの `PaneDescriptor` を管理する。
+表現可能な配置は `TopContext`、`Left`、`Right`、`Bottom` の四 stack、中央
+`EditorArea`、floating、hidden に限定し、stack 内も tab または一方向の比率分割だけ
+である。旧固定 geometry は削除し、既定値は従来の 40-DIP options、80-DIP tool、
+320-DIP color/layer 構成を保つ。狭い window の一時格納は geometry の計算結果だけに
+反映し、保存対象の model を変更しない。96-DPI reference value と device pixel の
+変換は `DockHost` の HWND 境界で一度だけ行う。
+
+UI/Input thread 上で `WorkspaceWindow` が所有する `DockHost` は、既存の tool、tool
+options、color、layer の child HWND を再利用する。allowed zone だけを示す drag
+preview、標準 tab control、mouse/keyboard splitter、Shift+F10 対応 context menu の
+dock/float/hide/reset、Window menu からの hide/restore を接続した。floating frame は
+main window 所有の通常 top-level window とし、閉じる操作は pane state を破棄せず
+hide に変換する。操作対象の pane は入力時に確定し、document command routing、
+CoreHost、RendererHost、C ABI v2 の所有権/thread 境界は変更していない。
+
+workspace persistence は bounded な version 3 record へ更新し、旧 version 2 の固定
+layout record を同じ既定配置へ移行する。pure tests は add/remove/move/tab/float/
+hide/restore/reset、重複、allowed zone、minimum、ratio、破損 record、96/120/144/192
+DPI、mirror、narrow 非破壊 adaptation を検証する。native smoke は全 primary pane の
+既存機能に加え、float の owner/style/reparent、hide/restore、dock、tab/split/reset、
+menu 復元、keyboard/high-contrast-compatible standard controls を検証する。
 
 ---
 
