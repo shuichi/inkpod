@@ -355,7 +355,10 @@ if(WIN32)
         "${CMAKE_SOURCE_DIR}/include")
     target_compile_definitions(inkpod_windows_owner_model_tests PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(inkpod_windows_owner_model_tests PRIVATE comctl32)
+    target_link_libraries(inkpod_windows_owner_model_tests PRIVATE
+        comctl32
+        ole32
+        oleacc)
     if(MSVC)
         inkpod_enable_strict_warnings(inkpod_windows_owner_model_tests)
         target_compile_options(inkpod_windows_owner_model_tests PRIVATE /EHsc)
@@ -507,6 +510,8 @@ if(WIN32)
         d3d11
         dxgi
         ole32
+        oleacc
+        oleaut32
         advapi32
         shell32)
     if(MSVC)

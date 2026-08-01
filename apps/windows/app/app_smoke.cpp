@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <oleacc.h>
 #include <shlobj.h>
 #include <windowsx.h>
 
@@ -69,6 +70,36 @@ constexpr wchar_t kVectorStrokePlaneRequired[] =
     L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
 
 bool CommandSurfacesMatchComputedState(const ApplicationHost& state) noexcept;
+
+bool WindowHasAccessibleName(HWND window) noexcept {
+    IAccessible* accessible = nullptr;
+    const HRESULT object_result = AccessibleObjectFromWindow(
+        window,
+        static_cast<DWORD>(OBJID_CLIENT),
+        IID_IAccessible,
+        reinterpret_cast<void**>(&accessible));
+    if (FAILED(object_result) || accessible == nullptr) {
+        return false;
+    }
+    VARIANT self{};
+    self.vt = VT_I4;
+    self.lVal = CHILDID_SELF;
+    BSTR name = nullptr;
+    const HRESULT name_result = accessible->get_accName(self, &name);
+    const bool has_name =
+        SUCCEEDED(name_result) && name != nullptr && SysStringLen(name) > 0U;
+    SysFreeString(name);
+    accessible->Release();
+    return has_name;
+}
+
+bool IsCaptionlessAccessibleSplitter(HWND window) noexcept {
+    return window != nullptr
+        && (GetWindowLongPtrW(window, GWL_STYLE) & WS_TABSTOP) != 0
+        && GetWindowTextLengthW(window) == 0
+        && WindowHasAccessibleName(window);
+}
+
 InkpodStatus CreateCell(ApplicationHost& state, std::uint32_t width, std::uint32_t height, std::uint32_t dpi_milli) noexcept;
 bool DispatchEnabledCommand(
     ApplicationHost& state,
@@ -606,6 +637,52 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         false,
         client.right - client.left,
         client.bottom - client.top);
+    RECT color_pane_bounds{};
+    if (GetWindowRect(state.Workspace().windows.color_pane, &color_pane_bounds) == FALSE) {
+        return 840;
+    }
+    const int color_pane_width = color_pane_bounds.right - color_pane_bounds.left;
+    const int color_pane_height = color_pane_bounds.bottom - color_pane_bounds.top;
+    SetWindowPos(
+        state.Workspace().windows.color_pane,
+        nullptr,
+        0,
+        0,
+        std::max(color_pane_width, 420),
+        std::max(color_pane_height, 360),
+        SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    RECT color_pane_client{};
+    ValidateRect(color_picker, nullptr);
+    if (GetClientRect(state.Workspace().windows.color_pane, &color_pane_client) == FALSE) {
+        return 840;
+    }
+    SendMessageW(
+        state.Workspace().windows.color_pane,
+        WM_SIZE,
+        SIZE_RESTORED,
+        MAKELPARAM(
+            color_pane_client.right - color_pane_client.left,
+            color_pane_client.bottom - color_pane_client.top));
+    RECT color_picker_client{};
+    RECT color_picker_update{};
+    if (GetClientRect(color_picker, &color_picker_client) == FALSE
+        || IsRectEmpty(&color_picker_client) != FALSE) {
+        return 841;
+    }
+    if (GetUpdateRect(color_picker, &color_picker_update, FALSE) == FALSE) {
+        return 842;
+    }
+    if (EqualRect(&color_picker_client, &color_picker_update) == FALSE) {
+        return 843;
+    }
+    SetWindowPos(
+        state.Workspace().windows.color_pane,
+        nullptr,
+        0,
+        0,
+        color_pane_width,
+        color_pane_height,
+        SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
     UpdateMenuState(state);
     const auto checked = [&](UINT command) {
         return (GetMenuState(menu, command, MF_BYCOMMAND) & MF_CHECKED) != 0U;
@@ -640,6 +717,13 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || color_bounds.left != layer_bounds.left
         || color_bounds.right != layer_bounds.right) {
         return 732;
+    }
+    for (const DockZone zone : {DockZone::Left, DockZone::Right}) {
+        if (!IsCaptionlessAccessibleSplitter(
+                state.Workspace().windows.dock_host.SplitterWindow(
+                    zone, DockSplitterKind::ZoneExtent))) {
+            return 838;
+        }
     }
     const HWND brush_button = GetDlgItem(state.Workspace().tools.palette, IDM_TOOL_BRUSH);
     const HWND pencil_button = GetDlgItem(state.Workspace().tools.palette, IDM_TOOL_PENCIL);
@@ -872,17 +956,10 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     }
     HWND dock_splitter = state.Workspace().windows.dock_host.SplitterWindow(
         DockZone::Left, DockSplitterKind::StackBoundary);
-    wchar_t splitter_name[64]{};
     const std::uint32_t tool_weight_before =
         state.Workspace().windows.workspace.dock.Pane(DockPaneType::Tool)
             ->split_weight;
-    if (dock_splitter == nullptr
-        || (GetWindowLongPtrW(dock_splitter, GWL_STYLE) & WS_TABSTOP) == 0
-        || GetWindowTextW(
-               dock_splitter,
-               splitter_name,
-               static_cast<int>(std::size(splitter_name)))
-            <= 0) {
+    if (!IsCaptionlessAccessibleSplitter(dock_splitter)) {
         return 838;
     }
     SetFocus(dock_splitter);

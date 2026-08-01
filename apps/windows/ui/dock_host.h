@@ -53,6 +53,7 @@ private:
         DockHost* host{};
         DockSplitterGeometry geometry{};
         POINT last_screen{};
+        bool accessible_name_set{};
     };
 
     struct TabHostState {

@@ -1,6 +1,8 @@
 #include "dock_host.h"
 
 #include <commctrl.h>
+#include <initguid.h>
+#include <oleacc.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -129,6 +131,26 @@ const wchar_t* SplitterName(const DockSplitterGeometry& splitter) noexcept {
     }
 }
 
+bool SetAccessibleName(HWND window, const wchar_t* name) noexcept {
+    IAccPropServices* properties = nullptr;
+    const HRESULT create_result = CoCreateInstance(
+        CLSID_AccPropServices,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&properties));
+    if (FAILED(create_result) || properties == nullptr) {
+        return false;
+    }
+    const HRESULT set_result = properties->SetHwndPropStr(
+        window,
+        static_cast<DWORD>(OBJID_CLIENT),
+        static_cast<DWORD>(CHILDID_SELF),
+        PROPID_ACC_NAME,
+        name);
+    properties->Release();
+    return SUCCEEDED(set_result);
+}
+
 }  // namespace
 
 DockHost::DockHost() noexcept {
@@ -180,7 +202,7 @@ bool DockHost::Initialize(
     if (preview_ == nullptr) {
         return false;
     }
-    SetWindowTextW(preview_, L"ドック先のプレビュー");
+    SetAccessibleName(preview_, L"ドック先のプレビュー");
     for (std::size_t index = 0U; index < splitters_.size(); ++index) {
         splitters_[index] = CreateWindowExW(
             0,
@@ -274,9 +296,15 @@ void DockHost::ApplyLayout(
     }
     for (std::size_t index = 0U; index < splitters_.size(); ++index) {
         if (index < geometry_.splitter_count) {
-            splitter_states_[index].geometry = geometry_.splitters[index];
-            SetWindowTextW(
-                splitters_[index], SplitterName(geometry_.splitters[index]));
+            SplitterHostState& state = splitter_states_[index];
+            const DockSplitterGeometry& next = geometry_.splitters[index];
+            if (!state.accessible_name_set
+                || state.geometry.zone != next.zone
+                || state.geometry.kind != next.kind) {
+                state.accessible_name_set =
+                    SetAccessibleName(splitters_[index], SplitterName(next));
+            }
+            state.geometry = next;
             PlaceWindow(splitters_[index], geometry_.splitters[index].bounds, true);
         } else {
             PlaceWindow(splitters_[index], {}, false);

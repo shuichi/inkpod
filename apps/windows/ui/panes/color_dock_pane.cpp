@@ -1696,6 +1696,15 @@ LRESULT CALLBACK PaneSubclassProcedure(
     switch (message) {
         case WM_SIZE:
             LayoutPane(pane);
+            RedrawWindow(
+                pane,
+                nullptr,
+                nullptr,
+                RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+            if (const HWND picker = GetDlgItem(pane, IDC_COLOR_PICKER);
+                picker != nullptr) {
+                InvalidateRect(picker, nullptr, TRUE);
+            }
             return 0;
         case WM_NOTIFY:
             if (state != nullptr) {
