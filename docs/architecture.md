@@ -90,9 +90,9 @@ main -> Application -> MainWindow/controllers -> CoreHost -> C ABI
 `ApplicationHost` is the process-lifetime composition root. It owns global
 shortcut and clipboard state, the frontend routing/token registries, job state,
 one `CoreHost`, one `RendererHost`, a single-entry workspace registry, and a
-bounded multi-entry document registry. The UI intentionally keeps one active
-document and one Canvas visible at G4, while both the document and renderer
-ownership models can hold multiple independent entries.
+bounded multi-entry document registry. The G5 UI exposes those document entries
+as multiple tabs while keeping one active view and one Canvas visible in its
+single editor group.
 `WorkspaceWindow` owns the top-level `HWND`, all child/control handles,
 window-local command/menu/status presentation, pane handles, tool presentation,
 and layout state. `DocumentSession` owns the file/recovery shell and an explicit
@@ -104,6 +104,17 @@ gesture presentation. All views in the session therefore share one Core handle,
 history, dirty state, and savepoint while retaining independent presentation.
 Cached IDs and metadata support presentation only and are not a C++ document
 model.
+
+`DocumentRegistry` also owns the canonical identity index. An existing Windows
+file is keyed by `FILE_ID_INFO` volume and file ID when available, otherwise by
+its normalized absolute case-insensitive path; an untitled session is keyed by
+a generated UUID. Display names and tab positions are never identities. Open
+resolves this index before creating a Core entry and selects an existing view on
+a duplicate. Save As stages the destination identity, rejects a conflict with a
+different live session before writing, and publishes the new shell path,
+identity index, title, bounded recent-file entry, and recovery metadata only
+after save succeeds. A failed save leaves the old identity and presentation
+intact.
 
 The top-level window stores only its `WorkspaceWindow*` in `GWLP_USERDATA`.
 The window procedure reaches process services through the workspace's explicit
@@ -153,8 +164,9 @@ route. Stale, hidden, occluded, queue-full, replaced, closed, and shutdown paths
 all consume the Rust snapshot owner exactly once. Device loss first discards all
 surface GPU resources, recreates the shared device, then reconstructs every
 surface cache from its retained immutable snapshot; Core document state is not
-involved. G4 retains one visible Canvas only because document tabs and a second
-EditorGroup are G5 and G6 UI work, not because renderer ownership is singular.
+involved. G5 retains one visible Canvas because surfaces follow visible editor
+groups rather than the number of open or inactive tabs. A second EditorGroup is
+G6 work, not a renderer-ownership limitation.
 
 The UI/Input thread owns the frontend target registry. Workspace window,
 document session, document view, editor group, Canvas, pane, job, and generation
@@ -181,12 +193,15 @@ Rust-owned object pointer is placed in `WPARAM` or `LPARAM`. Canvas stroke and
 view-gesture payloads follow the same rule: `CanvasHost` owns them in bounded
 queues until the workspace takes the matching token plus surface generation.
 Document-bound and preview queries use typed Canvas APIs rather than output
-pointers in custom messages. G4 retains one
-workspace, one active document tab, one editor group, and one Canvas behind the
-now-multi-session backend; later milestones expose that multiplicity without
-restoring an implicit active object.
+pointers in custom messages. G5 exposes one workspace with multiple document
+tabs, one editor group, and one Canvas. Tab activation first cancels the old
+stroke/preview, selects the session, binds the Canvas route, and selects the
+Core view before refreshing pane, menu, status, title, and autosave presentation.
+Inactive-session notifications validate their captured session/generation and
+update only tab dirty/processing presentation; they do not retarget the active
+view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 281 production commands exactly one
+The fixed command-state catalog assigns all 293 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no

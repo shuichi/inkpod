@@ -326,8 +326,12 @@ if(WIN32)
 
     add_executable(inkpod_windows_owner_model_tests
         apps/windows/app/application_owner_graph.h
+        apps/windows/app/document_identity.cpp
+        apps/windows/app/document_identity.h
         apps/windows/app/document_session.cpp
         apps/windows/app/document_session.h
+        apps/windows/app/recent_documents.cpp
+        apps/windows/app/recent_documents.h
         apps/windows/app/frontend_state.h
         apps/windows/app/workspace_window.cpp
         apps/windows/app/workspace_window.h
@@ -401,8 +405,12 @@ if(WIN32)
         apps/windows/app/application_owner_graph.h
         apps/windows/app/command_context.cpp
         apps/windows/app/command_context.h
+        apps/windows/app/document_identity.cpp
+        apps/windows/app/document_identity.h
         apps/windows/app/document_session.cpp
         apps/windows/app/document_session.h
+        apps/windows/app/recent_documents.cpp
+        apps/windows/app/recent_documents.h
         apps/windows/app/frontend_state.h
         apps/windows/app/identity.h
         apps/windows/app/workspace_window.cpp

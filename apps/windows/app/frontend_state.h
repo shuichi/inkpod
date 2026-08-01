@@ -87,12 +87,15 @@ struct BatchOperationUi {
 struct AppLifetimeState {
     HINSTANCE instance{};
     bool smoke_test{};
+    int smoke_dirty_prompt_choice{IDNO};
+    std::uint32_t smoke_dirty_prompt_count{};
     std::wstring smoke_raster_path;
     std::vector<std::wstring> smoke_sequence_paths;
 };
 
 struct DocumentShellState {
     std::wstring current_path;
+    std::wstring source_path;
     std::wstring recovery_path;
     std::uint64_t smoke_layer_id{};
     std::uint64_t selection_layer_id{};

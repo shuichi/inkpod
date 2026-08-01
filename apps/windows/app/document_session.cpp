@@ -1,6 +1,7 @@
 #include "document_session.h"
 
 #include <new>
+#include <utility>
 
 namespace inkpod::app {
 namespace {
@@ -158,6 +159,24 @@ const DocumentView* DocumentSession::ActiveView() const noexcept {
     return FindView(active_view_);
 }
 
+DocumentView* DocumentSession::ViewAt(std::size_t index) noexcept {
+    return const_cast<DocumentView*>(
+        static_cast<const DocumentSession&>(*this).ViewAt(index));
+}
+
+const DocumentView* DocumentSession::ViewAt(std::size_t index) const noexcept {
+    std::size_t current{};
+    for (std::size_t slot = 0U; slot < views_.size(); ++slot) {
+        if (!view_used_[slot]) {
+            continue;
+        }
+        if (current++ == index) {
+            return &views_[slot];
+        }
+    }
+    return nullptr;
+}
+
 std::size_t DocumentSession::ViewCount() const noexcept {
     return view_count_;
 }
@@ -278,6 +297,58 @@ const DocumentSession* DocumentRegistry::Find(DocumentSessionId id) const noexce
     return nullptr;
 }
 
+DocumentSession* DocumentRegistry::FindByView(DocumentViewId view) noexcept {
+    return const_cast<DocumentSession*>(
+        static_cast<const DocumentRegistry&>(*this).FindByView(view));
+}
+
+const DocumentSession* DocumentRegistry::FindByView(
+    DocumentViewId view) const noexcept {
+    for (const auto& session : sessions_) {
+        if (session != nullptr && session->FindView(view) != nullptr) {
+            return session.get();
+        }
+    }
+    return nullptr;
+}
+
+DocumentSession* DocumentRegistry::FindByIdentity(
+    const DocumentIdentity& identity) noexcept {
+    return const_cast<DocumentSession*>(
+        static_cast<const DocumentRegistry&>(*this).FindByIdentity(identity));
+}
+
+const DocumentSession* DocumentRegistry::FindByIdentity(
+    const DocumentIdentity& identity) const noexcept {
+    if (!identity) {
+        return nullptr;
+    }
+    for (const auto& session : sessions_) {
+        if (session != nullptr && session->identity == identity) {
+            return session.get();
+        }
+    }
+    return nullptr;
+}
+
+bool DocumentRegistry::AssignIdentity(
+    DocumentSessionId id,
+    const DocumentIdentity& identity) noexcept {
+    DocumentSession* session = Find(id);
+    const DocumentSession* conflict = FindByIdentity(identity);
+    if (session == nullptr || !identity
+        || (conflict != nullptr && conflict != session)) {
+        return false;
+    }
+    try {
+        DocumentIdentity candidate = identity;
+        session->identity = std::move(candidate);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
 void DocumentRegistry::ClearCoreBindings() noexcept {
     for (auto& session : sessions_) {
         if (session != nullptr) {
@@ -304,6 +375,24 @@ const DocumentSession* DocumentRegistry::Current() const noexcept {
     return current_index_ < sessions_.size()
         ? sessions_[current_index_].get()
         : nullptr;
+}
+
+DocumentSession* DocumentRegistry::SessionAt(std::size_t index) noexcept {
+    return const_cast<DocumentSession*>(
+        static_cast<const DocumentRegistry&>(*this).SessionAt(index));
+}
+
+const DocumentSession* DocumentRegistry::SessionAt(std::size_t index) const noexcept {
+    std::size_t current{};
+    for (const auto& session : sessions_) {
+        if (session == nullptr) {
+            continue;
+        }
+        if (current++ == index) {
+            return session.get();
+        }
+    }
+    return nullptr;
 }
 
 std::size_t DocumentRegistry::Count() const noexcept {

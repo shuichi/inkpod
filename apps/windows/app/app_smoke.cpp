@@ -89,6 +89,10 @@ InkpodStatus ApplyView(
     double value2,
     double value3 = 0.0,
     double value4 = 0.0) noexcept;
+bool ActivateDocumentTab(
+    ApplicationHost& state,
+    inkpod::app::DocumentViewId view) noexcept;
+bool ConfirmAllDocuments(ApplicationHost& state) noexcept;
 InkpodStatus FinishVectorCanvasGesture(ApplicationHost& state) noexcept;
 InkpodStatus FitCanvas(ApplicationHost& state, InkpodViewCommandKind kind) noexcept;
 InkpodStatus OpenFromPath(ApplicationHost& state, const std::wstring& path) noexcept;
@@ -103,7 +107,7 @@ bool RefreshColorPanes(ApplicationHost& state) noexcept;
 bool RefreshLightTablePane(ApplicationHost& state) noexcept;
 bool RefreshSequencePane(ApplicationHost& state) noexcept;
 bool RefreshTreePane(ApplicationHost& state) noexcept;
-void ResetUiForDocumentReplacement(ApplicationHost& state) noexcept;
+void ResetUiForNewActiveDocument(ApplicationHost& state) noexcept;
 bool ResolveConfiguredShortcut(ApplicationHost& state, std::uint32_t virtual_key, std::uint32_t modifiers, UINT& menu_command) noexcept;
 bool SamePersistentMetadata(const InkpodDocumentInfo& left, const InkpodDocumentInfo& right) noexcept;
 InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexcept;
@@ -169,6 +173,66 @@ bool ReadDocumentTabLabel(HWND tabs, int index, std::wstring& output) noexcept {
         output.assign(buffer.data());
     } catch (const std::bad_alloc&) {
         return false;
+    }
+    return true;
+}
+
+bool DocumentTabsMatchRegistry(const ApplicationHost& state) noexcept {
+    const HWND tabs = state.Workspace().windows.document_tabs;
+    if (tabs == nullptr) {
+        return false;
+    }
+    std::size_t expected_count{};
+    for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
+        const auto* document = state.Documents().SessionAt(index);
+        if (document != nullptr) {
+            expected_count += document->ViewCount();
+        }
+    }
+    const int tab_count = TabCtrl_GetItemCount(tabs);
+    if (tab_count < 0 || static_cast<std::size_t>(tab_count) != expected_count) {
+        return false;
+    }
+    std::array<inkpod::app::DocumentViewId, 4096U> seen{};
+    if (expected_count > seen.size()) {
+        return false;
+    }
+    inkpod::app::DocumentViewId selected{};
+    const int selected_index = TabCtrl_GetCurSel(tabs);
+    for (int index = 0; index < tab_count; ++index) {
+        TCITEMW item{};
+        item.mask = TCIF_PARAM;
+        if (TabCtrl_GetItem(tabs, index, &item) == FALSE) {
+            return false;
+        }
+        const inkpod::app::DocumentViewId view{
+            static_cast<std::uint64_t>(item.lParam)};
+        if (!view || state.Documents().FindByView(view) == nullptr) {
+            return false;
+        }
+        for (int prior = 0; prior < index; ++prior) {
+            if (seen[static_cast<std::size_t>(prior)] == view) {
+                return false;
+            }
+        }
+        seen[static_cast<std::size_t>(index)] = view;
+        if (index == selected_index) {
+            selected = view;
+        }
+    }
+    return selected == state.routing.targets.ActiveDocumentView();
+}
+
+bool SameCommandStates(
+    const CommandStateSet& left,
+    const CommandStateSet& right) noexcept {
+    for (std::size_t index = 0U; index < left.size(); ++index) {
+        if (left[index].command != right[index].command
+            || left[index].owner != right[index].owner
+            || left[index].enabled != right[index].enabled
+            || left[index].checked != right[index].checked) {
+            return false;
+        }
     }
     return true;
 }
@@ -857,7 +921,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || (before_line.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
         || GetWindowTextW(
                state.Workspace().windows.window, initial_title.data(), static_cast<int>(initial_title.size())) == 0
-        || std::wcscmp(initial_title.data(), L"無題 - inkpod") != 0) {
+        || std::wcscmp(initial_title.data(), L"無題セル 1 - inkpod") != 0) {
         return 32;
     }
     const auto frames_before = static_cast<std::uint64_t>(SendMessageW(
@@ -1582,6 +1646,7 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
     if (SaveToPath(state, normal_path) != INKPOD_STATUS_OK) {
         return 209;
     }
+    const inkpod::app::DocumentSessionId normal_session = state.Document().id;
     InkpodDocumentInfo normally_saved{};
     if (!QueryDocument(state, normally_saved)) {
         return 210;
@@ -1643,7 +1708,8 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         },
         false,
         false);
-    const bool normal_unchanged = OpenFromPath(state, normal_path) == INKPOD_STATUS_OK;
+    const bool normal_unchanged = state.CloseDocumentSession(normal_session)
+        && OpenDocumentFromPath(state, normal_path) == INKPOD_STATUS_OK;
     InkpodDocumentInfo reopened_normal{};
     const bool normal_matches = QueryDocument(state, reopened_normal)
         && reopened_normal.color_plane_checksum == normally_saved.color_plane_checksum
@@ -1718,12 +1784,17 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
                 InkpodDocumentInfo info = EmptyDocumentInfo();
                 return inkpod_core_new_cell(core, &source_options, &info);
             },
-            false,
-            false) != INKPOD_STATUS_OK) {
+            true,
+            true) != INKPOD_STATUS_OK) {
         return 302;
     }
-    ResetUiForDocumentReplacement(state);
-    if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
+    ResetUiForNewActiveDocument(state);
+    if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1) {
         return 303;
     }
 
@@ -2256,7 +2327,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
             false) != INKPOD_STATUS_OK) {
         return 319;
     }
-    ResetUiForDocumentReplacement(state);
+    ResetUiForNewActiveDocument(state);
     if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK
         || !RefreshTreePane(state)
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_PASTE_SELECTED, 0) != 1
@@ -2407,12 +2478,24 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         return 366;
     }
 
-    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_NEW, 0);
+    const int tab_count_before_view = TabCtrl_GetItemCount(
+        state.Workspace().windows.document_tabs);
+    const std::size_t view_count_before = state.Document().ViewCount();
     std::wstring secondary_tab_label;
-    if (state.ActiveView().presentation.secondary_view_id == 0U || state.ActiveView().presentation.active_view_id != state.ActiveView().presentation.secondary_view_id
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_VIEW_NEW,
+            0) != 1
+        || state.ActiveView().presentation.secondary_view_id == 0U || state.ActiveView().presentation.active_view_id != state.ActiveView().presentation.secondary_view_id
         || state.Workspace().windows.document_tabs == nullptr
-        || TabCtrl_GetItemCount(state.Workspace().windows.document_tabs) != 2
-        || !ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 1, secondary_tab_label)
+        || state.Document().ViewCount() != view_count_before + 1U
+        || TabCtrl_GetItemCount(state.Workspace().windows.document_tabs)
+            != tab_count_before_view + 1
+        || !ReadDocumentTabLabel(
+            state.Workspace().windows.document_tabs,
+            TabCtrl_GetCurSel(state.Workspace().windows.document_tabs),
+            secondary_tab_label)
         || secondary_tab_label.find(L"[ビュー 2]") == std::wstring::npos) {
         return 324;
     }
@@ -3320,7 +3403,10 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 412;
     }
     std::wstring active_cell_tab;
-    if (!ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, active_cell_tab)
+    if (!ReadDocumentTabLabel(
+            state.Workspace().windows.document_tabs,
+            TabCtrl_GetCurSel(state.Workspace().windows.document_tabs),
+            active_cell_tab)
         || active_cell_tab != L"cell3.png") {
         return 718;
     }
@@ -3371,7 +3457,7 @@ int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
             false) != INKPOD_STATUS_OK) {
         return 501;
     }
-    ResetUiForDocumentReplacement(state);
+    ResetUiForNewActiveDocument(state);
     if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
         return 501;
     }
@@ -4128,6 +4214,450 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
         : 726;
 }
 
+int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
+    using inkpod::app::DocumentSessionId;
+    using inkpod::app::DocumentViewId;
+    using inkpod::app::Generation;
+
+    InkpodDocumentInfo initial_probe = EmptyDocumentInfo();
+    if (state.engine == nullptr || !QueryDocument(state, initial_probe)) {
+        return 732;
+    }
+    std::array<wchar_t, MAX_PATH> temporary_directory{};
+    if (GetTempPathW(
+            static_cast<DWORD>(temporary_directory.size()),
+            temporary_directory.data()) == 0U) {
+        return 733;
+    }
+    const auto suffix = static_cast<unsigned long long>(GetTickCount64());
+    std::array<wchar_t, MAX_PATH> first_buffer{};
+    std::array<wchar_t, MAX_PATH> second_buffer{};
+    _snwprintf_s(
+        first_buffer.data(),
+        first_buffer.size(),
+        _TRUNCATE,
+        L"%lsinkpod-g5-first-%lu-%llu.inkpod",
+        temporary_directory.data(),
+        GetCurrentProcessId(),
+        suffix);
+    _snwprintf_s(
+        second_buffer.data(),
+        second_buffer.size(),
+        _TRUNCATE,
+        L"%lsinkpod-g5-second-%lu-%llu.inkpod",
+        temporary_directory.data(),
+        GetCurrentProcessId(),
+        suffix);
+    const std::wstring first_path(first_buffer.data());
+    const std::wstring second_path(second_buffer.data());
+    DeleteFileW(first_path.c_str());
+    DeleteFileW(second_path.c_str());
+    const auto cleanup = [&first_path, &second_path]() noexcept {
+        DeleteFileW(first_path.c_str());
+        DeleteFileW(second_path.c_str());
+    };
+
+    const std::size_t baseline_count = state.Documents().Count();
+    const DocumentSessionId first_session = state.Document().id;
+    const Generation first_generation = state.Document().generation;
+    const DocumentViewId first_view = state.ActiveView().id;
+    InkpodDocumentInfo first_saved = EmptyDocumentInfo();
+    InkpodHistoryInfo first_history{};
+    first_history.struct_size = sizeof(first_history);
+    if (baseline_count == 0U
+        || SaveToPath(state, first_path) != INKPOD_STATUS_OK
+        || !QueryDocument(state, first_saved)
+        || (first_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || state.engine->Invoke(
+               first_session,
+               first_generation,
+               [&first_history](InkpodCore* core) {
+                   return inkpod_core_history_info(core, &first_history);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || state.RecentDocumentAt(0U) == nullptr
+        || state.RecentDocumentAt(0U)->path != first_path) {
+        cleanup();
+        return 734;
+    }
+
+    if (CreateCell(state, 96U, 64U, 96000U) != INKPOD_STATUS_OK
+        || state.Documents().Count() != baseline_count + 1U
+        || state.engine->SessionCount() != state.Documents().Count()
+        || state.Document().id == first_session
+        || !DocumentTabsMatchRegistry(state)) {
+        cleanup();
+        return 735;
+    }
+    const DocumentSessionId second_session = state.Document().id;
+    const Generation second_generation = state.Document().generation;
+    const DocumentViewId second_view = state.ActiveView().id;
+    InkpodDocumentInfo second_initial = EmptyDocumentInfo();
+    if (!QueryDocument(state, second_initial)
+        || state.CloseDocumentView(DocumentViewId{UINT64_MAX})) {
+        cleanup();
+        return 736;
+    }
+
+    state.Workspace().tools.active_plane = INKPOD_PLANE_MAIN_LINE;
+    TransitionActiveTool(
+        state.Workspace().tools,
+        state.Workspace().windows.canvas,
+        INKPOD_TOOL_PENCIL);
+    if (state.engine->Invoke(
+            [](InkpodCore* core) {
+                return inkpod_core_set_active_plane(
+                    core, INKPOD_PLANE_MAIN_LINE);
+            },
+            false,
+            false) != INKPOD_STATUS_OK
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               WM_LBUTTONDOWN,
+               MK_LBUTTON,
+               MAKELPARAM(120, 120)) != 1
+        || !ActivateDocumentTab(state, first_view)
+        || state.engine->WaitIdle(second_session, second_generation)
+            != INKPOD_STATUS_OK) {
+        cleanup();
+        return 737;
+    }
+    InkpodDocumentInfo second_cancelled = EmptyDocumentInfo();
+    if (!state.engine->GetDocumentInfo(
+            second_session, second_generation, second_cancelled)
+        || second_cancelled.document_revision
+            != second_initial.document_revision
+        || second_cancelled.main_plane_checksum
+            != second_initial.main_plane_checksum
+        || !ActivateDocumentTab(state, second_view)) {
+        cleanup();
+        return 738;
+    }
+
+    const InkpodStrokeSample sample{
+        sizeof(InkpodStrokeSample), 0U, 12.0F, 12.0F, 1.0F, 0U};
+    const InkpodStrokeInput stroke{
+        sizeof(InkpodStrokeInput),
+        INKPOD_TOOL_PENCIL,
+        INKPOD_PLANE_MAIN_LINE,
+        INKPOD_COORDINATE_SPACE_DOCUMENT,
+        INKPOD_FEATURE_NONE,
+        UINT32_C(0x000000ff),
+        1.0F,
+        &sample,
+        1U,
+        sizeof(sample)};
+    if (state.engine->Invoke(
+            [stroke](InkpodCore* core) {
+                InkpodDispatchResult result{};
+                result.struct_size = sizeof(result);
+                return inkpod_core_apply_stroke(core, &stroke, &result);
+            },
+            true,
+            true) != INKPOD_STATUS_OK) {
+        cleanup();
+        return 739;
+    }
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo second_edited = EmptyDocumentInfo();
+    std::wstring dirty_label;
+    const int dirty_index = TabCtrl_GetCurSel(
+        state.Workspace().windows.document_tabs);
+    if (!QueryDocument(state, second_edited)
+        || second_edited.main_plane_checksum
+            == second_initial.main_plane_checksum
+        || (second_edited.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || !ReadDocumentTabLabel(
+            state.Workspace().windows.document_tabs, dirty_index, dirty_label)
+        || !dirty_label.ends_with(L" *")) {
+        cleanup();
+        return 740;
+    }
+
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    InkpodDocumentInfo second_undone = EmptyDocumentInfo();
+    if (!QueryDocument(state, second_undone)
+        || second_undone.main_plane_checksum
+            != second_initial.main_plane_checksum) {
+        cleanup();
+        return 742;
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
+    InkpodDocumentInfo second_redone = EmptyDocumentInfo();
+    if (!QueryDocument(state, second_redone)
+        || second_redone.main_plane_checksum
+            != second_edited.main_plane_checksum
+        || SaveToPath(state, second_path) != INKPOD_STATUS_OK
+        || state.RecentDocumentAt(0U) == nullptr
+        || state.RecentDocumentAt(0U)->path != second_path) {
+        cleanup();
+        return 743;
+    }
+    InkpodDocumentInfo second_saved = EmptyDocumentInfo();
+    const inkpod::app::CommandContext second_async_context =
+        state.routing.targets.Capture();
+    if (!QueryDocument(state, second_saved)
+        || (second_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || OpenDocumentFromPath(state, first_path) != INKPOD_STATUS_OK
+        || state.Document().id != first_session
+        || state.Documents().Count() != baseline_count + 1U
+        || state.RecentDocumentAt(0U) == nullptr
+        || state.RecentDocumentAt(0U)->path != first_path) {
+        cleanup();
+        return 744;
+    }
+    const std::size_t recent_count_before_missing =
+        state.RecentDocumentCount();
+    const std::wstring missing_recent_path = first_path + L".missing";
+    inkpod::app::DocumentIdentity missing_recent_identity{};
+    if (!inkpod::app::ResolveDocumentFileIdentity(
+            missing_recent_path, missing_recent_identity)
+        || !state.RecordRecentDocument(
+            missing_recent_path, std::move(missing_recent_identity))) {
+        cleanup();
+        return 744;
+    }
+    UpdateMenuState(state);
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_FILE_RECENT_1,
+            0) != 0
+        || state.RecentDocumentCount() != recent_count_before_missing
+        || state.RecentDocumentAt(0U) == nullptr
+        || state.RecentDocumentAt(0U)->path != first_path) {
+        cleanup();
+        return 744;
+    }
+
+    const auto first_command_states = state.Workspace().command_states;
+    const InkpodSelectionInput second_selection{
+        sizeof(InkpodSelectionInput),
+        INKPOD_SELECTION_RECTANGLE,
+        INKPOD_SELECTION_NEW,
+        INKPOD_FEATURE_NONE,
+        {2, 3, 7, 5},
+        nullptr,
+        0U,
+        0U};
+    if (!state.engine->Enqueue(
+            second_async_context,
+            [second_selection](InkpodCore* core) {
+                InkpodDispatchResult result{};
+                result.struct_size = sizeof(result);
+                return inkpod_core_apply_selection(
+                    core, &second_selection, &result);
+            },
+            true,
+            true,
+            false)
+        || state.engine->WaitIdle(second_session, second_generation)
+            != INKPOD_STATUS_OK) {
+        cleanup();
+        return 745;
+    }
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo second_after_async = EmptyDocumentInfo();
+    InkpodLocatorOutput second_locator{};
+    second_locator.struct_size = sizeof(second_locator);
+    InkpodLocatorOutput first_locator{};
+    first_locator.struct_size = sizeof(first_locator);
+    if (state.Document().id != first_session
+        || !SameCommandStates(
+            first_command_states, state.Workspace().command_states)
+        || !state.engine->GetDocumentInfo(
+            second_session, second_generation, second_after_async)
+        || (second_after_async.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || state.engine->Invoke(
+               second_session,
+               second_generation,
+               [&second_locator](InkpodCore* core) {
+                   return inkpod_core_locator_sample(
+                       core, 0U, 0.0, 0.0, &second_locator);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || (second_locator.flags & INKPOD_LOCATOR_SELECTION_PRESENT) == 0U
+        || second_locator.selection.x != second_selection.bounds.x
+        || second_locator.selection.y != second_selection.bounds.y
+        || second_locator.selection.width != second_selection.bounds.width
+        || second_locator.selection.height != second_selection.bounds.height
+        || state.engine->Invoke(
+               [&first_locator](InkpodCore* core) {
+                   return inkpod_core_locator_sample(
+                       core, 0U, 0.0, 0.0, &first_locator);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || (first_locator.flags & INKPOD_LOCATOR_SELECTION_PRESENT) != 0U) {
+        cleanup();
+        return 745;
+    }
+
+    InkpodDocumentInfo first_after = EmptyDocumentInfo();
+    InkpodHistoryInfo first_history_after{};
+    first_history_after.struct_size = sizeof(first_history_after);
+    if (!QueryDocument(state, first_after)
+        || first_after.document_revision != first_saved.document_revision
+        || first_after.main_plane_checksum != first_saved.main_plane_checksum
+        || state.engine->Invoke(
+               first_session,
+               first_generation,
+               [&first_history_after](InkpodCore* core) {
+                   return inkpod_core_history_info(core, &first_history_after);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || first_history_after.cursor != first_history.cursor
+        || first_history_after.item_count != first_history.item_count
+        || SaveToPath(state, second_path) != INKPOD_STATUS_INVALID_STATE
+        || state.Document().shell.current_path != first_path) {
+        cleanup();
+        return 745;
+    }
+
+    const InkpodStrokeSample first_prompt_sample{
+        sizeof(InkpodStrokeSample), 0U, 6.0F, 6.0F, 1.0F, 0U};
+    const InkpodStrokeInput first_prompt_stroke{
+        sizeof(InkpodStrokeInput),
+        INKPOD_TOOL_PENCIL,
+        INKPOD_PLANE_MAIN_LINE,
+        INKPOD_COORDINATE_SPACE_DOCUMENT,
+        INKPOD_FEATURE_NONE,
+        UINT32_C(0x000000ff),
+        1.0F,
+        &first_prompt_sample,
+        1U,
+        sizeof(first_prompt_sample)};
+    if (state.engine->Invoke(
+            [first_prompt_stroke](InkpodCore* core) {
+                InkpodDispatchResult result{};
+                result.struct_size = sizeof(result);
+                return inkpod_core_apply_stroke(
+                    core, &first_prompt_stroke, &result);
+            },
+            true,
+            true) != INKPOD_STATUS_OK) {
+        cleanup();
+        return 745;
+    }
+    std::uint32_t expected_dirty_prompts{};
+    for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
+        const auto* document = state.Documents().SessionAt(index);
+        InkpodDocumentInfo document_info = EmptyDocumentInfo();
+        if (document != nullptr && state.engine->GetDocumentInfo(
+                document->id, document->generation, document_info)
+            && (document_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+            ++expected_dirty_prompts;
+        }
+    }
+    state.lifetime.smoke_dirty_prompt_choice = IDCANCEL;
+    state.lifetime.smoke_dirty_prompt_count = 0U;
+    if (expected_dirty_prompts < 2U || ConfirmAllDocuments(state)
+        || state.lifetime.smoke_dirty_prompt_count != 1U
+        || state.Documents().Count() != baseline_count + 1U) {
+        cleanup();
+        return 745;
+    }
+    state.lifetime.smoke_dirty_prompt_choice = IDNO;
+    state.lifetime.smoke_dirty_prompt_count = 0U;
+    if (!ConfirmAllDocuments(state)
+        || state.lifetime.smoke_dirty_prompt_count != expected_dirty_prompts
+        || state.Documents().Count() != baseline_count + 1U
+        || !ActivateDocumentTab(state, first_view)) {
+        cleanup();
+        return 745;
+    }
+
+    const std::size_t first_view_count = state.Document().ViewCount();
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_VIEW_NEW,
+            0) != 1
+        || state.Document().id != first_session
+        || state.Document().ViewCount() != first_view_count + 1U
+        || !DocumentTabsMatchRegistry(state)
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_VIEW_CLOSE,
+               0) != 1
+        || state.Document().ViewCount() != first_view_count
+        || !DocumentTabsMatchRegistry(state)) {
+        cleanup();
+        return 746;
+    }
+
+    const DocumentViewId before_next =
+        state.routing.targets.ActiveDocumentView();
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_TAB_NEXT, 0);
+    const DocumentViewId after_next =
+        state.routing.targets.ActiveDocumentView();
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_TAB_PREVIOUS, 0);
+    if (after_next == before_next
+        || state.routing.targets.ActiveDocumentView() != before_next
+        || !DocumentTabsMatchRegistry(state)
+        || !ActivateDocumentTab(state, second_view)
+        || SaveToPath(state, second_path) != INKPOD_STATUS_OK
+        || !QueryDocument(state, second_saved)
+        || (second_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+        cleanup();
+        return 747;
+    }
+
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_DOCUMENT_CLOSE,
+            0) != 1
+        || state.Documents().Count() != baseline_count
+        || state.engine->HasSession(second_session, second_generation)
+        || state.Documents().Find(second_session) != nullptr
+        || OpenDocumentFromPath(state, second_path) != INKPOD_STATUS_OK
+        || state.Documents().Count() != baseline_count + 1U
+        || state.Document().id == second_session) {
+        cleanup();
+        return 748;
+    }
+    InkpodDocumentInfo second_reopened = EmptyDocumentInfo();
+    InkpodLocatorOutput reopened_locator{};
+    reopened_locator.struct_size = sizeof(reopened_locator);
+    if (!QueryDocument(state, second_reopened)
+        || !SamePersistentMetadata(second_saved, second_reopened)
+        || (second_reopened.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || state.engine->Invoke(
+               [&reopened_locator](InkpodCore* core) {
+                   return inkpod_core_locator_sample(
+                       core, 0U, 0.0, 0.0, &reopened_locator);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || (reopened_locator.flags & INKPOD_LOCATOR_SELECTION_PRESENT) == 0U
+        || reopened_locator.selection.x != second_selection.bounds.x
+        || reopened_locator.selection.y != second_selection.bounds.y
+        || reopened_locator.selection.width != second_selection.bounds.width
+        || reopened_locator.selection.height != second_selection.bounds.height
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_VIEW_CLOSE,
+               0) != 1
+        || state.Documents().Count() != baseline_count
+        || !ActivateDocumentTab(state, first_view)
+        || !DocumentTabsMatchRegistry(state)) {
+        cleanup();
+        return 749;
+    }
+    cleanup();
+    return 0;
+}
+
 int RunCommandContextSmoke(ApplicationHost& state) noexcept {
     using inkpod::app::CommandContext;
     using inkpod::app::CommandResolveStatus;
@@ -4217,6 +4747,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunMagnifiedRasterHitSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunMultiDocumentTabSmoke(state);
     }
     if (exit_code != 0) {
         std::fprintf(stderr, "inkpod application smoke failed: %d\n", exit_code);

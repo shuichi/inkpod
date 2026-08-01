@@ -624,6 +624,39 @@ Debug と ARM64 Debug は strict build と CTest 19/19 を完了した。可視 
 - 同じ file を通常操作で二つの独立 session として開けない。
 - 一文書しか開かない従来 workflow に余分な modal 操作が増えない。
 
+### 完了記録
+
+2026-08-01 に G5 を完了した。`DocumentRegistry` は file identity と untitled
+UUID の bounded index を持ち、Windows の既存 file は利用可能なら volume/file
+ID、取得できない場合は正規化した絶対 path で識別する。New/Open/Import/
+Recovery は一つの `DocumentSession` と初期 `DocumentView` を作って active group
+へ追加し、duplicate open は既存 view を選択する。tab item data は frontend の
+`DocumentViewId` 値だけを保持し、Core-local view ID、配列 index、raw pointer は
+保持しない。
+
+active tab の変更は live stroke/preview を cancel した後、session、Canvas route、
+Core view、pane/status/menu/title/autosave presentation を同じ UI-thread transaction
+で切り替える。Canvas は可視 editor group に一つのままで、inactive tab の Core
+state notification は tab の dirty/processing 表示だけを更新し、snapshot や
+active pane/menu target を切り替えない。発行済み非同期 work は capture 済みの
+session/generation を検証し、後から active document を再解決しない。
+
+`ビューを閉じる`、`文書を閉じる`、`次/前の tab` と既存の `新しいビュー` を
+共通 command/state/shortcut catalog へ接続した。最後の view close は document
+close へ昇格し、window close は dirty session ごとに一度だけ確認する。Save As
+は別の open session と identity が競合する場合は書き込みも session 合流も行わず、
+成功時だけ identity index、title、recent files、recovery metadata を更新する。
+
+native model/application smoke は二文書の edit、Undo/Redo、selection、dirty、
+save/reopen、file-ID/path/case/hard-link duplicate、Save As conflict、inactive-session
+completion、tab keyboard navigation、new/last-view/document close、dirty prompt 数、
+recent-file cleanup を検証する。C ABI は変更していない。G5 の可視構成は一
+window、一 editor group、一 Canvas、複数 document tab であり、分割表示は G6 の
+対象である。2026-08-01 の Rust format、zero-warning clippy、workspace test は
+177 tests と 1 doctest が成功した。Windows 11 x64 Debug/Release は MSVC 19.51
+で fresh configure、strict build、unsigned MSIX assembly、CTest 19/19 を両構成
+とも完了した。
+
 ---
 
 ## G6. 分割 EditorGroup

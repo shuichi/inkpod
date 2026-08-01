@@ -75,6 +75,10 @@ public:
     void InvalidateAll() noexcept;
 
     [[nodiscard]] DocumentSessionId ReplaceDocument() noexcept;
+    [[nodiscard]] std::optional<DocumentSessionId> AddDocument() noexcept;
+    bool ActivateDocument(
+        DocumentSessionId document, DocumentViewId view) noexcept;
+    bool RemoveDocument(DocumentSessionId document) noexcept;
     [[nodiscard]] std::optional<DocumentViewId> AddDocumentView() noexcept;
     bool ActivateDocumentView(DocumentViewId view) noexcept;
     bool RemoveDocumentView(DocumentViewId view) noexcept;
@@ -102,6 +106,11 @@ public:
     [[nodiscard]] DocumentViewId ActiveDocumentView() const noexcept;
 
 private:
+    static constexpr std::size_t kMaximumDocuments = 64U;
+    static constexpr std::size_t kMaximumViews = 64U;
+    static constexpr std::size_t kMaximumPanes = 32U;
+    static constexpr std::size_t kMaximumJobs = 16U;
+
     template <typename Id>
     [[nodiscard]] Id Issue() noexcept {
         const std::uint64_t value = next_id_++;
@@ -112,26 +121,38 @@ private:
     }
 
     void AdvanceGeneration() noexcept;
+    struct DocumentTarget final {
+        DocumentSessionId document{};
+        DocumentViewId active_view{};
+        std::array<DocumentViewId, kMaximumViews> views{};
+        std::size_t view_count{};
+    };
+    struct JobTarget final {
+        JobSessionId job{};
+        DocumentSessionId document{};
+    };
+
+    [[nodiscard]] DocumentTarget* FindDocument(
+        DocumentSessionId document) noexcept;
+    [[nodiscard]] const DocumentTarget* FindDocument(
+        DocumentSessionId document) const noexcept;
+    [[nodiscard]] const DocumentTarget* FindDocumentForView(
+        DocumentViewId view) const noexcept;
     [[nodiscard]] bool ContainsView(DocumentViewId view) const noexcept;
     [[nodiscard]] bool ContainsPane(PaneInstanceId pane) const noexcept;
     [[nodiscard]] bool ContainsJob(JobSessionId job) const noexcept;
-
-    static constexpr std::size_t kMaximumViews = 64U;
-    static constexpr std::size_t kMaximumPanes = 32U;
-    static constexpr std::size_t kMaximumJobs = 16U;
 
     std::uint64_t next_id_{1U};
     Generation generation_{};
     WorkspaceWindowId workspace_{};
     EditorGroupId editor_group_{};
     CanvasId canvas_{};
-    DocumentSessionId document_session_{};
-    DocumentViewId active_document_view_{};
-    std::array<DocumentViewId, kMaximumViews> views_{};
-    std::size_t view_count_{};
+    DocumentSessionId active_document_{};
+    std::array<DocumentTarget, kMaximumDocuments> documents_{};
+    std::size_t document_count_{};
     std::array<PaneInstanceId, kMaximumPanes> panes_{};
     std::size_t pane_count_{};
-    std::array<JobSessionId, kMaximumJobs> jobs_{};
+    std::array<JobTarget, kMaximumJobs> jobs_{};
     std::size_t job_count_{};
 };
 

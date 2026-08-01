@@ -67,6 +67,17 @@ BEGIN
     BEGIN
         MENUITEM "新規セル(&N)\tCtrl+N", IDM_FILE_NEW
         MENUITEM "開く(&O)...\tCtrl+O", IDM_FILE_OPEN
+        POPUP "最近使ったファイル"
+        BEGIN
+            MENUITEM "1 (なし)", IDM_FILE_RECENT_1
+            MENUITEM "2 (なし)", IDM_FILE_RECENT_2
+            MENUITEM "3 (なし)", IDM_FILE_RECENT_3
+            MENUITEM "4 (なし)", IDM_FILE_RECENT_4
+            MENUITEM "5 (なし)", IDM_FILE_RECENT_5
+            MENUITEM "6 (なし)", IDM_FILE_RECENT_6
+            MENUITEM "7 (なし)", IDM_FILE_RECENT_7
+            MENUITEM "8 (なし)", IDM_FILE_RECENT_8
+        END
         MENUITEM "保存(&S)\tCtrl+S", IDM_FILE_SAVE
         MENUITEM "名前を付けて保存(&A)...", IDM_FILE_SAVE_AS
         MENUITEM "復帰(&R)", IDM_FILE_REVERT
@@ -130,7 +141,6 @@ BEGIN
         END
         MENUITEM "グリッド設定...", IDM_VIEW_GRID_SETTINGS
         MENUITEM "透明部分", IDM_VIEW_TRANSPARENT
-        MENUITEM "新しいビュー", IDM_VIEW_NEW
     END
     POPUP "セル(&D)"
     BEGIN
@@ -459,6 +469,12 @@ BEGIN
     END
     POPUP "ウィンドウ(&N)"
     BEGIN
+        MENUITEM "新しいビュー", IDM_VIEW_NEW
+        MENUITEM "ビューを閉じる", IDM_VIEW_CLOSE
+        MENUITEM "文書を閉じる", IDM_DOCUMENT_CLOSE
+        MENUITEM "次のタブ", IDM_TAB_NEXT
+        MENUITEM "前のタブ", IDM_TAB_PREVIOUS
+        MENUITEM SEPARATOR
         MENUITEM "ツールパレット", IDM_WINDOW_TOOL_PALETTE
         MENUITEM "ツールオプション", IDM_WINDOW_TOOL_OPTIONS
         MENUITEM "カラー", IDM_WINDOW_COLOR_PANE

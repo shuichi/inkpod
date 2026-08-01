@@ -67,6 +67,41 @@ bool ReplacementRejectsQueuedContext() {
         == CommandResolveStatus::StaleGeneration;
 }
 
+bool CapturedSessionDoesNotFollowTabFocus() {
+    CommandTargetRegistry registry;
+    registry.Initialize();
+    const DocumentSessionId first_session = registry.ReplaceDocument();
+    const DocumentViewId first_view = registry.ActiveDocumentView();
+    const CommandContext first = registry.Capture();
+    const auto second_session = registry.AddDocument();
+    if (!second_session.has_value()
+        || second_session.value() == first_session) {
+        return false;
+    }
+    const DocumentViewId second_view = registry.ActiveDocumentView();
+    const CommandContext second = registry.Capture();
+    if (second_view == first_view
+        || registry.Resolve(first, kDocumentViewCommandScope)
+            != CommandResolveStatus::Ok
+        || registry.Resolve(second, kDocumentViewCommandScope)
+            != CommandResolveStatus::Ok) {
+        return false;
+    }
+    CommandContext crossed = second;
+    crossed.document_view = first_view;
+    if (registry.Resolve(crossed, kDocumentViewCommandScope)
+        != CommandResolveStatus::StaleTarget) {
+        return false;
+    }
+    if (!registry.RemoveDocument(first_session)) {
+        return false;
+    }
+    return registry.Resolve(first, kDocumentViewCommandScope)
+            == CommandResolveStatus::StaleTarget
+        && registry.Resolve(second, kDocumentViewCommandScope)
+            == CommandResolveStatus::Ok;
+}
+
 bool InvalidRequestsAreRejected() {
     CommandTargetRegistry registry;
     registry.Initialize();
@@ -128,6 +163,7 @@ int main() {
     return StrongIdsHashAndCompare()
             && CapturedViewSurvivesFocusChangeButNotClose()
             && ReplacementRejectsQueuedContext()
+            && CapturedSessionDoesNotFollowTabFocus()
             && InvalidRequestsAreRejected()
             && PaneAndJobTargetsDoNotFallback()
             && GenerationTaggedTokensNeverRetarget()

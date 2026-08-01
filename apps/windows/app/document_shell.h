@@ -16,7 +16,11 @@ struct DocumentShellState;
 
 class DocumentShellController final {
 public:
-    DocumentShellController(DocumentShellState& state, CoreHost& engine) noexcept;
+    DocumentShellController(
+        DocumentShellState& state,
+        CoreHost& engine,
+        DocumentSessionId session,
+        Generation generation) noexcept;
 
     InkpodStatus Save(const std::wstring& path) noexcept;
     InkpodStatus Open(const std::wstring& path) noexcept;
@@ -31,6 +35,8 @@ public:
 private:
     DocumentShellState& state_;
     CoreHost& engine_;
+    DocumentSessionId session_{};
+    Generation generation_{};
 };
 
 bool WidePathToUtf8(

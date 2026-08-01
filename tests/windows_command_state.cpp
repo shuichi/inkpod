@@ -125,6 +125,10 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         FindShortcutSequence(shortcuts, IDM_WINDOW_TOOL_PALETTE);
     const auto* layer_palette =
         FindShortcutSequence(shortcuts, IDM_WINDOW_LAYER_PALETTE);
+    const auto* close_view = FindShortcutSequence(shortcuts, IDM_VIEW_CLOSE);
+    const auto* next_tab = FindShortcutSequence(shortcuts, IDM_TAB_NEXT);
+    const auto* previous_tab =
+        FindShortcutSequence(shortcuts, IDM_TAB_PREVIOUS);
     return save != nullptr && save->stroke_count == 1U
         && save->strokes[0].virtual_key == static_cast<std::uint32_t>('S')
         && save->strokes[0].modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL
@@ -133,7 +137,20 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         && pencil->strokes[0].modifiers == 0U
         && batch != nullptr && batch->stroke_count > 1U
         && tool_palette != nullptr && tool_palette->stroke_count == 3U
-        && layer_palette != nullptr && layer_palette->stroke_count == 3U;
+        && layer_palette != nullptr && layer_palette->stroke_count == 3U
+        && close_view != nullptr && close_view->stroke_count == 1U
+        && close_view->strokes[0].virtual_key == VK_F4
+        && close_view->strokes[0].modifiers
+            == INKPOD_SHORTCUT_MODIFIER_CONTROL
+        && next_tab != nullptr && next_tab->stroke_count == 1U
+        && next_tab->strokes[0].virtual_key == VK_TAB
+        && next_tab->strokes[0].modifiers
+            == INKPOD_SHORTCUT_MODIFIER_CONTROL
+        && previous_tab != nullptr && previous_tab->stroke_count == 1U
+        && previous_tab->strokes[0].virtual_key == VK_TAB
+        && previous_tab->strokes[0].modifiers
+            == (INKPOD_SHORTCUT_MODIFIER_CONTROL
+                | INKPOD_SHORTCUT_MODIFIER_SHIFT);
 }
 
 } // namespace
@@ -157,6 +174,11 @@ int main() {
         || !IsCommandChecked(states, IDM_WINDOW_TOOL_OPTIONS)
         || !IsCommandChecked(states, IDM_WINDOW_COLOR_PANE)
         || IsCommandChecked(states, IDM_WORKSPACE_MIRROR)
+        || IsCommandEnabled(states, IDM_DOCUMENT_CLOSE)
+        || IsCommandEnabled(states, IDM_VIEW_CLOSE)
+        || IsCommandEnabled(states, IDM_TAB_NEXT)
+        || IsCommandEnabled(states, IDM_TAB_PREVIOUS)
+        || IsCommandEnabled(states, IDM_FILE_RECENT_1)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
         return 1;
     }
@@ -164,15 +186,46 @@ int main() {
     inputs.document.has_document = true;
     inputs.document.has_saved_path = true;
     inputs.document.dirty = false;
+    inputs.selection_view.document_count = 1U;
+    inputs.selection_view.view_count = 1U;
     states = ComputeCommandStates(inputs);
     CommandStateInputs dirty_inputs = inputs;
     dirty_inputs.document.dirty = true;
     const CommandStateSet dirty_states = ComputeCommandStates(dirty_inputs);
     if (!SameStates(states, dirty_states)
         || !IsCommandEnabled(states, IDM_FILE_SAVE)
-        || !IsCommandEnabled(states, IDM_FILE_REVERT)) {
+        || !IsCommandEnabled(states, IDM_FILE_REVERT)
+        || !IsCommandEnabled(states, IDM_DOCUMENT_CLOSE)
+        || !IsCommandEnabled(states, IDM_VIEW_CLOSE)
+        || IsCommandEnabled(states, IDM_TAB_NEXT)
+        || IsCommandEnabled(states, IDM_TAB_PREVIOUS)) {
         return 2;
     }
+
+    inputs.document.recent_document_count = 2U;
+    states = ComputeCommandStates(inputs);
+    if (!IsCommandEnabled(states, IDM_FILE_RECENT_1)
+        || !IsCommandEnabled(states, IDM_FILE_RECENT_2)
+        || IsCommandEnabled(states, IDM_FILE_RECENT_3)) {
+        return 17;
+    }
+
+    inputs.selection_view.document_count = 2U;
+    states = ComputeCommandStates(inputs);
+    if (!IsCommandEnabled(states, IDM_TAB_NEXT)
+        || !IsCommandEnabled(states, IDM_TAB_PREVIOUS)
+        || !IsCommandEnabled(states, IDM_VIEW_CLOSE)) {
+        return 15;
+    }
+    inputs.selection_view.document_count = 1U;
+    inputs.selection_view.view_count = 2U;
+    states = ComputeCommandStates(inputs);
+    if (!IsCommandEnabled(states, IDM_VIEW_CLOSE)
+        || !IsCommandEnabled(states, IDM_TAB_NEXT)
+        || !IsCommandEnabled(states, IDM_TAB_PREVIOUS)) {
+        return 16;
+    }
+    inputs.selection_view.view_count = 1U;
 
     inputs.edit.can_undo = true;
     inputs.edit.can_redo = false;

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "document_identity.h"
 #include "frontend_state.h"
 
 namespace inkpod::app {
@@ -24,6 +25,8 @@ public:
 
     DocumentSessionId id{};
     Generation generation{};
+    DocumentIdentity identity{};
+    std::uint32_t untitled_number{};
     DocumentShellState shell{};
 
     void BindCore(CoreHost* host) noexcept;
@@ -47,6 +50,8 @@ public:
         std::uint64_t core_view_id) const noexcept;
     [[nodiscard]] DocumentView* ActiveView() noexcept;
     [[nodiscard]] const DocumentView* ActiveView() const noexcept;
+    [[nodiscard]] DocumentView* ViewAt(std::size_t index) noexcept;
+    [[nodiscard]] const DocumentView* ViewAt(std::size_t index) const noexcept;
     [[nodiscard]] std::size_t ViewCount() const noexcept;
 
 private:
@@ -76,10 +81,23 @@ public:
     [[nodiscard]] bool Activate(DocumentSessionId id) noexcept;
     [[nodiscard]] DocumentSession* Find(DocumentSessionId id) noexcept;
     [[nodiscard]] const DocumentSession* Find(DocumentSessionId id) const noexcept;
+    [[nodiscard]] DocumentSession* FindByView(DocumentViewId view) noexcept;
+    [[nodiscard]] const DocumentSession* FindByView(
+        DocumentViewId view) const noexcept;
+    [[nodiscard]] DocumentSession* FindByIdentity(
+        const DocumentIdentity& identity) noexcept;
+    [[nodiscard]] const DocumentSession* FindByIdentity(
+        const DocumentIdentity& identity) const noexcept;
+    [[nodiscard]] bool AssignIdentity(
+        DocumentSessionId id,
+        const DocumentIdentity& identity) noexcept;
     void ClearCoreBindings() noexcept;
     void Clear() noexcept;
     [[nodiscard]] DocumentSession* Current() noexcept;
     [[nodiscard]] const DocumentSession* Current() const noexcept;
+    [[nodiscard]] DocumentSession* SessionAt(std::size_t index) noexcept;
+    [[nodiscard]] const DocumentSession* SessionAt(
+        std::size_t index) const noexcept;
     [[nodiscard]] std::size_t Count() const noexcept;
 
 private:

@@ -69,8 +69,14 @@ bool RecoveryDirectory(std::wstring& output) noexcept {
 } // namespace
 
 DocumentShellController::DocumentShellController(
-    DocumentShellState& state, CoreHost& engine) noexcept
-    : state_(state), engine_(engine) {}
+    DocumentShellState& state,
+    CoreHost& engine,
+    DocumentSessionId session,
+    Generation generation) noexcept
+    : state_(state),
+      engine_(engine),
+      session_(session),
+      generation_(generation) {}
 
 InkpodStatus DocumentShellController::Save(const std::wstring& path) noexcept {
     std::vector<std::uint8_t> utf8;
@@ -88,6 +94,8 @@ InkpodStatus DocumentShellController::Save(const std::wstring& path) noexcept {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus status = engine_.Invoke(
+        session_,
+        generation_,
         [utf8](InkpodCore* core) {
             InkpodDocumentInfo info = EmptyDocumentInfo();
             return inkpod_core_save(core, utf8.data(), utf8.size(), &info);
@@ -96,6 +104,7 @@ InkpodStatus DocumentShellController::Save(const std::wstring& path) noexcept {
         true);
     if (status == INKPOD_STATUS_OK) {
         state_.current_path = std::move(next_current_path);
+        state_.source_path.clear();
         state_.recovery_path = std::move(next_recovery_path);
         if (!old_recovery_path.empty() && old_recovery_path != path) {
             DeleteFileW(old_recovery_path.c_str());
@@ -118,6 +127,8 @@ InkpodStatus DocumentShellController::Open(const std::wstring& path) noexcept {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus status = engine_.Invoke(
+        session_,
+        generation_,
         [utf8](InkpodCore* core) {
             InkpodDocumentInfo info = EmptyDocumentInfo();
             return inkpod_core_open(core, utf8.data(), utf8.size(), &info);
@@ -126,6 +137,7 @@ InkpodStatus DocumentShellController::Open(const std::wstring& path) noexcept {
         false);
     if (status == INKPOD_STATUS_OK) {
         state_.current_path = std::move(next_current_path);
+        state_.source_path.clear();
         state_.recovery_path = std::move(next_recovery_path);
     }
     return status;
@@ -143,6 +155,8 @@ InkpodStatus DocumentShellController::OpenRecovery(const std::wstring& path) noe
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus status = engine_.Invoke(
+        session_,
+        generation_,
         [utf8](InkpodCore* core) {
             InkpodDocumentInfo info = EmptyDocumentInfo();
             return inkpod_core_open_recovery(core, utf8.data(), utf8.size(), &info);
@@ -151,6 +165,7 @@ InkpodStatus DocumentShellController::OpenRecovery(const std::wstring& path) noe
         false);
     if (status == INKPOD_STATUS_OK) {
         state_.current_path.clear();
+        state_.source_path.clear();
         state_.recovery_path = std::move(next_recovery_path);
     }
     return status;
@@ -163,6 +178,12 @@ InkpodStatus DocumentShellController::ImportCommonRaster(
     if (format == 0U || !ReadBoundedFile(path, bytes)) {
         return INKPOD_STATUS_IO_ERROR;
     }
+    std::wstring next_source_path;
+    try {
+        next_source_path = path;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
     GUID uuid{};
     if (FAILED(CoCreateGuid(&uuid))) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -174,6 +195,8 @@ InkpodStatus DocumentShellController::ImportCommonRaster(
         &low, reinterpret_cast<const std::uint8_t*>(&uuid) + sizeof(high),
         sizeof(low));
     const InkpodStatus status = engine_.Invoke(
+        session_,
+        generation_,
         [format, bytes = std::move(bytes), high, low](InkpodCore* core) {
             InkpodDocumentInfo info = EmptyDocumentInfo();
             return inkpod_core_import_common_raster(
@@ -182,6 +205,7 @@ InkpodStatus DocumentShellController::ImportCommonRaster(
         false,
         false);
     if (status == INKPOD_STATUS_OK) {
+        state_.source_path = std::move(next_source_path);
         state_.current_path.clear();
         state_.recovery_path.clear();
     }
@@ -196,6 +220,8 @@ InkpodStatus DocumentShellController::ExportCommonRaster(
     }
     std::vector<std::uint8_t> bytes;
     const InkpodStatus status = engine_.Invoke(
+        session_,
+        generation_,
         [format, composite_white, &bytes](InkpodCore* core) {
             InkpodByteBuffer* buffer{};
             InkpodStatus current = inkpod_core_export_common_raster(

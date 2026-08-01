@@ -78,6 +78,21 @@ void ProvideDocumentCommandStates(
         states,
         {IDM_FILE_REVERT, IDM_FILE_REVERT_PARTIAL},
         input.has_document && input.has_saved_path);
+    constexpr std::array<UINT, 8U> recent_commands{
+        IDM_FILE_RECENT_1,
+        IDM_FILE_RECENT_2,
+        IDM_FILE_RECENT_3,
+        IDM_FILE_RECENT_4,
+        IDM_FILE_RECENT_5,
+        IDM_FILE_RECENT_6,
+        IDM_FILE_RECENT_7,
+        IDM_FILE_RECENT_8};
+    for (std::size_t index = 0U; index < recent_commands.size(); ++index) {
+        SetEnabled(
+            states,
+            recent_commands[index],
+            index < input.recent_document_count);
+    }
 }
 
 void ProvideEditCommandStates(
@@ -218,10 +233,21 @@ void ProvideSelectionViewCommandStates(
          IDM_VIEW_GUIDE_VERTICAL,
          IDM_VIEW_GUIDE_HORIZONTAL,
          IDM_VIEW_GUIDE_MOVE,
-         IDM_VIEW_GUIDE_DELETE_ALL,
-         IDM_VIEW_GRID_SETTINGS,
-         IDM_VIEW_NEW},
+          IDM_VIEW_GUIDE_DELETE_ALL,
+          IDM_VIEW_GRID_SETTINGS,
+          IDM_VIEW_NEW,
+          IDM_DOCUMENT_CLOSE},
         input.document.has_document);
+    SetEnabled(
+        states,
+        {IDM_VIEW_CLOSE},
+        input.document.has_document);
+    SetEnabled(
+        states,
+        {IDM_TAB_NEXT, IDM_TAB_PREVIOUS},
+        input.document.has_document
+            && (input.selection_view.document_count > 1U
+                || input.selection_view.view_count > 1U));
     SetEnabled(
         states,
         {IDM_SELECTION_FROM_LAYER, IDM_SELECTION_LAYER_ADD,

@@ -55,10 +55,9 @@ void CommandTargetRegistry::Initialize() noexcept {
 
 void CommandTargetRegistry::InvalidateAll() noexcept {
     AdvanceGeneration();
-    document_session_ = {};
-    active_document_view_ = {};
-    views_.fill({});
-    view_count_ = 0U;
+    active_document_ = {};
+    documents_.fill({});
+    document_count_ = 0U;
     jobs_.fill({});
     job_count_ = 0U;
     panes_.fill({});
@@ -71,40 +70,109 @@ void CommandTargetRegistry::InvalidateAll() noexcept {
 DocumentSessionId CommandTargetRegistry::ReplaceDocument() noexcept {
     Initialize();
     AdvanceGeneration();
-    document_session_ = Issue<DocumentSessionId>();
-    views_.fill({});
-    view_count_ = 1U;
-    views_[0] = Issue<DocumentViewId>();
-    active_document_view_ = views_[0];
+    documents_.fill({});
+    document_count_ = 1U;
+    DocumentTarget& target = documents_[0];
+    target.document = Issue<DocumentSessionId>();
+    target.view_count = 1U;
+    target.views[0] = Issue<DocumentViewId>();
+    target.active_view = target.views[0];
+    active_document_ = target.document;
     jobs_.fill({});
     job_count_ = 0U;
-    return document_session_;
+    return active_document_;
+}
+
+std::optional<DocumentSessionId> CommandTargetRegistry::AddDocument() noexcept {
+    Initialize();
+    if (document_count_ >= documents_.size()) {
+        return std::nullopt;
+    }
+    DocumentTarget& target = documents_[document_count_++];
+    target = {};
+    target.document = Issue<DocumentSessionId>();
+    target.view_count = 1U;
+    target.views[0] = Issue<DocumentViewId>();
+    target.active_view = target.views[0];
+    active_document_ = target.document;
+    return target.document;
+}
+
+bool CommandTargetRegistry::ActivateDocument(
+    DocumentSessionId document,
+    DocumentViewId view) noexcept {
+    DocumentTarget* target = FindDocument(document);
+    if (target == nullptr || !Contains(target->views, target->view_count, view)) {
+        return false;
+    }
+    target->active_view = view;
+    active_document_ = document;
+    return true;
+}
+
+bool CommandTargetRegistry::RemoveDocument(
+    DocumentSessionId document) noexcept {
+    const auto end = documents_.begin() + document_count_;
+    const auto found = std::find_if(
+        documents_.begin(), end, [document](const DocumentTarget& target) {
+            return target.document == document;
+        });
+    if (found == end) {
+        return false;
+    }
+    std::move(found + 1, end, found);
+    --document_count_;
+    documents_[document_count_] = {};
+    for (std::size_t index = job_count_; index > 0U; --index) {
+        if (jobs_[index - 1U].document == document) {
+            std::move(
+                jobs_.begin() + static_cast<std::ptrdiff_t>(index),
+                jobs_.begin() + static_cast<std::ptrdiff_t>(job_count_),
+                jobs_.begin() + static_cast<std::ptrdiff_t>(index - 1U));
+            --job_count_;
+            jobs_[job_count_] = {};
+        }
+    }
+    if (active_document_ == document) {
+        active_document_ = document_count_ == 0U
+            ? DocumentSessionId{}
+            : documents_[0].document;
+    }
+    return true;
 }
 
 std::optional<DocumentViewId> CommandTargetRegistry::AddDocumentView() noexcept {
-    if (!document_session_ || view_count_ >= views_.size()) {
+    DocumentTarget* target = FindDocument(active_document_);
+    if (target == nullptr || target->view_count >= target->views.size()) {
         return std::nullopt;
     }
     const DocumentViewId view = Issue<DocumentViewId>();
-    views_[view_count_++] = view;
-    active_document_view_ = view;
+    target->views[target->view_count++] = view;
+    target->active_view = view;
     return view;
 }
 
 bool CommandTargetRegistry::ActivateDocumentView(DocumentViewId view) noexcept {
-    if (!ContainsView(view)) {
+    const DocumentTarget* target = FindDocumentForView(view);
+    if (target == nullptr) {
         return false;
     }
-    active_document_view_ = view;
-    return true;
+    return ActivateDocument(target->document, view);
 }
 
 bool CommandTargetRegistry::RemoveDocumentView(DocumentViewId view) noexcept {
-    if (!Remove(views_, view_count_, view)) {
+    const DocumentTarget* owner = FindDocumentForView(view);
+    if (owner == nullptr) {
         return false;
     }
-    if (active_document_view_ == view) {
-        active_document_view_ = view_count_ == 0U ? DocumentViewId{} : views_[0];
+    DocumentTarget* target = FindDocument(owner->document);
+    if (target == nullptr || !Remove(target->views, target->view_count, view)) {
+        return false;
+    }
+    if (target->active_view == view) {
+        target->active_view = target->view_count == 0U
+            ? DocumentViewId{}
+            : target->views[0];
     }
     return true;
 }
@@ -124,16 +192,27 @@ bool CommandTargetRegistry::UnregisterPane(PaneInstanceId pane) noexcept {
 }
 
 std::optional<JobSessionId> CommandTargetRegistry::BeginJob() noexcept {
-    if (!document_session_ || job_count_ >= jobs_.size()) {
+    if (!active_document_ || job_count_ >= jobs_.size()) {
         return std::nullopt;
     }
     const JobSessionId job = Issue<JobSessionId>();
-    jobs_[job_count_++] = job;
+    jobs_[job_count_++] = JobTarget{job, active_document_};
     return job;
 }
 
 bool CommandTargetRegistry::EndJob(JobSessionId job) noexcept {
-    return Remove(jobs_, job_count_, job);
+    const auto end = jobs_.begin() + job_count_;
+    const auto found = std::find_if(
+        jobs_.begin(), end, [job](const JobTarget& target) {
+            return target.job == job;
+        });
+    if (found == end) {
+        return false;
+    }
+    std::move(found + 1, end, found);
+    --job_count_;
+    jobs_[job_count_] = {};
+    return true;
 }
 
 CommandContext CommandTargetRegistry::Capture(
@@ -146,11 +225,12 @@ CommandContext CommandTargetRegistry::Capture(
     if (editor_group_) {
         context.editor_group = editor_group_;
     }
-    if (document_session_) {
-        context.document_session = document_session_;
-    }
-    if (active_document_view_) {
-        context.document_view = active_document_view_;
+    const DocumentTarget* document = FindDocument(active_document_);
+    if (document != nullptr) {
+        context.document_session = document->document;
+        if (document->active_view) {
+            context.document_view = document->active_view;
+        }
     }
     if (pane.has_value()) {
         context.pane = pane;
@@ -189,8 +269,10 @@ CommandResolveStatus CommandTargetRegistry::Resolve(
         && !context.document_session.has_value()) {
         return CommandResolveStatus::MissingScope;
     }
-    if (context.document_session.has_value()
-        && context.document_session.value() != document_session_) {
+    const DocumentTarget* document = context.document_session.has_value()
+        ? FindDocument(context.document_session.value())
+        : nullptr;
+    if (context.document_session.has_value() && document == nullptr) {
         return CommandResolveStatus::StaleTarget;
     }
     if (HasScope(required, CommandTargetScope::DocumentView)
@@ -198,7 +280,11 @@ CommandResolveStatus CommandTargetRegistry::Resolve(
         return CommandResolveStatus::MissingScope;
     }
     if (context.document_view.has_value()
-        && !ContainsView(context.document_view.value())) {
+        && (document == nullptr
+            || !Contains(
+                document->views,
+                document->view_count,
+                context.document_view.value()))) {
         return CommandResolveStatus::StaleTarget;
     }
     if (HasScope(required, CommandTargetScope::Pane) && !context.pane.has_value()) {
@@ -210,8 +296,17 @@ CommandResolveStatus CommandTargetRegistry::Resolve(
     if (HasScope(required, CommandTargetScope::Job) && !context.job.has_value()) {
         return CommandResolveStatus::MissingScope;
     }
-    if (context.job.has_value() && !ContainsJob(context.job.value())) {
-        return CommandResolveStatus::StaleTarget;
+    if (context.job.has_value()) {
+        const auto found = std::find_if(
+            jobs_.cbegin(), jobs_.cbegin() + job_count_,
+            [&context](const JobTarget& target) {
+                return target.job == context.job.value();
+            });
+        if (found == jobs_.cbegin() + job_count_
+            || (context.document_session.has_value()
+                && found->document != context.document_session.value())) {
+            return CommandResolveStatus::StaleTarget;
+        }
     }
     return CommandResolveStatus::Ok;
 }
@@ -241,11 +336,12 @@ CanvasId CommandTargetRegistry::Canvas() const noexcept {
 }
 
 DocumentSessionId CommandTargetRegistry::DocumentSession() const noexcept {
-    return document_session_;
+    return active_document_;
 }
 
 DocumentViewId CommandTargetRegistry::ActiveDocumentView() const noexcept {
-    return active_document_view_;
+    const DocumentTarget* document = FindDocument(active_document_);
+    return document == nullptr ? DocumentViewId{} : document->active_view;
 }
 
 void CommandTargetRegistry::AdvanceGeneration() noexcept {
@@ -257,7 +353,7 @@ void CommandTargetRegistry::AdvanceGeneration() noexcept {
 }
 
 bool CommandTargetRegistry::ContainsView(DocumentViewId view) const noexcept {
-    return Contains(views_, view_count_, view);
+    return FindDocumentForView(view) != nullptr;
 }
 
 bool CommandTargetRegistry::ContainsPane(PaneInstanceId pane) const noexcept {
@@ -265,7 +361,39 @@ bool CommandTargetRegistry::ContainsPane(PaneInstanceId pane) const noexcept {
 }
 
 bool CommandTargetRegistry::ContainsJob(JobSessionId job) const noexcept {
-    return Contains(jobs_, job_count_, job);
+    return std::find_if(
+               jobs_.cbegin(),
+               jobs_.cbegin() + job_count_,
+               [job](const JobTarget& target) { return target.job == job; })
+        != jobs_.cbegin() + job_count_;
+}
+
+CommandTargetRegistry::DocumentTarget* CommandTargetRegistry::FindDocument(
+    DocumentSessionId document) noexcept {
+    return const_cast<DocumentTarget*>(
+        static_cast<const CommandTargetRegistry&>(*this).FindDocument(document));
+}
+
+const CommandTargetRegistry::DocumentTarget* CommandTargetRegistry::FindDocument(
+    DocumentSessionId document) const noexcept {
+    const auto found = std::find_if(
+        documents_.cbegin(),
+        documents_.cbegin() + document_count_,
+        [document](const DocumentTarget& target) {
+            return target.document == document;
+        });
+    return found == documents_.cbegin() + document_count_ ? nullptr : &*found;
+}
+
+const CommandTargetRegistry::DocumentTarget*
+CommandTargetRegistry::FindDocumentForView(DocumentViewId view) const noexcept {
+    const auto found = std::find_if(
+        documents_.cbegin(),
+        documents_.cbegin() + document_count_,
+        [view](const DocumentTarget& target) {
+            return Contains(target.views, target.view_count, view);
+        });
+    return found == documents_.cbegin() + document_count_ ? nullptr : &*found;
 }
 
 CommandTimerToken CommandTimerRegistry::Arm(

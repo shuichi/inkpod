@@ -113,6 +113,15 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
             sequence = Sequence(command, {Stroke(L'S', control | shift)});
             return true;
         case IDM_APP_EXIT: sequence = Sequence(command, {Stroke(VK_F4, alt)}); return true;
+        case IDM_VIEW_CLOSE:
+            sequence = Sequence(command, {Stroke(VK_F4, control)});
+            return true;
+        case IDM_TAB_NEXT:
+            sequence = Sequence(command, {Stroke(VK_TAB, control)});
+            return true;
+        case IDM_TAB_PREVIOUS:
+            sequence = Sequence(command, {Stroke(VK_TAB, control | shift)});
+            return true;
         case IDM_EDIT_UNDO: sequence = Sequence(command, {Stroke(L'Z', control)}); return true;
         case IDM_EDIT_REDO: sequence = Sequence(command, {Stroke(L'Y', control)}); return true;
         case IDM_EDIT_CUT: sequence = Sequence(command, {Stroke(L'X', control)}); return true;

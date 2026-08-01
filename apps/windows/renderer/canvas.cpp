@@ -3130,6 +3130,14 @@ bool BindCanvasSnapshotSink(
         && host->Bind(document_session, document_view, document_generation);
 }
 
+void CancelCanvasStroke(HWND canvas) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    if (host != nullptr) {
+        host->CancelStroke();
+    }
+}
+
 bool TakeCanvasStrokeEvent(
     HWND canvas,
     std::uint64_t token,
