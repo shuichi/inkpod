@@ -8,6 +8,7 @@
 #include <cstdint>
 
 #include "app/resource.h"
+#include "tab_drag.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -366,7 +367,8 @@ bool CreateEditorGroupTabs(
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(control)),
         instance,
         nullptr);
-    return group.document_tabs != nullptr;
+    return group.document_tabs != nullptr
+        && AttachDocumentTabDrag(group.document_tabs, group.id);
 }
 
 void SyncActiveEditorHandles(app::MainWindowHandles& windows) noexcept {

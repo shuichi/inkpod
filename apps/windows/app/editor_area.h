@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 #include "identity.h"
 
@@ -27,12 +28,18 @@ struct EditorGroup final {
     HWND focus_history{};
 
     [[nodiscard]] bool AddView(DocumentViewId view) noexcept;
+    [[nodiscard]] bool InsertView(
+        DocumentViewId view, std::size_t insertion_index) noexcept;
     [[nodiscard]] bool RemoveView(DocumentViewId view) noexcept;
+    [[nodiscard]] bool ReorderView(
+        DocumentViewId view, std::size_t insertion_index) noexcept;
     [[nodiscard]] bool ActivateView(DocumentViewId view) noexcept;
     void ClearViews() noexcept;
     [[nodiscard]] bool Contains(DocumentViewId view) const noexcept;
     [[nodiscard]] DocumentViewId ActiveView() const noexcept;
     [[nodiscard]] DocumentViewId ViewAt(std::size_t index) const noexcept;
+    [[nodiscard]] std::optional<std::size_t> ViewIndex(
+        DocumentViewId view) const noexcept;
     [[nodiscard]] std::size_t ViewCount() const noexcept;
 
 private:
@@ -61,6 +68,12 @@ public:
     [[nodiscard]] bool AddView(EditorGroupId group, DocumentViewId view) noexcept;
     [[nodiscard]] bool MoveView(
         DocumentViewId view, EditorGroupId destination) noexcept;
+    [[nodiscard]] bool MoveView(
+        DocumentViewId view,
+        EditorGroupId destination,
+        std::size_t insertion_index) noexcept;
+    [[nodiscard]] bool ReorderView(
+        DocumentViewId view, std::size_t insertion_index) noexcept;
     [[nodiscard]] bool RemoveView(DocumentViewId view) noexcept;
     [[nodiscard]] bool ResetViews(DocumentViewId view) noexcept;
     [[nodiscard]] bool MergeAndRemove(

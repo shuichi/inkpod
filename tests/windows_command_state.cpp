@@ -205,6 +205,8 @@ int main() {
         || IsCommandEnabled(states, IDM_VIEW_CLOSE)
         || IsCommandEnabled(states, IDM_TAB_NEXT)
         || IsCommandEnabled(states, IDM_TAB_PREVIOUS)
+        || IsCommandEnabled(states, IDM_TAB_MOVE_LEFT)
+        || IsCommandEnabled(states, IDM_TAB_MOVE_RIGHT)
         || IsCommandEnabled(states, IDM_EDITOR_SPLIT_RIGHT)
         || IsCommandEnabled(states, IDM_EDITOR_SPLIT_DOWN)
         || IsCommandEnabled(states, IDM_EDITOR_MOVE_OTHER_GROUP)
@@ -214,6 +216,8 @@ int main() {
         || !IsCommandEnabled(states, IDM_WORKSPACE_NEW_WINDOW)
         || IsCommandEnabled(states, IDM_VIEW_MOVE_NEW_WINDOW)
         || IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEW_WINDOW)
+        || IsCommandEnabled(states, IDM_VIEW_MOVE_NEXT_WINDOW)
+        || IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEXT_WINDOW)
         || IsCommandEnabled(states, IDM_FILE_RECENT_1)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
         return 1;
@@ -224,6 +228,7 @@ int main() {
     inputs.document.dirty = false;
     inputs.selection_view.document_count = 1U;
     inputs.selection_view.view_count = 1U;
+    inputs.selection_view.active_group_view_count = 1U;
     inputs.workspace.locator_target_available = true;
     inputs.workspace.locator_visible = true;
     inputs.workspace.locator_pinned = true;
@@ -281,7 +286,11 @@ int main() {
         || IsCommandEnabled(states, IDM_EDITOR_GROUP_CLOSE)
         || IsCommandEnabled(states, IDM_EDITOR_GROUP_NEXT)
         || IsCommandEnabled(states, IDM_TAB_NEXT)
-        || IsCommandEnabled(states, IDM_TAB_PREVIOUS)) {
+        || IsCommandEnabled(states, IDM_TAB_PREVIOUS)
+        || IsCommandEnabled(states, IDM_TAB_MOVE_LEFT)
+        || IsCommandEnabled(states, IDM_TAB_MOVE_RIGHT)
+        || IsCommandEnabled(states, IDM_VIEW_MOVE_NEXT_WINDOW)
+        || IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEXT_WINDOW)) {
         return 2;
     }
 
@@ -309,6 +318,28 @@ int main() {
         return 16;
     }
     inputs.selection_view.view_count = 1U;
+
+    inputs.selection_view.active_group_view_count = 3U;
+    inputs.selection_view.active_tab_index = 1U;
+    inputs.selection_view.workspace_count = 2U;
+    states = ComputeCommandStates(inputs);
+    if (!IsCommandEnabled(states, IDM_TAB_MOVE_LEFT)
+        || !IsCommandEnabled(states, IDM_TAB_MOVE_RIGHT)
+        || !IsCommandEnabled(states, IDM_VIEW_MOVE_NEXT_WINDOW)
+        || !IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEXT_WINDOW)) {
+        return 19;
+    }
+    inputs.selection_view.active_tab_index = 0U;
+    inputs.selection_view.workspace_count = 1U;
+    states = ComputeCommandStates(inputs);
+    if (IsCommandEnabled(states, IDM_TAB_MOVE_LEFT)
+        || !IsCommandEnabled(states, IDM_TAB_MOVE_RIGHT)
+        || IsCommandEnabled(states, IDM_VIEW_MOVE_NEXT_WINDOW)
+        || IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEXT_WINDOW)) {
+        return 20;
+    }
+    inputs.selection_view.active_group_view_count = 1U;
+    inputs.selection_view.active_tab_index = 0U;
 
     inputs.selection_view.editor_group_count = 2U;
     states = ComputeCommandStates(inputs);

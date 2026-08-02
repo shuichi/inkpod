@@ -59,6 +59,7 @@
 #include "ui/main_window_runtime.h"
 #include "ui/main_window_runtime_internal.h"
 #include "ui/main_window_status_presenter.h"
+#include "ui/tab_drag.h"
 
 namespace inkpod::windows::ui::runtime {
 
@@ -97,8 +98,10 @@ using inkpod::app::DocumentSessionId;
 using inkpod::app::DocumentSession;
 using inkpod::app::DocumentViewId;
 using inkpod::app::EditorGroupId;
+using inkpod::app::EditorGroup;
 using inkpod::app::EditorSplitOrientation;
 using inkpod::app::WorkspaceWindowId;
+using inkpod::app::WorkspaceWindow;
 
 std::array<wchar_t, 96U> WorkspaceRegistryValueName(
     std::wstring_view base, std::uint32_t slot) noexcept {
@@ -967,12 +970,18 @@ bool ActivateEditorGroup(
 bool CreateDocumentViewInGroup(
     ApplicationHost& state,
     EditorGroupId destination,
-    HWND error_owner) noexcept {
+    HWND error_owner,
+    std::optional<std::size_t> insertion_index) noexcept {
     inkpod::app::WorkspaceWindow* destination_workspace = state.FindWorkspace(
         state.routing.targets.WorkspaceForGroup(destination));
+    EditorGroup* destination_group = destination_workspace == nullptr
+        ? nullptr
+        : destination_workspace->editors.Find(destination);
+    const std::size_t target_index = insertion_index.value_or(
+        destination_group == nullptr ? 0U : destination_group->ViewCount());
     if (state.engine == nullptr || state.Documents().Current() == nullptr
-        || destination_workspace == nullptr
-        || destination_workspace->editors.Find(destination) == nullptr) {
+        || destination_group == nullptr
+        || target_index > destination_group->ViewCount()) {
         return false;
     }
     const CommandContext previous = state.routing.targets.Capture();
@@ -1011,8 +1020,7 @@ bool CreateDocumentViewInGroup(
             document.generation,
             frontend_view.value(),
             core_view_id)
-        && destination_workspace->editors.AddView(
-            destination, frontend_view.value());
+        && destination_group->InsertView(frontend_view.value(), target_index);
     if (!registered || !state.ActivateDocumentView(frontend_view.value())) {
         (void)state.engine->Invoke(
             document.id,
@@ -1122,34 +1130,103 @@ bool MoveActiveViewToOtherGroup(ApplicationHost& state) noexcept {
     if (source == nullptr || target == nullptr || !view) {
         return false;
     }
-    const EditorGroupId source_id = source->id;
     const EditorGroupId target_id = target->id;
     renderer::CancelCanvasStroke(source->canvas);
-    if (!editors.MoveView(view, target_id)) {
-        return false;
-    }
-    if (!state.routing.targets.MoveDocumentView(view, target_id)) {
-        (void)editors.MoveView(view, source_id);
-        return false;
-    }
-    source = editors.Find(source_id);
-    if (source != nullptr && source->ActiveView()) {
-        const auto* source_document = state.Documents().FindByView(source->ActiveView());
-        if (source_document != nullptr) {
-            (void)renderer::BindCanvasSnapshotSink(
-                source->canvas,
-                source_document->id,
-                source->ActiveView(),
-                source_document->generation);
-        }
-    } else if (source != nullptr) {
-        (void)renderer::UnbindCanvasSnapshotSink(source->canvas);
-    }
-    const bool activated = state.ActivateDocumentView(view);
+    const bool activated = state.MoveDocumentView(
+        view,
+        state.Workspace().id,
+        target_id,
+        target->ViewCount());
     if (activated) {
         UpdateMenuState(state);
     }
     return activated;
+}
+
+bool MoveActiveTabBy(ApplicationHost& state, int direction) noexcept {
+    EditorGroup* group = state.Workspace().editors.Active();
+    const DocumentViewId view = group == nullptr
+        ? DocumentViewId{}
+        : group->ActiveView();
+    const auto source_index = group == nullptr
+        ? std::nullopt
+        : group->ViewIndex(view);
+    if (group == nullptr || !source_index.has_value() || direction == 0) {
+        return false;
+    }
+    std::size_t insertion{};
+    if (direction < 0) {
+        if (source_index.value() == 0U) {
+            return false;
+        }
+        insertion = source_index.value() - 1U;
+    } else {
+        if (source_index.value() + 1U >= group->ViewCount()) {
+            return false;
+        }
+        insertion = source_index.value() + 2U;
+    }
+    const bool moved = state.MoveDocumentView(
+        view,
+        state.Workspace().id,
+        group->id,
+        insertion);
+    if (moved) {
+        UpdateMenuState(state);
+    }
+    return moved;
+}
+
+WorkspaceWindow* NextWorkspace(
+    ApplicationHost& state, WorkspaceWindowId source) noexcept {
+    const std::size_t count = state.Workspaces().Count();
+    if (count <= 1U) {
+        return nullptr;
+    }
+    for (std::size_t index = 0U; index < count; ++index) {
+        const WorkspaceWindow* candidate = state.Workspaces().At(index);
+        if (candidate != nullptr && candidate->id == source) {
+            return state.Workspaces().At((index + 1U) % count);
+        }
+    }
+    return nullptr;
+}
+
+bool MoveOrDuplicateViewToNextWorkspace(
+    ApplicationHost& state,
+    const CommandContext& context,
+    bool duplicate) noexcept {
+    if (!context.workspace.has_value() || !context.document_view.has_value()) {
+        return false;
+    }
+    const WorkspaceWindowId source = context.workspace.value();
+    WorkspaceWindow* target = NextWorkspace(state, source);
+    EditorGroup* target_group = target == nullptr
+        ? nullptr
+        : target->editors.Active();
+    if (target_group == nullptr) {
+        return false;
+    }
+    const DocumentViewId view = context.document_view.value();
+    const bool transferred = duplicate
+        ? state.ActivateDocumentView(view)
+            && CreateDocumentViewInGroup(
+                state, target_group->id, target->windows.window)
+        : state.MoveDocumentView(
+            view,
+            target->id,
+            target_group->id,
+            target_group->ViewCount());
+    if (!transferred) {
+        return false;
+    }
+    if (state.FindWorkspace(source) != nullptr) {
+        (void)state.ActivateWorkspaceWindow(source, false);
+        UpdateMenuState(state);
+    }
+    (void)state.ActivateWorkspaceWindow(target->id, true);
+    UpdateMenuState(state);
+    return true;
 }
 
 bool CloseActiveEditorGroup(ApplicationHost& state) noexcept {
@@ -4339,6 +4416,17 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.selection_view.view_count = document == nullptr ? 0U : document->ViewCount();
     inputs.selection_view.editor_group_count =
         state.Workspace().editors.GroupCount();
+    const EditorGroup* active_editor_group = state.Workspace().editors.Active();
+    inputs.selection_view.active_group_view_count = active_editor_group == nullptr
+        ? 0U
+        : active_editor_group->ViewCount();
+    inputs.selection_view.active_tab_index = active_editor_group == nullptr
+            || !active_editor_group->ViewIndex(
+                state.routing.targets.ActiveDocumentView()).has_value()
+        ? 0U
+        : active_editor_group->ViewIndex(
+            state.routing.targets.ActiveDocumentView()).value();
+    inputs.selection_view.workspace_count = state.Workspaces().Count();
 
     TreePaneNode active_plane{};
     inputs.tool.vector_stroke_plane = has_document
@@ -9003,7 +9091,8 @@ void DestroyEmptyWorkspaceWindow(
 bool MoveOrDuplicateViewToNewWorkspace(
     ApplicationHost& state,
     const CommandContext& context,
-    bool duplicate) noexcept {
+    bool duplicate,
+    std::optional<POINT> drop_point) noexcept {
     if (!context.workspace.has_value() || !context.document_view.has_value()) {
         return false;
     }
@@ -9035,6 +9124,39 @@ bool MoveOrDuplicateViewToNewWorkspace(
     UpdateMenuState(state);
     (void)state.ActivateWorkspaceWindow(destination_workspace, true);
     UpdateMenuState(state);
+    if (drop_point.has_value()) {
+        RECT bounds{};
+        if (GetWindowRect(created->windows.window, &bounds) != FALSE) {
+            const HMONITOR monitor = MonitorFromPoint(
+                drop_point.value(), MONITOR_DEFAULTTONEAREST);
+            MONITORINFO info{};
+            info.cbSize = sizeof(info);
+            if (GetMonitorInfoW(monitor, &info) != FALSE) {
+                const int width = std::min(
+                    bounds.right - bounds.left,
+                    info.rcWork.right - info.rcWork.left);
+                const int height = std::min(
+                    bounds.bottom - bounds.top,
+                    info.rcWork.bottom - info.rcWork.top);
+                const int x = std::clamp(
+                    drop_point->x - MulDiv(48, GetDpiForWindow(created->windows.window), 96),
+                    info.rcWork.left,
+                    info.rcWork.right - width);
+                const int y = std::clamp(
+                    drop_point->y - MulDiv(16, GetDpiForWindow(created->windows.window), 96),
+                    info.rcWork.top,
+                    info.rcWork.bottom - height);
+                SetWindowPos(
+                    created->windows.window,
+                    nullptr,
+                    x,
+                    y,
+                    width,
+                    height,
+                    SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
+            }
+        }
+    }
     ShowWindow(created->windows.window, state.lifetime.show_command);
     ShowInitialPalettes(state);
     UpdateWindow(created->windows.window);
@@ -11518,6 +11640,10 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             }
             return 0;
         }
+        case IDM_TAB_MOVE_LEFT:
+            return MoveActiveTabBy(*state, -1) ? 1 : 0;
+        case IDM_TAB_MOVE_RIGHT:
+            return MoveActiveTabBy(*state, 1) ? 1 : 0;
         case IDM_VIEW_CLOSE:
             return CloseActiveView(*state) ? 1 : 0;
         case IDM_DOCUMENT_CLOSE:
@@ -11578,6 +11704,12 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 *state, context, false) ? 1 : 0;
         case IDM_VIEW_DUPLICATE_NEW_WINDOW:
             return MoveOrDuplicateViewToNewWorkspace(
+                *state, context, true) ? 1 : 0;
+        case IDM_VIEW_MOVE_NEXT_WINDOW:
+            return MoveOrDuplicateViewToNextWorkspace(
+                *state, context, false) ? 1 : 0;
+        case IDM_VIEW_DUPLICATE_NEXT_WINDOW:
+            return MoveOrDuplicateViewToNextWorkspace(
                 *state, context, true) ? 1 : 0;
         default:
             break;
@@ -12871,6 +13003,7 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
         case WM_DISPLAYCHANGE:
         case WM_SETTINGCHANGE:
             if (state != nullptr) {
+                CancelDocumentTabDrag(*state);
                 CaptureWorkspacePresentation(*state);
                 ClampWorkspaceOwnedWindows(*state);
                 RelayoutWorkspace(*state);
@@ -12878,6 +13011,9 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
             break;
         case WM_DPICHANGED: {
             const auto* bounds = reinterpret_cast<const RECT*>(lparam);
+            if (state != nullptr) {
+                CancelDocumentTabDrag(*state);
+            }
             SetWindowPos(
                 window,
                 nullptr,
@@ -14031,6 +14167,9 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
             return 0;
         }
         case WM_CLOSE:
+            if (state != nullptr) {
+                CancelDocumentTabDrag(*state);
+            }
             if (state != nullptr && state->Workspaces().Count() > 1U) {
                 (void)CloseWorkspaceWindow(*state, window);
                 return 0;

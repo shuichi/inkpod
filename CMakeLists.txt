@@ -214,6 +214,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_command_context.cmake")
 
 add_test(
+    NAME inkpod_windows_tab_drag_boundaries
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_tab_drag.cmake")
+
+add_test(
     NAME inkpod_windows_application_host_boundaries
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -306,6 +312,8 @@ if(WIN32)
         apps/windows/app/command_context.cpp
         apps/windows/app/command_context.h
         apps/windows/app/identity.h
+        apps/windows/app/tab_drag.cpp
+        apps/windows/app/tab_drag.h
         apps/windows/app/pane_target.cpp
         apps/windows/app/pane_target.h
         tests/windows_command_context.cpp)
@@ -444,6 +452,8 @@ if(WIN32)
         apps/windows/app/identity.h
         apps/windows/app/pane_target.cpp
         apps/windows/app/pane_target.h
+        apps/windows/app/tab_drag.cpp
+        apps/windows/app/tab_drag.h
         apps/windows/app/workspace_window.cpp
         apps/windows/app/workspace_window.h
         apps/windows/app/app_smoke.cpp
@@ -512,6 +522,8 @@ if(WIN32)
         apps/windows/ui/main_window_runtime_internal.h
         apps/windows/ui/main_window_status_presenter.cpp
         apps/windows/ui/main_window_status_presenter.h
+        apps/windows/ui/tab_drag.cpp
+        apps/windows/ui/tab_drag.h
         apps/windows/ui/workspace_layout.cpp
         apps/windows/ui/workspace_layout.h
         tests/abi_smoke.cpp

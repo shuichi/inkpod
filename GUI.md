@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8、G9、G10 完了、次は G11 |
+| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8、G9、G10、G11 完了、次は G12 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -1031,6 +1031,30 @@ G6 と G10 で完成した command を pointer drag からも利用できるよ�
 - command と drag の結果が同じ model operation を通る。
 - cancel と失敗で view、tab order、dirty、history が完全復元される。
 - drag 実装に文書所有権や Core handle の移動が含まれない。
+
+### 完了記録
+
+2026-08-02 に、`ApplicationHost` が UI thread 上で所有する値型だけの
+`TabDragCoordinator` と Common Controls tab subclass を実装した。`DragToken` は発行時の
+workspace、editor group、document session/view、generation と move/copy operation を保持し、
+button release までは配置を変更しない。同一 group reorder、group/window 間 move、Ctrl による
+新規 view、window 外 drop の tear-out は、menu/context menu/keyboard と同じ
+`ApplicationHost::MoveDocumentView`、`CreateDocumentViewInGroup`、
+`MoveOrDuplicateViewToNewWorkspace` を通る。
+
+commit 直前に token、source index、target workspace/group、capacity、active Canvas stroke、
+floating/modal preview、effect task、capture を再検証する。同期 save は UI thread 上で drag と
+同時進行せず、session/generation で隔離された Batch job 中の view 移動は許可する。失敗時は
+source/target `EditorArea`、routing、Canvas binding、発行前 active context を復元する。
+`Esc`、capture loss、source/target close、DPI/monitor/theme change は commit 前に cancel する。
+drag image は現在の native tab item を capture するため Windows theme、DPI、high contrast の
+描画を継承する。document/session/Core handle、revision、dirty、history は移動しない。
+
+value-token/model unit、command-state/catalog/構造 gate と native smoke で、reorder、別 group/window、
+tear-out、Ctrl-copy、menu parity、cancel/capture loss、200% DPI、target close race、stale source、
+active stroke、modal/effect 拒否、Batch job 許可、revision/checksum/dirty/history 不変を検証した。
+x64 Debug/Release の strict build と全 22/22 CTest を完了した。次に着手する milestone は
+G12 である。
 
 ---
 

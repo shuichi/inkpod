@@ -499,9 +499,16 @@ bool TestEditorAreaLifetimeAndSplit() {
     if (editors.SplitRatioMilli() != 200U
         || !editors.SetOrientation(EditorSplitOrientation::Horizontal)
         || editors.Orientation() != EditorSplitOrientation::Horizontal
-        || !editors.MoveView(second_view, second_group)
+        || !editors.ReorderView(second_view, 0U)
+        || editors.Find(first_group)->ViewAt(0U) != second_view
+        || editors.Find(first_group)->ViewAt(1U) != first_view
+        || !editors.ReorderView(second_view, 1U)
+        || editors.ReorderView(second_view, 3U)
+        || !editors.MoveView(second_view, second_group, 0U)
         || editors.FindByView(second_view) == nullptr
         || editors.FindByView(second_view)->id != second_group
+        || editors.Find(second_group)->ViewAt(0U) != second_view
+        || editors.Find(second_group)->ViewAt(1U) != third_view
         || editors.MoveView(second_view, second_group)) {
         return false;
     }

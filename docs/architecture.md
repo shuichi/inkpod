@@ -89,7 +89,7 @@ main -> Application -> MainWindow/controllers -> CoreHost -> C ABI
 
 `ApplicationHost` is the process-lifetime composition root. It owns global
 shortcut and clipboard state, the frontend routing/token registries, job state,
-one `CoreHost`, one `RendererHost`, a single-entry workspace registry, and a
+one `CoreHost`, one `RendererHost`, a bounded multi-entry workspace registry, and a
 bounded multi-entry document registry. The G6 UI exposes those document entries
 as tabs in one or two `EditorGroup` values. Each visible group owns one tab
 control, active frontend view, focus history, Canvas slot, and Canvas identity;
@@ -180,6 +180,20 @@ the same owner-to-target-scope mapping. Missing scope, unknown command, stale
 generation, closed view/pane/job, and document replacement are rejected without
 falling back to the currently active view.
 
+`ApplicationHost` also owns the single process-wide `TabDragCoordinator` on the
+UI/Input thread. The Common Controls tab subclass gives it only strong value IDs,
+generation, operation, original index, and a pointer-free restore context; no
+`HWND`, C++ object pointer, or Rust owner is posted through a window message. Tab
+capture and the native item drag image remain UI-thread resources. Placement is
+deferred until button release, when source and target still exist and the
+captured route, index, capacity, active-stroke, modal/effect, and capture rules
+are revalidated. Reorder, group/window transfer, new-view copy, and tear-out use
+the same application operations as menu, context-menu, and keyboard entry
+points. Cancellation changes no model state; a failed transfer restores both
+`EditorArea` values, target routing, Canvas bindings, and the prior active
+context. Only view placement moves: `DocumentSession`, Core handle, document
+revision, history, dirty state, and savepoint remain with their existing owners.
+
 Asynchronous Core work receives a copy of the issue-time context. Filter/effect,
 Batch, autosave, Canvas effect gesture, and locator completions validate that
 copy before changing UI state; a stale preview in the still-current document is
@@ -207,7 +221,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 325 production commands exactly one
+The fixed command-state catalog assigns all 329 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no

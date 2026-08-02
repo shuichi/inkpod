@@ -835,8 +835,10 @@ void CommandTimerRegistry::Clear() noexcept {
     timers_.fill(std::nullopt);
 }
 
-DragToken FrontendTokenSource::IssueDrag(const CommandContext& context) noexcept {
-    return DragToken{IssueValue(), context};
+DragToken FrontendTokenSource::IssueDrag(
+    const CommandContext& context,
+    DragOperation operation) noexcept {
+    return DragToken{IssueValue(), context, operation};
 }
 
 PostedNotificationToken FrontendTokenSource::IssueNotification(

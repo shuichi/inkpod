@@ -1,5 +1,6 @@
 #include "app/command_context.h"
 #include "app/pane_target.h"
+#include "app/tab_drag.h"
 
 #include <cstdlib>
 #include <functional>
@@ -27,6 +28,10 @@ using inkpod::app::PaneTargetRegistry;
 using inkpod::app::PaneTargetStatus;
 using inkpod::app::WorkspaceWindowId;
 using inkpod::app::FrontendTokenSource;
+using inkpod::app::DragOperation;
+using inkpod::app::TabDragCoordinator;
+using inkpod::app::TabDropKind;
+using inkpod::app::TabDropTarget;
 using inkpod::app::kDocumentViewCommandScope;
 
 static_assert(!std::is_convertible_v<WorkspaceWindowId, DocumentSessionId>);
@@ -380,6 +385,62 @@ bool PanePoliciesCaptureAndRejectStaleTargets() {
             == PaneTargetNotice::None;
 }
 
+bool TabDragTokensStayValueOnlyAndTransactional() {
+    CommandTargetRegistry targets;
+    targets.Initialize();
+    (void)targets.ReplaceDocument();
+    const CommandContext source = targets.Capture();
+    FrontendTokenSource tokens;
+    TabDragCoordinator drag;
+    if (drag.Arm(
+            tokens.IssueDrag(source, DragOperation::CanvasStroke),
+            source,
+            0U,
+            100,
+            100)
+        || !drag.Arm(
+            tokens.IssueDrag(source, DragOperation::TabMove),
+            source,
+            1U,
+            100,
+            100)
+        || !drag.IsArmed()
+        || drag.IsDragging()
+        || drag.TryBegin(102, 102, 4, 4)
+        || !drag.TryBegin(105, 100, 4, 4)
+        || !drag.SetOperation(DragOperation::TabCopy)) {
+        return false;
+    }
+    const TabDropTarget target{
+        TabDropKind::EditorGroup,
+        source.workspace.value(),
+        source.editor_group.value(),
+        2U};
+    if (!drag.UpdateTarget(target)) {
+        return false;
+    }
+    const auto request = drag.TakeDrop();
+    if (!request.has_value()
+        || request->token.context != source
+        || request->token.operation != DragOperation::TabCopy
+        || request->restore_context != source
+        || request->source_index != 1U
+        || request->target != target
+        || drag.IsArmed()
+        || drag.IsDragging()
+        || drag.TakeDrop().has_value()) {
+        return false;
+    }
+    return drag.Arm(
+               tokens.IssueDrag(source, DragOperation::TabMove),
+               source,
+               0U,
+               0,
+               0)
+        && drag.Cancel()
+        && !drag.Cancel();
+}
+
 }  // namespace
 
 int main() {
@@ -394,6 +455,7 @@ int main() {
             && EditorGroupsRouteCapturedViewsWithoutRetargeting()
             && WorkspacesRouteCapturedViewsWithoutFocusRetargeting()
             && PanePoliciesCaptureAndRejectStaleTargets()
+            && TabDragTokensStayValueOnlyAndTransactional()
         ? EXIT_SUCCESS
         : EXIT_FAILURE;
 }

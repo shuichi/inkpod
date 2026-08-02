@@ -137,6 +137,12 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
         case IDM_TAB_PREVIOUS:
             sequence = Sequence(command, {Stroke(VK_TAB, control | shift)});
             return true;
+        case IDM_TAB_MOVE_LEFT:
+            sequence = Sequence(command, {Stroke(VK_PRIOR, control | shift)});
+            return true;
+        case IDM_TAB_MOVE_RIGHT:
+            sequence = Sequence(command, {Stroke(VK_NEXT, control | shift)});
+            return true;
         case IDM_EDITOR_SPLIT_RIGHT:
             sequence = Sequence(command, {Stroke(VK_RIGHT, control | alt)});
             return true;
@@ -165,6 +171,14 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
         case IDM_VIEW_DUPLICATE_NEW_WINDOW:
             sequence = Sequence(
                 command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'V'), Stroke(L'D')});
+            return true;
+        case IDM_VIEW_MOVE_NEXT_WINDOW:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'W'), Stroke(L'V'), Stroke(L'M')});
+            return true;
+        case IDM_VIEW_DUPLICATE_NEXT_WINDOW:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'W'), Stroke(L'V'), Stroke(L'D')});
             return true;
         case IDM_EDIT_UNDO: sequence = Sequence(command, {Stroke(L'Z', control)}); return true;
         case IDM_EDIT_REDO: sequence = Sequence(command, {Stroke(L'Y', control)}); return true;

@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 325U;
+inline constexpr std::size_t kProductionCommandStateCount = 329U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -83,6 +83,9 @@ struct SelectionViewCommandStateInput {
     std::size_t document_count{};
     std::size_t view_count{};
     std::size_t editor_group_count{1U};
+    std::size_t active_group_view_count{};
+    std::size_t active_tab_index{};
+    std::size_t workspace_count{1U};
 };
 
 struct ToolCommandStateInput {

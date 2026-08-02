@@ -6252,6 +6252,451 @@ int RunCommandContextSmoke(ApplicationHost& state) noexcept {
     return 0;
 }
 
+int RunTabDragSmoke(ApplicationHost& state) noexcept {
+    using inkpod::app::DocumentViewId;
+    using inkpod::app::DragOperation;
+    using inkpod::app::JobSessionId;
+    using inkpod::app::WorkspaceWindow;
+    using inkpod::app::WorkspaceWindowId;
+
+    auto* group = state.Workspace().editors.Active();
+    if (group == nullptr || group->document_tabs == nullptr
+        || state.Workspaces().Count() != 1U) {
+        return 950;
+    }
+    while (group->ViewCount() < 2U) {
+        if (SendMessageW(
+                state.Workspace().windows.window,
+                WM_COMMAND,
+                IDM_VIEW_NEW,
+                0) != 1) {
+            return 951;
+        }
+        group = state.Workspace().editors.Active();
+    }
+    SetWindowPos(
+        group->document_tabs,
+        nullptr,
+        96,
+        64,
+        640,
+        32,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    const auto begin_drag = [](HWND tabs, int index, POINT target, bool copy) noexcept {
+        RECT item{};
+        if (TabCtrl_GetItemRect(tabs, index, &item) == FALSE) {
+            return false;
+        }
+        std::array<BYTE, 256U> keyboard{};
+        GetKeyboardState(keyboard.data());
+        const BYTE previous_control = keyboard[VK_CONTROL];
+        keyboard[VK_CONTROL] = copy ? static_cast<BYTE>(0x80U) : 0U;
+        SetKeyboardState(keyboard.data());
+        const LPARAM start = MAKELPARAM(
+            (item.left + item.right) / 2,
+            (item.top + item.bottom) / 2);
+        SendMessageW(
+            tabs,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON | (copy ? MK_CONTROL : 0U),
+            start);
+        POINT client = target;
+        ScreenToClient(tabs, &client);
+        SendMessageW(
+            tabs,
+            WM_MOUSEMOVE,
+            MK_LBUTTON | (copy ? MK_CONTROL : 0U),
+            MAKELPARAM(client.x, client.y));
+        keyboard[VK_CONTROL] = previous_control;
+        SetKeyboardState(keyboard.data());
+        return true;
+    };
+    const auto finish_drag = [](HWND tabs, POINT target) noexcept {
+        POINT client = target;
+        ScreenToClient(tabs, &client);
+        SendMessageW(
+            tabs, WM_LBUTTONUP, 0, MAKELPARAM(client.x, client.y));
+        PumpPendingWindowMessages();
+    };
+
+    InkpodDocumentInfo before{};
+    InkpodDocumentInfo after{};
+    const DocumentViewId first = group->ViewAt(0U);
+    const DocumentViewId second = group->ViewAt(1U);
+    auto* reordered_document = state.Documents().FindByView(first);
+    InkpodHistoryInfo history_before{};
+    InkpodHistoryInfo history_after{};
+    history_before.struct_size = sizeof(history_before);
+    history_after.struct_size = sizeof(history_after);
+    if (reordered_document == nullptr || !state.ActivateDocumentView(first)
+        || state.engine->Invoke(
+               reordered_document->id,
+               reordered_document->generation,
+               [&history_before](InkpodCore* core) {
+                   return inkpod_core_history_info(core, &history_before);
+               },
+               false,
+               false) != INKPOD_STATUS_OK) {
+        return 952;
+    }
+    TabCtrl_SetCurSel(group->document_tabs, 0);
+    TabCtrl_SetCurFocus(group->document_tabs, 0);
+    RECT tab_target_bounds{};
+    GetWindowRect(group->document_tabs, &tab_target_bounds);
+    const POINT after_second{
+        tab_target_bounds.right - 8,
+        (tab_target_bounds.top + tab_target_bounds.bottom) / 2};
+    if (!QueryDocument(state, before)
+        || !begin_drag(group->document_tabs, 0, after_second, false)
+        || !state.TabDrag().IsDragging()) {
+        return 952;
+    }
+    if (state.TabDrag().Target().kind
+            != inkpod::app::TabDropKind::Reorder) {
+        RECT window_bounds{};
+        RECT tab_bounds{};
+        GetWindowRect(state.Workspace().windows.window, &window_bounds);
+        GetWindowRect(group->document_tabs, &tab_bounds);
+        std::fprintf(
+            stderr,
+            "G11 target mismatch: kind=%u point=%ld,%ld window=%ld,%ld,%ld,%ld tabs=%ld,%ld,%ld,%ld visible=%d\n",
+            static_cast<unsigned int>(state.TabDrag().Target().kind),
+            after_second.x,
+            after_second.y,
+            window_bounds.left,
+            window_bounds.top,
+            window_bounds.right,
+            window_bounds.bottom,
+            tab_bounds.left,
+            tab_bounds.top,
+            tab_bounds.right,
+            tab_bounds.bottom,
+            IsWindowVisible(state.Workspace().windows.window) != FALSE ? 1 : 0);
+    }
+    finish_drag(group->document_tabs, after_second);
+    group = state.Workspace().editors.Active();
+    if (group == nullptr || group->ViewAt(0U) != second
+        || group->ViewAt(1U) != first
+        || !QueryDocument(state, after)
+        || after.document_revision != before.document_revision
+        || after.main_plane_checksum != before.main_plane_checksum
+        || (after.flags & INKPOD_DOCUMENT_FLAG_DIRTY)
+            != (before.flags & INKPOD_DOCUMENT_FLAG_DIRTY)
+        || state.engine->Invoke(
+               reordered_document->id,
+               reordered_document->generation,
+               [&history_after](InkpodCore* core) {
+                   return inkpod_core_history_info(core, &history_after);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || history_after.cursor != history_before.cursor
+        || history_after.item_count != history_before.item_count) {
+        std::fprintf(
+            stderr,
+            "G11 reorder mismatch: order=%llu,%llu expected=%llu,%llu rev=%llu/%llu checksum=%llu/%llu flags=%u/%u armed=%d\n",
+            static_cast<unsigned long long>(
+                group == nullptr ? 0U : group->ViewAt(0U).Value()),
+            static_cast<unsigned long long>(
+                group == nullptr ? 0U : group->ViewAt(1U).Value()),
+            static_cast<unsigned long long>(second.Value()),
+            static_cast<unsigned long long>(first.Value()),
+            static_cast<unsigned long long>(before.document_revision),
+            static_cast<unsigned long long>(after.document_revision),
+            static_cast<unsigned long long>(before.main_plane_checksum),
+            static_cast<unsigned long long>(after.main_plane_checksum),
+            before.flags,
+            after.flags,
+            state.TabDrag().IsArmed() ? 1 : 0);
+        return 953;
+    }
+
+    const DocumentViewId cancel_first = group->ViewAt(0U);
+    const DocumentViewId cancel_second = group->ViewAt(1U);
+    if (!begin_drag(group->document_tabs, 0, after_second, false)
+        || !state.TabDrag().IsDragging()) {
+        return 954;
+    }
+    SendMessageW(group->document_tabs, WM_KEYDOWN, VK_ESCAPE, 0);
+    PumpPendingWindowMessages();
+    if (state.TabDrag().IsArmed() || group->ViewAt(0U) != cancel_first
+        || group->ViewAt(1U) != cancel_second) {
+        return 955;
+    }
+    if (!begin_drag(group->document_tabs, 0, after_second, false)) {
+        return 956;
+    }
+    SendMessageW(group->document_tabs, WM_CAPTURECHANGED, 0, 0);
+    if (state.TabDrag().IsArmed() || group->ViewAt(0U) != cancel_first) {
+        return 957;
+    }
+    if (!begin_drag(group->document_tabs, 0, after_second, false)) {
+        return 958;
+    }
+    RECT dpi_bounds{};
+    GetWindowRect(state.Workspace().windows.window, &dpi_bounds);
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_DPICHANGED,
+        MAKELONG(192, 192),
+        reinterpret_cast<LPARAM>(&dpi_bounds));
+    if (state.TabDrag().IsArmed() || group->ViewAt(0U) != cancel_first) {
+        return 959;
+    }
+    state.Workspace().tools.floating_active = true;
+    if (!begin_drag(group->document_tabs, 0, after_second, false)
+        || state.TabDrag().IsArmed()) {
+        state.Workspace().tools.floating_active = false;
+        return 960;
+    }
+    state.Workspace().tools.floating_active = false;
+    auto* drag_document = state.Documents().FindByView(group->ViewAt(0U));
+    auto* drag_view = drag_document == nullptr
+        ? nullptr
+        : drag_document->FindView(group->ViewAt(0U));
+    if (drag_view == nullptr) {
+        return 961;
+    }
+    drag_view->presentation.active_drag = state.routing.tokens.IssueDrag(
+        state.routing.targets.Capture(), DragOperation::CanvasStroke);
+    if (!begin_drag(group->document_tabs, 0, after_second, false)
+        || state.TabDrag().IsArmed()) {
+        drag_view->presentation.active_drag.reset();
+        return 961;
+    }
+    drag_view->presentation.active_drag.reset();
+
+    state.effects.task = reinterpret_cast<InkpodTask*>(group);
+    if (!begin_drag(group->document_tabs, 0, after_second, false)
+        || state.TabDrag().IsArmed()) {
+        state.effects.task = nullptr;
+        return 983;
+    }
+    state.effects.task = nullptr;
+
+    state.batch.task = reinterpret_cast<InkpodBatchTask*>(group);
+    state.batch.job_id = JobSessionId{0xB11U};
+    if (!begin_drag(group->document_tabs, 0, after_second, false)
+        || !state.TabDrag().IsDragging()) {
+        state.batch.task = nullptr;
+        state.batch.job_id.reset();
+        return 984;
+    }
+    state.batch.task = nullptr;
+    state.batch.job_id.reset();
+    SendMessageW(group->document_tabs, WM_KEYDOWN, VK_ESCAPE, 0);
+    if (state.TabDrag().IsArmed()) {
+        return 984;
+    }
+
+    const DocumentViewId command_view = group->ViewAt(1U);
+    if (!state.ActivateDocumentView(command_view)
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_TAB_MOVE_LEFT,
+               0) != 1
+        || group->ViewAt(0U) != command_view
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_TAB_MOVE_RIGHT,
+               0) != 1
+        || group->ViewAt(1U) != command_view) {
+        return 962;
+    }
+
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDITOR_SPLIT_RIGHT,
+            0) != 1) {
+        return 963;
+    }
+    auto* source_group = state.Workspace().editors.GroupAt(0U);
+    auto* target_group = state.Workspace().editors.GroupAt(1U);
+    if (source_group == nullptr || target_group == nullptr
+        || source_group->ViewCount() == 0U) {
+        return 964;
+    }
+    SetWindowPos(
+        source_group->document_tabs,
+        nullptr,
+        64,
+        64,
+        360,
+        32,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    SetWindowPos(
+        target_group->document_tabs,
+        nullptr,
+        520,
+        64,
+        360,
+        32,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    const DocumentViewId group_move_view = source_group->ViewAt(0U);
+    RECT target_canvas{};
+    GetWindowRect(target_group->canvas, &target_canvas);
+    const POINT target_canvas_point{
+        (target_canvas.left + target_canvas.right) / 2,
+        (target_canvas.top + target_canvas.bottom) / 2};
+    if (!begin_drag(source_group->document_tabs, 0, target_canvas_point, false)) {
+        return 965;
+    }
+    finish_drag(source_group->document_tabs, target_canvas_point);
+    if (source_group->Contains(group_move_view)
+        || !target_group->Contains(group_move_view)
+        || state.routing.targets.GroupForView(group_move_view) != target_group->id) {
+        return 966;
+    }
+    SendMessageW(target_group->canvas, WM_SETFOCUS, 0, 0);
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDITOR_MOVE_OTHER_GROUP,
+            0) != 1) {
+        return 967;
+    }
+    SendMessageW(target_group->canvas, WM_SETFOCUS, 0, 0);
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDITOR_GROUP_CLOSE,
+            0) != 1
+        || state.Workspace().editors.GroupCount() != 1U) {
+        return 968;
+    }
+
+    WorkspaceWindow* source_workspace = &state.Workspace();
+    const WorkspaceWindowId source_workspace_id = source_workspace->id;
+    group = source_workspace->editors.Active();
+    SetWindowPos(
+        group->document_tabs,
+        nullptr,
+        96,
+        64,
+        640,
+        32,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    const DocumentViewId window_move_view = group->ViewAt(0U);
+    if (!state.ActivateDocumentView(window_move_view)
+        || SendMessageW(
+               source_workspace->windows.window,
+               WM_COMMAND,
+               IDM_WORKSPACE_NEW_WINDOW,
+               0) != 1
+        || state.Workspaces().Count() != 2U) {
+        return 969;
+    }
+    WorkspaceWindow* destination = state.Workspaces().At(1U);
+    if (destination == nullptr || destination->id == source_workspace_id) {
+        return 970;
+    }
+    RECT source_bounds{};
+    GetWindowRect(source_workspace->windows.window, &source_bounds);
+    SetWindowPos(
+        destination->windows.window,
+        nullptr,
+        source_bounds.right + 64,
+        source_bounds.top,
+        source_bounds.right - source_bounds.left,
+        source_bounds.bottom - source_bounds.top,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    RECT destination_canvas{};
+    GetWindowRect(destination->windows.canvas, &destination_canvas);
+    const POINT destination_point{
+        (destination_canvas.left + destination_canvas.right) / 2,
+        (destination_canvas.top + destination_canvas.bottom) / 2};
+    if (!begin_drag(group->document_tabs, 0, destination_point, false)) {
+        return 971;
+    }
+    SendMessageW(destination->windows.window, WM_CLOSE, 0, 0);
+    if (state.Workspaces().Count() != 1U || state.TabDrag().IsArmed()
+        || !group->Contains(window_move_view)) {
+        return 972;
+    }
+
+    if (SendMessageW(
+            source_workspace->windows.window,
+            WM_COMMAND,
+            IDM_WORKSPACE_NEW_WINDOW,
+            0) != 1) {
+        return 973;
+    }
+    destination = state.Workspaces().At(1U);
+    if (destination == nullptr) {
+        return 974;
+    }
+    SetWindowPos(
+        destination->windows.window,
+        nullptr,
+        source_bounds.right + 64,
+        source_bounds.top,
+        source_bounds.right - source_bounds.left,
+        source_bounds.bottom - source_bounds.top,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    GetWindowRect(destination->windows.canvas, &destination_canvas);
+    const POINT move_point{
+        (destination_canvas.left + destination_canvas.right) / 2,
+        (destination_canvas.top + destination_canvas.bottom) / 2};
+    if (!begin_drag(group->document_tabs, 0, move_point, false)) {
+        return 975;
+    }
+    finish_drag(group->document_tabs, move_point);
+    if (group->Contains(window_move_view)
+        || destination->editors.Active() == nullptr
+        || !destination->editors.Active()->Contains(window_move_view)) {
+        return 976;
+    }
+    SendMessageW(destination->windows.window, WM_CLOSE, 0, 0);
+    if (state.Workspaces().Count() != 1U) {
+        return 977;
+    }
+
+    source_workspace = state.Workspaces().At(0U);
+    group = source_workspace == nullptr ? nullptr : source_workspace->editors.Active();
+    if (group == nullptr || group->ViewCount() == 0U) {
+        return 978;
+    }
+    const DocumentViewId copy_source = group->ViewAt(0U);
+    auto* copy_document = state.Documents().FindByView(copy_source);
+    if (copy_document == nullptr) {
+        return 979;
+    }
+    const std::size_t before_copy_views = copy_document->ViewCount();
+    RECT workspace_bounds{};
+    GetWindowRect(source_workspace->windows.window, &workspace_bounds);
+    const POINT outside{
+        workspace_bounds.right + 320,
+        workspace_bounds.bottom + 160};
+    if (!begin_drag(group->document_tabs, 0, outside, true)) {
+        return 979;
+    }
+    finish_drag(group->document_tabs, outside);
+    if (state.Workspaces().Count() != 2U
+        || !group->Contains(copy_source)
+        || copy_document->ViewCount() != before_copy_views + 1U) {
+        std::fprintf(
+            stderr,
+            "G11 copy tear-out mismatch: workspaces=%zu source=%d views=%zu/%zu current=%llu source_view=%llu\n",
+            state.Workspaces().Count(),
+            group->Contains(copy_source) ? 1 : 0,
+            copy_document->ViewCount(),
+            before_copy_views,
+            static_cast<unsigned long long>(state.ActiveView().id.Value()),
+            static_cast<unsigned long long>(copy_source.Value()));
+        return 980;
+    }
+    destination = state.Workspaces().At(1U);
+    if (destination == nullptr || destination->editors.Active() == nullptr
+        || destination->editors.Active()->ViewCount() != 1U) {
+        return 981;
+    }
+    SendMessageW(destination->windows.window, WM_CLOSE, 0, 0);
+    return state.Workspaces().Count() == 1U ? 0 : 982;
+}
+
 int RunMultiWorkspaceWindowSmoke(ApplicationHost& state) noexcept {
     using inkpod::app::CommandResolveStatus;
     using inkpod::app::DocumentSessionId;
@@ -6715,6 +7160,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunSplitEditorGroupSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunTabDragSmoke(state);
     }
     if (exit_code == 0) {
         exit_code = runtime::RunMultiWorkspaceWindowSmoke(state);

@@ -255,6 +255,24 @@ void ProvideSelectionViewCommandStates(
                 || input.selection_view.view_count > 1U));
     SetEnabled(
         states,
+        {IDM_TAB_MOVE_LEFT},
+        input.document.has_document
+            && input.selection_view.active_group_view_count > 1U
+            && input.selection_view.active_tab_index > 0U);
+    SetEnabled(
+        states,
+        {IDM_TAB_MOVE_RIGHT},
+        input.document.has_document
+            && input.selection_view.active_group_view_count > 1U
+            && input.selection_view.active_tab_index + 1U
+                < input.selection_view.active_group_view_count);
+    SetEnabled(
+        states,
+        {IDM_VIEW_MOVE_NEXT_WINDOW, IDM_VIEW_DUPLICATE_NEXT_WINDOW},
+        input.document.has_document
+            && input.selection_view.workspace_count > 1U);
+    SetEnabled(
+        states,
         {IDM_EDITOR_MOVE_OTHER_GROUP,
          IDM_EDITOR_GROUP_CLOSE,
          IDM_EDITOR_GROUP_NEXT},

@@ -281,54 +281,115 @@ bool ApplicationHost::RemoveWorkspaceWindow(WorkspaceWindowId id) noexcept {
 
 bool ApplicationHost::MoveDocumentViewToWorkspace(
     DocumentViewId view, WorkspaceWindowId destination) noexcept {
-    WorkspaceWindow* source = WorkspaceForView(view);
     WorkspaceWindow* target = workspaces_.Find(destination);
+    EditorGroup* target_group = target == nullptr
+        ? nullptr
+        : target->editors.Active();
+    return target_group != nullptr
+        && MoveDocumentView(
+            view,
+            destination,
+            target_group->id,
+            target_group->ViewCount());
+}
+
+bool ApplicationHost::MoveDocumentView(
+    DocumentViewId view,
+    WorkspaceWindowId destination_workspace,
+    EditorGroupId destination_group,
+    std::size_t insertion_index) noexcept {
+    WorkspaceWindow* source = WorkspaceForView(view);
+    WorkspaceWindow* target = workspaces_.Find(destination_workspace);
     EditorGroup* source_group = source == nullptr
         ? nullptr
         : source->editors.FindByView(view);
     EditorGroup* target_group = target == nullptr
         ? nullptr
-        : target->editors.Active();
+        : target->editors.Find(destination_group);
     DocumentSession* document = documents_.FindByView(view);
-    if (source == nullptr || target == nullptr || source == target
-        || source_group == nullptr || target_group == nullptr
-        || document == nullptr || target_group->Contains(view)
-        || target_group->ViewCount() >= EditorGroup::kMaximumViews) {
+    if (source == nullptr || target == nullptr || source_group == nullptr
+        || target_group == nullptr || document == nullptr
+        || (target_group->ViewCount() >= EditorGroup::kMaximumViews
+            && source_group != target_group)
+        || insertion_index > target_group->ViewCount()) {
         return false;
     }
+    const WorkspaceWindowId source_workspace = source->id;
     const EditorGroupId source_group_id = source_group->id;
-    if (!source->editors.RemoveView(view)
-        || !target->editors.AddView(target_group->id, view)) {
-        if (source->editors.FindByView(view) == nullptr) {
-            (void)source->editors.AddView(source_group_id, view);
+    const EditorArea source_before = source->editors;
+    const EditorArea target_before = target->editors;
+    const CommandContext previous = routing.targets.Capture();
+    const bool placed = source == target
+        ? source->editors.MoveView(view, destination_group, insertion_index)
+        : source->editors.RemoveView(view)
+            && target_group->InsertView(view, insertion_index);
+    if (!placed) {
+        source->editors = source_before;
+        if (source != target) {
+            target->editors = target_before;
         }
         return false;
     }
-    if (!routing.targets.MoveDocumentView(view, target_group->id)) {
-        (void)target->editors.RemoveView(view);
-        (void)source->editors.AddView(source_group_id, view);
+    if (source_group == target_group) {
+        if (ActivateDocumentView(view)) {
+            return true;
+        }
+        source->editors = source_before;
         return false;
     }
-    if (source_group->canvas != nullptr) {
-        const DocumentSession* replacement = documents_.FindByView(
-            source_group->ActiveView());
-        if (replacement == nullptr) {
-            (void)renderer::UnbindCanvasSnapshotSink(source_group->canvas);
-        } else {
-            (void)renderer::BindCanvasSnapshotSink(
-                source_group->canvas,
-                replacement->id,
-                source_group->ActiveView(),
-                replacement->generation);
+    if (!routing.targets.MoveDocumentView(view, destination_group)) {
+        source->editors = source_before;
+        if (source != target) {
+            target->editors = target_before;
         }
+        return false;
     }
-    return (target_group->canvas == nullptr
-        || renderer::BindCanvasSnapshotSink(
-                target_group->canvas,
-                document->id,
-                view,
-                document->generation))
-        && ActivateDocumentView(view);
+    const auto bind_group = [this](WorkspaceWindow& workspace, EditorGroupId id) {
+        EditorGroup* group = workspace.editors.Find(id);
+        if (group == nullptr || group->canvas == nullptr) {
+            return group != nullptr;
+        }
+        const DocumentSession* active = documents_.FindByView(group->ActiveView());
+        return active == nullptr
+            ? renderer::UnbindCanvasSnapshotSink(group->canvas)
+            : renderer::BindCanvasSnapshotSink(
+                group->canvas,
+                active->id,
+                group->ActiveView(),
+                active->generation);
+    };
+    if (bind_group(*source, source_group_id)
+        && bind_group(*target, destination_group)
+        && ActivateDocumentView(view)) {
+        return true;
+    }
+
+    (void)routing.targets.MoveDocumentView(view, source_group_id);
+    source->editors = source_before;
+    if (source != target) {
+        target->editors = target_before;
+    }
+    (void)bind_group(*source, source_group_id);
+    if (source != target || source_group_id != destination_group) {
+        (void)bind_group(*target, destination_group);
+    }
+    if (previous.workspace.has_value()) {
+        (void)ActivateWorkspaceWindow(previous.workspace.value(), false);
+    }
+    if (previous.document_view.has_value()) {
+        (void)ActivateDocumentView(previous.document_view.value());
+    } else {
+        (void)ActivateWorkspaceWindow(source_workspace, false);
+    }
+    return false;
+}
+
+TabDragCoordinator& ApplicationHost::TabDrag() noexcept {
+    return tab_drag_;
+}
+
+const TabDragCoordinator& ApplicationHost::TabDrag() const noexcept {
+    return tab_drag_;
 }
 
 DocumentSession& ApplicationHost::Document() noexcept {

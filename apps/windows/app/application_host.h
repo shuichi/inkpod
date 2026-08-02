@@ -8,6 +8,7 @@
 #include "document_session.h"
 #include "recent_documents.h"
 #include "renderer/renderer_host.h"
+#include "tab_drag.h"
 #include "workspace_window.h"
 
 namespace inkpod::app {
@@ -44,6 +45,13 @@ public:
     [[nodiscard]] bool RemoveWorkspaceWindow(WorkspaceWindowId id) noexcept;
     [[nodiscard]] bool MoveDocumentViewToWorkspace(
         DocumentViewId view, WorkspaceWindowId destination) noexcept;
+    [[nodiscard]] bool MoveDocumentView(
+        DocumentViewId view,
+        WorkspaceWindowId destination_workspace,
+        EditorGroupId destination_group,
+        std::size_t insertion_index) noexcept;
+    [[nodiscard]] TabDragCoordinator& TabDrag() noexcept;
+    [[nodiscard]] const TabDragCoordinator& TabDrag() const noexcept;
     [[nodiscard]] DocumentSession& Document() noexcept;
     [[nodiscard]] const DocumentSession& Document() const noexcept;
     [[nodiscard]] DocumentView& ActiveView() noexcept;
@@ -87,6 +95,7 @@ private:
     WorkspaceWindowRegistry workspaces_;
     DocumentRegistry documents_;
     RecentDocumentList recent_documents_;
+    TabDragCoordinator tab_drag_;
     std::uint32_t next_untitled_number_{1U};
 };
 

@@ -260,9 +260,16 @@ private:
     std::array<std::optional<CommandTimerToken>, kTimerCount> timers_{};
 };
 
+enum class DragOperation : std::uint8_t {
+    CanvasStroke,
+    TabMove,
+    TabCopy,
+};
+
 struct DragToken {
     std::uint64_t value{};
     CommandContext context;
+    DragOperation operation{DragOperation::CanvasStroke};
 
     [[nodiscard]] explicit constexpr operator bool() const noexcept {
         return value != 0U;
@@ -280,7 +287,9 @@ struct PostedNotificationToken {
 
 class FrontendTokenSource final {
 public:
-    [[nodiscard]] DragToken IssueDrag(const CommandContext& context) noexcept;
+    [[nodiscard]] DragToken IssueDrag(
+        const CommandContext& context,
+        DragOperation operation = DragOperation::CanvasStroke) noexcept;
     [[nodiscard]] PostedNotificationToken IssueNotification(
         Generation generation) noexcept;
 

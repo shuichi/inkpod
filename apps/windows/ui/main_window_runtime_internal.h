@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <optional>
+#include <cstddef>
 #include <string>
 
 #include "app/command_context.h"
@@ -43,6 +44,16 @@ InkpodStatus OpenDocumentFromPathImpl(
     app::ApplicationHost& state, const std::wstring& path) noexcept;
 InkpodStatus OpenRecoveryFromPathImpl(
     app::ApplicationHost& state, const std::wstring& path) noexcept;
+bool CreateDocumentViewInGroup(
+    app::ApplicationHost& state,
+    app::EditorGroupId destination,
+    HWND error_owner,
+    std::optional<std::size_t> insertion_index = std::nullopt) noexcept;
+bool MoveOrDuplicateViewToNewWorkspace(
+    app::ApplicationHost& state,
+    const app::CommandContext& context,
+    bool duplicate,
+    std::optional<POINT> drop_point = std::nullopt) noexcept;
 
 #define INKPOD_DECLARE_COMMAND_ROUTE(name) \
     std::optional<LRESULT> name( \

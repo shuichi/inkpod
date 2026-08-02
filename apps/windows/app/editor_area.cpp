@@ -5,10 +5,23 @@
 namespace inkpod::app {
 
 bool EditorGroup::AddView(DocumentViewId view) noexcept {
+    return InsertView(view, view_count_);
+}
+
+bool EditorGroup::InsertView(
+    DocumentViewId view, std::size_t insertion_index) noexcept {
     if (!view || Contains(view) || view_count_ >= views_.size()) {
         return false;
     }
-    views_[view_count_++] = view;
+    if (insertion_index > view_count_) {
+        return false;
+    }
+    std::move_backward(
+        views_.begin() + static_cast<std::ptrdiff_t>(insertion_index),
+        views_.begin() + static_cast<std::ptrdiff_t>(view_count_),
+        views_.begin() + static_cast<std::ptrdiff_t>(view_count_ + 1U));
+    views_[insertion_index] = view;
+    ++view_count_;
     active_view_ = view;
     return true;
 }
@@ -25,6 +38,36 @@ bool EditorGroup::RemoveView(DocumentViewId view) noexcept {
     if (active_view_ == view) {
         active_view_ = view_count_ == 0U ? DocumentViewId{} : views_[0];
     }
+    return true;
+}
+
+bool EditorGroup::ReorderView(
+    DocumentViewId view, std::size_t insertion_index) noexcept {
+    const auto source = ViewIndex(view);
+    if (!source.has_value() || insertion_index > view_count_) {
+        return false;
+    }
+    std::size_t destination = insertion_index;
+    if (source.value() < destination) {
+        --destination;
+    }
+    if (source.value() == destination) {
+        return true;
+    }
+    const DocumentViewId active = active_view_;
+    if (source.value() < destination) {
+        std::move(
+            views_.begin() + static_cast<std::ptrdiff_t>(source.value() + 1U),
+            views_.begin() + static_cast<std::ptrdiff_t>(destination + 1U),
+            views_.begin() + static_cast<std::ptrdiff_t>(source.value()));
+    } else {
+        std::move_backward(
+            views_.begin() + static_cast<std::ptrdiff_t>(destination),
+            views_.begin() + static_cast<std::ptrdiff_t>(source.value()),
+            views_.begin() + static_cast<std::ptrdiff_t>(source.value() + 1U));
+    }
+    views_[destination] = view;
+    active_view_ = active;
     return true;
 }
 
@@ -53,6 +96,15 @@ DocumentViewId EditorGroup::ActiveView() const noexcept {
 
 DocumentViewId EditorGroup::ViewAt(std::size_t index) const noexcept {
     return index < view_count_ ? views_[index] : DocumentViewId{};
+}
+
+std::optional<std::size_t> EditorGroup::ViewIndex(
+    DocumentViewId view) const noexcept {
+    const auto end = views_.cbegin() + static_cast<std::ptrdiff_t>(view_count_);
+    const auto found = std::find(views_.cbegin(), end, view);
+    return found == end
+        ? std::nullopt
+        : std::optional<std::size_t>{static_cast<std::size_t>(found - views_.cbegin())};
 }
 
 std::size_t EditorGroup::ViewCount() const noexcept {
@@ -118,21 +170,44 @@ bool EditorArea::AddView(EditorGroupId group, DocumentViewId view) noexcept {
 
 bool EditorArea::MoveView(
     DocumentViewId view, EditorGroupId destination) noexcept {
+    const EditorGroup* source = FindByView(view);
+    const EditorGroup* target = Find(destination);
+    return source != nullptr && target != nullptr && source != target
+        && MoveView(view, destination, target->ViewCount());
+}
+
+bool EditorArea::MoveView(
+    DocumentViewId view,
+    EditorGroupId destination,
+    std::size_t insertion_index) noexcept {
     EditorGroup* source = FindByView(view);
     EditorGroup* target = Find(destination);
-    if (source == nullptr || target == nullptr || source == target
-        || target->ViewCount() >= EditorGroup::kMaximumViews) {
+    if (source == nullptr || target == nullptr) {
         return false;
     }
+    if (source == target) {
+        return source->ReorderView(view, insertion_index);
+    }
+    if (target->ViewCount() >= EditorGroup::kMaximumViews
+        || insertion_index > target->ViewCount()) {
+        return false;
+    }
+    const EditorArea before = *this;
     if (!source->RemoveView(view)) {
         return false;
     }
-    if (target->AddView(view)) {
+    if (target->InsertView(view, insertion_index)) {
         active_group_ = destination;
         return true;
     }
-    (void)source->AddView(view);
+    *this = before;
     return false;
+}
+
+bool EditorArea::ReorderView(
+    DocumentViewId view, std::size_t insertion_index) noexcept {
+    EditorGroup* group = FindByView(view);
+    return group != nullptr && group->ReorderView(view, insertion_index);
 }
 
 bool EditorArea::RemoveView(DocumentViewId view) noexcept {
