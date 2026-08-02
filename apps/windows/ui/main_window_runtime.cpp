@@ -132,10 +132,14 @@ using inkpod::app::ChooseCommonRasterPaths;
 using inkpod::app::ChooseInkpodPath;
 using inkpod::app::ChooseOpenDocumentPath;
 using inkpod::app::CommonRasterFormatFromPath;
-using inkpod::app::NewestPrivateRecovery;
 using inkpod::app::PrivateRecoveryPath;
 using inkpod::app::ReadBoundedFile;
 using inkpod::app::RecoveryIsNewer;
+using inkpod::app::RecoveryMetadata;
+using inkpod::app::BuildRecoveryMetadata;
+using inkpod::app::DiscardRecoveryArtifact;
+using inkpod::app::ClearPreviousDocumentPaths;
+using inkpod::app::SaveRestorePreviousDocumentsSetting;
 using inkpod::app::ResolveDocumentFileIdentity;
 using inkpod::app::UntitledDocumentIdentity;
 using inkpod::app::WidePathToUtf8;
@@ -4363,6 +4367,8 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.document.dirty =
         has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U;
     inputs.document.recent_document_count = state.RecentDocumentCount();
+    inputs.application.restore_previous_documents =
+        state.lifetime.restore_previous_documents;
 
     inputs.edit.can_undo =
         has_document && (info.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO) != 0U;
@@ -6100,6 +6106,7 @@ InkpodStatus CreateCell(
     state.Document().shell.current_path.clear();
     state.Document().shell.source_path.clear();
     state.Document().shell.recovery_path = std::move(private_recovery_path);
+    state.Document().shell.recovery_original_path.clear();
     state.ActiveView().presentation.color_check_mode = INKPOD_COLOR_CHECK_OFF;
     state.Workspace().tools.active_plane = INKPOD_PLANE_MAIN_LINE;
     ResetUiForNewActiveDocument(state);
@@ -7428,12 +7435,22 @@ InkpodStatus OpenFromPath(ApplicationHost& state, const std::wstring& path) noex
     return view_status;
 }
 
-InkpodStatus OpenRecoveryFromPathImpl(ApplicationHost& state, const std::wstring& path) noexcept {
+InkpodStatus OpenRecoveryWithIdentity(
+    ApplicationHost& state,
+    const std::wstring& path,
+    const DocumentIdentity* original_identity,
+    const std::wstring* original_path) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     DocumentIdentity identity{};
-    if (!ResolveDocumentFileIdentity(path, identity)) {
+    if (original_identity != nullptr && *original_identity) {
+        try {
+            identity = *original_identity;
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+    } else if (!ResolveDocumentFileIdentity(path, identity)) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
     if (const auto* existing = state.Documents().FindByIdentity(identity);
@@ -7461,6 +7478,14 @@ InkpodStatus OpenRecoveryFromPathImpl(ApplicationHost& state, const std::wstring
         RollbackNewDocumentTab(state, added, previous_view);
         return INKPOD_STATUS_INVALID_STATE;
     }
+    if (original_path != nullptr) {
+        try {
+            state.Document().shell.recovery_original_path = *original_path;
+        } catch (const std::bad_alloc&) {
+            RollbackNewDocumentTab(state, added, previous_view);
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+    }
     state.Document().untitled_number = 0U;
     state.Workspace().tools.active_plane = INKPOD_PLANE_MAIN_LINE;
     state.ActiveView().presentation.color_check_mode = INKPOD_COLOR_CHECK_OFF;
@@ -7481,6 +7506,41 @@ InkpodStatus OpenRecoveryFromPathImpl(ApplicationHost& state, const std::wstring
     }
     UpdateMenuState(state);
     return view_status;
+}
+
+InkpodStatus OpenRecoveryFromPathImpl(
+    ApplicationHost& state, const std::wstring& path) noexcept {
+    inkpod::app::RecoveryMetadata metadata{};
+    if (inkpod::app::ReadRecoveryMetadata(path, metadata)) {
+        const DocumentIdentity* identity = metadata.original_identity
+            ? &metadata.original_identity
+            : nullptr;
+        return OpenRecoveryWithIdentity(
+            state, path, identity, &metadata.original_path);
+    }
+    return OpenRecoveryWithIdentity(state, path, nullptr, nullptr);
+}
+
+InkpodStatus OpenRecoveryCandidateImpl(
+    ApplicationHost& state,
+    const inkpod::app::RecoveryCandidate& candidate) noexcept {
+    const DocumentIdentity* identity = candidate.has_metadata
+            && candidate.metadata.original_identity
+        ? &candidate.metadata.original_identity
+        : nullptr;
+    const std::wstring* original_path = candidate.has_metadata
+        ? &candidate.metadata.original_path
+        : nullptr;
+    if (identity != nullptr
+        && state.Documents().FindByIdentity(*identity) != nullptr) {
+        if (state.engine != nullptr) {
+            state.engine->SetLocalFailure(
+                L"Recovery の元文書は既に開いています。候補は破棄せず保持しました。");
+        }
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    return OpenRecoveryWithIdentity(
+        state, candidate.recovery_path, identity, original_path);
 }
 
 InkpodStatus OpenDocumentFromPathImpl(
@@ -7533,7 +7593,7 @@ InkpodStatus OpenDocumentFromPathImpl(
         return OpenRecoveryFromPath(state, recovery);
     }
     if (choice == IDNO) {
-        DeleteFileW(recovery.c_str());
+        (void)DiscardRecoveryArtifact(recovery);
     }
     return OpenFromPath(state, path);
 }
@@ -7542,15 +7602,37 @@ bool QueueAutosave(
     ApplicationHost& state,
     const CommandContext& context,
     const std::wstring& path) noexcept {
-    if (state.engine == nullptr) {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()) {
+        return false;
+    }
+    DocumentSession* document = state.Documents().Find(
+        context.document_session.value());
+    InkpodDocumentInfo info = EmptyDocumentInfo();
+    RecoveryMetadata metadata{};
+    if (document == nullptr
+        || document->generation != context.generation.value()
+        || !state.engine->GetDocumentInfo(
+            document->id, document->generation, info)
+        || !BuildRecoveryMetadata(
+            document->id,
+            document->generation,
+            document->identity,
+            info.document_uuid_high,
+            info.document_uuid_low,
+            document->shell.current_path.empty()
+                ? document->shell.recovery_original_path
+                : document->shell.current_path,
+            document->shell.source_path,
+            metadata)) {
         return false;
     }
     DocumentShellController shell(
-        state.Document().shell,
+        document->shell,
         *state.engine,
-        state.Document().id,
-        state.Document().generation);
-    return shell.QueueAutosave(context, path);
+        document->id,
+        document->generation);
+    return shell.QueueAutosave(context, path, metadata);
 }
 
 InkpodStatus ApplyFillAtDeviceRange(
@@ -7846,8 +7928,7 @@ bool DiscardCurrentRecovery(ApplicationHost& state) noexcept {
     if (state.engine != nullptr && state.engine->WaitIdle() != INKPOD_STATUS_OK) {
         return false;
     }
-    if (DeleteFileW(state.Document().shell.recovery_path.c_str()) == FALSE
-        && GetLastError() != ERROR_FILE_NOT_FOUND) {
+    if (!DiscardRecoveryArtifact(state.Document().shell.recovery_path)) {
         return false;
     }
     state.Document().shell.recovery_path.clear();
@@ -12534,6 +12615,21 @@ std::optional<LRESULT> RouteApplicationCommand(
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
+        case IDM_FILE_RESTORE_PREVIOUS: {
+            const bool enabled = !state->lifetime.restore_previous_documents;
+            if (!SaveRestorePreviousDocumentsSetting(enabled)
+                || (!enabled && !ClearPreviousDocumentPaths())) {
+                MessageBoxW(
+                    window,
+                    L"前回の文書を復元する設定を保存できませんでした。",
+                    L"inkpod",
+                    MB_OK | MB_ICONERROR);
+                return 0;
+            }
+            state->lifetime.restore_previous_documents = enabled;
+            UpdateMenuState(*state);
+            return 1;
+        }
         case IDM_WORKSPACE_NEW_WINDOW:
             return CreateWorkspaceWindow(*state, true) != nullptr ? 1 : 0;
         case IDM_WINDOW_LOCATOR:

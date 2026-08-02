@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace inkpod::app {
 
@@ -13,7 +14,8 @@ struct ApplicationLaunch {
     HINSTANCE instance{};
     int show_command{};
     bool smoke_test{};
-    std::wstring document_path;
+    bool open_in_new_workspace{};
+    std::vector<std::wstring> document_paths;
 };
 
 class Application final {

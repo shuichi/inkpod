@@ -14,6 +14,9 @@ bool IsOption(const wchar_t* argument, const wchar_t* expected) noexcept {
     return argument != nullptr && wcscmp(argument, expected) == 0;
 }
 
+constexpr std::size_t kMaximumLaunchPaths = 64U;
+constexpr std::size_t kMaximumLaunchCharacters = 1024U * 1024U;
+
 }  // namespace
 
 LaunchParseStatus ParseLaunchArguments(
@@ -27,6 +30,8 @@ LaunchParseStatus ParseLaunchArguments(
     LaunchOptions parsed{};
     bool options_ended{};
     bool has_mode{};
+    bool has_new_workspace{};
+    std::size_t total_path_characters{};
     try {
         for (int index = 1; index < argument_count; ++index) {
             const wchar_t* argument = arguments[index];
@@ -53,19 +58,33 @@ LaunchParseStatus ParseLaunchArguments(
                 has_mode = true;
                 continue;
             }
+            if (!options_ended && IsOption(argument, L"--new-window")) {
+                if (has_new_workspace) {
+                    return LaunchParseStatus::InvalidArguments;
+                }
+                parsed.open_in_new_workspace = true;
+                has_new_workspace = true;
+                continue;
+            }
             if (!options_ended && argument[0] == L'-') {
                 return LaunchParseStatus::InvalidArguments;
             }
-            if (!parsed.document_path.empty()) {
+            const std::size_t path_characters = wcslen(argument);
+            if (path_characters > 32767U
+                || parsed.document_paths.size() >= kMaximumLaunchPaths
+                || total_path_characters
+                    > kMaximumLaunchCharacters - path_characters) {
                 return LaunchParseStatus::InvalidArguments;
             }
-            parsed.document_path.assign(argument);
+            total_path_characters += path_characters;
+            parsed.document_paths.emplace_back(argument);
         }
     } catch (const std::bad_alloc&) {
         return LaunchParseStatus::OutOfMemory;
     }
 
-    if (has_mode && !parsed.document_path.empty()) {
+    if (has_mode
+        && (!parsed.document_paths.empty() || parsed.open_in_new_workspace)) {
         return LaunchParseStatus::InvalidArguments;
     }
     output = std::move(parsed);

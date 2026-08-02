@@ -3,12 +3,15 @@
 #include <commctrl.h>
 
 #include <array>
+#include <algorithm>
 #include <memory>
 #include <new>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
+#include "activation.h"
 #include "application_host.h"
 #include "app_smoke.h"
 #include "com_runtime.h"
@@ -17,6 +20,7 @@
 #include "inkpod/core_ffi.h"
 #include "renderer/canvas.h"
 #include "resource.h"
+#include "session_recovery.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
 #include "ui/palette_window.h"
@@ -220,10 +224,197 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
     state.routing.targets.InvalidateAll();
     return INKPOD_STATUS_OK;
 }
+
+std::wstring RecoveryDisplayPath(const RecoveryCandidate& candidate) {
+    if (!candidate.has_metadata) {
+        return L"(metadata なし)";
+    }
+    if (!candidate.metadata.original_path.empty()) {
+        return candidate.metadata.original_path;
+    }
+    if (!candidate.metadata.source_path.empty()) {
+        return candidate.metadata.source_path;
+    }
+    if (!candidate.metadata.original_identity.normalized_path.empty()) {
+        return candidate.metadata.original_identity.normalized_path;
+    }
+    return L"(未保存文書)";
+}
+
+std::wstring RecoveryPromptText(
+    const RecoveryCandidate& candidate,
+    std::size_t index,
+    std::size_t count) {
+    FILETIME local_time{};
+    SYSTEMTIME system_time{};
+    (void)FileTimeToLocalFileTime(&candidate.modified, &local_time);
+    (void)FileTimeToSystemTime(&local_time, &system_time);
+    const std::wstring original = RecoveryDisplayPath(candidate);
+    const bool newer = candidate.has_metadata
+        && !candidate.metadata.original_path.empty()
+        && RecoveryIsNewer(
+            candidate.metadata.original_path, candidate.recovery_path);
+    std::array<wchar_t, 1024U> text{};
+    _snwprintf_s(
+        text.data(),
+        text.size(),
+        _TRUNCATE,
+        L"Recovery候補 %zu / %zu\n\n"
+        L"元ファイル: %ls\n"
+        L"Recovery日時: %04u-%02u-%02u %02u:%02u:%02u\n"
+        L"session: %llu / generation: %llu\n"
+        L"状態: %ls\n\n"
+        L"はい: この候補を復元\n"
+        L"いいえ: この候補を破棄\n"
+        L"キャンセル: この候補を後で判断",
+        index + 1U,
+        count,
+        original.c_str(),
+        system_time.wYear,
+        system_time.wMonth,
+        system_time.wDay,
+        system_time.wHour,
+        system_time.wMinute,
+        system_time.wSecond,
+        static_cast<unsigned long long>(
+            candidate.has_metadata ? candidate.metadata.session.Value() : 0U),
+        static_cast<unsigned long long>(
+            candidate.has_metadata ? candidate.metadata.generation.Value() : 0U),
+        candidate.has_metadata
+            ? (newer ? L"元ファイルより新しいRecovery" : L"Recovery（比較不能または元ファイル以下）")
+            : L"metadataがないRecovery（内容は保持されています）");
+    return text.data();
+}
+
+bool ReviewRecoveryCandidates(
+    ApplicationHost& state,
+    HWND owner,
+    bool& document_initialized) noexcept {
+    std::vector<RecoveryCandidate> candidates;
+    if (!EnumerateRecoveryCandidates(candidates)) {
+        MessageBoxW(
+            owner,
+            L"Recovery候補が上限を超えたか、一覧を安全に読み取れませんでした。"
+            L"ファイルは削除していません。",
+            L"inkpod Recovery",
+            MB_OK | MB_ICONWARNING);
+        return false;
+    }
+    for (std::size_t index = 0U; index < candidates.size(); ++index) {
+        std::wstring prompt;
+        try {
+            prompt = RecoveryPromptText(candidates[index], index, candidates.size());
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+        const int choice = MessageBoxW(
+            owner,
+            prompt.c_str(),
+            L"inkpod Recovery",
+            MB_YESNOCANCEL | MB_ICONQUESTION);
+        if (choice == IDYES) {
+            const InkpodStatus status = windows::ui::runtime::OpenRecoveryCandidate(
+                state, candidates[index]);
+            if (status == INKPOD_STATUS_OK) {
+                document_initialized = true;
+            } else {
+                windows::ui::runtime::ShowCoreError(
+                    state, owner, L"Recovery候補を開く");
+            }
+        } else if (choice == IDNO
+            && !DiscardRecoveryArtifact(candidates[index].recovery_path)) {
+            MessageBoxW(
+                owner,
+                L"Recovery候補を削除できませんでした。ファイルは保持されています。",
+                L"inkpod Recovery",
+                MB_OK | MB_ICONWARNING);
+        }
+    }
+    return true;
+}
+
+bool OpenDocumentPaths(
+    ApplicationHost& state,
+    HWND owner,
+    const std::vector<std::wstring>& paths,
+    bool& document_initialized) noexcept {
+    bool all_opened = true;
+    for (const auto& path : paths) {
+        const InkpodStatus status = windows::ui::runtime::OpenDocumentFromPath(
+            state, path);
+        if (status == INKPOD_STATUS_OK) {
+            document_initialized = true;
+        } else {
+            windows::ui::runtime::ShowCoreError(
+                state, owner, L"起動ファイルを開く");
+            all_opened = false;
+        }
+    }
+    return all_opened;
+}
+
+void RestorePreviousDocuments(
+    ApplicationHost& state,
+    HWND owner,
+    bool& document_initialized) noexcept {
+    if (!state.lifetime.restore_previous_documents) {
+        return;
+    }
+    std::vector<std::wstring> paths;
+    if (!LoadPreviousDocumentPaths(paths)) {
+        MessageBoxW(
+            owner,
+            L"前回の文書一覧が不正なため復元しません。文書ファイルは変更していません。",
+            L"inkpod",
+            MB_OK | MB_ICONWARNING);
+        return;
+    }
+    (void)OpenDocumentPaths(state, owner, paths, document_initialized);
+}
+
+void SavePreviousDocuments(ApplicationHost& state) noexcept {
+    if (!state.lifetime.restore_previous_documents) {
+        (void)ClearPreviousDocumentPaths();
+        return;
+    }
+    std::vector<std::wstring> paths;
+    try {
+        paths.reserve(state.Documents().Count());
+        for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
+            const DocumentSession* document = state.Documents().SessionAt(index);
+            if (document == nullptr || document->shell.current_path.empty()
+                || std::find(
+                    paths.begin(), paths.end(), document->shell.current_path)
+                    != paths.end()) {
+                continue;
+            }
+            paths.push_back(document->shell.current_path);
+        }
+    } catch (const std::bad_alloc&) {
+        return;
+    }
+    (void)SavePreviousDocumentPaths(paths);
+}
+
 int RunMessageLoop(ApplicationHost& state) noexcept {
     MSG message{};
     BOOL result{};
     while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+        if (message.hwnd == nullptr
+            && message.message == kApplicationActivationMessage) {
+            const std::uint64_t token =
+                static_cast<std::uint64_t>(message.wParam & UINT32_MAX)
+                | (static_cast<std::uint64_t>(
+                       static_cast<std::uint32_t>(message.lParam))
+                   << 32U);
+            ActivationRequest request{};
+            if (state.activation != nullptr
+                && state.activation->Take(token, request)) {
+                (void)windows::ui::runtime::HandleApplicationActivation(
+                    state, request);
+            }
+            continue;
+        }
         bool dialog_message{};
         for (std::size_t workspace_index = 0U;
              workspace_index < state.Workspaces().Count() && !dialog_message;
@@ -269,6 +460,58 @@ Application::Application(ApplicationLaunch launch) noexcept
 Application::~Application() = default;
 
 int Application::Run() {
+    try {
+        host_ = std::make_unique<ApplicationHost>();
+        if (!launch_.smoke_test) {
+            host_->activation = std::make_unique<ActivationService>();
+        }
+    } catch (const std::bad_alloc&) {
+        return 14;
+    }
+    if (!launch_.smoke_test) {
+        MSG queue_probe{};
+        (void)PeekMessageW(&queue_probe, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+        const ActivationRole role = host_->activation->Start(GetCurrentThreadId());
+        if (role == ActivationRole::Failed) {
+            MessageBoxW(
+                nullptr,
+                L"同一ユーザーの application activation を初期化できませんでした。",
+                L"inkpod",
+                MB_OK | MB_ICONERROR);
+            host_.reset();
+            return 19;
+        }
+        if (role == ActivationRole::Secondary) {
+            ActivationRequest request{};
+            request.request_id = NewActivationRequestId();
+            request.target = launch_.open_in_new_workspace
+                ? ActivationTargetPreference::NewWorkspace
+                : ActivationTargetPreference::LastFocusedWorkspace;
+            try {
+                request.paths = launch_.document_paths;
+            } catch (const std::bad_alloc&) {
+                host_.reset();
+                return 14;
+            }
+            const ActivationSendStatus sent = host_->activation->Send(
+                request, 5000U);
+            if (sent != ActivationSendStatus::Accepted
+                && sent != ActivationSendStatus::Duplicate) {
+                MessageBoxW(
+                    nullptr,
+                    sent == ActivationSendStatus::Timeout
+                        ? L"起動中の inkpod が応答しませんでした。同じ文書を別 process では開きません。"
+                        : L"起動中の inkpod へ安全に要求を渡せませんでした。同じ文書を別 process では開きません。",
+                    L"inkpod",
+                    MB_OK | MB_ICONERROR);
+                host_.reset();
+                return 20;
+            }
+            host_.reset();
+            return 0;
+        }
+    }
+
     INITCOMMONCONTROLSEX controls{};
     controls.dwSize = sizeof(controls);
     controls.dwICC = ICC_STANDARD_CLASSES | ICC_BAR_CLASSES | ICC_TAB_CLASSES;
@@ -313,17 +556,18 @@ int Application::Run() {
         return 13;
     }
 
-    try {
-        host_ = std::make_unique<ApplicationHost>();
-    } catch (const std::bad_alloc&) {
-        return 14;
-    }
     ApplicationHost& state = *host_;
     state.lifetime.instance = launch_.instance;
     state.lifetime.window_class_name = class_name.data();
     state.lifetime.window_title = title.data();
     state.lifetime.show_command = launch_.show_command;
     state.lifetime.smoke_test = launch_.smoke_test;
+    if (!launch_.smoke_test) {
+        bool restore_previous{};
+        state.lifetime.restore_previous_documents =
+            LoadRestorePreviousDocumentsSetting(restore_previous)
+            && restore_previous;
+    }
     if (!InitializeFrontendRouting(state)) {
         host_.reset();
         return 14;
@@ -367,41 +611,13 @@ int Application::Run() {
     }
 
     bool document_initialized{};
-    if (!launch_.document_path.empty()) {
-        core_status = windows::ui::runtime::OpenDocumentFromPath(
-            state, launch_.document_path);
-        document_initialized = core_status == INKPOD_STATUS_OK;
+    if (!launch_.document_paths.empty()) {
+        (void)OpenDocumentPaths(
+            state, window, launch_.document_paths, document_initialized);
     }
-    if (core_status == INKPOD_STATUS_OK && !document_initialized
-        && !launch_.smoke_test) {
-        std::wstring recovery;
-        if (NewestPrivateRecovery(recovery)) {
-            const int choice = MessageBoxW(
-                window,
-                L"未処理のRecoveryがあります。\n\n"
-                L"はい: Recoveryを開く\nいいえ: Recoveryを破棄\n"
-                L"キャンセル: 後で判断して新規セルを開く",
-                L"inkpod Recovery",
-                MB_YESNOCANCEL | MB_ICONQUESTION);
-            if (choice == IDYES) {
-                core_status = windows::ui::runtime::OpenRecoveryFromPath(
-                    state, recovery);
-                document_initialized = core_status == INKPOD_STATUS_OK;
-                if (!document_initialized) {
-                    windows::ui::runtime::ShowCoreError(
-                        state, window, L"起動時Recoveryを開く");
-                    core_status = INKPOD_STATUS_OK;
-                }
-            } else if (choice == IDNO
-                && DeleteFileW(recovery.c_str()) == FALSE
-                && GetLastError() != ERROR_FILE_NOT_FOUND) {
-                MessageBoxW(
-                    window,
-                    L"Recoveryを削除できませんでした。ファイルを残して新規セルを開きます。",
-                    L"inkpod Recovery",
-                    MB_OK | MB_ICONWARNING);
-            }
-        }
+    if (!launch_.smoke_test) {
+        (void)ReviewRecoveryCandidates(state, window, document_initialized);
+        RestorePreviousDocuments(state, window, document_initialized);
     }
     if (core_status == INKPOD_STATUS_OK && !document_initialized) {
         core_status = windows::ui::runtime::CreateDefaultCell(state);
@@ -412,9 +628,7 @@ int Application::Run() {
             windows::ui::runtime::ShowCoreError(
                 state,
                 window,
-                launch_.document_path.empty()
-                    ? L"セルまたはRecoveryの初期化"
-                    : L"起動ファイルを開く");
+                L"セルまたはRecoveryの初期化");
         }
         StopCore(state);
         DestroyWindow(window);
@@ -454,6 +668,12 @@ int Application::Run() {
         exit_code = RunMessageLoop(state);
     }
 
+    if (!launch_.smoke_test) {
+        if (state.activation != nullptr) {
+            state.activation->Stop();
+        }
+        SavePreviousDocuments(state);
+    }
     core_status = StopCore(state);
     for (std::size_t index = state.Workspaces().Count(); index > 0U; --index) {
         WorkspaceWindow* workspace = state.Workspaces().At(index - 1U);

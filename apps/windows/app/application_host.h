@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "core_host.h"
+#include "activation.h"
 #include "document_session.h"
 #include "recent_documents.h"
 #include "renderer/renderer_host.h"
@@ -84,6 +85,7 @@ public:
     InkpodClipboard* clipboard{};
     std::unique_ptr<CoreHost> engine;
     std::unique_ptr<renderer::RendererHost> renderer;
+    std::unique_ptr<ActivationService> activation;
 
 private:
     [[nodiscard]] bool RegisterWorkspacePanes(

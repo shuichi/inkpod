@@ -221,7 +221,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 329 production commands exactly one
+The fixed command-state catalog assigns all 330 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
@@ -335,6 +335,20 @@ sessions and surviving windows remain registered. Only closing the final workspa
 posts quit. Shutdown unbinds every Canvas, rejects stale notifications, detaches
 and stops Core on its owner thread, stops the renderer on its thread, and only then
 destroys remaining workspace HWND ownership.
+
+G12 adds one process-lifetime `ActivationService` owned by `ApplicationHost`.
+Before Common Controls, COM, CoreHost, RendererHost, or workspace creation, a
+current-user/logon-session named mutex selects the primary. A secondary serializes
+only validated bounded UTF-8 paths, version/size, request ID, open mode, and target
+preference to a local named pipe whose ACL permits the current SID and SYSTEM and
+rejects remote clients. The IPC thread owns no HWND or Core handle; it copies the
+request into a bounded queue and posts only a 64-bit value token split across
+`WPARAM`/`LPARAM`. The UI thread takes the token once, fixes the last-focused
+workspace/active group or explicit new workspace, and calls the normal identity-
+aware open route. Duplicate request IDs are idempotent. Queue/post failure removes
+the unpublished request, shutdown rejects new requests, and a bounded client
+timeout never creates an independent editor. Application shutdown stops activation
+before saving optional previous-document paths and stopping CoreHost.
 
 The five built-in presets are Coloring, Line Cleanup, Reference Check, Batch,
 and Focus. Save, Save As, Restore, and Reset share the normal command/state/
@@ -488,6 +502,18 @@ Timer autosave is enqueued without blocking the UI and is deferred behind a live
 stroke. Long-running tasks expose progress and cancellation; cancellation,
 failure, or stale revision does not partially commit. Format limits and recovery
 details are specified in [`file-format.md`](file-format.md).
+
+Each successful autosave is paired with an atomically replaced, current-version,
+bounded metadata sidecar containing `DocumentSessionId`, generation, document UUID,
+original file identity/path, source path, and write time. Startup enumerates every
+bounded recovery artifact instead of selecting one newest file; missing or malformed
+metadata never causes silent deletion, and restore/discard/defer is per candidate.
+Opening recovery preserves its original identity namespace and retains the artifact
+until a normal save explicitly removes the recovery and sidecar. Autosave does not
+advance the normal savepoint. Workspace layout never contains document paths. A
+separate bounded current-version HKCU path record is read and written only when the
+default-off `起動時に前回の文書を復元` setting is enabled; crash recovery remains
+independent of that privacy choice.
 
 ## Build, portability, and verification boundaries
 

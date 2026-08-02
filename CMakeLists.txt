@@ -208,6 +208,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_frontend_boundaries.cmake")
 
 add_test(
+    NAME inkpod_windows_activation_recovery_boundaries
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_activation_recovery.cmake")
+
+add_test(
     NAME inkpod_windows_command_context_boundaries
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -267,6 +273,47 @@ if(MSVC)
 endif()
 
 if(WIN32)
+    add_executable(inkpod_windows_activation_tests
+        apps/windows/app/activation.cpp
+        apps/windows/app/activation.h
+        tests/windows_activation.cpp)
+    target_include_directories(inkpod_windows_activation_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows")
+    target_compile_definitions(inkpod_windows_activation_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_activation_tests PRIVATE
+        advapi32
+        user32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_activation_tests)
+        target_compile_options(inkpod_windows_activation_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_activation
+        COMMAND inkpod_windows_activation_tests)
+
+    add_executable(inkpod_windows_session_recovery_tests
+        apps/windows/app/document_identity.h
+        apps/windows/app/identity.h
+        apps/windows/app/session_recovery.cpp
+        apps/windows/app/session_recovery.h
+        tests/windows_session_recovery.cpp)
+    target_include_directories(inkpod_windows_session_recovery_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows")
+    target_compile_definitions(inkpod_windows_session_recovery_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_session_recovery_tests PRIVATE
+        advapi32
+        ole32
+        shell32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_session_recovery_tests)
+        target_compile_options(inkpod_windows_session_recovery_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_session_recovery
+        COMMAND inkpod_windows_session_recovery_tests)
+
     add_executable(inkpod_windows_launch_options_tests
         apps/windows/app/launch_options.cpp
         apps/windows/app/launch_options.h
@@ -435,6 +482,8 @@ if(WIN32)
         COMMAND inkpod_windows_renderer_host_tests)
 
     add_executable(inkpod WIN32
+        apps/windows/app/activation.cpp
+        apps/windows/app/activation.h
         apps/windows/app/application_host.cpp
         apps/windows/app/application_host.h
         apps/windows/app/application_owner_graph.h
@@ -448,6 +497,8 @@ if(WIN32)
         apps/windows/app/document_session.h
         apps/windows/app/recent_documents.cpp
         apps/windows/app/recent_documents.h
+        apps/windows/app/session_recovery.cpp
+        apps/windows/app/session_recovery.h
         apps/windows/app/frontend_state.h
         apps/windows/app/identity.h
         apps/windows/app/pane_target.cpp

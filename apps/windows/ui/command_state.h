@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 329U;
+inline constexpr std::size_t kProductionCommandStateCount = 330U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -146,6 +146,10 @@ struct WorkspaceCommandStateInput {
     bool batch_auto_hidden{};
 };
 
+struct ApplicationCommandStateInput {
+    bool restore_previous_documents{};
+};
+
 struct CommandStateInputs {
     DocumentCommandStateInput document;
     EditCommandStateInput edit;
@@ -157,6 +161,7 @@ struct CommandStateInputs {
     ColorCommandStateInput color;
     BatchCommandStateInput batch;
     WorkspaceCommandStateInput workspace;
+    ApplicationCommandStateInput application;
 };
 
 CommandStateSet ComputeCommandStates(const CommandStateInputs& inputs) noexcept;

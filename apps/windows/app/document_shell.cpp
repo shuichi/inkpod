@@ -1,8 +1,7 @@
 #include "document_shell.h"
 
 #include <commdlg.h>
-#include <shlobj.h>
-
+#include <objbase.h>
 #include <algorithm>
 #include <array>
 #include <climits>
@@ -16,6 +15,7 @@
 
 #include "frontend_state.h"
 #include "core_host.h"
+#include "session_recovery.h"
 
 namespace inkpod::app {
 namespace {
@@ -24,46 +24,6 @@ InkpodDocumentInfo EmptyDocumentInfo() noexcept {
     InkpodDocumentInfo info{};
     info.struct_size = sizeof(info);
     return info;
-}
-
-bool EnsureDirectory(const std::wstring& path) noexcept {
-    if (CreateDirectoryW(path.c_str(), nullptr) != FALSE) {
-        return true;
-    }
-    if (GetLastError() != ERROR_ALREADY_EXISTS) {
-        return false;
-    }
-    const DWORD attributes = GetFileAttributesW(path.c_str());
-    return attributes != INVALID_FILE_ATTRIBUTES
-        && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0U;
-}
-
-bool RecoveryDirectory(std::wstring& output) noexcept {
-    PWSTR local_app_data{};
-    if (FAILED(SHGetKnownFolderPath(
-            FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &local_app_data))) {
-        return false;
-    }
-    try {
-        std::wstring root(local_app_data);
-        CoTaskMemFree(local_app_data);
-        local_app_data = nullptr;
-        root += L"\\inkpod";
-        if (!EnsureDirectory(root)) {
-            return false;
-        }
-        root += L"\\Recovery";
-        if (!EnsureDirectory(root)) {
-            return false;
-        }
-        output = std::move(root);
-        return true;
-    } catch (const std::bad_alloc&) {
-        if (local_app_data != nullptr) {
-            CoTaskMemFree(local_app_data);
-        }
-        return false;
-    }
 }
 
 } // namespace
@@ -85,13 +45,24 @@ InkpodStatus DocumentShellController::Save(const std::wstring& path) noexcept {
     }
     std::wstring old_recovery_path;
     std::wstring next_current_path;
+    std::wstring fallback_recovery_path;
+    InkpodDocumentInfo current = EmptyDocumentInfo();
+    if (!engine_.GetDocumentInfo(session_, generation_, current)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
     std::wstring next_recovery_path;
     try {
         old_recovery_path = state_.recovery_path;
         next_current_path = path;
-        next_recovery_path = path + L".recovery.inkpod";
+        fallback_recovery_path = path + L".recovery.inkpod";
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (!PrivateRecoveryPath(
+            current.document_uuid_high,
+            current.document_uuid_low,
+            next_recovery_path)) {
+        next_recovery_path = std::move(fallback_recovery_path);
     }
     const InkpodStatus status = engine_.Invoke(
         session_,
@@ -106,8 +77,9 @@ InkpodStatus DocumentShellController::Save(const std::wstring& path) noexcept {
         state_.current_path = std::move(next_current_path);
         state_.source_path.clear();
         state_.recovery_path = std::move(next_recovery_path);
-        if (!old_recovery_path.empty() && old_recovery_path != path) {
-            DeleteFileW(old_recovery_path.c_str());
+        state_.recovery_original_path.clear();
+        if (!old_recovery_path.empty()) {
+            (void)DiscardRecoveryArtifact(old_recovery_path);
         }
     }
     return status;
@@ -119,26 +91,35 @@ InkpodStatus DocumentShellController::Open(const std::wstring& path) noexcept {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
     std::wstring next_current_path;
-    std::wstring next_recovery_path;
+    std::wstring fallback_recovery_path;
+    InkpodDocumentInfo opened_info = EmptyDocumentInfo();
     try {
         next_current_path = path;
-        next_recovery_path = path + L".recovery.inkpod";
+        fallback_recovery_path = path + L".recovery.inkpod";
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus status = engine_.Invoke(
         session_,
         generation_,
-        [utf8](InkpodCore* core) {
-            InkpodDocumentInfo info = EmptyDocumentInfo();
-            return inkpod_core_open(core, utf8.data(), utf8.size(), &info);
+        [utf8, &opened_info](InkpodCore* core) {
+            return inkpod_core_open(
+                core, utf8.data(), utf8.size(), &opened_info);
         },
         false,
         false);
     if (status == INKPOD_STATUS_OK) {
+        std::wstring private_recovery_path;
+        if (!PrivateRecoveryPath(
+                opened_info.document_uuid_high,
+                opened_info.document_uuid_low,
+                private_recovery_path)) {
+            private_recovery_path = std::move(fallback_recovery_path);
+        }
         state_.current_path = std::move(next_current_path);
         state_.source_path.clear();
-        state_.recovery_path = std::move(next_recovery_path);
+        state_.recovery_path = std::move(private_recovery_path);
+        state_.recovery_original_path.clear();
     }
     return status;
 }
@@ -167,6 +148,7 @@ InkpodStatus DocumentShellController::OpenRecovery(const std::wstring& path) noe
         state_.current_path.clear();
         state_.source_path.clear();
         state_.recovery_path = std::move(next_recovery_path);
+        state_.recovery_original_path.clear();
     }
     return status;
 }
@@ -194,6 +176,14 @@ InkpodStatus DocumentShellController::ImportCommonRaster(
     std::memcpy(
         &low, reinterpret_cast<const std::uint8_t*>(&uuid) + sizeof(high),
         sizeof(low));
+    std::wstring private_recovery_path;
+    if (!PrivateRecoveryPath(high, low, private_recovery_path)) {
+        try {
+            private_recovery_path = path + L".recovery.inkpod";
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+    }
     const InkpodStatus status = engine_.Invoke(
         session_,
         generation_,
@@ -207,7 +197,8 @@ InkpodStatus DocumentShellController::ImportCommonRaster(
     if (status == INKPOD_STATUS_OK) {
         state_.source_path = std::move(next_source_path);
         state_.current_path.clear();
-        state_.recovery_path.clear();
+        state_.recovery_path = std::move(private_recovery_path);
+        state_.recovery_original_path.clear();
     }
     return status;
 }
@@ -253,16 +244,32 @@ InkpodStatus DocumentShellController::ExportCommonRaster(
 
 bool DocumentShellController::QueueAutosave(
     const CommandContext& context,
-    const std::wstring& path) noexcept {
+    const std::wstring& path,
+    const RecoveryMetadata& metadata) noexcept {
     std::vector<std::uint8_t> utf8;
     if (!WidePathToUtf8(path, utf8)) {
         return false;
     }
+    std::wstring recovery_path;
+    RecoveryMetadata recovery_metadata{};
+    try {
+        recovery_path = path;
+        recovery_metadata = metadata;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
     return engine_.Enqueue(
         context,
-        [utf8](InkpodCore* core) {
+        [utf8 = std::move(utf8),
+         path = std::move(recovery_path),
+         metadata = std::move(recovery_metadata)](InkpodCore* core) {
             InkpodDocumentInfo info = EmptyDocumentInfo();
-            return inkpod_core_autosave(core, utf8.data(), utf8.size(), &info);
+            const InkpodStatus status = inkpod_core_autosave(
+                core, utf8.data(), utf8.size(), &info);
+            return status == INKPOD_STATUS_OK
+                    && !WriteRecoveryMetadata(path, metadata)
+                ? INKPOD_STATUS_IO_ERROR
+                : status;
         },
         false,
         false,
@@ -546,7 +553,7 @@ bool PrivateRecoveryPath(
     std::uint64_t uuid_low,
     std::wstring& output) noexcept {
     std::wstring directory;
-    if (!RecoveryDirectory(directory)) {
+    if (!RecoveryRootDirectory(directory)) {
         return false;
     }
     std::array<wchar_t, 96> name{};
@@ -560,41 +567,6 @@ bool PrivateRecoveryPath(
     } catch (const std::bad_alloc&) {
         return false;
     }
-}
-
-bool NewestPrivateRecovery(std::wstring& output) noexcept {
-    std::wstring directory;
-    if (!RecoveryDirectory(directory)) {
-        return false;
-    }
-    std::wstring pattern;
-    try {
-        pattern = directory + L"\\*.inkpod";
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    WIN32_FIND_DATAW entry{};
-    HANDLE search = FindFirstFileW(pattern.c_str(), &entry);
-    if (search == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    FILETIME newest{};
-    bool found{};
-    do {
-        if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0U
-            && (!found || CompareFileTime(&entry.ftLastWriteTime, &newest) > 0)) {
-            try {
-                output = directory + L"\\" + entry.cFileName;
-            } catch (const std::bad_alloc&) {
-                FindClose(search);
-                return false;
-            }
-            newest = entry.ftLastWriteTime;
-            found = true;
-        }
-    } while (FindNextFileW(search, &entry) != FALSE);
-    FindClose(search);
-    return found;
 }
 
 bool RecoveryIsNewer(

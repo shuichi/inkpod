@@ -673,6 +673,15 @@ void ProvideWorkspaceCommandStates(
         input.batch_auto_hidden);
 }
 
+void ProvideApplicationCommandStates(
+    const ApplicationCommandStateInput& input,
+    CommandStateSet& states) noexcept {
+    SetChecked(
+        states,
+        IDM_FILE_RESTORE_PREVIOUS,
+        input.restore_previous_documents);
+}
+
 } // namespace
 
 CommandStateSet ComputeCommandStates(const CommandStateInputs& inputs) noexcept {
@@ -688,6 +697,7 @@ CommandStateSet ComputeCommandStates(const CommandStateInputs& inputs) noexcept 
     ProvideToolCommandStates(inputs, states);
     ProvideColorCommandStates(inputs.color, states);
     ProvideWorkspaceCommandStates(inputs.workspace, states);
+    ProvideApplicationCommandStates(inputs.application, states);
     return states;
 }
 

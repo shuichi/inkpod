@@ -25,12 +25,14 @@
 #include <vector>
 
 #include "app/application_host.h"
+#include "app/activation.h"
 #include "canvas.h"
 #include "app/clipboard_adapter.h"
 #include "app/core_host.h"
 #include "app/document_shell.h"
 #include "inkpod/core_ffi.h"
 #include "app/resource.h"
+#include "app/session_recovery.h"
 #include "ui/dialogs/about_dialog.h"
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
@@ -57,10 +59,17 @@
 namespace inkpod::windows::ui::runtime {
 
 using inkpod::app::ApplicationHost;
+using inkpod::app::ActivationRequest;
+using inkpod::app::ActivationTargetPreference;
+using inkpod::app::DiscardRecoveryArtifact;
+using inkpod::app::EnumerateRecoveryCandidates;
 using inkpod::app::InkpodClipboardFormat;
-using inkpod::app::NewestPrivateRecovery;
 using inkpod::app::PublishStandardClipboard;
 using inkpod::app::ReadBoundedFile;
+using inkpod::app::ReadRecoveryMetadata;
+using inkpod::app::RecoveryCandidate;
+using inkpod::app::RecoveryMetadata;
+using inkpod::app::RecoveryMetadataPath;
 using inkpod::app::WriteFileAtomically;
 using inkpod::app::CommandTimerKind;
 using inkpod::windows::ui::tools::TransitionActiveTool;
@@ -1490,16 +1499,33 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         }
     }
     const std::wstring initial_recovery_path = state.Document().shell.recovery_path;
-    std::wstring discovered_recovery;
+    RecoveryMetadata initial_recovery_metadata{};
+    InkpodDocumentInfo initial_recovery_info = EmptyDocumentInfo();
+    std::vector<RecoveryCandidate> recovery_candidates;
     if (initial_recovery_path.empty()
         || !QueueAutosave(
             state, state.routing.targets.Capture(), initial_recovery_path)
         || state.engine->WaitIdle() != INKPOD_STATUS_OK
         || GetFileAttributesW(initial_recovery_path.c_str())
             == INVALID_FILE_ATTRIBUTES
-        || !NewestPrivateRecovery(discovered_recovery)
-        || _wcsicmp(
-            discovered_recovery.c_str(), initial_recovery_path.c_str()) != 0) {
+        || !ReadRecoveryMetadata(
+            initial_recovery_path, initial_recovery_metadata)
+        || !QueryDocument(state, initial_recovery_info)
+        || initial_recovery_metadata.session != state.Document().id
+        || initial_recovery_metadata.generation != state.Document().generation
+        || initial_recovery_metadata.document_uuid_high
+            != initial_recovery_info.document_uuid_high
+        || initial_recovery_metadata.document_uuid_low
+            != initial_recovery_info.document_uuid_low
+        || !EnumerateRecoveryCandidates(recovery_candidates)
+        || std::none_of(
+            recovery_candidates.begin(),
+            recovery_candidates.end(),
+            [&initial_recovery_path](const RecoveryCandidate& candidate) {
+                return _wcsicmp(
+                    candidate.recovery_path.c_str(),
+                    initial_recovery_path.c_str()) == 0;
+            })) {
         return 215;
     }
     std::wstring active_stroke_recovery_path;
@@ -1508,8 +1534,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     } catch (const std::bad_alloc&) {
         return 217;
     }
-    if (DeleteFileW(active_stroke_recovery_path.c_str()) == FALSE
-        && GetLastError() != ERROR_FILE_NOT_FOUND) {
+    if (!DiscardRecoveryArtifact(active_stroke_recovery_path)) {
         return 218;
     }
     PumpPendingWindowMessages();
@@ -1610,7 +1635,9 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         == INVALID_FILE_ATTRIBUTES) {
         return 220;
     }
-    DeleteFileW(active_stroke_recovery_path.c_str());
+    if (!DiscardRecoveryArtifact(active_stroke_recovery_path)) {
+        return 221;
+    }
     PumpPendingWindowMessages();
     InkpodDocumentInfo after_line{};
     if (!QueryDocument(state, after_line)
@@ -1746,6 +1773,14 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || GetLastError() != ERROR_FILE_NOT_FOUND) {
         DeleteFileW(path.c_str());
         return 216;
+    }
+    std::wstring initial_metadata_path;
+    if (!RecoveryMetadataPath(initial_recovery_path, initial_metadata_path)
+        || GetFileAttributesW(initial_metadata_path.c_str())
+            != INVALID_FILE_ATTRIBUTES
+        || GetLastError() != ERROR_FILE_NOT_FOUND) {
+        DeleteFileW(path.c_str());
+        return 222;
     }
     InkpodDocumentInfo saved{};
     if (!QueryDocument(state, saved)
@@ -2317,22 +2352,24 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         || GetFileAttributesW(normal_path.c_str()) == INVALID_FILE_ATTRIBUTES
         || GetFileAttributesW(recovery_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
         DeleteFileW(normal_path.c_str());
-        DeleteFileW(recovery_path.c_str());
+        (void)DiscardRecoveryArtifact(recovery_path);
         return 211;
     }
     InkpodDocumentInfo autosaved{};
     if (!QueryDocument(state, autosaved)
         || (autosaved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
         DeleteFileW(normal_path.c_str());
-        DeleteFileW(recovery_path.c_str());
+        (void)DiscardRecoveryArtifact(recovery_path);
         return 212;
     }
-    if (CreateDefaultCell(state) != INKPOD_STATUS_OK
+    if (!state.CloseDocumentSession(normal_session)
+        || CreateDefaultCell(state) != INKPOD_STATUS_OK
         || OpenRecoveryFromPath(state, recovery_path) != INKPOD_STATUS_OK) {
         DeleteFileW(normal_path.c_str());
-        DeleteFileW(recovery_path.c_str());
+        (void)DiscardRecoveryArtifact(recovery_path);
         return 213;
     }
+    const inkpod::app::DocumentSessionId recovered_session = state.Document().id;
     InkpodDocumentInfo recovered{};
     const bool recovery_state = QueryDocument(state, recovered)
         && (recovered.flags & INKPOD_DOCUMENT_FLAG_RECOVERED) != 0U
@@ -2346,14 +2383,14 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         },
         false,
         false);
-    const bool normal_unchanged = state.CloseDocumentSession(normal_session)
+    const bool normal_unchanged = state.CloseDocumentSession(recovered_session)
         && OpenDocumentFromPath(state, normal_path) == INKPOD_STATUS_OK;
     InkpodDocumentInfo reopened_normal{};
     const bool normal_matches = QueryDocument(state, reopened_normal)
         && reopened_normal.color_plane_checksum == normally_saved.color_plane_checksum
         && reopened_normal.color_plane_checksum != recovered.color_plane_checksum;
     DeleteFileW(normal_path.c_str());
-    DeleteFileW(recovery_path.c_str());
+    (void)DiscardRecoveryArtifact(recovery_path);
     return recovery_state && revert_status == INKPOD_STATUS_INVALID_STATE && normal_unchanged
             && normal_matches
         ? 0
@@ -5461,7 +5498,16 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         cleanup();
         return 891;
     }
-    if (OpenDocumentFromPath(state, first_path) != INKPOD_STATUS_OK) {
+    ActivationRequest activation{};
+    activation.request_id = 1U;
+    activation.target = ActivationTargetPreference::LastFocusedWorkspace;
+    try {
+        activation.paths.push_back(first_path);
+    } catch (const std::bad_alloc&) {
+        cleanup();
+        return 892;
+    }
+    if (!HandleApplicationActivation(state, activation)) {
         cleanup();
         return 892;
     }
@@ -5632,9 +5678,61 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
             ++expected_dirty_prompts;
         }
     }
+    if (expected_dirty_prompts < 2U) {
+        cleanup();
+        return 745;
+    }
+    const auto* first_document = state.Documents().Find(first_session);
+    const auto* second_document = state.Documents().Find(second_session);
+    if (first_document == nullptr || second_document == nullptr
+        || first_document->shell.recovery_path.empty()
+        || second_document->shell.recovery_path.empty()
+        || !QueueAutosave(
+            state,
+            state.routing.targets.Capture(),
+            first_document->shell.recovery_path)
+        || !ActivateDocumentTab(state, second_view)
+        || !QueueAutosave(
+            state,
+            state.routing.targets.Capture(),
+            second_document->shell.recovery_path)
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        cleanup();
+        return 952;
+    }
+    std::vector<RecoveryCandidate> multi_recovery_candidates;
+    if (!EnumerateRecoveryCandidates(multi_recovery_candidates)) {
+        cleanup();
+        return 953;
+    }
+    const auto has_session = [&multi_recovery_candidates](
+                                 inkpod::app::DocumentSessionId session) {
+        return std::any_of(
+            multi_recovery_candidates.begin(),
+            multi_recovery_candidates.end(),
+            [session](const RecoveryCandidate& candidate) {
+                return candidate.has_metadata
+                    && candidate.metadata.session == session;
+            });
+    };
+    InkpodDocumentInfo first_after_autosave = EmptyDocumentInfo();
+    InkpodDocumentInfo second_after_autosave = EmptyDocumentInfo();
+    if (!has_session(first_session) || !has_session(second_session)
+        || !state.engine->GetDocumentInfo(
+            first_session, first_generation, first_after_autosave)
+        || !state.engine->GetDocumentInfo(
+            second_session, second_generation, second_after_autosave)
+        || (first_after_autosave.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || (second_after_autosave.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || !DiscardRecoveryArtifact(first_document->shell.recovery_path)
+        || !DiscardRecoveryArtifact(second_document->shell.recovery_path)
+        || !ActivateDocumentTab(state, first_view)) {
+        cleanup();
+        return 954;
+    }
     state.lifetime.smoke_dirty_prompt_choice = IDCANCEL;
     state.lifetime.smoke_dirty_prompt_count = 0U;
-    if (expected_dirty_prompts < 2U || ConfirmAllDocuments(state)
+    if (ConfirmAllDocuments(state)
         || state.lifetime.smoke_dirty_prompt_count != 1U
         || state.Documents().Count() != baseline_count + 1U) {
         cleanup();
@@ -6341,11 +6439,16 @@ int RunTabDragSmoke(ApplicationHost& state) noexcept {
     }
     TabCtrl_SetCurSel(group->document_tabs, 0);
     TabCtrl_SetCurFocus(group->document_tabs, 0);
-    RECT tab_target_bounds{};
-    GetWindowRect(group->document_tabs, &tab_target_bounds);
-    const POINT after_second{
-        tab_target_bounds.right - 8,
-        (tab_target_bounds.top + tab_target_bounds.bottom) / 2};
+    RECT second_tab_bounds{};
+    if (TabCtrl_GetItemRect(
+            group->document_tabs, 1, &second_tab_bounds) == FALSE) {
+        return 952;
+    }
+    POINT after_second{
+        second_tab_bounds.left
+            + (second_tab_bounds.right - second_tab_bounds.left) * 3 / 4,
+        (second_tab_bounds.top + second_tab_bounds.bottom) / 2};
+    ClientToScreen(group->document_tabs, &after_second);
     if (!QueryDocument(state, before)
         || !begin_drag(group->document_tabs, 0, after_second, false)
         || !state.TabDrag().IsDragging()) {
@@ -6617,11 +6720,10 @@ int RunTabDragSmoke(ApplicationHost& state) noexcept {
         return 972;
     }
 
-    if (SendMessageW(
-            source_workspace->windows.window,
-            WM_COMMAND,
-            IDM_WORKSPACE_NEW_WINDOW,
-            0) != 1) {
+    ActivationRequest new_workspace_activation{};
+    new_workspace_activation.request_id = 2U;
+    new_workspace_activation.target = ActivationTargetPreference::NewWorkspace;
+    if (!HandleApplicationActivation(state, new_workspace_activation)) {
         return 973;
     }
     destination = state.Workspaces().At(1U);

@@ -20,7 +20,7 @@ int APIENTRY wWinMain(
             nullptr,
             parse_status == inkpod::app::LaunchParseStatus::OutOfMemory
                 ? L"起動引数を処理するメモリが不足しています。"
-                : L"起動引数が正しくありません。開くファイルは1つだけ指定してください。",
+                : L"起動引数が正しくありません。開くファイルは64件以内で指定してください。",
             L"inkpod",
             MB_OK | MB_ICONERROR);
         return 9;
@@ -32,6 +32,7 @@ int APIENTRY wWinMain(
         instance,
         show_command,
         options.mode == inkpod::app::LaunchMode::ApplicationSmoke,
-        std::move(options.document_path)};
+        options.open_in_new_workspace,
+        std::move(options.document_paths)};
     return inkpod::app::Application(std::move(launch)).Run();
 }

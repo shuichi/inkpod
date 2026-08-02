@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace inkpod::app {
 
@@ -18,7 +19,8 @@ enum class LaunchParseStatus {
 
 struct LaunchOptions {
     LaunchMode mode{LaunchMode::Application};
-    std::wstring document_path;
+    bool open_in_new_workspace{};
+    std::vector<std::wstring> document_paths;
 };
 
 LaunchParseStatus ParseLaunchArguments(

@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8、G9、G10、G11 完了、次は G12 |
+| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8、G9、G10、G11、G12 完了、次は G13 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -1090,6 +1090,34 @@ OS から複数 file を開く操作と複数 workspace window を整合させ�
 - Explorer/file association から複数 file を開いても、一つの論理 application 内の tab/window として扱われる。
 - 二重 process による同じ file の無警告上書きを防ぐ。
 - 複数文書の recovery を一件も silent に捨てない。
+
+### 完了記録
+
+2026-08-02 に G12 を完了した。同一 user/session の SID 付き named mutex と
+current-user/SYSTEM だけを許可する local named pipe を導入し、secondary は既存 parser で
+Unicode/space を含む最大 64 path と --new-window を検証してから、version 1、長さ付き、
+最大 1 MiB の request を送る。primary の IPC thread は request ID の重複、queue 上限、
+shutdown、malformed message を検査し、値 token だけを UI thread message queue へ渡す。
+secondary は Common Controls、CoreHost、RendererHost、workspace HWND を作る前に終了し、
+5 秒以内に primary が応答しなければ別 process で編集を開始しない。UI thread は受信時に
+last-focused workspace/active group または明示された新規 workspace を確定し、複数 path を
+既存の open/identity route へ順に渡す。同じ file は既存 session/view を activate する。
+
+autosave ごとに versioned/bounded metadata sidecar へ DocumentSessionId、generation、
+document UUID、original file identity/path、source、時刻を記録する。起動時は最大 4096 件の
+全 recovery を新しい順に列挙し、metadata が壊れていても候補本体を保持したまま、一件ずつ
+復元、破棄、保留を選べる。通常 save は対応する recovery と sidecar を除去するが、
+autosave/recovery は通常 savepoint を進めない。前回開いていた通常 path の復元は workspace
+layout と crash recovery から分離し、「ファイル > 起動時に前回の文書を復元」の明示設定を
+既定 off で追加した。C ABI と Rust Core の所有権契約は変更していない。
+
+protocol/transport unit は Unicode、space、long/multiple path、duplicate、4 concurrent
+clients、version/truncation/oversize/偽 request、timeout、UI queue failure を確認した。
+recovery unit と application smoke は metadata/path record の current-version
+round-trip/malformed rejection、全候補列挙、個別破棄、二つの dirty session の autosave と
+列挙、crash 相当の close/recovery、savepoint/Undo/Redo/save/reopen、同一 file focus と明示
+new-window routing を確認した。Rust 178 tests と 1 doctest、x64 Debug/Release の strict build、
+unsigned MSIX assembly、全 25/25 CTest を完了した。次に着手する milestone は G13 である。
 
 ---
 

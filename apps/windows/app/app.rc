@@ -95,6 +95,7 @@ BEGIN
         MENUITEM "ラスタ－を書き出し...", IDM_FILE_EXPORT_RASTER
         MENUITEM "Recoveryを保存(&V)", IDM_FILE_AUTOSAVE_NOW
         MENUITEM "Recoveryを開く(&Y)...", IDM_FILE_OPEN_RECOVERY
+        MENUITEM "起動時に前回の文書を復元(&P)", IDM_FILE_RESTORE_PREVIOUS
         MENUITEM SEPARATOR
         MENUITEM "終了(&X)", IDM_APP_EXIT
     END

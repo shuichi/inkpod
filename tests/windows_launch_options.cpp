@@ -23,7 +23,8 @@ int main() {
     const wchar_t* no_arguments[]{L"inkpod.exe"};
     if (Parse(no_arguments, 1, options) != LaunchParseStatus::Ok
         || options.mode != LaunchMode::Application
-        || !options.document_path.empty()) {
+        || options.open_in_new_workspace
+        || !options.document_paths.empty()) {
         return 1;
     }
 
@@ -31,21 +32,22 @@ int main() {
         L"inkpod.exe", L"C:\\制作資料\\空白 を含むセル.inkpod"};
     if (Parse(document, 2, options) != LaunchParseStatus::Ok
         || options.mode != LaunchMode::Application
-        || options.document_path != document[1]) {
+        || options.document_paths.size() != 1U
+        || options.document_paths[0] != document[1]) {
         return 2;
     }
 
     const wchar_t* smoke[]{L"inkpod.exe", L"--smoke-test"};
     if (Parse(smoke, 2, options) != LaunchParseStatus::Ok
         || options.mode != LaunchMode::ApplicationSmoke
-        || !options.document_path.empty()) {
+        || !options.document_paths.empty()) {
         return 3;
     }
 
     const wchar_t* abi[]{L"inkpod.exe", L"--abi-smoke-test"};
     if (Parse(abi, 2, options) != LaunchParseStatus::Ok
         || options.mode != LaunchMode::AbiSmoke
-        || !options.document_path.empty()) {
+        || !options.document_paths.empty()) {
         return 4;
     }
 
@@ -53,14 +55,16 @@ int main() {
         L"inkpod.exe", L"C:\\cells\\--smoke-test drawing.inkpod"};
     if (Parse(option_like_name, 2, options) != LaunchParseStatus::Ok
         || options.mode != LaunchMode::Application
-        || options.document_path != option_like_name[1]) {
+        || options.document_paths.size() != 1U
+        || options.document_paths[0] != option_like_name[1]) {
         return 5;
     }
 
     const wchar_t* escaped_option[]{
         L"inkpod.exe", L"--", L"--named-cell.inkpod"};
     if (Parse(escaped_option, 3, options) != LaunchParseStatus::Ok
-        || options.document_path != escaped_option[2]) {
+        || options.document_paths.size() != 1U
+        || options.document_paths[0] != escaped_option[2]) {
         return 6;
     }
 
@@ -72,8 +76,10 @@ int main() {
 
     const wchar_t* multiple_documents[]{
         L"inkpod.exe", L"first.inkpod", L"second.inkpod"};
-    if (Parse(multiple_documents, 3, options)
-        != LaunchParseStatus::InvalidArguments) {
+    if (Parse(multiple_documents, 3, options) != LaunchParseStatus::Ok
+        || options.document_paths.size() != 2U
+        || options.document_paths[0] != multiple_documents[1]
+        || options.document_paths[1] != multiple_documents[2]) {
         return 8;
     }
 
@@ -88,6 +94,28 @@ int main() {
     if (Parse(duplicate_modes, 3, options)
         != LaunchParseStatus::InvalidArguments) {
         return 10;
+    }
+
+    const wchar_t* new_window[]{
+        L"inkpod.exe", L"--new-window", L"first.inkpod", L"second.inkpod"};
+    if (Parse(new_window, 4, options) != LaunchParseStatus::Ok
+        || !options.open_in_new_workspace
+        || options.document_paths.size() != 2U) {
+        return 11;
+    }
+
+    const wchar_t* duplicate_new_window[]{
+        L"inkpod.exe", L"--new-window", L"--new-window"};
+    if (Parse(duplicate_new_window, 3, options)
+        != LaunchParseStatus::InvalidArguments) {
+        return 12;
+    }
+
+    const wchar_t* smoke_new_window[]{
+        L"inkpod.exe", L"--smoke-test", L"--new-window"};
+    if (Parse(smoke_new_window, 3, options)
+        != LaunchParseStatus::InvalidArguments) {
+        return 13;
     }
 
     return 0;

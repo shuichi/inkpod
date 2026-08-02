@@ -8,6 +8,7 @@
 
 #include "command_context.h"
 #include "inkpod/core_ffi.h"
+#include "session_recovery.h"
 
 namespace inkpod::app {
 
@@ -30,7 +31,8 @@ public:
         const std::wstring& path, bool composite_white) noexcept;
     bool QueueAutosave(
         const CommandContext& context,
-        const std::wstring& path) noexcept;
+        const std::wstring& path,
+        const RecoveryMetadata& metadata) noexcept;
 
 private:
     DocumentShellState& state_;
@@ -60,7 +62,6 @@ bool PrivateRecoveryPath(
     std::uint64_t uuid_high,
     std::uint64_t uuid_low,
     std::wstring& output) noexcept;
-bool NewestPrivateRecovery(std::wstring& output) noexcept;
 bool RecoveryIsNewer(
     const std::wstring& normal_path,
     const std::wstring& recovery_path) noexcept;

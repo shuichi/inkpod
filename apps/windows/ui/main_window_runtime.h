@@ -7,7 +7,9 @@
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
+struct ActivationRequest;
 class ApplicationHost;
+struct RecoveryCandidate;
 struct WorkspaceWindow;
 }
 
@@ -23,6 +25,12 @@ InkpodStatus OpenDocumentFromPath(
     app::ApplicationHost& state, const std::wstring& path) noexcept;
 InkpodStatus OpenRecoveryFromPath(
     app::ApplicationHost& state, const std::wstring& path) noexcept;
+InkpodStatus OpenRecoveryCandidate(
+    app::ApplicationHost& state,
+    const app::RecoveryCandidate& candidate) noexcept;
+bool HandleApplicationActivation(
+    app::ApplicationHost& state,
+    const app::ActivationRequest& request) noexcept;
 void UpdateMenuState(app::ApplicationHost& state) noexcept;
 void ShowInitialPalettes(app::ApplicationHost& state) noexcept;
 void CaptureWorkspacePresentation(app::ApplicationHost& state) noexcept;

@@ -11,6 +11,7 @@
 
 namespace inkpod::app {
 class ApplicationHost;
+struct RecoveryCandidate;
 }
 
 namespace inkpod::windows::ui::runtime {
@@ -44,6 +45,9 @@ InkpodStatus OpenDocumentFromPathImpl(
     app::ApplicationHost& state, const std::wstring& path) noexcept;
 InkpodStatus OpenRecoveryFromPathImpl(
     app::ApplicationHost& state, const std::wstring& path) noexcept;
+InkpodStatus OpenRecoveryCandidateImpl(
+    app::ApplicationHost& state,
+    const app::RecoveryCandidate& candidate) noexcept;
 bool CreateDocumentViewInGroup(
     app::ApplicationHost& state,
     app::EditorGroupId destination,

@@ -219,8 +219,16 @@ int main() {
         || IsCommandEnabled(states, IDM_VIEW_MOVE_NEXT_WINDOW)
         || IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEXT_WINDOW)
         || IsCommandEnabled(states, IDM_FILE_RECENT_1)
+        || !IsCommandEnabled(states, IDM_FILE_RESTORE_PREVIOUS)
+        || IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
         return 1;
+    }
+
+    inputs.application.restore_previous_documents = true;
+    states = ComputeCommandStates(inputs);
+    if (!IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)) {
+        return 21;
     }
 
     inputs.document.has_document = true;

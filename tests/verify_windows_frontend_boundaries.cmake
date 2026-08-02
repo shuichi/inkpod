@@ -7,6 +7,10 @@ set(application_source
     "${INKPOD_SOURCE_DIR}/apps/windows/app/application.cpp")
 set(launch_source
     "${INKPOD_SOURCE_DIR}/apps/windows/app/launch_options.cpp")
+set(activation_source
+    "${INKPOD_SOURCE_DIR}/apps/windows/app/activation.cpp")
+set(recovery_source
+    "${INKPOD_SOURCE_DIR}/apps/windows/app/session_recovery.cpp")
 set(smoke_source "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp")
 set(runtime_source
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp")
@@ -26,6 +30,8 @@ foreach(required_source IN ITEMS
         "${main_source}"
         "${application_source}"
         "${launch_source}"
+        "${activation_source}"
+        "${recovery_source}"
         "${smoke_source}"
         "${runtime_source}"
         "${chrome_source}"
@@ -109,7 +115,8 @@ foreach(required_launch_token IN ITEMS
         "CommandLineToArgvW"
         "ParseLaunchArguments"
         "--smoke-test"
-        "--abi-smoke-test")
+        "--abi-smoke-test"
+        "--new-window")
     string(FIND "${launch_text}" "${required_launch_token}" token_offset)
     if(token_offset LESS 0)
         message(FATAL_ERROR
@@ -138,9 +145,11 @@ file(READ "${application_source}" application_text)
 foreach(required_application_token IN ITEMS
         "InitCommonControlsEx"
         "ComApartment"
-        "NewestPrivateRecovery"
-        "launch_.document_path"
+        "ActivationService"
+        "launch_.document_paths"
         "OpenDocumentFromPath"
+        "ReviewRecoveryCandidates"
+        "LoadRestorePreviousDocumentsSetting"
         "CreateDefaultCell"
         "RunMessageLoop"
         "RunApplicationSmoke"
@@ -194,7 +203,9 @@ file(READ "${cmake_source}" cmake_text)
 foreach(required_cmake_source IN ITEMS
         "apps/windows/app/app_smoke.cpp"
         "apps/windows/app/application.cpp"
+        "apps/windows/app/activation.cpp"
         "apps/windows/app/launch_options.cpp"
+        "apps/windows/app/session_recovery.cpp"
         "apps/windows/app/main.cpp"
         "apps/windows/ui/command_catalog.cpp"
         "apps/windows/ui/shortcut_controller.cpp"
