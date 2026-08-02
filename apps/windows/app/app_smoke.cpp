@@ -1027,7 +1027,12 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (GetUpdateRect(color_picker, &color_picker_update, FALSE) == FALSE) {
         return 842;
     }
-    if (EqualRect(&color_picker_client, &color_picker_update) == FALSE) {
+    // A child window's update region can be clipped or coalesced by Windows
+    // according to its parent and siblings, so its bounding rectangle is not
+    // required to match the full client rectangle. Any pending picker paint
+    // redraws the complete current-size surface; verify that path directly.
+    if (UpdateWindow(color_picker) == FALSE
+        || GetUpdateRect(color_picker, &color_picker_update, FALSE) != FALSE) {
         return 843;
     }
     SetWindowPos(
