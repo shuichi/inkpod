@@ -14,6 +14,24 @@ namespace {
 
 constexpr UINT_PTR kSplitterSubclass = 1U;
 
+constexpr std::array<UINT, kWorkspaceAuxiliaryPaneCount>
+    kAutoHideButtonCommands{
+        IDM_WINDOW_LOCATOR,
+        IDM_WINDOW_SEQUENCE,
+        IDM_WINDOW_LIGHT_TABLE,
+        IDM_WINDOW_SUBPALETTE,
+        IDM_WINDOW_BATCH,
+    };
+
+constexpr std::array<UINT, kWorkspaceAuxiliaryPaneCount>
+    kAutoHideButtonLabelResources{
+        IDS_PANE_LOCATOR,
+        IDS_PANE_SEQUENCE,
+        IDS_PANE_LIGHT_TABLE,
+        IDS_PANE_REFERENCE,
+        IDS_PANE_BATCH,
+    };
+
 void PlaceChild(HWND child, const RECT& bounds, bool requested_visible) noexcept {
     if (child == nullptr) {
         return;
@@ -283,6 +301,34 @@ bool CreateMainChrome(
         || !windows.dock_host.Initialize(windows.window, instance, windows.workspace.dock)) {
         return false;
     }
+    for (std::size_t index = 0U; index < windows.auto_hide_buttons.size(); ++index) {
+        std::array<wchar_t, 64U> label{};
+        if (LoadStringW(
+                instance,
+                kAutoHideButtonLabelResources[index],
+                label.data(),
+                static_cast<int>(label.size()))
+            == 0) {
+            return false;
+        }
+        windows.auto_hide_buttons[index] = CreateWindowExW(
+            0,
+            L"BUTTON",
+            label.data(),
+            WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON,
+            0,
+            0,
+            0,
+            0,
+            windows.window,
+            reinterpret_cast<HMENU>(
+                static_cast<INT_PTR>(kAutoHideButtonCommands[index])),
+            instance,
+            nullptr);
+        if (windows.auto_hide_buttons[index] == nullptr) {
+            return false;
+        }
+    }
     editors.splitter = CreateEditorSplitter(windows, instance);
     if (editors.splitter == nullptr) {
         return false;
@@ -366,6 +412,14 @@ void LayoutMainChrome(
     windows.workspace.last_client_width = width;
     windows.workspace.last_client_height = height;
     windows.dock_host.ApplyLayout(layout.dock, dpi);
+    for (std::size_t index = 0U; index < windows.auto_hide_buttons.size(); ++index) {
+        const auto* pane = FindWorkspaceAuxiliaryPane(
+            windows.workspace, static_cast<WorkspaceAuxiliaryPane>(index));
+        PlaceChild(
+            windows.auto_hide_buttons[index],
+            layout.auto_hide_buttons[index],
+            pane != nullptr && pane->auto_hide);
+    }
     LayoutEditorArea(windows, layout, smoke_test, dpi);
 }
 

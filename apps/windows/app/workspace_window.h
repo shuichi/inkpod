@@ -27,6 +27,7 @@ struct WorkspaceWindow final {
     HWND effects_progress{};
     HWND batch_progress{};
     HWND batch_palette{};
+    bool workspace_presentation_pending{};
     std::uint64_t color_notice_sequence{};
     std::uint64_t batch_notice_sequence{};
     HWND locator_palette{};

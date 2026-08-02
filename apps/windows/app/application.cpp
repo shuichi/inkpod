@@ -173,8 +173,9 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
         state.Workspace().batch_progress = nullptr;
     }
     if (!state.lifetime.smoke_test) {
+        windows::ui::runtime::CaptureWorkspacePresentation(state);
         windows::ui::SaveWorkspaceLayout(
-            state.Workspace().windows.workspace, L"WorkspaceSessionV2");
+            state.Workspace().windows.workspace, L"WorkspaceSessionV4");
         (void)windows::ui::SavePaletteWindowPlacement(
             state.Workspace().locator_palette, L"LocatorPaletteV1");
         (void)windows::ui::SavePaletteWindowPlacement(

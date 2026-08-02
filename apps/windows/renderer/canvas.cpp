@@ -2721,6 +2721,11 @@ LRESULT CALLBACK CanvasWindowProcedure(
                     static_cast<float>(GET_X_LPARAM(lparam)),
                     static_cast<float>(GET_Y_LPARAM(lparam)));
                 ReleaseCapture();
+                SendMessageW(
+                    GetParent(window),
+                    kCanvasInteractionEnded,
+                    static_cast<WPARAM>(host->Canvas().Value()),
+                    static_cast<LPARAM>(host->SurfaceGeneration().Value()));
                 return completed ? 1 : 0;
             }
             return 0;
@@ -2771,12 +2776,22 @@ LRESULT CALLBACK CanvasWindowProcedure(
             }
             const bool completed = host->EndPointer(pointer_id, samples);
             ReleaseCapture();
+            SendMessageW(
+                GetParent(window),
+                kCanvasInteractionEnded,
+                static_cast<WPARAM>(host->Canvas().Value()),
+                static_cast<LPARAM>(host->SurfaceGeneration().Value()));
             return completed ? 1 : 0;
         }
         case WM_CAPTURECHANGED:
             if (host != nullptr) {
                 host->CancelStroke();
                 host->panning = false;
+                SendMessageW(
+                    GetParent(window),
+                    kCanvasInteractionEnded,
+                    static_cast<WPARAM>(host->Canvas().Value()),
+                    static_cast<LPARAM>(host->SurfaceGeneration().Value()));
             }
             return 0;
         case kCanvasRenderOnce:

@@ -1358,6 +1358,67 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             state.Workspace().panes.layer_palette, state.Workspace().command_states)) {
         return 739;
     }
+    InkpodDocumentInfo before_workspace_preset{};
+    InkpodDocumentInfo after_workspace_preset{};
+    if (!QueryDocument(state, before_workspace_preset)
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_WORKSPACE_PRESET_REFERENCE,
+               0)
+            != 1
+        || state.Workspace().windows.workspace.selected_preset
+            != inkpod::windows::ui::WorkspacePreset::ReferenceCheck
+        || !checked(IDM_WORKSPACE_PRESET_REFERENCE)) {
+        return 944;
+    }
+    const std::size_t locator_index = static_cast<std::size_t>(
+        inkpod::windows::ui::WorkspaceAuxiliaryPane::Locator);
+    const HWND locator_edge =
+        state.Workspace().windows.auto_hide_buttons[locator_index];
+    if (locator_edge == nullptr || IsWindowVisible(locator_edge) == FALSE
+        || (GetWindowLongPtrW(locator_edge, GWL_STYLE) & WS_TABSTOP) == 0
+        || !WindowHasAccessibleName(locator_edge)) {
+        return 945;
+    }
+    SendMessageW(locator_edge, BM_CLICK, 0, 0);
+    if (IsWindowVisible(state.Workspace().locator_palette) == FALSE) {
+        return 945;
+    }
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_ACTIVATE,
+        WA_ACTIVE,
+        0);
+    if (IsWindowVisible(state.Workspace().locator_palette) != FALSE
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_WORKSPACE_AUTOHIDE_LOCATOR,
+               0)
+            != 1
+        || IsWindowVisible(locator_edge) != FALSE
+        || checked(IDM_WORKSPACE_AUTOHIDE_LOCATOR)) {
+        return 946;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WORKSPACE_PRESET_FOCUS,
+            0)
+            != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_WORKSPACE_PRESET_COLORING,
+               0)
+            != 1
+        || !QueryDocument(state, after_workspace_preset)
+        || after_workspace_preset.document_revision
+            != before_workspace_preset.document_revision
+        || after_workspace_preset.flags != before_workspace_preset.flags) {
+        return 947;
+    }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WORKSPACE_RESET, 0);
     ShowWindow(state.Workspace().windows.window, SW_HIDE);
 
@@ -1480,6 +1541,28 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     SendMessageW(state.Workspace().windows.canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 100));
     for (int x = 90; x <= 240; x += 15) {
         SendMessageW(state.Workspace().windows.canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, 120));
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WORKSPACE_PRESET_FOCUS,
+            0)
+        != 1) {
+        return 948;
+    }
+    if (GetCapture() != state.Workspace().windows.canvas) {
+        return 949;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WORKSPACE_PRESET_COLORING,
+            0)
+        != 1) {
+        return 950;
+    }
+    if (GetCapture() != state.Workspace().windows.canvas) {
+        return 951;
     }
     if (state.engine->FlushPreview() != INKPOD_STATUS_OK) {
         return 33;

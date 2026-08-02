@@ -620,6 +620,36 @@ void ProvideWorkspaceCommandStates(
     SetChecked(states, IDM_BATCH_PIN, input.batch_pinned);
     SetEnabled(states, IDM_BATCH_PIN, input.batch_target_available);
     SetChecked(states, IDM_WORKSPACE_MIRROR, input.mirrored);
+    SetChecked(
+        states, IDM_WORKSPACE_PRESET_COLORING,
+        input.selected_workspace_preset == 0U);
+    SetChecked(
+        states, IDM_WORKSPACE_PRESET_LINE_CLEANUP,
+        input.selected_workspace_preset == 1U);
+    SetChecked(
+        states, IDM_WORKSPACE_PRESET_REFERENCE,
+        input.selected_workspace_preset == 2U);
+    SetChecked(
+        states, IDM_WORKSPACE_PRESET_BATCH,
+        input.selected_workspace_preset == 3U);
+    SetChecked(
+        states, IDM_WORKSPACE_PRESET_FOCUS,
+        input.selected_workspace_preset == 4U);
+    SetChecked(
+        states, IDM_WORKSPACE_AUTOHIDE_LOCATOR,
+        input.locator_auto_hidden);
+    SetChecked(
+        states, IDM_WORKSPACE_AUTOHIDE_SEQUENCE,
+        input.sequence_auto_hidden);
+    SetChecked(
+        states, IDM_WORKSPACE_AUTOHIDE_LIGHT_TABLE,
+        input.light_table_auto_hidden);
+    SetChecked(
+        states, IDM_WORKSPACE_AUTOHIDE_REFERENCE,
+        input.reference_auto_hidden);
+    SetChecked(
+        states, IDM_WORKSPACE_AUTOHIDE_BATCH,
+        input.batch_auto_hidden);
 }
 
 } // namespace

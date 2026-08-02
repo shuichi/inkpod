@@ -238,6 +238,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_dock_host.cmake")
 
 add_test(
+    NAME inkpod_windows_workspace_persistence_boundaries
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_workspace_persistence.cmake")
+
+add_test(
     NAME inkpod_msvc_runtime_discovery
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -325,7 +331,9 @@ if(WIN32)
         "${CMAKE_SOURCE_DIR}/apps/windows")
     target_compile_definitions(inkpod_windows_workspace_layout_tests PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(inkpod_windows_workspace_layout_tests PRIVATE advapi32)
+    target_link_libraries(inkpod_windows_workspace_layout_tests PRIVATE
+        advapi32
+        shcore)
     if(MSVC)
         inkpod_enable_strict_warnings(inkpod_windows_workspace_layout_tests)
         target_compile_options(inkpod_windows_workspace_layout_tests PRIVATE /EHsc)
@@ -525,6 +533,7 @@ if(WIN32)
         oleacc
         oleaut32
         advapi32
+        shcore
         shell32)
     if(MSVC)
         inkpod_enable_strict_warnings(inkpod)

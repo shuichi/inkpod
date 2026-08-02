@@ -92,8 +92,11 @@ const wchar_t* GroupName(UINT command) noexcept {
                     || command == IDM_COLOR_PIN
                     || command == IDM_WORKSPACE_RESET
                     || command == IDM_WORKSPACE_SAVE
+                    || command == IDM_WORKSPACE_SAVE_AS
                     || command == IDM_WORKSPACE_RESTORE
                     || command == IDM_WORKSPACE_MIRROR
+                    || (command >= IDM_WORKSPACE_PRESET_COLORING
+                        && command <= IDM_WORKSPACE_AUTOHIDE_BATCH)
                     || command == IDM_WINDOW_LOCATOR
                     || command == IDM_LOCATOR_PIN
                     || command == IDM_LOCATOR_FIXED
@@ -230,6 +233,50 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
             return true;
         case IDM_WORKSPACE_MIRROR:
             sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'M')});
+            return true;
+        case IDM_WORKSPACE_PRESET_COLORING:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'W'), Stroke(L'C')});
+            return true;
+        case IDM_WORKSPACE_PRESET_LINE_CLEANUP:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'W'), Stroke(L'L')});
+            return true;
+        case IDM_WORKSPACE_PRESET_REFERENCE:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'W'), Stroke(L'R')});
+            return true;
+        case IDM_WORKSPACE_PRESET_BATCH:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'W'), Stroke(L'B')});
+            return true;
+        case IDM_WORKSPACE_PRESET_FOCUS:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'W'), Stroke(L'F')});
+            return true;
+        case IDM_WORKSPACE_SAVE_AS:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'W'), Stroke(L'A')});
+            return true;
+        case IDM_WORKSPACE_AUTOHIDE_LOCATOR:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'A'), Stroke(L'K')});
+            return true;
+        case IDM_WORKSPACE_AUTOHIDE_SEQUENCE:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'A'), Stroke(L'F')});
+            return true;
+        case IDM_WORKSPACE_AUTOHIDE_LIGHT_TABLE:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'A'), Stroke(L'H')});
+            return true;
+        case IDM_WORKSPACE_AUTOHIDE_REFERENCE:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'A'), Stroke(L'P')});
+            return true;
+        case IDM_WORKSPACE_AUTOHIDE_BATCH:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'A'), Stroke(L'B')});
             return true;
         default: return false;
     }

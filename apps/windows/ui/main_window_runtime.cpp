@@ -134,6 +134,10 @@ using inkpod::windows::ui::ComputeCommandStates;
 using inkpod::windows::ui::CommandStateOwner;
 using inkpod::windows::ui::FindCommandState;
 using inkpod::windows::ui::IsCommandEnabled;
+using inkpod::windows::ui::WorkspaceAuxiliaryPane;
+using inkpod::windows::ui::WorkspaceLayoutState;
+using inkpod::windows::ui::WorkspacePreset;
+using inkpod::windows::ui::WorkspaceSplitOrientation;
 using inkpod::windows::ui::tools::CancelVectorGeometryPreview;
 using inkpod::windows::ui::tools::CancelSelectionGeometryPreview;
 using inkpod::windows::ui::tools::HandleActivePlaneTransition;
@@ -4394,6 +4398,23 @@ CommandStateInputs BuildCommandStateInputs(
             state.routing.targets).status == PaneTargetStatus::Ok;
     inputs.workspace.mirrored =
         state.Workspace().windows.workspace.dock.Mirrored();
+    inputs.workspace.selected_workspace_preset = static_cast<std::uint32_t>(
+        state.Workspace().windows.workspace.selected_preset);
+    const auto auto_hidden = [&state](WorkspaceAuxiliaryPane type) {
+        const auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
+            state.Workspace().windows.workspace, type);
+        return pane != nullptr && pane->auto_hide;
+    };
+    inputs.workspace.locator_auto_hidden = auto_hidden(
+        WorkspaceAuxiliaryPane::Locator);
+    inputs.workspace.sequence_auto_hidden = auto_hidden(
+        WorkspaceAuxiliaryPane::Sequence);
+    inputs.workspace.light_table_auto_hidden = auto_hidden(
+        WorkspaceAuxiliaryPane::LightTable);
+    inputs.workspace.reference_auto_hidden = auto_hidden(
+        WorkspaceAuxiliaryPane::Reference);
+    inputs.workspace.batch_auto_hidden = auto_hidden(
+        WorkspaceAuxiliaryPane::Batch);
     return inputs;
 }
 
@@ -8267,6 +8288,141 @@ bool ChooseBatchFolder(HWND owner, std::wstring& selected_path) noexcept {
     return BatchController::ChooseFolder(owner, selected_path);
 }
 
+HWND AuxiliaryPaneWindow(
+    const ApplicationHost& state, WorkspaceAuxiliaryPane type) noexcept {
+    switch (type) {
+        case WorkspaceAuxiliaryPane::Locator:
+            return state.Workspace().locator_palette;
+        case WorkspaceAuxiliaryPane::Sequence:
+            return state.Workspace().sequence_palette;
+        case WorkspaceAuxiliaryPane::LightTable:
+            return state.Workspace().light_table_palette;
+        case WorkspaceAuxiliaryPane::Reference:
+            return state.Workspace().subpalette_palette;
+        case WorkspaceAuxiliaryPane::Batch:
+            return state.Workspace().batch_palette;
+        case WorkspaceAuxiliaryPane::Count:
+            return nullptr;
+    }
+    return nullptr;
+}
+
+WorkspaceSplitOrientation CaptureSplitOrientation(
+    const ApplicationHost& state) noexcept {
+    switch (state.Workspace().editors.Orientation()) {
+        case EditorSplitOrientation::Vertical:
+            return WorkspaceSplitOrientation::Vertical;
+        case EditorSplitOrientation::Horizontal:
+            return WorkspaceSplitOrientation::Horizontal;
+        case EditorSplitOrientation::None:
+            return WorkspaceSplitOrientation::None;
+    }
+    return WorkspaceSplitOrientation::None;
+}
+
+void CaptureWorkspacePresentation(ApplicationHost& state) noexcept {
+    WorkspaceLayoutState& layout = state.Workspace().windows.workspace;
+    layout.split_orientation = CaptureSplitOrientation(state);
+    layout.split_ratio_milli = state.Workspace().editors.SplitRatioMilli();
+    if (state.Workspace().windows.window != nullptr
+        && IsWindowVisible(state.Workspace().windows.window) != FALSE) {
+        static_cast<void>(inkpod::windows::ui::CaptureWorkspaceWindowPlacement(
+            state.Workspace().windows.window, layout));
+    }
+    for (std::size_t index = 0U;
+         index < inkpod::windows::ui::kWorkspaceAuxiliaryPaneCount;
+         ++index) {
+        const auto type = static_cast<WorkspaceAuxiliaryPane>(index);
+        auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
+            layout, type);
+        const HWND window = AuxiliaryPaneWindow(state, type);
+        if (pane == nullptr || window == nullptr) {
+            continue;
+        }
+        static_cast<void>(inkpod::windows::ui::CaptureWorkspaceAuxiliaryPlacement(
+            window, layout, type));
+        if (!pane->auto_hide) {
+            pane->visible = IsWindowVisible(window) != FALSE;
+        }
+    }
+}
+
+void ApplyWorkspacePresentation(ApplicationHost& state) noexcept {
+    WorkspaceLayoutState& layout = state.Workspace().windows.workspace;
+    state.Workspace().editors.SetSplitRatioMilli(layout.split_ratio_milli);
+    if (state.Workspace().editors.GroupCount() > 1U) {
+        const EditorSplitOrientation orientation =
+            layout.split_orientation == WorkspaceSplitOrientation::Horizontal
+            ? EditorSplitOrientation::Horizontal
+            : EditorSplitOrientation::Vertical;
+        static_cast<void>(state.Workspace().editors.SetOrientation(orientation));
+    }
+    for (std::size_t index = 0U;
+         index < inkpod::windows::ui::kWorkspaceAuxiliaryPaneCount;
+         ++index) {
+        const auto type = static_cast<WorkspaceAuxiliaryPane>(index);
+        const auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
+            layout, type);
+        const HWND window = AuxiliaryPaneWindow(state, type);
+        if (pane == nullptr || window == nullptr) {
+            continue;
+        }
+        static_cast<void>(inkpod::windows::ui::ApplyWorkspaceAuxiliaryPlacement(
+            window, state.Workspace().windows.window, layout, type));
+        ShowWindow(
+            window,
+            pane->visible && !pane->auto_hide ? SW_SHOWNOACTIVATE : SW_HIDE);
+    }
+}
+
+void CollapseAutoHiddenPanes(ApplicationHost& state) noexcept {
+    const WorkspaceLayoutState& layout = state.Workspace().windows.workspace;
+    for (std::size_t index = 0U;
+         index < inkpod::windows::ui::kWorkspaceAuxiliaryPaneCount;
+         ++index) {
+        const auto type = static_cast<WorkspaceAuxiliaryPane>(index);
+        const auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
+            layout, type);
+        const HWND window = AuxiliaryPaneWindow(state, type);
+        if (pane != nullptr && pane->auto_hide && window != nullptr) {
+            ShowWindow(window, SW_HIDE);
+        }
+    }
+}
+
+bool ToggleAuxiliaryPaneVisibility(
+    ApplicationHost& state, WorkspaceAuxiliaryPane type) noexcept {
+    WorkspaceLayoutState& layout = state.Workspace().windows.workspace;
+    auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(layout, type);
+    const HWND window = AuxiliaryPaneWindow(state, type);
+    if (pane == nullptr || window == nullptr) {
+        return false;
+    }
+    const bool show = IsWindowVisible(window) == FALSE;
+    ShowWindow(window, show ? SW_SHOW : SW_HIDE);
+    if (!pane->auto_hide) {
+        pane->visible = show;
+    }
+    layout.selected_preset = WorkspacePreset::Custom;
+    return show;
+}
+
+void ClampWorkspaceOwnedWindows(ApplicationHost& state) noexcept {
+    WorkspaceLayoutState& layout = state.Workspace().windows.workspace;
+    static_cast<void>(inkpod::windows::ui::ApplyWorkspaceWindowPlacement(
+        state.Workspace().windows.window, layout));
+    for (std::size_t index = 0U;
+         index < inkpod::windows::ui::kWorkspaceAuxiliaryPaneCount;
+         ++index) {
+        const auto type = static_cast<WorkspaceAuxiliaryPane>(index);
+        static_cast<void>(inkpod::windows::ui::ApplyWorkspaceAuxiliaryPlacement(
+            AuxiliaryPaneWindow(state, type),
+            state.Workspace().windows.window,
+            layout,
+            type));
+    }
+}
+
 void RelayoutWorkspace(ApplicationHost& state) noexcept {
     RECT client{};
     if (GetClientRect(state.Workspace().windows.window, &client) != FALSE) {
@@ -8278,11 +8434,40 @@ void RelayoutWorkspace(ApplicationHost& state) noexcept {
     }
 }
 
+bool WorkspaceCanvasOwnsCapture(const ApplicationHost& state) noexcept {
+    const HWND capture = GetCapture();
+    for (std::size_t index = 0U;
+         capture != nullptr && index < state.Workspace().editors.GroupCount();
+         ++index) {
+        const auto* group = state.Workspace().editors.GroupAt(index);
+        if (group != nullptr && group->canvas == capture) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ApplyOrDeferWorkspacePresentation(ApplicationHost& state) noexcept {
+    if (WorkspaceCanvasOwnsCapture(state)) {
+        state.Workspace().workspace_presentation_pending = true;
+        UpdateMenuState(state);
+        return;
+    }
+    state.Workspace().workspace_presentation_pending = false;
+    ApplyWorkspacePresentation(state);
+    RelayoutWorkspace(state);
+    RefreshTreePane(state);
+    RefreshDockPaneViews(state);
+    UpdateMenuState(state);
+}
+
 void NotifyDockHostChanged(void* context) noexcept {
     auto* state = static_cast<ApplicationHost*>(context);
     if (state == nullptr) {
         return;
     }
+    state->Workspace().windows.workspace.selected_preset =
+        WorkspacePreset::Custom;
     RelayoutWorkspace(*state);
     RefreshColorPanes(*state);
     RefreshDockPaneViews(*state);
@@ -8292,7 +8477,15 @@ void NotifyDockHostChanged(void* context) noexcept {
 
 bool InitializeMainChrome(ApplicationHost& state) noexcept {
     if (!state.lifetime.smoke_test) {
-        LoadWorkspaceLayout(state.Workspace().windows.workspace, L"WorkspaceSessionV2");
+        if (!LoadWorkspaceLayout(
+                state.Workspace().windows.workspace, L"WorkspaceSessionV4")
+            && LoadWorkspaceLayout(
+                state.Workspace().windows.workspace, L"WorkspaceSessionV2")) {
+            if (SaveWorkspaceLayout(
+                    state.Workspace().windows.workspace, L"WorkspaceSessionV4")) {
+                static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSessionV2"));
+            }
+        }
     }
     if (!inkpod::windows::ui::CreateMainChrome(
             state.Workspace().windows,
@@ -8300,6 +8493,11 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
             state.lifetime.instance,
             state.lifetime.smoke_test)) {
         return false;
+    }
+    if (!state.lifetime.smoke_test) {
+        static_cast<void>(inkpod::windows::ui::ApplyWorkspaceWindowPlacement(
+            state.Workspace().windows.window,
+            state.Workspace().windows.workspace));
     }
     state.batch.palette_dialog = {
         &state,
@@ -8480,6 +8678,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
             DockPaneType::Layer, state.Workspace().windows.layer_palette)) {
         return false;
     }
+    ApplyWorkspacePresentation(state);
     RelayoutWorkspace(state);
     return true;
 }
@@ -8508,9 +8707,9 @@ std::optional<LRESULT> RouteBatchCommand(
     switch (LOWORD(wparam)) {
         case IDM_WINDOW_BATCH:
             if (state->Workspace().batch_palette != nullptr) {
-                const bool visible = IsWindowVisible(state->Workspace().batch_palette) != FALSE;
-                ShowWindow(state->Workspace().batch_palette, visible ? SW_HIDE : SW_SHOW);
-                if (!visible) {
+                const bool shown = ToggleAuxiliaryPaneVisibility(
+                    *state, WorkspaceAuxiliaryPane::Batch);
+                if (shown) {
                     UpdateBatchTarget(*state);
                     RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
                     SetForegroundWindow(state->Workspace().batch_palette);
@@ -11852,12 +12051,9 @@ std::optional<LRESULT> RouteApplicationCommand(
     switch (LOWORD(wparam)) {
         case IDM_WINDOW_LOCATOR:
             if (state->Workspace().locator_palette != nullptr) {
-                const bool visible = IsWindowVisible(
-                    state->Workspace().locator_palette) != FALSE;
-                ShowWindow(
-                    state->Workspace().locator_palette,
-                    visible ? SW_HIDE : SW_SHOW);
-                if (!visible) {
+                const bool shown = ToggleAuxiliaryPaneVisibility(
+                    *state, WorkspaceAuxiliaryPane::Locator);
+                if (shown) {
                     RefreshLocatorPane(*state);
                     QueueLocatorSample(*state);
                     SetForegroundWindow(state->Workspace().locator_palette);
@@ -11903,12 +12099,9 @@ std::optional<LRESULT> RouteApplicationCommand(
             return 1;
         case IDM_WINDOW_SEQUENCE:
             if (state->Workspace().sequence_palette != nullptr) {
-                const bool visible = IsWindowVisible(
-                    state->Workspace().sequence_palette) != FALSE;
-                ShowWindow(
-                    state->Workspace().sequence_palette,
-                    visible ? SW_HIDE : SW_SHOW);
-                if (!visible) {
+                const bool shown = ToggleAuxiliaryPaneVisibility(
+                    *state, WorkspaceAuxiliaryPane::Sequence);
+                if (shown) {
                     RefreshSequencePane(*state);
                     SetForegroundWindow(state->Workspace().sequence_palette);
                     SetFocus(GetDlgItem(
@@ -11940,12 +12133,9 @@ std::optional<LRESULT> RouteApplicationCommand(
         }
         case IDM_WINDOW_LIGHT_TABLE:
             if (state->Workspace().light_table_palette != nullptr) {
-                const bool visible = IsWindowVisible(
-                    state->Workspace().light_table_palette) != FALSE;
-                ShowWindow(
-                    state->Workspace().light_table_palette,
-                    visible ? SW_HIDE : SW_SHOW);
-                if (!visible) {
+                const bool shown = ToggleAuxiliaryPaneVisibility(
+                    *state, WorkspaceAuxiliaryPane::LightTable);
+                if (shown) {
                     RefreshLightTablePane(*state);
                     SetForegroundWindow(state->Workspace().light_table_palette);
                     SetFocus(GetDlgItem(
@@ -11979,12 +12169,9 @@ std::optional<LRESULT> RouteApplicationCommand(
         }
         case IDM_WINDOW_SUBPALETTE:
             if (state->Workspace().subpalette_palette != nullptr) {
-                const bool visible = IsWindowVisible(
-                    state->Workspace().subpalette_palette) != FALSE;
-                ShowWindow(
-                    state->Workspace().subpalette_palette,
-                    visible ? SW_HIDE : SW_SHOW);
-                if (!visible) {
+                const bool shown = ToggleAuxiliaryPaneVisibility(
+                    *state, WorkspaceAuxiliaryPane::Reference);
+                if (shown) {
                     (void)RefreshSubpalettePane(*state);
                     SetForegroundWindow(state->Workspace().subpalette_palette);
                     SetFocus(
@@ -12019,15 +12206,50 @@ std::optional<LRESULT> RouteApplicationCommand(
             return 0;
         }
         case IDM_WORKSPACE_RESET:
-            ResetWorkspaceLayout(state->Workspace().windows.workspace);
-            RelayoutWorkspace(*state);
-            RefreshTreePane(*state);
-            RefreshDockPaneViews(*state);
-            UpdateMenuState(*state);
+            static_cast<void>(ApplyWorkspacePreset(
+                state->Workspace().windows.workspace,
+                WorkspacePreset::Coloring));
+            ApplyOrDeferWorkspacePresentation(*state);
             return 1;
+        case IDM_WORKSPACE_PRESET_COLORING:
+        case IDM_WORKSPACE_PRESET_LINE_CLEANUP:
+        case IDM_WORKSPACE_PRESET_REFERENCE:
+        case IDM_WORKSPACE_PRESET_BATCH:
+        case IDM_WORKSPACE_PRESET_FOCUS: {
+            WorkspaceLayoutState& layout = state->Workspace().windows.workspace;
+            const WorkspaceSplitOrientation orientation =
+                CaptureSplitOrientation(*state);
+            const std::uint32_t ratio =
+                state->Workspace().editors.SplitRatioMilli();
+            WorkspacePreset preset = WorkspacePreset::Coloring;
+            switch (LOWORD(wparam)) {
+                case IDM_WORKSPACE_PRESET_LINE_CLEANUP:
+                    preset = WorkspacePreset::LineCleanup;
+                    break;
+                case IDM_WORKSPACE_PRESET_REFERENCE:
+                    preset = WorkspacePreset::ReferenceCheck;
+                    break;
+                case IDM_WORKSPACE_PRESET_BATCH:
+                    preset = WorkspacePreset::Batch;
+                    break;
+                case IDM_WORKSPACE_PRESET_FOCUS:
+                    preset = WorkspacePreset::Focus;
+                    break;
+                default:
+                    break;
+            }
+            if (!ApplyWorkspacePreset(layout, preset)) {
+                return 0;
+            }
+            layout.split_orientation = orientation;
+            layout.split_ratio_milli = ratio;
+            ApplyOrDeferWorkspacePresentation(*state);
+            return 1;
+        }
         case IDM_WORKSPACE_SAVE: {
+            CaptureWorkspacePresentation(*state);
             const bool saved = SaveWorkspaceLayout(
-                state->Workspace().windows.workspace, L"WorkspaceSavedV2");
+                state->Workspace().windows.workspace, L"WorkspaceSavedV4");
             if (!saved && !state->lifetime.smoke_test) {
                 MessageBoxW(
                     window,
@@ -12037,16 +12259,54 @@ std::optional<LRESULT> RouteApplicationCommand(
             }
             return saved ? 1 : 0;
         }
+        case IDM_WORKSPACE_SAVE_AS: {
+            TextInputDialogState dialog{};
+            dialog.title = L"ワークスペースに名前を付けて保存";
+            dialog.label = L"名前";
+            const WorkspaceLayoutState& current =
+                state->Workspace().windows.workspace;
+            dialog.value = current.custom_name[0] == L'\0'
+                ? L"ユーザーワークスペース"
+                : current.custom_name.data();
+            dialog.close_immediately = state->lifetime.smoke_test;
+            if (ShowTextInput(
+                    state->lifetime.instance,
+                    window,
+                    state->lifetime.smoke_test,
+                    dialog)
+                != IDOK) {
+                return 0;
+            }
+            CaptureWorkspacePresentation(*state);
+            WorkspaceLayoutState& layout = state->Workspace().windows.workspace;
+            if (!SetWorkspaceCustomName(layout, dialog.value)) {
+                if (!state->lifetime.smoke_test) {
+                    MessageBoxW(
+                        window,
+                        L"ワークスペース名は1〜63文字で指定してください。",
+                        L"inkpod",
+                        MB_OK | MB_ICONWARNING);
+                }
+                return 0;
+            }
+            const bool saved = SaveWorkspaceLayout(
+                layout, L"WorkspaceSavedV4");
+            UpdateMenuState(*state);
+            return saved ? 1 : 0;
+        }
         case IDM_WORKSPACE_RESTORE: {
             WorkspaceLayoutState restored = state->Workspace().windows.workspace;
-            const bool loaded = LoadWorkspaceLayout(
-                restored, L"WorkspaceSavedV2");
+            bool loaded = LoadWorkspaceLayout(restored, L"WorkspaceSavedV4");
+            if (!loaded
+                && LoadWorkspaceLayout(restored, L"WorkspaceSavedV2")) {
+                if (SaveWorkspaceLayout(restored, L"WorkspaceSavedV4")) {
+                    static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSavedV2"));
+                }
+                loaded = true;
+            }
             if (loaded) {
                 state->Workspace().windows.workspace = restored;
-                RelayoutWorkspace(*state);
-                RefreshTreePane(*state);
-                RefreshDockPaneViews(*state);
-                UpdateMenuState(*state);
+                ApplyOrDeferWorkspacePresentation(*state);
             } else if (!state->lifetime.smoke_test) {
                 MessageBoxW(
                     window,
@@ -12056,9 +12316,47 @@ std::optional<LRESULT> RouteApplicationCommand(
             }
             return loaded ? 1 : 0;
         }
+        case IDM_WORKSPACE_AUTOHIDE_LOCATOR:
+        case IDM_WORKSPACE_AUTOHIDE_SEQUENCE:
+        case IDM_WORKSPACE_AUTOHIDE_LIGHT_TABLE:
+        case IDM_WORKSPACE_AUTOHIDE_REFERENCE:
+        case IDM_WORKSPACE_AUTOHIDE_BATCH: {
+            WorkspaceAuxiliaryPane type = WorkspaceAuxiliaryPane::Locator;
+            switch (LOWORD(wparam)) {
+                case IDM_WORKSPACE_AUTOHIDE_SEQUENCE:
+                    type = WorkspaceAuxiliaryPane::Sequence;
+                    break;
+                case IDM_WORKSPACE_AUTOHIDE_LIGHT_TABLE:
+                    type = WorkspaceAuxiliaryPane::LightTable;
+                    break;
+                case IDM_WORKSPACE_AUTOHIDE_REFERENCE:
+                    type = WorkspaceAuxiliaryPane::Reference;
+                    break;
+                case IDM_WORKSPACE_AUTOHIDE_BATCH:
+                    type = WorkspaceAuxiliaryPane::Batch;
+                    break;
+                default:
+                    break;
+            }
+            auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
+                state->Workspace().windows.workspace, type);
+            if (pane == nullptr) {
+                return 0;
+            }
+            pane->auto_hide = !pane->auto_hide;
+            pane->visible = false;
+            state->Workspace().windows.workspace.selected_preset =
+                WorkspacePreset::Custom;
+            ShowWindow(AuxiliaryPaneWindow(*state, type), SW_HIDE);
+            RelayoutWorkspace(*state);
+            UpdateMenuState(*state);
+            return 1;
+        }
         case IDM_WORKSPACE_MIRROR:
             state->Workspace().windows.workspace.dock.SetMirrored(
                 !state->Workspace().windows.workspace.dock.Mirrored());
+            state->Workspace().windows.workspace.selected_preset =
+                WorkspacePreset::Custom;
             RelayoutWorkspace(*state);
             UpdateMenuState(*state);
             return 1;
@@ -12135,7 +12433,7 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
     ApplicationHost* state,
     HWND window,
     UINT message,
-    WPARAM,
+    WPARAM wparam,
     LPARAM lparam) noexcept {
     switch (message) {
         case WM_CREATE:
@@ -12204,6 +12502,20 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
                 }
             }
             break;
+        case WM_ACTIVATE:
+            if (state != nullptr && LOWORD(wparam) != WA_INACTIVE) {
+                CollapseAutoHiddenPanes(*state);
+                UpdateMenuState(*state);
+            }
+            break;
+        case WM_DISPLAYCHANGE:
+        case WM_SETTINGCHANGE:
+            if (state != nullptr) {
+                CaptureWorkspacePresentation(*state);
+                ClampWorkspaceOwnedWindows(*state);
+                RelayoutWorkspace(*state);
+            }
+            break;
         case WM_DPICHANGED: {
             const auto* bounds = reinterpret_cast<const RECT*>(lparam);
             SetWindowPos(
@@ -12214,6 +12526,11 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
                 bounds->right - bounds->left,
                 bounds->bottom - bounds->top,
                 SWP_NOACTIVATE | SWP_NOZORDER);
+            if (state != nullptr) {
+                CaptureWorkspacePresentation(*state);
+                ClampWorkspaceOwnedWindows(*state);
+                RelayoutWorkspace(*state);
+            }
             return 0;
         }
         default:
@@ -12859,6 +13176,19 @@ std::optional<LRESULT> RouteCanvasMessage(
                 }
             }
             return 0;
+        case inkpod::renderer::kCanvasInteractionEnded:
+            if (state != nullptr
+                && state->Workspace().workspace_presentation_pending) {
+                const CanvasId canvas{static_cast<std::uint64_t>(wparam)};
+                const auto* group = state->Workspace().editors.FindByCanvas(canvas);
+                if (group != nullptr
+                    && group->generation
+                        == Generation(static_cast<std::uint64_t>(lparam))) {
+                    ApplyOrDeferWorkspacePresentation(*state);
+                    return 1;
+                }
+            }
+            return 0;
         case inkpod::renderer::kCanvasViewportChanged:
             if (state != nullptr && state->engine != nullptr && wparam != 0U) {
                 const CanvasId canvas{static_cast<std::uint64_t>(wparam)};
@@ -13330,6 +13660,7 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
                 state->effects.airbrush_active = false;
                 DisarmCommandTimer(
                     *state, window, CommandTimerKind::ContinuousSpray);
+                CaptureWorkspacePresentation(*state);
             }
             ShowWindow(window, SW_HIDE);
             PostQuitMessage(0);

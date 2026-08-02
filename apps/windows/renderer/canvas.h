@@ -20,6 +20,7 @@ inline constexpr UINT kCanvasGetRendererThreadId = WM_APP + 0x127U;
 inline constexpr UINT kCanvasGetPresentedFrameCount = WM_APP + 0x128U;
 inline constexpr UINT kCanvasActivated = WM_APP + 0x129U;
 inline constexpr UINT kCanvasPointerMoved = WM_APP + 0x12AU;
+inline constexpr UINT kCanvasInteractionEnded = WM_APP + 0x12BU;
 inline constexpr UINT kCanvasValidateClosedVectorStroke = WM_APP + 0x12DU;
 inline constexpr UINT kCanvasClearGeometryPreview = WM_APP + 0x12FU;
 enum class CanvasStrokeEventKind : std::uint32_t {

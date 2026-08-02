@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <array>
+
 #include "app/editor_area.h"
 #include "ui/dock_host.h"
 #include "ui/workspace_layout.h"
@@ -22,6 +24,8 @@ struct MainWindowHandles {
     EditorArea* editors{};
     windows::ui::WorkspaceLayoutState workspace{};
     windows::ui::DockHost dock_host{};
+    std::array<HWND, windows::ui::kWorkspaceAuxiliaryPaneCount>
+        auto_hide_buttons{};
 };
 
 }

@@ -24,6 +24,7 @@ InkpodStatus OpenRecoveryFromPath(
     app::ApplicationHost& state, const std::wstring& path) noexcept;
 void UpdateMenuState(app::ApplicationHost& state) noexcept;
 void ShowInitialPalettes(app::ApplicationHost& state) noexcept;
+void CaptureWorkspacePresentation(app::ApplicationHost& state) noexcept;
 void ShowCoreError(
     const app::ApplicationHost& state,
     HWND owner,

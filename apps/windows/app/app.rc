@@ -66,6 +66,8 @@ BEGIN
     IDS_PANE_LOCATOR "ロケーター"
     IDS_PANE_SEQUENCE "シーケンス"
     IDS_PANE_LIGHT_TABLE "ライトテーブル"
+    IDS_PANE_REFERENCE "参照"
+    IDS_PANE_BATCH "バッチ"
 END
 
 IDR_MAIN_MENU MENU
@@ -522,11 +524,29 @@ BEGIN
             MENUITEM "文書に固定／追従", IDM_BATCH_PIN
         END
         MENUITEM SEPARATOR
-        POPUP "パレットの整頓"
+        POPUP "ワークスペース"
         BEGIN
-            MENUITEM "初期位置", IDM_WORKSPACE_RESET
-            MENUITEM "現在位置を保存", IDM_WORKSPACE_SAVE
-            MENUITEM "保存位置へ戻す", IDM_WORKSPACE_RESTORE
+            POPUP "プリセット"
+            BEGIN
+                MENUITEM "彩色", IDM_WORKSPACE_PRESET_COLORING
+                MENUITEM "線整理", IDM_WORKSPACE_PRESET_LINE_CLEANUP
+                MENUITEM "参照・チェック", IDM_WORKSPACE_PRESET_REFERENCE
+                MENUITEM "バッチ", IDM_WORKSPACE_PRESET_BATCH
+                MENUITEM "集中", IDM_WORKSPACE_PRESET_FOCUS
+            END
+            MENUITEM SEPARATOR
+            MENUITEM "ワークスペースを保存", IDM_WORKSPACE_SAVE
+            MENUITEM "名前を付けて保存...", IDM_WORKSPACE_SAVE_AS
+            MENUITEM "保存したワークスペースを復元", IDM_WORKSPACE_RESTORE
+            MENUITEM "既定に戻す", IDM_WORKSPACE_RESET
+            POPUP "補助ペインを自動格納"
+            BEGIN
+                MENUITEM "ロケーター", IDM_WORKSPACE_AUTOHIDE_LOCATOR
+                MENUITEM "シーケンス／プレビュー", IDM_WORKSPACE_AUTOHIDE_SEQUENCE
+                MENUITEM "ライトテーブル", IDM_WORKSPACE_AUTOHIDE_LIGHT_TABLE
+                MENUITEM "サブパレット／参照", IDM_WORKSPACE_AUTOHIDE_REFERENCE
+                MENUITEM "バッチ", IDM_WORKSPACE_AUTOHIDE_BATCH
+            END
             MENUITEM "左右を反転", IDM_WORKSPACE_MIRROR
         END
     END

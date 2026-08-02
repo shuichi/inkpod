@@ -207,7 +207,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 311 production commands exactly one
+The fixed command-state catalog assigns all 322 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
@@ -292,13 +292,27 @@ close maps to hide, preserving the pane's controller state. All HWND and Common
 Controls activity remains on the UI/Input thread; Core and renderer ownership is
 unchanged.
 
-Pane zones, order, ratios, floating placement, visibility, and mirroring are
-stored as bounded 96-DPI values in the per-user version 3 workspace record. A
-validated migration reads the prior fixed-layout version 2 record. Device-pixel
-conversion occurs once at the DockHost platform boundary. Narrow layouts may
-temporarily suppress lower-priority panes in computed geometry, without mutating
-or saving that adaptation. Named presets, general monitor recovery, and
-secondary-pane auto-hide remain later workspace work.
+G9 persists a bounded version 4 workspace record in HKCU. It contains only main
+window placement, editor split orientation/ratio, dock zones/order/ratios,
+primary and secondary pane visibility/size/floating placement, AutoHide edge,
+density, and selected or user-named preset; document paths and document/Core
+identities are excluded. The decoder validates its exact size, counts, enums,
+stable pane IDs, duplicate IDs, placement bounds, and bounded terminated name.
+Unknown pane IDs are ignored, absent known panes retain current defaults, and an
+invalid or unsupported record restores the default without aborting startup.
+Version 2 fixed and version 3 dock records migrate once to version 4.
+
+The five built-in presets are Coloring, Line Cleanup, Reference Check, Batch,
+and Focus. Save, Save As, Restore, and Reset share the normal command/state/
+shortcut catalog. Secondary palettes use resource-titled standard-button
+AutoHide edge strips, keeping keyboard and accessibility behavior in Common
+Controls. Main and floating placements are captured in physical screen pixels
+with their source DPI and clamped to current monitor work areas on display, DPI,
+and taskbar changes; conversion occurs once. Narrow/compact geometry never
+mutates the saved logical layout. If an editor Canvas owns input capture, preset
+presentation is deferred until that Canvas sends its `CanvasId` and surface
+generation as values after interaction end, so a layout switch cannot cancel or
+retarget an active stroke.
 
 The six-part status bar reports tool/plane, zoom/view flags, coordinates,
 RGBA/selection, paper/DPI, and task/shortcut/dirty state. Document tabs use the

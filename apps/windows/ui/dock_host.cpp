@@ -38,6 +38,27 @@ int PixelsToDip(int value, UINT dpi) noexcept {
     return MulDiv(value, 96, static_cast<int>(dpi == 0U ? 96U : dpi));
 }
 
+RECT ClampToVisibleWorkArea(RECT candidate) noexcept {
+    const HMONITOR monitor = MonitorFromRect(&candidate, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info{sizeof(info)};
+    if (monitor == nullptr || GetMonitorInfoW(monitor, &info) == FALSE) {
+        return candidate;
+    }
+    const int available_width = std::max(1L, info.rcWork.right - info.rcWork.left);
+    const int available_height = std::max(1L, info.rcWork.bottom - info.rcWork.top);
+    const int width = std::clamp(
+        static_cast<int>(candidate.right - candidate.left), 1, available_width);
+    const int height = std::clamp(
+        static_cast<int>(candidate.bottom - candidate.top), 1, available_height);
+    candidate.left = std::clamp(
+        candidate.left, info.rcWork.left, info.rcWork.right - width);
+    candidate.top = std::clamp(
+        candidate.top, info.rcWork.top, info.rcWork.bottom - height);
+    candidate.right = candidate.left + width;
+    candidate.bottom = candidate.top + height;
+    return candidate;
+}
+
 RECT ToRect(const DockRect& value) noexcept {
     return RECT{
         value.x,
@@ -513,13 +534,22 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
             SetParent(pane.content, pane.floating_window);
         }
         if (IsWindowVisible(pane.floating_window) == FALSE) {
+            const RECT restored = ClampToVisibleWorkArea(RECT{
+                ScaleDip(placement->floating.x_dip, dpi_),
+                ScaleDip(placement->floating.y_dip, dpi_),
+                ScaleDip(
+                    placement->floating.x_dip + placement->floating.width_dip,
+                    dpi_),
+                ScaleDip(
+                    placement->floating.y_dip + placement->floating.height_dip,
+                    dpi_)});
             SetWindowPos(
                 pane.floating_window,
                 nullptr,
-                ScaleDip(placement->floating.x_dip, dpi_),
-                ScaleDip(placement->floating.y_dip, dpi_),
-                ScaleDip(placement->floating.width_dip, dpi_),
-                ScaleDip(placement->floating.height_dip, dpi_),
+                restored.left,
+                restored.top,
+                restored.right - restored.left,
+                restored.bottom - restored.top,
                 SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
             ShowWindow(pane.floating_window, SW_SHOWNOACTIVATE);
         }

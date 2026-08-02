@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8 完了、次は G9 |
+| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8、G9 完了、次は G10 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -915,6 +915,31 @@ document/view/job target を説明でき、表示だけの placeholder pane と�
 - application restart 後に layout が安全に復元される。
 - 不正 record と存在しない monitor で window を見失わない。
 - 現在相当の配置へ一操作で戻せる。
+
+### 完了記録
+
+2026-08-02 に G9 を完了した。`WorkspaceLayoutState` は 8 KiB 以下の bounded
+version 4 record とし、window placement、editor split orientation/ratio、primary
+dock stack、pane visibility/size、secondary pane の floating placement/AutoHide、
+selected preset と任意名だけを HKCU に保存する。文書 path、文書 ID、Core 所有状態は
+record に含めない。version 2 fixed record と version 3 dock record は検証後に現在形式へ
+一度だけ移行し、truncated、oversized、unknown enum、重複 ID、不正文字列は既定配置へ
+安全に戻す。unknown pane ID は無視し、不足する既知 pane は現在の default で補う。
+
+`彩色`、`線整理`、`参照・チェック`、`バッチ`、`集中` の五 preset と、保存、名前を
+付けて保存、復元、既定に戻す command を Window menu と configurable shortcut へ接続した。
+secondary pane は resource 名を持つ標準 `BUTTON` の edge strip から pointer、Tab/Space、
+screen reader で開け、main workspace へ戻ると格納される。標準/compact density と狭幅時の
+一時 geometry は保存 model を変更しない。monitor 削除、primary 変更、DPI/work-area 変更時は
+main/floating placement を device-pixel capture DPI から一度だけ換算し、可視 work area へ
+clamp する。
+
+preset 発行時に Canvas が stroke を capture 中なら、文書/Core command には触れず UI 配置の
+適用だけを保留する。Canvas は `CanvasId` と surface generation の値だけで終了を通知し、同じ
+surface と検証できた場合に配置を適用するため、active stroke、Undo/Redo、document/view revision
+は変わらない。pure serialization/migration/malformed/monitor/DPI/density tests、構造 gate、実 HWND
+AutoHide/accessibility と active-stroke smoke、x64 Debug/Release の全 CTest を完了した。次に
+着手する milestone は G10 である。
 
 ---
 
