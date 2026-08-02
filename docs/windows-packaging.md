@@ -21,6 +21,8 @@ main window, title bars, and About dialog use one generated asset. About calls
 suitable ICO image and scales it down instead of maintaining a separate WIC
 PNG-decoding path. The generated app-list PNGs remain package assets referenced
 by the MSIX manifest; they are not duplicated as About-specific Win32 resources.
+The dialog also displays the semantic application version and the configured
+numeric build number as `Version <version> (Build <number>)`.
 
 The winapp CLI 0.5.0 SVG renderer omits a group when the group itself uses the
 SVG `feDropShadow` primitive. Keep optional filter effects on separate shadow
@@ -31,10 +33,13 @@ and artwork geometry intact and omits only that unsupported outer shadow.
 `inkpod_windows_assets` verifies the required file set, representative package
 PNG dimensions, ICO directory entries, the configured x64 or ARM64 package
 identity, executable name, and that the four-part MSIX version matches the CMake
-project version. CMake materializes an architecture-specific manifest in the
-build directory from the checked-in asset-authoring manifest. When changing the
-application version, update `project(inkpod VERSION ...)` in `CMakeLists.txt`;
-the generated MSIX version's last component remains zero.
+project and build numbers. CMake materializes an architecture-specific manifest
+in the build directory from the checked-in asset-authoring manifest. When
+changing the application version, update `project(inkpod VERSION ...)` in
+`CMakeLists.txt`. `INKPOD_BUILD_NUMBER` supplies the fourth component, defaults
+to zero for local builds, and accepts decimal values from 0 through 65535.
+Hosted CI passes the GitHub Actions run number explicitly. The same value is
+embedded in the executable version resource and shown by the About dialog.
 
 The manifest registers `.inkpod` as the `inkpod` file type. The executable uses
 `CommandLineToArgvW` so a shell launch can pass one quoted Unicode path, then
@@ -45,7 +50,7 @@ file-type registration and Windows retains control of the default-app choice.
 
 Every Windows CMake build now assembles an unsigned package through the Windows
 SDK `MakeAppx` tool. The artifact is written to
-`build/<preset>/package/inkpod-<version>-<architecture>.msix` and contains `inkpod.exe`, the
+`build/<preset>/package/inkpod-<four-part-version>-<architecture>.msix` and contains `inkpod.exe`, the
 manifest, generated PNG assets, `LICENSE.txt`, `ThirdPartyNotices.txt`, and the
 MSVC toolchain's matching x64 or ARM64 app-local CRT DLLs required by the `/MD`
 executable. CRT discovery uses the developer environment's `VCToolsRedistDir`

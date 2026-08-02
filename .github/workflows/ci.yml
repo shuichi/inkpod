@@ -50,7 +50,7 @@ jobs:
             throw "Expected Visual Studio 2026, got '$env:VisualStudioVersion'"
           }
           where.exe cl
-      - run: cmake --preset ${{ matrix.preset }}
+      - run: cmake --preset ${{ matrix.preset }} -DINKPOD_BUILD_NUMBER=${{ github.run_number }}
       - run: cmake --build --preset ${{ matrix.preset }}
       - name: Verify unchanged build does not rebuild Rust or MSIX
         shell: pwsh

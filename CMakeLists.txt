@@ -3,6 +3,22 @@ cmake_minimum_required(VERSION 3.25)
 cmake_policy(SET CMP0091 NEW)
 project(inkpod VERSION 0.1.0 LANGUAGES C CXX)
 
+set(INKPOD_BUILD_NUMBER "0" CACHE STRING
+    "Numeric application build number (0-65535)")
+if(NOT INKPOD_BUILD_NUMBER MATCHES "^[0-9]+$")
+    message(FATAL_ERROR
+        "INKPOD_BUILD_NUMBER must contain only decimal digits, not "
+        "'${INKPOD_BUILD_NUMBER}'")
+endif()
+string(LENGTH "${INKPOD_BUILD_NUMBER}" INKPOD_BUILD_NUMBER_LENGTH)
+if(INKPOD_BUILD_NUMBER_LENGTH GREATER 5 OR INKPOD_BUILD_NUMBER GREATER 65535)
+    message(FATAL_ERROR
+        "INKPOD_BUILD_NUMBER must be between 0 and 65535, not "
+        "'${INKPOD_BUILD_NUMBER}'")
+endif()
+math(EXPR INKPOD_BUILD_NUMBER "${INKPOD_BUILD_NUMBER}")
+set(INKPOD_FOUR_PART_VERSION "${PROJECT_VERSION}.${INKPOD_BUILD_NUMBER}")
+
 # MSVC 19.51 can emit UTF-8 /showIncludes text while CMake 4.4 decodes it
 # through the active Japanese code page. Repair that detected prefix so Ninja
 # records header dependencies instead of silently retaining stale objects.
@@ -74,7 +90,7 @@ configure_file(
 file(READ "${INKPOD_PACKAGE_MANIFEST}" INKPOD_PACKAGE_MANIFEST_CONTENT)
 string(REGEX REPLACE
     "ProcessorArchitecture=\"[^\"]+\"([ \t\r\n]+)Version=\"[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+\""
-    "ProcessorArchitecture=\"${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}\"\\1Version=\"${PROJECT_VERSION}.0\""
+    "ProcessorArchitecture=\"${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}\"\\1Version=\"${INKPOD_FOUR_PART_VERSION}\""
     INKPOD_PACKAGE_MANIFEST_CONTENT
     "${INKPOD_PACKAGE_MANIFEST_CONTENT}")
 file(WRITE
@@ -187,6 +203,7 @@ add_test(
             "-DINKPOD_PACKAGE_MANIFEST=${INKPOD_PACKAGE_MANIFEST}"
             "-DINKPOD_PACKAGE_ARCHITECTURE=${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}"
             "-DINKPOD_PROJECT_VERSION=${PROJECT_VERSION}"
+            "-DINKPOD_BUILD_NUMBER=${INKPOD_BUILD_NUMBER}"
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_assets.cmake")
 
 add_test(
@@ -638,7 +655,7 @@ if(WIN32)
         "${INKPOD_MSVC_CRT_DIRECTORY}")
     file(GLOB INKPOD_MSVC_RUNTIME_DLLS "${INKPOD_MSVC_CRT_DIRECTORY}/*.dll")
     set(INKPOD_MSIX_PATH
-        "${CMAKE_BINARY_DIR}/package/inkpod-${PROJECT_VERSION}-${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}.msix")
+        "${CMAKE_BINARY_DIR}/package/inkpod-${INKPOD_FOUR_PART_VERSION}-${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}.msix")
     add_custom_command(
         OUTPUT "${INKPOD_MSIX_PATH}"
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
@@ -667,7 +684,7 @@ if(WIN32)
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_SOURCE_DIR}/tests/verify_msix.ps1"
                 -PackagePath "${INKPOD_MSIX_PATH}"
-                -ExpectedVersion "${PROJECT_VERSION}.0"
+                -ExpectedVersion "${INKPOD_FOUR_PART_VERSION}"
                 -ExpectedArchitecture "${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}")
     set_tests_properties(inkpod_windows_msix_payload_smoke PROPERTIES
         DEPENDS inkpod_windows_assets
@@ -679,7 +696,7 @@ if(WIN32)
             COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
                     -File "${CMAKE_SOURCE_DIR}/tests/msix_install_smoke.ps1"
                     -PackagePath "${INKPOD_MSIX_PATH}"
-                    -ExpectedVersion "${PROJECT_VERSION}.0")
+                    -ExpectedVersion "${INKPOD_FOUR_PART_VERSION}")
         set_tests_properties(inkpod_windows_msix_install_uninstall_smoke PROPERTIES
             DEPENDS inkpod_windows_msix_payload_smoke
             RUN_SERIAL TRUE

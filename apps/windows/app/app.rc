@@ -26,11 +26,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "inkpod contributors\0"
             VALUE "FileDescription", "アニメーション彩色のための制作アプリ\0"
-            VALUE "FileVersion", INKPOD_VERSION_STRING "\0"
+            VALUE "FileVersion", INKPOD_FILE_VERSION_STRING "\0"
             VALUE "InternalName", "inkpod\0"
             VALUE "OriginalFilename", "inkpod.exe\0"
             VALUE "ProductName", "inkpod\0"
-            VALUE "ProductVersion", INKPOD_VERSION_STRING "\0"
+            VALUE "ProductVersion", INKPOD_FILE_VERSION_STRING "\0"
         END
     END
     BLOCK "VarFileInfo"
@@ -44,6 +44,7 @@ BEGIN
     IDS_APP_TITLE "inkpod"
     IDS_MAIN_WINDOW_CLASS "InkpodMainWindow"
     IDS_APP_VERSION INKPOD_VERSION_STRING
+    IDS_APP_BUILD_NUMBER INKPOD_BUILD_NUMBER_STRING
     IDS_ABOUT_DESCRIPTION "Inkpod is a GPU-accelerated painting engine with vector-based strokes for non-destructive editing."
     IDS_ABOUT_COPYRIGHT "© Shuichi Kurabayashi"
     IDS_PLANE_KIND_MAIN_LINE "主線"

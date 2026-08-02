@@ -373,7 +373,8 @@ bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
 
     std::array<wchar_t, 32> name{};
     std::array<wchar_t, 64> version{};
-    std::array<wchar_t, 96> expected_version{};
+    std::array<wchar_t, 16> build_number{};
+    std::array<wchar_t, 128> expected_version{};
     std::array<wchar_t, 512> description{};
     std::array<wchar_t, 512> expected_description{};
     std::array<wchar_t, 64> copyright{};
@@ -397,6 +398,11 @@ bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
                static_cast<int>(version.size())) == 0
         || LoadStringW(
                instance,
+               IDS_APP_BUILD_NUMBER,
+               build_number.data(),
+               static_cast<int>(build_number.size())) == 0
+        || LoadStringW(
+               instance,
                IDS_ABOUT_DESCRIPTION,
                expected_description.data(),
                static_cast<int>(expected_description.size())) == 0
@@ -412,13 +418,14 @@ bool ValidateAboutDialog(HWND dialog, HINSTANCE instance) noexcept {
                static_cast<int>(expected_copyright.size())) == 0) {
         return false;
     }
-    std::array<wchar_t, 96> version_label{};
+    std::array<wchar_t, 128> version_label{};
     _snwprintf_s(
         version_label.data(),
         version_label.size(),
         _TRUNCATE,
-        L"Version %ls",
-        version.data());
+        L"Version %ls (Build %ls)",
+        version.data(),
+        build_number.data());
     return std::wcscmp(name.data(), L"Inkpod") == 0
         && std::wcscmp(expected_version.data(), version_label.data()) == 0
         && std::wcscmp(description.data(), expected_description.data()) == 0
@@ -440,7 +447,8 @@ INT_PTR CALLBACK AboutDialogProcedure(
                 dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
 
             std::array<wchar_t, 64> version{};
-            std::array<wchar_t, 96> version_label{};
+            std::array<wchar_t, 16> build_number{};
+            std::array<wchar_t, 128> version_label{};
             std::array<wchar_t, 512> description{};
             std::array<wchar_t, 64> copyright{};
             if (LoadStringW(
@@ -448,6 +456,11 @@ INT_PTR CALLBACK AboutDialogProcedure(
                     IDS_APP_VERSION,
                     version.data(),
                     static_cast<int>(version.size())) == 0
+                || LoadStringW(
+                       state->instance,
+                       IDS_APP_BUILD_NUMBER,
+                       build_number.data(),
+                       static_cast<int>(build_number.size())) == 0
                 || LoadStringW(
                        state->instance,
                        IDS_ABOUT_DESCRIPTION,
@@ -465,8 +478,9 @@ INT_PTR CALLBACK AboutDialogProcedure(
                 version_label.data(),
                 version_label.size(),
                 _TRUNCATE,
-                L"Version %ls",
-                version.data());
+                L"Version %ls (Build %ls)",
+                version.data(),
+                build_number.data());
             SetDlgItemTextW(dialog, IDC_ABOUT_VERSION, version_label.data());
             SetDlgItemTextW(dialog, IDC_ABOUT_DESCRIPTION, description.data());
             SetDlgItemTextW(dialog, IDC_ABOUT_COPYRIGHT, copyright.data());

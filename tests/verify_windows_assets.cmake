@@ -10,17 +10,20 @@ endif()
 if(NOT DEFINED INKPOD_PROJECT_VERSION)
     message(FATAL_ERROR "INKPOD_PROJECT_VERSION is required")
 endif()
+if(NOT DEFINED INKPOD_BUILD_NUMBER)
+    message(FATAL_ERROR "INKPOD_BUILD_NUMBER is required")
+endif()
 
 file(READ "${INKPOD_PACKAGE_MANIFEST}" package_manifest)
 string(
     FIND
     "${package_manifest}"
-    "Version=\"${INKPOD_PROJECT_VERSION}.0\""
+    "Version=\"${INKPOD_PROJECT_VERSION}.${INKPOD_BUILD_NUMBER}\""
     manifest_version_offset)
 if(manifest_version_offset EQUAL -1)
     message(FATAL_ERROR
         "Package.appxmanifest version does not match CMake project version "
-        "${INKPOD_PROJECT_VERSION}")
+        "${INKPOD_PROJECT_VERSION}.${INKPOD_BUILD_NUMBER}")
 endif()
 foreach(required_manifest_text IN ITEMS
         "Executable=\"inkpod.exe\""
