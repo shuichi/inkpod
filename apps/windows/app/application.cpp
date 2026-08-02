@@ -6,6 +6,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "application_host.h"
@@ -20,62 +21,22 @@
 #include "ui/main_window_runtime.h"
 #include "ui/palette_window.h"
 #include "ui/shortcut_controller.h"
+#include "ui/workspace_layout.h"
 
 namespace inkpod::app {
 namespace {
 
-bool InitializeFrontendRouting(ApplicationHost& state) noexcept {
-    if (!state.InitializeOwners()) {
-        return false;
-    }
-    const auto tool = state.routing.targets.RegisterPane();
-    const auto tool_options = state.routing.targets.RegisterPane();
-    const auto color = state.routing.targets.RegisterPane();
-    const auto layer = state.routing.targets.RegisterPane();
-    const auto batch = state.routing.targets.RegisterPane();
-    const auto locator = state.routing.targets.RegisterPane();
-    const auto sequence = state.routing.targets.RegisterPane();
-    const auto light_table = state.routing.targets.RegisterPane();
-    const auto reference = state.routing.targets.RegisterPane();
-    const auto subpalette = state.routing.targets.RegisterPane();
-    if (!tool.has_value() || !tool_options.has_value() || !color.has_value()
-        || !layer.has_value() || !batch.has_value() || !locator.has_value()
-        || !sequence.has_value() || !light_table.has_value()
-        || !reference.has_value() || !subpalette.has_value()) {
-        state.ClearOwners();
-        return false;
-    }
-    state.routing.tool_pane = tool.value();
-    state.routing.tool_options_pane = tool_options.value();
-    state.routing.color_pane = color.value();
-    state.routing.layer_pane = layer.value();
-    state.routing.batch_pane = batch.value();
-    state.routing.locator_pane = locator.value();
-    state.routing.sequence_pane = sequence.value();
-    state.routing.light_table_pane = light_table.value();
-    state.routing.reference_pane = reference.value();
-    state.routing.subpalette_pane = subpalette.value();
+std::array<wchar_t, 96U> WorkspaceRegistryValueName(
+    std::wstring_view base, std::uint32_t slot) noexcept {
+    std::array<wchar_t, 96U> result{};
+    _snwprintf_s(
+        result.data(), result.size(), _TRUNCATE, L"%.*ls.%u",
+        static_cast<int>(base.size()), base.data(), slot);
+    return result;
+}
 
-    using PanePolicy = PaneTargetPolicy;
-    const std::array registrations{
-        std::pair{tool.value(), PanePolicy::Application},
-        std::pair{tool_options.value(), PanePolicy::FollowActiveView},
-        std::pair{color.value(), PanePolicy::FollowActiveView},
-        std::pair{layer.value(), PanePolicy::FollowActiveView},
-        std::pair{batch.value(), PanePolicy::FollowActiveView},
-        std::pair{locator.value(), PanePolicy::FollowActiveView},
-        std::pair{sequence.value(), PanePolicy::FollowActiveView},
-        std::pair{light_table.value(), PanePolicy::FollowActiveView},
-        std::pair{reference.value(), PanePolicy::FollowActiveView},
-        std::pair{subpalette.value(), PanePolicy::FollowActiveView}};
-    for (const auto& [pane, policy] : registrations) {
-        if (state.routing.pane_targets.Register(pane, policy)
-            != PaneTargetStatus::Ok) {
-            state.ClearOwners();
-            return false;
-        }
-    }
-    return true;
+bool InitializeFrontendRouting(ApplicationHost& state) noexcept {
+    return state.InitializeOwners();
 }
 
 HRESULT StartRenderer(ApplicationHost& state) noexcept {
@@ -122,40 +83,53 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
     if (state.batch.task != nullptr) {
         inkpod_batch_task_cancel(state.batch.task);
     }
-    if (state.Workspace().subpalette_dialog.canvas != nullptr) {
-        (void)renderer::UnbindCanvasSnapshotSink(
-            state.Workspace().subpalette_dialog.canvas);
+    if (!state.lifetime.smoke_test) {
+        (void)windows::ui::SaveWorkspaceWindowCount(
+            static_cast<std::uint32_t>(state.Workspaces().Count()));
     }
-    if (state.engine != nullptr
-        && state.Workspace().subpalette_core_view_id != 0U
-        && state.Workspace().subpalette_session
-        && state.Workspace().subpalette_document_generation) {
-        const std::uint64_t view_id =
-            state.Workspace().subpalette_core_view_id;
-        (void)state.engine->Invoke(
-            state.Workspace().subpalette_session,
-            state.Workspace().subpalette_document_generation,
-            [view_id](InkpodCore* core) {
-                return inkpod_core_view_close(core, view_id);
-            },
-            false,
-            false);
-        state.Workspace().subpalette_core_view_id = 0U;
-    }
-    if (state.Workspace().subpalette_palette != nullptr) {
-        if (!state.lifetime.smoke_test) {
-            (void)windows::ui::SavePaletteWindowPlacement(
-                state.Workspace().subpalette_palette,
-                L"SubpalettePaletteV1");
+    for (std::size_t index = 0U; index < state.Workspaces().Count(); ++index) {
+        WorkspaceWindow* workspace = state.Workspaces().At(index);
+        if (workspace == nullptr) {
+            continue;
         }
-        DestroyWindow(state.Workspace().subpalette_palette);
-        state.Workspace().subpalette_palette = nullptr;
+        (void)state.ActivateWorkspaceWindow(workspace->id, false);
+        for (std::size_t group_index = 0U;
+             group_index < workspace->editors.GroupCount(); ++group_index) {
+            const EditorGroup* group = workspace->editors.GroupAt(group_index);
+            if (group != nullptr && group->canvas != nullptr) {
+                (void)renderer::UnbindCanvasSnapshotSink(group->canvas);
+            }
+        }
+        if (workspace->subpalette_dialog.canvas != nullptr) {
+            (void)renderer::UnbindCanvasSnapshotSink(
+                workspace->subpalette_dialog.canvas);
+        }
+        if (state.engine != nullptr
+            && workspace->subpalette_core_view_id != 0U
+            && workspace->subpalette_session
+            && workspace->subpalette_document_generation) {
+            const std::uint64_t view_id = workspace->subpalette_core_view_id;
+            (void)state.engine->Invoke(
+                workspace->subpalette_session,
+                workspace->subpalette_document_generation,
+                [view_id](InkpodCore* core) {
+                    return inkpod_core_view_close(core, view_id);
+                },
+                false,
+                false);
+            workspace->subpalette_core_view_id = 0U;
+        }
+        if (workspace->subpalette_canvas_id) {
+            (void)state.routing.targets.UnregisterAuxiliaryCanvas(
+                workspace->subpalette_canvas_id);
+            workspace->subpalette_canvas_id = {};
+        }
+        if (workspace->subpalette_palette != nullptr) {
+            DestroyWindow(workspace->subpalette_palette);
+            workspace->subpalette_palette = nullptr;
+        }
     }
-    if (state.Workspace().subpalette_canvas_id) {
-        (void)state.routing.targets.UnregisterAuxiliaryCanvas(
-            state.Workspace().subpalette_canvas_id);
-        state.Workspace().subpalette_canvas_id = {};
-    }
+
     if (state.engine != nullptr) {
         state.DetachCoreSessions();
         state.engine->Stop();
@@ -164,64 +138,73 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
     if (state.renderer != nullptr) {
         state.renderer->Stop();
     }
-    if (state.Workspace().effects_progress != nullptr) {
-        DestroyWindow(state.Workspace().effects_progress);
-        state.Workspace().effects_progress = nullptr;
+    for (std::size_t index = 0U; index < state.Workspaces().Count(); ++index) {
+        WorkspaceWindow* workspace = state.Workspaces().At(index);
+        if (workspace == nullptr) {
+            continue;
+        }
+        (void)state.ActivateWorkspaceWindow(workspace->id, false);
+        if (!state.lifetime.smoke_test) {
+            windows::ui::runtime::CaptureWorkspacePresentation(state);
+            const auto session_name =
+                WorkspaceRegistryValueName(
+                    L"WorkspaceSessionV4", workspace->persistence_slot);
+            windows::ui::SaveWorkspaceLayout(
+                workspace->windows.workspace, session_name.data());
+            const auto locator_name =
+                WorkspaceRegistryValueName(
+                    L"LocatorPaletteV1", workspace->persistence_slot);
+            const auto sequence_name =
+                WorkspaceRegistryValueName(
+                    L"SequencePaletteV1", workspace->persistence_slot);
+            const auto light_table_name =
+                WorkspaceRegistryValueName(
+                    L"LightTablePaletteV1", workspace->persistence_slot);
+            const auto subpalette_name =
+                WorkspaceRegistryValueName(
+                    L"SubpalettePaletteV1", workspace->persistence_slot);
+            (void)windows::ui::SavePaletteWindowPlacement(
+                workspace->locator_palette, locator_name.data());
+            (void)windows::ui::SavePaletteWindowPlacement(
+                workspace->sequence_palette, sequence_name.data());
+            (void)windows::ui::SavePaletteWindowPlacement(
+                workspace->light_table_palette, light_table_name.data());
+            (void)windows::ui::SavePaletteWindowPlacement(
+                workspace->subpalette_palette, subpalette_name.data());
+        }
+        const std::array<HWND*, 9U> owned{
+            &workspace->effects_progress,
+            &workspace->batch_progress,
+            &workspace->tools.palette,
+            &workspace->windows.tool_options,
+            &workspace->windows.color_pane,
+            &workspace->panes.layer_palette,
+            &workspace->batch_palette,
+            &workspace->locator_palette,
+            &workspace->sequence_palette};
+        for (HWND* handle : owned) {
+            if (*handle != nullptr) {
+                DestroyWindow(*handle);
+                *handle = nullptr;
+            }
+        }
+        if (workspace->light_table_palette != nullptr) {
+            DestroyWindow(workspace->light_table_palette);
+            workspace->light_table_palette = nullptr;
+        }
+        workspace->windows.tool_palette = nullptr;
+        workspace->windows.layer_palette = nullptr;
     }
-    if (state.Workspace().batch_progress != nullptr) {
-        DestroyWindow(state.Workspace().batch_progress);
-        state.Workspace().batch_progress = nullptr;
-    }
-    if (!state.lifetime.smoke_test) {
-        windows::ui::runtime::CaptureWorkspacePresentation(state);
-        windows::ui::SaveWorkspaceLayout(
-            state.Workspace().windows.workspace, L"WorkspaceSessionV4");
-        (void)windows::ui::SavePaletteWindowPlacement(
-            state.Workspace().locator_palette, L"LocatorPaletteV1");
-        (void)windows::ui::SavePaletteWindowPlacement(
-            state.Workspace().sequence_palette, L"SequencePaletteV1");
-        (void)windows::ui::SavePaletteWindowPlacement(
-            state.Workspace().light_table_palette, L"LightTablePaletteV1");
-    }
-    if (state.Workspace().tools.palette != nullptr) {
-        DestroyWindow(state.Workspace().tools.palette);
-        state.Workspace().tools.palette = nullptr;
-        state.Workspace().windows.tool_palette = nullptr;
-    }
-    if (state.Workspace().windows.tool_options != nullptr) {
-        DestroyWindow(state.Workspace().windows.tool_options);
-        state.Workspace().windows.tool_options = nullptr;
-    }
-    if (state.Workspace().windows.color_pane != nullptr) {
-        DestroyWindow(state.Workspace().windows.color_pane);
-        state.Workspace().windows.color_pane = nullptr;
-    }
-    if (state.Workspace().panes.layer_palette != nullptr) {
-        DestroyWindow(state.Workspace().panes.layer_palette);
-        state.Workspace().panes.layer_palette = nullptr;
-        state.Workspace().windows.layer_palette = nullptr;
-    }
-    if (state.Workspace().batch_palette != nullptr) {
-        DestroyWindow(state.Workspace().batch_palette);
-        state.Workspace().batch_palette = nullptr;
-    }
-    if (state.Workspace().locator_palette != nullptr) {
-        DestroyWindow(state.Workspace().locator_palette);
-        state.Workspace().locator_palette = nullptr;
-    }
-    if (state.Workspace().sequence_palette != nullptr) {
-        DestroyWindow(state.Workspace().sequence_palette);
-        state.Workspace().sequence_palette = nullptr;
-    }
-    if (state.Workspace().light_table_palette != nullptr) {
-        DestroyWindow(state.Workspace().light_table_palette);
-        state.Workspace().light_table_palette = nullptr;
-    }
+
     const InkpodStatus task_status = inkpod_task_release(&state.effects.task);
-    const InkpodStatus batch_task_status = inkpod_batch_task_release(&state.batch.task);
-    const InkpodStatus preview_status = inkpod_batch_preview_release(&state.batch.preview);
-    const InkpodStatus report_status = inkpod_batch_report_release(&state.batch.report);
-    const InkpodStatus graph_status = inkpod_batch_graph_release(&state.batch.graph);
+    const InkpodStatus batch_task_status =
+        inkpod_batch_task_release(&state.batch.task);
+    const InkpodStatus preview_status =
+        inkpod_batch_preview_release(&state.batch.preview);
+    const InkpodStatus report_status =
+        inkpod_batch_report_release(&state.batch.report);
+    const InkpodStatus graph_status =
+        inkpod_batch_graph_release(&state.batch.graph);
     for (const InkpodStatus status : {
              clipboard_status,
              task_status,
@@ -237,25 +220,33 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
     state.routing.targets.InvalidateAll();
     return INKPOD_STATUS_OK;
 }
-
 int RunMessageLoop(ApplicationHost& state) noexcept {
     MSG message{};
     BOOL result{};
     while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
         bool dialog_message{};
-        const std::array<HWND, 7U> palettes{
-            state.Workspace().tools.palette,
-            state.Workspace().panes.layer_palette,
-            state.Workspace().batch_palette,
-            state.Workspace().locator_palette,
-            state.Workspace().sequence_palette,
-            state.Workspace().light_table_palette,
-            state.Workspace().subpalette_palette};
-        for (const HWND palette : palettes) {
-            if (palette != nullptr && IsWindowVisible(palette) != FALSE
-                && IsDialogMessageW(palette, &message) != FALSE) {
-                dialog_message = true;
-                break;
+        for (std::size_t workspace_index = 0U;
+             workspace_index < state.Workspaces().Count() && !dialog_message;
+             ++workspace_index) {
+            const WorkspaceWindow* workspace =
+                state.Workspaces().At(workspace_index);
+            if (workspace == nullptr) {
+                continue;
+            }
+            const std::array<HWND, 7U> palettes{
+                workspace->tools.palette,
+                workspace->panes.layer_palette,
+                workspace->batch_palette,
+                workspace->locator_palette,
+                workspace->sequence_palette,
+                workspace->light_table_palette,
+                workspace->subpalette_palette};
+            for (const HWND palette : palettes) {
+                if (palette != nullptr && IsWindowVisible(palette) != FALSE
+                    && IsDialogMessageW(palette, &message) != FALSE) {
+                    dialog_message = true;
+                    break;
+                }
             }
         }
         if (dialog_message) {
@@ -329,6 +320,9 @@ int Application::Run() {
     }
     ApplicationHost& state = *host_;
     state.lifetime.instance = launch_.instance;
+    state.lifetime.window_class_name = class_name.data();
+    state.lifetime.window_title = title.data();
+    state.lifetime.show_command = launch_.show_command;
     state.lifetime.smoke_test = launch_.smoke_test;
     if (!InitializeFrontendRouting(state)) {
         host_.reset();
@@ -428,20 +422,46 @@ int Application::Run() {
         host_.reset();
         return 16;
     }
+    const WorkspaceWindowId initial_workspace = state.Workspace().id;
+    if (!launch_.smoke_test) {
+        std::uint32_t window_count{1U};
+        (void)windows::ui::LoadWorkspaceWindowCount(window_count);
+        for (std::uint32_t index = 1U; index < window_count; ++index) {
+            if (windows::ui::runtime::CreateWorkspaceWindow(state, false)
+                == nullptr) {
+                break;
+            }
+        }
+        (void)state.ActivateWorkspaceWindow(initial_workspace, false);
+    }
     windows::ui::runtime::UpdateMenuState(state);
 
     int exit_code{};
     if (launch_.smoke_test) {
         exit_code = windows::ui::RunApplicationSmoke(state);
     } else {
-        ShowWindow(window, launch_.show_command);
-        windows::ui::runtime::ShowInitialPalettes(state);
-        UpdateWindow(window);
+        for (std::size_t index = 0U; index < state.Workspaces().Count(); ++index) {
+            WorkspaceWindow* workspace = state.Workspaces().At(index);
+            if (workspace == nullptr || workspace->windows.window == nullptr) {
+                continue;
+            }
+            (void)state.ActivateWorkspaceWindow(workspace->id, false);
+            ShowWindow(workspace->windows.window, launch_.show_command);
+            windows::ui::runtime::ShowInitialPalettes(state);
+            UpdateWindow(workspace->windows.window);
+        }
+        (void)state.ActivateWorkspaceWindow(initial_workspace, true);
         exit_code = RunMessageLoop(state);
     }
 
     core_status = StopCore(state);
-    DestroyWindow(window);
+    for (std::size_t index = state.Workspaces().Count(); index > 0U; --index) {
+        WorkspaceWindow* workspace = state.Workspaces().At(index - 1U);
+        if (workspace != nullptr && workspace->windows.window != nullptr) {
+            DestroyWindow(workspace->windows.window);
+            workspace->windows.window = nullptr;
+        }
+    }
     state.ClearOwners();
     host_.reset();
     if (core_status != INKPOD_STATUS_OK && exit_code == 0) {

@@ -25,6 +25,25 @@ public:
 
     [[nodiscard]] WorkspaceWindow& Workspace() noexcept;
     [[nodiscard]] const WorkspaceWindow& Workspace() const noexcept;
+    [[nodiscard]] WorkspaceWindow* FindWorkspace(
+        WorkspaceWindowId id) noexcept;
+    [[nodiscard]] const WorkspaceWindow* FindWorkspace(
+        WorkspaceWindowId id) const noexcept;
+    [[nodiscard]] WorkspaceWindow* WorkspaceForView(
+        DocumentViewId view) noexcept;
+    [[nodiscard]] const WorkspaceWindow* WorkspaceForView(
+        DocumentViewId view) const noexcept;
+    [[nodiscard]] WorkspaceWindow* WorkspaceForWindow(HWND window) noexcept;
+    [[nodiscard]] const WorkspaceWindow* WorkspaceForWindow(
+        HWND window) const noexcept;
+    [[nodiscard]] WorkspaceWindowRegistry& Workspaces() noexcept;
+    [[nodiscard]] const WorkspaceWindowRegistry& Workspaces() const noexcept;
+    [[nodiscard]] WorkspaceWindow* AddWorkspaceWindow() noexcept;
+    [[nodiscard]] bool ActivateWorkspaceWindow(
+        WorkspaceWindowId id, bool record_focus = false) noexcept;
+    [[nodiscard]] bool RemoveWorkspaceWindow(WorkspaceWindowId id) noexcept;
+    [[nodiscard]] bool MoveDocumentViewToWorkspace(
+        DocumentViewId view, WorkspaceWindowId destination) noexcept;
     [[nodiscard]] DocumentSession& Document() noexcept;
     [[nodiscard]] const DocumentSession& Document() const noexcept;
     [[nodiscard]] DocumentView& ActiveView() noexcept;
@@ -59,6 +78,12 @@ public:
     std::unique_ptr<renderer::RendererHost> renderer;
 
 private:
+    [[nodiscard]] bool RegisterWorkspacePanes(
+        WorkspaceWindow& workspace) noexcept;
+    void UnregisterWorkspacePanes(WorkspaceWindow& workspace) noexcept;
+    void BindWorkspacePaneAliases(
+        const WorkspaceWindow& workspace) noexcept;
+
     WorkspaceWindowRegistry workspaces_;
     DocumentRegistry documents_;
     RecentDocumentList recent_documents_;

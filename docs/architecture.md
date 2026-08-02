@@ -207,7 +207,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 322 production commands exactly one
+The fixed command-state catalog assigns all 325 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
@@ -301,6 +301,26 @@ stable pane IDs, duplicate IDs, placement bounds, and bounded terminated name.
 Unknown pane IDs are ignored, absent known panes retain current defaults, and an
 invalid or unsupported record restores the default without aborting startup.
 Version 2 fixed and version 3 dock records migrate once to version 4.
+
+G10 replaces the single workspace slot with a UI-thread-owned, fixed-capacity
+`WorkspaceWindowRegistry`. Each heap-stable `WorkspaceWindow` owns its top-level
+and child HWNDs, menu/status presentation, `DockHost`, `EditorArea`, pane instances,
+focus history, and persistence slot. The application continues to share its
+`DocumentRegistry`, `CoreHost`, `RendererHost`, clipboard, shortcuts, and job
+registries. One `DocumentSession` therefore keeps one Core binding when views are
+moved or duplicated across windows; only `DocumentView` presentation and the one
+Canvas per visible editor group are distinct. Window procedures resolve their
+instance from `GWLP_USERDATA`, and the message loop enumerates the registry for
+modeless dialog and keyboard processing.
+
+Window/view commands capture a pointer-free `CommandContext` before routing.
+Cross-window move or duplication validates workspace, group, view, session, and
+generation namespaces and never re-resolves a later active document. Closing a
+window prompts only for dirty sessions whose final view is being removed; shared
+sessions and surviving windows remain registered. Only closing the final workspace
+posts quit. Shutdown unbinds every Canvas, rejects stale notifications, detaches
+and stops Core on its owner thread, stops the renderer on its thread, and only then
+destroys remaining workspace HWND ownership.
 
 The five built-in presets are Coloring, Line Cleanup, Reference Check, Batch,
 and Focus. Save, Save As, Restore, and Reset share the normal command/state/

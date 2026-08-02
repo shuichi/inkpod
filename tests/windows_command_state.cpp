@@ -211,6 +211,9 @@ int main() {
         || IsCommandEnabled(states, IDM_EDITOR_NEW_VIEW_OTHER_GROUP)
         || IsCommandEnabled(states, IDM_EDITOR_GROUP_CLOSE)
         || IsCommandEnabled(states, IDM_EDITOR_GROUP_NEXT)
+        || !IsCommandEnabled(states, IDM_WORKSPACE_NEW_WINDOW)
+        || IsCommandEnabled(states, IDM_VIEW_MOVE_NEW_WINDOW)
+        || IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEW_WINDOW)
         || IsCommandEnabled(states, IDM_FILE_RECENT_1)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
         return 1;
@@ -251,6 +254,9 @@ int main() {
         || !IsCommandEnabled(states, IDM_EDITOR_SPLIT_RIGHT)
         || !IsCommandEnabled(states, IDM_EDITOR_SPLIT_DOWN)
         || !IsCommandEnabled(states, IDM_EDITOR_NEW_VIEW_OTHER_GROUP)
+        || !IsCommandEnabled(states, IDM_WORKSPACE_NEW_WINDOW)
+        || !IsCommandEnabled(states, IDM_VIEW_MOVE_NEW_WINDOW)
+        || !IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEW_WINDOW)
         || !IsCommandEnabled(states, IDM_LOCATOR_PIN)
         || !IsCommandEnabled(states, IDM_LOCATOR_FIXED)
         || !IsCommandEnabled(states, IDM_LOCATOR_AUTOSCROLL)

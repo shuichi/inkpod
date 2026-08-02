@@ -35,6 +35,8 @@ foreach(REQUIRED IN ITEMS
         "EncodeWorkspaceLayout"
         "DecodeWorkspaceLayout"
         "DeleteWorkspaceLayout"
+        "SaveWorkspaceWindowCount"
+        "LoadWorkspaceWindowCount"
         "ClampWorkspacePlacement")
     string(FIND "${LAYOUT_HEADER_TEXT}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
@@ -56,7 +58,8 @@ foreach(REQUIRED IN ITEMS
         "GetDpiForMonitor"
         "g_monitor_collection"
         "RegGetValueW"
-        "RegSetValueExW")
+        "RegSetValueExW"
+        "WorkspaceWindowCountV1")
     string(FIND "${LAYOUT_SOURCE_TEXT}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "G9 persistence implementation is missing: ${REQUIRED}")
@@ -138,4 +141,5 @@ endforeach()
 
 message(STATUS
     "Verified G9 bounded v4 persistence, v2/v3 migration, named presets, "
-    "monitor recovery, and accessible auxiliary-pane auto-hide integration")
+    "monitor recovery, accessible auxiliary-pane auto-hide integration, "
+    "and G10 bounded workspace-window count persistence")

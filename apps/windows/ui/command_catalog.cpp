@@ -96,7 +96,7 @@ const wchar_t* GroupName(UINT command) noexcept {
                     || command == IDM_WORKSPACE_RESTORE
                     || command == IDM_WORKSPACE_MIRROR
                     || (command >= IDM_WORKSPACE_PRESET_COLORING
-                        && command <= IDM_WORKSPACE_AUTOHIDE_BATCH)
+                        && command <= IDM_VIEW_DUPLICATE_NEW_WINDOW)
                     || command == IDM_WINDOW_LOCATOR
                     || command == IDM_LOCATOR_PIN
                     || command == IDM_LOCATOR_FIXED
@@ -154,6 +154,17 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
             return true;
         case IDM_EDITOR_GROUP_NEXT:
             sequence = Sequence(command, {Stroke(VK_F6, control)});
+            return true;
+        case IDM_WORKSPACE_NEW_WINDOW:
+            sequence = Sequence(command, {Stroke(L'N', control | shift)});
+            return true;
+        case IDM_VIEW_MOVE_NEW_WINDOW:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'V'), Stroke(L'M')});
+            return true;
+        case IDM_VIEW_DUPLICATE_NEW_WINDOW:
+            sequence = Sequence(
+                command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'V'), Stroke(L'D')});
             return true;
         case IDM_EDIT_UNDO: sequence = Sequence(command, {Stroke(L'Z', control)}); return true;
         case IDM_EDIT_REDO: sequence = Sequence(command, {Stroke(L'Y', control)}); return true;

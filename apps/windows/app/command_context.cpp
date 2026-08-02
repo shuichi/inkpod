@@ -30,28 +30,24 @@ bool Remove(
     return true;
 }
 
-template <typename Id>
-bool MatchesRequired(
-    const std::optional<Id>& supplied,
-    Id current,
-    bool required) noexcept {
-    if (required && !supplied.has_value()) {
-        return false;
-    }
-    return !supplied.has_value() || supplied.value() == current;
-}
-
 }  // namespace
 
 void CommandTargetRegistry::Initialize() noexcept {
-    if (workspace_) {
+    if (active_workspace_) {
         return;
     }
     generation_ = Generation(1U);
-    workspace_ = Issue<WorkspaceWindowId>();
+    WorkspaceTarget& workspace = workspaces_[0];
+    workspace.workspace = Issue<WorkspaceWindowId>();
     editor_groups_[0].group = Issue<EditorGroupId>();
     editor_groups_[0].canvas = Issue<CanvasId>();
+    editor_groups_[0].workspace = workspace.workspace;
+    workspace.groups[0] = editor_groups_[0].group;
+    workspace.group_count = 1U;
+    workspace.active_group = editor_groups_[0].group;
+    workspace_count_ = 1U;
     editor_group_count_ = 1U;
+    active_workspace_ = workspace.workspace;
     active_editor_group_ = editor_groups_[0].group;
 }
 
@@ -66,10 +62,99 @@ void CommandTargetRegistry::InvalidateAll() noexcept {
     pane_count_ = 0U;
     auxiliary_canvases_.fill({});
     auxiliary_canvas_count_ = 0U;
-    workspace_ = {};
+    workspaces_.fill({});
+    workspace_count_ = 0U;
+    active_workspace_ = {};
     editor_groups_.fill({});
     editor_group_count_ = 0U;
     active_editor_group_ = {};
+}
+
+std::optional<WorkspaceBinding> CommandTargetRegistry::AddWorkspace() noexcept {
+    Initialize();
+    if (workspace_count_ >= workspaces_.size()
+        || editor_group_count_ >= editor_groups_.size()) {
+        return std::nullopt;
+    }
+    WorkspaceTarget& workspace = workspaces_[workspace_count_++];
+    workspace = {};
+    workspace.workspace = Issue<WorkspaceWindowId>();
+    EditorGroupTarget& group = editor_groups_[editor_group_count_++];
+    group = {};
+    group.workspace = workspace.workspace;
+    group.group = Issue<EditorGroupId>();
+    group.canvas = Issue<CanvasId>();
+    workspace.groups[0] = group.group;
+    workspace.group_count = 1U;
+    workspace.active_group = group.group;
+    active_workspace_ = workspace.workspace;
+    active_editor_group_ = group.group;
+    active_document_ = {};
+    return WorkspaceBinding{workspace.workspace, group.group, group.canvas};
+}
+
+bool CommandTargetRegistry::ActivateWorkspace(
+    WorkspaceWindowId workspace_id) noexcept {
+    WorkspaceTarget* workspace = FindWorkspace(workspace_id);
+    if (workspace == nullptr) {
+        return false;
+    }
+    active_workspace_ = workspace_id;
+    active_editor_group_ = workspace->active_group;
+    const EditorGroupTarget* group = FindEditorGroup(active_editor_group_);
+    const DocumentTarget* document = group != nullptr && group->active_view
+        ? FindDocumentForView(group->active_view)
+        : nullptr;
+    active_document_ = document == nullptr
+        ? DocumentSessionId{}
+        : document->document;
+    return true;
+}
+
+bool CommandTargetRegistry::RemoveWorkspace(
+    WorkspaceWindowId workspace_id) noexcept {
+    WorkspaceTarget* workspace = FindWorkspace(workspace_id);
+    if (workspace == nullptr) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < workspace->group_count; ++index) {
+        const EditorGroupTarget* group = FindEditorGroup(workspace->groups[index]);
+        if (group == nullptr || group->view_count != 0U) {
+            return false;
+        }
+    }
+    for (std::size_t index = workspace->group_count; index > 0U; --index) {
+        const EditorGroupId group_id = workspace->groups[index - 1U];
+        const auto end = editor_groups_.begin()
+            + static_cast<std::ptrdiff_t>(editor_group_count_);
+        const auto found = std::find_if(
+            editor_groups_.begin(), end,
+            [group_id](const EditorGroupTarget& candidate) {
+                return candidate.group == group_id;
+            });
+        if (found != end) {
+            std::move(found + 1, end, found);
+            --editor_group_count_;
+            editor_groups_[editor_group_count_] = {};
+        }
+    }
+    const auto workspace_end = workspaces_.begin()
+        + static_cast<std::ptrdiff_t>(workspace_count_);
+    const auto found = std::find_if(
+        workspaces_.begin(), workspace_end,
+        [workspace_id](const WorkspaceTarget& candidate) {
+            return candidate.workspace == workspace_id;
+        });
+    std::move(found + 1, workspace_end, found);
+    --workspace_count_;
+    workspaces_[workspace_count_] = {};
+    if (active_workspace_ == workspace_id) {
+        active_workspace_ = workspace_count_ == 0U
+            ? WorkspaceWindowId{}
+            : workspaces_[0].workspace;
+        return !active_workspace_ || ActivateWorkspace(active_workspace_);
+    }
+    return true;
 }
 
 DocumentSessionId CommandTargetRegistry::ReplaceDocument() noexcept {
@@ -138,6 +223,11 @@ bool CommandTargetRegistry::ActivateDocument(
     active_document_ = document;
     group->active_view = view;
     active_editor_group_ = group->group;
+    active_workspace_ = group->workspace;
+    WorkspaceTarget* workspace = FindWorkspace(group->workspace);
+    if (workspace != nullptr) {
+        workspace->active_group = group->group;
+    }
     return true;
 }
 
@@ -207,6 +297,11 @@ std::optional<DocumentViewId> CommandTargetRegistry::AddDocumentViewTo(
     group->views[group->view_count++] = view;
     group->active_view = view;
     active_editor_group_ = group_id;
+    active_workspace_ = group->workspace;
+    WorkspaceTarget* workspace = FindWorkspace(group->workspace);
+    if (workspace != nullptr) {
+        workspace->active_group = group_id;
+    }
     return view;
 }
 
@@ -245,14 +340,17 @@ bool CommandTargetRegistry::RemoveDocumentView(DocumentViewId view) noexcept {
 
 std::optional<EditorGroupBinding> CommandTargetRegistry::AddEditorGroup() noexcept {
     Initialize();
-    if (editor_group_count_ >= editor_groups_.size()) {
+    WorkspaceTarget* workspace = FindWorkspace(active_workspace_);
+    if (workspace == nullptr || workspace->group_count >= workspace->groups.size()
+        || editor_group_count_ >= editor_groups_.size()) {
         return std::nullopt;
     }
     EditorGroupTarget& group = editor_groups_[editor_group_count_++];
     group = {};
+    group.workspace = active_workspace_;
     group.group = Issue<EditorGroupId>();
     group.canvas = Issue<CanvasId>();
-    active_editor_group_ = group.group;
+    workspace->groups[workspace->group_count++] = group.group;
     return EditorGroupBinding{group.group, group.canvas};
 }
 
@@ -267,7 +365,12 @@ bool CommandTargetRegistry::ActivateEditorGroup(EditorGroupId group_id) noexcept
     if (group->active_view && document == nullptr) {
         return false;
     }
+    active_workspace_ = group->workspace;
     active_editor_group_ = group_id;
+    WorkspaceTarget* workspace = FindWorkspace(group->workspace);
+    if (workspace != nullptr) {
+        workspace->active_group = group_id;
+    }
     if (group->active_view) {
         active_document_ = document->document;
         DocumentTarget* mutable_document = FindDocument(active_document_);
@@ -296,7 +399,12 @@ bool CommandTargetRegistry::MoveDocumentView(
     }
     target->views[target->view_count++] = view;
     target->active_view = view;
+    active_workspace_ = target->workspace;
     active_editor_group_ = destination;
+    WorkspaceTarget* workspace = FindWorkspace(target->workspace);
+    if (workspace != nullptr) {
+        workspace->active_group = destination;
+    }
     const DocumentTarget* document = FindDocumentForView(view);
     if (document != nullptr) {
         active_document_ = document->document;
@@ -305,15 +413,16 @@ bool CommandTargetRegistry::MoveDocumentView(
 }
 
 bool CommandTargetRegistry::RemoveEditorGroup(EditorGroupId group_id) noexcept {
-    if (editor_group_count_ != 2U) {
+    WorkspaceTarget* workspace = FindWorkspace(active_workspace_);
+    if (workspace == nullptr || workspace->group_count != 2U
+        || !Contains(workspace->groups, workspace->group_count, group_id)) {
         return false;
     }
     EditorGroupTarget* source = FindEditorGroup(group_id);
-    EditorGroupTarget* target = source == nullptr
-        ? nullptr
-        : (editor_groups_[0].group == group_id
-               ? &editor_groups_[1]
-               : &editor_groups_[0]);
+    const EditorGroupId target_id = workspace->groups[0] == group_id
+        ? workspace->groups[1]
+        : workspace->groups[0];
+    EditorGroupTarget* target = FindEditorGroup(target_id);
     if (source == nullptr || target == nullptr
         || source->view_count + target->view_count > target->views.size()) {
         return false;
@@ -322,11 +431,20 @@ bool CommandTargetRegistry::RemoveEditorGroup(EditorGroupId group_id) noexcept {
         target->views[target->view_count++] = source->views[index];
         target->active_view = source->views[index];
     }
-    const EditorGroupTarget kept = *target;
-    editor_groups_.fill({});
-    editor_groups_[0] = kept;
-    editor_group_count_ = 1U;
-    active_editor_group_ = kept.group;
+    const auto end = editor_groups_.begin()
+        + static_cast<std::ptrdiff_t>(editor_group_count_);
+    const auto found = std::find_if(
+        editor_groups_.begin(), end,
+        [group_id](const EditorGroupTarget& candidate) {
+            return candidate.group == group_id;
+        });
+    std::move(found + 1, end, found);
+    --editor_group_count_;
+    editor_groups_[editor_group_count_] = {};
+    workspace->groups = {target_id, EditorGroupId{}};
+    workspace->group_count = 1U;
+    workspace->active_group = target_id;
+    active_editor_group_ = target_id;
     return ActivateEditorGroup(active_editor_group_);
 }
 
@@ -386,8 +504,8 @@ CommandContext CommandTargetRegistry::Capture(
     std::optional<PaneInstanceId> pane,
     std::optional<JobSessionId> job) const noexcept {
     CommandContext context{};
-    if (workspace_) {
-        context.workspace = workspace_;
+    if (active_workspace_) {
+        context.workspace = active_workspace_;
     }
     const EditorGroupTarget* group = FindEditorGroup(active_editor_group_);
     if (group != nullptr) {
@@ -426,20 +544,25 @@ CommandResolveStatus CommandTargetRegistry::Resolve(
     if (context.generation.value() != generation_) {
         return CommandResolveStatus::StaleGeneration;
     }
-    if (!MatchesRequired(
-            context.workspace,
-            workspace_,
-            HasScope(required, CommandTargetScope::Workspace))) {
-        return context.workspace.has_value()
-            ? CommandResolveStatus::StaleTarget
-            : CommandResolveStatus::MissingScope;
+    if (HasScope(required, CommandTargetScope::Workspace)
+        && !context.workspace.has_value()) {
+        return CommandResolveStatus::MissingScope;
+    }
+    const WorkspaceTarget* workspace = context.workspace.has_value()
+        ? FindWorkspace(context.workspace.value())
+        : nullptr;
+    if (context.workspace.has_value() && workspace == nullptr) {
+        return CommandResolveStatus::StaleTarget;
     }
     const EditorGroupTarget* group = context.editor_group.has_value()
         ? FindEditorGroup(context.editor_group.value())
         : nullptr;
     if ((HasScope(required, CommandTargetScope::EditorGroup)
          && !context.editor_group.has_value())
-        || (context.editor_group.has_value() && group == nullptr)) {
+        || (context.editor_group.has_value()
+            && (group == nullptr
+                || (workspace != nullptr
+                    && group->workspace != workspace->workspace)))) {
         return context.workspace.has_value() && context.editor_group.has_value()
             ? CommandResolveStatus::StaleTarget
             : CommandResolveStatus::MissingScope;
@@ -508,7 +631,23 @@ Generation CommandTargetRegistry::CurrentGeneration() const noexcept {
 }
 
 WorkspaceWindowId CommandTargetRegistry::Workspace() const noexcept {
-    return workspace_;
+    return active_workspace_;
+}
+
+WorkspaceWindowId CommandTargetRegistry::WorkspaceForGroup(
+    EditorGroupId group) const noexcept {
+    const EditorGroupTarget* target = FindEditorGroup(group);
+    return target == nullptr ? WorkspaceWindowId{} : target->workspace;
+}
+
+WorkspaceWindowId CommandTargetRegistry::WorkspaceForView(
+    DocumentViewId view) const noexcept {
+    const EditorGroupTarget* target = FindEditorGroupForView(view);
+    return target == nullptr ? WorkspaceWindowId{} : target->workspace;
+}
+
+std::size_t CommandTargetRegistry::WorkspaceCount() const noexcept {
+    return workspace_count_;
 }
 
 EditorGroupId CommandTargetRegistry::EditorGroup() const noexcept {
@@ -530,7 +669,8 @@ EditorGroupId CommandTargetRegistry::GroupForView(DocumentViewId view) const noe
 }
 
 std::size_t CommandTargetRegistry::EditorGroupCount() const noexcept {
-    return editor_group_count_;
+    const WorkspaceTarget* workspace = FindWorkspace(active_workspace_);
+    return workspace == nullptr ? 0U : workspace->group_count;
 }
 
 DocumentSessionId CommandTargetRegistry::DocumentSession() const noexcept {
@@ -564,6 +704,26 @@ bool CommandTargetRegistry::ContainsJob(JobSessionId job) const noexcept {
                jobs_.cbegin() + job_count_,
                [job](const JobTarget& target) { return target.job == job; })
         != jobs_.cbegin() + job_count_;
+}
+
+CommandTargetRegistry::WorkspaceTarget* CommandTargetRegistry::FindWorkspace(
+    WorkspaceWindowId workspace) noexcept {
+    return const_cast<WorkspaceTarget*>(
+        static_cast<const CommandTargetRegistry&>(*this).FindWorkspace(workspace));
+}
+
+const CommandTargetRegistry::WorkspaceTarget*
+CommandTargetRegistry::FindWorkspace(WorkspaceWindowId workspace) const noexcept {
+    const auto found = std::find_if(
+        workspaces_.cbegin(),
+        workspaces_.cbegin() + static_cast<std::ptrdiff_t>(workspace_count_),
+        [workspace](const WorkspaceTarget& target) {
+            return target.workspace == workspace;
+        });
+    return found == workspaces_.cbegin()
+            + static_cast<std::ptrdiff_t>(workspace_count_)
+        ? nullptr
+        : &*found;
 }
 
 CommandTargetRegistry::DocumentTarget* CommandTargetRegistry::FindDocument(

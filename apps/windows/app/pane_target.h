@@ -81,7 +81,7 @@ public:
     [[nodiscard]] std::size_t Count() const noexcept { return count_; }
 
 private:
-    static constexpr std::size_t kMaximumPaneTargets = 32U;
+    static constexpr std::size_t kMaximumPaneTargets = 128U;
 
     [[nodiscard]] PaneTargetBinding* FindMutable(PaneInstanceId pane) noexcept;
     static void SetNotice(

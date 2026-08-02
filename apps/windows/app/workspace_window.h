@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 
 #include "editor_area.h"
@@ -14,10 +17,25 @@ namespace inkpod::app {
 
 class ApplicationHost;
 
+struct WorkspacePaneIds final {
+    PaneInstanceId tool{};
+    PaneInstanceId tool_options{};
+    PaneInstanceId color{};
+    PaneInstanceId layer{};
+    PaneInstanceId batch{};
+    PaneInstanceId locator{};
+    PaneInstanceId sequence{};
+    PaneInstanceId light_table{};
+    PaneInstanceId reference{};
+    PaneInstanceId subpalette{};
+};
+
 struct WorkspaceWindow final {
     ApplicationHost* application{};
     WorkspaceWindowId id{};
     Generation generation{};
+    std::uint32_t persistence_slot{};
+    WorkspacePaneIds pane_ids{};
     MainWindowHandles windows{};
     EditorArea editors{};
     ToolUiState tools{};
@@ -27,6 +45,7 @@ struct WorkspaceWindow final {
     HWND effects_progress{};
     HWND batch_progress{};
     HWND batch_palette{};
+    windows::ui::BatchPaletteDialogState batch_dialog{};
     bool workspace_presentation_pending{};
     std::uint64_t color_notice_sequence{};
     std::uint64_t batch_notice_sequence{};
@@ -60,18 +79,41 @@ struct WorkspaceWindow final {
 
 class WorkspaceWindowRegistry final {
 public:
+    static constexpr std::size_t kMaximumWindows = 8U;
+
     [[nodiscard]] bool Initialize(
         ApplicationHost* application,
         WorkspaceWindowId id,
         EditorGroupId editor_group,
         CanvasId canvas,
         Generation generation) noexcept;
+    [[nodiscard]] bool Add(
+        ApplicationHost* application,
+        WorkspaceWindowId id,
+        EditorGroupId editor_group,
+        CanvasId canvas,
+        Generation generation,
+        std::uint32_t persistence_slot) noexcept;
+    [[nodiscard]] bool Activate(
+        WorkspaceWindowId id, bool record_focus) noexcept;
+    [[nodiscard]] bool Remove(WorkspaceWindowId id) noexcept;
     void Clear() noexcept;
     [[nodiscard]] WorkspaceWindow* Current() noexcept;
     [[nodiscard]] const WorkspaceWindow* Current() const noexcept;
+    [[nodiscard]] WorkspaceWindow* LastFocused() noexcept;
+    [[nodiscard]] const WorkspaceWindow* LastFocused() const noexcept;
+    [[nodiscard]] WorkspaceWindow* Find(WorkspaceWindowId id) noexcept;
+    [[nodiscard]] const WorkspaceWindow* Find(
+        WorkspaceWindowId id) const noexcept;
+    [[nodiscard]] WorkspaceWindow* At(std::size_t index) noexcept;
+    [[nodiscard]] const WorkspaceWindow* At(std::size_t index) const noexcept;
+    [[nodiscard]] std::size_t Count() const noexcept;
 
 private:
-    std::unique_ptr<WorkspaceWindow> current_;
+    std::array<std::unique_ptr<WorkspaceWindow>, kMaximumWindows> windows_{};
+    std::size_t count_{};
+    WorkspaceWindowId current_{};
+    WorkspaceWindowId last_focused_{};
 };
 
 }  // namespace inkpod::app

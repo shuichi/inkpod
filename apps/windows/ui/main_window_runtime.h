@@ -8,6 +8,7 @@
 
 namespace inkpod::app {
 class ApplicationHost;
+struct WorkspaceWindow;
 }
 
 namespace inkpod::windows::ui::runtime {
@@ -30,5 +31,7 @@ void ShowCoreError(
     HWND owner,
     const wchar_t* operation) noexcept;
 bool PreTranslateKeyboardMessage(app::ApplicationHost& state, const MSG& message) noexcept;
+app::WorkspaceWindow* CreateWorkspaceWindow(
+    app::ApplicationHost& state, bool show) noexcept;
 
 }  // namespace inkpod::windows::ui::runtime

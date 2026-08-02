@@ -242,6 +242,49 @@ bool EditorGroupsRouteCapturedViewsWithoutRetargeting() {
         == CommandResolveStatus::Ok;
 }
 
+bool WorkspacesRouteCapturedViewsWithoutFocusRetargeting() {
+    CommandTargetRegistry registry;
+    registry.Initialize();
+    const DocumentSessionId document = registry.ReplaceDocument();
+    const DocumentViewId first_view = registry.ActiveDocumentView();
+    const WorkspaceWindowId first_workspace = registry.Workspace();
+    const CommandContext first = registry.Capture();
+    const auto second = registry.AddWorkspace();
+    if (!document || !first_view || !first_workspace || !second.has_value()
+        || second->workspace == first_workspace
+        || registry.WorkspaceCount() != 2U
+        || registry.WorkspaceForGroup(second->editor_group) != second->workspace
+        || registry.Resolve(first, kDocumentViewCommandScope)
+            != CommandResolveStatus::Ok
+        || registry.Capture().document_view.has_value()) {
+        return false;
+    }
+    if (!registry.ActivateWorkspace(first_workspace)
+        || registry.ActiveDocumentView() != first_view
+        || registry.Resolve(first, kDocumentViewCommandScope)
+            != CommandResolveStatus::Ok
+        || !registry.MoveDocumentView(first_view, second->editor_group)
+        || registry.WorkspaceForView(first_view) != second->workspace
+        || registry.Resolve(first, kDocumentViewCommandScope)
+            != CommandResolveStatus::StaleTarget) {
+        return false;
+    }
+    const CommandContext moved = registry.Capture();
+    if (registry.Resolve(moved, kDocumentViewCommandScope)
+            != CommandResolveStatus::Ok
+        || !registry.RemoveWorkspace(first_workspace)
+        || registry.WorkspaceCount() != 1U
+        || registry.Resolve(first, kDocumentViewCommandScope)
+            != CommandResolveStatus::StaleTarget
+        || registry.Resolve(moved, kDocumentViewCommandScope)
+            != CommandResolveStatus::Ok
+        || registry.RemoveWorkspace(second->workspace)) {
+        return false;
+    }
+    return registry.Workspace() == second->workspace
+        && registry.ActiveDocumentView() == first_view;
+}
+
 bool PanePoliciesCaptureAndRejectStaleTargets() {
     CommandTargetRegistry targets;
     targets.Initialize();
@@ -349,6 +392,7 @@ int main() {
             && AuxiliaryCanvasIdsHaveIndependentBoundedLifetime()
             && GenerationTaggedTokensNeverRetarget()
             && EditorGroupsRouteCapturedViewsWithoutRetargeting()
+            && WorkspacesRouteCapturedViewsWithoutFocusRetargeting()
             && PanePoliciesCaptureAndRejectStaleTargets()
         ? EXIT_SUCCESS
         : EXIT_FAILURE;

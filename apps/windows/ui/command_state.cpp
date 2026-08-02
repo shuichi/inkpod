@@ -236,6 +236,8 @@ void ProvideSelectionViewCommandStates(
           IDM_VIEW_GUIDE_DELETE_ALL,
           IDM_VIEW_GRID_SETTINGS,
           IDM_VIEW_NEW,
+          IDM_VIEW_MOVE_NEW_WINDOW,
+          IDM_VIEW_DUPLICATE_NEW_WINDOW,
           IDM_EDITOR_SPLIT_RIGHT,
           IDM_EDITOR_SPLIT_DOWN,
           IDM_EDITOR_NEW_VIEW_OTHER_GROUP,
@@ -594,6 +596,7 @@ void ProvideBatchCommandStates(
 void ProvideWorkspaceCommandStates(
     const WorkspaceCommandStateInput& input,
     CommandStateSet& states) noexcept {
+    SetEnabled(states, IDM_WORKSPACE_NEW_WINDOW, true);
     SetChecked(states, IDM_WINDOW_TOOL_PALETTE, input.tool_visible);
     SetChecked(states, IDM_WINDOW_TOOL_OPTIONS, input.tool_options_visible);
     SetChecked(states, IDM_WINDOW_COLOR_PANE, input.color_visible);

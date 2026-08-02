@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8、G9 完了、次は G10 |
+| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8、G9、G10 完了、次は G11 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -976,6 +976,28 @@ AutoHide/accessibility と active-stroke smoke、x64 Debug/Release の全 CTest 
 - 二つ以上の workspace window を同時利用できる。
 - 同一文書を別 monitor の二 window で安全に表示できる。
 - 一 window 利用時の操作と性能に目立つ回帰がない。
+
+### 完了記録
+
+2026-08-02 に bounded な `WorkspaceWindowRegistry`、window ごとの `HWND`、menu、
+`DockHost`、`EditorArea`、status、focus、layout 所有、registry 列挙型 message loop、
+新規 window と view の window 間 move/duplicate command、window 単位の close と最終
+window shutdown を実装した。同一 session の複数 window view は一つの Core binding、
+文書、履歴、dirty、savepoint を共有し、view state と可視 group ごとの Canvas だけを
+分離する。command は発行時の `CommandContext` を保持し、window procedure と input は
+対象 `HWND` の `WorkspaceWindowId` へ routing する。x64 Debug/Release の build と 21/21
+CTest は通過し、multi-window smoke は二つの実 `HWND`、focus/menu/DPI、同一文書の
+編集/Undo/独立 flip、別文書の edit/save/reopen/pane 分離、dirty close の Cancel/Discard、
+一方の close 後の継続、最後の window だけの `WM_QUIT` を確認した。
+
+ARM64 toolset 導入後、`Hostx64\arm64\cl.exe` と Rust
+`aarch64-pc-windows-msvc` target による Debug/Release の fresh configure、strict
+cross-build、ARM64 MSIX assembly は完了した。両構成の CTest は構造検証と package smoke
+12/21 に成功したが、AMD64 実行ホストでは ARM64 executable を起動できず、native unit、
+ABI、renderer、multi-window smoke の9件が `BAD_COMMAND` で未実行となった。2026-08-02
+にユーザー判断で、x64 Debug/Release の全 native CTest と ARM64 Debug/Release の strict
+cross-build、構造検証、package smoke を G10 の検証 gate として受け入れ、G10 を完了とした。
+ARM64 native tests を実行済みとは扱わない。次に着手する milestone は G11 である。
 
 ---
 

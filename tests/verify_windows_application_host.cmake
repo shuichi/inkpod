@@ -4,6 +4,7 @@ endif()
 
 set(APP_DIR "${INKPOD_SOURCE_DIR}/apps/windows/app")
 set(UI_DIR "${INKPOD_SOURCE_DIR}/apps/windows/ui")
+set(APPLICATION_SOURCE "${APP_DIR}/application.cpp")
 
 set(REQUIRED_FILES
     "${APP_DIR}/application_host.h"
@@ -34,11 +35,26 @@ endforeach()
 file(READ "${APP_DIR}/application_host.h" HOST)
 foreach(REQUIRED IN ITEMS
         "WorkspaceWindowRegistry"
+        "AddWorkspaceWindow"
+        "ActivateWorkspaceWindow"
+        "RemoveWorkspaceWindow"
+        "MoveDocumentViewToWorkspace"
         "DocumentRegistry"
         "std::unique_ptr<CoreHost>"
         "InkpodClipboard\\* clipboard")
     if(NOT HOST MATCHES "${REQUIRED}")
         message(FATAL_ERROR "ApplicationHost is missing ownership: ${REQUIRED}")
+    endif()
+endforeach()
+
+file(READ "${APP_DIR}/workspace_window.h" WORKSPACE_HEADER)
+foreach(REQUIRED IN ITEMS
+        "kMaximumWindows = 8U"
+        "LastFocused"
+        "persistence_slot")
+    string(FIND "${WORKSPACE_HEADER}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "G10 workspace registry contract is missing: ${REQUIRED}")
     endif()
 endforeach()
 
@@ -69,6 +85,28 @@ if(NOT PROCEDURE MATCHES "WorkspaceWindow\\*"
         "Window procedure must bind WorkspaceWindow and use its explicit host link")
 endif()
 
+foreach(REQUIRED IN ITEMS
+        "ActivateWorkspaceWindow"
+        "previous_workspace"
+        "restore_workspace")
+    string(FIND "${PROCEDURE}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "G10 per-window procedure routing is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
+file(READ "${APPLICATION_SOURCE}" APPLICATION)
+foreach(REQUIRED IN ITEMS
+        "LoadWorkspaceWindowCount"
+        "CreateWorkspaceWindow"
+        "state.Workspaces().Count()"
+        "state.Workspaces().At(index)")
+    string(FIND "${APPLICATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "G10 registry-driven application loop is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
 file(READ "${UI_DIR}/main_window_runtime.cpp" RUNTIME)
 foreach(RETIRED IN ITEMS
         "LRESULT CALLBACK MainWindowProcedure"
@@ -80,4 +118,5 @@ foreach(RETIRED IN ITEMS
 endforeach()
 
 message(STATUS
-    "Verified ApplicationHost/WorkspaceWindow/DocumentSession/DocumentView ownership and G2 runtime boundaries")
+    "Verified ApplicationHost/WorkspaceWindow/DocumentSession/DocumentView ownership, "
+    "G2 runtime boundaries, and G10 bounded multi-window registry/routing")

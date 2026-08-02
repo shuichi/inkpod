@@ -1,5 +1,6 @@
 #include "application_host.h"
 
+#include <array>
 #include <cassert>
 #include <utility>
 
@@ -11,14 +12,21 @@ namespace inkpod::app {
 bool ApplicationHost::InitializeOwners() noexcept {
     routing.targets.Initialize();
     const Generation generation = routing.targets.CurrentGeneration();
-    return InitializeOwnerGraph(
+    if (!InitializeOwnerGraph(
         workspaces_,
         documents_,
         this,
         routing.targets.Workspace(),
         routing.targets.EditorGroup(),
         routing.targets.Canvas(),
-        generation);
+        generation)) {
+        return false;
+    }
+    if (!RegisterWorkspacePanes(Workspace())) {
+        ClearOwnerGraph(documents_, workspaces_);
+        return false;
+    }
+    return true;
 }
 
 void ApplicationHost::ClearOwners() noexcept {
@@ -33,6 +41,294 @@ WorkspaceWindow& ApplicationHost::Workspace() noexcept {
 const WorkspaceWindow& ApplicationHost::Workspace() const noexcept {
     assert(workspaces_.Current() != nullptr);
     return *workspaces_.Current();
+}
+
+WorkspaceWindow* ApplicationHost::FindWorkspace(
+    WorkspaceWindowId id) noexcept {
+    return workspaces_.Find(id);
+}
+
+const WorkspaceWindow* ApplicationHost::FindWorkspace(
+    WorkspaceWindowId id) const noexcept {
+    return workspaces_.Find(id);
+}
+
+WorkspaceWindow* ApplicationHost::WorkspaceForView(
+    DocumentViewId view) noexcept {
+    const WorkspaceWindowId workspace = routing.targets.WorkspaceForView(view);
+    return workspaces_.Find(workspace);
+}
+
+const WorkspaceWindow* ApplicationHost::WorkspaceForView(
+    DocumentViewId view) const noexcept {
+    const WorkspaceWindowId workspace = routing.targets.WorkspaceForView(view);
+    return workspaces_.Find(workspace);
+}
+
+WorkspaceWindow* ApplicationHost::WorkspaceForWindow(HWND window) noexcept {
+    return const_cast<WorkspaceWindow*>(
+        static_cast<const ApplicationHost&>(*this).WorkspaceForWindow(window));
+}
+
+const WorkspaceWindow* ApplicationHost::WorkspaceForWindow(
+    HWND window) const noexcept {
+    if (window == nullptr) {
+        return nullptr;
+    }
+    const HWND root_owner = GetAncestor(window, GA_ROOTOWNER);
+    for (std::size_t index = 0U; index < workspaces_.Count(); ++index) {
+        const WorkspaceWindow* workspace = workspaces_.At(index);
+        if (workspace == nullptr || workspace->windows.window == nullptr) {
+            continue;
+        }
+        const std::array owned{
+            workspace->windows.window,
+            workspace->tools.palette,
+            workspace->panes.layer_palette,
+            workspace->batch_palette,
+            workspace->locator_palette,
+            workspace->sequence_palette,
+            workspace->light_table_palette,
+            workspace->subpalette_palette};
+        for (const HWND candidate : owned) {
+            if (candidate != nullptr
+                && (window == candidate || root_owner == candidate
+                    || IsChild(candidate, window) != FALSE)) {
+                return workspace;
+            }
+        }
+    }
+    return nullptr;
+}
+
+WorkspaceWindowRegistry& ApplicationHost::Workspaces() noexcept {
+    return workspaces_;
+}
+
+const WorkspaceWindowRegistry& ApplicationHost::Workspaces() const noexcept {
+    return workspaces_;
+}
+
+bool ApplicationHost::RegisterWorkspacePanes(
+    WorkspaceWindow& workspace) noexcept {
+    using Policy = PaneTargetPolicy;
+    constexpr std::array policies{
+        Policy::Application,
+        Policy::FollowActiveView,
+        Policy::FollowActiveView,
+        Policy::FollowActiveView,
+        Policy::FollowActiveView,
+        Policy::FollowActiveView,
+        Policy::FollowActiveView,
+        Policy::FollowActiveView,
+        Policy::FollowActiveView,
+        Policy::FollowActiveView};
+    std::array<PaneInstanceId, policies.size()> panes{};
+    std::size_t registered{};
+    for (; registered < panes.size(); ++registered) {
+        const auto pane = routing.targets.RegisterPane();
+        if (!pane.has_value()
+            || routing.pane_targets.Register(pane.value(), policies[registered])
+                != PaneTargetStatus::Ok) {
+            if (pane.has_value()) {
+                (void)routing.targets.UnregisterPane(pane.value());
+            }
+            for (std::size_t index = 0U; index < registered; ++index) {
+                (void)routing.pane_targets.Unregister(panes[index]);
+                (void)routing.targets.UnregisterPane(panes[index]);
+            }
+            return false;
+        }
+        panes[registered] = pane.value();
+    }
+    workspace.pane_ids = WorkspacePaneIds{
+        panes[0], panes[1], panes[2], panes[3], panes[4],
+        panes[5], panes[6], panes[7], panes[8], panes[9]};
+    BindWorkspacePaneAliases(workspace);
+    return true;
+}
+
+void ApplicationHost::BindWorkspacePaneAliases(
+    const WorkspaceWindow& workspace) noexcept {
+    routing.tool_pane = workspace.pane_ids.tool;
+    routing.tool_options_pane = workspace.pane_ids.tool_options;
+    routing.color_pane = workspace.pane_ids.color;
+    routing.layer_pane = workspace.pane_ids.layer;
+    routing.batch_pane = workspace.pane_ids.batch;
+    routing.locator_pane = workspace.pane_ids.locator;
+    routing.sequence_pane = workspace.pane_ids.sequence;
+    routing.light_table_pane = workspace.pane_ids.light_table;
+    routing.reference_pane = workspace.pane_ids.reference;
+    routing.subpalette_pane = workspace.pane_ids.subpalette;
+}
+
+void ApplicationHost::UnregisterWorkspacePanes(
+    WorkspaceWindow& workspace) noexcept {
+    const std::array panes{
+        workspace.pane_ids.tool,
+        workspace.pane_ids.tool_options,
+        workspace.pane_ids.color,
+        workspace.pane_ids.layer,
+        workspace.pane_ids.batch,
+        workspace.pane_ids.locator,
+        workspace.pane_ids.sequence,
+        workspace.pane_ids.light_table,
+        workspace.pane_ids.reference,
+        workspace.pane_ids.subpalette};
+    for (const PaneInstanceId pane : panes) {
+        if (pane) {
+            (void)routing.pane_targets.Unregister(pane);
+            (void)routing.targets.UnregisterPane(pane);
+        }
+    }
+    workspace.pane_ids = {};
+}
+
+WorkspaceWindow* ApplicationHost::AddWorkspaceWindow() noexcept {
+    const WorkspaceWindowId previous = routing.targets.Workspace();
+    const auto binding = routing.targets.AddWorkspace();
+    if (!binding.has_value()) {
+        return nullptr;
+    }
+    std::uint32_t slot{};
+    for (; slot < WorkspaceWindowRegistry::kMaximumWindows; ++slot) {
+        bool used{};
+        for (std::size_t index = 0U; index < workspaces_.Count(); ++index) {
+            const WorkspaceWindow* workspace = workspaces_.At(index);
+            used = used || (workspace != nullptr
+                && workspace->persistence_slot == slot);
+        }
+        if (!used) {
+            break;
+        }
+    }
+    if (slot >= WorkspaceWindowRegistry::kMaximumWindows) {
+        (void)routing.targets.RemoveWorkspace(binding->workspace);
+        (void)routing.targets.ActivateWorkspace(previous);
+        return nullptr;
+    }
+    if (!workspaces_.Add(
+            this,
+            binding->workspace,
+            binding->editor_group,
+            binding->canvas,
+            routing.targets.CurrentGeneration(),
+            slot)) {
+        (void)routing.targets.RemoveWorkspace(binding->workspace);
+        (void)routing.targets.ActivateWorkspace(previous);
+        return nullptr;
+    }
+    WorkspaceWindow* workspace = workspaces_.Find(binding->workspace);
+    if (workspace == nullptr || !RegisterWorkspacePanes(*workspace)) {
+        (void)workspaces_.Remove(binding->workspace);
+        (void)routing.targets.RemoveWorkspace(binding->workspace);
+        (void)routing.targets.ActivateWorkspace(previous);
+        (void)workspaces_.Activate(previous, false);
+        return nullptr;
+    }
+    return workspace;
+}
+
+bool ApplicationHost::ActivateWorkspaceWindow(
+    WorkspaceWindowId id, bool record_focus) noexcept {
+    WorkspaceWindow* workspace = workspaces_.Find(id);
+    if (workspace == nullptr
+        || !routing.targets.ActivateWorkspace(id)
+        || !workspaces_.Activate(id, record_focus)) {
+        return false;
+    }
+    BindWorkspacePaneAliases(*workspace);
+    EditorGroup* group = workspace->editors.Active();
+    const DocumentViewId view = group == nullptr
+        ? DocumentViewId{}
+        : group->ActiveView();
+    DocumentSession* document = documents_.FindByView(view);
+    DocumentView* document_view = document == nullptr
+        ? nullptr
+        : document->FindView(view);
+    if (document == nullptr || document_view == nullptr) {
+        return document == nullptr && document_view == nullptr;
+    }
+    if (!documents_.Activate(document->id) || !document->ActivateView(view)) {
+        return false;
+    }
+    return engine == nullptr
+        || (engine->SetActiveSession(document->id, document->generation)
+            && engine->SetActiveView(document_view->core_view_id)
+                == INKPOD_STATUS_OK);
+}
+
+bool ApplicationHost::RemoveWorkspaceWindow(WorkspaceWindowId id) noexcept {
+    WorkspaceWindow* workspace = workspaces_.Find(id);
+    if (workspace == nullptr || workspaces_.Count() <= 1U) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < workspace->editors.GroupCount(); ++index) {
+        const EditorGroup* group = workspace->editors.GroupAt(index);
+        if (group == nullptr || group->ViewCount() != 0U) {
+            return false;
+        }
+    }
+    UnregisterWorkspacePanes(*workspace);
+    if (!routing.targets.RemoveWorkspace(id)
+        || !workspaces_.Remove(id)) {
+        return false;
+    }
+    WorkspaceWindow* current = workspaces_.Current();
+    return current != nullptr
+        && ActivateWorkspaceWindow(current->id, false);
+}
+
+bool ApplicationHost::MoveDocumentViewToWorkspace(
+    DocumentViewId view, WorkspaceWindowId destination) noexcept {
+    WorkspaceWindow* source = WorkspaceForView(view);
+    WorkspaceWindow* target = workspaces_.Find(destination);
+    EditorGroup* source_group = source == nullptr
+        ? nullptr
+        : source->editors.FindByView(view);
+    EditorGroup* target_group = target == nullptr
+        ? nullptr
+        : target->editors.Active();
+    DocumentSession* document = documents_.FindByView(view);
+    if (source == nullptr || target == nullptr || source == target
+        || source_group == nullptr || target_group == nullptr
+        || document == nullptr || target_group->Contains(view)
+        || target_group->ViewCount() >= EditorGroup::kMaximumViews) {
+        return false;
+    }
+    const EditorGroupId source_group_id = source_group->id;
+    if (!source->editors.RemoveView(view)
+        || !target->editors.AddView(target_group->id, view)) {
+        if (source->editors.FindByView(view) == nullptr) {
+            (void)source->editors.AddView(source_group_id, view);
+        }
+        return false;
+    }
+    if (!routing.targets.MoveDocumentView(view, target_group->id)) {
+        (void)target->editors.RemoveView(view);
+        (void)source->editors.AddView(source_group_id, view);
+        return false;
+    }
+    if (source_group->canvas != nullptr) {
+        const DocumentSession* replacement = documents_.FindByView(
+            source_group->ActiveView());
+        if (replacement == nullptr) {
+            (void)renderer::UnbindCanvasSnapshotSink(source_group->canvas);
+        } else {
+            (void)renderer::BindCanvasSnapshotSink(
+                source_group->canvas,
+                replacement->id,
+                source_group->ActiveView(),
+                replacement->generation);
+        }
+    }
+    return (target_group->canvas == nullptr
+        || renderer::BindCanvasSnapshotSink(
+                target_group->canvas,
+                document->id,
+                view,
+                document->generation))
+        && ActivateDocumentView(view);
 }
 
 DocumentSession& ApplicationHost::Document() noexcept {
@@ -161,16 +457,23 @@ ApplicationHost::AddDocumentSession() noexcept {
 bool ApplicationHost::ActivateDocumentView(DocumentViewId view) noexcept {
     DocumentSession* document = documents_.FindByView(view);
     DocumentView* target = document == nullptr ? nullptr : document->FindView(view);
-    EditorGroup* target_group = Workspace().editors.FindByView(view);
-    if (document == nullptr || target == nullptr || target_group == nullptr
+    WorkspaceWindow* target_workspace = WorkspaceForView(view);
+    EditorGroup* target_group = target_workspace == nullptr
+        ? nullptr
+        : target_workspace->editors.FindByView(view);
+    if (document == nullptr || target == nullptr || target_workspace == nullptr
+        || target_group == nullptr
         || engine == nullptr) {
         return false;
     }
+    WorkspaceWindow* previous_workspace = workspaces_.Current();
     DocumentSession* previous_document = documents_.Current();
     DocumentView* previous_view = previous_document == nullptr
         ? nullptr
         : previous_document->ActiveView();
-    EditorGroup* previous_group = Workspace().editors.Active();
+    EditorGroup* previous_group = previous_workspace == nullptr
+        ? nullptr
+        : previous_workspace->editors.Active();
     renderer::CancelCanvasStroke(
         previous_group == nullptr ? nullptr : previous_group->canvas);
     if (!engine->SetActiveSession(document->id, document->generation)
@@ -195,14 +498,16 @@ bool ApplicationHost::ActivateDocumentView(DocumentViewId view) noexcept {
         }
         return false;
     }
-    const bool activated = Workspace().editors.Activate(target_group->id)
+    const bool activated = workspaces_.Activate(target_workspace->id, false)
+        && target_workspace->editors.Activate(target_group->id)
         && target_group->ActivateView(view)
         && documents_.Activate(document->id)
         && document->ActivateView(view)
         && routing.targets.ActivateDocument(document->id, view);
     if (activated) {
-        Workspace().windows.canvas = target_group->canvas;
-        Workspace().windows.document_tabs = target_group->document_tabs;
+        BindWorkspacePaneAliases(*target_workspace);
+        target_workspace->windows.canvas = target_group->canvas;
+        target_workspace->windows.document_tabs = target_group->document_tabs;
     }
     return activated;
 }
@@ -213,7 +518,8 @@ bool ApplicationHost::CloseDocumentView(DocumentViewId view) noexcept {
         return false;
     }
     const DocumentView* closing = document->FindView(view);
-    if (closing == nullptr) {
+    WorkspaceWindow* source_workspace = WorkspaceForView(view);
+    if (closing == nullptr || source_workspace == nullptr) {
         return false;
     }
     DocumentViewId replacement{};
@@ -235,16 +541,17 @@ bool ApplicationHost::CloseDocumentView(DocumentViewId view) noexcept {
     if (status != INKPOD_STATUS_OK
         || !engine->UnregisterDocumentView(
             document->id, document->generation, view)
-        || !Workspace().editors.RemoveView(view)
+        || !source_workspace->editors.RemoveView(view)
         || !document->RemoveView(view)
         || !routing.targets.RemoveDocumentView(view)) {
         return false;
     }
-    EditorGroup* active_group = Workspace().editors.Active();
+    EditorGroup* active_group = source_workspace->editors.Active();
     if (active_group != nullptr && active_group->ActiveView()) {
         replacement = active_group->ActiveView();
-    } else if (Workspace().editors.GroupCount() == 2U && active_group != nullptr) {
-        const EditorGroup* other = Workspace().editors.Other(active_group->id);
+    } else if (source_workspace->editors.GroupCount() == 2U
+        && active_group != nullptr) {
+        const EditorGroup* other = source_workspace->editors.Other(active_group->id);
         if (other != nullptr) {
             replacement = other->ActiveView();
         }
@@ -258,55 +565,91 @@ bool ApplicationHost::CloseDocumentSession(DocumentSessionId session) noexcept {
         return false;
     }
     const Generation generation = document->generation;
-    if (documents_.Current() == document) {
-        renderer::CancelCanvasStroke(Workspace().windows.canvas);
+    for (std::size_t index = 0U; index < workspaces_.Count(); ++index) {
+        WorkspaceWindow* workspace = workspaces_.At(index);
+        if (workspace == nullptr) {
+            continue;
+        }
+        for (std::size_t group_index = 0U;
+             group_index < workspace->editors.GroupCount(); ++group_index) {
+            EditorGroup* group = workspace->editors.GroupAt(group_index);
+            if (group != nullptr) {
+                for (std::size_t view_index = 0U;
+                     view_index < group->ViewCount(); ++view_index) {
+                    const DocumentViewId candidate = group->ViewAt(view_index);
+                    if (document->FindView(candidate) != nullptr) {
+                        renderer::CancelCanvasStroke(group->canvas);
+                        break;
+                    }
+                }
+            }
+        }
     }
     if (engine->CloseSession(session, generation) != INKPOD_STATUS_OK) {
         return false;
     }
     routing.pane_targets.DocumentClosed(session);
-    for (std::size_t index = document->ViewCount(); index > 0U; --index) {
-        const DocumentView* view = document->ViewAt(index - 1U);
-        if (view != nullptr) {
-            (void)Workspace().editors.RemoveView(view->id);
+    for (std::size_t view_index = document->ViewCount();
+         view_index > 0U; --view_index) {
+        const DocumentView* view = document->ViewAt(view_index - 1U);
+        WorkspaceWindow* workspace = view == nullptr
+            ? nullptr
+            : WorkspaceForView(view->id);
+        if (view != nullptr && workspace != nullptr) {
+            (void)workspace->editors.RemoveView(view->id);
         }
     }
     if (!documents_.Remove(session)
         || !routing.targets.RemoveDocument(session)) {
         return false;
     }
-    for (std::size_t index = 0U;
-         index < Workspace().editors.GroupCount();
-         ++index) {
-        EditorGroup* group = Workspace().editors.GroupAt(index);
-        const DocumentSession* remaining = group == nullptr
-            ? nullptr
-            : documents_.FindByView(group->ActiveView());
-        if (group == nullptr || group->canvas == nullptr) {
+    for (std::size_t workspace_index = 0U;
+         workspace_index < workspaces_.Count(); ++workspace_index) {
+        WorkspaceWindow* workspace = workspaces_.At(workspace_index);
+        if (workspace == nullptr) {
             continue;
         }
-        if (remaining == nullptr) {
-            (void)renderer::UnbindCanvasSnapshotSink(group->canvas);
-        } else {
-            (void)renderer::BindCanvasSnapshotSink(
-                group->canvas,
-                remaining->id,
-                group->ActiveView(),
-                remaining->generation);
+        for (std::size_t group_index = 0U;
+             group_index < workspace->editors.GroupCount(); ++group_index) {
+            EditorGroup* group = workspace->editors.GroupAt(group_index);
+            const DocumentSession* remaining = group == nullptr
+                ? nullptr
+                : documents_.FindByView(group->ActiveView());
+            if (group == nullptr || group->canvas == nullptr) {
+                continue;
+            }
+            if (remaining == nullptr) {
+                (void)renderer::UnbindCanvasSnapshotSink(group->canvas);
+            } else {
+                (void)renderer::BindCanvasSnapshotSink(
+                    group->canvas,
+                    remaining->id,
+                    group->ActiveView(),
+                    remaining->generation);
+            }
         }
     }
-    EditorGroup* active_group = Workspace().editors.Active();
+    WorkspaceWindow* current_workspace = workspaces_.Current();
+    EditorGroup* active_group = current_workspace == nullptr
+        ? nullptr
+        : current_workspace->editors.Active();
     DocumentViewId replacement = active_group == nullptr
         ? DocumentViewId{}
         : active_group->ActiveView();
     if (!replacement) {
-        for (std::size_t index = 0U;
-             index < Workspace().editors.GroupCount();
-             ++index) {
-            const EditorGroup* group = Workspace().editors.GroupAt(index);
-            if (group != nullptr && group->ActiveView()) {
-                replacement = group->ActiveView();
-                break;
+        for (std::size_t workspace_index = 0U;
+             workspace_index < workspaces_.Count() && !replacement;
+             ++workspace_index) {
+            const WorkspaceWindow* workspace = workspaces_.At(workspace_index);
+            for (std::size_t group_index = 0U;
+                 workspace != nullptr
+                     && group_index < workspace->editors.GroupCount();
+                 ++group_index) {
+                const EditorGroup* group = workspace->editors.GroupAt(group_index);
+                if (group != nullptr && group->ActiveView()) {
+                    replacement = group->ActiveView();
+                    break;
+                }
             }
         }
     }

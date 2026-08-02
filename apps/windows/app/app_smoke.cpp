@@ -131,6 +131,8 @@ InkpodStatus ImportCommonRasterFromPath(
 InkpodStatus OpenFromPath(ApplicationHost& state, const std::wstring& path) noexcept;
 void PumpPendingWindowMessages() noexcept;
 bool QueryDocument(ApplicationHost& state, InkpodDocumentInfo& info) noexcept;
+bool QuerySnapshotTransform(
+    ApplicationHost& state, InkpodSnapshotTransform& transform) noexcept;
 bool QueryLightTableItem(ApplicationHost& state, std::uint32_t index, InkpodLightTableItemInfo& output) noexcept;
 bool QueueAutosave(
     ApplicationHost& state,
@@ -1491,11 +1493,13 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     std::wstring discovered_recovery;
     if (initial_recovery_path.empty()
         || !QueueAutosave(
-               state, state.routing.targets.Capture(), initial_recovery_path)
+            state, state.routing.targets.Capture(), initial_recovery_path)
         || state.engine->WaitIdle() != INKPOD_STATUS_OK
-        || GetFileAttributesW(initial_recovery_path.c_str()) == INVALID_FILE_ATTRIBUTES
+        || GetFileAttributesW(initial_recovery_path.c_str())
+            == INVALID_FILE_ATTRIBUTES
         || !NewestPrivateRecovery(discovered_recovery)
-        || _wcsicmp(discovered_recovery.c_str(), initial_recovery_path.c_str()) != 0) {
+        || _wcsicmp(
+            discovered_recovery.c_str(), initial_recovery_path.c_str()) != 0) {
         return 215;
     }
     std::wstring active_stroke_recovery_path;
@@ -5082,7 +5086,10 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().locator_dialog.select_pixel == nullptr) {
         return 860;
     }
-    state.Workspace().locator_dialog.select_pixel(&state, 4, 4);
+    state.Workspace().locator_dialog.select_pixel(
+        state.Workspace().locator_dialog.context,
+        4,
+        4);
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
         return 861;
     }
@@ -5092,7 +5099,10 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
         || locator_drawn.main_plane_checksum == erased.main_plane_checksum) {
         return 862;
     }
-    state.Workspace().locator_dialog.select_pixel(&state, -1, -1);
+    state.Workspace().locator_dialog.select_pixel(
+        state.Workspace().locator_dialog.context,
+        -1,
+        -1);
     if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
         return 863;
     }
@@ -6029,6 +6039,15 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
         || after_cancel.document_revision != before_cancel.document_revision) {
         return 763;
     }
+    if (!renderer::SubmitCanvasStrokeEvent(
+            second_canvas,
+            renderer::CanvasStrokeEventKind::Cancel,
+            nullptr,
+            0U)
+        || state.engine->WaitIdle(shared_session, shared_generation)
+            != INKPOD_STATUS_OK) {
+        return 785;
+    }
 
     SendMessageW(second_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(first_canvas), 0);
     const InkpodDocumentInfo shared_before_other_document = after_cancel;
@@ -6233,6 +6252,408 @@ int RunCommandContextSmoke(ApplicationHost& state) noexcept {
     return 0;
 }
 
+int RunMultiWorkspaceWindowSmoke(ApplicationHost& state) noexcept {
+    using inkpod::app::CommandResolveStatus;
+    using inkpod::app::DocumentSessionId;
+    using inkpod::app::DocumentViewId;
+    using inkpod::app::WorkspaceWindow;
+    using inkpod::app::WorkspaceWindowId;
+
+    if (state.Workspaces().Count() != 1U || state.engine == nullptr
+        || state.renderer == nullptr || state.Document().ActiveView() == nullptr) {
+        return 790;
+    }
+    WorkspaceWindow* source = state.Workspaces().At(0U);
+    if (source == nullptr || source->windows.window == nullptr
+        || source->windows.canvas == nullptr) {
+        return 791;
+    }
+    const WorkspaceWindowId source_workspace = source->id;
+    const DocumentSessionId shared_session = state.Document().id;
+    const DocumentViewId source_view = state.Document().ActiveView()->id;
+    const std::size_t original_view_count = state.Document().ViewCount();
+    InkpodDocumentInfo before_edit{};
+    InkpodSnapshotTransform source_transform_before{};
+    if (!QueryDocument(state, before_edit)
+        || !QuerySnapshotTransform(state, source_transform_before)
+        || !DispatchEnabledCommand(
+               state,
+               source->windows.window,
+               IDM_VIEW_DUPLICATE_NEW_WINDOW)
+        || state.Workspaces().Count() != 2U) {
+        return 792;
+    }
+
+    WorkspaceWindow* destination = state.Workspaces().At(1U);
+    if (destination == nullptr || destination->id == source_workspace
+        || destination->windows.window == nullptr
+        || destination->windows.window == source->windows.window
+        || destination->windows.canvas == nullptr
+        || state.Workspace().id != destination->id
+        || state.Document().id != shared_session
+        || state.Document().ViewCount() != original_view_count + 1U
+        || state.Document().ActiveView() == nullptr
+        || state.Document().ActiveView()->id == source_view
+        || state.WorkspaceForView(source_view) != source
+        || state.WorkspaceForView(state.Document().ActiveView()->id)
+            != destination
+        || GetMenu(source->windows.window) == nullptr
+        || GetMenu(destination->windows.window) == nullptr) {
+        return 793;
+    }
+    const WorkspaceWindowId destination_workspace = destination->id;
+    const DocumentViewId destination_view = state.Document().ActiveView()->id;
+    const auto destination_context = state.routing.targets.Capture();
+    SendMessageW(source->windows.window, WM_ACTIVATE, WA_ACTIVE, 0);
+    if (state.Workspace().id != source_workspace
+        || state.Document().id != shared_session
+        || state.Document().ActiveView() == nullptr
+        || state.Document().ActiveView()->id != source_view) {
+        return 794;
+    }
+    SendMessageW(destination->windows.window, WM_ACTIVATE, WA_ACTIVE, 0);
+    if (state.Workspace().id != destination_workspace
+        || state.Document().ActiveView() == nullptr
+        || state.Document().ActiveView()->id != destination_view) {
+        return 795;
+    }
+
+    RECT dpi_rect{};
+    GetWindowRect(destination->windows.window, &dpi_rect);
+    if (SendMessageW(
+            destination->windows.window,
+            WM_DPICHANGED,
+            MAKELONG(144, 144),
+            reinterpret_cast<LPARAM>(&dpi_rect)) != 0
+        || IsWindow(destination->windows.window) == FALSE) {
+        return 796;
+    }
+
+    InkpodSnapshotTransform destination_transform{};
+    InkpodSnapshotTransform destination_transform_before{};
+    InkpodSnapshotTransform source_transform{};
+    constexpr std::uint32_t horizontal_flip =
+        INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL;
+    if (!QuerySnapshotTransform(state, destination_transform_before)
+        || !DispatchEnabledCommand(
+            state,
+            destination->windows.window,
+            IDM_VIEW_FLIP_HORIZONTAL)
+        || !QuerySnapshotTransform(state, destination_transform)
+        || ((destination_transform.flags ^ destination_transform_before.flags)
+            & horizontal_flip) == 0U
+        || !state.ActivateDocumentView(source_view)
+        || !QuerySnapshotTransform(state, source_transform)
+        || (source_transform.flags & horizontal_flip)
+            != (source_transform_before.flags & horizontal_flip)) {
+        return 797;
+    }
+
+    InkpodSnapshotTransform edit_transform{};
+    if (!state.ActivateDocumentView(destination_view)
+        || !DispatchEnabledCommand(
+            state, destination->windows.window, IDM_VIEW_FIT)
+        || !QuerySnapshotTransform(state, edit_transform)
+        || !std::isfinite(edit_transform.zoom)
+        || edit_transform.zoom <= 0.0
+        || !DispatchEnabledCommand(
+               state, destination->windows.window, IDM_PLANE_MAIN_LINE)
+        || !DispatchEnabledCommand(
+               state, destination->windows.window, IDM_TOOL_PENCIL)
+        || SendMessageW(
+               destination->windows.canvas,
+               WM_LBUTTONDOWN,
+               MK_LBUTTON,
+               MAKELPARAM(
+                   static_cast<int>(std::lround(
+                       edit_transform.pan_x
+                       + static_cast<double>(edit_transform.document_width)
+                           * edit_transform.zoom * 0.4)),
+                   static_cast<int>(std::lround(
+                       edit_transform.pan_y
+                       + static_cast<double>(edit_transform.document_height)
+                           * edit_transform.zoom * 0.5)))) != 1) {
+        return 798;
+    }
+    SendMessageW(
+        destination->windows.canvas,
+        WM_MOUSEMOVE,
+        MK_LBUTTON,
+        MAKELPARAM(
+            static_cast<int>(std::lround(
+                edit_transform.pan_x
+                + static_cast<double>(edit_transform.document_width)
+                    * edit_transform.zoom * 0.5)),
+            static_cast<int>(std::lround(
+                edit_transform.pan_y
+                + static_cast<double>(edit_transform.document_height)
+                    * edit_transform.zoom * 0.5))));
+    if (SendMessageW(
+            destination->windows.canvas,
+            WM_LBUTTONUP,
+            0,
+            MAKELPARAM(
+                static_cast<int>(std::lround(
+                    edit_transform.pan_x
+                    + static_cast<double>(edit_transform.document_width)
+                        * edit_transform.zoom * 0.6)),
+                static_cast<int>(std::lround(
+                    edit_transform.pan_y
+                    + static_cast<double>(edit_transform.document_height)
+                        * edit_transform.zoom * 0.5)))) != 1
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 799;
+    }
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo destination_edit{};
+    InkpodDocumentInfo source_observed{};
+    const bool queried_destination = QueryDocument(state, destination_edit);
+    const bool activated_source = state.ActivateDocumentView(source_view);
+    if (activated_source) {
+        SendMessageW(source->windows.window, WM_ACTIVATE, WA_ACTIVE, 0);
+    }
+    const bool queried_source = activated_source
+        && QueryDocument(state, source_observed);
+    const bool dispatched_undo = queried_source
+        && DispatchEnabledCommand(state, source->windows.window, IDM_EDIT_UNDO);
+    const InkpodStatus undo_idle = state.engine->WaitIdle();
+    if (!queried_destination
+        || destination_edit.document_revision <= before_edit.document_revision
+        || destination_edit.main_plane_checksum == before_edit.main_plane_checksum
+        || (destination_edit.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || !activated_source || !queried_source
+        || source_observed.document_revision != destination_edit.document_revision
+        || source_observed.main_plane_checksum
+            != destination_edit.main_plane_checksum
+        || !dispatched_undo || undo_idle != INKPOD_STATUS_OK) {
+        return 800;
+    }
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo source_undo{};
+    InkpodDocumentInfo destination_observed_undo{};
+    if (!QueryDocument(state, source_undo)
+        || source_undo.main_plane_checksum != before_edit.main_plane_checksum
+        || !state.ActivateDocumentView(destination_view)
+        || !QueryDocument(state, destination_observed_undo)
+        || destination_observed_undo.main_plane_checksum
+            != source_undo.main_plane_checksum) {
+        return 801;
+    }
+    SendMessageW(destination->windows.window, WM_CLOSE, 0, 0);
+    if (state.Workspaces().Count() != 1U
+        || state.FindWorkspace(destination_workspace) != nullptr
+        || state.Document().ViewCount() != original_view_count
+        || state.routing.targets.Resolve(
+               destination_context,
+               inkpod::app::kDocumentViewCommandScope)
+            != CommandResolveStatus::StaleTarget
+        || !state.ActivateDocumentView(source_view)) {
+        return 802;
+    }
+    if (SendMessageW(
+            source->windows.window,
+            WM_COMMAND,
+            IDM_WORKSPACE_NEW_WINDOW,
+            0) != 1
+        || state.Workspaces().Count() != 2U) {
+        return 803;
+    }
+    destination = state.Workspaces().At(1U);
+    if (destination == nullptr || destination->windows.window == nullptr
+        || state.Workspace().id != destination->id
+        || state.routing.targets.DocumentSession()) {
+        return 804;
+    }
+    const std::size_t document_count = state.Documents().Count();
+    if (CreateDefaultCell(state) != INKPOD_STATUS_OK
+        || state.Documents().Count() != document_count + 1U
+        || state.Document().id == shared_session
+        || state.Document().ActiveView() == nullptr
+        || state.WorkspaceForView(state.Document().ActiveView()->id)
+            != destination) {
+        return 805;
+    }
+    const DocumentSessionId isolated_session = state.Document().id;
+    const DocumentViewId isolated_view = state.Document().ActiveView()->id;
+    InkpodDocumentInfo isolated_before{};
+    if (!QueryDocument(state, isolated_before)
+        || !DispatchEnabledCommand(
+               state, destination->windows.window, IDM_PLANE_MAIN_LINE)
+        || !DispatchEnabledCommand(
+               state, destination->windows.window, IDM_TOOL_PENCIL)
+        || SendMessageW(
+               destination->windows.canvas,
+               WM_LBUTTONDOWN,
+               MK_LBUTTON,
+               MAKELPARAM(120, 120)) != 1) {
+        return 806;
+    }
+    SendMessageW(
+        destination->windows.canvas,
+        WM_MOUSEMOVE,
+        MK_LBUTTON,
+        MAKELPARAM(180, 136));
+    SendMessageW(
+        destination->windows.canvas,
+        WM_LBUTTONUP,
+        0,
+        MAKELPARAM(220, 144));
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 807;
+    }
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo isolated_after{};
+    InkpodDocumentInfo source_after_isolated_edit{};
+    if (!QueryDocument(state, isolated_after)
+        || isolated_after.main_plane_checksum
+            == isolated_before.main_plane_checksum
+        || !state.ActivateDocumentView(source_view)
+        || !QueryDocument(state, source_after_isolated_edit)
+        || source_after_isolated_edit.main_plane_checksum
+            != source_undo.main_plane_checksum) {
+        return 808;
+    }
+
+    std::array<wchar_t, MAX_PATH> temporary_directory{};
+    std::array<wchar_t, MAX_PATH> temporary_file{};
+    const DWORD temporary_length = GetTempPathW(
+        static_cast<DWORD>(temporary_directory.size()),
+        temporary_directory.data());
+    if (temporary_length == 0U
+        || temporary_length >= temporary_directory.size()) {
+        return 812;
+    }
+    _snwprintf_s(
+        temporary_file.data(),
+        temporary_file.size(),
+        _TRUNCATE,
+        L"%lsinkpod-multi-window-%lu-%llu.inkpod",
+        temporary_directory.data(),
+        GetCurrentProcessId(),
+        static_cast<unsigned long long>(GetTickCount64()));
+    const std::wstring isolated_path(temporary_file.data());
+    const auto cleanup_isolated_file = [&isolated_path]() noexcept {
+        DeleteFileW(isolated_path.c_str());
+        DeleteFileW((isolated_path + L".recovery.inkpod").c_str());
+    };
+    InkpodDocumentInfo isolated_saved{};
+    if (!state.ActivateDocumentView(isolated_view)
+        || SaveToPath(state, isolated_path) != INKPOD_STATUS_OK
+        || !QueryDocument(state, isolated_saved)
+        || (isolated_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || isolated_saved.main_plane_checksum
+            != isolated_after.main_plane_checksum) {
+        cleanup_isolated_file();
+        return 813;
+    }
+    const BOOL source_locator_visible = IsWindowVisible(source->locator_palette);
+    const BOOL destination_locator_visible = IsWindowVisible(
+        destination->locator_palette);
+    if (!DispatchEnabledCommand(
+            state, destination->windows.window, IDM_WINDOW_LOCATOR)
+        || IsWindowVisible(source->locator_palette) != source_locator_visible
+        || IsWindowVisible(destination->locator_palette)
+            == destination_locator_visible
+        || !DispatchEnabledCommand(
+            state, destination->windows.window, IDM_WINDOW_LOCATOR)) {
+        cleanup_isolated_file();
+        return 814;
+    }
+    const std::uint32_t clean_prompt_count =
+        state.lifetime.smoke_dirty_prompt_count;
+    SendMessageW(destination->windows.window, WM_CLOSE, 0, 0);
+    if (state.Workspaces().Count() != 1U
+        || state.Documents().Find(isolated_session) != nullptr
+        || state.lifetime.smoke_dirty_prompt_count != clean_prompt_count
+        || !state.ActivateDocumentView(source_view)
+        || SendMessageW(
+               source->windows.window,
+               WM_COMMAND,
+               IDM_WORKSPACE_NEW_WINDOW,
+               0) != 1
+        || state.Workspaces().Count() != 2U) {
+        cleanup_isolated_file();
+        return 815;
+    }
+    destination = state.Workspaces().At(1U);
+    if (destination == nullptr || destination->windows.window == nullptr
+        || OpenDocumentFromPath(state, isolated_path) != INKPOD_STATUS_OK
+        || state.Document().id == isolated_session
+        || state.Document().id == shared_session
+        || state.Document().ActiveView() == nullptr) {
+        cleanup_isolated_file();
+        return 816;
+    }
+    const WorkspaceWindowId isolated_workspace = destination->id;
+    const DocumentSessionId reopened_session = state.Document().id;
+    const DocumentViewId reopened_view = state.Document().ActiveView()->id;
+    InkpodDocumentInfo reopened{};
+    InkpodDocumentInfo source_after_reopen{};
+    if (!QueryDocument(state, reopened)
+        || reopened.main_plane_checksum != isolated_saved.main_plane_checksum
+        || (reopened.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || !state.ActivateDocumentView(source_view)
+        || !QueryDocument(state, source_after_reopen)
+        || source_after_reopen.main_plane_checksum
+            != source_undo.main_plane_checksum
+        || !state.ActivateDocumentView(reopened_view)
+        || !DispatchEnabledCommand(
+            state, destination->windows.window, IDM_SELECTION_ALL)
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        cleanup_isolated_file();
+        return 817;
+    }
+    cleanup_isolated_file();
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo reopened_dirty{};
+    if (!QueryDocument(state, reopened_dirty)
+        || (reopened_dirty.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+        return 818;
+    }
+
+    const std::uint32_t prompt_count = state.lifetime.smoke_dirty_prompt_count;
+    state.lifetime.smoke_dirty_prompt_choice = IDCANCEL;
+    SendMessageW(destination->windows.window, WM_CLOSE, 0, 0);
+    if (state.Workspaces().Count() != 2U
+        || state.Documents().Find(reopened_session) == nullptr
+        || state.lifetime.smoke_dirty_prompt_count != prompt_count + 1U) {
+        return 809;
+    }
+    state.lifetime.smoke_dirty_prompt_choice = IDNO;
+    SendMessageW(destination->windows.window, WM_CLOSE, 0, 0);
+    if (state.Workspaces().Count() != 1U
+        || state.Documents().Find(reopened_session) != nullptr
+        || state.FindWorkspace(isolated_workspace) != nullptr
+        || !state.ActivateDocumentView(source_view)) {
+        return 810;
+    }
+    const LRESULT final_close = SendMessageW(
+        source->windows.window, WM_CLOSE, 0, 0);
+    MSG quit{};
+    BOOL found_quit{};
+    while (PeekMessageW(&quit, nullptr, 0, 0, PM_REMOVE) != FALSE) {
+        if (quit.message == WM_QUIT) {
+            found_quit = TRUE;
+            break;
+        }
+        TranslateMessage(&quit);
+        DispatchMessageW(&quit);
+    }
+    if (found_quit == FALSE
+        || quit.message != WM_QUIT || state.Workspaces().Count() != 1U) {
+        std::fprintf(
+            stderr,
+            "g10 close result=%lld quit=%d message=%u workspaces=%zu window=%d\n",
+            static_cast<long long>(final_close),
+            found_quit,
+            quit.message,
+            state.Workspaces().Count(),
+            IsWindow(source->windows.window) != FALSE ? 1 : 0);
+        return 811;
+    }
+    return 0;
+}
+
 
 }  // namespace inkpod::windows::ui::runtime
 
@@ -6294,6 +6715,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunSplitEditorGroupSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunMultiWorkspaceWindowSmoke(state);
     }
     if (exit_code != 0) {
         std::fprintf(stderr, "inkpod application smoke failed: %d\n", exit_code);

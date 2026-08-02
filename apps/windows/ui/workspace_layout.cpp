@@ -13,6 +13,7 @@ namespace inkpod::windows::ui {
 namespace {
 
 constexpr wchar_t kSettingsKey[] = L"Software\\Inkpod";
+constexpr wchar_t kWorkspaceWindowCountValue[] = L"WorkspaceWindowCountV1";
 constexpr std::uint32_t kMagic = UINT32_C(0x4c574b49);
 constexpr std::uint32_t kVersion = 4U;
 constexpr int kReferenceDpi = 96;
@@ -1168,6 +1169,58 @@ bool DeleteWorkspaceLayout(const wchar_t* value_name) noexcept {
     const LSTATUS status = RegDeleteValueW(key, value_name);
     RegCloseKey(key);
     return status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND;
+}
+
+bool LoadWorkspaceWindowCount(std::uint32_t& count) noexcept {
+    DWORD value{};
+    DWORD size = sizeof(value);
+    if (RegGetValueW(
+            HKEY_CURRENT_USER,
+            kSettingsKey,
+            kWorkspaceWindowCountValue,
+            RRF_RT_REG_DWORD,
+            nullptr,
+            &value,
+            &size)
+            != ERROR_SUCCESS
+        || size != sizeof(value)
+        || value == 0U
+        || value > kMaximumPersistedWorkspaceWindows) {
+        count = 1U;
+        return false;
+    }
+    count = value;
+    return true;
+}
+
+bool SaveWorkspaceWindowCount(std::uint32_t count) noexcept {
+    if (count == 0U || count > kMaximumPersistedWorkspaceWindows) {
+        return false;
+    }
+    HKEY key{};
+    if (RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            kSettingsKey,
+            0,
+            nullptr,
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE,
+            nullptr,
+            &key,
+            nullptr)
+        != ERROR_SUCCESS) {
+        return false;
+    }
+    const DWORD value = count;
+    const LSTATUS status = RegSetValueExW(
+        key,
+        kWorkspaceWindowCountValue,
+        0,
+        REG_DWORD,
+        reinterpret_cast<const BYTE*>(&value),
+        sizeof(value));
+    RegCloseKey(key);
+    return status == ERROR_SUCCESS;
 }
 
 }  // namespace inkpod::windows::ui

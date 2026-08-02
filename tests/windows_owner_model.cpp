@@ -406,6 +406,63 @@ bool TestWorkspaceLifetime() {
     return registry.Current() == nullptr;
 }
 
+bool TestMultipleWorkspaceLifetimeAndFocus() {
+    WorkspaceWindowRegistry registry;
+    auto* owner = reinterpret_cast<ApplicationHost*>(&registry);
+    if (!registry.Initialize(
+            owner,
+            WorkspaceWindowId{1U},
+            EditorGroupId{2U},
+            inkpod::app::CanvasId{3U},
+            Generation{4U})
+        || !registry.Add(
+            owner,
+            WorkspaceWindowId{5U},
+            EditorGroupId{6U},
+            inkpod::app::CanvasId{7U},
+            Generation{4U},
+            1U)
+        || registry.Count() != 2U
+        || registry.Current() == nullptr
+        || registry.Current()->id != WorkspaceWindowId{5U}
+        || registry.LastFocused() == nullptr
+        || registry.LastFocused()->id != WorkspaceWindowId{1U}
+        || registry.Find(WorkspaceWindowId{1U}) == nullptr
+        || registry.Find(WorkspaceWindowId{5U}) == nullptr
+        || registry.At(0U)->persistence_slot != 0U
+        || registry.At(1U)->persistence_slot != 1U) {
+        return false;
+    }
+    if (!registry.Activate(WorkspaceWindowId{5U}, true)
+        || registry.LastFocused() == nullptr
+        || registry.LastFocused()->id != WorkspaceWindowId{5U}
+        || !registry.Activate(WorkspaceWindowId{1U}, false)
+        || registry.Current()->id != WorkspaceWindowId{1U}
+        || registry.LastFocused()->id != WorkspaceWindowId{5U}
+        || registry.Activate(WorkspaceWindowId{99U}, true)
+        || registry.Add(
+            owner,
+            WorkspaceWindowId{5U},
+            EditorGroupId{8U},
+            inkpod::app::CanvasId{9U},
+            Generation{4U},
+            2U)) {
+        return false;
+    }
+    if (!registry.Remove(WorkspaceWindowId{5U})
+        || registry.Count() != 1U
+        || registry.Current() == nullptr
+        || registry.Current()->id != WorkspaceWindowId{1U}
+        || registry.LastFocused() == nullptr
+        || registry.LastFocused()->id != WorkspaceWindowId{1U}
+        || registry.Remove(WorkspaceWindowId{5U})) {
+        return false;
+    }
+    registry.Clear();
+    return registry.Count() == 0U && registry.Current() == nullptr
+        && registry.LastFocused() == nullptr;
+}
+
 bool TestEditorAreaLifetimeAndSplit() {
     EditorArea editors;
     const EditorGroupId first_group{1U};
@@ -490,6 +547,10 @@ int main() {
     if (!TestWorkspaceLifetime()) {
         std::cerr << "workspace ownership test failed\n";
         return 5;
+    }
+    if (!TestMultipleWorkspaceLifetimeAndFocus()) {
+        std::cerr << "multiple workspace ownership/focus test failed\n";
+        return 7;
     }
     if (!TestEditorAreaLifetimeAndSplit()) {
         std::cerr << "editor area split ownership test failed\n";

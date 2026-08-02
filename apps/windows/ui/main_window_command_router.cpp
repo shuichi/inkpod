@@ -134,6 +134,17 @@ std::optional<LRESULT> IssueCommand(
             != app::CommandResolveStatus::Ok) {
         return LRESULT{0};
     }
+    if (context.document_view.has_value()
+        && context.document_view.value()
+            != state->routing.targets.ActiveDocumentView()) {
+        if (!state->ActivateDocumentView(context.document_view.value())) {
+            return LRESULT{0};
+        }
+    } else if (context.workspace.has_value()
+        && context.workspace.value() != state->routing.targets.Workspace()
+        && !state->ActivateWorkspaceWindow(context.workspace.value(), false)) {
+        return LRESULT{0};
+    }
     return RouteMainWindowCommand(state, window, wparam, lparam, context)
         .value_or(0);
 }

@@ -52,6 +52,7 @@ inline constexpr std::size_t kWorkspaceAuxiliaryPaneCount =
     static_cast<std::size_t>(WorkspaceAuxiliaryPane::Count);
 inline constexpr std::size_t kWorkspacePresetNameCapacity = 64U;
 inline constexpr std::size_t kMaximumWorkspaceLayoutRecordBytes = 8U * 1024U;
+inline constexpr std::uint32_t kMaximumPersistedWorkspaceWindows = 8U;
 
 struct WorkspaceScreenPlacement {
     // Screen coordinates and dimensions are physical device pixels. The
@@ -182,5 +183,8 @@ bool SaveWorkspaceLayout(
     const WorkspaceLayoutState& state,
     const wchar_t* value_name) noexcept;
 bool DeleteWorkspaceLayout(const wchar_t* value_name) noexcept;
+
+[[nodiscard]] bool LoadWorkspaceWindowCount(std::uint32_t& count) noexcept;
+[[nodiscard]] bool SaveWorkspaceWindowCount(std::uint32_t count) noexcept;
 
 }  // namespace inkpod::windows::ui

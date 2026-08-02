@@ -88,6 +88,9 @@ struct BatchOperationUi {
 
 struct AppLifetimeState {
     HINSTANCE instance{};
+    std::wstring window_class_name;
+    std::wstring window_title;
+    int show_command{SW_SHOWNORMAL};
     bool smoke_test{};
     int smoke_dirty_prompt_choice{IDNO};
     std::uint32_t smoke_dirty_prompt_count{};

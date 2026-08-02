@@ -24,15 +24,12 @@ bool PreTranslateKeyboardMessage(
             return false;
         }
     }
-    const HWND workspace = state.Workspace().windows.window;
-    const HWND target_root = message.hwnd == nullptr
-        ? nullptr
-        : GetAncestor(message.hwnd, GA_ROOTOWNER);
-    if (message.hwnd != workspace
-        && !IsChild(workspace, message.hwnd)
-        && target_root != workspace) {
+    app::WorkspaceWindow* owner = state.WorkspaceForWindow(message.hwnd);
+    if (owner == nullptr
+        || !state.ActivateWorkspaceWindow(owner->id, true)) {
         return false;
     }
+    const HWND workspace = owner->windows.window;
     return RouteKeyboardMessage(
                &state,
                workspace,

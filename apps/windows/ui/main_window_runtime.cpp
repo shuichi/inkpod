@@ -98,6 +98,21 @@ using inkpod::app::DocumentSession;
 using inkpod::app::DocumentViewId;
 using inkpod::app::EditorGroupId;
 using inkpod::app::EditorSplitOrientation;
+using inkpod::app::WorkspaceWindowId;
+
+std::array<wchar_t, 96U> WorkspaceRegistryValueName(
+    std::wstring_view base, std::uint32_t slot) noexcept {
+    std::array<wchar_t, 96U> result{};
+    _snwprintf_s(
+        result.data(),
+        result.size(),
+        _TRUNCATE,
+        L"%.*ls.%u",
+        static_cast<int>(base.size()),
+        base.data(),
+        slot);
+    return result;
+}
 using inkpod::app::LocatorAsyncResult;
 using inkpod::app::PaneActionTarget;
 using inkpod::app::PaneTargetNotice;
@@ -408,11 +423,26 @@ InkpodStatus ApplyTreeEdit(
     std::uint32_t destination_index,
     std::uint64_t& out_object_id) noexcept;
 
+ApplicationHost* ActivateWorkspaceContext(void* context) noexcept {
+    auto* workspace = static_cast<inkpod::app::WorkspaceWindow*>(context);
+    if (workspace == nullptr || workspace->application == nullptr
+        || !workspace->application->ActivateWorkspaceWindow(
+            workspace->id, true)) {
+        return nullptr;
+    }
+    return workspace->application;
+}
+
 bool DispatchEnabledCommand(
     ApplicationHost& state,
     HWND window,
     UINT command,
     std::optional<inkpod::app::PaneInstanceId> pane = std::nullopt) noexcept {
+    const auto* workspace = state.WorkspaceForWindow(window);
+    if (workspace == nullptr
+        || !state.ActivateWorkspaceWindow(workspace->id, false)) {
+        return false;
+    }
     if (!IsCommandEnabled(state.Workspace().command_states, command)) {
         return false;
     }
@@ -420,7 +450,7 @@ bool DispatchEnabledCommand(
 }
 
 void DispatchBatchPaletteCommand(void* context, UINT command) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && state->Workspace().windows.window != nullptr) {
         DispatchEnabledCommand(
             *state,
@@ -432,7 +462,7 @@ void DispatchBatchPaletteCommand(void* context, UINT command) noexcept {
 
 void SelectBatchPaletteOperation(
     void* context, std::uint32_t selected_index) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && !state->batch.loaded_graph) {
         state->batch.selected_operation = selected_index;
     }
@@ -516,7 +546,7 @@ void ResetAnimationDocumentState(AnimationUiState& animation) noexcept {
 }
 
 void DispatchToolPaletteCommand(void* context, UINT command) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && state->Workspace().windows.window != nullptr) {
         DispatchEnabledCommand(
             *state,
@@ -527,7 +557,7 @@ void DispatchToolPaletteCommand(void* context, UINT command) noexcept {
 }
 
 void ChangeToolOptionsDiameter(void* context, float diameter) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr || !std::isfinite(diameter)
         || diameter < inkpod::windows::ui::panes::kMinimumToolDiameter
         || diameter > inkpod::windows::ui::panes::kMaximumToolDiameter) {
@@ -544,7 +574,7 @@ void ChangeToolOptionsDiameter(void* context, float diameter) noexcept {
 
 void ChangeDockDrawingColor(
     void* context, const InkpodColorValue& color) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr) {
         return;
     }
@@ -555,7 +585,7 @@ void ChangeDockDrawingColor(
 
 void ChangeDockMainLineColor(
     void* context, const InkpodColorValue& color) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr || state->engine == nullptr) {
         return;
     }
@@ -589,7 +619,7 @@ void ChangeDockMainLineColor(
 
 void SelectDockColor(
     void* context, std::uint32_t index, bool chart) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr || index >= state->Workspace().panes.palette_colors.size()) {
         return;
     }
@@ -605,7 +635,7 @@ void SelectDockColor(
 }
 
 void ChangeDockPaletteGroup(void* context, int delta) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr) {
         return;
     }
@@ -628,14 +658,14 @@ void ChangeDockPaletteGroup(void* context, int delta) noexcept {
 }
 
 void NotifyToolPaletteVisibilityChanged(void* context) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && state->Workspace().windows.window != nullptr) {
         UpdateMenuState(*state);
     }
 }
 
 void DispatchLayerPaletteCommand(void* context, UINT command) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && state->Workspace().windows.window != nullptr) {
         DispatchEnabledCommand(
             *state,
@@ -646,7 +676,7 @@ void DispatchLayerPaletteCommand(void* context, UINT command) noexcept {
 }
 
 void SelectLayerPaletteLayer(void* context, std::uint64_t layer_id) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr || state->engine == nullptr || layer_id == 0U) {
         return;
     }
@@ -685,7 +715,7 @@ void SelectLayerPaletteLayer(void* context, std::uint64_t layer_id) noexcept {
 }
 
 void SelectLayerPalettePlane(void* context, std::uint64_t plane_id) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr || state->engine == nullptr || plane_id == 0U
         || state->Workspace().panes.active_tree_layer_id == 0U) {
         return;
@@ -720,7 +750,7 @@ void ReorderLayerPaletteLayer(
     void* context,
     std::uint64_t layer_id,
     std::uint32_t destination_index) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr || layer_id == 0U) {
         return;
     }
@@ -744,7 +774,7 @@ void ReorderLayerPalettePlane(
     void* context,
     std::uint64_t plane_id,
     std::uint32_t destination_index) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr || plane_id == 0U) {
         return;
     }
@@ -765,7 +795,7 @@ void ReorderLayerPalettePlane(
 }
 
 void ChangeLayerPaletteSplit(void* context, std::uint32_t split_milli) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr) {
         return;
     }
@@ -774,7 +804,7 @@ void ChangeLayerPaletteSplit(void* context, std::uint32_t split_milli) noexcept 
 }
 
 void NotifyLayerPaletteVisibilityChanged(void* context) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && state->Workspace().windows.window != nullptr) {
         UpdateMenuState(*state);
     }
@@ -874,7 +904,7 @@ void RelayoutEditorArea(ApplicationHost& state) noexcept {
 }
 
 void DispatchColorPaneCommand(void* context, UINT command) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && state->Workspace().windows.window != nullptr) {
         DispatchEnabledCommand(
             *state,
@@ -938,8 +968,11 @@ bool CreateDocumentViewInGroup(
     ApplicationHost& state,
     EditorGroupId destination,
     HWND error_owner) noexcept {
+    inkpod::app::WorkspaceWindow* destination_workspace = state.FindWorkspace(
+        state.routing.targets.WorkspaceForGroup(destination));
     if (state.engine == nullptr || state.Documents().Current() == nullptr
-        || state.Workspace().editors.Find(destination) == nullptr) {
+        || destination_workspace == nullptr
+        || destination_workspace->editors.Find(destination) == nullptr) {
         return false;
     }
     const CommandContext previous = state.routing.targets.Capture();
@@ -963,10 +996,8 @@ bool CreateDocumentViewInGroup(
         false);
     if (status != INKPOD_STATUS_OK) {
         (void)state.routing.targets.RemoveDocumentView(frontend_view.value());
-        if (previous.document_session.has_value()
-            && previous.document_view.has_value()) {
-            (void)state.routing.targets.ActivateDocument(
-                previous.document_session.value(), previous.document_view.value());
+        if (previous.document_view.has_value()) {
+            (void)state.ActivateDocumentView(previous.document_view.value());
         }
         ShowCoreError(state, error_owner, L"ビューの作成");
         return false;
@@ -980,7 +1011,7 @@ bool CreateDocumentViewInGroup(
             document.generation,
             frontend_view.value(),
             core_view_id)
-        && state.Workspace().editors.AddView(
+        && destination_workspace->editors.AddView(
             destination, frontend_view.value());
     if (!registered || !state.ActivateDocumentView(frontend_view.value())) {
         (void)state.engine->Invoke(
@@ -991,7 +1022,7 @@ bool CreateDocumentViewInGroup(
             },
             false,
             false);
-        (void)state.Workspace().editors.RemoveView(frontend_view.value());
+        (void)destination_workspace->editors.RemoveView(frontend_view.value());
         (void)state.engine->UnregisterDocumentView(
             document.id, document.generation, frontend_view.value());
         (void)document.RemoveView(frontend_view.value());
@@ -1850,7 +1881,7 @@ bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
 }
 
 void DispatchSubpalettePaneCommand(void* context, UINT command) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && state->Workspace().windows.window != nullptr) {
         (void)IssueCommand(
             state,
@@ -1918,7 +1949,7 @@ void ApplySubpaletteViewInput(
 void PerformSubpalettePaneAction(
     void* context,
     inkpod::windows::ui::panes::SubpalettePaneAction action) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr) {
         return;
     }
@@ -1975,7 +2006,7 @@ void PerformSubpalettePaneAction(
 }
 
 void SampleSubpalettePane(void* context, double x, double y) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr || state->engine == nullptr) {
         return;
     }
@@ -2015,7 +2046,7 @@ void SampleSubpalettePane(void* context, double x, double y) noexcept {
 void ApplySubpalettePaneView(
     void* context,
     const inkpod::renderer::CanvasViewGesture& gesture) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr) {
         return;
     }
@@ -2276,7 +2307,7 @@ void RefreshLocatorPane(ApplicationHost& state) noexcept {
 }
 
 void DispatchLocatorPaneCommand(void* context, UINT command) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && state->Workspace().windows.window != nullptr) {
         (void)DispatchEnabledCommand(
             *state,
@@ -2290,7 +2321,7 @@ void SelectLocatorPixel(
     void* context,
     std::int32_t document_x,
     std::int32_t document_y) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr || state->engine == nullptr
         || !state->Workspace().locator_fixed_mode) {
         return;
@@ -2708,7 +2739,7 @@ void UpdateBatchTarget(ApplicationHost& state) noexcept {
 }
 
 void RefreshBatchPaletteTimer(void* context) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr) {
         UpdateBatchTarget(*state);
         RefreshBatchPalette(
@@ -3157,7 +3188,11 @@ InkpodDocumentInfo EmptyDocumentInfo() noexcept {
 
 bool QueryDocument(ApplicationHost& state, InkpodDocumentInfo& info) noexcept {
     info = EmptyDocumentInfo();
-    return state.engine != nullptr && state.engine->GetDocumentInfo(info);
+    const DocumentSessionId session = state.routing.targets.DocumentSession();
+    const DocumentSession* document = state.Documents().Find(session);
+    return state.engine != nullptr && document != nullptr
+        && state.engine->GetDocumentInfo(
+            document->id, document->generation, info);
 }
 
 bool ParseCurvePoints(
@@ -4238,8 +4273,16 @@ CommandStateInputs BuildCommandStateInputs(
     const InkpodHistoryInfo& history,
     bool has_history) noexcept {
     CommandStateInputs inputs{};
+    const inkpod::app::DocumentSession* document = has_document
+        ? state.Documents().Find(state.routing.targets.DocumentSession())
+        : nullptr;
+    const inkpod::app::DocumentView* active_view = document == nullptr
+        ? nullptr
+        : document->FindView(state.routing.targets.ActiveDocumentView());
+    has_document = has_document && document != nullptr && active_view != nullptr;
     inputs.document.has_document = has_document;
-    inputs.document.has_saved_path = !state.Document().shell.current_path.empty();
+    inputs.document.has_saved_path = has_document
+        && !document->shell.current_path.empty();
     inputs.document.dirty =
         has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U;
     inputs.document.recent_document_count = state.RecentDocumentCount();
@@ -4274,18 +4317,26 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.selection_view.active_tool = state.Workspace().tools.active_tool;
     inputs.selection_view.selection_shape = state.Workspace().tools.selection_shape;
     inputs.selection_view.selection_operation = state.Workspace().tools.selection_operation;
-    inputs.selection_view.flip_horizontal = state.ActiveView().presentation.flip_horizontal;
-    inputs.selection_view.flip_vertical = state.ActiveView().presentation.flip_vertical;
-    inputs.selection_view.ruler_visible = state.ActiveView().presentation.ruler_visible;
-    inputs.selection_view.guides_visible = state.ActiveView().presentation.guides_visible;
-    inputs.selection_view.grid_visible = state.ActiveView().presentation.grid_visible;
-    inputs.selection_view.snap_guides = state.ActiveView().presentation.snap_guides;
-    inputs.selection_view.snap_grid = state.ActiveView().presentation.snap_grid;
-    inputs.selection_view.transparent_visible = state.ActiveView().presentation.transparent_visible;
+    inputs.selection_view.flip_horizontal = active_view != nullptr
+        && active_view->presentation.flip_horizontal;
+    inputs.selection_view.flip_vertical = active_view != nullptr
+        && active_view->presentation.flip_vertical;
+    inputs.selection_view.ruler_visible = active_view != nullptr
+        && active_view->presentation.ruler_visible;
+    inputs.selection_view.guides_visible = active_view != nullptr
+        && active_view->presentation.guides_visible;
+    inputs.selection_view.grid_visible = active_view != nullptr
+        && active_view->presentation.grid_visible;
+    inputs.selection_view.snap_guides = active_view != nullptr
+        && active_view->presentation.snap_guides;
+    inputs.selection_view.snap_grid = active_view != nullptr
+        && active_view->presentation.snap_grid;
+    inputs.selection_view.transparent_visible = active_view != nullptr
+        && active_view->presentation.transparent_visible;
     inputs.selection_view.selection_layer_available =
-        state.Document().shell.selection_layer_id != 0U;
+        document != nullptr && document->shell.selection_layer_id != 0U;
     inputs.selection_view.document_count = state.Documents().Count();
-    inputs.selection_view.view_count = state.Document().ViewCount();
+    inputs.selection_view.view_count = document == nullptr ? 0U : document->ViewCount();
     inputs.selection_view.editor_group_count =
         state.Workspace().editors.GroupCount();
 
@@ -4303,7 +4354,8 @@ CommandStateInputs BuildCommandStateInputs(
             DockPaneType::Tool);
 
     inputs.color.eyedropper_source = state.Workspace().tools.eyedropper_source;
-    inputs.color.color_check_mode = state.ActiveView().presentation.color_check_mode;
+    inputs.color.color_check_mode = active_view != nullptr
+        && active_view->presentation.color_check_mode;
     inputs.color.chart_locked = state.Workspace().panes.color_chart_locked;
 
     inputs.batch.idle = state.batch.task == nullptr;
@@ -4644,8 +4696,13 @@ void UpdateMainWindowStatus(
     const InkpodDocumentInfo& info,
     bool has_document) noexcept {
     std::array<wchar_t, 1024> title{};
-    const std::wstring active_name = DocumentTabBaseName(
-        state, state.Document(), info, has_document);
+    const inkpod::app::DocumentSession* document = has_document
+        ? state.Documents().Find(state.routing.targets.DocumentSession())
+        : nullptr;
+    has_document = has_document && document != nullptr;
+    const std::wstring active_name = document == nullptr
+        ? L"文書なし"
+        : DocumentTabBaseName(state, *document, info, true);
     _snwprintf_s(
         title.data(),
         title.size(),
@@ -4854,6 +4911,47 @@ InkpodStatus ApplyView(
     }
     ViewController controller(*state.engine);
     return controller.Apply(view_id, input);
+}
+
+InkpodStatus ApplyView(
+    ApplicationHost& state,
+    const CommandContext& context,
+    InkpodViewCommandKind kind,
+    double value1,
+    double value2,
+    double value3 = 0.0,
+    double value4 = 0.0) noexcept {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.document_view.has_value()
+        || !context.generation.has_value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const DocumentSession* document = state.Documents().Find(
+        context.document_session.value());
+    const auto* view = document == nullptr
+        ? nullptr
+        : document->FindView(context.document_view.value());
+    if (view == nullptr || document->generation != context.generation.value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const InkpodViewInput input{
+        sizeof(InkpodViewInput), kind, 0U, value1, value2, value3, value4};
+    return state.engine->Invoke(
+        document->id,
+        document->generation,
+        [core_view_id = view->core_view_id, input](InkpodCore* core) {
+            InkpodDocumentInfo info{};
+            info.struct_size = sizeof(info);
+            InkpodStatus status = core_view_id == 0U
+                ? inkpod_core_apply_view(core, &input, &info)
+                : inkpod_core_view_apply(core, core_view_id, &input);
+            if (status == INKPOD_STATUS_OK && core_view_id != 0U) {
+                status = inkpod_core_get_document_info(core, &info);
+            }
+            return status;
+        },
+        true,
+        true);
 }
 
 bool QuerySnapshotTransform(
@@ -5877,7 +5975,7 @@ InkpodStatus CreateCell(
     }
     const DocumentViewId previous_view = state.routing.targets.ActiveDocumentView();
     InkpodDocumentInfo previous_info{};
-    const bool added_session = state.Documents().Count() == 0U
+    const bool added_session = !state.routing.targets.DocumentSession()
         || QueryDocument(state, previous_info);
     std::optional<ApplicationHost::DocumentBinding> added_binding;
     if (added_session) {
@@ -6160,6 +6258,10 @@ bool BeginNewDocumentTab(
     DocumentViewId& previous_view,
     std::optional<ApplicationHost::DocumentBinding>& added) noexcept {
     previous_view = state.routing.targets.ActiveDocumentView();
+    if (!state.routing.targets.DocumentSession()) {
+        added = state.AddDocumentSession();
+        return added.has_value();
+    }
     InkpodDocumentInfo existing{};
     if (state.Documents().Count() != 0U && !QueryDocument(state, existing)) {
         return true;
@@ -7064,7 +7166,7 @@ InkpodStatus SwitchSequenceTarget(
 }
 
 void DispatchSequencePaneCommand(void* context, UINT command) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && state->Workspace().windows.window != nullptr) {
         (void)IssueCommand(
             state,
@@ -7076,7 +7178,7 @@ void DispatchSequencePaneCommand(void* context, UINT command) noexcept {
 }
 
 void ActivateSequencePaneCell(void* context, std::uint32_t index) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr) {
         return;
     }
@@ -7097,7 +7199,7 @@ void ActivateSequencePaneCell(void* context, std::uint32_t index) noexcept {
 }
 
 void DispatchLightTablePaneCommand(void* context, UINT command) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state != nullptr && state->Workspace().windows.window != nullptr) {
         (void)IssueCommand(
             state,
@@ -7113,7 +7215,7 @@ void SelectLightTablePaneEntry(
     bool set_selection,
     std::uint32_t index,
     std::uint64_t stable_id) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr || state->engine == nullptr || stable_id == 0U) {
         return;
     }
@@ -7776,6 +7878,131 @@ bool ConfirmAllDocuments(ApplicationHost& state) noexcept {
             || !ConfirmDiscard(state)) {
             return false;
         }
+    }
+    return true;
+}
+
+bool CloseWorkspaceWindow(ApplicationHost& state, HWND window) noexcept {
+    inkpod::app::WorkspaceWindow* closing = state.WorkspaceForWindow(window);
+    if (closing == nullptr || closing->windows.window != window
+        || state.Workspaces().Count() <= 1U) {
+        return false;
+    }
+    std::array<DocumentSessionId, inkpod::app::DocumentRegistry::kMaximumSessions>
+        sessions_to_close{};
+    std::size_t session_count{};
+    std::array<DocumentViewId, 128U> views_to_close{};
+    std::size_t view_count{};
+    for (std::size_t group_index = 0U;
+         group_index < closing->editors.GroupCount(); ++group_index) {
+        const auto* group = closing->editors.GroupAt(group_index);
+        for (std::size_t index = 0U;
+             group != nullptr && index < group->ViewCount(); ++index) {
+            const DocumentViewId view = group->ViewAt(index);
+            if (view_count < views_to_close.size()) {
+                views_to_close[view_count++] = view;
+            }
+            const DocumentSession* document = state.Documents().FindByView(view);
+            if (document == nullptr) {
+                continue;
+            }
+            bool outside{};
+            for (std::size_t document_view_index = 0U;
+                 document_view_index < document->ViewCount();
+                 ++document_view_index) {
+                const inkpod::app::DocumentView* candidate =
+                    document->ViewAt(document_view_index);
+                if (candidate != nullptr
+                    && state.routing.targets.WorkspaceForView(candidate->id)
+                        != closing->id) {
+                    outside = true;
+                    break;
+                }
+            }
+            if (!outside
+                && std::find(
+                    sessions_to_close.begin(),
+                    sessions_to_close.begin()
+                        + static_cast<std::ptrdiff_t>(session_count),
+                    document->id)
+                    == sessions_to_close.begin()
+                        + static_cast<std::ptrdiff_t>(session_count)
+                && session_count < sessions_to_close.size()) {
+                sessions_to_close[session_count++] = document->id;
+            }
+        }
+    }
+    for (std::size_t index = 0U; index < session_count; ++index) {
+        DocumentSession* document = state.Documents().Find(sessions_to_close[index]);
+        if (document == nullptr || document->ActiveView() == nullptr) {
+            continue;
+        }
+        if (!state.ActivateDocumentView(document->ActiveView()->id)
+            || !ConfirmDiscard(state)) {
+            (void)state.ActivateWorkspaceWindow(closing->id, true);
+            return false;
+        }
+    }
+    for (std::size_t index = 0U; index < session_count; ++index) {
+        if (state.Documents().Find(sessions_to_close[index]) != nullptr
+            && !state.CloseDocumentSession(sessions_to_close[index])) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0U; index < view_count; ++index) {
+        DocumentSession* document = state.Documents().FindByView(
+            views_to_close[index]);
+        if (document != nullptr && document->ViewCount() > 1U
+            && !state.CloseDocumentView(views_to_close[index])) {
+            return false;
+        }
+    }
+
+    (void)state.ActivateWorkspaceWindow(closing->id, false);
+    CaptureWorkspacePresentation(state);
+    if (!state.lifetime.smoke_test) {
+        const auto session_name = WorkspaceRegistryValueName(
+            L"WorkspaceSessionV4", closing->persistence_slot);
+        (void)SaveWorkspaceLayout(
+            closing->windows.workspace, session_name.data());
+    }
+    if (closing->subpalette_dialog.canvas != nullptr) {
+        (void)renderer::UnbindCanvasSnapshotSink(
+            closing->subpalette_dialog.canvas);
+    }
+    if (state.engine != nullptr && closing->subpalette_core_view_id != 0U
+        && closing->subpalette_session
+        && closing->subpalette_document_generation) {
+        const std::uint64_t core_view_id = closing->subpalette_core_view_id;
+        (void)state.engine->Invoke(
+            closing->subpalette_session,
+            closing->subpalette_document_generation,
+            [core_view_id](InkpodCore* core) {
+                return inkpod_core_view_close(core, core_view_id);
+            },
+            false,
+            false);
+        closing->subpalette_core_view_id = 0U;
+    }
+    if (closing->subpalette_canvas_id) {
+        (void)state.routing.targets.UnregisterAuxiliaryCanvas(
+            closing->subpalette_canvas_id);
+        closing->subpalette_canvas_id = {};
+    }
+    const WorkspaceWindowId closing_id = closing->id;
+    DestroyWindow(window);
+    closing->windows.window = nullptr;
+    if (!state.RemoveWorkspaceWindow(closing_id)) {
+        return false;
+    }
+    inkpod::app::WorkspaceWindow* remaining = state.Workspaces().LastFocused();
+    if (remaining == nullptr) {
+        remaining = state.Workspaces().Current();
+    }
+    if (remaining != nullptr) {
+        (void)state.ActivateWorkspaceWindow(remaining->id, true);
+        UpdateMenuState(state);
+        SetForegroundWindow(remaining->windows.window);
     }
     return true;
 }
@@ -8462,7 +8689,7 @@ void ApplyOrDeferWorkspacePresentation(ApplicationHost& state) noexcept {
 }
 
 void NotifyDockHostChanged(void* context) noexcept {
-    auto* state = static_cast<ApplicationHost*>(context);
+    auto* state = ActivateWorkspaceContext(context);
     if (state == nullptr) {
         return;
     }
@@ -8476,13 +8703,19 @@ void NotifyDockHostChanged(void* context) noexcept {
 }
 
 bool InitializeMainChrome(ApplicationHost& state) noexcept {
+    const auto session_name = WorkspaceRegistryValueName(
+        L"WorkspaceSessionV4", state.Workspace().persistence_slot);
     if (!state.lifetime.smoke_test) {
         if (!LoadWorkspaceLayout(
-                state.Workspace().windows.workspace, L"WorkspaceSessionV4")
-            && LoadWorkspaceLayout(
-                state.Workspace().windows.workspace, L"WorkspaceSessionV2")) {
+                state.Workspace().windows.workspace, session_name.data())
+            && state.Workspace().persistence_slot == 0U
+            && (LoadWorkspaceLayout(
+                    state.Workspace().windows.workspace, L"WorkspaceSessionV4")
+                || LoadWorkspaceLayout(
+                    state.Workspace().windows.workspace, L"WorkspaceSessionV2"))) {
             if (SaveWorkspaceLayout(
-                    state.Workspace().windows.workspace, L"WorkspaceSessionV4")) {
+                    state.Workspace().windows.workspace, session_name.data())) {
+                static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSessionV4"));
                 static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSessionV2"));
             }
         }
@@ -8499,14 +8732,16 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
             state.Workspace().windows.window,
             state.Workspace().windows.workspace));
     }
-    state.batch.palette_dialog = {
-        &state,
+    state.Workspace().batch_dialog = {
+        &state.Workspace(),
         DispatchBatchPaletteCommand,
         SelectBatchPaletteOperation,
         RefreshBatchPaletteTimer,
         state.batch.loaded_graph};
     state.Workspace().batch_palette = inkpod::windows::ui::CreateBatchPaletteDialog(
-        state.lifetime.instance, state.Workspace().windows.window, state.batch.palette_dialog);
+        state.lifetime.instance,
+        state.Workspace().windows.window,
+        state.Workspace().batch_dialog);
     if (state.Workspace().batch_palette == nullptr) {
         return false;
     }
@@ -8514,7 +8749,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     ShowWindow(state.Workspace().batch_palette, SW_HIDE);
     state.Workspace().locator_dialog = {};
-    state.Workspace().locator_dialog.context = &state;
+    state.Workspace().locator_dialog.context = &state.Workspace();
     state.Workspace().locator_dialog.dispatch_command =
         DispatchLocatorPaneCommand;
     state.Workspace().locator_dialog.select_pixel = SelectLocatorPixel;
@@ -8526,14 +8761,16 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     if (state.Workspace().locator_palette == nullptr) {
         return false;
     }
+    const auto locator_name = WorkspaceRegistryValueName(
+        L"LocatorPaletteV1", state.Workspace().persistence_slot);
     (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
         state.Workspace().locator_palette,
         state.Workspace().windows.window,
-        L"LocatorPaletteV1",
+        locator_name.data(),
         !state.lifetime.smoke_test);
     ShowWindow(state.Workspace().locator_palette, SW_HIDE);
     state.Workspace().sequence_dialog = {};
-    state.Workspace().sequence_dialog.context = &state;
+    state.Workspace().sequence_dialog.context = &state.Workspace();
     state.Workspace().sequence_dialog.dispatch_command =
         DispatchSequencePaneCommand;
     state.Workspace().sequence_dialog.activate_cell =
@@ -8546,14 +8783,16 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     if (state.Workspace().sequence_palette == nullptr) {
         return false;
     }
+    const auto sequence_name = WorkspaceRegistryValueName(
+        L"SequencePaletteV1", state.Workspace().persistence_slot);
     (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
         state.Workspace().sequence_palette,
         state.Workspace().windows.window,
-        L"SequencePaletteV1",
+        sequence_name.data(),
         !state.lifetime.smoke_test);
     ShowWindow(state.Workspace().sequence_palette, SW_HIDE);
     state.Workspace().light_table_dialog = {};
-    state.Workspace().light_table_dialog.context = &state;
+    state.Workspace().light_table_dialog.context = &state.Workspace();
     state.Workspace().light_table_dialog.dispatch_command =
         DispatchLightTablePaneCommand;
     state.Workspace().light_table_dialog.select_entry =
@@ -8566,10 +8805,12 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     if (state.Workspace().light_table_palette == nullptr) {
         return false;
     }
+    const auto light_table_name = WorkspaceRegistryValueName(
+        L"LightTablePaletteV1", state.Workspace().persistence_slot);
     (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
         state.Workspace().light_table_palette,
         state.Workspace().windows.window,
-        L"LightTablePaletteV1",
+        light_table_name.data(),
         !state.lifetime.smoke_test);
     ShowWindow(state.Workspace().light_table_palette, SW_HIDE);
     const auto subpalette_canvas =
@@ -8581,7 +8822,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     state.Workspace().subpalette_surface_generation =
         state.routing.targets.CurrentGeneration();
     state.Workspace().subpalette_dialog = {};
-    state.Workspace().subpalette_dialog.context = &state;
+    state.Workspace().subpalette_dialog.context = &state.Workspace();
     state.Workspace().subpalette_dialog.dispatch_command =
         DispatchSubpalettePaneCommand;
     state.Workspace().subpalette_dialog.perform_action =
@@ -8602,14 +8843,16 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         state.Workspace().subpalette_canvas_id = {};
         return false;
     }
+    const auto subpalette_name = WorkspaceRegistryValueName(
+        L"SubpalettePaletteV1", state.Workspace().persistence_slot);
     (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
         state.Workspace().subpalette_palette,
         state.Workspace().windows.window,
-        L"SubpalettePaletteV1",
+        subpalette_name.data(),
         !state.lifetime.smoke_test);
     ShowWindow(state.Workspace().subpalette_palette, SW_HIDE);
     state.Workspace().tools.palette_dialog = {};
-    state.Workspace().tools.palette_dialog.context = &state;
+    state.Workspace().tools.palette_dialog.context = &state.Workspace();
     state.Workspace().tools.palette_dialog.dispatch_command = DispatchToolPaletteCommand;
     state.Workspace().tools.palette_dialog.visibility_changed =
         NotifyToolPaletteVisibilityChanged;
@@ -8621,7 +8864,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         return false;
     }
     state.Workspace().windows.tool_palette = state.Workspace().tools.palette;
-    state.Workspace().tools.options_pane.context = &state;
+    state.Workspace().tools.options_pane.context = &state.Workspace();
     state.Workspace().tools.options_pane.dispatch_command = DispatchToolPaletteCommand;
     state.Workspace().tools.options_pane.change_diameter = ChangeToolOptionsDiameter;
     state.Workspace().tools.options_pane.active_tool = state.Workspace().tools.active_tool;
@@ -8635,7 +8878,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     if (state.Workspace().windows.tool_options == nullptr) {
         return false;
     }
-    state.Workspace().panes.color_pane.context = &state;
+    state.Workspace().panes.color_pane.context = &state.Workspace();
     state.Workspace().panes.color_pane.dispatch_command = DispatchColorPaneCommand;
     state.Workspace().panes.color_pane.change_color = ChangeDockDrawingColor;
     state.Workspace().panes.color_pane.change_main_line_color = ChangeDockMainLineColor;
@@ -8649,7 +8892,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         return false;
     }
     auto& layer_dialog = state.Workspace().panes.layer_palette_dialog;
-    layer_dialog.context = &state;
+    layer_dialog.context = &state.Workspace();
     layer_dialog.dispatch_command = DispatchLayerPaletteCommand;
     layer_dialog.select_layer = SelectLayerPaletteLayer;
     layer_dialog.select_plane = SelectLayerPalettePlane;
@@ -8667,7 +8910,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     }
     state.Workspace().windows.layer_palette = state.Workspace().panes.layer_palette;
     state.Workspace().windows.dock_host.SetChangedCallback(
-        NotifyDockHostChanged, &state);
+        NotifyDockHostChanged, &state.Workspace());
     if (!state.Workspace().windows.dock_host.AttachPane(
             DockPaneType::Tool, state.Workspace().windows.tool_palette)
         || !state.Workspace().windows.dock_host.AttachPane(
@@ -8693,6 +8936,109 @@ void ShowInitialPalettes(ApplicationHost& state) noexcept {
     RefreshLightTablePane(state);
     RefreshSubpalettePane(state);
     UpdateMenuState(state);
+}
+
+inkpod::app::WorkspaceWindow* CreateWorkspaceWindow(
+    ApplicationHost& state, bool show) noexcept {
+    const WorkspaceWindowId previous = state.Workspace().id;
+    inkpod::app::WorkspaceWindow* workspace = state.AddWorkspaceWindow();
+    if (workspace == nullptr) {
+        return nullptr;
+    }
+    const WorkspaceWindowId created = workspace->id;
+    const HWND window = CreateWindowExW(
+        0,
+        state.lifetime.window_class_name.c_str(),
+        state.lifetime.window_title.c_str(),
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        1024,
+        720,
+        nullptr,
+        nullptr,
+        state.lifetime.instance,
+        workspace);
+    if (window == nullptr) {
+        if (workspace->subpalette_canvas_id) {
+            (void)state.routing.targets.UnregisterAuxiliaryCanvas(
+                workspace->subpalette_canvas_id);
+            workspace->subpalette_canvas_id = {};
+        }
+        (void)state.RemoveWorkspaceWindow(created);
+        (void)state.ActivateWorkspaceWindow(previous, false);
+        return nullptr;
+    }
+    UpdateMenuState(state);
+    if (show) {
+        ShowWindow(window, state.lifetime.show_command);
+        ShowInitialPalettes(state);
+        UpdateWindow(window);
+    }
+    return workspace;
+}
+
+void DestroyEmptyWorkspaceWindow(
+    ApplicationHost& state,
+    WorkspaceWindowId workspace_id,
+    WorkspaceWindowId restore) noexcept {
+    auto* workspace = state.FindWorkspace(workspace_id);
+    if (workspace == nullptr) {
+        return;
+    }
+    (void)state.ActivateWorkspaceWindow(workspace_id, false);
+    if (workspace->subpalette_canvas_id) {
+        (void)state.routing.targets.UnregisterAuxiliaryCanvas(
+            workspace->subpalette_canvas_id);
+        workspace->subpalette_canvas_id = {};
+    }
+    if (workspace->windows.window != nullptr) {
+        DestroyWindow(workspace->windows.window);
+        workspace->windows.window = nullptr;
+    }
+    (void)state.RemoveWorkspaceWindow(workspace_id);
+    (void)state.ActivateWorkspaceWindow(restore, false);
+}
+
+bool MoveOrDuplicateViewToNewWorkspace(
+    ApplicationHost& state,
+    const CommandContext& context,
+    bool duplicate) noexcept {
+    if (!context.workspace.has_value() || !context.document_view.has_value()) {
+        return false;
+    }
+    const WorkspaceWindowId source_workspace = context.workspace.value();
+    const DocumentViewId source_view = context.document_view.value();
+    auto* created = CreateWorkspaceWindow(state, false);
+    if (created == nullptr) {
+        return false;
+    }
+    const WorkspaceWindowId destination_workspace = created->id;
+    const inkpod::app::EditorGroup* destination_group = created->editors.Active();
+    bool transferred{};
+    if (destination_group != nullptr
+        && state.ActivateDocumentView(source_view)) {
+        transferred = duplicate
+            ? CreateDocumentViewInGroup(
+                state,
+                destination_group->id,
+                created->windows.window)
+            : state.MoveDocumentViewToWorkspace(
+                source_view, destination_workspace);
+    }
+    if (!transferred) {
+        DestroyEmptyWorkspaceWindow(
+            state, destination_workspace, source_workspace);
+        return false;
+    }
+    (void)state.ActivateWorkspaceWindow(source_workspace, false);
+    UpdateMenuState(state);
+    (void)state.ActivateWorkspaceWindow(destination_workspace, true);
+    UpdateMenuState(state);
+    ShowWindow(created->windows.window, state.lifetime.show_command);
+    ShowInitialPalettes(state);
+    UpdateWindow(created->windows.window);
+    return true;
 }
 
 std::optional<LRESULT> RouteBatchCommand(
@@ -10719,7 +11065,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
     HWND window,
     WPARAM wparam,
     LPARAM,
-    const CommandContext&) noexcept {
+    const CommandContext& context) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -11019,6 +11365,7 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 LOWORD(wparam) == IDM_VIEW_FLIP_HORIZONTAL;
             const InkpodStatus status = ApplyView(
                 *state,
+                context,
                 horizontal ? INKPOD_VIEW_FLIP_HORIZONTAL
                            : INKPOD_VIEW_FLIP_VERTICAL,
                 0.0,
@@ -11226,6 +11573,12 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             }
             return 1;
         }
+        case IDM_VIEW_MOVE_NEW_WINDOW:
+            return MoveOrDuplicateViewToNewWorkspace(
+                *state, context, false) ? 1 : 0;
+        case IDM_VIEW_DUPLICATE_NEW_WINDOW:
+            return MoveOrDuplicateViewToNewWorkspace(
+                *state, context, true) ? 1 : 0;
         default:
             break;
     }
@@ -12049,6 +12402,8 @@ std::optional<LRESULT> RouteApplicationCommand(
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
+        case IDM_WORKSPACE_NEW_WINDOW:
+            return CreateWorkspaceWindow(*state, true) != nullptr ? 1 : 0;
         case IDM_WINDOW_LOCATOR:
             if (state->Workspace().locator_palette != nullptr) {
                 const bool shown = ToggleAuxiliaryPaneVisibility(
@@ -12248,8 +12603,10 @@ std::optional<LRESULT> RouteApplicationCommand(
         }
         case IDM_WORKSPACE_SAVE: {
             CaptureWorkspacePresentation(*state);
+            const auto saved_name = WorkspaceRegistryValueName(
+                L"WorkspaceSavedV4", state->Workspace().persistence_slot);
             const bool saved = SaveWorkspaceLayout(
-                state->Workspace().windows.workspace, L"WorkspaceSavedV4");
+                state->Workspace().windows.workspace, saved_name.data());
             if (!saved && !state->lifetime.smoke_test) {
                 MessageBoxW(
                     window,
@@ -12289,17 +12646,20 @@ std::optional<LRESULT> RouteApplicationCommand(
                 }
                 return 0;
             }
-            const bool saved = SaveWorkspaceLayout(
-                layout, L"WorkspaceSavedV4");
+            const auto saved_name = WorkspaceRegistryValueName(
+                L"WorkspaceSavedV4", state->Workspace().persistence_slot);
+            const bool saved = SaveWorkspaceLayout(layout, saved_name.data());
             UpdateMenuState(*state);
             return saved ? 1 : 0;
         }
         case IDM_WORKSPACE_RESTORE: {
             WorkspaceLayoutState restored = state->Workspace().windows.workspace;
-            bool loaded = LoadWorkspaceLayout(restored, L"WorkspaceSavedV4");
-            if (!loaded
+            const auto saved_name = WorkspaceRegistryValueName(
+                L"WorkspaceSavedV4", state->Workspace().persistence_slot);
+            bool loaded = LoadWorkspaceLayout(restored, saved_name.data());
+            if (!loaded && state->Workspace().persistence_slot == 0U
                 && LoadWorkspaceLayout(restored, L"WorkspaceSavedV2")) {
-                if (SaveWorkspaceLayout(restored, L"WorkspaceSavedV4")) {
+                if (SaveWorkspaceLayout(restored, saved_name.data())) {
                     static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSavedV2"));
                 }
                 loaded = true;
@@ -13270,13 +13630,18 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
             || document->generation != context.generation.value()) {
             return false;
         }
-        if (context.workspace.has_value()
-            && context.workspace.value() != state->routing.targets.Workspace()) {
-            return false;
+        CommandTargetScope required = CommandTargetScope::DocumentSession;
+        if (context.workspace.has_value()) {
+            required = required | CommandTargetScope::Workspace;
         }
-        return !context.editor_group.has_value()
-            || context.editor_group.value()
-                == state->routing.targets.EditorGroup();
+        if (context.editor_group.has_value()) {
+            required = required | CommandTargetScope::EditorGroup;
+        }
+        if (context.document_view.has_value()) {
+            required = required | CommandTargetScope::DocumentView;
+        }
+        return state->routing.targets.Resolve(context, required)
+            == CommandResolveStatus::Ok;
     };
     switch (message) {
         case inkpod::app::kCoreStateChanged:
@@ -13290,6 +13655,10 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     && notification.kind
                         == inkpod::app::CoreNotificationKind::StateChanged
                     && targets_open_document(notification.context);
+                if (target_valid && notification.context.workspace.has_value()) {
+                    (void)state->ActivateWorkspaceWindow(
+                        notification.context.workspace.value(), false);
+                }
                 const bool target_current = target_valid
                     && notification.context.document_session.has_value()
                     && notification.context.document_session.value()
@@ -13384,6 +13753,13 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 const InkpodStatus status = static_cast<InkpodStatus>(wparam);
                 const CommandContext completion_context =
                     state->effects.completion_context;
+                auto* completion_workspace = completion_context.workspace.has_value()
+                    ? state->FindWorkspace(completion_context.workspace.value())
+                    : nullptr;
+                if (completion_workspace != nullptr) {
+                    (void)state->ActivateWorkspaceWindow(
+                        completion_workspace->id, false);
+                }
                 const bool target_current = completion_context.generation.has_value()
                     && completion_context.generation->Value()
                         == static_cast<std::uint64_t>(lparam)
@@ -13403,9 +13779,10 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     == CommandResolveStatus::Ok;
                 const bool prompt = state->effects.preview_prompt;
                 state->effects.preview_prompt = false;
-                if (state->Workspace().effects_progress != nullptr) {
-                    DestroyWindow(state->Workspace().effects_progress);
-                    state->Workspace().effects_progress = nullptr;
+                if (completion_workspace != nullptr
+                    && completion_workspace->effects_progress != nullptr) {
+                    DestroyWindow(completion_workspace->effects_progress);
+                    completion_workspace->effects_progress = nullptr;
                 }
                 inkpod_task_release(&state->effects.task);
                 if (status == INKPOD_STATUS_OK && prompt && document_current
@@ -13450,6 +13827,13 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 const InkpodStatus status = static_cast<InkpodStatus>(wparam);
                 const CommandContext completion_context =
                     state->batch.completion_context;
+                auto* completion_workspace = completion_context.workspace.has_value()
+                    ? state->FindWorkspace(completion_context.workspace.value())
+                    : nullptr;
+                if (completion_workspace != nullptr) {
+                    (void)state->ActivateWorkspaceWindow(
+                        completion_workspace->id, false);
+                }
                 const bool target_valid = completion_context.generation.has_value()
                     && completion_context.generation->Value()
                         == static_cast<std::uint64_t>(lparam)
@@ -13467,9 +13851,10 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 const std::wstring completed_target = completed_document == nullptr
                     ? L""
                     : LocatorDocumentName(*completed_document);
-                if (state->Workspace().batch_progress != nullptr) {
-                    DestroyWindow(state->Workspace().batch_progress);
-                    state->Workspace().batch_progress = nullptr;
+                if (completion_workspace != nullptr
+                    && completion_workspace->batch_progress != nullptr) {
+                    DestroyWindow(completion_workspace->batch_progress);
+                    completion_workspace->batch_progress = nullptr;
                 }
                 if (target_valid && state->batch.report != nullptr) {
                     try {
@@ -13646,6 +14031,10 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
             return 0;
         }
         case WM_CLOSE:
+            if (state != nullptr && state->Workspaces().Count() > 1U) {
+                (void)CloseWorkspaceWindow(*state, window);
+                return 0;
+            }
             if (state != nullptr && !state->lifetime.smoke_test
                 && !ConfirmAllDocuments(*state)) {
                 return 0;
@@ -13678,7 +14067,7 @@ std::optional<LRESULT> RouteTimerAndCloseMessage(
             }
             return 0;
         case WM_NCDESTROY:
-            if (state != nullptr) {
+            if (state != nullptr && state->Workspaces().Count() <= 1U) {
                 for (const CommandTimerKind kind : {
                          CommandTimerKind::Autosave,
                          CommandTimerKind::ContinuousSpray,
