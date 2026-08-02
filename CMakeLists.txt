@@ -300,6 +300,8 @@ if(WIN32)
         apps/windows/app/command_context.cpp
         apps/windows/app/command_context.h
         apps/windows/app/identity.h
+        apps/windows/app/pane_target.cpp
+        apps/windows/app/pane_target.h
         tests/windows_command_context.cpp)
     target_include_directories(inkpod_windows_command_context_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/apps/windows")
@@ -432,6 +434,8 @@ if(WIN32)
         apps/windows/app/recent_documents.h
         apps/windows/app/frontend_state.h
         apps/windows/app/identity.h
+        apps/windows/app/pane_target.cpp
+        apps/windows/app/pane_target.h
         apps/windows/app/workspace_window.cpp
         apps/windows/app/workspace_window.h
         apps/windows/app/app_smoke.cpp
@@ -457,6 +461,14 @@ if(WIN32)
         apps/windows/ui/dialogs/tool_palette.cpp
         apps/windows/ui/dialogs/tool_palette.h
         apps/windows/ui/panes/document_panes.cpp
+        apps/windows/ui/panes/light_table_pane.cpp
+        apps/windows/ui/panes/light_table_pane.h
+        apps/windows/ui/panes/locator_pane.cpp
+        apps/windows/ui/panes/locator_pane.h
+        apps/windows/ui/panes/sequence_pane.cpp
+        apps/windows/ui/panes/sequence_pane.h
+        apps/windows/ui/panes/subpalette_pane.cpp
+        apps/windows/ui/panes/subpalette_pane.h
         apps/windows/ui/panes/color_panes.cpp
         apps/windows/ui/panes/color_dock_pane.cpp
         apps/windows/ui/panes/color_dock_pane.h

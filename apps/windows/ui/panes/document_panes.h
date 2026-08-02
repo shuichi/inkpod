@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "app/identity.h"
 #include "inkpod/core_ffi.h"
 
 namespace inkpod::app {
@@ -44,6 +45,8 @@ struct LightTablePaneItem {
 struct SequencePaneCell {
     InkpodSequenceCellInfo info{};
     std::string name;
+    std::uint32_t thumbnail_stride_bytes{};
+    std::vector<std::uint8_t> thumbnail_rgba;
 };
 
 // Owns the Core-to-pane model adapter. Modeless palettes bind these records
@@ -59,9 +62,14 @@ public:
         std::vector<TreePaneNode>& planes,
         std::uint32_t& selected_layer_index) noexcept;
     InkpodStatus LoadLightTable(
+        app::DocumentSessionId session,
+        app::Generation generation,
         std::vector<LightTablePaneSet>& sets,
         std::vector<LightTablePaneItem>& items) noexcept;
-    InkpodStatus LoadSequence(std::vector<SequencePaneCell>& cells) noexcept;
+    InkpodStatus LoadSequence(
+        app::DocumentSessionId session,
+        app::Generation generation,
+        std::vector<SequencePaneCell>& cells) noexcept;
     InkpodStatus SampleLocator(
         std::uint64_t view_id,
         int device_x,

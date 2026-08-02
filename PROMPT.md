@@ -35,7 +35,7 @@ inkpod は次の構成を維持する。
 4. 既存コードがテストで保証する契約
 5. Windows 11 の標準的な操作慣習
 
-この文書で決めていない旧 proprietary binary の byte layout や旧設定ファイル形式は、推測で実装しないでください。DGA/CEL の layer semantics をネイティブモデルで再現することと、旧 DGA/CEL ファイルを直接読み書きすることは別です。実 fixture と独立した検証方法がない codec は `Unknown` または `Experimental` と記録し、互換書き出しを有効にしないでください。
+対応するファイル形式は本文書に明記されたものだけです。未列挙の外部形式を追加せず、GUI、codec registry、file dialog に placeholder や disabled entry を残さないでください。
 
 ## 内蔵機能仕様
 
@@ -465,19 +465,19 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 ### 20. 形式、白透過、一般画像入出力
 
 - native `.inkpod` は layer/plane、frame、history savepointに必要なmetadata、palette、light table、selection、color depthを保持するversioned container。
+- ユーザーがフォーマットフリーズを宣言するまで、`.inkpod`、`.inkbatch`、native preset等のapplication固有の永続化ファイル形式は現在versionだけを読み書きし、下位互換reader/writer、migration、互換shimを持たない。現在の要件に対して最も頑健で効率的なschemaを選ぶ。この規則はHKCUのworkspace layout recordには適用しない。
+- コードフリーズまでは、serialized schemaを変更するたびに対象形式の最上位format versionを必ずインクリメントする。section/record versionだけの変更で代用せず、旧versionは明示的に拒否する。
 - 一般 raster import/export は少なくとも PNG、TIFF、TGA、BMP の対応可能な 8/16 bit、alpha、DPI を扱う。形式が表せない情報はflatten/export optionで明示する。
 - legacy workflow の `白背景を合成` をexport optionとして持つ。onなら最下層へ白を合成してalphaを除き、offならformatが許すalphaを保持する。
 - legacy white-transparency modeでは完全な白を透明候補としてcheckできるが、native documentでは白色pixelと透明alphaを同一視しない。
 - 一枚 export とcut/sequence exportを分け、後者は対象layer、全体/作画frame、size/DPI、antialias、連番規則を設定する。
 - 旧固有拡張子を、内容がnative JSON等であるだけの別形式へ流用しない。
 
-### 21. この仕様で未確定として扱うもの
+### 21. 未指定事項の決定
 
-- DGA/CEL および旧 palette/chart/filter preset のbinary byte layout。
-- 旧ソフト内部の厳密な色距離、filter kernel、放送色域判定式のうち文章で一意に決まらない部分。
-- 旧UIのpixel位置、icon、配色、window dockingの細部。
-- 未確定事項は新しい安全なnative仕様として定義し、`docs/compatibility.md`へ差分、式、rounding、fixture、testを記録する。
-- 実データとの厳密互換が必要になった時点で、権利上利用可能なfixtureと期待出力を追加し、既存native semanticsを壊さない独立codecとして実装する。
+- 旧UIのpixel位置、icon、配色、window dockingの細部は再現対象にしない。
+- 本文書が数値や内部表現を一意に定めない場合は、安全性、頑健性、効率、決定性を優先したnative仕様を定義し、式、rounding、fixture、testを記録する。
+- 永続化schemaに影響する決定は、前節のフォーマットフリーズ前version規則に従う。
 
 ## 文書の使い分け
 
@@ -486,7 +486,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - 実装済み範囲と未対応範囲は `docs/compatibility.md`、現在の主要差分と直近検証は `docs/implementation-status.md` で確認する。
 - 実ファイル、依存関係、所有権、thread 構成の詳細は `docs/architecture.md` を参照し、本文書へ一時的な構造や行数を複製しない。
 - 完了済み工程の根拠が必要な場合は Git 履歴と該当テストを使い、本文書や status 文書へ時系列ログを再追加しない。
-- 仕様と既存テストだけでは安全に決められず、選択によって保存形式や互換性を不可逆に変える場合は、実装前にユーザー判断を求める。
+- 仕様と既存テストだけでは安全に決められない製品挙動は、実装前に選択肢と影響を示してユーザー判断を求める。フォーマットフリーズ前のschemaは下位互換性を理由に固定せず、頑健性と効率を優先する。
 
 ## 必須アーキテクチャ
 
@@ -569,10 +569,9 @@ Canvas の view transform は client の物理 device pixel を基準とし、`d
 - `WORKSPACE-001`: 制約付き dock、最大二つの `EditorGroup`、named workspace、versioned layout persistence と monitor/DPI recovery
 - `WORKSPACE-002`: pane scope、follow/pin/job target、発行時 `CommandContext`、ID/generation による stale routing rejection
 - `SESSION-001`: 複数 `DocumentSession` の file identity、view/document/window/application close、save/Save As、autosave/recovery lifecycle
-- `COMPAT-001`: rights-cleared fixture/oracle に基づく legacy codec 実測範囲
 - `SAFE-001`: malformed/corrupted input の bounded rejection と非破壊性
 - `PERF-001`: large sparse/COW document と bounded dense workload の benchmark
-- `PKG-001`: x64/ARM64 self-contained MSIX payload と release signing 境界
+- `PKG-001`: x64/ARM64 self-contained MSIX payload と package 検証
 - `PORT-001`: Rust workspace の OS 非依存性と次 frontend の adapter gap
 
 ### Document and view
@@ -675,7 +674,7 @@ Canvas の view transform は client の物理 device pixel を基準とし、`d
 
 - `GUI.md` は GUI モダナイゼーションの順序、依存関係、milestone gate の正本とする。完了した milestone には再現可能な code/test/document 証拠を結び付け、先行 gate が未完了の間は後続を開始しない。
 - `docs/gui-modernization-baseline.md` は G0 で固定した実装前の一 window、一 group、command/ABI/native smoke baseline と既知差分を保存する。将来の現行状態を追記する log にはせず、baseline の数値や証拠が誤っていた場合だけ訂正する。
-- `docs/compatibility.md` は要件 ID ごとの状態、実装、test、既知差分の正本とする。状態は `Not started`、`In progress`、`Experimental`、`Verified`、`Blocked`、外部形式の実測範囲には `Unknown` を使う。
+- `docs/compatibility.md` は要件 ID ごとの状態、実装、test、既知差分の正本とする。状態は `Not started`、`In progress`、`Experimental`、`Verified`、`Blocked` を使う。
 - `Verified` は対応する user-facing または明示的な Core-only 契約と再現可能な test がある場合だけに使う。source が移動しただけでは状態を変更しない。
 - `Blocked` は不足 fixture、利用不能な toolchain、外部判断など、具体的な解除条件がある場合だけに使う。
 - `docs/implementation-status.md` は現在の実装状態、既知差分、直近の代表的な検証だけを記録する。完了工程、時系列の作業ログ、古い test count を蓄積しない。
@@ -716,7 +715,7 @@ golden image は自作の単純な幾何 fixture を使い、旧製品由来の�
 - Rust の `Vec`/`String`、C++ STL、例外、panic を ABI 越しに出す
 - unbounded allocation、再帰 flood fill、無検査 path extraction
 - 保存先ファイルを直接 truncate してから書く
-- fixture のない DGA/CEL writer を「互換」として有効にする
+- 本文書に列挙されていない外部ファイル形式を実装またはGUIへ表示する
 - 旧 PaintMan の UI asset、スクリーンショット、長い説明文をコピーする
 - button と menu だけを並べ、Core command に未接続のまま完成扱いする
 - `TODO`、常時 `OK` の stub、空 callback を status `Verified` にする

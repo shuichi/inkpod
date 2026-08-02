@@ -275,13 +275,15 @@ fn io_001_manifest_and_blobs_round_trip() {
 }
 
 #[test]
-fn previous_container_version_is_rejected() {
-    let mut encoded = encode(&base_fixture()).unwrap();
-    encoded[8..12].copy_from_slice(&(FORMAT_VERSION - 1).to_le_bytes());
-    assert!(matches!(
-        decode(&encoded),
-        Err(FormatError::Unsupported("format version is not supported"))
-    ));
+fn non_current_container_versions_are_rejected_before_format_freeze() {
+    for version in [FORMAT_VERSION - 1, FORMAT_VERSION + 1] {
+        let mut encoded = encode(&base_fixture()).unwrap();
+        encoded[8..12].copy_from_slice(&version.to_le_bytes());
+        assert!(matches!(
+            decode(&encoded),
+            Err(FormatError::Unsupported("format version is not supported"))
+        ));
+    }
 }
 
 #[test]

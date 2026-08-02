@@ -97,6 +97,8 @@ public:
 
     [[nodiscard]] std::optional<PaneInstanceId> RegisterPane() noexcept;
     bool UnregisterPane(PaneInstanceId pane) noexcept;
+    [[nodiscard]] std::optional<CanvasId> RegisterAuxiliaryCanvas() noexcept;
+    bool UnregisterAuxiliaryCanvas(CanvasId canvas) noexcept;
     [[nodiscard]] std::optional<JobSessionId> BeginJob() noexcept;
     bool EndJob(JobSessionId job) noexcept;
 
@@ -125,6 +127,7 @@ private:
     static constexpr std::size_t kMaximumViews = 64U;
     static constexpr std::size_t kMaximumEditorGroups = 2U;
     static constexpr std::size_t kMaximumPanes = 32U;
+    static constexpr std::size_t kMaximumAuxiliaryCanvases = 16U;
     static constexpr std::size_t kMaximumJobs = 16U;
 
     template <typename Id>
@@ -184,6 +187,8 @@ private:
     std::size_t document_count_{};
     std::array<PaneInstanceId, kMaximumPanes> panes_{};
     std::size_t pane_count_{};
+    std::array<CanvasId, kMaximumAuxiliaryCanvases> auxiliary_canvases_{};
+    std::size_t auxiliary_canvas_count_{};
     std::array<JobTarget, kMaximumJobs> jobs_{};
     std::size_t job_count_{};
 };

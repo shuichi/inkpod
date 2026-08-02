@@ -375,6 +375,21 @@ pub struct LocatorSample {
     pub color: Option<PixelValue>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// Bounded straight-RGBA8 neighborhood centered on one locator sample.
+pub struct LocatorNeighborhood {
+    /// Document-space x-coordinate of the first returned pixel.
+    pub origin_x: i32,
+    /// Document-space y-coordinate of the first returned pixel.
+    pub origin_y: i32,
+    /// Square output width in pixels.
+    pub width: u32,
+    /// Square output height in pixels.
+    pub height: u32,
+    /// Packed row-major straight RGBA8 pixels. Out-of-document pixels are transparent.
+    pub pixels_rgba8: Vec<u8>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Legacy single-stroke shortcut binding.
 pub struct ShortcutBinding {

@@ -200,7 +200,13 @@ InkpodStatus BatchController::BuildGraph() noexcept {
     }
 }
 
-InkpodStatus BatchController::Preview(InkpodBatchRunScope scope) noexcept {
+InkpodStatus BatchController::Preview(
+    const app::CommandContext& context,
+    InkpodBatchRunScope scope) noexcept {
+    if (!context.document_session.has_value()
+        || !context.generation.has_value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
     const InkpodStatus graph_status = BuildGraph();
     if (graph_status != INKPOD_STATUS_OK) {
         return graph_status;
@@ -208,6 +214,8 @@ InkpodStatus BatchController::Preview(InkpodBatchRunScope scope) noexcept {
     inkpod_batch_preview_release(&batch_.preview);
     app::BatchUiState* const batch = &batch_;
     InkpodStatus status = engine_.Invoke(
+        *context.document_session,
+        *context.generation,
         [batch, scope](InkpodCore* core) {
             return inkpod_core_batch_preview(
                 core, batch->graph, scope, &batch->preview);
@@ -256,7 +264,7 @@ InkpodStatus BatchController::Start(
     }
     bool preview_confirmed = !batch_.preview_before_save || dry_run;
     if (!preview_confirmed) {
-        const InkpodStatus preview_status = Preview(scope);
+        const InkpodStatus preview_status = Preview(context, scope);
         if (preview_status != INKPOD_STATUS_OK) {
             return preview_status;
         }
@@ -280,7 +288,14 @@ InkpodStatus BatchController::Start(
         | (preview_confirmed ? INKPOD_BATCH_RUN_PREVIEW_CONFIRMED : 0U);
     app::BatchUiState* const batch = &batch_;
     if (lifetime_.smoke_test) {
+        if (!context.document_session.has_value()
+            || !context.generation.has_value()) {
+            inkpod_batch_task_release(&batch_.task);
+            return INKPOD_STATUS_INVALID_STATE;
+        }
         status = engine_.Invoke(
+            *context.document_session,
+            *context.generation,
             [batch, scope, flags](InkpodCore* core) {
                 return inkpod_core_batch_execute(
                     core,
@@ -417,6 +432,19 @@ void BatchController::RefreshPalette(
     }
     BatchPaletteView view{};
     try {
+        view.target_text = batch.target_text;
+        view.job_text = batch.job_text;
+        view.target_available = batch.target_available;
+        view.pinned = batch.target_pinned;
+        if (batch.task != nullptr && batch.job_id.has_value()) {
+            ProgressDialogInfo progress{};
+            if (QueryProgress(&batch, progress)) {
+                view.job_text = L"Job "
+                    + std::to_wstring(batch.job_id->Value()) + L" — "
+                    + std::to_wstring(progress.completed_work) + L" / "
+                    + std::to_wstring(progress.total_work);
+            }
+        }
         if (batch.input_kind == INKPOD_BATCH_INPUT_CURRENT_SEQUENCE) {
             view.input_label = L"現在セルを含む連番（自然順）";
         } else if (batch.input_kind == INKPOD_BATCH_INPUT_FOLDER) {

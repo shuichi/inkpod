@@ -6,7 +6,7 @@
 
 このファイルには、全タスクに常時適用する技術境界、品質基準、作業規律だけを置く。維持する機能、GUI メニュー、挙動契約、要件 ID、プロジェクト固有の実装指針は `PROMPT.md` を正本とし、ここへ複製しない。実装前に `PROMPT.md` の関連節を読み、現在状態や既知差分に関係する場合だけ `docs/implementation-status.md` と `docs/compatibility.md` の該当箇所を確認する。
 
-指示が競合する場合の優先順位は、今回のユーザー指示、`AGENTS.md`、`PROMPT.md`、テスト済みの既存契約の順とする。外部の旧製品マニュアルや画像を通常の実装時に参照せず、未確定の proprietary binary 仕様を推測で互換と称しない。旧製品の画像、アイコン、文面、商標表示を複製しない。
+指示が競合する場合の優先順位は、今回のユーザー指示、`AGENTS.md`、`PROMPT.md`、テスト済みの既存契約の順とする。外部の旧製品マニュアルや画像を通常の実装時に参照しない。対応するファイル形式は `PROMPT.md` に明記されたものだけとし、未列挙の外部形式を追加しない。旧製品の画像、アイコン、文面、商標表示を複製しない。
 
 「合理的な互換性」は旧 UI の模写ではなく、操作の意味、データ分離、座標、保存結果を再現することである。Windows 固有の外見と操作は Windows 11 の標準に合わせる。
 
@@ -84,15 +84,17 @@ Rust は Direct2D command ではなく immutable render snapshot を生成する
 - snapshot は所有権を明示した C++ queue で Core engine から Renderer へ渡す。Rust 所有 pointer を `PostMessage` の `WPARAM`/`LPARAM` に裸で積まず、受取側は enqueue 成否にかかわらず release 責務を一意に引き受ける。
 - C header と Rust 宣言の drift を CI で検出する。
 
-## 6. 保存、外部入力、互換性
+## 6. 保存、外部入力、フォーマット
 
-native extension は `.inkpod` とし、versioned manifest と圧縮可能な blob を分離する。manifest には format version、UUID、寸法、DPI、色空間、frame、layer/plane tree、blob length/checksum を含め、形式と migration を `docs/file-format.md` に記録する。
+native extension は `.inkpod` とし、versioned manifest と圧縮可能な blob を分離する。manifest には format version、UUID、寸法、DPI、色空間、frame、layer/plane tree、blob length/checksum を含め、形式を `docs/file-format.md` に記録する。
+
+ユーザーがフォーマットフリーズを明示的に宣言するまで、native file format と application 固有の永続化ファイル形式に下位互換性を設けない。decoder は現在の version だけを受理し、旧 version 用 migration、互換 reader、互換 writer、互換 shim を追加しない。常に現在の要件に対して最も頑健で効率的な形式を選び、コードフリーズまでは serialized schema を変更するたびに最上位の file format version を必ずインクリメントする。section version だけの変更で最上位 version の更新を代用しない。フォーマットフリーズ後の互換性方針は、その宣言時のユーザー指示で定める。この規則は `.inkpod`、`.inkbatch`、native preset 等のファイルに適用し、HKCU の workspace layout record には適用しない。
 
 - 保存は同一 volume の temporary file を完成・flush・close してから置換する。元 file を先に truncate しない。
 - autosave/recovery/export と通常保存を区別し、autosave 成功だけで通常 savepoint を進めない。
 - decoder は path traversal、zip bomb 相当、巨大寸法・個数、重複 ID、循環参照、checksum 不一致、不正 UTF を拒否する。
 - 未知の必須 feature は拒否し、未知の任意 metadata は可能な範囲で round-trip する。
-- PNG/TIFF/TGA/BMP 等の既知形式を先に実装する。DGA/CEL は権利上利用可能な実 fixture と独立検証が揃うまで `Unknown`/`Experimental` とし、互換出力を有効にしない。
+- 一般画像入出力は `PROMPT.md` に列挙された対応形式だけを実装し、未対応形式の placeholder、disabled entry、拡張子だけの偽装形式を作らない。
 - Windows file dialog、shell drop、clipboard 接続は C++、decode/encode と document 変換は Rust を基本とする。
 - app 内 clipboard は layer/plane type、document 座標、selection bounds を保持し、外部向け標準形式も提供する。
 
@@ -140,7 +142,7 @@ ctest --preset <windows-test-preset>
 必要なテストは次を含む。
 
 - Core: coordinate、tile indexing、selection algebra、Undo/Redo、serialization round-trip、fill/filter/transform/composite の unit/property/golden test
-- format: `.inkpod` round-trip、migration、malformed/cancel test
+- format: `.inkpod` current-version round-trip、非現行 version 拒否、malformed/cancel test
 - ABI: header の C11/C++20 include、ownership、NULL/短い structure/未知 enum/二重 release の negative test
 - Windows: MSVC `/W4 /permissive-`、create/render、resize/DPI/device lost smoke test
 - CI: Rust と Windows の configure/build/test。新規 warning を放置しない
@@ -155,7 +157,7 @@ ctest --preset <windows-test-preset>
 - `docs/compatibility.md` の requirement、状態、test、既知差分を更新している
 - 現在状態、既知差分、または代表的な直近検証が変わった場合は `docs/implementation-status.md` を更新している
 
-互換状態は `Not started`、`In progress`、`Experimental`、`Verified`、`Blocked` のいずれかとし、外部形式の実測範囲には `Unknown` を使用できる。test がない機能を `Verified` にしない。
+互換状態は `Not started`、`In progress`、`Experimental`、`Verified`、`Blocked` のいずれかとする。test がない機能を `Verified` にしない。
 
 ## 10. エージェントの作業手順
 
@@ -163,7 +165,7 @@ ctest --preset <windows-test-preset>
 2. ユーザー変更を保護し、今回の依頼に対応する `PROMPT.md` の機能・要件 ID と、status/compatibility に記録された現在状態・既知差分を確認する。
 3. 大きな変更を model/ABI、Core、Windows adapter、test、document の小さな縦切りへ分ける。
 4. 短い計画を示した後、計画だけで止まらず今回の scope を実装・検証する。
-5. 仕様が決められない場合は `Unknown` として fixture、期待出力、ユーザー判断の必要性を記録し、互換挙動を捏造しない。
+5. 仕様と既存テストだけで安全に決められない場合は推測で実装せず、具体的な選択肢、影響、解除条件を示してユーザー判断を求める。
 6. format、lint、test、build を実行し、現在状態、要件 status、既知差分、代表的検証が変わった場合だけ status/compatibility 文書を更新する。
 7. 最終報告では、利用者向け挙動、重要な設計判断、変更 file、検証結果、未検証事項、既知差分を簡潔に示す。
 

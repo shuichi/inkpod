@@ -1505,6 +1505,21 @@ typedef struct InkpodLocatorOutput {
 #define INKPOD_LOCATOR_SELECTION_PRESENT (UINT32_C(1) << 0)
 #define INKPOD_LOCATOR_COLOR_PRESENT (UINT32_C(1) << 1)
 
+/** @brief locator 中心を含む caller-owned packed straight RGBA8 neighborhood 出力。 */
+typedef struct InkpodLocatorNeighborhoodBuffer {
+    uint32_t struct_size;
+    uint32_t radius;
+    uint32_t width;
+    uint32_t height;
+    int32_t origin_x;
+    int32_t origin_y;
+    uint32_t reserved;
+    uint32_t reserved_2;
+    uint8_t* pixels_rgba8;
+    uint64_t pixel_capacity;
+    uint64_t required_bytes;
+} InkpodLocatorNeighborhoodBuffer;
+
 /** @brief 一つの正規化済みshortcut stroke。 */
 typedef struct InkpodShortcutStroke {
     uint32_t virtual_key;
@@ -1646,6 +1661,18 @@ typedef struct InkpodNamedBytesInput {
     uint64_t byte_count;
 } InkpodNamedBytesInput;
 
+/** @brief UTF-8 名、common-raster format、encoded byte span の borrowed record。 */
+typedef struct InkpodNamedRasterInput {
+    uint32_t struct_size;
+    uint32_t reserved;
+    InkpodCommonRasterFormat format;
+    uint32_t reserved2;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+    const uint8_t* bytes;
+    uint64_t byte_count;
+} InkpodNamedRasterInput;
+
 /** @brief sequence cell の UUID/番号/thumbnail/名を返す caller-owned size-query 対応出力。 */
 typedef struct InkpodSequenceCellInfo {
     uint32_t struct_size;
@@ -1664,6 +1691,20 @@ typedef struct InkpodSequenceCellInfo {
     uint64_t name_capacity;
     uint64_t name_bytes;
 } InkpodSequenceCellInfo;
+
+/** @brief sequence thumbnail を受け取る caller-owned size-query 対応 buffer。 */
+typedef struct InkpodSequenceThumbnailBuffer {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint32_t width;
+    uint32_t height;
+    uint32_t stride_bytes;
+    uint32_t reserved;
+    uint64_t checksum;
+    uint8_t* pixels_rgba8;
+    uint64_t pixel_capacity;
+    uint64_t required_bytes;
+} InkpodSequenceThumbnailBuffer;
 
 /** @brief motion-check の FPS と loop/selection/light-table flags を渡す入力。 */
 typedef struct InkpodMotionCheckInput {
@@ -2472,6 +2513,21 @@ InkpodStatus inkpod_core_locator_sample(
     double device_y,
     InkpodLocatorOutput* out_locator);
 /**
+ * @brief device 点を中心とする bounded composite-color neighborhood を一括取得する。
+ * @par 契約
+ * Core owner thread。`radius` は 0..16。capacity 0/NULL は size query。範囲外 pixel は
+ * transparent RGBA8。成功時 metadata/bytes、`BUFFER_TOO_SMALL` 時も required bytes と
+ * dimensions を返す。query のため document/view revision、dirty、Undo は不変。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_locator_neighborhood(
+    InkpodCore* core,
+    uint64_t view_id,
+    double device_x,
+    double device_y,
+    InkpodLocatorNeighborhoodBuffer* output);
+/**
  * @brief command の shortcut key chord を設定し、既存 conflict を置換する。
  * @par 契約
  * Core owner thread。`core` は非 NULL、command/key/modifier は bounded 既知値。成功時 application 設定だけ変更し、
@@ -2785,6 +2841,21 @@ InkpodStatus inkpod_core_sequence_import_encoded(
     uint64_t file_count,
     uint64_t file_stride_bytes);
 /**
+ * @brief file ごとの common-raster format で encoded sequence を decode して置換する。
+ * @par 契約
+ * Core owner thread。`core`/`files` は非 NULL、count/stride/nested sizes と各
+ * format/name/byte span を検証し、呼び出し中だけ borrowed。成功時は全 decode
+ * 結果を一括 install し、current document revision、dirty、Undo は不変。
+ * いずれかの失敗時は旧 sequence を保つ。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_sequence_import_mixed_encoded(
+    InkpodCore* core,
+    const InkpodNamedRasterInput* files,
+    uint64_t file_count,
+    uint64_t file_stride_bytes);
+/**
  * @brief sequence 全 cell を common raster へ encode する。
  * @par 契約
  * Core owner thread。`core`/`out_sequence` は非 NULL、`*out_sequence == NULL`。成功時 Rust-owned immutable sequence handle を格納。
@@ -2844,6 +2915,20 @@ InkpodStatus inkpod_core_sequence_cell_get(
     InkpodCore* core,
     uint32_t index,
     InkpodSequenceCellInfo* output);
+/**
+ * @brief sequence cell の straight-alpha RGBA8 thumbnail を caller buffer へコピーする。
+ * @par 契約
+ * Core owner thread。`core`/完全文サイズの `output` は非 NULL。capacity 0/NULL は
+ * size query。成功時 metadata/bytes、`BUFFER_TOO_SMALL` 時も required bytes と
+ * geometry/checksum を返す。caller-owned storage は保持せず、revision、dirty、Undo、
+ * 排他状態は不変。
+ * @par 主なステータス
+ * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_sequence_thumbnail_get(
+    InkpodCore* core,
+    uint32_t index,
+    InkpodSequenceThumbnailBuffer* output);
 /**
  * @brief clean な current document を sequence の index 指定 cell へ切り替える。
  * @par 契約
@@ -2937,6 +3022,49 @@ InkpodStatus inkpod_core_subpalette_sample(
     uint32_t x,
     uint32_t y,
     InkpodColorValue* output);
+/**
+ * @brief registered subpalette source 専用 logical view を更新する。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `input` は非 NULL、`view_id` は同じ Core が
+ * `inkpod_core_view_create` で発行した live ID。zoom/pan/flip/viewport だけを更新し、
+ * editable document、revision、dirty、Undo、active stroke は不変。失敗時 view も不変。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_subpalette_view_apply(
+    InkpodCore* core,
+    uint64_t view_id,
+    const InkpodViewInput* input);
+/**
+ * @brief subpalette 専用 view の device-pixel 座標から exact-depth 色を取得する。
+ * @par 契約
+ * Core owner thread。`core`/完全サイズの `output` は非 NULL、`view_id` は live secondary
+ * view。zoom/pan/flip を一度だけ適用し、half-open source bounds 外は `INVALID_ARGUMENT`。
+ * query のため document、view、history、dirty、source は不変。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_subpalette_view_sample(
+    InkpodCore* core,
+    uint64_t view_id,
+    double device_x,
+    double device_y,
+    InkpodColorValue* output);
+/**
+ * @brief registered subpalette source の read-only immutable snapshot を構築する。
+ * @par 契約
+ * Core owner thread。`core`/`options`/`out_snapshot` は非 NULL、`view_id` は live secondary
+ * view。成功時 Rust-owned snapshot を返し `inkpod_snapshot_release` で解放する。snapshot は
+ * Core/sequence の変更や destroy 後も release まで不変。document/history/dirty は不変。
+ * 失敗、短い options、不正 ID、subpalette 未登録では owner を NULL のまま返す。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_subpalette_build_snapshot(
+    InkpodCore* core,
+    uint64_t view_id,
+    const InkpodSnapshotOptions* options,
+    InkpodSnapshot** out_snapshot);
 
 /**
  * @brief cubic segment span から document-coordinate vector path を追加する。

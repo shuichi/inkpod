@@ -126,6 +126,8 @@ bool ActivateDocumentTab(
 bool ConfirmAllDocuments(ApplicationHost& state) noexcept;
 InkpodStatus FinishVectorCanvasGesture(ApplicationHost& state) noexcept;
 InkpodStatus FitCanvas(ApplicationHost& state, InkpodViewCommandKind kind) noexcept;
+InkpodStatus ImportCommonRasterFromPath(
+    ApplicationHost& state, const std::wstring& path) noexcept;
 InkpodStatus OpenFromPath(ApplicationHost& state, const std::wstring& path) noexcept;
 void PumpPendingWindowMessages() noexcept;
 bool QueryDocument(ApplicationHost& state, InkpodDocumentInfo& info) noexcept;
@@ -142,6 +144,342 @@ void ResetUiForNewActiveDocument(ApplicationHost& state) noexcept;
 bool ResolveConfiguredShortcut(ApplicationHost& state, std::uint32_t virtual_key, std::uint32_t modifiers, UINT& menu_command) noexcept;
 bool SamePersistentMetadata(const InkpodDocumentInfo& left, const InkpodDocumentInfo& right) noexcept;
 InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexcept;
+
+int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
+    const HWND pane = state.Workspace().locator_palette;
+    const HMENU menu = GetMenu(state.Workspace().windows.window);
+    if (pane == nullptr || menu == nullptr || IsWindowVisible(pane) != FALSE
+        || GetWindow(pane, GW_OWNER) != state.Workspace().windows.window
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) != 0U
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_EXSTYLE))
+            & (WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0U
+        || !WindowHasAccessibleName(pane)) {
+        return 850;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_LOCATOR,
+            0) != 1
+        || IsWindowVisible(pane) == FALSE
+        || (GetMenuState(menu, IDM_WINDOW_LOCATOR, MF_BYCOMMAND) & MF_CHECKED) == 0U
+        || GetDlgItem(pane, IDC_LOCATOR_TARGET) == nullptr
+        || GetDlgItem(pane, IDC_LOCATOR_PIN) == nullptr
+        || GetDlgItem(pane, IDC_LOCATOR_NEIGHBORHOOD) == nullptr
+        || GetDlgItem(pane, IDC_LOCATOR_FIXED) == nullptr
+        || GetDlgItem(pane, IDC_LOCATOR_AUTOSCROLL) == nullptr) {
+        return 851;
+    }
+    std::array<wchar_t, 256U> target_text{};
+    if (GetDlgItemTextW(
+            pane,
+            IDC_LOCATOR_TARGET,
+            target_text.data(),
+            static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(target_text.data(), L"追従") == nullptr) {
+        return 852;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_LOCATOR_PIN,
+            0) != 1) {
+        return 853;
+    }
+    const auto* binding = state.routing.pane_targets.Find(
+        state.routing.locator_pane);
+    target_text.fill(L'\0');
+    if (binding == nullptr
+        || binding->policy != inkpod::app::PaneTargetPolicy::PinnedDocument
+        || (GetMenuState(menu, IDM_LOCATOR_PIN, MF_BYCOMMAND) & MF_CHECKED) == 0U
+        || GetDlgItemTextW(
+               pane,
+               IDC_LOCATOR_TARGET,
+               target_text.data(),
+               static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(target_text.data(), L"固定") == nullptr) {
+        return 854;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_LOCATOR_FIXED,
+            0) != 1
+        || !state.Workspace().locator_fixed_mode
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_LOCATOR_AUTOSCROLL,
+               0) != 1
+        || state.Workspace().locator_auto_scroll) {
+        return 855;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_LOCATOR_FIXED,
+            0) != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_LOCATOR_AUTOSCROLL,
+               0) != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_LOCATOR_PIN,
+               0) != 1
+        || state.Workspace().locator_fixed_mode
+        || !state.Workspace().locator_auto_scroll
+        || state.routing.pane_targets.Find(state.routing.locator_pane)->policy
+            != inkpod::app::PaneTargetPolicy::FollowActiveView) {
+        return 856;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_LOCATOR,
+            0) != 1
+        || IsWindowVisible(pane) != FALSE
+        || (GetMenuState(menu, IDM_WINDOW_LOCATOR, MF_BYCOMMAND) & MF_CHECKED) != 0U) {
+        return 857;
+    }
+    return 0;
+}
+
+int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
+    const HWND pane = state.Workspace().sequence_palette;
+    const HMENU menu = GetMenu(state.Workspace().windows.window);
+    if (pane == nullptr || menu == nullptr || IsWindowVisible(pane) != FALSE
+        || GetWindow(pane, GW_OWNER) != state.Workspace().windows.window
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) != 0U
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_EXSTYLE))
+            & (WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0U
+        || !WindowHasAccessibleName(pane)) {
+        return 867;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_SEQUENCE,
+            0) != 1
+        || IsWindowVisible(pane) == FALSE
+        || (GetMenuState(menu, IDM_WINDOW_SEQUENCE, MF_BYCOMMAND) & MF_CHECKED) == 0U
+        || GetDlgItem(pane, IDC_SEQUENCE_TARGET) == nullptr
+        || GetDlgItem(pane, IDC_SEQUENCE_PIN) == nullptr
+        || GetDlgItem(pane, IDC_SEQUENCE_CELLS) == nullptr
+        || GetDlgItem(pane, IDC_SEQUENCE_PREVIOUS) == nullptr
+        || GetDlgItem(pane, IDC_SEQUENCE_NEXT) == nullptr
+        || GetDlgItem(pane, IDC_SEQUENCE_IMPORT) == nullptr) {
+        return 868;
+    }
+    std::array<wchar_t, 256U> target_text{};
+    const HWND cells = GetDlgItem(pane, IDC_SEQUENCE_CELLS);
+    if (GetDlgItemTextW(
+            pane,
+            IDC_SEQUENCE_TARGET,
+            target_text.data(),
+            static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(target_text.data(), L"追従") == nullptr
+        || IsWindowEnabled(cells) != FALSE
+        || SendMessageW(cells, LB_GETCOUNT, 0, 0) != 0) {
+        return 869;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_SEQUENCE_PIN,
+            0) != 1) {
+        return 870;
+    }
+    const auto* binding = state.routing.pane_targets.Find(
+        state.routing.sequence_pane);
+    target_text.fill(L'\0');
+    if (binding == nullptr
+        || binding->policy != inkpod::app::PaneTargetPolicy::PinnedDocument
+        || (GetMenuState(menu, IDM_SEQUENCE_PIN, MF_BYCOMMAND) & MF_CHECKED) == 0U
+        || GetDlgItemTextW(
+               pane,
+               IDC_SEQUENCE_TARGET,
+               target_text.data(),
+               static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(target_text.data(), L"固定") == nullptr) {
+        return 871;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_SEQUENCE_PIN,
+            0) != 1
+        || state.routing.pane_targets.Find(state.routing.sequence_pane)->policy
+            != inkpod::app::PaneTargetPolicy::FollowActiveView) {
+        return 872;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_SEQUENCE,
+            0) != 1
+        || IsWindowVisible(pane) != FALSE
+        || (GetMenuState(menu, IDM_WINDOW_SEQUENCE, MF_BYCOMMAND) & MF_CHECKED) != 0U) {
+        return 873;
+    }
+    return 0;
+}
+
+int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
+    const HWND pane = state.Workspace().light_table_palette;
+    const HMENU menu = GetMenu(state.Workspace().windows.window);
+    if (pane == nullptr || menu == nullptr || IsWindowVisible(pane) != FALSE
+        || GetWindow(pane, GW_OWNER) != state.Workspace().windows.window
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) != 0U
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_EXSTYLE))
+            & (WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0U
+        || !WindowHasAccessibleName(pane)) {
+        return 874;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_LIGHT_TABLE,
+            0) != 1
+        || IsWindowVisible(pane) == FALSE
+        || (GetMenuState(menu, IDM_WINDOW_LIGHT_TABLE, MF_BYCOMMAND) & MF_CHECKED) == 0U
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_TARGET) == nullptr
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_PIN) == nullptr
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_SETS) == nullptr
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_ITEMS) == nullptr
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_ITEM_ADD) == nullptr
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_ITEM_PROPERTIES) == nullptr
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_ITEM_MOVE) == nullptr
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_ITEM_SWAP) == nullptr
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_PREVIOUS) == nullptr
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_NEXT) == nullptr) {
+        return 875;
+    }
+    std::array<wchar_t, 256U> target_text{};
+    const HWND sets = GetDlgItem(pane, IDC_LIGHT_TABLE_SETS);
+    const HWND items = GetDlgItem(pane, IDC_LIGHT_TABLE_ITEMS);
+    if (GetDlgItemTextW(
+            pane,
+            IDC_LIGHT_TABLE_TARGET,
+            target_text.data(),
+            static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(target_text.data(), L"追従") == nullptr
+        || SendMessageW(sets, CB_GETCOUNT, 0, 0) < 1
+        || SendMessageW(items, LB_GETCOUNT, 0, 0) != 0
+        || IsWindowEnabled(items) != FALSE) {
+        return 876;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_LIGHT_TABLE_PIN,
+            0) != 1) {
+        return 877;
+    }
+    const auto* binding = state.routing.pane_targets.Find(
+        state.routing.light_table_pane);
+    target_text.fill(L'\0');
+    if (binding == nullptr
+        || binding->policy != inkpod::app::PaneTargetPolicy::PinnedDocument
+        || (GetMenuState(menu, IDM_LIGHT_TABLE_PIN, MF_BYCOMMAND) & MF_CHECKED) == 0U
+        || GetDlgItemTextW(
+               pane,
+               IDC_LIGHT_TABLE_TARGET,
+               target_text.data(),
+               static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(target_text.data(), L"固定") == nullptr) {
+        return 878;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_LIGHT_TABLE_PIN,
+            0) != 1
+        || state.routing.pane_targets.Find(state.routing.light_table_pane)->policy
+            != inkpod::app::PaneTargetPolicy::FollowActiveView
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_WINDOW_LIGHT_TABLE,
+               0) != 1
+        || IsWindowVisible(pane) != FALSE
+        || (GetMenuState(menu, IDM_WINDOW_LIGHT_TABLE, MF_BYCOMMAND) & MF_CHECKED) != 0U) {
+        return 879;
+    }
+    return 0;
+}
+
+int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
+    const HWND pane = state.Workspace().subpalette_palette;
+    const HWND canvas = state.Workspace().subpalette_dialog.canvas;
+    const HMENU menu = GetMenu(state.Workspace().windows.window);
+    if (pane == nullptr || canvas == nullptr || menu == nullptr
+        || IsWindowVisible(pane) != FALSE
+        || GetWindow(pane, GW_OWNER) != state.Workspace().windows.window
+        || GetParent(canvas) != pane
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) != 0U
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_EXSTYLE))
+            & (WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0U
+        || !WindowHasAccessibleName(pane)) {
+        return 920;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_SUBPALETTE,
+            0) != 1
+        || IsWindowVisible(pane) == FALSE
+        || GetDlgItem(pane, IDC_SUBPALETTE_TARGET) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_PIN) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_PREVIOUS) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_NEXT) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_CURRENT) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_FIT) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_ONE_TO_ONE) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_REGISTER) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_AUTO_PREVIOUS) == nullptr
+        || GetDlgItem(pane, IDC_SUBPALETTE_SCROLL_SYNC) == nullptr
+        || (GetMenuState(menu, IDM_WINDOW_SUBPALETTE, MF_BYCOMMAND)
+            & MF_CHECKED) == 0U) {
+        return 921;
+    }
+    std::array<wchar_t, 256U> target_text{};
+    if (GetDlgItemTextW(
+            pane,
+            IDC_SUBPALETTE_TARGET,
+            target_text.data(),
+            static_cast<int>(target_text.size())) <= 0
+        || std::wcsstr(target_text.data(), L"追従") == nullptr
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_SUBPALETTE_PIN,
+               0) != 1) {
+        return 922;
+    }
+    const auto* binding = state.routing.pane_targets.Find(
+        state.routing.subpalette_pane);
+    if (binding == nullptr
+        || binding->policy != inkpod::app::PaneTargetPolicy::PinnedDocument
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_SUBPALETTE_PIN,
+               0) != 1
+        || state.routing.pane_targets.Find(state.routing.subpalette_pane)->policy
+            != inkpod::app::PaneTargetPolicy::FollowActiveView
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_WINDOW_SUBPALETTE,
+               0) != 1
+        || IsWindowVisible(pane) != FALSE) {
+        return 923;
+    }
+    return 0;
+}
 
 bool MenuLeavesHaveAssignedShortcuts(
     HMENU menu,
@@ -466,7 +804,24 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     const HWND color_eyedropper =
         GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_EYEDROPPER);
     if (GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_TABS) == nullptr
+        || GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_TARGET) == nullptr
+        || GetDlgItem(state.Workspace().windows.color_pane, IDC_COLOR_PIN) == nullptr
         || GetDlgItem(state.Workspace().windows.color_pane, IDC_PALETTE_LIST) == nullptr
+        || GetDlgItem(
+               state.Workspace().windows.color_pane,
+               IDC_PALETTE_REGISTER_BUTTON) == nullptr
+        || GetDlgItem(
+               state.Workspace().windows.color_pane,
+               IDC_PALETTE_DELETE_BUTTON) == nullptr
+        || GetDlgItem(
+               state.Workspace().windows.color_pane,
+               IDC_PALETTE_CLEAR_BUTTON) == nullptr
+        || GetDlgItem(
+               state.Workspace().windows.color_pane,
+               IDC_PALETTE_LOAD_BUTTON) == nullptr
+        || GetDlgItem(
+               state.Workspace().windows.color_pane,
+               IDC_PALETTE_SAVE_BUTTON) == nullptr
         || main_line_label == nullptr || main_line_swatch == nullptr
         || drawing_swatch == nullptr
         || drawing_label == nullptr || color_picker == nullptr
@@ -801,7 +1156,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     }
     if (!ToolPaletteMatchesCommandState(
             state.Workspace().tools.palette, state.Workspace().command_states)) {
-        return 744;
+        return 896;
     }
     if (!CommandSurfacesMatchComputedState(state)) {
         return 745;
@@ -3499,6 +3854,23 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             return 414 + static_cast<int>(index);
         }
     }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_LIGHT_TABLE,
+            0) != 1
+        || !RefreshLightTablePane(state)
+        || IsWindowVisible(state.Workspace().light_table_palette) == FALSE
+        || SendMessageW(
+               GetDlgItem(
+                   state.Workspace().light_table_palette,
+                   IDC_LIGHT_TABLE_ITEMS),
+               LB_GETCOUNT,
+               0,
+               0) != static_cast<LRESULT>(
+                   state.Workspace().panes.light_table_item_count)) {
+        return 882;
+    }
     InkpodLightTableItemInfo light_item{};
     if (!QueryLightTableItem(state, state.Workspace().panes.active_light_table_item_index, light_item)
         || light_item.opacity_milli != 500U
@@ -3538,6 +3910,23 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     }
     const std::wstring swap_save = L"inkpod-lt-smoke.inkpod";
     DeleteFileW(swap_save.c_str());
+    InkpodDocumentInfo before_cancelled_swap = EmptyDocumentInfo();
+    InkpodDocumentInfo after_cancelled_swap = EmptyDocumentInfo();
+    if (!QueryDocument(state, before_cancelled_swap)
+        || (before_cancelled_swap.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_LT_ITEM_SWAP,
+               0) != 0
+        || !QueryDocument(state, after_cancelled_swap)
+        || after_cancelled_swap.document_revision
+            != before_cancelled_swap.document_revision) {
+        DeleteFileW(swap_save.c_str());
+        DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+        state.lifetime.smoke_raster_path.clear();
+        return 885;
+    }
     if (SaveToPath(state, swap_save) != INKPOD_STATUS_OK
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LT_ITEM_SWAP, 0) != 1) {
         DeleteFileW(swap_save.c_str());
@@ -3545,6 +3934,14 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 409;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_LIGHT_TABLE,
+            0) != 1
+        || IsWindowVisible(state.Workspace().light_table_palette) != FALSE) {
+        return 883;
     }
     DeleteFileW(swap_save.c_str());
     DeleteFileW((swap_save + L".recovery.inkpod").c_str());
@@ -3571,8 +3968,97 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 411;
     }
     RefreshSequencePane(state);
+    const HWND sequence_cells = GetDlgItem(
+        state.Workspace().sequence_palette, IDC_SEQUENCE_CELLS);
+    const auto& sequence_view = state.Workspace().sequence_dialog.view;
+    std::vector<inkpod::app::RecentDocumentEntry> recent_before_sequence_navigation;
+    try {
+        recent_before_sequence_navigation.reserve(state.RecentDocumentCount());
+        for (std::size_t index = 0U; index < state.RecentDocumentCount(); ++index) {
+            recent_before_sequence_navigation.push_back(
+                *state.RecentDocumentAt(index));
+        }
+    } catch (const std::bad_alloc&) {
+        return 874;
+    }
     if (state.Workspace().panes.sequence_count != 3U
-        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SUBPALETTE_SET, 0) != 1
+        || sequence_cells == nullptr
+        || SendMessageW(sequence_cells, LB_GETCOUNT, 0, 0) != 3
+        || sequence_view.cells.size() != 3U
+        || sequence_view.cells[0].name != L"cell1.png"
+        || sequence_view.cells[1].name != L"cell3.png"
+        || sequence_view.cells[2].name != L"cell10.png"
+        || sequence_view.cells[0].thumbnail_rgba.empty()
+        || sequence_view.cells[0].thumbnail_width == 0U
+        || sequence_view.cells[0].thumbnail_height == 0U
+        || sequence_view.cells[0].thumbnail_stride_bytes
+            != sequence_view.cells[0].thumbnail_width * 4U
+        || SaveToPath(state, swap_save) != INKPOD_STATUS_OK) {
+        return 874;
+    }
+    SendMessageW(sequence_cells, LB_SETCURSEL, 2U, 0);
+    SendMessageW(
+        state.Workspace().sequence_palette,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_SEQUENCE_CELLS, LBN_SELCHANGE),
+        reinterpret_cast<LPARAM>(sequence_cells));
+    InkpodDocumentInfo selected_ten = EmptyDocumentInfo();
+    if (!QueryDocument(state, selected_ten)
+        || state.Workspace().sequence_dialog.view.active_index != 2U) {
+        return 875;
+    }
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_SELECTION_ALL,
+        0);
+    InkpodDocumentInfo dirty_ten = EmptyDocumentInfo();
+    if (!QueryDocument(state, dirty_ten)
+        || (dirty_ten.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+        return 877;
+    }
+    SendMessageW(sequence_cells, LB_SETCURSEL, 0U, 0);
+    SendMessageW(
+        state.Workspace().sequence_palette,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_SEQUENCE_CELLS, LBN_SELCHANGE),
+        reinterpret_cast<LPARAM>(sequence_cells));
+    InkpodDocumentInfo after_cancelled_switch = EmptyDocumentInfo();
+    if (!QueryDocument(state, after_cancelled_switch)
+        || after_cancelled_switch.document_uuid_high
+            != dirty_ten.document_uuid_high
+        || after_cancelled_switch.document_uuid_low != dirty_ten.document_uuid_low
+        || state.Workspace().sequence_dialog.view.active_index != 2U) {
+        return 878;
+    }
+    if (state.engine->Invoke(
+            [](InkpodCore* core) {
+                InkpodDispatchResult result{};
+                result.struct_size = sizeof(result);
+                return inkpod_core_undo(core, &result);
+            },
+            true,
+            true) != INKPOD_STATUS_OK) {
+        return 879;
+    }
+    SendMessageW(sequence_cells, LB_SETCURSEL, 0U, 0);
+    SendMessageW(
+        state.Workspace().sequence_palette,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_SEQUENCE_CELLS, LBN_SELCHANGE),
+        reinterpret_cast<LPARAM>(sequence_cells));
+    InkpodDocumentInfo selected_one = EmptyDocumentInfo();
+    if (!QueryDocument(state, selected_one)
+        || selected_one.document_uuid_high == selected_ten.document_uuid_high
+            && selected_one.document_uuid_low == selected_ten.document_uuid_low
+        || state.Workspace().sequence_dialog.view.active_index != 0U) {
+        return 880;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_SUBPALETTE_SET,
+            0) != 1
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SUBPALETTE_SAMPLE, 0) != 1
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_GOTO, 0) != 1
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SEQ_PREVIOUS, 0) != 1
@@ -3601,6 +4087,58 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || active_cell_tab != L"cell3.png") {
         return 718;
     }
+    const inkpod::app::DocumentSessionId sequence_session = state.Document().id;
+    const inkpod::app::DocumentViewId sequence_view_id =
+        state.Document().ActiveView()->id;
+    if (ImportCommonRasterFromPath(state, L"cell3.png") != INKPOD_STATUS_OK) {
+        return 881;
+    }
+    if (state.Document().id == sequence_session) {
+        return 883;
+    }
+    if (state.Workspace().sequence_dialog.view.cells.size() != 3U) {
+        return 884;
+    }
+    if (state.Workspace().sequence_dialog.view.active_index != 1U) {
+        return 885;
+    }
+    if (state.Workspace().sequence_dialog.view.cells[0].name != L"cell1.png"
+        || state.Workspace().sequence_dialog.view.cells[1].name != L"cell3.png"
+        || state.Workspace().sequence_dialog.view.cells[2].name != L"cell10.png") {
+        return 886;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_DOCUMENT_CLOSE,
+            0) != 1) {
+        return 882;
+    }
+    if (state.Document().id != sequence_session
+        && !ActivateDocumentTab(state, sequence_view_id)) {
+        return 887;
+    }
+    if (state.Document().id != sequence_session) {
+        return 887;
+    }
+    while (state.RecentDocumentCount() != 0U) {
+        if (!state.RemoveRecentDocument(0U)) {
+            return 899;
+        }
+    }
+    for (auto entry = recent_before_sequence_navigation.rbegin();
+         entry != recent_before_sequence_navigation.rend();
+         ++entry) {
+        if (!state.RecordRecentDocument(entry->path, entry->identity)) {
+            return 899;
+        }
+    }
+    if (!RefreshSequencePane(state)) {
+        return 888;
+    }
+    if (state.Workspace().sequence_dialog.view.cells.size() != 3U) {
+        return 889;
+    }
     DeleteFileW(state.lifetime.smoke_raster_path.c_str());
     state.lifetime.smoke_raster_path = L"inkpod-sequence-export.png";
     DeleteFileW(state.lifetime.smoke_raster_path.c_str());
@@ -3616,6 +4154,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     for (const auto& path : state.lifetime.smoke_sequence_paths) {
         DeleteFileW(path.c_str());
     }
+    DeleteFileW(swap_save.c_str());
+    DeleteFileW((swap_save + L".recovery.inkpod").c_str());
     state.lifetime.smoke_sequence_paths.clear();
     DeleteFileW(L"inkpod-sequence-export-cell1.png");
     DeleteFileW(L"inkpod-sequence-export-cell3.png");
@@ -4196,6 +4736,26 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         cleanup();
         return 701;
     }
+    if (GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET) == nullptr
+        || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_PIN) == nullptr
+        || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB) == nullptr
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_PIN,
+               0) != 1
+        || state.routing.pane_targets.Find(state.routing.batch_pane)->policy
+            != inkpod::app::PaneTargetPolicy::PinnedDocument
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_PIN,
+               0) != 1
+        || state.routing.pane_targets.Find(state.routing.batch_pane)->policy
+            != inkpod::app::PaneTargetPolicy::FollowActiveView) {
+        cleanup();
+        return 925;
+    }
     state.batch.output_folder = L".";
     state.batch.basename = L"inkpod-batch-windows-smoke";
     if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_INPUT_CURRENT, 0) != 1
@@ -4224,6 +4784,10 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.batch.operations.back().colors.size() < 2U
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_DRY_RUN, 0) != 1
         || state.batch.report == nullptr
+        || state.batch.job_id.has_value()
+        || state.routing.pane_targets.Find(state.routing.batch_pane)->policy
+            != inkpod::app::PaneTargetPolicy::FollowActiveView
+        || state.batch.job_text.find(L"完了") == std::wstring::npos
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
         || state.batch.operations.size() != 1U) {
         cleanup();
@@ -4384,6 +4948,20 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
     const int device_x = static_cast<int>(std::lround(bounds.left + 3.75 * zoom));
     const int device_y = static_cast<int>(std::lround(bounds.top + 3.75 * zoom));
     if (SendMessageW(
+            state.Workspace().windows.window,
+            inkpod::renderer::kCanvasPointerMoved,
+            static_cast<WPARAM>(state.routing.targets.Canvas().Value()),
+            MAKELPARAM(device_x, device_y)) != 1
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 858;
+    }
+    PumpPendingWindowMessages();
+    if (!state.ActiveView().presentation.locator_valid
+        || state.ActiveView().presentation.locator_neighborhood_width != 9U
+        || state.ActiveView().presentation.locator_neighborhood_height != 9U) {
+        return 859;
+    }
+    if (SendMessageW(
             state.Workspace().windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
@@ -4398,11 +4976,76 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
     }
 
     InkpodDocumentInfo erased = EmptyDocumentInfo();
-    return QueryDocument(state, erased)
-            && erased.document_revision == seeded.document_revision + 1U
-            && erased.main_plane_checksum == blank.main_plane_checksum
-        ? 0
-        : 726;
+    if (!QueryDocument(state, erased)
+        || erased.document_revision != seeded.document_revision + 1U
+        || erased.main_plane_checksum != blank.main_plane_checksum) {
+        return 726;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_WINDOW_LOCATOR,
+            0) != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_LOCATOR_FIXED,
+               0) != 1
+        || state.Workspace().locator_dialog.select_pixel == nullptr) {
+        return 860;
+    }
+    state.Workspace().locator_dialog.select_pixel(&state, 4, 4);
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 861;
+    }
+    InkpodDocumentInfo locator_drawn = EmptyDocumentInfo();
+    if (!QueryDocument(state, locator_drawn)
+        || locator_drawn.document_revision != erased.document_revision + 1U
+        || locator_drawn.main_plane_checksum == erased.main_plane_checksum) {
+        return 862;
+    }
+    state.Workspace().locator_dialog.select_pixel(&state, -1, -1);
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 863;
+    }
+    InkpodDocumentInfo invalid_unchanged = EmptyDocumentInfo();
+    if (!QueryDocument(state, invalid_unchanged)
+        || invalid_unchanged.document_revision != locator_drawn.document_revision
+        || invalid_unchanged.main_plane_checksum
+            != locator_drawn.main_plane_checksum
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_EDIT_UNDO,
+               0) != 0) {
+        return 864;
+    }
+    InkpodDocumentInfo undone = EmptyDocumentInfo();
+    if (!QueryDocument(state, undone)
+        || undone.main_plane_checksum != erased.main_plane_checksum
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_EDIT_REDO,
+               0) != 0) {
+        return 865;
+    }
+    InkpodDocumentInfo redone = EmptyDocumentInfo();
+    if (!QueryDocument(state, redone)
+        || redone.main_plane_checksum != locator_drawn.main_plane_checksum
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_LOCATOR_FIXED,
+               0) != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_WINDOW_LOCATOR,
+               0) != 1) {
+        return 866;
+    }
+    return 0;
 }
 
 int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
@@ -4489,6 +5132,128 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         || state.CloseDocumentView(DocumentViewId{UINT64_MAX})) {
         cleanup();
         return 736;
+    }
+
+    if (!ActivateDocumentTab(state, first_view)
+        || !RefreshLightTablePane(state)
+        || IssueCommand(
+               &state,
+               state.Workspace().windows.window,
+               IDM_LIGHT_TABLE_PIN,
+               0,
+               state.routing.light_table_pane).value_or(0) != 1
+        || !ActivateDocumentTab(state, second_view)
+        || IssueCommand(
+               &state,
+               state.Workspace().windows.window,
+               IDM_LT_GLOBAL_OPACITY,
+               0,
+               state.routing.light_table_pane).value_or(0) != 1) {
+        cleanup();
+        return 880;
+    }
+    std::uint32_t first_light_opacity{};
+    std::uint32_t second_light_opacity{};
+    const auto read_light_opacity = [](
+        InkpodCore* core, std::uint32_t& opacity) noexcept {
+        InkpodLightTableSetInfo info{};
+        info.struct_size = sizeof(info);
+        const InkpodStatus status = inkpod_core_light_table_set_get(core, 0U, &info);
+        if (status == INKPOD_STATUS_OK) {
+            opacity = info.opacity_milli;
+        }
+        return status;
+    };
+    if (state.engine->Invoke(
+            first_session,
+            first_generation,
+            [&read_light_opacity, &first_light_opacity](InkpodCore* core) {
+                return read_light_opacity(core, first_light_opacity);
+            },
+            false,
+            false) != INKPOD_STATUS_OK
+        || state.engine->Invoke(
+               second_session,
+               second_generation,
+               [&read_light_opacity, &second_light_opacity](InkpodCore* core) {
+                   return read_light_opacity(core, second_light_opacity);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || first_light_opacity != 500U
+        || second_light_opacity != 1000U
+        || state.engine->Invoke(
+               first_session,
+               first_generation,
+               [](InkpodCore* core) {
+                   InkpodDispatchResult result{};
+                   result.struct_size = sizeof(result);
+                   return inkpod_core_undo(core, &result);
+               },
+               true,
+               true) != INKPOD_STATUS_OK
+        || state.engine->Invoke(
+               first_session,
+               first_generation,
+               [&read_light_opacity, &first_light_opacity](InkpodCore* core) {
+                   return read_light_opacity(core, first_light_opacity);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || first_light_opacity != 1000U
+        || state.engine->Invoke(
+               first_session,
+               first_generation,
+               [](InkpodCore* core) {
+                   InkpodDispatchResult result{};
+                   result.struct_size = sizeof(result);
+                   return inkpod_core_redo(core, &result);
+               },
+               true,
+               true) != INKPOD_STATUS_OK
+        || state.engine->Invoke(
+               first_session,
+               first_generation,
+               [&read_light_opacity, &first_light_opacity](InkpodCore* core) {
+                   return read_light_opacity(core, first_light_opacity);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || first_light_opacity != 500U
+        || state.engine->Invoke(
+               first_session,
+               first_generation,
+               [](InkpodCore* core) {
+                   InkpodDispatchResult result{};
+                   result.struct_size = sizeof(result);
+                   return inkpod_core_undo(core, &result);
+               },
+               true,
+               true) != INKPOD_STATUS_OK
+        || IssueCommand(
+               &state,
+               state.Workspace().windows.window,
+               IDM_LIGHT_TABLE_PIN,
+               0,
+               state.routing.light_table_pane).value_or(0) != 1
+        || state.routing.pane_targets.Find(state.routing.light_table_pane)->policy
+            != inkpod::app::PaneTargetPolicy::FollowActiveView) {
+        cleanup();
+        return 881;
+    }
+    if (!ActivateDocumentTab(state, first_view)
+        || !QueryDocument(state, first_saved)
+        || state.engine->Invoke(
+               first_session,
+               first_generation,
+               [&first_history](InkpodCore* core) {
+                   return inkpod_core_history_info(core, &first_history);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || !ActivateDocumentTab(state, second_view)) {
+        cleanup();
+        return 884;
     }
 
     state.Workspace().tools.active_plane = INKPOD_PLANE_MAIN_LINE;
@@ -4590,15 +5355,30 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
     InkpodDocumentInfo second_saved = EmptyDocumentInfo();
     const inkpod::app::CommandContext second_async_context =
         state.routing.targets.Capture();
-    if (!QueryDocument(state, second_saved)
-        || (second_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
-        || OpenDocumentFromPath(state, first_path) != INKPOD_STATUS_OK
-        || state.Document().id != first_session
-        || state.Documents().Count() != baseline_count + 1U
-        || state.RecentDocumentAt(0U) == nullptr
+    if (!QueryDocument(state, second_saved)) {
+        cleanup();
+        return 890;
+    }
+    if ((second_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+        cleanup();
+        return 891;
+    }
+    if (OpenDocumentFromPath(state, first_path) != INKPOD_STATUS_OK) {
+        cleanup();
+        return 892;
+    }
+    if (state.Document().id != first_session) {
+        cleanup();
+        return 893;
+    }
+    if (state.Documents().Count() != baseline_count + 1U) {
+        cleanup();
+        return 894;
+    }
+    if (state.RecentDocumentAt(0U) == nullptr
         || state.RecentDocumentAt(0U)->path != first_path) {
         cleanup();
-        return 744;
+        return 895;
     }
     const std::size_t recent_count_before_missing =
         state.RecentDocumentCount();
@@ -4609,19 +5389,28 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         || !state.RecordRecentDocument(
             missing_recent_path, std::move(missing_recent_identity))) {
         cleanup();
-        return 744;
+        return 897;
     }
     UpdateMenuState(state);
     if (SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
             IDM_FILE_RECENT_1,
-            0) != 0
-        || state.RecentDocumentCount() != recent_count_before_missing
-        || state.RecentDocumentAt(0U) == nullptr
-        || state.RecentDocumentAt(0U)->path != first_path) {
+            0) != 0) {
         cleanup();
-        return 744;
+        return 898;
+    }
+    if (state.RecentDocumentCount() != recent_count_before_missing) {
+        cleanup();
+        return 899;
+    }
+    if (state.RecentDocumentAt(0U) == nullptr) {
+        cleanup();
+        return 900;
+    }
+    if (state.RecentDocumentAt(0U)->path != first_path) {
+        cleanup();
+        return 901;
     }
 
     const auto first_command_states = state.Workspace().command_states;
@@ -4860,7 +5649,7 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr || state.renderer == nullptr
         || first_group == nullptr || editors.GroupCount() != 1U
         || state.routing.targets.EditorGroupCount() != 1U
-        || state.renderer->SurfaceCount() != 1U) {
+        || state.renderer->SurfaceCount() != 2U) {
         return 750;
     }
     const auto first_group_id = first_group->id;
@@ -4884,7 +5673,7 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
         || editors.GroupCount() != 2U
         || editors.Orientation() != EditorSplitOrientation::Vertical
         || state.routing.targets.EditorGroupCount() != 2U
-        || state.renderer->SurfaceCount() != 2U
+        || state.renderer->SurfaceCount() != 3U
         || state.Document().id != shared_session
         || state.Document().ViewCount() != original_view_count + 1U
         || second_group->canvas == nullptr
@@ -5012,6 +5801,22 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
         || state.ActiveView().id != first_view
         || editors.Active()->focus_history != first_tabs) {
         return 783;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_COLOR_PIN,
+            0) != 1
+        || state.routing.pane_targets.Find(state.routing.color_pane)->policy
+            != inkpod::app::PaneTargetPolicy::PinnedDocument
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_COLOR_PIN,
+               0) != 1
+        || state.routing.pane_targets.Find(state.routing.color_pane)->policy
+            != inkpod::app::PaneTargetPolicy::FollowActiveView) {
+        return 924;
     }
     SendMessageW(second_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(first_canvas), 0);
 
@@ -5234,7 +6039,7 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
         SIZE_RESTORED,
         MAKELPARAM(client.right - client.left, client.bottom - client.top));
     SendMessageW(second_canvas, WM_DPICHANGED_AFTERPARENT, 0, 0);
-    if (editors.GroupCount() != 2U || state.renderer->SurfaceCount() != 2U
+    if (editors.GroupCount() != 2U || state.renderer->SurfaceCount() != 3U
         || IsWindow(first_canvas) == FALSE || IsWindow(second_canvas) == FALSE) {
         return 784;
     }
@@ -5282,7 +6087,7 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
         || editors.GroupCount() != 1U
         || editors.Orientation() != EditorSplitOrientation::None
         || state.routing.targets.EditorGroupCount() != 1U
-        || state.renderer->SurfaceCount() != 1U
+        || state.renderer->SurfaceCount() != 2U
         || state.Document().ViewCount() != before_close_views
         || editors.Active() == nullptr
         || editors.Active()->id != second_group_id
@@ -5359,6 +6164,18 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
         : 0;
     if (exit_code == 0) {
         exit_code = runtime::RunCommandContextSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunLocatorPaneSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunSequencePaneSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunLightTablePaneSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunSubpalettePaneSmoke(state);
     }
     if (exit_code == 0) {
         exit_code = runtime::RunDrawingPersistenceSmoke(state);

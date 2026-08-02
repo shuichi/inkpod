@@ -264,6 +264,7 @@ bool ApplicationHost::CloseDocumentSession(DocumentSessionId session) noexcept {
     if (engine->CloseSession(session, generation) != INKPOD_STATUS_OK) {
         return false;
     }
+    routing.pane_targets.DocumentClosed(session);
     for (std::size_t index = document->ViewCount(); index > 0U; --index) {
         const DocumentView* view = document->ViewAt(index - 1U);
         if (view != nullptr) {

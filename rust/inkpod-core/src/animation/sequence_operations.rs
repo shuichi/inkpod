@@ -50,13 +50,29 @@ impl Core {
         format: CommonRasterFormat,
         files: Vec<(String, Vec<u8>)>,
     ) -> Result<(), CoreError> {
+        self.import_mixed_sequence(
+            files
+                .into_iter()
+                .map(|(name, bytes)| (name, format, bytes))
+                .collect(),
+        )
+    }
+
+    /// Decodes named common-raster files with per-file formats and atomically
+    /// installs them as a sequence.
+    ///
+    /// Any decode or validation failure retains the previous sequence state.
+    pub fn import_mixed_sequence(
+        &mut self,
+        files: Vec<(String, CommonRasterFormat, Vec<u8>)>,
+    ) -> Result<(), CoreError> {
         if files.is_empty() || files.len() > MAX_SEQUENCE_CELLS {
             return Err(CoreError::InvalidArgument(
                 "sequence import count is outside bounds",
             ));
         }
         let mut cells = Vec::with_capacity(files.len());
-        for (index, (name, bytes)) in files.into_iter().enumerate() {
+        for (index, (name, format, bytes)) in files.into_iter().enumerate() {
             let raster = decode_common_raster(format, &bytes)?;
             let uuid = (u128::from(0x494e_4b50_4f44_5334_u64) << 64)
                 | u128::try_from(index + 1)
@@ -66,25 +82,35 @@ impl Core {
         self.set_sequence(cells)
     }
 
+    /// Returns owned metadata and a thumbnail for one natural-order cell.
+    pub fn sequence_cell(&self, index: usize) -> Result<SequenceCellInfo, CoreError> {
+        let cell = self
+            .sequence
+            .as_ref()
+            .ok_or(CoreError::InvalidState("no sequence is configured"))?
+            .cells
+            .get(index)
+            .ok_or(CoreError::InvalidArgument(
+                "sequence target index is outside bounds",
+            ))?;
+        Ok(SequenceCellInfo {
+            name: cell.name.clone(),
+            cell_number: cell.cell_number,
+            document_uuid: cell.document_uuid,
+            width: cell.raster.width(),
+            height: cell.raster.height(),
+            thumbnail: cell.thumbnail()?,
+        })
+    }
+
     /// Returns owned metadata and thumbnails in natural sequence order.
     pub fn sequence_cells(&self) -> Result<Vec<SequenceCellInfo>, CoreError> {
         let sequence = self
             .sequence
             .as_ref()
             .ok_or(CoreError::InvalidState("no sequence is configured"))?;
-        sequence
-            .cells
-            .iter()
-            .map(|cell| {
-                Ok(SequenceCellInfo {
-                    name: cell.name.clone(),
-                    cell_number: cell.cell_number,
-                    document_uuid: cell.document_uuid,
-                    width: cell.raster.width(),
-                    height: cell.raster.height(),
-                    thumbnail: cell.thumbnail()?,
-                })
-            })
+        (0..sequence.cells.len())
+            .map(|index| self.sequence_cell(index))
             .collect()
     }
 

@@ -21,18 +21,18 @@ void ResetPresentation(ViewUiState& view) noexcept {
     view.pointer_device_x = 0;
     view.pointer_device_y = 0;
     ++view.locator_generation;
-    view.locator_pending_token = 0U;
     view.locator_valid = false;
     view.locator = {};
+    view.locator_neighborhood_width = 0U;
+    view.locator_neighborhood_height = 0U;
+    view.locator_neighborhood_origin_x = 0;
+    view.locator_neighborhood_origin_y = 0;
+    view.locator_neighborhood.fill(0U);
     view.gesture_samples.clear();
     view.guide_drag_active = false;
     view.guide_drag_axis = 0U;
     view.guide_drag_id = 0U;
     view.active_drag.reset();
-    {
-        std::lock_guard lock(view.locator_results_mutex);
-        view.locator_results.clear();
-    }
 }
 
 void InitializeView(

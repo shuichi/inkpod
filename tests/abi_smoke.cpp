@@ -38,10 +38,13 @@ static_assert(sizeof(InkpodSelectionInput) == 72U);
 static_assert(sizeof(InkpodFloatingTransform) == 48U);
 static_assert(sizeof(InkpodGridInput) == 32U);
 static_assert(sizeof(InkpodLocatorOutput) == 48U);
+static_assert(sizeof(InkpodLocatorNeighborhoodBuffer) == 56U);
 static_assert(sizeof(InkpodRasterSourceInput) == 96U);
 static_assert(sizeof(InkpodLightTableItemInput) == 168U);
 static_assert(sizeof(InkpodSequenceCellInput) == 120U);
 static_assert(sizeof(InkpodSequenceInput) == 40U);
+static_assert(sizeof(InkpodNamedRasterInput) == 48U);
+static_assert(sizeof(InkpodSequenceThumbnailBuffer) == 56U);
 static_assert(sizeof(InkpodMotionCheckInput) == 16U);
 static_assert(sizeof(InkpodMotionFrame) == 40U);
 static_assert(sizeof(InkpodVectorPoint) == 8U);
@@ -384,6 +387,41 @@ int InkpodRunAbiSmoke() {
         || motion_frame.cell_number != 10U
         || inkpod_core_motion_check_stop(core) != INKPOD_STATUS_OK) {
         return 46;
+    }
+    std::uint64_t reference_view_id{};
+    const InkpodViewInput reference_fit{
+        sizeof(InkpodViewInput),
+        INKPOD_VIEW_FIT,
+        0U,
+        100.0,
+        100.0,
+        0.0,
+        0.0};
+    InkpodColorValue reference_color{};
+    reference_color.struct_size = sizeof(reference_color);
+    InkpodSnapshot* reference_snapshot{};
+    const InkpodSnapshotOptions reference_options{
+        sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
+    if (inkpod_core_subpalette_set(core, 0U) != INKPOD_STATUS_OK
+        || inkpod_core_view_create(core, &reference_view_id) != INKPOD_STATUS_OK
+        || reference_view_id == 0U
+        || inkpod_core_subpalette_view_apply(
+               core, reference_view_id, &reference_fit) != INKPOD_STATUS_OK
+        || inkpod_core_subpalette_view_sample(
+               core, reference_view_id, 50.0, 50.0, &reference_color)
+            != INKPOD_STATUS_OK
+        || reference_color.red != 4U || reference_color.green != 5U
+        || reference_color.blue != 6U || reference_color.alpha != 255U
+        || inkpod_core_subpalette_build_snapshot(
+               core,
+               reference_view_id,
+               &reference_options,
+               &reference_snapshot) != INKPOD_STATUS_OK
+        || reference_snapshot == nullptr
+        || inkpod_snapshot_release(&reference_snapshot) != INKPOD_STATUS_OK
+        || inkpod_core_view_close(core, reference_view_id) != INKPOD_STATUS_OK) {
+        (void)inkpod_snapshot_release(&reference_snapshot);
+        return 96;
     }
     InkpodTreeEdit tree_edit{};
     tree_edit.struct_size = sizeof(tree_edit);
@@ -875,6 +913,32 @@ int InkpodRunAbiSmoke() {
         || inkpod_snapshot_release(&second_snapshot) != INKPOD_STATUS_OK
         || inkpod_core_view_close(core, second_view) != INKPOD_STATUS_OK) {
         return 40;
+    }
+    InkpodLocatorNeighborhoodBuffer locator_neighborhood{};
+    locator_neighborhood.struct_size = sizeof(locator_neighborhood);
+    locator_neighborhood.radius = 1U;
+    if (inkpod_core_locator_neighborhood(
+            core, 0U, 1.0, 1.0, &locator_neighborhood) != INKPOD_STATUS_OK
+        || locator_neighborhood.width != 3U
+        || locator_neighborhood.height != 3U
+        || locator_neighborhood.required_bytes != 36U) {
+        return 89;
+    }
+    std::array<std::uint8_t, 35U> short_neighborhood{};
+    locator_neighborhood.pixels_rgba8 = short_neighborhood.data();
+    locator_neighborhood.pixel_capacity = short_neighborhood.size();
+    if (inkpod_core_locator_neighborhood(
+            core, 0U, 1.0, 1.0, &locator_neighborhood)
+            != INKPOD_STATUS_BUFFER_TOO_SMALL) {
+        return 89;
+    }
+    std::array<std::uint8_t, 36U> neighborhood{};
+    locator_neighborhood.pixels_rgba8 = neighborhood.data();
+    locator_neighborhood.pixel_capacity = neighborhood.size();
+    if (inkpod_core_locator_neighborhood(
+            core, 0U, 1.0, 1.0, &locator_neighborhood) != INKPOD_STATUS_OK
+        || locator_neighborhood.required_bytes != neighborhood.size()) {
+        return 89;
     }
     std::uint32_t shortcut_command{};
     if (inkpod_core_shortcut_rebind(

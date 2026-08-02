@@ -15,6 +15,14 @@ impl Core {
         }
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let document_size = DocumentSizeU32::new(document.width, document.height);
+        self.apply_view_for_document_size(command, document_size)
+    }
+
+    pub(super) fn apply_view_for_document_size(
+        &mut self,
+        command: ViewCommand,
+        document_size: DocumentSizeU32,
+    ) -> Result<ViewState, CoreError> {
         let command_viewport = match command {
             ViewCommand::Fit {
                 viewport_width,

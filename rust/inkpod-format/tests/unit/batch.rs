@@ -55,7 +55,7 @@ fn batch_graph_round_trip_and_checksum_validation() {
 fn batch_graph_rejects_unknown_container_version_and_cancel_cleans_temp() {
     let graph = fixture();
     let mut encoded = encode_batch_graph(&graph).unwrap();
-    encoded[8..12].copy_from_slice(&2_u32.to_le_bytes());
+    encoded[8..12].copy_from_slice(&(BATCH_GRAPH_VERSION + 1).to_le_bytes());
     assert!(matches!(
         decode_batch_graph(&encoded),
         Err(FormatError::Invalid("batch graph version is unsupported"))

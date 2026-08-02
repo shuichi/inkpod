@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 299U;
+inline constexpr std::size_t kProductionCommandStateCount = 311U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -115,7 +115,25 @@ struct WorkspaceCommandStateInput {
     bool tool_visible{true};
     bool tool_options_visible{true};
     bool color_visible{true};
+    bool color_target_available{};
+    bool color_pinned{};
     bool layer_visible{true};
+    bool locator_visible{};
+    bool locator_target_available{};
+    bool locator_pinned{};
+    bool locator_fixed{};
+    bool locator_auto_scroll{true};
+    bool sequence_visible{};
+    bool sequence_target_available{};
+    bool sequence_pinned{};
+    bool light_table_visible{};
+    bool light_table_target_available{};
+    bool light_table_pinned{};
+    bool subpalette_visible{};
+    bool subpalette_target_available{};
+    bool subpalette_pinned{};
+    bool batch_target_available{};
+    bool batch_pinned{};
     bool mirrored{};
 };
 

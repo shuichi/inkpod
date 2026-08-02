@@ -446,6 +446,91 @@ pub unsafe extern "C" fn inkpod_core_locator_sample(
     })
 }
 
+/// Copies a bounded composite RGBA8 neighborhood around a locator point.
+///
+/// # Safety
+/// `core` must be live on its owner thread and `output` must expose a complete
+/// writable record. Non-zero output capacity must describe writable,
+/// non-overlapping byte storage valid for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_locator_neighborhood(
+    core: *mut InkpodCore,
+    view_id: u64,
+    device_x: f64,
+    device_y: f64,
+    output: *mut InkpodLocatorNeighborhoodBuffer,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: Output prefix is readable before the validated write.
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodLocatorNeighborhoodBuffer") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if output.reserved != 0 || output.reserved_2 != 0 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "locator neighborhood reserved fields must be zero",
+            );
+        }
+        let neighborhood = match core.core.locator_neighborhood(
+            (view_id != 0).then_some(view_id),
+            device_x,
+            device_y,
+            output.radius,
+        ) {
+            Ok(neighborhood) => neighborhood,
+            Err(error) => return map_core_error(error),
+        };
+        output.width = neighborhood.width;
+        output.height = neighborhood.height;
+        output.origin_x = neighborhood.origin_x;
+        output.origin_y = neighborhood.origin_y;
+        output.required_bytes = neighborhood.pixels_rgba8.len() as u64;
+        if output.pixel_capacity == 0 {
+            if !output.pixels_rgba8.is_null() {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity locator neighborhood buffer must be null",
+                );
+            }
+            return INKPOD_STATUS_OK;
+        }
+        if output.pixels_rgba8.is_null() || output.pixel_capacity > isize::MAX as u64 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "locator neighborhood output storage is invalid",
+            );
+        }
+        if output.pixel_capacity < output.required_bytes {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "locator neighborhood output storage is too small",
+            );
+        }
+        // SAFETY: The caller advertises enough writable, non-overlapping byte storage.
+        unsafe {
+            ptr::copy_nonoverlapping(
+                neighborhood.pixels_rgba8.as_ptr(),
+                output.pixels_rgba8,
+                neighborhood.pixels_rgba8.len(),
+            )
+        };
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Rebinds one shortcut, replacing any conflicting binding deterministically.
 ///
 /// # Safety

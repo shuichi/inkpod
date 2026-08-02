@@ -8,6 +8,8 @@
 namespace inkpod::windows::ui {
 namespace {
 
+constexpr UINT_PTR kBatchRefreshTimer = 1U;
+
 constexpr std::array<BatchPaletteEntry, 24U> kBatchPaletteEntries{{
     {IDM_BATCH_ADD_COLOR_REPLACE, L"色置換"},
     {IDM_BATCH_ADD_CONTINUOUS_FILL, L"連続フィル"},
@@ -49,7 +51,8 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
         case WM_INITDIALOG: {
             state = reinterpret_cast<BatchPaletteDialogState*>(lparam);
             if (state == nullptr || state->dispatch_command == nullptr
-                || state->select_operation == nullptr) {
+                || state->select_operation == nullptr
+                || state->refresh == nullptr) {
                 DestroyWindow(dialog);
                 return TRUE;
             }
@@ -71,6 +74,9 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
                 break;
             }
             switch (LOWORD(wparam)) {
+                case IDC_BATCH_PIN:
+                    DispatchCommand(*state, IDM_BATCH_PIN);
+                    return TRUE;
                 case IDC_BATCH_ADD: {
                     const LRESULT index = SendDlgItemMessageW(
                         dialog, IDC_BATCH_OPERATION_KIND, CB_GETCURSEL, 0, 0);
@@ -135,10 +141,17 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
                     break;
             }
             break;
+        case WM_TIMER:
+            if (state != nullptr && wparam == kBatchRefreshTimer) {
+                state->refresh(state->context);
+                return TRUE;
+            }
+            break;
         case WM_CLOSE:
             ShowWindow(dialog, SW_HIDE);
             return TRUE;
         case WM_NCDESTROY:
+            KillTimer(dialog, kBatchRefreshTimer);
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
             return TRUE;
         default:
@@ -177,6 +190,21 @@ void UpdateBatchPaletteDialog(
         GetWindowLongPtrW(dialog, GWLP_USERDATA));
     if (state != nullptr) {
         state->loaded_graph = view.loaded_graph;
+    }
+
+    SetDlgItemTextW(dialog, IDC_BATCH_TARGET, view.target_text.c_str());
+    SetDlgItemTextW(dialog, IDC_BATCH_JOB, view.job_text.c_str());
+    SetDlgItemTextW(
+        dialog,
+        IDC_BATCH_PIN,
+        view.pinned ? L"追従へ戻す" : L"文書に固定");
+    EnableWindow(
+        GetDlgItem(dialog, IDC_BATCH_PIN),
+        view.target_available && view.idle ? TRUE : FALSE);
+    if (view.idle) {
+        KillTimer(dialog, kBatchRefreshTimer);
+    } else {
+        SetTimer(dialog, kBatchRefreshTimer, 250U, nullptr);
     }
 
     SendMessageW(inputs, LB_RESETCONTENT, 0, 0);

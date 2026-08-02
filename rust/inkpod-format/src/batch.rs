@@ -4,6 +4,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Current development format. Increment for every serialized graph schema
+/// change until the user declares a format freeze; older versions are rejected.
 pub const BATCH_GRAPH_VERSION: u32 = 1;
 const MAGIC: [u8; 8] = *b"INKBATCH";
 const MAX_BATCH_FILE_BYTES: u64 = 16 * 1024 * 1024;

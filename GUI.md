@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7 完了、G8 未着手 |
+| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8 完了、次は G9 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -71,6 +71,7 @@ ApplicationHost
 - GUI 再編だけを理由に C ABI version を更新すること。
 - 計測前に Core thread を文書数だけ増やすこと。
 - 未接続のボタン、空 pane、常時成功する stub を先に大量配置すること。
+- 現在対応していないファイル形式を、placeholder、disabled menu、拡張子だけの選択肢として表示すること。
 
 ---
 
@@ -821,6 +822,58 @@ menu 復元、keyboard/high-contrast-compatible standard controls を検証す�
 - `docs/compatibility.md` で対象 requirement が test 付きの状態になっている。
 - 表示だけの placeholder pane と未接続 button がない。
 - どの pane action も対象 document/view/job を UI 上と code 上の両方で説明できる。
+
+### 進捗記録
+
+2026-08-02 に G8 の共通 target policy と最初の locator/navigation 縦切りを
+実装した。UI-thread 所有の bounded `PaneTargetRegistry` は `Application`、
+`FollowActiveView`、`PinnedDocument`、`Job` を strong ID と値の
+`CommandContext` だけで保持する。pane action は入力時点で target を capture し、
+固定先 close は別文書へ silent に転送せず追従へ戻り、header と MSAA alert で通知する。
+job close 後の action は target 不在として拒否する。
+
+modeless locator は対象文書名、追従/固定、X/Y、selection H/V/L、RGBA8/16、
+9 x 9 neighborhood、固定編集、自動 scroll を表示する。neighborhood は caller-owned
+bounded buffer を一度の C ABI call で取得し、結果 queue と window message には
+session/view/generation と値 token だけを渡す。固定編集は click 時に capture した
+session/view へ document 座標の一 pixel stroke を一 Undo 単位で発行する。
+Window menu、configurable shortcut、Tab navigation、placement persistence を接続し、
+表示だけの shell や未接続 control は残していない。
+
+同日に二番目の sequence/file preview 縦切りも実装した。対象文書名と追従/固定を
+表示する modeless owner-drawn list は、Core owner thread から caller-owned bounded
+buffer へ取得した straight RGBA8 thumbnail を自然順で表示し、行選択、前/次、番号移動、
+import を同じ exact session/generation へ発行する。dirty 時の Cancel、endpoint no-op、
+invalid index、Undo 後の再選択で別文書へ retarget しない。番号付き raster を開くと、
+最後の数字列の前後が一致する同一 folder の sibling だけを mixed-format で一括 decode し、
+開いた cell を選択する。decode failure では旧 sequence を保持する。
+
+三番目の light table 縦切りでは、modeless palette に対象文書と追従/固定を
+表示し、set/item の登録・選択・複製・削除・並べ替え、全体 opacity、item の
+表示・色・モード・opacity・offset、reload、Canvas 移動、編集画像との交換、
+前/次 cell を既存 Core/C ABI command へ接続した。pane action は選択 ID を
+session/generation namespace と組で保持し、Canvas 移動も開始時の
+`CommandContext` から別文書へ retarget しない。同じ文書の複数 view は
+一つの Core 所有 light-table/history を共有し、palette は画像複製を保持せず
+set/item metadata だけを表示する。
+
+最後に subpalette/reference viewer、palette target affordance、Batch job target を
+順番どおり完成させた。reference viewer は専用 Canvas binding と Core-local view を持ち、
+zoom/pan/flip、前後・現在セル、自動前セル、scroll 同期、色採取を提供するが、stroke は
+必ず consume して編集 input を送らない。immutable reference snapshot は source tile を
+共有境界で変換し、文書 revision、dirty、history、savepoint を変更しない。
+
+Color pane は follow/pin 対象を header に表示し、登録・削除・clear・load・save の
+button を既存 production command へ接続した。palette mutation は click 時の
+session/generation だけへ発行する。Batch pane は follow/pin、実行中の Job target、進捗、
+cancel、result を表示する。preview と smoke/async execution はどちらも確定済み
+`CommandContext` を使い、active tab が変わっても結果を別文書へ適用しない。target close、
+stale generation、queue failure、job close は結果を誤配せず、job 終了後は元の follow/pin
+policy へ戻す。
+
+2026-08-02 に G8 を完了した。全 auxiliary pane action は UI header と code の両方で
+document/view/job target を説明でき、表示だけの placeholder pane と未接続 button はない。
+次に着手する milestone は G9 である。
 
 ---
 

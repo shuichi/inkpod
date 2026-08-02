@@ -125,6 +125,12 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         FindShortcutSequence(shortcuts, IDM_WINDOW_TOOL_PALETTE);
     const auto* layer_palette =
         FindShortcutSequence(shortcuts, IDM_WINDOW_LAYER_PALETTE);
+    const auto* locator =
+        FindShortcutSequence(shortcuts, IDM_WINDOW_LOCATOR);
+    const auto* sequence =
+        FindShortcutSequence(shortcuts, IDM_WINDOW_SEQUENCE);
+    const auto* light_table =
+        FindShortcutSequence(shortcuts, IDM_WINDOW_LIGHT_TABLE);
     const auto* close_view = FindShortcutSequence(shortcuts, IDM_VIEW_CLOSE);
     const auto* next_tab = FindShortcutSequence(shortcuts, IDM_TAB_NEXT);
     const auto* previous_tab =
@@ -138,6 +144,11 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         && batch != nullptr && batch->stroke_count > 1U
         && tool_palette != nullptr && tool_palette->stroke_count == 3U
         && layer_palette != nullptr && layer_palette->stroke_count == 3U
+        && locator != nullptr && locator->stroke_count == 3U
+        && sequence != nullptr && sequence->stroke_count == 3U
+        && sequence->strokes[2].virtual_key == static_cast<std::uint32_t>('F')
+        && light_table != nullptr && light_table->stroke_count == 3U
+        && light_table->strokes[2].virtual_key == static_cast<std::uint32_t>('H')
         && close_view != nullptr && close_view->stroke_count == 1U
         && close_view->strokes[0].virtual_key == VK_F4
         && close_view->strokes[0].modifiers
@@ -173,6 +184,22 @@ int main() {
         || !IsCommandChecked(states, IDM_WINDOW_LAYER_PALETTE)
         || !IsCommandChecked(states, IDM_WINDOW_TOOL_OPTIONS)
         || !IsCommandChecked(states, IDM_WINDOW_COLOR_PANE)
+        || !IsCommandEnabled(states, IDM_WINDOW_LOCATOR)
+        || IsCommandChecked(states, IDM_WINDOW_LOCATOR)
+        || IsCommandEnabled(states, IDM_LOCATOR_PIN)
+        || IsCommandEnabled(states, IDM_LOCATOR_FIXED)
+        || IsCommandEnabled(states, IDM_LOCATOR_AUTOSCROLL)
+        || !IsCommandEnabled(states, IDM_WINDOW_SEQUENCE)
+        || IsCommandChecked(states, IDM_WINDOW_SEQUENCE)
+        || IsCommandEnabled(states, IDM_SEQUENCE_PIN)
+        || !IsCommandEnabled(states, IDM_WINDOW_LIGHT_TABLE)
+        || IsCommandChecked(states, IDM_WINDOW_LIGHT_TABLE)
+        || IsCommandEnabled(states, IDM_LIGHT_TABLE_PIN)
+        || !IsCommandEnabled(states, IDM_WINDOW_SUBPALETTE)
+        || IsCommandChecked(states, IDM_WINDOW_SUBPALETTE)
+        || IsCommandEnabled(states, IDM_SUBPALETTE_PIN)
+        || IsCommandEnabled(states, IDM_COLOR_PIN)
+        || IsCommandEnabled(states, IDM_BATCH_PIN)
         || IsCommandChecked(states, IDM_WORKSPACE_MIRROR)
         || IsCommandEnabled(states, IDM_DOCUMENT_CLOSE)
         || IsCommandEnabled(states, IDM_VIEW_CLOSE)
@@ -194,6 +221,24 @@ int main() {
     inputs.document.dirty = false;
     inputs.selection_view.document_count = 1U;
     inputs.selection_view.view_count = 1U;
+    inputs.workspace.locator_target_available = true;
+    inputs.workspace.locator_visible = true;
+    inputs.workspace.locator_pinned = true;
+    inputs.workspace.locator_fixed = true;
+    inputs.workspace.locator_auto_scroll = false;
+    inputs.workspace.sequence_target_available = true;
+    inputs.workspace.sequence_visible = true;
+    inputs.workspace.sequence_pinned = true;
+    inputs.workspace.light_table_target_available = true;
+    inputs.workspace.light_table_visible = true;
+    inputs.workspace.light_table_pinned = true;
+    inputs.workspace.subpalette_target_available = true;
+    inputs.workspace.subpalette_visible = true;
+    inputs.workspace.subpalette_pinned = true;
+    inputs.workspace.color_target_available = true;
+    inputs.workspace.color_pinned = true;
+    inputs.workspace.batch_target_available = true;
+    inputs.workspace.batch_pinned = true;
     states = ComputeCommandStates(inputs);
     CommandStateInputs dirty_inputs = inputs;
     dirty_inputs.document.dirty = true;
@@ -206,6 +251,26 @@ int main() {
         || !IsCommandEnabled(states, IDM_EDITOR_SPLIT_RIGHT)
         || !IsCommandEnabled(states, IDM_EDITOR_SPLIT_DOWN)
         || !IsCommandEnabled(states, IDM_EDITOR_NEW_VIEW_OTHER_GROUP)
+        || !IsCommandEnabled(states, IDM_LOCATOR_PIN)
+        || !IsCommandEnabled(states, IDM_LOCATOR_FIXED)
+        || !IsCommandEnabled(states, IDM_LOCATOR_AUTOSCROLL)
+        || !IsCommandChecked(states, IDM_WINDOW_LOCATOR)
+        || !IsCommandChecked(states, IDM_LOCATOR_PIN)
+        || !IsCommandChecked(states, IDM_LOCATOR_FIXED)
+        || IsCommandChecked(states, IDM_LOCATOR_AUTOSCROLL)
+        || !IsCommandChecked(states, IDM_WINDOW_SEQUENCE)
+        || !IsCommandEnabled(states, IDM_SEQUENCE_PIN)
+        || !IsCommandChecked(states, IDM_SEQUENCE_PIN)
+        || !IsCommandChecked(states, IDM_WINDOW_LIGHT_TABLE)
+        || !IsCommandEnabled(states, IDM_LIGHT_TABLE_PIN)
+        || !IsCommandChecked(states, IDM_LIGHT_TABLE_PIN)
+        || !IsCommandChecked(states, IDM_WINDOW_SUBPALETTE)
+        || !IsCommandEnabled(states, IDM_SUBPALETTE_PIN)
+        || !IsCommandChecked(states, IDM_SUBPALETTE_PIN)
+        || !IsCommandEnabled(states, IDM_COLOR_PIN)
+        || !IsCommandChecked(states, IDM_COLOR_PIN)
+        || !IsCommandEnabled(states, IDM_BATCH_PIN)
+        || !IsCommandChecked(states, IDM_BATCH_PIN)
         || IsCommandEnabled(states, IDM_EDITOR_MOVE_OTHER_GROUP)
         || IsCommandEnabled(states, IDM_EDITOR_GROUP_CLOSE)
         || IsCommandEnabled(states, IDM_EDITOR_GROUP_NEXT)

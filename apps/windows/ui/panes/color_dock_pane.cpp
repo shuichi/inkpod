@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cwchar>
 #include <new>
+#include <utility>
 #include <vector>
 
 #include <windowsx.h>
@@ -312,7 +313,12 @@ void ShowTabControls(HWND pane, int tab) noexcept {
     for (const int control : {
              IDC_PALETTE_LIST,
              IDC_PALETTE_PREVIOUS,
-             IDC_PALETTE_NEXT}) {
+             IDC_PALETTE_NEXT,
+             IDC_PALETTE_REGISTER_BUTTON,
+             IDC_PALETTE_DELETE_BUTTON,
+             IDC_PALETTE_CLEAR_BUTTON,
+             IDC_PALETTE_LOAD_BUTTON,
+             IDC_PALETTE_SAVE_BUTTON}) {
         ShowWindow(GetDlgItem(pane, control), tab == 1 ? SW_SHOW : SW_HIDE);
     }
     ShowWindow(
@@ -327,17 +333,38 @@ void LayoutPane(HWND pane) noexcept {
     const UINT dpi = GetDpiForWindow(pane);
     const int margin = ScaleForDpi(6, dpi);
     const int tabs_height = ScaleForDpi(28, dpi);
+    const int target_height = ScaleForDpi(22, dpi);
     const int row = ScaleForDpi(24, dpi);
     const int gap = ScaleForDpi(5, dpi);
     SetWindowPos(
         GetDlgItem(pane, IDC_COLOR_TABS),
         nullptr,
         margin,
-        margin,
+        margin + target_height,
         std::max(0, static_cast<int>(client.right) - margin * 2),
-        std::max(0, static_cast<int>(client.bottom) - margin * 2),
+        std::max(
+            0,
+            static_cast<int>(client.bottom) - margin * 2 - target_height),
         SWP_NOACTIVATE | SWP_NOZORDER);
-    RECT content{margin * 2, margin + tabs_height, client.right - margin * 2,
+    const int pin_width = ScaleForDpi(76, dpi);
+    SetWindowPos(
+        GetDlgItem(pane, IDC_COLOR_TARGET),
+        nullptr,
+        margin,
+        margin,
+        std::max(0, static_cast<int>(client.right) - margin * 3 - pin_width),
+        target_height,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    SetWindowPos(
+        GetDlgItem(pane, IDC_COLOR_PIN),
+        nullptr,
+        std::max(margin, static_cast<int>(client.right) - margin - pin_width),
+        margin,
+        pin_width,
+        target_height,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    RECT content{margin * 2, margin + target_height + tabs_height,
+                 client.right - margin * 2,
                  client.bottom - margin * 2};
     const int top_row = ScaleForDpi(44, dpi);
     const int swatch_width = ScaleForDpi(60, dpi);
@@ -444,14 +471,38 @@ void LayoutPane(HWND pane) noexcept {
         button_width,
         row,
         SWP_NOACTIVATE | SWP_NOZORDER);
+    const int palette_action_height = row;
+    const int palette_action_top = content.top + row + gap;
+    const int palette_action_width = std::max(
+        ScaleForDpi(36, dpi),
+        (static_cast<int>(content.right - content.left) - gap * 4) / 5);
+    int palette_action_x = content.left;
+    for (const int control : {
+             IDC_PALETTE_REGISTER_BUTTON,
+             IDC_PALETTE_DELETE_BUTTON,
+             IDC_PALETTE_CLEAR_BUTTON,
+             IDC_PALETTE_LOAD_BUTTON,
+             IDC_PALETTE_SAVE_BUTTON}) {
+        SetWindowPos(
+            GetDlgItem(pane, control),
+            nullptr,
+            palette_action_x,
+            palette_action_top,
+            palette_action_width,
+            palette_action_height,
+            SWP_NOACTIVATE | SWP_NOZORDER);
+        palette_action_x += palette_action_width + gap;
+    }
     SetWindowPos(
         GetDlgItem(pane, IDC_PALETTE_LIST),
         nullptr,
         content.left,
-        content.top + row + gap,
+        palette_action_top + palette_action_height + gap,
         std::max(0, static_cast<int>(content.right - content.left)),
         std::max(
-            0, static_cast<int>(content.bottom - content.top) - row - gap),
+            0,
+            static_cast<int>(content.bottom)
+                - palette_action_top - palette_action_height - gap),
         SWP_NOACTIVATE | SWP_NOZORDER);
     SetWindowPos(
         GetDlgItem(pane, IDC_COLOR_CHART_LIST),
@@ -484,6 +535,8 @@ void UpdateFont(HWND pane, ColorDockPaneState& state) noexcept {
     }
     for (const int control : {
              IDC_COLOR_TABS,
+             IDC_COLOR_TARGET,
+             IDC_COLOR_PIN,
              IDC_COLOR_MAIN_LINE_LABEL,
              IDC_COLOR_DRAWING_LABEL,
              IDC_COLOR_PICKER,
@@ -496,6 +549,11 @@ void UpdateFont(HWND pane, ColorDockPaneState& state) noexcept {
              IDC_PALETTE_LIST,
              IDC_PALETTE_PREVIOUS,
              IDC_PALETTE_NEXT,
+             IDC_PALETTE_REGISTER_BUTTON,
+             IDC_PALETTE_DELETE_BUTTON,
+             IDC_PALETTE_CLEAR_BUTTON,
+             IDC_PALETTE_LOAD_BUTTON,
+             IDC_PALETTE_SAVE_BUTTON,
              IDC_COLOR_CHART_LIST}) {
         SendDlgItemMessageW(
             pane, control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), TRUE);
@@ -1718,7 +1776,7 @@ LRESULT CALLBACK PaneSubclassProcedure(
                 }
             }
             break;
-        case WM_COMMAND:
+        case WM_COMMAND: {
             if (state == nullptr || state->updating) {
                 break;
             }
@@ -1730,6 +1788,37 @@ LRESULT CALLBACK PaneSubclassProcedure(
                 && HIWORD(wparam) == BN_CLICKED
                 && state->dispatch_command != nullptr) {
                 state->dispatch_command(state->context, IDM_TOOL_EYEDROPPER);
+                return 0;
+            }
+            if (LOWORD(wparam) == IDC_COLOR_PIN
+                && HIWORD(wparam) == BN_CLICKED
+                && state->dispatch_command != nullptr) {
+                state->dispatch_command(state->context, IDM_COLOR_PIN);
+                return 0;
+            }
+            UINT palette_command{};
+            switch (LOWORD(wparam)) {
+                case IDC_PALETTE_REGISTER_BUTTON:
+                    palette_command = IDM_PALETTE_REGISTER;
+                    break;
+                case IDC_PALETTE_DELETE_BUTTON:
+                    palette_command = IDM_PALETTE_DELETE;
+                    break;
+                case IDC_PALETTE_CLEAR_BUTTON:
+                    palette_command = IDM_PALETTE_CLEAR;
+                    break;
+                case IDC_PALETTE_LOAD_BUTTON:
+                    palette_command = IDM_PALETTE_LOAD;
+                    break;
+                case IDC_PALETTE_SAVE_BUTTON:
+                    palette_command = IDM_PALETTE_SAVE;
+                    break;
+                default:
+                    break;
+            }
+            if (palette_command != 0U && HIWORD(wparam) == BN_CLICKED
+                && state->dispatch_command != nullptr) {
+                state->dispatch_command(state->context, palette_command);
                 return 0;
             }
             if (LOWORD(wparam) == IDC_PALETTE_PREVIOUS
@@ -1758,6 +1847,7 @@ LRESULT CALLBACK PaneSubclassProcedure(
                 return 0;
             }
             break;
+        }
         case WM_DRAWITEM:
             if (state == nullptr) {
                 break;
@@ -1897,6 +1987,22 @@ HWND CreateColorDockPane(
                instance,
                pane,
                L"STATIC",
+               L"アクティブに追従",
+               SS_LEFT | SS_CENTERIMAGE | SS_ENDELLIPSIS,
+               IDC_COLOR_TARGET)
+            != nullptr
+        && CreateControl(
+               instance,
+               pane,
+               L"BUTTON",
+               L"文書に固定",
+               WS_TABSTOP | BS_PUSHBUTTON,
+               IDC_COLOR_PIN)
+            != nullptr
+        && CreateControl(
+               instance,
+               pane,
+               L"STATIC",
                L"主線色",
                SS_LEFT | SS_CENTERIMAGE | SS_ENDELLIPSIS,
                IDC_COLOR_MAIN_LINE_LABEL)
@@ -1972,6 +2078,26 @@ HWND CreateColorDockPane(
         && CreateControl(
                instance, pane, L"BUTTON", L">", WS_TABSTOP | BS_PUSHBUTTON,
                IDC_PALETTE_NEXT)
+            != nullptr
+        && CreateControl(
+               instance, pane, L"BUTTON", L"登録", WS_TABSTOP | BS_PUSHBUTTON,
+               IDC_PALETTE_REGISTER_BUTTON)
+            != nullptr
+        && CreateControl(
+               instance, pane, L"BUTTON", L"削除", WS_TABSTOP | BS_PUSHBUTTON,
+               IDC_PALETTE_DELETE_BUTTON)
+            != nullptr
+        && CreateControl(
+               instance, pane, L"BUTTON", L"クリア", WS_TABSTOP | BS_PUSHBUTTON,
+               IDC_PALETTE_CLEAR_BUTTON)
+            != nullptr
+        && CreateControl(
+               instance, pane, L"BUTTON", L"読込", WS_TABSTOP | BS_PUSHBUTTON,
+               IDC_PALETTE_LOAD_BUTTON)
+            != nullptr
+        && CreateControl(
+               instance, pane, L"BUTTON", L"保存", WS_TABSTOP | BS_PUSHBUTTON,
+               IDC_PALETTE_SAVE_BUTTON)
             != nullptr
         && CreateControl(
                instance,
@@ -2055,6 +2181,41 @@ void UpdateColorDockPane(
     UpdateColorDockPaneDrawingColor(pane, drawing_color);
     PopulateLists(pane, *state);
     InvalidateRect(GetDlgItem(pane, IDC_COLOR_MAIN_LINE_SWATCH), nullptr, TRUE);
+}
+
+void UpdateColorDockPaneTarget(
+    HWND pane,
+    std::wstring target_text,
+    bool target_available,
+    bool pinned) noexcept {
+    ColorDockPaneState* state = pane == nullptr ? nullptr : PaneState(pane);
+    if (state == nullptr) {
+        return;
+    }
+    try {
+        state->target_text = std::move(target_text);
+    } catch (const std::bad_alloc&) {
+        return;
+    }
+    state->target_available = target_available;
+    state->pinned = pinned;
+    SetDlgItemTextW(pane, IDC_COLOR_TARGET, state->target_text.c_str());
+    SetDlgItemTextW(
+        pane,
+        IDC_COLOR_PIN,
+        pinned ? L"追従へ戻す" : L"文書に固定");
+    EnableWindow(GetDlgItem(pane, IDC_COLOR_PIN), target_available ? TRUE : FALSE);
+    for (const int control : {
+             IDC_PALETTE_LIST,
+             IDC_PALETTE_PREVIOUS,
+             IDC_PALETTE_NEXT,
+             IDC_PALETTE_REGISTER_BUTTON,
+             IDC_PALETTE_DELETE_BUTTON,
+             IDC_PALETTE_CLEAR_BUTTON,
+             IDC_PALETTE_LOAD_BUTTON,
+             IDC_PALETTE_SAVE_BUTTON}) {
+        EnableWindow(GetDlgItem(pane, control), target_available ? TRUE : FALSE);
+    }
 }
 
 void UpdateColorDockPaneDrawingColor(

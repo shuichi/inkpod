@@ -607,6 +607,48 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
             INKPOD_STATUS_OK
         );
 
+        let mut mixed_files = [
+            InkpodNamedRasterInput {
+                struct_size: size_of::<InkpodNamedRasterInput>() as u32,
+                reserved: 0,
+                format: INKPOD_COMMON_RASTER_PNG,
+                reserved2: 0,
+                name_utf8: names[0].as_ptr(),
+                name_bytes: names[0].len() as u64,
+                bytes: png.as_ptr(),
+                byte_count: png.len() as u64,
+            },
+            InkpodNamedRasterInput {
+                struct_size: size_of::<InkpodNamedRasterInput>() as u32,
+                reserved: 0,
+                format: INKPOD_COMMON_RASTER_PNG,
+                reserved2: 1,
+                name_utf8: names[1].as_ptr(),
+                name_bytes: names[1].len() as u64,
+                bytes: png.as_ptr(),
+                byte_count: png.len() as u64,
+            },
+        ];
+        assert_eq!(
+            inkpod_core_sequence_import_mixed_encoded(
+                sequence_core,
+                mixed_files.as_ptr(),
+                mixed_files.len() as u64,
+                size_of::<InkpodNamedRasterInput>() as u64,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        mixed_files[1].reserved2 = 0;
+        assert_eq!(
+            inkpod_core_sequence_import_mixed_encoded(
+                sequence_core,
+                mixed_files.as_ptr(),
+                mixed_files.len() as u64,
+                size_of::<InkpodNamedRasterInput>() as u64,
+            ),
+            INKPOD_STATUS_OK
+        );
+
         let mut cell = InkpodSequenceCellInfo {
             struct_size: size_of::<InkpodSequenceCellInfo>() as u32,
             ..InkpodSequenceCellInfo::default()
@@ -625,6 +667,38 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
         );
         assert_eq!(cell_name, b"cell2.png");
 
+        let mut thumbnail = InkpodSequenceThumbnailBuffer {
+            struct_size: size_of::<InkpodSequenceThumbnailBuffer>() as u32,
+            ..InkpodSequenceThumbnailBuffer::default()
+        };
+        assert_eq!(
+            inkpod_core_sequence_thumbnail_get(sequence_core, 0, &mut thumbnail),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            thumbnail.required_bytes,
+            u64::from(thumbnail.height) * u64::from(thumbnail.stride_bytes)
+        );
+        assert_ne!(thumbnail.checksum, 0);
+        let mut short_pixels = vec![0_u8; thumbnail.required_bytes as usize - 1];
+        thumbnail.pixels_rgba8 = short_pixels.as_mut_ptr();
+        thumbnail.pixel_capacity = short_pixels.len() as u64;
+        assert_eq!(
+            inkpod_core_sequence_thumbnail_get(sequence_core, 0, &mut thumbnail),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        let mut pixels = vec![0_u8; thumbnail.required_bytes as usize];
+        thumbnail.pixels_rgba8 = pixels.as_mut_ptr();
+        thumbnail.pixel_capacity = pixels.len() as u64;
+        assert_eq!(
+            inkpod_core_sequence_thumbnail_get(sequence_core, 0, &mut thumbnail),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_sequence_thumbnail_get(sequence_core, 2, &mut thumbnail),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+
         assert_eq!(
             inkpod_core_subpalette_set(sequence_core, 0),
             INKPOD_STATUS_OK
@@ -635,6 +709,61 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
         };
         assert_eq!(
             inkpod_core_subpalette_sample(sequence_core, 0, 0, &mut sampled),
+            INKPOD_STATUS_OK
+        );
+        let mut subpalette_view_id = 0_u64;
+        assert_eq!(
+            inkpod_core_view_create(sequence_core, &mut subpalette_view_id),
+            INKPOD_STATUS_OK
+        );
+        let reference_fit = InkpodViewInput {
+            struct_size: size_of::<InkpodViewInput>() as u32,
+            kind: INKPOD_VIEW_FIT,
+            flags: 0,
+            value1: 240.0,
+            value2: 120.0,
+            value3: 0.0,
+            value4: 0.0,
+        };
+        assert_eq!(
+            inkpod_core_subpalette_view_apply(sequence_core, subpalette_view_id, &reference_fit,),
+            INKPOD_STATUS_OK
+        );
+        let mut reference_sample = InkpodColorValue {
+            struct_size: size_of::<InkpodColorValue>() as u32,
+            ..InkpodColorValue::default()
+        };
+        assert_eq!(
+            inkpod_core_subpalette_view_sample(
+                sequence_core,
+                subpalette_view_id,
+                120.0,
+                60.0,
+                &mut reference_sample,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let snapshot_options = InkpodSnapshotOptions {
+            struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+            reserved: 0,
+            feature_flags: INKPOD_FEATURE_NONE,
+        };
+        let mut reference_snapshot = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_subpalette_build_snapshot(
+                sequence_core,
+                subpalette_view_id,
+                &snapshot_options,
+                &mut reference_snapshot,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_snapshot_release(&mut reference_snapshot),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_view_close(sequence_core, subpalette_view_id),
             INKPOD_STATUS_OK
         );
 

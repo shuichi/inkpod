@@ -14,6 +14,12 @@ set(chrome_source
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window.cpp")
 set(chrome_header
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window.h")
+set(locator_pane_source
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/panes/locator_pane.cpp")
+set(sequence_pane_source
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/panes/sequence_pane.cpp")
+set(light_table_pane_source
+    "${INKPOD_SOURCE_DIR}/apps/windows/ui/panes/light_table_pane.cpp")
 set(cmake_source "${INKPOD_SOURCE_DIR}/CMakeLists.txt")
 
 foreach(required_source IN ITEMS
@@ -23,7 +29,10 @@ foreach(required_source IN ITEMS
         "${smoke_source}"
         "${runtime_source}"
         "${chrome_source}"
-        "${chrome_header}")
+        "${chrome_header}"
+        "${locator_pane_source}"
+        "${sequence_pane_source}"
+        "${light_table_pane_source}")
     if(NOT EXISTS "${required_source}")
         message(FATAL_ERROR "frontend source is missing: ${required_source}")
     endif()
@@ -72,6 +81,26 @@ foreach(required_main_token IN ITEMS
     if(token_offset LESS 0)
         message(FATAL_ERROR
             "main.cpp is missing ${required_main_token}")
+    endif()
+endforeach()
+
+set(modeless_pane_text "")
+foreach(pane_source IN ITEMS
+        "${locator_pane_source}"
+        "${sequence_pane_source}"
+        "${light_table_pane_source}")
+    file(READ "${pane_source}" pane_text)
+    string(APPEND modeless_pane_text "${pane_text}")
+endforeach()
+foreach(forbidden_pane_pointer IN ITEMS
+        "reinterpret_cast<LPARAM>(&state)"
+        "reinterpret_cast<WPARAM>(&state)")
+    string(FIND
+        "${modeless_pane_text}" "${forbidden_pane_pointer}" pointer_offset)
+    if(NOT pointer_offset LESS 0)
+        message(FATAL_ERROR
+            "Modeless pane passes a C++ state pointer in a window message: "
+            "${forbidden_pane_pointer}")
     endif()
 endforeach()
 
@@ -137,7 +166,8 @@ foreach(required_smoke IN ITEMS
         "RunProductionWorkflowSmoke"
         "RunVectorWorkflowSmoke"
         "RunImageEffectsSmoke"
-        "RunBatchWorkflowSmoke")
+        "RunBatchWorkflowSmoke"
+        "RunLightTablePaneSmoke")
     string(FIND "${smoke_text}" "${required_smoke}" smoke_offset)
     if(smoke_offset LESS 0)
         message(FATAL_ERROR
@@ -168,6 +198,9 @@ foreach(required_cmake_source IN ITEMS
         "apps/windows/app/main.cpp"
         "apps/windows/ui/command_catalog.cpp"
         "apps/windows/ui/shortcut_controller.cpp"
+        "apps/windows/ui/panes/locator_pane.cpp"
+        "apps/windows/ui/panes/sequence_pane.cpp"
+        "apps/windows/ui/panes/light_table_pane.cpp"
         "apps/windows/ui/main_window_runtime.cpp")
     string(FIND "${cmake_text}" "${required_cmake_source}" source_offset)
     if(source_offset LESS 0)

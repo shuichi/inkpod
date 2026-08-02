@@ -159,6 +159,14 @@ Rust panic は ABI 境界で捕捉され `INKPOD_STATUS_PANIC` になる。C++ e
 
 ## size query と caller-owned buffer
 
+`inkpod_core_locator_neighborhood` は modeless locator の magnified view に必要な
+複数 pixel を一回の owner-thread ABI call で返す。`radius` は 0..16、出力は常に
+`(radius * 2 + 1)` の正方形 packed straight RGBA8 で、文書外は透明になる。
+`pixel_capacity == 0` かつ `pixels_rgba8 == NULL` で metadata と
+`required_bytes` を問い合わせ、十分な caller-owned buffer を設定して再度呼ぶ。
+buffer は call 中だけ借用され、Core は保持しない。query/copy とも document、view、
+revision、dirty、Undo を変更しない。
+
 可変長出力は、まず NULL/容量 0 で必要量を問い合わせ、caller が確保した後に再度呼ぶ。API により
 必要量の field 名は異なるため、各構造体の Doxygen 契約を確認する。
 
@@ -186,6 +194,36 @@ status = inkpod_clipboard_render_rgba8(clipboard, &output);
 された straight-alpha RGBA8 で、`revision` は生成元の committed document revision である。
 buffer の確保・解放は caller が担い、Core は pointer を保持しない。レイヤー自体が非表示でも内容を
 確認できる一方、プレーンの表示状態とレイヤー／プレーン不透明度は thumbnail に反映される。
+
+`inkpod_core_sequence_thumbnail_get` も同じ caller-owned query/copy 契約を使う。
+`pixels_rgba8 = NULL`、`pixel_capacity = 0` の query で `required_bytes`、寸法、stride、
+checksum を取得し、確保後の二回目で bounded straight-alpha RGBA8 をコピーする。pointer は
+呼び出し中だけ借用され、Core は保持しない。二回の call は同じ
+`DocumentSessionId + generation` の CoreHost work item 内で行い、別 active document を再解決しない。
+
+`inkpod_core_sequence_import_mixed_encoded` の `InkpodNamedRasterInput` span は caller-owned
+borrowed 入力である。record、UTF-8 名、encoded bytes は呼び出し終了まで有効とし、Core は全 record
+の構造、format、長さを検証してから各画像を decode する。全件成功時だけ sequence を一括置換し、
+一件でも invalid/decode/allocation failure なら旧 sequence と current document、dirty、Undo を保つ。
+
+## subpalette/reference snapshot 契約
+
+read-only reference viewer は、対象 `DocumentSessionId + Generation` の Core owner thread で
+`inkpod_core_subpalette_set` と `inkpod_core_view_create` を呼び、返った Core-local view ID を
+その session namespace の外へ routing key として使わない。
+
+- `inkpod_core_subpalette_view_apply` はその view の zoom、pan、flip、viewport だけを変更する。
+- `inkpod_core_subpalette_view_sample` は同じ view transform を通した device 座標を half-open bounds で
+  検証し、source の RGBA8/16 depth を caller-owned `InkpodColorValue` へコピーする。
+- `inkpod_core_subpalette_build_snapshot` は NULL の owner 変数へ Rust-owned immutable snapshot を返す。
+  通常 snapshot と同様に、成功後は sink または caller のどちらか一方だけが
+  `inkpod_snapshot_release` の責任を持つ。
+
+これら三関数と view close は Core owner thread 限定である。snapshot accessor/release だけが
+外部同期した任意 thread で利用できる。reference raster は editable document へ install されず、
+document revision、dirty、Undo/Redo、savepoint を変更しない。Windows Canvas は stroke を consume し、
+編集 command を Core へ送らない。target rebind/close/shutdown では先に Canvas sink を unbind し、
+捕捉済み session/generation の Core 上で view を close してから Canvas owner を破棄する。
 
 ## 編集状態と排他
 

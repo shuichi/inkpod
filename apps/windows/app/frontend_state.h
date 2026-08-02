@@ -6,13 +6,13 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "command_context.h"
+#include "pane_target.h"
 #include "inkpod/core_ffi.h"
 #include "ui/command_state.h"
 #include "ui/dialogs/basic_dialogs.h"
@@ -57,6 +57,8 @@ struct LocatorAsyncResult {
     std::uint64_t sample_generation{};
     InkpodStatus status{INKPOD_STATUS_INVALID_STATE};
     InkpodLocatorOutput output{};
+    InkpodLocatorNeighborhoodBuffer neighborhood_output{};
+    std::array<std::uint8_t, 9U * 9U * 4U> neighborhood{};
 };
 
 struct AdjustmentLayerUiState {
@@ -158,16 +160,18 @@ struct ViewUiState {
     std::int32_t pointer_device_x{};
     std::int32_t pointer_device_y{};
     std::uint64_t locator_generation{};
-    std::atomic_uint64_t locator_pending_token{};
     bool locator_valid{};
     InkpodLocatorOutput locator{};
+    std::uint32_t locator_neighborhood_width{};
+    std::uint32_t locator_neighborhood_height{};
+    std::int32_t locator_neighborhood_origin_x{};
+    std::int32_t locator_neighborhood_origin_y{};
+    std::array<std::uint8_t, 9U * 9U * 4U> locator_neighborhood{};
     std::vector<InkpodStrokeSample> gesture_samples;
     bool guide_drag_active{};
     std::uint32_t guide_drag_axis{};
     std::uint64_t guide_drag_id{};
     std::optional<DragToken> active_drag;
-    std::mutex locator_results_mutex;
-    std::deque<LocatorAsyncResult> locator_results;
 };
 
 struct PaneUiState {
@@ -192,6 +196,9 @@ struct PaneUiState {
     std::uint32_t active_light_table_item_index{};
     std::uint32_t light_table_set_count{};
     std::uint32_t light_table_item_count{};
+    DocumentSessionId light_table_selection_session{};
+    Generation light_table_selection_generation{};
+    std::optional<CommandContext> light_table_move_context;
     std::uint32_t sequence_count{};
     std::vector<InkpodStrokeSample> light_table_move_samples;
     HWND layer_palette{};
@@ -228,6 +235,12 @@ struct EffectsUiState {
 };
 
 struct BatchUiState {
+    std::wstring target_text{L"アクティブに追従（対象なし）"};
+    std::wstring job_text{L"待機中"};
+    bool target_available{};
+    bool target_pinned{};
+    bool return_to_pinned{};
+    CommandContext return_context;
     InkpodBatchInputKind input_kind{INKPOD_BATCH_INPUT_CURRENT_SEQUENCE};
     std::wstring input_path;
     std::uint32_t first_cell{};
@@ -258,14 +271,23 @@ struct BatchUiState {
 
 struct FrontendRoutingState {
     CommandTargetRegistry targets;
+    PaneTargetRegistry pane_targets;
     CommandTimerRegistry timers;
     FrontendTokenSource tokens;
+    std::atomic_uint64_t locator_pending_token{};
+    std::mutex locator_results_mutex;
+    std::array<std::optional<LocatorAsyncResult>, 64U> locator_results{};
     CommandContext command_state_context;
     PaneInstanceId tool_pane{};
     PaneInstanceId tool_options_pane{};
     PaneInstanceId color_pane{};
     PaneInstanceId layer_pane{};
     PaneInstanceId batch_pane{};
+    PaneInstanceId locator_pane{};
+    PaneInstanceId sequence_pane{};
+    PaneInstanceId light_table_pane{};
+    PaneInstanceId reference_pane{};
+    PaneInstanceId subpalette_pane{};
 };
 
 } // namespace inkpod::app

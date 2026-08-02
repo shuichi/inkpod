@@ -454,6 +454,94 @@ fn acceptance_sequence_gaps_natural_order_thumbnails_subpalette_and_motion() {
             .collect::<Vec<_>>(),
         vec![1, 3, 10]
     );
+
+    let mixed = vec![
+        (
+            "mixed2.bmp".to_owned(),
+            CommonRasterFormat::Bmp,
+            encode_common_raster(
+                CommonRasterFormat::Bmp,
+                &rgba8(1, 1, vec![20, 30, 40, 255]),
+                false,
+            )
+            .unwrap(),
+        ),
+        (
+            "mixed1.png".to_owned(),
+            CommonRasterFormat::Png,
+            encode_common_raster(
+                CommonRasterFormat::Png,
+                &rgba8(1, 1, vec![1, 2, 3, 255]),
+                false,
+            )
+            .unwrap(),
+        ),
+    ];
+    imported.import_mixed_sequence(mixed).unwrap();
+    assert_eq!(imported.sequence_cell(0).unwrap().cell_number, 1);
+    assert_eq!(imported.sequence_cell(1).unwrap().cell_number, 2);
+    assert!(matches!(
+        imported.sequence_cell(2),
+        Err(CoreError::InvalidArgument(_))
+    ));
+}
+
+#[test]
+fn subpalette_reference_snapshot_has_independent_view_and_never_edits_document() {
+    let mut core = Core::new();
+    core.new_cell(8, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_sequence(vec![source(
+        "reference12.png",
+        12,
+        3,
+        2,
+        [40, 80, 120, 200],
+    )])
+    .unwrap();
+    core.set_subpalette_cell(0).unwrap();
+    let view_id = core.create_view().unwrap();
+    let before = core.document_info().unwrap();
+    let primary_view = core.view_state();
+    core.apply_subpalette_view_for(
+        view_id,
+        ViewCommand::Fit {
+            viewport_width: 300.0,
+            viewport_height: 100.0,
+        },
+    )
+    .unwrap();
+    core.apply_subpalette_view_for(
+        view_id,
+        ViewCommand::Flip {
+            axis: MirrorAxis::Horizontal,
+        },
+    )
+    .unwrap();
+    let snapshot = core.build_subpalette_snapshot_for(view_id).unwrap();
+    assert_eq!(
+        (snapshot.document_width(), snapshot.document_height()),
+        (3, 2)
+    );
+    assert_eq!(snapshot.tile_count(), 1);
+    assert!(snapshot.view().flip_horizontal());
+    assert!(snapshot.view().zoom() > 1.0);
+    assert_eq!(core.view_state(), primary_view);
+    assert_eq!(core.document_info().unwrap(), before);
+    assert_eq!(
+        core.subpalette_sample(0, 0).unwrap(),
+        PixelValue::Rgba([40, 80, 120, 200])
+    );
+    assert_eq!(
+        core.subpalette_view_sample(view_id, 200.0, 25.0).unwrap(),
+        PixelValue::Rgba([40, 80, 120, 200])
+    );
+    assert_eq!(
+        core.subpalette_sample(3, 1),
+        Err(CoreError::Raster(
+            inkpod_image::RasterError::PixelOutOfBounds
+        ))
+    );
 }
 
 #[test]

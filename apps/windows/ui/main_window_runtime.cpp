@@ -19,6 +19,7 @@
 #include <new>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -40,7 +41,12 @@
 #include "ui/panes/document_panes.h"
 #include "ui/panes/color_panes.h"
 #include "ui/panes/color_dock_pane.h"
+#include "ui/panes/light_table_pane.h"
+#include "ui/panes/locator_pane.h"
+#include "ui/panes/sequence_pane.h"
+#include "ui/panes/subpalette_pane.h"
 #include "ui/panes/tool_options_pane.h"
+#include "ui/palette_window.h"
 #include "ui/tools/fill_controller.h"
 #include "ui/tools/floating_paste_controller.h"
 #include "ui/tools/selection_controller.h"
@@ -93,6 +99,10 @@ using inkpod::app::DocumentViewId;
 using inkpod::app::EditorGroupId;
 using inkpod::app::EditorSplitOrientation;
 using inkpod::app::LocatorAsyncResult;
+using inkpod::app::PaneActionTarget;
+using inkpod::app::PaneTargetNotice;
+using inkpod::app::PaneTargetPolicy;
+using inkpod::app::PaneTargetStatus;
 using inkpod::app::PaneUiState;
 using inkpod::app::ToolUiState;
 using inkpod::app::ViewUiState;
@@ -359,6 +369,34 @@ bool RefreshTreePane(ApplicationHost& state) noexcept;
 void SetDrawingColor(ApplicationHost& state, InkpodColorValue color) noexcept;
 bool RefreshColorPanes(ApplicationHost& state) noexcept;
 void RefreshDockPaneViews(ApplicationHost& state) noexcept;
+void RefreshLocatorPane(ApplicationHost& state) noexcept;
+std::wstring LocatorDocumentName(const DocumentSession& document);
+void DispatchSequencePaneCommand(void* context, UINT command) noexcept;
+void ActivateSequencePaneCell(void* context, std::uint32_t index) noexcept;
+void DispatchLightTablePaneCommand(void* context, UINT command) noexcept;
+void SelectLightTablePaneEntry(
+    void* context,
+    bool set_selection,
+    std::uint32_t index,
+    std::uint64_t stable_id) noexcept;
+bool RefreshSubpalettePane(ApplicationHost& state) noexcept;
+void UpdateBatchTarget(ApplicationHost& state) noexcept;
+void RefreshBatchPalette(BatchUiState& batch, HWND palette) noexcept;
+void DispatchSubpalettePaneCommand(void* context, UINT command) noexcept;
+void PerformSubpalettePaneAction(
+    void* context,
+    inkpod::windows::ui::panes::SubpalettePaneAction action) noexcept;
+void SampleSubpalettePane(void* context, double x, double y) noexcept;
+void ApplySubpalettePaneView(
+    void* context,
+    const inkpod::renderer::CanvasViewGesture& gesture) noexcept;
+InkpodStatus ImportSequencePaths(
+    ApplicationHost& state,
+    const std::vector<std::wstring>& paths,
+    DocumentSessionId session,
+    Generation generation) noexcept;
+void AttachFilePreviewSequence(
+    ApplicationHost& state, const std::wstring& opened_path) noexcept;
 InkpodStatus ApplyTreeEdit(
     ApplicationHost& state,
     InkpodTreeOperation operation,
@@ -419,6 +457,9 @@ void ResetPaneDocumentState(PaneUiState& panes) noexcept {
     panes.active_light_table_item_id = 0U;
     panes.active_light_table_set_index = 0U;
     panes.active_light_table_item_index = 0U;
+    panes.light_table_selection_session = {};
+    panes.light_table_selection_generation = {};
+    panes.light_table_move_context.reset();
     panes.light_table_move_samples.clear();
 }
 
@@ -449,18 +490,18 @@ void ResetViewDocumentState(ViewUiState& view) noexcept {
     view.snap_grid = false;
     view.transparent_visible = true;
     ++view.locator_generation;
-    view.locator_pending_token = 0U;
     view.locator_valid = false;
     view.locator = {};
+    view.locator_neighborhood_width = 0U;
+    view.locator_neighborhood_height = 0U;
+    view.locator_neighborhood_origin_x = 0;
+    view.locator_neighborhood_origin_y = 0;
+    view.locator_neighborhood.fill(0U);
     view.gesture_samples.clear();
     view.guide_drag_active = false;
     view.guide_drag_axis = 0U;
     view.guide_drag_id = 0U;
     view.active_drag.reset();
-    {
-        std::lock_guard lock(view.locator_results_mutex);
-        view.locator_results.clear();
-    }
 }
 
 void ResetAnimationDocumentState(AnimationUiState& animation) noexcept {
@@ -514,8 +555,26 @@ void ChangeDockMainLineColor(
     if (state == nullptr || state->engine == nullptr) {
         return;
     }
-    ColorPanesController controller(*state->engine);
-    if (controller.SetMainLineColor(color) == INKPOD_STATUS_OK) {
+    const PaneActionTarget target = state->routing.pane_targets.CaptureAction(
+        state->routing.color_pane,
+        state->routing.targets.Capture(),
+        state->routing.targets);
+    InkpodStatus status = INKPOD_STATUS_INVALID_STATE;
+    if (target.status == PaneTargetStatus::Ok
+        && target.context.document_session.has_value()
+        && target.context.generation.has_value()) {
+        InkpodDispatchResult result{};
+        result.struct_size = sizeof(result);
+        status = state->engine->Invoke(
+            target.context.document_session.value(),
+            target.context.generation.value(),
+            [color, &result](InkpodCore* core) {
+                return inkpod_core_set_main_line_color(core, &color, &result);
+            },
+            true,
+            true);
+    }
+    if (status == INKPOD_STATUS_OK) {
         state->Workspace().panes.main_line_color = color;
     } else {
         RefreshColorPanes(*state);
@@ -789,6 +848,11 @@ bool ActivateDocumentTab(
             CommandTimerKind::Autosave,
             kAutosaveIntervalMilliseconds);
     }
+    (void)RefreshSubpalettePane(state);
+    (void)RefreshColorPanes(state);
+    RefreshDockPaneViews(state);
+    UpdateBatchTarget(state);
+    RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     UpdateMenuState(state);
     return true;
 }
@@ -802,6 +866,17 @@ void RelayoutEditorArea(ApplicationHost& state) noexcept {
             state.lifetime.smoke_test,
             client.right - client.left,
             client.bottom - client.top);
+    }
+}
+
+void DispatchColorPaneCommand(void* context, UINT command) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state != nullptr && state->Workspace().windows.window != nullptr) {
+        DispatchEnabledCommand(
+            *state,
+            state->Workspace().windows.window,
+            command,
+            state->routing.color_pane);
     }
 }
 
@@ -1141,23 +1216,92 @@ bool RefreshTreePane(ApplicationHost& state) noexcept {
 }
 
 bool RefreshLightTablePane(ApplicationHost& state) noexcept {
-    if (state.engine == nullptr) {
+    using inkpod::windows::ui::panes::LightTablePaneItemView;
+    using inkpod::windows::ui::panes::LightTablePaneSetView;
+    using inkpod::windows::ui::panes::LightTablePaneView;
+    using inkpod::windows::ui::panes::UpdateLightTablePaneDialog;
+
+    LightTablePaneView pane{};
+    pane.empty_text = L"参照画像はありません";
+    const auto* binding = state.routing.pane_targets.Find(
+        state.routing.light_table_pane);
+    pane.pinned = binding != nullptr
+        && binding->policy == PaneTargetPolicy::PinnedDocument;
+    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
+        state.routing.light_table_pane,
+        state.routing.targets.Capture(),
+        state.routing.targets);
+    auto* document = target.context.document_session.has_value()
+        ? state.Documents().Find(target.context.document_session.value())
+        : nullptr;
+    std::uint64_t notice_sequence{};
+    const PaneTargetNotice notice = state.routing.pane_targets.ConsumeNotice(
+        state.routing.light_table_pane, notice_sequence);
+    if (notice != PaneTargetNotice::None
+        && notice_sequence != state.Workspace().light_table_notice_sequence) {
+        state.Workspace().light_table_notice_sequence = notice_sequence;
+        if (state.Workspace().light_table_palette != nullptr) {
+            NotifyWinEvent(
+                EVENT_SYSTEM_ALERT,
+                state.Workspace().light_table_palette,
+                OBJID_CLIENT,
+                CHILDID_SELF);
+        }
+    }
+    if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
+        || document == nullptr || !target.context.generation.has_value()) {
+        pane.target_text = notice == PaneTargetNotice::PinnedDocumentClosed
+            ? L"固定先を閉じたためアクティブに追従（対象なし）"
+            : L"アクティブに追従（対象なし）";
+        pane.empty_text = L"対象文書がありません";
+        state.Workspace().panes.light_table_set_count = 0U;
+        state.Workspace().panes.light_table_item_count = 0U;
+        state.Workspace().panes.active_light_table_set_index = 0U;
+        state.Workspace().panes.active_light_table_set_id = 0U;
+        state.Workspace().panes.active_light_table_item_index = 0U;
+        state.Workspace().panes.active_light_table_item_id = 0U;
+        state.Workspace().panes.light_table_selection_session = {};
+        state.Workspace().panes.light_table_selection_generation = {};
+        UpdateLightTablePaneDialog(
+            state.Workspace().light_table_palette, std::move(pane));
         return false;
     }
+
     std::vector<LightTablePaneSet> sets;
     std::vector<LightTablePaneItem> items;
     DocumentPanesController controller(*state.engine);
-    const InkpodStatus status = controller.LoadLightTable(sets, items);
+    const InkpodStatus status = controller.LoadLightTable(
+        document->id, document->generation, sets, items);
     if (status != INKPOD_STATUS_OK || sets.empty()) {
         state.Workspace().panes.light_table_set_count = 0U;
         state.Workspace().panes.light_table_item_count = 0U;
+        state.Workspace().panes.active_light_table_set_index = 0U;
+        state.Workspace().panes.active_light_table_set_id = 0U;
+        state.Workspace().panes.active_light_table_item_index = 0U;
+        state.Workspace().panes.active_light_table_item_id = 0U;
+        state.Workspace().panes.light_table_selection_session = {};
+        state.Workspace().panes.light_table_selection_generation = {};
+        pane.target_available = true;
+        pane.target_text = pane.pinned
+            ? L"固定: " + LocatorDocumentName(*document)
+            : L"アクティブに追従: " + LocatorDocumentName(*document);
+        pane.empty_text = L"ライトテーブルを読み込めません";
+        UpdateLightTablePaneDialog(
+            state.Workspace().light_table_palette, std::move(pane));
         return false;
     }
+
+    const bool same_selection_namespace =
+        state.Workspace().panes.light_table_selection_session == document->id
+        && state.Workspace().panes.light_table_selection_generation
+            == document->generation;
     std::uint32_t selected_set{};
     for (std::size_t index = 0; index < sets.size(); ++index) {
         const auto& set = sets[index];
-        if (set.id == state.Workspace().panes.active_light_table_set_id
-            || (set.flags & INKPOD_LIGHT_TABLE_SET_ACTIVE) != 0U) {
+        if ((same_selection_namespace
+                && set.id == state.Workspace().panes.active_light_table_set_id)
+            || (!same_selection_namespace
+                && (set.flags & INKPOD_LIGHT_TABLE_SET_ACTIVE) != 0U)) {
             selected_set = static_cast<std::uint32_t>(index);
         }
     }
@@ -1168,7 +1312,8 @@ bool RefreshLightTablePane(ApplicationHost& state) noexcept {
     std::uint32_t selected_item{};
     for (std::size_t index = 0; index < items.size(); ++index) {
         const auto& item = items[index];
-        if (item.info.id == state.Workspace().panes.active_light_table_item_id) {
+        if (same_selection_namespace
+            && item.info.id == state.Workspace().panes.active_light_table_item_id) {
             selected_item = static_cast<std::uint32_t>(index);
         }
     }
@@ -1180,80 +1325,721 @@ bool RefreshLightTablePane(ApplicationHost& state) noexcept {
         state.Workspace().panes.active_light_table_item_index = 0U;
         state.Workspace().panes.active_light_table_item_id = 0U;
     }
+    state.Workspace().panes.light_table_selection_session = document->id;
+    state.Workspace().panes.light_table_selection_generation = document->generation;
+
+    const auto to_wide = [](const std::string& value, std::wstring& output) {
+        if (value.empty()) {
+            output.clear();
+            return true;
+        }
+        if (value.size() > static_cast<std::size_t>(INT_MAX)) {
+            return false;
+        }
+        const int required = MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            value.data(),
+            static_cast<int>(value.size()),
+            nullptr,
+            0);
+        if (required <= 0) {
+            return false;
+        }
+        output.resize(static_cast<std::size_t>(required));
+        return MultiByteToWideChar(
+                   CP_UTF8,
+                   MB_ERR_INVALID_CHARS,
+                   value.data(),
+                   static_cast<int>(value.size()),
+                   output.data(),
+                   required)
+            == required;
+    };
+    try {
+        pane.target_available = true;
+        const std::wstring name = LocatorDocumentName(*document);
+        pane.target_text = pane.pinned
+            ? L"固定: " + name
+            : L"アクティブに追従: " + name;
+        if (notice == PaneTargetNotice::PinnedDocumentClosed) {
+            pane.target_text = L"固定先を閉じたため追従: " + name;
+        }
+        pane.sets.reserve(sets.size());
+        for (const auto& set : sets) {
+            std::wstring name_text;
+            if (!to_wide(set.name, name_text)) {
+                return false;
+            }
+            pane.sets.push_back(LightTablePaneSetView{
+                set.id,
+                set.opacity_milli,
+                set.item_count,
+                std::move(name_text)});
+        }
+        pane.items.reserve(items.size());
+        for (const auto& item : items) {
+            std::wstring name_text;
+            if (!to_wide(item.name, name_text)) {
+                return false;
+            }
+            pane.items.push_back(LightTablePaneItemView{
+                item.info.id,
+                item.info.flags,
+                item.info.opacity_milli,
+                item.info.display_mode,
+                item.info.translate_x_milli,
+                item.info.translate_y_milli,
+                std::move(name_text)});
+        }
+        pane.selected_set_index = selected_set;
+        pane.selected_item_index = items.empty() ? UINT32_MAX : selected_item;
+    } catch (const std::bad_alloc&) {
+        pane = {};
+        pane.target_text = L"ライトテーブル表示用メモリが不足しました";
+        pane.empty_text = L"表示を更新できません";
+        UpdateLightTablePaneDialog(
+            state.Workspace().light_table_palette, std::move(pane));
+        return false;
+    }
+    UpdateLightTablePaneDialog(
+        state.Workspace().light_table_palette, std::move(pane));
     return true;
 }
 
 bool RefreshSequencePane(ApplicationHost& state) noexcept {
-    if (state.engine == nullptr) {
+    using inkpod::windows::ui::panes::SequencePaneCellView;
+    using inkpod::windows::ui::panes::SequencePaneView;
+    using inkpod::windows::ui::panes::UpdateSequencePaneDialog;
+    SequencePaneView pane{};
+    pane.empty_text = L"シーケンスはありません";
+    const auto* binding = state.routing.pane_targets.Find(
+        state.routing.sequence_pane);
+    pane.pinned = binding != nullptr
+        && binding->policy == PaneTargetPolicy::PinnedDocument;
+    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
+        state.routing.sequence_pane,
+        state.routing.targets.Capture(),
+        state.routing.targets);
+    auto* document = target.context.document_session.has_value()
+        ? state.Documents().Find(target.context.document_session.value())
+        : nullptr;
+    std::uint64_t notice_sequence{};
+    const PaneTargetNotice notice = state.routing.pane_targets.ConsumeNotice(
+        state.routing.sequence_pane, notice_sequence);
+    if (notice != PaneTargetNotice::None
+        && notice_sequence != state.Workspace().sequence_notice_sequence) {
+        state.Workspace().sequence_notice_sequence = notice_sequence;
+        if (state.Workspace().sequence_palette != nullptr) {
+            NotifyWinEvent(
+                EVENT_SYSTEM_ALERT,
+                state.Workspace().sequence_palette,
+                OBJID_CLIENT,
+                CHILDID_SELF);
+        }
+    }
+    if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
+        || document == nullptr || !target.context.generation.has_value()) {
+        pane.target_text = notice == PaneTargetNotice::PinnedDocumentClosed
+            ? L"固定先を閉じたためアクティブに追従（対象なし）"
+            : L"アクティブに追従（対象なし）";
+        pane.empty_text = L"対象文書がありません";
+        UpdateSequencePaneDialog(
+            state.Workspace().sequence_palette, std::move(pane));
         return false;
     }
+
     std::vector<SequencePaneCell> cells;
     DocumentPanesController controller(*state.engine);
-    const InkpodStatus status = controller.LoadSequence(cells);
-    if (status != INKPOD_STATUS_OK) {
-        state.Workspace().panes.sequence_count = 0U;
-        state.Workspace().animation.active_sequence_name.clear();
-        return false;
-    }
-    state.Workspace().panes.sequence_count = static_cast<std::uint32_t>(cells.size());
-    if (cells.empty()) {
-        state.Workspace().animation.active_sequence_index = 0U;
-        state.Workspace().animation.active_sequence_name.clear();
-        return true;
-    }
-    InkpodDocumentInfo document{};
-    QueryDocument(state, document);
-    std::uint32_t selected = std::min<std::uint32_t>(
-        state.Workspace().animation.active_sequence_index, static_cast<std::uint32_t>(cells.size() - 1U));
-    bool has_active_cell{};
-    for (std::size_t index = 0; index < cells.size(); ++index) {
-        const auto& cell = cells[index];
-        const bool active = cell.info.document_uuid_high == document.document_uuid_high
-            && cell.info.document_uuid_low == document.document_uuid_low;
-        if (active) {
-            selected = static_cast<std::uint32_t>(index);
-            has_active_cell = true;
+    const InkpodStatus status = controller.LoadSequence(
+        document->id, document->generation, cells);
+    pane.target_available = true;
+    try {
+        const std::wstring name = LocatorDocumentName(*document);
+        pane.target_text = pane.pinned
+            ? L"固定: " + name
+            : L"アクティブに追従: " + name;
+        if (notice == PaneTargetNotice::PinnedDocumentClosed) {
+            pane.target_text = L"固定先を閉じたため追従: " + name;
         }
-    }
-    state.Workspace().animation.active_sequence_index = selected;
-    state.Workspace().animation.active_sequence_name.clear();
-    if (has_active_cell) {
-        const std::string& name = cells[selected].name;
-        if (!name.empty() && name.size() <= static_cast<std::size_t>(INT_MAX)) {
-            const int required = MultiByteToWideChar(
-                CP_UTF8,
-                MB_ERR_INVALID_CHARS,
-                name.data(),
-                static_cast<int>(name.size()),
-                nullptr,
-                0);
-            if (required > 0) {
-                try {
-                    state.Workspace().animation.active_sequence_name.resize(
-                        static_cast<std::size_t>(required));
-                    if (MultiByteToWideChar(
-                            CP_UTF8,
-                            MB_ERR_INVALID_CHARS,
-                            name.data(),
-                            static_cast<int>(name.size()),
-                            state.Workspace().animation.active_sequence_name.data(),
-                            required) != required) {
-                        state.Workspace().animation.active_sequence_name.clear();
-                    }
-                } catch (const std::bad_alloc&) {
-                    state.Workspace().animation.active_sequence_name.clear();
+        if (status != INKPOD_STATUS_OK) {
+            pane.empty_text = L"シーケンスを読み込めません";
+            UpdateSequencePaneDialog(
+                state.Workspace().sequence_palette, std::move(pane));
+            return false;
+        }
+        pane.target_text += L" — " + std::to_wstring(cells.size()) + L" セル";
+        InkpodDocumentInfo info{};
+        info.struct_size = sizeof(info);
+        if (!state.engine->GetDocumentInfo(
+                document->id, document->generation, info)) {
+            pane.empty_text = L"対象文書を確認できません";
+            UpdateSequencePaneDialog(
+                state.Workspace().sequence_palette, std::move(pane));
+            return false;
+        }
+        pane.cells.reserve(cells.size());
+        for (auto& cell : cells) {
+            std::wstring wide_name;
+            if (!cell.name.empty()) {
+                if (cell.name.size() > static_cast<std::size_t>(INT_MAX)) {
+                    return false;
+                }
+                const int required = MultiByteToWideChar(
+                    CP_UTF8,
+                    MB_ERR_INVALID_CHARS,
+                    cell.name.data(),
+                    static_cast<int>(cell.name.size()),
+                    nullptr,
+                    0);
+                if (required <= 0) {
+                    return false;
+                }
+                wide_name.resize(static_cast<std::size_t>(required));
+                if (MultiByteToWideChar(
+                        CP_UTF8,
+                        MB_ERR_INVALID_CHARS,
+                        cell.name.data(),
+                        static_cast<int>(cell.name.size()),
+                        wide_name.data(),
+                        required) != required) {
+                    return false;
                 }
             }
+            if (cell.info.document_uuid_high == info.document_uuid_high
+                && cell.info.document_uuid_low == info.document_uuid_low) {
+                pane.active_index = static_cast<std::uint32_t>(pane.cells.size());
+            }
+            pane.cells.push_back(SequencePaneCellView{
+                static_cast<std::uint32_t>(cell.info.sequence_index),
+                cell.info.cell_number,
+                cell.info.width,
+                cell.info.height,
+                cell.info.thumbnail_width,
+                cell.info.thumbnail_height,
+                cell.thumbnail_stride_bytes,
+                cell.info.thumbnail_checksum,
+                std::move(wide_name),
+                std::move(cell.thumbnail_rgba)});
         }
+        if (document->id == state.routing.targets.DocumentSession()) {
+            state.Workspace().panes.sequence_count =
+                static_cast<std::uint32_t>(pane.cells.size());
+            state.Workspace().animation.active_sequence_index =
+                pane.active_index == UINT32_MAX ? 0U : pane.active_index;
+            state.Workspace().animation.active_sequence_name =
+                pane.active_index == UINT32_MAX
+                    ? std::wstring{}
+                    : pane.cells[pane.active_index].name;
+        }
+    } catch (const std::bad_alloc&) {
+        pane.cells.clear();
+        pane.empty_text = L"シーケンス表示用メモリが不足しました";
+        UpdateSequencePaneDialog(
+            state.Workspace().sequence_palette, std::move(pane));
+        return false;
     }
+    UpdateSequencePaneDialog(
+        state.Workspace().sequence_palette, std::move(pane));
     return true;
 }
 
+void ResetSubpaletteTarget(ApplicationHost& state) noexcept {
+    auto& workspace = state.Workspace();
+    if (workspace.subpalette_dialog.canvas != nullptr) {
+        renderer::CancelCanvasStroke(workspace.subpalette_dialog.canvas);
+        (void)renderer::UnbindCanvasSnapshotSink(
+            workspace.subpalette_dialog.canvas);
+    }
+    if (state.engine != nullptr && workspace.subpalette_core_view_id != 0U
+        && workspace.subpalette_session
+        && workspace.subpalette_document_generation) {
+        const std::uint64_t view_id = workspace.subpalette_core_view_id;
+        (void)state.engine->Invoke(
+            workspace.subpalette_session,
+            workspace.subpalette_document_generation,
+            [view_id](InkpodCore* core) {
+                return inkpod_core_view_close(core, view_id);
+            },
+            false,
+            false);
+    }
+    workspace.subpalette_session = {};
+    workspace.subpalette_document_view = {};
+    workspace.subpalette_document_generation = {};
+    workspace.subpalette_core_view_id = 0U;
+    workspace.subpalette_snapshot_revision = 0U;
+    workspace.subpalette_source_count = 0U;
+    workspace.subpalette_active_index = 0U;
+}
+
+bool PublishSubpaletteSnapshot(ApplicationHost& state) noexcept {
+    auto& workspace = state.Workspace();
+    auto* sink = renderer::GetCanvasSnapshotSink(
+        workspace.subpalette_dialog.canvas);
+    if (state.engine == nullptr || sink == nullptr
+        || workspace.subpalette_core_view_id == 0U
+        || !workspace.subpalette_session
+        || !workspace.subpalette_document_generation) {
+        return false;
+    }
+    InkpodSnapshot* snapshot{};
+    InkpodSnapshotView snapshot_view{};
+    snapshot_view.struct_size = sizeof(snapshot_view);
+    InkpodSnapshotTransform transform{};
+    transform.struct_size = sizeof(transform);
+    const std::uint64_t view_id = workspace.subpalette_core_view_id;
+    const InkpodStatus status = state.engine->Invoke(
+        workspace.subpalette_session,
+        workspace.subpalette_document_generation,
+        [view_id, &snapshot, &snapshot_view, &transform](InkpodCore* core) {
+            const InkpodSnapshotOptions options{
+                sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
+            InkpodStatus inner = inkpod_core_subpalette_build_snapshot(
+                core, view_id, &options, &snapshot);
+            if (inner == INKPOD_STATUS_OK) {
+                inner = inkpod_snapshot_get_view(snapshot, &snapshot_view);
+            }
+            if (inner == INKPOD_STATUS_OK) {
+                inner = inkpod_snapshot_get_transform(snapshot, &transform);
+            }
+            if (inner != INKPOD_STATUS_OK) {
+                (void)inkpod_snapshot_release(&snapshot);
+            }
+            return inner;
+        },
+        false,
+        false);
+    if (status != INKPOD_STATUS_OK || snapshot == nullptr) {
+        return false;
+    }
+    ++workspace.subpalette_snapshot_revision;
+    return sink->Submit(renderer::SnapshotEnvelope{
+        sink->Route(), snapshot_view.revision, transform.view_revision, snapshot});
+}
+
+bool RefreshSubpalettePane(ApplicationHost& state) noexcept {
+    using inkpod::windows::ui::panes::SubpalettePaneView;
+    using inkpod::windows::ui::panes::UpdateSubpalettePaneDialog;
+
+    auto& workspace = state.Workspace();
+    SubpalettePaneView pane{};
+    pane.auto_previous = workspace.subpalette_auto_previous;
+    pane.scroll_sync = workspace.subpalette_scroll_sync;
+    pane.empty_text = L"参照セルがありません";
+    const auto* binding = state.routing.pane_targets.Find(
+        state.routing.subpalette_pane);
+    pane.pinned = binding != nullptr
+        && binding->policy == PaneTargetPolicy::PinnedDocument;
+    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
+        state.routing.subpalette_pane,
+        state.routing.targets.Capture(),
+        state.routing.targets);
+    auto* document = target.context.document_session.has_value()
+        ? state.Documents().Find(target.context.document_session.value())
+        : nullptr;
+    std::uint64_t notice_sequence{};
+    const PaneTargetNotice notice = state.routing.pane_targets.ConsumeNotice(
+        state.routing.subpalette_pane, notice_sequence);
+    if (notice != PaneTargetNotice::None
+        && notice_sequence != workspace.subpalette_notice_sequence) {
+        workspace.subpalette_notice_sequence = notice_sequence;
+        if (workspace.subpalette_palette != nullptr) {
+            NotifyWinEvent(
+                EVENT_SYSTEM_ALERT,
+                workspace.subpalette_palette,
+                OBJID_CLIENT,
+                CHILDID_SELF);
+        }
+    }
+    if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
+        || document == nullptr || !target.context.document_view.has_value()
+        || !target.context.generation.has_value()) {
+        ResetSubpaletteTarget(state);
+        pane.target_text = notice == PaneTargetNotice::PinnedDocumentClosed
+            ? L"固定先を閉じたためアクティブに追従（対象なし）"
+            : L"アクティブに追従（対象なし）";
+        pane.source_text = L"参照セル: —";
+        pane.empty_text = L"対象文書がありません";
+        UpdateSubpalettePaneDialog(
+            workspace.subpalette_palette, std::move(pane));
+        return false;
+    }
+
+    std::vector<SequencePaneCell> cells;
+    DocumentPanesController controller(*state.engine);
+    const InkpodStatus sequence_status = controller.LoadSequence(
+        document->id, document->generation, cells);
+    pane.target_available = true;
+    const std::wstring document_name = LocatorDocumentName(*document);
+    pane.target_text = pane.pinned
+        ? L"固定: " + document_name
+        : L"アクティブに追従: " + document_name;
+    if (notice == PaneTargetNotice::PinnedDocumentClosed) {
+        pane.target_text = L"固定先を閉じたため追従: " + document_name;
+    }
+    if (sequence_status != INKPOD_STATUS_OK || cells.empty()) {
+        ResetSubpaletteTarget(state);
+        pane.source_text = L"参照セル: —";
+        pane.empty_text = sequence_status == INKPOD_STATUS_OK
+            ? L"シーケンスがありません"
+            : L"シーケンスを読み込めません";
+        UpdateSubpalettePaneDialog(
+            workspace.subpalette_palette, std::move(pane));
+        return false;
+    }
+
+    InkpodDocumentInfo info{};
+    info.struct_size = sizeof(info);
+    if (!state.engine->GetDocumentInfo(
+            document->id, document->generation, info)) {
+        pane.source_text = L"参照セル: —";
+        pane.empty_text = L"対象文書を確認できません";
+        UpdateSubpalettePaneDialog(
+            workspace.subpalette_palette, std::move(pane));
+        return false;
+    }
+    std::uint32_t active_index{};
+    for (std::size_t index = 0U; index < cells.size(); ++index) {
+        if (cells[index].info.document_uuid_high == info.document_uuid_high
+            && cells[index].info.document_uuid_low == info.document_uuid_low) {
+            active_index = static_cast<std::uint32_t>(index);
+            break;
+        }
+    }
+    const bool same_target = workspace.subpalette_session == document->id
+        && workspace.subpalette_document_view
+            == target.context.document_view.value()
+        && workspace.subpalette_document_generation == document->generation;
+    if (!same_target) {
+        ResetSubpaletteTarget(state);
+        workspace.subpalette_source_index =
+            workspace.subpalette_auto_previous && active_index != 0U
+            ? active_index - 1U
+            : active_index;
+    }
+    workspace.subpalette_source_count = static_cast<std::uint32_t>(cells.size());
+    workspace.subpalette_active_index = active_index;
+    workspace.subpalette_source_index = std::min<std::uint32_t>(
+        workspace.subpalette_source_index,
+        workspace.subpalette_source_count - 1U);
+
+    if (workspace.subpalette_core_view_id == 0U) {
+        std::uint64_t view_id{};
+        const std::uint32_t source_index = workspace.subpalette_source_index;
+        const InkpodStatus create_status = state.engine->Invoke(
+            document->id,
+            document->generation,
+            [source_index, &view_id](InkpodCore* core) {
+                InkpodStatus inner = inkpod_core_subpalette_set(
+                    core, source_index);
+                if (inner == INKPOD_STATUS_OK) {
+                    inner = inkpod_core_view_create(core, &view_id);
+                }
+                return inner;
+            },
+            false,
+            false);
+        if (create_status != INKPOD_STATUS_OK || view_id == 0U
+            || workspace.subpalette_dialog.canvas == nullptr
+            || !renderer::BindCanvasSnapshotSink(
+                workspace.subpalette_dialog.canvas,
+                document->id,
+                target.context.document_view.value(),
+                document->generation)) {
+            if (view_id != 0U) {
+                (void)state.engine->Invoke(
+                    document->id,
+                    document->generation,
+                    [view_id](InkpodCore* core) {
+                        return inkpod_core_view_close(core, view_id);
+                    },
+                    false,
+                    false);
+            }
+            pane.source_text = L"参照セル: —";
+            pane.empty_text = L"参照ビューを初期化できません";
+            UpdateSubpalettePaneDialog(
+                workspace.subpalette_palette, std::move(pane));
+            return false;
+        }
+        workspace.subpalette_session = document->id;
+        workspace.subpalette_document_view =
+            target.context.document_view.value();
+        workspace.subpalette_document_generation = document->generation;
+        workspace.subpalette_core_view_id = view_id;
+        RECT client{};
+        if (GetClientRect(workspace.subpalette_dialog.canvas, &client) != FALSE) {
+            const InkpodViewInput resize{
+                sizeof(InkpodViewInput),
+                INKPOD_VIEW_VIEWPORT_RESIZED,
+                0U,
+                static_cast<double>(client.right - client.left),
+                static_cast<double>(client.bottom - client.top),
+                0.0,
+                0.0};
+            const InkpodViewInput fit{
+                sizeof(InkpodViewInput), INKPOD_VIEW_FIT, 0U, 0.0, 0.0, 0.0, 0.0};
+            (void)state.engine->Invoke(
+                document->id,
+                document->generation,
+                [view_id, resize, fit](InkpodCore* core) {
+                    InkpodStatus inner = inkpod_core_subpalette_view_apply(
+                        core, view_id, &resize);
+                    return inner == INKPOD_STATUS_OK
+                        ? inkpod_core_subpalette_view_apply(
+                              core, view_id, &fit)
+                        : inner;
+                },
+                false,
+                false);
+        }
+    } else {
+        const std::uint32_t source_index = workspace.subpalette_source_index;
+        (void)state.engine->Invoke(
+            document->id,
+            document->generation,
+            [source_index](InkpodCore* core) {
+                return inkpod_core_subpalette_set(core, source_index);
+            },
+            false,
+            false);
+    }
+
+    pane.source_available = PublishSubpaletteSnapshot(state);
+    try {
+        const auto& source = cells[workspace.subpalette_source_index];
+        std::wstring source_name;
+        if (!source.name.empty()) {
+            const int required = MultiByteToWideChar(
+                CP_UTF8,
+                MB_ERR_INVALID_CHARS,
+                source.name.data(),
+                static_cast<int>(source.name.size()),
+                nullptr,
+                0);
+            if (required > 0) {
+                source_name.resize(static_cast<std::size_t>(required));
+                (void)MultiByteToWideChar(
+                    CP_UTF8,
+                    MB_ERR_INVALID_CHARS,
+                    source.name.data(),
+                    static_cast<int>(source.name.size()),
+                    source_name.data(),
+                    required);
+            }
+        }
+        pane.source_text = L"参照セル: "
+            + std::to_wstring(source.info.cell_number)
+            + (source_name.empty() ? L"" : L" — " + source_name);
+        pane.empty_text = pane.source_available
+            ? L""
+            : L"参照画像を描画できません";
+    } catch (const std::bad_alloc&) {
+        pane.source_available = false;
+        pane.source_text = L"参照セル: —";
+        pane.empty_text = L"参照表示用メモリが不足しました";
+    }
+    UpdateSubpalettePaneDialog(
+        workspace.subpalette_palette, std::move(pane));
+    return workspace.subpalette_dialog.view.source_available;
+}
+
+void DispatchSubpalettePaneCommand(void* context, UINT command) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state != nullptr && state->Workspace().windows.window != nullptr) {
+        (void)IssueCommand(
+            state,
+            state->Workspace().windows.window,
+            command,
+            0,
+            state->routing.subpalette_pane);
+    }
+}
+
+void ApplySubpaletteViewInput(
+    ApplicationHost& state, const InkpodViewInput& input) noexcept {
+    auto& workspace = state.Workspace();
+    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
+        state.routing.subpalette_pane,
+        state.routing.targets.Capture(),
+        state.routing.targets);
+    if (state.engine == nullptr || target.status != PaneTargetStatus::Ok
+        || !target.context.document_session.has_value()
+        || !target.context.document_view.has_value()
+        || !target.context.generation.has_value()
+        || target.context.document_session.value()
+            != workspace.subpalette_session
+        || target.context.document_view.value()
+            != workspace.subpalette_document_view
+        || target.context.generation.value()
+            != workspace.subpalette_document_generation
+        || workspace.subpalette_core_view_id == 0U) {
+        (void)RefreshSubpalettePane(state);
+        return;
+    }
+    auto* document = state.Documents().Find(workspace.subpalette_session);
+    auto* view = document == nullptr
+        ? nullptr
+        : document->FindView(workspace.subpalette_document_view);
+    const std::uint64_t reference_view_id = workspace.subpalette_core_view_id;
+    const std::uint64_t editor_view_id = view == nullptr
+        ? 0U
+        : view->presentation.active_view_id;
+    const bool synchronize = workspace.subpalette_scroll_sync && view != nullptr;
+    const InkpodStatus status = state.engine->Invoke(
+        workspace.subpalette_session,
+        workspace.subpalette_document_generation,
+        [reference_view_id, editor_view_id, synchronize, input](InkpodCore* core) {
+            InkpodStatus inner = inkpod_core_subpalette_view_apply(
+                core, reference_view_id, &input);
+            if (inner == INKPOD_STATUS_OK && synchronize) {
+                if (editor_view_id == 0U) {
+                    InkpodDocumentInfo ignored{};
+                    ignored.struct_size = sizeof(ignored);
+                    inner = inkpod_core_apply_view(core, &input, &ignored);
+                } else {
+                    inner = inkpod_core_view_apply(core, editor_view_id, &input);
+                }
+            }
+            return inner;
+        },
+        synchronize,
+        synchronize);
+    if (status == INKPOD_STATUS_OK) {
+        (void)PublishSubpaletteSnapshot(state);
+    }
+}
+
+void PerformSubpalettePaneAction(
+    void* context,
+    inkpod::windows::ui::panes::SubpalettePaneAction action) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state == nullptr) {
+        return;
+    }
+    auto& workspace = state->Workspace();
+    switch (action) {
+        case inkpod::windows::ui::panes::SubpalettePaneAction::Previous:
+            if (workspace.subpalette_source_index != 0U) {
+                --workspace.subpalette_source_index;
+            }
+            break;
+        case inkpod::windows::ui::panes::SubpalettePaneAction::Next:
+            if (workspace.subpalette_source_index + 1U
+                < workspace.subpalette_source_count) {
+                ++workspace.subpalette_source_index;
+            }
+            break;
+        case inkpod::windows::ui::panes::SubpalettePaneAction::Current:
+            workspace.subpalette_source_index = workspace.subpalette_active_index;
+            break;
+        case inkpod::windows::ui::panes::SubpalettePaneAction::Fit: {
+            const InkpodViewInput input{
+                sizeof(InkpodViewInput), INKPOD_VIEW_FIT, 0U, 0.0, 0.0, 0.0, 0.0};
+            ApplySubpaletteViewInput(*state, input);
+            return;
+        }
+        case inkpod::windows::ui::panes::SubpalettePaneAction::OneToOne: {
+            const InkpodViewInput input{
+                sizeof(InkpodViewInput),
+                INKPOD_VIEW_ONE_TO_ONE,
+                0U,
+                0.0,
+                0.0,
+                0.0,
+                0.0};
+            ApplySubpaletteViewInput(*state, input);
+            return;
+        }
+        case inkpod::windows::ui::panes::SubpalettePaneAction::ToggleAutoPrevious:
+            workspace.subpalette_auto_previous =
+                !workspace.subpalette_auto_previous;
+            if (workspace.subpalette_auto_previous) {
+                workspace.subpalette_source_index =
+                    workspace.subpalette_active_index == 0U
+                    ? 0U
+                    : workspace.subpalette_active_index - 1U;
+            }
+            break;
+        case inkpod::windows::ui::panes::SubpalettePaneAction::ToggleScrollSync:
+            workspace.subpalette_scroll_sync =
+                !workspace.subpalette_scroll_sync;
+            break;
+    }
+    (void)RefreshSubpalettePane(*state);
+}
+
+void SampleSubpalettePane(void* context, double x, double y) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state == nullptr || state->engine == nullptr) {
+        return;
+    }
+    auto& workspace = state->Workspace();
+    const PaneActionTarget target = state->routing.pane_targets.CaptureAction(
+        state->routing.subpalette_pane,
+        state->routing.targets.Capture(),
+        state->routing.targets);
+    if (target.status != PaneTargetStatus::Ok
+        || !target.context.document_session.has_value()
+        || !target.context.generation.has_value()
+        || target.context.document_session.value()
+            != workspace.subpalette_session
+        || target.context.generation.value()
+            != workspace.subpalette_document_generation
+        || workspace.subpalette_core_view_id == 0U) {
+        return;
+    }
+    InkpodColorValue color{};
+    color.struct_size = sizeof(color);
+    const std::uint64_t view_id = workspace.subpalette_core_view_id;
+    const InkpodStatus status = state->engine->Invoke(
+        workspace.subpalette_session,
+        workspace.subpalette_document_generation,
+        [view_id, x, y, &color](InkpodCore* core) {
+            return inkpod_core_subpalette_view_sample(
+                core, view_id, x, y, &color);
+        },
+        false,
+        false);
+    if (status == INKPOD_STATUS_OK) {
+        SetDrawingColor(*state, color);
+        (void)RefreshColorPanes(*state);
+    }
+}
+
+void ApplySubpalettePaneView(
+    void* context,
+    const inkpod::renderer::CanvasViewGesture& gesture) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state == nullptr) {
+        return;
+    }
+    const InkpodViewInput input{
+        sizeof(InkpodViewInput),
+        gesture.kind,
+        0U,
+        gesture.value1,
+        gesture.value2,
+        gesture.value3,
+        0.0};
+    ApplySubpaletteViewInput(*state, input);
+}
+
 void QueueLocatorSample(ApplicationHost& state) noexcept {
-    auto* view = state.Document().ActiveView();
-    if (state.engine == nullptr
+    const PaneActionTarget pane_target = state.routing.pane_targets.CaptureAction(
+        state.routing.locator_pane,
+        state.routing.targets.Capture(),
+        state.routing.targets);
+    auto* document = pane_target.context.document_session.has_value()
+        ? state.Documents().Find(pane_target.context.document_session.value())
+        : nullptr;
+    auto* view = document != nullptr && pane_target.context.document_view.has_value()
+        ? document->FindView(pane_target.context.document_view.value())
+        : nullptr;
+    if (state.engine == nullptr || pane_target.status != PaneTargetStatus::Ok
         || view == nullptr
-        || view->presentation.locator_pending_token.load(
+        || state.routing.locator_pending_token.load(
                std::memory_order_acquire) != 0U) {
         return;
     }
@@ -1263,7 +2049,7 @@ void QueueLocatorSample(ApplicationHost& state) noexcept {
     } catch (const std::bad_alloc&) {
         return;
     }
-    const CommandContext context = state.routing.targets.Capture();
+    const CommandContext context = pane_target.context;
     if (state.routing.targets.Resolve(
             context, inkpod::app::kDocumentViewCommandScope)
         != CommandResolveStatus::Ok) {
@@ -1274,33 +2060,52 @@ void QueueLocatorSample(ApplicationHost& state) noexcept {
     result->context = context;
     result->sample_generation = view->presentation.locator_generation;
     result->output.struct_size = sizeof(InkpodLocatorOutput);
+    result->neighborhood_output.struct_size = sizeof(InkpodLocatorNeighborhoodBuffer);
+    result->neighborhood_output.radius = 4U;
+    result->neighborhood_output.pixels_rgba8 = result->neighborhood.data();
+    result->neighborhood_output.pixel_capacity = result->neighborhood.size();
     const std::uint64_t view_id = view->presentation.active_view_id;
     const double device_x = static_cast<double>(view->presentation.pointer_device_x);
     const double device_y = static_cast<double>(view->presentation.pointer_device_y);
     const HWND window = state.Workspace().windows.window;
-    view->presentation.locator_pending_token.store(
+    state.routing.locator_pending_token.store(
         result->token.value, std::memory_order_release);
     if (!state.engine->Enqueue(
             context,
             [result, view_id, device_x, device_y](InkpodCore* core) {
-                return inkpod_core_locator_sample(
+                const InkpodStatus sample = inkpod_core_locator_sample(
                     core, view_id, device_x, device_y, &result->output);
+                return sample == INKPOD_STATUS_OK
+                    ? inkpod_core_locator_neighborhood(
+                          core,
+                          view_id,
+                          device_x,
+                          device_y,
+                          &result->neighborhood_output)
+                    : sample;
             },
             false,
             false,
             false,
-            [result, window, view](InkpodStatus status) {
+            [result, window, routing = &state.routing](InkpodStatus status) {
                 result->status = status;
-                try {
-                    std::lock_guard lock(view->presentation.locator_results_mutex);
-                    if (view->presentation.locator_results.size() >= 8U) {
-                        view->presentation.locator_results.pop_front();
+                result->neighborhood_output.pixels_rgba8 = nullptr;
+                result->neighborhood_output.pixel_capacity = 0U;
+                {
+                    std::lock_guard lock(routing->locator_results_mutex);
+                    const auto slot = std::find_if(
+                        routing->locator_results.begin(),
+                        routing->locator_results.end(),
+                        [](const auto& pending) { return !pending.has_value(); });
+                    if (slot == routing->locator_results.end()) {
+                        std::uint64_t expected = result->token.value;
+                        (void)routing->locator_pending_token.compare_exchange_strong(
+                            expected, 0U, std::memory_order_acq_rel);
+                        return;
                     }
-                    view->presentation.locator_results.push_back(*result);
-                } catch (const std::bad_alloc&) {
-                    std::uint64_t expected = result->token.value;
-                    (void)view->presentation.locator_pending_token.compare_exchange_strong(
-                        expected, 0U, std::memory_order_acq_rel);
+                    *slot = *result;
+                }
+                if (window == nullptr) {
                     return;
                 }
                 if (PostMessageW(
@@ -1309,34 +2114,328 @@ void QueueLocatorSample(ApplicationHost& state) noexcept {
                         static_cast<WPARAM>(result->token.value),
                         static_cast<LPARAM>(result->token.generation.Value()))
                     == FALSE) {
-                    std::lock_guard lock(view->presentation.locator_results_mutex);
+                    std::lock_guard lock(routing->locator_results_mutex);
                     const auto found = std::find_if(
-                        view->presentation.locator_results.begin(),
-                        view->presentation.locator_results.end(),
-                        [token = result->token](const LocatorAsyncResult& pending) {
-                            return pending.token.value == token.value
-                                && pending.token.generation == token.generation;
+                        routing->locator_results.begin(),
+                        routing->locator_results.end(),
+                        [token = result->token](const auto& pending) {
+                            return pending.has_value()
+                                && pending->token.value == token.value
+                                && pending->token.generation == token.generation;
                         });
-                    if (found != view->presentation.locator_results.end()) {
-                        view->presentation.locator_results.erase(found);
+                    if (found != routing->locator_results.end()) {
+                        found->reset();
                     }
                     std::uint64_t expected = result->token.value;
-                    (void)view->presentation.locator_pending_token.compare_exchange_strong(
+                    (void)routing->locator_pending_token.compare_exchange_strong(
                         expected, 0U, std::memory_order_acq_rel);
                 }
             })) {
         std::uint64_t expected = result->token.value;
-        (void)view->presentation.locator_pending_token.compare_exchange_strong(
+        (void)state.routing.locator_pending_token.compare_exchange_strong(
             expected, 0U, std::memory_order_acq_rel);
     }
+}
+
+std::wstring LocatorDocumentName(const DocumentSession& document) {
+    const std::wstring& path = !document.shell.current_path.empty()
+        ? document.shell.current_path
+        : document.shell.source_path;
+    if (!path.empty()) {
+        const std::size_t separator = path.find_last_of(L"\\/");
+        const std::wstring leaf = separator == std::wstring::npos
+            ? path
+            : path.substr(separator + 1U);
+        if (!leaf.empty()) {
+            return leaf;
+        }
+    }
+    return L"無題セル " + std::to_wstring(
+        document.untitled_number == 0U ? 1U : document.untitled_number);
+}
+
+void RefreshLocatorPane(ApplicationHost& state) noexcept {
+    using inkpod::windows::ui::panes::LocatorPaneView;
+    using inkpod::windows::ui::panes::UpdateLocatorPaneDialog;
+    LocatorPaneView pane{};
+    pane.fixed_mode = state.Workspace().locator_fixed_mode;
+    pane.auto_scroll = state.Workspace().locator_auto_scroll;
+
+    const auto* binding = state.routing.pane_targets.Find(
+        state.routing.locator_pane);
+    pane.pinned = binding != nullptr
+        && binding->policy == PaneTargetPolicy::PinnedDocument;
+    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
+        state.routing.locator_pane,
+        state.routing.targets.Capture(),
+        state.routing.targets);
+    auto* document = target.context.document_session.has_value()
+        ? state.Documents().Find(target.context.document_session.value())
+        : nullptr;
+    auto* view = document != nullptr && target.context.document_view.has_value()
+        ? document->FindView(target.context.document_view.value())
+        : nullptr;
+
+    std::uint64_t notice_sequence{};
+    const PaneTargetNotice notice = state.routing.pane_targets.ConsumeNotice(
+        state.routing.locator_pane, notice_sequence);
+    if (notice != PaneTargetNotice::None
+        && notice_sequence != state.Workspace().locator_notice_sequence) {
+        state.Workspace().locator_notice_sequence = notice_sequence;
+        if (state.Workspace().locator_palette != nullptr) {
+            NotifyWinEvent(
+                EVENT_SYSTEM_ALERT,
+                state.Workspace().locator_palette,
+                OBJID_CLIENT,
+                CHILDID_SELF);
+        }
+    }
+
+    try {
+        if (target.status != PaneTargetStatus::Ok || document == nullptr
+            || view == nullptr) {
+            pane.target_text = notice == PaneTargetNotice::PinnedDocumentClosed
+                ? L"固定先を閉じたためアクティブに追従（対象なし）"
+                : L"アクティブに追従（対象なし）";
+            pane.coordinate_text = L"X —  Y —";
+            pane.selection_text = L"選択 H —  V —  L —";
+            pane.color_text = L"RGBA —";
+            UpdateLocatorPaneDialog(state.Workspace().locator_palette, pane);
+            return;
+        }
+        const std::wstring name = LocatorDocumentName(*document);
+        pane.target_text = pane.pinned
+            ? L"固定: " + name
+            : L"アクティブに追従: " + name;
+        InkpodDocumentInfo target_info{};
+        target_info.struct_size = sizeof(target_info);
+        if (state.engine != nullptr && state.engine->GetDocumentInfo(
+                document->id, document->generation, target_info)) {
+            pane.target_text += target_info.active_plane == INKPOD_PLANE_COLOR
+                ? L" — 彩色"
+                : L" — 主線";
+        }
+        if (notice == PaneTargetNotice::PinnedDocumentClosed) {
+            pane.target_text = L"固定先を閉じたため追従: " + name;
+        }
+        pane.valid = view->presentation.locator_valid;
+        if (!pane.valid) {
+            pane.coordinate_text = L"X —  Y —";
+            pane.selection_text = L"選択 H —  V —  L —";
+            pane.color_text = L"RGBA —";
+        } else {
+            const InkpodLocatorOutput& locator = view->presentation.locator;
+            pane.coordinate_text = L"X " + std::to_wstring(locator.document_x)
+                + L"  Y " + std::to_wstring(locator.document_y);
+            if ((locator.flags & INKPOD_LOCATOR_SELECTION_PRESENT) != 0U) {
+                const double diagonal = std::hypot(
+                    static_cast<double>(locator.selection.width),
+                    static_cast<double>(locator.selection.height));
+                std::array<wchar_t, 96U> text{};
+                _snwprintf_s(
+                    text.data(), text.size(), _TRUNCATE,
+                    L"選択 H %d  V %d  L %.1f",
+                    locator.selection.width,
+                    locator.selection.height,
+                    diagonal);
+                pane.selection_text = text.data();
+            } else {
+                pane.selection_text = L"選択なし";
+            }
+            if ((locator.flags & INKPOD_LOCATOR_COLOR_PRESENT) != 0U) {
+                pane.color_text = L"RGBA "
+                    + std::to_wstring(locator.color.red) + L" / "
+                    + std::to_wstring(locator.color.green) + L" / "
+                    + std::to_wstring(locator.color.blue) + L" / "
+                    + std::to_wstring(locator.color.alpha)
+                    + (locator.color.depth == INKPOD_COLOR_DEPTH_16
+                           ? L" (16-bit)"
+                           : L" (8-bit)");
+            } else {
+                pane.color_text = L"RGBA —";
+            }
+            pane.neighborhood_width =
+                view->presentation.locator_neighborhood_width;
+            pane.neighborhood_height =
+                view->presentation.locator_neighborhood_height;
+            pane.neighborhood_origin_x =
+                view->presentation.locator_neighborhood_origin_x;
+            pane.neighborhood_origin_y =
+                view->presentation.locator_neighborhood_origin_y;
+            pane.neighborhood = view->presentation.locator_neighborhood;
+        }
+    } catch (const std::bad_alloc&) {
+        pane = {};
+        pane.target_text = L"ロケーターを更新できません";
+    }
+    UpdateLocatorPaneDialog(state.Workspace().locator_palette, pane);
+}
+
+void DispatchLocatorPaneCommand(void* context, UINT command) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state != nullptr && state->Workspace().windows.window != nullptr) {
+        (void)DispatchEnabledCommand(
+            *state,
+            state->Workspace().windows.window,
+            command,
+            state->routing.locator_pane);
+    }
+}
+
+void SelectLocatorPixel(
+    void* context,
+    std::int32_t document_x,
+    std::int32_t document_y) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state == nullptr || state->engine == nullptr
+        || !state->Workspace().locator_fixed_mode) {
+        return;
+    }
+    const PaneActionTarget target = state->routing.pane_targets.CaptureAction(
+        state->routing.locator_pane,
+        state->routing.targets.Capture(),
+        state->routing.targets);
+    if (target.status != PaneTargetStatus::Ok) {
+        return;
+    }
+    auto* document = target.context.document_session.has_value()
+        ? state->Documents().Find(target.context.document_session.value())
+        : nullptr;
+    auto* view = document != nullptr && target.context.document_view.has_value()
+        ? document->FindView(target.context.document_view.value())
+        : nullptr;
+    if (view == nullptr) {
+        return;
+    }
+    InkpodDocumentInfo document_info{};
+    document_info.struct_size = sizeof(document_info);
+    if (!state->engine->GetDocumentInfo(
+            document->id, document->generation, document_info)) {
+        return;
+    }
+    double pan_x{};
+    double pan_y{};
+    if (state->Workspace().locator_auto_scroll
+        && view->presentation.locator_neighborhood_width != 0U
+        && view->presentation.locator_neighborhood_height != 0U) {
+        const std::int32_t left =
+            view->presentation.locator_neighborhood_origin_x;
+        const std::int32_t top =
+            view->presentation.locator_neighborhood_origin_y;
+        const std::int32_t right = left + static_cast<std::int32_t>(
+            view->presentation.locator_neighborhood_width) - 1;
+        const std::int32_t bottom = top + static_cast<std::int32_t>(
+            view->presentation.locator_neighborhood_height) - 1;
+        pan_x = document_x == left ? 32.0 : (document_x == right ? -32.0 : 0.0);
+        pan_y = document_y == top ? 32.0 : (document_y == bottom ? -32.0 : 0.0);
+    }
+    const std::uint64_t core_view_id = view->core_view_id;
+    InkpodStrokeSample sample{
+        sizeof(InkpodStrokeSample),
+        0U,
+        static_cast<float>(document_x) + 0.5F,
+        static_cast<float>(document_y) + 0.5F,
+        1.0F,
+        0U};
+    InkpodStrokeInput input{
+        sizeof(InkpodStrokeInput),
+        INKPOD_TOOL_PENCIL,
+        document_info.active_plane,
+        INKPOD_COORDINATE_SPACE_DOCUMENT,
+        INKPOD_STROKE_FLAG_AUTO_ERASE,
+        state->Workspace().tools.color_rgba,
+        1.0F,
+        &sample,
+        1U,
+        sizeof(InkpodStrokeSample)};
+    (void)state->engine->Enqueue(
+        target.context,
+        [input, sample, core_view_id, pan_x, pan_y](InkpodCore* core) mutable {
+            input.samples = &sample;
+            const InkpodStatus begin = inkpod_core_stroke_begin(core, &input);
+            if (begin != INKPOD_STATUS_OK) {
+                return begin;
+            }
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            const InkpodStatus end = inkpod_core_stroke_end(core, &result);
+            if (end != INKPOD_STATUS_OK) {
+                (void)inkpod_core_stroke_cancel(core);
+            } else if ((pan_x != 0.0 || pan_y != 0.0)
+                && core_view_id != 0U) {
+                const InkpodViewInput view_input{
+                    sizeof(InkpodViewInput),
+                    INKPOD_VIEW_PAN_BY,
+                    0U,
+                    pan_x,
+                    pan_y,
+                    0.0,
+                    0.0};
+                (void)inkpod_core_view_apply(core, core_view_id, &view_input);
+            }
+            return end;
+        },
+        true,
+        true,
+        false);
 }
 
 bool RefreshColorPanes(ApplicationHost& state) noexcept {
     if (state.engine == nullptr) {
         return false;
     }
+    const auto* binding = state.routing.pane_targets.Find(
+        state.routing.color_pane);
+    const bool pinned = binding != nullptr
+        && binding->policy == PaneTargetPolicy::PinnedDocument;
+    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
+        state.routing.color_pane,
+        state.routing.targets.Capture(),
+        state.routing.targets);
+    auto* document = target.context.document_session.has_value()
+        ? state.Documents().Find(target.context.document_session.value())
+        : nullptr;
+    std::uint64_t notice_sequence{};
+    const PaneTargetNotice notice = state.routing.pane_targets.ConsumeNotice(
+        state.routing.color_pane, notice_sequence);
+    if (notice != PaneTargetNotice::None
+        && notice_sequence != state.Workspace().color_notice_sequence) {
+        state.Workspace().color_notice_sequence = notice_sequence;
+        if (state.Workspace().windows.color_pane != nullptr) {
+            NotifyWinEvent(
+                EVENT_SYSTEM_ALERT,
+                state.Workspace().windows.color_pane,
+                OBJID_CLIENT,
+                CHILDID_SELF);
+        }
+    }
+    if (target.status != PaneTargetStatus::Ok || document == nullptr
+        || !target.context.generation.has_value()) {
+        inkpod::windows::ui::panes::UpdateColorDockPaneTarget(
+            state.Workspace().windows.color_pane,
+            notice == PaneTargetNotice::PinnedDocumentClosed
+                ? L"固定先を閉じたため追従（対象なし）"
+                : L"アクティブに追従（対象なし）",
+            false,
+            false);
+        return false;
+    }
     ColorPanesController controller(*state.engine);
-    return controller.RefreshModel(state.Workspace().panes) == INKPOD_STATUS_OK;
+    const InkpodStatus status = controller.RefreshModel(
+        document->id, document->generation, state.Workspace().panes);
+    std::wstring target_text = pinned
+        ? L"固定: " + LocatorDocumentName(*document)
+        : L"追従: " + LocatorDocumentName(*document);
+    if (notice == PaneTargetNotice::PinnedDocumentClosed) {
+        target_text = L"固定先を閉じたため追従: "
+            + LocatorDocumentName(*document);
+    }
+    inkpod::windows::ui::panes::UpdateColorDockPaneTarget(
+        state.Workspace().windows.color_pane,
+        std::move(target_text),
+        status == INKPOD_STATUS_OK,
+        pinned);
+    return status == INKPOD_STATUS_OK;
 }
 
 void RefreshDockPaneViews(ApplicationHost& state) noexcept {
@@ -1357,12 +2456,18 @@ void RefreshDockPaneViews(ApplicationHost& state) noexcept {
 }
 
 InkpodStatus ReplacePalette(
-    ApplicationHost& state, const std::vector<InkpodColorValue>& colors) noexcept {
-    if (state.engine == nullptr) {
+    ApplicationHost& state,
+    const CommandContext& context,
+    const std::vector<InkpodColorValue>& colors) noexcept {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     ColorPanesController controller(*state.engine);
-    return controller.ReplacePalette(colors);
+    return controller.ReplacePalette(
+        context.document_session.value(),
+        context.generation.value(),
+        colors);
 }
 
 void UpdateMotionState(
@@ -1545,6 +2650,66 @@ bool QueryHistoryMenuLabels(
 
 void RefreshBatchPalette(BatchUiState& batch, HWND palette) noexcept {
     BatchController::RefreshPalette(batch, palette);
+}
+
+void UpdateBatchTarget(ApplicationHost& state) noexcept {
+    const auto* binding = state.routing.pane_targets.Find(
+        state.routing.batch_pane);
+    state.batch.target_pinned = binding != nullptr
+        && binding->policy == PaneTargetPolicy::PinnedDocument;
+    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
+        state.routing.batch_pane,
+        state.routing.targets.Capture(),
+        state.routing.targets);
+    auto* document = target.context.document_session.has_value()
+        ? state.Documents().Find(target.context.document_session.value())
+        : nullptr;
+    std::uint64_t notice_sequence{};
+    const PaneTargetNotice notice = state.routing.pane_targets.ConsumeNotice(
+        state.routing.batch_pane, notice_sequence);
+    if (notice != PaneTargetNotice::None
+        && notice_sequence != state.Workspace().batch_notice_sequence) {
+        state.Workspace().batch_notice_sequence = notice_sequence;
+        if (state.Workspace().batch_palette != nullptr) {
+            NotifyWinEvent(
+                EVENT_SYSTEM_ALERT,
+                state.Workspace().batch_palette,
+                OBJID_CLIENT,
+                CHILDID_SELF);
+        }
+    }
+    state.batch.target_available = target.status == PaneTargetStatus::Ok
+        && document != nullptr;
+    if (!state.batch.target_available) {
+        state.batch.target_text = notice == PaneTargetNotice::JobClosed
+            ? L"Job 終了（対象なし）"
+            : (notice == PaneTargetNotice::PinnedDocumentClosed
+                    ? L"固定先を閉じたため追従（対象なし）"
+                    : L"アクティブに追従（対象なし）");
+        return;
+    }
+    const std::wstring name = LocatorDocumentName(*document);
+    if (binding != nullptr && binding->policy == PaneTargetPolicy::Job
+        && target.context.job.has_value()) {
+        state.batch.target_text = L"Job "
+            + std::to_wstring(target.context.job->Value()) + L": " + name;
+    } else {
+        state.batch.target_text = state.batch.target_pinned
+            ? L"固定: " + name
+            : L"追従: " + name;
+        if (notice == PaneTargetNotice::PinnedDocumentClosed) {
+            state.batch.target_text = L"固定先を閉じたため追従: " + name;
+        }
+    }
+}
+
+void RefreshBatchPaletteTimer(void* context) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state != nullptr) {
+        UpdateBatchTarget(*state);
+        RefreshBatchPalette(
+            state->batch, state->Workspace().batch_palette);
+    }
 }
 std::uint32_t CurrentShortcutModifiers(LPARAM key_data) noexcept {
     std::uint32_t modifiers{};
@@ -3157,9 +4322,76 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.workspace.color_visible =
         state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Color);
+    const auto* color_binding = state.routing.pane_targets.Find(
+        state.routing.color_pane);
+    inputs.workspace.color_pinned = color_binding != nullptr
+        && color_binding->policy == PaneTargetPolicy::PinnedDocument;
+    inputs.workspace.color_target_available =
+        state.routing.pane_targets.CaptureAction(
+            state.routing.color_pane,
+            state.routing.targets.Capture(),
+            state.routing.targets).status == PaneTargetStatus::Ok;
     inputs.workspace.layer_visible =
         state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Layer);
+    inputs.workspace.locator_visible = state.Workspace().locator_palette != nullptr
+        && IsWindowVisible(state.Workspace().locator_palette) != FALSE;
+    const auto* locator_binding = state.routing.pane_targets.Find(
+        state.routing.locator_pane);
+    inputs.workspace.locator_pinned = locator_binding != nullptr
+        && locator_binding->policy == PaneTargetPolicy::PinnedDocument;
+    inputs.workspace.locator_fixed = state.Workspace().locator_fixed_mode;
+    inputs.workspace.locator_auto_scroll =
+        state.Workspace().locator_auto_scroll;
+    inputs.workspace.locator_target_available =
+        state.routing.pane_targets.CaptureAction(
+            state.routing.locator_pane,
+            state.routing.targets.Capture(),
+            state.routing.targets).status == PaneTargetStatus::Ok;
+    inputs.workspace.sequence_visible = state.Workspace().sequence_palette != nullptr
+        && IsWindowVisible(state.Workspace().sequence_palette) != FALSE;
+    const auto* sequence_binding = state.routing.pane_targets.Find(
+        state.routing.sequence_pane);
+    inputs.workspace.sequence_pinned = sequence_binding != nullptr
+        && sequence_binding->policy == PaneTargetPolicy::PinnedDocument;
+    inputs.workspace.sequence_target_available =
+        state.routing.pane_targets.CaptureAction(
+            state.routing.sequence_pane,
+            state.routing.targets.Capture(),
+            state.routing.targets).status == PaneTargetStatus::Ok;
+    inputs.workspace.light_table_visible =
+        state.Workspace().light_table_palette != nullptr
+        && IsWindowVisible(state.Workspace().light_table_palette) != FALSE;
+    const auto* light_table_binding = state.routing.pane_targets.Find(
+        state.routing.light_table_pane);
+    inputs.workspace.light_table_pinned = light_table_binding != nullptr
+        && light_table_binding->policy == PaneTargetPolicy::PinnedDocument;
+    inputs.workspace.light_table_target_available =
+        state.routing.pane_targets.CaptureAction(
+            state.routing.light_table_pane,
+            state.routing.targets.Capture(),
+            state.routing.targets).status == PaneTargetStatus::Ok;
+    inputs.workspace.subpalette_visible =
+        state.Workspace().subpalette_palette != nullptr
+        && IsWindowVisible(state.Workspace().subpalette_palette) != FALSE;
+    const auto* subpalette_binding = state.routing.pane_targets.Find(
+        state.routing.subpalette_pane);
+    inputs.workspace.subpalette_pinned = subpalette_binding != nullptr
+        && subpalette_binding->policy == PaneTargetPolicy::PinnedDocument;
+    inputs.workspace.subpalette_target_available =
+        state.routing.pane_targets.CaptureAction(
+            state.routing.subpalette_pane,
+            state.routing.targets.Capture(),
+            state.routing.targets).status == PaneTargetStatus::Ok;
+    const auto* batch_binding = state.routing.pane_targets.Find(
+        state.routing.batch_pane);
+    inputs.workspace.batch_pinned = batch_binding != nullptr
+        && batch_binding->policy == PaneTargetPolicy::PinnedDocument;
+    inputs.workspace.batch_target_available =
+        inputs.batch.idle && state.routing.pane_targets.CaptureAction(
+            state.routing.batch_pane,
+            state.routing.targets.Capture(),
+            state.routing.targets).status == PaneTargetStatus::Ok;
     inputs.workspace.mirrored =
         state.Workspace().windows.workspace.dock.Mirrored();
     return inputs;
@@ -3558,6 +4790,7 @@ void UpdateMenuState(ApplicationHost& state) noexcept {
         state.Workspace().panes.layer_palette,
         state.Workspace().command_states);
     RefreshDockPaneViews(state);
+    RefreshLocatorPane(state);
     ApplyShortcutLabelsToMenu(menu, state.shortcuts.bindings);
     UpdateMainWindowStatus(state, info, has_document);
     DrawMenuBar(state.Workspace().windows.window);
@@ -4971,6 +6204,7 @@ InkpodStatus ImportCommonRasterFromPath(
         RollbackNewDocumentTab(state, added, previous_view);
         return INKPOD_STATUS_INVALID_STATE;
     }
+    AttachFilePreviewSequence(state, path);
     state.Document().untitled_number = 0U;
     state.Workspace().tools.active_plane = INKPOD_PLANE_COLOR;
     state.ActiveView().presentation.color_check_mode = INKPOD_COLOR_CHECK_OFF;
@@ -4991,6 +6225,8 @@ InkpodStatus ImportCommonRasterFromPath(
         RollbackNewDocumentTab(state, added, previous_view);
         return INKPOD_STATUS_INVALID_STATE;
     }
+    RefreshSequencePane(state);
+    (void)RefreshSubpalettePane(state);
     UpdateMenuState(state);
     return view_status;
 }
@@ -5010,6 +6246,7 @@ InkpodStatus ExportCommonRasterToPath(
 
 InkpodStatus ApplyLightTableEdit(
     ApplicationHost& state,
+    const CommandContext& context,
     InkpodLightTableEdit edit,
     const std::wstring& name,
     std::uint64_t& object_id) noexcept {
@@ -5020,9 +6257,12 @@ InkpodStatus ApplyLightTableEdit(
     edit.struct_size = sizeof(edit);
     edit.name_utf8 = utf8.empty() ? nullptr : utf8.data();
     edit.name_bytes = utf8.size();
-    return state.engine == nullptr
+    return state.engine == nullptr || !context.document_session.has_value()
+            || !context.generation.has_value()
         ? INKPOD_STATUS_INVALID_STATE
         : state.engine->Invoke(
+              context.document_session.value(),
+              context.generation.value(),
               [edit, utf8, &object_id](InkpodCore* core) mutable {
                   InkpodLightTableEdit input = edit;
                   input.name_utf8 = utf8.empty() ? nullptr : utf8.data();
@@ -5038,13 +6278,17 @@ InkpodStatus ApplyLightTableEdit(
 
 bool QueryLightTableItem(
     ApplicationHost& state,
+    const CommandContext& context,
     std::uint32_t index,
     InkpodLightTableItemInfo& output) noexcept {
     output = {};
     output.struct_size = sizeof(output);
     output.display_color.struct_size = sizeof(output.display_color);
-    return state.engine != nullptr
+    return state.engine != nullptr && context.document_session.has_value()
+        && context.generation.has_value()
         && state.engine->Invoke(
+               context.document_session.value(),
+               context.generation.value(),
                [index, &output](InkpodCore* core) {
                    return inkpod_core_light_table_item_get(core, index, &output);
                },
@@ -5053,11 +6297,66 @@ bool QueryLightTableItem(
             == INKPOD_STATUS_OK;
 }
 
+bool QueryLightTableItem(
+    ApplicationHost& state,
+    std::uint32_t index,
+    InkpodLightTableItemInfo& output) noexcept {
+    return QueryLightTableItem(
+        state, state.routing.targets.Capture(), index, output);
+}
+
+bool PrepareLightTableSelection(
+    ApplicationHost& state, const CommandContext& context) noexcept {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()) {
+        return false;
+    }
+    if (state.Workspace().panes.light_table_selection_session
+            == context.document_session.value()
+        && state.Workspace().panes.light_table_selection_generation
+            == context.generation.value()) {
+        return true;
+    }
+    std::vector<LightTablePaneSet> sets;
+    std::vector<LightTablePaneItem> items;
+    DocumentPanesController controller(*state.engine);
+    if (controller.LoadLightTable(
+            context.document_session.value(),
+            context.generation.value(),
+            sets,
+            items) != INKPOD_STATUS_OK
+        || sets.empty()) {
+        return false;
+    }
+    std::uint32_t selected_set{};
+    for (std::size_t index = 0U; index < sets.size(); ++index) {
+        if ((sets[index].flags & INKPOD_LIGHT_TABLE_SET_ACTIVE) != 0U) {
+            selected_set = static_cast<std::uint32_t>(index);
+            break;
+        }
+    }
+    auto& panes = state.Workspace().panes;
+    panes.light_table_selection_session = context.document_session.value();
+    panes.light_table_selection_generation = context.generation.value();
+    panes.active_light_table_set_index = selected_set;
+    panes.active_light_table_set_id = sets[selected_set].id;
+    panes.light_table_set_count = static_cast<std::uint32_t>(sets.size());
+    panes.light_table_item_count = static_cast<std::uint32_t>(items.size());
+    panes.active_light_table_item_index = 0U;
+    panes.active_light_table_item_id = items.empty() ? 0U : items[0].info.id;
+    return true;
+}
+
 InkpodStatus AddOrReloadLightTableRaster(
-    ApplicationHost& state, const std::wstring& path, bool reload) noexcept {
+    ApplicationHost& state,
+    const CommandContext& context,
+    const std::wstring& path,
+    bool reload) noexcept {
     std::vector<std::uint8_t> bytes;
     const InkpodCommonRasterFormat format = CommonRasterFormatFromPath(path);
-    if (state.engine == nullptr || format == 0U || !ReadBoundedFile(path, bytes)) {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value() || format == 0U
+        || !ReadBoundedFile(path, bytes)) {
         return INKPOD_STATUS_IO_ERROR;
     }
     GUID uuid{};
@@ -5080,6 +6379,8 @@ InkpodStatus AddOrReloadLightTableRaster(
     const std::uint64_t item_id = state.Workspace().panes.active_light_table_item_id;
     std::uint64_t added_item_id{};
     const InkpodStatus status = state.engine->Invoke(
+        context.document_session.value(),
+        context.generation.value(),
         [reload,
          item_id,
          format,
@@ -5124,9 +6425,14 @@ InkpodStatus AddOrReloadLightTableRaster(
     return status;
 }
 
-InkpodStatus EditLightTableItemProperties(ApplicationHost& state) noexcept {
+InkpodStatus EditLightTableItemProperties(
+    ApplicationHost& state, const CommandContext& context) noexcept {
     InkpodLightTableItemInfo info{};
-    if (!QueryLightTableItem(state, state.Workspace().panes.active_light_table_item_index, info)) {
+    if (!QueryLightTableItem(
+            state,
+            context,
+            state.Workspace().panes.active_light_table_item_index,
+            info)) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     ViewOptionsDialogState display{};
@@ -5176,16 +6482,28 @@ InkpodStatus EditLightTableItemProperties(ApplicationHost& state) noexcept {
     edit.scale_y_milli = static_cast<std::uint32_t>(transform.values[3]) * 10U;
     edit.rotation_milli_degrees = display.values[3] * 1000;
     std::uint64_t ignored{};
-    return ApplyLightTableEdit(state, edit, {}, ignored);
+    return ApplyLightTableEdit(state, context, edit, {}, ignored);
 }
 
-InkpodStatus MoveLightTableFromCanvas(ApplicationHost& state) noexcept {
+InkpodStatus MoveLightTableFromCanvas(
+    ApplicationHost& state, const CommandContext& context) noexcept {
     if (state.Workspace().panes.light_table_move_samples.size() < 2U) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
+    if (context.document_session != state.routing.targets.DocumentSession()
+        || context.document_view != state.routing.targets.ActiveDocumentView()
+        || context.generation != state.routing.targets.CurrentGeneration()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
     InkpodDocumentInfo document{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
-    if (!QueryDocument(state, document) || document.width == 0U
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()
+        || !state.engine->GetDocumentInfo(
+            context.document_session.value(),
+            context.generation.value(),
+            document)
+        || document.width == 0U
         || !inkpod::renderer::GetCanvasDocumentBounds(
                state.Workspace().windows.canvas, bounds)) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -5213,7 +6531,7 @@ InkpodStatus MoveLightTableFromCanvas(ApplicationHost& state) noexcept {
             continue;
         }
         InkpodLightTableItemInfo info{};
-        if (!QueryLightTableItem(state, index, info)) {
+        if (!QueryLightTableItem(state, context, index, info)) {
             break;
         }
         const std::int64_t translated_x = static_cast<std::int64_t>(info.translate_x_milli)
@@ -5237,7 +6555,7 @@ InkpodStatus MoveLightTableFromCanvas(ApplicationHost& state) noexcept {
         edit.scale_y_milli = info.scale_y_milli;
         edit.rotation_milli_degrees = info.rotation_milli_degrees;
         std::uint64_t ignored{};
-        status = ApplyLightTableEdit(state, edit, {}, ignored);
+        status = ApplyLightTableEdit(state, context, edit, {}, ignored);
         if (status != INKPOD_STATUS_OK || !all_items) {
             break;
         }
@@ -5246,25 +6564,78 @@ InkpodStatus MoveLightTableFromCanvas(ApplicationHost& state) noexcept {
 }
 
 struct SequenceEncodedFile {
+    InkpodCommonRasterFormat format{};
     std::vector<std::uint8_t> name;
     std::vector<std::uint8_t> bytes;
 };
 
-InkpodStatus ImportSequencePaths(
-    ApplicationHost& state, const std::vector<std::wstring>& paths) noexcept {
-    if (state.engine == nullptr || paths.empty()) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
+struct SequenceFilenamePattern final {
+    std::size_t digit_start{};
+    std::size_t digit_end{};
+    std::size_t stem_end{};
+};
+
+bool ExtractSequenceFilenamePattern(
+    std::wstring_view name, SequenceFilenamePattern& pattern) noexcept {
+    pattern = {};
+    pattern.stem_end = name.find_last_of(L'.');
+    if (pattern.stem_end == std::wstring_view::npos) {
+        pattern.stem_end = name.size();
     }
-    const InkpodCommonRasterFormat format = CommonRasterFormatFromPath(paths.front());
-    if (format == 0U) {
+    pattern.digit_end = pattern.stem_end;
+    while (pattern.digit_end > 0U
+        && (name[pattern.digit_end - 1U] < L'0'
+            || name[pattern.digit_end - 1U] > L'9')) {
+        --pattern.digit_end;
+    }
+    if (pattern.digit_end == 0U) {
+        return false;
+    }
+    pattern.digit_start = pattern.digit_end;
+    while (pattern.digit_start > 0U
+        && name[pattern.digit_start - 1U] >= L'0'
+        && name[pattern.digit_start - 1U] <= L'9') {
+        --pattern.digit_start;
+    }
+    return pattern.digit_start < pattern.digit_end;
+}
+
+bool MatchesSequenceFilenamePattern(
+    std::wstring_view candidate,
+    std::wstring_view opened,
+    const SequenceFilenamePattern& opened_pattern) noexcept {
+    SequenceFilenamePattern candidate_pattern{};
+    if (!ExtractSequenceFilenamePattern(candidate, candidate_pattern)
+        || candidate_pattern.digit_start != opened_pattern.digit_start
+        || candidate_pattern.stem_end - candidate_pattern.digit_end
+            != opened_pattern.stem_end - opened_pattern.digit_end) {
+        return false;
+    }
+    return _wcsnicmp(
+               candidate.data(), opened.data(), opened_pattern.digit_start)
+            == 0
+        && _wcsnicmp(
+               candidate.data() + candidate_pattern.digit_end,
+               opened.data() + opened_pattern.digit_end,
+               opened_pattern.stem_end - opened_pattern.digit_end)
+            == 0;
+}
+
+InkpodStatus ImportSequencePaths(
+    ApplicationHost& state,
+    const std::vector<std::wstring>& paths,
+    DocumentSessionId session,
+    Generation generation) noexcept {
+    if (state.engine == nullptr || paths.empty()) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
     std::vector<SequenceEncodedFile> files;
     try {
         files.reserve(paths.size());
         for (const std::wstring& path : paths) {
-            if (CommonRasterFormatFromPath(path) != format) {
-                return INKPOD_STATUS_UNSUPPORTED;
+            const InkpodCommonRasterFormat format = CommonRasterFormatFromPath(path);
+            if (format == 0U) {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
             }
             std::wstring filename = path;
             const std::size_t slash = filename.find_last_of(L"\\/");
@@ -5272,6 +6643,7 @@ InkpodStatus ImportSequencePaths(
                 filename.erase(0, slash + 1U);
             }
             SequenceEncodedFile file{};
+            file.format = format;
             if (!WidePathToUtf8(filename, file.name)
                 || !ReadBoundedFile(path, file.bytes)) {
                 return INKPOD_STATUS_IO_ERROR;
@@ -5282,13 +6654,17 @@ InkpodStatus ImportSequencePaths(
         return INKPOD_STATUS_INVALID_STATE;
     }
     return state.engine->Invoke(
-        [format, files = std::move(files)](InkpodCore* core) {
-            std::vector<InkpodNamedBytesInput> records;
+        session,
+        generation,
+        [files = std::move(files)](InkpodCore* core) {
+            std::vector<InkpodNamedRasterInput> records;
             try {
                 records.reserve(files.size());
                 for (const auto& file : files) {
-                    records.push_back(InkpodNamedBytesInput{
-                        sizeof(InkpodNamedBytesInput),
+                    records.push_back(InkpodNamedRasterInput{
+                        sizeof(InkpodNamedRasterInput),
+                        0U,
+                        file.format,
                         0U,
                         file.name.data(),
                         file.name.size(),
@@ -5298,11 +6674,118 @@ InkpodStatus ImportSequencePaths(
             } catch (const std::bad_alloc&) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
-            return inkpod_core_sequence_import_encoded(
-                core, format, records.data(), records.size(), sizeof(InkpodNamedBytesInput));
+            return inkpod_core_sequence_import_mixed_encoded(
+                core, records.data(), records.size(), sizeof(InkpodNamedRasterInput));
         },
         false,
         false);
+}
+
+void AttachFilePreviewSequence(
+    ApplicationHost& state, const std::wstring& opened_path) noexcept {
+    if (state.engine == nullptr || opened_path.empty()) {
+        return;
+    }
+    const std::size_t separator = opened_path.find_last_of(L"\\/");
+    const std::wstring directory = separator == std::wstring::npos
+        ? L".\\"
+        : opened_path.substr(0U, separator + 1U);
+    const std::wstring opened_name = separator == std::wstring::npos
+        ? opened_path
+        : opened_path.substr(separator + 1U);
+    SequenceFilenamePattern opened_pattern{};
+    if (!ExtractSequenceFilenamePattern(opened_name, opened_pattern)) {
+        return;
+    }
+    std::vector<std::wstring> paths;
+    WIN32_FIND_DATAW entry{};
+    const std::wstring pattern = directory + L"*";
+    HANDLE search = FindFirstFileW(pattern.c_str(), &entry);
+    if (search == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    bool includes_opened{};
+    try {
+        do {
+            const std::wstring_view name(entry.cFileName);
+            if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U
+                || CommonRasterFormatFromPath(std::wstring(name)) == 0U
+                || !MatchesSequenceFilenamePattern(
+                    name, opened_name, opened_pattern)) {
+                continue;
+            }
+            paths.push_back(directory + std::wstring(name));
+            includes_opened = includes_opened
+                || _wcsicmp(name.data(), opened_name.c_str()) == 0;
+            if (paths.size() >= 10'000U) {
+                break;
+            }
+        } while (FindNextFileW(search, &entry) != FALSE);
+    } catch (const std::bad_alloc&) {
+        FindClose(search);
+        return;
+    }
+    FindClose(search);
+    if (!includes_opened || paths.empty()
+        || ImportSequencePaths(
+               state,
+               paths,
+               state.Document().id,
+               state.Document().generation)
+            != INKPOD_STATUS_OK) {
+        return;
+    }
+
+    std::vector<SequencePaneCell> cells;
+    DocumentPanesController controller(*state.engine);
+    if (controller.LoadSequence(
+            state.Document().id, state.Document().generation, cells)
+        != INKPOD_STATUS_OK) {
+        return;
+    }
+    for (std::uint32_t index = 0U; index < cells.size(); ++index) {
+        const std::string& utf8 = cells[index].name;
+        if (utf8.empty() || utf8.size() > static_cast<std::size_t>(INT_MAX)) {
+            continue;
+        }
+        const int required = MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            utf8.data(),
+            static_cast<int>(utf8.size()),
+            nullptr,
+            0);
+        if (required <= 0) {
+            continue;
+        }
+        std::wstring name;
+        try {
+            name.resize(static_cast<std::size_t>(required));
+        } catch (const std::bad_alloc&) {
+            return;
+        }
+        if (MultiByteToWideChar(
+                CP_UTF8,
+                MB_ERR_INVALID_CHARS,
+                utf8.data(),
+                static_cast<int>(utf8.size()),
+                name.data(),
+                required) != required
+            || _wcsicmp(name.c_str(), opened_name.c_str()) != 0) {
+            continue;
+        }
+        InkpodDocumentInfo activated{};
+        activated.struct_size = sizeof(activated);
+        (void)state.engine->Invoke(
+            state.Document().id,
+            state.Document().generation,
+            [index, &activated](InkpodCore* core) {
+                return inkpod_core_sequence_activate(core, index, &activated);
+            },
+            false,
+            false);
+        return;
+    }
 }
 
 InkpodStatus ExportSequenceToPath(
@@ -5339,6 +6822,7 @@ InkpodStatus ExportSequenceToPath(
                         &data_bytes);
                     if (current == INKPOD_STATUS_OK) {
                         files.push_back(SequenceEncodedFile{
+                            format,
                             std::vector<std::uint8_t>(name, name + name_bytes),
                             std::vector<std::uint8_t>(data, data + data_bytes)});
                     }
@@ -5463,6 +6947,206 @@ InkpodStatus SaveDocument(ApplicationHost& state, bool force_dialog) noexcept {
         }
     }
     return SaveToPath(state, path);
+}
+
+InkpodStatus SwitchSequenceTarget(
+    ApplicationHost& state,
+    const CommandContext& context,
+    std::optional<std::uint32_t> index,
+    InkpodSequenceDirection direction = 0U) noexcept {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    auto* document = state.Documents().Find(context.document_session.value());
+    if (document == nullptr || document->generation != context.generation.value()
+        || document->ActiveView() == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const DocumentViewId previous_view =
+        state.routing.targets.ActiveDocumentView();
+    const bool target_was_active =
+        document->id == state.routing.targets.DocumentSession();
+    InkpodDocumentInfo before{};
+    before.struct_size = sizeof(before);
+    if (!state.engine->GetDocumentInfo(
+            document->id, document->generation, before)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if ((before.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+        if (state.lifetime.smoke_test) {
+            return INKPOD_STATUS_CANCELLED;
+        }
+        const int choice = MessageBoxW(
+            state.Workspace().sequence_palette != nullptr
+                ? state.Workspace().sequence_palette
+                : state.Workspace().windows.window,
+            L"現在のセルを保存してからシーケンスを切り替えますか？",
+            L"シーケンス",
+            MB_OKCANCEL | MB_ICONQUESTION);
+        if (choice != IDOK) {
+            return INKPOD_STATUS_CANCELLED;
+        }
+        if (!target_was_active
+            && !ActivateDocumentTab(state, document->ActiveView()->id)) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        const InkpodStatus save_status = SaveDocument(state, false);
+        if (save_status != INKPOD_STATUS_OK) {
+            if (!target_was_active && previous_view) {
+                (void)ActivateDocumentTab(state, previous_view);
+            }
+            return save_status;
+        }
+    }
+    InkpodDocumentInfo after{};
+    after.struct_size = sizeof(after);
+    const InkpodStatus status = state.engine->Invoke(
+        document->id,
+        document->generation,
+        [index, direction, &after](InkpodCore* core) {
+            return index.has_value()
+                ? inkpod_core_sequence_activate(core, index.value(), &after)
+                : inkpod_core_sequence_step(core, direction, 0U, &after);
+        },
+        true,
+        true);
+    if (status != INKPOD_STATUS_OK) {
+        if (!target_was_active && previous_view) {
+            (void)ActivateDocumentTab(state, previous_view);
+        }
+        RefreshSequencePane(state);
+        (void)RefreshSubpalettePane(state);
+        UpdateMenuState(state);
+        return status;
+    }
+    if (!target_was_active
+        && !ActivateDocumentTab(state, document->ActiveView()->id)) {
+        if (previous_view) {
+            (void)ActivateDocumentTab(state, previous_view);
+        }
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const bool changed = before.document_uuid_high != after.document_uuid_high
+        || before.document_uuid_low != after.document_uuid_low;
+    if (changed) {
+        ResetUiForNewActiveDocument(state);
+        (void)FitCanvas(state, INKPOD_VIEW_FIT);
+    }
+    RefreshSequencePane(state);
+    (void)RefreshSubpalettePane(state);
+    RefreshTreePane(state);
+    RefreshLightTablePane(state);
+    RefreshColorPanes(state);
+    UpdateMenuState(state);
+    return INKPOD_STATUS_OK;
+}
+
+void DispatchSequencePaneCommand(void* context, UINT command) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state != nullptr && state->Workspace().windows.window != nullptr) {
+        (void)IssueCommand(
+            state,
+            state->Workspace().windows.window,
+            command,
+            0,
+            state->routing.sequence_pane);
+    }
+}
+
+void ActivateSequencePaneCell(void* context, std::uint32_t index) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state == nullptr) {
+        return;
+    }
+    const PaneActionTarget target = state->routing.pane_targets.CaptureAction(
+        state->routing.sequence_pane,
+        state->routing.targets.Capture(),
+        state->routing.targets);
+    if (target.status != PaneTargetStatus::Ok) {
+        RefreshSequencePane(*state);
+        return;
+    }
+    const InkpodStatus status = SwitchSequenceTarget(*state, target.context, index);
+    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED
+        && !state->lifetime.smoke_test) {
+        ShowCoreError(
+            *state, state->Workspace().sequence_palette, L"シーケンスの切り替え");
+    }
+}
+
+void DispatchLightTablePaneCommand(void* context, UINT command) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state != nullptr && state->Workspace().windows.window != nullptr) {
+        (void)IssueCommand(
+            state,
+            state->Workspace().windows.window,
+            command,
+            0,
+            state->routing.light_table_pane);
+    }
+}
+
+void SelectLightTablePaneEntry(
+    void* context,
+    bool set_selection,
+    std::uint32_t index,
+    std::uint64_t stable_id) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state == nullptr || state->engine == nullptr || stable_id == 0U) {
+        return;
+    }
+    const PaneActionTarget target = state->routing.pane_targets.CaptureAction(
+        state->routing.light_table_pane,
+        state->routing.targets.Capture(),
+        state->routing.targets);
+    if (target.status != PaneTargetStatus::Ok
+        || !target.context.document_session.has_value()
+        || !target.context.generation.has_value()
+        || state->Workspace().panes.light_table_selection_session
+            != target.context.document_session.value()
+        || state->Workspace().panes.light_table_selection_generation
+            != target.context.generation.value()) {
+        RefreshLightTablePane(*state);
+        return;
+    }
+    if (set_selection) {
+        InkpodLightTableEdit edit{};
+        edit.struct_size = sizeof(edit);
+        edit.operation = INKPOD_LIGHT_TABLE_SET_ACTIVE_OPERATION;
+        edit.object_id = stable_id;
+        std::uint64_t ignored{};
+        const InkpodStatus status = state->engine->Invoke(
+            target.context.document_session.value(),
+            target.context.generation.value(),
+            [edit, &ignored](InkpodCore* core) mutable {
+                InkpodDispatchResult result{};
+                result.struct_size = sizeof(result);
+                return inkpod_core_light_table_edit(
+                    core, &edit, &result, &ignored);
+            },
+            true,
+            true);
+        if (status != INKPOD_STATUS_OK) {
+            if (!state->lifetime.smoke_test) {
+                ShowCoreError(
+                    *state,
+                    state->Workspace().light_table_palette,
+                    L"ライトテーブルセットの選択");
+            }
+            RefreshLightTablePane(*state);
+            return;
+        }
+        state->Workspace().panes.active_light_table_set_index = index;
+        state->Workspace().panes.active_light_table_set_id = stable_id;
+        state->Workspace().panes.active_light_table_item_index = 0U;
+        state->Workspace().panes.active_light_table_item_id = 0U;
+    } else {
+        state->Workspace().panes.active_light_table_item_index = index;
+        state->Workspace().panes.active_light_table_item_id = stable_id;
+    }
+    RefreshLightTablePane(*state);
+    UpdateMenuState(*state);
 }
 
 InkpodStatus OpenFromPath(ApplicationHost& state, const std::wstring& path) noexcept {
@@ -6453,8 +8137,19 @@ std::wstring BatchReportSummary(const InkpodBatchReport* report) {
     return BatchController::ReportSummary(report);
 }
 
-InkpodStatus PreviewBatch(ApplicationHost& state, InkpodBatchRunScope scope) noexcept {
+InkpodStatus PreviewBatch(
+    ApplicationHost& state,
+    const CommandContext& issued_context,
+    InkpodBatchRunScope scope) noexcept {
     if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const PaneActionTarget pane_target =
+        state.routing.pane_targets.CaptureAction(
+            state.routing.batch_pane,
+            issued_context,
+            state.routing.targets);
+    if (pane_target.status != PaneTargetStatus::Ok) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     BatchController controller(
@@ -6464,7 +8159,7 @@ InkpodStatus PreviewBatch(ApplicationHost& state, InkpodBatchRunScope scope) noe
         state.Workspace().batch_palette,
         state.batch,
         *state.engine);
-    return controller.Preview(scope);
+    return controller.Preview(pane_target.context, scope);
 }
 
 InkpodStatus StartBatch(
@@ -6475,13 +8170,39 @@ InkpodStatus StartBatch(
     if (state.engine == nullptr || state.batch.task != nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
+    const PaneActionTarget pane_target =
+        state.routing.pane_targets.CaptureAction(
+            state.routing.batch_pane,
+            issued_context,
+            state.routing.targets);
+    if (pane_target.status != PaneTargetStatus::Ok) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const auto* previous_binding = state.routing.pane_targets.Find(
+        state.routing.batch_pane);
+    state.batch.return_to_pinned = previous_binding != nullptr
+        && previous_binding->policy == PaneTargetPolicy::PinnedDocument;
+    state.batch.return_context = pane_target.context;
     const auto job = state.routing.targets.BeginJob();
     if (!job.has_value()) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    CommandContext context = issued_context;
+    CommandContext context = pane_target.context;
+    context.pane = state.routing.batch_pane;
     context.job = job;
     state.batch.job_id = job;
+    if (state.routing.pane_targets.BindJob(
+            state.routing.batch_pane, context, state.routing.targets)
+        != PaneTargetStatus::Ok) {
+        (void)state.routing.targets.EndJob(job.value());
+        state.batch.job_id.reset();
+        state.batch.return_context = {};
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    state.batch.job_text = L"Job " + std::to_wstring(job->Value())
+        + L" — 開始中";
+    UpdateBatchTarget(state);
+    RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     BatchController controller(
         state.lifetime,
         state.Workspace().windows,
@@ -6493,8 +8214,23 @@ InkpodStatus StartBatch(
         context, scope, dry_run, kBatchTaskCompleted);
     if (status != INKPOD_STATUS_OK || state.lifetime.smoke_test) {
         (void)state.routing.targets.EndJob(job.value());
+        if (state.batch.return_to_pinned) {
+            (void)state.routing.pane_targets.PinDocument(
+                state.routing.batch_pane,
+                state.batch.return_context,
+                state.routing.targets);
+        } else {
+            (void)state.routing.pane_targets.FollowActive(
+                state.routing.batch_pane);
+        }
         state.batch.job_id.reset();
         state.batch.completion_context = {};
+        state.batch.return_context = {};
+        state.batch.job_text = status == INKPOD_STATUS_OK
+            ? L"完了"
+            : (status == INKPOD_STATUS_CANCELLED ? L"キャンセル" : L"開始失敗");
+        UpdateBatchTarget(state);
+        RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     }
     return status;
 }
@@ -6569,14 +8305,111 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         &state,
         DispatchBatchPaletteCommand,
         SelectBatchPaletteOperation,
+        RefreshBatchPaletteTimer,
         state.batch.loaded_graph};
     state.Workspace().batch_palette = inkpod::windows::ui::CreateBatchPaletteDialog(
         state.lifetime.instance, state.Workspace().windows.window, state.batch.palette_dialog);
     if (state.Workspace().batch_palette == nullptr) {
         return false;
     }
+    UpdateBatchTarget(state);
     RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     ShowWindow(state.Workspace().batch_palette, SW_HIDE);
+    state.Workspace().locator_dialog = {};
+    state.Workspace().locator_dialog.context = &state;
+    state.Workspace().locator_dialog.dispatch_command =
+        DispatchLocatorPaneCommand;
+    state.Workspace().locator_dialog.select_pixel = SelectLocatorPixel;
+    state.Workspace().locator_palette =
+        inkpod::windows::ui::panes::CreateLocatorPaneDialog(
+            state.lifetime.instance,
+            state.Workspace().windows.window,
+            state.Workspace().locator_dialog);
+    if (state.Workspace().locator_palette == nullptr) {
+        return false;
+    }
+    (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
+        state.Workspace().locator_palette,
+        state.Workspace().windows.window,
+        L"LocatorPaletteV1",
+        !state.lifetime.smoke_test);
+    ShowWindow(state.Workspace().locator_palette, SW_HIDE);
+    state.Workspace().sequence_dialog = {};
+    state.Workspace().sequence_dialog.context = &state;
+    state.Workspace().sequence_dialog.dispatch_command =
+        DispatchSequencePaneCommand;
+    state.Workspace().sequence_dialog.activate_cell =
+        ActivateSequencePaneCell;
+    state.Workspace().sequence_palette =
+        inkpod::windows::ui::panes::CreateSequencePaneDialog(
+            state.lifetime.instance,
+            state.Workspace().windows.window,
+            state.Workspace().sequence_dialog);
+    if (state.Workspace().sequence_palette == nullptr) {
+        return false;
+    }
+    (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
+        state.Workspace().sequence_palette,
+        state.Workspace().windows.window,
+        L"SequencePaletteV1",
+        !state.lifetime.smoke_test);
+    ShowWindow(state.Workspace().sequence_palette, SW_HIDE);
+    state.Workspace().light_table_dialog = {};
+    state.Workspace().light_table_dialog.context = &state;
+    state.Workspace().light_table_dialog.dispatch_command =
+        DispatchLightTablePaneCommand;
+    state.Workspace().light_table_dialog.select_entry =
+        SelectLightTablePaneEntry;
+    state.Workspace().light_table_palette =
+        inkpod::windows::ui::panes::CreateLightTablePaneDialog(
+            state.lifetime.instance,
+            state.Workspace().windows.window,
+            state.Workspace().light_table_dialog);
+    if (state.Workspace().light_table_palette == nullptr) {
+        return false;
+    }
+    (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
+        state.Workspace().light_table_palette,
+        state.Workspace().windows.window,
+        L"LightTablePaletteV1",
+        !state.lifetime.smoke_test);
+    ShowWindow(state.Workspace().light_table_palette, SW_HIDE);
+    const auto subpalette_canvas =
+        state.routing.targets.RegisterAuxiliaryCanvas();
+    if (!subpalette_canvas.has_value()) {
+        return false;
+    }
+    state.Workspace().subpalette_canvas_id = subpalette_canvas.value();
+    state.Workspace().subpalette_surface_generation =
+        state.routing.targets.CurrentGeneration();
+    state.Workspace().subpalette_dialog = {};
+    state.Workspace().subpalette_dialog.context = &state;
+    state.Workspace().subpalette_dialog.dispatch_command =
+        DispatchSubpalettePaneCommand;
+    state.Workspace().subpalette_dialog.perform_action =
+        PerformSubpalettePaneAction;
+    state.Workspace().subpalette_dialog.sample = SampleSubpalettePane;
+    state.Workspace().subpalette_dialog.apply_view = ApplySubpalettePaneView;
+    state.Workspace().subpalette_palette =
+        inkpod::windows::ui::panes::CreateSubpalettePaneDialog(
+            state.lifetime.instance,
+            state.Workspace().windows.window,
+            *state.renderer,
+            state.Workspace().subpalette_canvas_id,
+            state.Workspace().subpalette_surface_generation,
+            state.Workspace().subpalette_dialog);
+    if (state.Workspace().subpalette_palette == nullptr) {
+        (void)state.routing.targets.UnregisterAuxiliaryCanvas(
+            state.Workspace().subpalette_canvas_id);
+        state.Workspace().subpalette_canvas_id = {};
+        return false;
+    }
+    (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
+        state.Workspace().subpalette_palette,
+        state.Workspace().windows.window,
+        L"SubpalettePaletteV1",
+        !state.lifetime.smoke_test);
+    ShowWindow(state.Workspace().subpalette_palette, SW_HIDE);
     state.Workspace().tools.palette_dialog = {};
     state.Workspace().tools.palette_dialog.context = &state;
     state.Workspace().tools.palette_dialog.dispatch_command = DispatchToolPaletteCommand;
@@ -6605,7 +8438,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         return false;
     }
     state.Workspace().panes.color_pane.context = &state;
-    state.Workspace().panes.color_pane.dispatch_command = DispatchToolPaletteCommand;
+    state.Workspace().panes.color_pane.dispatch_command = DispatchColorPaneCommand;
     state.Workspace().panes.color_pane.change_color = ChangeDockDrawingColor;
     state.Workspace().panes.color_pane.change_main_line_color = ChangeDockMainLineColor;
     state.Workspace().panes.color_pane.select_color = SelectDockColor;
@@ -6656,6 +8489,10 @@ void ShowInitialPalettes(ApplicationHost& state) noexcept {
     RefreshColorPanes(state);
     RefreshDockPaneViews(state);
     RefreshTreePane(state);
+    RefreshLocatorPane(state);
+    RefreshSequencePane(state);
+    RefreshLightTablePane(state);
+    RefreshSubpalettePane(state);
     UpdateMenuState(state);
 }
 
@@ -6674,6 +8511,7 @@ std::optional<LRESULT> RouteBatchCommand(
                 const bool visible = IsWindowVisible(state->Workspace().batch_palette) != FALSE;
                 ShowWindow(state->Workspace().batch_palette, visible ? SW_HIDE : SW_SHOW);
                 if (!visible) {
+                    UpdateBatchTarget(*state);
                     RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
                     SetForegroundWindow(state->Workspace().batch_palette);
                 }
@@ -6681,6 +8519,30 @@ std::optional<LRESULT> RouteBatchCommand(
                 return 1;
             }
             return 0;
+        case IDM_BATCH_PIN: {
+            if (state->batch.task != nullptr) {
+                return 0;
+            }
+            const auto* binding = state->routing.pane_targets.Find(
+                state->routing.batch_pane);
+            const PaneTargetStatus status = binding != nullptr
+                    && binding->policy == PaneTargetPolicy::PinnedDocument
+                ? state->routing.pane_targets.FollowActive(
+                      state->routing.batch_pane)
+                : state->routing.pane_targets.PinDocument(
+                      state->routing.batch_pane,
+                      context,
+                      state->routing.targets);
+            if (status == PaneTargetStatus::Ok
+                || status == PaneTargetStatus::NoOp) {
+                UpdateBatchTarget(*state);
+                RefreshBatchPalette(
+                    state->batch, state->Workspace().batch_palette);
+                UpdateMenuState(*state);
+                return status == PaneTargetStatus::Ok ? 1 : 0;
+            }
+            return 0;
+        }
         case IDM_BATCH_INPUT_FILE:
         case IDM_BATCH_INPUT_FOLDER:
         case IDM_BATCH_INPUT_CURRENT: {
@@ -6929,7 +8791,8 @@ std::optional<LRESULT> RouteBatchCommand(
             }
             return 0;
         case IDM_BATCH_PREVIEW: {
-            const InkpodStatus status = PreviewBatch(*state, INKPOD_BATCH_SCOPE_ALL);
+            const InkpodStatus status = PreviewBatch(
+                *state, context, INKPOD_BATCH_SCOPE_ALL);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"バッチプレビュー");
             }
@@ -7007,6 +8870,12 @@ std::optional<LRESULT> RouteDocumentCommand(
     const CommandContext& context) noexcept {
     if (state == nullptr) {
         return std::nullopt;
+    }
+    const UINT animation_command = LOWORD(wparam);
+    if (animation_command >= IDM_LT_SET_NEW
+        && animation_command <= IDM_LT_ITEM_MOVE
+        && !PrepareLightTableSelection(*state, context)) {
+        return 0;
     }
     switch (LOWORD(wparam)) {
         case IDM_FILE_RECENT_1:
@@ -8027,7 +9896,7 @@ std::optional<LRESULT> RouteAnimationCommand(
     HWND window,
     WPARAM wparam,
     LPARAM,
-    const CommandContext&) noexcept {
+    const CommandContext& context) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
@@ -8051,7 +9920,7 @@ std::optional<LRESULT> RouteAnimationCommand(
             edit.object_id = state->Workspace().panes.active_light_table_set_id;
             std::uint64_t object_id{};
             const InkpodStatus status = ApplyLightTableEdit(
-                *state, edit, dialog.value, object_id);
+                *state, context, edit, dialog.value, object_id);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"ライトテーブルセット");
             } else if (object_id != 0U) {
@@ -8079,7 +9948,8 @@ std::optional<LRESULT> RouteAnimationCommand(
                 ++edit.destination_index;
             }
             std::uint64_t object_id{};
-            const InkpodStatus status = ApplyLightTableEdit(*state, edit, {}, object_id);
+            const InkpodStatus status = ApplyLightTableEdit(
+                *state, context, edit, {}, object_id);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"ライトテーブルセット操作");
             } else if (object_id != 0U) {
@@ -8103,6 +9973,8 @@ std::optional<LRESULT> RouteAnimationCommand(
             const std::uint32_t opacity =
                 static_cast<std::uint32_t>(dialog.values[0]) * 10U;
             const InkpodStatus status = state->engine->Invoke(
+                context.document_session.value(),
+                context.generation.value(),
                 [opacity](InkpodCore* core) {
                     InkpodDispatchResult result{};
                     result.struct_size = sizeof(result);
@@ -8124,7 +9996,10 @@ std::optional<LRESULT> RouteAnimationCommand(
                 return 0;
             }
             const InkpodStatus status = AddOrReloadLightTableRaster(
-                *state, path, LOWORD(wparam) == IDM_LT_ITEM_RELOAD);
+                *state,
+                context,
+                path,
+                LOWORD(wparam) == IDM_LT_ITEM_RELOAD);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"ライトテーブル画像");
             }
@@ -8146,7 +10021,8 @@ std::optional<LRESULT> RouteAnimationCommand(
                 ++edit.destination_index;
             }
             std::uint64_t ignored{};
-            const InkpodStatus status = ApplyLightTableEdit(*state, edit, {}, ignored);
+            const InkpodStatus status = ApplyLightTableEdit(
+                *state, context, edit, {}, ignored);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"ライトテーブル項目操作");
             }
@@ -8155,7 +10031,8 @@ std::optional<LRESULT> RouteAnimationCommand(
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_LT_ITEM_PROPERTIES: {
-            const InkpodStatus status = EditLightTableItemProperties(*state);
+            const InkpodStatus status = EditLightTableItemProperties(
+                *state, context);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
                 ShowCoreError(*state, window, L"ライトテーブル項目プロパティ");
             }
@@ -8166,8 +10043,16 @@ std::optional<LRESULT> RouteAnimationCommand(
             if (state->Workspace().panes.active_light_table_item_id == 0U) {
                 return 0;
             }
+            if (context.document_session != state->routing.targets.DocumentSession()
+                || context.document_view
+                    != state->routing.targets.ActiveDocumentView()
+                || context.generation
+                    != state->routing.targets.CurrentGeneration()) {
+                return 0;
+            }
             TransitionActiveTool(
                 state->Workspace().tools, state->Workspace().windows.canvas, kInteractionLightTableMove);
+            state->Workspace().panes.light_table_move_context = context;
             state->Workspace().panes.light_table_move_samples.clear();
             UpdateMenuState(*state);
             return 1;
@@ -8191,6 +10076,8 @@ std::optional<LRESULT> RouteAnimationCommand(
             InkpodColorValue color{};
             color.struct_size = sizeof(color);
             const InkpodStatus status = state->engine->Invoke(
+                context.document_session.value(),
+                context.generation.value(),
                 [&color, &dialog](InkpodCore* core) {
                     return inkpod_core_light_table_sample(
                         core,
@@ -8208,9 +10095,40 @@ std::optional<LRESULT> RouteAnimationCommand(
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_LT_ITEM_SWAP: {
+            InkpodDocumentInfo before{};
+            before.struct_size = sizeof(before);
+            if (!state->engine->GetDocumentInfo(
+                    context.document_session.value(),
+                    context.generation.value(),
+                    before)) {
+                return 0;
+            }
+            if ((before.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+                if (state->lifetime.smoke_test) {
+                    return 0;
+                }
+                const int choice = MessageBoxW(
+                    state->Workspace().light_table_palette != nullptr
+                        ? state->Workspace().light_table_palette
+                        : window,
+                    L"現在の編集画像を保存してからライトテーブル項目と入れ替えますか？",
+                    L"ライトテーブル",
+                    MB_OKCANCEL | MB_ICONQUESTION);
+                if (choice != IDOK || !context.document_view.has_value()
+                    || !ActivateDocumentTab(
+                        *state, context.document_view.value())) {
+                    return 0;
+                }
+                const InkpodStatus save_status = SaveDocument(*state, false);
+                if (save_status != INKPOD_STATUS_OK) {
+                    return 0;
+                }
+            }
             InkpodDocumentInfo info{};
             const std::uint64_t item_id = state->Workspace().panes.active_light_table_item_id;
             const InkpodStatus status = state->engine->Invoke(
+                context.document_session.value(),
+                context.generation.value(),
                 [item_id, &info](InkpodCore* core) {
                     info = EmptyDocumentInfo();
                     return inkpod_core_light_table_swap(core, item_id, &info);
@@ -8237,7 +10155,14 @@ std::optional<LRESULT> RouteAnimationCommand(
             } else if (!ChooseCommonRasterPaths(window, paths)) {
                 return 0;
             }
-            const InkpodStatus status = ImportSequencePaths(*state, paths);
+            const InkpodStatus status = context.document_session.has_value()
+                    && context.generation.has_value()
+                ? ImportSequencePaths(
+                      *state,
+                      paths,
+                      context.document_session.value(),
+                      context.generation.value())
+                : INKPOD_STATUS_INVALID_STATE;
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"連番読み込み");
             }
@@ -8268,26 +10193,15 @@ std::optional<LRESULT> RouteAnimationCommand(
         case IDM_SEQ_PREVIOUS:
         case IDM_SEQ_NEXT: {
             const bool next = LOWORD(wparam) == IDM_SEQ_NEXT;
-            InkpodDocumentInfo info{};
-            const InkpodStatus status = state->engine->Invoke(
-                [next, &info](InkpodCore* core) {
-                    info = EmptyDocumentInfo();
-                    return inkpod_core_sequence_step(
-                        core,
-                        next ? INKPOD_SEQUENCE_NEXT : INKPOD_SEQUENCE_PREVIOUS,
-                        INKPOD_SEQUENCE_FLAG_LOOP,
-                        &info);
-                },
-                false,
-                false);
-            if (status != INKPOD_STATUS_OK) {
+            const InkpodStatus status = SwitchSequenceTarget(
+                *state,
+                context,
+                std::nullopt,
+                next ? INKPOD_SEQUENCE_NEXT : INKPOD_SEQUENCE_PREVIOUS);
+            if (status != INKPOD_STATUS_OK
+                && status != INKPOD_STATUS_CANCELLED) {
                 ShowCoreError(*state, window, L"前後セル切替");
-            } else {
-                ResetUiForNewActiveDocument(*state);
-                FitCanvas(*state, INKPOD_VIEW_FIT);
-                RefreshSequencePane(*state);
             }
-            UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_SEQ_GOTO: {
@@ -8301,42 +10215,50 @@ std::optional<LRESULT> RouteAnimationCommand(
                 return 0;
             }
             const std::uint32_t number = static_cast<std::uint32_t>(dialog.values[0]);
-            InkpodDocumentInfo info{};
             std::uint32_t selected{};
-            const InkpodStatus status = state->engine->Invoke(
-                [number, &info, &selected](InkpodCore* core) {
-                    for (std::uint32_t index = 0U; index < 10000U; ++index) {
-                        InkpodSequenceCellInfo cell{};
-                        cell.struct_size = sizeof(cell);
-                        const InkpodStatus query = inkpod_core_sequence_cell_get(
-                            core, index, &cell);
-                        if (query != INKPOD_STATUS_OK) {
-                            return INKPOD_STATUS_INVALID_ARGUMENT;
-                        }
-                        if (cell.cell_number == number) {
-                            selected = index;
-                            info = EmptyDocumentInfo();
-                            return inkpod_core_sequence_activate(core, index, &info);
-                        }
-                    }
-                    return INKPOD_STATUS_INVALID_ARGUMENT;
-                },
-                false,
-                false);
-            if (status != INKPOD_STATUS_OK) {
+            const InkpodStatus query_status = state->engine != nullptr
+                    && context.document_session.has_value()
+                    && context.generation.has_value()
+                ? state->engine->Invoke(
+                      context.document_session.value(),
+                      context.generation.value(),
+                      [number, &selected](InkpodCore* core) {
+                          for (std::uint32_t index = 0U; index < 10000U; ++index) {
+                              InkpodSequenceCellInfo cell{};
+                              cell.struct_size = sizeof(cell);
+                              const InkpodStatus query =
+                                  inkpod_core_sequence_cell_get(
+                                      core, index, &cell);
+                              if (query != INKPOD_STATUS_OK) {
+                                  return INKPOD_STATUS_INVALID_ARGUMENT;
+                              }
+                              if (cell.cell_number == number) {
+                                  selected = index;
+                                  return INKPOD_STATUS_OK;
+                              }
+                          }
+                          return INKPOD_STATUS_INVALID_ARGUMENT;
+                      },
+                      false,
+                      false)
+                : INKPOD_STATUS_INVALID_STATE;
+            const InkpodStatus status = query_status == INKPOD_STATUS_OK
+                ? SwitchSequenceTarget(*state, context, selected)
+                : query_status;
+            if (status != INKPOD_STATUS_OK
+                && status != INKPOD_STATUS_CANCELLED) {
                 ShowCoreError(*state, window, L"セル番号移動");
-            } else {
-                ResetUiForNewActiveDocument(*state);
-                state->Workspace().animation.active_sequence_index = selected;
-                FitCanvas(*state, INKPOD_VIEW_FIT);
-                RefreshSequencePane(*state);
             }
-            UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_SUBPALETTE_SET: {
             const std::uint32_t index = state->Workspace().animation.active_sequence_index;
-            const InkpodStatus status = state->engine->Invoke(
+            const InkpodStatus status = !context.document_session.has_value()
+                    || !context.generation.has_value()
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                context.document_session.value(),
+                context.generation.value(),
                 [index](InkpodCore* core) {
                     return inkpod_core_subpalette_set(core, index);
                 },
@@ -8344,6 +10266,8 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"サブパレット登録");
+            } else {
+                (void)RefreshSubpalettePane(*state);
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -8360,7 +10284,12 @@ std::optional<LRESULT> RouteAnimationCommand(
             }
             InkpodColorValue color{};
             color.struct_size = sizeof(color);
-            const InkpodStatus status = state->engine->Invoke(
+            const InkpodStatus status = !context.document_session.has_value()
+                    || !context.generation.has_value()
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                context.document_session.value(),
+                context.generation.value(),
                 [&dialog, &color](InkpodCore* core) {
                     return inkpod_core_subpalette_sample(
                         core,
@@ -8372,6 +10301,8 @@ std::optional<LRESULT> RouteAnimationCommand(
                 false);
             if (status == INKPOD_STATUS_OK) {
                 SetDrawingColor(*state, color);
+                (void)RefreshColorPanes(*state);
+                RefreshDockPaneViews(*state);
             } else if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"サブパレット色サンプル");
             }
@@ -9457,6 +11388,26 @@ std::optional<LRESULT> RouteColorCommand(
                 RefreshColorPanes(*state);
             }
             return 1;
+        case IDM_COLOR_PIN: {
+            const auto* binding = state->routing.pane_targets.Find(
+                state->routing.color_pane);
+            const PaneTargetStatus status = binding != nullptr
+                    && binding->policy == PaneTargetPolicy::PinnedDocument
+                ? state->routing.pane_targets.FollowActive(
+                      state->routing.color_pane)
+                : state->routing.pane_targets.PinDocument(
+                      state->routing.color_pane,
+                      context,
+                      state->routing.targets);
+            if (status == PaneTargetStatus::Ok
+                || status == PaneTargetStatus::NoOp) {
+                (void)RefreshColorPanes(*state);
+                RefreshDockPaneViews(*state);
+                UpdateMenuState(*state);
+                return status == PaneTargetStatus::Ok ? 1 : 0;
+            }
+            return 0;
+        }
         case IDM_COLOR_EDITOR: {
             const InkpodStatus status = ShowDrawingColorEditor(*state);
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
@@ -9511,7 +11462,7 @@ std::optional<LRESULT> RouteColorCommand(
             } catch (const std::bad_alloc&) {
                 return 0;
             }
-            const InkpodStatus status = ReplacePalette(*state, colors);
+            const InkpodStatus status = ReplacePalette(*state, context, colors);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"カラーパレット編集");
             } else {
@@ -9543,7 +11494,7 @@ std::optional<LRESULT> RouteColorCommand(
             if (!LoadPaletteFile(path, colors)) {
                 return 0;
             }
-            const InkpodStatus status = ReplacePalette(*state, colors);
+            const InkpodStatus status = ReplacePalette(*state, context, colors);
             RefreshColorPanes(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -9691,7 +11642,7 @@ std::optional<LRESULT> RouteColorCommand(
             if (!LoadColorChartFile(path, colors, names)) {
                 return 0;
             }
-            const InkpodStatus status = ReplacePalette(*state, colors);
+            const InkpodStatus status = ReplacePalette(*state, context, colors);
             if (status == INKPOD_STATUS_OK) {
                 try {
                     state->Workspace().panes.color_chart_names = std::move(names);
@@ -9761,7 +11712,7 @@ std::optional<LRESULT> RouteColorCommand(
             std::vector<std::wstring> names = state->Workspace().panes.color_chart_names;
             colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
             names.erase(names.begin() + static_cast<std::ptrdiff_t>(index));
-            const InkpodStatus status = ReplacePalette(*state, colors);
+            const InkpodStatus status = ReplacePalette(*state, context, colors);
             if (status == INKPOD_STATUS_OK) {
                 state->Workspace().panes.color_chart_names = std::move(names);
                 RefreshColorPanes(*state);
@@ -9820,7 +11771,7 @@ std::optional<LRESULT> RouteColorCommand(
                 return 0;
             }
             colors.push_back(color);
-            const InkpodStatus status = ReplacePalette(*state, colors);
+            const InkpodStatus status = ReplacePalette(*state, context, colors);
             if (status == INKPOD_STATUS_OK) {
                 RefreshColorPanes(*state);
                 state->Workspace().panes.color_chart_names.back() = pasted_name.empty()
@@ -9894,11 +11845,179 @@ std::optional<LRESULT> RouteApplicationCommand(
     HWND window,
     WPARAM wparam,
     LPARAM,
-    const CommandContext&) noexcept {
+    const CommandContext& context) noexcept {
     if (state == nullptr) {
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
+        case IDM_WINDOW_LOCATOR:
+            if (state->Workspace().locator_palette != nullptr) {
+                const bool visible = IsWindowVisible(
+                    state->Workspace().locator_palette) != FALSE;
+                ShowWindow(
+                    state->Workspace().locator_palette,
+                    visible ? SW_HIDE : SW_SHOW);
+                if (!visible) {
+                    RefreshLocatorPane(*state);
+                    QueueLocatorSample(*state);
+                    SetForegroundWindow(state->Workspace().locator_palette);
+                    SetFocus(GetDlgItem(
+                        state->Workspace().locator_palette,
+                        IDC_LOCATOR_PIN));
+                }
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_LOCATOR_PIN: {
+            const auto* binding = state->routing.pane_targets.Find(
+                state->routing.locator_pane);
+            const PaneTargetStatus status = binding != nullptr
+                    && binding->policy == PaneTargetPolicy::PinnedDocument
+                ? state->routing.pane_targets.FollowActive(
+                      state->routing.locator_pane)
+                : state->routing.pane_targets.PinDocument(
+                      state->routing.locator_pane,
+                      context,
+                      state->routing.targets);
+            if (status == PaneTargetStatus::Ok
+                || status == PaneTargetStatus::NoOp) {
+                RefreshLocatorPane(*state);
+                QueueLocatorSample(*state);
+                UpdateMenuState(*state);
+                return status == PaneTargetStatus::Ok ? 1 : 0;
+            }
+            return 0;
+        }
+        case IDM_LOCATOR_FIXED:
+            state->Workspace().locator_fixed_mode =
+                !state->Workspace().locator_fixed_mode;
+            RefreshLocatorPane(*state);
+            UpdateMenuState(*state);
+            return 1;
+        case IDM_LOCATOR_AUTOSCROLL:
+            state->Workspace().locator_auto_scroll =
+                !state->Workspace().locator_auto_scroll;
+            RefreshLocatorPane(*state);
+            UpdateMenuState(*state);
+            return 1;
+        case IDM_WINDOW_SEQUENCE:
+            if (state->Workspace().sequence_palette != nullptr) {
+                const bool visible = IsWindowVisible(
+                    state->Workspace().sequence_palette) != FALSE;
+                ShowWindow(
+                    state->Workspace().sequence_palette,
+                    visible ? SW_HIDE : SW_SHOW);
+                if (!visible) {
+                    RefreshSequencePane(*state);
+                    SetForegroundWindow(state->Workspace().sequence_palette);
+                    SetFocus(GetDlgItem(
+                        state->Workspace().sequence_palette,
+                        IDC_SEQUENCE_CELLS));
+                }
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_SEQUENCE_PIN: {
+            const auto* binding = state->routing.pane_targets.Find(
+                state->routing.sequence_pane);
+            const PaneTargetStatus status = binding != nullptr
+                    && binding->policy == PaneTargetPolicy::PinnedDocument
+                ? state->routing.pane_targets.FollowActive(
+                      state->routing.sequence_pane)
+                : state->routing.pane_targets.PinDocument(
+                      state->routing.sequence_pane,
+                      context,
+                      state->routing.targets);
+            if (status == PaneTargetStatus::Ok
+                || status == PaneTargetStatus::NoOp) {
+                RefreshSequencePane(*state);
+                UpdateMenuState(*state);
+                return status == PaneTargetStatus::Ok ? 1 : 0;
+            }
+            return 0;
+        }
+        case IDM_WINDOW_LIGHT_TABLE:
+            if (state->Workspace().light_table_palette != nullptr) {
+                const bool visible = IsWindowVisible(
+                    state->Workspace().light_table_palette) != FALSE;
+                ShowWindow(
+                    state->Workspace().light_table_palette,
+                    visible ? SW_HIDE : SW_SHOW);
+                if (!visible) {
+                    RefreshLightTablePane(*state);
+                    SetForegroundWindow(state->Workspace().light_table_palette);
+                    SetFocus(GetDlgItem(
+                        state->Workspace().light_table_palette,
+                        state->Workspace().panes.light_table_item_count != 0U
+                            ? IDC_LIGHT_TABLE_ITEMS
+                            : IDC_LIGHT_TABLE_SETS));
+                }
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_LIGHT_TABLE_PIN: {
+            const auto* binding = state->routing.pane_targets.Find(
+                state->routing.light_table_pane);
+            const PaneTargetStatus status = binding != nullptr
+                    && binding->policy == PaneTargetPolicy::PinnedDocument
+                ? state->routing.pane_targets.FollowActive(
+                      state->routing.light_table_pane)
+                : state->routing.pane_targets.PinDocument(
+                      state->routing.light_table_pane,
+                      context,
+                      state->routing.targets);
+            if (status == PaneTargetStatus::Ok
+                || status == PaneTargetStatus::NoOp) {
+                RefreshLightTablePane(*state);
+                UpdateMenuState(*state);
+                return status == PaneTargetStatus::Ok ? 1 : 0;
+            }
+            return 0;
+        }
+        case IDM_WINDOW_SUBPALETTE:
+            if (state->Workspace().subpalette_palette != nullptr) {
+                const bool visible = IsWindowVisible(
+                    state->Workspace().subpalette_palette) != FALSE;
+                ShowWindow(
+                    state->Workspace().subpalette_palette,
+                    visible ? SW_HIDE : SW_SHOW);
+                if (!visible) {
+                    (void)RefreshSubpalettePane(*state);
+                    SetForegroundWindow(state->Workspace().subpalette_palette);
+                    SetFocus(
+                        state->Workspace().subpalette_dialog.canvas != nullptr
+                        ? state->Workspace().subpalette_dialog.canvas
+                        : GetDlgItem(
+                              state->Workspace().subpalette_palette,
+                              IDC_SUBPALETTE_PIN));
+                }
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_SUBPALETTE_PIN: {
+            const auto* binding = state->routing.pane_targets.Find(
+                state->routing.subpalette_pane);
+            const PaneTargetStatus status = binding != nullptr
+                    && binding->policy == PaneTargetPolicy::PinnedDocument
+                ? state->routing.pane_targets.FollowActive(
+                      state->routing.subpalette_pane)
+                : state->routing.pane_targets.PinDocument(
+                      state->routing.subpalette_pane,
+                      context,
+                      state->routing.targets);
+            if (status == PaneTargetStatus::Ok
+                || status == PaneTargetStatus::NoOp) {
+                ResetSubpaletteTarget(*state);
+                (void)RefreshSubpalettePane(*state);
+                UpdateMenuState(*state);
+                return status == PaneTargetStatus::Ok ? 1 : 0;
+            }
+            return 0;
+        }
         case IDM_WORKSPACE_RESET:
             ResetWorkspaceLayout(state->Workspace().windows.workspace);
             RelayoutWorkspace(*state);
@@ -10358,15 +12477,29 @@ std::optional<LRESULT> RouteCanvasMessage(
                         }
                     } catch (const std::bad_alloc&) {
                         state->Workspace().panes.light_table_move_samples.clear();
+                        state->Workspace().panes.light_table_move_context.reset();
                         return 0;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
                         state->Workspace().panes.light_table_move_samples.clear();
+                        state->Workspace().panes.light_table_move_context.reset();
                         return 1;
                     }
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
-                        const InkpodStatus status = MoveLightTableFromCanvas(*state);
+                        const InkpodStatus status =
+                            state->Workspace().panes.light_table_move_context.has_value()
+                                && state->routing.targets.Resolve(
+                                       state->Workspace().panes
+                                           .light_table_move_context.value(),
+                                       inkpod::app::kDocumentViewCommandScope)
+                                    == CommandResolveStatus::Ok
+                            ? MoveLightTableFromCanvas(
+                                  *state,
+                                  state->Workspace().panes
+                                      .light_table_move_context.value())
+                            : INKPOD_STATUS_INVALID_STATE;
                         state->Workspace().panes.light_table_move_samples.clear();
+                        state->Workspace().panes.light_table_move_context.reset();
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"ライトテーブル移動");
                         }
@@ -10832,6 +12965,8 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     && notification.context.document_session.value()
                         == state->routing.targets.DocumentSession();
                 if (target_valid && !target_current) {
+                    RefreshSequencePane(*state);
+                    (void)RefreshSubpalettePane(*state);
                     UpdateMenuState(*state);
                     return 0;
                 }
@@ -10841,6 +12976,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 RefreshTreePane(*state);
                 RefreshLightTablePane(*state);
                 RefreshSequencePane(*state);
+                (void)RefreshSubpalettePane(*state);
                 RefreshColorPanes(*state);
                 UpdateMenuState(*state);
             }
@@ -10848,43 +12984,66 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
         case kLocatorSampleReady: {
             std::optional<LocatorAsyncResult> result;
             if (state != nullptr) {
-                std::lock_guard lock(state->ActiveView().presentation.locator_results_mutex);
+                std::lock_guard lock(state->routing.locator_results_mutex);
                 const auto found = std::find_if(
-                    state->ActiveView().presentation.locator_results.begin(),
-                    state->ActiveView().presentation.locator_results.end(),
-                    [wparam, lparam](const LocatorAsyncResult& pending) {
-                        return pending.token.value
+                    state->routing.locator_results.begin(),
+                    state->routing.locator_results.end(),
+                    [wparam, lparam](const auto& pending) {
+                        return pending.has_value()
+                            && pending->token.value
                                 == static_cast<std::uint64_t>(wparam)
-                            && pending.token.generation.Value()
+                            && pending->token.generation.Value()
                                 == static_cast<std::uint64_t>(lparam);
                     });
-                if (found != state->ActiveView().presentation.locator_results.end()) {
-                    result = std::move(*found);
-                    state->ActiveView().presentation.locator_results.erase(found);
+                if (found != state->routing.locator_results.end()) {
+                    result = std::move(found->value());
+                    found->reset();
                 }
             }
             if (state != nullptr && result.has_value()) {
                 std::uint64_t expected = result->token.value;
                 const bool was_pending =
-                    state->ActiveView().presentation.locator_pending_token.compare_exchange_strong(
+                    state->routing.locator_pending_token.compare_exchange_strong(
                         expected, 0U, std::memory_order_acq_rel);
-                const bool target_current =
-                    state->routing.targets.Resolve(
-                        result->context,
-                        inkpod::app::kDocumentViewCommandScope)
-                        == CommandResolveStatus::Ok
-                    && result->context.document_view.has_value()
-                    && result->context.document_view.value()
-                        == state->routing.targets.ActiveDocumentView();
+                auto* document = result->context.document_session.has_value()
+                    ? state->Documents().Find(result->context.document_session.value())
+                    : nullptr;
+                auto* view = document != nullptr && result->context.document_view.has_value()
+                    ? document->FindView(result->context.document_view.value())
+                    : nullptr;
+                if (view == nullptr) {
+                    return 0;
+                }
+                const PaneActionTarget current =
+                    state->routing.pane_targets.CaptureAction(
+                        state->routing.locator_pane,
+                        state->routing.targets.Capture(),
+                        state->routing.targets);
+                const bool target_current = current.status == PaneTargetStatus::Ok
+                    && current.context.document_session
+                        == result->context.document_session
+                    && current.context.document_view == result->context.document_view;
                 if (was_pending && target_current
                     && result->status == INKPOD_STATUS_OK
-                    && result->sample_generation == state->ActiveView().presentation.locator_generation) {
-                    state->ActiveView().presentation.locator = result->output;
-                    state->ActiveView().presentation.locator_valid = true;
-                    UpdateLocatorStatus(*state);
+                    && result->sample_generation == view->presentation.locator_generation) {
+                    view->presentation.locator = result->output;
+                    view->presentation.locator_valid = true;
+                    view->presentation.locator_neighborhood_width =
+                        result->neighborhood_output.width;
+                    view->presentation.locator_neighborhood_height =
+                        result->neighborhood_output.height;
+                    view->presentation.locator_neighborhood_origin_x =
+                        result->neighborhood_output.origin_x;
+                    view->presentation.locator_neighborhood_origin_y =
+                        result->neighborhood_output.origin_y;
+                    view->presentation.locator_neighborhood = result->neighborhood;
+                    if (view->id == state->routing.targets.ActiveDocumentView()) {
+                        UpdateLocatorStatus(*state);
+                    }
+                    RefreshLocatorPane(*state);
                 } else if (was_pending && (!target_current
                     || result->sample_generation
-                        != state->ActiveView().presentation.locator_generation)) {
+                        != view->presentation.locator_generation)) {
                     QueueLocatorSample(*state);
                 }
             }
@@ -10902,7 +13061,7 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                            completion_context,
                            inkpod::app::kDocumentViewCommandScope
                                | CommandTargetScope::Job)
-                        == CommandResolveStatus::Ok
+                    == CommandResolveStatus::Ok
                     && completion_context.document_view.has_value()
                     && completion_context.document_view.value()
                         == state->routing.targets.ActiveDocumentView();
@@ -10961,40 +13120,70 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 const InkpodStatus status = static_cast<InkpodStatus>(wparam);
                 const CommandContext completion_context =
                     state->batch.completion_context;
-                const bool target_current = completion_context.generation.has_value()
+                const bool target_valid = completion_context.generation.has_value()
                     && completion_context.generation->Value()
                         == static_cast<std::uint64_t>(lparam)
                     && state->routing.targets.Resolve(
                            completion_context,
                            inkpod::app::kDocumentViewCommandScope
                                | CommandTargetScope::Job)
-                        == CommandResolveStatus::Ok
-                    && completion_context.document_view.has_value()
-                    && completion_context.document_view.value()
-                        == state->routing.targets.ActiveDocumentView();
+                    == CommandResolveStatus::Ok
+                    && completion_context.document_view.has_value();
+                const auto* completed_document = target_valid
+                        && completion_context.document_session.has_value()
+                    ? state->Documents().Find(
+                          completion_context.document_session.value())
+                    : nullptr;
+                const std::wstring completed_target = completed_document == nullptr
+                    ? L""
+                    : LocatorDocumentName(*completed_document);
                 if (state->Workspace().batch_progress != nullptr) {
                     DestroyWindow(state->Workspace().batch_progress);
                     state->Workspace().batch_progress = nullptr;
                 }
-                if (target_current && state->batch.report != nullptr) {
+                if (target_valid && state->batch.report != nullptr) {
                     try {
                         state->batch.last_result = BatchReportSummary(state->batch.report);
                     } catch (const std::bad_alloc&) {
                         state->batch.last_result = L"レポート表示用メモリが不足しました";
                     }
-                } else if (!target_current) {
+                } else if (!target_valid) {
                     inkpod_batch_report_release(&state->batch.report);
                 }
                 inkpod_batch_task_release(&state->batch.task);
                 if (state->batch.job_id.has_value()) {
+                    state->routing.pane_targets.JobClosed(
+                        state->batch.job_id.value());
                     (void)state->routing.targets.EndJob(
                         state->batch.job_id.value());
                 }
+                if (state->batch.return_to_pinned && target_valid) {
+                    (void)state->routing.pane_targets.PinDocument(
+                        state->routing.batch_pane,
+                        state->batch.return_context,
+                        state->routing.targets);
+                } else {
+                    (void)state->routing.pane_targets.FollowActive(
+                        state->routing.batch_pane);
+                }
                 state->batch.job_id.reset();
                 state->batch.completion_context = {};
+                state->batch.return_context = {};
+                state->batch.job_text = status == INKPOD_STATUS_OK
+                    ? L"完了"
+                    : (status == INKPOD_STATUS_CANCELLED
+                              ? L"キャンセル"
+                              : L"失敗");
+                if (!completed_target.empty()) {
+                    state->batch.job_text += L": " + completed_target;
+                }
+                if (!target_valid) {
+                    state->batch.job_text += L"（対象を閉じたため結果を破棄）";
+                }
+                UpdateBatchTarget(*state);
                 RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
                 UpdateMenuState(*state);
-                if (target_current && status != INKPOD_STATUS_OK
+                if (target_valid && status != INKPOD_STATUS_OK
                     && status != INKPOD_STATUS_CANCELLED
                     && !state->lifetime.smoke_test) {
                     ShowCoreError(*state, window, L"バッチ実行");

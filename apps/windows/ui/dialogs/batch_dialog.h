@@ -20,15 +20,19 @@ using BatchPaletteCommandCallback = void (*)(
     void* context, UINT command) noexcept;
 using BatchPaletteSelectionCallback = void (*)(
     void* context, std::uint32_t selected_index) noexcept;
+using BatchPaletteRefreshCallback = void (*)(void* context) noexcept;
 
 struct BatchPaletteDialogState {
     void* context{};
     BatchPaletteCommandCallback dispatch_command{};
     BatchPaletteSelectionCallback select_operation{};
+    BatchPaletteRefreshCallback refresh{};
     bool loaded_graph{};
 };
 
 struct BatchPaletteView {
+    std::wstring target_text;
+    std::wstring job_text;
     std::wstring input_label;
     std::vector<std::wstring> operation_labels;
     std::uint32_t selected_operation{};
@@ -36,6 +40,8 @@ struct BatchPaletteView {
     bool loaded_graph{};
     bool idle{true};
     bool runnable{};
+    bool target_available{};
+    bool pinned{};
 };
 
 HWND CreateBatchPaletteDialog(

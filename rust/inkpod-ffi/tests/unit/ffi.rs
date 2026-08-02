@@ -1929,6 +1929,37 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
             INKPOD_STATUS_OK
         );
         assert_eq!((locator.document_x, locator.document_y), (3, 1));
+        let mut neighborhood = InkpodLocatorNeighborhoodBuffer {
+            struct_size: size_of::<InkpodLocatorNeighborhoodBuffer>() as u32,
+            radius: 1,
+            ..InkpodLocatorNeighborhoodBuffer::default()
+        };
+        assert_eq!(
+            inkpod_core_locator_neighborhood(core, 0, 1.0, 1.0, &mut neighborhood),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!((neighborhood.width, neighborhood.height), (3, 3));
+        assert_eq!(neighborhood.required_bytes, 36);
+        let mut short = [0_u8; 35];
+        neighborhood.pixels_rgba8 = short.as_mut_ptr();
+        neighborhood.pixel_capacity = short.len() as u64;
+        assert_eq!(
+            inkpod_core_locator_neighborhood(core, 0, 1.0, 1.0, &mut neighborhood),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        let mut pixels = [0_u8; 36];
+        neighborhood.pixels_rgba8 = pixels.as_mut_ptr();
+        neighborhood.pixel_capacity = pixels.len() as u64;
+        assert_eq!(
+            inkpod_core_locator_neighborhood(core, 0, 1.0, 1.0, &mut neighborhood),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(neighborhood.required_bytes, pixels.len() as u64);
+        neighborhood.radius = 17;
+        assert_eq!(
+            inkpod_core_locator_neighborhood(core, 0, 1.0, 1.0, &mut neighborhood),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
         assert_eq!(
             inkpod_core_shortcut_rebind(
                 core,

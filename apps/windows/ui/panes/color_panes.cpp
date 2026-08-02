@@ -25,6 +25,31 @@ InkpodStatus ColorPanesController::RefreshModel(
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
+    return ApplyLoadedModel(panes, main_line_color, colors);
+}
+
+InkpodStatus ColorPanesController::RefreshModel(
+    app::DocumentSessionId session,
+    app::Generation generation,
+    app::PaneUiState& panes) noexcept {
+    InkpodColorValue main_line_color{};
+    main_line_color.struct_size = sizeof(main_line_color);
+    InkpodStatus status = LoadMainLineColor(
+        session, generation, main_line_color);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    std::vector<InkpodColorValue> colors;
+    status = LoadPalette(session, generation, colors);
+    return status == INKPOD_STATUS_OK
+        ? ApplyLoadedModel(panes, main_line_color, colors)
+        : status;
+}
+
+InkpodStatus ColorPanesController::ApplyLoadedModel(
+    app::PaneUiState& panes,
+    const InkpodColorValue& main_line_color,
+    const std::vector<InkpodColorValue>& colors) noexcept {
     try {
         panes.main_line_color = main_line_color;
         panes.palette_colors = colors;
@@ -90,6 +115,42 @@ InkpodStatus ColorPanesController::LoadPalette(
         false);
 }
 
+InkpodStatus ColorPanesController::LoadPalette(
+    app::DocumentSessionId session,
+    app::Generation generation,
+    std::vector<InkpodColorValue>& colors) noexcept {
+    return engine_.Invoke(
+        session,
+        generation,
+        [&colors](InkpodCore* core) {
+            InkpodColorBuffer query{};
+            query.struct_size = sizeof(query);
+            InkpodStatus status = inkpod_core_palette_get(core, &query);
+            if (status != INKPOD_STATUS_OK) {
+                return status;
+            }
+            try {
+                colors.resize(static_cast<std::size_t>(query.color_count));
+            } catch (const std::bad_alloc&) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            for (auto& color : colors) {
+                color.struct_size = sizeof(color);
+            }
+            if (colors.empty()) {
+                return INKPOD_STATUS_OK;
+            }
+            InkpodColorBuffer output{};
+            output.struct_size = sizeof(output);
+            output.colors = colors.data();
+            output.color_capacity = colors.size();
+            output.color_stride_bytes = sizeof(InkpodColorValue);
+            return inkpod_core_palette_get(core, &output);
+        },
+        false,
+        false);
+}
+
 InkpodStatus ColorPanesController::LoadMainLineColor(
     InkpodColorValue& color) noexcept {
     return engine_.Invoke(
@@ -100,9 +161,46 @@ InkpodStatus ColorPanesController::LoadMainLineColor(
         false);
 }
 
+InkpodStatus ColorPanesController::LoadMainLineColor(
+    app::DocumentSessionId session,
+    app::Generation generation,
+    InkpodColorValue& color) noexcept {
+    return engine_.Invoke(
+        session,
+        generation,
+        [&color](InkpodCore* core) {
+            return inkpod_core_get_main_line_color(core, &color);
+        },
+        false,
+        false);
+}
+
 InkpodStatus ColorPanesController::ReplacePalette(
     const std::vector<InkpodColorValue>& colors) noexcept {
     return engine_.Invoke(
+        [&colors](InkpodCore* core) {
+            InkpodColorArray input{};
+            input.struct_size = sizeof(input);
+            input.colors = colors.empty() ? nullptr : colors.data();
+            input.color_count = colors.size();
+            input.color_stride_bytes = colors.empty()
+                ? 0U
+                : sizeof(InkpodColorValue);
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            return inkpod_core_palette_set(core, &input, &result);
+        },
+        true,
+        true);
+}
+
+InkpodStatus ColorPanesController::ReplacePalette(
+    app::DocumentSessionId session,
+    app::Generation generation,
+    const std::vector<InkpodColorValue>& colors) noexcept {
+    return engine_.Invoke(
+        session,
+        generation,
         [&colors](InkpodCore* core) {
             InkpodColorArray input{};
             input.struct_size = sizeof(input);

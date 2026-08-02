@@ -74,8 +74,7 @@ installs it, verifies the installed version and payload, executes the installed
 private key, and temporary package in `finally`. Failure cleanup retains the
 installed package identity until removal is confirmed, so a failed post-install
 assertion can retry uninstall instead of orphaning the package. The generated artifact remains
-unsigned; a release publisher must sign it with the organization's protected
-production credential before distribution.
+unsigned.
 
 The default CTest set, including hosted Windows x64 CI, builds the MSIX and runs
 manifest/assets, payload, ABI, and application smoke tests without registering

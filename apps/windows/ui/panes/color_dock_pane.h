@@ -33,6 +33,9 @@ struct ColorDockPaneState {
     std::uint32_t palette_group{};
     std::uint32_t chart_page{};
     bool chart_locked{};
+    std::wstring target_text;
+    bool target_available{};
+    bool pinned{};
     int active_tab{};
     double main_line_hue_degrees{};
     double drawing_hue_degrees{};
@@ -83,5 +86,11 @@ void UpdateColorDockPaneDrawingColor(
 void UpdateColorDockPaneMainLineColor(
     HWND pane,
     const InkpodColorValue& main_line_color) noexcept;
+
+void UpdateColorDockPaneTarget(
+    HWND pane,
+    std::wstring target_text,
+    bool target_available,
+    bool pinned) noexcept;
 
 }  // namespace inkpod::windows::ui::panes

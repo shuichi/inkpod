@@ -1,7 +1,13 @@
 # Native file format
 
-`.inkpod` v2 is a bounded little-endian container. It does not reuse a legacy
-extension and makes no DGA/CEL byte-compatibility claim.
+`.inkpod` v2 is a bounded little-endian container.
+
+Until the user explicitly declares a format freeze, Inkpod accepts only the
+current version of each application-owned file format. It provides no older-
+version reader, writer, migration path, or compatibility shim. Every serialized
+schema change before code freeze must increment the format's top-level version;
+changing only a section or record version is not a substitute. The current
+schema should be replaced whenever a more robust or efficient design is found.
 
 ## Container layout
 
@@ -109,8 +115,9 @@ trailing bytes.
 
 Batch settings use the separate `.inkbatch` extension. Version 1 is a bounded
 little-endian file with a 28-byte header: magic `INKBATCH`, graph version, body
-length, and FNV-1a 64-bit body checksum. It does not claim compatibility with
-an undocumented legacy batch/preset format.
+length, and FNV-1a 64-bit body checksum. The format-freeze policy above applies:
+only the current graph version is accepted, and any graph schema change increments
+the top-level graph version.
 
 The body stores a bounded UTF-8 graph name; one or more file, folder, or
 current-sequence input selectors with optional cell-number ranges; up to 1,024
@@ -201,12 +208,6 @@ idempotent discard helpers. Core, FFI, and Windows tests verify that recovery
 never changes the normal file bytes/checksum. Normal user-facing save/open
 progress and cancellation UI remain a known `IO-001` difference; recovery
 itself retains the contract above.
-
-## Unknown formats
-
-DGA, CEL, and legacy palette/chart/filter-preset layouts remain `Unknown`. No
-reader or writer is enabled without rights-cleared fixtures and an independent
-expected-result oracle.
 
 ## Corrupted-input regression corpus
 

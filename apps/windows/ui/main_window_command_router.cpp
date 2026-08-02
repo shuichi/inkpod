@@ -81,6 +81,18 @@ std::optional<app::PaneInstanceId> PaneForCommandSource(
     if (belongs_to(state.Workspace().batch_palette)) {
         return state.routing.batch_pane;
     }
+    if (belongs_to(state.Workspace().locator_palette)) {
+        return state.routing.locator_pane;
+    }
+    if (belongs_to(state.Workspace().sequence_palette)) {
+        return state.routing.sequence_pane;
+    }
+    if (belongs_to(state.Workspace().light_table_palette)) {
+        return state.routing.light_table_pane;
+    }
+    if (belongs_to(state.Workspace().subpalette_palette)) {
+        return state.routing.subpalette_pane;
+    }
     return std::nullopt;
 }
 
@@ -104,7 +116,16 @@ std::optional<LRESULT> IssueCommand(
     if (!pane.has_value()) {
         pane = PaneForCommandSource(*state, lparam);
     }
-    const app::CommandContext context = state->routing.targets.Capture(pane);
+    app::CommandContext context = state->routing.targets.Capture(pane);
+    if (pane.has_value()) {
+        const app::PaneActionTarget target =
+            state->routing.pane_targets.CaptureAction(
+                pane.value(), context, state->routing.targets);
+        if (target.status != app::PaneTargetStatus::Ok) {
+            return LRESULT{0};
+        }
+        context = target.context;
+    }
     const app::CommandTargetScope required =
         TargetScopeForCommand(*state, command);
     if (required == app::CommandTargetScope::None

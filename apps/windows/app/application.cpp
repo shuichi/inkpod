@@ -18,6 +18,7 @@
 #include "resource.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
+#include "ui/palette_window.h"
 #include "ui/shortcut_controller.h"
 
 namespace inkpod::app {
@@ -32,8 +33,15 @@ bool InitializeFrontendRouting(ApplicationHost& state) noexcept {
     const auto color = state.routing.targets.RegisterPane();
     const auto layer = state.routing.targets.RegisterPane();
     const auto batch = state.routing.targets.RegisterPane();
+    const auto locator = state.routing.targets.RegisterPane();
+    const auto sequence = state.routing.targets.RegisterPane();
+    const auto light_table = state.routing.targets.RegisterPane();
+    const auto reference = state.routing.targets.RegisterPane();
+    const auto subpalette = state.routing.targets.RegisterPane();
     if (!tool.has_value() || !tool_options.has_value() || !color.has_value()
-        || !layer.has_value() || !batch.has_value()) {
+        || !layer.has_value() || !batch.has_value() || !locator.has_value()
+        || !sequence.has_value() || !light_table.has_value()
+        || !reference.has_value() || !subpalette.has_value()) {
         state.ClearOwners();
         return false;
     }
@@ -42,6 +50,31 @@ bool InitializeFrontendRouting(ApplicationHost& state) noexcept {
     state.routing.color_pane = color.value();
     state.routing.layer_pane = layer.value();
     state.routing.batch_pane = batch.value();
+    state.routing.locator_pane = locator.value();
+    state.routing.sequence_pane = sequence.value();
+    state.routing.light_table_pane = light_table.value();
+    state.routing.reference_pane = reference.value();
+    state.routing.subpalette_pane = subpalette.value();
+
+    using PanePolicy = PaneTargetPolicy;
+    const std::array registrations{
+        std::pair{tool.value(), PanePolicy::Application},
+        std::pair{tool_options.value(), PanePolicy::FollowActiveView},
+        std::pair{color.value(), PanePolicy::FollowActiveView},
+        std::pair{layer.value(), PanePolicy::FollowActiveView},
+        std::pair{batch.value(), PanePolicy::FollowActiveView},
+        std::pair{locator.value(), PanePolicy::FollowActiveView},
+        std::pair{sequence.value(), PanePolicy::FollowActiveView},
+        std::pair{light_table.value(), PanePolicy::FollowActiveView},
+        std::pair{reference.value(), PanePolicy::FollowActiveView},
+        std::pair{subpalette.value(), PanePolicy::FollowActiveView}};
+    for (const auto& [pane, policy] : registrations) {
+        if (state.routing.pane_targets.Register(pane, policy)
+            != PaneTargetStatus::Ok) {
+            state.ClearOwners();
+            return false;
+        }
+    }
     return true;
 }
 
@@ -89,6 +122,40 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
     if (state.batch.task != nullptr) {
         inkpod_batch_task_cancel(state.batch.task);
     }
+    if (state.Workspace().subpalette_dialog.canvas != nullptr) {
+        (void)renderer::UnbindCanvasSnapshotSink(
+            state.Workspace().subpalette_dialog.canvas);
+    }
+    if (state.engine != nullptr
+        && state.Workspace().subpalette_core_view_id != 0U
+        && state.Workspace().subpalette_session
+        && state.Workspace().subpalette_document_generation) {
+        const std::uint64_t view_id =
+            state.Workspace().subpalette_core_view_id;
+        (void)state.engine->Invoke(
+            state.Workspace().subpalette_session,
+            state.Workspace().subpalette_document_generation,
+            [view_id](InkpodCore* core) {
+                return inkpod_core_view_close(core, view_id);
+            },
+            false,
+            false);
+        state.Workspace().subpalette_core_view_id = 0U;
+    }
+    if (state.Workspace().subpalette_palette != nullptr) {
+        if (!state.lifetime.smoke_test) {
+            (void)windows::ui::SavePaletteWindowPlacement(
+                state.Workspace().subpalette_palette,
+                L"SubpalettePaletteV1");
+        }
+        DestroyWindow(state.Workspace().subpalette_palette);
+        state.Workspace().subpalette_palette = nullptr;
+    }
+    if (state.Workspace().subpalette_canvas_id) {
+        (void)state.routing.targets.UnregisterAuxiliaryCanvas(
+            state.Workspace().subpalette_canvas_id);
+        state.Workspace().subpalette_canvas_id = {};
+    }
     if (state.engine != nullptr) {
         state.DetachCoreSessions();
         state.engine->Stop();
@@ -108,6 +175,12 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
     if (!state.lifetime.smoke_test) {
         windows::ui::SaveWorkspaceLayout(
             state.Workspace().windows.workspace, L"WorkspaceSessionV2");
+        (void)windows::ui::SavePaletteWindowPlacement(
+            state.Workspace().locator_palette, L"LocatorPaletteV1");
+        (void)windows::ui::SavePaletteWindowPlacement(
+            state.Workspace().sequence_palette, L"SequencePaletteV1");
+        (void)windows::ui::SavePaletteWindowPlacement(
+            state.Workspace().light_table_palette, L"LightTablePaletteV1");
     }
     if (state.Workspace().tools.palette != nullptr) {
         DestroyWindow(state.Workspace().tools.palette);
@@ -130,6 +203,18 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
     if (state.Workspace().batch_palette != nullptr) {
         DestroyWindow(state.Workspace().batch_palette);
         state.Workspace().batch_palette = nullptr;
+    }
+    if (state.Workspace().locator_palette != nullptr) {
+        DestroyWindow(state.Workspace().locator_palette);
+        state.Workspace().locator_palette = nullptr;
+    }
+    if (state.Workspace().sequence_palette != nullptr) {
+        DestroyWindow(state.Workspace().sequence_palette);
+        state.Workspace().sequence_palette = nullptr;
+    }
+    if (state.Workspace().light_table_palette != nullptr) {
+        DestroyWindow(state.Workspace().light_table_palette);
+        state.Workspace().light_table_palette = nullptr;
     }
     const InkpodStatus task_status = inkpod_task_release(&state.effects.task);
     const InkpodStatus batch_task_status = inkpod_batch_task_release(&state.batch.task);
@@ -157,10 +242,14 @@ int RunMessageLoop(ApplicationHost& state) noexcept {
     BOOL result{};
     while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
         bool dialog_message{};
-        const std::array<HWND, 3U> palettes{
+        const std::array<HWND, 7U> palettes{
             state.Workspace().tools.palette,
             state.Workspace().panes.layer_palette,
-            state.Workspace().batch_palette};
+            state.Workspace().batch_palette,
+            state.Workspace().locator_palette,
+            state.Workspace().sequence_palette,
+            state.Workspace().light_table_palette,
+            state.Workspace().subpalette_palette};
         for (const HWND palette : palettes) {
             if (palette != nullptr && IsWindowVisible(palette) != FALSE
                 && IsDialogMessageW(palette, &message) != FALSE) {

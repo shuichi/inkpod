@@ -89,10 +89,22 @@ const wchar_t* GroupName(UINT command) noexcept {
                     || command == IDM_WINDOW_LAYER_PALETTE
                     || command == IDM_WINDOW_TOOL_OPTIONS
                     || command == IDM_WINDOW_COLOR_PANE
+                    || command == IDM_COLOR_PIN
                     || command == IDM_WORKSPACE_RESET
                     || command == IDM_WORKSPACE_SAVE
                     || command == IDM_WORKSPACE_RESTORE
                     || command == IDM_WORKSPACE_MIRROR
+                    || command == IDM_WINDOW_LOCATOR
+                    || command == IDM_LOCATOR_PIN
+                    || command == IDM_LOCATOR_FIXED
+                    || command == IDM_LOCATOR_AUTOSCROLL
+                    || command == IDM_WINDOW_SEQUENCE
+                    || command == IDM_SEQUENCE_PIN
+                    || command == IDM_WINDOW_LIGHT_TABLE
+                    || command == IDM_LIGHT_TABLE_PIN
+                    || command == IDM_WINDOW_SUBPALETTE
+                    || command == IDM_SUBPALETTE_PIN
+                    || command == IDM_BATCH_PIN
                     || command == IDM_WINDOW_BATCH
                 ? L"ウィンドウ"
                 : L"バッチ";
@@ -194,6 +206,18 @@ bool DirectSequence(UINT command, InkpodShortcutSequence& sequence) noexcept {
             return true;
         case IDM_WINDOW_COLOR_PANE:
             sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'C')});
+            return true;
+        case IDM_WINDOW_LOCATOR:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'K')});
+            return true;
+        case IDM_WINDOW_SEQUENCE:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'F')});
+            return true;
+        case IDM_WINDOW_LIGHT_TABLE:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'H')});
+            return true;
+        case IDM_WINDOW_SUBPALETTE:
+            sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'P')});
             return true;
         case IDM_WORKSPACE_RESET:
             sequence = Sequence(command, {Stroke(L'Q'), Stroke(L'N'), Stroke(L'R')});

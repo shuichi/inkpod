@@ -19,7 +19,7 @@ use inkpod_core::{
     PaintTool, PixelFormat, PixelValue, PlaneType, PointF32, RectI32, RenderSnapshot, ResizeAnchor,
     RgbaRasterBytes, RotateDirection, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
     SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SelectionLayerOperation, SelectionOperation,
-    SelectionShape, SequenceCellInfo, SequenceCellSource, SequenceDirection, ShortcutBinding,
+    SelectionShape, SequenceCellSource, SequenceDirection, ShortcutBinding,
     ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape, Stroke, StrokeSample,
     TileRaster, VectorCubicSegment, VectorEraseMode, VectorPathInput, VectorSelectionMode,
     VectorWidthMode, ViewCommand,

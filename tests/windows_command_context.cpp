@@ -1,4 +1,5 @@
 #include "app/command_context.h"
+#include "app/pane_target.h"
 
 #include <cstdlib>
 #include <functional>
@@ -8,6 +9,7 @@
 namespace {
 
 using inkpod::app::CommandContext;
+using inkpod::app::CanvasId;
 using inkpod::app::CommandRequest;
 using inkpod::app::CommandResolveStatus;
 using inkpod::app::CommandTargetRegistry;
@@ -19,6 +21,10 @@ using inkpod::app::EditorGroupId;
 using inkpod::app::Generation;
 using inkpod::app::JobSessionId;
 using inkpod::app::PaneInstanceId;
+using inkpod::app::PaneTargetNotice;
+using inkpod::app::PaneTargetPolicy;
+using inkpod::app::PaneTargetRegistry;
+using inkpod::app::PaneTargetStatus;
 using inkpod::app::WorkspaceWindowId;
 using inkpod::app::FrontendTokenSource;
 using inkpod::app::kDocumentViewCommandScope;
@@ -138,6 +144,36 @@ bool PaneAndJobTargetsDoNotFallback() {
         == CommandResolveStatus::StaleTarget;
 }
 
+bool AuxiliaryCanvasIdsHaveIndependentBoundedLifetime() {
+    CommandTargetRegistry registry;
+    registry.Initialize();
+    (void)registry.ReplaceDocument();
+    const CanvasId editor_canvas = registry.Canvas();
+    const auto first = registry.RegisterAuxiliaryCanvas();
+    const auto second = registry.RegisterAuxiliaryCanvas();
+    if (!first.has_value() || !second.has_value()
+        || first.value() == second.value() || first.value() == editor_canvas
+        || second.value() == editor_canvas
+        || !registry.UnregisterAuxiliaryCanvas(first.value())
+        || registry.UnregisterAuxiliaryCanvas(first.value())) {
+        return false;
+    }
+    std::array<CanvasId, 16U> canvases{};
+    canvases[0] = second.value();
+    for (std::size_t index = 1U; index < canvases.size(); ++index) {
+        const auto canvas = registry.RegisterAuxiliaryCanvas();
+        if (!canvas.has_value()) {
+            return false;
+        }
+        canvases[index] = canvas.value();
+    }
+    if (registry.RegisterAuxiliaryCanvas().has_value()) {
+        return false;
+    }
+    registry.InvalidateAll();
+    return !registry.UnregisterAuxiliaryCanvas(canvases[0]);
+}
+
 bool GenerationTaggedTokensNeverRetarget() {
     CommandTargetRegistry registry;
     registry.Initialize();
@@ -206,6 +242,101 @@ bool EditorGroupsRouteCapturedViewsWithoutRetargeting() {
         == CommandResolveStatus::Ok;
 }
 
+bool PanePoliciesCaptureAndRejectStaleTargets() {
+    CommandTargetRegistry targets;
+    targets.Initialize();
+    const DocumentSessionId first_document = targets.ReplaceDocument();
+    const auto follow_pane = targets.RegisterPane();
+    const auto application_pane = targets.RegisterPane();
+    const auto reference_pane = targets.RegisterPane();
+    const auto batch_pane = targets.RegisterPane();
+    if (!follow_pane.has_value() || !application_pane.has_value()
+        || !reference_pane.has_value() || !batch_pane.has_value()) {
+        return false;
+    }
+
+    PaneTargetRegistry panes;
+    if (panes.Register(
+            follow_pane.value(), PaneTargetPolicy::FollowActiveView)
+            != PaneTargetStatus::Ok
+        || panes.Register(
+               application_pane.value(), PaneTargetPolicy::Application)
+            != PaneTargetStatus::Ok
+        || panes.Register(
+               reference_pane.value(), PaneTargetPolicy::FollowActiveView)
+            != PaneTargetStatus::Ok
+        || panes.Register(
+               batch_pane.value(), PaneTargetPolicy::FollowActiveView)
+            != PaneTargetStatus::Ok) {
+        return false;
+    }
+    const CommandContext first = targets.Capture();
+    if (panes.PinDocument(reference_pane.value(), first, targets)
+            != PaneTargetStatus::Ok) {
+        return false;
+    }
+    const auto second_document = targets.AddDocument();
+    if (!second_document.has_value()) {
+        return false;
+    }
+    const CommandContext second = targets.Capture();
+    const auto followed = panes.CaptureAction(
+        follow_pane.value(), second, targets);
+    const auto pinned = panes.CaptureAction(
+        reference_pane.value(), second, targets);
+    const auto application = panes.CaptureAction(
+        application_pane.value(), second, targets);
+    if (followed.status != PaneTargetStatus::Ok
+        || followed.context.document_session != second_document
+        || pinned.status != PaneTargetStatus::Ok
+        || pinned.context.document_session != first_document
+        || application.status != PaneTargetStatus::Ok
+        || application.context.document_session != second_document
+        || application.context.pane != application_pane) {
+        return false;
+    }
+
+    const auto job = targets.BeginJob();
+    if (!job.has_value()) {
+        return false;
+    }
+    const CommandContext job_context = targets.Capture(
+        batch_pane, job);
+    if (panes.BindJob(batch_pane.value(), job_context, targets)
+            != PaneTargetStatus::Ok
+        || panes.CaptureAction(batch_pane.value(), first, targets).context
+                != job_context) {
+        return false;
+    }
+    panes.JobClosed(job.value());
+    (void)targets.EndJob(job.value());
+    std::uint64_t notice_sequence{};
+    if (panes.FollowActive(batch_pane.value()) != PaneTargetStatus::Ok
+        || panes.CaptureAction(batch_pane.value(), second, targets).status
+            != PaneTargetStatus::Ok
+        || panes.CaptureAction(batch_pane.value(), second, targets)
+                .context.document_session != second_document
+        || panes.ConsumeNotice(batch_pane.value(), notice_sequence)
+            != PaneTargetNotice::JobClosed
+        || notice_sequence == 0U) {
+        return false;
+    }
+
+    panes.DocumentClosed(first_document);
+    if (!targets.RemoveDocument(first_document)) {
+        return false;
+    }
+    const auto after_close = panes.CaptureAction(
+        reference_pane.value(), second, targets);
+    return after_close.status == PaneTargetStatus::Ok
+        && after_close.policy == PaneTargetPolicy::FollowActiveView
+        && after_close.context.document_session == second_document
+        && panes.ConsumeNotice(reference_pane.value(), notice_sequence)
+            == PaneTargetNotice::PinnedDocumentClosed
+        && panes.ConsumeNotice(reference_pane.value(), notice_sequence)
+            == PaneTargetNotice::None;
+}
+
 }  // namespace
 
 int main() {
@@ -215,8 +346,10 @@ int main() {
             && CapturedSessionDoesNotFollowTabFocus()
             && InvalidRequestsAreRejected()
             && PaneAndJobTargetsDoNotFallback()
+            && AuxiliaryCanvasIdsHaveIndependentBoundedLifetime()
             && GenerationTaggedTokensNeverRetarget()
             && EditorGroupsRouteCapturedViewsWithoutRetargeting()
+            && PanePoliciesCaptureAndRejectStaleTargets()
         ? EXIT_SUCCESS
         : EXIT_FAILURE;
 }

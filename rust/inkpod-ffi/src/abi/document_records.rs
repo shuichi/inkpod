@@ -153,6 +153,22 @@ pub struct InkpodLocatorOutput {
 }
 
 #[repr(C)]
+#[derive(Default)]
+pub struct InkpodLocatorNeighborhoodBuffer {
+    pub struct_size: u32,
+    pub radius: u32,
+    pub width: u32,
+    pub height: u32,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub reserved: u32,
+    pub reserved_2: u32,
+    pub pixels_rgba8: *mut u8,
+    pub pixel_capacity: u64,
+    pub required_bytes: u64,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodRasterSourceInput {
     pub struct_size: u32,
@@ -282,6 +298,19 @@ pub struct InkpodNamedBytesInput {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodNamedRasterInput {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub format: u32,
+    pub reserved2: u32,
+    pub name_utf8: *const u8,
+    pub name_bytes: u64,
+    pub bytes: *const u8,
+    pub byte_count: u64,
+}
+
+#[repr(C)]
 #[derive(Default)]
 pub struct InkpodSequenceCellInfo {
     pub struct_size: u32,
@@ -299,6 +328,21 @@ pub struct InkpodSequenceCellInfo {
     pub name_utf8: *mut u8,
     pub name_capacity: u64,
     pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodSequenceThumbnailBuffer {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub width: u32,
+    pub height: u32,
+    pub stride_bytes: u32,
+    pub reserved: u32,
+    pub checksum: u64,
+    pub pixels_rgba8: *mut u8,
+    pub pixel_capacity: u64,
+    pub required_bytes: u64,
 }
 
 #[repr(C)]

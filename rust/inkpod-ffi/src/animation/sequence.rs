@@ -253,6 +253,127 @@ pub unsafe extern "C" fn inkpod_core_sequence_import_encoded(
     })
 }
 
+/// Decodes a bounded naturally sorted sequence whose common-raster format is
+/// carried by each input record.
+///
+/// # Safety
+/// Core and every strided named-raster record/span must remain live and readable
+/// for this owner-thread call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_import_mixed_encoded(
+    core: *mut InkpodCore,
+    files: *const InkpodNamedRasterInput,
+    file_count: u64,
+    file_stride_bytes: u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || files.is_null()
+            || !is_aligned(files)
+            || file_count == 0
+            || file_count > 10_000
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "mixed encoded sequence header is invalid",
+            );
+        }
+        let count = match usize::try_from(file_count) {
+            Ok(count) => count,
+            Err(_) => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "sequence count overflows"),
+        };
+        let stride = match usize::try_from(file_stride_bytes) {
+            Ok(stride)
+                if stride >= size_of::<InkpodNamedRasterInput>()
+                    && stride % align_of::<InkpodNamedRasterInput>() == 0 =>
+            {
+                stride
+            }
+            _ => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "sequence stride is invalid"),
+        };
+        let storage = count
+            .saturating_sub(1)
+            .checked_mul(stride)
+            .and_then(|offset| offset.checked_add(size_of::<InkpodNamedRasterInput>()));
+        if storage.is_none_or(|bytes| bytes > isize::MAX as usize) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence record span overflows",
+            );
+        }
+        let mut decoded = Vec::with_capacity(count);
+        let mut total_bytes = 0_usize;
+        for index in 0..count {
+            // SAFETY: The checked strided span makes every record prefix readable.
+            let pointer = unsafe {
+                files
+                    .cast::<u8>()
+                    .add(index * stride)
+                    .cast::<InkpodNamedRasterInput>()
+            };
+            let advertised = match unsafe { validate_struct(pointer, "InkpodNamedRasterInput") } {
+                Ok(size) => size,
+                Err(status) => return status,
+            };
+            if advertised as usize > stride {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "sequence record exceeds stride",
+                );
+            }
+            // SAFETY: Complete record was validated above.
+            let record = unsafe { &*pointer };
+            if record.reserved != 0
+                || record.reserved2 != 0
+                || record.bytes.is_null()
+                || record.byte_count == 0
+                || record.byte_count > MAX_COMMON_RASTER_BYTES as u64
+            {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "mixed sequence file span is invalid",
+                );
+            }
+            let format = match parse_common_raster_format(record.format) {
+                Ok(format) => format,
+                Err(status) => return status,
+            };
+            let name = match unsafe { name_from_utf8(record.name_utf8, record.name_bytes) } {
+                Ok(name) => name.to_owned(),
+                Err(status) => return status,
+            };
+            let length = match usize::try_from(record.byte_count) {
+                Ok(length) => length,
+                Err(_) => return fail(INKPOD_STATUS_INVALID_ARGUMENT, "file length overflows"),
+            };
+            total_bytes = match total_bytes.checked_add(length) {
+                Some(total) if total <= MAX_COMMON_RASTER_BYTES => total,
+                _ => {
+                    return fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "sequence bytes exceed bound",
+                    );
+                }
+            };
+            // SAFETY: Caller advertises this complete bounded byte span.
+            let bytes = unsafe { slice::from_raw_parts(record.bytes, length) }.to_vec();
+            decoded.push((name, format, bytes));
+        }
+        // SAFETY: Live owner-thread core was validated above.
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.import_mixed_sequence(decoded) {
+            Ok(()) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Encodes the configured sequence into a Rust-owned immutable file collection.
 ///
 /// # Safety
@@ -454,15 +575,9 @@ pub unsafe extern "C" fn inkpod_core_sequence_cell_get(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        let cells: Vec<SequenceCellInfo> = match core.core.sequence_cells() {
-            Ok(cells) => cells,
+        let cell = match core.core.sequence_cell(index as usize) {
+            Ok(cell) => cell,
             Err(error) => return map_core_error(error),
-        };
-        let Some(cell) = cells.get(index as usize) else {
-            return fail(
-                INKPOD_STATUS_INVALID_ARGUMENT,
-                "sequence cell index is outside bounds",
-            );
         };
         output.flags = 0;
         output.sequence_index = u64::from(index);
@@ -494,6 +609,78 @@ pub unsafe extern "C" fn inkpod_core_sequence_cell_get(
         }
         // SAFETY: Caller advertises sufficient writable name capacity.
         unsafe { ptr::copy_nonoverlapping(cell.name.as_ptr(), output.name_utf8, cell.name.len()) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Copies one tightly packed straight-alpha RGBA8 sequence thumbnail.
+///
+/// # Safety
+/// Core/output must be complete live owner-thread records and the optional pixel
+/// buffer must be writable for its advertised capacity.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_thumbnail_get(
+    core: *mut InkpodCore,
+    index: u32,
+    output: *mut InkpodSequenceThumbnailBuffer,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodSequenceThumbnailBuffer") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if output.flags != 0 || output.reserved != 0 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "sequence thumbnail flags are invalid",
+            );
+        }
+        let thumbnail = match core.core.sequence_cell(index as usize) {
+            Ok(cell) => cell.thumbnail,
+            Err(error) => return map_core_error(error),
+        };
+        let required = thumbnail.rgba8.len() as u64;
+        output.width = thumbnail.width;
+        output.height = thumbnail.height;
+        output.stride_bytes = thumbnail.width.saturating_mul(4);
+        output.checksum = thumbnail.checksum;
+        output.required_bytes = required;
+        if output.pixel_capacity == 0 {
+            return if output.pixels_rgba8.is_null() {
+                INKPOD_STATUS_OK
+            } else {
+                fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "zero-capacity thumbnail buffer must be null",
+                )
+            };
+        }
+        if output.pixels_rgba8.is_null() || output.pixel_capacity < required {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "sequence thumbnail buffer is too small",
+            );
+        }
+        // SAFETY: Caller advertises sufficient writable pixel capacity.
+        unsafe {
+            ptr::copy_nonoverlapping(
+                thumbnail.rgba8.as_ptr(),
+                output.pixels_rgba8,
+                thumbnail.rgba8.len(),
+            )
+        };
         INKPOD_STATUS_OK
     })
 }
@@ -589,6 +776,137 @@ pub unsafe extern "C" fn inkpod_core_subpalette_sample(
                 Ok(()) => INKPOD_STATUS_OK,
                 Err(status) => status,
             },
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Applies a view-only command to the registered subpalette source.
+///
+/// # Safety
+/// Core and input must be complete live owner-thread records. `view_id` must
+/// identify a live secondary view created by this Core.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_subpalette_view_apply(
+    core: *mut InkpodCore,
+    view_id: u64,
+    input: *const InkpodViewInput,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodViewInput") } {
+            return status;
+        }
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let input = unsafe { &*input };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let command = match parse_view_command(&core.core, input) {
+            Ok(command) => command,
+            Err(status) => return status,
+        };
+        match core.core.apply_subpalette_view_for(view_id, command) {
+            Ok(_) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Samples one exact-depth subpalette pixel through its independent view.
+///
+/// # Safety
+/// Core/output must be complete live owner-thread records and `view_id` must
+/// identify a live secondary view.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_subpalette_view_sample(
+    core: *mut InkpodCore,
+    view_id: u64,
+    device_x: f64,
+    device_y: f64,
+    output: *mut InkpodColorValue,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(output.cast_const(), "InkpodColorValue") } {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *output };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core
+            .core
+            .subpalette_view_sample(view_id, device_x, device_y)
+        {
+            Ok(color) => match write_color_value(output, color) {
+                Ok(()) => INKPOD_STATUS_OK,
+                Err(status) => status,
+            },
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Builds one Rust-owned immutable snapshot of the registered subpalette source.
+///
+/// # Safety
+/// Core/options/output must be complete live owner-thread records. The returned
+/// owner must be released with `inkpod_snapshot_release`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_subpalette_build_snapshot(
+    core: *mut InkpodCore,
+    view_id: u64,
+    options: *const InkpodSnapshotOptions,
+    out_snapshot: *mut *mut InkpodSnapshot,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null()
+            || !is_aligned(core)
+            || out_snapshot.is_null()
+            || !is_aligned(out_snapshot)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "subpalette snapshot pointer is invalid",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(options, "InkpodSnapshotOptions") } {
+            return status;
+        }
+        // SAFETY: Caller provides writable output handle storage.
+        unsafe { out_snapshot.write(ptr::null_mut()) };
+        // SAFETY: Complete live objects were validated above.
+        let core = unsafe { &mut *core };
+        let options = unsafe { &*options };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if options.reserved != 0 || options.feature_flags != INKPOD_FEATURE_NONE {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "snapshot options contain unsupported values",
+            );
+        }
+        match core.core.build_subpalette_snapshot_for(view_id) {
+            Ok(snapshot) => {
+                // SAFETY: Output storage receives exactly one Rust Box owner.
+                unsafe { out_snapshot.write(Box::into_raw(snapshot_handle(snapshot))) };
+                INKPOD_STATUS_OK
+            }
             Err(error) => map_core_error(error),
         }
     })

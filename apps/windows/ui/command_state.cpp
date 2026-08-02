@@ -597,7 +597,28 @@ void ProvideWorkspaceCommandStates(
     SetChecked(states, IDM_WINDOW_TOOL_PALETTE, input.tool_visible);
     SetChecked(states, IDM_WINDOW_TOOL_OPTIONS, input.tool_options_visible);
     SetChecked(states, IDM_WINDOW_COLOR_PANE, input.color_visible);
+    SetChecked(states, IDM_COLOR_PIN, input.color_pinned);
+    SetEnabled(states, IDM_COLOR_PIN, input.color_target_available);
     SetChecked(states, IDM_WINDOW_LAYER_PALETTE, input.layer_visible);
+    SetChecked(states, IDM_WINDOW_LOCATOR, input.locator_visible);
+    SetChecked(states, IDM_LOCATOR_PIN, input.locator_pinned);
+    SetChecked(states, IDM_LOCATOR_FIXED, input.locator_fixed);
+    SetChecked(states, IDM_LOCATOR_AUTOSCROLL, input.locator_auto_scroll);
+    SetEnabled(
+        states,
+        {IDM_LOCATOR_PIN, IDM_LOCATOR_FIXED, IDM_LOCATOR_AUTOSCROLL},
+        input.locator_target_available);
+    SetChecked(states, IDM_WINDOW_SEQUENCE, input.sequence_visible);
+    SetChecked(states, IDM_SEQUENCE_PIN, input.sequence_pinned);
+    SetEnabled(states, IDM_SEQUENCE_PIN, input.sequence_target_available);
+    SetChecked(states, IDM_WINDOW_LIGHT_TABLE, input.light_table_visible);
+    SetChecked(states, IDM_LIGHT_TABLE_PIN, input.light_table_pinned);
+    SetEnabled(states, IDM_LIGHT_TABLE_PIN, input.light_table_target_available);
+    SetChecked(states, IDM_WINDOW_SUBPALETTE, input.subpalette_visible);
+    SetChecked(states, IDM_SUBPALETTE_PIN, input.subpalette_pinned);
+    SetEnabled(states, IDM_SUBPALETTE_PIN, input.subpalette_target_available);
+    SetChecked(states, IDM_BATCH_PIN, input.batch_pinned);
+    SetEnabled(states, IDM_BATCH_PIN, input.batch_target_available);
     SetChecked(states, IDM_WORKSPACE_MIRROR, input.mirrored);
 }
 

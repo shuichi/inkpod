@@ -481,6 +481,28 @@ fn paint_001_magnified_device_click_matches_the_locator_pixel_cell() {
 }
 
 #[test]
+fn view_003_locator_neighborhood_is_bounded_clipped_and_read_only() {
+    let mut core = Core::new();
+    core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 0.0,
+        y: 0.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let before = core.document_info().unwrap();
+    let neighborhood = core.locator_neighborhood(None, 0.25, 0.25, 1).unwrap();
+    assert_eq!((neighborhood.origin_x, neighborhood.origin_y), (-1, -1));
+    assert_eq!((neighborhood.width, neighborhood.height), (3, 3));
+    assert_eq!(neighborhood.pixels_rgba8.len(), 36);
+    assert_eq!(&neighborhood.pixels_rgba8[0..4], &[0, 0, 0, 0]);
+    assert_eq!(&neighborhood.pixels_rgba8[16..20], &[0, 0, 0, 255]);
+    assert!(core.locator_neighborhood(None, 0.0, 0.0, 17).is_err());
+    assert_eq!(core.document_info().unwrap(), before);
+}
+
+#[test]
 fn abi_002_snapshot_composites_visible_main_line_over_color() {
     let mut core = Core::new();
     core.new_cell(64, 64, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)

@@ -207,11 +207,65 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 299 production commands exactly one
+The fixed command-state catalog assigns all 311 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
 toolbar; every user command remains reachable through a menu leaf.
+
+G8 adds a UI-thread-owned, fixed-capacity `PaneTargetRegistry` beside the target
+registry. It stores only `PaneInstanceId`, strong session/view/job IDs,
+generation-tagged value contexts, and the four explicit policies `Application`,
+`FollowActiveView`, `PinnedDocument`, and `Job`. A pane captures its action target
+before routing; a stale pinned or job target never falls back to the active tab.
+Closing a pinned document returns that pane to follow mode with a consumable
+accessible notice, while closing a job leaves its pane action disabled until it
+is explicitly rebound. Locator completion records copy the captured context and
+bounded pixel data into application-lifetime storage; `PostMessage` carries only
+the token and generation.
+
+The sequence/file-preview palette uses the same pane-target registry. Its header
+shows follow/pinned state, and every import or cell activation captures one exact
+session/generation before dispatch. Mixed PNG/TIFF/TGA/BMP inputs are copied and
+decoded atomically on the Core owner thread; C++ neither decodes pixels nor owns a
+second sequence model. The modeless owner-drawn list obtains bounded straight
+RGBA8 thumbnails through caller-owned query/copy buffers. Opening a numbered
+raster discovers only sibling files whose prefix and suffix around the final
+numeric run match, then selects the opened cell in Core natural order. Dirty-cell
+cancel, stale target, decode failure, and endpoint no-op leave the current cell
+unchanged.
+
+The Light Table palette also uses the pane-target registry. Its set/item
+selection is valid only with the captured session/generation namespace, and
+every mutation dispatches to that exact Core handle. Canvas movement retains
+the issue-time `CommandContext` until commit or cancel; a focus change, close,
+or stale generation cannot redirect it. The UI caches only bounded set/item
+metadata, while raster storage, snapshots, history, and persistence remain
+Core-owned. Modeless pane state is attached on the UI thread after dialog
+creation; window messages do not carry C++ object or Rust-owned pointers.
+
+The subpalette/reference palette completes the read-only auxiliary-display
+path. It owns one UI-thread Canvas child and one auxiliary `CanvasId`; the
+RendererHost still owns that Canvas surface and presents it on the renderer
+thread. Its captured document session owns one Core-local secondary view for
+independent zoom, pan, flip, and viewport state. Core builds a Rust-owned
+immutable snapshot directly from the registered sequence raster without
+installing it as the editable document or changing document revision, dirty
+state, history, or savepoint. The Canvas consumes pointer strokes and converts
+only view gestures and sample coordinates; it never enqueues edit input. A
+target rebind or shutdown first unbinds the snapshot sink, closes the secondary
+view on the captured Core owner thread, destroys the palette, and unregisters
+the auxiliary Canvas ID. Queue rejection retains a single snapshot-release
+owner.
+
+Color and Batch panes use the same target registry. Color registration, clear,
+load, save, and main-line changes capture the pane's exact session/generation;
+the header states follow or pinned policy. A Batch run replaces that policy
+temporarily with a generation-tagged `JobSessionId`. Preview, synchronous smoke,
+and queued execution all use the captured document session instead of resolving
+the later active tab. Completion validates the original target, publishes
+progress/result only there, closes the job, and restores the prior follow/pin
+policy. Closed/stale targets and queue failure cannot redirect a result.
 
 The canonical workspace is represented by an HWND-free, fixed-capacity
 `DockLayoutModel`. Four primary `PaneDescriptor` records give tool, tool options,

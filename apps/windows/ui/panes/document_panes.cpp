@@ -152,9 +152,13 @@ InkpodStatus DocumentPanesController::LoadTree(
 }
 
 InkpodStatus DocumentPanesController::LoadLightTable(
+    app::DocumentSessionId session,
+    app::Generation generation,
     std::vector<LightTablePaneSet>& sets,
     std::vector<LightTablePaneItem>& items) noexcept {
     return engine_.Invoke(
+        session,
+        generation,
         [&sets, &items](InkpodCore* core) {
             try {
                 sets.clear();
@@ -206,8 +210,12 @@ InkpodStatus DocumentPanesController::LoadLightTable(
 }
 
 InkpodStatus DocumentPanesController::LoadSequence(
+    app::DocumentSessionId session,
+    app::Generation generation,
     std::vector<SequencePaneCell>& cells) noexcept {
     return engine_.Invoke(
+        session,
+        generation,
         [&cells](InkpodCore* core) {
             try {
                 cells.clear();
@@ -233,6 +241,31 @@ InkpodStatus DocumentPanesController::LoadSequence(
                         static_cast<std::size_t>(cell.info.name_bytes));
                     cell.info.name_utf8 = nullptr;
                     cell.info.name_capacity = 0U;
+                    InkpodSequenceThumbnailBuffer thumbnail{};
+                    thumbnail.struct_size = sizeof(thumbnail);
+                    InkpodStatus thumbnail_status =
+                        inkpod_core_sequence_thumbnail_get(core, index, &thumbnail);
+                    if (thumbnail_status != INKPOD_STATUS_OK
+                        || thumbnail.required_bytes == 0U
+                        || thumbnail.required_bytes > 64U * 64U * 4U
+                        || thumbnail.stride_bytes != thumbnail.width * 4U
+                        || thumbnail.required_bytes
+                            != static_cast<std::uint64_t>(thumbnail.stride_bytes)
+                                * thumbnail.height) {
+                        return thumbnail_status == INKPOD_STATUS_OK
+                            ? INKPOD_STATUS_INVALID_STATE
+                            : thumbnail_status;
+                    }
+                    cell.thumbnail_rgba.resize(
+                        static_cast<std::size_t>(thumbnail.required_bytes));
+                    thumbnail.pixels_rgba8 = cell.thumbnail_rgba.data();
+                    thumbnail.pixel_capacity = cell.thumbnail_rgba.size();
+                    thumbnail_status =
+                        inkpod_core_sequence_thumbnail_get(core, index, &thumbnail);
+                    if (thumbnail_status != INKPOD_STATUS_OK) {
+                        return thumbnail_status;
+                    }
+                    cell.thumbnail_stride_bytes = thumbnail.stride_bytes;
                     cells.push_back(std::move(cell));
                 }
             } catch (const std::bad_alloc&) {

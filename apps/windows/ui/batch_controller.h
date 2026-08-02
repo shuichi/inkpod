@@ -25,7 +25,9 @@ public:
         app::BatchUiState& batch,
         app::CoreHost& engine) noexcept;
 
-    InkpodStatus Preview(InkpodBatchRunScope scope) noexcept;
+    InkpodStatus Preview(
+        const app::CommandContext& context,
+        InkpodBatchRunScope scope) noexcept;
     InkpodStatus Start(
         const app::CommandContext& context,
         InkpodBatchRunScope scope,

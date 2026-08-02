@@ -1,6 +1,6 @@
 use inkpod_core::*;
 
-pub(crate) use inkpod_format::{BATCH_GRAPH_VERSION, CommonRaster};
+pub(crate) use inkpod_format::{BATCH_GRAPH_VERSION, CommonRaster, encode_common_raster};
 pub(crate) use std::collections::BTreeSet;
 pub(crate) use std::fs;
 pub(crate) use std::path::{Path, PathBuf};

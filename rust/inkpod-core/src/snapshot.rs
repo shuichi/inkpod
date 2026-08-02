@@ -324,6 +324,50 @@ impl Core {
             vector_fills,
         }
     }
+
+    /// Builds an immutable read-only snapshot of the registered subpalette cell.
+    ///
+    /// The source raster is never installed as the editable document. The supplied
+    /// secondary view contributes only its independent zoom, pan, flip, and viewport
+    /// state; document revisions, history, dirty state, and render cache are unchanged.
+    pub fn build_subpalette_snapshot_for(&self, view_id: u64) -> Result<RenderSnapshot, CoreError> {
+        let view = *self
+            .secondary_views
+            .get(&ViewId::from_raw(view_id))
+            .ok_or(CoreError::InvalidArgument("view ID does not exist"))?;
+        let sequence = self
+            .sequence
+            .as_ref()
+            .ok_or(CoreError::InvalidState("no sequence is configured"))?;
+        let index = self
+            .subpalette_index
+            .ok_or(CoreError::InvalidState("subpalette has no registered cell"))?;
+        let cell = sequence
+            .cells
+            .get(index)
+            .ok_or(CoreError::InvalidState("subpalette source disappeared"))?;
+        let raster = &cell.raster;
+        let mut tiles = Vec::new();
+        for coord in raster.allocated_coords() {
+            let source_revision = RenderRevision::from_raw(raster.tile_revision(coord));
+            if let Some(tile) =
+                compose_reference_tile(raster, coord, source_revision, source_revision)
+            {
+                tiles.push(tile);
+            }
+        }
+        Ok(RenderSnapshot {
+            revision: RenderRevision::from_raw(raster.checksum()),
+            feature_flags: 0,
+            view,
+            document_size: DocumentSizeU32::new(raster.width(), raster.height()),
+            guides: Vec::new(),
+            grid: GridConfig::default(),
+            tiles,
+            vector_segments: Vec::new(),
+            vector_fills: Vec::new(),
+        })
+    }
 }
 
 // Shared implementation helpers for this responsibility.
@@ -454,6 +498,52 @@ pub(super) fn compose_tile(
     }
     Some(RenderTile {
         tile_id: (u64::from(coord.y) << 32) | u64::from(coord.x) | (1_u64 << 63),
+        origin: DocumentPointI32 {
+            x: origin_x as i32,
+            y: origin_y as i32,
+        },
+        size: DocumentSizeU32::new(width, height),
+        stride_bytes: stride,
+        pixels: Arc::from(pixels),
+        source_revision,
+        tile_revision,
+    })
+}
+
+fn compose_reference_tile(
+    raster: &TileRaster,
+    coord: TileCoord,
+    source_revision: RenderRevision,
+    tile_revision: RenderRevision,
+) -> Option<RenderTile> {
+    let origin_x = coord.x.checked_mul(TILE_SIZE)?;
+    let origin_y = coord.y.checked_mul(TILE_SIZE)?;
+    if origin_x >= raster.width() || origin_y >= raster.height() {
+        return None;
+    }
+    let width = TILE_SIZE.min(raster.width() - origin_x);
+    let height = TILE_SIZE.min(raster.height() - origin_y);
+    let stride = width.checked_mul(4)?;
+    let capacity = usize::try_from(stride.checked_mul(height)?).ok()?;
+    let mut pixels = Vec::with_capacity(capacity);
+    for y in 0..height {
+        for x in 0..width {
+            let rgba = rgba8_for_display(raster.pixel(origin_x + x, origin_y + y).ok()?)?;
+            let alpha = u32::from(rgba[3]);
+            let premultiply = |channel: u8| ((u32::from(channel) * alpha + 127) / 255) as u8;
+            pixels.extend_from_slice(&[
+                premultiply(rgba[2]),
+                premultiply(rgba[1]),
+                premultiply(rgba[0]),
+                rgba[3],
+            ]);
+        }
+    }
+    if pixels.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+        return None;
+    }
+    Some(RenderTile {
+        tile_id: (u64::from(coord.y) << 32) | u64::from(coord.x) | (1_u64 << 62),
         origin: DocumentPointI32 {
             x: origin_x as i32,
             y: origin_y as i32,

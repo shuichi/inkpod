@@ -3,6 +3,8 @@ use inkpod_image::{FNV_OFFSET, PixelFormat, PixelValue, TileCoord, fnv_bytes};
 use std::fmt;
 use std::sync::atomic::AtomicU64;
 pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
+/// Current development format. Increment for every serialized schema change
+/// until the user declares a format freeze; older versions are not migrated.
 pub const FORMAT_VERSION: u32 = 2;
 pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
 pub(super) const HEADER_BYTES: usize = 32;

@@ -64,6 +64,8 @@ void CommandTargetRegistry::InvalidateAll() noexcept {
     job_count_ = 0U;
     panes_.fill({});
     pane_count_ = 0U;
+    auxiliary_canvases_.fill({});
+    auxiliary_canvas_count_ = 0U;
     workspace_ = {};
     editor_groups_.fill({});
     editor_group_count_ = 0U;
@@ -340,6 +342,20 @@ std::optional<PaneInstanceId> CommandTargetRegistry::RegisterPane() noexcept {
 
 bool CommandTargetRegistry::UnregisterPane(PaneInstanceId pane) noexcept {
     return Remove(panes_, pane_count_, pane);
+}
+
+std::optional<CanvasId> CommandTargetRegistry::RegisterAuxiliaryCanvas() noexcept {
+    Initialize();
+    if (auxiliary_canvas_count_ >= auxiliary_canvases_.size()) {
+        return std::nullopt;
+    }
+    const CanvasId canvas = Issue<CanvasId>();
+    auxiliary_canvases_[auxiliary_canvas_count_++] = canvas;
+    return canvas;
+}
+
+bool CommandTargetRegistry::UnregisterAuxiliaryCanvas(CanvasId canvas) noexcept {
+    return Remove(auxiliary_canvases_, auxiliary_canvas_count_, canvas);
 }
 
 std::optional<JobSessionId> CommandTargetRegistry::BeginJob() noexcept {

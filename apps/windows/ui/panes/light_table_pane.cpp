@@ -1,0 +1,271 @@
+#include "light_table_pane.h"
+
+#include <array>
+#include <cwchar>
+#include <utility>
+
+#include "app/resource.h"
+#include "inkpod/core_ffi.h"
+
+namespace inkpod::windows::ui::panes {
+namespace {
+
+void Dispatch(LightTablePaneDialogState& state, UINT command) noexcept {
+    if (state.dispatch_command != nullptr) {
+        state.dispatch_command(state.context, command);
+    }
+}
+
+void SelectSet(HWND dialog, LightTablePaneDialogState& state) noexcept {
+    const LRESULT selected = SendDlgItemMessageW(
+        dialog, IDC_LIGHT_TABLE_SETS, CB_GETCURSEL, 0, 0);
+    if (selected == CB_ERR
+        || static_cast<std::size_t>(selected) >= state.view.sets.size()
+        || state.select_entry == nullptr) {
+        return;
+    }
+    const auto index = static_cast<std::uint32_t>(selected);
+    state.select_entry(
+        state.context, true, index, state.view.sets[index].id);
+}
+
+void SelectItem(HWND dialog, LightTablePaneDialogState& state) noexcept {
+    const LRESULT selected = SendDlgItemMessageW(
+        dialog, IDC_LIGHT_TABLE_ITEMS, LB_GETCURSEL, 0, 0);
+    if (selected == LB_ERR
+        || static_cast<std::size_t>(selected) >= state.view.items.size()
+        || state.select_entry == nullptr) {
+        return;
+    }
+    const auto index = static_cast<std::uint32_t>(selected);
+    state.select_entry(
+        state.context, false, index, state.view.items[index].id);
+}
+
+INT_PTR CALLBACK LightTablePaneProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM) noexcept {
+    auto* state = reinterpret_cast<LightTablePaneDialogState*>(
+        GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    switch (message) {
+        case WM_INITDIALOG:
+            return TRUE;
+        case WM_COMMAND:
+            if (state == nullptr) {
+                break;
+            }
+            switch (LOWORD(wparam)) {
+                case IDC_LIGHT_TABLE_PIN:
+                    Dispatch(*state, IDM_LIGHT_TABLE_PIN);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_SETS:
+                    if (HIWORD(wparam) == CBN_SELCHANGE) {
+                        SelectSet(dialog, *state);
+                    }
+                    return TRUE;
+                case IDC_LIGHT_TABLE_ITEMS:
+                    if (HIWORD(wparam) == LBN_SELCHANGE) {
+                        SelectItem(dialog, *state);
+                    } else if (HIWORD(wparam) == LBN_DBLCLK) {
+                        SelectItem(dialog, *state);
+                        Dispatch(*state, IDM_LT_ITEM_SWAP);
+                    }
+                    return TRUE;
+                case IDC_LIGHT_TABLE_SET_NEW:
+                    Dispatch(*state, IDM_LT_SET_NEW);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_SET_DUPLICATE:
+                    Dispatch(*state, IDM_LT_SET_DUPLICATE);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_SET_DELETE:
+                    Dispatch(*state, IDM_LT_SET_DELETE);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_GLOBAL_OPACITY:
+                    Dispatch(*state, IDM_LT_GLOBAL_OPACITY);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_ITEM_ADD:
+                    Dispatch(*state, IDM_LT_ITEM_ADD);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_ITEM_RELOAD:
+                    Dispatch(*state, IDM_LT_ITEM_RELOAD);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_ITEM_DELETE:
+                    Dispatch(*state, IDM_LT_ITEM_DELETE);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_ITEM_UP:
+                    Dispatch(*state, IDM_LT_ITEM_UP);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_ITEM_DOWN:
+                    Dispatch(*state, IDM_LT_ITEM_DOWN);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_ITEM_PROPERTIES:
+                    Dispatch(*state, IDM_LT_ITEM_PROPERTIES);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_ITEM_MOVE:
+                    Dispatch(*state, IDM_LT_ITEM_MOVE);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_ITEM_SWAP:
+                    Dispatch(*state, IDM_LT_ITEM_SWAP);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_PREVIOUS:
+                    Dispatch(*state, IDM_SEQ_PREVIOUS);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_NEXT:
+                    Dispatch(*state, IDM_SEQ_NEXT);
+                    return TRUE;
+                case IDCANCEL:
+                    ShowWindow(dialog, SW_HIDE);
+                    return TRUE;
+                default:
+                    break;
+            }
+            break;
+        case WM_CLOSE:
+            ShowWindow(dialog, SW_HIDE);
+            return TRUE;
+        case WM_NCDESTROY:
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
+std::wstring ItemLabel(const LightTablePaneItemView& item) {
+    const wchar_t* mode = item.display_mode == INKPOD_LIGHT_TABLE_MONOTONE
+        ? L"単色"
+        : (item.display_mode == INKPOD_LIGHT_TABLE_HALFTONE ? L"網点" : L"色");
+    std::array<wchar_t, 512U> label{};
+    (void)_snwprintf_s(
+        label.data(),
+        label.size(),
+        _TRUNCATE,
+        L"%ls  [%ls / %u%%]  X %.1f  Y %.1f%ls",
+        item.name.c_str(),
+        mode,
+        item.opacity_milli / 10U,
+        static_cast<double>(item.translate_x_milli) / 1000.0,
+        static_cast<double>(item.translate_y_milli) / 1000.0,
+        (item.flags & INKPOD_LIGHT_TABLE_ITEM_VISIBLE) != 0U
+            ? L""
+            : L"  (非表示)");
+    return label.data();
+}
+
+}  // namespace
+
+HWND CreateLightTablePaneDialog(
+    HINSTANCE instance, HWND owner, LightTablePaneDialogState& state) noexcept {
+    if (state.dispatch_command == nullptr || state.select_entry == nullptr) {
+        return nullptr;
+    }
+    const HWND dialog = CreateDialogParamW(
+        instance,
+        MAKEINTRESOURCEW(IDD_LIGHT_TABLE_PALETTE),
+        owner,
+        LightTablePaneProcedure,
+        0);
+    if (dialog == nullptr) {
+        return nullptr;
+    }
+    SetWindowLongPtrW(
+        dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
+    SetWindowTextW(
+        GetDlgItem(dialog, IDC_LIGHT_TABLE_SETS),
+        L"ライトテーブルセット");
+    SetWindowTextW(
+        GetDlgItem(dialog, IDC_LIGHT_TABLE_ITEMS),
+        L"ライトテーブル参照画像");
+    return dialog;
+}
+
+void UpdateLightTablePaneDialog(HWND dialog, LightTablePaneView view) noexcept {
+    if (dialog == nullptr) {
+        return;
+    }
+    auto* state = reinterpret_cast<LightTablePaneDialogState*>(
+        GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    if (state == nullptr) {
+        return;
+    }
+    state->view = std::move(view);
+    SetDlgItemTextW(dialog, IDC_LIGHT_TABLE_TARGET, state->view.target_text.c_str());
+    SetDlgItemTextW(
+        dialog,
+        IDC_LIGHT_TABLE_PIN,
+        state->view.pinned ? L"追従へ戻す" : L"文書に固定");
+
+    const HWND sets = GetDlgItem(dialog, IDC_LIGHT_TABLE_SETS);
+    SendMessageW(sets, WM_SETREDRAW, FALSE, 0);
+    SendMessageW(sets, CB_RESETCONTENT, 0, 0);
+    for (const auto& set : state->view.sets) {
+        std::array<wchar_t, 384U> label{};
+        (void)_snwprintf_s(
+            label.data(),
+            label.size(),
+            _TRUNCATE,
+            L"%ls  (%u項目 / %u%%)",
+            set.name.c_str(),
+            set.item_count,
+            set.opacity_milli / 10U);
+        (void)SendMessageW(
+            sets, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.data()));
+    }
+    if (state->view.selected_set_index != UINT32_MAX
+        && state->view.selected_set_index < state->view.sets.size()) {
+        SendMessageW(sets, CB_SETCURSEL, state->view.selected_set_index, 0);
+    }
+    SendMessageW(sets, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(sets, nullptr, TRUE);
+
+    const HWND items = GetDlgItem(dialog, IDC_LIGHT_TABLE_ITEMS);
+    SendMessageW(items, WM_SETREDRAW, FALSE, 0);
+    SendMessageW(items, LB_RESETCONTENT, 0, 0);
+    for (const auto& item : state->view.items) {
+        const std::wstring label = ItemLabel(item);
+        (void)SendMessageW(
+            items, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+    }
+    if (state->view.selected_item_index != UINT32_MAX
+        && state->view.selected_item_index < state->view.items.size()) {
+        SendMessageW(items, LB_SETCURSEL, state->view.selected_item_index, 0);
+    }
+    SendMessageW(items, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(items, nullptr, TRUE);
+
+    const bool target = state->view.target_available;
+    const bool has_set = target && !state->view.sets.empty();
+    const bool has_item = target && !state->view.items.empty();
+    EnableWindow(GetDlgItem(dialog, IDC_LIGHT_TABLE_PIN), target ? TRUE : FALSE);
+    EnableWindow(sets, has_set ? TRUE : FALSE);
+    EnableWindow(items, has_item ? TRUE : FALSE);
+    for (const int control : {
+             IDC_LIGHT_TABLE_SET_NEW,
+             IDC_LIGHT_TABLE_PREVIOUS,
+             IDC_LIGHT_TABLE_NEXT}) {
+        EnableWindow(GetDlgItem(dialog, control), target ? TRUE : FALSE);
+    }
+    for (const int control : {
+             IDC_LIGHT_TABLE_SET_DUPLICATE,
+             IDC_LIGHT_TABLE_SET_DELETE,
+             IDC_LIGHT_TABLE_GLOBAL_OPACITY,
+             IDC_LIGHT_TABLE_ITEM_ADD}) {
+        EnableWindow(GetDlgItem(dialog, control), has_set ? TRUE : FALSE);
+    }
+    for (const int control : {
+             IDC_LIGHT_TABLE_ITEM_RELOAD,
+             IDC_LIGHT_TABLE_ITEM_DELETE,
+             IDC_LIGHT_TABLE_ITEM_UP,
+             IDC_LIGHT_TABLE_ITEM_DOWN,
+             IDC_LIGHT_TABLE_ITEM_PROPERTIES,
+             IDC_LIGHT_TABLE_ITEM_MOVE,
+             IDC_LIGHT_TABLE_ITEM_SWAP}) {
+        EnableWindow(GetDlgItem(dialog, control), has_item ? TRUE : FALSE);
+    }
+    SetDlgItemTextW(
+        dialog,
+        IDC_LIGHT_TABLE_EMPTY,
+        has_item ? L"" : state->view.empty_text.c_str());
+}
+
+}  // namespace inkpod::windows::ui::panes
