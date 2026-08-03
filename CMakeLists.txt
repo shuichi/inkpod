@@ -290,6 +290,11 @@ if(MSVC)
 endif()
 
 if(WIN32)
+    set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/manual.html")
+    set_property(SOURCE tests/windows_embedded_manual.rc APPEND PROPERTY
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/manual.html")
+
     add_executable(inkpod_windows_activation_tests
         apps/windows/app/activation.cpp
         apps/windows/app/activation.h
@@ -330,6 +335,27 @@ if(WIN32)
     add_test(
         NAME inkpod_windows_session_recovery
         COMMAND inkpod_windows_session_recovery_tests)
+
+    add_executable(inkpod_windows_embedded_manual_tests
+        apps/windows/app/embedded_manual.cpp
+        apps/windows/app/embedded_manual.h
+        tests/windows_embedded_manual.cpp
+        tests/windows_embedded_manual.rc)
+    target_include_directories(inkpod_windows_embedded_manual_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows"
+        "${CMAKE_BINARY_DIR}/generated")
+    target_compile_definitions(inkpod_windows_embedded_manual_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_embedded_manual_tests PRIVATE
+        ole32
+        shell32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_embedded_manual_tests)
+        target_compile_options(inkpod_windows_embedded_manual_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_embedded_manual
+        COMMAND inkpod_windows_embedded_manual_tests)
 
     add_executable(inkpod_windows_launch_options_tests
         apps/windows/app/launch_options.cpp
@@ -514,6 +540,8 @@ if(WIN32)
         apps/windows/app/document_identity.h
         apps/windows/app/document_session.cpp
         apps/windows/app/document_session.h
+        apps/windows/app/embedded_manual.cpp
+        apps/windows/app/embedded_manual.h
         apps/windows/app/recent_documents.cpp
         apps/windows/app/recent_documents.h
         apps/windows/app/session_recovery.cpp

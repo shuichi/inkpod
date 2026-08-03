@@ -1,0 +1,3 @@
+#include "../apps/windows/app/resource.h"
+
+IDR_MANUAL_HTML RCDATA "../manual.html"

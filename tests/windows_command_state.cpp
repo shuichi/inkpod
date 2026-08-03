@@ -135,6 +135,7 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
     const auto* next_tab = FindShortcutSequence(shortcuts, IDM_TAB_NEXT);
     const auto* previous_tab =
         FindShortcutSequence(shortcuts, IDM_TAB_PREVIOUS);
+    const auto* manual = FindShortcutSequence(shortcuts, IDM_HELP_MANUAL);
     return save != nullptr && save->stroke_count == 1U
         && save->strokes[0].virtual_key == static_cast<std::uint32_t>('S')
         && save->strokes[0].modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL
@@ -161,7 +162,10 @@ bool ShortcutCatalogIsCompleteAndPrefixFree() {
         && previous_tab->strokes[0].virtual_key == VK_TAB
         && previous_tab->strokes[0].modifiers
             == (INKPOD_SHORTCUT_MODIFIER_CONTROL
-                | INKPOD_SHORTCUT_MODIFIER_SHIFT);
+                | INKPOD_SHORTCUT_MODIFIER_SHIFT)
+        && manual != nullptr && manual->stroke_count == 1U
+        && manual->strokes[0].virtual_key == VK_F1
+        && manual->strokes[0].modifiers == 0U;
 }
 
 } // namespace
@@ -171,6 +175,7 @@ int main() {
     CommandStateSet states = ComputeCommandStates(inputs);
     if (!CatalogHasExactlyOneOwner(states)
         || !ShortcutCatalogIsCompleteAndPrefixFree()
+        || FindCommandState(states, IDM_HELP_MANUAL) == nullptr
         || FindCommandState(states, IDM_HELP_ABOUT) == nullptr
         || IsCommandEnabled(states, IDM_FILE_SAVE)
         || IsCommandEnabled(states, IDM_VIEW_FIT)

@@ -28,6 +28,7 @@
 #include "app/clipboard_adapter.h"
 #include "app/core_host.h"
 #include "app/document_shell.h"
+#include "app/embedded_manual.h"
 #include "inkpod/core_ffi.h"
 #include "app/resource.h"
 #include "ui/dialogs/about_dialog.h"
@@ -100,6 +101,7 @@ using inkpod::app::DocumentViewId;
 using inkpod::app::EditorGroupId;
 using inkpod::app::EditorGroup;
 using inkpod::app::EditorSplitOrientation;
+using inkpod::app::EmbeddedManualStatus;
 using inkpod::app::WorkspaceWindowId;
 using inkpod::app::WorkspaceWindow;
 
@@ -3098,6 +3100,22 @@ void ShowCoreError(const ApplicationHost& state, HWND owner, const wchar_t* oper
         L"%ls に失敗しました。\n\n%ls",
         operation,
         detail.c_str());
+    MessageBoxW(owner, message.data(), L"inkpod", MB_OK | MB_ICONERROR);
+}
+
+void ShowEmbeddedManualError(const ApplicationHost& state, HWND owner) noexcept {
+    if (state.lifetime.smoke_test) {
+        return;
+    }
+    std::array<wchar_t, 256U> message{};
+    if (LoadStringW(
+            state.lifetime.instance,
+            IDS_HELP_MANUAL_OPEN_FAILED,
+            message.data(),
+            static_cast<int>(message.size()))
+        <= 0) {
+        return;
+    }
     MessageBoxW(owner, message.data(), L"inkpod", MB_OK | MB_ICONERROR);
 }
 
@@ -13222,6 +13240,19 @@ std::optional<LRESULT> RouteApplicationCommand(
                 return 0;
             }
             UpdateMenuState(*state);
+            return 1;
+        }
+        case IDM_HELP_MANUAL: {
+            std::wstring manual_path;
+            const EmbeddedManualStatus status = state->lifetime.smoke_test
+                ? inkpod::app::PrepareEmbeddedManual(
+                      state->lifetime.instance, manual_path)
+                : inkpod::app::OpenEmbeddedManual(
+                      state->lifetime.instance, window);
+            if (status != EmbeddedManualStatus::Ok) {
+                ShowEmbeddedManualError(*state, window);
+                return 0;
+            }
             return 1;
         }
         case IDM_HELP_ABOUT:

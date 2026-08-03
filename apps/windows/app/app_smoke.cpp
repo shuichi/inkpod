@@ -842,7 +842,9 @@ const wchar_t* RejectViewOptionsForSmoke(
 int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     const HMENU menu = GetMenu(state.Workspace().windows.window);
     if (menu == nullptr
+        || GetMenuState(menu, IDM_HELP_MANUAL, MF_BYCOMMAND) == static_cast<UINT>(-1)
         || GetMenuState(menu, IDM_HELP_ABOUT, MF_BYCOMMAND) == static_cast<UINT>(-1)
+        || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_HELP_MANUAL, 0) != 1
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
         return 29;
     }
