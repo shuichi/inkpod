@@ -1,16 +1,18 @@
 # GUI modernization baseline
 
-This document freezes the pre-G1 regression baseline required by `GUI.md` G0.
-It describes the implementation that must remain usable while G1 and later
-milestones change ownership and presentation. It is not the target architecture
-and it is not a chronological verification log.
+This document freezes the historical pre-G1 regression baseline captured before
+the completed GUI modernization. It is not the current architecture or a
+chronological verification log. Current product contracts live in
+[`../PROMPT.md`](../PROMPT.md), development boundaries in
+[`../AGENTS.md`](../AGENTS.md), and the former milestone plan remains in Git
+history.
 
 ## Scope and sources of truth
 
 | Item | Baseline source |
 |---|---|
 | Product behavior | [`../PROMPT.md`](../PROMPT.md) |
-| Milestone order and gates | [`../GUI.md`](../GUI.md) |
+| Completed modernization plan | Git history; current contracts are in `PROMPT.md` and `AGENTS.md` |
 | Current ownership/thread structure | [`architecture.md`](architecture.md) |
 | Requirement state | [`compatibility.md`](compatibility.md) |
 | Current verification summary | [`implementation-status.md`](implementation-status.md) |
@@ -22,7 +24,7 @@ continues to record the G0 comparison point.
 
 ## Pre-G1 ownership baseline
 
-| Area | G0 baseline | Target difference tracked by `GUI.md` |
+| Area | G0 baseline | Completed target difference |
 |---|---|---|
 | Application/window | One `Application` creates one main `HWND`; stack-owned `AppContext` is the private composition root | G2 introduces process-owned `ApplicationHost` and `WorkspaceWindow` ownership; G10 makes windows plural |
 | Document | One `DocumentShellState` and one `CoreEngine` own one `InkpodCore` binding | G2 separates `DocumentSession`/`DocumentView`; G3 makes `CoreHost` session-keyed |
@@ -103,8 +105,8 @@ git diff --check
 | Windows x64 Debug CTest | Passed 11/11, including route/state/boundary, ABI, native application/DPI/device-lost, and MSIX payload smoke |
 | Whitespace check | Passed with `git diff --check` |
 
-ARM64 and Release are not G0 gates. They remain later milestone gates exactly as
-listed in `GUI.md`.
+ARM64 and Release were not G0 gates; they were covered by later modernization
+gates and are tracked by the current status and compatibility documents.
 
 ## Known differences at the G0 boundary
 

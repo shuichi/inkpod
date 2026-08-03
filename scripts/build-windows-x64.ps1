@@ -158,10 +158,33 @@ function ConvertTo-CmdToken {
     return '"' + $Token + '"'
 }
 
-function Invoke-BuildTool {
+function Resolve-BuildToolPath {
     param(
         [Parameter(Mandatory = $true)]
         [string] $Tool,
+
+        [AllowNull()]
+        [string] $DeveloperCommand
+    )
+
+    $commands = @(Get-Command -Name $Tool -CommandType Application `
+        -ErrorAction SilentlyContinue)
+    if ($commands.Count -gt 0) {
+        return [string] $commands[0].Source
+    }
+    if (-not [string]::IsNullOrEmpty($DeveloperCommand)) {
+        return $Tool
+    }
+    throw "Required build tool was not found on PATH: $Tool"
+}
+
+function Invoke-BuildTool {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $ToolPath,
+
+        [Parameter(Mandatory = $true)]
+        [string] $DisplayName,
 
         [Parameter(Mandatory = $true)]
         [string[]] $Arguments,
@@ -170,14 +193,12 @@ function Invoke-BuildTool {
         [string] $DeveloperCommand
     )
 
-    $toolCommand = Get-Command -Name $Tool -CommandType Application `
-        -ErrorAction Stop
-    Write-Host "> $Tool $($Arguments -join ' ')"
+    Write-Host "> $DisplayName $($Arguments -join ' ')"
 
     if ([string]::IsNullOrEmpty($DeveloperCommand)) {
-        & $toolCommand.Source @Arguments
+        & $ToolPath @Arguments
     } else {
-        $tokens = @($toolCommand.Source) + $Arguments |
+        $tokens = @($ToolPath) + $Arguments |
             ForEach-Object { ConvertTo-CmdToken -Token $_ }
         $commandLine = 'call "' + $DeveloperCommand +
             '" -no_logo -arch=x64 -host_arch=x64 && ' +
@@ -186,7 +207,7 @@ function Invoke-BuildTool {
     }
 
     if ($LASTEXITCODE -ne 0) {
-        throw "$Tool failed with exit code $LASTEXITCODE. Build number remains reserved."
+        throw "$DisplayName failed with exit code $LASTEXITCODE. Build number remains reserved."
     }
 }
 
@@ -195,11 +216,14 @@ if ($selectedConfigurations.Count -eq 0) {
 }
 
 $developerCommand = Resolve-VsDevCmd
-Get-Command -Name "cmake.exe" -CommandType Application -ErrorAction Stop |
-    Out-Null
+$cmakeToolPath = Resolve-BuildToolPath `
+    -Tool "cmake.exe" `
+    -DeveloperCommand $developerCommand
+$ctestToolPath = $null
 if ($Test) {
-    Get-Command -Name "ctest.exe" -CommandType Application -ErrorAction Stop |
-        Out-Null
+    $ctestToolPath = Resolve-BuildToolPath `
+        -Tool "ctest.exe" `
+        -DeveloperCommand $developerCommand
 }
 
 if ($DryRun) {
@@ -209,6 +233,10 @@ if ($DryRun) {
     }
     Write-Host "Dry run: would reserve Inkpod build number $($currentBuildNumber + 1)."
     Write-Host "Configurations: $($selectedConfigurations -join ', ')"
+    Write-Host "CMake: $cmakeToolPath"
+    if ($Test) {
+        Write-Host "CTest: $ctestToolPath"
+    }
     return
 }
 
@@ -239,7 +267,8 @@ try {
     foreach ($selectedConfiguration in $selectedConfigurations) {
         $preset = "windows-x64-$($selectedConfiguration.ToLowerInvariant())"
         Invoke-BuildTool `
-            -Tool "cmake.exe" `
+            -ToolPath $cmakeToolPath `
+            -DisplayName "cmake.exe" `
             -Arguments @(
                 "--preset",
                 $preset,
@@ -251,13 +280,15 @@ try {
             $buildArguments += "--clean-first"
         }
         Invoke-BuildTool `
-            -Tool "cmake.exe" `
+            -ToolPath $cmakeToolPath `
+            -DisplayName "cmake.exe" `
             -Arguments $buildArguments `
             -DeveloperCommand $developerCommand
 
         if ($Test) {
             Invoke-BuildTool `
-                -Tool "ctest.exe" `
+                -ToolPath $ctestToolPath `
+                -DisplayName "ctest.exe" `
                 -Arguments @("--preset", $preset) `
                 -DeveloperCommand $developerCommand
         }

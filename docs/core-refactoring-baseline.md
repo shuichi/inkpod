@@ -1,10 +1,11 @@
 # Rust Core refactoring baseline
 
-This document is the durable M0 input for the refactoring milestones in
-[`REFACTORING.md`](../REFACTORING.md). It inventories the observable contract and
-the current mutation paths as of 2026-07-30. It is not a product status log and
-does not replace [`PROMPT.md`](../PROMPT.md),
-[`compatibility.md`](compatibility.md), or the tests.
+This document is the historical M0 input for the completed Core refactoring. It
+inventories the observable contract and mutation paths as of 2026-07-30. It is
+not a current product status log. Current behavior lives in
+[`PROMPT.md`](../PROMPT.md), development boundaries in
+[`AGENTS.md`](../AGENTS.md), and the former milestone plan remains in Git
+history.
 
 The inventory is intentionally expressed in terms of public operations and
 responsibility owners instead of line numbers, so later source movement does not

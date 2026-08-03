@@ -2,9 +2,9 @@
 
 ## 1. 適用範囲と仕様の正本
 
-この指示はリポジトリ全体に適用する。inkpod は、旧 PaintMan のアニメーション彩色ワークフローを、長期保守可能なクロスプラットフォーム設計で再構築するプロジェクトである。
+この指示はリポジトリ全体に適用する。inkpod は、PaintMan と合理的な互換性のあるアニメーション彩色ワークフローを、長期保守可能なクロスプラットフォーム設計で再構築するプロジェクトである。
 
-このファイルには、全タスクに常時適用する技術境界、品質基準、作業規律だけを置く。維持する機能、GUI メニュー、挙動契約、要件 ID、プロジェクト固有の実装指針は `PROMPT.md` を正本とし、ここへ複製しない。実装前に `PROMPT.md` の関連節を読み、現在状態や既知差分に関係する場合だけ `docs/implementation-status.md` と `docs/compatibility.md` の該当箇所を確認する。
+このファイルには、全タスクに常時適用する技術境界、品質基準、作業規律、すなわち「どう開発するか」だけを置く。維持する機能、GUI メニュー、利用者向け挙動、要件 ID、すなわち「何を作るか」は `PROMPT.md` を正本とし、ここへ複製しない。実装前に `PROMPT.md` の関連節を読み、現在状態や既知差分に関係する場合だけ `docs/implementation-status.md` と `docs/compatibility.md` の該当箇所を確認する。
 
 指示が競合する場合の優先順位は、今回のユーザー指示、`AGENTS.md`、`PROMPT.md`、テスト済みの既存契約の順とする。外部の旧製品マニュアルや画像を通常の実装時に参照しない。対応するファイル形式は `PROMPT.md` に明記されたものだけとし、未列挙の外部形式を追加しない。旧製品の画像、アイコン、文面、商標表示を複製しない。
 
@@ -23,6 +23,8 @@ Rust Core へ `HWND`、Windows message、COM/WinRT、Direct2D/Direct3D/DXGI/WIC/
 
 C++ に画像処理、レイヤー規則、選択演算、履歴、native file format の別実装を作らない。C++ command handler は入力を C ABI の command/event へ変換し、結果を UI と renderer へ反映する薄い adapter にする。
 
+Windows frontend の所有権は process 単位の `ApplicationHost`、top-level window 単位の `WorkspaceWindow`、論理文書単位の `DocumentSession`、表示単位の `DocumentView`、tab/Canvas slot 単位の `EditorGroup` に分ける。`CoreHost` と `RendererHost` は owner thread 上の registry を持ち、process-global な active document pointer や全機能を知る巨大 context を設けない。同じ文書の view は一つの session/Core handle を共有し、文書状態と view logical state を別 owner・別 revision にする。
+
 ## 3. コード構成とビルド
 
 責務は原則として次へ分離する。初期 milestone で空 crate や空 directory を大量生成しない。
@@ -38,7 +40,7 @@ C++ に画像処理、レイヤー規則、選択演算、履歴、native file f
 - `tests`: fixture、golden、FFI、integration
 - `docs`: architecture、FFI、file format、compatibility、status
 
-循環依存を避け、`inkpod-ffi` は公開 API の薄い変換だけにする。形式 crate から application state へ逆依存せず、必要なら serialization DTO を境界に置く。
+循環依存を避け、`inkpod-ffi` は公開 API の薄い変換だけにする。形式 crate から application state へ逆依存せず、必要なら serialization DTO を境界に置く。Core の公開 Rust API は C ABI から独立させ、FFI の pointer validation や `#[repr(C)]` 型を domain model へ浸透させない。
 
 - Rust は stable、edition 2024。nightly 固有機能へ依存しない。
 - Windows は MSVC C++20 と Unicode API を使い、Visual Studio 2022 または 2026 x64 を検証基準とする。
@@ -47,6 +49,7 @@ C++ に画像処理、レイヤー規則、選択演算、履歴、native file f
 - build にローカル絶対 path、手動 file copy、開発者個人だけの前提を埋め込まない。
 - 非 Windows でも Rust の build/test を可能にし、Win32 target は明示的に skip する。
 - 依存は必要最小限とし、配布ライセンスを確認して third-party notice を更新する。
+- `lib.rs` と `mod.rs` は module declaration と意図した re-export を中心にし、production logic を置かない。責務で module を分け、便宜的な `helpers`、`common`、`utils` や循環依存を作らず、visibility を必要最小限に保つ。
 
 ## 4. Rust Core の不変条件
 
@@ -62,6 +65,13 @@ C++ に画像処理、レイヤー規則、選択演算、履歴、native file f
 - Undo 後の新規編集では redo branch を破棄する。保存成功時の savepoint を持ち、dirty 判定を file timestamp だけに依存させない。
 - 長時間処理は進捗と cancellation を持ち、cancel、failure、stale revision で部分結果を commit しない。
 - 同じ状態と入力から同じ結果を返す。tile 順、thread 数、hash iteration 順で画像結果を変えない。
+- fill は再帰を使わず、scanline または上限付き明示 queue で selection、tile boundary、訪問数を検査する。color distance、alpha、rounding を固定し、gap close は仮想境界または別 transaction、overflow abort は all-or-nothing とする。
+
+同期 document edit は共通 transaction 境界を通す。transaction は開始時の document と base revision、作業状態、commit revision を保持し、作業状態だけを変更する。commit 前に stale base と overflow を検査し、明示的な一回の commit だけが document、revision、history、dirty、cache invalidation を同時に公開する。`Drop` で commit しない。意味上の no-op は revision、history、dirty、render content を進めない。長寿命 preview/stroke/floating selection と一回の同期 edit を同じ transaction 型へ押し込まない。
+
+stable ID、document/view/render/preview revision、history state は意味ごとの newtype にし、異なる型同士の暗黙変換を許さない。raw 固定幅整数との変換は C ABI、公開互換 API、file DTO の境界へ集約し、C ABI layout を Rust newtype の表現へ依存させない。zero の意味、ID の所属 namespace と lifetime、increment/overflow を型ごとに定義する。
+
+document、view logical、device 座標と point/size/rect/offset/zoom は意味ごとの型を使う。座標変換、flip、rounding、half-open pixel boundary は一か所に集約し、非有限値、極端な zoom/pan、最終 valid pixel、範囲外を検証する。Core の Canvas 変換へ OS DPI を適用しない。
 
 Rust は Direct2D command ではなく immutable render snapshot を生成する。snapshot には raster tile/vector/text/overlay、revision、dirty rect と cache invalidation 情報を含め、font 解決と GPU resource は frontend に任せる。Core の可変参照を snapshot から露出しない。
 
@@ -101,8 +111,11 @@ native extension は `.inkpod` とし、versioned manifest と圧縮可能な bl
 ## 7. Win32 と renderer
 
 - `wWinMain` と wide-character API を使い、`InitCommonControlsEx`、COM、renderer、Core の初期化失敗を安全に unwind する。
+- `main.cpp` は起動 mode と application runner に限定し、feature command、dialog、pane、smoke scenario を置かない。private declaration は `apps/windows` 以下に閉じ、公開 C ABI header へ出さない。
 - menu、toolbar、shortcut、context menu は同じ command ID と enable/checked state を共有する。
 - `WM_COMMAND` 等の message handler を責務別に分け、worker thread から `HWND` を直接操作しない。完了通知が必要なら `PostMessage` で UI thread の queue へ値だけを渡し、window 状態の変更は UI thread が行う。
+- command は発行時の immutable な `CommandContext` に workspace/session/view/pane/job の ID と generation を固定する。state query と execution は同じ target 解決を使い、query は副作用を持たず、stale target を現在 active な別文書へ再解決しない。controller は他 controller の private state を直接変更せず、各 command ID は一つの feature owner だけが処理する。
+- dialog は typed initial value と typed result だけを受け取り、完全な application state、Core handle、FFI を所有しない。Cancel は caller state を変更しない。
 - pen/mouse/touch は可能な範囲で `WM_POINTER` を用い、pressure/tilt のない mouse fallback を持つ。
 - Canvas の座標は client device pixel に統一し、`device = document * zoom + pan` を Core snapshot と renderer で共有する。D2D Canvas は pixel unit/96-DPI target とし、Per-Monitor DPI を Canvas transform へ二重適用しない。
 - UI の DPI 変換は `device_px = MulDiv(reference_px, target_dpi, reference_dpi)` とする。96 DPI 論理値の `reference_dpi` は 96、スクリーンショット等の実 device pixel は撮影時 DPI とし、同じ値へ DPI scale を二重適用しない。
@@ -111,18 +124,27 @@ native extension は `.inkpod` とし、versioned manifest と圧縮可能な bl
 - UI thread で大きな decode、filter、save を同期実行しない。非表示・最小化時は不要な描画を止める。
 - pan/zoom は GPU cache を再利用し、変更 tile だけ upload する。毎 frame の CPU 全面合成を避ける。
 - UI string は resource に集約し、日本語・英語、high DPI、high contrast、keyboard navigation、アクセシビリティを考慮する。
+- 非表示 tab の snapshot build と不要な Present を止め、GPU、thumbnail、reference、light-table cache に application-wide の上限と回収方針を持たせる。resource 使用量を document、view、Canvas、pane と cache category ごとに観測可能にする。
+- `--smoke-test` と `--abi-smoke-test` は実製品の UI/Core/renderer/ABI 経路を検証する private entry point として維持する。
 
 機能の正確な GUI、tool、fill、selection、filter、light table、batch の挙動は `PROMPT.md` の「内蔵機能仕様」を参照する。このファイルへ再掲しない。
 
 ## 8. 安全性と品質
 
-- `unsafe` は FFI と証明可能な hot path に局所化し、各 block に safety invariant を記述する。
+- `inkpod-core` は safe Rust を維持する。`unsafe` は FFI と証明可能な image hot path に局所化し、各 block に safety invariant を記述する。
 - allocation、寸法、stride、圧縮後 size、文字列長等に上限を設け、任意入力で panic、範囲外 access、制御不能な OOM を起こさない。
 - container、decoder、FFI に malformed tests と fuzz target を用意する。
 - user path、画像内容、未保存 document を log へ無制限に出さない。
 - 最適化は再現可能な benchmark と before/after に基づく。画質低下は暗黙に行わず明示設定にする。
 - placeholder、常時成功する stub、未接続 button、コンパイルしない巨大雛形を完成扱いしない。
+- test failure を削除、ignore、過大 tolerance で隠さない。
 - 既存のユーザー変更を上書きせず、対象外の refactor や formatting を混ぜない。
+
+公開 Rust API の rustdoc には、必要に応じて座標系・単位・範囲・境界、ID の所属と lifetime、success/no-op/error、revision/history/dirty/savepoint への影響、ownership、cancellation、panic の有無を記す。invalid input は通常 `CoreError` 等の明示 error にし、test や文書化のためだけの public accessor を追加しない。
+
+公開契約の regression test は public API から観測し、private helper の局所的不変条件だけを実装 file に colocate する。固定 seed、bounded case、失敗時の replay 情報を持つ state-machine/property test で determinism、failure/cancel atomicity、no-op stability、Undo/Redo round-trip、redo branch truncation、revision separation、savepoint、ID integrity を検証する。OS entropy、test 実行順、private field bridge に依存させない。
+
+benchmark は quick/full で同じ scenario と意味上の counter/checksum を使う。共有 CI の wall-clock 絶対値だけで失敗判定せず、同じ machine・profile・入力の複数回中央値で before/after を比較する。重い検証を理由なく ignored test に隠さない。
 
 ## 9. 検証と完了条件
 
@@ -132,12 +154,14 @@ native extension は `.inkpod` とし、versioned manifest と圧縮可能な bl
 cargo fmt --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
+cargo bench --package inkpod-core --bench core_workflows -- --quick
+cargo doc --package inkpod-core --all-features --no-deps
 cmake --preset <windows-preset>
 cmake --build --preset <windows-build-preset>
 ctest --preset <windows-test-preset>
 ```
 
-実際の preset 名を使う。非 Windows 環境でも Rust 検証を完了し、Win32 は Windows CI で検証する。実行できなかった検証を隠さない。
+実際の preset 名を使い、rustdoc は実行 shell に応じて `RUSTDOCFLAGS=-D warnings` 相当を設定する。非 Windows 環境でも Rust 検証を完了し、Win32 は Windows CI で検証する。実行できなかった検証を隠さない。
 
 必要なテストは次を含む。
 
@@ -145,6 +169,7 @@ ctest --preset <windows-test-preset>
 - format: `.inkpod` current-version round-trip、非現行 version 拒否、malformed/cancel test
 - ABI: header の C11/C++20 include、ownership、NULL/短い structure/未知 enum/二重 release の negative test
 - Windows: MSVC `/W4 /permissive-`、create/render、resize/DPI/device lost smoke test
+- Windows hardening: queue saturation、close 中 input、active stroke、stale snapshot、save failure、allocation failure、shutdown race の fault injection、tab/window/layout/device reset の反復 soak、keyboard/UI Automation/high contrast/DPI/screen reader/IME の再現可能な確認
 - CI: Rust と Windows の configure/build/test。新規 warning を放置しない
 
 ピクセル完全一致でない処理も、色空間、rounding、境界条件を固定して小さな明示 tolerance を使う。第三者作品を golden fixture に使わない。
@@ -163,7 +188,7 @@ ctest --preset <windows-test-preset>
 
 1. `git status`、既存差分、`PROMPT.md` の関連節、対象 code/test を確認し、現在状態や既知差分が関係する場合だけ status/compatibility の該当箇所を読む。
 2. ユーザー変更を保護し、今回の依頼に対応する `PROMPT.md` の機能・要件 ID と、status/compatibility に記録された現在状態・既知差分を確認する。
-3. 大きな変更を model/ABI、Core、Windows adapter、test、document の小さな縦切りへ分ける。
+3. 公開契約を test で先に固定し、一つの変更では一種類の意味上の risk だけを扱う。機械的な rename/module 移動、algorithm 変更、公開境界変更を分け、大きな変更を model/ABI、Core、Windows adapter、test、document の小さな縦切りへ分ける。
 4. 短い計画を示した後、計画だけで止まらず今回の scope を実装・検証する。
 5. 仕様と既存テストだけで安全に決められない場合は推測で実装せず、具体的な選択肢、影響、解除条件を示してユーザー判断を求める。
 6. format、lint、test、build を実行し、現在状態、要件 status、既知差分、代表的検証が変わった場合だけ status/compatibility 文書を更新する。

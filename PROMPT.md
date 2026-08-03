@@ -1,6 +1,6 @@
-# inkpod 機能・実装仕様
+# inkpod 機能・挙動仕様
 
-この文書は、inkpod が維持する利用者向け機能、挙動契約、互換性の境界、プロジェクト固有の実装指針を定める恒久仕様である。完了済み工程の進捗、過去の検証ログ、作業再開用プロンプトは含めない。
+この文書は、inkpod が維持する利用者向け機能、挙動契約、互換性の境界、要件 ID、すなわち「何を作るか」を定める恒久仕様である。技術境界、品質基準、作業規律、完了済み工程の進捗、過去の検証ログ、作業再開用プロンプトは含めない。
 
 開発作業では、リポジトリ直下の `AGENTS.md` を作業規律と品質基準、本文書を機能と挙動の正本、`docs/architecture.md` を現在の構造、`docs/compatibility.md` を要件ごとの対応状況、`docs/implementation-status.md` を現在状態・既知差分・直近検証の要約として扱う。
 
@@ -62,18 +62,22 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - 独立した常設 toolbar は置かない。利用者が実行できる全機能を menu bar の末端項目から呼び出せることを優先する。選択中 tool の option strip は toolbar ではなく、同じ command/state を表示する context pane とする。
 - editor area は一つまたは二つの `EditorGroup` を持つ。二分割は左右または上下だけを許し、再帰分割しない。各 group は独立した tab strip、active `DocumentView`、一つの可視 Canvas slot、focus history を持つ。
 - 一つの `DocumentSession` は一つの `InkpodCore` handle、file identity、dirty/savepoint、Undo/Redo、autosave/recovery を所有する。同じ document の全 `DocumentView` は session を共有し、zoom、pan、flip、表示補助、表示中 frame 等の view logical state だけを分離する。文書 raster、layer、history、保存先を view ごとに複製しない。
-- tab label は active sequence cell 名、保存 file 名、`無題セル N`、`復元セル`の順で意味のある識別名を使い、dirty は `*`、同じ document の追加 view は `[ビュー N]` で示す。tab を閉じる操作は view を閉じ、最後の view の場合だけ document close と dirty 確認へ進む。
+- tab label は active sequence cell 名、保存 file 名、`無題セル N`、`復元セル`の順で意味のある識別名を使い、dirty は `*`、同じ document の追加 view は `[ビュー N]` で示す。read-only、処理中、error も compact かつ accessible な状態として示す。tab を閉じる操作は view を閉じ、最後の view の場合だけ document close と dirty 確認へ進む。
 - `CanvasSurface` は非表示 tab ではなく可視 `EditorGroup` ごとに一つ持つ。active tab の切替時に同じ surface を別 `DocumentView` へ bind し直し、非表示 tab 数に比例して swap chain や renderer thread を増やさない。
 - dock zone は `TopContext`、`Left`、`Right`、`Bottom`、`Floating`、`Hidden`、`AutoHide` に制限する。各 zone は pane tab stack と一方向の比率分割だけを持ち、任意に再帰する dock tree を作らない。pane descriptor は stable type ID、default/allowed zone、scope、multiplicity、float/autohide 可否、最小寸法を宣言する。
 - pane の target scope は `Application`、`FollowActiveView`、`PinnedDocument`、`Job` を区別する。pin 先 document が閉じた場合は別文書へ silent に向けず、追従 mode へ戻して accessible notification を出す。pane action は発行時の target ID と generation を保持する。
 - 現在相当の一 window、一 group 配置を初期 named workspace `彩色` として維持する。96 DPI の初期値は上端に全幅 40 DIP の tool options、body 左端に幅 80 DIP の一列 tool pane、中央に document tabs と Canvas、右端に幅 320 DIP の color/palette/chart および layer/plane inspector、最下段に status bar とする。既存の 32:68、55:45 比率と 4 DIP splitter を初期値に使うが、これは固定所有権ではなく復元可能な layout state である。
 - tool pane の既定 button は 72 x 34 DIP、一列、7 pt の読み取れる一語ラベルとする。正規ラベルは `鉛筆`、`ブラシ`、`消しゴム`、`塗りつぶし`、`閉領域塗り`、`塗り延ばし`、`スポイト`、`直線`、`曲線`、`長方形`、`楕円`、`折れ線`、`線消しゴム`、`グラデーション`、`エアブラシ`、`境界ブラシ`、`ぼかし`、`スタンプ`、`ゴミ取り`、`アルファ階調` とする。意味を推測させる一文字略号へ戻さず、詳細名は tooltip で補う。
 - named workspace と per-window layout は versioned、bounded な application setting として保存し、`.inkpod` 文書へ混ぜない。monitor/DPI 構成が変わった場合は可視 work area へ clamp し、不正 record は拒否して初期配置へ戻す。temporary な narrow-window adaptation で保存済み logical layout を上書きしない。
+- built-in named workspace は `彩色`、`線整理`、`参照・チェック`、`バッチ`、`集中` を提供する。layout record は window、split、dock、pane、floating placement と選択 preset だけを保持し、開いている文書 path や Core 所有状態を含めない。未知 pane は無視し、不足する既知 pane は既定値で補う。
 - floating pane は owner workspace を持つ通常の owned top-level window とし、閉じる操作では既定で非表示にする。`WS_EX_TOPMOST`、`WS_EX_PALETTEWINDOW`、`WS_EX_NOACTIVATE` は使わず、独立した `WM_DPICHANGED`、keyboard navigation、high contrast、screen reader を扱う。
 - 下段の status bar は現在 tool/active plane、document 座標、zoom/view flip/grid、pixel RGBA/selection 寸法、文書寸法/DPI、処理進捗、dirty 状態、複数ストローク入力待ちを短く表示する。
 - menu、shortcut、context menu、pane button は同じ command ID と enable/checked state を共有する。command 発行時に immutable な `CommandContext` として workspace、group、session、view、pane/job、generation を確定し、非同期実行時に active tab を再解決しない。stale target は明示 error または安全な no-op とし、現在 active な別文書へ fallback しない。
 - 全ての実行可能な menu 末端項目に shortcut を割り当て、menu label に現在の割当を表示する。`Ctrl+S`、`Ctrl+O`、Undo/Redo、clipboard など標準操作は一般的な割当を維持する。描画・選択・塗りなど高頻度操作は、text 入力に focus がないときの single stroke を基本とする。その他は短い prefix-free な multi-stroke を使い、入力待ちを status bar に表示する。
 - 色 palette の `1`–`0`、次 group の `Tab` は数値入力中でない場合の高速操作として保持する。shortcut は検索可能な設定 dialog で最大4 strokeまで再割当てでき、完全一致の衝突は元の割当と交換し、prefix 衝突は拒否する。
+- tab drag は同一 group 内の並べ替え、別 group/window への移動、window 外 drop による新規 window を扱う。active stroke、pointer capture、modal preview 中は開始せず、`Esc` で cancel した場合は元の位置を完全復元する。同じ操作は drag に依存せず menu と keyboard からも実行できる。
+- `Ctrl+Tab`/`Ctrl+Shift+Tab` は tab、`Ctrl+F6`/`Ctrl+Shift+F6` は editor group/view、`F6`/`Shift+F6` は menu・dock pane・editor area・status の focus、`Ctrl+F4` は view close に使う。tab、splitter、pane header、AutoHide、target、dirty、job progress と command の disabled state は UI Automation から取得できるようにする。
+- 数値入力と選択肢を共有する modal dialog は、選択肢ごとに標準 combo box を使い、owner window の中央かつ monitor work area 内へ配置する。Cancel は表示前の状態を変えない。
 - 実行不能 command は disable する。例として vector layer で pencil、選択なしの一部 command、対象 layer 未指定の batch を無言で成功させない。未接続 button、空 pane、常時成功する stub は生成しない。
 
 ### 3. メニュー構成
@@ -171,7 +175,7 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - active cell が dirty の状態で別セルへ移る場合は、設定に応じて保存確認または自動保存を行う。cancel ならセルを切り替えない。
 - `前のセル` と `次のセル` は欠番を飛ばし、設定で末尾から先頭へ循環できる。
 - 通常保存、自動保存、recovery、export は別 status とし、自動保存成功だけで通常 savepoint を進めない。
-- 保存は temp file 完成後の置換とし、失敗しても元ファイルを残す。起動時に新しい recovery があれば、開く/破棄/後で判断を選べる。
+- 保存は temp file 完成後の置換とし、失敗しても元ファイルを残す。起動時は全 recovery 候補を列挙し、一件ずつ復元/破棄/保留を選べるようにして、silent に捨てない。通常の前回文書復元は layout と crash recovery から分離した既定 off の明示設定とする。
 - `名前を付けて保存` は成功時に file identity registry、title、recent files、recovery metadata を一つの transaction として更新する。保存先 identity が別の open session と競合する場合は上書きや silent merge をせず、明示的な解決を求める。
 - 外部変更または read-only は session ごとに検出し、保存前に利用者へ示す。read-only document を同じ path へ無言で書き換えず、reload は dirty/history を失うため明示確認と cancel を持つ。
 - `view を閉じる` は一つの `DocumentView` だけを閉じる。最後の view でなければ document、history、dirty、job を保持し、dirty 確認を出さない。
@@ -479,78 +483,23 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - 本文書が数値や内部表現を一意に定めない場合は、安全性、頑健性、効率、決定性を優先したnative仕様を定義し、式、rounding、fixture、testを記録する。
 - 永続化schemaに影響する決定は、前節のフォーマットフリーズ前version規則に従う。
 
-## 文書の使い分け
+## 横断的な状態遷移契約
 
-- 新機能や挙動変更では、本文書の関連機能、要件 ID、禁止事項を先に確認する。
-- GUI モダナイゼーションでは `GUI.md` を G0 から G13 の実装順、各 gate の実装項目/test/完了条件として使う。本文書の利用者向け挙動と要件 ID が正本であり、順序計画を製品仕様の代わりにしない。
-- 実装済み範囲と未対応範囲は `docs/compatibility.md`、現在の主要差分と直近検証は `docs/implementation-status.md` で確認する。
-- 実ファイル、依存関係、所有権、thread 構成の詳細は `docs/architecture.md` を参照し、本文書へ一時的な構造や行数を複製しない。
-- 完了済み工程の根拠が必要な場合は Git 履歴と該当テストを使い、本文書や status 文書へ時系列ログを再追加しない。
-- 仕様と既存テストだけでは安全に決められない製品挙動は、実装前に選択肢と影響を示してユーザー判断を求める。フォーマットフリーズ前のschemaは下位互換性を理由に固定せず、頑健性と効率を優先する。
+- 同じ初期状態と入力列は、thread 数、tile 順、hash iteration 順にかかわらず同じ result class と意味上の結果を返す。
+- 操作結果は success、no-op、invalid、cancel、stale revision を区別する。Undo 対象となる一つの確定 document edit は一つの document revision と一つの history entry だけを進める。
+- no-op は document revision、history、dirty、render content を変えない。invalid、cancel、stale revision、overflow、失敗は document、history、dirty、revision、確定 snapshot、通常出力 file に部分変更を残さない。
+- 一つの document edit は一回の Undo で直前の意味状態へ戻り、一回の Redo で同じ結果へ進む。Undo 後の新規 edit は以前の redo branch を破棄する。
+- view-only edit は document revision、history、dirty を変えず、意味上の変更がある対象 view の revision だけを進める。document edit は必要な render cache invalidation を起こす。
+- 通常 save の成功だけが通常 savepoint を進める。autosave、recovery save、export は通常 savepoint を進めない。
+- stable ID は所属 document/session 内の生存 object 間で重複せず、保存、Undo/Redo、snapshot を通して参照関係を維持する。layer、plane、view 等の別 namespace を混同しない。
+- 長時間処理は base revision、cancel、target generation を確定し、全計算と検証が成功した場合だけ結果を公開する。
 
-## 必須アーキテクチャ
+## 仕様と追跡
 
-### Rust workspace
-
-次の責務を分離し、循環依存や Win32 型の混入を許可しない。
-
-- `inkpod-image`: raster tile、pixel/color、selection、fill、filter、vector geometry
-- `inkpod-format`: `.inkpod` container、manifest、codec trait、common raster import/export
-- `inkpod-core`: project/cut/cell、layer/plane、command、history、workspace、render snapshot
-- `inkpod-ffi`: C ABI 変換と panic containment だけを持つ `staticlib`
-
-Core の公開 Rust API は C ABI から独立させてください。FFI 用の pointer validation や `#[repr(C)]` 型を domain model に浸透させないでください。
-
-### Windows frontend
-
-- `wWinMain`、Unicode Win32 API、Common Controls v6、Per-Monitor DPI v2
-- process に一つの `ApplicationHost`、同一 UI/Input thread 上の複数 `WorkspaceWindow`、window ごとに最大二つの `EditorGroup`、可視 group ごとに一つの custom Canvas child window。古典的 MDI と toolbar は作成しない
-- application 所有の `DocumentRegistry` が `DocumentSessionId` ごとに一つの `InkpodCore` handle binding を持ち、同じ session の全 `DocumentView` は文書状態と履歴を共有する
-- `RendererHost` は一つの renderer thread と共有 D3D11/D2D device/cache を持ち、`CanvasSurface` ごとに swap chain、target、size、DPI、visibility、surface generation を持つ
-- Rust snapshot の raster/vector/text/overlay を Direct2D primitive へ変換する
-- resize、minimize、occlusion、DPI change、theme change、device lost を処理する
-- file picker、drag and drop、clipboard、known folder、message loop は C++ に閉じ込める
-- pen/mouse/touch を正規化して input batch として Rust へ渡す
-- 数値入力と選択肢を共有する modal dialog は選択肢ごとに標準コンボボックスを使い、owner の main window 中央へ配置して monitor の work area 内に収める
-
-Direct2D resource を Rust に渡したり、C++ で document state を別に持ったりしないでください。
-
-Windows frontend は、次の三つの長寿命 thread に責務を分離してください。
-
-1. UI/Input thread: 全 `WorkspaceWindow`、子 `HWND`、message loop、Common Controls、pointer history の取得、Canvas client device-pixel 座標への正規化、発行時 `CommandContext` の確定、bounded input/command queue への投入を担当する。描画中に Core の完了や `Present` を待たない。
-2. Core engine thread: `CoreHost` が全 `InkpodCore` をこの thread で生成・使用・破棄し、session ごとの single-writer として command と `stroke begin/append/end/cancel` を順序どおり処理する。work item は `DocumentSessionId`、必要な `DocumentViewId`、generation、sequence を値で持ち、描画中の immutable preview snapshot を表示 cadence 以下で発行する。計測前に文書数だけ thread を増やさない。
-3. Renderer thread: `RendererHost` が共有 D3D11/D2D device と全 `CanvasSurface` の DXGI swap chain、Direct2D target、GPU tile cache、`Present` をこの thread で生成・使用・破棄し、routing key と generation が一致する最新の immutable snapshot だけを描画する。
-
-thread 間は所有権を明示した queue で接続してください。queue item、snapshot、非同期結果、timer/drag token は必要最小限の workspace/session/view/canvas/pane/job ID と generation を値で持ちます。renderer は置き換えられた古い snapshot/frame を破棄してよい一方、pointer sample や stroke の begin/end/cancel を描画負荷軽減のために破棄してはいけません。Core thread から Canvas の window message queue へ Rust 所有 pointer や C++ object pointer を裸で積まず、snapshot の受取側が enqueue 成功、失敗、破棄、window close の全経路で release 責務を一意に引き受ける C++ queue を使ってください。
-
-Canvas の view transform は client の物理 device pixel を基準とし、`device = document * zoom + pan` とします。Direct2D Canvas は pixel unit/96-DPI target で同じ transform を使い、Per-Monitor DPI は menu、dialog、status bar、modeless palette 等の UI scaling と実寸表示 policy にだけ反映してください。同一の client size と view state で DPI 変更だけにより Canvas が移動・縮小してはいけません。
-
-### C ABI
-
-- opaque `InkpodCore*` と immutable `InkpodSnapshot*`
-- ABI version と各 public structure の `struct_size`
-- fixed-width integer、pointer + length、UTF-8
-- snapshot を一括取得し、要素ごとの FFI call を避ける
-- allocate 側が release する
-- `catch_unwind`、NULL/length/alignment/enum validation、thread 契約
-- C11 と C++20 の header compile test
-
-最低限、create、dispatch batch、stroke begin/append/end/cancel、snapshot build/view/release、error copy、destroy を提供してください。API 名を変える場合は `docs/ffi.md` へ理由と所有権を記録してください。
-
-### Windows frontend の内部境界
-
-- `main.cpp` は起動 mode の解釈と application runner の呼び出しに限定し、feature command、dialog、pane、smoke scenario を置かない。
-- `ApplicationHost` は process lifetime、初期化、起動時 recovery、message loop、window/document/Core/renderer/job registry、application-global setting、shutdown 順序を所有する。domain operation は実装しない。
-- `WorkspaceWindow` は一つの top-level `HWND`、menu、dock/editor area、status、window-local focus/command context/layout を所有する。window procedure は `WM_*` の正規化と instance への委譲に限定し、process-global singleton や暗黙の active document pointer を参照しない。
-- `DocumentSession` は file identity、dirty/save/recovery と一つの Core handle binding を所有し、`DocumentView` は Core view ID と view-local presentation state だけを所有する。`EditorGroup` は tab collection、active view、Canvas slot を所有する。
-- `CoreHost` と `RendererHost` はそれぞれ owner thread 上の registry を管理する。Core-local ID/revision は必ず `DocumentSessionId` と組み合わせ、snapshot は session/view/canvas/revision/surface generation を持つ envelope で routing する。
-- 各 command ID は一つの feature owner だけが処理する。menu、shortcut、context menu、pane button は同じ router へ `CommandContext` の copy を渡し、state query と execution は同じ target 解決規則を使う。
-- command の enabled/checked state は feature ごとの副作用のない query から構築し、menu、shortcut、context menu、存在する palette control が同じ結果を使う。query 中に Core、tool、preview、document を変更しない。
-- controller は担当 state と typed input だけを受け取り、別 controller の private state を直接変更しない。Core 操作は `CoreHost` の session-keyed API を介して Core engine thread へ送る。
-- dialog entry point は dialog 固有の typed initial value と result を使う。dialog module は完全な application state、`CoreHost`、Rust FFI を受け取らず、Cancel では caller state を変更しない。
-- process/window/document/view/pane/job の owner state を明示的に分離する。完全な context を全関数へ渡したり、C++ 側に第二の document model、history、保存形式を作ったりしない。
-- private declaration は `apps/windows` 以下に閉じ、公開 `include/inkpod` API へ出さない。汎用の `helpers.*`、`common.*`、`utils.*` や、全機能を知る巨大 controller を作らない。
-- `--smoke-test` と `--abi-smoke-test` は実製品の UI/Core/renderer/ABI 経路を検証する private entry point として維持する。
+- 本文書を機能、利用者向け挙動、要件 ID の正本とし、`AGENTS.md` を作業規律、技術境界、品質基準の正本とする。
+- 実装済み範囲、test、既知差分は `docs/compatibility.md`、現在状態と直近の代表的検証は `docs/implementation-status.md`、現在の所有権・thread・data flow は `docs/architecture.md` で管理する。
+- 完了工程や過去の検証ログは Git 履歴を参照し、恒久仕様へ時系列記録を追加しない。
+- 仕様と既存 test だけでは安全に決められない製品挙動は、実装前に選択肢と影響を示してユーザー判断を求める。
 
 ## 要件 ID
 
@@ -624,106 +573,3 @@ Canvas の view transform は client の物理 device pixel を基準とし、`d
 - `BATCH-003`: dry-run、preview、progress、cancel、per-output atomicity、failure report
 - `VECTOR-001`: path/variable width/fill/color-trace model と rendering
 - `VECTOR-002`: vector draw/erase/connect/width/select/convert
-
-## 実装の詳細規則
-
-### 文書とメモリ
-
-- raster は sparse tiled storage と copy-on-write を使う。
-- width x height x bytes を無検査で確保しない。
-- document ID、layer ID、plane ID は安定 ID にする。
-- view state と document state を別 revision にする。
-- savepoint は history 上の位置または同等の確実な方法で管理する。
-
-### フィル
-
-- 再帰 flood fill は使用しない。
-- scanline または明示 queue を使い、訪問上限、selection、tile boundary を検査する。
-- color distance と alpha の式を明文化する。
-- gap close は入力を先に破壊せず、仮想境界または別 transaction で扱う。
-- overflow abort は all-or-nothing transaction とする。
-- 同じ seed/config/state なら thread 数に関係なく同じ結果にする。
-
-### 履歴
-
-- pointer down から up までを一 stroke とする。
-- stroke は begin/append 中の preview state と確定 document state を分け、end だけを一 history entry として commit し、cancel/failure は開始前へ完全復元する。
-- filter/transform dialog は preview state を commit state と分ける。
-- Undo 後に新規編集した場合、redo を無効にする。
-- file save、autosave、export を同じ dirty semantics にしない。
-
-### renderer
-
-- Core snapshot の tile revision で GPU bitmap を cache する。
-- dirty tile だけ upload する。
-- immutable snapshot は Core engine thread から所有権付き queue で Renderer thread へ渡し、古い未描画 snapshot は release して最新を優先する。
-- pointer sample は UI/Input から Core engine へ順序どおり渡し、renderer の遅延を理由に破棄しない。
-- Canvas の document/view/device 変換は client device pixel に統一し、D2D の暗黙 DIP 変換と二重適用しない。
-- minimize/occlusion 時に無駄な rendering loop を止める。
-- device lost で Core document を破棄しない。
-- transparent color、white compatibility check、selection overlay を元画像へ焼き込まない。
-
-### background work
-
-- decode、encode、filter、batch は worker で実行可能にする。
-- worker は `HWND` や Common Controls を操作しない。
-- completion 時に document revision を照合する。
-- cancel と app shutdown で worker lifetime を回収する。
-
-## 追跡文書の責務
-
-- `GUI.md` は GUI モダナイゼーションの順序、依存関係、milestone gate の正本とする。完了した milestone には再現可能な code/test/document 証拠を結び付け、先行 gate が未完了の間は後続を開始しない。
-- `docs/gui-modernization-baseline.md` は G0 で固定した実装前の一 window、一 group、command/ABI/native smoke baseline と既知差分を保存する。将来の現行状態を追記する log にはせず、baseline の数値や証拠が誤っていた場合だけ訂正する。
-- `docs/compatibility.md` は要件 ID ごとの状態、実装、test、既知差分の正本とする。状態は `Not started`、`In progress`、`Experimental`、`Verified`、`Blocked` を使う。
-- `Verified` は対応する user-facing または明示的な Core-only 契約と再現可能な test がある場合だけに使う。source が移動しただけでは状態を変更しない。
-- `Blocked` は不足 fixture、利用不能な toolchain、外部判断など、具体的な解除条件がある場合だけに使う。
-- `docs/implementation-status.md` は現在の実装状態、既知差分、直近の代表的な検証だけを記録する。完了工程、時系列の作業ログ、古い test count を蓄積しない。
-- `docs/architecture.md` は現在実装済みの構造、ownership、thread/data flow を説明する。計画だけでは変更せず、milestone で owner、lifetime、thread、queue、routing、shutdown の実装が変わったときに code/test と同時に更新する。移行前の行数、段階名、進捗表を設計規則として使わない。
-- 過去の詳細は Git 履歴に残し、常時参照する文書へ複製しない。
-
-## テストと CI
-
-変更範囲に応じて、最低限次を実行してください。
-
-```text
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cmake --preset <windows-preset>
-cmake --build --preset <windows-build-preset>
-ctest --preset <windows-test-preset>
-```
-
-実際の preset 名はリポジトリに定義したものを使ってください。非 Windows 環境では Rust の全検証を実行し、Win32 は Windows CI で検証してください。「この環境では Windows build を実行できない」ことを、コード未検証の言い訳にせず CI を追加してください。
-
-さらに次を用意してください。
-
-- pure Rust unit/property/golden tests
-- `.inkpod` round-trip と malformed fixture tests
-- C/C++ ABI smoke and negative tests
-- Windows app creation/render smoke test
-- codec/FFI fuzz targets
-- large tile/fill/filter benchmarks
-
-golden image は自作の単純な幾何 fixture を使い、旧製品由来の画像や第三者作品を含めないでください。
-
-## 禁止事項
-
-- Rust Core から Win32/COM/Direct2D を呼ぶ
-- C++ に画像処理や history の別実装を作る
-- 1 pointer sample、1 pixel、1 path element ごとに FFI を往復する
-- Rust の `Vec`/`String`、C++ STL、例外、panic を ABI 越しに出す
-- unbounded allocation、再帰 flood fill、無検査 path extraction
-- 保存先ファイルを直接 truncate してから書く
-- 本文書に列挙されていない外部ファイル形式を実装またはGUIへ表示する
-- 旧 PaintMan の UI asset、スクリーンショット、長い説明文をコピーする
-- button と menu だけを並べ、Core command に未接続のまま完成扱いする
-- `TODO`、常時 `OK` の stub、空 callback を status `Verified` にする
-- 現在の milestone と無関係な全面 rewrite
-- test failure を削除、ignore、過大 tolerance で隠す
-
-## 変更の完了条件
-
-変更範囲に対応する success、no-op、invalid、cancel、Undo/Redo、必要な save/reopen を検証し、UI を持つ機能は UI から Core までの実経路へ接続する。diff と既存テスト契約を見直し、未実行の platform 固有検証と理由を明記する。
-
-要件の状態や既知差分が変わった場合だけ `docs/compatibility.md` を更新し、現在状態または代表的な最新検証が変わった場合だけ `docs/implementation-status.md` を更新する。新規 codec、dependency、`unsafe`、ABI、file-format、ownership の変更は対応する設計文書へ記録する。
