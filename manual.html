@@ -1,0 +1,1646 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>inkpod 取扱説明書</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f6cbd' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 5.5A2.5 2.5 0 0 1 6.5 3H11v17H6.5A2.5 2.5 0 0 0 4 22V5.5Z'/%3E%3Cpath d='M20 5.5A2.5 2.5 0 0 0 17.5 3H13v17h4.5A2.5 2.5 0 0 1 20 22V5.5Z'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --accent: #0f6cbd;
+      --accent-strong: #0b4f8a;
+      --accent-soft: #e7f2fb;
+      --bg: #f5f6f8;
+      --surface: #ffffff;
+      --surface-2: #f0f3f6;
+      --text: #1b1b1b;
+      --muted: #5b6470;
+      --border: #d3d8de;
+      --warning: #8a4b08;
+      --warning-bg: #fff4ce;
+      --tip: #0b6a45;
+      --tip-bg: #e7f6ed;
+      --danger: #a4262c;
+      --danger-bg: #fde7e9;
+      --mark: #ffe58f;
+      --mark-text: #231f00;
+      --shadow: 0 2px 10px rgba(0, 0, 0, .08);
+      --header-height: 78px;
+      --content: 1120px;
+      --app-icon: url("data:image/png;base64,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");
+      --icon-book: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 5.5A2.5 2.5 0 0 1 6.5 3H11v17H6.5A2.5 2.5 0 0 0 4 22V5.5Z'/%3E%3Cpath d='M20 5.5A2.5 2.5 0 0 0 17.5 3H13v17h4.5A2.5 2.5 0 0 1 20 22V5.5Z'/%3E%3C/svg%3E");
+      --icon-search: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='m15.5 15.5 5 5'/%3E%3C/svg%3E");
+      --icon-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 6 12 12M18 6 6 18'/%3E%3C/svg%3E");
+      --icon-up: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 7-7 7 7M12 5v14'/%3E%3C/svg%3E");
+      --icon-menu: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M5 7h14M5 12h14M5 17h14'/%3E%3C/svg%3E");
+      --icon-page: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3h8l4 4v14H6V3Z'/%3E%3Cpath d='M14 3v5h4M9 12h6M9 16h6'/%3E%3C/svg%3E");
+      --icon-list: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round'%3E%3Cpath d='M9 6h11M9 12h11M9 18h11'/%3E%3Ccircle cx='4.5' cy='6' r='1' fill='black' stroke='none'/%3E%3Ccircle cx='4.5' cy='12' r='1' fill='black' stroke='none'/%3E%3Ccircle cx='4.5' cy='18' r='1' fill='black' stroke='none'/%3E%3C/svg%3E");
+      --icon-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m8 10 4 4 4-4'/%3E%3C/svg%3E");
+      --icon-info: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 11v6M12 7.5h.01'/%3E%3C/svg%3E");
+      --icon-tip: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8.5 15.5A7 7 0 1 1 15.5 15.5L14 17H10l-1.5-1.5ZM10 20h4'/%3E%3Cpath d='M12 5v2M6.5 8l1.4 1M17.5 8l-1.4 1'/%3E%3C/svg%3E");
+      --icon-warning: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 2.8 20h18.4L12 3Z'/%3E%3Cpath d='M12 9v5M12 17.5h.01'/%3E%3C/svg%3E");
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --accent: #60aeea;
+        --accent-strong: #8bc7f3;
+        --accent-soft: #15364f;
+        --bg: #151719;
+        --surface: #202326;
+        --surface-2: #292d31;
+        --text: #f2f2f2;
+        --muted: #bcc4cc;
+        --border: #454b52;
+        --warning: #ffd38a;
+        --warning-bg: #4a3516;
+        --tip: #8fe0ba;
+        --tip-bg: #173d2d;
+        --danger: #ffb3b8;
+        --danger-bg: #4b2024;
+        --mark: #765f00;
+        --mark-text: #ffffff;
+        --shadow: 0 2px 12px rgba(0, 0, 0, .28);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-height) + 18px); }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Yu Gothic UI", Meiryo, sans-serif;
+      font-size: 16px;
+      line-height: 1.75;
+    }
+    a { color: var(--accent-strong); text-underline-offset: .16em; }
+    a:hover { text-decoration-thickness: 2px; }
+    button, input, summary { font: inherit; }
+    button, input { color: inherit; }
+    :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    [hidden] { display: none !important; }
+
+    .skip-link {
+      position: fixed;
+      z-index: 1000;
+      top: 8px;
+      left: 8px;
+      padding: 8px 14px;
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: var(--shadow);
+      transform: translateY(-160%);
+    }
+    .skip-link:focus { transform: none; }
+
+    .search-box label::before,
+    .small-button::before,
+    .top-link::before,
+    .mobile-toc > summary::before,
+    .chapter > h2::before,
+    .callout strong:first-child::before,
+    details.reference > summary::before,
+    details.reference > summary::after {
+      content: "";
+      display: inline-block;
+      width: 1.05em;
+      height: 1.05em;
+      margin-right: .42em;
+      background-color: currentColor;
+      vertical-align: -.16em;
+      -webkit-mask: var(--icon-page) center / contain no-repeat;
+      mask: var(--icon-page) center / contain no-repeat;
+    }
+
+    .site-header {
+      position: sticky;
+      z-index: 100;
+      top: 0;
+      min-height: var(--header-height);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .header-inner {
+      width: min(100% - 32px, 1440px);
+      min-height: var(--header-height);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(210px, .7fr) minmax(320px, 1.3fr) auto;
+      gap: 22px;
+      align-items: center;
+    }
+    .brand { min-width: 0; }
+    .brand-lockup, .hero-lockup { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-lockup > div, .hero-lockup > div { min-width: 0; }
+    .app-icon { display: block; flex: 0 0 auto; background: var(--app-icon) center / contain no-repeat; }
+    .app-icon-header { width: 34px; height: 34px; }
+    .app-icon-hero { width: 52px; height: 52px; }
+    .brand h1 { margin: 0; font-size: 1.22rem; line-height: 1.2; letter-spacing: .01em; }
+    .brand p { margin: 2px 0 0; color: var(--muted); font-size: .78rem; line-height: 1.2; }
+    .search-box { min-width: 0; }
+    .search-box label { display: block; margin-bottom: 3px; color: var(--muted); font-size: .76rem; font-weight: 650; line-height: 1.2; }
+    .search-box label::before { -webkit-mask-image: var(--icon-search); mask-image: var(--icon-search); }
+    .search-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+    #manual-search {
+      width: 100%;
+      min-width: 0;
+      height: 38px;
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface-2);
+    }
+    .small-button, .top-link {
+      min-height: 38px;
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface-2);
+      color: var(--text);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .small-button:hover, .top-link:hover { border-color: var(--accent); background: var(--accent-soft); }
+    #clear-search::before, #no-results-clear::before { -webkit-mask-image: var(--icon-close); mask-image: var(--icon-close); }
+    .top-link::before { -webkit-mask-image: var(--icon-up); mask-image: var(--icon-up); }
+    .search-meta { min-height: 1.2em; margin-top: 2px; color: var(--muted); font-size: .74rem; line-height: 1.2; }
+
+    .mobile-toc { display: none; }
+    .page-shell {
+      width: min(100% - 32px, 1440px);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      gap: 40px;
+      align-items: start;
+    }
+    .sidebar {
+      position: sticky;
+      top: calc(var(--header-height) + 18px);
+      max-height: calc(100vh - var(--header-height) - 36px);
+      overflow: auto;
+      padding: 18px 10px 22px 0;
+      scrollbar-width: thin;
+    }
+    .toc-title { margin: 0 0 8px 10px; color: var(--muted); font-size: .78rem; font-weight: 700; letter-spacing: .08em; }
+    .toc-list { margin: 0; padding: 0; list-style: none; }
+    .toc-list a {
+      display: block;
+      padding: 7px 10px;
+      border-left: 3px solid transparent;
+      border-radius: 0 6px 6px 0;
+      color: var(--muted);
+      font-size: .88rem;
+      line-height: 1.35;
+      text-decoration: none;
+    }
+    .toc-list a:hover { color: var(--text); background: var(--surface-2); }
+    .toc-list a[aria-current="true"] { border-left-color: var(--accent); background: var(--accent-soft); color: var(--text); font-weight: 700; }
+
+    main { min-width: 0; padding: 40px 0 96px; }
+    article { max-width: var(--content); }
+    .hero {
+      margin-bottom: 34px;
+      padding: 30px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+    }
+    .eyebrow { margin: 0 0 8px; color: var(--accent-strong); font-size: .8rem; font-weight: 750; letter-spacing: .08em; }
+    .hero h2 { margin: 0; font-size: clamp(1.8rem, 4vw, 2.8rem); line-height: 1.18; }
+    .hero-lockup { align-items: flex-start; gap: 16px; }
+    .hero .lead { max-width: 760px; margin: 14px 0 0; color: var(--muted); font-size: 1.08rem; }
+    .meta-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .meta-strip span { padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: .78rem; }
+
+    .chapter { margin: 0 0 50px; scroll-margin-top: calc(var(--header-height) + 18px); }
+    .chapter > h2 { margin: 0 0 18px; padding-bottom: 10px; border-bottom: 2px solid var(--border); font-size: clamp(1.5rem, 3vw, 2rem); line-height: 1.3; }
+    .chapter > h2::before { color: var(--accent); -webkit-mask-image: var(--icon-page); mask-image: var(--icon-page); }
+    h3 { margin: 32px 0 12px; font-size: 1.28rem; line-height: 1.4; }
+    h4 { margin: 24px 0 8px; font-size: 1.06rem; line-height: 1.4; }
+    p { margin: 10px 0; }
+    ul, ol { padding-left: 1.5rem; }
+    li + li { margin-top: .35rem; }
+    kbd {
+      display: inline-block;
+      min-width: 1.7em;
+      margin: 0 .08em;
+      padding: .05em .42em;
+      border: 1px solid var(--border);
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      background: var(--surface-2);
+      font-family: inherit;
+      font-size: .83em;
+      font-weight: 650;
+      line-height: 1.5;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .menu-path { font-weight: 700; }
+    .menu-path .sep { padding: 0 .3em; color: var(--muted); font-weight: 400; }
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin: 18px 0; }
+    .card, .search-unit {
+      scroll-margin-top: calc(var(--header-height) + 18px);
+    }
+    .card { padding: 17px 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+    .card > :first-child { margin-top: 0; }
+    .card > :last-child { margin-bottom: 0; }
+    .card h3, .card h4 { margin-top: 0; }
+    .callout { margin: 18px 0; padding: 14px 16px; border-left: 4px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--accent-soft); }
+    .callout strong:first-child { display: block; margin-bottom: 3px; }
+    .callout strong:first-child::before { color: var(--accent-strong); -webkit-mask-image: var(--icon-info); mask-image: var(--icon-info); }
+    .callout.tip { border-left-color: var(--tip); background: var(--tip-bg); }
+    .callout.tip strong:first-child::before { color: var(--tip); -webkit-mask-image: var(--icon-tip); mask-image: var(--icon-tip); }
+    .callout.warning { border-left-color: var(--warning); background: var(--warning-bg); }
+    .callout.warning strong:first-child::before { color: var(--warning); -webkit-mask-image: var(--icon-warning); mask-image: var(--icon-warning); }
+    .callout.danger { border-left-color: var(--danger); background: var(--danger-bg); }
+    .callout.danger strong:first-child::before { color: var(--danger); -webkit-mask-image: var(--icon-warning); mask-image: var(--icon-warning); }
+    .steps { counter-reset: step; padding: 0; list-style: none; }
+    .steps > li { position: relative; min-height: 40px; padding: 0 0 16px 46px; }
+    .steps > li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 750; line-height: 30px; text-align: center; }
+    .steps > li + li { margin-top: 6px; }
+    .compare { width: 100%; margin: 16px 0; border-collapse: collapse; background: var(--surface); font-size: .93rem; }
+    .compare th, .compare td { padding: 10px 12px; border: 1px solid var(--border); vertical-align: top; text-align: left; }
+    .compare th { background: var(--surface-2); }
+    .table-scroll { max-width: 100%; overflow-x: auto; }
+
+    details.reference { margin: 14px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+    details.reference > summary { padding: 14px 18px; cursor: pointer; font-weight: 750; list-style: none; }
+    details.reference > summary::-webkit-details-marker { display: none; }
+    details.reference > summary::before { color: var(--accent); -webkit-mask-image: var(--icon-list); mask-image: var(--icon-list); }
+    details.reference > summary::after { float: right; margin: .18em 0 0 .5em; -webkit-mask-image: var(--icon-chevron); mask-image: var(--icon-chevron); transition: transform .16s ease; }
+    details.reference[open] > summary::after { transform: rotate(180deg); }
+    details.reference[open] > summary { border-bottom: 1px solid var(--border); }
+    .details-body { padding: 4px 18px 18px; }
+    .command-list { margin: 0; padding: 0; list-style: none; }
+    .command-list > li { display: grid; grid-template-columns: minmax(250px, .85fr) minmax(320px, 1.5fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .command-list > li:last-child { border-bottom: 0; }
+    .command-name { font-weight: 720; line-height: 1.5; }
+    .command-desc { color: var(--muted); line-height: 1.6; }
+    .tag { display: inline-block; margin-left: 5px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; font-size: .72rem; font-weight: 700; vertical-align: .12em; }
+    .tag.view { color: var(--accent-strong); background: var(--accent-soft); }
+    .tag.undo { color: var(--tip); background: var(--tip-bg); }
+    .tag.caution { color: var(--warning); background: var(--warning-bg); }
+    mark { padding: 0 .08em; border-radius: 2px; background: var(--mark); color: var(--mark-text); }
+    .no-results { margin: 18px 0 34px; padding: 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); text-align: center; }
+    .back-top { display: inline-block; margin-top: 24px; }
+    footer { padding: 26px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: .85rem; }
+
+    @media (max-width: 900px) {
+      :root { --header-height: 126px; }
+      .header-inner { width: min(100% - 20px, 720px); grid-template-columns: 1fr auto; gap: 8px 12px; padding: 8px 0; }
+      .brand p { display: none; }
+      .search-box { grid-column: 1 / -1; grid-row: 2; }
+      .header-inner > .top-link { grid-column: 2; grid-row: 1; min-height: 32px; padding: 3px 9px; }
+      .mobile-toc { display: block; grid-column: 1; grid-row: 1; justify-self: end; position: relative; }
+      .mobile-toc > summary { min-height: 32px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); cursor: pointer; list-style: none; }
+      .mobile-toc > summary::before { -webkit-mask-image: var(--icon-menu); mask-image: var(--icon-menu); }
+      .mobile-toc > summary::-webkit-details-marker { display: none; }
+      .mobile-toc[open] nav { position: fixed; z-index: 120; top: var(--header-height); left: 10px; right: 10px; max-height: calc(100vh - var(--header-height) - 10px); padding: 12px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+      .page-shell { width: min(100% - 20px, 760px); display: block; }
+      .sidebar { display: none; }
+      main { padding-top: 24px; }
+      .hero { padding: 22px; }
+      .command-list > li { grid-template-columns: 1fr; gap: 4px; }
+    }
+
+    @media (max-width: 520px) {
+      :root { --header-height: 132px; }
+      body { font-size: 15px; }
+      .header-inner { grid-template-columns: minmax(0, 1fr) auto auto; }
+      .brand h1 { font-size: 1rem; }
+      .app-icon-header { width: 28px; height: 28px; }
+      .app-icon-hero { width: 44px; height: 44px; }
+      .mobile-toc { grid-column: 2; }
+      .header-inner > .top-link { grid-column: 3; }
+      .search-row { grid-template-columns: minmax(0, 1fr) auto; }
+      .small-button { padding-inline: 9px; }
+      .hero { padding: 18px; }
+      .card-grid { grid-template-columns: 1fr; }
+      .compare th, .compare td { padding: 8px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+
+    @media print {
+      :root { color-scheme: light; --bg: #fff; --surface: #fff; --surface-2: #f3f3f3; --text: #000; --muted: #333; --border: #bbb; }
+      .site-header, .sidebar, .mobile-toc, .skip-link, .back-top, .no-results { display: none !important; }
+      body { background: #fff; color: #000; font-size: 10.5pt; line-height: 1.5; }
+      .page-shell, article { width: 100%; max-width: none; display: block; }
+      main { padding: 0; }
+      .hero, .card, details.reference { box-shadow: none; break-inside: avoid; }
+      .chapter { break-before: page; margin-bottom: 20px; }
+      .chapter:first-of-type { break-before: auto; }
+      details.reference > summary { display: none; }
+      details.reference:not([open]) > .details-body { display: block !important; }
+      a { color: #000; text-decoration: none; }
+      a[href^="#"]::after { content: ""; }
+    }
+  </style>
+</head>
+<body id="top">
+  <a class="skip-link" href="#main-content">本文へ移動</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-lockup">
+          <span class="app-icon app-icon-header" aria-hidden="true"></span>
+          <div>
+            <h1>inkpod 取扱説明書</h1>
+            <p>Windows版・オフラインマニュアル</p>
+          </div>
+        </div>
+      </div>
+      <div class="search-box" role="search">
+        <label for="manual-search">キーワード検索 <span aria-hidden="true">（Ctrl / Cmd + K）</span></label>
+        <div class="search-row">
+          <input id="manual-search" type="search" autocomplete="off" placeholder="例: Recovery 保存、ライトテーブル、Ctrl+S" aria-describedby="search-status">
+          <button class="small-button" id="clear-search" type="button">解除</button>
+        </div>
+        <div class="search-meta" id="search-status" aria-live="polite">すべての章を表示しています。</div>
+      </div>
+      <details class="mobile-toc">
+        <summary>目次</summary>
+        <nav aria-label="モバイル目次">
+          <ol class="toc-list">
+            <li><a href="#about">1. inkpodについて</a></li>
+            <li><a href="#getting-started">2. はじめに</a></li>
+            <li><a href="#quick-start">3. クイックスタート</a></li>
+            <li><a href="#concepts">4. 基本概念</a></li>
+            <li><a href="#workspace">5. 画面とワークスペース</a></li>
+            <li><a href="#menus">6. メニューリファレンス</a></li>
+            <li><a href="#panes">7. ペインリファレンス</a></li>
+            <li><a href="#tools">8. 描画・選択・ベクターツール</a></li>
+            <li><a href="#color">9. カラー、パレット、カラーチャート</a></li>
+            <li><a href="#layers">10. レイヤーとプレーン</a></li>
+            <li><a href="#animation">11. ライトテーブル、連番、サブパレット、モーションチェック</a></li>
+            <li><a href="#filters">12. フィルターと調整レイヤー</a></li>
+            <li><a href="#batch">13. バッチ処理</a></li>
+            <li><a href="#files">14. 保存、読み込み、書き出し、Recovery</a></li>
+            <li><a href="#keyboard">15. キーボード操作とショートカット</a></li>
+            <li><a href="#recipes">16. よくある操作例</a></li>
+            <li><a href="#troubleshooting">17. トラブルシューティング</a></li>
+            <li><a href="#glossary">18. 用語集</a></li>
+          </ol>
+        </nav>
+      </details>
+      <a class="top-link" href="#top">先頭へ</a>
+    </div>
+  </header>
+
+  <div class="page-shell">
+    <aside class="sidebar">
+      <nav aria-label="章の目次">
+        <p class="toc-title">目次</p>
+        <ol class="toc-list" id="toc-list">
+          <li><a href="#about">1. inkpodについて</a></li>
+          <li><a href="#getting-started">2. はじめに</a></li>
+          <li><a href="#quick-start">3. クイックスタート</a></li>
+          <li><a href="#concepts">4. 基本概念</a></li>
+          <li><a href="#workspace">5. 画面とワークスペース</a></li>
+          <li><a href="#menus">6. メニューリファレンス</a></li>
+          <li><a href="#panes">7. ペインリファレンス</a></li>
+          <li><a href="#tools">8. 描画・選択・ベクターツール</a></li>
+          <li><a href="#color">9. カラー、パレット、カラーチャート</a></li>
+          <li><a href="#layers">10. レイヤーとプレーン</a></li>
+          <li><a href="#animation">11. ライトテーブル、連番、サブパレット、モーションチェック</a></li>
+          <li><a href="#filters">12. フィルターと調整レイヤー</a></li>
+          <li><a href="#batch">13. バッチ処理</a></li>
+          <li><a href="#files">14. 保存、読み込み、書き出し、Recovery</a></li>
+          <li><a href="#keyboard">15. キーボード操作とショートカット</a></li>
+          <li><a href="#recipes">16. よくある操作例</a></li>
+          <li><a href="#troubleshooting">17. トラブルシューティング</a></li>
+          <li><a href="#glossary">18. 用語集</a></li>
+        </ol>
+      </nav>
+    </aside>
+
+    <main id="main-content" tabindex="-1">
+      <article>
+        <div class="hero search-unit" data-search="manual help guide windows 11 japanese offline">
+          <div class="hero-lockup">
+            <span class="app-icon app-icon-hero" aria-hidden="true"></span>
+            <div>
+              <p class="eyebrow">はじめて使う方へ</p>
+              <h2>線を守り、色を重ね、動きを確かめる。</h2>
+            </div>
+          </div>
+          <p class="lead">inkpodは、アニメーションの作画・彩色をセル、レイヤー、プレーンに分けて扱うWindowsアプリです。この説明書は、現在のWindows版で実際に利用できる操作を、制作の流れに沿って案内します。</p>
+          <div class="meta-strip" aria-label="マニュアル情報">
+            <span>Windows 11</span><span>日本語UI</span><span>オフライン対応</span><span>2026年8月3日の実装に基づく</span>
+          </div>
+        </div>
+
+        <div class="no-results" id="no-results" hidden role="status">
+          <h2>該当する項目がありません</h2>
+          <p>語を減らすか、別の表記を試してください。</p>
+          <button class="small-button" id="no-results-clear" type="button">検索を解除</button>
+        </div>
+
+        <section class="chapter" id="about" aria-labelledby="about-heading">
+          <h2 id="about-heading">1. inkpodについて</h2>
+          <div class="search-unit" data-search="概要 purpose animation paint coloring">
+            <p>inkpodは、主線と彩色を分けたアニメーション制作、前後セルの参照、連番確認、繰り返し処理を一つの作業環境で行うためのアプリです。画像を単に一枚へ平坦化せず、用途ごとの情報を保持したまま編集できることが中心です。</p>
+          </div>
+          <div class="card-grid">
+            <div class="card search-unit" data-search="main line protect 主線保護">
+              <h3>主線を守る</h3>
+              <p>主線プレーンと彩色プレーンを分け、彩色中に主線へ誤って描き込まない構成を取れます。編集対象は<a href="#layers-active">レイヤー／プレーン</a>で必ず確認してください。</p>
+            </div>
+            <div class="card search-unit" data-search="reference light table sequence motion">
+              <h3>前後を見比べる</h3>
+              <p>ライトテーブル、シーケンス、参照ビュー、モーションチェックで、前後セルとの位置・色・動きを確認できます。</p>
+            </div>
+            <div class="card search-unit" data-search="undo preview batch atomic">
+              <h3>試してから確定する</h3>
+              <p>描画や編集はUndo単位で記録され、フィルターなどのプレビューは確定前にキャンセルできます。バッチはdry-runで出力前に対象を検査できます。</p>
+            </div>
+          </div>
+          <div class="callout warning search-unit" data-search="current limitations 現行版 制限">
+            <strong>現行版での制限</strong>
+            <span>表示言語は日本語です。AutoHideの端ボタンは画面上で操作できますが、現行版では <kbd>F6</kbd>、<kbd>Tab</kbd>、<kbd>Shift</kbd>+<kbd>Tab</kbd> だけでは到達できない場合があります。バッチ出力は現在 `.inkpod` です。詳しくは<a href="#current-limitations">トラブルシューティング</a>を参照してください。</span>
+          </div>
+        </section>
+
+        <section class="chapter" id="getting-started" aria-labelledby="getting-started-heading">
+          <h2 id="getting-started-heading">2. はじめに</h2>
+          <div class="search-unit" data-search="対応環境 requirements Windows 11 x64 arm64">
+            <h3 id="environment">対応環境</h3>
+            <p>Windows 11向けのデスクトップアプリです。画面はWindowsの表示倍率とハイコントラスト設定に追従する設計です。通常の検証はx64環境を中心に行われています。ARM64版パッケージも構築されていますが、現行の記録ではARM64実機上の一部操作検証は未完了です。</p>
+          </div>
+          <div class="search-unit" data-search="launch exit 起動 終了 open with msix">
+            <h3 id="launch-exit">起動と終了</h3>
+            <p>インストール済みのinkpodをスタートメニューから起動するか、関連付け済みの `.inkpod` ファイルを開きます。未インストール版では、Windowsの「プログラムから開く」で実行ファイルを選べます。同じユーザーセッションでは一つの論理アプリとして動作し、追加で開いたファイルは既存のアプリへ渡されます。</p>
+            <p>終了は <span class="menu-path">ファイル<span class="sep">›</span>終了</span> または <kbd>Alt</kbd>+<kbd>F4</kbd> です。未保存文書がある場合は文書ごとに保存・破棄・キャンセルを確認します。キャンセルまたは保存失敗時は終了を開始しません。</p>
+          </div>
+          <div class="search-unit" data-search="screen layout UI workspace canvas tabs status panes">
+            <h3 id="screen-layout">画面の基本構成</h3>
+            <div class="table-scroll">
+              <table class="compare">
+                <thead><tr><th>位置</th><th>領域</th><th>役割</th></tr></thead>
+                <tbody>
+                  <tr><td>上端</td><td>メニューバー／ツールオプション</td><td>すべてのコマンドと、選択ツールに応じた設定を表示します。</td></tr>
+                  <tr><td>左</td><td>ツールパレット</td><td>20個の描画・彩色・修正ツールを切り替えます。</td></tr>
+                  <tr><td>中央</td><td>文書タブ／Canvas</td><td>文書や追加ビューを切り替え、実際に描画します。</td></tr>
+                  <tr><td>右</td><td>カラー／レイヤー／プレーン</td><td>描画色と編集対象、表示・編集可否を管理します。</td></tr>
+                  <tr><td>下端</td><td>ステータスバー</td><td>ツール、対象プレーン、座標、倍率、色、選択、処理、未保存状態、ショートカット入力待ちを表示します。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="chapter" id="quick-start" aria-labelledby="quick-start-heading">
+          <h2 id="quick-start-heading">3. クイックスタート</h2>
+          <div class="search-unit" data-search="new cell quick start Ctrl N">
+            <h3 id="quick-new">新規セルを作って彩色する</h3>
+            <ol class="steps">
+              <li><span class="menu-path">ファイル<span class="sep">›</span>新規セル</span>（<kbd>Ctrl</kbd>+<kbd>N</kbd>）を選びます。新しい無題セルが文書タブに開きます。</li>
+              <li><a href="#pane-layer">レイヤー／プレーン</a>で目的のレイヤーを選び、その中の「主線」または「彩色」プレーンを選びます。彩色する場合は「彩色」が編集可能であることを確認します。</li>
+              <li>描画色は<a href="#pane-color">カラー</a>で指定します。主線色と彩色用描画色は別表示です。</li>
+              <li>ツールパレットで「鉛筆」「ブラシ」「フィル」などを選び、Canvasで操作します。ストロークはペンを下ろしてから離すまでが一回のUndo単位です。</li>
+              <li><span class="menu-path">ファイル<span class="sep">›</span>名前を付けて保存...</span>で `.inkpod` として保存します。以後は <kbd>Ctrl</kbd>+<kbd>S</kbd> で同じ場所へ保存できます。</li>
+            </ol>
+          </div>
+          <div class="search-unit" data-search="open file Ctrl O raster png tiff tga bmp">
+            <h3 id="quick-open">ファイルを開く</h3>
+            <p><span class="menu-path">ファイル<span class="sep">›</span>開く...</span>（<kbd>Ctrl</kbd>+<kbd>O</kbd>）で `.inkpod` または対応するPNG、TIFF、TGA、BMPを選びます。同じファイルがすでに開いている場合、別文書を重複作成せず既存文書を選択します。別の表示を並べたい場合は<a href="#views-groups">新しいビュー</a>を使います。</p>
+          </div>
+          <div class="callout tip search-unit" data-search="save recovery difference autosave">
+            <strong>保存とRecovery保存は別です</strong>
+            <span>通常の「保存」は、その時点を「保存済み」の基準にします。「Recoveryを保存」は障害復旧用の別データを作る操作で、通常保存の基準や未保存表示を進めません。作業終了前には通常の保存を行ってください。</span>
+          </div>
+        </section>
+
+        <section class="chapter" id="concepts" aria-labelledby="concepts-heading">
+          <h2 id="concepts-heading">4. 基本概念</h2>
+          <div class="card-grid">
+            <div class="card search-unit" id="term-cut" data-search="cut shot scene カット">
+              <h3>カット</h3><p>一つのショットに属するセル連番、背景、基準フレーム、既定用紙、制作情報をまとめる単位です。</p>
+            </div>
+            <div class="card search-unit" id="term-cell" data-search="cell セル">
+              <h3>セル</h3><p>一枚の作画・彩色文書です。用紙、フレーム、複数レイヤー、選択範囲、補助情報を持ちます。</p>
+            </div>
+            <div class="card search-unit" id="term-frame" data-search="frame 100 reference drawing safe margin フレーム">
+              <h3>フレーム</h3><p>「100フレーム」は制作上の基準寸法、「基準フレーム」は位置合わせ、「作画フレーム」は描く範囲、「安全フレーム」は必ず見せたい範囲の目安です。余白は作画フレーム外でも文書内に残す領域です。</p>
+            </div>
+            <div class="card search-unit" id="term-layer" data-search="layer レイヤー">
+              <h3>レイヤー</h3><p>セル画を重ねる単位です。種類によって、内部に作成できるプレーンと使えるツールが異なります。</p>
+            </div>
+            <div class="card search-unit" id="term-plane" data-search="plane プレーン">
+              <h3>プレーン</h3><p>レイヤー内の最小編集単位です。主線、彩色、色トレース、塗り、ラスター、選択などを分けて保持します。</p>
+            </div>
+            <div class="card search-unit" id="term-selection" data-search="selection mask 選択範囲">
+              <h3>選択範囲</h3><p>処理を適用する範囲を示すマスクです。描画、フィルター、変形などを選択の内側へ限定できます。</p>
+            </div>
+          </div>
+          <div class="search-unit" data-search="main line color plane active visibility editability">
+            <h3 id="mainline-color">主線と彩色</h3>
+            <p>主線プレーンは線、彩色プレーンは色トレースや塗り色を保持します。彩色モードでは主線を見ながら彩色プレーンへ処理でき、主線を保護できます。ただし、「見えている」ことと「編集できる」ことは別です。さらに、選択中のレイヤーと選択中のプレーンも別です。操作前にレイヤー／プレーンの選択行、表示状態、編集可否、ステータスバーを確認してください。</p>
+          </div>
+          <div class="search-unit" data-search="document view tab editor group session shared independent zoom pan flip">
+            <h3 id="document-view-difference">文書、ビュー、タブ、エディターグループ</h3>
+            <div class="table-scroll">
+              <table class="compare">
+                <thead><tr><th>言葉</th><th>意味</th><th>共有／独立</th></tr></thead>
+                <tbody>
+                  <tr><td>文書</td><td>保存対象となる一つのセルと編集履歴</td><td>同じ文書の全ビューで画像、レイヤー、履歴、未保存状態、保存先を共有</td></tr>
+                  <tr><td>ビュー</td><td>文書を見る一つの表示</td><td>倍率、パン、表示反転、補助表示、表示フレームはビューごとに独立</td></tr>
+                  <tr><td>タブ</td><td>ビューを切り替える見出し</td><td>追加ビューには「[ビュー N]」、未保存には「*」などの状態が付く</td></tr>
+                  <tr><td>エディターグループ</td><td>タブ列と一つのCanvasを持つ領域</td><td>最大2グループを左右または上下に分割</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="callout warning search-unit" data-search="close view document difference">
+            <strong>「ビューを閉じる」と「文書を閉じる」</strong>
+            <span>ビューを閉じても、同じ文書の別ビューが残っていれば文書と未保存状態は残ります。文書を閉じると、別ウィンドウを含むその文書の全ビューを対象に、一度だけ保存確認を行います。</span>
+          </div>
+        </section>
+
+        <section class="chapter" id="workspace" aria-labelledby="workspace-heading">
+          <h2 id="workspace-heading">5. 画面とワークスペース</h2>
+          <div class="search-unit" data-search="menu bar tool options tool palette canvas tabs status bar">
+            <h3 id="workspace-regions">主要領域</h3>
+            <ul>
+              <li><strong>メニューバー:</strong> すべての利用者向けコマンドへ到達できます。項目には現在のショートカットが表示され、実行できない状況では無効になります。</li>
+              <li><strong>ツールオプション:</strong> 選択中ツール名、ブラシ／消しゴムの太さ、消しゴムの対象「主線／彩色」、詳細設定ボタンを表示します。</li>
+              <li><strong>ツールパレット:</strong> 20個のツールを一列で表示し、選択中ツールを視覚的に示します。狭い場合は縦スクロールできます。</li>
+              <li><strong>Canvas:</strong> 文書を描画する中心領域です。倍率、パン、表示反転はビュー固有で、画像データそのものは変えません。</li>
+              <li><strong>文書タブ:</strong> セル名やファイル名、追加ビュー番号、未保存状態を示します。</li>
+              <li><strong>ステータスバー:</strong> 現在の対象と、処理・ショートカット入力待ちを確認する最後の手掛かりです。</li>
+            </ul>
+          </div>
+          <div class="search-unit" data-search="dock floating hidden restore autohide edge buttons">
+            <h3 id="dock-autohide">ドッキング、フローティング、非表示、自動格納</h3>
+            <p>ペインは上・左・右・下へのドック、タブ化／比率分割、独立したフローティング、非表示、AutoHide（自動格納）を、ペインごとの許可範囲内で使えます。フローティングペインの閉じるボタンは通常、ペインを終了せず非表示にします。非表示にしたペインは <span class="menu-path">ウィンドウ</span> メニューから復元します。</p>
+            <p>AutoHideにすると画面端の名前付きボタンへ格納されます。ポインター操作は可能ですが、現行版ではキーボードだけで端ボタンへ移動できない場合があります。</p>
+          </div>
+          <div class="search-unit" data-search="workspace presets coloring line cleanup reference check batch focus">
+            <h3 id="workspace-presets">ワークスペースプリセット</h3>
+            <p><span class="menu-path">ウィンドウ<span class="sep">›</span>ワークスペース<span class="sep">›</span>プリセット</span>には「彩色」「線整理」「参照・チェック」「バッチ」「集中」があります。プリセットはペイン配置と分割を切り替えるもので、開いている文書や画像データを変更しません。</p>
+            <p>「ワークスペースを保存」は現在の名前へ上書きし、「名前を付けて保存...」は新しい名前で保存します。「保存したワークスペースを復元」は保存状態へ戻し、「既定に戻す」は標準配置へ戻します。「左右を反転」は配置の左右を入れ替えます。</p>
+          </div>
+          <div class="search-unit" data-search="multiple view split window editor group">
+            <h3 id="views-groups">複数ビュー、画面分割、複数ウィンドウ</h3>
+            <p>「新しいビュー」は同じ文書をもう一つ表示します。画像とUndo履歴は共有されますが、倍率・パン・表示反転は別にできます。「右へ分割」「下へ分割」で最大2グループを作り、別グループや別ウィンドウへビューを移動／複製できます。</p>
+            <p>タブのドラッグでも同じグループ内の並べ替え、別グループ／ウィンドウへの移動、ウィンドウ外への取り出しができます。描画中、プレビュー中、ポインターを捕捉中は開始されません。<kbd>Esc</kbd>でキャンセルすると元の位置へ戻ります。</p>
+          </div>
+        </section>
+
+        <section class="chapter" id="menus" aria-labelledby="menus-heading">
+          <h2 id="menus-heading">6. メニューリファレンス</h2>
+          <div class="callout search-unit" data-search="menu reference common rules shortcut cancel undo disabled">
+            <strong>全メニュー共通の読み方</strong>
+            <span>「...」が付く項目は設定または確認画面を開きます。編集プレビューは「OK／実行」で一回のUndo単位として確定し、「キャンセル」で開始前へ戻ります。文書や選択、適合するレイヤー／プレーンがないときは項目が無効になります。すべての末端項目には設定可能なショートカットがあり、メニューには現在の割り当てが表示されます。以下では標準的な既定キーを個別に示し、その他は「設定可」とします。</span>
+          </div>
+          <div class="callout warning search-unit" data-search="destructive overwrite caution save delete merge">
+            <strong>上書きや削除を伴う操作</strong>
+            <span>「削除」「クリア」「復帰」「統合」「鏡像」「回転」「明示上書き」などは結果をよく確認してください。文書編集は原則Undoできますが、通常保存、ファイル出力、Recovery管理、ワークスペース設定、バッチで確定済みの外部ファイルは通常のUndo対象ではありません。</span>
+          </div>
+
+          <details class="reference search-unit" id="menu-file" open data-search="ファイル file new open save recovery import export recent">
+            <summary>ファイル</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">ファイル › 新規セル <kbd>Ctrl</kbd>+<kbd>N</kbd></div><div class="command-desc">新しい無題セルを作り、現在のグループへタブとして開きます。文書を作れる状態なら実行でき、新しい文書は未保存です。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 開く... <kbd>Ctrl</kbd>+<kbd>O</kbd></div><div class="command-desc">`.inkpod` または対応ラスター画像を選びます。同じ実体のファイルが開いていれば既存文書を選択します。ダイアログのキャンセルでは変化しません。</div></li>
+              <li class="search-unit" data-search="1 (なし) 2 3 4 5 6 7 8"><div class="command-name">ファイル › 最近使ったファイル › 1 (なし)〜8 (なし)</div><div class="command-desc">直近の最大8件を開く可変スロットです。履歴が空なら「(なし)」となり無効です。表示中のパスを開く点は「開く...」と同じです。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 保存 <kbd>Ctrl</kbd>+<kbd>S</kbd></div><div class="command-desc">現在の保存先へ安全に保存し、成功時だけ通常保存の基準を進めます。未保存なら保存先を選びます。変更なしは何も変えません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 名前を付けて保存... <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></div><div class="command-desc">新しい `.inkpod` 保存先を選び、成功後に文書名、最近使ったファイル、Recovery情報を更新します。別の開いている文書と保存先が衝突する場合は確認なしに統合しません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 復帰 <span class="tag caution">注意</span></div><div class="command-desc">文書全体を最後の通常保存時点へ戻します。未保存変更とその後の履歴を失うため確認して使います。Recovery保存は復帰点ではありません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › レイヤーを部分的に復帰 <span class="tag undo">Undo可</span></div><div class="command-desc">最後の通常保存内容から、選択中レイヤー／プレーンの選択範囲だけを戻します。保存済み状態、編集対象、選択範囲が必要です。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › ラスタ－を読み込み...</div><div class="command-desc">PNG、TIFF、TGA、BMPを文書として読み込みます。選択をキャンセルした場合や読み込み失敗時は既存文書を変更しません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › ラスタ－を書き出し...</div><div class="command-desc">現在の表示内容を対応ラスター形式へ書き出します。レイヤー／プレーン等の固有情報は画像形式では平坦化され得るため、編集用原本は `.inkpod` でも保存してください。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › Recoveryを保存</div><div class="command-desc">障害復旧用の別保存を直ちに作ります。通常保存先、通常の保存基準、未保存表示は変えません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › Recoveryを開く...</div><div class="command-desc">列挙されたRecovery候補を選んで「復元セル」として開きます。元ファイルを無言で上書きしません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 起動時に前回の文書を復元</div><div class="command-desc">通常終了時の文書一覧を次回起動時に戻す設定を切り替えます。既定はオフで、障害復旧用Recoveryとは別です。<span class="tag view">設定</span></div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 終了 <kbd>Alt</kbd>+<kbd>F4</kbd></div><div class="command-desc">inkpodを終了します。未保存文書ごとに一度だけ保存判断を求め、キャンセルまたは保存失敗なら終了しません。</div></li>
+            </ul></div>
+          </details>
+
+          <details class="reference search-unit" id="menu-edit" open data-search="編集 edit undo redo clipboard paste floating shortcut">
+            <summary>編集</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">編集 › 元に戻す <kbd>Ctrl</kbd>+<kbd>Z</kbd></div><div class="command-desc">直前の確定編集を戻します。戻せる履歴がないと無効です。通常保存の有無にかかわらず履歴上を移動します。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › やり直し <kbd>Ctrl</kbd>+<kbd>Y</kbd></div><div class="command-desc">元に戻した編集を再適用します。Undo後に新しい編集をすると、やり直し側の履歴は破棄されます。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › 複数段階戻る...</div><div class="command-desc">履歴一覧から戻り先を選びます。OKでまとめて移動し、キャンセルでは現在の履歴位置を維持します。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › 複数段階進む...</div><div class="command-desc">やり直し可能な履歴一覧から進み先を選びます。候補がないと無効です。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › カット <kbd>Ctrl</kbd>+<kbd>X</kbd> <span class="tag undo">Undo可</span></div><div class="command-desc">選択中のプレーン／レイヤーにある選択内容を座標・種類付きでクリップボードへ移し、元を消します。選択内容が必要です。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › コピー <kbd>Ctrl</kbd>+<kbd>C</kbd></div><div class="command-desc">選択対象を種類、色深度、文書座標とともにコピーします。文書は変更せず、外部アプリ向けの標準画像形式も用意します。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › 貼り付け <kbd>Ctrl</kbd>+<kbd>V</kbd></div><div class="command-desc">コピー元と同じ属性の適合プレーンを優先し、フローティング選択として貼り付けます。移動・変形後に確定またはキャンセルします。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › 選択プレーンにペースト</div><div class="command-desc">現在のプレーンへ明示的に変換・合成して貼ります。型や色深度の損失がある場合はプレビュー／確認を行います。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › 変換してペースト...</div><div class="command-desc">貼り付け先の新規レイヤー／プレーン種類、色深度、名前を選びます。OK後もフローティング状態なので、最終確定が必要です。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › フローティング選択 › 移動・拡大縮小・回転...</div><div class="command-desc">貼り付け直後などの浮動内容をX/Y、幅／高さ、縦横比、基準点、角度で調整します。まだ確定されません。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › フローティング選択 › 確定 <span class="tag undo">Undo可</span></div><div class="command-desc">浮動内容を一回の履歴単位として編集対象へ確定します。フローティング選択がある場合だけ有効です。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › フローティング選択 › キャンセル</div><div class="command-desc">浮動内容を破棄し、貼り付け／変形開始前の文書へ完全に戻します。履歴は増えません。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › 設定 › ショートカット編集...</div><div class="command-desc">検索可能なコマンド一覧から、最大4ストロークのキー列を割り当てます。完全一致は割当を交換し、途中まで同じになる競合は受け付けません。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › 設定 › ショートカットを初期化</div><div class="command-desc">変更した割り当てを既定値へ戻します。文書内容には影響しません。<span class="tag view">設定</span></div></li>
+            </ul></div>
+          </details>
+
+          <details class="reference search-unit" id="menu-view" open data-search="表示 view zoom flip ruler guide grid snap transparent">
+            <summary>表示</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">表示 › 拡大</div><div class="command-desc">現在のビューを一段拡大します。画像データ、履歴、未保存状態は変えません。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">表示 › 縮小</div><div class="command-desc">現在のビューを一段縮小します。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">表示 › 全体表示</div><div class="command-desc">用紙全体がCanvasへ収まる倍率と位置にします。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">表示 › ピクセル等倍</div><div class="command-desc">文書の1ピクセルをCanvasの1デバイスピクセルとして表示します。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">表示 › 表示倍率...</div><div class="command-desc">倍率を数値で指定します。OKでビューへ反映し、キャンセルでは元の倍率を維持します。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › 範囲を拡大</div><div class="command-desc">Canvas上で指定した範囲へ表示を合わせます。文書を切り抜く操作ではありません。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">表示 › 表示を左右反転</div><div class="command-desc">現在のビューだけを左右反転します。同じ文書の別ビューと画像データは変わりません。実データの反転は「セル › 鏡像」を使います。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">表示 › 表示を上下反転</div><div class="command-desc">現在のビューだけを上下反転します。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">表示 › ルーラー</div><div class="command-desc">現在のビューのルーラー表示を切り替えます。チェック状態が現在値です。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › ガイド線</div><div class="command-desc">ガイドの表示／非表示を切り替えます。ガイド自体は削除されません。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › グリッド</div><div class="command-desc">グリッド表示を切り替えます。スナップの有無とは別です。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › スナップ › ガイド</div><div class="command-desc">描画や配置をガイドへ吸着させる設定を切り替えます。ガイド表示がオフでも設定値は独立して保持されます。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › スナップ › グリッド</div><div class="command-desc">描画や配置をグリッドへ吸着させる設定を切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › ガイド › 垂直ガイドを追加...</div><div class="command-desc">文書座標で垂直ガイド位置を指定して追加します。キャンセルでは追加しません。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › ガイド › 水平ガイドを追加...</div><div class="command-desc">文書座標で水平ガイド位置を指定して追加します。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › ガイド › ガイドを移動</div><div class="command-desc">既存ガイドをCanvas上で移動する操作へ切り替えます。ガイドがない場合は実行できません。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › ガイド › すべて削除 <span class="tag caution">注意</span></div><div class="command-desc">文書の全ガイドを削除します。画像ピクセルは変えません。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › グリッド設定...</div><div class="command-desc">グリッド間隔、分割、原点などを設定します。キャンセルでは現在設定を維持します。</div></li>
+              <li class="search-unit"><div class="command-name">表示 › 透明部分</div><div class="command-desc">透明領域の表示を切り替えます。アルファ値や書き出し結果自体は変更しません。<span class="tag view">表示のみ</span></div></li>
+            </ul></div>
+          </details>
+
+          <details class="reference search-unit" id="menu-cell" open data-search="セル cell paper image resolution mirror rotate frame layer plane">
+            <summary>セル</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">セル › 用紙設定...</div><div class="command-desc">用紙寸法、DPI、フレーム単位、元画像の配置基準を設定します。サイズ変更を確定すると文書編集として履歴へ記録されます。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 撮影フレームを考慮して用紙サイズ変更</div><div class="command-desc">撮影フレームを収めるよう用紙を切り詰め／拡張します。文書全体に作用するため、実行前にフレーム設定を確認してください。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 画像サイズ...</div><div class="command-desc">Canvasの幅・高さと既存画像の配置基準を変更します。見えなくなる領域が生じ得るためプレビューを確認します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 画像解像度...</div><div class="command-desc">物理寸法、DPI、ピクセル数、再サンプルの有無を設定します。再サンプルなしではピクセル数を変えません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 鏡像 › 水平方向 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書の実データと関連座標を左右反転します。「表示を左右反転」と異なり保存結果も変わります。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 鏡像 › 垂直方向 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書の実データと関連座標を上下反転します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 回転 › 左90度 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書の画像、ベクター、選択、フレーム、ガイドを左へ90度回転します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › 回転 › 右90度 <span class="tag undo">Undo可</span></div><div class="command-desc">全文書の関連データを右へ90度回転します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › フレーム設定 › 100フレーム...</div><div class="command-desc">制作基準となる100フレームの物理寸法、DPI、ピクセル寸法を設定します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › フレーム設定 › 基準フレーム...</div><div class="command-desc">異なる用紙や参照画像を重ねる位置合わせ基準を設定します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › フレーム設定 › 作画フレーム...</div><div class="command-desc">作画対象の目安となる範囲を設定します。画像へ線を焼き込みません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › フレーム設定 › 安全フレーム...</div><div class="command-desc">必ず画面内へ収めたい内容の目安を設定します。作画フレームとは別です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › フレーム設定 › 余白...</div><div class="command-desc">作画フレーム外でも文書内に保持する領域を設定します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 新規...</div><div class="command-desc">種類と名前を指定してレイヤーを追加します。作成可能な構成だけが確定されます。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 複製</div><div class="command-desc">選択中レイヤーと内容を新しい識別子で複製します。レイヤー選択が必要です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 削除 <span class="tag caution">注意</span></div><div class="command-desc">選択中レイヤーを削除します。文書を成立させる最低構成は残す必要があり、削除不可のときは無効です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 非表示を削除 <span class="tag caution">注意</span></div><div class="command-desc">非表示レイヤーをまとめて削除します。非表示は編集可否と別なので、対象を確認してから実行します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 最前面へ移動</div><div class="command-desc">選択中レイヤーをレイヤー順の最上位へ移します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 上へ</div><div class="command-desc">選択中レイヤーを一段上へ移します。プレーン順は変えません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 下へ</div><div class="command-desc">選択中レイヤーを一段下へ移します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 表示切替</div><div class="command-desc">合成表示への参加を切り替えます。非表示でも編集可否の状態は別に保持されます。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 編集可否切替</div><div class="command-desc">選択レイヤーを編集可能／不可に切り替えます。表示は変えません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 不透明度...</div><div class="command-desc">レイヤー全体の合成不透明度を設定します。OKで一回の履歴として確定します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 変換...</div><div class="command-desc">選択レイヤーを別の対応種類へ変換します。表現できない情報がある場合は内容を確認してから確定します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › 同種を統合 <span class="tag caution">注意</span></div><div class="command-desc">互換性のある同種レイヤーを順序に従って統合します。異種または統合できない構成では無効です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › レイヤー › プロパティ...</div><div class="command-desc">選択レイヤーの名前、種類、状態など確認可能な属性を表示・編集します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 主線</div><div class="command-desc">選択中レイヤーの主線プレーンを編集対象にします。存在しない／編集不可なら無効です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 彩色</div><div class="command-desc">選択中レイヤーの彩色プレーンを編集対象にします。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 新規...</div><div class="command-desc">プレーン種類と形式（2値、グレースケール、RGBA等）を選んで追加します。レイヤーに使えない組み合わせは確定されず、画面を開いたままエラー表示します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 複製</div><div class="command-desc">選択プレーンと内容を同じレイヤー内へ複製します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 削除 <span class="tag caution">注意</span></div><div class="command-desc">選択プレーンを削除します。レイヤーの必須構成を壊す場合は実行できません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 上へ</div><div class="command-desc">選択プレーンを同じレイヤー内で一段上へ移します。別レイヤーへは移しません。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 下へ</div><div class="command-desc">選択プレーンを同じレイヤー内で一段下へ移します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 表示切替</div><div class="command-desc">選択プレーンの表示を切り替えます。編集可否とは別です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 編集可否切替</div><div class="command-desc">選択プレーンへの編集を許可／禁止します。選択中でも編集不可なら描画コマンドは無効です。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 不透明度...</div><div class="command-desc">選択プレーンの合成不透明度を設定します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 変換...</div><div class="command-desc">プレーン種類または保存形式を、対応する組み合わせへ変換します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › 同種を統合 <span class="tag caution">注意</span></div><div class="command-desc">同じレイヤー内の互換プレーンを順序どおりに統合します。</div></li>
+              <li class="search-unit"><div class="command-name">セル › プレーン › プロパティ...</div><div class="command-desc">名前、種類、形式、表示・編集状態など選択プレーンの詳細を確認・編集します。</div></li>
+            </ul></div>
+          </details>
+
+          <details class="reference search-unit" id="menu-selection" open data-search="選択 selection rectangle ellipse lasso polyline trace wand mode invert expand shrink">
+            <summary>選択</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">選択 › すべて選択 <kbd>Ctrl</kbd>+<kbd>A</kbd></div><div class="command-desc">文書全体を選択マスクにします。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択解除</div><div class="command-desc">現在の選択マスクを空にします。画像内容は消しません。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 長方形 <kbd>R</kbd></div><div class="command-desc">ドラッグした長方形を、現在の作成モードで選択へ反映します。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 楕円 <kbd>O</kbd></div><div class="command-desc">ドラッグした楕円を選択します。<kbd>Shift</kbd>による形状制約を利用できます。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 投げ縄 <kbd>L</kbd></div><div class="command-desc">自由に囲んだ領域を選択します。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 折れ線</div><div class="command-desc">クリックで頂点を追加して多角形選択を作ります。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択ツール › トレース</div><div class="command-desc">ブラシ状の軌跡を選択マスクへ描きます。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 色の杖 <kbd>W</kbd></div><div class="command-desc">クリック位置と許容差内でつながった同系色領域を選択します。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 作成モード › 新規</div><div class="command-desc">次の選択操作で既存選択を置き換えます。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 作成モード › 追加</div><div class="command-desc">次の領域を既存選択へ加えます。基本修飾キーは<kbd>Shift</kbd>です。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 作成モード › 削除</div><div class="command-desc">次の領域を既存選択から引きます。基本修飾キーは<kbd>Alt</kbd>です。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 作成モード › 交差</div><div class="command-desc">既存選択と次の領域が重なる部分だけを残します。基本修飾キーは<kbd>Shift</kbd>+<kbd>Alt</kbd>です。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 描画色を選択</div><div class="command-desc">現在の描画色と一致する領域を選択します。対象プレーンと色が必要です。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 描画色以外を選択</div><div class="command-desc">現在の描画色以外の領域を選択します。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 描画色を選択範囲に追加</div><div class="command-desc">描画色に一致する領域を既存の選択へ追加します。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択範囲を反転</div><div class="command-desc">文書範囲内で選択と非選択を入れ替えます。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択範囲を拡張...</div><div class="command-desc">指定ピクセル幅だけ選択マスクを外側へ広げます。キャンセルでは変更しません。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択範囲を縮小...</div><div class="command-desc">指定ピクセル幅だけ選択マスクを内側へ狭めます。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 変換 › 選択範囲をレイヤーへ</div><div class="command-desc">現在の選択マスクを選択レイヤーとして保持できる形へ変換します。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 変換 › レイヤーを選択範囲へ</div><div class="command-desc">選択レイヤーの内容から現在の選択マスクを作ります。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 変換 › レイヤーを追加</div><div class="command-desc">選択レイヤーのマスクを現在の選択へ加えます。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 変換 › レイヤーを削除</div><div class="command-desc">選択レイヤーのマスクを現在の選択から引きます。</div></li>
+            </ul></div>
+          </details>
+
+          <details class="reference search-unit" id="menu-filter" open data-search="フィルタ filter sharpen blur gaussian invert contrast tone curve levels hsv color balance unsharp dust adjustment">
+            <summary>フィルタ</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">フィルタ › 直前のフィルタを再実行</div><div class="command-desc">最後に確定したフィルターとパラメーターを、現在の対象へもう一度適用します。履歴がないと無効です。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › シャープ（弱）</div><div class="command-desc">弱い固定プリセットで輪郭を強調します。選択があれば内側、なければ編集可能な対象プレーン全体へ適用します。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › シャープ（強）</div><div class="command-desc">強い固定プリセットで輪郭を強調します。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › 階調反転</div><div class="command-desc">対象チャンネルの値を反転します。アルファの扱いは対象形式に従います。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › ぼかし（弱）</div><div class="command-desc">弱い固定プリセットでぼかします。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › ぼかし（強）</div><div class="command-desc">強い固定プリセットでぼかします。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › ガウスぼかし...</div><div class="command-desc">半径／強さを指定してプレビューし、OKで一回だけ確定します。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › 自動コントラスト</div><div class="command-desc">色ヒストグラムに基づいて範囲を拡張します。アルファは色のヒストグラムへ混ぜません。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › 明るさ・コントラスト...</div><div class="command-desc">明るさとコントラストを別々に調整してプレビューします。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › トーンカーブ...</div><div class="command-desc">RGBまたは各色チャンネルの制御点カーブで階調を調整します。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › レベル補正...</div><div class="command-desc">入力シャドウ／ガンマ／ハイライトと出力範囲を調整します。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › 色相・彩度・明度...</div><div class="command-desc">HSVの各値を調整してプレビューします。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › カラーバランス...</div><div class="command-desc">色の偏りを調整します。確定まで元画像へ累積適用しません。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › アンシャープマスク...</div><div class="command-desc">半径、量、しきい値を指定して輪郭を強調します。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › ゴミ取り...</div><div class="command-desc">選択またはプレーン全体の小点／小穴／異色小領域を一括処理します。必要な線を消す可能性があるためプレビューを確認します。ベクターでは無効です。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › 調整レイヤーを作成...</div><div class="command-desc">元ピクセルを変えず、明るさ・コントラスト、レベル、トーンカーブ等の調整を持つレイヤーを作ります。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › 前の調整レイヤーを選択</div><div class="command-desc">レイヤー順で前の調整レイヤーを選びます。候補がなければ無効です。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › 次の調整レイヤーを選択</div><div class="command-desc">レイヤー順で次の調整レイヤーを選びます。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › 調整レイヤーを再編集...</div><div class="command-desc">選択中の調整パラメーターを再び開き、プレビュー後に更新します。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › 調整レイヤーの表示切替</div><div class="command-desc">選択中の調整効果を一時的に表示／非表示にします。</div></li>
+              <li class="search-unit"><div class="command-name">フィルタ › 調整レイヤーを最前面へ</div><div class="command-desc">選択中の調整レイヤーをレイヤー順の最上位へ移します。</div></li>
+            </ul></div>
+          </details>
+
+          <details class="reference search-unit" id="menu-tools" open data-search="ツール tool pencil brush eraser fill eyedropper vector gradient airbrush blur stamp dust alpha">
+            <summary>ツール</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">ツール › 鉛筆 <kbd>P</kbd></div><div class="command-desc">硬い線を描きます。ベクター彩色レイヤーでは使用できません。開始色と同じならストローク全体を消去にする自動消去を使えます。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ブラシ <kbd>B</kbd></div><div class="command-desc">丸／角、太さ、筆圧、平滑化などを使う描画ツールです。適合する編集可能プレーンが必要です。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 消しゴム <kbd>E</kbd></div><div class="command-desc">ツールオプションで明示された「主線／彩色」対象を消します。ツールを選んだだけでは対象を自動変更しません。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › フィル <kbd>F</kbd></div><div class="command-desc">クリック位置と許容差内で連結する領域を塗ります。成功時は実際に塗ったプレーンが選択され、0ピクセル、失敗、キャンセルでは対象選択を変えません。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 閉領域フィル <kbd>Shift</kbd>+<kbd>F</kbd></div><div class="command-desc">指定範囲に含まれる複数の閉領域を一度に塗ります。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 塗りのばし <kbd>X</kbd></div><div class="command-desc">既存色をドラッグ方向の狭い未着色領域へ広げます。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › フィル設定...</div><div class="command-desc">操作、許容差、隙間、のばし距離、含み塗り、最大6対象色、あふれ中断、離れた同色、透明だけ、選択制限、ライトテーブル境界／色を設定します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › スポイト <kbd>I</kbd></div><div class="command-desc">指定した参照元から色を採取し、直前の色付きツールの描画色へ設定します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › 直線</div><div class="command-desc">開始点から終点へドラッグし、離したときに直線を確定します。ベクタープレーンが必要です。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › 曲線</div><div class="command-desc">始終点を指定後、制御点を調整してクリックで曲線を確定します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › 長方形</div><div class="command-desc">ドラッグ範囲へベクター長方形を作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › 楕円</div><div class="command-desc">ドラッグ範囲へベクター楕円を作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › 折れ線</div><div class="command-desc">クリックで頂点を増やし、ダブルクリックで終了します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター描画 › ベクター消しゴム</div><div class="command-desc">選択中のベクター消去モードに従って線を消します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター消去モード › 触れた部分</div><div class="command-desc">消しゴムが触れた区間だけを切り取ります。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター消去モード › 交点まで</div><div class="command-desc">触れた位置から近い交点までの線を消します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター消去モード › 線全体</div><div class="command-desc">触れたベクターパス全体を消します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 線つなぎ...</div><div class="command-desc">選択範囲内の近い端点を距離・角度に基づいて接続します。誤接続を確認し、確定後は一回のUndoで戻せます。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 線幅修正...</div><div class="command-desc">太く／細く、倍率、一定幅などを対象形式に応じて適用します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 選択範囲で切断</div><div class="command-desc">選択境界でベクター線を切断します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 一部でも触れる線</div><div class="command-desc">選択に一部でも触れるベクター線を対象にします。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 完全に含まれる線</div><div class="command-desc">選択の内側に完全に収まる線だけを対象にします。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 線を選択</div><div class="command-desc">Canvasで指した線をベクター編集対象にします。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 線全体</div><div class="command-desc">指したパス全体を選択します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 交点まで</div><div class="command-desc">指した区間から交点までを選択します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 塗りを囲む線</div><div class="command-desc">塗り領域の境界を構成する線を選択します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクター選択 › 塗り</div><div class="command-desc">ベクター塗り領域を選択します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ベクターをラスタライズ...</div><div class="command-desc">ベクター内容を指定形式のラスターデータへ変換します。編集特性が変わるため変換先を確認します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ラスターをベクター化...</div><div class="command-desc">ラスター線からベクター内容を生成します。プレビューで追跡結果を確認します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › グラデーション... <kbd>G</kbd></div><div class="command-desc">線形／放射、3色以上の停止点、各アルファ、合成方法等を設定して適用します。選択なしでは対象プレーン全体です。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › エアブラシ... <kbd>A</kbd></div><div class="command-desc">太さ、硬さ、間隔、フェード、筆圧を設定した噴霧描画を行います。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 境界色エアブラシ...</div><div class="command-desc">指定した複数色の境界部分だけへ設定幅のグラデーションを作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ぼかしツール...</div><div class="command-desc">ペン／長方形／折れ線／投げ縄範囲で局所的にぼかします。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › スタンプ...</div><div class="command-desc">採取した元位置から一定オフセットで画像を複製して描きます。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ゴミ取り...</div><div class="command-desc">ペン／長方形／折れ線／投げ縄の局所範囲で小点、小穴、異色小領域を修正します。ベクターでは無効です。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › アルファグラデーション...</div><div class="command-desc">対象ラスターのアルファだけへ階調を作ります。通常の色チャンネルを変更しません。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › アルファをグレースケール表示</div><div class="command-desc">アルファ編集用のグレースケール表示を切り替えます。<span class="tag view">表示モード</span></div></li>
+            </ul></div>
+          </details>
+
+          <details class="reference search-unit" id="menu-color" open data-search="色 color RGB HSV RGBA Windows palette chart eyedropper check white transparent">
+            <summary>色</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">色 › 描画色（RGB/HSV・RGBA8/16）...</div><div class="command-desc">RGBまたはHSVで描画色とアルファを編集します。8／16 bitの現在の色深度を保ち、選択中の色付きツールへ反映します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › Windows色選択...</div><div class="command-desc">Windows標準の色選択画面から描画色を設定します。キャンセルでは色を変えません。</div></li>
+              <li class="search-unit"><div class="command-name">色 › スポイト参照元 › 最上位の非透明プレーン</div><div class="command-desc">スポイトが、クリック位置で最上位に見つかる非透明プレーンの色を採るようにします。</div></li>
+              <li class="search-unit"><div class="command-name">色 › スポイト参照元 › 選択中プレーン</div><div class="command-desc">スポイトの参照を現在のプレーンだけに限定します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › スポイト参照元 › 合成表示色</div><div class="command-desc">全レイヤー／プレーンを合成した画面上の色を採ります。</div></li>
+              <li class="search-unit"><div class="command-name">色 › スポイト参照元 › ライトテーブル最上位色</div><div class="command-desc">基準フレームと項目変形を考慮し、最上位のライトテーブル参照色を採ります。参照画像が必要です。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーパレット › 現在色を登録</div><div class="command-desc">現在の描画色を選択中パレット位置へ登録します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーパレット › 選択色を削除</div><div class="command-desc">選択中のパレット色を削除します。文書の既存ピクセルは変わりません。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーパレット › クリア <span class="tag caution">注意</span></div><div class="command-desc">現在のパレット内容を消去します。必要なら先に保存してください。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーパレット › 保存...</div><div class="command-desc">パレットをネイティブデータとしてファイルへ保存します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーパレット › 読み込み...</div><div class="command-desc">保存済みパレットを読み込みます。失敗時は現在の有効データを維持します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーパレット › 次の10色グループ <kbd>Tab</kbd></div><div class="command-desc">高頻度10色の次グループへ切り替えます。文字／数値入力中は通常のTab移動が優先されます。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › セルから作成...</div><div class="command-desc">セルの一意色を抽出してチャート候補を作ります。色数上限、量子化、プレビューを確認して確定します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › 名前・番号を検索...</div><div class="command-desc">チャートの色名または番号から候補を検索します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › 次候補</div><div class="command-desc">現在の検索に一致する次の色へ移動します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › ロック</div><div class="command-desc">選択中のチャート項目を不用意に変更しないようロック／解除します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › 名前を変更...</div><div class="command-desc">選択色の名前を変更します。ネイティブ形式では短い固定文字数に制限しません。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › 次のページ</div><div class="command-desc">複数ページの次ページへ切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › 保存...</div><div class="command-desc">チャートの色、名前、ページをファイルへ保存します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › 読み込み...</div><div class="command-desc">保存済みカラーチャートを読み込みます。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › カット</div><div class="command-desc">選択中のチャート項目をクリップボードへ移して一覧から外します。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › コピー</div><div class="command-desc">選択中のチャート項目をコピーします。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーチャート › ペースト</div><div class="command-desc">コピーしたチャート項目を現在位置へ貼り付けます。</div></li>
+              <li class="search-unit"><div class="command-name">色 › 彩色チェックを解除</div><div class="command-desc">彩色チェックの一時表示を終了し、通常の合成表示へ戻します。文書データは変わりません。</div></li>
+              <li class="search-unit"><div class="command-name">色 › 完全な白をチェック</div><div class="command-desc">完全な白RGB(255,255,255)を未彩色／透明候補として強調表示します。<span class="tag view">表示のみ</span></div></li>
+              <li class="search-unit"><div class="command-name">色 › 白と透明をチェック</div><div class="command-desc">完全な白と透明アルファを別の候補として強調表示します。<span class="tag view">表示のみ</span></div></li>
+            </ul></div>
+          </details>
+
+          <details class="reference search-unit" id="menu-production" open data-search="制作 production light table sequence subpalette motion batch FPS dry-run preview output">
+            <summary>制作</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブルセット › 新規...</div><div class="command-desc">現在の文書へ新しい参照セットを作ります。名前を指定し、キャンセルでは作成しません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブルセット › 複製</div><div class="command-desc">選択セットと項目設定を複製します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブルセット › 削除 <span class="tag caution">注意</span></div><div class="command-desc">選択セットを削除します。参照元画像自体は削除しません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブルセット › 名前を変更...</div><div class="command-desc">選択セットの表示名を変更します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブルセット › 上へ</div><div class="command-desc">選択セットを一覧で一段上へ移します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブルセット › 下へ</div><div class="command-desc">選択セットを一覧で一段下へ移します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブルセット › 全体不透明度...</div><div class="command-desc">セット全体の不透明度を設定します。各項目との積が実効不透明度です。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブル項目 › 画像を追加...</div><div class="command-desc">対応画像を選択セットの参照項目として追加します。参照は読み取り専用です。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブル項目 › 画像を再読み込み...</div><div class="command-desc">参照元の更新を読み直します。失敗時は以前の有効な参照表示を維持します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブル項目 › 削除</div><div class="command-desc">選択項目をセットから外します。元ファイルは削除しません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブル項目 › 上へ</div><div class="command-desc">参照項目を合成順で一段上へ移します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブル項目 › 下へ</div><div class="command-desc">参照項目を合成順で一段下へ移します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブル項目 › 表示・変形プロパティ...</div><div class="command-desc">表示、個別不透明度、色／モノトーン等のモード、位置、倍率、回転、表示レイヤーを編集します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブル項目 › Canvasで移動 (Shift:全項目)</div><div class="command-desc">Canvasで選択参照を動かします。<kbd>Shift</kbd>を押して操作すると全項目をまとめて移動します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブル項目 › 色をサンプル...</div><div class="command-desc">選択項目の変形と基準フレームを考慮した位置から色を採取します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › ライトテーブル項目 › 編集画像と入れ替え <span class="tag caution">確認</span></div><div class="command-desc">選択参照と現在の編集画像を入れ替えます。未保存確認を通り、キャンセルでは入れ替えません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › 連番を読み込み...</div><div class="command-desc">対応画像を自然順のシーケンスとして読み込みます。途中失敗で既存連番を部分置換しません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › 連番を書き出し...</div><div class="command-desc">現在の連番を対応する画像列として書き出します。形式で表せない固有情報に注意してください。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › 前のセル</div><div class="command-desc">自然順で前のセルへ移動します。未保存時は必要な保存確認を行い、キャンセルなら切り替えません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › 次のセル</div><div class="command-desc">自然順で次のセルへ移動します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › セル番号で移動...</div><div class="command-desc">番号を指定して連番内のセルへ移動します。存在しない番号は選択しません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › 選択セルをサブパレット登録</div><div class="command-desc">シーケンスで選択中のセルを参照ビューへ登録します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › サブパレット色サンプル...</div><div class="command-desc">サブパレット／参照ビューの表示セルから色を採取します。参照セルへ描画しません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › 開始・設定...</div><div class="command-desc">再生範囲、倍率、背景／余白色、開始時停止、選択のみ、ライトテーブルを含めるか等を設定して再生を開始します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › 一時停止/再開</div><div class="command-desc">再生中の一時停止と再開を切り替えます。<kbd>Space</kbd>も使用できます。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › 前のフレーム</div><div class="command-desc">再生位置を一フレーム前へ送ります。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › 次のフレーム</div><div class="command-desc">再生位置を一フレーム後へ送ります。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › 先頭フレーム</div><div class="command-desc">指定再生範囲の先頭へ移動します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › 末尾フレーム</div><div class="command-desc">指定再生範囲の末尾へ移動します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 30 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>3</kbd></div><div class="command-desc">再生速度を30フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 25 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>2</kbd></div><div class="command-desc">再生速度を25フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 24 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>4</kbd></div><div class="command-desc">再生速度を24フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 12 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd></div><div class="command-desc">再生速度を12フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 10 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>0</kbd></div><div class="command-desc">再生速度を10フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 8 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>8</kbd></div><div class="command-desc">再生速度を8フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › 停止</div><div class="command-desc">モーションチェックを終了します。<kbd>Esc</kbd>も使用できます。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 入力ファイル...</div><div class="command-desc">処理対象のファイルを入力一覧へ追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 入力フォルダー...</div><div class="command-desc">フォルダー内の対応ファイルを自然順で入力候補にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 現在の連番</div><div class="command-desc">現在文書のシーケンスをバッチ入力に設定します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › セル番号範囲...</div><div class="command-desc">入力連番のうち処理する番号範囲を指定します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 色置換</div><div class="command-desc">旧色／新色の複数組を置換する処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 連続フィル</div><div class="command-desc">複数の文書座標と色を使い、各フレームへ通常フィルを行う処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 色分解</div><div class="command-desc">指定色をマスク化し、置換、主線／彩色プレーン、別出力へ送る処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › レイヤー表示</div><div class="command-desc">安定した対象指定によりレイヤー表示を変更する処理を追加します。対象なしの扱いを確認します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 線幅</div><div class="command-desc">加算／減算／倍率／一定幅の線幅処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 境界色エアブラシ</div><div class="command-desc">複数色の境界へ指定幅の効果を加える処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › ゴミ取り</div><div class="command-desc">小点／小穴／異色小領域を除去する一括処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 鏡像</div><div class="command-desc">各入力の実データを水平／垂直反転する処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 90度回転</div><div class="command-desc">各入力を左／右へ90度回転する処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 画像サイズ・解像度</div><div class="command-desc">画像寸法、DPI、再サンプルを変更する処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › ラスター変換</div><div class="command-desc">ラスター形式／色深度を変換する処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › シャープ（弱）</div><div class="command-desc">弱いシャープ固定プリセットを処理列へ追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › シャープ（強）</div><div class="command-desc">強いシャープ固定プリセットを追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › ぼかし（弱）</div><div class="command-desc">弱いぼかし固定プリセットを追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › ぼかし（強）</div><div class="command-desc">強いぼかし固定プリセットを追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › ガウスぼかし...</div><div class="command-desc">設定可能なガウスぼかしを追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › 階調反転</div><div class="command-desc">階調反転を処理列へ追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › 自動コントラスト</div><div class="command-desc">自動コントラストを処理列へ追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › 明るさ・コントラスト...</div><div class="command-desc">明るさ／コントラスト設定を持つ処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › トーンカーブ...</div><div class="command-desc">トーンカーブ設定を持つ処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › レベル補正...</div><div class="command-desc">レベル補正設定を持つ処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › 色相・彩度・明度...</div><div class="command-desc">HSV調整処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › カラーバランス...</div><div class="command-desc">カラーバランス調整処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › アンシャープマスク...</div><div class="command-desc">アンシャープマスク設定を持つ処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 選択項目を編集...</div><div class="command-desc">処理列で選択した項目の対象レイヤー、パラメーター、有効状態等を編集します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 色置換 old/new を入替</div><div class="command-desc">選択した色置換処理の旧色と新色をまとめて交換します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 選択項目を削除</div><div class="command-desc">選択処理をバッチ列から外します。入力ファイルは変えません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 上へ</div><div class="command-desc">選択処理を一段前へ移し、実行順を変更します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 下へ</div><div class="command-desc">選択処理を一段後へ移します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › 複製保存（既定）</div><div class="command-desc">元入力を残し、複製した出力へ結果を保存します。既定の上書き方針です。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › 新規保存</div><div class="command-desc">指定した新規名／場所へ保存します。既存出力との衝突を設定で確認します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › 明示上書き <span class="tag caution">注意</span></div><div class="command-desc">明示的に既存対象へ上書きします。dry-runとプレビューで対象を確認してから選んでください。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › フォルダー・命名・待機...</div><div class="command-desc">出力フォルダー、セルフォルダー、形式、基本名、開始番号、増減方向、ファイル間待機を設定します。現行版の実出力形式は `.inkpod` です。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 失敗時 › 記録して続行</div><div class="command-desc">失敗を記録し、次の入力へ進みます。失敗した一件の部分出力は確定しません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 失敗時 › 記録して停止</div><div class="command-desc">最初の失敗を記録して残りの処理を停止します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › プレビュー</div><div class="command-desc">選択対象に対する処理結果を保存前に表示します。確定出力は書きません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › dry-run</div><div class="command-desc">入力、処理列、対象、出力名、衝突、失敗条件を検証します。一切ファイルを書きません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 現在セルを実行</div><div class="command-desc">現在セルだけへ処理列を適用し、設定した方針で原子的に出力します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 全実行</div><div class="command-desc">入力一覧全体を自然順で処理します。対象レイヤーが未指定などの検証エラーがあれば開始しません。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › キャンセル</div><div class="command-desc">進行中のバッチを中止します。処理途中の一件は確定せず、すでに完了した別ファイルは残ります。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › セットを保存...</div><div class="command-desc">処理列、入力／出力設定等を `.inkbatch` セットとして保存します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › セットを読み込み...</div><div class="command-desc">現在版の `.inkbatch` セットを読み込みます。旧版や不正データは拒否されます。</div></li>
+            </ul></div>
+          </details>
+
+          <details class="reference search-unit" id="menu-window" open data-search="ウィンドウ window view tab split group pane workspace preset autohide pin follow active">
+            <summary>ウィンドウ</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">ウィンドウ › 新しいビュー</div><div class="command-desc">現在文書の追加ビューを現在グループに作ります。画像、レイヤー、履歴、保存先は共有し、倍率やパン等は独立します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ビューを閉じる <kbd>Ctrl</kbd>+<kbd>F4</kbd></div><div class="command-desc">現在ビューだけを閉じます。別ビューが残る限り文書は閉じず、保存確認もしません。最後のビューなら文書を閉じる確認へ進みます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 文書を閉じる</div><div class="command-desc">別グループ／ウィンドウを含む現在文書の全ビューを閉じます。未保存なら文書につき一度だけ確認し、キャンセルまたは保存失敗では一つも閉じません。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 次のタブ <kbd>Ctrl</kbd>+<kbd>Tab</kbd></div><div class="command-desc">現在グループの次の文書タブを選びます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 前のタブ <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></div><div class="command-desc">現在グループの前の文書タブを選びます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › タブを左へ移動 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd></div><div class="command-desc">現在タブを同じグループ内で一つ左へ並べ替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › タブを右へ移動 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageDown</kbd></div><div class="command-desc">現在タブを同じグループ内で一つ右へ並べ替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 右へ分割 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Right</kbd></div><div class="command-desc">エディターを左右2グループにし、右側グループを作ります。すでに2グループなら無効です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 下へ分割 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Down</kbd></div><div class="command-desc">エディターを上下2グループにし、下側グループを作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 別グループへ移動 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd></div><div class="command-desc">現在ビューをもう一方のグループへ移します。2グループが必要です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 別グループに新しいビュー <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd></div><div class="command-desc">同じ文書の追加ビューをもう一方のグループに作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 次のエディターグループ <kbd>Ctrl</kbd>+<kbd>F6</kbd></div><div class="command-desc">フォーカスするエディターグループを切り替えます。逆順は<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F6</kbd>です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › グループを閉じる <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd></div><div class="command-desc">現在グループを閉じ、ビューを残るグループへ集約します。最後の一グループは閉じません。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 新しいウィンドウ <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="command-desc">独立したメニュー、ペイン配置、エディターを持つ新しい作業ウィンドウを同じアプリ内に作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ビューを次のウィンドウへ移動</div><div class="command-desc">現在ビューを次の既存ウィンドウへ移します。移動先がないと無効です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 次のウィンドウに複製ビュー</div><div class="command-desc">同じ文書の追加ビューを次の既存ウィンドウへ作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ビューを新しいウィンドウへ移動</div><div class="command-desc">新しい作業ウィンドウを作り、現在ビューをそこへ移します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › 新しいウィンドウに複製ビュー</div><div class="command-desc">新しい作業ウィンドウへ同じ文書の追加ビューを作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ツールパレット</div><div class="command-desc">ツールパレットの表示／非表示を切り替えます。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>T</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ツールオプション</div><div class="command-desc">ツールオプションの表示／非表示を切り替えます。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>O</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › カラー</div><div class="command-desc">カラーペインの表示／非表示を切り替えます。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>C</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › カラーを文書に固定／追従</div><div class="command-desc">カラーの対象を現在文書へ固定するか、アクティブ文書へ追従するか切り替えます。固定文書が閉じると追従へ戻ります。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › レイヤー／プレーン</div><div class="command-desc">レイヤー／プレーンペインの表示／非表示を切り替えます。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>L</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ロケーター › 表示</div><div class="command-desc">ロケーターペインを表示／非表示にします。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>K</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ロケーター › 文書に固定／追従</div><div class="command-desc">ロケーターの対象文書を固定／アクティブ追従で切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ロケーター › 固定編集モード</div><div class="command-desc">ロケーター内の固定位置を編集基準として使うモードを切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ロケーター › 端で自動スクロール</div><div class="command-desc">ロケーター操作が端へ到達したときの自動スクロールを切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › シーケンス › 表示</div><div class="command-desc">シーケンスペインを表示／非表示にします。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>F</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › シーケンス › 文書に固定／追従</div><div class="command-desc">シーケンス一覧の対象を一つの文書へ固定するか、アクティブ文書へ追従します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ライトテーブル › 表示</div><div class="command-desc">ライトテーブルペインを表示／非表示にします。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>H</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ライトテーブル › 文書に固定／追従</div><div class="command-desc">ライトテーブル設定の対象文書を固定／追従で切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › サブパレット／参照ビュー › 表示</div><div class="command-desc">読み取り専用参照ビューを表示／非表示にします。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>P</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › サブパレット／参照ビュー › 文書に固定／追従</div><div class="command-desc">参照ビューの対象を固定／追従で切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › バッチ › 表示</div><div class="command-desc">バッチペインを表示／非表示にします。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>B</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › バッチ › 文書に固定／追従</div><div class="command-desc">バッチの対象文書を固定／追従で切り替えます。実行中は発行時のジョブ対象を保ち、別タブへ勝手に移しません。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › プリセット › 彩色</div><div class="command-desc">上部ツールオプション、左ツール、中央Canvas、右カラー／レイヤーを中心とする標準彩色配置へ切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › プリセット › 線整理</div><div class="command-desc">線の確認・修正に向く組み込み配置へ切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › プリセット › 参照・チェック</div><div class="command-desc">ライトテーブル、シーケンス、参照などの確認を重視する配置へ切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › プリセット › バッチ</div><div class="command-desc">バッチペインを中心にした配置へ切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › プリセット › 集中</div><div class="command-desc">Canvas中心の集中用配置へ切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › ワークスペースを保存</div><div class="command-desc">現在のウィンドウ、分割、ドック、ペイン配置を現在名へ保存します。文書パスや画像内容は含めません。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 名前を付けて保存...</div><div class="command-desc">現在配置を新しいワークスペース名で保存します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 保存したワークスペースを復元</div><div class="command-desc">選択中ワークスペースを最後に保存した配置へ戻します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 既定に戻す</div><div class="command-desc">標準の彩色配置へ戻します。文書内容は変えません。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>R</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 補助ペインを自動格納 › ロケーター</div><div class="command-desc">ロケーターを画面端のAutoHideボタンへ格納／復元します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 補助ペインを自動格納 › シーケンス／プレビュー</div><div class="command-desc">シーケンス／プレビューをAutoHideへ格納／復元します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 補助ペインを自動格納 › ライトテーブル</div><div class="command-desc">ライトテーブルをAutoHideへ格納／復元します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 補助ペインを自動格納 › サブパレット／参照</div><div class="command-desc">サブパレット／参照ビューをAutoHideへ格納／復元します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 補助ペインを自動格納 › バッチ</div><div class="command-desc">バッチペインをAutoHideへ格納／復元します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 左右を反転</div><div class="command-desc">ドック配置の左右を入れ替えます。Canvasの表示反転や文書の鏡像ではありません。</div></li>
+            </ul></div>
+          </details>
+
+          <details class="reference search-unit" id="menu-help" open data-search="ヘルプ help about Inkpodについて version build">
+            <summary>ヘルプ</summary>
+            <div class="details-body"><ul class="command-list">
+              <li class="search-unit"><div class="command-name">ヘルプ › Inkpodについて...</div><div class="command-desc">製品名、説明、バージョン、ビルド番号、著作権情報を表示します。画面は英語タイトル／説明を含みますが、現行の日本語UIで意図された表示です。</div></li>
+            </ul></div>
+          </details>
+        </section>
+        <section class="chapter" id="panes" aria-labelledby="panes-heading">
+          <h2 id="panes-heading">7. ペインリファレンス</h2>
+          <div class="callout search-unit" data-search="follow active pinned document job target 追従 文書に固定 ジョブ対象">
+            <strong>「追従」「文書に固定」「ジョブ対象」</strong>
+            <span>追従はアクティブな文書／ビューを対象にします。文書に固定はタブを切り替えても指定文書を見続けます。固定文書を閉じたときは、別文書へ勝手に向けず追従へ戻ります。バッチ実行中のジョブ対象は開始時に確定され、途中でタブを切り替えても変わりません。</span>
+          </div>
+          <div class="card-grid">
+            <div class="card search-unit" id="pane-tool-palette" data-search="ツールパレット tool palette 20 buttons scroll">
+              <h3>ツールパレット</h3>
+              <p>20個の一語ボタンでツールを選びます。選択中は押下状態で示され、使えないツールは無効です。縦に収まらないときはホイールまたはスクロールバーを使います。各ボタンは<kbd>Tab</kbd>で移動し、<kbd>Space</kbd>で実行できます。</p>
+              <p><a href="#tool-list">全ツール一覧</a>／<span class="menu-path">ウィンドウ › ツールパレット</span></p>
+            </div>
+            <div class="card search-unit" id="pane-tool-options" data-search="ツールオプション diameter details eraser target main line color">
+              <h3>ツールオプション</h3>
+              <p>現在ツール名を表示します。鉛筆、ブラシ、消しゴムでは太さを示し、ブラシ／消しゴムは数値編集できます。消しゴムでは「消去対象: 主線／彩色」を常時表示します。「詳細...」はフィルや効果ツールの設定画面を開きます。</p>
+              <p><span class="menu-path">ウィンドウ › ツールオプション</span></p>
+            </div>
+            <div class="card search-unit" id="pane-color" data-search="カラー color hue saturation value opacity RGB alpha palette chart pin">
+              <h3>カラー</h3>
+              <p>「主線色」と「彩色用描画色」を別に表示します。色相リング、彩度・明度、不透明度、RGBA数値、スポイト、適用、パレット／チャートのタブを持ちます。選択中の色付きツールごとに現在色を保ちます。</p>
+              <p>アクティブ追従／文書固定を切り替えられます。<span class="menu-path">ウィンドウ › カラー</span></p>
+            </div>
+            <div class="card search-unit" id="pane-layer" data-search="レイヤー プレーン layer plane thumbnail visibility editability opacity drag reorder">
+              <h3>レイヤー／プレーン</h3>
+              <p>上段にレイヤー、下段に選択レイヤー内のプレーンを縦順で表示します。タイルには選択、表示、編集可否、種類／不透明度情報、サムネイルが現れます。ドラッグで同じ階層内を並べ替え、下部ボタンで新規、複製、削除、上下移動、詳細を実行します。</p>
+              <p><span class="menu-path">ウィンドウ › レイヤー／プレーン</span>。現行版は複数対象を同時編集する専用表示を備えていません。</p>
+            </div>
+            <div class="card search-unit" id="pane-locator" data-search="ロケーター locator neighborhood X Y selection H V L RGBA fixed edit auto scroll">
+              <h3>ロケーター</h3>
+              <p>ポインター周辺の拡大表示、文書座標X/Y、選択情報H/V/L、ピクセルRGBAを表示します。「固定編集モード」と「端で自動スクロール」を切り替えられます。アクティブ追従／文書固定に対応します。</p>
+              <p><span class="menu-path">ウィンドウ › ロケーター</span></p>
+            </div>
+            <div class="card search-unit" id="pane-sequence" data-search="シーケンス sequence thumbnails previous next import files natural order">
+              <h3>シーケンス</h3>
+              <p>自然順のセル一覧とサムネイルを表示し、選択、前へ、次へ、ファイル追加ができます。アクティブ追従／文書固定に対応します。現行版ではセル切替時の自動保存と端点ループを指定する専用コントロールはありません。</p>
+              <p><span class="menu-path">ウィンドウ › シーケンス</span></p>
+            </div>
+            <div class="card search-unit" id="pane-light-table" data-search="ライトテーブル light table set reference image opacity transform reload swap canvas move">
+              <h3>ライトテーブル</h3>
+              <p>セット選択、新規／複製／削除、全体不透明度、参照一覧、追加、再読込、削除、上下移動、表示・変形、Canvas移動、編集画像との交換、前後セル移動を提供します。項目のダブルクリックでも編集画像と交換できます。</p>
+              <p>アクティブ追従／文書固定に対応します。現行版では前後N枚の一括登録と自動不透明度ステップの専用操作は未実装です。</p>
+            </div>
+            <div class="card search-unit" id="pane-reference" data-search="サブパレット 参照ビュー subpalette reference viewer read only sample color previous next current fit one to one sync">
+              <h3>サブパレット／参照ビュー</h3>
+              <p>参照セルを読み取り専用で表示します。前へ、次へ、現在セル、全体、等倍、現在色を登録、前セルを自動参照、Canvasスクロール同期を操作できます。クリックは色採取で、描画入力を文書へ送りません。</p>
+              <p>アクティブ追従／文書固定に対応します。</p>
+            </div>
+            <div class="card search-unit" id="pane-batch" data-search="バッチ batch input operations output preview dry-run run current all cancel save set job target">
+              <h3>バッチ</h3>
+              <p>対象表示とジョブ状態、入力一覧、順序付き処理、処理種類、追加／削除／上下／編集、出力概要、プレビュー、dry-run、現在セル、全実行、中止、セット保存／読込を配置します。実行中はジョブ対象を固定します。</p>
+              <p><span class="menu-path">ウィンドウ › バッチ</span></p>
+            </div>
+            <div class="card search-unit" id="pane-canvas" data-search="Canvas キャンバス pointer pen mouse touch zoom pan flip drawing">
+              <h3>Canvas</h3>
+              <p>表示中ビューの描画面です。ペン、マウス、タッチ入力を受け、座標は画面上のデバイスピクセルとして解釈されます。非表示タブのために余分なCanvasを作らず、各可視グループに一つあります。</p>
+            </div>
+            <div class="card search-unit" id="pane-tabs" data-search="文書タブ エディターグループ tabs editor group dirty view drag">
+              <h3>文書タブ／エディターグループ</h3>
+              <p>タブ名はセル名、保存名、「無題セル N」、「復元セル」などを使い、未保存は「*」、追加ビューは「[ビュー N]」で示します。ドラッグまたはメニューで並べ替え、グループ／ウィンドウ間移動ができます。</p>
+            </div>
+            <div class="card search-unit" id="pane-status" data-search="ステータスバー status tool plane coordinate zoom flip grid RGBA selection dimensions DPI progress dirty shortcut pending">
+              <h3>ステータスバー</h3>
+              <p>現在ツール／プレーン、座標、倍率、表示反転、グリッド、RGBA、選択寸法、文書寸法／DPI、処理進捗、未保存状態、複数ストロークのキー入力待ちを短く表示します。<kbd>F6</kbd>のフォーカス巡回対象です。</p>
+            </div>
+            <div class="card search-unit" id="pane-autohide" data-search="AutoHide edge buttons 自動格納 端ボタン accessibility keyboard">
+              <h3>AutoHideの端ボタン</h3>
+              <p>自動格納した補助ペインを名前付きの画面端ボタンとして表示します。ポインターで開け、支援技術から名前を取得できます。現行版のキーボード到達性には<a href="#current-limitations">制限</a>があります。</p>
+            </div>
+          </div>
+          <div class="search-unit" data-search="pane keyboard navigation F6 Tab arrow dock float hidden restore">
+            <h3 id="pane-keyboard">ペインのキーボード操作と配置</h3>
+            <p><kbd>F6</kbd>／<kbd>Shift</kbd>+<kbd>F6</kbd>でメニュー、ドックペイン、エディター、ステータスの順／逆順に移動します。ペイン内は<kbd>Tab</kbd>／<kbd>Shift</kbd>+<kbd>Tab</kbd>、一覧は矢印、ボタンは<kbd>Space</kbd>または<kbd>Enter</kbd>を使います。表示は「ウィンドウ」メニュー、AutoHideは「ウィンドウ › ワークスペース › 補助ペインを自動格納」から切り替えます。</p>
+          </div>
+        </section>
+
+        <section class="chapter" id="tools" aria-labelledby="tools-heading">
+          <h2 id="tools-heading">8. 描画・選択・ベクターツール</h2>
+          <div class="search-unit" id="tool-list" data-search="all tools 20 全ツール">
+            <h3>ツールパレットの全20ツール</h3>
+            <div class="table-scroll"><table class="compare">
+              <thead><tr><th>ツール</th><th>主な用途</th><th>主な設定・条件</th></tr></thead>
+              <tbody>
+                <tr><td>鉛筆</td><td>硬い主線／彩色線</td><td>固定太さ。ベクター彩色では無効。<kbd>P</kbd></td></tr>
+                <tr><td>ブラシ</td><td>筆圧を使う描画</td><td>丸／角、太さ、筆圧、平滑化、同色領域制限。<kbd>B</kbd></td></tr>
+                <tr><td>消しゴム</td><td>ラスターまたはベクターの消去</td><td>太さ、筆圧、主線／彩色対象、ベクター消去モード。<kbd>E</kbd></td></tr>
+                <tr><td>塗りつぶし</td><td>つながった領域を塗る</td><td>許容差、隙間、含み塗り、あふれ中断、LT境界／色。<kbd>F</kbd></td></tr>
+                <tr><td>閉領域塗り</td><td>囲んだ範囲の複数領域を塗る</td><td>透明だけ、選択制限、含み塗り。<kbd>Shift</kbd>+<kbd>F</kbd></td></tr>
+                <tr><td>塗り延ばし</td><td>既存色を未着色部へ広げる</td><td>距離、強さ、囲み範囲。<kbd>X</kbd></td></tr>
+                <tr><td>スポイト</td><td>Canvas／参照から色を採る</td><td>最上位、選択プレーン、合成、ライトテーブル。<kbd>I</kbd></td></tr>
+                <tr><td>直線</td><td>ベクター直線</td><td>線色／幅、吸着、45度、入り抜き</td></tr>
+                <tr><td>曲線</td><td>制御点付き曲線</td><td>始終点後に制御点を調整</td></tr>
+                <tr><td>長方形</td><td>ベクター長方形</td><td>輪郭／塗り、比率、中心、回転</td></tr>
+                <tr><td>楕円</td><td>ベクター楕円</td><td>輪郭／塗り、比率、中心、回転</td></tr>
+                <tr><td>折れ線</td><td>複数頂点の線</td><td>ダブルクリックで終了、閉じる／曲線化</td></tr>
+                <tr><td>線消しゴム</td><td>ベクター線の消去</td><td>触れた部分／交点まで／線全体</td></tr>
+                <tr><td>グラデーション</td><td>線形／放射の多色階調</td><td>3色以上、アルファ、合成／上書き、ディザー。<kbd>G</kbd></td></tr>
+                <tr><td>エアブラシ</td><td>噴霧状の描画</td><td>太さ、硬さ、間隔、フェード、筆圧、連続噴霧。<kbd>A</kbd></td></tr>
+                <tr><td>境界ブラシ</td><td>色境界だけへ階調効果</td><td>境界色群と幅</td></tr>
+                <tr><td>ぼかし</td><td>局所ぼかし</td><td>範囲形状、太さ、ぼかし量、筆圧</td></tr>
+                <tr><td>スタンプ</td><td>別位置から画像を複製</td><td>元位置、形、硬さ、間隔、筆圧</td></tr>
+                <tr><td>ゴミ取り</td><td>小点／小穴／異色小領域の修正</td><td>範囲形状、モード、最大サイズ。ベクター不可</td></tr>
+                <tr><td>アルファ階調</td><td>アルファだけへグラデーション</td><td>ラスターのアルファ編集表示と組み合わせる</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+          <div class="search-unit" data-search="selection tools rectangle ellipse lasso polyline trace magic wand modes modifiers">
+            <h3 id="selection-tools">選択ツールと作成モード</h3>
+            <p>長方形、楕円、投げ縄、折れ線、トレース、色の杖があります。作成モードは新規、追加、削除、交差です。修飾キーの基本は<kbd>Shift</kbd>=追加、<kbd>Alt</kbd>=削除、<kbd>Shift</kbd>+<kbd>Alt</kbd>=交差です。選択中の内容を動かす場合、マスクだけを動かす操作と、対象プレーンの内容をフローティング選択として動かす操作を区別してください。</p>
+          </div>
+          <div class="search-unit" data-search="vector select erase rasterize vectorize line connect width">
+            <h3 id="vector-tools">ベクターの選択・消去・変換</h3>
+            <p>ベクターは「一部でも触れる」「完全に含まれる」「線全体」「交点まで」「塗りを囲む線」「塗り」など、ラスター選択と異なる単位を持ちます。ベクター消去も「触れた部分」「交点まで」「線全体」を明示します。「線つなぎ」「線幅修正」は範囲と対象形式を確認して適用します。「ベクターをラスタライズ」「ラスターをベクター化」は編集特性が変わるため、プレビューとUndoを利用してください。</p>
+          </div>
+        </section>
+
+        <section class="chapter" id="color" aria-labelledby="color-heading">
+          <h2 id="color-heading">9. カラー、パレット、カラーチャート</h2>
+          <div class="search-unit" data-search="drawing color main line color active command color RGBA8 RGBA16 RGB HSV alpha">
+            <h3 id="drawing-colors">主線色と彩色用描画色</h3>
+            <p>カラーペインは主線色と彩色用描画色を別のラベル／スウォッチで表示します。鉛筆の初期色は黒で、色を使うツールはそれぞれの現在色を保持します。ツールを切り替えると、そのツールの色がカラー編集へ戻ります。スポイトのような一時ツールは、直前に使っていた色付きツールの色を更新します。</p>
+            <p>色はsRGBのRGBA 8／16 bitを保持し、RGBとHSV、アルファ数値／不透明度で編集できます。</p>
+          </div>
+          <div class="search-unit" data-search="palette pages groups 1 2 3 4 5 6 7 8 9 0 Tab save load">
+            <h3 id="palette-use">カラーパレット</h3>
+            <p>色をクリックして描画色へ設定し、現在色の登録、選択色の削除、クリア、保存、読み込みができます。高頻度10色は文字入力中でないとき<kbd>1</kbd>〜<kbd>0</kbd>で選び、<kbd>Tab</kbd>で次の10色グループへ移動します。</p>
+          </div>
+          <div class="search-unit" data-search="color chart name number page lock cut copy paste quantization">
+            <h3 id="chart-use">カラーチャート</h3>
+            <p>色と名前を複数ページで管理します。名前／番号検索、次候補、ロック、名前変更、ページ移動、保存／読み込み、カット／コピー／ペーストを利用できます。「セルから作成...」は一意色を抽出するため、グラデーションやアンチエイリアスを含むセルでは最大色数と量子化のプレビューを確認してください。</p>
+          </div>
+          <div class="search-unit" data-search="color check white transparency legacy native alpha">
+            <h3 id="color-check">彩色チェック</h3>
+            <p>「完全な白をチェック」は完全な白を候補として強調し、「白と透明をチェック」は白と透明アルファを別に示します。どちらも一時表示で、画像へ書き込みません。「彩色チェックを解除」で通常表示へ戻ります。</p>
+          </div>
+        </section>
+
+        <section class="chapter" id="layers" aria-labelledby="layers-heading">
+          <h2 id="layers-heading">10. レイヤーとプレーン</h2>
+          <div class="search-unit" id="layers-active" data-search="active layer active plane selected editing target visibility editability">
+            <h3>active layerとactive plane</h3>
+            <p>active layerはプレーンを含む上位単位、active planeは実際の編集先です。レイヤーを選んだだけで意図したプレーンが編集対象とは限りません。プレーン行、表示アイコン、編集可否、ツールオプション、ステータスバーを合わせて確認してください。フィルがピクセルを変更した場合は、実際に塗った標準彩色または汎用ラスタープレーンが選択へ同期します。</p>
+          </div>
+          <div class="table-scroll search-unit" data-search="layer types binary grayscale vector adjustment selection raster plane kinds storage">
+            <table class="compare">
+              <thead><tr><th>構成</th><th>主なプレーン</th><th>用途／注意</th></tr></thead>
+              <tbody>
+                <tr><td>2値彩色レイヤー</td><td>主線、彩色、任意ラスター</td><td>硬い主線と彩色を分離。彩色時に主線を保護</td></tr>
+                <tr><td>階調彩色レイヤー</td><td>グレースケール主線、彩色</td><td>主線のカバレッジと基本線色を合成</td></tr>
+                <tr><td>ベクター彩色レイヤー</td><td>ベクター主線、色トレース、ベクター塗り</td><td>パスと閉領域を編集。鉛筆など一部ラスター用ツールは無効</td></tr>
+                <tr><td>調整レイヤー</td><td>調整パラメーター</td><td>元ピクセルを変えず明るさ等を適用</td></tr>
+                <tr><td>選択レイヤー</td><td>選択マスク</td><td>選択範囲の保存・編集・相互変換</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="search-unit" data-search="visibility editability opacity order merge convert new plane validation">
+            <h3 id="layer-operations">表示、編集可否、順序</h3>
+            <p>表示切替は合成に含めるか、編集可否切替はコマンドが変更してよいかを決めます。非表示でも編集不可とは限らず、選択中でも編集不可なら描画できません。レイヤーとプレーンは別々の順序を持ち、プレーンを所属レイヤーの外へ移しません。新規プレーンでは種類と形式を文字列から選び、成立しない組み合わせは作成しません。</p>
+            <p>削除、変換、同種統合は内容や編集特性を変えます。Undoできますが、保存前に結果を確認してください。</p>
+          </div>
+        </section>
+
+        <section class="chapter" id="animation" aria-labelledby="animation-heading">
+          <h2 id="animation-heading">11. ライトテーブル、連番、サブパレット、モーションチェック</h2>
+          <div class="search-unit" data-search="light table workflow read only reference alignment swap">
+            <h3 id="light-table-workflow">ライトテーブル</h3>
+            <ol class="steps">
+              <li>ライトテーブルペインでセットを選ぶか「新規」を作ります。</li>
+              <li>「画像を追加」で参照を登録し、上下で重なり順を決めます。</li>
+              <li>「表示・変形」で不透明度、色表示、位置、倍率、回転、表示レイヤーを設定します。異寸法セルは基準フレームで整列します。</li>
+              <li>Canvasで移動する場合、<kbd>Shift</kbd>を押すと全項目をまとめて動かします。</li>
+              <li>参照元が変わったら再読込します。失敗しても以前の参照表示は残ります。</li>
+            </ol>
+            <p>参照は読み取り専用です。「編集画像と入れ替え」または項目のダブルクリックを明示したときだけ編集対象が変わり、未保存確認を行います。</p>
+          </div>
+          <div class="search-unit" data-search="sequence natural order siblings thumbnails previous next goto export">
+            <h3 id="sequence-workflow">連番</h3>
+            <p>「連番を読み込み...」またはシーケンスの「ファイルを追加」で画像列を読み込みます。同じフォルダーの対応画像は自然順で並びます。サムネイル、前／次、番号指定で切り替えます。未保存変更があるセルから移る際に確認が出た場合、キャンセルすると切り替わりません。</p>
+          </div>
+          <div class="search-unit" data-search="subpalette reference viewer sample readonly current previous auto scroll sync">
+            <h3 id="subpalette-workflow">サブパレット／参照ビュー</h3>
+            <p>シーケンスの選択セルを登録するか、前セル自動参照を使います。「全体」「等倍」で表示を整え、必要ならCanvasスクロール同期をオンにします。参照上のクリックは色を採るだけで、文書へ線を描きません。「現在色を登録」で採取色をパレットへ保存できます。</p>
+          </div>
+          <div class="search-unit" data-search="motion check playback FPS Space Escape first last frame">
+            <h3 id="motion-workflow">モーションチェック</h3>
+            <p>「開始・設定...」で範囲、倍率、背景／余白色、開始時停止、選択のみ、ライトテーブルを含めるかを指定します。再生中は前後、先頭／末尾、30／25／24／12／10／8 FPSを切り替えられます。<kbd>Space</kbd>は一時停止／再開、<kbd>Esc</kbd>は停止です。</p>
+          </div>
+        </section>
+
+        <section class="chapter" id="filters" aria-labelledby="filters-heading">
+          <h2 id="filters-heading">12. フィルターと調整レイヤー</h2>
+          <div class="search-unit" data-search="filter target selection active plane preview cancel apply undo last filter">
+            <h3 id="filter-basics">適用範囲とプレビュー</h3>
+            <p>選択範囲があればその内側、なければ編集可能なactive plane全体へ適用します。ダイアログのプレビューは開始状態から毎回計算され、スライダー操作を重ねるたびに効果が累積することはありません。OKで一回のUndo単位、キャンセルで完全復元です。「直前のフィルタを再実行」は最後に確定した値を使います。</p>
+          </div>
+          <div class="card-grid">
+            <div class="card search-unit" data-search="sharpen weak strong unsharp blur gaussian dust">
+              <h3>輪郭とノイズ</h3><p>シャープ弱／強、アンシャープマスク、ぼかし弱／強、ガウスぼかし、ゴミ取りを使います。ゴミ取りは必要な線を消す可能性があるため、小さい範囲でプレビューしてください。</p>
+            </div>
+            <div class="card search-unit" data-search="invert auto contrast brightness tone curve levels hsv balance">
+              <h3>階調と色</h3><p>階調反転、自動コントラスト、明るさ・コントラスト、トーンカーブ、レベル補正、色相・彩度・明度、カラーバランスを使います。</p>
+            </div>
+            <div class="card search-unit" data-search="effect gradient airbrush boundary blur stamp alpha">
+              <h3>効果ツール</h3><p>グラデーション、エアブラシ、境界色エアブラシ、ぼかし、スタンプ、アルファグラデーションはCanvasで範囲や方向を指定する局所処理です。</p>
+            </div>
+          </div>
+          <div class="search-unit" data-search="adjustment layer non destructive create edit visibility order">
+            <h3 id="adjustment-layers">調整レイヤー</h3>
+            <p>元ピクセルを変えずに明るさ・コントラスト、レベル、トーンカーブ等を保持します。複数作成、前後選択、再編集、表示切替、最前面移動ができます。表示順によって下の合成結果への作用が変わるため、レイヤー順を確認してください。</p>
+          </div>
+        </section>
+
+        <section class="chapter" id="batch" aria-labelledby="batch-heading">
+          <h2 id="batch-heading">13. バッチ処理</h2>
+          <div class="search-unit" data-search="batch workflow dry run preview execution cancel overwrite failure atomic">
+            <h3 id="batch-workflow">安全な実行手順</h3>
+            <ol class="steps">
+              <li>入力ファイル、入力フォルダー、または現在の連番を選び、必要ならセル番号範囲を指定します。</li>
+              <li>処理を順番に追加し、各処理の対象レイヤーと値を編集します。上へ／下へで順序を確認します。</li>
+              <li>出力方針はまず「複製保存（既定）」を使い、フォルダー・命名・待機を設定します。現行版の実出力は `.inkpod` です。</li>
+              <li><strong>dry-run</strong>で入力、対象、出力名、衝突、エラーを検査します。dry-runは一切書き込みません。</li>
+              <li><strong>プレビュー</strong>で結果を目視します。連続フィルでは、同じ文書座標が全フレームで目的領域にあるか確認します。</li>
+              <li>「現在セルを実行」または「全実行」を開始します。進捗はペインとステータスに表示されます。</li>
+            </ol>
+          </div>
+          <div class="table-scroll search-unit" data-search="batch output duplicate new overwrite failure continue stop cancel">
+            <table class="compare">
+              <thead><tr><th>設定</th><th>意味</th><th>注意</th></tr></thead>
+              <tbody>
+                <tr><td>複製保存（既定）</td><td>元を残して結果を複製</td><td>最初の確認に推奨</td></tr>
+                <tr><td>新規保存</td><td>新しい名前／場所へ出力</td><td>命名衝突をdry-runで確認</td></tr>
+                <tr><td>明示上書き</td><td>既存対象を置換</td><td>プレビュー後にだけ選ぶ</td></tr>
+                <tr><td>記録して続行</td><td>失敗を記録し次へ</td><td>失敗した一件は部分確定しない</td></tr>
+                <tr><td>記録して停止</td><td>最初の失敗で停止</td><td>それ以前に完了した別出力は残る</td></tr>
+                <tr><td>キャンセル</td><td>実行中ジョブを中止</td><td>処理途中の一件は確定しない</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout warning search-unit" data-search="batch target pinned active job">
+            <strong>選択中の文書とジョブ対象</strong>
+            <span>バッチは開始時の対象文書と世代を固定します。実行後に別タブを選んでも、その文書へ処理を付け替えません。対象レイヤーが必要なのに未指定なら検証エラーとなり、無言で成功しません。</span>
+          </div>
+        </section>
+
+        <section class="chapter" id="files" aria-labelledby="files-heading">
+          <h2 id="files-heading">14. ファイルの保存、読み込み、書き出し、Recovery</h2>
+          <div class="table-scroll search-unit" data-search="save recovery export autosave savepoint undo redo dirty">
+            <table class="compare">
+              <thead><tr><th>操作</th><th>目的</th><th>通常保存の基準／未保存状態</th><th>Undo</th></tr></thead>
+              <tbody>
+                <tr><td>保存／名前を付けて保存</td><td>編集可能な原本を `.inkpod` として保存</td><td>成功時だけ基準を現在へ進める</td><td>保存自体はUndoしない。編集履歴は保持</td></tr>
+                <tr><td>Recoveryを保存</td><td>障害復旧用の別データ</td><td>進めない。未保存表示も消さない</td><td>対象外</td></tr>
+                <tr><td>Recoveryを開く</td><td>復旧候補を「復元セル」として開く</td><td>元ファイルを上書きしない</td><td>新しく開いた文書で編集可能</td></tr>
+                <tr><td>ラスタ－を書き出し</td><td>他アプリ向けの平坦な画像</td><td>進めない</td><td>外部出力はUndoしない</td></tr>
+                <tr><td>復帰</td><td>最後の通常保存へ戻す</td><td>保存基準そのものを使用</td><td>未保存編集と履歴を失う操作として確認</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="search-unit" data-search="atomic safe save temporary replace failure original file">
+            <h3 id="safe-save">保存の安全性</h3>
+            <p>保存は同じ保存場所に一時ファイルを完成させてから元ファイルを置き換えます。失敗しても先に元を空にしません。保存失敗時は未保存状態、保存先、最近使ったファイルを成功扱いに更新しません。通常の保存／読み込みは現行版では処理完了まで操作を待つため、大きな文書では少し時間がかかることがあります。</p>
+          </div>
+          <div class="search-unit" data-search="savepoint undo redo dirty star tab">
+            <h3 id="savepoint-history">通常保存の基準とUndo／Redo</h3>
+            <p>通常保存が成功した履歴位置が「保存済み」の基準です。そこから編集、Undo、Redoで別の状態へ移るとタブに未保存の「*」が付きます。履歴上で保存した状態へ正確に戻ると未保存表示も解消できます。Recovery保存や書き出しだけでは基準は動きません。</p>
+          </div>
+          <div class="search-unit" data-search="supported formats inkpod v2 PNG TIFF TGA BMP 8 16 alpha DPI inkbatch">
+            <h3 id="file-formats">対応形式</h3>
+            <ul>
+              <li><strong>編集用:</strong> `.inkpod`（現在の形式バージョン2）。レイヤー／プレーン、フレーム、保存基準に必要な情報、パレット、ライトテーブル、選択、色深度を保持します。</li>
+              <li><strong>一般ラスター:</strong> PNG、TIFF、TGA、BMP。各形式が表現できる8／16 bit、アルファ、寸法、DPIを扱います。形式で表せないレイヤー構造等は平坦化されます。</li>
+              <li><strong>バッチセット:</strong> `.inkbatch`。現行版だけを読み書きします。</li>
+            </ul>
+            <p>JPEGなど、ここに記載のない拡張子は対応形式として扱わないでください。アプリ固有形式は正式な形式凍結前のため、古い形式バージョンは移行せず明示的に拒否します。</p>
+          </div>
+          <div class="search-unit" data-search="startup recovery candidates previous documents restore default off">
+            <h3 id="recovery-startup">起動時の復元</h3>
+            <p>障害後はRecovery候補を一件ずつ復元／破棄／保留できます。候補を無言で削除しません。「起動時に前回の文書を復元」は通常終了時の文書一覧を戻す別設定で、既定はオフです。ワークスペース配置の復元とも別です。</p>
+          </div>
+        </section>
+
+        <section class="chapter" id="keyboard" aria-labelledby="keyboard-heading">
+          <h2 id="keyboard-heading">15. キーボード操作とショートカット</h2>
+          <div class="search-unit" data-search="shortcut editor configurable prefix sequence status bar">
+            <h3 id="shortcut-system">ショートカットの仕組み</h3>
+            <p>すべてのメニュー末端項目には、1〜4ストロークの重複しないショートカットがあります。現在の割り当てはメニューに表示されます。頻繁なツールは単独キー、その他は <kbd>Q</kbd> から始まる分類済みキー列が中心です。複数キーの途中ではステータスバーに入力待ちが表示されます。</p>
+            <p><span class="menu-path">編集 › 設定 › ショートカット編集...</span>で変更できます。完全一致は元コマンドと交換し、ある割り当てが別の割り当ての途中と同じになる競合は拒否します。「ショートカットを初期化」で既定へ戻せます。</p>
+          </div>
+          <div class="table-scroll search-unit" data-search="default keyboard shortcuts Ctrl Alt Shift">
+            <table class="compare">
+              <thead><tr><th>キー</th><th>操作</th><th>キー</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>新規セル</td><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>開く</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>保存</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>名前を付けて保存</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>元に戻す</td><td><kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>やり直し</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>X</kbd>/<kbd>C</kbd>/<kbd>V</kbd></td><td>カット／コピー／貼り付け</td><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>すべて選択</td></tr>
+                <tr><td><kbd>P</kbd>/<kbd>B</kbd>/<kbd>E</kbd></td><td>鉛筆／ブラシ／消しゴム</td><td><kbd>F</kbd>/<kbd>Shift</kbd>+<kbd>F</kbd></td><td>フィル／閉領域フィル</td></tr>
+                <tr><td><kbd>X</kbd>/<kbd>I</kbd></td><td>塗りのばし／スポイト</td><td><kbd>G</kbd>/<kbd>A</kbd></td><td>グラデーション／エアブラシ</td></tr>
+                <tr><td><kbd>R</kbd>/<kbd>O</kbd>/<kbd>L</kbd>/<kbd>W</kbd></td><td>長方形／楕円／投げ縄／色の杖選択</td><td><kbd>1</kbd>〜<kbd>0</kbd></td><td>パレットの高頻度10色</td></tr>
+                <tr><td><kbd>Tab</kbd></td><td>次の10色グループ（入力欄以外）</td><td><kbd>Alt</kbd>+<kbd>F4</kbd></td><td>アプリ終了</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd></td><td>次のタブ</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>前のタブ</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>F4</kbd></td><td>ビューを閉じる</td><td><kbd>Ctrl</kbd>+<kbd>F6</kbd></td><td>次のエディターグループ</td></tr>
+                <tr><td><kbd>F6</kbd>/<kbd>Shift</kbd>+<kbd>F6</kbd></td><td colspan="3">メニュー、ドックペイン、エディター、ステータスを順／逆順に巡回</td></tr>
+                <tr><td><kbd>Space</kbd></td><td>モーション一時停止／再開</td><td><kbd>Esc</kbd></td><td>再生、ドラッグ、プレビュー等のキャンセル</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="search-unit" data-search="keyboard navigation menu mnemonic arrows enter space tab accessibility">
+            <h3 id="keyboard-navigation">画面内の移動</h3>
+            <p>Windows標準どおり、<kbd>Alt</kbd>でメニューバー、矢印でメニュー／一覧、<kbd>Enter</kbd>または<kbd>Space</kbd>で決定、<kbd>Tab</kbd>でダイアログやペイン内の次のコントロールへ移動します。ペイン名、タブの未保存状態、分割線、対象文書、ジョブ状態は支援技術へ名前と状態を提供します。</p>
+          </div>
+        </section>
+
+        <section class="chapter" id="recipes" aria-labelledby="recipes-heading">
+          <h2 id="recipes-heading">16. よくある操作例</h2>
+          <div class="card-grid">
+            <div class="card search-unit" data-search="recipe paint without damaging line art">
+              <h3>主線を傷つけず彩色する</h3>
+              <ol><li>レイヤー／プレーンで主線が表示中であることを確認。</li><li>同じレイヤーの「彩色」を選択し、編集可能にする。</li><li>カラーで彩色用描画色を選ぶ。</li><li>フィルまたはブラシで描画し、ステータスの対象を確認。</li></ol>
+            </div>
+            <div class="card search-unit" data-search="recipe compare before after two views split">
+              <h3>同じ文書を倍率違いで見る</h3>
+              <ol><li>「ウィンドウ › 右へ分割」。</li><li>「別グループに新しいビュー」。</li><li>片方を全体表示、もう片方をピクセル等倍にする。</li></ol><p>編集とUndoは共有、倍率・パンは独立です。</p>
+            </div>
+            <div class="card search-unit" data-search="recipe reference previous frame light table">
+              <h3>前セルを薄く重ねる</h3>
+              <ol><li>ライトテーブルでセットを作る。</li><li>前セル画像を追加。</li><li>全体不透明度と項目位置を調整。</li><li>必要なら基準フレームで整列。</li></ol><p>参照画像は読み取り専用です。</p>
+            </div>
+            <div class="card search-unit" data-search="recipe copy paste converted plane">
+              <h3>別種類のプレーンへ貼る</h3>
+              <ol><li>選択してコピー。</li><li>「変換してペースト...」を選ぶ。</li><li>種類、形式、名前を指定。</li><li>浮動内容を配置し「確定」。</li></ol><p>途中で「キャンセル」すれば元に戻ります。</p>
+            </div>
+            <div class="card search-unit" data-search="recipe filter preview non destructive adjustment">
+              <h3>元画像を残して明るさを変える</h3>
+              <ol><li>「調整レイヤーを作成...」。</li><li>明るさ・コントラストを選ぶ。</li><li>プレビューで確認してOK。</li><li>必要なら表示切替または再編集。</li></ol>
+            </div>
+            <div class="card search-unit" data-search="recipe safe batch dry run duplicate save">
+              <h3>複数セルを安全に一括処理する</h3>
+              <ol><li>入力と処理列を設定。</li><li>出力を「複製保存（既定）」にする。</li><li>dry-runで衝突を検査。</li><li>プレビュー後に全実行。</li></ol>
+            </div>
+          </div>
+        </section>
+
+        <section class="chapter" id="troubleshooting" aria-labelledby="troubleshooting-heading">
+          <h2 id="troubleshooting-heading">17. トラブルシューティング</h2>
+          <div class="search-unit" data-search="cannot draw disabled command wrong plane">
+            <h3>描画できない／コマンドが無効</h3>
+            <ul>
+              <li>文書と可視Canvasがあるか確認します。</li>
+              <li>レイヤーだけでなく、目的のプレーン行が選択中か確認します。</li>
+              <li>レイヤー／プレーンが編集可能か確認します。表示中でも編集不可の場合があります。</li>
+              <li>ツールとレイヤー種類が適合するか確認します。例: ベクター彩色レイヤーでは鉛筆が無効です。</li>
+              <li>消しゴムはツールオプションの「主線／彩色」対象を確認します。</li>
+            </ul>
+          </div>
+          <div class="search-unit" data-search="fill no change overflow cancel selection tolerance gap">
+            <h3>フィルが変化しない／中断される</h3>
+            <p>選択範囲による制限、透明だけ、許容差、対象色、含み塗りを確認します。塗りあふれ中断が働いた場合、途中までのピクセルは確定されません。隙間値を上げすぎると別領域を誤って閉じるため、小さい値から試してください。</p>
+          </div>
+          <div class="search-unit" data-search="save failed read only external change disk original dirty">
+            <h3>保存できない</h3>
+            <p>読み取り専用、外部変更、保存先権限、空き容量、同じ保存先を使う別文書を確認します。失敗後も元ファイルと未保存状態は維持されます。別名保存を試す場合は、別の開いている文書と保存先が重ならない場所を選びます。</p>
+          </div>
+          <div class="search-unit" data-search="recovery missing not same save startup restore">
+            <h3>Recoveryを保存したのに通常保存済みにならない</h3>
+            <p>仕様どおりです。Recoveryは障害復旧用で、通常保存の基準を進めません。<kbd>Ctrl</kbd>+<kbd>S</kbd>または「名前を付けて保存...」で通常保存してください。</p>
+          </div>
+          <div class="search-unit" data-search="view flip mirror data export wrong direction">
+            <h3>反転したのに書き出し結果が変わらない</h3>
+            <p>「表示を左右／上下反転」はビューだけです。画像データを変えるには「セル › 鏡像 › 水平方向／垂直方向」を使います。</p>
+          </div>
+          <div class="search-unit" data-search="pane disappeared hidden floating restore default workspace">
+            <h3>ペインが見つからない</h3>
+            <p>「ウィンドウ」メニューで該当ペインをオンにします。AutoHideなら画面端ボタンを確認します。配置が崩れた場合は「ウィンドウ › ワークスペース › 既定に戻す」を使います。</p>
+          </div>
+          <div class="search-unit" data-search="batch no output dry-run preview current inkpod overwrite">
+            <h3>バッチが開始しない／期待した形式で出ない</h3>
+            <p>入力、処理列、必要な対象レイヤー、出力設定をdry-runで確認します。dry-runとプレビューは出力しません。「現在セルを実行」または「全実行」が必要です。現行版のバッチ出力は `.inkpod` です。</p>
+          </div>
+          <div class="callout warning search-unit" id="current-limitations" data-search="current limitations known differences 日本語 AutoHide ARM64 batch vector raster sequence light table">
+            <strong>現行版での制限</strong>
+            <ul>
+              <li>UIリソースは日本語のみです。英語表示へ切り替える設定はありません。</li>
+              <li>AutoHide端ボタンは支援技術から名前を取得できますが、<kbd>F6</kbd>／<kbd>Tab</kbd>だけでは到達できない場合があります。</li>
+              <li>ライトテーブルの前後N枚一括登録／自動不透明度ステップ、シーケンスの切替時自動保存／端点ループの専用UIはありません。</li>
+              <li>レイヤー／プレーンの複数対象同時編集を示す専用表示はありません。</li>
+              <li>ベクター同士の順序は保たれますが、現行表示ではベクター内容が合成済みラスターの後に描かれ、ラスターとベクターを任意に交互配置した見え方にはなりません。</li>
+              <li>バッチの実出力は `.inkpod` です。</li>
+              <li>ARM64パッケージは構築されていますが、現行記録では一部のARM64実機操作は未確認です。</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="chapter" id="glossary" aria-labelledby="glossary-heading">
+          <h2 id="glossary-heading">18. 用語集</h2>
+          <div class="table-scroll search-unit" data-search="glossary 用語 terms">
+            <table class="compare">
+              <thead><tr><th>用語</th><th>意味</th></tr></thead>
+              <tbody>
+                <tr><td>active／アクティブ</td><td>現在、操作の対象になっている状態。active layerとactive planeは別です。</td></tr>
+                <tr><td>AutoHide／自動格納</td><td>補助ペインを画面端の名前付きボタンへ畳む表示状態。</td></tr>
+                <tr><td>Canvas</td><td>文書画像を表示し、ペン・マウス・タッチで編集する中央領域。</td></tr>
+                <tr><td>dry-run</td><td>バッチの入力、対象、出力、衝突を検査するだけで、一切書き込まない実行。</td></tr>
+                <tr><td>Recovery</td><td>障害から作業を復元するための別保存。通常保存の代わりではありません。</td></tr>
+                <tr><td>savepoint／通常保存の基準</td><td>最後に通常保存が成功した履歴位置。未保存判定の基準になります。</td></tr>
+                <tr><td>カット</td><td>一つのショットに属するセル連番や制作設定をまとめる単位。</td></tr>
+                <tr><td>セル</td><td>一枚の作画・彩色文書。</td></tr>
+                <tr><td>シーケンス／連番</td><td>自然順に並べた複数セル／画像の列。</td></tr>
+                <tr><td>主線保護</td><td>主線を見せたまま、彩色操作が主線プレーンを変更しない性質。</td></tr>
+                <tr><td>選択マスク</td><td>処理を許可する範囲をピクセルごとに表す情報。</td></tr>
+                <tr><td>調整レイヤー</td><td>元ピクセルを変えず、表示合成時に明るさ等を調整するレイヤー。</td></tr>
+                <tr><td>ドック</td><td>ペインを作業ウィンドウの上・左・右・下へ固定配置すること。</td></tr>
+                <tr><td>フローティング選択</td><td>貼り付け／変形内容がまだ文書へ確定されず、移動・変形・取消できる状態。</td></tr>
+                <tr><td>フローティングペイン</td><td>ドックから外し、同じ作業ウィンドウに属する独立小窓として表示したペイン。</td></tr>
+                <tr><td>プレーン</td><td>レイヤー内の最小編集単位。主線、彩色、色トレース、塗りなど。</td></tr>
+                <tr><td>プレビュー</td><td>確定前の仮結果。OK／実行で確定し、キャンセルで開始前へ戻ります。</td></tr>
+                <tr><td>文書</td><td>画像、レイヤー、履歴、保存先、未保存状態を共有する保存対象。</td></tr>
+                <tr><td>ビュー</td><td>文書を見る一つの表示。倍率、パン、表示反転等はビューごとに独立。</td></tr>
+                <tr><td>エディターグループ</td><td>タブ列と一つの可視Canvasを持つ領域。最大2つ。</td></tr>
+                <tr><td>ライトテーブル</td><td>編集セルの背後へ別セルを半透明で重ねる読み取り専用参照。</td></tr>
+                <tr><td>レイヤー</td><td>セル画を重ねる単位。種類ごとに利用できるプレーンとツールが異なります。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <a class="back-top" href="#top">ページ先頭へ戻る</a>
+        </section>
+
+        <footer>
+          <p>inkpod 取扱説明書 — Windows版の現行実装に基づくオフライン文書。アプリの更新により表示や利用可能な機能が変わる場合があります。</p>
+          <a class="back-top" href="#top">ページ先頭へ戻る</a>
+        </footer>
+      </article>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const search = document.getElementById('manual-search');
+      const clearButton = document.getElementById('clear-search');
+      const noResultsClear = document.getElementById('no-results-clear');
+      const status = document.getElementById('search-status');
+      const noResults = document.getElementById('no-results');
+      const main = document.getElementById('main-content');
+      const chapters = Array.from(document.querySelectorAll('.chapter'));
+      const details = Array.from(document.querySelectorAll('details.reference'));
+      const allUnits = Array.from(main.querySelectorAll('.search-unit'));
+      const leafUnits = allUnits.filter((unit) => !unit.querySelector('.search-unit'));
+      const initialDetailsState = new Map(details.map((item) => [item, item.open]));
+      let printDetailsState = null;
+
+      const normalize = (value) => value
+        .normalize('NFKC')
+        .toLocaleLowerCase('ja-JP');
+
+      const termsFrom = (value) => normalize(value)
+        .trim()
+        .split(/\s+/u)
+        .filter(Boolean);
+
+      const searchableText = (element) => normalize(
+        `${element.textContent || ''} ${element.getAttribute('data-search') || ''}`
+      );
+
+      const matches = (element, terms) => {
+        const haystack = searchableText(element);
+        return terms.every((term) => haystack.includes(term));
+      };
+
+      const clearHighlights = () => {
+        main.querySelectorAll('mark[data-search-mark]').forEach((mark) => {
+          mark.replaceWith(document.createTextNode(mark.textContent || ''));
+        });
+        main.normalize();
+      };
+
+      const highlight = (root, terms) => {
+        if (!terms.length || root.hidden) return;
+        const lowerTerms = terms.map((term) => term.toLocaleLowerCase('ja-JP'));
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            const parent = node.parentElement;
+            if (!parent || !node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+            if (parent.closest('mark, script, style, input, button')) return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        });
+        const nodes = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+
+        nodes.forEach((node) => {
+          const source = node.nodeValue;
+          const folded = source.toLocaleLowerCase('ja-JP');
+          let cursor = 0;
+          let changed = false;
+          const fragment = document.createDocumentFragment();
+
+          while (cursor < source.length) {
+            let nextIndex = -1;
+            let nextTerm = '';
+            lowerTerms.forEach((term) => {
+              const index = folded.indexOf(term, cursor);
+              if (index >= 0 && (nextIndex < 0 || index < nextIndex)) {
+                nextIndex = index;
+                nextTerm = term;
+              }
+            });
+            if (nextIndex < 0 || !nextTerm) break;
+            if (nextIndex > cursor) fragment.append(document.createTextNode(source.slice(cursor, nextIndex)));
+            const mark = document.createElement('mark');
+            mark.setAttribute('data-search-mark', '');
+            mark.textContent = source.slice(nextIndex, nextIndex + nextTerm.length);
+            fragment.append(mark);
+            cursor = nextIndex + nextTerm.length;
+            changed = true;
+          }
+          if (changed) {
+            if (cursor < source.length) fragment.append(document.createTextNode(source.slice(cursor)));
+            node.replaceWith(fragment);
+          }
+        });
+      };
+
+      const restoreAll = () => {
+        clearHighlights();
+        leafUnits.forEach((unit) => { unit.hidden = false; });
+        details.forEach((item) => {
+          item.hidden = false;
+          item.open = initialDetailsState.get(item) === true;
+        });
+        chapters.forEach((chapter) => { chapter.hidden = false; });
+        noResults.hidden = true;
+        status.textContent = 'すべての章を表示しています。';
+      };
+
+      const updateSearch = () => {
+        clearHighlights();
+        const terms = termsFrom(search.value);
+        if (!terms.length) {
+          restoreAll();
+          return;
+        }
+
+        const matchedUnits = [];
+        const matchMap = new Map();
+        leafUnits.forEach((unit) => {
+          const isMatch = matches(unit, terms);
+          matchMap.set(unit, isMatch);
+          unit.hidden = !isMatch;
+          if (isMatch) matchedUnits.push(unit);
+        });
+
+        details.forEach((item) => {
+          const children = leafUnits.filter((unit) => item.contains(unit));
+          const hasMatch = children.some((unit) => matchMap.get(unit));
+          item.hidden = !hasMatch;
+          if (hasMatch) item.open = true;
+        });
+
+        let headingMatches = 0;
+        chapters.forEach((chapter) => {
+          const heading = chapter.querySelector(':scope > h2');
+          const headingMatch = heading ? matches(heading, terms) : false;
+          const hasMatch = leafUnits.some((unit) => chapter.contains(unit) && matchMap.get(unit));
+          chapter.hidden = !(headingMatch || hasMatch);
+          if (headingMatch) headingMatches += 1;
+          if (headingMatch && heading) highlight(heading, terms);
+        });
+
+        matchedUnits.forEach((unit) => highlight(unit, terms));
+        const count = matchedUnits.length + headingMatches;
+        noResults.hidden = count !== 0;
+        status.textContent = count === 0
+          ? '該当する項目はありません。'
+          : `${count}件の検索単位が一致しました。`;
+      };
+
+      const clearSearch = () => {
+        search.value = '';
+        restoreAll();
+        search.focus();
+      };
+
+      search.addEventListener('input', updateSearch);
+      clearButton.addEventListener('click', clearSearch);
+      noResultsClear.addEventListener('click', clearSearch);
+
+      document.addEventListener('keydown', (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'k') {
+          event.preventDefault();
+          search.focus();
+          search.select();
+          return;
+        }
+        if (event.key === 'Escape') {
+          if (search.value) {
+            event.preventDefault();
+            clearSearch();
+          } else {
+            const mobileToc = document.querySelector('.mobile-toc');
+            if (mobileToc && mobileToc.open) mobileToc.open = false;
+          }
+        }
+      });
+
+      document.querySelectorAll('.mobile-toc a').forEach((link) => {
+        link.addEventListener('click', () => {
+          const mobileToc = document.querySelector('.mobile-toc');
+          if (mobileToc) mobileToc.open = false;
+        });
+      });
+
+      const tocLinks = Array.from(document.querySelectorAll('.toc-list a'));
+      const setCurrent = (id) => {
+        tocLinks.forEach((link) => {
+          if (link.getAttribute('href') === `#${id}`) link.setAttribute('aria-current', 'true');
+          else link.removeAttribute('aria-current');
+        });
+      };
+
+      if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver((entries) => {
+          const visible = entries
+            .filter((entry) => entry.isIntersecting && !entry.target.hidden)
+            .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          if (visible[0]) setCurrent(visible[0].target.id);
+        }, { rootMargin: '-18% 0px -68% 0px', threshold: [0, .1] });
+        chapters.forEach((chapter) => observer.observe(chapter));
+      } else if (chapters[0]) {
+        setCurrent(chapters[0].id);
+      }
+
+      window.addEventListener('beforeprint', () => {
+        printDetailsState = details.map((item) => item.open);
+        details.forEach((item) => { item.open = true; });
+      });
+      window.addEventListener('afterprint', () => {
+        if (!printDetailsState) return;
+        details.forEach((item, index) => { item.open = printDetailsState[index]; });
+        printDetailsState = null;
+      });
+    })();
+  </script>
+</body>
+</html>
