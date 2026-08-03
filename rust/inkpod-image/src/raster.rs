@@ -95,6 +95,18 @@ impl TileRaster {
         self.tiles.len()
     }
 
+    /// Returns logical bytes retained by allocated tile payloads.
+    ///
+    /// Cloned rasters share these payloads copy-on-write, so summing this value
+    /// across clones intentionally reports logical retention rather than unique
+    /// process allocation.
+    #[must_use]
+    pub fn allocated_tile_bytes(&self) -> u64 {
+        self.tiles.values().fold(0_u64, |bytes, tile| {
+            bytes.saturating_add(tile.bytes.len() as u64)
+        })
+    }
+
     pub fn allocated_coords(&self) -> impl Iterator<Item = TileCoord> + '_ {
         self.tiles.keys().copied()
     }

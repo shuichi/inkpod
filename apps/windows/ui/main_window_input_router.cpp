@@ -14,6 +14,9 @@ bool PreTranslateKeyboardMessage(
     if (message.message != WM_KEYDOWN && message.message != WM_SYSKEYDOWN) {
         return false;
     }
+    const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool workspace_navigation = message.wParam == VK_F6
+        || (control && (message.wParam == VK_TAB || message.wParam == VK_F4));
     const HWND focus = GetFocus();
     if (focus != nullptr) {
         wchar_t class_name[64]{};
@@ -21,7 +24,9 @@ bool PreTranslateKeyboardMessage(
                 focus, class_name, static_cast<int>(std::size(class_name))) > 0
             && (_wcsicmp(class_name, L"Edit") == 0
                 || _wcsnicmp(class_name, L"RichEdit", 8) == 0)) {
-            return false;
+            if (!workspace_navigation) {
+                return false;
+            }
         }
     }
     app::WorkspaceWindow* owner = state.WorkspaceForWindow(message.hwnd);

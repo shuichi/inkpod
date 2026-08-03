@@ -20,6 +20,7 @@ static_assert(sizeof(InkpodSnapshotTile) == 64U);
 static_assert(sizeof(InkpodSnapshotView) == 48U);
 static_assert(sizeof(InkpodCellCreateOptions) == 48U);
 static_assert(sizeof(InkpodDocumentInfo) == 192U);
+static_assert(sizeof(InkpodResourceUsage) == 112U);
 static_assert(sizeof(InkpodStrokeSample) == 24U);
 static_assert(sizeof(InkpodStrokeInput) == 56U);
 static_assert(sizeof(InkpodViewInput) == 48U);
@@ -183,7 +184,12 @@ int InkpodRunAbiSmoke() {
     }
 
     InkpodStatus wrong_thread_status = INKPOD_STATUS_OK;
-    std::thread wrong_thread([core, &wrong_thread_status]() {
+    InkpodStatus wrong_thread_resource_status = INKPOD_STATUS_OK;
+    InkpodResourceUsage wrong_thread_usage{};
+    wrong_thread_usage.struct_size = sizeof(wrong_thread_usage);
+    wrong_thread_usage.feature_flags = UINT64_MAX;
+    std::thread wrong_thread(
+        [core, &wrong_thread_status, &wrong_thread_resource_status, &wrong_thread_usage]() {
         const InkpodCommand local_command{
             sizeof(InkpodCommand), INKPOD_COMMAND_NO_OP, 0U};
         const InkpodCommandBatch local_batch{
@@ -197,9 +203,13 @@ int InkpodRunAbiSmoke() {
         local_result.struct_size = sizeof(local_result);
         wrong_thread_status = inkpod_core_dispatch_batch(
             core, &local_batch, &local_result);
+        wrong_thread_resource_status = inkpod_core_get_resource_usage(
+            core, &wrong_thread_usage);
     });
     wrong_thread.join();
-    if (wrong_thread_status != INKPOD_STATUS_WRONG_THREAD) {
+    if (wrong_thread_status != INKPOD_STATUS_WRONG_THREAD
+        || wrong_thread_resource_status != INKPOD_STATUS_WRONG_THREAD
+        || wrong_thread_usage.feature_flags != UINT64_MAX) {
         return 7;
     }
     if (inkpod_core_destroy(&core) != INKPOD_STATUS_OK
@@ -259,6 +269,19 @@ int InkpodRunAbiSmoke() {
         || document.width != 1920U || document.height != 1080U
         || (document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
         return 24;
+    }
+    InkpodResourceUsage usage{};
+    usage.struct_size = sizeof(usage);
+    InkpodResourceUsage short_usage{};
+    short_usage.struct_size = sizeof(short_usage) - 1U;
+    if (inkpod_core_get_resource_usage(core, nullptr) != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_core_get_resource_usage(core, &short_usage)
+            != INKPOD_STATUS_INCOMPATIBLE_ABI
+        || inkpod_core_get_resource_usage(core, &usage) != INKPOD_STATUS_OK
+        || usage.feature_flags != INKPOD_FEATURE_NONE
+        || usage.document_tile_bytes != 0U || usage.document_tile_count != 0U
+        || usage.history_entry_count != 0U || usage.thumbnail_cache_bytes != 0U) {
+        return 97;
     }
     std::array<std::uint8_t, 4U * 4U * 4U> light_pixels{};
     const std::size_t light_offset = (2U * 4U + 2U) * 4U;

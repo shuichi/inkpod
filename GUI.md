@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8、G9、G10、G11、G12 完了、次は G13 |
+| 状態 | Active。G0、G1、G2、G3、G4、G5、G6、G7、G8、G9、G10、G11、G12 完了、G13 実装中 |
 | 対象 | Windows frontend、C ABI adapter、renderer、UI に必要な Rust Core 接続 |
 | 決定日 | 2026-07-31 |
 | 採用方式 | Win32/Common Controls、タブ、分割ビュー、制約付きドック、複数トップレベルウィンドウ |
@@ -1167,6 +1167,42 @@ unsigned MSIX assembly、全 25/25 CTest を完了した。次に着手する mi
 - 長時間処理中も別文書の input を失わず、cancel または stale な結果が部分 commit を残さない。
 - accessibility、DPI、device lost、shutdown の release scenario が自動または再現可能な手順で検証されている。
 - 対象 requirement が `docs/compatibility.md` で `Verified` または根拠付きの既知差分になっている。
+
+### 実装状況
+
+2026-08-03 に G13 の resource/latency hardening を開始した。Core は document tile/history、
+render cache、CPU staging、light table/reference、sequence source、thumbnail cache の logical
+payload を read-only C ABI で返す。CoreHost は session/generation ごとの queue 受理・拒否、
+pending high-water mark、queue wait を owner-thread dispatch 時に計測する。別 session の長時間
+work 中に受理済み input が失われず順序どおり完了することを native test で固定したが、worker
+分離の必要性を決める scenario baseline は未完了である。
+
+RendererHost は retained/pending snapshot、GPU tile、swap chain、surface、queue replacement/
+rejection、stale、resource-limit、device-reset を value copy で観測できる。active tile の合計を
+512 MiB の application-wide budget へ事前 admission し、inactive tile は全 CanvasSurface を
+横断した LRU で再利用・破棄する。非表示/occluded/閉じた surface の snapshot は従来どおり
+受理しない。aggregate に加えて document/view/Canvas/generation route を保持する per-surface
+value copy を取得できる。UI thread では layer/sequence thumbnail と color-picker CPU cache を
+pane instance/workspace 別に計測する。`Ctrl+Tab` / `Ctrl+Shift+Tab`、`Ctrl+F6` /
+`Ctrl+Shift+F6`、`F6` / `Shift+F6`、`Ctrl+F4` は text edit の誤作動を避けつつ
+workspace navigation として処理し、
+native smoke で forward/reverse の tab/group/focus 巡回と view close を確認する。Common Controls
+の MSAA/UI Automation bridge から tab の dirty label、captionless splitter、pane、AutoHide、
+target、job status の accessible name を取得する回帰も追加した。
+
+fault matrix は renderer queue saturation、close 中の Core input、active stroke、stale snapshot、
+device lost、置換不能な save、owner graph の allocation failure、pending queue を残した shutdown を
+native test で再現する。save failure は dirty、revision、path、recent list を変更しない。security/
+privacy と third-party notice review では新規依存がなく、telemetry が集計量と強い ID/generation
+だけを保持し、path、文書名、画像内容を保持・記録しないことを確認した。
+
+Windows x64 の quick benchmark は warmed 5-run median と回帰 review 閾値を
+`docs/core-benchmark-baseline.md` に固定した。owner/CoreHost/RendererHost/production GUI lifecycle
+を各 5 回反復する bounded soak を完走した。x64 Debug/Release の strict build、unsigned MSIX、
+25/25 CTest と ARM64 Debug/Release の strict cross-build、MSIX、host-independent 14/25 CTest は
+成功した。thumbnail の application-wide cache/budget/LRU、四つの固定 multi-window resource
+scenario、high contrast/200% DPI/screen reader/IME/日本語・英語 resource の release checklist、
+ARM64 上でしか実行できない 11 native test は未完了のため、G13 は `In progress` である。
 
 ---
 

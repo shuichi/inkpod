@@ -2,12 +2,32 @@
 
 #include <array>
 #include <cassert>
+#include <limits>
 #include <utility>
 
 #include "application_owner_graph.h"
 #include "renderer/canvas.h"
 
 namespace inkpod::app {
+
+namespace {
+
+std::uint64_t SaturatingPaneBytes(
+    std::uint64_t current,
+    std::size_t item_count,
+    std::size_t item_size = 1U) noexcept {
+    const std::uint64_t count = static_cast<std::uint64_t>(item_count);
+    const std::uint64_t size = static_cast<std::uint64_t>(item_size);
+    const std::uint64_t bytes = count != 0U
+            && size > std::numeric_limits<std::uint64_t>::max() / count
+        ? std::numeric_limits<std::uint64_t>::max()
+        : count * size;
+    return current > std::numeric_limits<std::uint64_t>::max() - bytes
+        ? std::numeric_limits<std::uint64_t>::max()
+        : current + bytes;
+}
+
+}  // namespace
 
 bool ApplicationHost::InitializeOwners() noexcept {
     routing.targets.Initialize();
@@ -107,6 +127,65 @@ WorkspaceWindowRegistry& ApplicationHost::Workspaces() noexcept {
 
 const WorkspaceWindowRegistry& ApplicationHost::Workspaces() const noexcept {
     return workspaces_;
+}
+
+bool ApplicationHost::GetPaneResourceUsage(
+    PaneInstanceId pane,
+    PaneResourceUsage& usage) const noexcept {
+    usage = {};
+    if (!pane) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < workspaces_.Count(); ++index) {
+        const WorkspaceWindow* workspace = workspaces_.At(index);
+        if (workspace == nullptr) {
+            continue;
+        }
+        usage.workspace = workspace->id;
+        usage.pane = pane;
+        if (pane == workspace->pane_ids.layer) {
+            const auto accumulate = [&usage](
+                                        const std::vector<windows::ui::LayerPaletteItem>& items) {
+                for (const auto& item : items) {
+                    usage.thumbnail_bytes = SaturatingPaneBytes(
+                        usage.thumbnail_bytes, item.thumbnail_bgra.size());
+                    usage.cached_item_count += item.thumbnail_bgra.empty() ? 0U : 1U;
+                }
+            };
+            accumulate(workspace->panes.layer_palette_dialog.items);
+            accumulate(workspace->panes.layer_palette_dialog.plane_items);
+            return true;
+        }
+        if (pane == workspace->pane_ids.sequence) {
+            for (const auto& cell : workspace->sequence_dialog.view.cells) {
+                usage.thumbnail_bytes = SaturatingPaneBytes(
+                    usage.thumbnail_bytes, cell.thumbnail_rgba.size());
+                usage.cached_item_count += cell.thumbnail_rgba.empty() ? 0U : 1U;
+            }
+            return true;
+        }
+        if (pane == workspace->pane_ids.color) {
+            const auto& color = workspace->panes.color_pane;
+            for (const auto size : {
+                     color.picker_ring_pixels.size(),
+                     color.picker_triangle_pixels.size(),
+                     color.picker_frame_pixels.size(),
+                     color.picker_present_pixels.size()}) {
+                usage.cpu_cache_bytes = SaturatingPaneBytes(
+                    usage.cpu_cache_bytes, size, sizeof(std::uint32_t));
+                usage.cached_item_count += size == 0U ? 0U : 1U;
+            }
+            return true;
+        }
+        const auto& ids = workspace->pane_ids;
+        if (pane == ids.tool || pane == ids.tool_options || pane == ids.batch
+            || pane == ids.locator || pane == ids.light_table
+            || pane == ids.reference || pane == ids.subpalette) {
+            return true;
+        }
+    }
+    usage = {};
+    return false;
 }
 
 bool ApplicationHost::RegisterWorkspacePanes(

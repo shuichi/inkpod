@@ -9,6 +9,57 @@ fn config() -> InkpodCoreConfig {
 }
 
 #[test]
+fn resource_usage_query_validates_output_and_is_read_only() {
+    let mut core = ptr::null_mut();
+    let config = config();
+    // SAFETY: Config and output records remain live, aligned, and non-overlapping.
+    unsafe {
+        assert_eq!(inkpod_core_create(&config, &mut core), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_get_resource_usage(core, ptr::null_mut()),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+
+        let mut short = InkpodResourceUsage {
+            struct_size: size_of::<InkpodResourceUsage>() as u32 - 1,
+            feature_flags: u64::MAX,
+            ..InkpodResourceUsage::default()
+        };
+        assert_eq!(
+            inkpod_core_get_resource_usage(core, &mut short),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(short.feature_flags, u64::MAX);
+
+        let mut usage = InkpodResourceUsage {
+            struct_size: size_of::<InkpodResourceUsage>() as u32,
+            feature_flags: u64::MAX,
+            ..InkpodResourceUsage::default()
+        };
+        assert_eq!(
+            inkpod_core_get_resource_usage(core, &mut usage),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(usage.feature_flags, INKPOD_FEATURE_NONE);
+        assert_eq!(usage.document_tile_bytes, 0);
+        assert_eq!(usage.document_tile_count, 0);
+        assert_eq!(usage.history_bytes, 0);
+        assert_eq!(usage.history_entry_count, 0);
+        assert_eq!(usage.thumbnail_cache_bytes, 0);
+
+        let mut document = InkpodDocumentInfo {
+            struct_size: size_of::<InkpodDocumentInfo>() as u32,
+            ..InkpodDocumentInfo::default()
+        };
+        assert_eq!(
+            inkpod_core_get_document_info(core, &mut document),
+            INKPOD_STATUS_NO_DOCUMENT
+        );
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn light_table_sequence_motion_and_dirty_switch_abi_are_connected() {
     let mut core = ptr::null_mut();
     let config = config();

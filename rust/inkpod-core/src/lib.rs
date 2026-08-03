@@ -36,6 +36,7 @@ mod history;
 mod identity;
 mod paint;
 mod persistence;
+mod resource;
 mod selection;
 mod snapshot;
 mod stroke;

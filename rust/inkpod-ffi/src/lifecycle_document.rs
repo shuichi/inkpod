@@ -332,6 +332,39 @@ pub unsafe extern "C" fn inkpod_core_get_document_info(
     })
 }
 
+/// Copies deterministic logical resource usage for the current Core session.
+///
+/// # Safety
+/// `core` must be live on its owner thread and `out_usage` must expose its
+/// complete writable advertised range without overlap.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_get_resource_usage(
+    core: *mut InkpodCore,
+    out_usage: *mut InkpodResourceUsage,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: The output prefix is readable before the validated write.
+        if let Err(status) =
+            unsafe { validate_struct(out_usage.cast_const(), "InkpodResourceUsage") }
+        {
+            return status;
+        }
+        // SAFETY: Live core and writable output are required by contract.
+        let core = unsafe { &mut *core };
+        let out_usage = unsafe { &mut *out_usage };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        write_resource_usage(out_usage, core.core.resource_usage());
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Transactionally updates the four production frames and independent margins.
 ///
 /// # Safety

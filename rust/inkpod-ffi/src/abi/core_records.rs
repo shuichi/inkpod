@@ -101,6 +101,26 @@ pub struct InkpodDocumentInfo {
 }
 
 #[repr(C)]
+#[derive(Default)]
+pub struct InkpodResourceUsage {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub document_tile_bytes: u64,
+    pub document_tile_count: u64,
+    pub history_bytes: u64,
+    pub history_entry_count: u64,
+    pub render_cache_bytes: u64,
+    pub render_cache_tile_count: u64,
+    pub cpu_staging_bytes: u64,
+    pub reference_light_table_bytes: u64,
+    pub reference_light_table_tile_count: u64,
+    pub sequence_source_bytes: u64,
+    pub sequence_source_tile_count: u64,
+    pub thumbnail_cache_bytes: u64,
+}
+
+#[repr(C)]
 pub struct InkpodPaperFramesInput {
     pub struct_size: u32,
     pub reserved: u32,

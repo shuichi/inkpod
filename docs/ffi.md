@@ -65,6 +65,14 @@ ABI v2 は、公開名から実装時のマイルストーン番号を除いた�
 保存／open、snapshot 構築、destroy は、すべて Core を作成した Core engine thread から呼ぶ。
 違反は `INKPOD_STATUS_WRONG_THREAD` となり、handle や出力の所有権は移動しない。
 
+`inkpod_core_get_resource_usage` も Core owner thread 限定の read-only query である。
+caller-owned の完全な `InkpodResourceUsage` を一回の呼び出し中だけ借用し、成功時だけ値を
+copy する。NULL、短い構造体、wrong thread、panic では出力を変更しない。tile/history、
+render cache、CPU staging、light table/reference、sequence source、thumbnail cache は
+logical payload の category 別推定値であり、allocator や GPU driver の private resident
+size と COW clone の物理共有量は推測しない。query は snapshot を構築せず、document/view
+revision、dirty、history、savepoint を変更しない。
+
 Windows frontend の `CoreHost` は複数の `InkpodCore` owner 変数を一つの Core engine thread 上に
 保持する。各 owner は `DocumentSessionId` と `Generation` の組で選択し、work item は投入時にその組を
 値で確定する。同じ数値の Core-local document/view ID や revision は session をまたいだ routing key に

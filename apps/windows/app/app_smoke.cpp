@@ -102,6 +102,65 @@ bool WindowHasAccessibleName(HWND window) noexcept {
     return has_name;
 }
 
+bool AccessibleChildNameContains(
+    HWND window, std::wstring_view expected) noexcept {
+    if (window == nullptr || expected.empty()) {
+        return false;
+    }
+    IAccessible* accessible = nullptr;
+    const HRESULT object_result = AccessibleObjectFromWindow(
+        window,
+        static_cast<DWORD>(OBJID_CLIENT),
+        IID_IAccessible,
+        reinterpret_cast<void**>(&accessible));
+    if (FAILED(object_result) || accessible == nullptr) {
+        return false;
+    }
+    LONG child_count = 0;
+    bool found = false;
+    if (SUCCEEDED(accessible->get_accChildCount(&child_count))) {
+        for (LONG child = 1; child <= child_count && !found; ++child) {
+            VARIANT child_id{};
+            child_id.vt = VT_I4;
+            child_id.lVal = child;
+            BSTR name = nullptr;
+            if (SUCCEEDED(accessible->get_accName(child_id, &name))
+                && name != nullptr) {
+                const std::wstring_view value(name, SysStringLen(name));
+                found = value.find(expected) != std::wstring_view::npos;
+            }
+            SysFreeString(name);
+        }
+    }
+    accessible->Release();
+    return found;
+}
+
+bool RouteKeyboardKey(
+    ApplicationHost& state,
+    UINT virtual_key,
+    bool control,
+    bool shift) noexcept {
+    std::array<BYTE, 256U> keyboard{};
+    GetKeyboardState(keyboard.data());
+    const BYTE previous_control = keyboard[VK_CONTROL];
+    const BYTE previous_shift = keyboard[VK_SHIFT];
+    keyboard[VK_CONTROL] = control ? static_cast<BYTE>(0x80U) : 0U;
+    keyboard[VK_SHIFT] = shift ? static_cast<BYTE>(0x80U) : 0U;
+    SetKeyboardState(keyboard.data());
+    MSG key{};
+    key.hwnd = GetFocus() != nullptr
+        ? GetFocus()
+        : state.Workspace().windows.window;
+    key.message = WM_KEYDOWN;
+    key.wParam = virtual_key;
+    const bool handled = PreTranslateKeyboardMessage(state, key);
+    keyboard[VK_CONTROL] = previous_control;
+    keyboard[VK_SHIFT] = previous_shift;
+    SetKeyboardState(keyboard.data());
+    return handled;
+}
+
 bool IsCaptionlessAccessibleSplitter(HWND window) noexcept {
     return window != nullptr
         && (GetWindowLongPtrW(window, GWL_STYLE) & WS_TABSTOP) != 0
@@ -1746,6 +1805,36 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             static_cast<DWORD>(temporary_directory.size()),
             temporary_directory.data()) == 0U) {
         return 47;
+    }
+    std::array<wchar_t, MAX_PATH> failing_destination{};
+    _snwprintf_s(
+        failing_destination.data(),
+        failing_destination.size(),
+        _TRUNCATE,
+        L"%lsinkpod-save-failure-%lu-%llu",
+        temporary_directory.data(),
+        GetCurrentProcessId(),
+        static_cast<unsigned long long>(GetTickCount64()));
+    const std::wstring path_before_failed_save =
+        state.Document().shell.current_path;
+    const std::size_t recent_before_failed_save =
+        state.RecentDocumentCount();
+    if (CreateDirectoryW(failing_destination.data(), nullptr) == FALSE) {
+        return 52;
+    }
+    const InkpodStatus failed_save =
+        SaveToPath(state, failing_destination.data());
+    const BOOL removed_failure_directory =
+        RemoveDirectoryW(failing_destination.data());
+    InkpodDocumentInfo after_failed_save{};
+    if (failed_save != INKPOD_STATUS_IO_ERROR
+        || removed_failure_directory == FALSE
+        || !QueryDocument(state, after_failed_save)
+        || after_failed_save.document_revision != after_view.document_revision
+        || (after_failed_save.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || state.Document().shell.current_path != path_before_failed_save
+        || state.RecentDocumentCount() != recent_before_failed_save) {
+        return 53;
     }
     std::array<wchar_t, MAX_PATH> temporary_file{};
     _snwprintf_s(
@@ -4100,6 +4189,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     const HWND sequence_cells = GetDlgItem(
         state.Workspace().sequence_palette, IDC_SEQUENCE_CELLS);
     const auto& sequence_view = state.Workspace().sequence_dialog.view;
+    inkpod::app::PaneResourceUsage sequence_resources{};
     std::vector<inkpod::app::RecentDocumentEntry> recent_before_sequence_navigation;
     try {
         recent_before_sequence_navigation.reserve(state.RecentDocumentCount());
@@ -4122,6 +4212,11 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || sequence_view.cells[0].thumbnail_height == 0U
         || sequence_view.cells[0].thumbnail_stride_bytes
             != sequence_view.cells[0].thumbnail_width * 4U
+        || !state.GetPaneResourceUsage(
+            state.Workspace().pane_ids.sequence, sequence_resources)
+        || sequence_resources.workspace != state.Workspace().id
+        || sequence_resources.thumbnail_bytes == 0U
+        || sequence_resources.cached_item_count != 3U
         || SaveToPath(state, swap_save) != INKPOD_STATUS_OK) {
         return 874;
     }
@@ -4868,6 +4963,10 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
     if (GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET) == nullptr
         || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_PIN) == nullptr
         || GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB) == nullptr
+        || !WindowHasAccessibleName(
+            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET))
+        || !WindowHasAccessibleName(
+            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB))
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
@@ -4917,6 +5016,10 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.routing.pane_targets.Find(state.routing.batch_pane)->policy
             != inkpod::app::PaneTargetPolicy::FollowActiveView
         || state.batch.job_text.find(L"完了") == std::wstring::npos
+        || !WindowHasAccessibleName(
+            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_TARGET))
+        || !WindowHasAccessibleName(
+            GetDlgItem(state.Workspace().batch_palette, IDC_BATCH_JOB))
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OPERATION_REMOVE, 0) != 1
         || state.batch.operations.size() != 1U) {
         cleanup();
@@ -5461,7 +5564,9 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         || (second_edited.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
         || !ReadDocumentTabLabel(
             state.Workspace().windows.document_tabs, dirty_index, dirty_label)
-        || !dirty_label.ends_with(L" *")) {
+        || !dirty_label.ends_with(L" *")
+        || !AccessibleChildNameContains(
+            state.Workspace().windows.document_tabs, dirty_label)) {
         cleanup();
         return 740;
     }
@@ -6275,6 +6380,60 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
         || !renderer::GetCanvasSnapshotSink(second_canvas)->AcceptsSnapshots()) {
         return 772;
     }
+    if (!HandleWorkspaceNavigation(
+            state,
+            state.Workspace().windows.window,
+            VK_F6,
+            INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_SHIFT)) {
+        return 1001;
+    }
+    if (editors.Active() == nullptr || editors.Active()->id != first_group_id) {
+        return 1006;
+    }
+    if (!HandleWorkspaceNavigation(
+            state,
+            state.Workspace().windows.window,
+            VK_F6,
+            INKPOD_SHORTCUT_MODIFIER_CONTROL)) {
+        return 1007;
+    }
+    if (editors.Active() == nullptr || editors.Active()->id != second_group_id) {
+        return 1008;
+    }
+    ShowWindow(state.Workspace().windows.status_bar, SW_SHOWNA);
+    SetFocus(second_canvas);
+    if (!RouteKeyboardKey(state, VK_F6, false, false)
+        || GetFocus() != state.Workspace().windows.status_bar) {
+        return 1002;
+    }
+    if (!HandleWorkspaceNavigation(
+            state,
+            state.Workspace().windows.window,
+            VK_F6,
+            INKPOD_SHORTCUT_MODIFIER_SHIFT)
+        || (GetFocus() != second_canvas
+            && GetFocus() != editors.Find(second_group_id)->document_tabs)) {
+        return 1003;
+    }
+    if (!HandleWorkspaceNavigation(
+            state,
+            state.Workspace().windows.window,
+            VK_F6,
+            INKPOD_SHORTCUT_MODIFIER_SHIFT)
+        || (GetFocus() != state.Workspace().windows.tool_palette
+            && IsChild(state.Workspace().windows.tool_palette, GetFocus()) == FALSE)) {
+        return 1004;
+    }
+    if (!HandleWorkspaceNavigation(
+            state,
+            state.Workspace().windows.window,
+            VK_F6,
+            0U)
+        || (GetFocus() != second_canvas
+            && GetFocus() != editors.Find(second_group_id)->document_tabs)) {
+        return 1005;
+    }
+    ShowWindow(state.Workspace().windows.status_bar, SW_HIDE);
     const std::size_t before_close_views = state.Document().ViewCount();
     if (SendMessageW(
             state.Workspace().windows.window,

@@ -822,3 +822,38 @@ pub struct DocumentInfo {
     /// Deterministic checksum of the active color plane.
     pub color_plane_checksum: u64,
 }
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// Read-only logical resource usage for one Core document session.
+///
+/// Tile and history byte counts are deterministic payload sizes. Copy-on-write
+/// clones may share their physical allocation, so history bytes deliberately
+/// describe retained logical state rather than allocator-private resident size.
+pub struct ResourceUsage {
+    /// Allocated sparse tile payloads in the committed document.
+    pub document_tile_bytes: u64,
+    /// Number of allocated sparse tiles in the committed document.
+    pub document_tile_count: u64,
+    /// Logical payload retained by Undo/Redo entries.
+    pub history_bytes: u64,
+    /// Number of Undo/Redo entries.
+    pub history_entry_count: u64,
+    /// CPU compositing cache payload retained by Core.
+    pub render_cache_bytes: u64,
+    /// Number of cached composited raster tiles.
+    pub render_cache_tile_count: u64,
+    /// Transient preview, stroke, and floating-selection staging payload.
+    pub cpu_staging_bytes: u64,
+    /// Light-table source tile payload retained by the document.
+    pub reference_light_table_bytes: u64,
+    /// Number of light-table source tiles.
+    pub reference_light_table_tile_count: u64,
+    /// Imported sequence source tile payload retained by the session.
+    pub sequence_source_bytes: u64,
+    /// Number of imported sequence source tiles.
+    pub sequence_source_tile_count: u64,
+    /// Persistent thumbnail cache payload owned by Core.
+    ///
+    /// Core currently generates bounded thumbnails on demand, so this is zero.
+    pub thumbnail_cache_bytes: u64,
+}

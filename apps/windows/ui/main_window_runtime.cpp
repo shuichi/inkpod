@@ -2844,6 +2844,140 @@ std::uint32_t CurrentShortcutModifiers(LPARAM key_data) noexcept {
     return modifiers;
 }
 
+bool FocusIsWithin(HWND owner, HWND focus) noexcept {
+    return owner != nullptr && focus != nullptr
+        && (owner == focus || IsChild(owner, focus) != FALSE);
+}
+
+HWND FirstVisibleDockFocusTarget(ApplicationHost& state) noexcept {
+    constexpr std::array pane_types{
+        inkpod::windows::ui::DockPaneType::Tool,
+        inkpod::windows::ui::DockPaneType::ToolOptions,
+        inkpod::windows::ui::DockPaneType::Color,
+        inkpod::windows::ui::DockPaneType::Layer};
+    for (const auto pane_type : pane_types) {
+        const HWND content = state.Workspace().windows.dock_host.ContentWindow(pane_type);
+        if (content == nullptr || IsWindowVisible(content) == FALSE
+            || IsWindowEnabled(content) == FALSE) {
+            continue;
+        }
+        const HWND child = GetNextDlgTabItem(content, nullptr, FALSE);
+        return child != nullptr ? child : content;
+    }
+    return nullptr;
+}
+
+bool FocusIsInDock(ApplicationHost& state, HWND focus) noexcept {
+    constexpr std::array pane_types{
+        inkpod::windows::ui::DockPaneType::Tool,
+        inkpod::windows::ui::DockPaneType::ToolOptions,
+        inkpod::windows::ui::DockPaneType::Color,
+        inkpod::windows::ui::DockPaneType::Layer};
+    return std::any_of(pane_types.cbegin(), pane_types.cend(), [&](const auto pane_type) {
+        return FocusIsWithin(
+            state.Workspace().windows.dock_host.ContentWindow(pane_type), focus);
+    });
+}
+
+bool FocusIsInEditor(ApplicationHost& state, HWND focus) noexcept {
+    for (std::size_t index = 0U; index < state.Workspace().editors.GroupCount(); ++index) {
+        const auto* group = state.Workspace().editors.GroupAt(index);
+        if (group != nullptr
+            && (FocusIsWithin(group->canvas, focus)
+                || FocusIsWithin(group->document_tabs, focus))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CycleWorkspaceFocus(ApplicationHost& state, bool reverse) noexcept {
+    enum class FocusArea : std::uint8_t { Menu, Dock, Editor, Status };
+    const HWND focus = GetFocus();
+    FocusArea current = FocusArea::Menu;
+    if (FocusIsInDock(state, focus)) {
+        current = FocusArea::Dock;
+    } else if (FocusIsInEditor(state, focus)) {
+        current = FocusArea::Editor;
+    } else if (FocusIsWithin(state.Workspace().windows.status_bar, focus)) {
+        current = FocusArea::Status;
+    }
+    const auto next_area = [reverse](FocusArea area) noexcept {
+        const auto value = static_cast<std::uint8_t>(area);
+        const auto count = static_cast<std::uint8_t>(FocusArea::Status) + 1U;
+        return static_cast<FocusArea>(
+            reverse ? (value + count - 1U) % count : (value + 1U) % count);
+    };
+    FocusArea candidate = current;
+    for (std::size_t attempt = 0U; attempt < 4U; ++attempt) {
+        candidate = next_area(candidate);
+        HWND target{};
+        switch (candidate) {
+            case FocusArea::Menu:
+                if (state.Workspace().windows.window != nullptr) {
+                    PostMessageW(
+                        state.Workspace().windows.window,
+                        WM_SYSCOMMAND,
+                        SC_KEYMENU,
+                        0);
+                    return true;
+                }
+                break;
+            case FocusArea::Dock:
+                target = FirstVisibleDockFocusTarget(state);
+                break;
+            case FocusArea::Editor: {
+                const auto* group = state.Workspace().editors.Active();
+                target = group == nullptr
+                    ? nullptr
+                    : (group->focus_history != nullptr
+                              && IsWindow(group->focus_history) != FALSE
+                          ? group->focus_history
+                          : group->canvas);
+                break;
+            }
+            case FocusArea::Status:
+                target = state.Workspace().windows.status_bar;
+                break;
+        }
+        if (target != nullptr && IsWindowVisible(target) != FALSE
+            && IsWindowEnabled(target) != FALSE) {
+            SetFocus(target);
+            return GetFocus() == target || IsChild(target, GetFocus()) != FALSE;
+        }
+    }
+    return false;
+}
+
+bool HandleWorkspaceNavigation(
+    ApplicationHost& state,
+    HWND window,
+    std::uint32_t virtual_key,
+    std::uint32_t modifiers) noexcept {
+    const std::uint32_t navigation_modifiers = modifiers
+        & (INKPOD_SHORTCUT_MODIFIER_CONTROL
+            | INKPOD_SHORTCUT_MODIFIER_SHIFT
+            | INKPOD_SHORTCUT_MODIFIER_ALT);
+    if (virtual_key == VK_F6
+        && (navigation_modifiers == 0U
+            || navigation_modifiers == INKPOD_SHORTCUT_MODIFIER_SHIFT)) {
+        (void)CycleWorkspaceFocus(
+            state,
+            navigation_modifiers == INKPOD_SHORTCUT_MODIFIER_SHIFT);
+        return true;
+    }
+    if (virtual_key == VK_F6
+        && (navigation_modifiers == INKPOD_SHORTCUT_MODIFIER_CONTROL
+            || navigation_modifiers
+                == (INKPOD_SHORTCUT_MODIFIER_CONTROL
+                    | INKPOD_SHORTCUT_MODIFIER_SHIFT))) {
+        UpdateMenuState(state);
+        DispatchEnabledCommand(state, window, IDM_EDITOR_GROUP_NEXT);
+        return true;
+    }
+    return false;
+}
+
 UINT ShortcutMenuCommand(std::uint32_t command_id) noexcept {
     return inkpod::windows::ui::ShortcutMenuCommand(command_id);
 }
@@ -13177,6 +13311,13 @@ std::optional<LRESULT> RouteKeyboardMessage(
                     return 0;
                 }
                 const std::uint32_t modifiers = CurrentShortcutModifiers(lparam);
+                if (HandleWorkspaceNavigation(
+                        *state,
+                        window,
+                        static_cast<std::uint32_t>(wparam),
+                        modifiers)) {
+                    return 0;
+                }
                 UINT menu_command{};
                 const InkpodShortcutMatch shortcut_match = ResolveShortcutStroke(
                     state->shortcuts,

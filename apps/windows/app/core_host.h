@@ -48,6 +48,12 @@ struct EngineMetrics {
     std::uint64_t completed_strokes{};
     std::uint64_t completed_samples{};
     std::uint64_t preview_snapshots{};
+    std::uint64_t accepted_work_items{};
+    std::uint64_t rejected_work_items{};
+    std::uint64_t queue_wait_samples{};
+    std::uint64_t total_queue_wait_microseconds{};
+    std::uint64_t maximum_queue_wait_microseconds{};
+    std::uint64_t peak_pending_operations{};
 };
 
 struct CoreSessionState {
@@ -157,6 +163,10 @@ public:
         Generation generation) const;
     void SetLocalFailure(std::wstring_view message) noexcept;
     EngineMetrics Metrics() const noexcept;
+    bool GetMetrics(
+        DocumentSessionId session,
+        Generation generation,
+        EngineMetrics& metrics) const noexcept;
     bool GetSessionState(
         DocumentSessionId session,
         Generation generation,

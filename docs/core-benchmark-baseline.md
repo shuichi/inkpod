@@ -81,3 +81,30 @@ same-machine comparison reference only.
 Compare performance changes on the same machine and profile using repeated-run
 medians. Correctness is determined by the assertions and fixed counters, never
 by an absolute elapsed-time threshold.
+
+## G13 Windows x64 reference and review threshold
+
+The first G13 Windows reference was captured on 2026-08-03 with Windows build
+26200, an AMD64 Family 26 Model 68 processor, and Rust 1.97.1. The values below
+are medians of five warmed quick-profile runs. They are not portable speed
+claims; comparison requires the same machine, power mode, toolchain, and
+profile.
+
+| Benchmark/scenario | Median |
+| --- | ---: |
+| image sparse 1,048,576 square / 512 samples | 8 ms |
+| image dense 1,024 square / 4,194,304 bytes | 45 ms |
+| `sparse_snapshot` | 878,800 ns |
+| `dirty_tile_rebuild` | 112,500 ns |
+| `pan_zoom_snapshot` | 5,300 ns |
+| `undo_redo` | 3,057,500 ns |
+| `light_table_composite` | 1,868,600 ns |
+| `vector_snapshot` | 45,555,100 ns |
+| `batch_preview` | 210,100 ns |
+
+A same-machine median is a release-review regression when it is both more than
+25% above this reference and more than 100 microseconds slower. The image
+benchmark reports integer milliseconds, so its absolute-noise floor is one
+millisecond. A confirmed regression blocks release until it is explained,
+accepted, or corrected; a single run never fails the gate. Semantic checksum,
+counter, allocation-bound, and resource-budget failures remain unconditional.

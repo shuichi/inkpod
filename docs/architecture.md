@@ -141,6 +141,14 @@ Create, new/open/import, command, input, snapshot, save, rebind, close, and
 destroy work captures that key before queueing. Per-session active stroke,
 sequence/pending counts, cached document info, diagnostics, active Core view,
 and metrics prevent equal Core-local IDs or revisions from crossing sessions.
+The metrics include accepted/rejected work, pending high-water mark, and total
+and maximum queue wait measured from enqueue to owner-thread dispatch. A
+session/generation value must be supplied when reading them; the UI never
+re-resolves the active document. The read-only C ABI resource query reports
+logical document tile/history, render-cache, CPU-staging, light-table/reference,
+sequence-source, and thumbnail-cache categories without building a snapshot.
+ApplicationHost separately reports layer/sequence thumbnail and color-picker
+CPU cache bytes by captured workspace/pane ID on the UI thread.
 Close marks a session non-accepting before its ordered close item, resolves all
 previously accepted work, cancels a live stroke, and destroys the handle on the
 owner thread. Long operations still share this single lane and may delay other
@@ -165,7 +173,15 @@ route. Stale, hidden, occluded, queue-full, replaced, closed, and shutdown paths
 all consume the Rust snapshot owner exactly once. Device loss first discards all
 surface GPU resources, recreates the shared device, then reconstructs every
 surface cache from its retained immutable snapshot; Core document state is not
-involved. G6 retains one Canvas surface per visible editor group, up to two,
+involved. Renderer telemetry is published as a value copy and accounts for
+retained/pending immutable snapshots, active/cached GPU tiles, swap-chain
+payloads, surfaces, queue rejection/replacement, stale frames, resource-limit
+rejection, and device reset. A per-surface value copy retains the bound document/
+view/Canvas/generation route and byte/count values but no snapshot or GPU
+pointer. GPU tile payloads share a 512 MiB application-wide
+budget; active tiles are admitted only when the aggregate fits, while inactive
+tiles are retained for reuse and evicted in application-wide least-recently-used
+order. G6 retains one Canvas surface per visible editor group, up to two,
 rather than per open or inactive tab. Closing a group unregisters its snapshot
 sink before destroying its Canvas and moves its views to the surviving group.
 
@@ -354,7 +370,14 @@ The five built-in presets are Coloring, Line Cleanup, Reference Check, Batch,
 and Focus. Save, Save As, Restore, and Reset share the normal command/state/
 shortcut catalog. Secondary palettes use resource-titled standard-button
 AutoHide edge strips, keeping keyboard and accessibility behavior in Common
-Controls. Main and floating placements are captured in physical screen pixels
+Controls. Workspace navigation is intercepted before the configurable command
+catalog: Ctrl+Tab/Ctrl+Shift+Tab select tabs, Ctrl+F6/Ctrl+Shift+F6 select an
+editor group, F6/Shift+F6 cycle menu, dock, editor, and status, and Ctrl+F4
+closes the captured view. Edit controls retain all other text input. Standard
+tab, static, dialog, and button controls expose dirty, target, job, pane, and
+AutoHide names through the Windows MSAA/UI Automation bridge; captionless
+splitters receive explicit accessible names. Main and floating placements are
+captured in physical screen pixels
 with their source DPI and clamped to current monitor work areas on display, DPI,
 and taskbar changes; conversion occurs once. Narrow/compact geometry never
 mutates the saved logical layout. If an editor Canvas owns input capture, preset
@@ -540,8 +563,10 @@ allocation, distributed writes, copy-on-write isolation, and a bounded dense
 filter workload. The `core_workflows` benchmark separately covers sparse and
 dirty-tile snapshots, view-only cache reuse, Undo/Redo, light-table composition,
 vector snapshot/rasterization, and in-memory Batch preview/dry-run. Both expose
-fixed quick/full inputs and semantic counters/checksums; timing is reported
-without a machine-specific pass threshold.
+fixed quick/full inputs and semantic counters/checksums. G13 records a warmed
+five-run Windows x64 median and a same-machine relative review threshold in
+`docs/core-benchmark-baseline.md`; semantic drift and resource-budget failures
+remain unconditional on every machine.
 
 ## Initialization and shutdown
 

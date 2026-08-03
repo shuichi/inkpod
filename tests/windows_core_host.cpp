@@ -21,6 +21,7 @@ using inkpod::app::CoreNotification;
 using inkpod::app::CoreNotificationKind;
 using inkpod::app::CoreSessionState;
 using inkpod::app::DocumentSessionId;
+using inkpod::app::EngineMetrics;
 using inkpod::app::Generation;
 using inkpod::app::StrokeEvent;
 using inkpod::app::StrokeEventKind;
@@ -652,6 +653,62 @@ int wmain() {
         return 17;
     }
     DeleteFileW(save_path.c_str());
+
+    // One long operation retains the single-writer lane, but input already
+    // accepted for another document remains queued and observable instead of
+    // being dropped or retargeted.
+    std::promise<void> latency_operation_started;
+    std::promise<void> release_latency_operation;
+    std::shared_future<void> latency_release_future =
+        release_latency_operation.get_future().share();
+    std::promise<InkpodStatus> latency_operation_completion;
+    std::promise<InkpodStatus> delayed_input_completion;
+    if (!host.Enqueue(
+            Context(second, generation),
+            [&latency_operation_started, latency_release_future](InkpodCore*) {
+                latency_operation_started.set_value();
+                latency_release_future.wait();
+                return INKPOD_STATUS_OK;
+            },
+            false,
+            false,
+            false,
+            [&latency_operation_completion](InkpodStatus status) {
+                latency_operation_completion.set_value(status);
+            })) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 25;
+    }
+    latency_operation_started.get_future().wait();
+    if (!host.Enqueue(
+            Context(first, generation),
+            [](InkpodCore*) { return INKPOD_STATUS_OK; },
+            false,
+            false,
+            false,
+            [&delayed_input_completion](InkpodStatus status) {
+                delayed_input_completion.set_value(status);
+            })) {
+        release_latency_operation.set_value();
+        host.Stop();
+        DestroyWindow(owner);
+        return 26;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    release_latency_operation.set_value();
+    EngineMetrics first_metrics{};
+    if (latency_operation_completion.get_future().get() != INKPOD_STATUS_OK
+        || delayed_input_completion.get_future().get() != INKPOD_STATUS_OK
+        || !host.GetMetrics(first, generation, first_metrics)
+        || first_metrics.accepted_work_items == 0U
+        || first_metrics.queue_wait_samples == 0U
+        || first_metrics.maximum_queue_wait_microseconds < 1000U
+        || first_metrics.peak_pending_operations == 0U) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 27;
+    }
 
     std::promise<void> operation_started;
     std::promise<void> release_operation;

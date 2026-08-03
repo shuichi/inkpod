@@ -567,6 +567,31 @@ typedef struct InkpodDocumentInfo {
     uint64_t color_plane_checksum;
 } InkpodDocumentInfo;
 
+/**
+ * @brief Core owner-thread session の deterministic な論理 resource 使用量。
+ *
+ * tile/history byte は payload の論理保持量であり、copy-on-write clone 間で共有される
+ * allocator/driver private resident size を推測しない。query は snapshot、revision、dirty、
+ * history、savepoint を変更しない。
+ */
+typedef struct InkpodResourceUsage {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t document_tile_bytes;
+    uint64_t document_tile_count;
+    uint64_t history_bytes;
+    uint64_t history_entry_count;
+    uint64_t render_cache_bytes;
+    uint64_t render_cache_tile_count;
+    uint64_t cpu_staging_bytes;
+    uint64_t reference_light_table_bytes;
+    uint64_t reference_light_table_tile_count;
+    uint64_t sequence_source_bytes;
+    uint64_t sequence_source_tile_count;
+    uint64_t thumbnail_cache_bytes;
+} InkpodResourceUsage;
+
 /** @brief 100F/基準/作画/安全 frame と margin を更新する borrowed 入力。 */
 typedef struct InkpodPaperFramesInput {
     uint32_t struct_size;
@@ -1808,6 +1833,17 @@ InkpodStatus inkpod_core_new_cell(
 InkpodStatus inkpod_core_get_document_info(
     InkpodCore* core,
     InkpodDocumentInfo* out_info);
+
+/**
+ * @brief current Core session の category 別 logical resource 使用量をコピーする。
+ *
+ * Core owner thread。`core` と caller-owned `out_usage` は非 NULL、完全な advertised
+ * range、非重複でなければならない。成功/no-op/失敗のいずれでも document、view、
+ * history、dirty、savepoint は不変。
+ */
+InkpodStatus inkpod_core_get_resource_usage(
+    InkpodCore* core,
+    InkpodResourceUsage* out_usage);
 /**
  * @brief 紙 frame と margin を 1 transaction で更新する。
  * @par 契約

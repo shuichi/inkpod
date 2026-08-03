@@ -92,6 +92,7 @@ struct SyncWork {
     std::optional<std::uint64_t> active_view_update;
     std::shared_ptr<std::promise<InkpodStatus>> completion;
     std::function<void(InkpodStatus)> async_completion;
+    std::chrono::steady_clock::time_point queued_at{std::chrono::steady_clock::now()};
 };
 
 struct StrokeWork {
@@ -99,6 +100,7 @@ struct StrokeWork {
     std::uint64_t sequence{};
     std::uint64_t pending_units{1U};
     StrokeEvent event;
+    std::chrono::steady_clock::time_point queued_at{std::chrono::steady_clock::now()};
 };
 
 enum class ControlKind : std::uint8_t {
@@ -526,6 +528,9 @@ struct CoreHost::Impl final {
             std::lock_guard state_lock(state_mutex);
             const auto session = FindPublishedLocked(binding);
             if (session == published.end() || !session->state.accepting_work) {
+                if (session != published.end()) {
+                    ++session->metrics.rejected_work_items;
+                }
                 return false;
             }
             item.sequence = ++session->state.last_accepted_sequence;
@@ -543,8 +548,10 @@ struct CoreHost::Impl final {
         }
         if (!queued) {
             RollbackPending(binding);
+            RecordRejected(binding);
             return false;
         }
+        RecordAccepted(binding);
         wake.notify_one();
         return true;
     }
@@ -566,6 +573,9 @@ struct CoreHost::Impl final {
             std::lock_guard state_lock(state_mutex);
             const auto session = FindPublishedLocked(item.binding);
             if (session == published.end() || !session->state.accepting_work) {
+                if (session != published.end()) {
+                    ++session->metrics.rejected_work_items;
+                }
                 return false;
             }
             item.sequence = ++session->state.last_accepted_sequence;
@@ -607,8 +617,10 @@ struct CoreHost::Impl final {
         }
         if (!queued) {
             RollbackPending(item.binding);
+            RecordRejected(item.binding);
             return false;
         }
+        RecordAccepted(item.binding);
         wake.notify_one();
         return true;
     }
@@ -633,6 +645,49 @@ struct CoreHost::Impl final {
         if (found != published.end() && found->state.pending_operations != 0U) {
             --found->state.pending_operations;
         }
+    }
+
+    void RecordAccepted(SessionBinding binding) noexcept {
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found == published.end()) {
+            return;
+        }
+        ++found->metrics.accepted_work_items;
+        found->metrics.peak_pending_operations = std::max(
+            found->metrics.peak_pending_operations,
+            found->state.pending_operations);
+    }
+
+    void RecordRejected(SessionBinding binding) noexcept {
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found != published.end()) {
+            ++found->metrics.rejected_work_items;
+        }
+    }
+
+    void RecordQueueWait(
+        SessionBinding binding,
+        std::chrono::steady_clock::time_point queued_at) noexcept {
+        const auto elapsed = std::chrono::steady_clock::now() - queued_at;
+        const auto raw_microseconds = std::chrono::duration_cast<
+            std::chrono::microseconds>(elapsed).count();
+        const std::uint64_t microseconds = raw_microseconds <= 0
+            ? 0U
+            : static_cast<std::uint64_t>(raw_microseconds);
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found == published.end()) {
+            return;
+        }
+        ++found->metrics.queue_wait_samples;
+        found->metrics.total_queue_wait_microseconds =
+            found->metrics.total_queue_wait_microseconds > UINT64_MAX - microseconds
+            ? UINT64_MAX
+            : found->metrics.total_queue_wait_microseconds + microseconds;
+        found->metrics.maximum_queue_wait_microseconds = std::max(
+            found->metrics.maximum_queue_wait_microseconds, microseconds);
     }
 
     void CompletePending(
@@ -809,6 +864,7 @@ struct CoreHost::Impl final {
     }
 
     void ProcessStroke(StrokeWork item) noexcept {
+        RecordQueueWait(item.binding, item.queued_at);
         CoreEntry* entry = FindEntry(item.binding);
         if (entry == nullptr || item.event.context.document_session != item.binding.session
             || item.event.context.generation != item.binding.generation) {
@@ -906,6 +962,7 @@ struct CoreHost::Impl final {
     }
 
     void ProcessSync(SyncWork item) noexcept {
+        RecordQueueWait(item.binding, item.queued_at);
         CoreEntry* entry = FindEntry(item.binding);
         InkpodStatus status = entry == nullptr
             ? INKPOD_STATUS_CANCELLED
@@ -1667,6 +1724,18 @@ EngineMetrics CoreHost::Metrics() const noexcept {
     }
     const auto binding = impl_->ActiveBinding();
     return binding.has_value() ? impl_->CopyMetrics(binding.value()) : EngineMetrics{};
+}
+
+bool CoreHost::GetMetrics(
+    DocumentSessionId session,
+    Generation generation,
+    EngineMetrics& metrics) const noexcept {
+    const SessionBinding binding{session, generation};
+    if (impl_ == nullptr || !impl_->HasSession(binding)) {
+        return false;
+    }
+    metrics = impl_->CopyMetrics(binding);
+    return true;
 }
 
 bool CoreHost::GetSessionState(

@@ -17,7 +17,7 @@ use inkpod_core::{
     MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION,
     MAX_SHORTCUT_STROKES, MAX_SHORTCUTS, Margins, MirrorAxis, MotionCheckConfig, MotionFrame,
     PaintTool, PixelFormat, PixelValue, PlaneType, PointF32, RectI32, RenderSnapshot, ResizeAnchor,
-    RgbaRasterBytes, RotateDirection, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
+    ResourceUsage, RgbaRasterBytes, RotateDirection, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
     SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SelectionLayerOperation, SelectionOperation,
     SelectionShape, SequenceCellSource, SequenceDirection, ShortcutBinding,
     ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape, Stroke, StrokeSample,

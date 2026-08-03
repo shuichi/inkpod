@@ -189,6 +189,23 @@ int Run() {
         || !HasBounds(host, second_canvas, second_surface_generation, 48.0, 16.0)) {
         return 8;
     }
+    const inkpod::renderer::RendererResourceUsage initial_usage = host.ResourceUsage();
+    inkpod::renderer::RendererSurfaceResourceUsage first_surface_usage{};
+    if (initial_usage.gpu_tile_budget_bytes == 0U
+        || initial_usage.surface_count != 2U
+        || initial_usage.visible_surface_count != 2U
+        || initial_usage.retained_snapshot_bytes == 0U
+        || initial_usage.gpu_tile_bytes > initial_usage.gpu_tile_budget_bytes
+        || initial_usage.active_tile_count > initial_usage.cached_tile_count
+        || !host.GetSurfaceResourceUsage(
+            first_canvas, first_surface_generation, first_surface_usage)
+        || first_surface_usage.route != first_sink->Route()
+        || first_surface_usage.retained_snapshot_bytes == 0U
+        || !first_surface_usage.visible || first_surface_usage.occluded
+        || host.GetSurfaceResourceUsage(
+            first_canvas, Generation{999U}, first_surface_usage)) {
+        return 30;
+    }
 
     CoreOwner replacement_core;
     if (!replacement_core.Create(4U, 40U, 20U)) {
@@ -203,6 +220,12 @@ int Run() {
         || !first_sink->Submit(replacement)) {
         host.SetQueuePausedForSmokeTest(false);
         return 21;
+    }
+    const inkpod::renderer::RendererResourceUsage paused_usage = host.ResourceUsage();
+    if (paused_usage.pending_snapshot_bytes == 0U
+        || paused_usage.queue_replacement_count == 0U) {
+        host.SetQueuePausedForSmokeTest(false);
+        return 31;
     }
     host.SetQueuePausedForSmokeTest(false);
     if (!HasBounds(host, first_canvas, first_surface_generation, 40.0, 20.0)) {
@@ -223,6 +246,9 @@ int Run() {
     if (!host.WaitQueueIdleForSmokeTest()) {
         return 24;
     }
+    if (host.ResourceUsage().queue_rejection_count == 0U) {
+        return 32;
+    }
     host.SetVisible(first_canvas, first_surface_generation, true);
     if (FAILED(host.RenderOnce(first_canvas, first_surface_generation))) {
         return 26;
@@ -238,6 +264,9 @@ int Run() {
     }
     if (host.DeviceGeneration() <= device_generation_before) {
         return 91;
+    }
+    if (host.ResourceUsage().device_reset_count == 0U) {
+        return 33;
     }
     if (!HasBounds(host, first_canvas, first_surface_generation, 40.0, 20.0)) {
         return 92;
@@ -255,6 +284,9 @@ int Run() {
             Generation(22U))
         || host.Submit(stale)) {
         return 10;
+    }
+    if (host.ResourceUsage().stale_snapshot_count == 0U) {
+        return 34;
     }
     inkpod::renderer::CanvasDocumentBounds cleared{};
     if (FAILED(host.GetDocumentBounds(
@@ -329,7 +361,10 @@ int Run() {
     }
     host.Stop();
     if (host.ThreadId() != 0U || host.DeviceGeneration() != 0U
-        || host.SurfaceCount() != 0U) {
+        || host.SurfaceCount() != 0U
+        || host.ResourceUsage().surface_count != 0U
+        || host.GetSurfaceResourceUsage(
+            second_canvas, second_surface_generation, first_surface_usage)) {
         return 19;
     }
     second_canvas_window.Reset();

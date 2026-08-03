@@ -128,6 +128,19 @@ pub(crate) struct SequenceState {
     pub(super) active_index: Option<usize>,
 }
 
+impl SequenceState {
+    pub(crate) fn logical_raster_usage(&self) -> (u64, u64) {
+        self.cells
+            .iter()
+            .fold((0_u64, 0_u64), |(tiles, bytes), cell| {
+                (
+                    tiles.saturating_add(cell.raster.allocated_tile_count() as u64),
+                    bytes.saturating_add(cell.raster.allocated_tile_bytes()),
+                )
+            })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Relative direction used for sequence navigation.
 pub enum SequenceDirection {

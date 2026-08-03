@@ -291,6 +291,23 @@ pub(crate) fn write_document_info(output: &mut InkpodDocumentInfo, info: Documen
     output.color_plane_checksum = info.color_plane_checksum;
 }
 
+pub(crate) fn write_resource_usage(output: &mut InkpodResourceUsage, usage: ResourceUsage) {
+    output.reserved = 0;
+    output.feature_flags = INKPOD_FEATURE_NONE;
+    output.document_tile_bytes = usage.document_tile_bytes;
+    output.document_tile_count = usage.document_tile_count;
+    output.history_bytes = usage.history_bytes;
+    output.history_entry_count = usage.history_entry_count;
+    output.render_cache_bytes = usage.render_cache_bytes;
+    output.render_cache_tile_count = usage.render_cache_tile_count;
+    output.cpu_staging_bytes = usage.cpu_staging_bytes;
+    output.reference_light_table_bytes = usage.reference_light_table_bytes;
+    output.reference_light_table_tile_count = usage.reference_light_table_tile_count;
+    output.sequence_source_bytes = usage.sequence_source_bytes;
+    output.sequence_source_tile_count = usage.sequence_source_tile_count;
+    output.thumbnail_cache_bytes = usage.thumbnail_cache_bytes;
+}
+
 pub(crate) fn write_dispatch_result(
     result: &mut InkpodDispatchResult,
     outcome: inkpod_core::DispatchOutcome,

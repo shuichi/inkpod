@@ -298,6 +298,18 @@ impl LightTableState {
         })
     }
 
+    pub(crate) fn logical_raster_usage(&self) -> (u64, u64) {
+        self.sets
+            .iter()
+            .flat_map(|set| &set.items)
+            .fold((0_u64, 0_u64), |(tiles, bytes), item| {
+                (
+                    tiles.saturating_add(item.source.raster.allocated_tile_count() as u64),
+                    bytes.saturating_add(item.source.raster.allocated_tile_bytes()),
+                )
+            })
+    }
+
     pub(crate) fn source_revision(&self) -> u64 {
         self.active()
             .into_iter()

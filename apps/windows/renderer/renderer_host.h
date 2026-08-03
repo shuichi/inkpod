@@ -63,6 +63,43 @@ struct SnapshotEnvelope {
     std::uint64_t document_revision{};
     std::uint64_t view_revision{};
     InkpodSnapshot* snapshot{};
+    std::uint64_t estimated_payload_bytes{};
+};
+
+// Process-wide renderer resource telemetry. Byte counts describe payloads and
+// GPU allocations owned by RendererHost; they intentionally exclude driver-
+// private allocations that DXGI does not expose portably. The snapshot is a
+// value copy and is safe to inspect from the UI/Input thread.
+struct RendererResourceUsage {
+    std::uint64_t gpu_tile_budget_bytes{};
+    std::uint64_t retained_snapshot_bytes{};
+    std::uint64_t gpu_tile_bytes{};
+    std::uint64_t swap_chain_bytes{};
+    std::uint64_t pending_snapshot_bytes{};
+    std::uint64_t cached_tile_count{};
+    std::uint64_t active_tile_count{};
+    std::uint64_t surface_count{};
+    std::uint64_t visible_surface_count{};
+    std::uint64_t queued_work_count{};
+    std::uint64_t queue_rejection_count{};
+    std::uint64_t queue_replacement_count{};
+    std::uint64_t stale_snapshot_count{};
+    std::uint64_t resource_limit_count{};
+    std::uint64_t device_reset_count{};
+};
+
+// One CanvasSurface contribution to RendererResourceUsage. The route keeps the
+// document/view/Canvas namespace captured when the surface was bound; no GPU
+// object or snapshot pointer escapes the renderer owner thread.
+struct RendererSurfaceResourceUsage {
+    SnapshotRoute route;
+    std::uint64_t retained_snapshot_bytes{};
+    std::uint64_t gpu_tile_bytes{};
+    std::uint64_t swap_chain_bytes{};
+    std::uint64_t cached_tile_count{};
+    std::uint64_t active_tile_count{};
+    bool visible{};
+    bool occluded{};
 };
 
 // Process-owned facade for one renderer thread. Every GPU call and every
@@ -142,6 +179,11 @@ public:
         app::Generation surface_generation) const noexcept;
     [[nodiscard]] std::size_t SurfaceCount() const noexcept;
     [[nodiscard]] std::uint64_t DeviceGeneration() const noexcept;
+    [[nodiscard]] RendererResourceUsage ResourceUsage() const noexcept;
+    [[nodiscard]] bool GetSurfaceResourceUsage(
+        app::CanvasId canvas,
+        app::Generation surface_generation,
+        RendererSurfaceResourceUsage& usage) const noexcept;
     void SetQueuePausedForSmokeTest(bool paused) noexcept;
     [[nodiscard]] bool WaitQueueIdleForSmokeTest() noexcept;
 

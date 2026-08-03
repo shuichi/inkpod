@@ -10,6 +10,7 @@ _Static_assert(sizeof(InkpodCommandBatch) == 40U, "command batch layout drift");
 _Static_assert(sizeof(InkpodSnapshotView) == 48U, "snapshot view layout drift");
 _Static_assert(sizeof(InkpodCellCreateOptions) == 48U, "cell options layout drift");
 _Static_assert(sizeof(InkpodDocumentInfo) == 192U, "document info layout drift");
+_Static_assert(sizeof(InkpodResourceUsage) == 112U, "resource usage layout drift");
 _Static_assert(sizeof(InkpodStrokeSample) == 24U, "stroke sample layout drift");
 _Static_assert(sizeof(InkpodStrokeInput) == 56U, "stroke input layout drift");
 _Static_assert(sizeof(InkpodStrokeSampleSpan) == 40U, "stroke span layout drift");

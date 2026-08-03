@@ -14,6 +14,17 @@
 
 namespace inkpod::app {
 
+// UI-thread value copy for memory retained by a modeless pane. Thumbnail bytes
+// and other CPU cache bytes are separated so the application-wide policy can
+// account for image-derived previews without exposing HWND-owned objects.
+struct PaneResourceUsage final {
+    WorkspaceWindowId workspace{};
+    PaneInstanceId pane{};
+    std::uint64_t thumbnail_bytes{};
+    std::uint64_t cpu_cache_bytes{};
+    std::uint64_t cached_item_count{};
+};
+
 class ApplicationHost final {
 public:
     struct DocumentBinding final {
@@ -71,6 +82,9 @@ public:
     [[nodiscard]] const RecentDocumentEntry* RecentDocumentAt(
         std::size_t index) const noexcept;
     [[nodiscard]] std::size_t RecentDocumentCount() const noexcept;
+    [[nodiscard]] bool GetPaneResourceUsage(
+        PaneInstanceId pane,
+        PaneResourceUsage& usage) const noexcept;
     [[nodiscard]] bool ReplaceDocumentSession(
         DocumentSessionId id,
         Generation generation,

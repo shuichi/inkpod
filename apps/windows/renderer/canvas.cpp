@@ -44,15 +44,71 @@ constexpr std::size_t kMaximumPendingCanvasInput = 64U;
 constexpr std::uint64_t kMaximumStrokeSamples = UINT64_C(1048576);
 constexpr std::uint32_t kVectorSamplesPerSegment = 24U;
 constexpr float kVectorMiterLimit = 4.0F;
+constexpr std::uint64_t kApplicationGpuTileBudgetBytes = UINT64_C(512) * 1024U * 1024U;
+std::atomic<std::uint64_t> gApplicationTileUseSequence{};
 
 struct CachedTile {
     std::uint64_t revision{};
+    std::uint64_t last_used{};
+    std::uint64_t byte_count{};
     int origin_x{};
     int origin_y{};
     UINT width{};
     UINT height{};
+    bool active{};
     ComPtr<ID2D1Bitmap1> bitmap;
 };
+
+std::uint64_t SaturatingAdd(std::uint64_t left, std::uint64_t right) noexcept {
+    return left > UINT64_MAX - right ? UINT64_MAX : left + right;
+}
+
+std::uint64_t SaturatingProduct(std::uint64_t left, std::uint64_t right) noexcept {
+    return left != 0U && right > UINT64_MAX / left ? UINT64_MAX : left * right;
+}
+
+std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
+    if (snapshot == nullptr) {
+        return 0U;
+    }
+    InkpodSnapshotView view{};
+    view.struct_size = sizeof(view);
+    InkpodSnapshotOverlay overlay{};
+    overlay.struct_size = sizeof(overlay);
+    InkpodSnapshotVectorView vectors{};
+    vectors.struct_size = sizeof(vectors);
+    if (inkpod_snapshot_get_view(snapshot, &view) != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_overlay(snapshot, &overlay) != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_vectors(snapshot, &vectors) != INKPOD_STATUS_OK) {
+        return 0U;
+    }
+    std::uint64_t bytes = sizeof(InkpodSnapshotView) + sizeof(InkpodSnapshotTransform)
+        + sizeof(InkpodSnapshotOverlay) + sizeof(InkpodSnapshotVectorView);
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        view.tile_count, view.tile_stride_bytes));
+    if (view.tiles != nullptr && view.tile_stride_bytes >= sizeof(InkpodSnapshotTile)
+        && view.tile_stride_bytes <= static_cast<std::uint64_t>(SIZE_MAX)) {
+        const auto* base = reinterpret_cast<const std::uint8_t*>(view.tiles);
+        const std::size_t stride = static_cast<std::size_t>(view.tile_stride_bytes);
+        for (std::uint64_t index = 0U; index < view.tile_count; ++index) {
+            if (index > static_cast<std::uint64_t>(SIZE_MAX / stride)) {
+                return UINT64_MAX;
+            }
+            const auto* tile = reinterpret_cast<const InkpodSnapshotTile*>(
+                base + static_cast<std::size_t>(index) * stride);
+            bytes = SaturatingAdd(bytes, tile->pixel_bytes);
+        }
+    }
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        overlay.guide_count, overlay.guide_stride_bytes));
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        vectors.segment_count, vectors.segment_stride_bytes));
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        vectors.fill_count, vectors.fill_stride_bytes));
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        vectors.boundary_path_count, sizeof(std::uint64_t)));
+    return bytes;
+}
 
 class SharedRendererDevice final {
 public:
@@ -216,7 +272,12 @@ public:
         if (FAILED(result)) {
             return result;
         }
-        return CreateTargetBitmap();
+        result = CreateTargetBitmap();
+        if (SUCCEEDED(result)) {
+            surface_width_ = width;
+            surface_height_ = height;
+        }
+        return result;
     }
 
     HRESULT Render() noexcept {
@@ -301,6 +362,9 @@ public:
             }
             for (const auto& entry : tile_cache_) {
                 const CachedTile& tile = entry.second;
+                if (!tile.active) {
+                    continue;
+                }
                 const D2D1_RECT_F destination = D2D1::RectF(
                     static_cast<float>(tile.origin_x),
                     static_cast<float>(tile.origin_y),
@@ -393,6 +457,7 @@ public:
         transform_ = transform;
         overlay_ = overlay;
         vectors_ = vectors;
+        retained_snapshot_bytes_ = EstimateSnapshotPayloadBytes(snapshot);
         return RebuildTileCache();
     }
 
@@ -467,10 +532,76 @@ public:
         overlay_ = {};
         vectors_ = {};
         tile_cache_.clear();
+        retained_snapshot_bytes_ = 0U;
+        gpu_tile_bytes_ = 0U;
     }
 
-    void SetTileBudget(std::size_t tile_budget) noexcept {
-        tile_budget_ = std::max<std::size_t>(1U, tile_budget);
+    void SetTileBudgetBytes(std::uint64_t tile_budget_bytes) noexcept {
+        tile_budget_bytes_ = std::max<std::uint64_t>(1U, tile_budget_bytes);
+        TrimTileCache();
+    }
+
+    [[nodiscard]] std::uint64_t RetainedSnapshotBytes() const noexcept {
+        return retained_snapshot_bytes_;
+    }
+
+    [[nodiscard]] std::uint64_t GpuTileBytes() const noexcept {
+        return gpu_tile_bytes_;
+    }
+
+    [[nodiscard]] std::uint64_t SwapChainBytes() const noexcept {
+        return static_cast<std::uint64_t>(surface_width_) * surface_height_ * 4U * 2U;
+    }
+
+    [[nodiscard]] std::uint64_t CachedTileCount() const noexcept {
+        return static_cast<std::uint64_t>(tile_cache_.size());
+    }
+
+    [[nodiscard]] std::uint64_t ActiveTileCount() const noexcept {
+        return static_cast<std::uint64_t>(std::count_if(
+            tile_cache_.cbegin(), tile_cache_.cend(), [](const auto& entry) {
+                return entry.second.active;
+            }));
+    }
+
+    [[nodiscard]] std::uint64_t ActiveTileBytes() const noexcept {
+        std::uint64_t bytes{};
+        for (const auto& entry : tile_cache_) {
+            if (entry.second.active) {
+                bytes = SaturatingAdd(bytes, entry.second.byte_count);
+            }
+        }
+        return bytes;
+    }
+
+    [[nodiscard]] std::optional<std::uint64_t> OldestInactiveUse() const noexcept {
+        std::optional<std::uint64_t> oldest;
+        for (const auto& entry : tile_cache_) {
+            if (!entry.second.active
+                && (!oldest.has_value() || entry.second.last_used < oldest.value())) {
+                oldest = entry.second.last_used;
+            }
+        }
+        return oldest;
+    }
+
+    bool EvictOldestInactive() noexcept {
+        auto victim = tile_cache_.end();
+        for (auto iterator = tile_cache_.begin(); iterator != tile_cache_.end(); ++iterator) {
+            if (iterator->second.active) {
+                continue;
+            }
+            if (victim == tile_cache_.end()
+                || iterator->second.last_used < victim->second.last_used) {
+                victim = iterator;
+            }
+        }
+        if (victim == tile_cache_.end()) {
+            return false;
+        }
+        gpu_tile_bytes_ -= victim->second.byte_count;
+        tile_cache_.erase(victim);
+        return true;
     }
 
     HRESULT ValidateClosedVectorStrokeForSmokeTest() noexcept {
@@ -1332,16 +1463,36 @@ private:
         return S_OK;
     }
 
+    void TrimTileCache() noexcept {
+        while (gpu_tile_bytes_ > tile_budget_bytes_) {
+            auto victim = tile_cache_.end();
+            for (auto iterator = tile_cache_.begin(); iterator != tile_cache_.end(); ++iterator) {
+                if (iterator->second.active) {
+                    continue;
+                }
+                if (victim == tile_cache_.end()
+                    || iterator->second.last_used < victim->second.last_used) {
+                    victim = iterator;
+                }
+            }
+            if (victim == tile_cache_.end()) {
+                break;
+            }
+            gpu_tile_bytes_ -= victim->second.byte_count;
+            tile_cache_.erase(victim);
+        }
+    }
+
     HRESULT RebuildTileCache() noexcept {
         if (!d2d_context_) {
             return E_UNEXPECTED;
         }
         if (snapshot_ == nullptr) {
             tile_cache_.clear();
+            gpu_tile_bytes_ = 0U;
             return S_OK;
         }
         if (snapshot_view_.tile_count > kMaximumSnapshotTiles
-            || snapshot_view_.tile_count > tile_budget_
             || (snapshot_view_.feature_flags
                     & ~(INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE
                         | INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA))
@@ -1359,11 +1510,10 @@ private:
             return E_INVALIDARG;
         }
         try {
-            std::unordered_set<std::uint64_t> present;
-            present.reserve(static_cast<std::size_t>(snapshot_view_.tile_count));
             const auto* base = reinterpret_cast<const std::uint8_t*>(snapshot_view_.tiles);
             const std::size_t stride = static_cast<std::size_t>(
                 snapshot_view_.tile_stride_bytes);
+            std::uint64_t active_bytes{};
             for (std::uint64_t index = 0; index < snapshot_view_.tile_count; ++index) {
                 if (index > static_cast<std::uint64_t>(
                                 std::numeric_limits<std::size_t>::max() / stride)) {
@@ -1380,7 +1530,19 @@ private:
                         < static_cast<std::uint64_t>(tile->stride_bytes) * tile->height) {
                     return E_INVALIDARG;
                 }
-                present.insert(tile->tile_id);
+                if (tile->pixel_bytes > tile_budget_bytes_
+                    || active_bytes > tile_budget_bytes_ - tile->pixel_bytes) {
+                    return E_OUTOFMEMORY;
+                }
+                active_bytes += tile->pixel_bytes;
+            }
+            for (auto& entry : tile_cache_) {
+                entry.second.active = false;
+            }
+            std::uint64_t upload_bytes{};
+            for (std::uint64_t index = 0; index < snapshot_view_.tile_count; ++index) {
+                const auto* tile = reinterpret_cast<const InkpodSnapshotTile*>(
+                    base + static_cast<std::size_t>(index) * stride);
                 auto existing = tile_cache_.find(tile->tile_id);
                 if (existing != tile_cache_.end()
                     && existing->second.revision == tile->tile_revision
@@ -1388,6 +1550,27 @@ private:
                     && existing->second.height == tile->height) {
                     existing->second.origin_x = tile->origin_x;
                     existing->second.origin_y = tile->origin_y;
+                    existing->second.active = true;
+                    existing->second.last_used =
+                        gApplicationTileUseSequence.fetch_add(1U, std::memory_order_relaxed) + 1U;
+                } else {
+                    upload_bytes = SaturatingAdd(upload_bytes, tile->pixel_bytes);
+                }
+            }
+            while (upload_bytes <= tile_budget_bytes_
+                && gpu_tile_bytes_ > tile_budget_bytes_ - upload_bytes) {
+                if (!EvictOldestInactive()) {
+                    return E_OUTOFMEMORY;
+                }
+            }
+            if (upload_bytes > tile_budget_bytes_) {
+                return E_OUTOFMEMORY;
+            }
+            for (std::uint64_t index = 0; index < snapshot_view_.tile_count; ++index) {
+                const auto* tile = reinterpret_cast<const InkpodSnapshotTile*>(
+                    base + static_cast<std::size_t>(index) * stride);
+                auto existing = tile_cache_.find(tile->tile_id);
+                if (existing != tile_cache_.end() && existing->second.active) {
                     continue;
                 }
 
@@ -1410,20 +1593,22 @@ private:
                 }
                 CachedTile cache_entry{};
                 cache_entry.revision = tile->tile_revision;
+                cache_entry.last_used =
+                    gApplicationTileUseSequence.fetch_add(1U, std::memory_order_relaxed) + 1U;
+                cache_entry.byte_count = tile->pixel_bytes;
                 cache_entry.origin_x = tile->origin_x;
                 cache_entry.origin_y = tile->origin_y;
                 cache_entry.width = tile->width;
                 cache_entry.height = tile->height;
+                cache_entry.active = true;
                 cache_entry.bitmap = std::move(bitmap);
-                tile_cache_[tile->tile_id] = std::move(cache_entry);
-            }
-            for (auto iterator = tile_cache_.begin(); iterator != tile_cache_.end();) {
-                if (!present.contains(iterator->first)) {
-                    iterator = tile_cache_.erase(iterator);
-                } else {
-                    ++iterator;
+                if (existing != tile_cache_.end()) {
+                    gpu_tile_bytes_ -= existing->second.byte_count;
                 }
+                tile_cache_[tile->tile_id] = std::move(cache_entry);
+                gpu_tile_bytes_ += tile->pixel_bytes;
             }
+            TrimTileCache();
             return S_OK;
         } catch (const std::bad_alloc&) {
             return E_OUTOFMEMORY;
@@ -1500,6 +1685,9 @@ private:
             surface.Get(), &properties, &target_bitmap_);
         if (SUCCEEDED(result)) {
             d2d_context_->SetTarget(target_bitmap_.Get());
+            const D2D1_SIZE_U size = target_bitmap_->GetPixelSize();
+            surface_width_ = size.width;
+            surface_height_ = size.height;
         }
         return result;
     }
@@ -1510,12 +1698,15 @@ private:
             frame_latency_waitable_ = nullptr;
         }
         tile_cache_.clear();
+        gpu_tile_bytes_ = 0U;
         if (d2d_context_) {
             d2d_context_->SetTarget(nullptr);
         }
         target_bitmap_.Reset();
         d2d_context_.Reset();
         swap_chain_.Reset();
+        surface_width_ = 0U;
+        surface_height_ = 0U;
     }
 
     HWND window_{};
@@ -1533,7 +1724,11 @@ private:
     ComPtr<ID2D1DeviceContext> d2d_context_;
     ComPtr<ID2D1Bitmap1> target_bitmap_;
     HANDLE frame_latency_waitable_{};
-    std::size_t tile_budget_{kMaximumSnapshotTiles};
+    std::uint64_t tile_budget_bytes_{kApplicationGpuTileBudgetBytes};
+    std::uint64_t retained_snapshot_bytes_{};
+    std::uint64_t gpu_tile_bytes_{};
+    UINT surface_width_{};
+    UINT surface_height_{};
 };
 
 enum class HostControlKind {
@@ -1591,6 +1786,11 @@ struct PublishedSurface {
     bool visible{};
     bool occluded{};
     std::uint64_t presented_frames{};
+    std::uint64_t retained_snapshot_bytes{};
+    std::uint64_t gpu_tile_bytes{};
+    std::uint64_t swap_chain_bytes{};
+    std::uint64_t cached_tile_count{};
+    std::uint64_t active_tile_count{};
 };
 
 class RendererHostState final {
@@ -1714,15 +1914,23 @@ public:
     bool Submit(SnapshotEnvelope envelope) noexcept {
         if (envelope.snapshot == nullptr || !envelope.route) {
             ReleaseEnvelope(envelope);
+            queue_rejection_count_.fetch_add(1U, std::memory_order_relaxed);
             return false;
+        }
+        if (envelope.estimated_payload_bytes == 0U) {
+            envelope.estimated_payload_bytes = EstimateSnapshotPayloadBytes(
+                envelope.snapshot);
         }
         SnapshotEnvelope replaced{};
         bool accepted{};
+        bool stale_rejected{};
         try {
             {
                 std::lock_guard lock(mutex_);
                 const auto status = FindPublishedLocked(envelope.route.canvas,
                     envelope.route.surface_generation);
+                stale_rejected = running_ && !stopping_
+                    && (status == published_.end() || status->route != envelope.route);
                 if (!running_ || stopping_ || status == published_.end()
                     || status->route != envelope.route || !status->visible
                     || status->occluded) {
@@ -1739,6 +1947,8 @@ public:
                     if (pending != work_.end()) {
                         replaced = std::exchange(
                             std::get<SnapshotEnvelope>(*pending), envelope);
+                        queue_replacement_count_.fetch_add(
+                            1U, std::memory_order_relaxed);
                         accepted = true;
                     } else if (work_.size() < kMaximumNoncriticalHostWork) {
                         work_.emplace_back(envelope);
@@ -1753,6 +1963,10 @@ public:
         ReleaseEnvelope(replaced);
         if (!accepted) {
             ReleaseEnvelope(envelope);
+            queue_rejection_count_.fetch_add(1U, std::memory_order_relaxed);
+            if (stale_rejected) {
+                stale_snapshot_count_.fetch_add(1U, std::memory_order_relaxed);
+            }
             return false;
         }
         wake_.notify_one();
@@ -1787,6 +2001,66 @@ public:
 
     std::uint64_t DeviceGeneration() const noexcept {
         return device_generation_.load(std::memory_order_acquire);
+    }
+
+    RendererResourceUsage ResourceUsage() const noexcept {
+        RendererResourceUsage usage{};
+        usage.gpu_tile_budget_bytes = kApplicationGpuTileBudgetBytes;
+        std::lock_guard lock(mutex_);
+        usage.surface_count = static_cast<std::uint64_t>(published_.size());
+        usage.queued_work_count = static_cast<std::uint64_t>(work_.size());
+        for (const PublishedSurface& surface : published_) {
+            usage.retained_snapshot_bytes = SaturatingAdd(
+                usage.retained_snapshot_bytes, surface.retained_snapshot_bytes);
+            usage.gpu_tile_bytes = SaturatingAdd(
+                usage.gpu_tile_bytes, surface.gpu_tile_bytes);
+            usage.swap_chain_bytes = SaturatingAdd(
+                usage.swap_chain_bytes, surface.swap_chain_bytes);
+            usage.cached_tile_count = SaturatingAdd(
+                usage.cached_tile_count, surface.cached_tile_count);
+            usage.active_tile_count = SaturatingAdd(
+                usage.active_tile_count, surface.active_tile_count);
+            usage.visible_surface_count += surface.visible && !surface.occluded ? 1U : 0U;
+        }
+        for (const HostWork& item : work_) {
+            const auto* envelope = std::get_if<SnapshotEnvelope>(&item);
+            if (envelope != nullptr) {
+                usage.pending_snapshot_bytes = SaturatingAdd(
+                    usage.pending_snapshot_bytes, envelope->estimated_payload_bytes);
+            }
+        }
+        usage.queue_rejection_count = queue_rejection_count_.load(
+            std::memory_order_relaxed);
+        usage.queue_replacement_count = queue_replacement_count_.load(
+            std::memory_order_relaxed);
+        usage.stale_snapshot_count = stale_snapshot_count_.load(
+            std::memory_order_relaxed);
+        usage.resource_limit_count = resource_limit_count_.load(
+            std::memory_order_relaxed);
+        usage.device_reset_count = device_reset_count_.load(
+            std::memory_order_relaxed);
+        return usage;
+    }
+
+    bool GetSurfaceResourceUsage(
+        app::CanvasId canvas,
+        app::Generation surface_generation,
+        RendererSurfaceResourceUsage& usage) const noexcept {
+        std::lock_guard lock(mutex_);
+        const auto found = FindPublishedLocked(canvas, surface_generation);
+        if (found == published_.end()) {
+            return false;
+        }
+        usage = RendererSurfaceResourceUsage{
+            found->route,
+            found->retained_snapshot_bytes,
+            found->gpu_tile_bytes,
+            found->swap_chain_bytes,
+            found->cached_tile_count,
+            found->active_tile_count,
+            found->visible,
+            found->occluded};
+        return true;
     }
 
     void SetQueuePausedForSmokeTest(bool paused) noexcept {
@@ -1859,7 +2133,12 @@ private:
             surface.route,
             surface.visible,
             surface.occluded,
-            surface.presented_frames};
+            surface.presented_frames,
+            surface.surface->RetainedSnapshotBytes(),
+            surface.surface->GpuTileBytes(),
+            surface.surface->SwapChainBytes(),
+            surface.surface->CachedTileCount(),
+            surface.surface->ActiveTileCount()};
         if (found == published_.end()) {
             try {
                 published_.push_back(value);
@@ -1879,10 +2158,30 @@ private:
     }
 
     void UpdateTileBudgets() noexcept {
-        const std::size_t per_surface = std::max<std::size_t>(
-            1U, static_cast<std::size_t>(kMaximumSnapshotTiles) / std::max<std::size_t>(1U, surfaces_.size()));
         for (auto& surface : surfaces_) {
-            surface.surface->SetTileBudget(per_surface);
+            surface.surface->SetTileBudgetBytes(kApplicationGpuTileBudgetBytes);
+        }
+        for (;;) {
+            std::uint64_t total_bytes{};
+            for (const auto& surface : surfaces_) {
+                total_bytes = SaturatingAdd(
+                    total_bytes, surface.surface->GpuTileBytes());
+            }
+            if (total_bytes <= kApplicationGpuTileBudgetBytes) {
+                return;
+            }
+            auto victim = surfaces_.end();
+            std::uint64_t oldest = UINT64_MAX;
+            for (auto iterator = surfaces_.begin(); iterator != surfaces_.end(); ++iterator) {
+                const auto candidate = iterator->surface->OldestInactiveUse();
+                if (candidate.has_value() && candidate.value() < oldest) {
+                    oldest = candidate.value();
+                    victim = iterator;
+                }
+            }
+            if (victim == surfaces_.end() || !victim->surface->EvictOldestInactive()) {
+                return;
+            }
         }
     }
 
@@ -1901,8 +2200,12 @@ private:
                 return result;
             }
             surface.occluded = false;
+        }
+        UpdateTileBudgets();
+        for (const auto& surface : surfaces_) {
             PublishSurface(surface);
         }
+        device_reset_count_.fetch_add(1U, std::memory_order_relaxed);
         return S_OK;
     }
 
@@ -1947,6 +2250,7 @@ private:
         if (found == surfaces_.end() || found->route != envelope.route
             || !found->visible || found->occluded) {
             ReleaseEnvelope(envelope);
+            stale_snapshot_count_.fetch_add(1U, std::memory_order_relaxed);
             return S_FALSE;
         }
         InkpodSnapshotView view{};
@@ -1959,11 +2263,50 @@ private:
             || view.revision != envelope.document_revision
             || transform.view_revision != envelope.view_revision) {
             ReleaseEnvelope(envelope);
+            stale_snapshot_count_.fetch_add(1U, std::memory_order_relaxed);
             return E_INVALIDARG;
         }
+        std::uint64_t other_active_bytes{};
+        for (const auto& surface : surfaces_) {
+            if (&surface != &*found) {
+                other_active_bytes = SaturatingAdd(
+                    other_active_bytes, surface.surface->ActiveTileBytes());
+            }
+        }
+        std::uint64_t candidate_tile_bytes{};
+        if (view.tiles != nullptr && view.tile_stride_bytes >= sizeof(InkpodSnapshotTile)
+            && view.tile_stride_bytes <= static_cast<std::uint64_t>(SIZE_MAX)) {
+            const auto* base = reinterpret_cast<const std::uint8_t*>(view.tiles);
+            const std::size_t stride = static_cast<std::size_t>(view.tile_stride_bytes);
+            for (std::uint64_t index = 0U; index < view.tile_count; ++index) {
+                if (index > static_cast<std::uint64_t>(SIZE_MAX / stride)) {
+                    candidate_tile_bytes = UINT64_MAX;
+                    break;
+                }
+                const auto* tile = reinterpret_cast<const InkpodSnapshotTile*>(
+                    base + static_cast<std::size_t>(index) * stride);
+                candidate_tile_bytes = SaturatingAdd(
+                    candidate_tile_bytes, tile->pixel_bytes);
+            }
+        }
+        if (other_active_bytes >= kApplicationGpuTileBudgetBytes
+            || candidate_tile_bytes
+                > kApplicationGpuTileBudgetBytes - other_active_bytes) {
+            ReleaseEnvelope(envelope);
+            resource_limit_count_.fetch_add(1U, std::memory_order_relaxed);
+            return E_OUTOFMEMORY;
+        }
+        found->surface->SetTileBudgetBytes(
+            kApplicationGpuTileBudgetBytes - other_active_bytes);
         HRESULT result = found->surface->SetSnapshot(envelope.snapshot);
         envelope.snapshot = nullptr;
         result = NormalizeResult(*found, result);
+        if (SUCCEEDED(result)) {
+            UpdateTileBudgets();
+            for (const auto& surface : surfaces_) {
+                PublishSurface(surface);
+            }
+        }
         if (SUCCEEDED(result) && found->visible) {
             result = RenderAndCount(*found);
         }
@@ -1991,7 +2334,9 @@ private:
                 }
                 surfaces_.push_back(std::move(surface));
                 UpdateTileBudgets();
-                PublishSurface(surfaces_.back());
+                for (const auto& current : surfaces_) {
+                    PublishSurface(current);
+                }
                 return S_OK;
             } catch (const std::bad_alloc&) {
                 return E_OUTOFMEMORY;
@@ -2005,6 +2350,9 @@ private:
             RemovePublished(found->canvas, found->generation);
             surfaces_.erase(found);
             UpdateTileBudgets();
+            for (const auto& current : surfaces_) {
+                PublishSurface(current);
+            }
             return S_OK;
         }
         SurfaceRecord& surface = *found;
@@ -2171,6 +2519,11 @@ private:
     SharedRendererDevice shared_;
     std::atomic<DWORD> thread_id_{};
     std::atomic<std::uint64_t> device_generation_{};
+    std::atomic<std::uint64_t> queue_rejection_count_{};
+    std::atomic<std::uint64_t> queue_replacement_count_{};
+    std::atomic<std::uint64_t> stale_snapshot_count_{};
+    std::atomic<std::uint64_t> resource_limit_count_{};
+    std::atomic<std::uint64_t> device_reset_count_{};
 };
 
 class CanvasHost final : public CanvasSnapshotSink {
@@ -3118,6 +3471,19 @@ std::size_t RendererHost::SurfaceCount() const noexcept {
 
 std::uint64_t RendererHost::DeviceGeneration() const noexcept {
     return impl_ == nullptr ? 0U : impl_->state.DeviceGeneration();
+}
+
+RendererResourceUsage RendererHost::ResourceUsage() const noexcept {
+    return impl_ == nullptr ? RendererResourceUsage{} : impl_->state.ResourceUsage();
+}
+
+bool RendererHost::GetSurfaceResourceUsage(
+    app::CanvasId canvas,
+    app::Generation surface_generation,
+    RendererSurfaceResourceUsage& usage) const noexcept {
+    return impl_ != nullptr
+        && impl_->state.GetSurfaceResourceUsage(
+            canvas, surface_generation, usage);
 }
 
 void RendererHost::SetQueuePausedForSmokeTest(bool paused) noexcept {

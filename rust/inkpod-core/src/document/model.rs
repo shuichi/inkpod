@@ -92,6 +92,16 @@ pub(crate) struct PaperSpec {
 }
 
 impl CellDocument {
+    pub(crate) fn logical_raster_usage(&self) -> (u64, u64) {
+        let mut tile_count = self.selection.allocated_tile_count() as u64;
+        let mut tile_bytes = self.selection.allocated_tile_bytes();
+        for plane in self.layers.iter().flat_map(|layer| &layer.planes) {
+            tile_count = tile_count.saturating_add(plane.raster.allocated_tile_count() as u64);
+            tile_bytes = tile_bytes.saturating_add(plane.raster.allocated_tile_bytes());
+        }
+        (tile_count, tile_bytes)
+    }
+
     pub(crate) fn new(ids: DocumentIds, uuid: u128, paper: PaperSpec) -> Result<Self, CoreError> {
         if paper.dpi_x_milli == 0 || paper.dpi_y_milli == 0 {
             return Err(CoreError::InvalidArgument("DPI must be nonzero"));
