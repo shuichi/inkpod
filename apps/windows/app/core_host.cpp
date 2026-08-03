@@ -155,7 +155,7 @@ struct CoreHost::Impl final {
                 std::lock_guard lock(state_mutex);
                 published.reserve(kMaximumSessions);
                 frontend_views.reserve(kMaximumFrontendViews);
-                snapshot_sinks.reserve(2U);
+                snapshot_sinks.reserve(CoreHost::kMaximumSnapshotSinks);
                 snapshot_sinks.push_back(initial_canvas);
                 notifications.clear();
             }
@@ -344,7 +344,7 @@ struct CoreHost::Impl final {
         std::lock_guard lock(state_mutex);
         if (std::find(snapshot_sinks.cbegin(), snapshot_sinks.cend(), sink)
                 != snapshot_sinks.cend()
-            || snapshot_sinks.size() >= 2U) {
+            || snapshot_sinks.size() >= CoreHost::kMaximumSnapshotSinks) {
             return false;
         }
         try {

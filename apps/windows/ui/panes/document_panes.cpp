@@ -39,6 +39,7 @@ InkpodStatus LoadLayerThumbnail(
     node.thumbnail_width = output.width;
     node.thumbnail_height = output.height;
     node.thumbnail_stride_bytes = output.stride_bytes;
+    node.thumbnail_revision = output.revision;
     node.thumbnail_bgra.resize(static_cast<std::size_t>(output.required_bytes));
     for (std::uint32_t y = 0U; y < output.height; ++y) {
         for (std::uint32_t x = 0U; x < output.width; ++x) {

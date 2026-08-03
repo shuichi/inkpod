@@ -83,6 +83,9 @@ struct CoreNotification {
 class CoreHost final {
 public:
     using CoreOperation = std::function<InkpodStatus(InkpodCore*)>;
+    // The application supports up to eight workspace windows with two visible
+    // editor groups in each. Only visible editor-group canvases are registered.
+    static constexpr std::size_t kMaximumSnapshotSinks = 16U;
 
     CoreHost();
     ~CoreHost();

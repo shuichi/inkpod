@@ -50,6 +50,7 @@ bool ApplicationHost::InitializeOwners() noexcept {
 }
 
 void ApplicationHost::ClearOwners() noexcept {
+    thumbnails_.Clear();
     ClearOwnerGraph(documents_, workspaces_);
 }
 
@@ -143,25 +144,15 @@ bool ApplicationHost::GetPaneResourceUsage(
         }
         usage.workspace = workspace->id;
         usage.pane = pane;
-        if (pane == workspace->pane_ids.layer) {
-            const auto accumulate = [&usage](
-                                        const std::vector<windows::ui::LayerPaletteItem>& items) {
-                for (const auto& item : items) {
-                    usage.thumbnail_bytes = SaturatingPaneBytes(
-                        usage.thumbnail_bytes, item.thumbnail_bgra.size());
-                    usage.cached_item_count += item.thumbnail_bgra.empty() ? 0U : 1U;
-                }
-            };
-            accumulate(workspace->panes.layer_palette_dialog.items);
-            accumulate(workspace->panes.layer_palette_dialog.plane_items);
-            return true;
-        }
-        if (pane == workspace->pane_ids.sequence) {
-            for (const auto& cell : workspace->sequence_dialog.view.cells) {
-                usage.thumbnail_bytes = SaturatingPaneBytes(
-                    usage.thumbnail_bytes, cell.thumbnail_rgba.size());
-                usage.cached_item_count += cell.thumbnail_rgba.empty() ? 0U : 1U;
+        if (pane == workspace->pane_ids.layer
+            || pane == workspace->pane_ids.sequence) {
+            windows::ui::ThumbnailPaneUsage cache_usage{};
+            if (!thumbnails_.GetPaneUsage(pane, cache_usage)) {
+                usage = {};
+                return false;
             }
+            usage.thumbnail_bytes = cache_usage.resident_bytes;
+            usage.cached_item_count = cache_usage.entry_count;
             return true;
         }
         if (pane == workspace->pane_ids.color) {
@@ -186,6 +177,53 @@ bool ApplicationHost::GetPaneResourceUsage(
     }
     usage = {};
     return false;
+}
+
+ApplicationResourceUsage ApplicationHost::ResourceUsage() const noexcept {
+    ApplicationResourceUsage usage{};
+    usage.workspace_window_count = workspaces_.Count();
+    usage.document_session_count = documents_.Count();
+    for (std::size_t index = 0U; index < documents_.Count(); ++index) {
+        const DocumentSession* document = documents_.SessionAt(index);
+        if (document != nullptr) {
+            usage.document_view_count += document->ViewCount();
+        }
+    }
+    for (std::size_t index = 0U; index < workspaces_.Count(); ++index) {
+        const WorkspaceWindow* workspace = workspaces_.At(index);
+        if (workspace == nullptr) {
+            continue;
+        }
+        usage.editor_group_count += workspace->editors.GroupCount();
+        usage.editor_canvas_count += workspace->editors.GroupCount();
+        usage.auxiliary_canvas_count += workspace->subpalette_canvas_id ? 1U : 0U;
+        for (const PaneInstanceId pane : {
+                 workspace->pane_ids.tool,
+                 workspace->pane_ids.tool_options,
+                 workspace->pane_ids.color,
+                 workspace->pane_ids.layer,
+                 workspace->pane_ids.batch,
+                 workspace->pane_ids.locator,
+                 workspace->pane_ids.sequence,
+                 workspace->pane_ids.light_table,
+                 workspace->pane_ids.reference,
+                 workspace->pane_ids.subpalette}) {
+            usage.pane_instance_count += pane ? 1U : 0U;
+        }
+    }
+    usage.thumbnails = thumbnails_.Usage();
+    if (renderer != nullptr) {
+        usage.renderer = renderer->ResourceUsage();
+    }
+    return usage;
+}
+
+windows::ui::ThumbnailCache& ApplicationHost::Thumbnails() noexcept {
+    return thumbnails_;
+}
+
+const windows::ui::ThumbnailCache& ApplicationHost::Thumbnails() const noexcept {
+    return thumbnails_;
 }
 
 bool ApplicationHost::RegisterWorkspacePanes(
@@ -256,6 +294,7 @@ void ApplicationHost::UnregisterWorkspacePanes(
         workspace.pane_ids.subpalette};
     for (const PaneInstanceId pane : panes) {
         if (pane) {
+            thumbnails_.RemovePane(pane);
             (void)routing.pane_targets.Unregister(pane);
             (void)routing.targets.UnregisterPane(pane);
         }
@@ -728,6 +767,7 @@ bool ApplicationHost::CloseDocumentSession(DocumentSessionId session) noexcept {
     if (engine->CloseSession(session, generation) != INKPOD_STATUS_OK) {
         return false;
     }
+    thumbnails_.RemoveDocument(session, generation);
     routing.pane_targets.DocumentClosed(session);
     for (std::size_t view_index = document->ViewCount();
          view_index > 0U; --view_index) {

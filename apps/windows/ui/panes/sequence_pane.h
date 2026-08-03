@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "ui/thumbnail_cache.h"
+
 namespace inkpod::windows::ui::panes {
 
 using SequencePaneCommandCallback = void (*)(void* context, UINT command) noexcept;
@@ -21,7 +23,7 @@ struct SequencePaneCellView final {
     std::uint32_t thumbnail_stride_bytes{};
     std::uint64_t thumbnail_checksum{};
     std::wstring name;
-    std::vector<std::uint8_t> thumbnail_rgba;
+    ThumbnailCacheKey thumbnail_key{};
 };
 
 struct SequencePaneView final {
@@ -35,6 +37,7 @@ struct SequencePaneView final {
 
 struct SequencePaneDialogState final {
     void* context{};
+    ThumbnailCache* thumbnail_cache{};
     SequencePaneCommandCallback dispatch_command{};
     SequencePaneActivateCallback activate_cell{};
     SequencePaneView view;
@@ -44,5 +47,7 @@ HWND CreateSequencePaneDialog(
     HINSTANCE instance, HWND owner, SequencePaneDialogState& state) noexcept;
 
 void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept;
+
+bool SequencePaneItemHasThumbnail(HWND dialog, std::size_t index) noexcept;
 
 }  // namespace inkpod::windows::ui::panes

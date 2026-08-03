@@ -1070,12 +1070,21 @@ bool SplitEditorArea(
     }
     const EditorGroupId previous_group = state.routing.targets.EditorGroup();
     const auto binding = state.routing.targets.AddEditorGroup();
-    if (!binding.has_value()
-        || !editors.Split(
+    const bool model_split = binding.has_value()
+        && editors.Split(
             binding->group,
             binding->canvas,
             state.routing.targets.CurrentGeneration(),
-            orientation)) {
+            orientation);
+    if (!model_split) {
+        if (state.lifetime.smoke_test) {
+            std::fprintf(
+                stderr,
+                "editor split model failed binding=%d groups=%zu workspace=%llu\n",
+                binding.has_value() ? 1 : 0,
+                editors.GroupCount(),
+                static_cast<unsigned long long>(state.Workspace().id.Value()));
+        }
         if (binding.has_value()) {
             (void)state.routing.targets.RemoveEditorGroup(binding->group);
         }
@@ -1088,6 +1097,14 @@ bool SplitEditorArea(
             *group,
             state.lifetime.instance,
             state.lifetime.smoke_test)) {
+        if (state.lifetime.smoke_test) {
+            std::fprintf(
+                stderr,
+                "editor split tabs failed group=%d tabs=%d workspace=%llu\n",
+                group != nullptr ? 1 : 0,
+                group != nullptr && group->document_tabs != nullptr ? 1 : 0,
+                static_cast<unsigned long long>(state.Workspace().id.Value()));
+        }
         EditorGroupId ignored{};
         (void)editors.MergeAndRemove(binding->group, ignored);
         (void)state.routing.targets.RemoveEditorGroup(binding->group);
@@ -1100,9 +1117,23 @@ bool SplitEditorArea(
         binding->canvas,
         state.routing.targets.CurrentGeneration());
     renderer::CanvasSnapshotSink* sink = renderer::GetCanvasSnapshotSink(group->canvas);
-    if (group->canvas == nullptr || sink == nullptr
-        || !state.engine->RegisterSnapshotSink(sink)
-        || !CreateDocumentViewInGroup(state, binding->group, error_owner)) {
+    const bool sink_registered = sink != nullptr
+        && state.engine->RegisterSnapshotSink(sink);
+    const bool view_created = sink_registered
+        && CreateDocumentViewInGroup(state, binding->group, error_owner);
+    if (group->canvas == nullptr || sink == nullptr || !sink_registered
+        || !view_created) {
+        if (state.lifetime.smoke_test) {
+            std::fprintf(
+                stderr,
+                "editor split canvas failed canvas=%d sink=%d registered=%d "
+                "view=%d workspace=%llu\n",
+                group->canvas != nullptr ? 1 : 0,
+                sink != nullptr ? 1 : 0,
+                sink_registered ? 1 : 0,
+                view_created ? 1 : 0,
+                static_cast<unsigned long long>(state.Workspace().id.Value()));
+        }
         if (sink != nullptr) {
             (void)state.engine->UnregisterSnapshotSink(sink);
         }
@@ -1294,6 +1325,43 @@ bool RefreshTreePane(ApplicationHost& state) noexcept {
             0U,
             state.Workspace().windows.workspace.layer_split_milli);
         return false;
+    }
+    InkpodDocumentInfo document_info{};
+    document_info.struct_size = sizeof(document_info);
+    const DocumentSession& thumbnail_document = state.Document();
+    if (!state.engine->GetDocumentInfo(
+            thumbnail_document.id,
+            thumbnail_document.generation,
+            document_info)) {
+        return false;
+    }
+    for (auto& layer : layers) {
+        if (layer.thumbnail_bgra.empty()) {
+            continue;
+        }
+        const ThumbnailCacheKey key{
+            state.Workspace().pane_ids.layer,
+            thumbnail_document.id,
+            thumbnail_document.generation,
+            layer.id,
+            layer.thumbnail_revision == 0U
+                ? document_info.document_revision
+                : layer.thumbnail_revision,
+            ThumbnailKind::Layer};
+        if (state.Thumbnails().Put(
+                key,
+                layer.thumbnail_width,
+                layer.thumbnail_height,
+                layer.thumbnail_stride_bytes,
+                ThumbnailPixelLayout::Bgra8,
+                std::move(layer.thumbnail_bgra))) {
+            layer.thumbnail_key = key;
+        } else {
+            layer.thumbnail_width = 0U;
+            layer.thumbnail_height = 0U;
+            layer.thumbnail_stride_bytes = 0U;
+            layer.thumbnail_revision = 0U;
+        }
     }
     selected_layer_index = std::min<std::uint32_t>(
         selected_layer_index, static_cast<std::uint32_t>(layers.size() - 1U));
@@ -1626,6 +1694,26 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
                 && cell.info.document_uuid_low == info.document_uuid_low) {
                 pane.active_index = static_cast<std::uint32_t>(pane.cells.size());
             }
+            if (!cell.thumbnail_rgba.empty()) {
+                const ThumbnailCacheKey thumbnail_key{
+                    state.Workspace().pane_ids.sequence,
+                    document->id,
+                    document->generation,
+                    static_cast<std::uint64_t>(cell.info.sequence_index) + 1U,
+                    cell.info.thumbnail_checksum == 0U
+                        ? info.document_revision
+                        : cell.info.thumbnail_checksum,
+                    ThumbnailKind::Sequence};
+                if (state.Thumbnails().Put(
+                        thumbnail_key,
+                        cell.info.thumbnail_width,
+                        cell.info.thumbnail_height,
+                        cell.thumbnail_stride_bytes,
+                        ThumbnailPixelLayout::Rgba8,
+                        std::move(cell.thumbnail_rgba))) {
+                    cell.thumbnail_key = thumbnail_key;
+                }
+            }
             pane.cells.push_back(SequencePaneCellView{
                 static_cast<std::uint32_t>(cell.info.sequence_index),
                 cell.info.cell_number,
@@ -1636,7 +1724,7 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
                 cell.thumbnail_stride_bytes,
                 cell.info.thumbnail_checksum,
                 std::move(wide_name),
-                std::move(cell.thumbnail_rgba)});
+                cell.thumbnail_key});
         }
         if (document->id == state.routing.targets.DocumentSession()) {
             state.Workspace().panes.sequence_count =
@@ -9074,6 +9162,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     ShowWindow(state.Workspace().locator_palette, SW_HIDE);
     state.Workspace().sequence_dialog = {};
     state.Workspace().sequence_dialog.context = &state.Workspace();
+    state.Workspace().sequence_dialog.thumbnail_cache = &state.Thumbnails();
     state.Workspace().sequence_dialog.dispatch_command =
         DispatchSequencePaneCommand;
     state.Workspace().sequence_dialog.activate_cell =
@@ -9196,6 +9285,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     }
     auto& layer_dialog = state.Workspace().panes.layer_palette_dialog;
     layer_dialog.context = &state.Workspace();
+    layer_dialog.thumbnail_cache = &state.Thumbnails();
     layer_dialog.dispatch_command = DispatchLayerPaletteCommand;
     layer_dialog.select_layer = SelectLayerPaletteLayer;
     layer_dialog.select_plane = SelectLayerPalettePlane;

@@ -1175,15 +1175,19 @@ render cache、CPU staging、light table/reference、sequence source、thumbnail
 payload を read-only C ABI で返す。CoreHost は session/generation ごとの queue 受理・拒否、
 pending high-water mark、queue wait を owner-thread dispatch 時に計測する。別 session の長時間
 work 中に受理済み input が失われず順序どおり完了することを native test で固定したが、worker
-分離の必要性を決める scenario baseline は未完了である。
+分離を正当化する欠落や部分 commit は固定 scenario でも観測されていないため、single-writer
+affinity を維持する。
 
 RendererHost は retained/pending snapshot、GPU tile、swap chain、surface、queue replacement/
 rejection、stale、resource-limit、device-reset を value copy で観測できる。active tile の合計を
 512 MiB の application-wide budget へ事前 admission し、inactive tile は全 CanvasSurface を
 横断した LRU で再利用・破棄する。非表示/occluded/閉じた surface の snapshot は従来どおり
 受理しない。aggregate に加えて document/view/Canvas/generation route を保持する per-surface
-value copy を取得できる。UI thread では layer/sequence thumbnail と color-picker CPU cache を
-pane instance/workspace 別に計測する。`Ctrl+Tab` / `Ctrl+Shift+Tab`、`Ctrl+F6` /
+value copy を取得できる。UI thread では layer/sequence thumbnail を一つの 64 MiB
+application-wide cache へ集約し、document session/generation、pane instance、content ID/revision
+で namespace 化した。全 workspace を横断する LRU、256 MiB の設定上限、pane/document close
+時の明示解放を持ち、pane instance/workspace 別の resident bytes/item count を計測する。
+color-picker CPU cache も pane instance/workspace 別に計測する。`Ctrl+Tab` / `Ctrl+Shift+Tab`、`Ctrl+F6` /
 `Ctrl+Shift+F6`、`F6` / `Shift+F6`、`Ctrl+F4` は text edit の誤作動を避けつつ
 workspace navigation として処理し、
 native smoke で forward/reverse の tab/group/focus 巡回と view close を確認する。Common Controls
@@ -1200,9 +1204,25 @@ Windows x64 の quick benchmark は warmed 5-run median と回帰 review 閾値�
 `docs/core-benchmark-baseline.md` に固定した。owner/CoreHost/RendererHost/production GUI lifecycle
 を各 5 回反復する bounded soak を完走した。x64 Debug/Release の strict build、unsigned MSIX、
 25/25 CTest と ARM64 Debug/Release の strict cross-build、MSIX、host-independent 14/25 CTest は
-成功した。thumbnail の application-wide cache/budget/LRU、四つの固定 multi-window resource
-scenario、high contrast/200% DPI/screen reader/IME/日本語・英語 resource の release checklist、
-ARM64 上でしか実行できない 11 native test は未完了のため、G13 は `In progress` である。
+成功した。四つの固定 scenario は一 window/一文書/一 view、一 window/四文書/二 group、
+二 window/四文書/四 view、大画像/light table/reference/Undo history/device lost を native smoke
+で構築し、Core category、frontend owner graph、thumbnail budget、per-surface route を照合する。
+これに伴い CoreHost の visible Canvas sink 上限を workspace 8 × group 2 の 16 に揃えた。
+high contrast/200% DPI/keyboard/screen reader/IME/日本語・英語 resource の自動証拠と実機手順は
+`docs/windows-g13-release-checklist.md` に固定した。ARM64 上でしか実行できない 11 native test は
+2026-08-03 の明示的なユーザー判断により G13 gate から除外した。未実行を成功とは記録せず、
+strict cross-build、MSIX、host-independent 14/25 CTest を証拠として保持する。実機
+2026-08-03 に native x64 Release build で実機観察を開始した。UIA client は dirty tab、
+dock splitter、pane、follow target、disabled state、AutoHide button 名を取得でき、tab/group
+移動、Locator の keyboard menu route、dirty label と Undo による復帰を確認した。一方、
+Reference Check preset の AutoHide edge button は F6/Tab/Shift+Tab で keyboard focus へ到達
+できなかった。About の英語 title/description は 2026-08-03 にユーザーが想定どおりの仕様と確認した。
+high contrast と 200% DPI は
+Windows Settings の automation approval が得られず、Japanese IME は導入済みだが Computer Use
+が入力 mode key を注入できないため `Blocked` である。全結果と再現手順は
+`docs/windows-g13-release-checklist.md` に記録した。未解消の keyboard accessibility defect と
+未完了の high contrast/200% DPI/IME 観察は対応する要件の既知差分として別途解決する。
+2026-08-03 の明示的なユーザー判断により、これらを G13 gate から除外し G13 を完了とする。
 
 ---
 

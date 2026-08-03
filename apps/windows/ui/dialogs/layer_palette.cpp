@@ -310,6 +310,7 @@ void DrawThumbnail(
     HDC dc,
     const RECT& bounds,
     const LayerPaletteItem& item,
+    ThumbnailCache* cache,
     UINT dpi,
     bool plane) noexcept {
     const int requested_width = ScaleForDpi(plane ? 42 : kThumbnailWidth, dpi);
@@ -334,11 +335,12 @@ void DrawThumbnail(
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         return;
     }
-    if (item.thumbnail_width == 0U || item.thumbnail_height == 0U
-        || item.thumbnail_stride_bytes != item.thumbnail_width * 4U
-        || item.thumbnail_bgra.size()
-            < static_cast<std::size_t>(item.thumbnail_stride_bytes)
-                * item.thumbnail_height) {
+    ThumbnailImageView image{};
+    if (cache == nullptr || !cache->Get(item.thumbnail_key, image)
+        || image.layout != ThumbnailPixelLayout::Bgra8
+        || image.width != item.thumbnail_width
+        || image.height != item.thumbnail_height
+        || image.stride_bytes != item.thumbnail_stride_bytes) {
         return;
     }
     const int available_width = std::max(1, requested_width - 2);
@@ -368,7 +370,7 @@ void DrawThumbnail(
         0,
         static_cast<int>(item.thumbnail_width),
         static_cast<int>(item.thumbnail_height),
-        item.thumbnail_bgra.data(),
+        image.pixels.data(),
         &bitmap,
         DIB_RGB_COLORS,
         SRCCOPY);
@@ -415,7 +417,7 @@ void DrawItem(
     const UINT dpi = GetDpiForWindow(draw.hwndItem);
     const int margin = ScaleForDpi(kMargin, dpi);
     InflateRect(&inner, -margin, -ScaleForDpi(4, dpi));
-    DrawThumbnail(draw.hDC, inner, item, dpi, plane);
+    DrawThumbnail(draw.hDC, inner, item, state.thumbnail_cache, dpi, plane);
 
     const int action_width = ScaleForDpi(kActionWidth, dpi);
     const int thumbnail_width = ScaleForDpi(plane ? 42 : kThumbnailWidth, dpi);
@@ -804,7 +806,7 @@ std::vector<LayerPaletteItem> MakeItems(
             node.thumbnail_width,
             node.thumbnail_height,
             node.thumbnail_stride_bytes,
-            node.thumbnail_bgra});
+            node.thumbnail_key});
     }
     return items;
 }
@@ -942,10 +944,12 @@ std::uint64_t LayerPaletteSelectedPlane(HWND dialog) noexcept {
 
 bool LayerPaletteItemHasThumbnail(HWND dialog, std::size_t index) noexcept {
     const LayerPaletteDialogState* state = DialogState(dialog);
-    return state != nullptr && index < state->items.size()
-        && state->items[index].thumbnail_width != 0U
-        && state->items[index].thumbnail_height != 0U
-        && !state->items[index].thumbnail_bgra.empty();
+    ThumbnailImageView image{};
+    return state != nullptr && state->thumbnail_cache != nullptr
+        && index < state->items.size()
+        && state->thumbnail_cache->Peek(
+            state->items[index].thumbnail_key, image)
+        && image.layout == ThumbnailPixelLayout::Bgra8;
 }
 
 }  // namespace inkpod::windows::ui

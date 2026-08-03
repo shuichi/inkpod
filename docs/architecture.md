@@ -147,12 +147,19 @@ session/generation value must be supplied when reading them; the UI never
 re-resolves the active document. The read-only C ABI resource query reports
 logical document tile/history, render-cache, CPU-staging, light-table/reference,
 sequence-source, and thumbnail-cache categories without building a snapshot.
-ApplicationHost separately reports layer/sequence thumbnail and color-picker
-CPU cache bytes by captured workspace/pane ID on the UI thread.
+`ApplicationHost` owns one UI-thread-only layer/sequence `ThumbnailCache` for
+all workspaces. Its 64 MiB default and 256 MiB maximum application budget use a
+cross-workspace LRU. Keys contain pane instance, document session/generation,
+content ID/revision, and kind; dialogs retain only keys and borrow pixel spans
+for the duration of one UI-thread draw. Pane/document/workspace close removes
+the corresponding entries. ApplicationHost reports resident bytes/item counts
+by captured pane ID and reports color-picker CPU cache bytes separately.
 Close marks a session non-accepting before its ordered close item, resolves all
 previously accepted work, cancels a live stroke, and destroys the handle on the
 owner thread. Long operations still share this single lane and may delay other
-sessions; worker/revision splitting remains measurement-driven G13 work.
+sessions. The cross-session delay test and fixed G13 scenarios retain every
+accepted input without partial commit, so current measurements do not justify
+relaxing the single-writer owner-thread contract.
 
 `ApplicationHost` owns one `RendererHost` and starts it before any Canvas or
 Core. Its single renderer thread owns a shared D3D11 device/immediate context,
@@ -166,7 +173,10 @@ There is no per-Canvas renderer thread or per-Canvas D3D/D2D device.
 
 CoreHost publishes through a `SnapshotEnvelope` containing document session,
 frontend view, Canvas, document generation, surface generation, document
-revision, and view revision. RendererHost accepts it only when the complete
+revision, and view revision. Snapshot fan-out registers at most 16 visible
+editor-group sinks, matching eight workspaces with two groups each; inactive
+tabs and auxiliary panes do not consume that bound. RendererHost accepts a
+snapshot only when the complete
 route equals the current surface binding and the snapshot accessors confirm both
 revisions. Rebind clears the old retained snapshot before accepting the new
 route. Stale, hidden, occluded, queue-full, replaced, closed, and shutdown paths

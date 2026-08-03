@@ -18,13 +18,19 @@ void Dispatch(SequencePaneDialogState& state, UINT command) noexcept {
 }
 
 void DrawThumbnail(
-    HDC dc, const RECT& destination, const SequencePaneCellView& cell) noexcept {
+    HDC dc,
+    const RECT& destination,
+    const SequencePaneCellView& cell,
+    ThumbnailCache* cache) noexcept {
+    ThumbnailImageView image{};
     if (cell.thumbnail_width == 0U || cell.thumbnail_height == 0U
         || cell.thumbnail_width > 64U || cell.thumbnail_height > 64U
         || cell.thumbnail_stride_bytes != cell.thumbnail_width * 4U
-        || cell.thumbnail_rgba.size()
-            != static_cast<std::size_t>(cell.thumbnail_stride_bytes)
-                * cell.thumbnail_height) {
+        || cache == nullptr || !cache->Get(cell.thumbnail_key, image)
+        || image.layout != ThumbnailPixelLayout::Rgba8
+        || image.width != cell.thumbnail_width
+        || image.height != cell.thumbnail_height
+        || image.stride_bytes != cell.thumbnail_stride_bytes) {
         FillRect(dc, &destination, GetSysColorBrush(COLOR_3DFACE));
         return;
     }
@@ -34,7 +40,7 @@ void DrawThumbnail(
             const std::size_t offset = static_cast<std::size_t>(y)
                     * cell.thumbnail_stride_bytes
                 + static_cast<std::size_t>(x) * 4U;
-            const std::uint32_t alpha = cell.thumbnail_rgba[offset + 3U];
+            const std::uint32_t alpha = image.pixels[offset + 3U];
             const std::uint32_t checker = ((x / 8U) + (y / 8U)) % 2U == 0U
                 ? 248U
                 : 216U;
@@ -44,9 +50,9 @@ void DrawThumbnail(
                          + checker * (255U - alpha) + 127U)
                     / 255U);
             };
-            bgra[offset] = composite(cell.thumbnail_rgba[offset + 2U]);
-            bgra[offset + 1U] = composite(cell.thumbnail_rgba[offset + 1U]);
-            bgra[offset + 2U] = composite(cell.thumbnail_rgba[offset]);
+            bgra[offset] = composite(image.pixels[offset + 2U]);
+            bgra[offset + 1U] = composite(image.pixels[offset + 1U]);
+            bgra[offset + 2U] = composite(image.pixels[offset]);
             bgra[offset + 3U] = 255U;
         }
     }
@@ -102,7 +108,7 @@ void DrawCell(
         item.rcItem.top + padding,
         item.rcItem.left + padding + std::min(available_height, thumbnail_width),
         item.rcItem.bottom - padding};
-    DrawThumbnail(item.hDC, thumbnail, cell);
+    DrawThumbnail(item.hDC, thumbnail, cell, state.thumbnail_cache);
 
     RECT text{
         thumbnail.right + 8,
@@ -274,6 +280,17 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
         dialog,
         IDC_SEQUENCE_EMPTY,
         has_sequence ? L"" : state->view.empty_text.c_str());
+}
+
+bool SequencePaneItemHasThumbnail(HWND dialog, std::size_t index) noexcept {
+    auto* state = reinterpret_cast<SequencePaneDialogState*>(
+        dialog == nullptr ? 0 : GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    ThumbnailImageView image{};
+    return state != nullptr && state->thumbnail_cache != nullptr
+        && index < state->view.cells.size()
+        && state->thumbnail_cache->Peek(
+            state->view.cells[index].thumbnail_key, image)
+        && image.layout == ThumbnailPixelLayout::Rgba8;
 }
 
 }  // namespace inkpod::windows::ui::panes

@@ -11,6 +11,7 @@
 #include "app/document_session.h"
 #include "app/recent_documents.h"
 #include "app/workspace_window.h"
+#include "ui/thumbnail_cache.h"
 
 namespace {
 
@@ -61,6 +62,108 @@ using inkpod::app::Generation;
 using inkpod::app::RecentDocumentList;
 using inkpod::app::WorkspaceWindowId;
 using inkpod::app::WorkspaceWindowRegistry;
+using inkpod::windows::ui::ThumbnailCache;
+using inkpod::windows::ui::ThumbnailCacheKey;
+using inkpod::windows::ui::ThumbnailImageView;
+using inkpod::windows::ui::ThumbnailKind;
+using inkpod::windows::ui::ThumbnailPaneUsage;
+using inkpod::windows::ui::ThumbnailPixelLayout;
+
+bool TestApplicationWideThumbnailLru() {
+    g_allocations_before_failure = -1;
+    ThumbnailCache cache;
+    if (cache.SetBudgetBytes(0U) || !cache.SetBudgetBytes(32U)) {
+        return false;
+    }
+    const ThumbnailCacheKey first{
+        inkpod::app::PaneInstanceId{1U},
+        DocumentSessionId{11U},
+        Generation{21U},
+        31U,
+        41U,
+        ThumbnailKind::Layer};
+    const ThumbnailCacheKey second{
+        inkpod::app::PaneInstanceId{2U},
+        DocumentSessionId{12U},
+        Generation{22U},
+        32U,
+        42U,
+        ThumbnailKind::Sequence};
+    const ThumbnailCacheKey third{
+        inkpod::app::PaneInstanceId{3U},
+        DocumentSessionId{13U},
+        Generation{23U},
+        33U,
+        43U,
+        ThumbnailKind::Layer};
+    const std::vector<std::uint8_t> first_pixels(16U, 1U);
+    const std::vector<std::uint8_t> second_pixels(16U, 2U);
+    const std::vector<std::uint8_t> third_pixels(16U, 3U);
+    if (!cache.Put(
+            first, 2U, 2U, 8U, ThumbnailPixelLayout::Bgra8, first_pixels)
+        || !cache.Put(
+            second, 2U, 2U, 8U, ThumbnailPixelLayout::Rgba8, second_pixels)) {
+        return false;
+    }
+    ThumbnailImageView image{};
+    if (!cache.Get(first, image) || image.pixels.size() != 16U
+        || image.pixels[0] != 1U
+        || !cache.Put(
+            third, 2U, 2U, 8U, ThumbnailPixelLayout::Bgra8, third_pixels)) {
+        return false;
+    }
+    if (cache.Peek(second, image) || !cache.Peek(first, image)
+        || !cache.Peek(third, image)) {
+        return false;
+    }
+    const auto after_eviction = cache.Usage();
+    if (after_eviction.budget_bytes != 32U
+        || after_eviction.resident_bytes != 32U
+        || after_eviction.entry_count != 2U
+        || after_eviction.hit_count != 1U
+        || after_eviction.eviction_count != 1U) {
+        return false;
+    }
+
+    // Re-inserting identical content is a touch/no-op and must not create a
+    // duplicate or consume additional budget.
+    if (!cache.Put(
+            first, 2U, 2U, 8U, ThumbnailPixelLayout::Bgra8, first_pixels)
+        || cache.Usage().resident_bytes != 32U
+        || cache.Usage().entry_count != 2U
+        || cache.Put(
+            ThumbnailCacheKey{},
+            2U,
+            2U,
+            8U,
+            ThumbnailPixelLayout::Bgra8,
+            first_pixels)
+        || cache.Put(
+            second,
+            4U,
+            4U,
+            16U,
+            ThumbnailPixelLayout::Rgba8,
+            std::vector<std::uint8_t>(64U, 4U))) {
+        return false;
+    }
+
+    ThumbnailPaneUsage pane_usage{};
+    if (!cache.GetPaneUsage(first.pane, pane_usage)
+        || pane_usage.resident_bytes != 16U || pane_usage.entry_count != 1U) {
+        return false;
+    }
+    cache.RemoveDocument(first.document, first.document_generation);
+    if (cache.Peek(first, image) || cache.Usage().resident_bytes != 16U) {
+        return false;
+    }
+    cache.RemovePane(third.pane);
+    if (cache.Usage().resident_bytes != 0U || cache.Usage().entry_count != 0U) {
+        return false;
+    }
+    cache.Clear();
+    return cache.Usage().resident_bytes == 0U;
+}
 
 bool TestDocumentIdentityAndIndex() {
     std::array<wchar_t, MAX_PATH> directory{};
@@ -535,6 +638,10 @@ bool TestEditorAreaLifetimeAndSplit() {
 }  // namespace
 
 int main() {
+    if (!TestApplicationWideThumbnailLru()) {
+        std::cerr << "application-wide thumbnail LRU test failed\n";
+        return 8;
+    }
     if (!TestOwnerGraphFailureUnwind()) {
         std::cerr << "owner graph failure unwind test failed\n";
         return 1;

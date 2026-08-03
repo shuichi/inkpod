@@ -6,6 +6,7 @@
 
 #include "app/identity.h"
 #include "inkpod/core_ffi.h"
+#include "ui/thumbnail_cache.h"
 
 namespace inkpod::app {
 class CoreHost;
@@ -26,6 +27,8 @@ struct TreePaneNode {
     std::uint32_t thumbnail_width{};
     std::uint32_t thumbnail_height{};
     std::uint32_t thumbnail_stride_bytes{};
+    std::uint64_t thumbnail_revision{};
+    ThumbnailCacheKey thumbnail_key{};
     std::vector<std::uint8_t> thumbnail_bgra;
 };
 
@@ -46,6 +49,7 @@ struct SequencePaneCell {
     InkpodSequenceCellInfo info{};
     std::string name;
     std::uint32_t thumbnail_stride_bytes{};
+    ThumbnailCacheKey thumbnail_key{};
     std::vector<std::uint8_t> thumbnail_rgba;
 };
 

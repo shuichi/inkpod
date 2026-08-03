@@ -431,6 +431,8 @@ if(WIN32)
         apps/windows/ui/dock_layout.h
         apps/windows/ui/dock_host.cpp
         apps/windows/ui/dock_host.h
+        apps/windows/ui/thumbnail_cache.cpp
+        apps/windows/ui/thumbnail_cache.h
         tests/windows_owner_model.cpp)
     target_include_directories(inkpod_windows_owner_model_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/apps/windows"
@@ -590,6 +592,8 @@ if(WIN32)
         apps/windows/ui/main_window_runtime_internal.h
         apps/windows/ui/main_window_status_presenter.cpp
         apps/windows/ui/main_window_status_presenter.h
+        apps/windows/ui/thumbnail_cache.cpp
+        apps/windows/ui/thumbnail_cache.h
         apps/windows/ui/tab_drag.cpp
         apps/windows/ui/tab_drag.h
         apps/windows/ui/workspace_layout.cpp
@@ -631,6 +635,15 @@ if(WIN32)
 
     add_test(NAME inkpod_abi_smoke COMMAND inkpod --abi-smoke-test)
     add_test(NAME inkpod_windows_smoke COMMAND inkpod --smoke-test)
+    if(INKPOD_WINDOWS_ARCHITECTURE STREQUAL "x64")
+        add_test(
+            NAME inkpod_windows_local_build_number_dry_run
+            COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                    -File "${CMAKE_SOURCE_DIR}/scripts/build-windows-x64.ps1"
+                    -DryRun)
+        set_tests_properties(inkpod_windows_local_build_number_dry_run PROPERTIES
+            TIMEOUT 30)
+    endif()
 
     file(GLOB INKPOD_MSIX_ASSETS CONFIGURE_DEPENDS
         "${CMAKE_SOURCE_DIR}/apps/windows/package/Assets/*.png")

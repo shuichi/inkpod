@@ -10,6 +10,7 @@
 #include "recent_documents.h"
 #include "renderer/renderer_host.h"
 #include "tab_drag.h"
+#include "ui/thumbnail_cache.h"
 #include "workspace_window.h"
 
 namespace inkpod::app {
@@ -23,6 +24,22 @@ struct PaneResourceUsage final {
     std::uint64_t thumbnail_bytes{};
     std::uint64_t cpu_cache_bytes{};
     std::uint64_t cached_item_count{};
+};
+
+// UI-thread value snapshot for the frontend owner graph. Renderer telemetry is
+// already a pointer-free copy, and thumbnail usage comes from the one
+// application-wide cache. Core logical categories remain queried per session
+// on the CoreHost owner thread.
+struct ApplicationResourceUsage final {
+    std::uint64_t workspace_window_count{};
+    std::uint64_t document_session_count{};
+    std::uint64_t document_view_count{};
+    std::uint64_t editor_group_count{};
+    std::uint64_t editor_canvas_count{};
+    std::uint64_t auxiliary_canvas_count{};
+    std::uint64_t pane_instance_count{};
+    windows::ui::ThumbnailCacheUsage thumbnails{};
+    renderer::RendererResourceUsage renderer{};
 };
 
 class ApplicationHost final {
@@ -85,6 +102,9 @@ public:
     [[nodiscard]] bool GetPaneResourceUsage(
         PaneInstanceId pane,
         PaneResourceUsage& usage) const noexcept;
+    [[nodiscard]] ApplicationResourceUsage ResourceUsage() const noexcept;
+    [[nodiscard]] windows::ui::ThumbnailCache& Thumbnails() noexcept;
+    [[nodiscard]] const windows::ui::ThumbnailCache& Thumbnails() const noexcept;
     [[nodiscard]] bool ReplaceDocumentSession(
         DocumentSessionId id,
         Generation generation,
@@ -112,6 +132,7 @@ private:
     DocumentRegistry documents_;
     RecentDocumentList recent_documents_;
     TabDragCoordinator tab_drag_;
+    windows::ui::ThumbnailCache thumbnails_;
     std::uint32_t next_untitled_number_{1U};
 };
 

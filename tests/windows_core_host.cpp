@@ -208,6 +208,7 @@ bool DrainNotifications(
 int wmain() {
     SnapshotSink sink;
     SnapshotSink second_sink;
+    std::array<SnapshotSink, CoreHost::kMaximumSnapshotSinks - 2U> capacity_sinks{};
     SnapshotSink rejected_sink;
     HWND owner = CreateWindowExW(
         0,
@@ -292,6 +293,11 @@ int wmain() {
         0.0};
     second_sink.Bind(
         first, generation, second_frontend_view, CanvasId{32U});
+    bool registered_capacity = true;
+    for (SnapshotSink& capacity_sink : capacity_sinks) {
+        registered_capacity = host.RegisterSnapshotSink(&capacity_sink)
+            && registered_capacity;
+    }
     if (host.Invoke(
             first,
             generation,
@@ -311,6 +317,7 @@ int wmain() {
             first, generation, second_frontend_view, second_core_view)
         || !host.RegisterSnapshotSink(&second_sink)
         || host.RegisterSnapshotSink(&second_sink)
+        || !registered_capacity
         || host.RegisterSnapshotSink(&rejected_sink)
         || host.RegisterDocumentView(
             first, generation, second_frontend_view, second_core_view)
@@ -407,6 +414,13 @@ int wmain() {
         host.Stop();
         DestroyWindow(owner);
         return 23;
+    }
+    for (SnapshotSink& capacity_sink : capacity_sinks) {
+        if (!host.UnregisterSnapshotSink(&capacity_sink)) {
+            host.Stop();
+            DestroyWindow(owner);
+            return 23;
+        }
     }
     const std::uint64_t second_sink_before_unmap =
         second_sink.submitted.load(std::memory_order_acquire);

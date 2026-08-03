@@ -215,6 +215,150 @@ bool ResolveConfiguredShortcut(ApplicationHost& state, std::uint32_t virtual_key
 bool SamePersistentMetadata(const InkpodDocumentInfo& left, const InkpodDocumentInfo& right) noexcept;
 InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexcept;
 
+bool QueryCoreResourceUsage(
+    ApplicationHost& state,
+    inkpod::app::DocumentSessionId session,
+    inkpod::app::Generation generation,
+    InkpodResourceUsage& usage) noexcept {
+    usage = {};
+    usage.struct_size = sizeof(usage);
+    return state.engine != nullptr
+        && state.engine->Invoke(
+               session,
+               generation,
+               [&usage](InkpodCore* core) {
+                   return inkpod_core_get_resource_usage(core, &usage);
+               },
+               false,
+               false) == INKPOD_STATUS_OK;
+}
+
+bool ValidateFixedResourceScenario(
+    ApplicationHost& state,
+    const char* scenario,
+    std::uint64_t expected_workspaces,
+    std::uint64_t expected_documents,
+    std::uint64_t expected_views,
+    std::uint64_t expected_groups) noexcept {
+    const inkpod::app::ApplicationResourceUsage usage = state.ResourceUsage();
+    if (scenario == nullptr
+        || usage.workspace_window_count != expected_workspaces
+        || usage.document_session_count != expected_documents
+        || usage.document_view_count != expected_views
+        || usage.editor_group_count != expected_groups
+        || usage.editor_canvas_count != expected_groups
+        || usage.auxiliary_canvas_count != expected_workspaces
+        || usage.pane_instance_count != expected_workspaces * 10U
+        || usage.thumbnails.budget_bytes == 0U
+        || usage.thumbnails.resident_bytes > usage.thumbnails.budget_bytes
+        || usage.renderer.gpu_tile_budget_bytes == 0U
+        || usage.renderer.gpu_tile_bytes > usage.renderer.gpu_tile_budget_bytes
+         || usage.renderer.surface_count
+             != usage.editor_canvas_count + usage.auxiliary_canvas_count) {
+        std::fprintf(
+            stderr,
+            "G13 resource mismatch scenario=%s workspaces=%llu/%llu "
+            "documents=%llu/%llu views=%llu/%llu groups=%llu/%llu "
+            "editor_canvases=%llu auxiliary_canvases=%llu panes=%llu "
+            "thumbnail=%llu/%llu renderer_surfaces=%llu renderer_budget=%llu/%llu\n",
+            scenario == nullptr ? "(null)" : scenario,
+            static_cast<unsigned long long>(usage.workspace_window_count),
+            static_cast<unsigned long long>(expected_workspaces),
+            static_cast<unsigned long long>(usage.document_session_count),
+            static_cast<unsigned long long>(expected_documents),
+            static_cast<unsigned long long>(usage.document_view_count),
+            static_cast<unsigned long long>(expected_views),
+            static_cast<unsigned long long>(usage.editor_group_count),
+            static_cast<unsigned long long>(expected_groups),
+            static_cast<unsigned long long>(usage.editor_canvas_count),
+            static_cast<unsigned long long>(usage.auxiliary_canvas_count),
+            static_cast<unsigned long long>(usage.pane_instance_count),
+            static_cast<unsigned long long>(usage.thumbnails.resident_bytes),
+            static_cast<unsigned long long>(usage.thumbnails.budget_bytes),
+            static_cast<unsigned long long>(usage.renderer.surface_count),
+            static_cast<unsigned long long>(usage.renderer.gpu_tile_bytes),
+            static_cast<unsigned long long>(usage.renderer.gpu_tile_budget_bytes));
+        return false;
+    }
+
+    std::uint64_t document_tile_bytes{};
+    std::uint64_t history_bytes{};
+    std::uint64_t reference_bytes{};
+    for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
+        const auto* document = state.Documents().SessionAt(index);
+        InkpodResourceUsage core{};
+        if (document == nullptr
+            || !QueryCoreResourceUsage(
+                state, document->id, document->generation, core)) {
+            return false;
+        }
+        document_tile_bytes += core.document_tile_bytes;
+        history_bytes += core.history_bytes;
+        reference_bytes += core.reference_light_table_bytes;
+    }
+
+    for (std::size_t workspace_index = 0U;
+         workspace_index < state.Workspaces().Count();
+         ++workspace_index) {
+        const auto* workspace = state.Workspaces().At(workspace_index);
+        if (workspace == nullptr) {
+            return false;
+        }
+        inkpod::app::PaneResourceUsage layer_usage{};
+        inkpod::app::PaneResourceUsage sequence_usage{};
+        if (!state.GetPaneResourceUsage(workspace->pane_ids.layer, layer_usage)
+            || !state.GetPaneResourceUsage(
+                workspace->pane_ids.sequence, sequence_usage)
+            || layer_usage.workspace != workspace->id
+            || sequence_usage.workspace != workspace->id) {
+            return false;
+        }
+        for (std::size_t group_index = 0U;
+             group_index < workspace->editors.GroupCount();
+             ++group_index) {
+            const auto* group = workspace->editors.GroupAt(group_index);
+            inkpod::renderer::RendererSurfaceResourceUsage surface{};
+            const auto* document = group == nullptr
+                ? nullptr
+                : state.Documents().FindByView(group->ActiveView());
+            if (group == nullptr || document == nullptr
+                || !state.renderer->GetSurfaceResourceUsage(
+                    group->canvas_id, group->generation, surface)
+                || surface.route.canvas != group->canvas_id
+                || surface.route.document_session != document->id
+                || surface.route.document_view != group->ActiveView()
+                || surface.route.document_generation != document->generation
+                || surface.route.surface_generation != group->generation) {
+                return false;
+            }
+        }
+    }
+
+    std::fprintf(
+        stdout,
+        "inkpod-g13-resource scenario=%s workspaces=%llu documents=%llu "
+        "views=%llu editor_canvases=%llu auxiliary_canvases=%llu panes=%llu "
+        "core_tile_bytes=%llu history_bytes=%llu reference_bytes=%llu "
+        "thumbnail_bytes=%llu renderer_bytes=%llu\n",
+        scenario,
+        static_cast<unsigned long long>(usage.workspace_window_count),
+        static_cast<unsigned long long>(usage.document_session_count),
+        static_cast<unsigned long long>(usage.document_view_count),
+        static_cast<unsigned long long>(usage.editor_canvas_count),
+        static_cast<unsigned long long>(usage.auxiliary_canvas_count),
+        static_cast<unsigned long long>(usage.pane_instance_count),
+        static_cast<unsigned long long>(document_tile_bytes),
+        static_cast<unsigned long long>(history_bytes),
+        static_cast<unsigned long long>(reference_bytes),
+        static_cast<unsigned long long>(usage.thumbnails.resident_bytes),
+        static_cast<unsigned long long>(
+            usage.renderer.retained_snapshot_bytes
+            + usage.renderer.pending_snapshot_bytes
+            + usage.renderer.gpu_tile_bytes
+            + usage.renderer.swap_chain_bytes));
+    return true;
+}
+
 int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
     const HWND pane = state.Workspace().locator_palette;
     const HMENU menu = GetMenu(state.Workspace().windows.window);
@@ -4207,7 +4351,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || sequence_view.cells[0].name != L"cell1.png"
         || sequence_view.cells[1].name != L"cell3.png"
         || sequence_view.cells[2].name != L"cell10.png"
-        || sequence_view.cells[0].thumbnail_rgba.empty()
+        || !inkpod::windows::ui::panes::SequencePaneItemHasThumbnail(
+            state.Workspace().sequence_palette, 0U)
         || sequence_view.cells[0].thumbnail_width == 0U
         || sequence_view.cells[0].thumbnail_height == 0U
         || sequence_view.cells[0].thumbnail_stride_bytes
@@ -6958,6 +7103,439 @@ int RunTabDragSmoke(ApplicationHost& state) noexcept {
     return state.Workspaces().Count() == 1U ? 0 : 982;
 }
 
+int RunG13ResourceScenarioSmoke(ApplicationHost& state) noexcept {
+    using inkpod::app::DocumentSessionId;
+    using inkpod::app::DocumentViewId;
+    using inkpod::app::Generation;
+    using inkpod::app::WorkspaceWindow;
+    using inkpod::app::WorkspaceWindowId;
+
+    struct FixedDocument final {
+        DocumentSessionId session{};
+        Generation generation{};
+        DocumentViewId view{};
+    };
+
+    if (state.engine == nullptr || state.renderer == nullptr
+        || state.Workspaces().Count() != 1U
+        || state.Workspace().editors.GroupCount() != 1U
+        || state.Documents().Count() == 0U) {
+        std::fprintf(
+            stderr,
+            "G13 baseline mismatch engine=%d renderer=%d workspaces=%zu "
+            "documents=%zu groups=%zu views=%zu\n",
+            state.engine != nullptr ? 1 : 0,
+            state.renderer != nullptr ? 1 : 0,
+            state.Workspaces().Count(),
+            state.Documents().Count(),
+            state.Workspace().editors.GroupCount(),
+            state.Documents().Count() == 0U ? 0U : state.Document().ViewCount());
+        return 1030;
+    }
+    const DocumentSessionId baseline_session = state.Document().id;
+    while (state.Documents().Count() > 1U) {
+        DocumentSessionId extra{};
+        for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
+            const auto* document = state.Documents().SessionAt(index);
+            if (document != nullptr && document->id != baseline_session) {
+                extra = document->id;
+                break;
+            }
+        }
+        if (!extra || !state.CloseDocumentSession(extra)) {
+            std::fprintf(
+                stderr,
+                "G13 baseline document cleanup failed documents=%zu extra=%llu\n",
+                state.Documents().Count(),
+                static_cast<unsigned long long>(extra.Value()));
+            return 1031;
+        }
+    }
+    while (state.Document().ViewCount() > 1U) {
+        DocumentViewId extra{};
+        for (std::size_t index = 0U; index < state.Document().ViewCount(); ++index) {
+            const auto* view = state.Document().ViewAt(index);
+            if (view != nullptr && view->id != state.ActiveView().id) {
+                extra = view->id;
+                break;
+            }
+        }
+        if (!extra || !state.CloseDocumentView(extra)) {
+            std::fprintf(
+                stderr,
+                "G13 baseline view cleanup failed views=%zu active=%llu extra=%llu\n",
+                state.Document().ViewCount(),
+                static_cast<unsigned long long>(state.ActiveView().id.Value()),
+                static_cast<unsigned long long>(extra.Value()));
+            return 1032;
+        }
+    }
+    if (state.Document().ViewCount() != 1U || !RefreshTreePane(state)) {
+        return 1033;
+    }
+    if (!ValidateFixedResourceScenario(
+            state, "one-window-one-document-one-view", 1U, 1U, 1U, 1U)) {
+        return 1034;
+    }
+
+    WorkspaceWindow* source = state.Workspaces().At(0U);
+    if (source == nullptr || source->editors.Active() == nullptr) {
+        return 1002;
+    }
+    const WorkspaceWindowId source_workspace = source->id;
+    const auto source_first_group = source->editors.Active()->id;
+    const FixedDocument first{
+        state.Document().id,
+        state.Document().generation,
+        state.ActiveView().id};
+
+    if (CreateCell(state, 4096U, 4096U, 96000U) != INKPOD_STATUS_OK) {
+        return 1003;
+    }
+    const FixedDocument large{
+        state.Document().id,
+        state.Document().generation,
+        state.ActiveView().id};
+    if (CreateCell(state, 256U, 192U, 96000U) != INKPOD_STATUS_OK) {
+        return 1004;
+    }
+    const FixedDocument third{
+        state.Document().id,
+        state.Document().generation,
+        state.ActiveView().id};
+    if (CreateCell(state, 320U, 180U, 96000U) != INKPOD_STATUS_OK) {
+        return 1005;
+    }
+    const FixedDocument fourth{
+        state.Document().id,
+        state.Document().generation,
+        state.ActiveView().id};
+    if (state.Documents().Count() != 4U
+        || !DispatchEnabledCommand(
+            state, source->windows.window, IDM_EDITOR_SPLIT_RIGHT)
+        || source->editors.GroupCount() != 2U) {
+        return 1006;
+    }
+    const auto* source_second = source->editors.Other(source_first_group);
+    auto* fourth_document = state.Documents().Find(fourth.session);
+    if (source_second == nullptr || fourth_document == nullptr
+        || fourth_document->ViewCount() != 2U) {
+        return 1007;
+    }
+    DocumentViewId duplicate_fourth{};
+    for (std::size_t index = 0U; index < fourth_document->ViewCount(); ++index) {
+        const auto* view = fourth_document->ViewAt(index);
+        if (view != nullptr && view->id != fourth.view) {
+            duplicate_fourth = view->id;
+            break;
+        }
+    }
+    if (!duplicate_fourth
+        || !state.MoveDocumentView(
+            third.view,
+            source_workspace,
+            source_second->id,
+            0U)
+        || !state.CloseDocumentView(duplicate_fourth)
+        || !RefreshTreePane(state)
+        || !ValidateFixedResourceScenario(
+            state, "one-window-four-documents-two-groups", 1U, 4U, 4U, 2U)) {
+        return 1008;
+    }
+
+    if (SendMessageW(
+            source->windows.window,
+            WM_COMMAND,
+            IDM_WORKSPACE_NEW_WINDOW,
+            0) != 1
+        || state.Workspaces().Count() != 2U) {
+        return 1009;
+    }
+    WorkspaceWindow* destination = state.Workspaces().At(1U);
+    if (destination == nullptr || destination->editors.Active() == nullptr) {
+        return 1010;
+    }
+    const WorkspaceWindowId destination_workspace = destination->id;
+    const auto destination_first_group = destination->editors.Active()->id;
+    if (!state.MoveDocumentView(
+            fourth.view,
+            destination_workspace,
+            destination_first_group,
+            0U)
+        || !state.ActivateDocumentView(fourth.view)
+        || SendMessageW(
+               destination->windows.window,
+               WM_COMMAND,
+               IDM_EDITOR_SPLIT_RIGHT,
+               0) != 1
+        || destination->editors.GroupCount() != 2U) {
+        std::fprintf(
+            stderr,
+            "G13 destination split failed workspace=%llu active_workspace=%llu "
+            "groups=%zu fourth_workspace=%llu\n",
+            static_cast<unsigned long long>(destination_workspace.Value()),
+            static_cast<unsigned long long>(state.Workspace().id.Value()),
+            destination->editors.GroupCount(),
+            static_cast<unsigned long long>(
+                state.routing.targets.WorkspaceForView(fourth.view).Value()));
+        return 1011;
+    }
+    const auto* destination_second = destination->editors.Other(
+        destination_first_group);
+    fourth_document = state.Documents().Find(fourth.session);
+    if (destination_second == nullptr || fourth_document == nullptr
+        || fourth_document->ViewCount() != 2U) {
+        return 1012;
+    }
+    duplicate_fourth = {};
+    for (std::size_t index = 0U; index < fourth_document->ViewCount(); ++index) {
+        const auto* view = fourth_document->ViewAt(index);
+        if (view != nullptr && view->id != fourth.view) {
+            duplicate_fourth = view->id;
+            break;
+        }
+    }
+    if (!duplicate_fourth
+        || !state.MoveDocumentView(
+            large.view,
+            destination_workspace,
+            destination_second->id,
+            0U)
+        || !state.CloseDocumentView(duplicate_fourth)) {
+        return 1013;
+    }
+
+    const auto cache_before = state.Thumbnails().Usage();
+    if (!state.Thumbnails().SetBudgetBytes(20000U)
+        || !state.ActivateDocumentView(first.view) || !RefreshTreePane(state)
+        || !state.ActivateDocumentView(large.view) || !RefreshTreePane(state)) {
+        return 1014;
+    }
+    const auto constrained_cache = state.Thumbnails().Usage();
+    inkpod::app::PaneResourceUsage destination_layer_cache{};
+    if (constrained_cache.resident_bytes > constrained_cache.budget_bytes
+        || constrained_cache.eviction_count <= cache_before.eviction_count
+        || !state.GetPaneResourceUsage(
+            destination->pane_ids.layer, destination_layer_cache)
+        || destination_layer_cache.thumbnail_bytes == 0U
+        || !state.Thumbnails().SetBudgetBytes(
+            inkpod::windows::ui::ThumbnailCache::kDefaultBudgetBytes)
+        || !state.ActivateDocumentView(first.view) || !RefreshTreePane(state)
+        || !state.ActivateDocumentView(large.view) || !RefreshTreePane(state)
+        || !ValidateFixedResourceScenario(
+            state, "two-windows-four-documents-four-views", 2U, 4U, 4U, 4U)) {
+        return 1015;
+    }
+
+    InkpodDocumentInfo large_before = EmptyDocumentInfo();
+    if (!QueryDocument(state, large_before)) {
+        return 1016;
+    }
+    const InkpodStatus large_edit_status = state.engine->Invoke(
+        large.session,
+        large.generation,
+        [](InkpodCore* core) {
+            const InkpodStrokeSample sample{
+                sizeof(InkpodStrokeSample), 0U, 16.0F, 16.0F, 1.0F, 0U};
+            const InkpodStrokeInput stroke{
+                sizeof(InkpodStrokeInput),
+                INKPOD_TOOL_PENCIL,
+                INKPOD_PLANE_COLOR,
+                INKPOD_COORDINATE_SPACE_DOCUMENT,
+                0U,
+                UINT32_C(0x2a6ec8ff),
+                1.0F,
+                &sample,
+                1U,
+                sizeof(sample)};
+            InkpodDispatchResult dispatch{};
+            dispatch.struct_size = sizeof(dispatch);
+            InkpodStatus status = inkpod_core_set_active_plane(
+                core, INKPOD_PLANE_COLOR);
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_core_apply_stroke(core, &stroke, &dispatch);
+            }
+
+            std::array<std::uint8_t, 4U * 4U * 4U> pixels{};
+            for (std::size_t offset = 0U; offset < pixels.size(); offset += 4U) {
+                pixels[offset] = 48U;
+                pixels[offset + 1U] = 96U;
+                pixels[offset + 2U] = 192U;
+                pixels[offset + 3U] = 255U;
+            }
+            constexpr std::array<std::uint8_t, 13U> name{
+                'g', '1', '3', '-', 'r', 'e', 'f', 'e', 'r', 'e', 'n', 'c', 'e'};
+            const InkpodRasterSourceInput source_input{
+                sizeof(InkpodRasterSourceInput),
+                INKPOD_STORAGE_RGBA8,
+                0U,
+                0x1300130013001300ULL,
+                0x3100310031003100ULL,
+                1U,
+                4U,
+                4U,
+                96000U,
+                96000U,
+                InkpodFrameRect{0, 0, 4, 4},
+                pixels.data(),
+                pixels.size(),
+                16U};
+            const InkpodLightTableItemInput item{
+                sizeof(InkpodLightTableItemInput),
+                INKPOD_LIGHT_TABLE_ITEM_VISIBLE,
+                500U,
+                INKPOD_LIGHT_TABLE_COLOR,
+                InkpodColorValue{
+                    sizeof(InkpodColorValue),
+                    INKPOD_COLOR_DEPTH_8,
+                    48U,
+                    96U,
+                    192U,
+                    255U},
+                0,
+                0,
+                1000U,
+                1000U,
+                0,
+                0U,
+                name.data(),
+                name.size(),
+                source_input};
+            std::uint64_t item_id{};
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_core_light_table_add_item(
+                    core, &item, &dispatch, &item_id);
+            }
+            return status == INKPOD_STATUS_OK && item_id != 0U
+                ? INKPOD_STATUS_OK
+                : INKPOD_STATUS_INVALID_STATE;
+        },
+        true,
+        true);
+    InkpodDocumentInfo large_after = EmptyDocumentInfo();
+    InkpodResourceUsage large_resources{};
+    if (large_edit_status != INKPOD_STATUS_OK
+        || state.engine->WaitIdle(large.session, large.generation)
+            != INKPOD_STATUS_OK
+        || !QueryDocument(state, large_after)
+        || !QueryCoreResourceUsage(
+            state, large.session, large.generation, large_resources)
+        || large_after.document_revision <= large_before.document_revision
+        || large_resources.document_tile_bytes == 0U
+        || large_resources.history_bytes == 0U
+        || large_resources.history_entry_count < 2U
+        || large_resources.reference_light_table_bytes == 0U
+        || large_resources.reference_light_table_tile_count == 0U) {
+        return 1017;
+    }
+
+    InkpodDispatchResult history_result{};
+    history_result.struct_size = sizeof(history_result);
+    if (state.engine->Invoke(
+            large.session,
+            large.generation,
+            [&history_result](InkpodCore* core) {
+                return inkpod_core_undo(core, &history_result);
+            },
+            true,
+            true) != INKPOD_STATUS_OK) {
+        return 1018;
+    }
+    InkpodResourceUsage after_undo{};
+    if (!QueryCoreResourceUsage(
+            state, large.session, large.generation, after_undo)
+        || after_undo.reference_light_table_bytes != 0U
+        || state.engine->Invoke(
+               large.session,
+               large.generation,
+               [&history_result](InkpodCore* core) {
+                   return inkpod_core_redo(core, &history_result);
+               },
+               true,
+               true) != INKPOD_STATUS_OK) {
+        return 1019;
+    }
+    InkpodResourceUsage after_redo{};
+    InkpodDocumentInfo before_device_loss = EmptyDocumentInfo();
+    if (!QueryCoreResourceUsage(
+            state, large.session, large.generation, after_redo)
+        || after_redo.reference_light_table_bytes
+            != large_resources.reference_light_table_bytes
+        || !QueryDocument(state, before_device_loss)) {
+        return 1020;
+    }
+
+    auto* large_group = destination->editors.FindByView(large.view);
+    const auto renderer_before = state.renderer->ResourceUsage();
+    if (large_group == nullptr || large_group->canvas == nullptr
+        || SendMessageW(
+            large_group->canvas,
+            inkpod::renderer::kCanvasSimulateDeviceLoss,
+            0,
+            0) != 1
+        || SendMessageW(
+            large_group->canvas,
+            inkpod::renderer::kCanvasRenderOnce,
+            0,
+            0) != 1
+        || !state.renderer->WaitQueueIdleForSmokeTest()) {
+        return 1021;
+    }
+    InkpodDocumentInfo after_device_loss = EmptyDocumentInfo();
+    const auto renderer_after = state.renderer->ResourceUsage();
+    if (!QueryDocument(state, after_device_loss)
+        || after_device_loss.document_revision
+            != before_device_loss.document_revision
+        || after_device_loss.main_plane_checksum
+            != before_device_loss.main_plane_checksum
+        || after_device_loss.color_plane_checksum
+            != before_device_loss.color_plane_checksum
+        || renderer_after.device_reset_count
+            <= renderer_before.device_reset_count
+        || !ValidateFixedResourceScenario(
+            state,
+            "large-light-table-reference-history-device-lost",
+            2U,
+            4U,
+            4U,
+            4U)) {
+        return 1022;
+    }
+
+    // Restore the one-window/one-group baseline for the following G10 smoke.
+    auto* source_first = source->editors.Find(source_first_group);
+    if (source_first == nullptr
+        || !state.MoveDocumentView(
+            large.view,
+            source_workspace,
+            source_first_group,
+            source_first->ViewCount())
+        || !state.MoveDocumentView(
+            fourth.view,
+            source_workspace,
+            source_first_group,
+            source_first->ViewCount())) {
+        return 1023;
+    }
+    SendMessageW(destination->windows.window, WM_CLOSE, 0, 0);
+    if (state.Workspaces().Count() != 1U
+        || !state.ActivateDocumentView(third.view)
+        || !DispatchEnabledCommand(
+            state, source->windows.window, IDM_EDITOR_GROUP_CLOSE)
+        || source->editors.GroupCount() != 1U
+        || !state.ActivateDocumentView(first.view)
+        || !state.CloseDocumentSession(large.session)
+        || !state.CloseDocumentSession(third.session)
+        || !state.CloseDocumentSession(fourth.session)
+        || state.Documents().Count() != 1U
+        || state.Document().id != first.session
+        || state.Document().ViewCount() != 1U
+        || state.Workspace().editors.GroupCount() != 1U) {
+        return 1024;
+    }
+    return 0;
+}
+
 int RunMultiWorkspaceWindowSmoke(ApplicationHost& state) noexcept {
     using inkpod::app::CommandResolveStatus;
     using inkpod::app::DocumentSessionId;
@@ -7424,6 +8002,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunTabDragSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunG13ResourceScenarioSmoke(state);
     }
     if (exit_code == 0) {
         exit_code = runtime::RunMultiWorkspaceWindowSmoke(state);

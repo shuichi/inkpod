@@ -93,6 +93,22 @@ cmake --build --preset windows-x64-release
 
 CMake がアプリ全体のビルド入口です。CMake から Cargo を呼び出して Rust の `inkpod-ffi` 静的ライブラリをビルドし、MSVC の各ターゲットへリンクするため、先に `cargo build` を実行する必要はありません。
 
+x64 のローカル成果物を作る通常の入口は、Debug／Release 共通の build
+number を一度だけ増加させるラッパーです。Visual Studio の x64 developer
+environment は自動検出されます。次は両構成を clean build し、CTest まで
+実行します。
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+  .\scripts\build-windows-x64.ps1 -Clean -Test
+```
+
+番号は Git 対象外の `.inkpod-local/build-number.txt` に保持され、失敗した
+build の番号も再利用しません。実行内容だけを確認する場合は `-DryRun`、
+一方の構成だけを作る場合は `-Configuration Debug` または
+`-Configuration Release` を指定します。直接 CMake preset を実行する方法は
+引き続き利用できますが、ローカル番号は自動的には増加しません。
+
 リポジトリのルートで、デバッグ版を構成、ビルド、テストします。
 
 ```powershell

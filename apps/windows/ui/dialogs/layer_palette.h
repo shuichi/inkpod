@@ -23,7 +23,7 @@ struct LayerPaletteItem {
     std::uint32_t thumbnail_width{};
     std::uint32_t thumbnail_height{};
     std::uint32_t thumbnail_stride_bytes{};
-    std::vector<std::uint8_t> thumbnail_bgra;
+    ThumbnailCacheKey thumbnail_key{};
 };
 
 using LayerPaletteCommandCallback = void (*)(void* context, UINT command) noexcept;
@@ -37,6 +37,7 @@ using LayerPaletteVisibilityCallback = void (*)(void* context) noexcept;
 
 struct LayerPaletteDialogState {
     void* context{};
+    ThumbnailCache* thumbnail_cache{};
     LayerPaletteCommandCallback dispatch_command{};
     LayerPaletteSelectionCallback select_layer{};
     LayerPaletteSelectionCallback select_plane{};
