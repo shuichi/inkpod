@@ -224,7 +224,7 @@ flowchart LR
 ## 仕様と開発情報
 
 - 開発時に常時適用する設計境界と品質基準: [開発ガイド](AGENTS.md)
-- 維持する機能、挙動契約、要件 ID、実装指針: [機能・実装仕様](PROMPT.md)
+- 維持する機能、挙動契約、要件 ID、実装指針: [機能・実装仕様](SPEC.md)
 - 要件ごとの実装状態と検証記録: [実装状況](docs/implementation-status.md)
 - 対応形式と互換性の範囲: [互換性一覧](docs/compatibility.md)
 

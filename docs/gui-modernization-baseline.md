@@ -3,7 +3,7 @@
 This document freezes the historical pre-G1 regression baseline captured before
 the completed GUI modernization. It is not the current architecture or a
 chronological verification log. Current product contracts live in
-[`../PROMPT.md`](../PROMPT.md), development boundaries in
+[`../SPEC.md`](../SPEC.md), development boundaries in
 [`../AGENTS.md`](../AGENTS.md), and the former milestone plan remains in Git
 history.
 
@@ -11,8 +11,8 @@ history.
 
 | Item | Baseline source |
 |---|---|
-| Product behavior | [`../PROMPT.md`](../PROMPT.md) |
-| Completed modernization plan | Git history; current contracts are in `PROMPT.md` and `AGENTS.md` |
+| Product behavior | [`../SPEC.md`](../SPEC.md) |
+| Completed modernization plan | Git history; current contracts are in `SPEC.md` and `AGENTS.md` |
 | Current ownership/thread structure | [`architecture.md`](architecture.md) |
 | Requirement state | [`compatibility.md`](compatibility.md) |
 | Current verification summary | [`implementation-status.md`](implementation-status.md) |

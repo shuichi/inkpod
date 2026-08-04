@@ -3,7 +3,7 @@
 This document is the historical M0 input for the completed Core refactoring. It
 inventories the observable contract and mutation paths as of 2026-07-30. It is
 not a current product status log. Current behavior lives in
-[`PROMPT.md`](../PROMPT.md), development boundaries in
+[`SPEC.md`](../SPEC.md), development boundaries in
 [`AGENTS.md`](../AGENTS.md), and the former milestone plan remains in Git
 history.
 

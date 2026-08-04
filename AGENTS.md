@@ -4,9 +4,9 @@
 
 この指示はリポジトリ全体に適用する。inkpod は、PaintMan と合理的な互換性のあるアニメーション彩色ワークフローを、長期保守可能なクロスプラットフォーム設計で再構築するプロジェクトである。
 
-このファイルには、全タスクに常時適用する技術境界、品質基準、作業規律、すなわち「どう開発するか」だけを置く。維持する機能、GUI メニュー、利用者向け挙動、要件 ID、すなわち「何を作るか」は `PROMPT.md` を正本とし、ここへ複製しない。実装前に `PROMPT.md` の関連節を読み、現在状態や既知差分に関係する場合だけ `docs/implementation-status.md` と `docs/compatibility.md` の該当箇所を確認する。
+このファイルには、全タスクに常時適用する技術境界、品質基準、作業規律、すなわち「どう開発するか」だけを置く。維持する機能、GUI メニュー、利用者向け挙動、要件 ID、すなわち「何を作るか」は `SPEC.md` を正本とし、ここへ複製しない。実装前に `SPEC.md` の関連節を読み、現在状態や既知差分に関係する場合だけ `docs/implementation-status.md` と `docs/compatibility.md` の該当箇所を確認する。
 
-指示が競合する場合の優先順位は、今回のユーザー指示、`AGENTS.md`、`PROMPT.md`、テスト済みの既存契約の順とする。外部の旧製品マニュアルや画像を通常の実装時に参照しない。対応するファイル形式は `PROMPT.md` に明記されたものだけとし、未列挙の外部形式を追加しない。旧製品の画像、アイコン、文面、商標表示を複製しない。
+指示が競合する場合の優先順位は、今回のユーザー指示、`AGENTS.md`、`SPEC.md`、テスト済みの既存契約の順とする。外部の旧製品マニュアルや画像を通常の実装時に参照しない。対応するファイル形式は `SPEC.md` に明記されたものだけとし、未列挙の外部形式を追加しない。旧製品の画像、アイコン、文面、商標表示を複製しない。
 
 「合理的な互換性」は旧 UI の模写ではなく、操作の意味、データ分離、座標、保存結果を再現することである。Windows 固有の外見と操作は Windows 11 の標準に合わせる。
 
@@ -104,7 +104,7 @@ native extension は `.inkpod` とし、versioned manifest と圧縮可能な bl
 - autosave/recovery/export と通常保存を区別し、autosave 成功だけで通常 savepoint を進めない。
 - decoder は path traversal、zip bomb 相当、巨大寸法・個数、重複 ID、循環参照、checksum 不一致、不正 UTF を拒否する。
 - 未知の必須 feature は拒否し、未知の任意 metadata は可能な範囲で round-trip する。
-- 一般画像入出力は `PROMPT.md` に列挙された対応形式だけを実装し、未対応形式の placeholder、disabled entry、拡張子だけの偽装形式を作らない。
+- 一般画像入出力は `SPEC.md` に列挙された対応形式だけを実装し、未対応形式の placeholder、disabled entry、拡張子だけの偽装形式を作らない。
 - Windows file dialog、shell drop、clipboard 接続は C++、decode/encode と document 変換は Rust を基本とする。
 - app 内 clipboard は layer/plane type、document 座標、selection bounds を保持し、外部向け標準形式も提供する。
 
@@ -127,7 +127,7 @@ native extension は `.inkpod` とし、versioned manifest と圧縮可能な bl
 - 非表示 tab の snapshot build と不要な Present を止め、GPU、thumbnail、reference、light-table cache に application-wide の上限と回収方針を持たせる。resource 使用量を document、view、Canvas、pane と cache category ごとに観測可能にする。
 - `--smoke-test` と `--abi-smoke-test` は実製品の UI/Core/renderer/ABI 経路を検証する private entry point として維持する。
 
-機能の正確な GUI、tool、fill、selection、filter、light table、batch の挙動は `PROMPT.md` の「内蔵機能仕様」を参照する。このファイルへ再掲しない。
+機能の正確な GUI、tool、fill、selection、filter、light table、batch の挙動は `SPEC.md` の「内蔵機能仕様」を参照する。このファイルへ再掲しない。
 
 ## 8. 安全性と品質
 
@@ -186,8 +186,8 @@ ctest --preset <windows-test-preset>
 
 ## 10. エージェントの作業手順
 
-1. `git status`、既存差分、`PROMPT.md` の関連節、対象 code/test を確認し、現在状態や既知差分が関係する場合だけ status/compatibility の該当箇所を読む。
-2. ユーザー変更を保護し、今回の依頼に対応する `PROMPT.md` の機能・要件 ID と、status/compatibility に記録された現在状態・既知差分を確認する。
+1. `git status`、既存差分、`SPEC.md` の関連節、対象 code/test を確認し、現在状態や既知差分が関係する場合だけ status/compatibility の該当箇所を読む。
+2. ユーザー変更を保護し、今回の依頼に対応する `SPEC.md` の機能・要件 ID と、status/compatibility に記録された現在状態・既知差分を確認する。
 3. 公開契約を test で先に固定し、一つの変更では一種類の意味上の risk だけを扱う。機械的な rename/module 移動、algorithm 変更、公開境界変更を分け、大きな変更を model/ABI、Core、Windows adapter、test、document の小さな縦切りへ分ける。
 4. 短い計画を示した後、計画だけで止まらず今回の scope を実装・検証する。
 5. 仕様と既存テストだけで安全に決められない場合は推測で実装せず、具体的な選択肢、影響、解除条件を示してユーザー判断を求める。

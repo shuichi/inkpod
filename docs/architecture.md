@@ -1,7 +1,7 @@
 # Architecture
 
 This document describes the current component, ownership, thread, and state
-boundaries. Product behavior is specified in [`../PROMPT.md`](../PROMPT.md), and
+boundaries. Product behavior is specified in [`../SPEC.md`](../SPEC.md), and
 current gaps are summarized in [`implementation-status.md`](implementation-status.md).
 Completed migration steps and historical size measurements belong to Git history.
 
