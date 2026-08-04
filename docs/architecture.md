@@ -173,9 +173,10 @@ There is no per-Canvas renderer thread or per-Canvas D3D/D2D device.
 
 CoreHost publishes through a `SnapshotEnvelope` containing document session,
 frontend view, Canvas, document generation, surface generation, document
-revision, and view revision. Snapshot fan-out registers at most 16 visible
-editor-group sinks, matching eight workspaces with two groups each; inactive
-tabs and auxiliary panes do not consume that bound. RendererHost accepts a
+revision, and view revision. Snapshot fan-out registers every visible
+editor-group Canvas, including the primary group of each newly created
+workspace, up to 16 sinks matching eight workspaces with two groups each;
+inactive tabs and auxiliary panes do not consume that bound. RendererHost accepts a
 snapshot only when the complete
 route equals the current surface binding and the snapshot accessors confirm both
 revisions. Rebind clears the old retained snapshot before accepting the new
@@ -192,8 +193,11 @@ pointer. GPU tile payloads share a 512 MiB application-wide
 budget; active tiles are admitted only when the aggregate fits, while inactive
 tiles are retained for reuse and evicted in application-wide least-recently-used
 order. G6 retains one Canvas surface per visible editor group, up to two,
-rather than per open or inactive tab. Closing a group unregisters its snapshot
-sink before destroying its Canvas and moves its views to the surviving group.
+rather than per open or inactive tab. Closing a group or non-final workspace
+atomically unregisters every affected snapshot sink through the same
+`CoreHost` publication lock before destroying its Canvas. The deterministic
+application resource snapshot reports one registered sink per visible editor
+group, and group close moves its views to the surviving group.
 
 The UI/Input thread owns the frontend target registry. Workspace window,
 document session, document view, editor group, Canvas, pane, job, and generation
@@ -357,10 +361,13 @@ Window/view commands capture a pointer-free `CommandContext` before routing.
 Cross-window move or duplication validates workspace, group, view, session, and
 generation namespaces and never re-resolves a later active document. Closing a
 window prompts only for dirty sessions whose final view is being removed; shared
-sessions and surviving windows remain registered. Only closing the final workspace
-posts quit. Shutdown unbinds every Canvas, rejects stale notifications, detaches
-and stops Core on its owner thread, stops the renderer on its thread, and only then
-destroys remaining workspace HWND ownership.
+sessions and surviving windows remain registered. Before a non-final window is
+destroyed, `CoreHost` synchronously retargets its notification owner to a
+surviving top-level window and reposts every pending value token; duplicate old
+messages are harmless because token consumption is single-shot. Only closing the
+final workspace posts quit. Shutdown unbinds every Canvas, rejects stale
+notifications, detaches and stops Core on its owner thread, stops the renderer
+on its thread, and only then destroys remaining workspace HWND ownership.
 
 G12 adds one process-lifetime `ActivationService` owned by `ApplicationHost`.
 Before Common Controls, COM, CoreHost, RendererHost, or workspace creation, a
@@ -585,7 +592,9 @@ Application initializes Common Controls, COM, frontend owners, and RendererHost;
 it then creates the main window/Canvas surface and starts CoreHost. Core creation
 and initial document/snapshot work occur on the Core thread. Shutdown stops and
 joins Core work before stopping and joining RendererHost, then destroys the
-Canvas `HWND`; the stopped Canvas unregister is a safe no-op. No sink or
-notification target outlives its owner. A renderer-held snapshot may outlive
+Canvas `HWND`; the stopped Canvas unregister is a safe no-op. A non-final
+workspace first retargets Core notifications and atomically unregisters all of
+its snapshot sinks under their respective publication locks, so neither a sink
+nor notification target outlives its owner. A renderer-held snapshot may outlive
 Core until RendererHost shutdown because it independently owns all borrowed
 storage and is released by the Rust snapshot release function.

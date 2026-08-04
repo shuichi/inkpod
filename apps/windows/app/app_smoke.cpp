@@ -247,6 +247,7 @@ bool ValidateFixedResourceScenario(
         || usage.document_view_count != expected_views
         || usage.editor_group_count != expected_groups
         || usage.editor_canvas_count != expected_groups
+        || usage.registered_snapshot_sink_count != expected_groups
         || usage.auxiliary_canvas_count != expected_workspaces
         || usage.pane_instance_count != expected_workspaces * 10U
         || usage.thumbnails.budget_bytes == 0U
@@ -259,7 +260,7 @@ bool ValidateFixedResourceScenario(
             stderr,
             "G13 resource mismatch scenario=%s workspaces=%llu/%llu "
             "documents=%llu/%llu views=%llu/%llu groups=%llu/%llu "
-            "editor_canvases=%llu auxiliary_canvases=%llu panes=%llu "
+            "editor_canvases=%llu snapshot_sinks=%llu auxiliary_canvases=%llu panes=%llu "
             "thumbnail=%llu/%llu renderer_surfaces=%llu renderer_budget=%llu/%llu\n",
             scenario == nullptr ? "(null)" : scenario,
             static_cast<unsigned long long>(usage.workspace_window_count),
@@ -271,6 +272,8 @@ bool ValidateFixedResourceScenario(
             static_cast<unsigned long long>(usage.editor_group_count),
             static_cast<unsigned long long>(expected_groups),
             static_cast<unsigned long long>(usage.editor_canvas_count),
+            static_cast<unsigned long long>(
+                usage.registered_snapshot_sink_count),
             static_cast<unsigned long long>(usage.auxiliary_canvas_count),
             static_cast<unsigned long long>(usage.pane_instance_count),
             static_cast<unsigned long long>(usage.thumbnails.resident_bytes),
@@ -337,7 +340,8 @@ bool ValidateFixedResourceScenario(
     std::fprintf(
         stdout,
         "inkpod-g13-resource scenario=%s workspaces=%llu documents=%llu "
-        "views=%llu editor_canvases=%llu auxiliary_canvases=%llu panes=%llu "
+        "views=%llu editor_canvases=%llu snapshot_sinks=%llu "
+        "auxiliary_canvases=%llu panes=%llu "
         "core_tile_bytes=%llu history_bytes=%llu reference_bytes=%llu "
         "thumbnail_bytes=%llu renderer_bytes=%llu\n",
         scenario,
@@ -345,6 +349,7 @@ bool ValidateFixedResourceScenario(
         static_cast<unsigned long long>(usage.document_session_count),
         static_cast<unsigned long long>(usage.document_view_count),
         static_cast<unsigned long long>(usage.editor_canvas_count),
+        static_cast<unsigned long long>(usage.registered_snapshot_sink_count),
         static_cast<unsigned long long>(usage.auxiliary_canvas_count),
         static_cast<unsigned long long>(usage.pane_instance_count),
         static_cast<unsigned long long>(document_tile_bytes),
@@ -7519,12 +7524,18 @@ int RunG13ResourceScenarioSmoke(ApplicationHost& state) noexcept {
             source_first->ViewCount())) {
         return 1023;
     }
+    // Closing the split workspace must synchronously detach both Canvas sinks;
+    // the following activation publishes a snapshot immediately.
     SendMessageW(destination->windows.window, WM_CLOSE, 0, 0);
     if (state.Workspaces().Count() != 1U
+        || !ValidateFixedResourceScenario(
+            state, "workspace-close", 1U, 4U, 4U, 2U)
         || !state.ActivateDocumentView(third.view)
         || !DispatchEnabledCommand(
             state, source->windows.window, IDM_EDITOR_GROUP_CLOSE)
         || source->editors.GroupCount() != 1U
+        || !ValidateFixedResourceScenario(
+            state, "editor-group-close", 1U, 4U, 4U, 1U)
         || !state.ActivateDocumentView(first.view)
         || !state.CloseDocumentSession(large.session)
         || !state.CloseDocumentSession(third.session)

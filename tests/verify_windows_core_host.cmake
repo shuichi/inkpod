@@ -40,6 +40,9 @@ foreach(REQUIRED IN ITEMS
         "RebindSession("
         "CloseSession("
         "SetActiveSession("
+        "RetargetNotificationOwner("
+        "UnregisterSnapshotSinks("
+        "SnapshotSinkCount()"
         "InvokeAll("
         "SetSessionInitializer("
         "CoreSessionState"
@@ -65,7 +68,8 @@ foreach(REQUIRED IN ITEMS
         "state.pending_operations"
         "ReadCoreErrorOnCurrentThread()"
         "CoreNotificationKind::StateChanged"
-        "CoreNotificationKind::AsyncFailed")
+        "CoreNotificationKind::AsyncFailed"
+        "notification_owner_mutex")
     string(FIND "${SOURCE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "CoreHost implementation is missing: ${REQUIRED}")
@@ -108,6 +112,8 @@ endforeach()
 file(READ "${RUNTIME_SOURCE}" RUNTIME)
 foreach(REQUIRED IN ITEMS
         "TakeNotification("
+        "RetargetCoreNotificationsBeforeWorkspaceClose("
+        "UnregisterSnapshotSinks("
         "CoreNotificationKind::StateChanged"
         "CoreNotificationKind::AsyncFailed"
         "kDocumentSessionCommandScope")
@@ -132,6 +138,9 @@ file(READ "${TEST_SOURCE}" TEST)
 foreach(REQUIRED IN ITEMS
         "host.CreateSession(first"
         "host.CreateSession(second"
+        "host.RetargetNotificationOwner(owner, replacement_owner)"
+        "host.UnregisterSnapshotSinks("
+        "host.SnapshotSinkCount()"
         "first_info.document_id != second_info.document_id"
         "inkpod_core_undo"
         "inkpod_core_redo"

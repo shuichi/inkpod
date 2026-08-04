@@ -8291,6 +8291,86 @@ bool ConfirmAllDocuments(ApplicationHost& state) noexcept {
     return true;
 }
 
+bool RegisterWorkspaceSnapshotSinks(
+    ApplicationHost& state,
+    WorkspaceWindow& workspace) noexcept {
+    if (state.engine == nullptr
+        || workspace.editors.GroupCount() == 0U) {
+        return false;
+    }
+    std::array<renderer::CanvasSnapshotSink*,
+               inkpod::app::EditorArea::kMaximumGroups>
+        registered{};
+    std::size_t registered_count{};
+    for (std::size_t index = 0U;
+         index < workspace.editors.GroupCount(); ++index) {
+        const EditorGroup* group = workspace.editors.GroupAt(index);
+        renderer::CanvasSnapshotSink* sink = group == nullptr
+            ? nullptr
+            : renderer::GetCanvasSnapshotSink(group->canvas);
+        if (sink == nullptr || !state.engine->RegisterSnapshotSink(sink)) {
+            while (registered_count > 0U) {
+                --registered_count;
+                (void)state.engine->UnregisterSnapshotSink(
+                    registered[registered_count]);
+            }
+            return false;
+        }
+        registered[registered_count++] = sink;
+    }
+    return true;
+}
+
+bool UnregisterWorkspaceSnapshotSinks(
+    ApplicationHost& state,
+    WorkspaceWindow& workspace) noexcept {
+    if (state.engine == nullptr) {
+        return true;
+    }
+    const std::size_t group_count = workspace.editors.GroupCount();
+    if (group_count == 0U) {
+        return false;
+    }
+    std::array<renderer::CanvasSnapshotSink*,
+               inkpod::app::EditorArea::kMaximumGroups>
+        sinks{};
+    for (std::size_t index = 0U; index < group_count; ++index) {
+        const EditorGroup* group = workspace.editors.GroupAt(index);
+        renderer::CanvasSnapshotSink* sink = group == nullptr
+            ? nullptr
+            : renderer::GetCanvasSnapshotSink(group->canvas);
+        if (sink == nullptr
+            || std::find(sinks.cbegin(), sinks.cbegin() + index, sink)
+                != sinks.cbegin() + index) {
+            return false;
+        }
+        sinks[index] = sink;
+    }
+    for (std::size_t index = 0U; index < group_count; ++index) {
+        const EditorGroup* group = workspace.editors.GroupAt(index);
+        renderer::CancelCanvasStroke(group->canvas);
+    }
+    return state.engine->UnregisterSnapshotSinks(sinks.data(), group_count);
+}
+
+bool RetargetCoreNotificationsBeforeWorkspaceClose(
+    ApplicationHost& state,
+    WorkspaceWindowId closing,
+    HWND closing_window) noexcept {
+    if (state.engine == nullptr) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < state.Workspaces().Count(); ++index) {
+        const WorkspaceWindow* candidate = state.Workspaces().At(index);
+        if (candidate != nullptr && candidate->id != closing
+            && candidate->windows.window != nullptr) {
+            return state.engine->RetargetNotificationOwner(
+                closing_window, candidate->windows.window);
+        }
+    }
+    return false;
+}
+
 bool CloseWorkspaceWindow(ApplicationHost& state, HWND window) noexcept {
     inkpod::app::WorkspaceWindow* closing = state.WorkspaceForWindow(window);
     if (closing == nullptr || closing->windows.window != window
@@ -8352,9 +8432,15 @@ bool CloseWorkspaceWindow(ApplicationHost& state, HWND window) noexcept {
             return false;
         }
     }
+    if (!RetargetCoreNotificationsBeforeWorkspaceClose(
+            state, closing->id, closing->windows.window)
+        || !UnregisterWorkspaceSnapshotSinks(state, *closing)) {
+        return false;
+    }
     for (std::size_t index = 0U; index < session_count; ++index) {
         if (state.Documents().Find(sessions_to_close[index]) != nullptr
             && !state.CloseDocumentSession(sessions_to_close[index])) {
+            (void)RegisterWorkspaceSnapshotSinks(state, *closing);
             return false;
         }
     }
@@ -8363,6 +8449,7 @@ bool CloseWorkspaceWindow(ApplicationHost& state, HWND window) noexcept {
             views_to_close[index]);
         if (document != nullptr && document->ViewCount() > 1U
             && !state.CloseDocumentView(views_to_close[index])) {
+            (void)RegisterWorkspaceSnapshotSinks(state, *closing);
             return false;
         }
     }
@@ -8399,7 +8486,10 @@ bool CloseWorkspaceWindow(ApplicationHost& state, HWND window) noexcept {
         closing->subpalette_canvas_id = {};
     }
     const WorkspaceWindowId closing_id = closing->id;
-    DestroyWindow(window);
+    if (DestroyWindow(window) == FALSE) {
+        (void)RegisterWorkspaceSnapshotSinks(state, *closing);
+        return false;
+    }
     closing->windows.window = nullptr;
     if (!state.RemoveWorkspaceWindow(closing_id)) {
         return false;
@@ -9370,11 +9460,16 @@ inkpod::app::WorkspaceWindow* CreateWorkspaceWindow(
         nullptr,
         state.lifetime.instance,
         workspace);
-    if (window == nullptr) {
+    if (window == nullptr
+        || !RegisterWorkspaceSnapshotSinks(state, *workspace)) {
         if (workspace->subpalette_canvas_id) {
             (void)state.routing.targets.UnregisterAuxiliaryCanvas(
                 workspace->subpalette_canvas_id);
             workspace->subpalette_canvas_id = {};
+        }
+        if (window != nullptr) {
+            DestroyWindow(window);
+            workspace->windows.window = nullptr;
         }
         (void)state.RemoveWorkspaceWindow(created);
         (void)state.ActivateWorkspaceWindow(previous, false);
@@ -9398,13 +9493,24 @@ void DestroyEmptyWorkspaceWindow(
         return;
     }
     (void)state.ActivateWorkspaceWindow(workspace_id, false);
+    if (workspace->windows.window != nullptr
+        && (!RetargetCoreNotificationsBeforeWorkspaceClose(
+                state, workspace->id, workspace->windows.window)
+            || !UnregisterWorkspaceSnapshotSinks(state, *workspace))) {
+        (void)state.ActivateWorkspaceWindow(restore, false);
+        return;
+    }
     if (workspace->subpalette_canvas_id) {
         (void)state.routing.targets.UnregisterAuxiliaryCanvas(
             workspace->subpalette_canvas_id);
         workspace->subpalette_canvas_id = {};
     }
     if (workspace->windows.window != nullptr) {
-        DestroyWindow(workspace->windows.window);
+        if (DestroyWindow(workspace->windows.window) == FALSE) {
+            (void)RegisterWorkspaceSnapshotSinks(state, *workspace);
+            (void)state.ActivateWorkspaceWindow(restore, false);
+            return;
+        }
         workspace->windows.window = nullptr;
     }
     (void)state.RemoveWorkspaceWindow(workspace_id);

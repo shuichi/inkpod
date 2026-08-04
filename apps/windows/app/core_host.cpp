@@ -337,6 +337,37 @@ struct CoreHost::Impl final {
         return true;
     }
 
+    bool RetargetNotificationOwner(
+        HWND expected_owner,
+        HWND replacement_owner) noexcept {
+        if (expected_owner == nullptr || replacement_owner == nullptr
+            || expected_owner == replacement_owner
+            || IsWindow(replacement_owner) == FALSE) {
+            return false;
+        }
+        std::scoped_lock lock(notification_owner_mutex, state_mutex);
+        if (owner != expected_owner) {
+            return true;
+        }
+        for (const CoreNotification& notification : notifications) {
+            const UINT message = notification.kind
+                    == CoreNotificationKind::StateChanged
+                ? kCoreStateChanged
+                : kCoreAsyncFailed;
+            if (PostMessageW(
+                    replacement_owner,
+                    message,
+                    static_cast<WPARAM>(notification.token),
+                    static_cast<LPARAM>(
+                        notification.context.generation->Value()))
+                == FALSE) {
+                return false;
+            }
+        }
+        owner = replacement_owner;
+        return true;
+    }
+
     bool RegisterSnapshotSink(renderer::CanvasSnapshotSink* sink) noexcept {
         if (sink == nullptr) {
             return false;
@@ -355,17 +386,35 @@ struct CoreHost::Impl final {
         }
     }
 
-    bool UnregisterSnapshotSink(renderer::CanvasSnapshotSink* sink) noexcept {
-        if (sink == nullptr) {
+    bool UnregisterSnapshotSinks(
+        renderer::CanvasSnapshotSink* const* sinks,
+        std::size_t count) noexcept {
+        if (sinks == nullptr || count == 0U
+            || count > CoreHost::kMaximumSnapshotSinks) {
             return false;
         }
         std::lock_guard lock(state_mutex);
-        const auto found = std::find(snapshot_sinks.begin(), snapshot_sinks.end(), sink);
-        if (found == snapshot_sinks.end()) {
-            return false;
+        for (std::size_t index = 0U; index < count; ++index) {
+            if (sinks[index] == nullptr
+                || std::find(sinks, sinks + index, sinks[index]) != sinks + index
+                || std::find(
+                    snapshot_sinks.cbegin(),
+                    snapshot_sinks.cend(),
+                    sinks[index]) == snapshot_sinks.cend()) {
+                return false;
+            }
         }
-        snapshot_sinks.erase(found);
+        for (std::size_t index = 0U; index < count; ++index) {
+            const auto found = std::find(
+                snapshot_sinks.begin(), snapshot_sinks.end(), sinks[index]);
+            snapshot_sinks.erase(found);
+        }
         return true;
+    }
+
+    std::size_t SnapshotSinkCount() const noexcept {
+        std::lock_guard lock(state_mutex);
+        return snapshot_sinks.size();
     }
 
     bool RegisterDocumentView(
@@ -1396,12 +1445,17 @@ struct CoreHost::Impl final {
         const UINT message = kind == CoreNotificationKind::StateChanged
             ? kCoreStateChanged
             : kCoreAsyncFailed;
-        if (PostMessageW(
-                owner,
-                message,
-                static_cast<WPARAM>(token),
-                static_cast<LPARAM>(context.generation->Value()))
-            == FALSE) {
+        bool posted{};
+        {
+            std::lock_guard lock(notification_owner_mutex);
+            posted = PostMessageW(
+                         owner,
+                         message,
+                         static_cast<WPARAM>(token),
+                         static_cast<LPARAM>(context.generation->Value()))
+                != FALSE;
+        }
+        if (!posted) {
             CoreNotification ignored{};
             (void)TakeNotification(token, context.generation.value(), ignored);
         }
@@ -1425,6 +1479,7 @@ struct CoreHost::Impl final {
     }
 
     renderer::CanvasSnapshotSink* initial_canvas{};
+    mutable std::mutex notification_owner_mutex;
     HWND owner{};
 
     mutable std::mutex mutex;
@@ -1645,6 +1700,14 @@ InkpodStatus CoreHost::SetActiveView(std::uint64_t view_id) noexcept {
     return impl_->SetActiveView(binding.value(), view_id);
 }
 
+bool CoreHost::RetargetNotificationOwner(
+    HWND expected_owner,
+    HWND replacement_owner) noexcept {
+    return impl_ != nullptr
+        && impl_->RetargetNotificationOwner(
+            expected_owner, replacement_owner);
+}
+
 bool CoreHost::RegisterSnapshotSink(
     renderer::CanvasSnapshotSink* canvas) noexcept {
     return impl_ != nullptr && impl_->RegisterSnapshotSink(canvas);
@@ -1652,7 +1715,18 @@ bool CoreHost::RegisterSnapshotSink(
 
 bool CoreHost::UnregisterSnapshotSink(
     renderer::CanvasSnapshotSink* canvas) noexcept {
-    return impl_ != nullptr && impl_->UnregisterSnapshotSink(canvas);
+    return UnregisterSnapshotSinks(&canvas, 1U);
+}
+
+bool CoreHost::UnregisterSnapshotSinks(
+    renderer::CanvasSnapshotSink* const* canvases,
+    std::size_t count) noexcept {
+    return impl_ != nullptr
+        && impl_->UnregisterSnapshotSinks(canvases, count);
+}
+
+std::size_t CoreHost::SnapshotSinkCount() const noexcept {
+    return impl_ == nullptr ? 0U : impl_->SnapshotSinkCount();
 }
 
 bool CoreHost::RegisterDocumentView(

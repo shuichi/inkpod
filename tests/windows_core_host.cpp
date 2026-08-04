@@ -228,7 +228,8 @@ int wmain() {
     }
 
     CoreHost host;
-    if (host.Start(&sink, owner) != INKPOD_STATUS_OK || host.ThreadId() == 0U) {
+    if (host.Start(&sink, owner) != INKPOD_STATUS_OK || host.ThreadId() == 0U
+        || host.SnapshotSinkCount() != 1U) {
         DestroyWindow(owner);
         return 2;
     }
@@ -319,6 +320,7 @@ int wmain() {
         || host.RegisterSnapshotSink(&second_sink)
         || !registered_capacity
         || host.RegisterSnapshotSink(&rejected_sink)
+        || host.SnapshotSinkCount() != CoreHost::kMaximumSnapshotSinks
         || host.RegisterDocumentView(
             first, generation, second_frontend_view, second_core_view)
         || host.Invoke(
@@ -353,6 +355,66 @@ int wmain() {
         host.Stop();
         DestroyWindow(owner);
         return 5;
+    }
+
+    if (host.Invoke(
+            first,
+            generation,
+            [](InkpodCore*) { return INKPOD_STATUS_OK; },
+            false,
+            true) != INKPOD_STATUS_OK
+        || host.Invoke(
+               second,
+               generation,
+               [](InkpodCore*) { return INKPOD_STATUS_OK; },
+               false,
+               true) != INKPOD_STATUS_OK) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 24;
+    }
+    HWND replacement_owner = CreateWindowExW(
+        0,
+        L"STATIC",
+        L"inkpod-core-host-replacement-owner",
+        0,
+        0,
+        0,
+        0,
+        0,
+        HWND_MESSAGE,
+        nullptr,
+        GetModuleHandleW(nullptr),
+        nullptr);
+    if (replacement_owner == nullptr
+        || host.RetargetNotificationOwner(nullptr, replacement_owner)
+        || !host.RetargetNotificationOwner(owner, replacement_owner)) {
+        if (replacement_owner != nullptr) {
+            DestroyWindow(replacement_owner);
+        }
+        host.Stop();
+        DestroyWindow(owner);
+        return 24;
+    }
+    DestroyWindow(owner);
+    owner = replacement_owner;
+    if (!DrainNotifications(owner, host, first, second)
+        || host.Invoke(
+            first,
+            generation,
+            [](InkpodCore*) { return INKPOD_STATUS_OK; },
+            false,
+            true) != INKPOD_STATUS_OK
+        || host.Invoke(
+               second,
+               generation,
+               [](InkpodCore*) { return INKPOD_STATUS_OK; },
+               false,
+               true) != INKPOD_STATUS_OK
+        || !DrainNotifications(owner, host, first, second)) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 24;
     }
 
     std::wstring second_save_path;
@@ -415,12 +477,23 @@ int wmain() {
         DestroyWindow(owner);
         return 23;
     }
-    for (SnapshotSink& capacity_sink : capacity_sinks) {
-        if (!host.UnregisterSnapshotSink(&capacity_sink)) {
-            host.Stop();
-            DestroyWindow(owner);
-            return 23;
-        }
+    std::array<inkpod::renderer::CanvasSnapshotSink*,
+               CoreHost::kMaximumSnapshotSinks - 2U>
+        capacity_sink_ptrs{};
+    for (std::size_t index = 0U; index < capacity_sinks.size(); ++index) {
+        capacity_sink_ptrs[index] = &capacity_sinks[index];
+    }
+    std::array<inkpod::renderer::CanvasSnapshotSink*, 2U> invalid_sinks{
+        capacity_sink_ptrs.front(), &rejected_sink};
+    if (host.UnregisterSnapshotSinks(
+            invalid_sinks.data(), invalid_sinks.size())
+        || host.SnapshotSinkCount() != CoreHost::kMaximumSnapshotSinks
+        || !host.UnregisterSnapshotSinks(
+            capacity_sink_ptrs.data(), capacity_sink_ptrs.size())
+        || host.SnapshotSinkCount() != 2U) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 23;
     }
     const std::uint64_t second_sink_before_unmap =
         second_sink.submitted.load(std::memory_order_acquire);
@@ -439,6 +512,7 @@ int wmain() {
             != second_sink_before_unmap
         || !host.UnregisterSnapshotSink(&second_sink)
         || host.UnregisterSnapshotSink(&second_sink)
+        || host.SnapshotSinkCount() != 1U
         || host.Invoke(
                first,
                generation,

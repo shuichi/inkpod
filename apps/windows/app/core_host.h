@@ -143,8 +143,15 @@ public:
         Generation generation) noexcept;
     InkpodStatus FlushPreview() noexcept;
     InkpodStatus SetActiveView(std::uint64_t view_id) noexcept;
+    bool RetargetNotificationOwner(
+        HWND expected_owner,
+        HWND replacement_owner) noexcept;
     bool RegisterSnapshotSink(renderer::CanvasSnapshotSink* canvas) noexcept;
     bool UnregisterSnapshotSink(renderer::CanvasSnapshotSink* canvas) noexcept;
+    bool UnregisterSnapshotSinks(
+        renderer::CanvasSnapshotSink* const* canvases,
+        std::size_t count) noexcept;
+    [[nodiscard]] std::size_t SnapshotSinkCount() const noexcept;
     bool RegisterDocumentView(
         DocumentSessionId session,
         Generation generation,

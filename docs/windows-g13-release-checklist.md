@@ -86,8 +86,11 @@ English resources: Known difference — Japanese-only fallback
 Faulted shutdown: Pass | Fail | Blocked — evidence
 ```
 
-As of 2026-08-03, the automated x64 rows have executable coverage. The native
-ARM64 executables remain `Not Run` but are waived for G13.
+As of 2026-08-03, the automated x64 rows had executable coverage and the native
+ARM64 executables were `Not Run` under the then-current waiver. Native ARM64
+Debug/Release ABI, owner/Core/renderer, GUI, static-CRT, MSIX, and portable-ZIP
+coverage subsequently passed on 2026-08-04; the current record is in
+[`implementation-status.md`](implementation-status.md).
 
 ## Native x64 observation — 2026-08-03
 

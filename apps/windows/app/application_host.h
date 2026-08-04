@@ -36,6 +36,7 @@ struct ApplicationResourceUsage final {
     std::uint64_t document_view_count{};
     std::uint64_t editor_group_count{};
     std::uint64_t editor_canvas_count{};
+    std::uint64_t registered_snapshot_sink_count{};
     std::uint64_t auxiliary_canvas_count{};
     std::uint64_t pane_instance_count{};
     windows::ui::ThumbnailCacheUsage thumbnails{};

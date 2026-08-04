@@ -211,6 +211,9 @@ ApplicationResourceUsage ApplicationHost::ResourceUsage() const noexcept {
             usage.pane_instance_count += pane ? 1U : 0U;
         }
     }
+    if (engine != nullptr) {
+        usage.registered_snapshot_sink_count = engine->SnapshotSinkCount();
+    }
     usage.thumbnails = thumbnails_.Usage();
     if (renderer != nullptr) {
         usage.renderer = renderer->ResourceUsage();
