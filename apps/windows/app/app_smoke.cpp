@@ -7801,7 +7801,8 @@ int RunMultiWorkspaceWindowSmoke(ApplicationHost& state) noexcept {
     PumpPendingWindowMessages();
     InkpodDocumentInfo isolated_after{};
     InkpodDocumentInfo source_after_isolated_edit{};
-    if (!QueryDocument(state, isolated_after)
+    if (!state.ActivateDocumentView(isolated_view)
+        || !QueryDocument(state, isolated_after)
         || isolated_after.main_plane_checksum
             == isolated_before.main_plane_checksum
         || !state.ActivateDocumentView(source_view)
@@ -7903,7 +7904,8 @@ int RunMultiWorkspaceWindowSmoke(ApplicationHost& state) noexcept {
     cleanup_isolated_file();
     PumpPendingWindowMessages();
     InkpodDocumentInfo reopened_dirty{};
-    if (!QueryDocument(state, reopened_dirty)
+    if (!state.ActivateDocumentView(reopened_view)
+        || !QueryDocument(state, reopened_dirty)
         || (reopened_dirty.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
         return 818;
     }

@@ -9,9 +9,657 @@ schema change before code freeze must increment the format's top-level version;
 changing only a section or record version is not a substitute. The current
 schema should be replaced whenever a more robust or efficient design is found.
 
-## Container layout
+## Procedure-authoritative successor contract
 
-The file separates a manifest from binary tile blobs:
+This section is the approved contract for the successor procedure-authoritative
+container. It reserves top-level format version 3 and replay epoch 1, but no v3
+reader or writer exists yet. Version 2 remains the exact current version until
+the format cutover is implemented and tested atomically; production code must
+not emit a partially implemented v3 file. Any schema or replay-semantics change
+after this contract increments the top-level version before that change is
+merged. A replay-result change also increments the replay epoch.
+
+The authoritative sections are `META`, `GENS`, `ASST`, `PROC`, and `EDIT`.
+`CKPT` and `EXTM` are optional. There is no `HIST` section: history moves and
+branch cuts are records in `PROC`, while cursor, active branch, savepoints, and
+ID high-watermarks are fields in `META`. A materialized document or checkpoint
+is never sufficient without Genesis, retained assets, and the procedure/control
+event journal.
+
+### Canonical scalar and rounding contract
+
+- All serialized integers are little-endian fixed-width values. Boolean values
+  are `u8` 0 or 1; other values are invalid. Reserved bits and bytes are zero.
+- Canonical document geometry uses a signed `i64` with 16 fractional bits:
+  one document pixel is 65,536 units. The inclusive supported input range is
+  -16,777,216 through +16,777,216 document pixels before scaling; individual
+  primitives may impose the tighter existing vector or image bounds.
+- Pixel indices and half-open raster bounds remain integral. A point exactly on
+  the lower/right document edge is outside the raster; a finite point inside a
+  pixel cell maps with mathematical floor after view-to-document conversion.
+- Finite IEEE-754 input is converted by decoding its sign, exponent, and
+  significand, scaling by 65,536, and rounding to nearest with ties to even.
+  Negative zero becomes zero. NaN, infinity, and a scaled result outside `i64`
+  or the primitive bound are invalid. Canonicalization must not use locale,
+  host floating-point rounding mode, or a platform `libm` result.
+- Exact colors remain tagged RGBA8 or RGBA16 straight-alpha sRGB. Normalized
+  pressure, opacity, and unit-interval parameters use `u16` 0 through 65,535;
+  intermediate division uses round-to-nearest, ties-to-even unless a primitive
+  schema explicitly fixes another integer rule. DPI remains positive `u32`
+  thousandths. Angles use `u32` turns where 2^32 units equal one full turn.
+
+These rules canonicalize procedure arguments. Display-only device coordinates,
+OS DPI, monitor state, and renderer antialiasing are not journal fields.
+
+### Stable primitive namespace and replay versioning
+
+`PrimitiveId` is a nonzero `u32`; `PrimitiveSchemaVersion` is a nonzero `u16`.
+IDs are never renumbered or reused, and a removed primitive leaves a tombstone
+in the primitive catalog. The family allocation is:
+
+| Inclusive ID range | Family |
+|---|---|
+| `0x0001_0001..0x0001_FFFF` | document, paper, frame, and document metadata |
+| `0x0002_0001..0x0002_FFFF` | layer and plane topology |
+| `0x0003_0001..0x0003_FFFF` | palette and document color metadata |
+| `0x0004_0001..0x0004_FFFF` | selection, clipboard commit, and transform |
+| `0x0005_0001..0x0005_FFFF` | raster paint and stroke |
+| `0x0006_0001..0x0006_FFFF` | fill and line cleanup |
+| `0x0007_0001..0x0007_FFFF` | filters, effects, alpha, and adjustment |
+| `0x0008_0001..0x0008_FFFF` | vector document edits |
+| `0x0009_0001..0x0009_FFFF` | Light Table, sequence, and import document edits |
+| `0x000A_0001..0x000A_FFFF` | reserved document-edit families |
+| `0x8000_0000..0xFFFF_FFFF` | reserved; never emitted by the built-in catalog |
+
+`0`, family headers `0x0001_0000` through `0x000A_0000`,
+`0x000B_0000..0x7FFF_FFFF`, and every otherwise unassigned value are reserved
+and invalid in a procedure. Values in
+`0x8000_0000..0xFFFF_FFFF` are also invalid in a built-in file; reserving that
+range does not define an extension mechanism. A reader accepts only IDs present
+in the exact catalog named by the header.
+
+The first vertical slice has fixed assignments: `SetMainLineColor` is
+`0x0003_0001/v1`, `ReplacePalette` is `0x0003_0002/v1`, and
+`ApplyRasterStroke` is `0x0005_0001/v1`. Adding a primitive consumes a new ID.
+Changing only its canonical argument layout while preserving the exact
+semantics increments its schema version. Changing validation, rounding, pixels,
+IDs, state digest, or any other replay result increments both `ReplayEpoch` and
+the top-level format version. Before format freeze the reader accepts only the
+exact current top-level version, replay epoch, primitive catalog digest, and
+primitive schema set; no compatibility decoder is retained.
+
+`semantics revision` is a nonzero `u32`, begins at 1, and increments whenever
+normative validation, state-transition, pixel, allocation, no-op, or work-charge
+semantics change. An argument-layout-only change that provably leaves every
+accepted input and replay result identical increments only the primitive schema
+version. Any change that can alter acceptance, an output ID, state bytes, or a
+digest increments semantics revision, `ReplayEpoch`, and the top-level format
+version together. A wording correction that changes no normative rule changes
+none of them. Revisions are never decremented or reused.
+
+The primitive catalog digest is computed over ascending entries containing
+primitive ID, schema version, canonical name, argument-schema digest, semantics
+revision, and work-formula ID. Query, view, transient, ingestion, export, and
+application command IDs are not `PrimitiveId` values.
+
+The M1 schemas are already closed here and require no further product choice:
+
+| Primitive | Canonical input-ID roles | Canonical arguments | Inline payload | Work formula ID |
+|---|---|---|---|---:|
+| `SetMainLineColor` | none | ordinal 1 = tagged exact-depth color | empty | 1 |
+| `ReplacePalette` | none | ordinal 1 = ordered color sequence (`u64` count, then length-framed tagged colors) | empty | 2 |
+| `ApplyRasterStroke` | role 1 = target Plane ID | ordinals 1 tool `u32` (1 Pencil, 2 Brush, 3 Eraser), 2 tagged exact-depth color, 3 positive Q16 diameter `i64`, 4 auto-erase boolean, 5 pressure-size boolean | `u64` sample count, then exactly 24 bytes per sample: Q16 x `i64`, Q16 y `i64`, pressure `u16`, six zero bytes | 3 |
+
+All stroke samples are canonical document coordinates; role-based active plane,
+view/device coordinates, pan/zoom/flip, and OS DPI are resolved before the
+procedure is formed. The three work formula IDs are respectively constant 1,
+`1 + palette entry count`, and sample count plus every clipped dab-bounding-box
+pixel tested. All three schemas have semantics revision 1, emit no output IDs,
+and use no assets in this first inline-bounded slice.
+
+For pressure canonicalization, the frontend value is an IEEE-754 binary32 or
+binary64 value in the closed interval 0 through 1. Its exact rational value is
+multiplied by 65,535 and rounded to nearest with ties to even; negative zero
+becomes zero. NaN, infinity, or an out-of-range value is invalid. A diameter
+source must be finite and greater than 0 through 256 pixels, preserving the
+existing public validation range; after the Q16 conversion its canonical value
+is `max(1, rounded_q16)`, hence 1 through 16,777,216. This single sub-Q16 clamp
+preserves acceptance of an existing positive subquantum diameter, whose dab
+radius is already zero. Canonicalization failure publishes no procedure or
+state.
+
+`ApplyRasterStroke/v1` fixes the following integer raster semantics. These are
+the journal semantics; begin/append preview batching cannot change them.
+
+1. Resolve and validate the stable target Plane ID before execution. MainLine
+   BinaryMask8/Grayscale8/Grayscale16 draw values are the format maximum; color
+   and raster StraightRgba8 planes use the RGBA8 argument; StraightRgba16
+   expands each channel by 257. Eraser uses the all-zero value. Other formats,
+   a missing/noneditable plane, or a stale base is invalid.
+2. Convert a Q16 center to a raster cell with mathematical floor division by
+   65,536, including for negative values. Pencil always has radius zero. For
+   Brush/Eraser let `p' = pressure_size ? max(pressure, 655) : 65,535`, let
+   `d' = round_ties_even(diameter_q16 * p' / 65,535)`, and let radius be
+   `max(0, ceil((d' - 65,536) / 131,072))`. All products use checked signed
+   128-bit intermediates.
+3. Compute the maximum radius with the greatest canonical sample pressure and
+   clip each consecutive Q16 segment to the closed expanded center rectangle
+   `[-r*65,536, (width+r)*65,536]` by exact-rational Liang-Barsky clipping.
+   Parallel-outside segments are empty. Compare rational clip parameters by
+   cross multiplication; interpolate clipped x/y and pressure once, rounding
+   to nearest with ties to even. No floating-point or `libm` operation occurs.
+4. Rasterize clipped endpoint cells with the signed Bresenham recurrence:
+   `dx=abs(x1-x0)`, `sx=(x0<x1?1:-1)`, `dy=-abs(y1-y0)`,
+   `sy=(y0<y1?1:-1)`, `error=dx+dy`; visit the current cell, then update x when
+   `2*error>=dy` and y when `2*error<=dx`, until the end cell is visited. Let
+   `steps=max(dx,-dy,1)` and at visited step `i` use
+   `round_ties_even((p0*(steps-i)+p1*i)/steps)`. A one-sample stroke rasterizes
+   that sample once. Each later segment includes both endpoints, matching the
+   interactive continuation contract.
+5. For every dab, enumerate the complete `(2r+1)` square in ascending y offset
+   then ascending x offset. Every enumerated candidate consumes one primitive
+   work unit. Paint it only when `xoff^2+yoff^2<=r^2` and the cell is within
+   `[0,width) x [0,height)`. Checked 128-bit arithmetic is used for squares and
+   work. Multiple visits are allowed; the last identical desired value wins.
+6. Pencil auto-erase samples the first canonical sample cell before staging. If
+   it is in bounds and already equals that stroke's draw value, the whole
+   stroke uses the erase value; otherwise it uses the draw value. Auto-erase is
+   ignored by Brush/Eraser. A completed stroke that changes no pixel is a
+   semantic no-op and emits no Commit, ID, revision, history, or dirty change.
+
+The rational clipping endpoints and pressure are reduced only for overflow-safe
+comparison; reduction does not alter their value. A zero denominator, overflow,
+resource-limit excess, or inability to represent an interpolated canonical
+value rejects the whole staged primitive. This closes the pixel and work result
+for M1 without retaining the current runtime floating-point rasterizer as a
+second semantics owner.
+
+The schema-1 argument `value-kind` catalog is closed: 0 is the absent sentinel,
+1 Boolean (one byte, exactly 0 or 1), 2 U32 (four bytes), 3 Q16 document scalar
+(signed `i64`), 4 TaggedColor (tag 1 plus four RGBA8 bytes or tag 2 plus four
+little-endian RGBA16 channels), and 5 OrderedColorSequence (`u64` count, then
+`u64` element length plus one TaggedColor per element). Kind 0 is forbidden in
+a present argument; any other code is invalid. `ApplyRasterStroke/v1` narrows
+its kind-4 color to tag 1/length 5 because the public stroke contract is RGBA8;
+an RGBA16 target expands each channel by multiplication by 257. The two color
+metadata primitives accept either tag without depth conversion.
+
+Stable object-kind codes are 1 Document, 2 Project, 3 Cut, 4 Cell, 5 Frame, 6
+Sequence, 7 Layer, 8 Plane, 9 Guide, 10 LightTableSet, 11 LightTableItem, 12
+Adjustment, 13 VectorPath, and 14 VectorFill. Zero and unlisted codes are
+invalid. `ApplyRasterStroke/v1` input role 1 is required, has object kind 8,
+and names the exact target plane; the other M1 primitives have no ID roles.
+
+### Persistent identity and journal ordering
+
+Every persistent numeric ID is a little-endian nonzero `u64`. Genesis is
+`StateId(1)` on root `BranchId(1)`; the next state and branch values begin at 2.
+`ProcedureId` and `JournalEventId` begin at 1. `PrimitiveId` is the one stated
+`u32` exception, and `AssetId` is the full 32-byte `AssetDigest` rather than a
+numeric ID. Optional IDs use an explicit presence field and never encode zero as
+`None`.
+
+A document-wide stable-object cursor begins at 1 and allocates typed document,
+project, cut, cell, frame, sequence, layer, plane, guide, Light-Table set/item,
+adjustment, vector-path, and vector-fill IDs from one non-reusing namespace.
+The object kind is part of every typed reference, so equal numeric values of
+different kinds are invalid even though allocation uses one cursor. Each
+`next_*` value in `META` is the first unallocated value, not the last allocated
+value, and may not exceed `0x7FFF_FFFF_FFFF_FFFF`.
+
+`DocumentRevision` is not serialized. A newly created or successfully opened
+Core rebases it to 1 and increments it for each committed document change or
+actual history move in that Core generation. `EditorRevision` is a persisted,
+nonzero monotonic `u64`, starts at 1, and increments only for a semantic
+EditorState change. Persistent preconditions, history, and document savepoints
+use `StateId`; EditorState equality/savepoint uses `EditorStateDigest`.
+
+`PROC` is an append-only sequence of the following closed records. Each uses
+the common 16-byte record header defined below, then these exact payload bytes:
+
+- `Commit` has a 184-byte fixed prefix: `JournalEventId u64`, `ProcedureId
+  u64`, `PrimitiveId u32`, primitive schema `u16`, zero `u16`, replay epoch
+  `u32`, zero `u32`, parent `StateId u64`, committed `StateId u64`, post-commit
+  `BranchId u64`, argument/asset/input-ID/output-ID counts as four `u32`,
+  argument bytes length `u64`, inline payload length `u64`,
+  `DocumentStateDigest` before (32 bytes), `DocumentStateDigest` after (32
+  bytes), and `ProcedurePayloadDigest` (32 bytes). It is followed, in order,
+  by argument records, asset-reference records, input-ID records, output-ID
+  records, then inline payload bytes.
+- A canonical argument record is `ordinal u32`, `value-kind u16`, `presence
+  u8`, zero `u8`, `length u64`, and `length` bytes. Ordinals are consecutive
+  from 1 in the primitive schema. Presence 0 requires kind 0 and length 0;
+  presence 1 requires the schema's exact fixed/sequence kind. The concatenated
+  argument records must equal the prefix length exactly.
+- An asset-reference record is `argument ordinal u32`, zero `u32`, then the
+  32-byte `AssetId`. Input/output-ID records are `role ordinal u32`, typed
+  object-kind `u32`, and stable ID `u64`. Each sequence is strictly increasing
+  by ordinal with no duplicate role. The primitive schema fixes whether each
+  input/output role is required; transient object IDs are forbidden.
+- When payload length is zero, `ProcedurePayloadDigest` is 32 zero bytes and no
+  hash is compared. For a nonempty payload it is the digest of the one-field
+  canonical digest message whose field 1 is the exact inline payload bytes, and
+  it must match; a computed digest that happens to be all zero remains valid
+  because length, not the digest value, distinguishes absence. The procedure
+  schema defines the payload's canonical element framing.
+- `HistoryMove` is exactly 40 bytes: `JournalEventId u64`, kind `u8` where
+  1/2/3 = Undo/Redo/Jump, seven zero bytes, source `StateId u64`, destination
+  `StateId u64`, and the post-move active `BranchId u64`.
+- `BranchCut` is exactly 40 bytes: `JournalEventId u64`, fork `StateId u64`,
+  old active-tail `StateId u64`, new `BranchId u64`, and deactivated
+  `BranchId u64`. The fork belongs to the deactivated branch, the new branch is
+  previously unused, and the immediately following Commit uses that new branch
+  and names the fork as parent.
+
+Event IDs are strictly increasing by one and equal file order. Commit procedure
+and committed-state IDs are also strictly monotonic in their own namespaces.
+An Undo/Redo/Jump no-op emits nothing. Undo and Redo move only along the active
+branch. Jump may name any existing destination plus a post-move active branch
+whose ancestry path contains that destination; all other combinations are
+invalid. Whenever the cursor is not that active branch's tail, a new edit stages
+one `BranchCut` followed immediately by one `Commit`; their two event IDs are
+adjacent, the commit names only the new branch, and the cut is not duplicated in
+the commit. A commit at the active tail has no cut. Validation, execution, both
+records, state/history publication, and all high-watermark changes form one
+atomic publish batch. Failure, cancellation, stale base, overflow, or semantic
+no-op consumes no ID and appends no record.
+
+### Digest framing
+
+All semantic and container digests are BLAKE3-256 in derive-key mode. The exact
+ASCII context strings are:
+
+| Digest | Derive-key context |
+|---|---|
+| `DocumentStateDigest` | `org.inkpod.digest.document-state.v1` |
+| `EditorStateDigest` | `org.inkpod.digest.editor-state.v1` |
+| `JournalPrefixDigest` | `org.inkpod.digest.journal-prefix.v1` |
+| `AssetDigest` / `AssetId` | `org.inkpod.digest.asset.v1` |
+| asset chunk | `org.inkpod.digest.asset-chunk.v1` |
+| `ProcedurePayloadDigest` | `org.inkpod.digest.procedure-payload.v1` |
+| stored section bytes | `org.inkpod.digest.section-stored.v1` |
+| logical section bytes | `org.inkpod.digest.section-logical.v1` |
+| `FileRootDigest` | `org.inkpod.digest.file-root.v1` |
+| primitive catalog | `org.inkpod.digest.primitive-catalog.v1` |
+| primitive argument schema | `org.inkpod.digest.primitive-argument-schema.v1` |
+
+Every digest message uses the same canonical frame. It starts with digest-schema
+version `u32 = 1` and field count `u32`. Each field, in consecutive ordinal
+order starting at 1, is `ordinal u32`, `presence u8`, three zero bytes, byte
+length `u64`, then exactly that many bytes. Presence is 0 or 1. Absent is
+presence 0 plus length 0; present-empty is presence 1 plus length 0, so the two
+never collide. A required field is always present. No padding occurs between
+fields.
+
+A sequence field is `element-count u64`, then for every element `element-length
+u64` and exact element bytes. A schema-declared ordered sequence retains its
+semantic order. A set is sorted by unsigned lexicographic element bytes. A map
+is sorted by unsigned lexicographic canonical key bytes; duplicate canonical
+keys are invalid. Fixed-width integers are little-endian. UUID is the 16 RFC
+4122 network-order octets. UTF-8 is valid, unnormalized, and unterminated; its
+field/element length is the byte count. Nested values use this same frame with
+their own schema version. Unknown ordinals, missing required ordinals, nonzero
+reserved bytes, noncanonical order, and alternative encodings of the same value
+are invalid.
+
+The exact digest messages are:
+
+| Digest | Present fields in ordinal order |
+|---|---|
+| `DocumentStateDigest` | 1 document UUID; 2 stable Document ID; 3 paper; 4 frames/margins; 5 base surface; 6 ordered layer/plane tree; 7 persistent selection record; 8 palette; 9 main-line color; 10 guides; 11 grid; 12 Light Table; 13 project/cut/cell/frame/sequence identities and animation metadata; 14 required-extension sequence, empty in schema 1 |
+| `EditorStateDigest` | 1 editor-state schema `u32 = 1`; 2 active tool; 3 optional last color-consuming tool; 4 tool-keyed colors; 5 tool-keyed diameters; 6 fill options; 7 selection options; 8 vector options; 9 optional active layer; 10 optional active plane; 11 optional palette cursor; 12 editor-target/option records |
+| `JournalPrefixDigest` | 1 last included event count `u64`; 2 ordered sequence of the exact common-header-plus-payload `PROC` record bytes from event 1 through that count |
+| `AssetDigest` | 1 asset schema `u32 = 1`; 2 asset kind `u32`; 3 optional pixel format; 4 optional color space; 5 optional alpha semantics; 6 optional width; 7 optional height; 8 optional canonical stride; 9 logical element count `u64`; 10 logical payload length `u64`; 11 exact canonical logical payload bytes |
+| asset chunk | 1 `AssetId`; 2 chunk index `u32`; 3 logical offset `u64`; 4 exact chunk bytes |
+| `ProcedurePayloadDigest` | 1 exact nonempty inline payload bytes |
+| stored section | 1 FourCC bytes; 2 section version `u16`; 3 compression code `u32`; 4 exact on-disk section bytes |
+| logical section | 1 FourCC bytes; 2 section version `u16`; 3 exact post-decompression logical bytes |
+| `FileRootDigest` | 1 complete 128-byte header with only its FileRootDigest bytes zero; 2 exact directory bytes |
+| primitive catalog | 1 ordered sequence of catalog-entry frames |
+
+A primitive catalog entry frame has fields 1 `PrimitiveId u32`, 2 schema
+version `u16`, 3 canonical ASCII name, 4 32-byte argument-schema digest, 5
+semantics revision `u32`, and 6 work-formula ID `u32`. Entries are strictly
+ascending by PrimitiveId. The argument-schema digest uses the primitive-
+argument-schema context above and the universal digest frame. Its six fields
+are: 1 primitive schema version `u16`; 2 ordered argument-descriptor sequence; 3 ordered asset-role
+descriptor sequence; 4 ordered input-ID-role descriptor sequence; 5 ordered
+output-ID-role descriptor sequence; and 6 payload descriptor. Empty sequences
+are present-empty, not absent.
+
+An argument descriptor is a schema-1 frame with fields 1 ordinal `u32`; 2
+value-kind `u16`; 3 presence policy `u8` (1 Required, 2 Optional); 4 minimum
+encoded value length `u64`; 5 maximum encoded value length `u64`; 6 optional
+inclusive lower-bound value encoded in that same value kind; 7 optional
+inclusive upper-bound value; 8 element value-kind `u16` (zero for a scalar); 9
+minimum element count `u64`; and 10 maximum element count `u64`. Bounds are
+absent for nonnumeric values; scalar element counts are both zero. An asset-role
+descriptor is a schema-1 frame of role ordinal `u32` and presence policy `u8`.
+An ID-role descriptor is a schema-1 frame of role ordinal `u32`, object-kind
+`u32`, and presence policy `u8`. All descriptor sequences use consecutive
+ordinals from 1.
+
+The payload descriptor is a schema-1 frame with fields 1 payload schema `u16`;
+2 fixed element size `u32` (zero when not fixed); 3 minimum element count `u64`;
+4 maximum element count `u64`; 5 minimum byte length `u64`; and 6 maximum byte
+length `u64`. Payload schema 0 requires every other field to be zero and means
+the payload must be empty. For `ApplyRasterStroke/v1`, payload schema is 1,
+element size is 24, element count is 1 through 1,048,576, minimum length is 32,
+and maximum length is 25,165,832 (`8 + 24 * 1,048,576`). Its count prefix is
+outside the fixed-size elements. The other two M1 payload descriptors are all
+zero.
+
+The exact M1 argument descriptors are: `SetMainLineColor` ordinal 1, kind 4,
+Required, length 5..9; `ReplacePalette` ordinal 1, kind 5, Required, length
+8..69,640, element kind 4, count 0..4,096; `ApplyRasterStroke` ordinal 1 kind 2
+length 4 lower/upper 1/3, ordinal 2 kind 4 length 5..5, ordinal 3 kind 3 length
+8 lower/upper 1/16,777,216, and ordinals 4 and 5 kind 1 length 1..1. All are
+Required; omitted bounds are absent and scalar element counts are zero. Catalog
+names are the exact ASCII bytes `SetMainLineColor`, `ReplacePalette`, and
+`ApplyRasterStroke`. This descriptor frame, rather than a Rust type name or
+layout, is the sole argument-schema-digest input.
+
+`DocumentStateDigest` excludes document/editor revisions, history, paths, views,
+transient sessions, allocation/tile-cache state, and caches. Its nested schema
+is canonical as follows:
+
+- Paper is a frame ordering width/height `u32`, DPI x/y thousandths `u32`, and
+  color-space code `u32 = 1` for sRGB. Frames/margins order the hundred,
+  reference, drawing, and safe rectangles, then left/top/right/bottom margins.
+  A rectangle is Q16 x/y/width/height in that order and each margin is signed
+  Q16. The base surface is
+  discriminant 1 `SolidWhite` or 2 `Asset`, followed by an `AssetId` only for
+  discriminant 2.
+- Layers and planes retain document stacking order. A layer frame orders stable
+  ID, kind, UTF-8 name, visible, editable, normalized `u16` opacity, ordered planes,
+  and optional adjustment. A plane frame orders stable ID, kind, pixel format,
+  UTF-8 name, visible, editable, normalized `u16` opacity, optional raster, ordered
+  vector paths, and ordered vector fills. The closed plane-kind codes are 1
+  MainLine, 2 Color, 3 Raster, 4 Selection, 5 VectorMainLine, 6 ColorTrace, and
+  7 VectorFill. Layer-kind codes are 1 BinaryColoring, 2 GrayscaleColoring, 3
+  Raster, 4 Selection, 5 Frame, 6 VanishingPoint, 7 Adjustment, 8 Text, 9
+  Annotation, and 10 VectorColoring.
+  Existing thousandth opacity is canonicalized as
+  `round_ties_even(opacity_milli * 65,535 / 1,000)` after validating 0..1,000.
+- A raster frame orders width `u32`, height `u32`, canonical pixel format
+  `u32`, tile edge `u32 = 64`, and tiles sorted by `(tile_y, tile_x)`. A tile
+  orders `tile_x u32`, `tile_y u32`, valid width/height `u32`, then only valid
+  row-major pixels with no row padding. Missing tiles mean all-zero pixels;
+  all-zero stored tiles are forbidden. Pixel codes 1/2/3/4/5 are BinaryMask8,
+  Grayscale8, Grayscale16 little-endian, straight RGBA8, and straight RGBA16
+  little-endian. Premultiplied BGRA is display-only and invalid here.
+- The layer/plane tree contains editable document planes only. The persistent
+  selection record is a separate frame ordering selection Plane ID (object kind
+  8) and one BinaryMask8 raster frame; that ID may not occur in the editable
+  plane tree. Thus selection bytes occur exactly once and every selection
+  change changes the document digest. The stable Document ID in field 2 and all
+  tree/selection IDs must be distinct members of the one document namespace.
+- A color is tag `u8` 1 or 2 followed by RGBA8 bytes or four little-endian
+  RGBA16 channels. Palette order is semantic and retained. A vector path orders
+  path/owner IDs, color, closed boolean, and cubic segments; each segment orders
+  Q16 p0/p1/p2/p3 x/y then Q16 start/end width. A vector fill orders fill/owner
+  IDs, color, and boundary path IDs in boundary order.
+- Guides retain display order and order each stable ID, axis code, and Q16
+  position; axis 1/2 is Horizontal/Vertical. The Light-Table frame orders an
+  optional active-set ID and ordered sets. A set orders ID, UTF-8 name, normalized
+  `u16` global opacity, and ordered items. An item orders ID, canonical AssetId,
+  UTF-8 name, visible, normalized `u16` opacity, display-mode code 1/2/3 for
+  Color/Monotone/Halftone, exact display color, Q16 translate x/y and scale x/y,
+  then `u32` turn rotation.
+  The grid frame orders Q16 origin x/y, positive Q16 spacing x/y, then nonzero
+  subdivisions `u32`; current integer grid values are multiplied by 65,536.
+  The hierarchy frame orders optional Project ID, optional Cut ID, required
+  Cell ID, ordered animation-frame records, and ordered sequence records. A
+  frame record orders Frame ID and zero-based display ordinal `u32`. A sequence
+  record orders Sequence ID, UTF-8 name, and an ordered sequence of Frame IDs;
+  each referenced frame must occur in the frame-record sequence. In schema 1 a
+  standalone cell has absent Project/Cut IDs and may have empty frame/sequence
+  lists; creating a successor-format Genesis allocates its distinct Cell ID
+  explicitly. Collections whose UI order is not semantic are ID-sorted.
+- An adjustment frame orders kind, channel, interpolation, six signed `i32`
+  parameters, and an ordered point sequence of `(input u16, output u16)`.
+  Kinds 1/2/3 are BrightnessContrast, ToneCurve, and Levels; channels 0/1/2/3/4
+  are NotApplicable/Rgb/Red/Green/Blue; interpolation 0/1/2 is
+  NotApplicable/Bezier/BSpline. Unused parameters are zero. Brightness/contrast
+  occupy parameters 1/2; Levels orders input shadow, input gamma thousandths,
+  input highlight, output shadow, and output highlight in parameters 1..5.
+
+`EditorStateDigest` option records are frames ordered by nonzero stable
+`EditorOptionId u32`; each contains ID, value-kind, and canonical value bytes.
+Tool-keyed maps use nonzero stable `ToolId u32` ascending. This closed catalog,
+including defaults, is part of the EDIT schema; adding or changing an option or
+default changes the top-level version. Editor revision, savepoint,
+and the digest field itself are excluded.
+
+For raster assets, canonical stride is exactly width times bytes per pixel and
+payload is top-to-bottom row-major bytes without padding. Vector/sample assets
+use the sequence framing above and Q16 scalar rules. Chunking never changes
+`AssetId`: payload is split deterministically at 4 MiB boundaries only for
+storage, and chunk descriptors are verified separately against the asset
+payload. Encoded source bytes, path, file name, and provenance are never
+`AssetDigest` input.
+
+Asset-kind codes 1/2/3 are CanonicalRaster, CanonicalVectorStream, and
+CanonicalSampleStream. Raster pixel-format codes are the five canonical codes
+above; width, height, stride, and element count are required. Color-space code
+1 is sRGB and is present only for color rasters. Alpha-semantics codes 1/2/3
+are Opaque, Straight, and CoverageMask. Vector/sample assets omit pixel/color/
+alpha/dimension/stride fields and define their element record through their
+primitive schema. Unknown codes are invalid, not optional extensions.
+
+Self-referential digest fields are present as thirty-two zero bytes during
+calculation. The only absent-digest sentinel is paired with an explicit absent
+presence bit. The empty inline procedure payload instead stores 32 zero bytes
+under the length-zero rule above; no digest comparison is performed. Thus every
+zero rule is unambiguous. Directory entries cover section payloads through both
+section digests, while independently validated zero padding has no semantic
+content.
+
+The approved Rust implementation is the official `blake3` crate pinned and
+featured exactly as recorded in `third-party-notices.md`; its portable/SIMD
+backend choice does not change digest output. The crate is not added to the
+production dependency graph until the first digest implementation lands.
+
+### Header, directory, and record bytes
+
+The v3 header is exactly 128 bytes:
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 8 | magic bytes `49 4E 4B 50 4F 44 00 00` |
+| 8 | 4 | top-level format version = 3 |
+| 12 | 4 | replay epoch = 1 |
+| 16 | 4 | header size = 128 |
+| 20 | 4 | required flags = 0 |
+| 24 | 8 | total file length |
+| 32 | 8 | section-directory offset |
+| 40 | 4 | section count |
+| 44 | 4 | directory-entry size = 128 |
+| 48 | 32 | primitive catalog digest |
+| 80 | 32 | file-root digest |
+| 112 | 16 | zero reserved bytes |
+
+Each directory entry is exactly 128 bytes:
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 4 | ASCII section FourCC |
+| 4 | 2 | section schema version |
+| 6 | 2 | flags: bit 0 critical, bit 1 opaque-preserve; other bits zero |
+| 8 | 4 | compression code: 0 = None |
+| 12 | 4 | required alignment = 8 |
+| 16 | 8 | stored-byte offset |
+| 24 | 8 | stored-byte length |
+| 32 | 8 | logical-byte length |
+| 40 | 8 | record count |
+| 48 | 32 | stored-byte digest |
+| 80 | 32 | logical-byte digest |
+| 112 | 16 | zero reserved bytes |
+
+Directory entries are sorted by unsigned FourCC bytes then section version,
+regardless of physical section order. Known sections are singletons. Section and
+directory offsets are 8-byte aligned; all gap/padding bytes are zero. Ranges may
+not overlap the header, directory, another section, or exceed total length.
+There are no trailing bytes beyond total length. Initial readers accept only
+compression None, so stored and logical lengths/bytes are identical while both
+domain-separated digests remain mandatory. Unknown critical sections are
+rejected. Unknown optional sections require the opaque-preserve flag and are
+retained byte-for-byte through save.
+
+Logical section bytes are packed records with no implicit alignment or padding.
+Every record starts with `u16 kind`, `u16 record schema version`, `u32 flags`,
+and `u64 payload length`, followed by that many payload bytes. Record flags are
+zero unless the owning section schema defines them. Directory `record_count`
+must consume the logical range exactly. Unknown record kinds or record schema
+versions in a known section are invalid; only `EXTM` records are opaque.
+
+Required-section identity is closed and exact:
+
+| FourCC | Section version | Directory flags | Cardinality / record kinds |
+|---|---:|---:|---|
+| `META` | 1 | critical | exactly one kind-1/v1 record |
+| `GENS` | 1 | critical | exactly one kind-1/v1 record |
+| `ASST` | 1 | critical | one section; zero or more kind-1 descriptor plus kind-2 chunk records |
+| `PROC` | 1 | critical | one section; zero or more kind-1 Commit, kind-2 HistoryMove, kind-3 BranchCut records |
+| `EDIT` | 1 | critical | exactly one kind-1/v1 record |
+| `CKPT` | 1 | 0 | zero or one kind-1/v1 record |
+| `EXTM` | 1 | opaque-preserve | zero or one section of opaque records |
+
+All five required sections must occur once even when `ASST` or `PROC` has no
+records. Required sections set directory critical bit 0; `EXTM` sets only bit 1.
+`CKPT` is known optional and sets neither bit. Unknown optional sections must
+set only opaque-preserve and are retained as exact stored bytes and their exact
+directory descriptor, except that physical offset is reassigned on save.
+
+`META` kind-1 payload is a schema-1 canonical frame with these ordinals:
+
+1. document UUID (16 bytes)
+2. replay epoch (`u32`)
+3. primitive catalog digest (32 bytes)
+4. current `StateId` (`u64`)
+5. zero-based history cursor (`u64`; Genesis is 0)
+6. active `BranchId` (`u64`)
+7. optional document-savepoint `StateId`
+8. optional editor-savepoint digest
+9. next stable-object ID (`u64`)
+10. next `ProcedureId` (`u64`)
+11. next `StateId` (`u64`)
+12. next `JournalEventId` (`u64`)
+13. next `BranchId` (`u64`)
+14. Commit/procedure count (`u64`)
+15. all-journal-event count (`u64`)
+16. asset count (`u64`)
+17. editor record count (`u64`, exactly 1)
+18. expected current `DocumentStateDigest`
+19. expected `EditorStateDigest`
+20. expected full `JournalPrefixDigest`
+
+The cursor counts visible states after Genesis on the active branch and must
+resolve to current StateId; the two redundant values are validated. Counts,
+high-watermarks, referenced IDs, and the actual sections/journal graph must
+agree exactly.
+
+`GENS` kind-1 payload is a schema-1 frame: 1 document UUID; 2 Genesis
+`StateId(1)`; 3 root `BranchId(1)`; 4 the exact canonical Genesis document-state
+frame described above; 5 its `DocumentStateDigest`. It therefore includes
+paper, DPI, sRGB, frames/margins, initial typed topology/IDs, and base-surface
+discriminant/reference explicitly. No replay default comes from the build.
+
+`EDIT` kind-1 payload is a schema-1 frame: 1 editor-state schema `u32 = 1`; 2
+persisted `EditorRevision u64`; 3 exact canonical EditorState frame; 4 its
+`EditorStateDigest`. Revision starts at 1, is excluded from the digest, and the
+stored digest must match both the frame and `META`.
+
+An `ASST` kind-1 descriptor payload is a schema-1 frame whose ordinals are 1
+`AssetId`; 2 asset schema; 3 kind; 4 optional pixel format; 5 optional color
+space; 6 optional alpha semantics; 7 optional width; 8 optional height; 9
+optional canonical stride; 10 element count; 11 logical payload length; 12
+fixed chunk size `u32 = 4,194,304`; 13 ordered chunk-descriptor sequence. Each
+chunk descriptor orders index `u32`, logical offset `u64`, length `u32`, and
+32-byte asset-chunk digest. Chunks are a gap-free partition beginning at offset
+0; every nonfinal chunk has the fixed size and the final chunk is nonempty.
+
+The descriptor is immediately followed by its kind-2 chunk records in ascending
+index; asset groups are sorted by unsigned `AssetId`. A kind-2 payload is
+`AssetId[32]`, index `u32`, zero `u32`, logical offset `u64`, byte length `u32`,
+zero `u32`, asset-chunk digest `[32]`, then exact bytes. Concatenated bytes must
+match the descriptor's length and recomputed `AssetId`. A zero-length logical
+asset has no chunks. Provenance belongs in `EXTM`, not canonical asset records.
+
+`CKPT` kind-1 payload is a schema-1 frame: 1 checkpoint epoch `u32 = 1`; 2
+included journal-event count; 3 matching `JournalPrefixDigest`; 4 materialized
+`StateId`; 5 matching `DocumentStateDigest`; 6 exact canonical materialized
+document-state frame. Invalid section/record digest, structure, or resource
+bounds rejects the whole file. If structure is valid but checkpoint epoch,
+prefix digest, StateId, or state digest does not match the authoritative journal,
+the reader ignores the checkpoint and performs full replay. Failure of that
+full replay or its final authoritative digest rejects the file.
+
+### Exact resource limits
+
+Limits are checked with overflow-safe arithmetic before allocation, replay, or
+live-Core replacement. Compression None makes stored and logical totals equal;
+adding compression requires a new top-level version and explicit decompression-
+work limits.
+
+| Resource | Maximum |
+|---|---:|
+| total `.inkpod` bytes | 1 GiB (`1,073,741,824`) |
+| section-directory entries | 64 |
+| bytes in one logical section | 768 MiB |
+| required plus preserved optional logical bytes | 1 GiB |
+| procedures / Commit records | 1,048,576 |
+| all journal events | 2,097,152 |
+| branches | 65,536 |
+| any numeric persistent-ID high-watermark | `0x7FFF_FFFF_FFFF_FFFF` |
+| canonical argument bytes in one procedure | 1 MiB |
+| inline canonical payload in one procedure | 32 MiB |
+| one complete `PROC` record | 40 MiB |
+| total `PROC` logical bytes | 512 MiB |
+| immutable assets | 65,536 |
+| one asset logical payload | 512 MiB |
+| one asset chunk | 4 MiB |
+| total asset logical payload | 768 MiB |
+| all live or journal-retained stable objects | 1,048,576 |
+| document/project/cut/sequence objects | 1 / 1,024 / 1,024 / 1,024 |
+| cells / frames | 65,536 / 100 per cell |
+| layers / persisted planes / guides | 4,096 each |
+| Light Table sets / items | 256 / 4,096 |
+| vector paths / segments / fills / boundary refs | 65,536 / 262,144 / 65,536 / 262,144 |
+| palette entries | 4,096 |
+| raster width or height | 1,048,576 pixels |
+| materialized pixels visited by one image edit | 67,108,864 |
+| sparse tiles in one raster / all retained rasters | 262,144 / 1,048,576 |
+| canonical raster bytes in one asset or checkpoint / all decoded at open | 512 MiB / 768 MiB |
+| UTF-8 node name / general string | 1 KiB / 32 KiB |
+| `EDIT` logical bytes | 4 MiB |
+| all opaque optional `EXTM` bytes | 16 MiB |
+| one checkpoint logical payload | 512 MiB |
+| stroke samples in one canonical procedure | 1,048,576 |
+| total replay work units | 1,100,000,000 |
+
+Work is summed with checked `u64` arithmetic using exactly
+`W = journal_event_count + ceil(B / 64) + sum(primitive_execution_charge)`.
+`B` is the aggregate of every Commit's argument-record byte length, every
+Commit's inline-payload byte length, and every distinct asset's canonical
+logical-payload byte length; it excludes record headers, directory bytes, and
+checkpoints. The ceiling is applied once to that aggregate. Formula 1 charges
+1; formula 2 charges `1 + palette_entry_count`; formula 3 charges
+`stroke_sample_count + sum((2*radius_at_dab+1)^2)` over every dab visited by
+the exact rasterizer above, including candidates outside the circle/document
+and repeated segment endpoints. Thus event, decode, sample, and candidate costs
+are each counted exactly once. Future vector/output-pixel primitives must state
+their charge in their catalog descriptor before they can be emitted.
+
+Every primitive catalog entry selects one closed nonzero work-formula ID; there
+is no implementation-selected surcharge. A new formula or changed charge
+requires a semantics revision, top-level format version, and replay epoch
+change. Exceeding a count, byte, object, or work limit rejects the entire staged
+open/replay without changing the live Core or existing file.
+
+## Current v2 container layout
+
+The current production v2 file separates a manifest from binary tile blobs:
 
 ```text
 32-byte header

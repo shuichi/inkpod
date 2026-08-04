@@ -58,6 +58,95 @@ the responsibility split, `cfg(test)` gating, recursive CMake tracking, ABI
 header/export parity, direct contract-test references, and the absence of
 Windows dependencies throughout the Rust workspace.
 
+## Primitive, route, and journal target contract
+
+The procedure-history redesign keeps one machine-readable inventory in
+[`primitive-route-inventory.md`](primitive-route-inventory.md). It covers every
+public `Core` method, every exported C ABI function, and every production
+Windows command. Each route has exactly one of these semantic classes:
+
+| Class | Meaning |
+|---|---|
+| `document-primitive` | Creates Genesis or commits one atomic document meaning change |
+| `history-control-event` | Performs an actual Undo, Redo, or history jump and records that move |
+| `editor-state-command` | Changes document-session editing state without document history |
+| `view-only-command` | Changes a logical view or frontend presentation only |
+| `transient-preview-stroke` | Begins, updates, cancels, or owns uncommitted staging state |
+| `query-snapshot` | Observes state or builds immutable output without semantic mutation |
+| `asset-data-plane` | Ingests, copies, exports, saves, or releases bounded bulk data |
+| `os-application-adapter` | Owns path authority, application preferences, windows, jobs, and shell orchestration |
+
+Classification precedence is the committed effect, not the name of an entry
+point. A stroke/filter/floating apply endpoint is a document primitive; its
+begin/update/cancel calls are transient. A function that ingests bytes and then
+commits a document is a document primitive at the commit route and data-plane at
+the ingestion route. Query and application wrappers never become primitives
+merely because they call Core.
+
+New and raster-import-as-document create Genesis and are document-primitive
+routes. Open/recovery/whole revert instead stage and replace an entire Core
+generation from the native data plane; they are lifecycle/data-plane routes and
+do not append an Import procedure to the document being replaced. Sequence
+source ingestion configures bounded external cell data and is data-plane until
+an explicit active-cell/editor target or Import primitive is invoked. Export,
+copy, and save likewise remain data-plane operations.
+
+`document-primitive` and `history-control-event` routes have `rust-core` as
+their semantic owner on the Rust, C ABI, and Windows surfaces. The FFI and
+Windows entries are adapters to that owner and may not be catalogued as a C++
+feature implementation. The architecture guard compares the inventory with
+every public `Core` method, source-derived public non-Core in-place/file
+mutation, all C exports, and `app.rc`; a missing route,
+duplicate class/owner, unknown class, stale entry, or C++ document/history owner
+fails the build. Low-level `inkpod-image` in-place values and `inkpod-format`
+atomic file helpers are catalogued separately because they cannot publish a live
+Core transaction by themselves.
+
+The target control flow for a document primitive is:
+
+```text
+typed frontend request
+  -> validate session/generation/base revision/target IDs
+  -> copy or resolve bounded Rust-owned data-plane input
+  -> canonicalize coordinates, colors, options, payload, and output IDs
+  -> execute against private working state
+  -> reject invalid/no-op/cancel/stale/overflow/resource failure
+  -> atomically publish document + StateId + history + journal + revision
+     + dirty/cache invalidation + all high-watermarks
+```
+
+The control plane contains only fixed-width values and Rust-owned object/asset
+IDs. A borrowed C record is call-by-value in meaning and is not retained after
+return. Variable samples, paths, encoded images, and clipboard payloads enter
+through bounded data-plane APIs. A committed procedure contains bounded inline
+canonical bytes or immutable content-addressed `AssetId` values, never a raw
+pointer, path, native enum layout, callback, STL object, temporary object ID, OS
+DPI, or frontend command ID.
+
+The persistent journal is the closed sequence `Commit`, `HistoryMove`, and
+`BranchCut`. `Commit` contains one canonical procedure and its parent/committed
+StateIds. `HistoryMove` changes the cursor without creating a history item.
+Whenever the cursor is not the active branch tail (whether reached by Undo or a
+backward/cross-branch Jump), `BranchCut` precedes the new commit; both records
+publish atomically and the inactive branch remains retained. A Jump record names
+the post-move active branch, which must contain the destination on its ancestry
+path; a commit at that branch's tail needs no cut. Invalid, failure, cancel,
+stale, overflow, semantic no-op, query, preview update, and stroke sample calls
+emit no journal entry and consume no persistent ID.
+
+Persistent `StateId` names Genesis and committed semantic document states.
+Session-local `DocumentRevision` exists only for stale request detection and is
+rebased when a Core opens; it is never serialized. Persisted `EditorRevision`
+and `EditorStateDigest` are separate from document history. Exact ID start,
+ordering, canonical fixed-point, digest framing, and resource-limit rules live
+in [`file-format.md`](file-format.md).
+
+This is an enforced ownership and serialization target, not a claim that the
+current v2 materialized-state codec or current v2 ABI already implements
+procedure replay. The inventory records the current wrappers and known adapter
+composition gaps so later vertical slices can delegate them to the canonical
+executor without creating two semantic implementations.
+
 ## Windows frontend ownership
 
 The private dependency direction is:
@@ -251,7 +340,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 330 production commands exactly one
+The fixed command-state catalog assigns all 331 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no

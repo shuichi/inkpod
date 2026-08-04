@@ -11,6 +11,7 @@ inkpod-image = { path = "../inkpod-image" }
 
 [dev-dependencies]
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
+syn = { version = "2.0.119", default-features = false, features = ["full", "parsing"] }
 
 [[bench]]
 name = "core_workflows"
