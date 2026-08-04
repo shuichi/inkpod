@@ -268,18 +268,7 @@ impl Core {
         }
         let mut tiles = Vec::with_capacity(coords.len());
         for coord in &coords {
-            let source_revision = document
-                .layers
-                .iter()
-                .filter(|layer| layer.visible)
-                .flat_map(|layer| layer.planes.iter())
-                .filter(|plane| plane.visible)
-                .map(|plane| plane.raster.tile_revision(*coord))
-                .max()
-                .unwrap_or(0)
-                .max(document.light_table.source_revision())
-                .max(document.selection.tile_revision(*coord));
-            let source_revision = RenderRevision::from_raw(source_revision);
+            let source_revision = semantic_tile_source_revision(document, *coord);
             if cache
                 .get(coord)
                 .is_none_or(|tile| tile.source_revision != source_revision)
@@ -367,6 +356,57 @@ impl Core {
             vector_segments: Vec::new(),
             vector_fills: Vec::new(),
         })
+    }
+}
+
+fn semantic_tile_source_revision(document: &CellDocument, coord: TileCoord) -> RenderRevision {
+    let mut hasher = blake3::Hasher::new_derive_key("org.inkpod.render.tile-source.v1");
+    hasher.update(&coord.x.to_le_bytes());
+    hasher.update(&coord.y.to_le_bytes());
+    for layer in document.layers.iter().filter(|layer| layer.visible) {
+        hasher.update(&layer.id.get().to_le_bytes());
+        hasher.update(&layer.opacity_milli.to_le_bytes());
+        for plane in layer.planes.iter().filter(|plane| plane.visible) {
+            hasher.update(&plane.id.get().to_le_bytes());
+            hasher.update(&plane.opacity_milli.to_le_bytes());
+            hasher.update(&[snapshot_pixel_format_code(plane.raster.format())]);
+            if let Some(tile) = plane.raster.tile_data(coord) {
+                hasher.update(&[1]);
+                hasher.update(&tile.width.to_le_bytes());
+                hasher.update(&tile.height.to_le_bytes());
+                hasher.update(&tile.bytes);
+            } else {
+                hasher.update(&[0]);
+            }
+        }
+    }
+    if let Some(tile) = document.selection.tile_data(coord) {
+        hasher.update(&[1]);
+        hasher.update(&tile.bytes);
+    } else {
+        hasher.update(&[0]);
+    }
+    hasher.update(&document.light_table.source_revision().to_le_bytes());
+    let digest = hasher.finalize();
+    let mut value = u64::from_le_bytes(
+        digest.as_bytes()[0..8]
+            .try_into()
+            .expect("BLAKE3 digest prefix has a fixed length"),
+    );
+    if value == 0 {
+        value = 1;
+    }
+    RenderRevision::from_raw(value)
+}
+
+const fn snapshot_pixel_format_code(format: PixelFormat) -> u8 {
+    match format {
+        PixelFormat::BinaryMask8 => 1,
+        PixelFormat::Grayscale8 => 2,
+        PixelFormat::Grayscale16 => 3,
+        PixelFormat::StraightRgba8 => 4,
+        PixelFormat::StraightRgba16 => 5,
+        PixelFormat::PremultipliedBgra8 => 6,
     }
 }
 

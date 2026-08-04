@@ -9,5 +9,6 @@ mod document_selection;
 mod effects;
 mod foundation;
 mod history_stroke;
+mod primitive_kernel;
 mod state_machine;
 mod vector;

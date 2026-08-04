@@ -192,8 +192,6 @@ pub(crate) struct FloatingSelection {
     pub(crate) transform: FloatingTransform,
 }
 
-pub(crate) type StagedPixels = BTreeMap<(u32, u32), PixelValue>;
-
 #[cfg(test)]
 mod tests {
     use super::*;

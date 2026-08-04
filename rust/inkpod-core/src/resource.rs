@@ -52,10 +52,7 @@ impl Core {
         if let Some(stroke) = &self.active_stroke {
             cpu_staging_bytes = cpu_staging_bytes
                 .saturating_add(document_raster_bytes(&stroke.preview_document))
-                .saturating_add(
-                    (stroke.changes.len() as u64)
-                        .saturating_mul(std::mem::size_of::<PixelChange>() as u64),
-                );
+                .saturating_add(stroke.canonical_payload_bytes());
         }
         if let Some(preview) = &self.filter_preview {
             cpu_staging_bytes = cpu_staging_bytes

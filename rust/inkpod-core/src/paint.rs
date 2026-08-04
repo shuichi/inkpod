@@ -300,23 +300,12 @@ impl Core {
     /// An identical palette is a no-op; a change is one undoable edit. Invalid
     /// formats or palette limits fail without partial replacement.
     pub fn replace_palette(&mut self, colors: &[PixelValue]) -> Result<DispatchOutcome, CoreError> {
-        self.ensure_no_active_stroke()?;
-        let mut after = Palette::default();
-        for color in colors {
-            after.push(*color)?;
-        }
-        let before = self
-            .document
-            .as_ref()
-            .ok_or(CoreError::NoDocument)?
-            .palette
-            .clone();
-        if before == after {
-            return Ok(self.noop_outcome());
-        }
-        let mut edit = self.begin_document_edit()?;
-        edit.working_mut().palette = after;
-        edit.commit_palette(self)
+        let expected_revision = self.document_revision.get();
+        self.execute_primitive(PrimitiveRequest::ReplacePalette {
+            expected_revision,
+            colors: colors.to_vec(),
+        })
+        .map(|outcome| outcome.dispatch())
     }
 
     /// Returns the straight-alpha RGBA main-line display color.
@@ -332,30 +321,12 @@ impl Core {
     ///
     /// Only RGBA values are accepted; identical color is a no-op.
     pub fn set_main_line_color(&mut self, color: PixelValue) -> Result<DispatchOutcome, CoreError> {
-        self.ensure_no_active_stroke()?;
-        if color.rgba16().is_none() {
-            return Err(CoreError::InvalidArgument(
-                "main-line base color must be RGBA",
-            ));
-        }
-        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let main_line_plane_id = document.plane_for_role(ActivePlane::MainLine)?.id;
-        ensure_editable_plane(document, main_line_plane_id)?;
-        if !matches!(
-            document.raster(ActivePlane::MainLine).format(),
-            PixelFormat::BinaryMask8 | PixelFormat::Grayscale8 | PixelFormat::Grayscale16
-        ) {
-            return Err(CoreError::InvalidState(
-                "main-line base color requires a binary or grayscale main plane",
-            ));
-        }
-        let before = document.main_line_color;
-        if before == color {
-            return Ok(self.noop_outcome());
-        }
-        let mut edit = self.begin_document_edit()?;
-        edit.working_mut().main_line_color = color;
-        edit.commit_main_line_color(self)
+        let expected_revision = self.document_revision.get();
+        self.execute_primitive(PrimitiveRequest::SetMainLineColor {
+            expected_revision,
+            color,
+        })
+        .map(|outcome| outcome.dispatch())
     }
 
     /// Selects a non-destructive color-check render mode.

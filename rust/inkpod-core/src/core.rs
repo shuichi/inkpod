@@ -41,6 +41,7 @@ impl Core {
             history_cursor: 0,
             current_state: HistoryStateId::from_raw(0),
             next_state: HistoryStateId::from_raw(1),
+            next_procedure: ProcedureId::first(),
             savepoint: None,
             next_id: StableIdCursor::first(),
             current_path: None,
@@ -87,8 +88,8 @@ impl Core {
         dpi_x_milli: u32,
         dpi_y_milli: u32,
     ) -> Result<DocumentInfo, CoreError> {
-        let uuid =
-            (u128::from(0x494e_4b50_4f44_4d31_u64) << 64) | u128::from(self.next_id.next_raw());
+        let uuid = (u128::from(0x494e_4b50_4f44_4d31_u64) << 64)
+            | u128::from(self.next_document_revision()?.get());
         self.new_cell_with_uuid(width, height, dpi_x_milli, dpi_y_milli, uuid)
     }
 
@@ -104,17 +105,18 @@ impl Core {
         dpi_y_milli: u32,
         document_uuid: u128,
     ) -> Result<DocumentInfo, CoreError> {
-        self.cancel_stroke();
-        self.filter_preview = None;
-        self.last_filter = None;
-        self.render_cache.clear();
+        // Construct the complete replacement and its advanced cursor privately
+        // so invalid paper/UUID input cannot consume stable IDs or disturb the
+        // current live document. The established public surface keeps object
+        // IDs monotonic across document replacement within one Core session.
+        let mut next_id = self.next_id;
         let ids = DocumentIds {
-            document: self.next_id.take_document(),
-            layer: self.next_id.take_layer(),
-            main_plane: self.next_id.take_plane(),
-            color_plane: self.next_id.take_plane(),
-            selection_plane: self.next_id.take_plane(),
-            light_table_set: self.next_id.take_light_table_set(),
+            document: next_id.take_document(),
+            layer: next_id.take_layer(),
+            main_plane: next_id.take_plane(),
+            color_plane: next_id.take_plane(),
+            selection_plane: next_id.take_plane(),
+            light_table_set: next_id.take_light_table_set(),
         };
         let document = CellDocument::new(
             ids,
@@ -126,8 +128,15 @@ impl Core {
                 dpi_y_milli,
             },
         )?;
+        let revision = self.next_document_revision()?;
+
+        self.cancel_stroke();
+        self.filter_preview = None;
+        self.last_filter = None;
+        self.render_cache.clear();
+        self.next_id = next_id;
         self.document = Some(document);
-        self.document_revision = self.next_document_revision()?;
+        self.document_revision = revision;
         // A new blank cell is the initial in-memory savepoint even though it
         // does not have a normal-save path yet. Pathlessness controls whether
         // Save needs a destination; it must not make an unedited document
@@ -156,6 +165,7 @@ pub struct Core {
     pub(super) history_cursor: usize,
     pub(super) current_state: HistoryStateId,
     pub(super) next_state: HistoryStateId,
+    pub(super) next_procedure: ProcedureId,
     pub(super) savepoint: Option<HistoryStateId>,
     pub(super) next_id: StableIdCursor,
     pub(super) current_path: Option<PathBuf>,
@@ -188,13 +198,6 @@ pub(super) struct DocumentEdit {
     working: CellDocument,
     base_revision: DocumentRevision,
     commit_revision: DocumentRevision,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum DocumentEditHistory {
-    Document,
-    Palette,
-    MainLineColor,
 }
 
 impl DocumentEdit {
@@ -235,25 +238,6 @@ impl DocumentEdit {
     }
 
     pub(super) fn commit(self, core: &mut Core) -> Result<DispatchOutcome, CoreError> {
-        self.commit_with_history(core, DocumentEditHistory::Document)
-    }
-
-    pub(super) fn commit_palette(self, core: &mut Core) -> Result<DispatchOutcome, CoreError> {
-        self.commit_with_history(core, DocumentEditHistory::Palette)
-    }
-
-    pub(super) fn commit_main_line_color(
-        self,
-        core: &mut Core,
-    ) -> Result<DispatchOutcome, CoreError> {
-        self.commit_with_history(core, DocumentEditHistory::MainLineColor)
-    }
-
-    fn commit_with_history(
-        self,
-        core: &mut Core,
-        history: DocumentEditHistory,
-    ) -> Result<DispatchOutcome, CoreError> {
         if core.document_revision != self.base_revision {
             return Err(CoreError::InvalidState(
                 "document edit base revision is stale",
@@ -264,52 +248,19 @@ impl DocumentEdit {
                 "document edit commit revision does not follow its base",
             ));
         }
-        match history {
-            DocumentEditHistory::Palette => {
-                let mut expected = self.before.clone();
-                expected.palette = self.working.palette.clone();
-                if expected != self.working {
-                    return Err(CoreError::InvalidState(
-                        "palette edit changed unrelated document state",
-                    ));
-                }
-            }
-            DocumentEditHistory::MainLineColor => {
-                let mut expected = self.before.clone();
-                expected.main_line_color = self.working.main_line_color;
-                if expected != self.working {
-                    return Err(CoreError::InvalidState(
-                        "main-line color edit changed unrelated document state",
-                    ));
-                }
-            }
-            DocumentEditHistory::Document => {}
-        }
         if self.before == self.working {
             return Ok(core.noop_outcome());
         }
 
         let after_state = core.allocate_state()?;
-        let change = match history {
-            DocumentEditHistory::Document => HistoryChange::Document {
-                before: Box::new(self.before),
-                after: Box::new(self.working.clone()),
-            },
-            DocumentEditHistory::Palette => HistoryChange::Palette {
-                before: self.before.palette,
-                after: self.working.palette.clone(),
-            },
-            DocumentEditHistory::MainLineColor => HistoryChange::MainLineColor {
-                before: self.before.main_line_color,
-                after: self.working.main_line_color,
-            },
+        let change = HistoryChange::Document {
+            before: Box::new(self.before),
+            after: Box::new(self.working.clone()),
         };
 
         core.document = Some(self.working);
         core.document_revision = self.commit_revision;
-        if !matches!(history, DocumentEditHistory::Palette) {
-            core.render_cache.clear();
-        }
+        core.render_cache.clear();
         core.commit_history_change(change, after_state);
         Ok(DispatchOutcome {
             revision: self.commit_revision.get(),
@@ -390,8 +341,12 @@ impl Core {
     pub(super) fn reset_history(&mut self, saved: bool) {
         self.history.clear();
         self.history_cursor = 0;
-        self.current_state = self.next_state;
-        self.next_state = self.next_state.saturating_next();
+        // Persistent state/procedure IDs belong to the logical document. A
+        // replacement document always starts at the closed Genesis values,
+        // independently of the Core session's prior document.
+        self.current_state = HistoryStateId::from_raw(1);
+        self.next_state = HistoryStateId::from_raw(2);
+        self.next_procedure = ProcedureId::first();
         self.savepoint = saved.then_some(self.current_state);
     }
 
@@ -623,48 +578,33 @@ mod tests {
     }
 
     #[test]
-    fn specialized_metadata_commits_preserve_history_labels_and_cache_policy() {
+    fn primitive_metadata_commits_preserve_history_labels_and_cache_policy() {
         let mut core = initialized_core();
         let _ = core.build_snapshot();
         let cache = core.render_cache.clone();
-        let mut palette_edit = core.begin_document_edit().unwrap();
-        palette_edit
-            .working_mut()
-            .palette
-            .push(PixelValue::Rgba([1, 2, 3, 255]))
+        core.replace_palette(&[PixelValue::Rgba([1, 2, 3, 255])])
             .unwrap();
-
-        palette_edit.commit_palette(&mut core).unwrap();
 
         assert_eq!(core.history_entries()[0].label, "Palette edit");
         assert_eq!(core.render_cache, cache);
 
-        let mut color_edit = core.begin_document_edit().unwrap();
-        color_edit.working_mut().main_line_color = PixelValue::Rgba([4, 5, 6, 255]);
-        color_edit.commit_main_line_color(&mut core).unwrap();
+        core.set_main_line_color(PixelValue::Rgba([4, 5, 6, 255]))
+            .unwrap();
 
         assert_eq!(core.history_entries()[1].label, "Main-line color");
         assert!(core.render_cache.is_empty());
     }
 
     #[test]
-    fn specialized_metadata_commit_rejects_unrelated_working_changes() {
+    fn invalid_primitive_metadata_preserves_the_complete_commit_state() {
         let mut core = initialized_core();
         let before = core.document.clone();
         let before_revision = core.document_revision;
         let before_state = core.next_state;
-        let mut edit = core.begin_document_edit().unwrap();
-        edit.working_mut().grid.origin_x = 1;
-        edit.working_mut()
-            .palette
-            .push(PixelValue::Rgba([1; 4]))
-            .unwrap();
 
         assert!(matches!(
-            edit.commit_palette(&mut core),
-            Err(CoreError::InvalidState(
-                "palette edit changed unrelated document state"
-            ))
+            core.replace_palette(&[PixelValue::Binary(255)]),
+            Err(CoreError::Raster(_))
         ));
         assert_eq!(core.document, before);
         assert_eq!(core.document_revision, before_revision);

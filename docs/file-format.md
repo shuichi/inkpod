@@ -12,10 +12,16 @@ schema should be replaced whenever a more robust or efficient design is found.
 ## Procedure-authoritative successor contract
 
 This section is the approved contract for the successor procedure-authoritative
-container. It reserves top-level format version 3 and replay epoch 1, but no v3
-reader or writer exists yet. Version 2 remains the exact current version until
-the format cutover is implemented and tested atomically; production code must
-not emit a partially implemented v3 file. Any schema or replay-semantics change
+container. It reserves top-level format version 4 and replay epoch 2, but no v4
+reader or writer exists yet. The earlier v3/epoch-1 design reservation was
+superseded before any reader or writer existed when M1 closed the established
+live-stroke admission bound and the Light Table source-alignment digest field.
+The latter change advances the canonical document-state frame and
+`DocumentStateDigest` derive-key domain to schema/version 2; the independent
+asset and procedure-payload digest contracts remain version 1.
+Version 2 remains the exact current version until the format cutover is
+implemented and tested atomically; production code must not emit a partially
+implemented v4 file. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
 
@@ -114,7 +120,7 @@ All stroke samples are canonical document coordinates; role-based active plane,
 view/device coordinates, pan/zoom/flip, and OS DPI are resolved before the
 procedure is formed. The three work formula IDs are respectively constant 1,
 `1 + palette entry count`, and sample count plus every clipped dab-bounding-box
-pixel tested. All three schemas have semantics revision 1, emit no output IDs,
+pixel tested. All three schemas have semantics revision 2, emit no output IDs,
 and use no assets in this first inline-bounded slice.
 
 For pressure canonicalization, the frontend value is an IEEE-754 binary32 or
@@ -271,7 +277,7 @@ ASCII context strings are:
 
 | Digest | Derive-key context |
 |---|---|
-| `DocumentStateDigest` | `org.inkpod.digest.document-state.v1` |
+| `DocumentStateDigest` | `org.inkpod.digest.document-state.v2` |
 | `EditorStateDigest` | `org.inkpod.digest.editor-state.v1` |
 | `JournalPrefixDigest` | `org.inkpod.digest.journal-prefix.v1` |
 | `AssetDigest` / `AssetId` | `org.inkpod.digest.asset.v1` |
@@ -283,13 +289,16 @@ ASCII context strings are:
 | primitive catalog | `org.inkpod.digest.primitive-catalog.v1` |
 | primitive argument schema | `org.inkpod.digest.primitive-argument-schema.v1` |
 
-Every digest message uses the same canonical frame. It starts with digest-schema
-version `u32 = 1` and field count `u32`. Each field, in consecutive ordinal
-order starting at 1, is `ordinal u32`, `presence u8`, three zero bytes, byte
-length `u64`, then exactly that many bytes. Presence is 0 or 1. Absent is
-presence 0 plus length 0; present-empty is presence 1 plus length 0, so the two
-never collide. A required field is always present. No padding occurs between
-fields.
+Every digest message uses the same canonical frame shape. It starts with a
+digest-schema version `u32` and field count `u32`. `DocumentStateDigest` and
+every canonical document-state frame nested within it use schema version 2.
+Every other digest message in the table, including the separately hashed
+`AssetDigest` and `ProcedurePayloadDigest`, uses schema version 1. Each field,
+in consecutive ordinal order starting at 1, is `ordinal u32`, `presence u8`,
+three zero bytes, byte length `u64`, then exactly that many bytes. Presence is
+0 or 1. Absent is presence 0 plus length 0; present-empty is presence 1 plus
+length 0, so the two never collide. A required field is always present. No
+padding occurs between fields.
 
 A sequence field is `element-count u64`, then for every element `element-length
 u64` and exact element bytes. A schema-declared ordered sequence retains its
@@ -306,7 +315,7 @@ The exact digest messages are:
 
 | Digest | Present fields in ordinal order |
 |---|---|
-| `DocumentStateDigest` | 1 document UUID; 2 stable Document ID; 3 paper; 4 frames/margins; 5 base surface; 6 ordered layer/plane tree; 7 persistent selection record; 8 palette; 9 main-line color; 10 guides; 11 grid; 12 Light Table; 13 project/cut/cell/frame/sequence identities and animation metadata; 14 required-extension sequence, empty in schema 1 |
+| `DocumentStateDigest` | 1 document UUID; 2 stable Document ID; 3 paper; 4 frames/margins; 5 base surface; 6 ordered layer/plane tree; 7 persistent selection record; 8 palette; 9 main-line color; 10 guides; 11 grid; 12 Light Table; 13 project/cut/cell/frame/sequence identities and animation metadata; 14 required-extension sequence, empty in schema 2 |
 | `EditorStateDigest` | 1 editor-state schema `u32 = 1`; 2 active tool; 3 optional last color-consuming tool; 4 tool-keyed colors; 5 tool-keyed diameters; 6 fill options; 7 selection options; 8 vector options; 9 optional active layer; 10 optional active plane; 11 optional palette cursor; 12 editor-target/option records |
 | `JournalPrefixDigest` | 1 last included event count `u64`; 2 ordered sequence of the exact common-header-plus-payload `PROC` record bytes from event 1 through that count |
 | `AssetDigest` | 1 asset schema `u32 = 1`; 2 asset kind `u32`; 3 optional pixel format; 4 optional color space; 5 optional alpha semantics; 6 optional width; 7 optional height; 8 optional canonical stride; 9 logical element count `u64`; 10 logical payload length `u64`; 11 exact canonical logical payload bytes |
@@ -403,19 +412,29 @@ is canonical as follows:
   position; axis 1/2 is Horizontal/Vertical. The Light-Table frame orders an
   optional active-set ID and ordered sets. A set orders ID, UTF-8 name, normalized
   `u16` global opacity, and ordered items. An item orders ID, canonical AssetId,
-  UTF-8 name, visible, normalized `u16` opacity, display-mode code 1/2/3 for
+  the source reference origin as Q16 x/y, UTF-8 name, visible,
+  normalized `u16` opacity, display-mode code 1/2/3 for
   Color/Monotone/Halftone, exact display color, Q16 translate x/y and scale x/y,
-  then `u32` turn rotation.
+  then `u32` turn rotation. The source UUID, source revision, source DPI, and
+  reference-frame extent are provenance and are excluded; the source reference
+  origin is semantic
+  alignment state and therefore is not provenance.
   The grid frame orders Q16 origin x/y, positive Q16 spacing x/y, then nonzero
   subdivisions `u32`; current integer grid values are multiplied by 65,536.
   The hierarchy frame orders optional Project ID, optional Cut ID, required
   Cell ID, ordered animation-frame records, and ordered sequence records. A
   frame record orders Frame ID and zero-based display ordinal `u32`. A sequence
   record orders Sequence ID, UTF-8 name, and an ordered sequence of Frame IDs;
-  each referenced frame must occur in the frame-record sequence. In schema 1 a
-  standalone cell has absent Project/Cut IDs and may have empty frame/sequence
-  lists; creating a successor-format Genesis allocates its distinct Cell ID
-  explicitly. Collections whose UI order is not semantic are ID-sorted.
+  each referenced frame must occur in the frame-record sequence. The M1
+  Core-only runtime has no Genesis-owned Cell object yet, so its nonpersistent
+  schema-2 digest temporarily encodes the current standalone Document ID again
+  in the required Cell slot, with absent Project/Cut IDs and empty frame/sequence
+  lists. This is the sole temporary exception to cross-kind numeric-ID
+  uniqueness and is not a valid successor-container Genesis representation.
+  M4 must allocate a distinct Cell ID before the successor format can be
+  emitted; replacing this bridge changes digest/replay semantics and therefore
+  advances the document-state schema/domain, replay epoch, and top-level format
+  version together. Collections whose UI order is not semantic are ID-sorted.
 - An adjustment frame orders kind, channel, interpolation, six signed `i32`
   parameters, and an ordered point sequence of `(input u16, output u16)`.
   Kinds 1/2/3 are BrightnessContrast, ToneCurve, and Levels; channels 0/1/2/3/4
@@ -455,20 +474,23 @@ zero rule is unambiguous. Directory entries cover section payloads through both
 section digests, while independently validated zero padding has no semantic
 content.
 
-The approved Rust implementation is the official `blake3` crate pinned and
-featured exactly as recorded in `third-party-notices.md`; its portable/SIMD
-backend choice does not change digest output. The crate is not added to the
-production dependency graph until the first digest implementation lands.
+The approved Rust implementation is the official `blake3` crate pinned as
+exact version `=1.8.5` with default features disabled and only `std` enabled, as
+recorded in `third-party-notices.md`; its portable/SIMD backend choice does not
+change digest output. The Core production dependency now computes the
+schema-2 `DocumentStateDigest` for canonical execution and fresh-Core replay.
+This does not activate the successor container: `.inkpod` v2 remains the exact
+current production format and no v4 reader or writer is emitted by this slice.
 
 ### Header, directory, and record bytes
 
-The v3 header is exactly 128 bytes:
+The v4 header is exactly 128 bytes:
 
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic bytes `49 4E 4B 50 4F 44 00 00` |
-| 8 | 4 | top-level format version = 3 |
-| 12 | 4 | replay epoch = 1 |
+| 8 | 4 | top-level format version = 4 |
+| 12 | 4 | replay epoch = 2 |
 | 16 | 4 | header size = 128 |
 | 20 | 4 | required flags = 0 |
 | 24 | 8 | total file length |
@@ -650,6 +672,11 @@ the exact rasterizer above, including candidates outside the circle/document
 and repeated segment endpoints. Thus event, decode, sample, and candidate costs
 are each counted exactly once. Future vector/output-pixel primitives must state
 their charge in their catalog descriptor before they can be emitted.
+
+The M1 live synchronous stroke executor additionally retains the established
+per-stroke admission bound of 16,777,216 formula-3 work units. That live bound
+is checked before publication and is distinct from the future journal-wide
+`total replay work units` limit above.
 
 Every primitive catalog entry selects one closed nonzero work-formula ID; there
 is no implementation-selected surcharge. A new formula or changed charge

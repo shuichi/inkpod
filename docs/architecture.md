@@ -35,7 +35,7 @@ native-format model.
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, vector geometry, and deterministic raster/filter/effect operations |
 | `inkpod-format` | Bounded `.inkpod` v2 and `.inkbatch` models, encode/decode/validation, atomic file I/O, feature metadata, and PNG/TIFF/TGA/BMP codecs                                              |
-| `inkpod-core`   | Stable-ID document/layer/plane state, history/savepoint, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, and immutable render snapshots |
+| `inkpod-core`   | Stable-ID document/layer/plane state, history/savepoint, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution/replay plus semantic document digests for the migrated Core slice |
 | `inkpod-ffi`    | ABI v2 records, validation/conversion, panic containment, opaque handles, ownership functions, and feature-specific exports                                                        |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
@@ -141,11 +141,21 @@ and `EditorStateDigest` are separate from document history. Exact ID start,
 ordering, canonical fixed-point, digest framing, and resource-limit rules live
 in [`file-format.md`](file-format.md).
 
-This is an enforced ownership and serialization target, not a claim that the
-current v2 materialized-state codec or current v2 ABI already implements
-procedure replay. The inventory records the current wrappers and known adapter
-composition gaps so later vertical slices can delegate them to the canonical
-executor without creating two semantic implementations.
+The first Core-only vertical slice implements this boundary for
+`SetMainLineColor`, `ReplacePalette`, and one bounded `ApplyRasterStroke`.
+`Core::execute_primitive` validates and canonicalizes those requests, executes
+against private working state, detects semantic no-op, and publishes through
+one explicit primitive transaction boundary. `Core::replay_procedure` validates
+the resulting canonical procedure and executes it through the same kernel on a
+fresh Core; `Core::document_state_digest` observes the memory-layout-independent
+BLAKE3-256 semantic state digest. The established main-line, palette, and stroke
+public Rust APIs are wrappers over this executor rather than alternate mutation
+implementations.
+
+This implemented slice does not add the persistent `Commit`/`HistoryMove`/
+`BranchCut` journal, migrate the remaining document routes, change C ABI v2, or
+change the exact-current `.inkpod` v2 codec. Those parts of this section remain
+the enforced successor target, and production must not emit a partial v4 file.
 
 ## Windows frontend ownership
 
@@ -594,12 +604,17 @@ revisions; only an explicit consuming commit may publish the working document.
 Commit rejects a stale base and revision/history overflow before changing live
 state, treats an unchanged working document as a no-op, and otherwise updates the
 document, revision, one history entry, and render-cache invalidation together.
-Palette and main-line-color edits retain their existing history labels and cache
-policy through constrained transaction commit modes. Sparse tile allocations are
-shared through copy-on-write, so history can retain before/after document owners
-without eager full-image copies. A new edit after Undo discards the redo branch.
-A unique history-state token identifies the normal savepoint and drives dirty
-state independently of file timestamps.
+The migrated main-line-color, palette-replacement, and raster-stroke wrappers
+construct typed primitive requests and delegate validation, canonicalization,
+working-state mutation, no-op detection, and commit to the one canonical
+executor. Their canonical procedures retain the existing history labels and
+cache policy, and replay uses that same executor rather than a second pixel or
+metadata implementation. Sparse tile allocations are shared through
+copy-on-write, so history can retain before/after document owners without eager
+full-image copies. A new edit after Undo discards the redo branch. A unique
+history-state token identifies the normal savepoint and drives dirty state
+independently of file timestamps; the procedure-authoritative persistent
+journal remains separate follow-up work.
 
 Preview/session, floating-selection, cancellable Batch/effect, external reload,
 and potentially long-running raster/vector conversion paths retain their
@@ -609,8 +624,10 @@ candidate without changing committed document, history, revision, or cache.
 
 - Stroke begin/append changes only a preview document. Snapshots may show that
   preview while committed revision, dirty, savepoint, and history remain fixed.
-  End commits at most one history entry; cancel, capture loss, or failure restores
-  the exact base state.
+  Begin and append canonicalize the bounded document-coordinate sample sequence
+  into one lifetime-independent inline payload; end submits that owned payload
+  to the canonical executor and commits at most one history entry. Cancel,
+  capture loss, or failure restores the exact base state.
 - Fill/filter/effect/transform operations validate limits, selection, target
   types, cancellation, and stale revision before commit. Invalid, cancelled,
   overflow, empty, or failed work leaves committed state unchanged.

@@ -36,6 +36,7 @@ mod history;
 mod identity;
 mod paint;
 mod persistence;
+mod primitive;
 mod resource;
 mod selection;
 mod snapshot;
@@ -62,6 +63,10 @@ pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
 pub use history::HistoryEntryInfo;
 pub use inkpod_format::CommonRasterFormat;
+pub use primitive::{
+    CanonicalProcedure, DocumentStateDigest, PrimitiveId, PrimitiveOutcome, PrimitiveRequest,
+    ProcedureId, ReplayEpoch, StateId,
+};
 pub use snapshot::{RenderSnapshot, RenderTile};
 pub use vector::{
     RenderVectorFill, RenderVectorSegment, VectorCubicSegment, VectorEraseMode, VectorFillInfo,
@@ -74,7 +79,7 @@ use document::{CellDocument, DocumentIds, LayerNode, PaperSpec, PlaneNode};
 use history::{HistoryChange, HistoryEntry, PixelChange};
 pub(crate) use identity::*;
 use persistence::{file_plane_to_raster, raster_to_file_plane};
-use selection::{FloatingSelection, StagedPixels};
+use selection::FloatingSelection;
 use stroke::StrokeSession;
 use view::default_shortcuts;
 
@@ -128,6 +133,7 @@ const MAX_STROKE_SAMPLES: usize = 1_048_576;
 const MAX_BRUSH_DIAMETER: f32 = 256.0;
 const MAX_STROKE_COORDINATE: f32 = 16_777_216.0;
 const MAX_STROKE_WORK: u64 = 16_777_216;
+const MAX_PERSISTENT_NUMERIC_ID: u64 = 0x7fff_ffff_ffff_ffff;
 const MIN_ZOOM: f64 = 0.01;
 const MAX_ZOOM: f64 = 64.0;
 

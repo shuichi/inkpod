@@ -94,13 +94,14 @@ impl HistoryStateId {
 
     pub(crate) const fn checked_next(self) -> Option<Self> {
         match self.0.checked_add(1) {
-            Some(value) => Some(Self(value)),
+            Some(value) if value <= crate::MAX_PERSISTENT_NUMERIC_ID => Some(Self(value)),
             None => None,
+            Some(_) => None,
         }
     }
 
-    pub(crate) const fn saturating_next(self) -> Self {
-        Self(self.0.saturating_add(1))
+    pub(crate) const fn get(self) -> u64 {
+        self.0
     }
 }
 
@@ -140,6 +141,7 @@ impl StableIdCursor {
         Self(if value == 0 { 1 } else { value })
     }
 
+    #[cfg(test)]
     pub(crate) const fn next_raw(self) -> u64 {
         self.0
     }
