@@ -42,7 +42,7 @@ impl Core {
             animation::SequenceState::logical_raster_usage,
         );
         let history_bytes = self.history.iter().fold(0_u64, |bytes, entry| {
-            bytes.saturating_add(history_change_bytes(&entry.change))
+            bytes.saturating_add(entry.change.as_ref().map_or(0, history_change_bytes))
         });
         let render_cache_bytes = self.render_cache.values().fold(0_u64, |bytes, tile| {
             bytes.saturating_add(tile.pixels().len() as u64)

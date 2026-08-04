@@ -5,9 +5,12 @@ procedure-authoritative history redesign. It classifies the current public Rust
 routing surface, every exported C ABI function, and every production Windows
 command. The first Core-only canonical executor slice now covers main-line
 color, palette replacement, and one raster stroke plus fresh-Core replay and a
-semantic document-state digest. The inventory remains an ownership constraint,
-not a claim that the persistent journal, the remaining primitive routes, ABI v3,
-or `.inkpod` v4 already exists.
+semantic document-state digest. For exactly those procedures, the next Core-only
+slice adds an append-only `Commit`/`HistoryMove`/`BranchCut` runtime journal,
+StateId savepoint/branch state, and inverse-cache-independent replay. The
+inventory remains an ownership constraint, not a claim that unmigrated document
+routes have canonical procedures or that ABI v3 or the successor `.inkpod`
+container already exists.
 
 Each route has exactly one of the eight categories defined in
 [`architecture.md`](architecture.md). Classification follows the final semantic
@@ -31,7 +34,7 @@ route|rust|history-control-event|rust-core|Core::jump_history Core::redo Core::u
 route|rust|editor-state-command|rust-core|Core::sequence_activate Core::sequence_step Core::set_active_node Core::set_active_plane Core::set_subpalette_cell
 route|rust|view-only-command|rust-core|Core::apply_subpalette_view_for Core::apply_view Core::apply_view_for Core::close_view Core::create_view Core::motion_check_start Core::motion_check_step Core::motion_check_stop Core::motion_check_toggle_pause Core::set_color_check
 route|rust|transient-preview-stroke|rust-core|Core::append_stroke Core::begin_dust_preview_for_view Core::begin_filter_preview Core::begin_filter_preview_with_progress Core::begin_paste Core::begin_paste_to_active_converted Core::begin_stroke Core::cancel_filter_preview Core::cancel_floating Core::cancel_stroke Core::set_floating_transform Core::update_filter_preview Core::update_filter_preview_with_progress
-route|rust|query-snapshot|rust-core|Core::adjustment Core::batch_preview Core::build_snapshot Core::build_snapshot_for Core::build_subpalette_snapshot_for Core::dispatch Core::document_info Core::document_state_digest Core::eyedropper Core::grid Core::guides Core::history_cursor Core::history_entries Core::layer_thumbnail Core::layers Core::light_table_items Core::light_table_sample Core::light_table_sets Core::locator_neighborhood Core::locator_sample Core::main_line_color Core::palette Core::plane_pixel Core::resolve_shortcut Core::resolve_shortcut_sequence Core::resource_usage Core::selection_bounds Core::sequence_cell Core::sequence_cells Core::shortcut_bindings Core::shortcut_sequences Core::snap_document_point Core::stroke_is_active Core::subpalette_sample Core::subpalette_view_sample Core::validate_plane_creation Core::vector_fills Core::vector_layer_planes Core::vector_paths Core::vector_raster_layout Core::vector_select Core::view_state
+route|rust|query-snapshot|rust-core|Core::adjustment Core::batch_preview Core::build_snapshot Core::build_snapshot_for Core::build_subpalette_snapshot_for Core::dispatch Core::document_info Core::document_state_digest Core::eyedropper Core::grid Core::guides Core::history_cursor Core::history_entries Core::journal_entries Core::journal_state Core::layer_thumbnail Core::layers Core::light_table_items Core::light_table_sample Core::light_table_sets Core::locator_neighborhood Core::locator_sample Core::main_line_color Core::palette Core::plane_pixel Core::release_history_cache Core::resolve_shortcut Core::resolve_shortcut_sequence Core::resource_usage Core::selection_bounds Core::sequence_cell Core::sequence_cells Core::shortcut_bindings Core::shortcut_sequences Core::snap_document_point Core::stroke_is_active Core::subpalette_sample Core::subpalette_view_sample Core::validate_plane_creation Core::vector_fills Core::vector_layer_planes Core::vector_paths Core::vector_raster_layout Core::vector_select Core::verify_journal_replay Core::view_state
 route|rust|asset-data-plane|rust-core|BatchGraph::load Core::autosave Core::copy_selection Core::export_common_raster Core::export_sequence Core::import_mixed_sequence Core::import_sequence Core::open Core::open_recovery Core::rasterize_vector_layer Core::revert Core::save Core::set_sequence
 route|rust|asset-data-plane|rust-image|Palette::push TileRaster::insert_tile TileRaster::remove_tile_if_empty TileRaster::set_pixel
 route|rust|asset-data-plane|rust-format|inkpod_format::read inkpod_format::read_batch_graph inkpod_format::save_atomic inkpod_format::save_atomic_with_cancel inkpod_format::save_batch_graph_atomic inkpod_format::save_batch_graph_atomic_with_cancel inkpod_format::save_recovery_atomic
@@ -63,12 +66,13 @@ route|windows|os-application-adapter|windows-adapter|IDM_APP_EXIT IDM_BATCH_ADD_
 
 ## Known current composition and ownership gaps
 
-These are finite migration facts, not alternate semantic owners. M0 does not
-pre-implement their later milestone fixes.
+These are finite migration facts, not alternate semantic owners. The completed
+Core-only slices do not pre-implement their later milestone fixes.
 
 | Route or family | Current fact | Required canonical destination |
 |---|---|---|
 | `Core::dispatch` / `inkpod_core_dispatch_batch` | The generic ABI-v2 ingress still accepts only `NoOp`; real edits use individual APIs. The main-line-color, palette-replacement, and raster-stroke Rust wrappers now delegate to the canonical executor. | Keep ABI v2 behavior stable until the value/ID-only ABI cutover; migrate each remaining individual document wrapper to the same executor without adding another semantic owner. |
+| Canonical journal coverage | `SetMainLineColor`, `ReplacePalette`, and bounded `ApplyRasterStroke` commits share their canonical procedures with an append-only runtime journal. Their actual Undo/Redo/jump operations record history moves, branch-cut plus commit publishes atomically, and a complete slice can release/rebuild its inverse cache. Any other document commit explicitly marks the journal incomplete; verification and cache release reject it while cached history remains usable. The runtime journal is not serialized by `.inkpod` v2. | Migrate each real document route to its own catalogued procedure under the all-primitive milestone. Do not bridge the gap with a generic materialized snapshot/diff procedure, and do not emit a partial successor container. |
 | Light Table swap | Replaces the current document and resets session state outside a normal document transaction. | One Rust document primitive, with no partial history/revision reset. |
 | sequence activate/step | An EditorState target change currently also replaces the live document and resets session state. | EditorState owns the target; any required document load is staged and published separately. |
 | active layer/plane | Stored in the current document although the target model assigns it to persisted EditorState. | M3 removes the duplicate document owner. |

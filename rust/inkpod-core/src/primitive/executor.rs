@@ -279,13 +279,13 @@ impl Core {
         }
 
         let payload_digest = canonical_payload_digest(&canonical.payload)?;
-        let procedure = CanonicalProcedure {
+        let procedure = Arc::new(CanonicalProcedure {
             procedure_id,
             primitive_id: canonical.primitive_id,
             primitive_schema_version: PRIMITIVE_SCHEMA_VERSION,
             replay_epoch: ReplayEpoch::CURRENT,
-            base_state_id: StateId::from_raw(self.current_state.get()),
-            committed_state_id: StateId::from_raw(next_state.get()),
+            base_state_id: self.current_state,
+            committed_state_id: next_state,
             input_ids: canonical.input_ids,
             output_ids: transaction.output_ids,
             canonical_arguments: canonical.arguments,
@@ -293,25 +293,37 @@ impl Core {
             canonical_payload_digest: payload_digest,
             pre_state_digest,
             post_state_digest,
-        };
+        });
+        let journal_plan = self.prepare_canonical_commit(Arc::clone(&procedure))?;
 
-        // `commit_history_change` cannot report `Vec::push` allocation failure.
-        // Reserve before the publish point so every recoverable capacity error
-        // still leaves the live document and all counters untouched.
+        // Reserve every fallible runtime allocation before the single publish
+        // boundary so document/history/journal/counters advance together.
         self.history
             .try_reserve(1)
             .map_err(|_| CoreError::InvalidState("history allocation failed"))?;
 
+        self.history.truncate(self.history_cursor);
+        let history_entry = HistoryEntry {
+            label: applied.history.label(),
+            change: Some(applied.history),
+            before_state: self.current_state,
+            after_state: next_state,
+            procedure: Some(Arc::clone(&procedure)),
+            branch_id: journal_plan.branch_id(),
+        };
         self.document = Some(transaction.working);
         self.document_revision = revision;
-        self.next_state = following_state;
-        self.next_procedure = following_procedure;
         self.next_id = transaction.next_stable_id;
         match applied.cache_policy {
             CachePolicy::Preserve | CachePolicy::RasterRevision => {}
             CachePolicy::InvalidateAll => self.render_cache.clear(),
         }
-        self.commit_history_change(applied.history, next_state);
+        self.history.push(history_entry);
+        self.history_cursor = self.history.len();
+        self.current_state = next_state;
+        self.publish_canonical_commit(journal_plan);
+        self.next_state = following_state;
+        self.next_procedure = following_procedure;
         let dispatch = DispatchOutcome {
             revision: revision.get(),
             accepted_commands: 1,
@@ -552,8 +564,8 @@ mod tests {
     #[test]
     fn persistent_counter_overflow_does_not_publish_working_state() {
         let mut state_boundary = initialized_core(0x10);
-        state_boundary.current_state = HistoryStateId::from_raw(MAX_PERSISTENT_NUMERIC_ID - 2);
-        state_boundary.next_state = HistoryStateId::from_raw(MAX_PERSISTENT_NUMERIC_ID - 1);
+        state_boundary.current_state = StateId::from_raw(MAX_PERSISTENT_NUMERIC_ID - 2);
+        state_boundary.next_state = StateId::from_raw(MAX_PERSISTENT_NUMERIC_ID - 1);
         let outcome = state_boundary
             .execute_primitive(PrimitiveRequest::SetMainLineColor {
                 expected_revision: state_boundary.document_revision.get(),
@@ -571,7 +583,8 @@ mod tests {
         assert_eq!(state_boundary.next_state.get(), MAX_PERSISTENT_NUMERIC_ID);
 
         let mut procedure_boundary = initialized_core(0x14);
-        procedure_boundary.next_procedure = ProcedureId::from_raw(MAX_PERSISTENT_NUMERIC_ID - 1);
+        procedure_boundary.next_procedure =
+            ProcedureId::from_raw(crate::journal::MAX_JOURNAL_COMMITS);
         let outcome = procedure_boundary
             .execute_primitive(PrimitiveRequest::SetMainLineColor {
                 expected_revision: procedure_boundary.document_revision.get(),
@@ -580,16 +593,16 @@ mod tests {
             .unwrap();
         assert_eq!(
             outcome.procedure().unwrap().procedure_id().get(),
-            MAX_PERSISTENT_NUMERIC_ID - 1
+            crate::journal::MAX_JOURNAL_COMMITS
         );
         assert_eq!(
             procedure_boundary.next_procedure.get(),
-            MAX_PERSISTENT_NUMERIC_ID
+            crate::journal::MAX_JOURNAL_COMMITS + 1
         );
 
         let mut state_overflow = initialized_core(0x11);
-        state_overflow.current_state = HistoryStateId::from_raw(MAX_PERSISTENT_NUMERIC_ID - 1);
-        state_overflow.next_state = HistoryStateId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
+        state_overflow.current_state = StateId::from_raw(MAX_PERSISTENT_NUMERIC_ID - 1);
+        state_overflow.next_state = StateId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
         let before_document = state_overflow.document.clone();
         let before_revision = state_overflow.document_revision;
         let before_procedure = state_overflow.next_procedure;
@@ -637,8 +650,8 @@ mod tests {
             .clone();
 
         let mut state_exhausted = initialized_core(0x16);
-        state_exhausted.current_state = HistoryStateId::from_raw(MAX_PERSISTENT_NUMERIC_ID - 1);
-        state_exhausted.next_state = HistoryStateId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
+        state_exhausted.current_state = StateId::from_raw(MAX_PERSISTENT_NUMERIC_ID - 1);
+        state_exhausted.next_state = StateId::from_raw(MAX_PERSISTENT_NUMERIC_ID);
         let mut state_procedure = procedure.clone();
         state_procedure.base_state_id = StateId::from_raw(MAX_PERSISTENT_NUMERIC_ID - 1);
         state_procedure.committed_state_id = StateId::from_raw(MAX_PERSISTENT_NUMERIC_ID);

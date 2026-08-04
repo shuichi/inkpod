@@ -10,5 +10,6 @@ mod effects;
 mod foundation;
 mod history_stroke;
 mod primitive_kernel;
+mod procedure_journal;
 mod state_machine;
 mod vector;

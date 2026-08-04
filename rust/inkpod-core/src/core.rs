@@ -39,10 +39,17 @@ impl Core {
             view: ViewState::default(),
             history: Vec::new(),
             history_cursor: 0,
-            current_state: HistoryStateId::from_raw(0),
-            next_state: HistoryStateId::from_raw(1),
+            current_state: StateId::from_raw(0),
+            next_state: StateId::GENESIS,
             next_procedure: ProcedureId::first(),
             savepoint: None,
+            history_genesis: None,
+            journal: Vec::new(),
+            journal_complete: true,
+            active_branch: BranchId::ROOT,
+            next_journal_event: JournalEventId::first(),
+            next_branch: BranchId::first_unallocated(),
+            branch_tails: Vec::with_capacity(1),
             next_id: StableIdCursor::first(),
             current_path: None,
             recovered: false,
@@ -163,10 +170,17 @@ pub struct Core {
     pub(super) view: ViewState,
     pub(super) history: Vec<HistoryEntry>,
     pub(super) history_cursor: usize,
-    pub(super) current_state: HistoryStateId,
-    pub(super) next_state: HistoryStateId,
+    pub(super) current_state: StateId,
+    pub(super) next_state: StateId,
     pub(super) next_procedure: ProcedureId,
-    pub(super) savepoint: Option<HistoryStateId>,
+    pub(super) savepoint: Option<StateId>,
+    pub(super) history_genesis: Option<CellDocument>,
+    pub(super) journal: Vec<JournalEntry>,
+    pub(super) journal_complete: bool,
+    pub(super) active_branch: BranchId,
+    pub(super) next_journal_event: JournalEventId,
+    pub(super) next_branch: BranchId,
+    pub(super) branch_tails: Vec<StateId>,
     pub(super) next_id: StableIdCursor,
     pub(super) current_path: Option<PathBuf>,
     pub(super) recovered: bool,
@@ -329,7 +343,11 @@ impl Core {
         }
     }
 
-    pub(super) fn allocate_state(&mut self) -> Result<HistoryStateId, CoreError> {
+    pub(super) fn allocate_state(&mut self) -> Result<StateId, CoreError> {
+        // Restore every optional inverse cache before the first unmigrated
+        // document route makes the journal incomplete, so its established
+        // Undo/Redo contract remains usable.
+        self.ensure_history_cache()?;
         let state = self.next_state;
         self.next_state = self
             .next_state
@@ -344,10 +362,11 @@ impl Core {
         // Persistent state/procedure IDs belong to the logical document. A
         // replacement document always starts at the closed Genesis values,
         // independently of the Core session's prior document.
-        self.current_state = HistoryStateId::from_raw(1);
-        self.next_state = HistoryStateId::from_raw(2);
+        self.current_state = StateId::GENESIS;
+        self.next_state = StateId::from_raw(2);
         self.next_procedure = ProcedureId::first();
         self.savepoint = saved.then_some(self.current_state);
+        self.reset_journal();
     }
 
     pub(super) fn reset_view(&mut self) {
@@ -362,83 +381,27 @@ impl Core {
         &mut self,
         plane_id: PlaneId,
         changes: Vec<PixelChange>,
-        after_state: HistoryStateId,
+        after_state: StateId,
     ) {
         self.commit_history_change(HistoryChange::Pixels { plane_id, changes }, after_state);
     }
 
-    pub(super) fn commit_history_change(
-        &mut self,
-        change: HistoryChange,
-        after_state: HistoryStateId,
-    ) {
+    pub(super) fn commit_history_change(&mut self, change: HistoryChange, after_state: StateId) {
+        self.mark_journal_incomplete();
         self.history.truncate(self.history_cursor);
         let before_state = self.current_state;
+        let label = change.label();
         self.history.push(HistoryEntry {
-            change,
+            change: Some(change),
+            label,
             before_state,
             after_state,
+            procedure: None,
+            branch_id: self.active_branch,
         });
         self.history_cursor = self.history.len();
         self.current_state = after_state;
-    }
-
-    pub(super) fn apply_history_values(
-        &mut self,
-        entry: &HistoryEntry,
-        use_after: bool,
-        revision: DocumentRevision,
-    ) -> Result<(), CoreError> {
-        let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
-        match &entry.change {
-            HistoryChange::Pixels { plane_id, changes } => {
-                document.active_plane_id = *plane_id;
-                let raster = &mut document
-                    .plane_by_id_mut(*plane_id)
-                    .ok_or(CoreError::InvalidState("history plane no longer exists"))?
-                    .raster;
-                let mut touched = BTreeSet::new();
-                for change in changes {
-                    raster.set_pixel(
-                        change.x,
-                        change.y,
-                        if use_after {
-                            change.after
-                        } else {
-                            change.before
-                        },
-                        revision.get(),
-                    )?;
-                    touched.insert(TileCoord {
-                        x: change.x / TILE_SIZE,
-                        y: change.y / TILE_SIZE,
-                    });
-                }
-                for coord in touched {
-                    raster.remove_tile_if_empty(coord);
-                }
-            }
-            HistoryChange::Palette { before, after } => {
-                document.palette = if use_after {
-                    after.clone()
-                } else {
-                    before.clone()
-                };
-            }
-            HistoryChange::MainLineColor { before, after } => {
-                document.main_line_color = if use_after { *after } else { *before };
-                self.render_cache.clear();
-            }
-            HistoryChange::Document { before, after } => {
-                *document = if use_after {
-                    (**after).clone()
-                } else {
-                    (**before).clone()
-                };
-                self.render_cache.clear();
-            }
-        }
-        Ok(())
+        self.set_branch_tail(self.active_branch, after_state);
     }
 }
 
@@ -527,7 +490,7 @@ mod tests {
         let _ = history_overflow_core.build_snapshot();
         let mut overflow_edit = history_overflow_core.begin_document_edit().unwrap();
         overflow_edit.working_mut().grid.origin_x = 11;
-        history_overflow_core.next_state = HistoryStateId::from_raw(u64::MAX);
+        history_overflow_core.next_state = StateId::from_raw(u64::MAX);
         let overflow_document = history_overflow_core.document.clone();
         let overflow_revision = history_overflow_core.document_revision;
         let overflow_cache = history_overflow_core.render_cache.clone();
@@ -541,7 +504,7 @@ mod tests {
         assert_eq!(history_overflow_core.history.len(), 0);
         assert_eq!(
             history_overflow_core.next_state,
-            HistoryStateId::from_raw(u64::MAX)
+            StateId::from_raw(u64::MAX)
         );
         assert_eq!(history_overflow_core.render_cache, overflow_cache);
 

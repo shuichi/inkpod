@@ -379,8 +379,10 @@ section directory、`META`、`GENS`をversioned manifest領域とし、容量の
 
 完了条件:
 
-- Coreの全履歴操作がjournal semanticsから導出される。
-- `HIST-001` の既存契約を維持しながらreopen可能な内部表現が成立する。
+- canonical procedure化済みの履歴では、Commit、Undo、Redo、jump、branch cut、savepointがjournal semanticsから導出される。
+- canonical procedure化済みの履歴は、runtime inverse cacheを削除してもGenesisとcanonical procedureから同じ状態へ再生できる。
+- 未移行mutationはsynthetic snapshot/diff procedureへ変換せずjournal incompleteを明示し、`HIST-001` の既存cached Undo/Redo契約を安全に維持する。
+- runtime表現はserializationへ依存せず、M8でjournal semanticsを変更せずに保存・再オープンへ接続できる。
 
 ### M3: Core-owned EditorState と既定値
 
@@ -517,6 +519,8 @@ section directory、`META`、`GENS`をversioned manifest領域とし、容量の
 完了条件:
 
 - 全production document mutationが一つのstable `PrimitiveId`を持つ。
+- 全production `HistoryEntry`がcanonical procedureを参照し、CoreのCommit、Undo、Redo、jump、branch cut、savepointがjournal semanticsから導出される。
+- production mutationからjournal incompleteへ遷移する経路が0。
 - architecture inventoryでunclassified/direct mutationが0。
 - C++にpixel処理、fill/vector geometry、layer規則、history、native document/preset codecの別実装がない。
 

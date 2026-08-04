@@ -13,12 +13,32 @@ impl Core {
         if self.history_cursor == 0 {
             return Err(CoreError::InvalidState("there is no command to undo"));
         }
+        self.ensure_history_cache()?;
         let revision = self.next_document_revision()?;
         let entry = self.history[self.history_cursor - 1].clone();
-        self.apply_history_values(&entry, false, revision)?;
+        let movement = self.prepare_history_move(
+            HistoryMoveKind::Undo,
+            self.current_state,
+            entry.before_state,
+        )?;
+        let mut document = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let invalidate = apply_history_change(
+            &mut document,
+            entry
+                .change
+                .as_ref()
+                .ok_or(CoreError::InvalidState("history runtime cache is missing"))?,
+            false,
+            revision,
+        )?;
+        self.document = Some(document);
         self.history_cursor -= 1;
         self.current_state = entry.before_state;
         self.document_revision = revision;
+        if invalidate {
+            self.render_cache.clear();
+        }
+        self.publish_history_move(movement);
         Ok(DispatchOutcome {
             revision: revision.get(),
             accepted_commands: 1,
@@ -31,14 +51,34 @@ impl Core {
     /// The operation is rejected during a stroke or when no redo entry exists.
     pub fn redo(&mut self) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
+        self.ensure_history_cache()?;
         let Some(entry) = self.history.get(self.history_cursor).cloned() else {
             return Err(CoreError::InvalidState("there is no command to redo"));
         };
         let revision = self.next_document_revision()?;
-        self.apply_history_values(&entry, true, revision)?;
+        let movement = self.prepare_history_move(
+            HistoryMoveKind::Redo,
+            self.current_state,
+            entry.after_state,
+        )?;
+        let mut document = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let invalidate = apply_history_change(
+            &mut document,
+            entry
+                .change
+                .as_ref()
+                .ok_or(CoreError::InvalidState("history runtime cache is missing"))?,
+            true,
+            revision,
+        )?;
+        self.document = Some(document);
         self.history_cursor += 1;
         self.current_state = entry.after_state;
         self.document_revision = revision;
+        if invalidate {
+            self.render_cache.clear();
+        }
+        self.publish_history_move(movement);
         Ok(DispatchOutcome {
             revision: revision.get(),
             accepted_commands: 1,
@@ -54,12 +94,7 @@ impl Core {
             .map(|(index, entry)| HistoryEntryInfo {
                 index,
                 applied: index < self.history_cursor,
-                label: match &entry.change {
-                    HistoryChange::Pixels { .. } => "Raster edit",
-                    HistoryChange::Palette { .. } => "Palette edit",
-                    HistoryChange::MainLineColor { .. } => "Main-line color",
-                    HistoryChange::Document { .. } => "Document edit",
-                },
+                label: entry.label,
             })
             .collect()
     }
@@ -85,21 +120,56 @@ impl Core {
         if target_cursor == self.history_cursor {
             return Ok(self.noop_outcome());
         }
+        self.ensure_history_cache()?;
         let revision = self.next_document_revision()?;
         let accepted_commands = self.history_cursor.abs_diff(target_cursor) as u64;
-        while self.history_cursor > target_cursor {
-            let entry = self.history[self.history_cursor - 1].clone();
-            self.apply_history_values(&entry, false, revision)?;
-            self.history_cursor -= 1;
-            self.current_state = entry.before_state;
+        let destination_state = if target_cursor == 0 {
+            StateId::GENESIS
+        } else {
+            self.history[target_cursor - 1].after_state
+        };
+        let movement = self.prepare_history_move(
+            HistoryMoveKind::Jump,
+            self.current_state,
+            destination_state,
+        )?;
+        let mut document = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let mut cursor = self.history_cursor;
+        let mut invalidate = false;
+        while cursor > target_cursor {
+            let entry = &self.history[cursor - 1];
+            invalidate |= apply_history_change(
+                &mut document,
+                entry
+                    .change
+                    .as_ref()
+                    .ok_or(CoreError::InvalidState("history runtime cache is missing"))?,
+                false,
+                revision,
+            )?;
+            cursor -= 1;
         }
-        while self.history_cursor < target_cursor {
-            let entry = self.history[self.history_cursor].clone();
-            self.apply_history_values(&entry, true, revision)?;
-            self.history_cursor += 1;
-            self.current_state = entry.after_state;
+        while cursor < target_cursor {
+            let entry = &self.history[cursor];
+            invalidate |= apply_history_change(
+                &mut document,
+                entry
+                    .change
+                    .as_ref()
+                    .ok_or(CoreError::InvalidState("history runtime cache is missing"))?,
+                true,
+                revision,
+            )?;
+            cursor += 1;
         }
+        self.document = Some(document);
+        self.history_cursor = target_cursor;
+        self.current_state = destination_state;
         self.document_revision = revision;
+        if invalidate {
+            self.render_cache.clear();
+        }
+        self.publish_history_move(movement);
         Ok(DispatchOutcome {
             revision: revision.get(),
             accepted_commands,
@@ -235,11 +305,83 @@ pub(super) enum HistoryChange {
     },
 }
 
+impl HistoryChange {
+    pub(super) const fn label(&self) -> &'static str {
+        match self {
+            Self::Pixels { .. } => "Raster edit",
+            Self::Palette { .. } => "Palette edit",
+            Self::MainLineColor { .. } => "Main-line color",
+            Self::Document { .. } => "Document edit",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct HistoryEntry {
-    pub(super) change: HistoryChange,
-    pub(super) before_state: HistoryStateId,
-    pub(super) after_state: HistoryStateId,
+    pub(super) change: Option<HistoryChange>,
+    pub(super) label: &'static str,
+    pub(super) before_state: StateId,
+    pub(super) after_state: StateId,
+    pub(super) procedure: Option<Arc<CanonicalProcedure>>,
+    pub(super) branch_id: BranchId,
+}
+
+pub(super) fn apply_history_change(
+    document: &mut CellDocument,
+    change: &HistoryChange,
+    use_after: bool,
+    revision: DocumentRevision,
+) -> Result<bool, CoreError> {
+    let mut invalidate_all = false;
+    match change {
+        HistoryChange::Pixels { plane_id, changes } => {
+            document.active_plane_id = *plane_id;
+            let raster = &mut document
+                .plane_by_id_mut(*plane_id)
+                .ok_or(CoreError::InvalidState("history plane no longer exists"))?
+                .raster;
+            let mut touched = BTreeSet::new();
+            for change in changes {
+                raster.set_pixel(
+                    change.x,
+                    change.y,
+                    if use_after {
+                        change.after
+                    } else {
+                        change.before
+                    },
+                    revision.get(),
+                )?;
+                touched.insert(TileCoord {
+                    x: change.x / TILE_SIZE,
+                    y: change.y / TILE_SIZE,
+                });
+            }
+            for coord in touched {
+                raster.remove_tile_if_empty(coord);
+            }
+        }
+        HistoryChange::Palette { before, after } => {
+            document.palette = if use_after {
+                after.clone()
+            } else {
+                before.clone()
+            };
+        }
+        HistoryChange::MainLineColor { before, after } => {
+            document.main_line_color = if use_after { *after } else { *before };
+            invalidate_all = true;
+        }
+        HistoryChange::Document { before, after } => {
+            *document = if use_after {
+                (**after).clone()
+            } else {
+                (**before).clone()
+            };
+            invalidate_all = true;
+        }
+    }
+    Ok(invalidate_all)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

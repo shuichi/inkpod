@@ -10,7 +10,7 @@ const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 2;
 const ASSET_SCHEMA_VERSION: u32 = 1;
 const PROCEDURE_PAYLOAD_SCHEMA_VERSION: u32 = 1;
 
-pub(super) fn canonical_document_state(
+pub(crate) fn canonical_document_state(
     document: &CellDocument,
 ) -> Result<(Vec<u8>, DocumentStateDigest), CoreError> {
     let paper = frame(&[

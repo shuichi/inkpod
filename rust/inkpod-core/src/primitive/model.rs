@@ -1,6 +1,7 @@
 //! Stable public types for canonical primitive execution and replay.
 
 use crate::{DispatchOutcome, PixelValue, Stroke};
+use std::sync::Arc;
 
 macro_rules! public_id {
     ($name:ident, $inner:ty, $docs:literal) => {
@@ -32,7 +33,7 @@ public_id!(
 public_id!(
     StateId,
     u64,
-    "A persistent identifier for Genesis or one committed semantic document state."
+    "A nonzero persistent identifier for Genesis or one committed semantic state in a document namespace. IDs remain unique until that document is replaced."
 );
 public_id!(
     ReplayEpoch,
@@ -69,8 +70,19 @@ impl ProcedureId {
 }
 
 impl StateId {
+    /// State ID assigned to a document's Genesis state.
+    pub const GENESIS: Self = Self(1);
+
     pub(crate) const fn from_raw(value: u64) -> Self {
         Self(value)
+    }
+
+    pub(crate) const fn checked_next(self) -> Option<Self> {
+        match self.0.checked_add(1) {
+            Some(value) if value <= crate::MAX_PERSISTENT_NUMERIC_ID => Some(Self(value)),
+            None => None,
+            Some(_) => None,
+        }
     }
 }
 
@@ -251,7 +263,7 @@ impl CanonicalProcedure {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PrimitiveOutcome {
     pub(crate) dispatch: DispatchOutcome,
-    pub(crate) procedure: Option<CanonicalProcedure>,
+    pub(crate) procedure: Option<Arc<CanonicalProcedure>>,
 }
 
 impl PrimitiveOutcome {
@@ -264,7 +276,7 @@ impl PrimitiveOutcome {
 
     pub(crate) const fn committed(
         dispatch: DispatchOutcome,
-        procedure: CanonicalProcedure,
+        procedure: Arc<CanonicalProcedure>,
     ) -> Self {
         Self {
             dispatch,
@@ -280,8 +292,8 @@ impl PrimitiveOutcome {
 
     /// Borrows the committed canonical procedure, or `None` for a semantic no-op.
     #[must_use]
-    pub const fn procedure(&self) -> Option<&CanonicalProcedure> {
-        self.procedure.as_ref()
+    pub fn procedure(&self) -> Option<&CanonicalProcedure> {
+        self.procedure.as_deref()
     }
 }
 

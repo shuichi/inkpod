@@ -35,7 +35,7 @@ native-format model.
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, vector geometry, and deterministic raster/filter/effect operations |
 | `inkpod-format` | Bounded `.inkpod` v2 and `.inkbatch` models, encode/decode/validation, atomic file I/O, feature metadata, and PNG/TIFF/TGA/BMP codecs                                              |
-| `inkpod-core`   | Stable-ID document/layer/plane state, history/savepoint, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution/replay plus semantic document digests for the migrated Core slice |
+| `inkpod-core`   | Stable-ID document/layer/plane state, StateId savepoints, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
 | `inkpod-ffi`    | ABI v2 records, validation/conversion, panic containment, opaque handles, ownership functions, and feature-specific exports                                                        |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
@@ -146,16 +146,35 @@ The first Core-only vertical slice implements this boundary for
 `Core::execute_primitive` validates and canonicalizes those requests, executes
 against private working state, detects semantic no-op, and publishes through
 one explicit primitive transaction boundary. `Core::replay_procedure` validates
-the resulting canonical procedure and executes it through the same kernel on a
-fresh Core; `Core::document_state_digest` observes the memory-layout-independent
-BLAKE3-256 semantic state digest. The established main-line, palette, and stroke
-public Rust APIs are wrappers over this executor rather than alternate mutation
+the resulting canonical procedure and executes it through the same kernel;
+`Core::document_state_digest` observes the memory-layout-independent BLAKE3-256
+semantic state digest. The established main-line, palette, and stroke public
+Rust APIs are wrappers over this executor rather than alternate mutation
 implementations.
 
-This implemented slice does not add the persistent `Commit`/`HistoryMove`/
-`BranchCut` journal, migrate the remaining document routes, change C ABI v2, or
-change the exact-current `.inkpod` v2 codec. Those parts of this section remain
-the enforced successor target, and production must not emit a partial v4 file.
+While history remains within that canonical slice, Core now owns an append-only runtime
+`JournalEntry::{Commit, HistoryMove, BranchCut}` sequence. A canonical history
+entry shares its retained procedure with its `Commit`; while the journal is
+complete, an actual Undo, Redo, or jump appends one `HistoryMove` without
+creating a history item. A canonical commit away from the active branch tail
+reserves and publishes an adjacent `BranchCut` plus `Commit`, retains the
+inactive tail outside the normal redo UI, and advances State, Procedure,
+JournalEvent, and Branch IDs only at the common publish boundary. `JournalState`
+exposes the current/savepoint StateIds, active branch, visible cursor, and
+whether every current commit is canonical. A complete
+journal can rebuild its runtime inverse/COW history cache privately from the
+Genesis document and canonical procedures; digest and graph validation precede
+cache release, and later history movement reconstructs the cache on demand.
+
+This is deliberately not a generic snapshot- or diff-procedure bridge for the
+remaining document routes. Any legacy document mutation marks the runtime
+journal incomplete; existing Undo/Redo continues through its retained runtime
+cache, while journal verification and cache release reject that mixed state.
+Full primitive migration remains a later milestone. C ABI v2 and the
+exact-current `.inkpod` v2 codec are unchanged: the runtime journal is not
+serialized, and a current-v2 open establishes a new Genesis/root journal rather
+than restoring the prior session's history. Production must not emit a partial
+successor container.
 
 ## Windows frontend ownership
 
@@ -609,12 +628,20 @@ construct typed primitive requests and delegate validation, canonicalization,
 working-state mutation, no-op detection, and commit to the one canonical
 executor. Their canonical procedures retain the existing history labels and
 cache policy, and replay uses that same executor rather than a second pixel or
-metadata implementation. Sparse tile allocations are shared through
-copy-on-write, so history can retain before/after document owners without eager
-full-image copies. A new edit after Undo discards the redo branch. A unique
-history-state token identifies the normal savepoint and drives dirty state
-independently of file timestamps; the procedure-authoritative persistent
-journal remains separate follow-up work.
+metadata implementation. For a complete canonical slice, document, StateId,
+visible history, journal events, document revision, cache invalidation, and all
+persistent high-watermarks publish together. A new edit after history movement
+removes the old tail from normal Redo while retaining it as an inactive journal
+branch. The normal savepoint is a `StateId`, so dirty state follows Undo, Redo,
+jump, and branching independently of file timestamps.
+
+Sparse tile allocations remain shared through copy-on-write, and inverse
+history changes are an optional runtime cache. Core can validate a complete
+canonical journal against the live semantic digest, release that cache, and
+reconstruct it before the next history move. An unmigrated document transaction
+keeps the established runtime history behavior but marks the journal incomplete;
+it is never disguised as a canonical procedure and cannot use cache-free full
+replay until its real primitive route is migrated.
 
 Preview/session, floating-selection, cancellable Batch/effect, external reload,
 and potentially long-running raster/vector conversion paths retain their
@@ -648,6 +675,12 @@ Timer autosave is enqueued without blocking the UI and is deferred behind a live
 stroke. Long-running tasks expose progress and cancellation; cancellation,
 failure, or stale revision does not partially commit. Format limits and recovery
 details are specified in [`file-format.md`](file-format.md).
+
+The current production `.inkpod` v2 payload remains a materialized semantic
+document and does not encode the M2 runtime journal, branch graph, or history
+cache. Opening it starts a new root journal and clean StateId savepoint around
+the decoded document. Successor `PROC`/`META` persistence and reopen restoration
+remain part of the later atomic format cutover.
 
 Each successful autosave is paired with an atomically replaced, current-version,
 bounded metadata sidecar containing `DocumentSessionId`, generation, document UUID,

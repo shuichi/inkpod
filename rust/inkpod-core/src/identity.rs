@@ -82,35 +82,6 @@ checked_counter!(DocumentRevision);
 checked_counter!(ViewRevision);
 checked_counter!(PreviewRevision);
 
-/// A history state token. Zero is the initial unsaved state.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-#[repr(transparent)]
-pub(crate) struct HistoryStateId(u64);
-
-impl HistoryStateId {
-    pub(crate) const fn from_raw(value: u64) -> Self {
-        Self(value)
-    }
-
-    pub(crate) const fn checked_next(self) -> Option<Self> {
-        match self.0.checked_add(1) {
-            Some(value) if value <= crate::MAX_PERSISTENT_NUMERIC_ID => Some(Self(value)),
-            None => None,
-            Some(_) => None,
-        }
-    }
-
-    pub(crate) const fn get(self) -> u64 {
-        self.0
-    }
-}
-
-impl fmt::Display for HistoryStateId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
 impl ViewRevision {
     pub(crate) const fn saturating_next(self) -> Self {
         Self(self.0.saturating_add(1))

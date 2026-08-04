@@ -34,6 +34,7 @@ mod effects;
 mod error;
 mod history;
 mod identity;
+mod journal;
 mod paint;
 mod persistence;
 mod primitive;
@@ -63,6 +64,10 @@ pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
 pub use history::HistoryEntryInfo;
 pub use inkpod_format::CommonRasterFormat;
+pub use journal::{
+    BranchId, HistoryMoveKind, JournalBranchCut, JournalCommit, JournalEntry, JournalEventId,
+    JournalHistoryMove, JournalReplayInfo, JournalState,
+};
 pub use primitive::{
     CanonicalProcedure, DocumentStateDigest, PrimitiveId, PrimitiveOutcome, PrimitiveRequest,
     ProcedureId, ReplayEpoch, StateId,
