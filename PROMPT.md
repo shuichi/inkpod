@@ -520,7 +520,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - `SESSION-001`: 複数 `DocumentSession` の file identity、view/document/window/application close、save/Save As、autosave/recovery lifecycle
 - `SAFE-001`: malformed/corrupted input の bounded rejection と非破壊性
 - `PERF-001`: large sparse/COW document と bounded dense workload の benchmark
-- `PKG-001`: x64/ARM64 self-contained MSIX payload と package 検証
+- `PKG-001`: Rust/Win32 の静的 CRT、x64/ARM64 self-contained MSIX、ならびに ZIP 直下へ `inkpod.exe`、`README.txt`、`LICENSE.txt`、`ThirdPartyNotices.txt` だけを収録する x64/ARM64 portable payload と package/dependency 検証
 - `PORT-001`: Rust workspace の OS 非依存性と次 frontend の adapter gap
 
 ### Document and view

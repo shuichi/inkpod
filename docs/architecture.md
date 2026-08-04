@@ -553,8 +553,9 @@ independent of that privacy choice.
 CMake is the build entry. Configure-aware recursive Rust source tracking feeds a
 profile-specific Cargo completion stamp and declares the staticlib/rlib
 byproducts, so unchanged builds do not rerun Cargo. Windows presets validate x64
-or ARM64 compiler targets, align Cargo/MSVC `/MD` profiles, assemble the matching
-MSIX payload, and run strict C11/C++20/Rust tests.
+or ARM64 compiler targets, align Cargo `+crt-static` and MSVC `/MT` profiles,
+reject dynamic CRT imports in the final executable, assemble the matching MSIX
+and four-file portable ZIP payloads, and run strict C11/C++20/Rust tests.
 
 The C11 header probe and C++20 ABI checks run through the real executable's
 `--abi-smoke-test`. The private `--smoke-test` path uses the production UI input,

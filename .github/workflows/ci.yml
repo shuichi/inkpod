@@ -52,7 +52,7 @@ jobs:
           where.exe cl
       - run: cmake --preset ${{ matrix.preset }} -DINKPOD_BUILD_NUMBER=${{ github.run_number }}
       - run: cmake --build --preset ${{ matrix.preset }}
-      - name: Verify unchanged build does not rebuild Rust or MSIX
+      - name: Verify unchanged build does not rebuild Rust or packages
         shell: pwsh
         run: |
           $output = cmake --build --preset ${{ matrix.preset }} --verbose 2>&1
@@ -65,5 +65,11 @@ jobs:
           }
           if ($output -match 'Assembling unsigned inkpod MSIX') {
             throw 'unchanged build rebuilt the MSIX package'
+          }
+          if ($output -match 'Assembling inkpod portable ZIP') {
+            throw 'unchanged build rebuilt the portable ZIP package'
+          }
+          if ($output -match 'Verifying static MSVC CRT linkage') {
+            throw 'unchanged build repeated the static CRT verification'
           }
       - run: ctest --preset ${{ matrix.preset }}

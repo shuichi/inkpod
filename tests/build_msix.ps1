@@ -10,8 +10,6 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ThirdPartyNotices,
     [Parameter(Mandatory = $true)]
-    [string]$RuntimeDirectory,
-    [Parameter(Mandatory = $true)]
     [string]$OutputPath
 )
 
@@ -41,8 +39,7 @@ foreach ($path in @(
         $Manifest,
         $AssetsDirectory,
         $License,
-        $ThirdPartyNotices,
-        $RuntimeDirectory)) {
+        $ThirdPartyNotices)) {
     if (-not (Test-Path -LiteralPath $path)) {
         throw "Required MSIX input does not exist: $path"
     }
@@ -68,15 +65,6 @@ Copy-Item -LiteralPath $Manifest -Destination (Join-Path $layoutDirectory 'AppxM
 Copy-Item -LiteralPath $AssetsDirectory -Destination (Join-Path $layoutDirectory 'Assets') -Recurse
 Copy-Item -LiteralPath $License -Destination (Join-Path $layoutDirectory 'LICENSE.txt')
 Copy-Item -LiteralPath $ThirdPartyNotices -Destination (Join-Path $layoutDirectory 'ThirdPartyNotices.txt')
-$runtimeDlls = @(Get-ChildItem -LiteralPath $RuntimeDirectory -Filter '*.dll' -File)
-foreach ($requiredRuntime in @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')) {
-    if (-not ($runtimeDlls.Name -contains $requiredRuntime)) {
-        throw "MSVC runtime directory is missing $requiredRuntime`: $RuntimeDirectory"
-    }
-}
-foreach ($runtimeDll in $runtimeDlls) {
-    Copy-Item -LiteralPath $runtimeDll.FullName -Destination $layoutDirectory
-}
 
 & $makeAppx pack /d $layoutDirectory /p $resolvedOutput /o /l
 if ($LASTEXITCODE -ne 0) {

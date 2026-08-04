@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 cmake_policy(SET CMP0091 NEW)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 project(inkpod VERSION 0.1.0 LANGUAGES C CXX)
 
 set(INKPOD_BUILD_NUMBER "0" CACHE STRING
@@ -38,14 +39,16 @@ if(WIN32)
 
     if(INKPOD_WINDOWS_ARCHITECTURE_NORMALIZED STREQUAL "x64")
         set(INKPOD_RUST_TARGET_TRIPLE x86_64-pc-windows-msvc)
-        set(INKPOD_MSVC_REDIST_ARCHITECTURE x64)
+        set(INKPOD_MSVC_TARGET_ARCHITECTURE x64)
         set(INKPOD_MSIX_PROCESSOR_ARCHITECTURE x64)
+        set(INKPOD_PORTABLE_ARCHITECTURE x64)
         set(INKPOD_WINDOWS_ARCHITECTURE_MACRO _M_X64)
         set(INKPOD_WINDOWS_PRESET_FAMILY windows-x64)
     elseif(INKPOD_WINDOWS_ARCHITECTURE_NORMALIZED STREQUAL "arm64")
         set(INKPOD_RUST_TARGET_TRIPLE aarch64-pc-windows-msvc)
-        set(INKPOD_MSVC_REDIST_ARCHITECTURE arm64)
+        set(INKPOD_MSVC_TARGET_ARCHITECTURE arm64)
         set(INKPOD_MSIX_PROCESSOR_ARCHITECTURE arm64)
+        set(INKPOD_PORTABLE_ARCHITECTURE arm)
         set(INKPOD_WINDOWS_ARCHITECTURE_MACRO _M_ARM64)
         set(INKPOD_WINDOWS_PRESET_FAMILY windows-arm)
     else()
@@ -75,7 +78,7 @@ if(WIN32)
             "The ${INKPOD_WINDOWS_PRESET_FAMILY} preset requires an "
             "${INKPOD_MSIX_PROCESSOR_ARCHITECTURE} MSVC target environment, but "
             "${CMAKE_CXX_COMPILER} targets another architecture. Initialize "
-            "VsDevCmd with '-arch=${INKPOD_MSVC_REDIST_ARCHITECTURE}', then rerun "
+            "VsDevCmd with '-arch=${INKPOD_MSVC_TARGET_ARCHITECTURE}', then rerun "
             "with 'cmake --fresh --preset ${INKPOD_WINDOWS_PRESET_FAMILY}-debug' "
             "or '${INKPOD_WINDOWS_PRESET_FAMILY}-release'.")
     endif()
@@ -108,7 +111,6 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 
 if(CMAKE_CONFIGURATION_TYPES)
     message(FATAL_ERROR "inkpod uses a single-config generator so Cargo and CMake share one profile")
@@ -128,10 +130,13 @@ find_program(
 set(INKPOD_CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/cargo-target")
 set(INKPOD_RUST_OUTPUT_DIR "${INKPOD_CARGO_TARGET_DIR}")
 set(INKPOD_CARGO_TARGET_ARGUMENT)
+set(INKPOD_CARGO_ENVIRONMENT)
 if(WIN32)
     set(INKPOD_RUST_OUTPUT_DIR
         "${INKPOD_CARGO_TARGET_DIR}/${INKPOD_RUST_TARGET_TRIPLE}")
     set(INKPOD_CARGO_TARGET_ARGUMENT --target "${INKPOD_RUST_TARGET_TRIPLE}")
+    set(INKPOD_CARGO_ENVIRONMENT
+        "CARGO_ENCODED_RUSTFLAGS=-Ctarget-feature=+crt-static")
 endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(INKPOD_RUST_PROFILE release)
@@ -156,6 +161,7 @@ file(GLOB_RECURSE INKPOD_RUST_SOURCE_INPUTS CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/rust/inkpod-image/src/*.rs")
 
 set(INKPOD_RUST_INPUTS
+    "${CMAKE_SOURCE_DIR}/.cargo/config.toml"
     "${CMAKE_SOURCE_DIR}/Cargo.toml"
     "${CMAKE_SOURCE_DIR}/Cargo.lock"
     "${CMAKE_SOURCE_DIR}/rust/inkpod-core/Cargo.toml"
@@ -169,6 +175,7 @@ add_custom_command(
     BYPRODUCTS "${INKPOD_RUST_STATICLIB}" "${INKPOD_RUST_RLIB}"
     COMMAND "${CMAKE_COMMAND}" -E env
             "CARGO_TARGET_DIR=${INKPOD_CARGO_TARGET_DIR}"
+            ${INKPOD_CARGO_ENVIRONMENT}
             "${CARGO_EXECUTABLE}" build --locked --package inkpod-ffi
             ${INKPOD_CARGO_TARGET_ARGUMENT} ${INKPOD_CARGO_PROFILE_ARGUMENT}
     COMMAND "${CMAKE_COMMAND}" -E touch_nocreate
@@ -271,13 +278,6 @@ add_test(
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_workspace_persistence.cmake")
-
-add_test(
-    NAME inkpod_msvc_runtime_discovery
-    COMMAND "${CMAKE_COMMAND}"
-            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-            "-DINKPOD_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/msvc-runtime-discovery"
-            -P "${CMAKE_SOURCE_DIR}/tests/verify_msvc_runtime_discovery.cmake")
 
 add_library(inkpod_header_c11 OBJECT tests/header_c11.c)
 target_include_directories(inkpod_header_c11 PRIVATE "${CMAKE_SOURCE_DIR}/include")
@@ -676,25 +676,63 @@ if(WIN32)
     file(GLOB INKPOD_MSIX_ASSETS CONFIGURE_DEPENDS
         "${CMAKE_SOURCE_DIR}/apps/windows/package/Assets/*.png")
     if(NOT MSVC)
-        message(FATAL_ERROR "inkpod MSIX packaging requires the supported MSVC toolchain")
+        message(FATAL_ERROR "inkpod Windows packaging requires the supported MSVC toolchain")
     endif()
-    get_filename_component(INKPOD_MSVC_COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    get_filename_component(INKPOD_MSVC_HOST_DIR "${INKPOD_MSVC_COMPILER_DIR}" DIRECTORY)
-    get_filename_component(INKPOD_MSVC_BIN_DIR "${INKPOD_MSVC_HOST_DIR}" DIRECTORY)
-    get_filename_component(INKPOD_MSVC_VERSION_DIR "${INKPOD_MSVC_BIN_DIR}" DIRECTORY)
-    get_filename_component(INKPOD_MSVC_VERSION "${INKPOD_MSVC_VERSION_DIR}" NAME)
-    get_filename_component(INKPOD_MSVC_FAMILY_DIR "${INKPOD_MSVC_VERSION_DIR}" DIRECTORY)
-    get_filename_component(INKPOD_MSVC_TOOLS_DIR "${INKPOD_MSVC_FAMILY_DIR}" DIRECTORY)
-    get_filename_component(INKPOD_VC_DIR "${INKPOD_MSVC_TOOLS_DIR}" DIRECTORY)
-    include("${CMAKE_SOURCE_DIR}/cmake/InkpodMsvcRuntime.cmake")
-    inkpod_find_msvc_crt_directory(INKPOD_MSVC_CRT_DIRECTORY
-        VC_DIRECTORY "${INKPOD_VC_DIR}"
-        TOOLSET_VERSION "${INKPOD_MSVC_VERSION}"
-        ARCHITECTURE "${INKPOD_MSVC_REDIST_ARCHITECTURE}")
-    message(STATUS
-        "Using ${INKPOD_MSVC_REDIST_ARCHITECTURE} MSVC CRT: "
-        "${INKPOD_MSVC_CRT_DIRECTORY}")
-    file(GLOB INKPOD_MSVC_RUNTIME_DLLS "${INKPOD_MSVC_CRT_DIRECTORY}/*.dll")
+    find_program(
+        INKPOD_DUMPBIN_EXECUTABLE
+        NAMES dumpbin.exe
+        DOC "Path to the MSVC COFF/PE dependency inspector"
+        REQUIRED)
+
+    set(INKPOD_STATIC_CRT_STAMP
+        "${CMAKE_BINARY_DIR}/package/inkpod-static-crt.cmake.stamp")
+    add_custom_command(
+        OUTPUT "${INKPOD_STATIC_CRT_STAMP}"
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/tests/verify_static_msvc_runtime.ps1"
+                -Executable "$<TARGET_FILE:inkpod>"
+                -Dumpbin "${INKPOD_DUMPBIN_EXECUTABLE}"
+        COMMAND "${CMAKE_COMMAND}" -E touch "${INKPOD_STATIC_CRT_STAMP}"
+        DEPENDS
+            inkpod
+            "${CMAKE_SOURCE_DIR}/tests/verify_static_msvc_runtime.ps1"
+        COMMENT "Verifying static MSVC CRT linkage"
+        VERBATIM)
+    add_custom_target(inkpod_static_crt ALL DEPENDS "${INKPOD_STATIC_CRT_STAMP}")
+
+    add_test(
+        NAME inkpod_windows_static_crt
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/tests/verify_static_msvc_runtime.ps1"
+                -Executable "$<TARGET_FILE:inkpod>"
+                -Dumpbin "${INKPOD_DUMPBIN_EXECUTABLE}")
+    set_tests_properties(inkpod_windows_static_crt PROPERTIES TIMEOUT 30)
+
+    set(INKPOD_PORTABLE_README
+        "${CMAKE_SOURCE_DIR}/apps/windows/package/README.portable.txt")
+    set(INKPOD_PORTABLE_ZIP_PATH
+        "${CMAKE_BINARY_DIR}/package/Inkpod-${PROJECT_VERSION}-windows-${INKPOD_PORTABLE_ARCHITECTURE}.zip")
+    add_custom_command(
+        OUTPUT "${INKPOD_PORTABLE_ZIP_PATH}"
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/scripts/package-windows-portable.ps1"
+                -Executable "$<TARGET_FILE:inkpod>"
+                -Readme "${INKPOD_PORTABLE_README}"
+                -License "${CMAKE_SOURCE_DIR}/LICENSE"
+                -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
+                -Version "${PROJECT_VERSION}"
+                -Architecture "${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}"
+                -OutputPath "${INKPOD_PORTABLE_ZIP_PATH}"
+        DEPENDS
+            "${INKPOD_STATIC_CRT_STAMP}"
+            "${CMAKE_SOURCE_DIR}/scripts/package-windows-portable.ps1"
+            "${INKPOD_PORTABLE_README}"
+            "${CMAKE_SOURCE_DIR}/LICENSE"
+            "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
+        COMMENT "Assembling inkpod portable ZIP"
+        VERBATIM)
+    add_custom_target(inkpod_portable_zip ALL DEPENDS "${INKPOD_PORTABLE_ZIP_PATH}")
+
     set(INKPOD_MSIX_PATH
         "${CMAKE_BINARY_DIR}/package/inkpod-${INKPOD_FOUR_PART_VERSION}-${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}.msix")
     add_custom_command(
@@ -706,16 +744,14 @@ if(WIN32)
                 -AssetsDirectory "${CMAKE_SOURCE_DIR}/apps/windows/package/Assets"
                 -License "${CMAKE_SOURCE_DIR}/LICENSE"
                 -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
-                -RuntimeDirectory "${INKPOD_MSVC_CRT_DIRECTORY}"
                 -OutputPath "${INKPOD_MSIX_PATH}"
         DEPENDS
-            inkpod
+            "${INKPOD_STATIC_CRT_STAMP}"
             "${CMAKE_SOURCE_DIR}/tests/build_msix.ps1"
             "${INKPOD_PACKAGE_MANIFEST}"
             "${CMAKE_SOURCE_DIR}/LICENSE"
             "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
             ${INKPOD_MSIX_ASSETS}
-            ${INKPOD_MSVC_RUNTIME_DLLS}
         COMMENT "Assembling unsigned inkpod MSIX"
         VERBATIM)
     add_custom_target(inkpod_msix ALL DEPENDS "${INKPOD_MSIX_PATH}")
@@ -728,7 +764,27 @@ if(WIN32)
                 -ExpectedVersion "${INKPOD_FOUR_PART_VERSION}"
                 -ExpectedArchitecture "${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}")
     set_tests_properties(inkpod_windows_msix_payload_smoke PROPERTIES
-        DEPENDS inkpod_windows_assets
+        DEPENDS "inkpod_windows_assets;inkpod_windows_static_crt"
+        TIMEOUT 60)
+
+    set(INKPOD_PORTABLE_TEST_ARGUMENTS)
+    if(INKPOD_WINDOWS_ARCHITECTURE STREQUAL "x64")
+        set(INKPOD_PORTABLE_TEST_ARGUMENTS -RunAbiSmoke)
+    endif()
+    add_test(
+        NAME inkpod_windows_portable_zip_payload_smoke
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/tests/verify_portable_zip.ps1"
+                -PackagePath "${INKPOD_PORTABLE_ZIP_PATH}"
+                -Executable "$<TARGET_FILE:inkpod>"
+                -Readme "${INKPOD_PORTABLE_README}"
+                -License "${CMAKE_SOURCE_DIR}/LICENSE"
+                -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
+                -ExpectedVersion "${PROJECT_VERSION}"
+                -ExpectedArchitecture "${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}"
+                ${INKPOD_PORTABLE_TEST_ARGUMENTS})
+    set_tests_properties(inkpod_windows_portable_zip_payload_smoke PROPERTIES
+        DEPENDS inkpod_windows_static_crt
         TIMEOUT 60)
 
     if(INKPOD_ENABLE_ELEVATED_MSIX_TESTS)

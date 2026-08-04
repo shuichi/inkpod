@@ -50,14 +50,19 @@ try {
             'inkpod.exe',
             'LICENSE.txt',
             'ThirdPartyNotices.txt',
-            'AppxManifest.xml',
-            'msvcp140.dll',
-            'vcruntime140.dll',
-            'vcruntime140_1.dll')) {
+            'AppxManifest.xml')) {
         $payloadPath = Join-Path $temporaryDirectory $relativePath
         if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
             throw "MSIX payload is missing $relativePath"
         }
+    }
+
+    $forbiddenRuntimePattern =
+        '^(?:msvcp.*|vcruntime.*|concrt.*|msvcr.*|ucrtbase.*|api-ms-win-crt-.*)\.dll$'
+    $runtimeDlls = @(Get-ChildItem -LiteralPath $temporaryDirectory -Recurse -File |
+        Where-Object { $_.Name -match $forbiddenRuntimePattern })
+    if ($runtimeDlls.Count -ne 0) {
+        throw "MSIX payload contains dynamic MSVC CRT DLLs: $($runtimeDlls.Name -join ', ')"
     }
 
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $temporaryDirectory 'AppxManifest.xml')

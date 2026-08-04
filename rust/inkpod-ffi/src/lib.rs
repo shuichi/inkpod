@@ -1,5 +1,13 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
+#[cfg(all(
+    target_env = "msvc",
+    not(target_feature = "crt-static"),
+    not(doc),
+    not(doctest)
+))]
+compile_error!("inkpod-ffi requires the statically linked MSVC CRT");
+
 mod batch;
 
 #[cfg(test)]

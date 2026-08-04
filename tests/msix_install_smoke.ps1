@@ -124,14 +124,19 @@ try {
             'inkpod.exe',
             'LICENSE.txt',
             'ThirdPartyNotices.txt',
-            'AppxManifest.xml',
-            'msvcp140.dll',
-            'vcruntime140.dll',
-            'vcruntime140_1.dll')) {
+            'AppxManifest.xml')) {
         $installedPath = Join-Path $installed.InstallLocation $relativePath
         if (-not (Test-Path -LiteralPath $installedPath)) {
             throw "Installed package is missing $relativePath"
         }
+    }
+
+    $forbiddenRuntimePattern =
+        '^(?:msvcp.*|vcruntime.*|concrt.*|msvcr.*|ucrtbase.*|api-ms-win-crt-.*)\.dll$'
+    $runtimeDlls = @(Get-ChildItem -LiteralPath $installed.InstallLocation -Recurse -File |
+        Where-Object { $_.Name -match $forbiddenRuntimePattern })
+    if ($runtimeDlls.Count -ne 0) {
+        throw "Installed package contains dynamic MSVC CRT DLLs: $($runtimeDlls.Name -join ', ')"
     }
 
     $process = Start-Process `

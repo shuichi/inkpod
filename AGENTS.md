@@ -44,7 +44,7 @@ Windows frontend の所有権は process 単位の `ApplicationHost`、top-level
 
 - Rust は stable、edition 2024。nightly 固有機能へ依存しない。
 - Windows は MSVC C++20 と Unicode API を使い、Visual Studio 2022 または 2026 x64 を検証基準とする。
-- `staticlib` は `inkpod-ffi` だけに設定し、MSVC runtime は Rust MSVC target と整合する `/MD` 系で統一する。
+- `staticlib` は `inkpod-ffi` だけに設定し、MSVC runtime は全構成の C/C++ を `/MT`（`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`）、Rust MSVC target を `-C target-feature=+crt-static` として静的 CRT に統一する。Rust と CRT 種別を合わせるため Debug でも `/MTd` を使わない。
 - manifest で Common Controls v6 と Per-Monitor DPI Awareness v2 を有効にする。
 - build にローカル絶対 path、手動 file copy、開発者個人だけの前提を埋め込まない。
 - 非 Windows でも Rust の build/test を可能にし、Win32 target は明示的に skip する。

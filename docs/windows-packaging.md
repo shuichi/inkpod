@@ -61,20 +61,58 @@ file-type registration and Windows retains control of the default-app choice.
 Every Windows CMake build now assembles an unsigned package through the Windows
 SDK `MakeAppx` tool. The artifact is written to
 `build/<preset>/package/inkpod-<four-part-version>-<architecture>.msix` and contains `inkpod.exe`, the
-manifest, generated PNG assets, `LICENSE.txt`, `ThirdPartyNotices.txt`, and the
-MSVC toolchain's matching x64 or ARM64 app-local CRT DLLs required by the `/MD`
-executable. CRT discovery uses the developer environment's `VCToolsRedistDir`
-instead of assuming that the compiler toolset and redistributable directory
-have identical version names. If that variable is unavailable, CMake accepts
-the compiler-version directory or a single unambiguous installed redist and
-rejects multiple candidates. The runtime DLLs are explicit CMake dependencies,
-so changing one rebuilds the package while an unchanged second build remains a
-no-op. `inkpod_msix` can also be selected explicitly as a build target.
+manifest, generated PNG assets, `LICENSE.txt`, and `ThirdPartyNotices.txt`.
+C/C++ uses MSVC `/MT` in every configuration and the x64/ARM64 Rust MSVC targets
+use `-C target-feature=+crt-static`. The final executable therefore contains the
+required Visual C/C++ runtime code and neither package ships app-local `MSVCP`,
+`VCRUNTIME`, or UCRT DLLs. Windows system DLLs used by Win32, Direct2D, and
+Direct3D remain operating-system dependencies. `inkpod_msix` can also be
+selected explicitly as a build target.
+
+The same build creates an install-free GitHub Release artifact through
+`scripts/package-windows-portable.ps1` and the `inkpod_portable_zip` target. ZIP
+names use the three-part CMake project version while the EXE and MSIX retain the
+four-part version containing `INKPOD_BUILD_NUMBER`:
+
+```text
+build/windows-x64-release/package/Inkpod-0.1.0-windows-x64.zip
+build/windows-arm-release/package/Inkpod-0.1.0-windows-arm.zip
+```
+
+`arm` in the archive name denotes the ARM64 target. Each ZIP has no enclosing
+directory and contains exactly these case-sensitive root entries:
+
+```text
+inkpod.exe
+README.txt
+LICENSE.txt
+ThirdPartyNotices.txt
+```
+
+The script writes a unique temporary archive beside the destination, verifies
+the exact entry set and each source-file SHA-256, and only then atomically
+replaces an older artifact. Creation or validation failure before replacement
+leaves an existing valid ZIP unchanged. The portable build registers no `.inkpod`
+association and still uses the current
+Windows user profile and HKCU for workspace, recent-file, autosave, recovery,
+and Help-cache state.
 
 `inkpod_windows_msix_payload_smoke` unpacks the produced artifact with `MakeAppx`
 without elevation and verifies the executable, identity/version/architecture, license,
-notices, `.inkpod` association, and required MSVC runtime payload. Hosted CI runs
-this test for Debug and Release.
+notices, `.inkpod` association, and absence of app-local dynamic CRT DLLs.
+`inkpod-ffi` has a Windows MSVC compile-time guard for the `crt-static` target
+feature, and `inkpod_windows_static_crt` inspects the final PE dependencies.
+Packaging depends on the same PE check, so a dynamic-CRT executable cannot
+produce an MSIX or portable ZIP.
+`inkpod_windows_portable_zip_payload_smoke` verifies the exact ZIP name, entry
+count/casing/root placement, source hashes, PE architecture, embedded version,
+and an extracted x64 `--abi-smoke-test`. Hosted CI runs these checks for Debug
+and Release.
+
+`scripts/publish-windows-release.ps1` validates both Release executables and ZIPs,
+creates a three-part `v<version>` tag, and uploads the x64 and ARM assets rather
+than a raw executable. `-DryRun` performs validation and prints the proposed Git
+and GitHub CLI commands without changing external state.
 
 `inkpod_windows_msix_install_uninstall_smoke` is not registered in the default
 CTest set. Configure with `-DINKPOD_ENABLE_ELEVATED_MSIX_TESTS=ON` to register it.

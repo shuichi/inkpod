@@ -52,6 +52,8 @@ FFI API HTML の生成には [doxygen-awesome-css](https://github.com/jothepro/d
 v2.4.2（commit `d52eafe3e9303399fda15661f3d7bb8fe3d7eabc`）を使用する。license は MIT。
 テーマ本体は文書生成時だけ取得し、生成した HTML へ upstream の `LICENSE` をコピーする。
 
-Windows MSIX は、選択した MSVC toolchain の documented redistributable directory から app-local の
-Microsoft Visual C++ runtime DLL を収録する。これらは Microsoft component であり、Microsoft Visual
-Studio license terms に従って再配布する。inkpod の GPL license の対象ではない。
+Windows x64/ARM64 binary は、選択した MSVC toolchain の Microsoft Visual C/C++ runtime と Rust
+MSVC target の C runtime support を executable へ静的リンクする。runtime code は適用される
+Microsoft Visual Studio license terms に従って再配布し、inkpod の GPL license の対象には含めない。
+MSIX と portable ZIP は app-local の MSVC CRT DLL を収録せず、この文書を package root の
+`ThirdPartyNotices.txt` として収録する。

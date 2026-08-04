@@ -91,7 +91,7 @@ cmake --build --preset windows-x64-release
 
 ## Windows アプリのビルドとテスト
 
-CMake がアプリ全体のビルド入口です。CMake から Cargo を呼び出して Rust の `inkpod-ffi` 静的ライブラリをビルドし、MSVC の各ターゲットへリンクするため、先に `cargo build` を実行する必要はありません。
+CMake がアプリ全体のビルド入口です。CMake から Cargo を呼び出して Rust の `inkpod-ffi` 静的ライブラリをビルドし、MSVC の各ターゲットへリンクするため、先に `cargo build` を実行する必要はありません。Windows の全構成は C/C++ を `/MT`、Rust MSVC target を `+crt-static` とし、最終 EXE に Visual C/C++ runtime を静的リンクします。
 
 x64 のローカル成果物を作る通常の入口は、Debug／Release 共通の build
 number を一度だけ増加させるラッパーです。Visual Studio の x64 developer
@@ -140,6 +140,47 @@ cmake --fresh --preset windows-arm-release
 cmake --build --preset windows-arm-release
 ctest --preset windows-arm-release
 .\build\windows-arm-release\inkpod.exe
+```
+
+## Windows 配布物
+
+通常の Windows ビルドは、unsigned MSIX に加えて GitHub Release 向けの
+ポータブル ZIP も生成します。Release 成果物は次の場所に作られます。
+
+```text
+build/windows-x64-release/package/Inkpod-0.1.0-windows-x64.zip
+build/windows-arm-release/package/Inkpod-0.1.0-windows-arm.zip
+```
+
+ZIP 名は三つ組の application version、EXE と MSIX は build number を加えた
+四つ組 version を使用します。ZIP 直下には次の4ファイルだけを収録します。
+
+```text
+Inkpod-0.1.0-windows-x64.zip
+├─ inkpod.exe
+├─ README.txt
+├─ LICENSE.txt
+└─ ThirdPartyNotices.txt
+```
+
+`inkpod.exe` は別配布の Visual C++ Runtime DLL を必要としませんが、Win32、
+Direct2D、Direct3D など Windows 11 の system component は使用します。
+ポータブル版は `.inkpod` 関連付けを登録せず、workspace、自動保存、復元などの
+状態は通常版と同様に現在の user profile と HKCU へ保存します。
+
+既存の Release build から ZIP だけを明示的に再生成する場合は、対応する target
+を指定します。
+
+```powershell
+cmake --build --preset windows-x64-release --target inkpod_portable_zip
+cmake --build --preset windows-arm-release --target inkpod_portable_zip
+```
+
+両 architecture の ZIP を検証して GitHub Release の実行内容だけを確認するには
+次を使用します。このコマンドは tag、push、Release 作成を行いません。
+
+```powershell
+.\scripts\publish-windows-release.ps1 -DryRun
 ```
 
 新規セルは 1920 × 1080 の 2 値彩色セルとして作成されます。UI／入力、単一書き込みの Rust Core エンジン、D3D／D2D 描画は、それぞれ独立したスレッドで動作します。描画中のストロークはペンを離す前からプレビューされ、確定時には 1 回分の「元に戻す」単位として記録されます。
