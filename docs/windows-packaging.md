@@ -41,13 +41,14 @@ to zero for local builds, and accepts decimal values from 0 through 65535.
 Hosted CI passes the GitHub Actions run number explicitly. The same value is
 embedded in the executable version resource and shown by the About dialog.
 
-Local x64 release production uses `scripts/build-windows-x64.ps1`. One wrapper
-invocation takes an exclusive `.inkpod-local/build-number.lock`, reads the
-Git-ignored shared counter and any higher existing x64 CMake-cache value,
+Local x64 and ARM64 release production uses `scripts/build-windows-x64.ps1` and
+`scripts/build-windows-arm64.ps1`, respectively. One wrapper invocation takes
+an exclusive `.inkpod-local/build-number.lock`, reads the Git-ignored shared
+counter and any higher existing CMake-cache value for its architecture,
 reserves the next number before starting work, and passes that exact value to
 every selected Debug/Release configure preset. A failed or interrupted build
 keeps its reserved number, so a later artifact cannot reuse the same identity.
-The wrapper rejects malformed state and refuses to wrap past 65535. `-DryRun`
+Both wrappers reject malformed state and refuse to wrap past 65535. `-DryRun`
 does not reserve a number. Direct CMake preset use and hosted CI do not mutate
 the local counter.
 

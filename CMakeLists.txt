@@ -671,6 +671,14 @@ if(WIN32)
                     -DryRun)
         set_tests_properties(inkpod_windows_local_build_number_dry_run PROPERTIES
             TIMEOUT 30)
+    elseif(INKPOD_WINDOWS_ARCHITECTURE STREQUAL "arm64")
+        add_test(
+            NAME inkpod_windows_local_build_number_dry_run
+            COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                    -File "${CMAKE_SOURCE_DIR}/scripts/build-windows-arm64.ps1"
+                    -DryRun)
+        set_tests_properties(inkpod_windows_local_build_number_dry_run PROPERTIES
+            TIMEOUT 30)
     endif()
 
     file(GLOB INKPOD_MSIX_ASSETS CONFIGURE_DEPENDS
