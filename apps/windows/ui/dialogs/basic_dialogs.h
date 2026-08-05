@@ -81,7 +81,7 @@ struct FillToolOptions {
     std::uint16_t gap_close{};
     std::uint32_t extension_distance{1U};
     InkpodInclusionMode inclusion_mode{INKPOD_INCLUSION_NONE};
-    std::vector<std::uint32_t> inclusion_rgba;
+    std::vector<InkpodColorValue> inclusion_colors;
     bool overflow_abort{true};
     bool detached_regions{};
     bool transparent_only{};

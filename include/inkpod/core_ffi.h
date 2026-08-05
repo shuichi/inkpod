@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v1 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v2 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -33,10 +33,12 @@
  * 同期する。
  *
  * @par revision、dirty、Undo と失敗時の原子性
- * 文書編集 API は、成功して実変更があると document revision を 1 回進め、dirty にし、
- * 原則 1 Undo 単位を追加する。query、view、shortcut、snapshot、task は文書 revision、dirty、
- * Undo を変えない。通常保存は revision/Undo を変えず savepoint を現在位置へ移して dirty を
- * 解消し、autosave は通常 savepoint を変えない。個別に部分出力を明記した
+ * 文書編集 API は、成功して実変更があると document revision を 1 回進め、document dirty にし、
+ * 原則 1 Undo 単位を追加する。EditorState の意味変更は独立した EditorRevision/digest/editor dirty
+ * だけを進める。公開 session dirty は `document_dirty || editor_dirty` である。query、view、shortcut、
+ * snapshot、task はいずれの意味状態も変えない。production v2の通常保存はrevision/Undoを変えず
+ * document savepointだけを現在位置へ移し、未保存のEditorStateがあればsession dirtyを維持する。
+ * autosaveは両方の通常savepointを変えない。個別に部分出力を明記した
  * `BUFFER_TOO_SMALL`、`FILL_OVERFLOW`、cancelled batch report、error-message API を除き、失敗時は
  * 文書、履歴、所有権出力を変更せず、通常の値出力は未使用とする。
  *
@@ -111,6 +113,58 @@ typedef uint32_t InkpodPaintTool;
 #define INKPOD_TOOL_PENCIL UINT32_C(1)
 #define INKPOD_TOOL_BRUSH UINT32_C(2)
 #define INKPOD_TOOL_ERASER UINT32_C(3)
+
+/** @brief Core-owned EditorState が保持する全 editor tool の安定識別子型。 */
+typedef uint32_t InkpodEditorTool;
+#define INKPOD_EDITOR_TOOL_PENCIL UINT32_C(1)
+#define INKPOD_EDITOR_TOOL_BRUSH UINT32_C(2)
+#define INKPOD_EDITOR_TOOL_ERASER UINT32_C(3)
+#define INKPOD_EDITOR_TOOL_FILL UINT32_C(1001)
+#define INKPOD_EDITOR_TOOL_EYEDROPPER UINT32_C(1002)
+#define INKPOD_EDITOR_TOOL_BOX_ZOOM UINT32_C(1003)
+#define INKPOD_EDITOR_TOOL_GUIDE_MOVE UINT32_C(1004)
+#define INKPOD_EDITOR_TOOL_SELECTION UINT32_C(1005)
+#define INKPOD_EDITOR_TOOL_FLOATING_TRANSFORM UINT32_C(1006)
+#define INKPOD_EDITOR_TOOL_LIGHT_TABLE_MOVE UINT32_C(1007)
+#define INKPOD_EDITOR_TOOL_EFFECT_GRADIENT UINT32_C(1101)
+#define INKPOD_EDITOR_TOOL_EFFECT_AIRBRUSH UINT32_C(1102)
+#define INKPOD_EDITOR_TOOL_EFFECT_BLUR UINT32_C(1103)
+#define INKPOD_EDITOR_TOOL_EFFECT_STAMP UINT32_C(1104)
+#define INKPOD_EDITOR_TOOL_EFFECT_DUST UINT32_C(1105)
+#define INKPOD_EDITOR_TOOL_EFFECT_ALPHA_GRADIENT UINT32_C(1106)
+#define INKPOD_EDITOR_TOOL_VECTOR_LINE UINT32_C(1201)
+#define INKPOD_EDITOR_TOOL_VECTOR_CURVE UINT32_C(1202)
+#define INKPOD_EDITOR_TOOL_VECTOR_RECTANGLE UINT32_C(1203)
+#define INKPOD_EDITOR_TOOL_VECTOR_ELLIPSE UINT32_C(1204)
+#define INKPOD_EDITOR_TOOL_VECTOR_POLYLINE UINT32_C(1205)
+#define INKPOD_EDITOR_TOOL_VECTOR_ERASER UINT32_C(1206)
+
+#define INKPOD_EDITOR_STATE_DIRTY (UINT32_C(1) << 0)
+#define INKPOD_EDITOR_STATE_HAS_LAST_COLOR_TOOL (UINT32_C(1) << 1)
+#define INKPOD_EDITOR_STATE_HAS_TARGET (UINT32_C(1) << 2)
+#define INKPOD_EDITOR_STATE_HAS_PALETTE_CURSOR (UINT32_C(1) << 3)
+#define INKPOD_EDITOR_STATE_HAS_CURRENT_COLOR (UINT32_C(1) << 4)
+
+#define INKPOD_EDITOR_FILL_OVERFLOW_ABORT (UINT64_C(1) << 0)
+#define INKPOD_EDITOR_FILL_DETACHED_REGIONS (UINT64_C(1) << 1)
+#define INKPOD_EDITOR_FILL_TRANSPARENT_ONLY (UINT64_C(1) << 2)
+#define INKPOD_EDITOR_FILL_DOCUMENT_SELECTION (UINT64_C(1) << 3)
+#define INKPOD_EDITOR_FILL_LIGHT_TABLE_BOUNDARY (UINT64_C(1) << 4)
+#define INKPOD_EDITOR_FILL_LIGHT_TABLE_COLOR (UINT64_C(1) << 5)
+#define INKPOD_EDITOR_FILL_FLAGS ((UINT64_C(1) << 6) - UINT64_C(1))
+
+typedef uint32_t InkpodEditorUpdateKind;
+#define INKPOD_EDITOR_UPDATE_ACTIVE_TOOL UINT32_C(1)
+#define INKPOD_EDITOR_UPDATE_TOOL_COLOR UINT32_C(2)
+#define INKPOD_EDITOR_UPDATE_TOOL_DIAMETER UINT32_C(3)
+#define INKPOD_EDITOR_UPDATE_FILL_OPTIONS UINT32_C(4)
+#define INKPOD_EDITOR_UPDATE_SELECTION_OPTIONS UINT32_C(5)
+#define INKPOD_EDITOR_UPDATE_VECTOR_OPTIONS UINT32_C(6)
+#define INKPOD_EDITOR_UPDATE_ACTIVE_TARGET UINT32_C(7)
+#define INKPOD_EDITOR_UPDATE_PALETTE_CURSOR UINT32_C(8)
+#define INKPOD_EDITOR_UPDATE_PALETTE_CURSOR_PRESENT (UINT64_C(1) << 0)
+
+#define INKPOD_EDITOR_MAX_INCLUSION_COLORS UINT32_C(6)
 
 /** @brief 入力座標が document logical か client device pixel かを表す型。 */
 typedef uint32_t InkpodCoordinateSpace;
@@ -703,6 +757,120 @@ typedef struct InkpodColorBuffer {
     uint64_t color_stride_bytes;
     uint64_t color_count;
 } InkpodColorBuffer;
+
+/** @brief fill tool の Core-owned option を exact-depth 色と共にコピーする値 record。 */
+typedef struct InkpodEditorFillOptions {
+    uint32_t struct_size;
+    InkpodFillOperation operation;
+    uint64_t flags;
+    uint16_t tolerance;
+    uint16_t gap_close;
+    InkpodInclusionMode inclusion_mode;
+    uint32_t extension_distance;
+    uint32_t inclusion_color_count;
+    uint32_t reserved;
+    InkpodColorValue inclusion_colors[INKPOD_EDITOR_MAX_INCLUSION_COLORS];
+} InkpodEditorFillOptions;
+
+/** @brief selection tool の shape/operation/tolerance/径をコピーする値 record。 */
+typedef struct InkpodEditorSelectionOptions {
+    uint32_t struct_size;
+    InkpodSelectionShape shape;
+    InkpodSelectionOperation operation;
+    uint32_t reserved;
+    uint16_t tolerance;
+    uint16_t gap_close;
+    uint32_t reserved2;
+    int64_t diameter_q16;
+} InkpodEditorSelectionOptions;
+
+/** @brief vector erase/select option をコピーする値 record。 */
+typedef struct InkpodEditorVectorOptions {
+    uint32_t struct_size;
+    InkpodVectorEraseMode erase_mode;
+    InkpodVectorSelectionMode selection_mode;
+    uint32_t reserved;
+} InkpodEditorVectorOptions;
+
+/**
+ * @brief document session に属する Core-owned EditorState の caller-owned snapshot。
+ *
+ * `editor_revision` と `editor_digest` は意味変更だけで進み、document revision/history/render
+ * とは独立する。色は `InkpodColorValue` の depth を保持し packed RGBA8 へ縮小しない。
+ */
+typedef struct InkpodEditorStateInfo {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t feature_flags;
+    uint64_t editor_revision;
+    uint8_t editor_digest[32];
+    InkpodEditorTool active_tool;
+    InkpodEditorTool last_color_consuming_tool;
+    InkpodColorValue current_color;
+    uint32_t reserved;
+    int64_t current_diameter_q16;
+    uint64_t active_layer_id;
+    uint64_t active_plane_id;
+    uint32_t palette_group;
+    uint32_t palette_index;
+    InkpodEditorFillOptions fill;
+    InkpodEditorSelectionOptions selection;
+    InkpodEditorVectorOptions vector;
+} InkpodEditorStateInfo;
+
+/** @brief document 作成前にも取得できる immutable built-in defaults のコピー。 */
+typedef struct InkpodEditorDefaults {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint32_t width;
+    uint32_t height;
+    uint32_t dpi_x_milli;
+    uint32_t dpi_y_milli;
+    InkpodEditorStateInfo state;
+} InkpodEditorDefaults;
+
+/**
+ * @brief `kind` が選ぶ一つの EditorState field update。
+ *
+ * 入力は呼出中だけ borrowed。未選択 field は無視される。`expected_editor_revision` は
+ * query で得た対象 session の厳密な base revision でなければならない。
+ */
+typedef struct InkpodEditorStateUpdate {
+    uint32_t struct_size;
+    InkpodEditorUpdateKind kind;
+    uint64_t expected_editor_revision;
+    uint64_t flags;
+    InkpodEditorTool tool;
+    uint32_t reserved;
+    InkpodColorValue color;
+    int64_t diameter_q16;
+    uint64_t active_layer_id;
+    uint64_t active_plane_id;
+    uint32_t palette_group;
+    uint32_t palette_index;
+    InkpodEditorFillOptions fill;
+    InkpodEditorSelectionOptions selection;
+    InkpodEditorVectorOptions vector;
+} InkpodEditorStateUpdate;
+
+/**
+ * @brief Core-owned EditorStateからtool/color/diameter/targetを開始時にcaptureするstroke入力。
+ *
+ * sample spanは呼出中だけborrowedでCoreが全値をcopyする。`tool == 0` はactive tool、
+ * 非0は指定toolのCore-owned styleを選ぶ。callerはcolor/diameter/targetを渡さず、
+ * `inkpod_core_editor_stroke_begin`が対象sessionのexact-depth値を一度だけ確定する。
+ */
+typedef struct InkpodEditorStrokeInput {
+    uint32_t struct_size;
+    InkpodCoordinateSpace coordinate_space;
+    InkpodEditorTool tool; /**< 0=active tool、それ以外=指定Core-owned tool style。 */
+    uint32_t reserved;
+    uint64_t flags;
+    const InkpodStrokeSample* samples;
+    uint64_t sample_count;
+    uint64_t sample_stride_bytes;
+} InkpodEditorStrokeInput;
 
 /**
  * @brief fill の演算、色、seed、選択範囲、包含色 span を渡す borrowed 入力。
@@ -1835,6 +2003,60 @@ InkpodStatus inkpod_core_get_document_info(
     InkpodDocumentInfo* out_info);
 
 /**
+ * @brief Rust-owned immutable built-in editor/new-document defaults を caller-owned record へコピーする。
+ * @par 契約
+ * Core owner thread。document 作成前にも有効。`core` と `out_defaults` は非 NULL、出力は完全な
+ * `struct_size` を持つ。query は Core state、revision、dirty、history を一切変更しない。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`PANIC`。
+ */
+InkpodStatus inkpod_core_get_editor_defaults(
+    InkpodCore* core,
+    InkpodEditorDefaults* out_defaults);
+
+/**
+ * @brief current document session の Core-owned EditorState を caller-owned record へコピーする。
+ * @par 契約
+ * Core owner thread。`core` と `out_state` は非 NULL、出力は完全な `struct_size`。返却値は
+ * 呼出後 caller が所有するコピーであり query は Editor/document revision、digest、dirty、history、
+ * journal、render content を変更しない。同一 document の view は同じ session state を読む。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`PANIC`。
+ */
+InkpodStatus inkpod_core_get_editor_state(
+    InkpodCore* core,
+    InkpodEditorStateInfo* out_state);
+
+/**
+ * @brief expected EditorRevision に対して一つの typed EditorState update を原子的に適用する。
+ * @par 契約
+ * Core owner thread。3 pointer は非 NULL、完全な `struct_size`、呼出中だけ borrowed/caller-owned。
+ * semantic no-op は revision/digest/dirty を維持する。実変更は EditorRevision/digest/editor dirty のみ
+ * 更新し、document revision、StateId、procedure journal、Undo history、render content は不変。
+ * stale、未知 enum/flags、overflow、invalid target、failure は出力と Core state を変更しない。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
+ */
+InkpodStatus inkpod_core_update_editor_state(
+    InkpodCore* core,
+    const InkpodEditorStateUpdate* update,
+    InkpodEditorStateInfo* out_state);
+
+/**
+ * @brief Core-owned EditorStateのexact tool/color/diameter/stable targetでstrokeを開始する。
+ * @par 契約
+ * Core owner thread。`input`とsample spanは呼出中だけborrowedで、Coreは全値をcopyする。成功時に
+ * EditorStateを一度だけcaptureし、append/end中の後続EditorState変更はprocedure引数を変えない。
+ * 開始自体はdocument/editor revision、digest、dirty、history、render contentをcommitしない。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INCOMPATIBLE_ABI`、`UNSUPPORTED`、`WRONG_THREAD`、
+ * `NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
+ */
+InkpodStatus inkpod_core_editor_stroke_begin(
+    InkpodCore* core,
+    const InkpodEditorStrokeInput* input);
+
+/**
  * @brief current Core session の category 別 logical resource 使用量をコピーする。
  *
  * Core owner thread。`core` と caller-owned `out_usage` は非 NULL、完全な advertised
@@ -1861,8 +2083,9 @@ InkpodStatus inkpod_core_update_paper_frames(
 /**
  * @brief 互換 main-line/color active plane を切り替える。
  * @par 契約
- * Core owner thread。`core` は非 NULL borrowed、`plane` は既知値。成功時は論理 UI state だけ更新し、
- * document revision、dirty、Undo を変えない。失敗時不変。stroke/preview と競合中は `INVALID_STATE`。
+ * Core owner thread。`core` は非 NULL borrowed、`plane` は既知値。成功時は EditorState target と
+ * EditorRevision/digest/editor dirty だけを更新し、document revision、StateId、Undo、render content は
+ * 変えない。semantic no-op と失敗は不変。stroke/preview と競合中は `INVALID_STATE`。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
  */
@@ -1872,8 +2095,9 @@ InkpodStatus inkpod_core_set_active_plane(
 /**
  * @brief stable layer/plane ID で active node を切り替える。
  * @par 契約
- * Core owner thread。`core` は非 NULL borrowed、ID は現文書内の整合する組。成功時は UI selection のみで
- * revision、dirty、Undo は不変。失敗時も不変。stroke/preview と競合中は `INVALID_STATE`。
+ * Core owner thread。`core` は非 NULL borrowed、ID は現文書内の整合する組。成功時は EditorState target と
+ * EditorRevision/digest/editor dirty だけを更新し、document revision、StateId、Undo、render content は
+ * 変えない。semantic no-op と失敗は不変。stroke/preview と競合中は `INVALID_STATE`。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
  */
@@ -1894,6 +2118,19 @@ InkpodStatus inkpod_core_set_active_node(
  */
 InkpodStatus inkpod_core_apply_fill(
     InkpodCore* core,
+    const InkpodFillInput* input,
+    InkpodFillResult* result);
+
+/**
+ * @brief gesture開始時にcaptureしたstable layer/plane targetでfillを実行する。
+ * @par 契約
+ * pointer/span、transaction、status契約は`inkpod_core_apply_fill`と同じ。layer/planeは同じ
+ * document namespaceに属する非0のpairでなければならず、後続EditorState変更でretargetしない。
+ */
+InkpodStatus inkpod_core_apply_fill_for_editor_target(
+    InkpodCore* core,
+    uint64_t layer_id,
+    uint64_t plane_id,
     const InkpodFillInput* input,
     InkpodFillResult* result);
 
@@ -2121,8 +2358,10 @@ InkpodStatus inkpod_core_revert_active_selection(
  * @brief current document を `.inkpod` へ atomic に通常保存する。
  * @par 契約
  * Core owner thread。`core`/path/`out_info` は非 NULL・非重複、path は非空 UTF-8 byte span として呼び出し中だけ borrowed。
- * 同一 directory の一時 file を完成・flush・close 後に置換する。成功時 revision/Undo は不変、normal savepoint/path を更新して dirty を解消し
- * out_info を書く。失敗時既存 file・文書・savepoint・出力は不変。stroke/preview/floating 中は `INVALID_STATE`。
+ * 同一 directory の一時 file を完成・flush・close 後に置換する。成功時 revision/Undo は不変、
+ * document normal savepoint/pathだけを更新してout_infoを書く。production v2はEditorStateを保存しないため
+ * editor savepointを進めず、editor dirtyならsession dirtyを維持する。失敗時既存file・文書・両savepoint・
+ * 出力は不変。stroke/preview/floating 中は `INVALID_STATE`。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
  */
@@ -2266,8 +2505,21 @@ InkpodStatus inkpod_core_apply_selection(
     InkpodCore* core,
     const InkpodSelectionInput* input,
     InkpodDispatchResult* result);
+
 /**
- * @brief active plane の指定色と同じ／異なる pixel を selection へ合成する。
+ * @brief gesture開始時にcaptureしたstable layer/plane targetでselectionを実行する。
+ * @par 契約
+ * pointer/span、transaction、status契約は`inkpod_core_apply_selection`と同じ。layer/planeは同じ
+ * document namespaceに属する非0のpairでなければならず、後続EditorState変更でretargetしない。
+ */
+InkpodStatus inkpod_core_apply_selection_for_editor_target(
+    InkpodCore* core,
+    uint64_t layer_id,
+    uint64_t plane_id,
+    const InkpodSelectionInput* input,
+    InkpodDispatchResult* result);
+/**
+ * @brief call開始時にcurrent EditorStateからcaptureしたactive planeの指定色と同じ／異なるpixelをselectionへ合成する。
  * @par 契約
  * Core owner thread。`core`/`color`/`result` は非 NULL・非重複、color は完全サイズで borrowed。
  * 成功時実変更を 1 revision/dirty/Undo 単位で commit。失敗時不変。stroke/preview/floating 中は不可。
@@ -2276,6 +2528,21 @@ InkpodStatus inkpod_core_apply_selection(
  */
 InkpodStatus inkpod_core_select_color(
     InkpodCore* core,
+    const InkpodColorValue* color,
+    uint16_t tolerance,
+    uint32_t different,
+    InkpodSelectionOperation operation,
+    InkpodDispatchResult* result);
+/**
+ * @brief command開始時にcaptureしたstable layer/plane targetから色選択する。
+ * @par 契約
+ * pointer、transaction、status契約は`inkpod_core_select_color`と同じ。layer/planeは同じ
+ * document namespaceに属する非0のpairでなければならず、後続EditorState変更でretargetしない。
+ */
+InkpodStatus inkpod_core_select_color_for_editor_target(
+    InkpodCore* core,
+    uint64_t layer_id,
+    uint64_t plane_id,
     const InkpodColorValue* color,
     uint16_t tolerance,
     uint32_t different,

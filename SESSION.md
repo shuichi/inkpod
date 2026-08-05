@@ -2,7 +2,7 @@
 
 更新日: 2026-08-05
 
-状態: M0–M2 完了、M3–M9 未完。旧 revision-max 判定式の正本化と環境別性能ゲートは反映済み
+状態: M0–M3 完了、M4–M9 未完。旧 revision-max 判定式の正本化と環境別性能ゲートは反映済み
 
 ## 1. 目的
 
@@ -434,6 +434,61 @@ Revision-max render-cache invariant:
 - C++にauthoritativeなtool/color/fill/selection/vector defaultが残らない。
 - C++ stateはCore queryから再構築可能なpresentation cacheだけになる。
 - production `.inkpod` v2を変更せず、M8がそのまま接続できるcanonical EditorState frame、digest、revision、savepoint契約が固定される。
+
+実装実績（2026-08-05）:
+
+- Rust Coreにimmutable `EditorDefaults`、document-session単位のtyped
+  `EditorState`、document revisionと独立したnonzero `EditorRevision`、
+  domain-separated `EditorStateDigest`を実装した。built-in new-document spec
+  とeditor defaultはdocument作成時にcopyし、application preferenceへ保存しない。
+- active/last color-consuming tool、tool別のstraight-alpha RGBA8/RGBA16 exact-
+  depth color、Q16 diameter、fill/Light Table、selection、vector option、stable
+  active layer/plane target、palette cursorを一つのEditorState ownerへ集約した。
+  palette content、main-line color、selection maskは引き続きdocument primitiveが
+  所有し、重複ownerを置いていない。
+- typed query/updateはexact base EditorRevisionを検証し、semantic no-opでは
+  revision/digest/dirtyを保持する。実変更はeditor revision/digest/dirtyだけを
+  進め、document revision、StateId、journal、Undo history、document savepoint、
+  render contentを変えない。invalid、stale、overflow、failureはatomicに拒否する。
+- session dirtyを`document_dirty || editor_dirty`として公開した。normal save、
+  failure、autosave、recovery、exportを別遷移として固定し、production v2 normal
+  saveはdocument savepointだけを進める。v2が復元できないEditorStateをsavedと
+  偽装せず、editor dirtyはM8まで残る。
+- active targetはstable layer/plane IDで検証し、layer/plane topology変更、native
+  open、sequence activate/step、Light Table swapを含むdocument replacementで、
+  Coreが最初の有効planeへ決定的に再解決する。target/revision overflowを含む失敗は
+  document、stable-ID cursor、EditorState、history、journal、cacheを部分公開しない。
+- command/stroke/preview開始時のexact-depth color、diameter、option、stable targetを
+  invocationへcopyする。M3で接続したstroke、fill、selection、color routeは、開始後の
+  EditorState変更やworkspace切替を参照してretargetしない。
+- `ApplyRasterStroke`はtarget Plane IDをinput roleとcanonical argumentの双方へ固定し、
+  RGBA8/RGBA16をtagged exact depthのまま保持するschema v2へ進めた。accepted inputと
+  bit-exact replay resultの変更なのでsemantics revision 4、`ReplayEpoch` 4、未実装の
+  successor予約top-level v6を一緒に固定し、stroke v1互換decoderは残していない。
+  他のM1 primitiveはschema v1のままで、production `.inkpod` v2も変更していない。
+- C ABI v2へimmutable defaults query、side-effect-free EditorState query、typed
+  update、exact-depth stroke begin、captured-target fill/selection/color-selectionの
+  7 APIと7 fixed-layout recordをadditiveに追加した。NULL、短いtop-level/
+  nested structure、未知enum、stale revision、invalid target、ownership、無副作用
+  queryを公開契約で検証し、export/header/test-reference parityは175関数になった。
+- Windows `CoreHost`はCore owner thread上でsession/generationを固定してquery/update
+  し、`DocumentSession`にはrevision/digest付きのdeep-copied presentation cacheだけを
+  保持する。同一documentの複数viewは一つのEditorStateを共有し、別sessionは分離し、
+  document/view/workspace切替時は対象Coreを再queryして旧workspace値を書き戻さない。
+- schema-1 canonical EditorState/EDIT frame、4 MiB bound、round-trip、digest golden、
+  revision/savepoint遷移をCore-only DTOとして実装した。production `.inkpod`はexact-
+  current v2のままで、`META`/`GENS`/`ASST`/`PROC`/`EDIT`のsave/reopen接続はM8へ残した。
+- 代表契約は`editor_state` public integration tests、canonical codec unit tests、
+  FFI EditorDefaults/EditorState contract tests、sequence/Light Table target-reconciliation
+  tests、Windows CoreHost/command-state/GUI ownership smokeで固定した。
+- 最終検証はRust workspace 276 test＋1 doctest、zero-warning Clippy、strict
+  rustdoc、ARM64 Debug/Release fresh configure/build、ABI/GUIを含むDebug CTest
+  27/27を合格した。承認済みRange ID
+  `windows-arm64-apple-silicon-parallels-release-2026-08-05`でwarm-up後5回の
+  medianはCore quick pan/dirty `0.851833`/`1.903334 ms`、full pan/dirty
+  `13.495000`/`9.158875 ms`、native drawing `174.223125 ms`、native wheel
+  `0.996097 refresh intervals/event`で、全意味counterと承認rangeを満たした。
+  workload/range、revision-max式、production v2は変更していない。
 
 ### M4: Immutable Genesis と Asset Store
 

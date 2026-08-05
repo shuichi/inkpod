@@ -9,7 +9,20 @@ use crate::primitive::digest::{
 use crate::primitive::raster::{apply as apply_raster_stroke, canonicalize as canonicalize_stroke};
 use crate::*;
 
-const PRIMITIVE_SCHEMA_VERSION: u16 = 1;
+const METADATA_PRIMITIVE_SCHEMA_VERSION: u16 = 1;
+const RASTER_STROKE_PRIMITIVE_SCHEMA_VERSION: u16 = 2;
+
+const fn current_primitive_schema_version(primitive_id: PrimitiveId) -> Option<u16> {
+    if primitive_id.get() == PrimitiveId::SET_MAIN_LINE_COLOR.get()
+        || primitive_id.get() == PrimitiveId::REPLACE_PALETTE.get()
+    {
+        Some(METADATA_PRIMITIVE_SCHEMA_VERSION)
+    } else if primitive_id.get() == PrimitiveId::APPLY_RASTER_STROKE.get() {
+        Some(RASTER_STROKE_PRIMITIVE_SCHEMA_VERSION)
+    } else {
+        None
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CachePolicy {
@@ -93,7 +106,9 @@ impl Core {
                 "procedure replay epoch is unsupported",
             ));
         }
-        if procedure.primitive_schema_version != PRIMITIVE_SCHEMA_VERSION {
+        if current_primitive_schema_version(procedure.primitive_id)
+            != Some(procedure.primitive_schema_version)
+        {
             return Err(CoreError::InvalidArgument(
                 "procedure primitive schema version is unsupported",
             ));
@@ -170,7 +185,7 @@ impl Core {
                 "primitive request revision is stale",
             ));
         }
-        let canonical_arguments = encode_stroke_arguments(&arguments);
+        let canonical_arguments = encode_stroke_arguments(&arguments)?;
         let target_plane_id = arguments.target_plane_id;
         self.execute_canonical(
             CanonicalizedRequest {
@@ -234,7 +249,7 @@ impl Core {
                     document.height,
                     target_plane_id,
                 )?;
-                let encoded_arguments = encode_stroke_arguments(&arguments);
+                let encoded_arguments = encode_stroke_arguments(&arguments)?;
                 Ok(CanonicalizedRequest {
                     primitive: CanonicalPrimitive::ApplyRasterStroke(arguments),
                     primitive_id: PrimitiveId::APPLY_RASTER_STROKE,
@@ -333,10 +348,13 @@ impl Core {
                 Vec::new()
             }
         };
+        let primitive_schema_version = current_primitive_schema_version(primitive_id).ok_or(
+            CoreError::InvalidArgument("primitive ID is not in the catalog"),
+        )?;
         let procedure = Arc::new(CanonicalProcedure {
             procedure_id,
             primitive_id,
-            primitive_schema_version: PRIMITIVE_SCHEMA_VERSION,
+            primitive_schema_version,
             replay_epoch: ReplayEpoch::CURRENT,
             base_state_id: self.current_state,
             committed_state_id: next_state,
@@ -431,7 +449,6 @@ fn apply_primitive(
                 return Ok(None);
             }
             let plane_id = PlaneId::from_raw(arguments.target_plane_id);
-            working.active_plane_id = plane_id;
             Ok(Some(AppliedPrimitive {
                 history: HistoryChange::Pixels { plane_id, changes },
                 cache_policy: CachePolicy::RasterRevision,
@@ -499,15 +516,21 @@ fn decode_palette(bytes: &[u8]) -> Result<Vec<PixelValue>, CoreError> {
     Ok(colors)
 }
 
-fn encode_stroke_arguments(arguments: &CanonicalStrokeArguments) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(19);
+fn encode_stroke_arguments(arguments: &CanonicalStrokeArguments) -> Result<Vec<u8>, CoreError> {
+    if arguments.target_plane_id == 0 {
+        return Err(CoreError::InvalidArgument(
+            "stroke target plane ID must be nonzero",
+        ));
+    }
+    let color = color_bytes(arguments.color)?;
+    let mut bytes = Vec::with_capacity(8 + 4 + color.len() + 8 + 2);
+    bytes.extend_from_slice(&arguments.target_plane_id.to_le_bytes());
     bytes.extend_from_slice(&arguments.tool_code.to_le_bytes());
-    bytes.push(1);
-    bytes.extend_from_slice(&arguments.color);
+    bytes.extend_from_slice(&color);
     bytes.extend_from_slice(&arguments.diameter_q16.to_le_bytes());
     bytes.push(u8::from(arguments.auto_erase));
     bytes.push(u8::from(arguments.pressure_size));
-    bytes
+    Ok(bytes)
 }
 
 fn decode_procedure(procedure: &CanonicalProcedure) -> Result<CanonicalizedRequest, CoreError> {
@@ -555,31 +578,55 @@ fn decode_procedure(procedure: &CanonicalProcedure) -> Result<CanonicalizedReque
 fn decode_stroke_procedure(
     procedure: &CanonicalProcedure,
 ) -> Result<CanonicalizedRequest, CoreError> {
-    if procedure.input_ids.len() != 1 || procedure.canonical_arguments.len() != 19 {
+    if procedure.input_ids.len() != 1 || !matches!(procedure.canonical_arguments.len(), 27 | 31) {
         return Err(CoreError::InvalidArgument(
             "raster stroke procedure has invalid canonical roles or arguments",
         ));
     }
     let bytes = &procedure.canonical_arguments;
-    let tool_code = u32::from_le_bytes(bytes[0..4].try_into().expect("fixed-width slice"));
-    if bytes[4] != 1 || !matches!(bytes[17], 0 | 1) || !matches!(bytes[18], 0 | 1) {
+    let target_plane_id = u64::from_le_bytes(bytes[0..8].try_into().expect("fixed-width slice"));
+    if target_plane_id == 0 || target_plane_id != procedure.input_ids[0] {
+        return Err(CoreError::InvalidArgument(
+            "raster stroke target argument does not match its input role",
+        ));
+    }
+    let tool_code = u32::from_le_bytes(bytes[8..12].try_into().expect("fixed-width slice"));
+    let color_length = match bytes[12] {
+        1 => 5,
+        2 => 9,
+        _ => {
+            return Err(CoreError::InvalidArgument(
+                "raster stroke color tag is unknown",
+            ));
+        }
+    };
+    let diameter_start = 12 + color_length;
+    let flags_start = diameter_start + 8;
+    if bytes.len() != flags_start + 2
+        || !matches!(bytes[flags_start], 0 | 1)
+        || !matches!(bytes[flags_start + 1], 0 | 1)
+    {
         return Err(CoreError::InvalidArgument(
             "raster stroke arguments are not canonical",
         ));
     }
-    let color = [bytes[5], bytes[6], bytes[7], bytes[8]];
-    let diameter_q16 = i64::from_le_bytes(bytes[9..17].try_into().expect("fixed-width slice"));
+    let color = decode_color(&bytes[12..diameter_start])?;
+    let diameter_q16 = i64::from_le_bytes(
+        bytes[diameter_start..flags_start]
+            .try_into()
+            .expect("fixed-width slice"),
+    );
     let arguments = CanonicalStrokeArguments {
-        target_plane_id: procedure.input_ids[0],
+        target_plane_id,
         tool_code,
         color,
         diameter_q16,
-        auto_erase: bytes[17] != 0,
-        pressure_size: bytes[18] != 0,
+        auto_erase: bytes[flags_start] != 0,
+        pressure_size: bytes[flags_start + 1] != 0,
         payload: procedure.canonical_payload.clone(),
     };
     crate::primitive::raster::decode_payload(&arguments.payload)?;
-    let encoded = encode_stroke_arguments(&arguments);
+    let encoded = encode_stroke_arguments(&arguments)?;
     Ok(CanonicalizedRequest {
         primitive: CanonicalPrimitive::ApplyRasterStroke(arguments),
         primitive_id: procedure.primitive_id,
@@ -919,5 +966,166 @@ mod tests {
         ));
         assert_eq!(target.document, before);
         assert!(target.history.is_empty());
+    }
+
+    #[test]
+    fn stroke_arguments_encode_target_and_exact_color_depth() {
+        let mut exact_source = initialized_core(0x18);
+        let exact_document = exact_source.document.as_ref().unwrap();
+        let exact_target = exact_document.primary_ids().2.get();
+        let exact_color = PixelValue::Rgba16([0x0123, 0x4567, 0x89ab, 0xcdef]);
+        let stroke = Stroke {
+            tool: PaintTool::Brush,
+            plane: ActivePlane::Color,
+            color: [9, 8, 7, 6],
+            diameter: 1.0,
+            auto_erase: true,
+            pressure_size: false,
+            coordinate_space: CoordinateSpace::Document,
+            samples: vec![StrokeSample {
+                x: 1.0,
+                y: 1.0,
+                pressure: 1.0,
+            }],
+        };
+        let exact_arguments = crate::primitive::raster::canonicalize_exact(
+            &stroke,
+            exact_color,
+            65_536,
+            &exact_source.view,
+            exact_document.width,
+            exact_document.height,
+            exact_target,
+        )
+        .unwrap();
+        let exact_outcome = exact_source
+            .execute_canonical_stroke(exact_source.document_revision.get(), exact_arguments)
+            .unwrap();
+        let exact_procedure = exact_outcome.procedure().unwrap();
+        let exact_bytes = exact_procedure.canonical_arguments();
+        assert_eq!(exact_procedure.primitive_schema_version(), 2);
+        assert_eq!(exact_procedure.replay_epoch(), ReplayEpoch::CURRENT);
+        assert_eq!(exact_bytes.len(), 31);
+        assert_eq!(
+            u64::from_le_bytes(exact_bytes[0..8].try_into().unwrap()),
+            exact_target
+        );
+        assert_eq!(
+            u32::from_le_bytes(exact_bytes[8..12].try_into().unwrap()),
+            2
+        );
+        assert_eq!(exact_bytes[12], 2);
+        assert_eq!(
+            &exact_bytes[13..21],
+            &[0x23, 0x01, 0x67, 0x45, 0xab, 0x89, 0xef, 0xcd]
+        );
+        assert_eq!(
+            i64::from_le_bytes(exact_bytes[21..29].try_into().unwrap()),
+            65_536
+        );
+        assert_eq!(&exact_bytes[29..31], &[1, 0]);
+
+        let mut exact_replay = initialized_core(0x18);
+        exact_replay.replay_procedure(exact_procedure).unwrap();
+        assert_eq!(
+            exact_source.document_state_digest().unwrap(),
+            exact_replay.document_state_digest().unwrap()
+        );
+
+        let mut stale_schema = exact_procedure.clone();
+        stale_schema.primitive_schema_version = 1;
+        let mut rejected_replay = initialized_core(0x18);
+        let rejected_document = rejected_replay.document.clone();
+        assert!(matches!(
+            rejected_replay.replay_procedure(&stale_schema),
+            Err(CoreError::InvalidArgument(
+                "procedure primitive schema version is unsupported"
+            ))
+        ));
+        assert_eq!(rejected_replay.document, rejected_document);
+        assert!(rejected_replay.history.is_empty());
+
+        let mut legacy = initialized_core(0x19);
+        let legacy_document = legacy.document_info().unwrap();
+        let legacy_outcome = legacy
+            .execute_primitive(PrimitiveRequest::ApplyRasterStroke {
+                expected_revision: legacy_document.document_revision,
+                target_plane_id: legacy_document.color_plane_id,
+                stroke: Stroke {
+                    auto_erase: false,
+                    pressure_size: true,
+                    ..stroke
+                },
+            })
+            .unwrap();
+        let legacy_bytes = legacy_outcome.procedure().unwrap().canonical_arguments();
+        assert_eq!(legacy_bytes.len(), 27);
+        assert_eq!(
+            u64::from_le_bytes(legacy_bytes[0..8].try_into().unwrap()),
+            legacy_document.color_plane_id
+        );
+        assert_eq!(&legacy_bytes[8..12], &2_u32.to_le_bytes());
+        assert_eq!(&legacy_bytes[12..17], &[1, 9, 8, 7, 6]);
+        assert_eq!(
+            i64::from_le_bytes(legacy_bytes[17..25].try_into().unwrap()),
+            65_536
+        );
+        assert_eq!(&legacy_bytes[25..27], &[0, 1]);
+    }
+
+    #[test]
+    fn primitive_schema_catalog_is_per_primitive_and_exact_current() {
+        assert_eq!(
+            current_primitive_schema_version(PrimitiveId::SET_MAIN_LINE_COLOR),
+            Some(1)
+        );
+        assert_eq!(
+            current_primitive_schema_version(PrimitiveId::REPLACE_PALETTE),
+            Some(1)
+        );
+        assert_eq!(
+            current_primitive_schema_version(PrimitiveId::APPLY_RASTER_STROKE),
+            Some(2)
+        );
+
+        let mut main_line = initialized_core(0x20);
+        let main_line_procedure = main_line
+            .execute_primitive(PrimitiveRequest::SetMainLineColor {
+                expected_revision: main_line.document_revision.get(),
+                color: PixelValue::Rgba([1, 2, 3, 255]),
+            })
+            .unwrap()
+            .procedure()
+            .unwrap()
+            .clone();
+        assert_eq!(main_line_procedure.primitive_schema_version(), 1);
+
+        let mut palette = initialized_core(0x21);
+        let palette_procedure = palette
+            .execute_primitive(PrimitiveRequest::ReplacePalette {
+                expected_revision: palette.document_revision.get(),
+                colors: vec![PixelValue::Rgba16([1, 2, 3, 4])],
+            })
+            .unwrap()
+            .procedure()
+            .unwrap()
+            .clone();
+        assert_eq!(palette_procedure.primitive_schema_version(), 1);
+
+        for mut wrong in [main_line_procedure, palette_procedure] {
+            wrong.primitive_schema_version = 2;
+            let mut target = initialized_core(match wrong.primitive_id {
+                PrimitiveId::SET_MAIN_LINE_COLOR => 0x20,
+                PrimitiveId::REPLACE_PALETTE => 0x21,
+                _ => unreachable!("the test covers only metadata primitives"),
+            });
+            assert!(matches!(
+                target.replay_procedure(&wrong),
+                Err(CoreError::InvalidArgument(
+                    "procedure primitive schema version is unsupported"
+                ))
+            ));
+            assert!(target.history.is_empty());
+        }
     }
 }

@@ -3,7 +3,8 @@
 use super::*;
 use crate::document::ensure_editable_plane;
 use crate::primitive::{
-    RasterStrokePreview, begin_stroke_preview, canonicalize_stroke, validate_stroke_request,
+    RasterStrokePreview, begin_stroke_preview, canonicalize_exact_stroke, canonicalize_stroke,
+    validate_stroke_request,
 };
 use crate::view::{device_to_document, stroke_coordinate_is_supported};
 
@@ -22,8 +23,12 @@ impl Core {
     pub fn apply_stroke(&mut self, stroke: &Stroke) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         validate_stroke_request(stroke)?;
+        let (active_layer_id, active_plane_id) = self.active_editor_target_ids()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let target_plane_id = document.plane_for_paint_role(stroke.plane)?.id.get();
+        let target_plane_id = document
+            .plane_for_paint_role(stroke.plane, Some(active_layer_id), Some(active_plane_id))?
+            .id
+            .get();
         let expected_revision = self.document_revision.get();
         self.execute_primitive(PrimitiveRequest::ApplyRasterStroke {
             expected_revision,
@@ -41,9 +46,11 @@ impl Core {
     pub fn begin_stroke(&mut self, stroke: &Stroke) -> Result<(), CoreError> {
         self.ensure_no_active_stroke()?;
         validate_stroke_request(stroke)?;
+        let (active_layer_id, active_plane_id) = self.active_editor_target_ids()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let target_plane_id = document.plane_for_paint_role(stroke.plane)?.id;
-        ensure_editable_plane(document, target_plane_id)?;
+        let target_plane_id = document
+            .plane_for_paint_role(stroke.plane, Some(active_layer_id), Some(active_plane_id))?
+            .id;
         let arguments = canonicalize_stroke(
             stroke,
             &self.view,
@@ -51,15 +58,111 @@ impl Core {
             document.height,
             target_plane_id.get(),
         )?;
+        self.begin_canonical_stroke_preview(stroke.clone(), arguments)
+    }
+
+    /// Begins a raster stroke using exact Core-owned EditorState values.
+    ///
+    /// The selected raster tool (or active tool when none is specified), its
+    /// exact-depth Core-owned color/Q16.16 diameter, and stable target IDs are
+    /// copied before the preview begins. Appends and commit use only that
+    /// captured style, so later EditorState updates cannot change an already-
+    /// started procedure. A tool selector chooses another Core-owned style; it
+    /// never supplies color or diameter from the caller.
+    pub fn begin_editor_stroke(&mut self, input: &EditorStrokeInput) -> Result<(), CoreError> {
+        self.ensure_no_active_stroke()?;
+        let (tool, color, diameter_q16, layer_id, target_plane_id) =
+            {
+                let state = &self
+                    .editor_session
+                    .as_ref()
+                    .ok_or(CoreError::NoDocument)?
+                    .state;
+                let editor_tool = input.tool.unwrap_or(state.active_tool);
+                let tool = raster_tool_from_editor(editor_tool)?;
+                let style = state
+                    .tool_style(editor_tool)
+                    .ok_or(CoreError::InvalidState(
+                        "editor raster tool style is missing",
+                    ))?;
+                let color = style.color.or_else(|| state.current_color()).ok_or(
+                    CoreError::InvalidState("editor raster tool has no captured color"),
+                )?;
+                let diameter_q16 = style.diameter_q16;
+                let target = state
+                    .target
+                    .ok_or(CoreError::InvalidState("editor state has no active target"))?;
+                (
+                    tool,
+                    color,
+                    diameter_q16,
+                    LayerId::from_raw(target.layer_id),
+                    PlaneId::from_raw(target.plane_id),
+                )
+            };
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let target = document
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)
+            .and_then(|layer| {
+                layer
+                    .planes
+                    .iter()
+                    .find(|plane| plane.id == target_plane_id)
+            })
+            .ok_or(CoreError::InvalidState(
+                "editor stroke target no longer exists",
+            ))?;
+        let plane = if target.kind == PlaneType::MainLine {
+            ActivePlane::MainLine
+        } else {
+            ActivePlane::Color
+        };
+        let stroke = Stroke {
+            tool,
+            plane,
+            // Exact color and diameter travel beside this legacy-compatible
+            // request shell and never round-trip through these presentation fields.
+            color: [0; 4],
+            diameter: (diameter_q16 as f64 / 65_536.0) as f32,
+            auto_erase: input.auto_erase,
+            pressure_size: input.pressure_size,
+            coordinate_space: input.coordinate_space,
+            samples: input.samples.clone(),
+        };
+        let arguments = canonicalize_exact_stroke(
+            &stroke,
+            color,
+            diameter_q16,
+            &self.view,
+            document.width,
+            document.height,
+            target_plane_id.get(),
+        )?;
+        self.begin_canonical_stroke_preview(stroke, arguments)
+    }
+
+    fn begin_canonical_stroke_preview(
+        &mut self,
+        mut settings: Stroke,
+        arguments: crate::primitive::CanonicalStrokeArguments,
+    ) -> Result<(), CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let target_plane_id = PlaneId::from_raw(arguments.target_plane_id);
+        ensure_editable_plane(document, target_plane_id)?;
         let base_document = document.clone();
         let mut preview_document = base_document.clone();
         let preview_revision = self.allocate_preview_revision()?;
         let preview =
             begin_stroke_preview(&mut preview_document, &arguments, preview_revision.get())?;
-        let mut settings = stroke.clone();
+        let captured_color = arguments.color;
+        let captured_diameter_q16 = arguments.diameter_q16;
         settings.samples.clear();
         self.active_stroke = Some(StrokeSession {
             settings,
+            captured_color,
+            captured_diameter_q16,
             preview,
             base_revision: self.document_revision.get(),
             base_document,
@@ -86,8 +189,10 @@ impl Core {
         ))?;
         let mut batch = session.settings.clone();
         batch.samples = samples.to_vec();
-        let appended = canonicalize_stroke(
+        let appended = canonicalize_exact_stroke(
             &batch,
+            session.captured_color,
+            session.captured_diameter_q16,
             &self.view,
             session.preview_document.width,
             session.preview_document.height,
@@ -197,11 +302,24 @@ fn validate_effect_samples(samples: &[StrokeSample]) -> Result<(), CoreError> {
 #[derive(Clone, Debug)]
 pub(super) struct StrokeSession {
     settings: Stroke,
+    captured_color: PixelValue,
+    captured_diameter_q16: i64,
     preview: RasterStrokePreview,
     base_revision: u64,
     base_document: CellDocument,
     pub(super) preview_document: CellDocument,
     pub(super) preview_revision: PreviewRevision,
+}
+
+fn raster_tool_from_editor(tool: EditorTool) -> Result<PaintTool, CoreError> {
+    match tool {
+        EditorTool::Pencil => Ok(PaintTool::Pencil),
+        EditorTool::Brush => Ok(PaintTool::Brush),
+        EditorTool::Eraser => Ok(PaintTool::Eraser),
+        _ => Err(CoreError::InvalidState(
+            "active editor tool is not a raster stroke tool",
+        )),
+    }
 }
 
 impl StrokeSession {

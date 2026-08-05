@@ -116,15 +116,20 @@ impl Core {
 
     /// Activates the adjacent sequence cell, optionally wrapping at the ends.
     ///
-    /// Dirty documents and active strokes are rejected. Endpoint no-op keeps the
-    /// current document; a switch installs a clean document and resets history/view.
+    /// Unsaved document changes and active strokes are rejected. Editor-only dirty
+    /// does not block a switch. Endpoint no-op keeps the current document; a switch
+    /// installs a clean document, resets history/view, preserves non-target
+    /// EditorState, and deterministically reconciles its stable target.
     pub fn sequence_step(
         &mut self,
         direction: SequenceDirection,
         loop_sequence: bool,
     ) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
-        if self.document_info()?.dirty {
+        if self.document.is_none() {
+            return Err(CoreError::NoDocument);
+        }
+        if self.savepoint != Some(self.current_state) {
             return Err(CoreError::UnsavedChanges);
         }
         let sequence = self
@@ -159,11 +164,16 @@ impl Core {
 
     /// Activates a sequence cell by zero-based natural-order index.
     ///
-    /// The current index is a no-op. Dirty/invalid switches do not replace the active
-    /// document; success establishes a clean savepoint with reset history and view.
+    /// The current index is a no-op. Unsaved document changes and invalid switches do
+    /// not replace the active document. Editor-only dirty does not block a switch;
+    /// success establishes a clean document savepoint with reset history/view while
+    /// preserving non-target EditorState and reconciling only its stable target.
     pub fn sequence_activate(&mut self, target: usize) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
-        if self.document_info()?.dirty {
+        if self.document.is_none() {
+            return Err(CoreError::NoDocument);
+        }
+        if self.savepoint != Some(self.current_state) {
             return Err(CoreError::UnsavedChanges);
         }
         let sequence = self
@@ -180,19 +190,23 @@ impl Core {
         }
         let source = sequence.cells[target].clone();
         let revision = self.next_document_revision()?;
-        let document = self.document_from_sequence_source(&source, revision)?;
+        let mut next_id = self.next_id;
+        let document = Self::document_from_sequence_source(&source, revision, &mut next_id)?;
+        let editor = self.stage_reconciled_editor_target(&document, None)?;
+        self.sequence
+            .as_mut()
+            .ok_or(CoreError::InvalidState("sequence disappeared"))?
+            .active_index = Some(target);
         self.document = Some(document);
         self.document_revision = revision;
+        self.next_id = next_id;
         self.render_cache.clear();
         self.reset_history(true);
         self.reset_view();
         self.current_path = None;
         self.recovered = false;
         self.floating = None;
-        self.sequence
-            .as_mut()
-            .ok_or(CoreError::InvalidState("sequence disappeared"))?
-            .active_index = Some(target);
+        self.publish_editor_session(editor);
         self.document_info()
     }
 
@@ -352,17 +366,17 @@ impl Core {
     }
 
     fn document_from_sequence_source(
-        &mut self,
         source: &SequenceCellSource,
         _revision: DocumentRevision,
+        next_id: &mut crate::identity::StableIdCursor,
     ) -> Result<CellDocument, CoreError> {
         let ids = DocumentIds {
-            document: self.next_id.take_document(),
-            layer: self.next_id.take_layer(),
-            main_plane: self.next_id.take_plane(),
-            color_plane: self.next_id.take_plane(),
-            selection_plane: self.next_id.take_plane(),
-            light_table_set: self.next_id.take_light_table_set(),
+            document: next_id.take_document(),
+            layer: next_id.take_layer(),
+            main_plane: next_id.take_plane(),
+            color_plane: next_id.take_plane(),
+            selection_plane: next_id.take_plane(),
+            light_table_set: next_id.take_light_table_set(),
         };
         let mut document = CellDocument::new(
             ids,

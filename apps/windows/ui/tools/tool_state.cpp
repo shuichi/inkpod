@@ -7,57 +7,6 @@
 namespace inkpod::windows::ui::tools {
 namespace {
 
-std::size_t ColorIndex(ColorCommand command) noexcept {
-    return static_cast<std::size_t>(command);
-}
-
-InkpodColorValue DefaultCommandColor(ColorCommand command) noexcept {
-    if (command == ColorCommand::Pencil) {
-        return InkpodColorValue{
-            sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
-    }
-    return InkpodColorValue{
-        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 220U, 40U, 30U, 255U};
-}
-
-bool ColorCommandForTool(
-    std::uint32_t tool, ColorCommand& command) noexcept {
-    switch (tool) {
-        case INKPOD_TOOL_PENCIL:
-            command = ColorCommand::Pencil;
-            return true;
-        case INKPOD_TOOL_BRUSH:
-            command = ColorCommand::Brush;
-            return true;
-        case kInteractionFill:
-            command = ColorCommand::Fill;
-            return true;
-        case kInteractionSelection:
-            command = ColorCommand::Selection;
-            return true;
-        case kInteractionEffectAirbrush:
-            command = ColorCommand::EffectAirbrush;
-            return true;
-        case kInteractionVectorLine:
-            command = ColorCommand::VectorLine;
-            return true;
-        case kInteractionVectorCurve:
-            command = ColorCommand::VectorCurve;
-            return true;
-        case kInteractionVectorRectangle:
-            command = ColorCommand::VectorRectangle;
-            return true;
-        case kInteractionVectorEllipse:
-            command = ColorCommand::VectorEllipse;
-            return true;
-        case kInteractionVectorPolyline:
-            command = ColorCommand::VectorPolyline;
-            return true;
-        default:
-            return false;
-    }
-}
-
 std::uint32_t ColorToRgba8(const InkpodColorValue& color) noexcept {
     const auto channel = [&](std::uint16_t value) {
         return color.depth == INKPOD_COLOR_DEPTH_16
@@ -76,21 +25,6 @@ void ApplyCurrentColor(
     tools.color_rgba = ColorToRgba8(color);
 }
 
-void ActivateColorCommand(
-    app::ToolUiState& tools, ColorCommand next_command) noexcept {
-    const std::size_t current = ColorIndex(tools.active_color_command);
-    tools.command_colors[current] = tools.drawing_color;
-    tools.command_color_initialized[current] = true;
-
-    const std::size_t next = ColorIndex(next_command);
-    if (!tools.command_color_initialized[next]) {
-        tools.command_colors[next] = DefaultCommandColor(next_command);
-        tools.command_color_initialized[next] = true;
-    }
-    tools.active_color_command = next_command;
-    ApplyCurrentColor(tools, tools.command_colors[next]);
-}
-
 } // namespace
 
 bool IsVectorCanvasTool(std::uint32_t tool) noexcept {
@@ -105,6 +39,7 @@ bool IsVectorStrokePlane(std::uint32_t kind) noexcept {
 void CancelVectorGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept {
     tools.vector_gesture_samples.clear();
+    tools.procedure.valid = false;
     if (canvas == nullptr) {
         return;
     }
@@ -114,6 +49,7 @@ void CancelVectorGeometryPreview(
 void CancelSelectionGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept {
     tools.selection_gesture_samples.clear();
+    tools.procedure.valid = false;
     if (canvas == nullptr) {
         return;
     }
@@ -129,20 +65,12 @@ void TransitionActiveTool(
         && tools.active_tool == kInteractionSelection) {
         CancelSelectionGeometryPreview(tools, canvas);
     }
-    ColorCommand next_color_command{};
-    if (ColorCommandForTool(next_tool, next_color_command)
-        && next_color_command != tools.active_color_command) {
-        ActivateColorCommand(tools, next_color_command);
-    }
     tools.active_tool = next_tool;
 }
 
 void SetActiveCommandColor(
     app::ToolUiState& tools, InkpodColorValue color) noexcept {
     ApplyCurrentColor(tools, color);
-    const std::size_t active = ColorIndex(tools.active_color_command);
-    tools.command_colors[active] = tools.drawing_color;
-    tools.command_color_initialized[active] = true;
 }
 
 void HandleActivePlaneTransition(

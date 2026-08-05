@@ -62,8 +62,6 @@ pub(crate) struct CellDocument {
     pub(crate) main_line_color: PixelValue,
     pub(crate) palette: Palette,
     pub(crate) layers: Vec<LayerNode>,
-    pub(crate) active_layer_id: LayerId,
-    pub(crate) active_plane_id: PlaneId,
     pub(crate) selection_plane_id: PlaneId,
     pub(crate) selection: TileRaster,
     pub(crate) guides: Vec<Guide>,
@@ -177,8 +175,6 @@ impl CellDocument {
                 opacity_milli: 1_000,
                 planes: vec![main_plane, color_plane],
             }],
-            active_layer_id: ids.layer,
-            active_plane_id: ids.main_plane,
             selection_plane_id: ids.selection_plane,
             selection: TileRaster::new(paper.width, paper.height, PixelFormat::BinaryMask8)?,
             guides: Vec::new(),
@@ -220,8 +216,11 @@ impl CellDocument {
             palette: self.palette.colors().to_vec(),
             planes,
             document_metadata: Some(FileDocumentMetadata {
-                active_layer_id: self.active_layer_id.get(),
-                active_plane_id: self.active_plane_id.get(),
+                // Production v2 has no EDIT section. Keep its mandatory legacy
+                // fields deterministic without treating them as EditorState
+                // persistence; a future atomic format cutover owns that change.
+                active_layer_id: layer_id.get(),
+                active_plane_id: main_plane_id.get(),
                 selection_plane_id: self.selection_plane_id.get(),
                 layers: self
                     .layers
@@ -297,7 +296,7 @@ impl CellDocument {
         for color in &file.palette {
             palette.push(*color)?;
         }
-        let (layers, active_layer_id, active_plane_id, selection_plane_id, selection, guides, grid) =
+        let (layers, selection_plane_id, selection, guides, grid) =
             if let Some(metadata) = &file.document_metadata {
                 let mut layers = Vec::with_capacity(metadata.layers.len());
                 for layer in &metadata.layers {
@@ -336,8 +335,6 @@ impl CellDocument {
                     .ok_or(CoreError::InvalidState("selection payload is missing"))?;
                 (
                     layers,
-                    LayerId::from_raw(metadata.active_layer_id),
-                    PlaneId::from_raw(metadata.active_plane_id),
                     PlaneId::from_raw(metadata.selection_plane_id),
                     file_plane_to_raster(selection_file, revision.get())?,
                     metadata
@@ -404,8 +401,6 @@ impl CellDocument {
                             },
                         ],
                     }],
-                    LayerId::from_raw(file.layer_id),
-                    PlaneId::from_raw(file.main_plane_id),
                     PlaneId::from_raw(selection_plane_id),
                     TileRaster::new(file.width, file.height, PixelFormat::BinaryMask8)?,
                     Vec::new(),
@@ -457,8 +452,6 @@ impl CellDocument {
             main_line_color: file.main_line_color,
             palette,
             layers,
-            active_layer_id,
-            active_plane_id,
             selection_plane_id,
             selection,
             guides,
@@ -507,7 +500,31 @@ impl CellDocument {
         };
         self.layers
             .iter()
-            .find(|layer| layer.id == self.active_layer_id)
+            .flat_map(|layer| layer.planes.iter())
+            .find(|plane| plane.kind == kind)
+            .ok_or(CoreError::InvalidState(
+                "requested plane role is unavailable",
+            ))
+    }
+
+    pub(crate) fn plane_for_paint_role(
+        &self,
+        role: ActivePlane,
+        active_layer_id: Option<LayerId>,
+        active_plane_id: Option<PlaneId>,
+    ) -> Result<&PlaneNode, CoreError> {
+        if role == ActivePlane::Color
+            && let Some(active) = active_plane_id.and_then(|id| self.plane_by_id(id))
+            && active.kind == PlaneType::Raster
+        {
+            return Ok(active);
+        }
+        let kind = match role {
+            ActivePlane::MainLine => PlaneType::MainLine,
+            ActivePlane::Color => PlaneType::Color,
+        };
+        active_layer_id
+            .and_then(|preferred| self.layers.iter().find(|layer| layer.id == preferred))
             .and_then(|layer| layer.planes.iter().find(|plane| plane.kind == kind))
             .or_else(|| {
                 self.layers
@@ -520,16 +537,6 @@ impl CellDocument {
             ))
     }
 
-    pub(crate) fn plane_for_paint_role(&self, role: ActivePlane) -> Result<&PlaneNode, CoreError> {
-        if role == ActivePlane::Color
-            && let Some(active) = self.plane_by_id(self.active_plane_id)
-            && active.kind == PlaneType::Raster
-        {
-            return Ok(active);
-        }
-        self.plane_for_role(role)
-    }
-
     pub(crate) fn plane_for_role_mut(
         &mut self,
         role: ActivePlane,
@@ -538,16 +545,6 @@ impl CellDocument {
             ActivePlane::MainLine => PlaneType::MainLine,
             ActivePlane::Color => PlaneType::Color,
         };
-        let preferred = self.active_layer_id;
-        let preferred_index = self.layers.iter().position(|layer| layer.id == preferred);
-        if let Some(index) = preferred_index
-            && let Some(plane_index) = self.layers[index]
-                .planes
-                .iter()
-                .position(|plane| plane.kind == kind)
-        {
-            return Ok(&mut self.layers[index].planes[plane_index]);
-        }
         for layer in &mut self.layers {
             if let Some(index) = layer.planes.iter().position(|plane| plane.kind == kind) {
                 return Ok(&mut layer.planes[index]);
@@ -572,11 +569,9 @@ impl CellDocument {
             .raster
     }
 
-    pub(crate) fn active_plane_role(&self) -> ActivePlane {
-        self.layers
-            .iter()
-            .flat_map(|layer| layer.planes.iter())
-            .find(|plane| plane.id == self.active_plane_id)
+    pub(crate) fn active_plane_role(&self, active_plane_id: Option<PlaneId>) -> ActivePlane {
+        active_plane_id
+            .and_then(|id| self.plane_by_id(id))
             .map_or(ActivePlane::Color, |plane| match plane.kind {
                 PlaneType::MainLine => ActivePlane::MainLine,
                 _ => ActivePlane::Color,

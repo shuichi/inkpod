@@ -31,6 +31,7 @@ impl Core {
             false,
             revision,
         )?;
+        let editor = self.stage_reconciled_editor_target(&document, None)?;
         self.document = Some(document);
         self.history_cursor -= 1;
         self.current_state = entry.before_state;
@@ -39,6 +40,7 @@ impl Core {
             self.render_cache.clear();
         }
         self.publish_history_move(movement);
+        self.publish_editor_session(editor);
         Ok(DispatchOutcome {
             revision: revision.get(),
             accepted_commands: 1,
@@ -71,6 +73,7 @@ impl Core {
             true,
             revision,
         )?;
+        let editor = self.stage_reconciled_editor_target(&document, None)?;
         self.document = Some(document);
         self.history_cursor += 1;
         self.current_state = entry.after_state;
@@ -79,6 +82,7 @@ impl Core {
             self.render_cache.clear();
         }
         self.publish_history_move(movement);
+        self.publish_editor_session(editor);
         Ok(DispatchOutcome {
             revision: revision.get(),
             accepted_commands: 1,
@@ -162,6 +166,7 @@ impl Core {
             )?;
             cursor += 1;
         }
+        let editor = self.stage_reconciled_editor_target(&document, None)?;
         self.document = Some(document);
         self.history_cursor = target_cursor;
         self.current_state = destination_state;
@@ -170,6 +175,7 @@ impl Core {
             self.render_cache.clear();
         }
         self.publish_history_move(movement);
+        self.publish_editor_session(editor);
         Ok(DispatchOutcome {
             revision: revision.get(),
             accepted_commands,
@@ -187,11 +193,11 @@ impl Core {
             .current_path
             .clone()
             .ok_or(CoreError::InvalidState("document has no normal-save path"))?;
+        let (_, active_plane_id) = self.active_editor_target_ids()?;
         let current = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let Some(bounds) = mask_bounds(&current.selection)? else {
             return Err(CoreError::InvalidState("selection is empty"));
         };
-        let active_plane_id = current.active_plane_id;
         let file = inkpod_format::read(&path)?;
         let saved = CellDocument::from_file(file, self.document_revision)?;
         if saved.uuid != current.uuid
@@ -335,7 +341,6 @@ pub(super) fn apply_history_change(
     let mut invalidate_all = false;
     match change {
         HistoryChange::Pixels { plane_id, changes } => {
-            document.active_plane_id = *plane_id;
             let raster = &mut document
                 .plane_by_id_mut(*plane_id)
                 .ok_or(CoreError::InvalidState("history plane no longer exists"))?

@@ -108,18 +108,34 @@ struct DocumentShellState {
     std::uint64_t selection_layer_id{};
 };
 
+// A workspace only retains a copied presentation of the Core-owned editor
+// state.  The binding prevents a value left visible by another document or an
+// older session generation from becoming an update base.
+struct EditorPresentationBinding final {
+    DocumentSessionId session{};
+    Generation generation{};
+    std::uint64_t editor_revision{};
+    std::array<std::uint8_t, 32U> editor_digest{};
+    bool valid{};
+};
+
+// Immutable values copied at an interaction boundary.  Finish paths consume
+// this record instead of re-reading a mutable workspace presentation.
+struct EditorProcedureCapture final {
+    DocumentSessionId session{};
+    Generation generation{};
+    InkpodEditorStateInfo state{sizeof(InkpodEditorStateInfo)};
+    bool valid{};
+};
+
 struct ToolUiState {
-    std::uint32_t active_tool{INKPOD_TOOL_PENCIL};
-    InkpodPlaneKind active_plane{INKPOD_PLANE_MAIN_LINE};
-    std::uint32_t color_rgba{UINT32_C(0x000000ff)};
-    InkpodColorValue drawing_color{
-        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
-    windows::ui::tools::ColorCommand active_color_command{
-        windows::ui::tools::ColorCommand::Pencil};
-    std::array<InkpodColorValue, windows::ui::tools::kColorCommandCount>
-        command_colors{};
-    std::array<bool, windows::ui::tools::kColorCommandCount>
-        command_color_initialized{};
+    EditorPresentationBinding editor{};
+    EditorProcedureCapture procedure{};
+    std::uint32_t active_tool{};
+    std::uint32_t last_color_consuming_tool{};
+    InkpodPlaneKind active_plane{};
+    std::uint32_t color_rgba{};
+    InkpodColorValue drawing_color{sizeof(InkpodColorValue)};
     InkpodEyedropperSource eyedropper_source{INKPOD_EYEDROPPER_COMPOSITE};
     float diameter{8.0F};
 
@@ -231,6 +247,8 @@ struct EffectsUiState {
     bool stamp_source_valid{};
     InkpodStrokeSample stamp_source{};
     CanvasEffectOptions options{};
+    CanvasEffectOptions gesture_options{};
+    bool gesture_options_valid{};
     std::vector<InkpodStrokeSample> samples;
     bool airbrush_active{};
     InkpodStrokeSample airbrush_last{};

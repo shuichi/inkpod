@@ -10,11 +10,27 @@ impl Core {
         shape: &SelectionShape,
         operation: SelectionOperation,
     ) -> Result<DispatchOutcome, CoreError> {
+        let target = self.active_editor_target()?;
+        self.apply_selection_for_editor_target(shape, operation, target)
+    }
+
+    /// Combines a selection shape using the stable target captured at gesture begin.
+    ///
+    /// The exact layer/plane pair must still exist. Later EditorState target
+    /// changes cannot redirect source-dependent selection shapes. A real mask
+    /// change remains one document revision and Undo unit; no-op/failure are atomic.
+    pub fn apply_selection_for_editor_target(
+        &mut self,
+        shape: &SelectionShape,
+        operation: SelectionOperation,
+        target: EditorTarget,
+    ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
+        let (_, active_plane_id) = self.editor_target_ids(target)?;
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision();
         let (before, after) = edit.documents();
-        let candidate = selection_mask_for_shape(before, shape, revision.get())?;
+        let candidate = selection_mask_for_shape(before, active_plane_id, shape, revision.get())?;
         after.selection =
             combine_selection_masks(&before.selection, &candidate, operation, revision.get())?;
         edit.commit(self)
@@ -63,7 +79,7 @@ impl Core {
         edit.commit(self)
     }
 
-    /// Selects active-plane pixels by color similarity or difference.
+    /// Selects pixels from the current editor target captured at command start.
     ///
     /// `tolerance` is an inclusive channel tolerance. The candidate mask is combined
     /// using `operation` and committed as one undoable edit.
@@ -74,12 +90,31 @@ impl Core {
         different: bool,
         operation: SelectionOperation,
     ) -> Result<DispatchOutcome, CoreError> {
+        let target = self.active_editor_target()?;
+        self.select_color_for_editor_target(color, tolerance, different, operation, target)
+    }
+
+    /// Selects pixels from the stable target captured when a command began.
+    ///
+    /// The exact layer/plane pair must still exist in the current document
+    /// namespace. Later EditorState target changes cannot redirect the color
+    /// source. A real mask change remains one document revision and Undo unit;
+    /// no-op and failure leave document and editor state unchanged.
+    pub fn select_color_for_editor_target(
+        &mut self,
+        color: PixelValue,
+        tolerance: u16,
+        different: bool,
+        operation: SelectionOperation,
+        target: EditorTarget,
+    ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
+        let (_, active_plane_id) = self.editor_target_ids(target)?;
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision();
         let (before, after) = edit.documents();
         let source = before
-            .plane_by_id(before.active_plane_id)
+            .plane_by_id(active_plane_id)
             .ok_or(CoreError::InvalidState("active plane is missing"))?;
         let candidate =
             color_selection_mask(&source.raster, color, tolerance, different, revision.get())?;
@@ -112,30 +147,36 @@ impl Core {
             }
             document.selection.clone()
         };
-        let layer_id = self.allocate_layer_id();
-        let plane_id = self.allocate_plane_id();
+        let mut next_id = self.next_id;
+        let layer_id = next_id.take_layer();
+        let plane_id = next_id.take_plane();
         let mut edit = self.begin_document_edit()?;
-        let after = edit.working_mut();
-        after.layers.push(LayerNode {
-            id: layer_id,
-            kind: LayerKind::Selection,
-            name: unique_layer_name(&after.layers, name),
-            visible: true,
-            editable: true,
-            opacity_milli: 1_000,
-            planes: vec![PlaneNode {
-                id: plane_id,
-                kind: PlaneType::Selection,
-                name: "Selection".to_owned(),
+        {
+            let after = edit.working_mut();
+            after.layers.push(LayerNode {
+                id: layer_id,
+                kind: LayerKind::Selection,
+                name: unique_layer_name(&after.layers, name),
                 visible: true,
                 editable: true,
                 opacity_milli: 1_000,
-                raster: selection,
-            }],
+                planes: vec![PlaneNode {
+                    id: plane_id,
+                    kind: PlaneType::Selection,
+                    name: "Selection".to_owned(),
+                    visible: true,
+                    editable: true,
+                    opacity_milli: 1_000,
+                    raster: selection,
+                }],
+            });
+        }
+        edit.prefer_editor_target(EditorTarget {
+            layer_id: layer_id.get(),
+            plane_id: plane_id.get(),
         });
-        after.active_layer_id = layer_id;
-        after.active_plane_id = plane_id;
         let outcome = edit.commit(self)?;
+        self.next_id = next_id;
         Ok((outcome, layer_id.get()))
     }
 
@@ -184,11 +225,12 @@ impl Core {
     /// Coordinates and half-open bounds remain in document space. The query does
     /// not change revision, history, selection, or dirty state.
     pub fn copy_selection(&self) -> Result<ClipboardPayload, CoreError> {
+        let (_, active_plane_id) = self.active_editor_target_ids()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let bounds = mask_bounds(&document.selection)?
             .ok_or(CoreError::InvalidState("selection is empty"))?;
         let plane = document
-            .plane_by_id(document.active_plane_id)
+            .plane_by_id(active_plane_id)
             .ok_or(CoreError::InvalidState("active plane is missing"))?;
         if !matches!(
             plane.kind,
@@ -254,9 +296,10 @@ impl Core {
                 "clipboard bounds are outside the supported range",
             ));
         }
+        let (_, active_plane_id) = self.active_editor_target_ids()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let active_destination = document
-            .plane_by_id(document.active_plane_id)
+            .plane_by_id(active_plane_id)
             .ok_or(CoreError::InvalidState("active plane is missing"))?;
         let compatible_source = |destination: &PlaneNode| {
             payload.planes.iter().find(|plane| {
@@ -324,9 +367,10 @@ impl Core {
         if self.floating.is_some() {
             return Err(CoreError::InvalidState("floating paste is already active"));
         }
+        let (_, active_plane_id) = self.active_editor_target_ids()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let destination = document
-            .plane_by_id(document.active_plane_id)
+            .plane_by_id(active_plane_id)
             .ok_or(CoreError::InvalidState("active plane is missing"))?;
         ensure_editable_plane(document, destination.id)?;
         let source = payload
@@ -359,9 +403,9 @@ impl Core {
     /// undoable document edit; failures do not publish partial clearing.
     pub fn clear_selected_content(&mut self) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
+        let (_, plane_id) = self.active_editor_target_ids()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        ensure_editable_plane(document, document.active_plane_id)?;
-        let plane_id = document.active_plane_id;
+        ensure_editable_plane(document, plane_id)?;
         let zero = zero_pixel(
             document
                 .plane_by_id(plane_id)
@@ -579,7 +623,6 @@ impl Core {
             self.floating = None;
             return Ok(self.noop_outcome());
         }
-        document.active_plane_id = floating.destination_plane_id;
         self.document_revision = revision;
         self.commit_pixel_history(floating.destination_plane_id, changes, after_state);
         self.floating = None;

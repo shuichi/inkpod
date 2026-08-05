@@ -88,6 +88,15 @@ Batch is cancellable persistence performed against private working Core values.
 | View ID allocator | `next_view_id` is checked and IDs are removed but not reused by `close_view` | returned view ID and secondary-view API results | Same sequence yields the same IDs; invalid close does not affect later views |
 | Preview revision | `next_preview_revision` is separate from document revision and is consumed by stroke/filter/dust preview work, including some failed attempts | preview info and preview snapshot revision | Compare preview sessions with identical call schedules; cancel must restore the committed semantic observation even though the private counter can advance |
 
+M3 explicitly supersedes only the eager-reservation result for the four
+target-changing topology routes `create_layer`, `create_plane`,
+`selection_to_layer`, and `rasterize_vector_layer_to_document`. Those routes now
+stage a local stable-ID cursor and publish it only after document and EditorState
+commit both succeed; EditorRevision overflow therefore consumes no ID. The public
+`target_changing_topology_editor_overflow_is_fully_atomic` contract fixes that
+intentional change. Other eager-allocation paths retain the historical behavior
+recorded above.
+
 There is no public stale-revision argument on ordinary synchronous APIs. Current
 stale checks occur inside long-running effect helpers by capturing the base
 document revision and validating it before commit, but safe single-writer Core

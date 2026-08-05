@@ -29,12 +29,8 @@ enum class StrokeEventKind : std::uint32_t {
 };
 
 struct StrokeStyle {
-    InkpodPaintTool tool{INKPOD_TOOL_PENCIL};
-    InkpodPlaneKind plane{INKPOD_PLANE_MAIN_LINE};
     InkpodCoordinateSpace coordinate_space{INKPOD_COORDINATE_SPACE_DEVICE};
     std::uint64_t flags{};
-    std::uint32_t color_rgba{};
-    float diameter{1.0F};
 };
 
 struct StrokeEvent {
@@ -167,6 +163,21 @@ public:
         DocumentSessionId session,
         Generation generation,
         InkpodDocumentInfo& info) const noexcept;
+    InkpodStatus GetEditorDefaults(
+        DocumentSessionId session,
+        Generation generation,
+        InkpodEditorDefaults& defaults) noexcept;
+    InkpodStatus RefreshEditorState(
+        DocumentSessionId session,
+        Generation generation) noexcept;
+    InkpodStatus UpdateEditorState(
+        DocumentSessionId session,
+        Generation generation,
+        const InkpodEditorStateUpdate& update) noexcept;
+    bool GetEditorState(
+        DocumentSessionId session,
+        Generation generation,
+        InkpodEditorStateInfo& state) const noexcept;
     std::wstring LastError() const;
     std::wstring LastError(
         DocumentSessionId session,

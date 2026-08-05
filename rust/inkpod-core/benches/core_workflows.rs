@@ -297,6 +297,15 @@ fn undo_redo(profile: Profile) -> ScenarioResult {
     .expect("bounded Undo/Redo document must be valid");
     core.set_active_plane(ActivePlane::Color)
         .expect("color plane must exist");
+    // The fixture's active target is pre-measurement state. Establish its
+    // canonical editor savepoint so the existing Undo assertion continues to
+    // measure the document savepoint rather than independent editor-state dirty.
+    // Production v2 save never uses this token-only benchmark setup.
+    let editor_savepoint = core
+        .editor_savepoint_token()
+        .expect("benchmark editor state must exist");
+    core.commit_editor_savepoint(editor_savepoint)
+        .expect("benchmark editor savepoint must be current");
 
     let started = Instant::now();
     for index in 0..profile.undo_edits {

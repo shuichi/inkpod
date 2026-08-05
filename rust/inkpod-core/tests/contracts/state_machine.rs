@@ -1521,7 +1521,7 @@ fn cancel_sessions_and_cancellable_fill_restore_the_common_observation() {
 }
 
 #[test]
-fn redo_branch_savepoint_and_failed_id_allocation_remain_observable_contracts() {
+fn redo_branch_savepoint_and_failed_target_creation_remain_observable_contracts() {
     let suffix = TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let normal = std::env::temp_dir().join(format!(
         "inkpod-state-machine-normal-{}-{suffix}.inkpod",
@@ -1593,7 +1593,10 @@ fn redo_branch_savepoint_and_failed_id_allocation_remain_observable_contracts() 
     let (_, control_id) = control
         .create_layer(LayerKind::Raster, "Control ID")
         .unwrap();
-    assert!(after_failed_id > control_id);
+    assert_eq!(
+        after_failed_id, control_id,
+        "target-changing topology must stage stable IDs until commit"
+    );
 
     fs::remove_file(normal).unwrap();
     fs::remove_file(recovery).unwrap();

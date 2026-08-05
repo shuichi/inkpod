@@ -542,7 +542,8 @@ struct FillOptionsDialogState {
     bool close_immediately{};
 };
 
-bool ParseFillColors(const wchar_t* text, std::vector<std::uint32_t>& colors) noexcept {
+bool ParseFillColors(
+    const wchar_t* text, std::vector<InkpodColorValue>& colors) noexcept {
     colors.clear();
     if (text == nullptr) {
         return false;
@@ -564,19 +565,28 @@ bool ParseFillColors(const wchar_t* text, std::vector<std::uint32_t>& colors) no
                 --last;
             }
             if (first != last) {
-                if (last - first != 8U || colors.size() >= 6U) {
+                const std::size_t digits = last - first;
+                if ((digits != 8U && digits != 16U) || colors.size() >= 6U) {
                     return false;
                 }
                 const std::wstring token = input.substr(first, last - first);
                 wchar_t* token_end{};
                 errno = 0;
-                const unsigned long value = std::wcstoul(
+                const unsigned long long value = std::wcstoull(
                     token.c_str(), &token_end, 16);
                 if (errno == ERANGE || token_end == token.c_str()
                     || *token_end != L'\0') {
                     return false;
                 }
-                colors.push_back(static_cast<std::uint32_t>(value));
+                const std::uint32_t shift = digits == 16U ? 16U : 8U;
+                const std::uint64_t mask = digits == 16U ? UINT16_MAX : UINT8_MAX;
+                colors.push_back(InkpodColorValue{
+                    sizeof(InkpodColorValue),
+                    digits == 16U ? INKPOD_COLOR_DEPTH_16 : INKPOD_COLOR_DEPTH_8,
+                    static_cast<std::uint16_t>((value >> (shift * 3U)) & mask),
+                    static_cast<std::uint16_t>((value >> (shift * 2U)) & mask),
+                    static_cast<std::uint16_t>((value >> shift) & mask),
+                    static_cast<std::uint16_t>(value & mask)});
             }
             if (separator == std::wstring::npos) {
                 break;
@@ -640,17 +650,34 @@ INT_PTR CALLBACK FillOptionsDialogProcedure(
                 dialog, IDC_FILL_EXTENSION, state->options.extension_distance, FALSE);
             std::wstring color_text;
             try {
-                std::array<wchar_t, 16U> token{};
-                for (std::size_t index = 0; index < state->options.inclusion_rgba.size(); ++index) {
+                std::array<wchar_t, 20U> token{};
+                for (std::size_t index = 0; index < state->options.inclusion_colors.size(); ++index) {
                     if (index != 0U) {
                         color_text += L';';
                     }
-                    _snwprintf_s(
-                        token.data(),
-                        token.size(),
-                        _TRUNCATE,
-                        L"%08X",
-                        state->options.inclusion_rgba[index]);
+                    const InkpodColorValue& color =
+                        state->options.inclusion_colors[index];
+                    if (color.depth == INKPOD_COLOR_DEPTH_16) {
+                        _snwprintf_s(
+                            token.data(),
+                            token.size(),
+                            _TRUNCATE,
+                            L"%04X%04X%04X%04X",
+                            color.red,
+                            color.green,
+                            color.blue,
+                            color.alpha);
+                    } else {
+                        _snwprintf_s(
+                            token.data(),
+                            token.size(),
+                            _TRUNCATE,
+                            L"%02X%02X%02X%02X",
+                            color.red,
+                            color.green,
+                            color.blue,
+                            color.alpha);
+                    }
                     color_text += token.data();
                 }
             } catch (const std::bad_alloc&) {
@@ -691,7 +718,7 @@ INT_PTR CALLBACK FillOptionsDialogProcedure(
                     IDC_FILL_COLORS,
                     color_text.data(),
                     static_cast<int>(color_text.size()));
-                std::vector<std::uint32_t> colors;
+                std::vector<InkpodColorValue> colors;
                 if (tolerance_ok == FALSE || gap_ok == FALSE || extension_ok == FALSE
                     || tolerance > UINT16_MAX || gap > UINT16_MAX || extension == 0U
                     || !ParseFillColors(color_text.data(), colors)) {
@@ -732,7 +759,7 @@ INT_PTR CALLBACK FillOptionsDialogProcedure(
                 state->options.tolerance = static_cast<std::uint16_t>(tolerance);
                 state->options.gap_close = static_cast<std::uint16_t>(gap);
                 state->options.extension_distance = extension;
-                state->options.inclusion_rgba = std::move(colors);
+                state->options.inclusion_colors = std::move(colors);
                 state->options.overflow_abort =
                     IsDlgButtonChecked(dialog, IDC_FILL_OVERFLOW) == BST_CHECKED;
                 state->options.detached_regions =

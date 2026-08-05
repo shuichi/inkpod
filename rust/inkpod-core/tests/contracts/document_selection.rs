@@ -90,6 +90,86 @@ fn selected_raster_layer_receives_fill_without_changing_coloring_plane() {
 }
 
 #[test]
+fn second_coloring_layer_fill_uses_its_own_main_line_boundary() {
+    let mut core = Core::new();
+    core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.apply_stroke(&line_stroke(
+        (0..4)
+            .map(|y| StrokeSample {
+                x: 1.0,
+                y: y as f32,
+                pressure: 1.0,
+            })
+            .collect(),
+    ))
+    .unwrap();
+
+    let (_, second_layer_id) = core
+        .create_layer(LayerKind::BinaryColoring, "Second")
+        .unwrap();
+    let second_color_id = core
+        .layers()
+        .unwrap()
+        .iter()
+        .find(|layer| layer.id == second_layer_id)
+        .unwrap()
+        .planes
+        .iter()
+        .find(|plane| plane.kind == PlaneType::Color)
+        .unwrap()
+        .id;
+    core.set_active_node(second_layer_id, second_color_id)
+        .unwrap();
+
+    let outcome = core
+        .apply_fill(&fill_request(0, 0, [90, 80, 70, 255]))
+        .unwrap();
+    assert_eq!(outcome.changed_pixels, 16);
+}
+
+#[test]
+fn selected_plane_eyedropper_follows_second_coloring_target() {
+    let mut core = Core::new();
+    core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_active_plane(ActivePlane::Color).unwrap();
+    let sample = StrokeSample {
+        x: 1.0,
+        y: 1.0,
+        pressure: 1.0,
+    };
+    core.apply_stroke(&color_stroke(PaintTool::Pencil, 1.0, sample))
+        .unwrap();
+
+    let (_, second_layer_id) = core
+        .create_layer(LayerKind::BinaryColoring, "Second")
+        .unwrap();
+    let second_color_id = core
+        .layers()
+        .unwrap()
+        .iter()
+        .find(|layer| layer.id == second_layer_id)
+        .unwrap()
+        .planes
+        .iter()
+        .find(|plane| plane.kind == PlaneType::Color)
+        .unwrap()
+        .id;
+    core.set_active_node(second_layer_id, second_color_id)
+        .unwrap();
+    let mut second_stroke = color_stroke(PaintTool::Pencil, 1.0, sample);
+    second_stroke.color = [200, 100, 50, 255];
+    core.apply_stroke(&second_stroke).unwrap();
+
+    assert_eq!(
+        core.eyedropper(EyedropperSource::SelectedPlane, 1, 1)
+            .unwrap(),
+        PixelValue::Rgba([200, 100, 50, 255])
+    );
+}
+
+#[test]
 fn viewport_resize_refits_only_persistent_fit_or_one_to_one_modes() {
     let mut core = Core::new();
     core.new_cell(200, 100, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)

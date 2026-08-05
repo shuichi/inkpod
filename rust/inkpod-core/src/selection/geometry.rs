@@ -2,6 +2,7 @@ use super::*;
 
 pub(crate) fn selection_mask_for_shape(
     document: &CellDocument,
+    active_plane_id: PlaneId,
     shape: &SelectionShape,
     revision: u64,
 ) -> Result<TileRaster, CoreError> {
@@ -80,7 +81,7 @@ pub(crate) fn selection_mask_for_shape(
                 return Err(CoreError::InvalidArgument("wand settings are invalid"));
             }
             let source = document
-                .plane_by_id(document.active_plane_id)
+                .plane_by_id(active_plane_id)
                 .ok_or(CoreError::InvalidState("active plane is missing"))?;
             let target = source.raster.pixel(*x, *y)?;
             let mut visited = BTreeSet::new();

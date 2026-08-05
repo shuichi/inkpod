@@ -83,7 +83,8 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .expect("a committed primitive must return its canonical procedure")
         .clone();
     assert_eq!(main_line_procedure.primitive_id().get(), 0x0003_0001);
-    assert_eq!(main_line_procedure.replay_epoch().get(), 3);
+    assert_eq!(main_line_procedure.primitive_schema_version(), 1);
+    assert_eq!(main_line_procedure.replay_epoch().get(), 4);
     assert_eq!(main_line_procedure.procedure_id().get(), 1);
     assert_eq!(main_line_procedure.base_state_id().get(), 1);
     assert_eq!(main_line_procedure.committed_state_id().get(), 2);
@@ -108,6 +109,8 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .expect("a committed primitive must return its canonical procedure")
         .clone();
     assert_eq!(palette_procedure.primitive_id().get(), 0x0003_0002);
+    assert_eq!(palette_procedure.primitive_schema_version(), 1);
+    assert_eq!(palette_procedure.replay_epoch().get(), 4);
     assert_eq!(palette_procedure.procedure_id().get(), 2);
     assert_eq!(palette_procedure.base_state_id().get(), 2);
     assert_eq!(palette_procedure.committed_state_id().get(), 3);
@@ -150,6 +153,8 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .expect("a committed primitive must return its canonical procedure")
         .clone();
     assert_eq!(stroke_procedure.primitive_id().get(), 0x0005_0001);
+    assert_eq!(stroke_procedure.primitive_schema_version(), 2);
+    assert_eq!(stroke_procedure.replay_epoch().get(), 4);
     assert_eq!(stroke_procedure.procedure_id().get(), 3);
     assert_eq!(stroke_procedure.base_state_id().get(), 3);
     assert_eq!(stroke_procedure.committed_state_id().get(), 4);
@@ -233,10 +238,10 @@ fn main_line_replay_does_not_depend_on_the_digest_excluded_active_target() {
     assert_eq!(runtime.layers().unwrap(), replay.layers().unwrap());
     assert_eq!(runtime.build_snapshot(), replay.build_snapshot());
 
-    assert!(matches!(
-        replay.set_main_line_color(replacement),
-        Err(CoreError::InvalidState(_))
-    ));
+    let before_no_op = replay.document_info().unwrap();
+    let no_op = replay.set_main_line_color(replacement).unwrap();
+    assert_eq!(no_op.revision(), before_no_op.document_revision);
+    assert_eq!(replay.document_info().unwrap(), before_no_op);
 }
 
 #[test]

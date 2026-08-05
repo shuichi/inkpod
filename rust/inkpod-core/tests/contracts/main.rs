@@ -6,6 +6,7 @@ use support::*;
 mod animation;
 mod batch;
 mod document_selection;
+mod editor_state;
 mod effects;
 mod foundation;
 mod history_stroke;

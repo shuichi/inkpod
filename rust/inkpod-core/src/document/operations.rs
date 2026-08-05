@@ -3,11 +3,12 @@ use super::*;
 impl Core {
     /// Selects the first available conventional main-line or color plane.
     ///
-    /// This changes only the active target, without adding history or changing
-    /// document revision/dirty state. Missing roles and active strokes are errors.
+    /// This changes only the EditorState target/revision/digest/dirty state,
+    /// without adding history or changing document revision/render content.
+    /// Missing roles and active strokes are errors.
     pub fn set_active_plane(&mut self, plane: ActivePlane) -> Result<(), CoreError> {
         self.ensure_no_active_stroke()?;
-        let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let kind = match plane {
             ActivePlane::MainLine => PlaneType::MainLine,
             ActivePlane::Color => PlaneType::Color,
@@ -25,8 +26,14 @@ impl Core {
             .ok_or(CoreError::InvalidState(
                 "requested plane role is unavailable",
             ))?;
-        document.active_layer_id = layer_id;
-        document.active_plane_id = plane_id;
+        let revision = self.editor_state()?.revision;
+        self.update_editor_state(
+            revision,
+            EditorStateUpdate::SetActiveTarget(EditorTarget {
+                layer_id: layer_id.get(),
+                plane_id: plane_id.get(),
+            }),
+        )?;
         Ok(())
     }
 
@@ -47,12 +54,13 @@ impl Core {
     /// Selects an existing layer and one of its planes as the active target.
     ///
     /// IDs must belong to this Core and the plane must belong to the layer. This
-    /// target-only change does not add history or change document dirty state.
+    /// target-only change advances EditorState when semantic, but does not add
+    /// history or change document revision/render content.
     pub fn set_active_node(&mut self, layer_id: u64, plane_id: u64) -> Result<(), CoreError> {
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
         let plane_id = PlaneId::from_raw(plane_id);
-        let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let layer = document
             .layers
             .iter()
@@ -63,8 +71,14 @@ impl Core {
                 "plane ID does not belong to the requested layer",
             ));
         }
-        document.active_layer_id = layer_id;
-        document.active_plane_id = plane_id;
+        let revision = self.editor_state()?.revision;
+        self.update_editor_state(
+            revision,
+            EditorStateUpdate::SetActiveTarget(EditorTarget {
+                layer_id: layer_id.get(),
+                plane_id: plane_id.get(),
+            }),
+        )?;
         Ok(())
     }
 
@@ -86,12 +100,13 @@ impl Core {
             }
             (document.width, document.height)
         };
-        let layer_id = self.allocate_layer_id();
+        let mut next_id = self.next_id;
+        let layer_id = next_id.take_layer();
         let mut planes = Vec::new();
         match kind {
             LayerKind::BinaryColoring | LayerKind::GrayscaleColoring => {
-                let main_id = self.allocate_plane_id();
-                let color_id = self.allocate_plane_id();
+                let main_id = next_id.take_plane();
+                let color_id = next_id.take_plane();
                 planes.push(PlaneNode {
                     id: main_id,
                     kind: PlaneType::MainLine,
@@ -120,7 +135,7 @@ impl Core {
                 });
             }
             LayerKind::Raster => planes.push(PlaneNode {
-                id: self.allocate_plane_id(),
+                id: next_id.take_plane(),
                 kind: PlaneType::Raster,
                 name: "Raster".to_owned(),
                 visible: true,
@@ -129,7 +144,7 @@ impl Core {
                 raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
             }),
             LayerKind::Selection => planes.push(PlaneNode {
-                id: self.allocate_plane_id(),
+                id: next_id.take_plane(),
                 kind: PlaneType::Selection,
                 name: "Selection".to_owned(),
                 visible: true,
@@ -144,7 +159,7 @@ impl Core {
                     (PlaneType::VectorFill, "Vector Fill"),
                 ] {
                     planes.push(PlaneNode {
-                        id: self.allocate_plane_id(),
+                        id: next_id.take_plane(),
                         kind,
                         name: name.to_owned(),
                         visible: true,
@@ -181,11 +196,19 @@ impl Core {
                 },
             );
         }
-        after.active_layer_id = layer_id;
-        if let Some(plane) = after.layers.last().and_then(|layer| layer.planes.first()) {
-            after.active_plane_id = plane.id;
+        if let Some(plane_id) = after
+            .layers
+            .last()
+            .and_then(|layer| layer.planes.first())
+            .map(|plane| plane.id.get())
+        {
+            edit.prefer_editor_target(EditorTarget {
+                layer_id: layer_id.get(),
+                plane_id,
+            });
         }
         let outcome = edit.commit(self)?;
+        self.next_id = next_id;
         Ok((outcome, layer_id.get()))
     }
 
@@ -225,9 +248,11 @@ impl Core {
         }
         after.vector.ensure_limits()?;
         after.layers.insert(index + 1, duplicate);
-        after.active_layer_id = duplicate_id;
         if let Some(id) = active_plane_id {
-            after.active_plane_id = id;
+            edit.prefer_editor_target(EditorTarget {
+                layer_id: duplicate_id.get(),
+                plane_id: id.get(),
+            });
         }
         let outcome = edit.commit(self)?;
         self.next_id = next_id;
@@ -241,6 +266,7 @@ impl Core {
     pub fn delete_layer(&mut self, layer_id: u64) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
+        let active_target = self.editor_state()?.state.target;
         let mut edit = self.begin_document_edit()?;
         let (before, after) = edit.documents();
         let index = before
@@ -263,24 +289,20 @@ impl Core {
         after.vector.remove_layer(before, layer_id);
         after.adjustments.remove(&layer_id);
         after.layers.remove(index);
-        if after.active_layer_id == layer_id {
+        if active_target.is_some_and(|target| target.layer_id == layer_id.get()) {
             let replacement = after
                 .layers
-                .get(index.min(after.layers.len().saturating_sub(1)))
-                .ok_or(CoreError::InvalidState("document must retain a layer"))?;
-            after.active_layer_id = replacement.id;
-            after.active_plane_id = replacement
-                .planes
-                .first()
-                .map_or(after.primary_ids().1, |plane| plane.id);
-        }
-        if after.plane_by_id(after.active_plane_id).is_none() {
-            after.active_plane_id = after
-                .layers
                 .iter()
-                .find(|layer| layer.id == after.active_layer_id)
-                .and_then(|layer| layer.planes.first())
-                .map_or(after.primary_ids().1, |plane| plane.id);
+                .skip(index.min(after.layers.len().saturating_sub(1)))
+                .chain(after.layers.iter())
+                .find_map(|layer| layer.planes.first().map(|plane| (layer.id, plane.id)))
+                .ok_or(CoreError::InvalidState(
+                    "document must retain an editable plane",
+                ))?;
+            edit.prefer_editor_target(EditorTarget {
+                layer_id: replacement.0.get(),
+                plane_id: replacement.1.get(),
+            });
         }
         edit.commit(self)
     }
@@ -398,7 +420,8 @@ impl Core {
             }
             (layer_index, document.width, document.height)
         };
-        let plane_id = self.allocate_plane_id();
+        let mut next_id = self.next_id;
+        let plane_id = next_id.take_plane();
         let raster = TileRaster::new(width, height, format)?;
         let mut edit = self.begin_document_edit()?;
         let after = edit.working_mut();
@@ -415,9 +438,12 @@ impl Core {
             after.layers[layer_index].kind,
             &after.layers[layer_index].planes,
         )?;
-        after.active_layer_id = layer_id;
-        after.active_plane_id = plane_id;
+        edit.prefer_editor_target(EditorTarget {
+            layer_id: layer_id.get(),
+            plane_id: plane_id.get(),
+        });
         let outcome = edit.commit(self)?;
+        self.next_id = next_id;
         Ok((outcome, plane_id.get()))
     }
 
@@ -461,8 +487,11 @@ impl Core {
         after.layers[layer_index]
             .planes
             .insert(plane_index + 1, duplicate);
-        after.active_layer_id = after.layers[layer_index].id;
-        after.active_plane_id = duplicate_id;
+        let preferred_target = EditorTarget {
+            layer_id: after.layers[layer_index].id.get(),
+            plane_id: duplicate_id.get(),
+        };
+        edit.prefer_editor_target(preferred_target);
         let outcome = edit.commit(self)?;
         self.next_id = next_id;
         Ok((outcome, duplicate_id.get()))
@@ -475,6 +504,7 @@ impl Core {
     pub fn delete_plane(&mut self, plane_id: u64) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
+        let active_target = self.editor_state()?.state.target;
         let mut edit = self.begin_document_edit()?;
         let (before, after) = edit.documents();
         let (layer_index, plane_index) = find_plane_indices(before, plane_id)?;
@@ -484,11 +514,24 @@ impl Core {
             after.layers[layer_index].kind,
             &after.layers[layer_index].planes,
         )?;
-        if after.active_plane_id == plane_id {
-            after.active_plane_id = after.layers[layer_index]
+        if active_target.is_some_and(|target| target.plane_id == plane_id.get()) {
+            let replacement = after.layers[layer_index]
                 .planes
-                .first()
-                .map_or(after.primary_ids().1, |plane| plane.id);
+                .get(plane_index.min(after.layers[layer_index].planes.len().saturating_sub(1)))
+                .map(|plane| (after.layers[layer_index].id, plane.id))
+                .or_else(|| {
+                    after
+                        .layers
+                        .iter()
+                        .find_map(|layer| layer.planes.first().map(|plane| (layer.id, plane.id)))
+                })
+                .ok_or(CoreError::InvalidState(
+                    "document must retain an editable plane",
+                ))?;
+            edit.prefer_editor_target(EditorTarget {
+                layer_id: replacement.0.get(),
+                plane_id: replacement.1.get(),
+            });
         }
         edit.commit(self)
     }
@@ -639,12 +682,15 @@ impl Core {
         )?;
         after.vector.reassign_plane(source.id, destination_id);
         after.layers[layer_index].planes.remove(upper);
-        after.active_layer_id = after.layers[layer_index].id;
-        after.active_plane_id = destination_id;
+        let preferred_target = EditorTarget {
+            layer_id: after.layers[layer_index].id.get(),
+            plane_id: destination_id.get(),
+        };
         validate_layer_kind(
             after.layers[layer_index].kind,
             &after.layers[layer_index].planes,
         )?;
+        edit.prefer_editor_target(preferred_target);
         edit.commit(self)
     }
 
@@ -748,8 +794,10 @@ impl Core {
             after.vector.reassign_plane(source_id, destination_id);
         }
         after.layers.remove(upper);
-        after.active_layer_id = lower_id;
-        after.active_plane_id = lower_plane_id;
+        edit.prefer_editor_target(EditorTarget {
+            layer_id: lower_id.get(),
+            plane_id: lower_plane_id.get(),
+        });
         edit.commit(self)
     }
 }
@@ -769,15 +817,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn active_plane_id_remains_valid_after_deleting_a_duplicate_layer() {
+    fn editor_target_remains_valid_after_deleting_a_duplicate_layer() {
         let mut core = Core::new();
         let created = core.new_cell(1, 1, 96_000, 96_000).unwrap();
         let (_, duplicate) = core.duplicate_layer(created.layer_id).unwrap();
         core.create_layer(LayerKind::Frame, "Frame").unwrap();
         core.delete_layer(duplicate).unwrap();
 
+        let target = core.editor_state().unwrap().state.target.unwrap();
         let document = core.document.as_ref().unwrap();
-        assert!(document.plane_by_id(document.active_plane_id).is_some());
+        assert!(
+            document
+                .plane_by_id(PlaneId::from_raw(target.plane_id))
+                .is_some()
+        );
     }
 
     #[test]

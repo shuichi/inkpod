@@ -1,8 +1,11 @@
 #include "application_host.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
+#include <iterator>
 #include <limits>
+#include <new>
 #include <utility>
 
 #include "application_owner_graph.h"
@@ -11,6 +14,108 @@
 namespace inkpod::app {
 
 namespace {
+
+std::uint32_t ColorToRgba8(const InkpodColorValue& color) noexcept {
+    const auto channel = [&color](std::uint16_t value) noexcept {
+        return color.depth == INKPOD_COLOR_DEPTH_16
+            ? static_cast<std::uint32_t>(
+                  (static_cast<std::uint32_t>(value) + 128U) / 257U)
+            : static_cast<std::uint32_t>(value & 0xffU);
+    };
+    return (channel(color.red) << 24U) | (channel(color.green) << 16U)
+        | (channel(color.blue) << 8U) | channel(color.alpha);
+}
+
+float Q16ToFloat(std::int64_t value) noexcept {
+    return static_cast<float>(
+        static_cast<double>(value) / static_cast<double>(UINT64_C(1) << 16U));
+}
+
+bool ProjectEditorPresentation(
+    const InkpodEditorStateInfo& editor,
+    const InkpodDocumentInfo* document_info,
+    DocumentSessionId session,
+    Generation generation,
+    WorkspaceWindow& workspace) noexcept {
+    try {
+        ToolUiState& tools = workspace.tools;
+        tools.editor.session = session;
+        tools.editor.generation = generation;
+        tools.editor.editor_revision = editor.editor_revision;
+        std::copy(
+            std::begin(editor.editor_digest),
+            std::end(editor.editor_digest),
+            tools.editor.editor_digest.begin());
+        tools.active_tool = editor.active_tool;
+        tools.last_color_consuming_tool =
+            (editor.flags & INKPOD_EDITOR_STATE_HAS_LAST_COLOR_TOOL) != 0U
+            ? editor.last_color_consuming_tool
+            : 0U;
+        if ((editor.flags & INKPOD_EDITOR_STATE_HAS_CURRENT_COLOR) != 0U) {
+            tools.drawing_color = editor.current_color;
+            tools.color_rgba = ColorToRgba8(editor.current_color);
+        }
+        tools.diameter = Q16ToFloat(editor.current_diameter_q16);
+
+        tools.fill_options.operation = editor.fill.operation;
+        tools.fill_options.tolerance = editor.fill.tolerance;
+        tools.fill_options.gap_close = editor.fill.gap_close;
+        tools.fill_options.extension_distance = editor.fill.extension_distance;
+        tools.fill_options.inclusion_mode = editor.fill.inclusion_mode;
+        tools.fill_options.overflow_abort =
+            (editor.fill.flags & INKPOD_EDITOR_FILL_OVERFLOW_ABORT) != 0U;
+        tools.fill_options.detached_regions =
+            (editor.fill.flags & INKPOD_EDITOR_FILL_DETACHED_REGIONS) != 0U;
+        tools.fill_options.transparent_only =
+            (editor.fill.flags & INKPOD_EDITOR_FILL_TRANSPARENT_ONLY) != 0U;
+        tools.fill_options.use_document_selection =
+            (editor.fill.flags & INKPOD_EDITOR_FILL_DOCUMENT_SELECTION) != 0U;
+        tools.fill_options.light_table_boundary =
+            (editor.fill.flags & INKPOD_EDITOR_FILL_LIGHT_TABLE_BOUNDARY) != 0U;
+        tools.fill_options.light_table_color =
+            (editor.fill.flags & INKPOD_EDITOR_FILL_LIGHT_TABLE_COLOR) != 0U;
+        tools.fill_options.inclusion_colors.clear();
+        tools.fill_options.inclusion_colors.reserve(editor.fill.inclusion_color_count);
+        for (std::uint32_t index = 0U;
+             index < editor.fill.inclusion_color_count
+                 && index < INKPOD_EDITOR_MAX_INCLUSION_COLORS;
+             ++index) {
+            tools.fill_options.inclusion_colors.push_back(
+                editor.fill.inclusion_colors[index]);
+        }
+
+        tools.selection_shape = editor.selection.shape;
+        tools.selection_operation = editor.selection.operation;
+        tools.selection_tolerance = editor.selection.tolerance;
+        tools.selection_gap_close = editor.selection.gap_close;
+        tools.selection_diameter = Q16ToFloat(editor.selection.diameter_q16);
+        tools.vector_erase_mode = editor.vector.erase_mode;
+        tools.vector_selection_mode = editor.vector.selection_mode;
+
+        if ((editor.flags & INKPOD_EDITOR_STATE_HAS_TARGET) != 0U) {
+            workspace.panes.active_tree_layer_id = editor.active_layer_id;
+            workspace.panes.active_tree_plane_id = editor.active_plane_id;
+            if (document_info != nullptr) {
+                tools.active_plane = document_info->active_plane;
+            }
+        } else {
+            workspace.panes.active_tree_layer_id = 0U;
+            workspace.panes.active_tree_plane_id = 0U;
+        }
+        if ((editor.flags & INKPOD_EDITOR_STATE_HAS_PALETTE_CURSOR) != 0U) {
+            workspace.panes.palette_group = editor.palette_group;
+            workspace.panes.selected_palette_index = editor.palette_index;
+        } else {
+            workspace.panes.palette_group = 0U;
+            workspace.panes.selected_palette_index = 0U;
+        }
+        tools.editor.valid = true;
+        return true;
+    } catch (const std::bad_alloc&) {
+        workspace.tools.editor.valid = false;
+        return false;
+    }
+}
 
 std::uint64_t SaturatingPaneBytes(
     std::uint64_t current,
@@ -373,10 +478,15 @@ bool ApplicationHost::ActivateWorkspaceWindow(
     if (!documents_.Activate(document->id) || !document->ActivateView(view)) {
         return false;
     }
-    return engine == nullptr
-        || (engine->SetActiveSession(document->id, document->generation)
-            && engine->SetActiveView(document_view->core_view_id)
-                == INKPOD_STATUS_OK);
+    if (engine == nullptr) {
+        return true;
+    }
+    if (!engine->SetActiveSession(document->id, document->generation)
+        || engine->SetActiveView(document_view->core_view_id)
+            != INKPOD_STATUS_OK) {
+        return false;
+    }
+    return RefreshEditorPresentation(document->id, document->generation);
 }
 
 bool ApplicationHost::RemoveWorkspaceWindow(WorkspaceWindowId id) noexcept {
@@ -691,7 +801,88 @@ bool ApplicationHost::ActivateDocumentView(DocumentViewId view) noexcept {
         target_workspace->windows.canvas = target_group->canvas;
         target_workspace->windows.document_tabs = target_group->document_tabs;
     }
-    return activated;
+    if (!activated) {
+        return false;
+    }
+    return RefreshEditorPresentation(document->id, document->generation);
+}
+
+bool ApplicationHost::RefreshEditorPresentation(
+    DocumentSessionId session, Generation generation) noexcept {
+    DocumentSession* document = documents_.Find(session);
+    if (engine == nullptr || document == nullptr
+        || document->generation != generation) {
+        return false;
+    }
+    const InkpodStatus refresh_status =
+        engine->RefreshEditorState(session, generation);
+    if (refresh_status == INKPOD_STATUS_NO_DOCUMENT) {
+        document->editor_presentation = {};
+        document->editor_presentation.struct_size =
+            sizeof(document->editor_presentation);
+        document->has_editor_presentation = false;
+        for (std::size_t index = 0U; index < document->ViewCount(); ++index) {
+            const DocumentView* view = document->ViewAt(index);
+            WorkspaceWindow* workspace = view == nullptr
+                ? nullptr
+                : WorkspaceForView(view->id);
+            if (workspace != nullptr) {
+                workspace->tools.editor = {};
+                workspace->tools.procedure = {};
+            }
+        }
+        return true;
+    }
+    if (refresh_status != INKPOD_STATUS_OK) {
+        return false;
+    }
+    InkpodEditorStateInfo editor{};
+    editor.struct_size = sizeof(editor);
+    InkpodDocumentInfo info{};
+    info.struct_size = sizeof(info);
+    if (!engine->GetEditorState(session, generation, editor)) {
+        return false;
+    }
+    const InkpodDocumentInfo* info_ptr =
+        engine->GetDocumentInfo(session, generation, info) ? &info : nullptr;
+    document->editor_presentation = editor;
+    document->has_editor_presentation = true;
+
+    bool projected{};
+    for (std::size_t index = 0U; index < document->ViewCount(); ++index) {
+        const DocumentView* view = document->ViewAt(index);
+        WorkspaceWindow* workspace = view == nullptr
+            ? nullptr
+            : WorkspaceForView(view->id);
+        if (workspace != nullptr) {
+            projected = ProjectEditorPresentation(
+                            editor, info_ptr, session, generation, *workspace)
+                || projected;
+        }
+    }
+    return projected;
+}
+
+InkpodStatus ApplicationHost::UpdateEditorState(
+    const InkpodEditorStateUpdate& update) noexcept {
+    DocumentSession* document = documents_.Current();
+    WorkspaceWindow* workspace = workspaces_.Current();
+    if (engine == nullptr || document == nullptr || workspace == nullptr
+        || !workspace->tools.editor.valid
+        || workspace->tools.editor.session != document->id
+        || workspace->tools.editor.generation != document->generation
+        || workspace->tools.editor.editor_revision
+            != update.expected_editor_revision) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const InkpodStatus status = engine->UpdateEditorState(
+        document->id, document->generation, update);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    return RefreshEditorPresentation(document->id, document->generation)
+        ? INKPOD_STATUS_OK
+        : INKPOD_STATUS_INVALID_STATE;
 }
 
 bool ApplicationHost::CloseDocumentView(DocumentViewId view) noexcept {

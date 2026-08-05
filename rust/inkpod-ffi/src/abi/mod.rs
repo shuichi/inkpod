@@ -3,6 +3,7 @@ use super::*;
 mod constants;
 mod core_records;
 mod document_records;
+mod editor_records;
 mod handles;
 mod vector_effect_records;
 
@@ -13,5 +14,6 @@ pub(crate) use constants::{
 };
 pub use core_records::*;
 pub use document_records::*;
+pub use editor_records::*;
 pub use handles::*;
 pub use vector_effect_records::*;

@@ -28,6 +28,8 @@ public:
     DocumentIdentity identity{};
     std::uint32_t untitled_number{};
     DocumentShellState shell{};
+    InkpodEditorStateInfo editor_presentation{sizeof(InkpodEditorStateInfo)};
+    bool has_editor_presentation{};
 
     void BindCore(CoreHost* host) noexcept;
     [[nodiscard]] CoreHost* Core() const noexcept;

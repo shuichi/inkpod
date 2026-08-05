@@ -13,6 +13,37 @@ pub unsafe extern "C" fn inkpod_core_apply_fill(
     input: *const InkpodFillInput,
     result: *mut InkpodFillResult,
 ) -> u32 {
+    unsafe { apply_fill_ffi(core, input, result, None) }
+}
+
+/// Applies a fill using the stable EditorState target captured at gesture begin.
+///
+/// # Safety
+/// The pointer and span contract is identical to [`inkpod_core_apply_fill`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_apply_fill_for_editor_target(
+    core: *mut InkpodCore,
+    layer_id: u64,
+    plane_id: u64,
+    input: *const InkpodFillInput,
+    result: *mut InkpodFillResult,
+) -> u32 {
+    unsafe {
+        apply_fill_ffi(
+            core,
+            input,
+            result,
+            Some(EditorTarget { layer_id, plane_id }),
+        )
+    }
+}
+
+unsafe fn apply_fill_ffi(
+    core: *mut InkpodCore,
+    input: *const InkpodFillInput,
+    result: *mut InkpodFillResult,
+    target: Option<EditorTarget>,
+) -> u32 {
     ffi_boundary(|| {
         clear_last_error();
         if core.is_null() || !is_aligned(core) {
@@ -44,11 +75,21 @@ pub unsafe extern "C" fn inkpod_core_apply_fill(
             Ok(request) => request,
             Err(status) => return status,
         };
-        match core.core.apply_fill_with_light_table(
-            &request,
-            input.flags & INKPOD_FILL_FLAG_LIGHT_TABLE_BOUNDARY != 0,
-            input.flags & INKPOD_FILL_FLAG_LIGHT_TABLE_COLOR != 0,
-        ) {
+        let use_boundary = input.flags & INKPOD_FILL_FLAG_LIGHT_TABLE_BOUNDARY != 0;
+        let use_sampled_color = input.flags & INKPOD_FILL_FLAG_LIGHT_TABLE_COLOR != 0;
+        let outcome = match target {
+            Some(target) => core.core.apply_fill_for_editor_target(
+                &request,
+                target,
+                use_boundary,
+                use_sampled_color,
+            ),
+            None => {
+                core.core
+                    .apply_fill_with_light_table(&request, use_boundary, use_sampled_color)
+            }
+        };
+        match outcome {
             Ok(outcome) => {
                 result.revision = outcome.dispatch.revision();
                 result.changed_pixel_count = outcome.changed_pixels;

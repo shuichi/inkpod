@@ -186,10 +186,15 @@ impl Core {
             dpi_x_milli: document.dpi_x_milli,
             dpi_y_milli: document.dpi_y_milli,
             frames: document.frames,
-            dirty: self.savepoint != Some(self.current_state),
+            dirty: self.savepoint != Some(self.current_state) || self.editor_dirty(),
             can_undo: self.history_cursor > 0,
             can_redo: self.history_cursor < self.history.len(),
-            active_plane: document.active_plane_role(),
+            active_plane: document.active_plane_role(
+                self.editor_session
+                    .as_ref()
+                    .and_then(|session| session.state.target)
+                    .map(|target| PlaneId::from_raw(target.plane_id)),
+            ),
             recovered: self.recovered,
             main_plane_checksum: document.raster(ActivePlane::MainLine).checksum(),
             color_plane_checksum: document.raster(ActivePlane::Color).checksum(),

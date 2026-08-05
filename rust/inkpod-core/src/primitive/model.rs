@@ -88,7 +88,7 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(3);
+    pub const CURRENT: Self = Self(4);
 }
 
 /// A BLAKE3-256 digest of canonical semantic document-state schema-3 bytes.
@@ -312,7 +312,7 @@ pub(super) enum CanonicalPrimitive {
 pub(crate) struct CanonicalStrokeArguments {
     pub(crate) target_plane_id: u64,
     pub(crate) tool_code: u32,
-    pub(crate) color: [u8; 4],
+    pub(crate) color: PixelValue,
     pub(crate) diameter_q16: i64,
     pub(crate) auto_erase: bool,
     pub(crate) pressure_size: bool,

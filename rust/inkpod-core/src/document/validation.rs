@@ -235,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn new_document_has_unique_stable_ids_and_valid_active_references() {
+    fn new_document_has_unique_stable_ids_and_required_primary_references() {
         let document = CellDocument::new(
             DocumentIds {
                 document: DocumentId::from_raw(1),
@@ -263,12 +263,9 @@ mod tests {
                 assert!(ids.insert(plane.id.get()));
             }
         }
-        assert!(
-            document
-                .layers
-                .iter()
-                .any(|layer| layer.id == document.active_layer_id)
-        );
-        assert!(document.plane_by_id(document.active_plane_id).is_some());
+        let (layer_id, main_plane_id, color_plane_id) = document.primary_ids();
+        assert!(document.layers.iter().any(|layer| layer.id == layer_id));
+        assert!(document.plane_by_id(main_plane_id).is_some());
+        assert!(document.plane_by_id(color_plane_id).is_some());
     }
 }

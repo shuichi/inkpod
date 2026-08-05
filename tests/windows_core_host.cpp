@@ -171,6 +171,144 @@ CommandContext Context(DocumentSessionId session, Generation generation) noexcep
     return context;
 }
 
+bool WaitForPendingOperations(
+    CoreHost& host,
+    DocumentSessionId session,
+    Generation generation,
+    std::uint64_t minimum) noexcept {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    do {
+        CoreSessionState state{};
+        if (host.GetSessionState(session, generation, state)
+            && state.pending_operations >= minimum) {
+            return true;
+        }
+        std::this_thread::yield();
+    } while (std::chrono::steady_clock::now() < deadline);
+    return false;
+}
+
+bool EditorCachePublicationIsOrdered(
+    CoreHost& host,
+    DocumentSessionId session,
+    Generation generation) {
+    InkpodEditorStateInfo before{};
+    before.struct_size = sizeof(before);
+    if (!host.GetEditorState(session, generation, before)) {
+        return false;
+    }
+
+    std::promise<void> blocker_started;
+    std::promise<void> release_blocker;
+    const std::shared_future<void> release = release_blocker.get_future().share();
+    std::promise<InkpodStatus> blocker_completed;
+    if (!host.Enqueue(
+            Context(session, generation),
+            [&blocker_started, release](InkpodCore*) {
+                blocker_started.set_value();
+                release.wait();
+                return INKPOD_STATUS_OK;
+            },
+            false,
+            false,
+            false,
+            [&blocker_completed](InkpodStatus status) {
+                blocker_completed.set_value(status);
+            })) {
+        return false;
+    }
+    blocker_started.get_future().wait();
+
+    std::atomic<InkpodStatus> refresh_status{INKPOD_STATUS_INVALID_STATE};
+    std::thread refresh([&host, session, generation, &refresh_status] {
+        (void)SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+        refresh_status.store(
+            host.RefreshEditorState(session, generation),
+            std::memory_order_release);
+    });
+    if (!WaitForPendingOperations(host, session, generation, 2U)) {
+        release_blocker.set_value();
+        refresh.join();
+        (void)blocker_completed.get_future().get();
+        return false;
+    }
+
+    InkpodEditorStateUpdate update{};
+    update.struct_size = sizeof(update);
+    update.kind = INKPOD_EDITOR_UPDATE_ACTIVE_TOOL;
+    update.expected_editor_revision = before.editor_revision;
+    update.tool = before.active_tool == INKPOD_EDITOR_TOOL_BRUSH
+        ? INKPOD_EDITOR_TOOL_PENCIL
+        : INKPOD_EDITOR_TOOL_BRUSH;
+    std::atomic<InkpodStatus> update_status{INKPOD_STATUS_INVALID_STATE};
+    std::thread updater([&host, session, generation, update, &update_status] {
+        (void)SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+        update_status.store(
+            host.UpdateEditorState(session, generation, update),
+            std::memory_order_release);
+    });
+    if (!WaitForPendingOperations(host, session, generation, 3U)) {
+        release_blocker.set_value();
+        refresh.join();
+        updater.join();
+        (void)blocker_completed.get_future().get();
+        return false;
+    }
+
+    release_blocker.set_value();
+    refresh.join();
+    updater.join();
+    const InkpodStatus blocker_status = blocker_completed.get_future().get();
+    InkpodEditorStateInfo after{};
+    after.struct_size = sizeof(after);
+    return blocker_status == INKPOD_STATUS_OK
+        && refresh_status.load(std::memory_order_acquire) == INKPOD_STATUS_OK
+        && update_status.load(std::memory_order_acquire) == INKPOD_STATUS_OK
+        && host.GetEditorState(session, generation, after)
+        && after.editor_revision == before.editor_revision + 1U
+        && after.active_tool == update.tool;
+}
+
+bool EditorUpdatePublishesDocumentInfo(
+    CoreHost& host,
+    DocumentSessionId session,
+    Generation generation) noexcept {
+    InkpodEditorStateInfo editor_before{};
+    editor_before.struct_size = sizeof(editor_before);
+    InkpodDocumentInfo document_before = EmptyDocumentInfo();
+    if (!host.GetEditorState(session, generation, editor_before)
+        || !host.GetDocumentInfo(session, generation, document_before)
+        || editor_before.active_layer_id != document_before.layer_id) {
+        return false;
+    }
+    const bool select_color =
+        editor_before.active_plane_id != document_before.color_plane_id;
+    InkpodEditorStateUpdate update{};
+    update.struct_size = sizeof(update);
+    update.kind = INKPOD_EDITOR_UPDATE_ACTIVE_TARGET;
+    update.expected_editor_revision = editor_before.editor_revision;
+    update.active_layer_id = editor_before.active_layer_id;
+    update.active_plane_id = select_color
+        ? document_before.color_plane_id
+        : document_before.main_plane_id;
+    if (host.UpdateEditorState(session, generation, update)
+        != INKPOD_STATUS_OK) {
+        return false;
+    }
+    InkpodEditorStateInfo editor_after{};
+    editor_after.struct_size = sizeof(editor_after);
+    InkpodDocumentInfo document_after = EmptyDocumentInfo();
+    return host.GetEditorState(session, generation, editor_after)
+        && host.GetDocumentInfo(session, generation, document_after)
+        && editor_after.editor_revision == editor_before.editor_revision + 1U
+        && editor_after.active_layer_id == update.active_layer_id
+        && editor_after.active_plane_id == update.active_plane_id
+        && document_after.document_revision == document_before.document_revision
+        && document_after.active_plane
+            == (select_color ? INKPOD_PLANE_COLOR : INKPOD_PLANE_MAIN_LINE)
+        && (document_after.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U;
+}
+
 bool DrainNotifications(
     HWND owner,
     CoreHost& host,
@@ -355,6 +493,29 @@ int wmain() {
         host.Stop();
         DestroyWindow(owner);
         return 5;
+    }
+
+    InkpodEditorStateInfo second_editor_before{};
+    second_editor_before.struct_size = sizeof(second_editor_before);
+    InkpodEditorStateInfo second_editor_after{};
+    second_editor_after.struct_size = sizeof(second_editor_after);
+    MSG unexpected_editor_notification{};
+    if (!host.GetEditorState(second, generation, second_editor_before)
+        || !EditorCachePublicationIsOrdered(host, first, generation)
+        || !EditorUpdatePublishesDocumentInfo(host, first, generation)
+        || !host.GetEditorState(second, generation, second_editor_after)
+        || second_editor_after.editor_revision
+            != second_editor_before.editor_revision
+        || second_editor_after.active_tool != second_editor_before.active_tool
+        || PeekMessageW(
+               &unexpected_editor_notification,
+               owner,
+               inkpod::app::kCoreStateChanged,
+               inkpod::app::kCoreStateChanged,
+               PM_REMOVE) != FALSE) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 28;
     }
 
     if (host.Invoke(
@@ -596,11 +757,7 @@ int wmain() {
     StrokeEvent begin{};
     begin.kind = StrokeEventKind::Begin;
     begin.context = Context(first, generation);
-    begin.style.tool = INKPOD_TOOL_PENCIL;
-    begin.style.plane = INKPOD_PLANE_COLOR;
     begin.style.coordinate_space = INKPOD_COORDINATE_SPACE_DOCUMENT;
-    begin.style.color_rgba = UINT32_C(0xff0000ff);
-    begin.style.diameter = 2.0F;
     begin.samples.push_back(InkpodStrokeSample{
         sizeof(InkpodStrokeSample), 0U, 10.0F, 10.0F, 1.0F, 0U});
     StrokeEvent cancel{};

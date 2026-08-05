@@ -9,10 +9,6 @@ impl Default for Core {
 }
 
 impl Core {
-    pub(super) fn allocate_layer_id(&mut self) -> LayerId {
-        self.next_id.take_layer()
-    }
-
     pub(super) fn allocate_plane_id(&mut self) -> PlaneId {
         self.next_id.take_plane()
     }
@@ -33,6 +29,7 @@ impl Core {
     #[must_use]
     pub fn new() -> Self {
         let shortcuts = default_shortcuts();
+        let editor_defaults = EditorDefaults::built_in();
         Self {
             document: None,
             document_revision: DocumentRevision::from_raw(0),
@@ -69,6 +66,8 @@ impl Core {
             sequence: None,
             motion_check: None,
             subpalette_index: None,
+            editor_defaults,
+            editor_session: None,
         }
     }
 
@@ -160,6 +159,7 @@ impl Core {
         self.sequence = None;
         self.motion_check = None;
         self.subpalette_index = None;
+        self.reset_editor_state(true);
         self.document_info()
     }
 }
@@ -203,6 +203,8 @@ pub struct Core {
     pub(super) sequence: Option<animation::SequenceState>,
     pub(super) motion_check: Option<animation::MotionCheckState>,
     pub(super) subpalette_index: Option<usize>,
+    pub(super) editor_defaults: EditorDefaults,
+    pub(super) editor_session: Option<EditorSessionState>,
 }
 
 /// One synchronous document edit staged independently from the live Core state.
@@ -216,6 +218,7 @@ pub(super) struct DocumentEdit {
     working: CellDocument,
     base_revision: DocumentRevision,
     commit_revision: DocumentRevision,
+    preferred_editor_target: Option<EditorTarget>,
 }
 
 impl DocumentEdit {
@@ -226,6 +229,7 @@ impl DocumentEdit {
             before,
             base_revision: core.document_revision,
             commit_revision: core.next_document_revision()?,
+            preferred_editor_target: None,
         })
     }
 
@@ -240,6 +244,7 @@ impl DocumentEdit {
             working,
             base_revision,
             commit_revision,
+            preferred_editor_target: None,
         }
     }
 
@@ -253,6 +258,10 @@ impl DocumentEdit {
 
     pub(super) const fn revision(&self) -> DocumentRevision {
         self.commit_revision
+    }
+
+    pub(super) fn prefer_editor_target(&mut self, target: EditorTarget) {
+        self.preferred_editor_target = Some(target);
     }
 
     pub(super) fn commit(self, core: &mut Core) -> Result<DispatchOutcome, CoreError> {
@@ -270,6 +279,8 @@ impl DocumentEdit {
             return Ok(core.noop_outcome());
         }
 
+        let editor =
+            core.stage_reconciled_editor_target(&self.working, self.preferred_editor_target)?;
         let after_state = core.allocate_state()?;
         let change = HistoryChange::Document {
             before: Box::new(self.before),
@@ -280,6 +291,7 @@ impl DocumentEdit {
         core.document_revision = self.commit_revision;
         core.render_cache.clear();
         core.commit_history_change(change, after_state);
+        core.publish_editor_session(editor);
         Ok(DispatchOutcome {
             revision: self.commit_revision.get(),
             accepted_commands: 1,
@@ -310,6 +322,19 @@ impl Core {
         commit_revision: DocumentRevision,
     ) -> Result<DispatchOutcome, CoreError> {
         DocumentEdit::from_staged(before, working, base_revision, commit_revision).commit(self)
+    }
+
+    pub(super) fn commit_deferred_document_edit_with_target(
+        &mut self,
+        before: CellDocument,
+        working: CellDocument,
+        base_revision: DocumentRevision,
+        commit_revision: DocumentRevision,
+        target: EditorTarget,
+    ) -> Result<DispatchOutcome, CoreError> {
+        let mut edit = DocumentEdit::from_staged(before, working, base_revision, commit_revision);
+        edit.prefer_editor_target(target);
+        edit.commit(self)
     }
 
     pub(super) fn commit_deferred_document_edit_current(

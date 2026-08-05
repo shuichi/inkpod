@@ -233,6 +233,28 @@ history, dirty state, and savepoint while retaining independent presentation.
 Cached IDs and metadata support presentation only and are not a C++ document
 model.
 
+Rust Core owns two distinct editor-state layers. Immutable `EditorDefaults`
+exists before any document and supplies the built-in initial document spec and
+initial editor values; creating a document explicitly copies those values into
+its Genesis/session `EditorState`. The defaults are not an application
+preference and are never made authoritative by a workspace. Each Core entry
+bound to a `DocumentSession` then owns exactly one mutable `EditorState`.
+Multiple views of that session share it, while different document sessions
+remain isolated even when their views appear in the same workspace. Palette
+content, main-line color, and the selection mask remain document primitives;
+only the palette cursor, active layer/plane target, and selection/tool options
+belong to `EditorState`.
+
+`CoreHost` queries the selected session/generation on the Core owner thread and
+copies an `InkpodEditorStateInfo` presentation record into the matching
+`DocumentSession`. `WorkspaceWindow` and tool controls may project that copy,
+keyed by session, generation, editor revision, and digest, but do not own
+authoritative tool, color, fill, selection, or vector defaults. Document, view,
+or workspace switching therefore refreshes from the target Core and never
+writes a previous workspace value into it. Commands, strokes, and previews
+capture the exact-depth color, diameter/options, and stable target IDs at begin;
+their canonical arguments do not consult later `EditorState` changes.
+
 `DocumentRegistry` also owns the canonical identity index. An existing Windows
 file is keyed by `FILE_ID_INFO` volume and file ID when available, otherwise by
 its normalized absolute case-insensitive path; an untitled session is keyed by
@@ -653,10 +675,23 @@ cutover and is neither serialized nor automatically changed by M8.
 
 ## Revision, preview, and transaction model
 
-Document and view revisions are independent. Successful document edits, history
-movement, new, and open advance document revision. Pan, zoom, fit, viewport
-resize, view flip, and other semantic view changes advance only view revision.
-Plane selection changes neither.
+Document, editor, and view revisions are independent. Successful document
+edits, history movement, new, and open advance document revision. Pan, zoom,
+fit, viewport resize, view flip, and other semantic view changes advance only
+view revision. A semantic `EditorState` update advances only the nonzero
+`EditorRevision` and recomputes the domain-separated canonical
+`EditorStateDigest`; the revision, editor savepoint, and digest field itself are
+not digest inputs. A semantic no-op changes neither token nor dirty state.
+Invalid, stale, failed, or overflowing updates publish no partial state.
+
+Editor updates do not advance document revision, `StateId`, procedure journal,
+Undo history, document savepoint, or render content. The editor savepoint is an
+`EditorStateDigest`, and Core reports editor dirty by comparing the current
+digest with that savepoint. Session dirty is exactly `document_dirty ||
+editor_dirty`. A topology-changing document transaction revalidates the active
+layer/plane stable-ID pair and resolves an invalid target deterministically in
+Core; the frontend does not substitute an active target. Color, diameter, and
+target-only changes therefore cannot add an Undo entry.
 
 Core-owned identities use distinct internal newtypes for documents, layers,
 planes, vector paths/fills, light-table sets/items, and secondary views. History
@@ -735,10 +770,17 @@ failure, or stale revision does not partially commit. Format limits and recovery
 details are specified in [`file-format.md`](file-format.md).
 
 The current production `.inkpod` v2 payload remains a materialized semantic
-document and does not encode the M2 runtime journal, branch graph, or history
-cache. Opening it starts a new root journal and clean StateId savepoint around
-the decoded document. Successor `PROC`/`META` persistence and reopen restoration
-remain part of the later atomic format cutover.
+document and does not encode the M2 runtime journal, branch graph, history
+cache, or the M3 canonical `EDIT` record/editor savepoint. Opening it starts a
+new root journal and clean StateId savepoint around the decoded document and
+copies the built-in defaults into a fresh `EditorState`. Recovery marks that
+editor state dirty. Core implements the bounded canonical EDIT DTO/frame,
+round-trip, digest, revision, and savepoint transitions in memory, but normal
+v2 save advances only the document savepoint: it must not report a dirty editor
+state as saved when v2 reopen cannot restore it. Consequently session dirty may
+remain set after a successful v2 save. Successor `META`/`GENS`/`ASST`/`PROC`/
+`EDIT` persistence and reopen restoration remain part of the later M8 atomic
+format cutover.
 
 Each successful autosave is paired with an atomically replaced, current-version,
 bounded metadata sidecar containing `DocumentSessionId`, generation, document UUID,

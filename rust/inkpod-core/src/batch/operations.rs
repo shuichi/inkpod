@@ -315,6 +315,7 @@ pub(super) fn core_from_document(document: CellDocument) -> Core {
     core.document_revision = DocumentRevision::from_raw(1);
     core.document = Some(document);
     core.reset_history(true);
+    core.reset_editor_state(true);
     core
 }
 

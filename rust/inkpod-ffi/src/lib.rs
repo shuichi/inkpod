@@ -18,14 +18,17 @@ use inkpod_core::{
     ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel,
     ClipboardPayload, ClipboardPixel, ClipboardPlane, ColorBalance, ColorCheckMode, Command,
     CommonRasterFormat, CoordinateSpace, Core, CoreError, CurveInterpolation, CurvePoint,
-    DocumentInfo, DocumentResize, DustMode, DustRemoval, EffectRegionKind, EyedropperSource,
-    FillOperation, FillRequest, Filter, FloatingTransform, FrameMetadata, Gradient, GradientKind,
-    GradientMode, GradientStop, GridConfig, GuideAxis, HsvAdjustment, InclusionMode, LayerKind,
-    Levels, LightTableDisplayMode, LightTableItemInput, LightTableItemProperties, LightTableSource,
-    MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION,
-    MAX_SHORTCUT_STROKES, MAX_SHORTCUTS, Margins, MirrorAxis, MotionCheckConfig, MotionFrame,
-    PaintTool, PixelFormat, PixelValue, PlaneType, PointF32, RectI32, RenderSnapshot, ResizeAnchor,
-    ResourceUsage, RgbaRasterBytes, RotateDirection, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
+    DocumentInfo, DocumentResize, DustMode, DustRemoval, EditorDefaults, EditorFillOptions,
+    EditorSelectionOptions, EditorSelectionShape, EditorState, EditorStateInfo, EditorStateUpdate,
+    EditorStrokeInput, EditorTarget, EditorTool, EditorVectorOptions, EffectRegionKind,
+    EyedropperSource, FillOperation, FillRequest, Filter, FloatingTransform, FrameMetadata,
+    Gradient, GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis, HsvAdjustment,
+    InclusionMode, LayerKind, Levels, LightTableDisplayMode, LightTableItemInput,
+    LightTableItemProperties, LightTableSource, MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS,
+    MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION, MAX_SHORTCUT_STROKES, MAX_SHORTCUTS, Margins,
+    MirrorAxis, MotionCheckConfig, MotionFrame, PaintTool, PaletteCursor, PixelFormat, PixelValue,
+    PlaneType, PointF32, RectI32, RenderSnapshot, ResizeAnchor, ResourceUsage, RgbaRasterBytes,
+    RotateDirection, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
     SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SelectionLayerOperation, SelectionOperation,
     SelectionShape, SequenceCellSource, SequenceDirection, ShortcutBinding,
     ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape, Stroke, StrokeSample,
@@ -44,6 +47,7 @@ use std::thread::{self, ThreadId};
 mod abi;
 mod animation;
 mod document_edit;
+mod editor_state;
 mod effects;
 mod lifecycle_document;
 mod paint_history;
@@ -57,6 +61,7 @@ pub(crate) use abi::{
 };
 pub use animation::*;
 pub use document_edit::*;
+pub use editor_state::*;
 pub use effects::*;
 pub use lifecycle_document::*;
 pub(crate) use paint_history::parse_view_command;

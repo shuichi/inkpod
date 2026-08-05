@@ -5,9 +5,11 @@ use super::*;
 impl Core {
     /// Atomically writes the active document to a normal-save path.
     ///
-    /// Success records the current history state as savepoint, clears recovered
-    /// status, and makes dirty false without changing document revision/history.
-    /// Write failure leaves the previous file and Core savepoint/path unchanged.
+    /// Success records the current history state as the document savepoint,
+    /// clears recovered status, and leaves document revision/history unchanged.
+    /// Production v2 omits EditorState, so this method never advances the editor
+    /// savepoint and session dirty may remain true. Write failure leaves the
+    /// previous file and both Core savepoint states/path unchanged.
     pub fn save(&mut self, path: &Path) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
@@ -56,6 +58,9 @@ impl Core {
         self.sequence = None;
         self.motion_check = None;
         self.subpalette_index = None;
+        // Production v2 has no EDIT section. Opening therefore copies the
+        // Rust-owned built-ins and establishes that reconstructed state clean.
+        self.reset_editor_state(true);
         self.document_info()
     }
 
@@ -87,6 +92,9 @@ impl Core {
         self.sequence = None;
         self.motion_check = None;
         self.subpalette_index = None;
+        // Recovery v2 also lacks EDIT; copied defaults remain unsaved so the
+        // combined session dirty contract cannot hide recovery provenance.
+        self.reset_editor_state(false);
         self.document_info()
     }
 

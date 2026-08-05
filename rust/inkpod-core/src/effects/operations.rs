@@ -16,7 +16,7 @@ impl Core {
         let revision = edit.revision();
         let (before, after) = edit.documents();
         let plane = editable_color_plane(before, plane_id)?;
-        let mut mask = selection_mask_for_shape(before, shape, revision.get())?;
+        let mut mask = selection_mask_for_shape(before, plane_id, shape, revision.get())?;
         if before.selection.allocated_tile_count() != 0 {
             mask = combine_selection_masks(
                 &before.selection,

@@ -104,15 +104,221 @@ fn acceptance_reference_frame_aligns_different_cell_sizes_and_reopens() {
     let before_swap = reopened.light_table_items().unwrap();
     assert_eq!(before_swap.len(), 1);
     let old_uuid = reopened.document_info().unwrap().document_uuid;
+    let editor_before_swap = reopened.editor_state().unwrap();
     let swapped = reopened
         .light_table_swap_with_active(before_swap[0].id)
         .unwrap();
     assert_eq!(swapped.document_uuid, 0x1111);
     assert_eq!((swapped.width, swapped.height), (4, 4));
+    let editor_after_swap = reopened.editor_state().unwrap();
+    assert_eq!(
+        editor_after_swap.revision.get(),
+        editor_before_swap.revision.get() + 1
+    );
+    assert_eq!(
+        editor_after_swap.state.without_target(),
+        editor_before_swap.state.without_target()
+    );
+    assert_eq!(
+        editor_after_swap.state.target,
+        Some(EditorTarget {
+            layer_id: swapped.layer_id,
+            plane_id: swapped.main_plane_id,
+        })
+    );
+    assert!(editor_after_swap.dirty);
+    assert!(swapped.dirty);
     let after_swap = reopened.light_table_items().unwrap();
     assert_eq!(after_swap[0].id, before_swap[0].id);
     assert_eq!(after_swap[0].opacity_milli, before_swap[0].opacity_milli);
     assert_eq!(after_swap[0].source_document_uuid, old_uuid);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn light_table_swap_editor_overflow_is_atomic_and_does_not_consume_stable_ids() {
+    let mut core = Core::new();
+    core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let source = LightTableSource::from_common_raster(
+        0x1212,
+        1,
+        RectI32 {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+        },
+        &rgba8(2, 2, [10, 20, 30, 255].repeat(4)),
+    )
+    .unwrap();
+    let (_, item_id) = core
+        .light_table_add_item(LightTableItemInput::new("swap overflow", source))
+        .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "inkpod-test-light-table-editor-overflow-{}.inkpod",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    core.save(&path).unwrap();
+
+    let mut maximum_revision = core.editor_state_frame().unwrap();
+    maximum_revision[44..52].copy_from_slice(&u64::MAX.to_le_bytes());
+    core.restore_editor_state_frame(&maximum_revision, EditorFrameDisposition::Saved)
+        .unwrap();
+    let document_before = core.document_info().unwrap();
+    let digest_before = core.document_state_digest().unwrap();
+    let editor_before = core.editor_state().unwrap();
+    let layers_before = core.layers().unwrap();
+    let items_before = core.light_table_items().unwrap();
+    let history_before = core.history_entries().to_vec();
+    let journal_before = core.journal_entries().to_vec();
+    let snapshot_before = core.build_snapshot();
+    let resources_before = core.resource_usage();
+
+    assert!(matches!(
+        core.light_table_swap_with_active(item_id),
+        Err(CoreError::InvalidState("editor revision overflow"))
+    ));
+    assert_eq!(core.document_info().unwrap(), document_before);
+    assert_eq!(core.document_state_digest().unwrap(), digest_before);
+    assert_eq!(core.editor_state().unwrap(), editor_before);
+    assert_eq!(core.layers().unwrap(), layers_before);
+    assert_eq!(core.light_table_items().unwrap(), items_before);
+    assert_eq!(core.history_entries(), history_before);
+    assert_eq!(core.journal_entries(), journal_before);
+    assert_eq!(core.build_snapshot(), snapshot_before);
+    assert_eq!(core.resource_usage(), resources_before);
+
+    let (_, guide_id) = core.add_guide(GuideAxis::Vertical, 1).unwrap();
+    assert_eq!(guide_id, item_id + 2);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn light_table_swap_rejects_document_dirty_atomically() {
+    let mut core = Core::new();
+    core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let source = LightTableSource::from_common_raster(
+        0x1313,
+        1,
+        RectI32 {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+        },
+        &rgba8(2, 2, [20, 30, 40, 255].repeat(4)),
+    )
+    .unwrap();
+    let (_, item_id) = core
+        .light_table_add_item(LightTableItemInput::new("document dirty", source))
+        .unwrap();
+    assert!(core.document_info().unwrap().dirty);
+    assert!(!core.editor_state().unwrap().dirty);
+
+    let document_before = core.document_info().unwrap();
+    let digest_before = core.document_state_digest().unwrap();
+    let editor_before = core.editor_state().unwrap();
+    let layers_before = core.layers().unwrap();
+    let items_before = core.light_table_items().unwrap();
+    let history_before = core.history_entries().to_vec();
+    let journal_before = core.journal_entries().to_vec();
+    let snapshot_before = core.build_snapshot();
+    let resources_before = core.resource_usage();
+
+    assert_eq!(
+        core.light_table_swap_with_active(item_id),
+        Err(CoreError::UnsavedChanges)
+    );
+    assert_eq!(core.document_info().unwrap(), document_before);
+    assert_eq!(core.document_state_digest().unwrap(), digest_before);
+    assert_eq!(core.editor_state().unwrap(), editor_before);
+    assert_eq!(core.layers().unwrap(), layers_before);
+    assert_eq!(core.light_table_items().unwrap(), items_before);
+    assert_eq!(core.history_entries(), history_before);
+    assert_eq!(core.journal_entries(), journal_before);
+    assert_eq!(core.build_snapshot(), snapshot_before);
+    assert_eq!(core.resource_usage(), resources_before);
+
+    let (_, guide_id) = core.add_guide(GuideAxis::Vertical, 1).unwrap();
+    assert_eq!(guide_id, item_id + 2);
+}
+
+#[test]
+fn light_table_swap_accepts_editor_only_dirty_after_v2_save() {
+    let mut core = Core::new();
+    core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let source = LightTableSource::from_common_raster(
+        0x1414,
+        1,
+        RectI32 {
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 2,
+        },
+        &rgba8(3, 2, [50, 60, 70, 255].repeat(6)),
+    )
+    .unwrap();
+    let (_, item_id) = core
+        .light_table_add_item(LightTableItemInput::new("editor dirty", source))
+        .unwrap();
+    let initial_editor = core.editor_state().unwrap();
+    let changed_editor = core
+        .update_editor_state(
+            initial_editor.revision,
+            EditorStateUpdate::SetToolDiameter {
+                tool: EditorTool::Brush,
+                diameter_q16: 11_i64 << 16,
+            },
+        )
+        .unwrap();
+    assert!(changed_editor.dirty);
+
+    let path = std::env::temp_dir().join(format!(
+        "inkpod-test-light-table-editor-dirty-{}-{}.inkpod",
+        std::process::id(),
+        item_id
+    ));
+    let _ = std::fs::remove_file(&path);
+    core.save(&path).unwrap();
+    let before_swap = core.editor_state().unwrap();
+    assert_eq!(before_swap, changed_editor);
+    assert!(before_swap.dirty);
+    assert!(
+        core.document_info().unwrap().dirty,
+        "public session dirty remains document_dirty || editor_dirty"
+    );
+
+    let swapped = core.light_table_swap_with_active(item_id).unwrap();
+    assert_eq!(swapped.document_uuid, 0x1414);
+    assert_eq!((swapped.width, swapped.height), (3, 2));
+    let after_swap = core.editor_state().unwrap();
+    assert_eq!(after_swap.revision.get(), before_swap.revision.get() + 1);
+    assert_eq!(
+        after_swap.state.without_target(),
+        before_swap.state.without_target()
+    );
+    assert_eq!(
+        after_swap.state.target,
+        Some(EditorTarget {
+            layer_id: swapped.layer_id,
+            plane_id: swapped.main_plane_id,
+        })
+    );
+    assert!(after_swap.dirty);
+    assert!(swapped.dirty);
+
+    let token = core.editor_savepoint_token().unwrap();
+    let editor_clean = core.commit_editor_savepoint(token).unwrap();
+    assert!(!editor_clean.dirty);
+    assert!(
+        !core.document_info().unwrap().dirty,
+        "swap establishes a clean document savepoint; only editor dirty kept the session dirty"
+    );
     std::fs::remove_file(path).unwrap();
 }
 
@@ -344,7 +550,7 @@ fn acceptance_light_table_fill_boundary_is_read_only() {
 }
 
 #[test]
-fn acceptance_sequence_switch_rejects_unsaved_document_without_discarding_it() {
+fn sequence_activate_and_step_reject_document_dirty_without_discarding_it() {
     let mut core = Core::new();
     let current = core
         .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
@@ -361,14 +567,35 @@ fn acceptance_sequence_switch_rejects_unsaved_document_without_discarding_it() {
     }]))
     .unwrap();
     let before = core.document_info().unwrap();
+    let digest_before = core.document_state_digest().unwrap();
+    let editor_before = core.editor_state().unwrap();
+    let layers_before = core.layers().unwrap();
+    let history_before = core.history_entries().to_vec();
+    let journal_before = core.journal_entries().to_vec();
+    let snapshot_before = core.build_snapshot();
+    let resources_before = core.resource_usage();
+    assert!(!editor_before.dirty);
+    assert_eq!(core.sequence_activate(1), Err(CoreError::UnsavedChanges));
+    assert_eq!(core.document_info().unwrap(), before);
+    assert_eq!(core.document_state_digest().unwrap(), digest_before);
+    assert_eq!(core.editor_state().unwrap(), editor_before);
+    assert_eq!(core.layers().unwrap(), layers_before);
+    assert_eq!(core.history_entries(), history_before);
+    assert_eq!(core.journal_entries(), journal_before);
+    assert_eq!(core.build_snapshot(), snapshot_before);
+    assert_eq!(core.resource_usage(), resources_before);
     assert_eq!(
         core.sequence_step(SequenceDirection::Next, false),
         Err(CoreError::UnsavedChanges)
     );
-    let after_rejection = core.document_info().unwrap();
-    assert_eq!(after_rejection.document_uuid, before.document_uuid);
-    assert_eq!(after_rejection.document_revision, before.document_revision);
-    assert!(after_rejection.dirty);
+    assert_eq!(core.document_info().unwrap(), before);
+    assert_eq!(core.document_state_digest().unwrap(), digest_before);
+    assert_eq!(core.editor_state().unwrap(), editor_before);
+    assert_eq!(core.layers().unwrap(), layers_before);
+    assert_eq!(core.history_entries(), history_before);
+    assert_eq!(core.journal_entries(), journal_before);
+    assert_eq!(core.build_snapshot(), snapshot_before);
+    assert_eq!(core.resource_usage(), resources_before);
 
     let path = std::env::temp_dir().join(format!(
         "inkpod-test-switch-{}-{}.inkpod",
@@ -380,6 +607,164 @@ fn acceptance_sequence_switch_rejects_unsaved_document_without_discarding_it() {
     let switched = core.sequence_step(SequenceDirection::Next, false).unwrap();
     assert_eq!(switched.document_uuid, 0x4444);
     assert_eq!((switched.width, switched.height), (3, 2));
+    assert!(switched.dirty);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn sequence_activate_and_step_accept_editor_only_dirty_after_v2_save() {
+    let mut core = Core::new();
+    let current = core
+        .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_sequence(vec![
+        source("cell1.png", current.document_uuid, 2, 2, [1, 2, 3, 255]),
+        source("cell2.png", 0x5555, 3, 2, [4, 5, 6, 255]),
+        source("cell3.png", 0x6666, 4, 2, [7, 8, 9, 255]),
+    ])
+    .unwrap();
+    let initial_editor = core.editor_state().unwrap();
+    let changed_editor = core
+        .update_editor_state(
+            initial_editor.revision,
+            EditorStateUpdate::SetToolDiameter {
+                tool: EditorTool::Brush,
+                diameter_q16: 13_i64 << 16,
+            },
+        )
+        .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "inkpod-test-sequence-editor-dirty-{}-{}.inkpod",
+        std::process::id(),
+        current.document_revision
+    ));
+    let _ = std::fs::remove_file(&path);
+    core.save(&path).unwrap();
+    let before_activate = core.editor_state().unwrap();
+    assert_eq!(before_activate, changed_editor);
+    assert!(before_activate.dirty);
+    assert!(
+        core.document_info().unwrap().dirty,
+        "public session dirty remains document_dirty || editor_dirty"
+    );
+
+    let activated = core.sequence_activate(1).unwrap();
+    assert_eq!(activated.document_uuid, 0x5555);
+    assert_eq!((activated.width, activated.height), (3, 2));
+    let after_activate = core.editor_state().unwrap();
+    assert_eq!(
+        after_activate.revision.get(),
+        before_activate.revision.get() + 1
+    );
+    assert_eq!(
+        after_activate.state.without_target(),
+        before_activate.state.without_target()
+    );
+    assert_eq!(
+        after_activate.state.target,
+        Some(EditorTarget {
+            layer_id: activated.layer_id,
+            plane_id: activated.main_plane_id,
+        })
+    );
+    assert!(after_activate.dirty);
+    assert!(activated.dirty);
+
+    let stepped = core.sequence_step(SequenceDirection::Next, false).unwrap();
+    assert_eq!(stepped.document_uuid, 0x6666);
+    assert_eq!((stepped.width, stepped.height), (4, 2));
+    let after_step = core.editor_state().unwrap();
+    assert_eq!(after_step.revision.get(), after_activate.revision.get() + 1);
+    assert_eq!(
+        after_step.state.without_target(),
+        after_activate.state.without_target()
+    );
+    assert_eq!(
+        after_step.state.target,
+        Some(EditorTarget {
+            layer_id: stepped.layer_id,
+            plane_id: stepped.main_plane_id,
+        })
+    );
+    assert!(after_step.dirty);
+    assert!(stepped.dirty);
+
+    let token = core.editor_savepoint_token().unwrap();
+    let editor_clean = core.commit_editor_savepoint(token).unwrap();
+    assert!(!editor_clean.dirty);
+    assert!(
+        !core.document_info().unwrap().dirty,
+        "each sequence switch establishes a clean document savepoint"
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn sequence_activation_failure_and_editor_overflow_are_atomic() {
+    let mut core = Core::new();
+    let current = core
+        .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_sequence(vec![
+        source("cell1.png", current.document_uuid, 2, 2, [1, 2, 3, 255]),
+        source("cell2.png", 0x7777, 3, 2, [4, 5, 6, 255]),
+    ])
+    .unwrap();
+    let (_, prior_guide_id) = core.add_guide(GuideAxis::Vertical, 1).unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "inkpod-test-sequence-editor-overflow-{}-{}.inkpod",
+        std::process::id(),
+        current.document_revision
+    ));
+    let _ = std::fs::remove_file(&path);
+    core.save(&path).unwrap();
+
+    let invalid_before = core.document_info().unwrap();
+    let invalid_editor_before = core.editor_state().unwrap();
+    assert!(matches!(
+        core.sequence_activate(usize::MAX),
+        Err(CoreError::InvalidArgument(_))
+    ));
+    assert_eq!(core.document_info().unwrap(), invalid_before);
+    assert_eq!(core.editor_state().unwrap(), invalid_editor_before);
+
+    let normal_editor_frame = core.editor_state_frame().unwrap();
+    let mut maximum_revision = normal_editor_frame.clone();
+    maximum_revision[44..52].copy_from_slice(&u64::MAX.to_le_bytes());
+    core.restore_editor_state_frame(&maximum_revision, EditorFrameDisposition::Saved)
+        .unwrap();
+    let document_before = core.document_info().unwrap();
+    let digest_before = core.document_state_digest().unwrap();
+    let editor_before = core.editor_state().unwrap();
+    let layers_before = core.layers().unwrap();
+    let history_before = core.history_entries().to_vec();
+    let journal_before = core.journal_entries().to_vec();
+    let snapshot_before = core.build_snapshot();
+    let resources_before = core.resource_usage();
+
+    assert!(matches!(
+        core.sequence_activate(1),
+        Err(CoreError::InvalidState("editor revision overflow"))
+    ));
+    assert_eq!(core.document_info().unwrap(), document_before);
+    assert_eq!(core.document_state_digest().unwrap(), digest_before);
+    assert_eq!(core.editor_state().unwrap(), editor_before);
+    assert_eq!(core.layers().unwrap(), layers_before);
+    assert_eq!(core.history_entries(), history_before);
+    assert_eq!(core.journal_entries(), journal_before);
+    assert_eq!(core.build_snapshot(), snapshot_before);
+    assert_eq!(core.resource_usage(), resources_before);
+
+    let (_, next_guide_id) = core.add_guide(GuideAxis::Horizontal, 1).unwrap();
+    assert_eq!(next_guide_id, prior_guide_id + 1);
+    core.save(&path).unwrap();
+    core.restore_editor_state_frame(&normal_editor_frame, EditorFrameDisposition::Saved)
+        .unwrap();
+    let switched = core.sequence_step(SequenceDirection::Next, false).unwrap();
+    assert_eq!(
+        switched.document_uuid, 0x7777,
+        "failed activation must not advance the sequence active index"
+    );
     std::fs::remove_file(path).unwrap();
 }
 

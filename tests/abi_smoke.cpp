@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -30,6 +31,14 @@ static_assert(sizeof(InkpodSnapshotOverlay) == 56U);
 static_assert(sizeof(InkpodColorValue) == 16U);
 static_assert(sizeof(InkpodColorArray) == 40U);
 static_assert(sizeof(InkpodColorBuffer) == 48U);
+static_assert(std::is_standard_layout_v<InkpodEditorStateInfo>);
+static_assert(sizeof(InkpodEditorFillOptions) == 136U);
+static_assert(sizeof(InkpodEditorSelectionOptions) == 32U);
+static_assert(sizeof(InkpodEditorVectorOptions) == 16U);
+static_assert(sizeof(InkpodEditorStateInfo) == 304U);
+static_assert(sizeof(InkpodEditorDefaults) == 336U);
+static_assert(sizeof(InkpodEditorStateUpdate) == 264U);
+static_assert(sizeof(InkpodEditorStrokeInput) == 48U);
 static_assert(sizeof(InkpodFillInput) == 96U);
 static_assert(sizeof(InkpodFillResult) == 32U);
 static_assert(sizeof(InkpodTreeEdit) == 64U);
@@ -252,6 +261,14 @@ int InkpodRunAbiSmoke() {
 
     if (inkpod_core_create(&config, &core) != INKPOD_STATUS_OK || core == nullptr) {
         return 23;
+    }
+    InkpodEditorDefaults editor_defaults{};
+    editor_defaults.struct_size = sizeof(editor_defaults);
+    if (inkpod_core_get_editor_defaults(core, &editor_defaults) != INKPOD_STATUS_OK
+        || editor_defaults.width != 1920U || editor_defaults.height != 1080U
+        || editor_defaults.state.active_tool != INKPOD_EDITOR_TOOL_PENCIL
+        || (editor_defaults.state.flags & INKPOD_EDITOR_STATE_HAS_TARGET) != 0U) {
+        return 130;
     }
     const InkpodCellCreateOptions cell_options{
         sizeof(InkpodCellCreateOptions),
@@ -820,6 +837,15 @@ int InkpodRunAbiSmoke() {
     if (inkpod_core_set_active_plane(core, INKPOD_PLANE_COLOR) != INKPOD_STATUS_OK
         || inkpod_core_select_color(
                core,
+               &selected_color,
+               0U,
+               0U,
+               INKPOD_SELECTION_NEW,
+               &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_select_color_for_editor_target(
+               core,
+               document.layer_id,
+               document.color_plane_id,
                &selected_color,
                0U,
                0U,
@@ -1401,6 +1427,85 @@ int InkpodRunAbiSmoke() {
         return 88;
     }
     std::remove(batch_settings.c_str());
+    InkpodEditorStateInfo editor_state{};
+    editor_state.struct_size = sizeof(editor_state);
+    InkpodDocumentInfo before_editor_update{};
+    before_editor_update.struct_size = sizeof(before_editor_update);
+    if (inkpod_core_get_editor_state(core, &editor_state) != INKPOD_STATUS_OK
+        || inkpod_core_get_document_info(core, &before_editor_update) != INKPOD_STATUS_OK
+        || (editor_state.flags & INKPOD_EDITOR_STATE_HAS_TARGET) == 0U) {
+        return 131;
+    }
+    InkpodEditorStateUpdate editor_update{};
+    editor_update.struct_size = sizeof(editor_update);
+    editor_update.kind = INKPOD_EDITOR_UPDATE_TOOL_COLOR;
+    editor_update.expected_editor_revision = editor_state.editor_revision;
+    editor_update.tool = INKPOD_EDITOR_TOOL_BRUSH;
+    editor_update.color = InkpodColorValue{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_16, 1U, 257U, 32769U, 65534U};
+    InkpodEditorStateInfo changed_editor_state{};
+    changed_editor_state.struct_size = sizeof(changed_editor_state);
+    if (inkpod_core_update_editor_state(core, &editor_update, &changed_editor_state)
+            != INKPOD_STATUS_OK
+        || changed_editor_state.editor_revision != editor_state.editor_revision + 1U) {
+        return 132;
+    }
+    editor_update.kind = INKPOD_EDITOR_UPDATE_ACTIVE_TOOL;
+    editor_update.expected_editor_revision = changed_editor_state.editor_revision;
+    editor_update.tool = INKPOD_EDITOR_TOOL_BRUSH;
+    if (inkpod_core_update_editor_state(core, &editor_update, &changed_editor_state)
+            != INKPOD_STATUS_OK
+        || changed_editor_state.current_color.depth != INKPOD_COLOR_DEPTH_16
+        || changed_editor_state.current_color.red != 1U
+        || changed_editor_state.current_color.green != 257U
+        || changed_editor_state.current_color.blue != 32769U
+        || changed_editor_state.current_color.alpha != 65534U) {
+        return 133;
+    }
+    const std::uint64_t no_op_revision = changed_editor_state.editor_revision;
+    std::array<std::uint8_t, 32U> no_op_digest{};
+    std::memcpy(no_op_digest.data(), changed_editor_state.editor_digest, no_op_digest.size());
+    editor_update.expected_editor_revision = no_op_revision;
+    if (inkpod_core_update_editor_state(core, &editor_update, &changed_editor_state)
+            != INKPOD_STATUS_OK
+        || changed_editor_state.editor_revision != no_op_revision
+        || std::memcmp(
+               changed_editor_state.editor_digest,
+               no_op_digest.data(),
+               no_op_digest.size())
+            != 0) {
+        return 134;
+    }
+    const InkpodStrokeSample editor_sample{
+        sizeof(InkpodStrokeSample), 0U, 2.0F, 2.0F, 1.0F, 0U};
+    const InkpodEditorStrokeInput editor_stroke{
+        sizeof(InkpodEditorStrokeInput),
+        INKPOD_COORDINATE_SPACE_DOCUMENT,
+        0U,
+        0U,
+        0U,
+        &editor_sample,
+        1U,
+        sizeof(InkpodStrokeSample)};
+    if (inkpod_core_editor_stroke_begin(core, &editor_stroke) != INKPOD_STATUS_OK
+        || inkpod_core_stroke_cancel(core) != INKPOD_STATUS_OK) {
+        return 136;
+    }
+    if (inkpod_core_apply_fill_for_editor_target(
+            nullptr, 0U, 0U, nullptr, nullptr)
+            != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_core_apply_selection_for_editor_target(
+               nullptr, 0U, 0U, nullptr, nullptr)
+            != INKPOD_STATUS_INVALID_ARGUMENT) {
+        return 137;
+    }
+    InkpodDocumentInfo after_editor_update{};
+    after_editor_update.struct_size = sizeof(after_editor_update);
+    if (inkpod_core_get_document_info(core, &after_editor_update) != INKPOD_STATUS_OK
+        || after_editor_update.document_revision
+            != before_editor_update.document_revision) {
+        return 135;
+    }
     if (inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
         || inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK
         || inkpod_core_destroy(&core) != INKPOD_STATUS_OK) {

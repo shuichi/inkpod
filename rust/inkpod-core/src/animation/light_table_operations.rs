@@ -552,19 +552,23 @@ impl Core {
 
     /// Swaps the clean active document with one light-table source.
     ///
-    /// Dirty documents are rejected. Success installs the selected source as a new
-    /// clean document and preserves the outgoing flattened document as that item;
-    /// validation failure leaves the current document unchanged.
+    /// Unsaved document changes are rejected. Editor-only dirty is retained and does
+    /// not block the swap because non-target EditorState survives intact. Success
+    /// installs the selected source with a clean document savepoint and preserves the
+    /// outgoing flattened document as that item. Deterministic active-target
+    /// reconciliation may advance the editor revision and leave the combined session
+    /// dirty. Validation failure is atomic.
     pub fn light_table_swap_with_active(
         &mut self,
         item_id: u64,
     ) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
         let item_id = LightTableItemId::from_raw(item_id);
-        if self.document_info()?.dirty {
+        let current = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        if self.savepoint != Some(self.current_state) {
             return Err(CoreError::UnsavedChanges);
         }
-        let current = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let current = current.clone();
         let set_index = current
             .light_table
             .sets
@@ -589,13 +593,14 @@ impl Core {
             dpi_y_milli: current.dpi_y_milli,
             raster: flatten_document(&current, self.document_revision.get().max(1))?,
         };
+        let mut next_id = self.next_id;
         let ids = DocumentIds {
-            document: self.next_id.take_document(),
-            layer: self.next_id.take_layer(),
-            main_plane: self.next_id.take_plane(),
-            color_plane: self.next_id.take_plane(),
-            selection_plane: self.next_id.take_plane(),
-            light_table_set: self.next_id.take_light_table_set(),
+            document: next_id.take_document(),
+            layer: next_id.take_layer(),
+            main_plane: next_id.take_plane(),
+            color_plane: next_id.take_plane(),
+            selection_plane: next_id.take_plane(),
+            light_table_set: next_id.take_light_table_set(),
         };
         let mut next = CellDocument::new(
             ids,
@@ -613,8 +618,10 @@ impl Core {
         next.light_table.sets[set_index].items[item_index].source = outgoing;
 
         let revision = self.next_document_revision()?;
+        let editor = self.stage_reconciled_editor_target(&next, None)?;
         self.document = Some(next);
         self.document_revision = revision;
+        self.next_id = next_id;
         self.render_cache.clear();
         self.reset_history(true);
         self.reset_view();
@@ -622,6 +629,7 @@ impl Core {
         self.recovered = false;
         self.floating = None;
         self.motion_check = None;
+        self.publish_editor_session(editor);
         self.document_info()
     }
 }

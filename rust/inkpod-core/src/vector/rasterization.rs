@@ -1,6 +1,7 @@
 use super::geometry::*;
 use super::model::*;
 use super::*;
+use crate::EditorTarget;
 
 impl Core {
     /// Rasterizes one vector-coloring layer into owned straight-alpha RGBA8 pixels.
@@ -203,8 +204,9 @@ impl Core {
                 }
             }
         }
-        let new_layer_id = self.allocate_layer_id();
-        let new_plane_id = self.allocate_plane_id();
+        let mut next_id = self.next_id;
+        let new_layer_id = next_id.take_layer();
+        let new_plane_id = next_id.take_plane();
         let mut after = before.clone();
         after.layers.push(LayerNode {
             id: new_layer_id,
@@ -223,9 +225,17 @@ impl Core {
                 raster,
             }],
         });
-        after.active_layer_id = new_layer_id;
-        after.active_plane_id = new_plane_id;
-        let outcome = self.commit_deferred_document_edit(before, after, base_revision, revision)?;
+        let outcome = self.commit_deferred_document_edit_with_target(
+            before,
+            after,
+            base_revision,
+            revision,
+            EditorTarget {
+                layer_id: new_layer_id.get(),
+                plane_id: new_plane_id.get(),
+            },
+        )?;
+        self.next_id = next_id;
         Ok((outcome, new_layer_id.get()))
     }
 

@@ -233,6 +233,59 @@ document revision、dirty、Undo/Redo、savepoint を変更しない。Windows C
 編集 command を Core へ送らない。target rebind/close/shutdown では先に Canvas sink を unbind し、
 捕捉済み session/generation の Core 上で view を close してから Canvas owner を破棄する。
 
+## EditorDefaults / EditorState ABI v2
+
+M3 は ABI version を変更せず、次の七つの Core-owner-thread API と固定幅 record を ABI v2 へ
+additive に追加する。
+
+- `inkpod_core_get_editor_defaults` は document 作成前にも有効な Rust-owned immutable
+  `InkpodEditorDefaults` を caller-owned record へコピーする。built-in initial document spec と
+  built-in editor values は application preference ではなく、新規 document 作成時に Core が
+  session の Genesis/EditorState へ明示的にコピーする。
+- `inkpod_core_get_editor_state` は現在の `InkpodEditorStateInfo` を副作用なくコピーする。
+- `inkpod_core_update_editor_state` は `InkpodEditorStateUpdate` の kind と exact expected
+  `EditorRevision` を検証し、成功時の完全な `InkpodEditorStateInfo` をコピーする。update kind は
+  active tool、tool color、tool diameter、fill、selection、vector、active target、palette cursor の
+  closed set である。
+- `inkpod_core_editor_stroke_begin` は caller-owned `InkpodEditorStrokeInput` の sample span を call 中だけ
+  borrow し、tool 0 なら active tool、非0なら指定 raster tool の Core-owned styleを選び、RGBA8/RGBA16
+  exact-depth color、Q16 diameter、stable target を begin 時に一度だけ canonical stroke argument へ
+  コピーする。selector は locator の固定鉛筆等に使うが、caller は color/diameter/target を渡さない。
+  append/end は後続の EditorState を再参照しない。
+- `inkpod_core_apply_fill_for_editor_target` と
+  `inkpod_core_apply_selection_for_editor_target` は既存の bounded input/output record に、gesture beginで
+  captureしたstable layer/plane ID pairを添えて実行する。pairは同じdocument namespace内で再検証し、
+  gesture中のEditorState変更で別targetへ再解決しない。既存entrypointは一回の同期command開始時に
+  current targetをCore内でcaptureする経路として維持する。
+- `inkpod_core_select_color_for_editor_target` は色選択command開始時にcaptureしたstable layer/plane
+  ID pairとexact-depth `InkpodColorValue`を使う。後続EditorState変更でsource planeをretargetせず、
+  既存`inkpod_core_select_color`は同期command開始時のcurrent targetをCore内でcaptureして委譲する。
+
+公開 record は `InkpodEditorFillOptions`、`InkpodEditorSelectionOptions`、
+`InkpodEditorVectorOptions`、`InkpodEditorStateInfo`、`InkpodEditorDefaults`、
+`InkpodEditorStateUpdate`、`InkpodEditorStrokeInput` である。caller は入力の
+top-level recordと、その入力がadvertiseする各nested recordの`struct_size`をABI v2 headerの
+完全な`sizeof(record)`以上に設定し、reservedと未知flagを0にする。query/updateの出力は
+callerがtop-level outputの`struct_size`だけを提示し、Coreが成功時に完全なcaller-owned copyと
+各nested outputの`struct_size`を書き込む。短いtop-level record、使用する短いnested input、
+NULL、未知enum/update kind、非有限・範囲外の値、0または存在しないstable target IDは拒否する。
+RGBA8/RGBA16 は既存の `InkpodColorValue` tag と channel 幅を保持し、
+alpha を含め packed RGBA8 へ縮小しない。diameter と option scalar は ABI record で定義した exact
+integer/Q16 表現を使う。
+
+七 API の入力は call 中だけ borrowed、出力 record は caller-owned copy であり、release 関数を
+必要としない。query は editor/document revision、digest、dirty、history、journal、render content を
+変更しない。update は expected revision が一致したときだけ一括適用する。semantic no-op は
+`EditorRevision`、`EditorStateDigest`、dirty を保持し、semantic change は editor revision/digest と
+editor dirty だけを更新する。stale、invalid、overflow、allocation failure、panic では Core と出力
+record のどちらも変更しない。active target は layer/plane の stable-ID pair で、document topology
+変更後の検証と決定的な再解決も Core が行う。
+
+Windows の `CoreHost` は issue-time の `DocumentSessionId + Generation` を owner thread で解決して
+query/update し、結果を同じ key の presentation cache へ deep copy する。document/view/workspace
+切替は対象 Core を再 query する。同一 document の複数 view は一つの EditorState を共有し、別
+session は分離される。workspace の以前の表示値を Core へ戻してはならない。
+
 ## 編集状態と排他
 
 Core が持つ transient editing state は、committed document と分離される。
@@ -258,11 +311,13 @@ preview の描画更新は snapshot 側の transient revision で区別する。
 | 操作の種類                                                    | document revision    | dirty                             | Undo                              |
 | ------------------------------------------------------------- | -------------------- | --------------------------------- | --------------------------------- |
 | query、snapshot accessor、task、shortcut、view-only 操作      | 不変                 | 不変                              | 不変                              |
+| EditorState query または semantic no-op                      | 不変                 | 不変                              | 不変                              |
+| EditorState の semantic update                               | 不変                 | editor savepoint との差だけ変化   | 不変                              |
 | stroke begin/append、preview begin/update、floating transform | 不変                 | 不変                              | 不変                              |
 | stroke end、preview apply、floating commit                    | 実変更時に 1 回進む  | dirty                             | 高々 1 単位                       |
 | 直接の文書編集                                                | 実変更時に 1 回進む  | dirty                             | 原則 1 単位                       |
 | Undo/Redo/history jump                                        | 結果状態へ進む       | savepoint との位置で再計算        | cursor を移動し item は増やさない |
-| 通常保存                                                      | 不変                 | 現在位置を savepoint として clean | 不変                              |
+| 現行 v2 の通常保存                                            | 不変                 | document だけ clean。editor dirty は保持 | 不変                         |
 | autosave                                                      | 不変                 | 不変                              | 不変                              |
 | new/open/import/recovery                                      | 新しい文書情報が正本 | 戻り情報が正本                    | 旧 history を引き継がない         |
 
@@ -377,11 +432,16 @@ batch execution だけは cancel/失敗時にも report owner を返し得る。
 ## 保存、autosave、recovery
 
 通常保存は同一 directory の temporary file を完成・flush・close してから置換する。成功時だけ normal path と
-savepoint が進み、dirty が解消する。失敗時に元 file を truncate しない。
+document savepoint が進む。現行 production `.inkpod` v2 は canonical EDIT frame を保存・復元しないため、
+M3 の editor savepoint は進めず、editor dirty があれば session dirty は解消しない。失敗時に元 file を
+truncate せず、document/editor のどちらの savepoint も変更しない。M8 の atomic format cutover までは
+`session_dirty = document_dirty || editor_dirty` がこの差分を利用者へ正しく公開する。
 
-autosave は recovery file を atomic に書くが、normal path/savepoint と dirty を変えない。recovery open は
-文書を dirty・recovered・pathless として開く。以前の通常 file を上書きするには、ユーザーが明示した path で
-改めて通常保存する必要がある。
+autosave、export は出力を atomic に書いても normal path、document/editor savepoint、dirty を変えない。
+recovery open は文書と built-in defaults からコピーした EditorState を dirty・recovered・pathless として
+開く。通常 v2 open は built-in defaults の clean EditorState を作るが、保存前の EditorState を復元した
+ものとはみなさない。以前の通常 file を上書きするには、ユーザーが明示した path で改めて通常保存する
+必要がある。
 
 active stroke/preview/floating 中は保存や open を実行せず、Core queue 上で完了または cancel 後に行う。
 

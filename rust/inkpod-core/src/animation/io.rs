@@ -51,6 +51,7 @@ impl Core {
         self.motion_check = None;
         self.sequence = None;
         self.subpalette_index = None;
+        self.reset_editor_state(true);
         self.document_info()
     }
 

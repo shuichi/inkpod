@@ -11,6 +11,37 @@ pub unsafe extern "C" fn inkpod_core_apply_selection(
     input: *const InkpodSelectionInput,
     result: *mut InkpodDispatchResult,
 ) -> u32 {
+    unsafe { apply_selection_ffi(core, input, result, None) }
+}
+
+/// Applies one bounded selection gesture using its captured stable editor target.
+///
+/// # Safety
+/// The pointer and span contract is identical to [`inkpod_core_apply_selection`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_apply_selection_for_editor_target(
+    core: *mut InkpodCore,
+    layer_id: u64,
+    plane_id: u64,
+    input: *const InkpodSelectionInput,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    unsafe {
+        apply_selection_ffi(
+            core,
+            input,
+            result,
+            Some(EditorTarget { layer_id, plane_id }),
+        )
+    }
+}
+
+unsafe fn apply_selection_ffi(
+    core: *mut InkpodCore,
+    input: *const InkpodSelectionInput,
+    result: *mut InkpodDispatchResult,
+    target: Option<EditorTarget>,
+) -> u32 {
     ffi_boundary(|| {
         clear_last_error();
         if core.is_null() || !is_aligned(core) {
@@ -167,7 +198,13 @@ pub unsafe extern "C" fn inkpod_core_apply_selection(
                 );
             }
         };
-        match core.core.apply_selection(&shape, operation) {
+        let outcome = match target {
+            Some(target) => core
+                .core
+                .apply_selection_for_editor_target(&shape, operation, target),
+            None => core.core.apply_selection(&shape, operation),
+        };
+        match outcome {
             Ok(outcome) => {
                 write_dispatch_result(result, outcome);
                 INKPOD_STATUS_OK
@@ -190,6 +227,47 @@ pub unsafe extern "C" fn inkpod_core_select_color(
     different: u32,
     operation: u32,
     result: *mut InkpodDispatchResult,
+) -> u32 {
+    unsafe { select_color_ffi(core, color, tolerance, different, operation, result, None) }
+}
+
+/// Selects equal or different pixels from a captured stable editor target.
+///
+/// # Safety
+/// The pointer contract is identical to [`inkpod_core_select_color`]. The
+/// layer/plane pair must identify one current document plane.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_select_color_for_editor_target(
+    core: *mut InkpodCore,
+    layer_id: u64,
+    plane_id: u64,
+    color: *const InkpodColorValue,
+    tolerance: u16,
+    different: u32,
+    operation: u32,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    unsafe {
+        select_color_ffi(
+            core,
+            color,
+            tolerance,
+            different,
+            operation,
+            result,
+            Some(EditorTarget { layer_id, plane_id }),
+        )
+    }
+}
+
+unsafe fn select_color_ffi(
+    core: *mut InkpodCore,
+    color: *const InkpodColorValue,
+    tolerance: u16,
+    different: u32,
+    operation: u32,
+    result: *mut InkpodDispatchResult,
+    target: Option<EditorTarget>,
 ) -> u32 {
     ffi_boundary(|| {
         clear_last_error();
@@ -225,10 +303,15 @@ pub unsafe extern "C" fn inkpod_core_select_color(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        match core
-            .core
-            .select_color(color, tolerance, different, operation)
-        {
+        let outcome = match target {
+            Some(target) => core
+                .core
+                .select_color_for_editor_target(color, tolerance, different, operation, target),
+            None => core
+                .core
+                .select_color(color, tolerance, different, operation),
+        };
+        match outcome {
             Ok(outcome) => {
                 write_dispatch_result(result, outcome);
                 INKPOD_STATUS_OK

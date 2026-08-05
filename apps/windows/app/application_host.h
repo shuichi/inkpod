@@ -90,6 +90,11 @@ public:
     [[nodiscard]] const DocumentRegistry& Documents() const noexcept;
     [[nodiscard]] std::optional<DocumentBinding> AddDocumentSession() noexcept;
     [[nodiscard]] bool ActivateDocumentView(DocumentViewId view) noexcept;
+    [[nodiscard]] bool RefreshEditorPresentation(
+        DocumentSessionId session,
+        Generation generation) noexcept;
+    [[nodiscard]] InkpodStatus UpdateEditorState(
+        const InkpodEditorStateUpdate& update) noexcept;
     [[nodiscard]] bool CloseDocumentView(DocumentViewId view) noexcept;
     [[nodiscard]] bool CloseDocumentSession(DocumentSessionId session) noexcept;
     [[nodiscard]] std::uint32_t IssueUntitledNumber() noexcept;

@@ -243,7 +243,12 @@ impl Core {
         let revision = self.next_document_revision()?;
         let plane = editable_color_plane(&before, plane_id)?;
         let mut operation_mask = match shape {
-            Some(shape) => Some(selection_mask_for_shape(&before, shape, revision.get())?),
+            Some(shape) => Some(selection_mask_for_shape(
+                &before,
+                plane_id,
+                shape,
+                revision.get(),
+            )?),
             None => None,
         };
         if before.selection.allocated_tile_count() != 0 {
@@ -327,7 +332,9 @@ impl Core {
         let plane = editable_color_plane(&base_document, plane_id)?;
         let mut operation_mask = shape
             .as_ref()
-            .map(|shape| selection_mask_for_shape(&base_document, shape, preview_revision.get()))
+            .map(|shape| {
+                selection_mask_for_shape(&base_document, plane_id, shape, preview_revision.get())
+            })
             .transpose()?;
         if base_document.selection.allocated_tile_count() != 0 {
             operation_mask = Some(match operation_mask {

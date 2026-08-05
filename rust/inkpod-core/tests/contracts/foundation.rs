@@ -97,7 +97,10 @@ fn acceptance_saved_drawing_vertical_slice() {
         TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
     let saved = core.save(&path).unwrap();
-    assert!(!saved.dirty);
+    assert!(
+        saved.dirty,
+        "production v2 saves document pixels but cannot claim the changed editor target was saved"
+    );
     let expected_snapshot = core.build_snapshot();
     drop(core);
 

@@ -238,7 +238,6 @@ impl Core {
             },
         );
         after.adjustments.insert(layer_id, adjustment);
-        after.active_layer_id = layer_id;
         let outcome = edit.commit(self)?;
         self.next_id = next_id;
         Ok((outcome, layer_id.get()))

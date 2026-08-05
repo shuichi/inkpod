@@ -30,7 +30,7 @@ pub(crate) struct CanonicalStrokeSample {
 pub(super) struct CanonicalRasterStroke {
     pub(super) tool: PaintTool,
     pub(super) target_plane_id: PlaneId,
-    pub(super) color_rgba8: [u8; 4],
+    pub(super) color: PixelValue,
     pub(super) diameter_q16: i64,
     pub(super) auto_erase: bool,
     pub(super) pressure_size: bool,
@@ -65,9 +65,41 @@ pub(crate) fn canonicalize(
     target_plane_id: u64,
 ) -> Result<CanonicalStrokeArguments, CoreError> {
     validate_public_stroke(stroke)?;
+    let diameter_q16 = canonical_q16_from_f32(stroke.diameter)?.max(1);
+    canonicalize_exact(
+        stroke,
+        PixelValue::Rgba(stroke.color),
+        diameter_q16,
+        view,
+        width,
+        height,
+        target_plane_id,
+    )
+}
+
+/// Resolves a public stroke's geometry with exact captured editor style.
+///
+/// The legacy public stroke delegates with RGBA8 and a canonicalized binary32
+/// diameter above. Core-owned editor state instead supplies its straight
+/// RGBA8/RGBA16 color and Q16.16 diameter without a lossy presentation detour.
+pub(crate) fn canonicalize_exact(
+    stroke: &Stroke,
+    color: PixelValue,
+    diameter_q16: i64,
+    view: &ViewState,
+    width: u32,
+    height: u32,
+    target_plane_id: u64,
+) -> Result<CanonicalStrokeArguments, CoreError> {
+    validate_canonical_color(color)?;
     if target_plane_id == 0 {
         return Err(CoreError::InvalidArgument(
             "stroke target plane ID must be nonzero",
+        ));
+    }
+    if !(1..=i64::from(256) * Q16_ONE).contains(&diameter_q16) {
+        return Err(CoreError::InvalidArgument(
+            "canonical stroke diameter is outside bounds",
         ));
     }
 
@@ -78,18 +110,10 @@ pub(crate) fn canonicalize(
         width,
         height,
     )?;
-    let diameter_q16 = canonical_q16_from_f32(stroke.diameter)?;
-    let diameter_q16 = diameter_q16.max(1);
-    if diameter_q16 > i64::from(256) * Q16_ONE {
-        return Err(CoreError::InvalidArgument(
-            "stroke diameter is outside bounds",
-        ));
-    }
-
     Ok(CanonicalStrokeArguments {
         target_plane_id,
         tool_code: tool_code(stroke.tool),
-        color: stroke.color,
+        color,
         diameter_q16,
         auto_erase: stroke.auto_erase,
         pressure_size: stroke.pressure_size,
@@ -293,7 +317,7 @@ impl RasterStrokePreview {
         Ok(CanonicalStrokeArguments {
             target_plane_id: self.stroke.target_plane_id.get(),
             tool_code: tool_code(self.stroke.tool),
-            color: self.stroke.color_rgba8,
+            color: self.stroke.color,
             diameter_q16: self.stroke.diameter_q16,
             auto_erase: self.stroke.auto_erase,
             pressure_size: self.stroke.pressure_size,
@@ -315,10 +339,11 @@ impl RasterStrokePreview {
 fn stroke_from_arguments(
     arguments: &CanonicalStrokeArguments,
 ) -> Result<CanonicalRasterStroke, CoreError> {
+    validate_canonical_color(arguments.color)?;
     Ok(CanonicalRasterStroke {
         tool: tool_from_code(arguments.tool_code)?,
         target_plane_id: checked_plane_id(arguments.target_plane_id)?,
-        color_rgba8: arguments.color,
+        color: arguments.color,
         diameter_q16: arguments.diameter_q16,
         auto_erase: arguments.auto_erase,
         pressure_size: arguments.pressure_size,
@@ -329,7 +354,7 @@ fn stroke_from_arguments(
 fn same_stroke_settings(left: &CanonicalRasterStroke, right: &CanonicalRasterStroke) -> bool {
     left.tool == right.tool
         && left.target_plane_id == right.target_plane_id
-        && left.color_rgba8 == right.color_rgba8
+        && left.color == right.color
         && left.diameter_q16 == right.diameter_q16
         && left.auto_erase == right.auto_erase
         && left.pressure_size == right.pressure_size
@@ -391,7 +416,7 @@ fn canonical_stroke_from_public(
     view: &ViewState,
     document: &CellDocument,
 ) -> Result<CanonicalRasterStroke, CoreError> {
-    let target_plane_id = document.plane_for_paint_role(stroke.plane)?.id;
+    let target_plane_id = document.plane_for_paint_role(stroke.plane, None, None)?.id;
     let arguments = canonicalize(
         stroke,
         view,
@@ -402,7 +427,7 @@ fn canonical_stroke_from_public(
     Ok(CanonicalRasterStroke {
         tool: tool_from_code(arguments.tool_code)?,
         target_plane_id,
-        color_rgba8: arguments.color,
+        color: arguments.color,
         diameter_q16: arguments.diameter_q16,
         auto_erase: arguments.auto_erase,
         pressure_size: arguments.pressure_size,
@@ -512,8 +537,7 @@ fn validated_stroke_context(
         .ok_or(CoreError::InvalidState(
             "stroke target plane no longer exists",
         ))?;
-    let (draw_value, erase_value) =
-        target_values(plane.kind, plane.raster.format(), stroke.color_rgba8)?;
+    let (draw_value, erase_value) = target_values(plane.kind, plane.raster.format(), stroke.color)?;
     let desired = desired_value(document, stroke, draw_value, erase_value)?;
     let maximum_radius = stroke.samples.iter().try_fold(0_i64, |maximum, sample| {
         dab_radius(stroke, sample.pressure).map(|radius| maximum.max(radius))
@@ -610,7 +634,6 @@ fn apply_staged_changes(
     for coordinate in touched_tiles {
         raster.remove_tile_if_empty(coordinate);
     }
-    document.active_plane_id = target_plane_id;
     Ok(())
 }
 
@@ -652,8 +675,11 @@ fn validate_public_sample(sample: &StrokeSample) -> Result<(), CoreError> {
 fn target_values(
     kind: PlaneType,
     format: PixelFormat,
-    color: [u8; 4],
+    color: PixelValue,
 ) -> Result<(PixelValue, PixelValue), CoreError> {
+    let rgba16 = color.rgba16().ok_or(CoreError::InvalidArgument(
+        "canonical stroke color must be straight RGBA8 or RGBA16",
+    ))?;
     match (kind, format) {
         (PlaneType::MainLine, PixelFormat::BinaryMask8) => {
             Ok((PixelValue::Binary(u8::MAX), PixelValue::Binary(0)))
@@ -665,16 +691,26 @@ fn target_values(
             PixelValue::Grayscale16(u16::MAX),
             PixelValue::Grayscale16(0),
         )),
-        (PlaneType::Color | PlaneType::Raster, PixelFormat::StraightRgba8) => {
-            Ok((PixelValue::Rgba(color), PixelValue::Rgba([0; 4])))
-        }
-        (PlaneType::Color | PlaneType::Raster, PixelFormat::StraightRgba16) => Ok((
-            PixelValue::Rgba16(color.map(|channel| u16::from(channel) * 257)),
-            PixelValue::Rgba16([0; 4]),
+        (PlaneType::Color | PlaneType::Raster, PixelFormat::StraightRgba8) => Ok((
+            PixelValue::Rgba(rgba16.map(|channel| ((u32::from(channel) + 128) / 257) as u8)),
+            PixelValue::Rgba([0; 4]),
         )),
+        (PlaneType::Color | PlaneType::Raster, PixelFormat::StraightRgba16) => {
+            Ok((PixelValue::Rgba16(rgba16), PixelValue::Rgba16([0; 4])))
+        }
         _ => Err(CoreError::InvalidState(
             "stroke target plane does not support raster painting",
         )),
+    }
+}
+
+fn validate_canonical_color(color: PixelValue) -> Result<(), CoreError> {
+    if matches!(color, PixelValue::Rgba(_) | PixelValue::Rgba16(_)) {
+        Ok(())
+    } else {
+        Err(CoreError::InvalidArgument(
+            "canonical stroke color must be straight RGBA8 or RGBA16",
+        ))
     }
 }
 
@@ -1330,7 +1366,7 @@ mod tests {
         let mut stroke = CanonicalRasterStroke {
             tool: PaintTool::Brush,
             target_plane_id: PlaneId::from_raw(1),
-            color_rgba8: [0; 4],
+            color: PixelValue::Rgba([0; 4]),
             diameter_q16: 3 * Q16_ONE,
             auto_erase: false,
             pressure_size: true,
@@ -1345,6 +1381,39 @@ mod tests {
 
         stroke.tool = PaintTool::Pencil;
         assert_eq!(dab_radius(&stroke, u16::MAX).unwrap(), 0);
+    }
+
+    #[test]
+    fn exact_depth_color_is_retained_until_target_format_conversion() {
+        let rgba16 = PixelValue::Rgba16([0x0123, 0x4567, 0x89ab, 0xcdef]);
+        assert_eq!(
+            target_values(PlaneType::Raster, PixelFormat::StraightRgba16, rgba16).unwrap(),
+            (rgba16, PixelValue::Rgba16([0; 4]))
+        );
+        assert_eq!(
+            target_values(PlaneType::Raster, PixelFormat::StraightRgba8, rgba16).unwrap(),
+            (
+                PixelValue::Rgba([1, 69, 137, 205]),
+                PixelValue::Rgba([0; 4])
+            )
+        );
+
+        let rgba8 = PixelValue::Rgba([1, 69, 137, 205]);
+        assert_eq!(
+            target_values(PlaneType::Raster, PixelFormat::StraightRgba16, rgba8).unwrap(),
+            (
+                PixelValue::Rgba16([257, 17_733, 35_209, 52_685]),
+                PixelValue::Rgba16([0; 4])
+            )
+        );
+        assert!(
+            target_values(
+                PlaneType::Raster,
+                PixelFormat::StraightRgba16,
+                PixelValue::Grayscale16(1),
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -12,8 +12,10 @@ pub use model::{
 
 use digest::canonical_payload_digest;
 pub(crate) use digest::{CanonicalDocumentStateCache, canonical_document_state};
-use model::{CanonicalPrimitive, CanonicalStrokeArguments};
+use model::CanonicalPrimitive;
+pub(crate) use model::CanonicalStrokeArguments;
 pub(crate) use raster::{
     RasterStrokePreview, begin_preview as begin_stroke_preview,
-    canonicalize as canonicalize_stroke, validate_public_stroke as validate_stroke_request,
+    canonicalize as canonicalize_stroke, canonicalize_exact as canonicalize_exact_stroke,
+    validate_public_stroke as validate_stroke_request,
 };

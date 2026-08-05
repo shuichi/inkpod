@@ -30,6 +30,7 @@ mod batch;
 mod coordinate;
 mod core;
 mod document;
+mod editor;
 mod effects;
 mod error;
 mod history;
@@ -60,6 +61,12 @@ pub use batch::{
     BatchTargetSelector,
 };
 pub use core::Core;
+pub use editor::{
+    EditorDefaults, EditorFillOptions, EditorFrameDisposition, EditorRevision,
+    EditorSavepointToken, EditorSelectionOptions, EditorSelectionShape, EditorState,
+    EditorStateDigest, EditorStateInfo, EditorStateUpdate, EditorStrokeInput, EditorTarget,
+    EditorTool, EditorToolStyle, EditorVectorOptions, InitialDocumentSpec, PaletteCursor,
+};
 pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
 pub use history::HistoryEntryInfo;
@@ -81,6 +88,7 @@ pub use vector::{
 
 pub(crate) use coordinate::*;
 use document::{CellDocument, DocumentIds, LayerNode, PaperSpec, PlaneNode};
+use editor::EditorSessionState;
 use history::{HistoryChange, HistoryEntry, PixelChange};
 pub(crate) use identity::*;
 use persistence::{file_plane_to_raster, raster_to_file_plane};

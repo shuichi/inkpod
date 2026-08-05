@@ -7,7 +7,8 @@ use crate::selection::{combine_selection_masks, selection_from_rect};
 impl Core {
     /// Applies a fill atomically to the active editable raster plane.
     pub fn apply_fill(&mut self, request: &FillRequest) -> Result<FillOutcome, CoreError> {
-        self.apply_fill_with_cancel(request, || false)
+        let target = self.active_editor_target()?;
+        self.apply_fill_internal(request, target, false, false, || false)
     }
 
     /// Applies a fill with optional visible light-table boundary/color sampling.
@@ -20,7 +21,24 @@ impl Core {
         use_boundary: bool,
         use_sampled_color: bool,
     ) -> Result<FillOutcome, CoreError> {
-        self.apply_fill_internal(request, use_boundary, use_sampled_color, || false)
+        let target = self.active_editor_target()?;
+        self.apply_fill_internal(request, target, use_boundary, use_sampled_color, || false)
+    }
+
+    /// Applies a fill to the stable target captured when an editor gesture began.
+    ///
+    /// The layer/plane pair must still exist in the current document namespace.
+    /// Later EditorState target changes cannot redirect the operation. Success,
+    /// no-op, failure, cancellation, revision, and history semantics otherwise
+    /// match [`Core::apply_fill_with_light_table`].
+    pub fn apply_fill_for_editor_target(
+        &mut self,
+        request: &FillRequest,
+        target: EditorTarget,
+        use_boundary: bool,
+        use_sampled_color: bool,
+    ) -> Result<FillOutcome, CoreError> {
+        self.apply_fill_internal(request, target, use_boundary, use_sampled_color, || false)
     }
 
     /// Applies a light-table-aware fill with cooperative cancellation.
@@ -34,7 +52,14 @@ impl Core {
         use_sampled_color: bool,
         is_cancelled: impl FnMut() -> bool,
     ) -> Result<FillOutcome, CoreError> {
-        self.apply_fill_internal(request, use_boundary, use_sampled_color, is_cancelled)
+        let target = self.active_editor_target()?;
+        self.apply_fill_internal(
+            request,
+            target,
+            use_boundary,
+            use_sampled_color,
+            is_cancelled,
+        )
     }
 
     /// Applies a fill with cooperative cancellation and no light-table sampling.
@@ -45,25 +70,41 @@ impl Core {
         request: &FillRequest,
         is_cancelled: impl FnMut() -> bool,
     ) -> Result<FillOutcome, CoreError> {
-        self.apply_fill_internal(request, false, false, is_cancelled)
+        let target = self.active_editor_target()?;
+        self.apply_fill_internal(request, target, false, false, is_cancelled)
     }
 
     fn apply_fill_internal(
         &mut self,
         request: &FillRequest,
+        target: EditorTarget,
         use_light_table_boundary: bool,
         use_light_table_color: bool,
         mut is_cancelled: impl FnMut() -> bool,
     ) -> Result<FillOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
+        let (active_layer_id, active_plane_id) = self.editor_target_ids(target)?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let target_plane_id = document.plane_for_paint_role(ActivePlane::Color)?.id;
+        let target_plane_id = document
+            .plane_for_paint_role(
+                ActivePlane::Color,
+                Some(active_layer_id),
+                Some(active_plane_id),
+            )?
+            .id;
         ensure_editable_plane(document, target_plane_id)?;
         let target_raster = &document
             .plane_by_id(target_plane_id)
             .ok_or(CoreError::InvalidState(
                 "fill target plane no longer exists",
             ))?
+            .raster;
+        let main_line_raster = &document
+            .plane_for_paint_role(
+                ActivePlane::MainLine,
+                Some(active_layer_id),
+                Some(active_plane_id),
+            )?
             .raster;
         let document_pixels = u64::from(document.width)
             .checked_mul(u64::from(document.height))
@@ -99,7 +140,7 @@ impl Core {
             inclusion_colors: request.inclusion_colors.clone(),
         };
         let light_boundary = if use_light_table_boundary {
-            let mut raster = document.raster(ActivePlane::MainLine).clone();
+            let mut raster = main_line_raster.clone();
             for y in 0..document.height {
                 if is_cancelled() {
                     return Err(CoreError::Cancelled);
@@ -128,9 +169,7 @@ impl Core {
         } else {
             None
         };
-        let main_line = light_boundary
-            .as_ref()
-            .unwrap_or_else(|| document.raster(ActivePlane::MainLine));
+        let main_line = light_boundary.as_ref().unwrap_or(main_line_raster);
         let fill_color = if use_light_table_color {
             let sampled = document
                 .light_table
@@ -212,6 +251,21 @@ impl Core {
             .map_err(|_| CoreError::InvalidState("fill edit count is not representable"))?;
         let mut next_color = target_raster.clone();
         let revision = self.next_document_revision()?;
+        let target_layer_id = document
+            .layers
+            .iter()
+            .find(|layer| layer.planes.iter().any(|plane| plane.id == target_plane_id))
+            .map(|layer| layer.id)
+            .ok_or(CoreError::InvalidState(
+                "fill target plane has no owning layer",
+            ))?;
+        let editor = self.stage_reconciled_editor_target(
+            document,
+            Some(EditorTarget {
+                layer_id: target_layer_id.get(),
+                plane_id: target_plane_id.get(),
+            }),
+        )?;
         let after_state = self.allocate_state()?;
         let mut changes = Vec::with_capacity(plan.edits.len());
         let mut touched = BTreeSet::new();
@@ -238,9 +292,9 @@ impl Core {
                 "fill target plane no longer exists",
             ))?
             .raster = next_color;
-        document.active_plane_id = target_plane_id;
         self.document_revision = revision;
         self.commit_pixel_history(target_plane_id, changes, after_state);
+        self.publish_editor_session(editor);
         Ok(FillOutcome {
             dispatch: DispatchOutcome {
                 revision: revision.get(),
@@ -259,6 +313,7 @@ impl Core {
         x: u32,
         y: u32,
     ) -> Result<PixelValue, CoreError> {
+        let (active_layer_id, active_plane_id) = self.active_editor_target_ids()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         if source == EyedropperSource::LightTableTopmost {
             return document
@@ -269,14 +324,26 @@ impl Core {
                 ));
         }
         let line = PlaneSample {
-            raster: document.raster(ActivePlane::MainLine),
+            raster: &document
+                .plane_for_paint_role(
+                    ActivePlane::MainLine,
+                    Some(active_layer_id),
+                    Some(active_plane_id),
+                )?
+                .raster,
             base_color: Some(document.main_line_color),
         };
         let color = PlaneSample {
-            raster: document.raster(ActivePlane::Color),
+            raster: &document
+                .plane_for_paint_role(
+                    ActivePlane::Color,
+                    Some(active_layer_id),
+                    Some(active_plane_id),
+                )?
+                .raster,
             base_color: None,
         };
-        let selected = match document.active_plane_role() {
+        let selected = match document.active_plane_role(Some(active_plane_id)) {
             ActivePlane::MainLine => line,
             ActivePlane::Color => color,
         };
@@ -379,15 +446,21 @@ mod tests {
         let mut core = Core::new();
         core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
             .unwrap();
-        let document = core.document.as_mut().unwrap();
-        document.layers[0].kind = LayerKind::GrayscaleColoring;
-        document.layers[0].planes[0].raster =
-            TileRaster::new(4, 4, PixelFormat::Grayscale8).unwrap();
-        document.layers[0].planes[0]
-            .raster
-            .set_pixel(1, 1, PixelValue::Grayscale8(128), 2)
-            .unwrap();
-        document.active_plane_id = document.layers[0].planes[0].id;
+        let (layer_id, plane_id) = {
+            let document = core.document.as_mut().unwrap();
+            document.layers[0].kind = LayerKind::GrayscaleColoring;
+            document.layers[0].planes[0].raster =
+                TileRaster::new(4, 4, PixelFormat::Grayscale8).unwrap();
+            document.layers[0].planes[0]
+                .raster
+                .set_pixel(1, 1, PixelValue::Grayscale8(128), 2)
+                .unwrap();
+            (
+                document.layers[0].id.get(),
+                document.layers[0].planes[0].id.get(),
+            )
+        };
+        core.set_active_node(layer_id, plane_id).unwrap();
         let line_color = PixelValue::Rgba16([1_001, 2_002, 3_003, 65_535]);
         core.set_main_line_color(line_color).unwrap();
         assert_eq!(

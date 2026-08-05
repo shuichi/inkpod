@@ -122,6 +122,8 @@ struct PublishedSession {
     SessionBinding binding;
     InkpodDocumentInfo document_info{};
     bool has_document_info{};
+    InkpodEditorStateInfo editor_state{};
+    bool has_editor_state{};
     std::wstring last_error;
     EngineMetrics metrics{};
     CoreSessionState state{};
@@ -283,6 +285,10 @@ struct CoreHost::Impl final {
             return INKPOD_STATUS_INVALID_STATE;
         }
         old->binding = new_binding;
+        old->document_info = {};
+        old->has_document_info = false;
+        old->editor_state = {};
+        old->has_editor_state = false;
         std::erase_if(frontend_views, [old_binding](const FrontendViewBinding& view) {
             return view.session == old_binding;
         });
@@ -811,7 +817,12 @@ struct CoreHost::Impl final {
     InkpodStatus RefreshDocumentInfo(CoreEntry& entry, const CommandContext& context) noexcept {
         InkpodDocumentInfo info{};
         info.struct_size = sizeof(info);
-        const InkpodStatus status = inkpod_core_get_document_info(entry.core, &info);
+        InkpodStatus status = inkpod_core_get_document_info(entry.core, &info);
+        InkpodEditorStateInfo editor{};
+        editor.struct_size = sizeof(editor);
+        if (status == INKPOD_STATUS_OK) {
+            status = inkpod_core_get_editor_state(entry.core, &editor);
+        }
         if (status == INKPOD_STATUS_OK) {
             {
                 std::lock_guard lock(state_mutex);
@@ -819,6 +830,8 @@ struct CoreHost::Impl final {
                 if (found != published.end()) {
                     found->document_info = info;
                     found->has_document_info = true;
+                    found->editor_state = editor;
+                    found->has_editor_state = true;
                 }
             }
             PostNotification(CoreNotificationKind::StateChanged, context, status);
@@ -927,18 +940,16 @@ struct CoreHost::Impl final {
                     status = INKPOD_STATUS_INVALID_ARGUMENT;
                     break;
                 }
-                const InkpodStrokeInput input{
-                    sizeof(InkpodStrokeInput),
-                    item.event.style.tool,
-                    item.event.style.plane,
+                const InkpodEditorStrokeInput input{
+                    sizeof(InkpodEditorStrokeInput),
                     item.event.style.coordinate_space,
+                    0U,
+                    0U,
                     item.event.style.flags,
-                    item.event.style.color_rgba,
-                    item.event.style.diameter,
                     item.event.samples.data(),
                     static_cast<std::uint64_t>(item.event.samples.size()),
                     sizeof(InkpodStrokeSample)};
-                status = inkpod_core_stroke_begin(entry->core, &input);
+                status = inkpod_core_editor_stroke_begin(entry->core, &input);
                 if (status == INKPOD_STATUS_OK) {
                     entry->stroke_active = true;
                     entry->active_sample_count = item.event.samples.size();
@@ -1360,6 +1371,45 @@ struct CoreHost::Impl final {
         return true;
     }
 
+    bool CopyEditorState(
+        SessionBinding binding, InkpodEditorStateInfo& output) const noexcept {
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found == published.end() || !found->has_editor_state) {
+            return false;
+        }
+        output = found->editor_state;
+        return true;
+    }
+
+    bool StoreEditorState(
+        SessionBinding binding, const InkpodEditorStateInfo& state) noexcept {
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found == published.end() || !found->state.accepting_work) {
+            return false;
+        }
+        found->editor_state = state;
+        found->has_editor_state = true;
+        return true;
+    }
+
+    bool StoreDocumentAndEditorState(
+        SessionBinding binding,
+        const InkpodDocumentInfo& document,
+        const InkpodEditorStateInfo& editor) noexcept {
+        std::lock_guard lock(state_mutex);
+        const auto found = FindPublishedLocked(binding);
+        if (found == published.end() || !found->state.accepting_work) {
+            return false;
+        }
+        found->document_info = document;
+        found->has_document_info = true;
+        found->editor_state = editor;
+        found->has_editor_state = true;
+        return true;
+    }
+
     std::wstring CopyLastError(SessionBinding binding) const {
         std::lock_guard lock(state_mutex);
         const auto found = FindPublishedLocked(binding);
@@ -1762,6 +1812,93 @@ bool CoreHost::GetDocumentInfo(
     InkpodDocumentInfo& info) const noexcept {
     return impl_ != nullptr
         && impl_->CopyDocumentInfo(SessionBinding{session, generation}, info);
+}
+
+InkpodStatus CoreHost::GetEditorDefaults(
+    DocumentSessionId session,
+    Generation generation,
+    InkpodEditorDefaults& defaults) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    defaults = {};
+    defaults.struct_size = sizeof(defaults);
+    defaults.state.struct_size = sizeof(defaults.state);
+    return impl_->Invoke(
+        SessionBinding{session, generation},
+        [&defaults](InkpodCore* core) {
+            return inkpod_core_get_editor_defaults(core, &defaults);
+        },
+        false,
+        false);
+}
+
+InkpodStatus CoreHost::RefreshEditorState(
+    DocumentSessionId session, Generation generation) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const SessionBinding binding{session, generation};
+    Impl* const impl = impl_.get();
+    return impl_->Invoke(
+        binding,
+        [impl, binding](InkpodCore* core) {
+            InkpodEditorStateInfo state{};
+            state.struct_size = sizeof(state);
+            const InkpodStatus status =
+                inkpod_core_get_editor_state(core, &state);
+            if (status != INKPOD_STATUS_OK) {
+                return status;
+            }
+            return impl->StoreEditorState(binding, state)
+                ? INKPOD_STATUS_OK
+                : INKPOD_STATUS_INVALID_STATE;
+        },
+        false,
+        false);
+}
+
+InkpodStatus CoreHost::UpdateEditorState(
+    DocumentSessionId session,
+    Generation generation,
+    const InkpodEditorStateUpdate& update) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const SessionBinding binding{session, generation};
+    Impl* const impl = impl_.get();
+    return impl_->Invoke(
+        binding,
+        [impl, binding, &update](InkpodCore* core) {
+            InkpodEditorStateInfo updated{};
+            updated.struct_size = sizeof(updated);
+            const InkpodStatus update_status =
+                inkpod_core_update_editor_state(core, &update, &updated);
+            if (update_status != INKPOD_STATUS_OK) {
+                return update_status;
+            }
+            InkpodDocumentInfo document{};
+            document.struct_size = sizeof(document);
+            const InkpodStatus query_status =
+                inkpod_core_get_document_info(core, &document);
+            if (query_status != INKPOD_STATUS_OK) {
+                return query_status;
+            }
+            return impl->StoreDocumentAndEditorState(
+                       binding, document, updated)
+                ? INKPOD_STATUS_OK
+                : INKPOD_STATUS_INVALID_STATE;
+        },
+        false,
+        false);
+}
+
+bool CoreHost::GetEditorState(
+    DocumentSessionId session,
+    Generation generation,
+    InkpodEditorStateInfo& state) const noexcept {
+    return impl_ != nullptr
+        && impl_->CopyEditorState(SessionBinding{session, generation}, state);
 }
 
 std::wstring CoreHost::LastError() const {

@@ -12,10 +12,12 @@ schema should be replaced whenever a more robust or efficient design is found.
 ## Procedure-authoritative successor contract
 
 This section is the approved contract for the successor procedure-authoritative
-container. It reserves top-level format version 5 and replay epoch 3, but no v5
-reader or writer exists yet. The earlier v3/epoch-1 and v4/epoch-2 reservations
-were superseded before any reader or writer existed. Version 5 replaces the
-flat schema-2 state hash with the schema-3 hierarchical document commitment:
+container. It reserves top-level format version 6 and replay epoch 4, but no v6
+reader or writer exists yet. The earlier v3/epoch-1, v4/epoch-2, and
+v5/epoch-3 reservations were superseded before any reader or writer existed.
+Version 6 retains the schema-3 hierarchical document commitment introduced by
+the superseded v5 reservation and replaces `ApplyRasterStroke/v1` with the
+exact-depth, target-explicit v2 schema:
 metadata, raster, and raster-tile commitments are domain-separated so a raster
 edit hashes only changed tile payloads instead of every allocated document
 pixel. This semantic digest is independent of the renderer's canonical
@@ -23,7 +25,7 @@ revision-max cache identity. Asset and procedure-payload digest contracts remain
 version 1.
 Version 2 remains the exact current version until the format cutover is
 implemented and tested atomically; production code must not emit a partially
-implemented v5 file. Any schema or replay-semantics change
+implemented v6 file. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
 
@@ -88,7 +90,7 @@ in the exact catalog named by the header.
 
 The first vertical slice has fixed assignments: `SetMainLineColor` is
 `0x0003_0001/v1`, `ReplacePalette` is `0x0003_0002/v1`, and
-`ApplyRasterStroke` is `0x0005_0001/v1`. Adding a primitive consumes a new ID.
+`ApplyRasterStroke` is `0x0005_0001/v2`. Adding a primitive consumes a new ID.
 Changing only its canonical argument layout while preserving the exact
 semantics increments its schema version. Changing validation, rounding, pixels,
 IDs, state digest, or any other replay result increments both `ReplayEpoch` and
@@ -110,20 +112,24 @@ primitive ID, schema version, canonical name, argument-schema digest, semantics
 revision, and work-formula ID. Query, view, transient, ingestion, export, and
 application command IDs are not `PrimitiveId` values.
 
-The M1 schemas are already closed here and require no further product choice:
+The current first-slice schemas are closed here. M3 leaves the two metadata
+primitives at v1 and replaces only `ApplyRasterStroke` with exact-current v2:
 
 | Primitive | Canonical input-ID roles | Canonical arguments | Inline payload | Work formula ID |
 |---|---|---|---|---:|
 | `SetMainLineColor` | none | ordinal 1 = tagged exact-depth color | empty | 1 |
 | `ReplacePalette` | none | ordinal 1 = ordered color sequence (`u64` count, then length-framed tagged colors) | empty | 2 |
-| `ApplyRasterStroke` | role 1 = target Plane ID | ordinals 1 tool `u32` (1 Pencil, 2 Brush, 3 Eraser), 2 tagged exact-depth color, 3 positive Q16 diameter `i64`, 4 auto-erase boolean, 5 pressure-size boolean | `u64` sample count, then exactly 24 bytes per sample: Q16 x `i64`, Q16 y `i64`, pressure `u16`, six zero bytes | 3 |
+| `ApplyRasterStroke` | role 1 = target Plane ID | ordinals 1 target Plane ID `u64` (must equal input role 1), 2 tool `u32` (1 Pencil, 2 Brush, 3 Eraser), 3 tagged exact-depth color, 4 positive Q16 diameter `i64`, 5 auto-erase boolean, 6 pressure-size boolean | `u64` sample count, then exactly 24 bytes per sample: Q16 x `i64`, Q16 y `i64`, pressure `u16`, six zero bytes | 3 |
 
 All stroke samples are canonical document coordinates; role-based active plane,
 view/device coordinates, pan/zoom/flip, and OS DPI are resolved before the
 procedure is formed. The three work formula IDs are respectively constant 1,
 `1 + palette entry count`, and sample count plus every clipped dab-bounding-box
-pixel tested. All three schemas have semantics revision 3, emit no output IDs,
-and use no assets in this first inline-bounded slice.
+pixel tested. The metadata primitives retain semantics revision 3;
+`ApplyRasterStroke/v2` has semantics revision 4 because it accepts and preserves
+RGBA16 in addition to RGBA8 and can therefore change exact state bytes and replay
+results. All three emit no output IDs and use no assets in this first
+inline-bounded slice.
 
 For pressure canonicalization, the frontend value is an IEEE-754 binary32 or
 binary64 value in the closed interval 0 through 1. Its exact rational value is
@@ -136,14 +142,17 @@ preserves acceptance of an existing positive subquantum diameter, whose dab
 radius is already zero. Canonicalization failure publishes no procedure or
 state.
 
-`ApplyRasterStroke/v1` fixes the following integer raster semantics. These are
+`ApplyRasterStroke/v2` fixes the following integer raster semantics. These are
 the journal semantics; begin/append preview batching cannot change them.
 
-1. Resolve and validate the stable target Plane ID before execution. MainLine
-   BinaryMask8/Grayscale8/Grayscale16 draw values are the format maximum; color
-   and raster StraightRgba8 planes use the RGBA8 argument; StraightRgba16
-   expands each channel by 257. Eraser uses the all-zero value. Other formats,
-   a missing/noneditable plane, or a stale base is invalid.
+1. Decode a nonzero stable target Plane ID from argument ordinal 1, require it
+   to equal input-ID role 1, then resolve and validate that exact plane before
+   execution. MainLine BinaryMask8/Grayscale8/Grayscale16 draw values are the
+   format maximum. Color and raster StraightRgba8 planes retain RGBA8 directly
+   and reduce RGBA16 by `(channel + 128) / 257`; StraightRgba16 retains RGBA16
+   directly and expands RGBA8 by multiplication by 257. Alpha follows the same
+   exact conversion. Eraser uses the all-zero value. Other formats, a missing
+   or noneditable plane, a role/argument mismatch, or a stale base is invalid.
 2. Convert a Q16 center to a raster cell with mathematical floor division by
    65,536, including for negative values. Pencil always has radius zero. For
    Brush/Eraser let `p' = pressure_size ? max(pressure, 655) : 65,535`, let
@@ -186,16 +195,17 @@ The schema-1 argument `value-kind` catalog is closed: 0 is the absent sentinel,
 1 Boolean (one byte, exactly 0 or 1), 2 U32 (four bytes), 3 Q16 document scalar
 (signed `i64`), 4 TaggedColor (tag 1 plus four RGBA8 bytes or tag 2 plus four
 little-endian RGBA16 channels), and 5 OrderedColorSequence (`u64` count, then
-`u64` element length plus one TaggedColor per element). Kind 0 is forbidden in
-a present argument; any other code is invalid. `ApplyRasterStroke/v1` narrows
-its kind-4 color to tag 1/length 5 because the public stroke contract is RGBA8;
-an RGBA16 target expands each channel by multiplication by 257. The two color
-metadata primitives accept either tag without depth conversion.
+`u64` element length plus one TaggedColor per element), and 6 StableObjectId
+(one nonzero little-endian `u64` in the document-wide namespace). Kind 0 is
+forbidden in a present argument; any other code is invalid.
+`ApplyRasterStroke/v2` accepts kind-4 tag 1/length 5 and tag 2/length 9 without
+reducing its canonical argument depth. The two color metadata primitives also
+accept either tag without depth conversion.
 
 Stable object-kind codes are 1 Document, 2 Project, 3 Cut, 4 Cell, 5 Frame, 6
 Sequence, 7 Layer, 8 Plane, 9 Guide, 10 LightTableSet, 11 LightTableItem, 12
 Adjustment, 13 VectorPath, and 14 VectorFill. Zero and unlisted codes are
-invalid. `ApplyRasterStroke/v1` input role 1 is required, has object kind 8,
+invalid. `ApplyRasterStroke/v2` input role 1 is required, has object kind 8,
 and names the exact target plane; the other M1 primitives have no ID roles.
 
 ### Persistent identity and journal ordering
@@ -361,21 +371,24 @@ The payload descriptor is a schema-1 frame with fields 1 payload schema `u16`;
 2 fixed element size `u32` (zero when not fixed); 3 minimum element count `u64`;
 4 maximum element count `u64`; 5 minimum byte length `u64`; and 6 maximum byte
 length `u64`. Payload schema 0 requires every other field to be zero and means
-the payload must be empty. For `ApplyRasterStroke/v1`, payload schema is 1,
+the payload must be empty. For `ApplyRasterStroke/v2`, payload schema is 1,
 element size is 24, element count is 1 through 1,048,576, minimum length is 32,
 and maximum length is 25,165,832 (`8 + 24 * 1,048,576`). Its count prefix is
 outside the fixed-size elements. The other two M1 payload descriptors are all
 zero.
 
-The exact M1 argument descriptors are: `SetMainLineColor` ordinal 1, kind 4,
+The exact current first-slice argument descriptors are: `SetMainLineColor`
+ordinal 1, kind 4,
 Required, length 5..9; `ReplacePalette` ordinal 1, kind 5, Required, length
-8..69,640, element kind 4, count 0..4,096; `ApplyRasterStroke` ordinal 1 kind 2
-length 4 lower/upper 1/3, ordinal 2 kind 4 length 5..5, ordinal 3 kind 3 length
-8 lower/upper 1/16,777,216, and ordinals 4 and 5 kind 1 length 1..1. All are
-Required; omitted bounds are absent and scalar element counts are zero. Catalog
-names are the exact ASCII bytes `SetMainLineColor`, `ReplacePalette`, and
-`ApplyRasterStroke`. This descriptor frame, rather than a Rust type name or
-layout, is the sole argument-schema-digest input.
+8..69,640, element kind 4, count 0..4,096; `ApplyRasterStroke/v2` ordinal 1
+kind 6 length 8 lower/upper 1/`0x7FFF_FFFF_FFFF_FFFF`, ordinal 2 kind 2 length
+4 lower/upper 1/3, ordinal 3 kind 4 length 5..9, ordinal 4 kind 3 length 8
+lower/upper 1/16,777,216, and ordinals 5 and 6 kind 1 length 1..1. All are
+Required; omitted bounds are absent and scalar element counts are zero. Its
+ordinal-1 value must equal input-ID role 1 in addition to satisfying the
+descriptor. Catalog names are the exact ASCII bytes `SetMainLineColor`,
+`ReplacePalette`, and `ApplyRasterStroke`. This descriptor frame, rather than a
+Rust type name or layout, is the sole argument-schema-digest input.
 
 `DocumentStateDigest` excludes document/editor revisions, history, paths, views,
 transient sessions, allocation/tile-cache state, and caches. Its schema-3 root
@@ -461,12 +474,56 @@ follows:
   occupy parameters 1/2; Levels orders input shadow, input gamma thousandths,
   input highlight, output shadow, and output highlight in parameters 1..5.
 
-`EditorStateDigest` option records are frames ordered by nonzero stable
-`EditorOptionId u32`; each contains ID, value-kind, and canonical value bytes.
-Tool-keyed maps use nonzero stable `ToolId u32` ascending. This closed catalog,
-including defaults, is part of the EDIT schema; adding or changing an option or
-default changes the top-level version. Editor revision, savepoint,
-and the digest field itself are excluded.
+The M3 canonical EditorState frame has schema 1 and exactly twelve fields in
+this order: 1 schema `u32 = 1`; 2 active `ToolId u32`; 3 optional last
+color-consuming `ToolId`; 4 tool-color sequence; 5 tool-diameter sequence; 6
+fill-options frame; 7 selection-options frame; 8 vector-options frame; 9
+optional active Layer ID; 10 optional active Plane ID; 11 optional palette-
+cursor frame; and 12 a required present-empty editor-option sequence. Fields 9
+and 10 are either both present as nonzero IDs in the same document namespace or
+both absent. The palette cursor orders zero-based group and entry `u32` values,
+so zero is a valid index rather than an absence sentinel. Field 12 is exactly
+the eight-byte zero count in schema 1; a nonempty sequence is unsupported.
+
+The closed `ToolId` catalog is 1 Pencil, 2 Brush, 3 Eraser; 1001 Fill, 1002
+Eyedropper, 1003 BoxZoom, 1004 GuideMove, 1005 Selection, 1006
+FloatingTransform, 1007 LightTableMove; 1101 EffectGradient, 1102
+EffectAirbrush, 1103 EffectBlur, 1104 EffectStamp, 1105 EffectDust, 1106
+EffectAlphaGradient; and 1201..1206 VectorLine, VectorCurve, VectorRectangle,
+VectorEllipse, VectorPolyline, VectorEraser in that order. Each tool sequence
+contains exactly those 22 IDs in ascending order. A color entry frame orders
+ToolId and an optional exact color. Color is required only for Pencil, Brush,
+Fill, Selection, EffectAirbrush, VectorLine, VectorCurve, VectorRectangle,
+VectorEllipse, and VectorPolyline and absent for every other tool. A diameter
+entry frame orders ToolId and signed Q16.16 `i64`; every tool has one positive
+diameter, bounded to 256 document pixels. Exact color is tag 1 plus four RGBA8
+bytes or tag 2 plus four little-endian RGBA16 channels, including alpha; no
+packed RGBA8 reduction is permitted.
+
+The fill-options frame orders: 1 operation `u32` (1 Seed, 2 ClosedRegion, 3
+Extend); 2 normalized tolerance `u16`; 3 gap-close `u8`; 4 extension distance
+`u32`; 5 inclusion mode `u32` (0 None, 1 Specified, 2 ExceptSpecified); 6 an
+ordered sequence of zero through six exact colors; then booleans 7
+overflow-abort, 8 detached-regions, 9 transparent-only, 10 use-document-
+selection, 11 Light-Table boundary, and 12 Light-Table color. Inclusion mode 0
+requires an empty color sequence; modes 1/2 require at least one color.
+Booleans are exactly one byte 0 or 1.
+
+The selection-options frame orders: 1 shape `u32` (1 Rectangle, 2 Ellipse, 3
+Lasso, 4 Polyline, 5 Trace, 6 Wand); 2 operation `u32` (1 New, 2 Add, 3
+Subtract, 4 Intersect); 3 tolerance `u16`; 4 gap-close `u8`; and 5 positive
+signed Q16.16 diameter `i64`, bounded to 4,096 document pixels. The vector-
+options frame orders erase mode `u32` (1 Partial, 2 ToIntersection, 3
+WholePath) and selection mode `u32` (1 CutBySelection, 2 Touching, 3
+FullyContained, 4 Line, 5 WholeLine, 6 ToIntersection, 7 FillBoundary, 8 Fill).
+Unknown codes, wrong fixed lengths, noncanonical booleans, partial targets,
+trailing bytes, and lengths/counts that exceed their bounds are invalid.
+
+This closed catalog, including defaults, is part of the EDIT schema; adding or
+changing an option or default changes the top-level version. The
+`EditorStateDigest` hashes the exact twelve-field state frame with
+`org.inkpod.digest.editor-state.v1`. Editor revision, editor savepoint, and the
+digest field itself are excluded.
 
 For raster assets, canonical stride is exactly width times bytes per pixel and
 payload is top-to-bottom row-major bytes without padding. Vector/sample assets
@@ -500,18 +557,18 @@ hierarchical schema-3 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render
 caching: snapshot validation uses only the documented revision-max scalar and
 never these digests. This does not activate the successor container: `.inkpod`
-v2 remains the exact current production format and no v5 reader or writer is
+v2 remains the exact current production format and no v6 reader or writer is
 emitted by this slice.
 
 ### Header, directory, and record bytes
 
-The v5 header is exactly 128 bytes:
+The v6 header is exactly 128 bytes:
 
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic bytes `49 4E 4B 50 4F 44 00 00` |
-| 8 | 4 | top-level format version = 5 |
-| 12 | 4 | replay epoch = 3 |
+| 8 | 4 | top-level format version = 6 |
+| 12 | 4 | replay epoch = 4 |
 | 16 | 4 | header size = 128 |
 | 20 | 4 | required flags = 0 |
 | 24 | 8 | total file length |
@@ -612,6 +669,14 @@ discriminant/reference explicitly. No replay default comes from the build.
 persisted `EditorRevision u64`; 3 exact canonical EditorState frame; 4 its
 `EditorStateDigest`. Revision starts at 1, is excluded from the digest, and the
 stored digest must match both the frame and `META`.
+
+M3 implements this bounded canonical EDIT payload as a Core frame/DTO, including
+round-trip validation, digest verification, editor revision, and editor
+savepoint transitions. The decoder rejects an EDIT frame larger than 4 MiB.
+This is an in-memory target-format contract only: M3 does not emit or consume a
+v6 container, add an EDIT section to production files, or connect
+`META`/`GENS`/`ASST`/`PROC`/`EDIT` save/reopen. Those changes remain one atomic
+M8 format cutover; production stays exact-current v2.
 
 An `ASST` kind-1 descriptor payload is a schema-1 frame whose ordinals are 1
 `AssetId`; 2 asset schema; 3 kind; 4 optional pixel format; 5 optional color
@@ -759,6 +824,16 @@ The persistent selection is a normal sparse binary-mask plane referenced by
 `selection_plane_id`; it is not inferred from a UI rectangle. View flips,
 ruler visibility, locator position, secondary-view transforms, floating paste,
 and shortcut bindings are transient/application state and are not serialized.
+
+The unchanged v2 `DOCM` active-ID fields do not constitute the M3 canonical
+EditorState and do not restore its tool/color/diameter/options, palette cursor,
+`EditorRevision`, digest, or editor savepoint. A normal v2 open copies the
+built-in immutable defaults into a fresh clean session EditorState and resolves
+its document target in Core. Because v2 reopen cannot reproduce a modified
+EditorState, a successful v2 normal save advances only the document savepoint;
+it does not mark editor dirty clean. Autosave, recovery, and export likewise do
+not advance the editor savepoint, and recovery initializes its EditorState
+dirty. Full EDIT restoration remains M8 work.
 
 Header flag bit 2 advertises the `"LTBL"` version-1 section. It stores
 stable-ID light-table sets, the active set, global opacity, and ordered items.
