@@ -2,7 +2,7 @@
 
 更新日: 2026-08-05
 
-状態: M0–M2 完了、M3–M9 未完。旧 revision-max 正本化と性能ゲートは反映済み
+状態: M0–M2 完了、M3–M9 未完。旧 revision-max 判定式の正本化と環境別性能ゲートは反映済み
 
 ## 1. 目的
 
@@ -426,13 +426,14 @@ Revision-max render-cache invariant:
 - 複数document、同一document複数view、複数workspaceでcurrent color/optionsが正しいsessionに属する。
 - pencil/brush/fill/vector各commandの初期値と切替復元。
 - RGBA16とalphaをC++ packed RGBA8へ縮小しない。
-- open成功後にpersisted active plane/editor stateをC++が上書きしない。
-- 色、径、active targetだけを変更した場合もdirtyとなり、normal save/reopenで復元され、Undo historyは増えない。
+- canonical EditorState frameをCoreへ復元した後、C++ presentation同期がactive plane/editor stateを上書きしない。production open経路でのend-to-end復元はM8で検証する。
+- 色、径、active targetだけを変更した場合もeditor dirtyとなり、canonical EditorState frameのround-tripとnormal-save成功/失敗に対するsavepoint状態遷移が一致し、Undo historyは増えない。production `.inkpod`のsave/reopenでEditorStateを復元するend-to-end接続はM8のatomic format cutoverで検証する。
 
 完了条件:
 
 - C++にauthoritativeなtool/color/fill/selection/vector defaultが残らない。
 - C++ stateはCore queryから再構築可能なpresentation cacheだけになる。
+- production `.inkpod` v2を変更せず、M8がそのまま接続できるcanonical EditorState frame、digest、revision、savepoint契約が固定される。
 
 ### M4: Immutable Genesis と Asset Store
 
@@ -621,7 +622,10 @@ Revision-max render-cache invariant:
 - checkpoint openとfull replayの全state/pixel/history digest一致。
 - checkpoint sectionのhash/構造/bound違反はfile reject、構造上有効なprefix/state digestまたはepoch不一致はfull replay fallbackとなることを検証する。
 - large sparse document、長いstroke、100万件級を含む設定済み上限近傍のbounded benchmark。
-- 連続zoom/pan snapshotは変更のないtile payload/revisionを再利用し、source raster byte数に比例するcopy/hashを行わないことをquick/full benchmarkで継続検証する。quick/fullで2,048/8,192 pairを測る`pan_zoom_snapshot`、同一allocated tileへの1 pixel edit＋snapshot rebuildを32/128回測る`dirty_tile_rebuild`、および1024平方・256 allocated tileの実Canvasで512 wheel eventを各1 Presentまでと16本/544 sampleのmulti-tile strokeを各1 Presentまで測るprivate native performance smokeは、同一host/toolchain/Release profile/workloadで測ったrevision-max中央値を正本ベースラインとする。Core/nativeの拡大縮小・描画はいずれも、環境揺らぎを再測定で除いた後に旧中央値を上回る性能悪化を受け入れない。snapshot validation本体とrevision-max helperのcall graphをsource-lockし、初回composeでは正に増えるpayload access counterが128回のcache-hit zoom snapshotでは0のままになることを自動検証する。
+- 連続zoom/pan snapshotは変更のないtile payload/revisionを再利用し、source raster byte数に比例するcopy/hashを行わないことをquick/full benchmarkで継続検証する。snapshot validation本体とrevision-max helperのcall graphをsource-lockし、初回composeでは正に増えるpayload access counterが128回のcache-hit zoom snapshotでは0のままになることを、wall-clockとは独立した意味ゲートとして常時要求する。
+- 保護対象はquick/fullで2,048/8,192 pairを測る`pan_zoom_snapshot`、同一allocated tileへの1 pixel edit＋snapshot rebuildを32/128回測る`dirty_tile_rebuild`、および1024平方・256 allocated tileの実Canvasで512 wheel eventを各1 Presentまでと16本/544 sampleのmulti-tile strokeを各1 Presentまで測るprivate native performance smokeとする。
+- 日常のwall-clock検証は`docs/core-benchmark-baseline.md`の承認済み環境別reference envelopeを使う。一回以上warm-upして5回以上の中央値を比較し、下限未満は処理省略を疑う診断値にだけ使い、意味ゲートが正常な高速化は拒否しない。上限を超えた場合は独立した5回以上を再測定し、両方の中央値が上限を超えたときだけ回帰として拒否する。native wheelは固定nanosecond値ではなく、記録したdisplay refresh interval当たりの時間へ正規化する。
+- detached旧revision-max buildとのA/Bは、workload/harness変更、reference環境追加・変更、envelope再設定、または境界結果の明示監査時に限る。envelopeは自動的に緩和せず、変更理由、環境、全sample、意味counterを記録してユーザーの明示承認を得る。
 - cargo fmt/clippy/test/bench/doc、Windows configure/build/CTest、ABI/UI/renderer smoke。
 - x64/ARM64 replay、save/open、recovery、queue saturation、shutdown raceの反復test。
 

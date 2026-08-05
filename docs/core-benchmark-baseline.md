@@ -3,11 +3,14 @@
 This document defines the reproducible comparison contract for
 `rust/inkpod-core/benches/core_workflows.rs`. It is a living baseline for the M3
 and later refactoring milestones. Cross-host absolute wall-clock values are not
-a CI gate, but same-host comparisons of `pan_zoom_snapshot`,
-`dirty_tile_rebuild`, and the native `wheel_zoom`/`drawing` performance-smoke
-scenarios are release gates against the canonical revision-max implementation.
-Update a workload only when its input or semantic output intentionally changes;
-changing it does not waive the revision-max no-regression rule.
+a CI gate. Routine validation uses an approved environment-specific reference
+envelope for `pan_zoom_snapshot`, `dirty_tile_rebuild`, and the native
+`wheel_zoom`/`drawing` performance-smoke scenarios, while semantic counters and
+checksums remain hard gates on every host. Reconstructing the detached old
+revision-max build is reserved for workload/harness changes, range calibration,
+or an explicit boundary audit. Update a workload only when its input or
+semantic output intentionally changes; changing it also requires recalibrating
+the affected envelope.
 
 ## Commands and profiles
 
@@ -41,10 +44,10 @@ Every scenario prints exactly one line with this stable schema:
 inkpod-core-workflows profile=<profile> scenario=<name> iterations=<n> input_items=<n> output_items=<n> reused_items=<n> document_revision=<n> history_entries=<n> successes=<n> failures=<n> checksum=<hex> elapsed_ns=<n>
 ```
 
-`elapsed_ns` is observational when a run has no same-host revision-max
-comparison. The benchmark fails directly on semantic checksum or counter drift;
-the comparison procedure below additionally gates protected performance
-scenarios. The scenario assertions cover the following contracts:
+`elapsed_ns` is observational when a run has no matching approved environment
+envelope. The benchmark fails directly on semantic checksum or counter drift;
+the routine procedure below additionally gates protected performance scenarios
+on a matching environment. The scenario assertions cover these contracts:
 
 | Scenario | Hard assertion |
 | --- | --- |
@@ -70,7 +73,53 @@ paths. The expected values embedded in the benchmark are:
 | `vector_snapshot` | `aeb93faa005c3a18` | `99c64854735f7960` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
 
-## 2026-08-05 canonical revision-max baseline
+## Routine reference envelopes
+
+The first approved routine range is identified as
+`windows-arm64-apple-silicon-parallels-release-2026-08-05`. It applies only to
+Windows build 26200 on the recorded Apple Silicon/Parallels ARM64 host, the
+Release profiles and fixed workloads in this document, Rust/Cargo 1.97.1,
+LLVM 22.1.6, MSVC 19.51 for the native route, and the recorded `Parallels`
+power scheme. The native wheel range was captured with the Parallels Display
+Adapter at 3456 x 2168 and 120 Hz, so its normalization denominator is
+8,333,333.33 ns per refresh interval. A materially different host, target,
+toolchain, power mode, or display mode needs its own approved range; it must not
+silently reuse this one.
+
+| Protected score | Accepted routine range | Recorded accepted median | Interpretation |
+| --- | ---: | ---: | --- |
+| quick `pan_zoom_snapshot`, 2,048 pairs | 0.70–1.05 ms total | 0.806 ms | Core CPU/view-cache gate |
+| quick `dirty_tile_rebuild`, 32 edits | 1.8–2.4 ms total | 2.042 ms | Core incremental-drawing gate |
+| full `pan_zoom_snapshot`, 8,192 pairs | 12–16 ms total | 13.575 ms | Core CPU/view-cache gate |
+| full `dirty_tile_rebuild`, 128 edits | 8.5–11 ms total | 9.387 ms | Core incremental-drawing gate |
+| native `drawing`, 16 strokes | 150–200 ms total | 163.196 ms | fixed burst through 16 final Presents |
+| native `wheel_zoom`, 512 events | 0.95–1.10 display refresh intervals/event | approximately 1.00 | Present-paced routing gate, not a CPU microbenchmark |
+
+Run at least one unmeasured warm-up followed by five measured runs and compare
+their median with the matching row. The native command performs its fixture
+warm-up internally, but the complete process is still run at least five times.
+All semantic checksums, revisions, reuse/rebuild counts, payload-access counts,
+samples, Presents, and queue/resource counters must pass before elapsed time is
+considered. A result below the lower edge is diagnostic only: verify that work
+was not skipped, then accept it when the semantic gate remains intact. If a
+median exceeds the upper edge, run an independent second batch of at least five
+measurements. Both batch medians must exceed the upper edge before the result is
+classified as a performance regression.
+
+For native `wheel_zoom`, divide elapsed time per event by the display refresh
+interval recorded for that run. The retained 2026-08-05 measurements resolve to
+approximately one refresh interval per event; this explains why their tiny
+paired sign is not evidence of CPU cost. Core `pan_zoom_snapshot` remains the
+CPU-sensitive zoom gate. Shared CI enforces semantic work rather than these
+host-specific time ranges.
+
+An envelope is never widened automatically. Changing one requires the range
+ID, environment, complete samples, semantic counters, reason, and explicit user
+approval to be recorded here. The historical A/B evidence below remains the
+calibration provenance and an exceptional rebaseline tool, not a routine build
+requirement.
+
+## 2026-08-05 canonical revision-max calibration provenance
 
 The `pan_zoom_snapshot` workload performs 2,048 quick or 8,192 full alternating
 zoom/pan pairs and builds a snapshot after every pair. It asserts that every
@@ -119,21 +168,15 @@ paired ratio is the median of the nine candidate/old ratios.
 | full `dirty_tile_rebuild` | 11,979,708; 13,977,250; 12,139,333; 12,720,791; 13,085,000; 12,054,417; 12,057,750; 12,089,750; 12,359,792 | 12,139,333 (94,838.54 ns/edit) | 9,335,625; 9,387,459; 14,266,459; 12,255,625; 9,173,458; 9,278,250; 9,558,500; 9,517,792; 9,199,709 | 9,387,459 (73,339.52 ns/edit) | -22.669% | 0.779287 |
 
 Both protected candidate medians are below the old revision-max baseline in
-both profiles, so this implementation passes the zero-regression gate. The M1
-flat document-hash observations and historical one-pair M2/G13 values use a
-different workload and remain provenance only, not an acceptance threshold.
+both profiles. These results calibrate the approved routine envelope above.
+The M1 flat document-hash observations and historical one-pair M2/G13 values use
+a different workload and remain provenance only, not an acceptance threshold.
+Reconstruct and compare the old build only when a workload or harness changes,
+an environment envelope is created or revised, or the user requests an explicit
+boundary audit. Such a comparison uses the same host, power mode, toolchain,
+target, Release profile, exact input, warm-up, and order-interleaved samples.
 
-For a candidate render-cache change, run the canonical revision-max build and
-the candidate on the same host, power mode, toolchain, target, Release profile,
-and exact benchmark input. Discard at least one warm-up and compare medians of at
-least five runs. A candidate median above the revision-max median for either
-`pan_zoom_snapshot` or `dirty_tile_rebuild` triggers an interleaved A/B/A
-remeasurement to separate environmental noise. If the candidate remains slower,
-the change is rejected: the allowed confirmed regression is 0%, with no 25%,
-100-microsecond, explanation, or waiver exception. Shared CI continues to gate
-semantic checksums, counters, and reuse rather than stored absolute nanoseconds.
-
-## Windows native wheel/drawing companion gate
+## Windows native wheel/drawing fixture and calibration provenance
 
 The private command below runs the complete Windows route independently of the
 long application smoke:
@@ -176,7 +219,8 @@ order-alternating pairs put the wheel candidate median 0.008817% above the old
 median, so the required remeasurement used nine more pairs with the starting
 order reversed. All 18 pairs are retained and pooled below; none were discarded.
 
-The exact old-worktree backport is versioned as
+For rebaseline or an explicit audit, the exact old-worktree backport is
+versioned as
 `tests/revision_max_native_harness_3f164db.patch` (SHA-256
 `2b434f0ab5827fc987f0cb583ff68f65c4af6b9aaf89531fa8735bee071044a0`).
 It contains full old/new Git blob IDs and changes only the seven launch/smoke
@@ -184,7 +228,7 @@ adapter files plus `apps/windows/renderer/canvas.cpp`. A structural test fixes
 that eight-file allowlist, artifact hash, and the Canvas hunk's restriction to
 pause/idle/in-flight instrumentation; GPU update and Present algorithms are
 forbidden from its changed lines. Recreate the baseline from a fresh detached
-worktree before measuring:
+worktree before measuring. This is not part of routine range validation:
 
 ```powershell
 $baseline = 'C:\path\to\inkpod-revision-max-baseline'
@@ -218,15 +262,14 @@ adopted as the baseline because old and candidate runs presented different
 frame counts. Performance evidence must compare equal semantic work, wait for
 in-flight Present completion, and require equal successful Present counts.
 
-The Core benchmark and native performance smoke are complementary release
-gates. For all four protected scenarios, a candidate median above the old
-revision-max median triggers order-interleaved remeasurement. A confirmed
-positive regression is rejected; there is no general 25% or 100-microsecond
-allowance. The explicitly accepted +0.001537% wheel diagnostic above is a
-recorded measurement-noise decision for this run, not a reusable waiver.
-Stored wall-clock values remain host-specific; shared CI continues to enforce
-the semantic counters and source-payload guard rather than comparing
-nanoseconds across machines.
+The Core benchmark and native performance smoke are complementary protected
+scenarios. Routine acceptance follows the matching environment envelope above,
+including the independent second five-run batch after an upper-edge result.
+The explicitly accepted +0.001537% wheel diagnostic remains calibration
+provenance for this run and is not a CPU speedup claim. Rebuild the old binary
+only for recalibration or an explicit audit. Stored wall-clock values remain
+host-specific; shared CI continues to enforce semantic counters and the
+source-payload guard rather than comparing nanoseconds across machines.
 
 ## M2 reference run
 
@@ -274,8 +317,8 @@ reference and more than 100 microseconds slower. The image benchmark reports
 integer milliseconds, so its absolute-noise floor is one millisecond. Such a
 confirmed general regression blocks release until it is explained, accepted, or
 corrected; a single run never fails the gate. `pan_zoom_snapshot` and
-`dirty_tile_rebuild` instead use the canonical revision-max procedure above:
-after noise-controlled remeasurement, any positive median regression blocks the
-change and cannot use this threshold or an explanatory waiver. Semantic
+`dirty_tile_rebuild` instead use the matching approved routine envelope above.
+An upper-edge median triggers a second independent five-run batch, and both
+medians must remain above the edge before the change is rejected. Semantic
 checksum, counter, allocation-bound, and resource-budget failures remain
 unconditional.

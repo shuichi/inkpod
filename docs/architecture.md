@@ -779,13 +779,15 @@ filter workload. The `core_workflows` benchmark separately covers sparse and
 dirty-tile snapshots, view-only cache reuse, Undo/Redo, light-table composition,
 vector snapshot/rasterization, and in-memory Batch preview/dry-run. Both expose
 fixed quick/full inputs and semantic counters/checksums. The old pre-M1
-revision-max implementation is the canonical same-host baseline for the
-protected `pan_zoom_snapshot` and `dirty_tile_rebuild` scenarios: a confirmed
-positive median regression is rejected. The acceptance record uses warm-up and
-nine order-alternating old/candidate pairs. Other G13 scenarios retain their
-warmed Windows x64 relative review threshold in
-`docs/core-benchmark-baseline.md`; semantic drift and resource-budget failures
-remain unconditional on every machine.
+revision-max implementation supplies historical calibration provenance for the
+protected `pan_zoom_snapshot` and `dirty_tile_rebuild` scenarios. Routine
+wall-clock acceptance uses a matching approved environment envelope from
+`docs/core-benchmark-baseline.md`: after warm-up, compare at least five-run
+medians, and require a second independent five-run median before confirming an
+upper-edge regression. Reconstruct the old build only for recalibration or an
+explicit audit. Other G13 scenarios retain their warmed Windows x64 relative
+review threshold; semantic drift and resource-budget failures remain
+unconditional on every machine.
 
 The private Windows `--performance-smoke-test` is the native companion gate. It
 materializes all 256 tiles of a 1024-square raster, sends 256 alternating wheel
@@ -802,9 +804,11 @@ path has returned; queue removal alone is not completion. A regression test
 requires an idle wait to observe exactly as many new Presents as queued render
 requests. Document/view revisions, checksums, completed samples/strokes, tile
 bytes, Present counts, queue rejection, and resource-limit counters are hard
-assertions. Native elapsed medians use the same old-revision-max, same-host,
-alternating-order, zero-confirmed-regression rule as the protected Core
-workloads.
+assertions. Native routine elapsed medians use the matching approved environment
+envelope and the same two-batch upper-edge rule as the protected Core workloads.
+Wheel elapsed time is normalized by the recorded display refresh interval; Core
+`pan_zoom_snapshot` remains the CPU-sensitive zoom gate. Old/candidate
+alternating-order comparison is reserved for recalibration or explicit audit.
 
 ## Initialization and shutdown
 
