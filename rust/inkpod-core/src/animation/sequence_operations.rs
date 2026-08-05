@@ -176,19 +176,34 @@ impl Core {
         if self.savepoint != Some(self.current_state) {
             return Err(CoreError::UnsavedChanges);
         }
-        let sequence = self
-            .sequence
-            .as_ref()
-            .ok_or(CoreError::InvalidState("no sequence is configured"))?;
-        if target >= sequence.cells.len() {
-            return Err(CoreError::InvalidArgument(
-                "sequence target index is outside bounds",
-            ));
-        }
-        if sequence.active_index == Some(target) {
+        let (source, has_active_cell) = {
+            let sequence = self
+                .sequence
+                .as_ref()
+                .ok_or(CoreError::InvalidState("no sequence is configured"))?;
+            if target >= sequence.cells.len() {
+                return Err(CoreError::InvalidArgument(
+                    "sequence target index is outside bounds",
+                ));
+            }
+            if sequence.active_index == Some(target) {
+                return self.document_info();
+            }
+            (
+                sequence.cells[target].clone(),
+                sequence.active_index.is_some(),
+            )
+        };
+        if !has_active_cell && self.sequence_source_matches_current_asset(&source)? {
+            let current_uuid = self.document.as_ref().ok_or(CoreError::NoDocument)?.uuid;
+            let sequence = self
+                .sequence
+                .as_mut()
+                .ok_or(CoreError::InvalidState("sequence disappeared"))?;
+            sequence.cells[target].document_uuid = current_uuid;
+            sequence.active_index = Some(target);
             return self.document_info();
         }
-        let source = sequence.cells[target].clone();
         let revision = self.next_document_revision()?;
         let mut next_id = self.next_id;
         let document = Self::document_from_sequence_source(&source, revision, &mut next_id)?;
@@ -200,6 +215,7 @@ impl Core {
         self.document = Some(document);
         self.document_revision = revision;
         self.next_id = next_id;
+        self.assets = asset::AssetStore::default();
         self.render_cache.clear();
         self.reset_history(true);
         self.reset_view();
@@ -377,6 +393,7 @@ impl Core {
             color_plane: next_id.take_plane(),
             selection_plane: next_id.take_plane(),
             light_table_set: next_id.take_light_table_set(),
+            cell: next_id.take_cell(),
         };
         let mut document = CellDocument::new(
             ids,
@@ -391,5 +408,23 @@ impl Core {
         document.frames = source.frames;
         document.plane_for_role_mut(ActivePlane::Color)?.raster = source.raster.clone();
         Ok(document)
+    }
+
+    fn sequence_source_matches_current_asset(
+        &self,
+        source: &SequenceCellSource,
+    ) -> Result<bool, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let BaseSurface::Asset(base_id) = document.base_surface else {
+            return Ok(false);
+        };
+        if document.dpi_x_milli != source.dpi_x_milli
+            || document.dpi_y_milli != source.dpi_y_milli
+            || document.frames != source.frames
+        {
+            return Ok(false);
+        }
+        let mut candidate = asset::AssetStore::default();
+        Ok(candidate.ingest_tile_raster(&source.raster, None)?.id() == base_id)
     }
 }

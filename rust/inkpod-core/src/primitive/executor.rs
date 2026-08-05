@@ -11,6 +11,8 @@ use crate::*;
 
 const METADATA_PRIMITIVE_SCHEMA_VERSION: u16 = 1;
 const RASTER_STROKE_PRIMITIVE_SCHEMA_VERSION: u16 = 2;
+const IMPORT_RASTER_ASSET_PRIMITIVE_SCHEMA_VERSION: u16 = 1;
+const MAX_INLINE_PROCEDURE_PAYLOAD_BYTES: usize = 4 * 1_024 * 1_024;
 
 const fn current_primitive_schema_version(primitive_id: PrimitiveId) -> Option<u16> {
     if primitive_id.get() == PrimitiveId::SET_MAIN_LINE_COLOR.get()
@@ -19,6 +21,8 @@ const fn current_primitive_schema_version(primitive_id: PrimitiveId) -> Option<u
         Some(METADATA_PRIMITIVE_SCHEMA_VERSION)
     } else if primitive_id.get() == PrimitiveId::APPLY_RASTER_STROKE.get() {
         Some(RASTER_STROKE_PRIMITIVE_SCHEMA_VERSION)
+    } else if primitive_id.get() == PrimitiveId::IMPORT_RASTER_ASSET.get() {
+        Some(IMPORT_RASTER_ASSET_PRIMITIVE_SCHEMA_VERSION)
     } else {
         None
     }
@@ -52,14 +56,26 @@ struct CanonicalizedRequest {
     primitive: CanonicalPrimitive,
     primitive_id: PrimitiveId,
     input_ids: Vec<u64>,
+    asset_ids: Vec<AssetId>,
     arguments: Vec<u8>,
+    staged_assets: Option<asset::AssetStore>,
 }
 
 impl CanonicalizedRequest {
-    fn payload(&self) -> &[u8] {
+    fn execution_payload(&self) -> &[u8] {
         match &self.primitive {
             CanonicalPrimitive::ApplyRasterStroke(arguments) => &arguments.payload,
-            CanonicalPrimitive::SetMainLineColor(_) | CanonicalPrimitive::ReplacePalette(_) => &[],
+            CanonicalPrimitive::SetMainLineColor(_)
+            | CanonicalPrimitive::ReplacePalette(_)
+            | CanonicalPrimitive::ImportRasterAsset { .. } => &[],
+        }
+    }
+
+    fn procedure_payload(&self) -> &[u8] {
+        if self.asset_ids.is_empty() {
+            self.execution_payload()
+        } else {
+            &[]
         }
     }
 }
@@ -143,7 +159,7 @@ impl Core {
                 "procedure pre-state digest does not match current state",
             ));
         }
-        let canonical = decode_procedure(procedure)?;
+        let canonical = decode_procedure(procedure, &self.assets)?;
         self.execute_canonical(canonical, Some(procedure))
     }
 
@@ -185,17 +201,8 @@ impl Core {
                 "primitive request revision is stale",
             ));
         }
-        let canonical_arguments = encode_stroke_arguments(&arguments)?;
-        let target_plane_id = arguments.target_plane_id;
-        self.execute_canonical(
-            CanonicalizedRequest {
-                primitive: CanonicalPrimitive::ApplyRasterStroke(arguments),
-                primitive_id: PrimitiveId::APPLY_RASTER_STROKE,
-                input_ids: vec![target_plane_id],
-                arguments: canonical_arguments,
-            },
-            None,
-        )
+        let canonical = self.canonicalized_stroke_request(arguments)?;
+        self.execute_canonical(canonical, None)
     }
 
     fn canonicalize_primitive(
@@ -224,7 +231,9 @@ impl Core {
                     primitive: CanonicalPrimitive::SetMainLineColor(color),
                     primitive_id: PrimitiveId::SET_MAIN_LINE_COLOR,
                     input_ids: Vec::new(),
+                    asset_ids: Vec::new(),
                     arguments: color_bytes(color)?,
+                    staged_assets: None,
                 })
             }
             PrimitiveRequest::ReplacePalette { colors, .. } => {
@@ -233,7 +242,9 @@ impl Core {
                     primitive: CanonicalPrimitive::ReplacePalette(colors),
                     primitive_id: PrimitiveId::REPLACE_PALETTE,
                     input_ids: Vec::new(),
+                    asset_ids: Vec::new(),
                     arguments,
+                    staged_assets: None,
                 })
             }
             PrimitiveRequest::ApplyRasterStroke {
@@ -249,15 +260,74 @@ impl Core {
                     document.height,
                     target_plane_id,
                 )?;
-                let encoded_arguments = encode_stroke_arguments(&arguments)?;
+                self.canonicalized_stroke_request(arguments)
+            }
+            PrimitiveRequest::ImportRasterAsset {
+                target_plane_id,
+                raster,
+                ..
+            } => {
+                let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+                let target_id = PlaneId::from_raw(target_plane_id);
+                let target = document
+                    .plane_by_id(target_id)
+                    .ok_or(CoreError::InvalidArgument(
+                        "import target plane ID does not exist",
+                    ))?;
+                ensure_editable_plane(document, target_id)?;
+                if raster.width != document.width
+                    || raster.height != document.height
+                    || raster.pixel_format != target.raster.format()
+                {
+                    return Err(CoreError::InvalidArgument(
+                        "import raster must exactly match destination dimensions and format",
+                    ));
+                }
+                let mut staged_assets = self.assets.clone();
+                let asset = staged_assets.ingest_raster(raster)?;
                 Ok(CanonicalizedRequest {
-                    primitive: CanonicalPrimitive::ApplyRasterStroke(arguments),
-                    primitive_id: PrimitiveId::APPLY_RASTER_STROKE,
+                    primitive: CanonicalPrimitive::ImportRasterAsset {
+                        target_plane_id,
+                        asset_id: asset.id(),
+                    },
+                    primitive_id: PrimitiveId::IMPORT_RASTER_ASSET,
                     input_ids: vec![target_plane_id],
-                    arguments: encoded_arguments,
+                    asset_ids: vec![asset.id()],
+                    arguments: target_plane_id.to_le_bytes().to_vec(),
+                    staged_assets: Some(staged_assets),
                 })
             }
         }
+    }
+
+    fn canonicalized_stroke_request(
+        &self,
+        arguments: CanonicalStrokeArguments,
+    ) -> Result<CanonicalizedRequest, CoreError> {
+        let canonical_arguments = encode_stroke_arguments(&arguments)?;
+        let target_plane_id = arguments.target_plane_id;
+        let (asset_ids, staged_assets) =
+            if arguments.payload.len() > MAX_INLINE_PROCEDURE_PAYLOAD_BYTES {
+                let samples = crate::primitive::raster::decode_payload(&arguments.payload)?;
+                let mut staged_assets = self.assets.clone();
+                let asset = staged_assets.ingest_stream(CanonicalStreamInput {
+                    kind: AssetKind::CanonicalSampleStream,
+                    element_count: samples.len() as u64,
+                    payload: arguments.payload.clone(),
+                    expected_id: None,
+                })?;
+                (vec![asset.id()], Some(staged_assets))
+            } else {
+                (Vec::new(), None)
+            };
+        Ok(CanonicalizedRequest {
+            primitive: CanonicalPrimitive::ApplyRasterStroke(arguments),
+            primitive_id: PrimitiveId::APPLY_RASTER_STROKE,
+            input_ids: vec![target_plane_id],
+            asset_ids,
+            arguments: canonical_arguments,
+            staged_assets,
+        })
     }
 
     fn execute_canonical(
@@ -277,9 +347,11 @@ impl Core {
             .document_revision
             .checked_next()
             .unwrap_or(self.document_revision);
+        let execution_assets = canonical.staged_assets.as_ref().unwrap_or(&self.assets);
         let applied = apply_primitive(
             &mut transaction.working,
             &canonical.primitive,
+            execution_assets,
             staging_revision.get(),
         )?;
         let Some(applied) = applied else {
@@ -321,8 +393,9 @@ impl Core {
             if expected.primitive_id != canonical.primitive_id
                 || expected.input_ids != canonical.input_ids
                 || expected.output_ids != transaction.output_ids
+                || expected.asset_ids != canonical.asset_ids
                 || expected.canonical_arguments != canonical.arguments
-                || expected.canonical_payload != canonical.payload()
+                || expected.canonical_payload != canonical.procedure_payload()
             {
                 return Err(CoreError::InvalidArgument(
                     "procedure canonical fields do not match its primitive schema",
@@ -335,19 +408,16 @@ impl Core {
             }
         }
 
-        let payload_digest = canonical_payload_digest(canonical.payload())?;
+        let payload = canonical.procedure_payload().to_vec();
+        let payload_digest = canonical_payload_digest(&payload)?;
         let CanonicalizedRequest {
-            primitive,
+            primitive: _,
             primitive_id,
             input_ids,
+            asset_ids,
             arguments,
+            staged_assets,
         } = canonical;
-        let payload = match primitive {
-            CanonicalPrimitive::ApplyRasterStroke(arguments) => arguments.payload,
-            CanonicalPrimitive::SetMainLineColor(_) | CanonicalPrimitive::ReplacePalette(_) => {
-                Vec::new()
-            }
-        };
         let primitive_schema_version = current_primitive_schema_version(primitive_id).ok_or(
             CoreError::InvalidArgument("primitive ID is not in the catalog"),
         )?;
@@ -360,6 +430,7 @@ impl Core {
             committed_state_id: next_state,
             input_ids,
             output_ids: transaction.output_ids,
+            asset_ids,
             canonical_arguments: arguments,
             canonical_payload: payload,
             canonical_payload_digest: payload_digest,
@@ -373,6 +444,8 @@ impl Core {
         self.history
             .try_reserve(1)
             .map_err(|_| CoreError::InvalidState("history allocation failed"))?;
+        let staged_assets =
+            self.prepare_asset_store_for_commit(staged_assets, &transaction.working, &procedure)?;
 
         self.history.truncate(self.history_cursor);
         let history_entry = HistoryEntry {
@@ -386,6 +459,9 @@ impl Core {
         self.document = Some(transaction.working);
         self.document_revision = revision;
         self.next_id = transaction.next_stable_id;
+        if let Some(assets) = staged_assets {
+            self.assets = assets;
+        }
         match applied.cache_policy {
             CachePolicy::Preserve | CachePolicy::RasterRevision => {}
             CachePolicy::InvalidateAll => self.render_cache.clear(),
@@ -408,6 +484,7 @@ impl Core {
 fn apply_primitive(
     working: &mut CellDocument,
     primitive: &CanonicalPrimitive,
+    assets: &asset::AssetStore,
     revision: u64,
 ) -> Result<Option<AppliedPrimitive>, CoreError> {
     match primitive {
@@ -452,6 +529,45 @@ fn apply_primitive(
             Ok(Some(AppliedPrimitive {
                 history: HistoryChange::Pixels { plane_id, changes },
                 cache_policy: CachePolicy::RasterRevision,
+            }))
+        }
+        CanonicalPrimitive::ImportRasterAsset {
+            target_plane_id,
+            asset_id,
+        } => {
+            let target_id = PlaneId::from_raw(*target_plane_id);
+            ensure_editable_plane(working, target_id)?;
+            let target = working
+                .plane_by_id(target_id)
+                .ok_or(CoreError::InvalidState("import target plane disappeared"))?;
+            let asset = assets.get(*asset_id).ok_or(CoreError::InvalidState(
+                "import procedure raster asset is not registered",
+            ))?;
+            let raster = asset.raster().ok_or(CoreError::InvalidArgument(
+                "import procedure asset is not a raster",
+            ))?;
+            if raster.width() != working.width
+                || raster.height() != working.height
+                || raster.format() != target.raster.format()
+            {
+                return Err(CoreError::InvalidArgument(
+                    "import procedure asset does not match its destination",
+                ));
+            }
+            if target.raster == **raster {
+                return Ok(None);
+            }
+            let before = working.clone();
+            working
+                .plane_by_id_mut(target_id)
+                .ok_or(CoreError::InvalidState("import target plane disappeared"))?
+                .raster = (**raster).clone();
+            Ok(Some(AppliedPrimitive {
+                history: HistoryChange::Document {
+                    before: Box::new(before),
+                    after: Box::new(working.clone()),
+                },
+                cache_policy: CachePolicy::InvalidateAll,
             }))
         }
     }
@@ -533,7 +649,10 @@ fn encode_stroke_arguments(arguments: &CanonicalStrokeArguments) -> Result<Vec<u
     Ok(bytes)
 }
 
-fn decode_procedure(procedure: &CanonicalProcedure) -> Result<CanonicalizedRequest, CoreError> {
+fn decode_procedure(
+    procedure: &CanonicalProcedure,
+    assets: &asset::AssetStore,
+) -> Result<CanonicalizedRequest, CoreError> {
     if !procedure.output_ids.is_empty() {
         return Err(CoreError::InvalidArgument(
             "primitive schema does not permit output IDs",
@@ -541,7 +660,10 @@ fn decode_procedure(procedure: &CanonicalProcedure) -> Result<CanonicalizedReque
     }
     match procedure.primitive_id {
         PrimitiveId::SET_MAIN_LINE_COLOR => {
-            if !procedure.input_ids.is_empty() || !procedure.canonical_payload.is_empty() {
+            if !procedure.input_ids.is_empty()
+                || !procedure.asset_ids.is_empty()
+                || !procedure.canonical_payload.is_empty()
+            {
                 return Err(CoreError::InvalidArgument(
                     "main-line color procedure has unexpected roles or payload",
                 ));
@@ -551,11 +673,16 @@ fn decode_procedure(procedure: &CanonicalProcedure) -> Result<CanonicalizedReque
                 primitive: CanonicalPrimitive::SetMainLineColor(color),
                 primitive_id: procedure.primitive_id,
                 input_ids: Vec::new(),
+                asset_ids: Vec::new(),
                 arguments: procedure.canonical_arguments.clone(),
+                staged_assets: None,
             })
         }
         PrimitiveId::REPLACE_PALETTE => {
-            if !procedure.input_ids.is_empty() || !procedure.canonical_payload.is_empty() {
+            if !procedure.input_ids.is_empty()
+                || !procedure.asset_ids.is_empty()
+                || !procedure.canonical_payload.is_empty()
+            {
                 return Err(CoreError::InvalidArgument(
                     "palette procedure has unexpected roles or payload",
                 ));
@@ -565,10 +692,13 @@ fn decode_procedure(procedure: &CanonicalProcedure) -> Result<CanonicalizedReque
                 primitive: CanonicalPrimitive::ReplacePalette(colors),
                 primitive_id: procedure.primitive_id,
                 input_ids: Vec::new(),
+                asset_ids: Vec::new(),
                 arguments: procedure.canonical_arguments.clone(),
+                staged_assets: None,
             })
         }
-        PrimitiveId::APPLY_RASTER_STROKE => decode_stroke_procedure(procedure),
+        PrimitiveId::APPLY_RASTER_STROKE => decode_stroke_procedure(procedure, assets),
+        PrimitiveId::IMPORT_RASTER_ASSET => decode_import_raster_procedure(procedure, assets),
         _ => Err(CoreError::InvalidArgument(
             "primitive ID is not in the catalog",
         )),
@@ -577,6 +707,7 @@ fn decode_procedure(procedure: &CanonicalProcedure) -> Result<CanonicalizedReque
 
 fn decode_stroke_procedure(
     procedure: &CanonicalProcedure,
+    assets: &asset::AssetStore,
 ) -> Result<CanonicalizedRequest, CoreError> {
     if procedure.input_ids.len() != 1 || !matches!(procedure.canonical_arguments.len(), 27 | 31) {
         return Err(CoreError::InvalidArgument(
@@ -616,6 +747,31 @@ fn decode_stroke_procedure(
             .try_into()
             .expect("fixed-width slice"),
     );
+    let (payload, asset_element_count) = match (
+        procedure.asset_ids.as_slice(),
+        procedure.canonical_payload.is_empty(),
+    ) {
+        ([], false) => (procedure.canonical_payload.clone(), None),
+        ([asset_id], true) => {
+            let asset = assets.get(*asset_id).ok_or(CoreError::InvalidState(
+                "stroke sample asset is not registered",
+            ))?;
+            if asset.descriptor().kind != AssetKind::CanonicalSampleStream {
+                return Err(CoreError::InvalidArgument(
+                    "stroke procedure asset is not a canonical sample stream",
+                ));
+            }
+            (
+                asset.payload().to_vec(),
+                Some(asset.descriptor().logical_element_count),
+            )
+        }
+        _ => {
+            return Err(CoreError::InvalidArgument(
+                "stroke procedure must use exactly one inline or asset payload",
+            ));
+        }
+    };
     let arguments = CanonicalStrokeArguments {
         target_plane_id,
         tool_code,
@@ -623,15 +779,67 @@ fn decode_stroke_procedure(
         diameter_q16,
         auto_erase: bytes[flags_start] != 0,
         pressure_size: bytes[flags_start + 1] != 0,
-        payload: procedure.canonical_payload.clone(),
+        payload,
     };
-    crate::primitive::raster::decode_payload(&arguments.payload)?;
+    let samples = crate::primitive::raster::decode_payload(&arguments.payload)?;
+    if asset_element_count.is_some_and(|count| count != samples.len() as u64) {
+        return Err(CoreError::InvalidArgument(
+            "stroke sample asset element count does not match its payload",
+        ));
+    }
     let encoded = encode_stroke_arguments(&arguments)?;
     Ok(CanonicalizedRequest {
         primitive: CanonicalPrimitive::ApplyRasterStroke(arguments),
         primitive_id: procedure.primitive_id,
         input_ids: procedure.input_ids.clone(),
+        asset_ids: procedure.asset_ids.clone(),
         arguments: encoded,
+        staged_assets: None,
+    })
+}
+
+fn decode_import_raster_procedure(
+    procedure: &CanonicalProcedure,
+    assets: &asset::AssetStore,
+) -> Result<CanonicalizedRequest, CoreError> {
+    if procedure.input_ids.len() != 1
+        || procedure.asset_ids.len() != 1
+        || procedure.canonical_arguments.len() != 8
+        || !procedure.canonical_payload.is_empty()
+    {
+        return Err(CoreError::InvalidArgument(
+            "raster import procedure has invalid canonical roles or payload",
+        ));
+    }
+    let target_plane_id = u64::from_le_bytes(
+        procedure.canonical_arguments[..8]
+            .try_into()
+            .expect("fixed-width slice"),
+    );
+    if target_plane_id == 0 || procedure.input_ids[0] != target_plane_id {
+        return Err(CoreError::InvalidArgument(
+            "raster import target argument does not match its input role",
+        ));
+    }
+    let asset_id = procedure.asset_ids[0];
+    let asset = assets.get(asset_id).ok_or(CoreError::InvalidState(
+        "raster import asset is not registered",
+    ))?;
+    if asset.descriptor().kind != AssetKind::CanonicalRaster || asset.raster().is_none() {
+        return Err(CoreError::InvalidArgument(
+            "raster import procedure references a non-raster asset",
+        ));
+    }
+    Ok(CanonicalizedRequest {
+        primitive: CanonicalPrimitive::ImportRasterAsset {
+            target_plane_id,
+            asset_id,
+        },
+        primitive_id: procedure.primitive_id,
+        input_ids: procedure.input_ids.clone(),
+        asset_ids: procedure.asset_ids.clone(),
+        arguments: procedure.canonical_arguments.clone(),
+        staged_assets: None,
     })
 }
 

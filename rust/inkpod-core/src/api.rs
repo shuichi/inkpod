@@ -789,6 +789,8 @@ pub struct DocumentInfo {
     pub view_revision: u64,
     /// Stable document ID within this Core instance.
     pub document_id: u64,
+    /// Distinct stable Cell ID in the document-wide object namespace.
+    pub cell_id: u64,
     /// Persistent document UUID stored in the native file.
     pub document_uuid: u128,
     /// Stable ID of the active layer.

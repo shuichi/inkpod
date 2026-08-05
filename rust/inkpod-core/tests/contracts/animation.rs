@@ -323,6 +323,100 @@ fn light_table_swap_accepts_editor_only_dirty_after_v2_save() {
 }
 
 #[test]
+fn light_table_sources_are_canonical_assets_and_failed_updates_publish_nothing() {
+    let mut core = Core::new();
+    core.new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let pixels = [10, 20, 30, 40].repeat(4);
+    let first_raster = rgba8(2, 2, pixels.clone());
+    let second_raster = CommonRaster::new(
+        2,
+        2,
+        PixelFormat::StraightRgba8,
+        Some(300_000),
+        Some(300_000),
+        pixels,
+    )
+    .unwrap();
+    let frame = RectI32 {
+        x: 0,
+        y: 0,
+        width: 2,
+        height: 2,
+    };
+    let first = LightTableSource::from_common_raster(0x1001, 1, frame, &first_raster).unwrap();
+    let (_, item_id) = core
+        .light_table_add_item(LightTableItemInput::new("first", first))
+        .unwrap();
+    let first_asset = core.asset_infos()[0].id;
+    assert_eq!(core.asset_store_usage().asset_count, 1);
+    assert_eq!(
+        core.asset_info(first_asset)
+            .unwrap()
+            .descriptor
+            .logical_payload_length,
+        16
+    );
+
+    let second = LightTableSource::from_common_raster(
+        0x2002,
+        99,
+        RectI32 {
+            x: 11,
+            y: -7,
+            width: 4,
+            height: 5,
+        },
+        &second_raster,
+    )
+    .unwrap();
+    core.light_table_add_item(LightTableItemInput::new("second", second))
+        .unwrap();
+    assert_eq!(core.asset_store_usage().asset_count, 1);
+    assert_eq!(core.asset_infos()[0].id, first_asset);
+
+    let distinct = LightTableSource::from_common_raster(
+        0x3003,
+        1,
+        frame,
+        &rgba8(2, 2, [90, 80, 70, 60].repeat(4)),
+    )
+    .unwrap();
+    let before_failure = core.asset_store_usage();
+    assert!(matches!(
+        core.light_table_update_item(
+            u64::MAX,
+            LightTableItemInput::new("invalid target", distinct),
+        ),
+        Err(CoreError::InvalidArgument(
+            "light-table item ID does not exist"
+        ))
+    ));
+    assert_eq!(core.asset_store_usage(), before_failure);
+
+    let replacement = LightTableSource::from_common_raster(
+        0x3003,
+        1,
+        frame,
+        &rgba8(2, 2, [90, 80, 70, 60].repeat(4)),
+    )
+    .unwrap();
+    core.light_table_update_item(
+        item_id,
+        LightTableItemInput::new("replacement", replacement),
+    )
+    .unwrap();
+    assert_eq!(core.asset_store_usage().asset_count, 2);
+    core.undo().unwrap();
+    core.collect_unreferenced_assets().unwrap();
+    assert_eq!(
+        core.asset_store_usage().asset_count,
+        2,
+        "the redo tail remains an asset-retention root"
+    );
+}
+
+#[test]
 fn acceptance_individual_and_global_opacity_multiply_to_twenty_five_percent() {
     let mut core = Core::new();
     core.new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)

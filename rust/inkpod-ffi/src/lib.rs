@@ -29,11 +29,11 @@ use inkpod_core::{
     MirrorAxis, MotionCheckConfig, MotionFrame, PaintTool, PaletteCursor, PixelFormat, PixelValue,
     PlaneType, PointF32, RectI32, RenderSnapshot, ResizeAnchor, ResourceUsage, RgbaRasterBytes,
     RotateDirection, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
-    SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SelectionLayerOperation, SelectionOperation,
-    SelectionShape, SequenceCellSource, SequenceDirection, ShortcutBinding,
-    ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape, Stroke, StrokeSample,
-    TileRaster, VectorCubicSegment, VectorEraseMode, VectorPathInput, VectorSelectionMode,
-    VectorWidthMode, ViewCommand,
+    SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SNAPSHOT_FEATURE_SOLID_WHITE_BASE,
+    SelectionLayerOperation, SelectionOperation, SelectionShape, SequenceCellSource,
+    SequenceDirection, ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp,
+    StampGesture, StampShape, Stroke, StrokeSample, TileRaster, VectorCubicSegment,
+    VectorEraseMode, VectorPathInput, VectorSelectionMode, VectorWidthMode, ViewCommand,
 };
 use std::cell::RefCell;
 use std::mem::{align_of, size_of};

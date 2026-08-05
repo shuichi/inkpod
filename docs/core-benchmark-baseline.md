@@ -70,8 +70,13 @@ paths. The expected values embedded in the benchmark are:
 | `pan_zoom_snapshot` | `517ed7ae78bf0487` | `439040e0244d5773` |
 | `undo_redo` | `3f1053b9fde37d35` | `a2c1a74e7f9781a3` |
 | `light_table_composite` | `255ab9bad114dfdd` | `77f63d83e130185f` |
-| `vector_snapshot` | `aeb93faa005c3a18` | `99c64854735f7960` |
+| `vector_snapshot` | `688dd42c93a71bec` | `27e6aa988b125683` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
+
+The M4 vector checksums supersede the earlier values because the new distinct
+Genesis Cell ID advances the shared stable-ID cursor before vector plane, path,
+and fill IDs are allocated. The scenario inputs, iteration counts, rasterized
+pixels, and routine timing envelopes are unchanged.
 
 ## Routine reference envelopes
 
@@ -118,6 +123,33 @@ ID, environment, complete samples, semantic counters, reason, and explicit user
 approval to be recorded here. The historical A/B evidence below remains the
 calibration provenance and an exceptional rebaseline tool, not a routine build
 requirement.
+
+## 2026-08-06 M4 routine acceptance
+
+M4 final validation reused Range ID
+`windows-arm64-apple-silicon-parallels-release-2026-08-05` without changing a
+workload, semantic assertion, reference envelope, or the revision-max formula.
+Core used one unmeasured warm-up followed by five measured quick and full runs.
+The native fixture performed its internal warm-up in each of five independent
+measured Release processes. Individual samples are retained below; acceptance
+uses the prescribed median, so the isolated high dirty-tile samples do not
+change the result and did not require a second batch.
+
+| Protected score | Five measured samples (ns) | Median | Result |
+| --- | --- | ---: | --- |
+| quick `pan_zoom_snapshot` | 889,750; 921,792; 916,791; 969,917; 992,250 | 921,792 ns (0.921792 ms) | Within 0.70–1.05 ms |
+| quick `dirty_tile_rebuild` | 8,340,417; 1,994,584; 2,149,459; 1,874,625; 2,168,250 | 2,149,459 ns (2.149459 ms) | Within 1.8–2.4 ms |
+| full `pan_zoom_snapshot` | 13,292,417; 13,285,625; 13,612,792; 12,934,125; 12,973,709 | 13,285,625 ns (13.285625 ms) | Within 12–16 ms |
+| full `dirty_tile_rebuild` | 9,317,709; 15,880,250; 9,118,500; 9,338,166; 9,161,958 | 9,317,709 ns (9.317709 ms) | Within 8.5–11 ms |
+| native `drawing` | 163,999,584; 162,555,250; 174,470,708; 168,510,875; 167,134,750 | 167,134,750 ns (167.134750 ms) | Within 150–200 ms |
+| native `wheel_zoom` | 4,608,558,292; 4,266,759,958; 4,608,538,500; 4,266,352,125; 4,641,402,709 | 4,608,538,500 ns total; 1.080126211 intervals/event | Within 0.95–1.10 intervals/event |
+
+Every Core run retained its expected checksum, document revision, history,
+input/output, reuse/rebuild, success, and failure counters. Every native run
+retained 256 tiles and 1,048,576 payload bytes; wheel retained 256 pairs, 512
+events, 512 Presents, and 512 queue replacements; drawing retained 16 strokes,
+544 samples, 16 Presents, and the expected cumulative 592 queue replacements.
+No queue/resource-limit failure was published.
 
 ## 2026-08-05 canonical revision-max calibration provenance
 

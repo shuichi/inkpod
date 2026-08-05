@@ -35,7 +35,7 @@ native-format model.
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, vector geometry, and deterministic raster/filter/effect operations |
 | `inkpod-format` | Bounded `.inkpod` v2 and `.inkbatch` models, encode/decode/validation, atomic file I/O, feature metadata, and PNG/TIFF/TGA/BMP codecs                                              |
-| `inkpod-core`   | Stable-ID document/layer/plane state, StateId savepoints, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
+| `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
 | `inkpod-ffi`    | ABI v2 records, validation/conversion, panic containment, opaque handles, ownership functions, and feature-specific exports                                                        |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
@@ -118,10 +118,16 @@ typed frontend request
 The control plane contains only fixed-width values and Rust-owned object/asset
 IDs. A borrowed C record is call-by-value in meaning and is not retained after
 return. Variable samples, paths, encoded images, and clipboard payloads enter
-through bounded data-plane APIs. A committed procedure contains bounded inline
-canonical bytes or immutable content-addressed `AssetId` values, never a raw
-pointer, path, native enum layout, callback, STL object, temporary object ID, OS
-DPI, or frontend command ID.
+through bounded data-plane APIs. Every ABI-v2 ingestion route synchronously
+validates and copies borrowed data before returning. Raster open/import,
+clipboard, and Light Table sources are interned in the canonical asset registry;
+stroke samples become an owned inline payload up to 4 MiB and one immutable
+sample asset above that cutoff. Sequence sources remain bounded Rust-owned raster
+copies, and vector-procedure asset wiring is later M6 work. Neither Core nor a
+committed procedure retains the caller's record, buffer, file name, or path. A
+committed procedure contains bounded inline canonical bytes or immutable
+content-addressed `AssetId` values, never a raw pointer, path, native enum layout,
+callback, STL object, temporary object ID, OS DPI, or frontend command ID.
 
 The persistent journal is the closed sequence `Commit`, `HistoryMove`, and
 `BranchCut`. `Commit` contains one canonical procedure and its parent/committed
@@ -141,14 +147,15 @@ and `EditorStateDigest` are separate from document history. Exact ID start,
 ordering, canonical fixed-point, digest framing, and resource-limit rules live
 in [`file-format.md`](file-format.md).
 
-The first Core-only vertical slice implements this boundary for
-`SetMainLineColor`, `ReplacePalette`, and one bounded `ApplyRasterStroke`.
-`Core::execute_primitive` validates and canonicalizes those requests, executes
+The current Core-only vertical slice implements this boundary for
+`SetMainLineColor`, `ReplacePalette`, one bounded `ApplyRasterStroke`, and
+`ImportRasterAsset` into an existing plane. `Core::execute_primitive` validates
+and canonicalizes those requests, executes
 against private working state, detects semantic no-op, and publishes through
 one explicit primitive transaction boundary. `Core::replay_procedure` validates
 the resulting canonical procedure and executes it through the same kernel;
 `Core::document_state_digest` observes the memory-layout-independent BLAKE3-256
-semantic state digest. Schema 3 is a domain-separated commitment tree: one
+semantic state digest. Schema 4 is a domain-separated commitment tree: one
 metadata commitment plus stable-Plane-ID-keyed raster roots, whose leaves commit
 to logical tile pixels. A revision-matched raster-tile edit reuses every
 unchanged leaf and updates only the changed tile, its raster root, and the
@@ -184,6 +191,65 @@ exact-current `.inkpod` v2 codec are unchanged: the runtime journal is not
 serialized, and a current-v2 open establishes a new Genesis/root journal rather
 than restoring the prior session's history. Production must not emit a partial
 successor container.
+
+## Immutable Genesis and canonical assets
+
+Each Core document has one immutable Genesis state. Genesis owns a stable
+Document ID, a distinct stable Cell ID from the same document namespace, and a
+typed base surface. `BaseSurface::SolidWhite` is an allocation-free opaque sRGB
+white underlay; it contributes to a flattened canonical composite or export but
+is not an editable layer or plane and never enters a layer-only export or the
+selection mask. `BaseSurface::Asset` instead names one immutable canonical raster
+asset whose dimensions and pixel semantics match the document paper. Replacing
+the earlier temporary Document-ID-as-Cell bridge changes canonical document-state
+bytes, so this Core slice uses document-state schema/domain 4 and replay epoch 5;
+the unimplemented successor container reservation advances to version 7.
+
+The Core-owned asset registry interns canonical descriptors and logical payload
+bytes under a content-addressed `AssetId`. A raster descriptor fixes pixel format,
+color space, alpha semantics, dimensions, canonical stride, element count, and
+payload length before the digest is accepted. Vector and sample streams use their
+own closed canonical descriptors. Equal descriptor-plus-payload inputs deduplicate
+regardless of source path or codec, while a different format, alpha meaning,
+dimension, stride, or logical payload produces a different identity. Encoded
+source bytes, file names, paths, timestamps, and optional provenance do not enter
+the asset digest or replay input.
+
+Registry retention is semantic rather than a cache of the current materialized
+document. Roots include Genesis, every retained journal branch and redo tail,
+known persistent editor/optional-metadata references, and live transient owners.
+An asset referenced only by an inactive branch therefore remains available for
+cache-free replay. Reference accounting and resource bounds are checked before
+publication; failure does not partly install an asset, procedure, document, or
+retention edge. Closing the owning Core session releases its registry after live
+transient users are drained. A checkpoint or the current materialized state alone
+is never an asset-retention authority.
+
+Raster open-as-document canonicalizes the decoded pixels before selecting a
+Genesis asset base. Import into an existing document, private clipboard payloads,
+and Light Table sources pass through the same bounded asset-ingestion boundary.
+Stroke samples are always copied into bounded Rust-owned canonical bytes; payloads
+larger than 4 MiB are promoted to a canonical sample asset, while smaller payloads
+stay inline. The registry can validate canonical vector streams, but connecting a
+vector document primitive is M6 work. The Windows path/clipboard adapters retain
+OS authority only long enough to obtain input bytes; later replay does not reopen
+a path or borrow C++ memory.
+
+Cache-free verification first builds a detached asset archive from every semantic
+retention root, deep-copies each logical payload, and re-ingests it into an empty
+registry with the expected `AssetId`. Fresh Genesis/journal replay uses only that
+detached registry, so passing verification cannot be an artifact of shared
+`AssetRecord`, payload, or `TileRaster` ownership. This is an in-memory
+save/reopen-equivalent for M4 retention tests, not a production container.
+
+The present ABI remains v2 and `CoreHost` still uses its existing queue model.
+Value/ID-only ABI v3 records and the closed typed CoreHost queue remain M5 work,
+while serializing `GENS`/`ASST` and reopening their retained graph remains the
+atomic M8 container cutover. Production `.inkpod` therefore remains exact-current
+v2. Because v2 cannot preserve an asset-backed Genesis, normal save,
+autosave/recovery, and Batch `.inkpod` output reject that document before file or
+directory creation and leave existing output and live save/path state unchanged;
+common-raster flat export remains available.
 
 ## Windows frontend ownership
 

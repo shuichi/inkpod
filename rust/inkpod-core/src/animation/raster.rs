@@ -27,13 +27,40 @@ pub(super) fn validate_sequence_cell(cell: &SequenceCellSource) -> Result<(), Co
 
 pub(super) fn flatten_document(
     document: &CellDocument,
+    assets: &asset::AssetStore,
     revision: u64,
 ) -> Result<TileRaster, CoreError> {
     bounded_document_pixels(document.width, document.height)?;
     let mut raster = TileRaster::new(document.width, document.height, PixelFormat::StraightRgba8)?;
+    let base_asset = match document.base_surface {
+        BaseSurface::SolidWhite => None,
+        BaseSurface::Asset(id) => {
+            let record = assets
+                .get(id)
+                .ok_or(CoreError::InvalidState("Genesis base asset is missing"))?;
+            let source = record.raster().ok_or(CoreError::InvalidState(
+                "Genesis base asset is not a raster",
+            ))?;
+            if source.width() != document.width || source.height() != document.height {
+                return Err(CoreError::InvalidState(
+                    "Genesis base asset dimensions do not match the paper",
+                ));
+            }
+            Some(record)
+        }
+    };
     for y in 0..document.height {
         for x in 0..document.width {
-            let mut composite = [0_u8; 4];
+            let mut composite = match &base_asset {
+                None => [u8::MAX; 4],
+                Some(record) => base_raster_pixel(
+                    record.raster().ok_or(CoreError::InvalidState(
+                        "Genesis base asset stopped being a raster",
+                    ))?,
+                    x,
+                    y,
+                )?,
+            };
             for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
                 let mut layer_pixel = [0_u8; 4];
                 for plane in layer
@@ -87,6 +114,20 @@ pub(super) fn flatten_document(
         }
     }
     Ok(raster)
+}
+
+pub(crate) fn base_raster_pixel(raster: &TileRaster, x: u32, y: u32) -> Result<[u8; 4], CoreError> {
+    match raster.pixel(x, y)? {
+        PixelValue::Binary(coverage) => Ok([0, 0, 0, coverage]),
+        PixelValue::Grayscale8(value) => Ok([value, value, value, u8::MAX]),
+        PixelValue::Grayscale16(value) => {
+            let value = ((u32::from(value) + 128) / 257) as u8;
+            Ok([value, value, value, u8::MAX])
+        }
+        value @ (PixelValue::Rgba(_) | PixelValue::Rgba16(_)) => rgba8_for_display(value).ok_or(
+            CoreError::InvalidState("Genesis base raster is not displayable"),
+        ),
+    }
 }
 
 pub(super) fn validate_frames(

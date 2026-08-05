@@ -2,7 +2,7 @@ use super::raster::*;
 use super::*;
 
 impl Core {
-    /// Decodes a common raster and replaces the active document with a clean cell.
+    /// Decodes a common raster into an immutable Genesis asset and opens a clean cell.
     ///
     /// UUID must be nonzero. Success resets history, savepoint, view, sequence, and
     /// transient sessions; decode/validation failure leaves the current document intact.
@@ -19,27 +19,77 @@ impl Core {
             ));
         }
         let raster = decode_common_raster(format, bytes)?;
+        let dpi_x_milli = raster.info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI);
+        let dpi_y_milli = raster.info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI);
+        let input = RasterAssetInput {
+            width: raster.info.width,
+            height: raster.info.height,
+            pixel_format: raster.info.pixel_format,
+            color_space: Some(AssetColorSpace::Srgb),
+            alpha_semantics: AssetAlphaSemantics::Straight,
+            canonical_stride: u64::from(raster.info.width)
+                .checked_mul(raster.info.pixel_format.bytes_per_pixel() as u64)
+                .ok_or(CoreError::InvalidArgument(
+                    "common-raster asset stride overflows",
+                ))?,
+            pixels: raster.pixels,
+            expected_id: None,
+        };
+        self.new_cell_from_raster_asset(input, dpi_x_milli, dpi_y_milli, document_uuid)
+    }
+
+    /// Opens canonical raster bytes as the immutable Genesis base of a clean cell.
+    ///
+    /// The asset's exact pixel format, color/alpha semantics, dimensions, stride,
+    /// payload length, and optional expected identity are validated before any live
+    /// state changes. DPI is document metadata and deliberately does not contribute
+    /// to [`AssetId`]. Success owns an immutable copy and retains no caller buffer,
+    /// encoded-image bytes, codec, path, or provenance. History is reset to Genesis.
+    pub fn new_cell_from_raster_asset(
+        &mut self,
+        raster: RasterAssetInput,
+        dpi_x_milli: u32,
+        dpi_y_milli: u32,
+        document_uuid: u128,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.ensure_no_active_stroke()?;
+        if document_uuid == 0 {
+            return Err(CoreError::InvalidArgument(
+                "asset document UUID must be nonzero",
+            ));
+        }
+        let width = raster.width;
+        let height = raster.height;
+        let mut assets = asset::AssetStore::default();
+        let record = assets.ingest_raster(raster)?;
+        let mut next_id = self.next_id;
         let ids = DocumentIds {
-            document: self.next_id.take_document(),
-            layer: self.next_id.take_layer(),
-            main_plane: self.next_id.take_plane(),
-            color_plane: self.next_id.take_plane(),
-            selection_plane: self.next_id.take_plane(),
-            light_table_set: self.next_id.take_light_table_set(),
+            document: next_id.take_document(),
+            layer: next_id.take_layer(),
+            main_plane: next_id.take_plane(),
+            color_plane: next_id.take_plane(),
+            selection_plane: next_id.take_plane(),
+            light_table_set: next_id.take_light_table_set(),
+            cell: next_id.take_cell(),
         };
         let mut document = CellDocument::new(
             ids,
             document_uuid,
             PaperSpec {
-                width: raster.info.width,
-                height: raster.info.height,
-                dpi_x_milli: raster.info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI),
-                dpi_y_milli: raster.info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI),
+                width,
+                height,
+                dpi_x_milli,
+                dpi_y_milli,
             },
         )?;
-        document.plane_for_role_mut(ActivePlane::Color)?.raster =
-            common_to_tile_raster(&raster, self.document_revision.get().max(1))?;
+        document.base_surface = BaseSurface::Asset(record.id());
+        assets = self.prepare_asset_store_for_session_reset(assets, &document)?;
         let revision = self.next_document_revision()?;
+        self.cancel_stroke();
+        self.filter_preview = None;
+        self.last_filter = None;
+        self.next_id = next_id;
+        self.assets = assets;
         self.document = Some(document);
         self.document_revision = revision;
         self.render_cache.clear();
@@ -47,6 +97,8 @@ impl Core {
         self.reset_view();
         self.current_path = None;
         self.recovered = false;
+        self.color_check = None;
+        self.secondary_views.clear();
         self.floating = None;
         self.motion_check = None;
         self.sequence = None;
@@ -64,7 +116,8 @@ impl Core {
         composite_white: bool,
     ) -> Result<Vec<u8>, CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let flattened = flatten_document(document, self.document_revision.get().max(1))?;
+        let flattened =
+            flatten_document(document, &self.assets, self.document_revision.get().max(1))?;
         let raster = tile_to_common(
             &flattened,
             Some(document.dpi_x_milli),
@@ -93,7 +146,8 @@ impl Core {
             ));
         }
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let flattened = flatten_document(document, self.document_revision.get().max(1))?;
+        let flattened =
+            flatten_document(document, &self.assets, self.document_revision.get().max(1))?;
         let mask = u8::MAX << quantization_bits;
         let mut unique = BTreeSet::new();
         for y in 0..flattened.height() {

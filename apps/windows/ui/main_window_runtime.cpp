@@ -844,6 +844,8 @@ std::optional<DocumentViewId> FrontendViewForCoreView(
 
 void ResetUiForNewActiveDocument(ApplicationHost& state) noexcept {
     CancelSelectionGeometryPreview(state.Workspace().tools, state.Workspace().windows.canvas);
+    state.Thumbnails().RemoveDocument(
+        state.Document().id, state.Document().generation);
     ResetDocumentShellTransientState(state.Document().shell);
     ResetPaneDocumentState(state.Workspace().panes);
     ResetToolDocumentState(state.Workspace().tools);
@@ -1604,6 +1606,7 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
     using inkpod::windows::ui::panes::SequencePaneCellView;
     using inkpod::windows::ui::panes::SequencePaneView;
     using inkpod::windows::ui::panes::UpdateSequencePaneDialog;
+    state.Thumbnails().RemovePane(state.Workspace().pane_ids.sequence);
     SequencePaneView pane{};
     pane.empty_text = L"シーケンスはありません";
     const auto* binding = state.routing.pane_targets.Find(

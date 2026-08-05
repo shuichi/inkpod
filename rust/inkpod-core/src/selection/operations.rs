@@ -347,11 +347,14 @@ impl Core {
                 "clipboard pixel lies outside its bounds",
             ));
         }
+        let (staged_assets, asset_ids) = stage_clipboard_assets(self, payload)?;
         self.floating = Some(FloatingSelection {
             payload: payload.clone(),
             destination_plane_id: destination.id,
             transform: FloatingTransform::default(),
+            asset_ids,
         });
+        self.assets = staged_assets;
         Ok(())
     }
 
@@ -389,11 +392,14 @@ impl Core {
         for pixel in &mut converted.planes[0].pixels {
             pixel.value = convert_plane_pixel(pixel.value, destination.raster.format())?;
         }
+        let (staged_assets, asset_ids) = stage_clipboard_assets(self, &converted)?;
         self.floating = Some(FloatingSelection {
             payload: converted,
             destination_plane_id: destination.id,
             transform: FloatingTransform::default(),
+            asset_ids,
         });
+        self.assets = staged_assets;
         Ok(())
     }
 
@@ -472,7 +478,11 @@ impl Core {
 
     /// Discards the floating-paste preview and restores the unmodified base state.
     pub fn cancel_floating(&mut self) {
+        let retained_assets = self.asset_store_without_floating().ok();
         self.floating = None;
+        if let Some(assets) = retained_assets {
+            self.assets = assets;
+        }
     }
 
     /// Atomically applies the active floating paste as one undoable edit.
@@ -485,6 +495,7 @@ impl Core {
             .floating
             .clone()
             .ok_or(CoreError::InvalidState("there is no floating paste"))?;
+        let retained_assets = self.asset_store_without_floating()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let destination =
             document
@@ -621,11 +632,13 @@ impl Core {
         }
         if changes.is_empty() {
             self.floating = None;
+            self.assets = retained_assets;
             return Ok(self.noop_outcome());
         }
         self.document_revision = revision;
         self.commit_pixel_history(floating.destination_plane_id, changes, after_state);
         self.floating = None;
+        self.assets = retained_assets;
         Ok(DispatchOutcome {
             revision: revision.get(),
             accepted_commands: 1,
@@ -634,3 +647,64 @@ impl Core {
 }
 
 // Shared implementation helpers for this responsibility.
+
+fn stage_clipboard_assets(
+    core: &Core,
+    payload: &ClipboardPayload,
+) -> Result<(asset::AssetStore, Vec<AssetId>), CoreError> {
+    let width = u32::try_from(payload.bounds.width)
+        .map_err(|_| CoreError::InvalidArgument("clipboard width is invalid"))?;
+    let height = u32::try_from(payload.bounds.height)
+        .map_err(|_| CoreError::InvalidArgument("clipboard height is invalid"))?;
+    if width == 0 || height == 0 {
+        return Err(CoreError::InvalidArgument(
+            "clipboard bounds must be nonempty",
+        ));
+    }
+    let right = payload
+        .bounds
+        .x
+        .checked_add(payload.bounds.width)
+        .ok_or(CoreError::InvalidArgument("clipboard bounds overflow"))?;
+    let bottom = payload
+        .bounds
+        .y
+        .checked_add(payload.bounds.height)
+        .ok_or(CoreError::InvalidArgument("clipboard bounds overflow"))?;
+    let mut staged = core.assets.clone();
+    let mut asset_ids = Vec::new();
+    asset_ids
+        .try_reserve(payload.planes.len())
+        .map_err(|_| CoreError::InvalidState("clipboard asset allocation failed"))?;
+    for plane in &payload.planes {
+        let mut raster = TileRaster::new(width, height, plane.pixel_format)?;
+        let mut coordinates = BTreeSet::new();
+        for pixel in &plane.pixels {
+            if pixel.x < payload.bounds.x
+                || pixel.y < payload.bounds.y
+                || pixel.x >= right
+                || pixel.y >= bottom
+            {
+                return Err(CoreError::InvalidArgument(
+                    "clipboard pixel lies outside its bounds",
+                ));
+            }
+            let local_x = u32::try_from(pixel.x - payload.bounds.x)
+                .map_err(|_| CoreError::InvalidArgument("clipboard X is invalid"))?;
+            let local_y = u32::try_from(pixel.y - payload.bounds.y)
+                .map_err(|_| CoreError::InvalidArgument("clipboard Y is invalid"))?;
+            if !coordinates.insert((local_x, local_y)) {
+                return Err(CoreError::InvalidArgument(
+                    "clipboard plane contains a duplicate pixel coordinate",
+                ));
+            }
+            raster.set_pixel(local_x, local_y, pixel.value, 1)?;
+        }
+        let asset = staged.ingest_tile_raster(&raster, None)?;
+        asset_ids.push(asset.id());
+    }
+    let mut roots = core.asset_retention_roots();
+    roots.extend(asset_ids.iter().copied());
+    staged.garbage_collect(roots)?;
+    Ok((staged, asset_ids))
+}

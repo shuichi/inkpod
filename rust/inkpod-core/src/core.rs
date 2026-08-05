@@ -9,6 +9,38 @@ impl Default for Core {
 }
 
 impl Core {
+    /// Returns immutable identity and base-surface metadata for active Genesis.
+    ///
+    /// This query does not change document, history, revisions, asset retention,
+    /// or renderer caches.
+    pub fn genesis_info(&self) -> Result<GenesisInfo, CoreError> {
+        self.genesis
+            .as_ref()
+            .map(genesis::Genesis::info)
+            .ok_or(CoreError::NoDocument)
+    }
+
+    /// Returns deterministic logical usage for the active Core asset store.
+    ///
+    /// The count includes assets retained by inactive journal branches and redo
+    /// tails. This read-only query does not perform garbage collection.
+    #[must_use]
+    pub fn asset_store_usage(&self) -> AssetStoreUsage {
+        self.assets.usage()
+    }
+
+    /// Returns metadata for one registered immutable asset identity.
+    #[must_use]
+    pub fn asset_info(&self, id: AssetId) -> Option<AssetInfo> {
+        self.assets.info(id)
+    }
+
+    /// Returns every registered asset in ascending [`AssetId`] order.
+    #[must_use]
+    pub fn asset_infos(&self) -> Vec<AssetInfo> {
+        self.assets.infos()
+    }
+
     pub(super) fn allocate_plane_id(&mut self) -> PlaneId {
         self.next_id.take_plane()
     }
@@ -31,6 +63,7 @@ impl Core {
         let shortcuts = default_shortcuts();
         let editor_defaults = EditorDefaults::built_in();
         Self {
+            assets: asset::AssetStore::default(),
             document: None,
             document_revision: DocumentRevision::from_raw(0),
             view: ViewState::default(),
@@ -40,7 +73,7 @@ impl Core {
             next_state: StateId::GENESIS,
             next_procedure: ProcedureId::first(),
             savepoint: None,
-            history_genesis: None,
+            genesis: None,
             journal: Vec::new(),
             journal_complete: true,
             canonical_state_cache: std::cell::RefCell::new(None),
@@ -124,6 +157,7 @@ impl Core {
             color_plane: next_id.take_plane(),
             selection_plane: next_id.take_plane(),
             light_table_set: next_id.take_light_table_set(),
+            cell: next_id.take_cell(),
         };
         let document = CellDocument::new(
             ids,
@@ -142,6 +176,7 @@ impl Core {
         self.last_filter = None;
         self.render_cache.clear();
         self.next_id = next_id;
+        self.assets = asset::AssetStore::default();
         self.document = Some(document);
         self.document_revision = revision;
         *self.canonical_state_cache.get_mut() = None;
@@ -167,6 +202,7 @@ impl Core {
 /// Single-writer application core. Document and view revisions are independent.
 #[derive(Debug)]
 pub struct Core {
+    pub(super) assets: asset::AssetStore,
     pub(super) document: Option<CellDocument>,
     pub(super) document_revision: DocumentRevision,
     pub(super) view: ViewState,
@@ -176,7 +212,7 @@ pub struct Core {
     pub(super) next_state: StateId,
     pub(super) next_procedure: ProcedureId,
     pub(super) savepoint: Option<StateId>,
-    pub(super) history_genesis: Option<CellDocument>,
+    pub(super) genesis: Option<genesis::Genesis>,
     pub(super) journal: Vec<JournalEntry>,
     pub(super) journal_complete: bool,
     pub(super) canonical_state_cache:

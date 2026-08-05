@@ -190,6 +190,7 @@ pub(crate) struct FloatingSelection {
     pub(crate) payload: ClipboardPayload,
     pub(crate) destination_plane_id: PlaneId,
     pub(crate) transform: FloatingTransform,
+    pub(crate) asset_ids: Vec<AssetId>,
 }
 
 #[cfg(test)]

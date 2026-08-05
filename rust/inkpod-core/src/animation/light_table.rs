@@ -1,7 +1,10 @@
-use super::raster::{common_to_tile_raster, validate_reference_frame};
+use super::raster::validate_reference_frame;
 use super::*;
+use crate::asset::{AssetRecord, AssetStore};
 use crate::persistence::{file_plane_to_raster, raster_to_file_plane};
 use inkpod_format::{FileLightTableItem, FileLightTableMetadata, FileLightTableSet};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Owned tightly packed raster bytes accepted by animation import helpers.
@@ -20,7 +23,7 @@ pub struct RgbaRasterBytes {
     pub pixels: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 /// Validated immutable raster source used by a light-table item.
 pub struct LightTableSource {
     /// Persistent UUID of the source document.
@@ -33,8 +36,24 @@ pub struct LightTableSource {
     pub dpi_x_milli: u32,
     /// Vertical source resolution in thousandths of a DPI.
     pub dpi_y_milli: u32,
-    pub(super) raster: TileRaster,
+    asset: Arc<AssetRecord>,
+    width: u32,
+    height: u32,
+    pixel_format: PixelFormat,
 }
+
+impl PartialEq for LightTableSource {
+    fn eq(&self, other: &Self) -> bool {
+        self.document_uuid == other.document_uuid
+            && self.source_revision == other.source_revision
+            && self.reference_frame == other.reference_frame
+            && self.dpi_x_milli == other.dpi_x_milli
+            && self.dpi_y_milli == other.dpi_y_milli
+            && self.asset.id() == other.asset.id()
+    }
+}
+
+impl Eq for LightTableSource {}
 
 impl LightTableSource {
     /// Validates and converts owned tightly packed raster bytes into a source.
@@ -65,39 +84,120 @@ impl LightTableSource {
         reference_frame: RectI32,
         raster: &CommonRaster,
     ) -> Result<Self, CoreError> {
+        raster.validate()?;
+        let canonical_stride = u64::from(raster.info.width)
+            .checked_mul(raster.info.pixel_format.bytes_per_pixel() as u64)
+            .ok_or(CoreError::InvalidArgument(
+                "light-table source stride overflows",
+            ))?;
+        let mut store = AssetStore::default();
+        let asset = store.ingest_raster(RasterAssetInput {
+            width: raster.info.width,
+            height: raster.info.height,
+            pixel_format: raster.info.pixel_format,
+            color_space: Some(AssetColorSpace::Srgb),
+            alpha_semantics: AssetAlphaSemantics::Straight,
+            canonical_stride,
+            pixels: raster.pixels.clone(),
+            expected_id: None,
+        })?;
+        Self::from_record(
+            document_uuid,
+            source_revision,
+            reference_frame,
+            raster.info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI),
+            raster.info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI),
+            asset,
+        )
+    }
+
+    pub(super) fn from_tile_raster(
+        document_uuid: u128,
+        source_revision: u64,
+        reference_frame: RectI32,
+        dpi_x_milli: u32,
+        dpi_y_milli: u32,
+        raster: TileRaster,
+    ) -> Result<Self, CoreError> {
+        let mut store = AssetStore::default();
+        let asset = store.ingest_tile_raster(&raster, None)?;
+        Self::from_record(
+            document_uuid,
+            source_revision,
+            reference_frame,
+            dpi_x_milli,
+            dpi_y_milli,
+            asset,
+        )
+    }
+
+    fn from_record(
+        document_uuid: u128,
+        source_revision: u64,
+        reference_frame: RectI32,
+        dpi_x_milli: u32,
+        dpi_y_milli: u32,
+        asset: Arc<AssetRecord>,
+    ) -> Result<Self, CoreError> {
         if document_uuid == 0 || source_revision == 0 {
             return Err(CoreError::InvalidArgument(
                 "light-table source identity is invalid",
             ));
         }
+        if dpi_x_milli == 0 || dpi_y_milli == 0 {
+            return Err(CoreError::InvalidArgument(
+                "light-table source DPI is invalid",
+            ));
+        }
         validate_reference_frame(reference_frame)?;
-        let tile_raster = common_to_tile_raster(raster, source_revision)?;
+        let raster = asset
+            .raster()
+            .ok_or(CoreError::InvalidState("light-table asset is not a raster"))?;
         Ok(Self {
             document_uuid,
             source_revision,
             reference_frame,
-            dpi_x_milli: raster.info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI),
-            dpi_y_milli: raster.info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI),
-            raster: tile_raster,
+            dpi_x_milli,
+            dpi_y_milli,
+            width: raster.width(),
+            height: raster.height(),
+            pixel_format: raster.format(),
+            asset,
         })
+    }
+
+    pub(crate) fn asset_id(&self) -> AssetId {
+        self.asset.id()
+    }
+
+    pub(crate) fn intern_into(&mut self, store: &mut AssetStore) -> Result<AssetId, CoreError> {
+        self.asset = store.intern_record(Arc::clone(&self.asset))?;
+        Ok(self.asset.id())
+    }
+
+    pub(super) fn immutable_raster(&self) -> &TileRaster {
+        self.asset
+            .raster()
+            .expect("a validated light-table source always owns a raster asset")
+            .as_ref()
     }
 
     /// Returns source width in pixels.
     #[must_use]
     pub const fn width(&self) -> u32 {
-        self.raster.width()
+        self.width
     }
 
     /// Returns source height in pixels.
     #[must_use]
     pub const fn height(&self) -> u32 {
-        self.raster.height()
+        self.height
     }
 
     /// Returns the source pixel format.
     #[must_use]
     pub const fn pixel_format(&self) -> PixelFormat {
-        self.raster.format()
+        self.pixel_format
     }
 }
 
@@ -303,9 +403,10 @@ impl LightTableState {
             .iter()
             .flat_map(|set| &set.items)
             .fold((0_u64, 0_u64), |(tiles, bytes), item| {
+                let raster = item.source.immutable_raster();
                 (
-                    tiles.saturating_add(item.source.raster.allocated_tile_count() as u64),
-                    bytes.saturating_add(item.source.raster.allocated_tile_bytes()),
+                    tiles.saturating_add(raster.allocated_tile_count() as u64),
+                    bytes.saturating_add(raster.allocated_tile_bytes()),
                 )
             })
     }
@@ -324,6 +425,35 @@ impl LightTableState {
         self.sets.iter().map(|set| set.items.len()).sum()
     }
 
+    pub(crate) fn intern_into(&mut self, store: &mut AssetStore) -> Result<(), CoreError> {
+        for item in self.sets.iter_mut().flat_map(|set| &mut set.items) {
+            item.source.intern_into(store)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn asset_ids(&self) -> impl Iterator<Item = AssetId> + '_ {
+        self.sets
+            .iter()
+            .flat_map(|set| &set.items)
+            .map(|item| item.source.asset_id())
+    }
+
+    pub(crate) fn asset_ids_by_source_plane(&self) -> Result<BTreeMap<u64, AssetId>, CoreError> {
+        let mut assets = BTreeMap::new();
+        for item in self.sets.iter().flat_map(|set| &set.items) {
+            if assets
+                .insert(item.source_plane_id.get(), item.source.asset_id())
+                .is_some()
+            {
+                return Err(CoreError::InvalidState(
+                    "canonical light-table source plane ID is duplicated",
+                ));
+            }
+        }
+        Ok(assets)
+    }
+
     pub(crate) fn file_planes(&self) -> Vec<FilePlane> {
         self.sets
             .iter()
@@ -332,7 +462,7 @@ impl LightTableState {
                 raster_to_file_plane(
                     item.source_plane_id.get(),
                     FilePlaneKind::LightTable,
-                    &item.source.raster,
+                    item.source.immutable_raster(),
                 )
             })
             .collect()
@@ -404,14 +534,14 @@ impl LightTableState {
                     id: LightTableItemId::from_raw(item.id),
                     source_plane_id: PlaneId::from_raw(item.source_plane_id),
                     name: item.name.clone(),
-                    source: LightTableSource {
-                        document_uuid: u128::from_le_bytes(item.source_document_uuid),
-                        source_revision: item.source_revision,
-                        reference_frame: item.source_reference_frame,
-                        dpi_x_milli: item.source_dpi_x_milli,
-                        dpi_y_milli: item.source_dpi_y_milli,
-                        raster: file_plane_to_raster(plane, revision.get())?,
-                    },
+                    source: LightTableSource::from_tile_raster(
+                        u128::from_le_bytes(item.source_document_uuid),
+                        item.source_revision,
+                        item.source_reference_frame,
+                        item.source_dpi_x_milli,
+                        item.source_dpi_y_milli,
+                        file_plane_to_raster(plane, revision.get())?,
+                    )?,
                     visible: item.visible,
                     opacity_milli: item.opacity_milli,
                     display_mode: item.display_mode,
@@ -602,7 +732,10 @@ fn sample_item_source(
     {
         return Ok(None);
     }
-    let value = item.source.raster.pixel(source_x as u32, source_y as u32)?;
+    let value = item
+        .source
+        .immutable_raster()
+        .pixel(source_x as u32, source_y as u32)?;
     if value.is_transparent() {
         return Ok(None);
     }
@@ -749,5 +882,62 @@ mod tests {
             Some(PixelValue::Rgba([10, 20, 30, 255]))
         );
         assert_eq!(aligned_only.sample(destination, 3, 3).unwrap(), None);
+    }
+
+    #[test]
+    fn asset_identity_excludes_source_provenance_alignment_and_dpi() {
+        let pixels = [17, 34, 51, 68].repeat(4);
+        let first_raster = CommonRaster::new(
+            2,
+            2,
+            PixelFormat::StraightRgba8,
+            Some(96_000),
+            Some(96_000),
+            pixels.clone(),
+        )
+        .unwrap();
+        let second_raster = CommonRaster::new(
+            2,
+            2,
+            PixelFormat::StraightRgba8,
+            Some(300_000),
+            Some(300_000),
+            pixels,
+        )
+        .unwrap();
+        let mut first = LightTableSource::from_common_raster(
+            1,
+            7,
+            RectI32 {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2,
+            },
+            &first_raster,
+        )
+        .unwrap();
+        let mut second = LightTableSource::from_common_raster(
+            2,
+            99,
+            RectI32 {
+                x: 10,
+                y: -20,
+                width: 4,
+                height: 5,
+            },
+            &second_raster,
+        )
+        .unwrap();
+
+        assert_eq!(first.asset_id(), second.asset_id());
+        assert_ne!(first, second);
+
+        let mut store = AssetStore::default();
+        first.intern_into(&mut store).unwrap();
+        second.intern_into(&mut store).unwrap();
+        assert!(Arc::ptr_eq(&first.asset, &second.asset));
+        assert_eq!(store.usage().asset_count, 1);
+        assert_eq!(store.usage().logical_payload_bytes, 16);
     }
 }

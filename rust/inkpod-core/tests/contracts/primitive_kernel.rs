@@ -84,7 +84,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(main_line_procedure.primitive_id().get(), 0x0003_0001);
     assert_eq!(main_line_procedure.primitive_schema_version(), 1);
-    assert_eq!(main_line_procedure.replay_epoch().get(), 4);
+    assert_eq!(main_line_procedure.replay_epoch().get(), 5);
     assert_eq!(main_line_procedure.procedure_id().get(), 1);
     assert_eq!(main_line_procedure.base_state_id().get(), 1);
     assert_eq!(main_line_procedure.committed_state_id().get(), 2);
@@ -110,7 +110,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(palette_procedure.primitive_id().get(), 0x0003_0002);
     assert_eq!(palette_procedure.primitive_schema_version(), 1);
-    assert_eq!(palette_procedure.replay_epoch().get(), 4);
+    assert_eq!(palette_procedure.replay_epoch().get(), 5);
     assert_eq!(palette_procedure.procedure_id().get(), 2);
     assert_eq!(palette_procedure.base_state_id().get(), 2);
     assert_eq!(palette_procedure.committed_state_id().get(), 3);
@@ -154,7 +154,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(stroke_procedure.primitive_id().get(), 0x0005_0001);
     assert_eq!(stroke_procedure.primitive_schema_version(), 2);
-    assert_eq!(stroke_procedure.replay_epoch().get(), 4);
+    assert_eq!(stroke_procedure.replay_epoch().get(), 5);
     assert_eq!(stroke_procedure.procedure_id().get(), 3);
     assert_eq!(stroke_procedure.base_state_id().get(), 3);
     assert_eq!(stroke_procedure.committed_state_id().get(), 4);

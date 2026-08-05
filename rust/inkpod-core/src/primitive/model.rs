@@ -1,6 +1,6 @@
 //! Stable public types for canonical primitive execution and replay.
 
-use crate::{DispatchOutcome, PixelValue, Stroke};
+use crate::{AssetId, DispatchOutcome, PixelValue, RasterAssetInput, Stroke};
 use std::sync::Arc;
 
 macro_rules! public_id {
@@ -48,6 +48,8 @@ impl PrimitiveId {
     pub const REPLACE_PALETTE: Self = Self(0x0003_0002);
     /// Primitive ID for one bounded raster stroke transaction.
     pub const APPLY_RASTER_STROKE: Self = Self(0x0005_0001);
+    /// Primitive ID for replacing one existing raster plane from an immutable asset.
+    pub const IMPORT_RASTER_ASSET: Self = Self(0x0009_0001);
 }
 
 impl ProcedureId {
@@ -88,13 +90,13 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(4);
+    pub const CURRENT: Self = Self(5);
 }
 
-/// A BLAKE3-256 digest of canonical semantic document-state schema-3 bytes.
+/// A BLAKE3-256 digest of canonical semantic document-state schema-4 bytes.
 ///
-/// The compact root and semantic metadata frames use schema version 3 in the
-/// `org.inkpod.digest.document-state.v3` derive-key domain. Raster payloads
+/// The compact root and semantic metadata frames use schema version 4 in the
+/// `org.inkpod.digest.document-state.v4` derive-key domain. Raster payloads
 /// enter that root through separately domain-separated, content-addressed tile
 /// and raster commitments, so the digest is independent of edit order and
 /// allocation history without requiring unchanged tile bytes to be rehashed
@@ -145,6 +147,16 @@ pub enum PrimitiveRequest {
         /// Owned stroke settings and samples.
         stroke: Stroke,
     },
+    /// Replaces one existing editable plane from canonical immutable raster bytes.
+    ImportRasterAsset {
+        /// Document revision observed by the request producer.
+        expected_revision: u64,
+        /// Stable destination Plane ID resolved before canonicalization.
+        target_plane_id: u64,
+        /// Owned canonical raster descriptor and bytes. External paths and encoded
+        /// source bytes are deliberately absent from this semantic request.
+        raster: RasterAssetInput,
+    },
 }
 
 impl PrimitiveRequest {
@@ -157,6 +169,9 @@ impl PrimitiveRequest {
                 expected_revision, ..
             }
             | Self::ApplyRasterStroke {
+                expected_revision, ..
+            }
+            | Self::ImportRasterAsset {
                 expected_revision, ..
             } => *expected_revision,
         }
@@ -174,6 +189,7 @@ pub struct CanonicalProcedure {
     pub(crate) committed_state_id: StateId,
     pub(crate) input_ids: Vec<u64>,
     pub(crate) output_ids: Vec<u64>,
+    pub(crate) asset_ids: Vec<AssetId>,
     pub(crate) canonical_arguments: Vec<u8>,
     pub(crate) canonical_payload: Vec<u8>,
     pub(crate) canonical_payload_digest: [u8; 32],
@@ -228,6 +244,12 @@ impl CanonicalProcedure {
     #[must_use]
     pub fn output_ids(&self) -> &[u64] {
         &self.output_ids
+    }
+
+    /// Borrows immutable asset IDs in primitive-schema role order.
+    #[must_use]
+    pub fn asset_ids(&self) -> &[AssetId] {
+        &self.asset_ids
     }
 
     /// Borrows the canonical fixed-width argument bytes.
@@ -306,6 +328,10 @@ pub(super) enum CanonicalPrimitive {
     SetMainLineColor(PixelValue),
     ReplacePalette(Vec<PixelValue>),
     ApplyRasterStroke(CanonicalStrokeArguments),
+    ImportRasterAsset {
+        target_plane_id: u64,
+        asset_id: AssetId,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

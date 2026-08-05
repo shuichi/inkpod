@@ -880,8 +880,79 @@ int InkpodRunAbiSmoke() {
         || clipboard != nullptr) {
         return 38;
     }
+
+    const std::array<std::uint8_t, 4> expected_external_pixels{17U, 34U, 51U, 255U};
+    std::array<std::uint8_t, 4> external_pixels = expected_external_pixels;
+    const InkpodClipboardRgbaInput external_clipboard_input{
+        sizeof(InkpodClipboardRgbaInput),
+        0U,
+        20,
+        30,
+        1U,
+        1U,
+        external_pixels.data(),
+        external_pixels.size(),
+        4U};
+    InkpodClipboard* external_clipboard{};
+    if (inkpod_clipboard_create_rgba8(
+            &external_clipboard_input, &external_clipboard) != INKPOD_STATUS_OK
+        || external_clipboard == nullptr) {
+        inkpod_clipboard_release(&external_clipboard);
+        return 98;
+    }
+    external_pixels.fill(0U);
+    std::array<std::uint8_t, 4> rendered_external_pixels{};
+    InkpodClipboardRasterBuffer rendered_external{
+        sizeof(InkpodClipboardRasterBuffer),
+        0U,
+        0,
+        0,
+        0U,
+        0U,
+        rendered_external_pixels.data(),
+        rendered_external_pixels.size(),
+        0U,
+        0U};
+    if (inkpod_clipboard_render_rgba8(external_clipboard, &rendered_external)
+            != INKPOD_STATUS_OK
+        || rendered_external.origin_x != 20 || rendered_external.origin_y != 30
+        || rendered_external.width != 1U || rendered_external.height != 1U
+        || rendered_external.required_bytes != rendered_external_pixels.size()
+        || rendered_external.row_stride_bytes != 4U
+        || rendered_external_pixels != expected_external_pixels
+        || inkpod_core_paste_begin_mode(
+               core, external_clipboard, INKPOD_PASTE_ACTIVE_CONVERTED)
+            != INKPOD_STATUS_OK
+        || inkpod_clipboard_release(&external_clipboard) != INKPOD_STATUS_OK
+        || inkpod_clipboard_release(&external_clipboard) != INKPOD_STATUS_OK
+        || external_clipboard != nullptr
+        || inkpod_core_floating_commit(core, &dispatch) != INKPOD_STATUS_OK) {
+        inkpod_clipboard_release(&external_clipboard);
+        return 99;
+    }
+    InkpodColorValue pasted_external_color{};
+    pasted_external_color.struct_size = sizeof(pasted_external_color);
+    if (inkpod_core_eyedropper(
+            core,
+            INKPOD_EYEDROPPER_SELECTED_PLANE,
+            20U,
+            30U,
+            &pasted_external_color) != INKPOD_STATUS_OK
+        || pasted_external_color.depth != INKPOD_COLOR_DEPTH_8
+        || pasted_external_color.red != 17U || pasted_external_color.green != 34U
+        || pasted_external_color.blue != 51U || pasted_external_color.alpha != 255U) {
+        return 99;
+    }
     if (inkpod_core_undo(core, &dispatch) != INKPOD_STATUS_OK
-        || inkpod_core_redo(core, &dispatch) != INKPOD_STATUS_OK) {
+        || inkpod_core_redo(core, &dispatch) != INKPOD_STATUS_OK
+        || inkpod_core_eyedropper(
+               core,
+               INKPOD_EYEDROPPER_SELECTED_PLANE,
+               20U,
+               30U,
+               &pasted_external_color) != INKPOD_STATUS_OK
+        || pasted_external_color.red != 17U || pasted_external_color.green != 34U
+        || pasted_external_color.blue != 51U || pasted_external_color.alpha != 255U) {
         return 27;
     }
     snapshot = nullptr;

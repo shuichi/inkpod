@@ -54,6 +54,8 @@ impl LayerNode {
 pub(crate) struct CellDocument {
     pub(crate) uuid: u128,
     pub(crate) id: DocumentId,
+    pub(crate) cell_id: CellId,
+    pub(crate) base_surface: BaseSurface,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) dpi_x_milli: u32,
@@ -79,6 +81,7 @@ pub(crate) struct DocumentIds {
     pub(crate) color_plane: PlaneId,
     pub(crate) selection_plane: PlaneId,
     pub(crate) light_table_set: LightTableSetId,
+    pub(crate) cell: CellId,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -159,6 +162,8 @@ impl CellDocument {
         Ok(Self {
             uuid,
             id: ids.document,
+            cell_id: ids.cell,
+            base_surface: BaseSurface::SolidWhite,
             width: paper.width,
             height: paper.height,
             dpi_x_milli: paper.dpi_x_milli,
@@ -441,9 +446,34 @@ impl CellDocument {
                     .collect()
             })
             .unwrap_or_default();
+        let synthetic_cell_id = file
+            .planes
+            .iter()
+            .map(|plane| plane.id)
+            .chain(layers.iter().flat_map(|layer| {
+                std::iter::once(layer.id.get())
+                    .chain(layer.planes.iter().map(|plane| plane.id.get()))
+            }))
+            .chain(guides.iter().map(|guide| guide.id))
+            .chain([
+                light_table.maximum_id(),
+                vector.maximum_id(),
+                file.document_id,
+                selection_plane_id.get(),
+            ])
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .filter(|id| *id <= MAX_PERSISTENT_NUMERIC_ID)
+            .ok_or(CoreError::InvalidState("synthetic cell ID overflow"))?;
         Ok(Self {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: DocumentId::from_raw(file.document_id),
+            cell_id: CellId::from_raw(synthetic_cell_id),
+            // Production v2 has no Genesis section. Before the successor
+            // container cutover, a validated v2 document reconstructs the
+            // specified allocation-free paper base.
+            base_surface: BaseSurface::SolidWhite,
             width: file.width,
             height: file.height,
             dpi_x_milli: file.dpi_x_milli,
@@ -602,7 +632,11 @@ impl CellDocument {
             .chain(self.guides.iter().map(|guide| guide.id))
             .chain([self.light_table.maximum_id()])
             .chain([self.vector.maximum_id()])
-            .chain([self.id.get(), self.selection_plane_id.get()])
+            .chain([
+                self.id.get(),
+                self.cell_id.get(),
+                self.selection_plane_id.get(),
+            ])
             .max()
             .unwrap_or(0)
     }

@@ -8,11 +8,14 @@ impl Core {
     /// Success records the current history state as the document savepoint,
     /// clears recovered status, and leaves document revision/history unchanged.
     /// Production v2 omits EditorState, so this method never advances the editor
-    /// savepoint and session dirty may remain true. Write failure leaves the
-    /// previous file and both Core savepoint states/path unchanged.
+    /// savepoint and session dirty may remain true. It also cannot represent an
+    /// immutable asset Genesis base; that state is rejected before touching the
+    /// destination rather than silently dropping the source image. Write failure
+    /// leaves the previous file and both Core savepoint states/path unchanged.
     pub fn save(&mut self, path: &Path) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        ensure_v2_can_represent_document_base(document)?;
         inkpod_format::save_atomic(path, &document.to_file())?;
         self.savepoint = Some(self.current_state);
         self.current_path = Some(path.to_path_buf());
@@ -23,10 +26,12 @@ impl Core {
     /// Atomically writes recovery data without advancing the normal-save savepoint.
     ///
     /// Document revision, history, dirty state, current normal path, and recovered
-    /// status are unchanged.
+    /// status are unchanged. An asset-backed Genesis is rejected before file I/O
+    /// because the production recovery format cannot preserve that base.
     pub fn autosave(&self, path: &Path) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        ensure_v2_can_represent_document_base(document)?;
         inkpod_format::save_recovery_atomic(path, &document.to_file())?;
         self.document_info()
     }
@@ -40,9 +45,13 @@ impl Core {
         self.ensure_no_active_stroke()?;
         let file = inkpod_format::read(path)?;
         let revision = self.next_document_revision()?;
-        let document = CellDocument::from_file(file, revision)?;
+        let mut document = CellDocument::from_file(file, revision)?;
+        let mut assets = asset::AssetStore::default();
+        document.light_table.intern_into(&mut assets)?;
+        assets = self.prepare_asset_store_for_session_reset(assets, &document)?;
         let max_id = document.max_stable_id();
         self.next_id.advance_past_raw(max_id);
+        self.assets = assets;
         self.document = Some(document);
         self.filter_preview = None;
         self.last_filter = None;
@@ -72,9 +81,13 @@ impl Core {
         self.ensure_no_active_stroke()?;
         let file = inkpod_format::read(path)?;
         let revision = self.next_document_revision()?;
-        let document = CellDocument::from_file(file, revision)?;
+        let mut document = CellDocument::from_file(file, revision)?;
+        let mut assets = asset::AssetStore::default();
+        document.light_table.intern_into(&mut assets)?;
+        assets = self.prepare_asset_store_for_session_reset(assets, &document)?;
         let max_id = document.max_stable_id();
         self.next_id.advance_past_raw(max_id);
+        self.assets = assets;
         self.document = Some(document);
         self.filter_preview = None;
         self.last_filter = None;
@@ -134,6 +147,18 @@ impl Core {
 }
 
 // Shared implementation helpers for this responsibility.
+
+pub(crate) fn ensure_v2_can_represent_document_base(
+    document: &CellDocument,
+) -> Result<(), CoreError> {
+    if matches!(document.base_surface, BaseSurface::Asset(_)) {
+        Err(CoreError::InvalidState(
+            "production native format cannot preserve an immutable asset base",
+        ))
+    } else {
+        Ok(())
+    }
+}
 
 pub(super) fn raster_to_file_plane(id: u64, kind: FilePlaneKind, raster: &TileRaster) -> FilePlane {
     let tiles = raster

@@ -225,7 +225,7 @@ impl Core {
     /// Success is one undoable edit and returns a new stable item ID.
     pub fn light_table_add_item(
         &mut self,
-        input: LightTableItemInput,
+        mut input: LightTableItemInput,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
         self.ensure_no_active_stroke()?;
         validate_item_input(&input)?;
@@ -241,8 +241,12 @@ impl Core {
                 "light-table item count exceeds its bound",
             ));
         }
-        let item_id = self.allocate_light_table_item_id();
-        let source_plane_id = self.allocate_plane_id();
+        let mut staged_assets = self.assets.clone();
+        input.source.intern_into(&mut staged_assets)?;
+        let base_revision = self.document_revision;
+        let mut next_id = self.next_id;
+        let item_id = next_id.take_light_table_item();
+        let source_plane_id = next_id.take_plane();
         let mut edit = self.begin_document_edit()?;
         edit.working_mut()
             .light_table
@@ -267,7 +271,13 @@ impl Core {
                     rotation_milli_degrees: input.rotation_milli_degrees,
                 },
             );
+        staged_assets =
+            self.prepare_asset_store_for_document_edit(staged_assets, edit.working_mut())?;
         let outcome = edit.commit(self)?;
+        if outcome.revision() != base_revision.get() {
+            self.next_id = next_id;
+            self.assets = staged_assets;
+        }
         Ok((outcome, item_id.get()))
     }
 
@@ -368,12 +378,15 @@ impl Core {
             height: i32::try_from(raster.info.height)
                 .map_err(|_| CoreError::InvalidArgument("reference height exceeds i32"))?,
         };
-        let replacement = LightTableSource::from_common_raster(
+        let mut replacement = LightTableSource::from_common_raster(
             document_uuid,
             source_revision,
             reference_frame,
             &raster,
         )?;
+        let mut staged_assets = self.assets.clone();
+        replacement.intern_into(&mut staged_assets)?;
+        let base_revision = self.document_revision;
         let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
         let mut after = before.clone();
         after
@@ -384,7 +397,12 @@ impl Core {
                 "light-table item ID does not exist",
             ))?
             .source = replacement;
-        self.commit_deferred_document_edit_current(before, after)
+        staged_assets = self.prepare_asset_store_for_document_edit(staged_assets, &after)?;
+        let outcome = self.commit_deferred_document_edit_current(before, after)?;
+        if outcome.revision() != base_revision.get() {
+            self.assets = staged_assets;
+        }
+        Ok(outcome)
     }
 
     /// Returns owned metadata for items in the active set, in stacking order.
@@ -449,11 +467,14 @@ impl Core {
     pub fn light_table_update_item(
         &mut self,
         item_id: u64,
-        input: LightTableItemInput,
+        mut input: LightTableItemInput,
     ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let item_id = LightTableItemId::from_raw(item_id);
         validate_item_input(&input)?;
+        let mut staged_assets = self.assets.clone();
+        input.source.intern_into(&mut staged_assets)?;
+        let base_revision = self.document_revision;
         let mut edit = self.begin_document_edit()?;
         let item = edit
             .working_mut()
@@ -478,7 +499,13 @@ impl Core {
             scale_y_milli: input.scale_y_milli,
             rotation_milli_degrees: input.rotation_milli_degrees,
         };
-        edit.commit(self)
+        staged_assets =
+            self.prepare_asset_store_for_document_edit(staged_assets, edit.working_mut())?;
+        let outcome = edit.commit(self)?;
+        if outcome.revision() != base_revision.get() {
+            self.assets = staged_assets;
+        }
+        Ok(outcome)
     }
 
     /// Removes an item from the active set as one undoable edit.
@@ -582,17 +609,20 @@ impl Core {
             .ok_or(CoreError::InvalidArgument(
                 "light-table item ID does not exist",
             ))?;
-        let selected_source = current.light_table.sets[set_index].items[item_index]
+        let mut staged_assets = self.assets.clone();
+        let mut selected_source = current.light_table.sets[set_index].items[item_index]
             .source
             .clone();
-        let outgoing = LightTableSource {
-            document_uuid: current.uuid,
-            source_revision: self.document_revision.get().max(1),
-            reference_frame: current.frames.reference_frame,
-            dpi_x_milli: current.dpi_x_milli,
-            dpi_y_milli: current.dpi_y_milli,
-            raster: flatten_document(&current, self.document_revision.get().max(1))?,
-        };
+        selected_source.intern_into(&mut staged_assets)?;
+        let mut outgoing = LightTableSource::from_tile_raster(
+            current.uuid,
+            self.document_revision.get().max(1),
+            current.frames.reference_frame,
+            current.dpi_x_milli,
+            current.dpi_y_milli,
+            flatten_document(&current, &self.assets, self.document_revision.get().max(1))?,
+        )?;
+        outgoing.intern_into(&mut staged_assets)?;
         let mut next_id = self.next_id;
         let ids = DocumentIds {
             document: next_id.take_document(),
@@ -601,6 +631,7 @@ impl Core {
             color_plane: next_id.take_plane(),
             selection_plane: next_id.take_plane(),
             light_table_set: next_id.take_light_table_set(),
+            cell: next_id.take_cell(),
         };
         let mut next = CellDocument::new(
             ids,
@@ -613,15 +644,18 @@ impl Core {
             },
         )?;
         next.frames.reference_frame = selected_source.reference_frame;
-        next.plane_for_role_mut(ActivePlane::Color)?.raster = selected_source.raster;
+        next.plane_for_role_mut(ActivePlane::Color)?.raster =
+            selected_source.immutable_raster().clone();
         next.light_table = current.light_table;
         next.light_table.sets[set_index].items[item_index].source = outgoing;
+        staged_assets = self.prepare_asset_store_for_session_reset(staged_assets, &next)?;
 
         let revision = self.next_document_revision()?;
         let editor = self.stage_reconciled_editor_target(&next, None)?;
         self.document = Some(next);
         self.document_revision = revision;
         self.next_id = next_id;
+        self.assets = staged_assets;
         self.render_cache.clear();
         self.reset_history(true);
         self.reset_view();

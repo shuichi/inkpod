@@ -26,6 +26,8 @@
 
 mod animation;
 mod api;
+mod asset;
+mod asset_operations;
 mod batch;
 mod coordinate;
 mod core;
@@ -33,6 +35,7 @@ mod document;
 mod editor;
 mod effects;
 mod error;
+mod genesis;
 mod history;
 mod identity;
 mod journal;
@@ -53,6 +56,10 @@ pub use animation::{
     SequenceCellInfo, SequenceCellSource, SequenceDirection, Thumbnail,
 };
 pub use api::*;
+pub use asset::{
+    AssetAlphaSemantics, AssetColorSpace, AssetDescriptor, AssetId, AssetInfo, AssetKind,
+    AssetStoreUsage, CanonicalStreamInput, RasterAssetInput,
+};
 pub use batch::{
     BATCH_OPERATION_VERSION, BatchColorPair, BatchFailurePolicy, BatchGraph, BatchInputKind,
     BatchInputSelector, BatchItemOutcome, BatchItemResult, BatchMissingTargetPolicy,
@@ -69,6 +76,7 @@ pub use editor::{
 };
 pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
+pub use genesis::{BaseSurface, GenesisInfo};
 pub use history::HistoryEntryInfo;
 pub use inkpod_format::CommonRasterFormat;
 pub use journal::{
@@ -117,6 +125,8 @@ pub const CORE_FEATURES: u64 = 1;
 pub const SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE: u64 = 1 << 0;
 /// Snapshot feature bit indicating native-alpha color-check rendering.
 pub const SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA: u64 = 1 << 1;
+/// Snapshot feature bit identifying an allocation-free SolidWhite Genesis base.
+pub const SNAPSHOT_FEATURE_SOLID_WHITE_BASE: u64 = 1 << 2;
 /// Default horizontal and vertical resolution in thousandths of a DPI.
 pub const DEFAULT_DPI_MILLI: u32 = 96_000;
 /// Maximum number of layers accepted in one document.

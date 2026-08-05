@@ -95,6 +95,7 @@ typedef uint32_t InkpodPixelFormat;
 #define INKPOD_PIXEL_FORMAT_PREMULTIPLIED_BGRA8 UINT32_C(1)
 #define INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE (UINT64_C(1) << 0)
 #define INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA (UINT64_C(1) << 1)
+#define INKPOD_SNAPSHOT_FEATURE_SOLID_WHITE_BASE (UINT64_C(1) << 2)
 
 /** @brief PNG/TIFF/TGA/BMP import/export の format 識別子型。 */
 typedef uint32_t InkpodCommonRasterFormat;
@@ -2361,7 +2362,8 @@ InkpodStatus inkpod_core_revert_active_selection(
  * 同一 directory の一時 file を完成・flush・close 後に置換する。成功時 revision/Undo は不変、
  * document normal savepoint/pathだけを更新してout_infoを書く。production v2はEditorStateを保存しないため
  * editor savepointを進めず、editor dirtyならsession dirtyを維持する。失敗時既存file・文書・両savepoint・
- * 出力は不変。stroke/preview/floating 中は `INVALID_STATE`。
+ * 出力は不変。production v2が保持できないasset-backed Genesisはfile I/O前に`INVALID_STATE`。
+ * stroke/preview/floating 中も `INVALID_STATE`。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
  */
@@ -2389,7 +2391,7 @@ InkpodStatus inkpod_core_open(
  * @par 契約
  * Core owner thread。通常 save と同じ非 NULL/UTF-8/borrowed path・出力サイズ規則。
  * 成功時 out_info を書くが document revision、dirty、Undo、normal path/savepoint は変えない。失敗時文書と既存出力 file は不変。
- * stroke/preview/floating 中は `INVALID_STATE`。
+ * production v2が保持できないasset-backed Genesisはfile I/O前に`INVALID_STATE`。stroke/preview/floating 中も `INVALID_STATE`。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
  */

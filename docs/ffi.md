@@ -59,6 +59,14 @@ ABI v2 は、公開名から実装時のマイルストーン番号を除いた�
 旧headerを使うcallerはv2 headerへ更新して再ビルドする必要がある。構造体レイアウト、数値定数、
 所有権、thread、statusの契約はこの名称変更では変えていない。
 
+M4 の canonical asset ingestion も ABI version を変更しない。既存の raster-open/import、
+clipboard、Light Table 入力は ABI v2 の bounded call の中で同期的に検証、copy、canonicalize、
+intern される。stroke sample は同期的に Rust-owned canonical bytes へ copy され、4 MiB 以下は
+procedure inline payload、4 MiB 超は canonical sample asset になる。sequence source は従来どおり
+bounded な Rust-owned raster copy であり、vector primitive の asset 接続は M6 の範囲である。
+asset ID を control-plane record として公開する ABI v3 と、typed `CoreHost` queue は M5 の範囲であり、
+この段階の ABI v2 caller が Rust-owned asset registry を直接所有または解放することはない。
+
 ## スレッド契約
 
 `InkpodCore` は single-writer かつ thread-affine である。作成、文書操作、view 操作、stroke、履歴、
@@ -113,6 +121,15 @@ text-focus guard、入力timeout、衝突時のUI上の交換policyはfrontend�
 （借用）である。保持が必要な API は戻る前に意味値をコピーする。caller は API が戻った後に入力
 buffer を再利用または解放できる。
 
+canonical asset ingestion を行う API もこの規則の例外ではない。Core owner thread 上の call が
+成功を返すまでに、raster-open/import、clipboard、Light Table の descriptor と encoded/decoded bytesを
+検証して Rust-owned canonical bytes へ copy し、内容アドレス付き registry へ intern する。stroke
+sample span も復帰前に copy し、4 MiB 以下はprocedure inline payload、4 MiB超は canonical sample
+assetへ確定する。sequenceはboundedなRust-owned raster copyであり、vector primitive asset接続はM6である。
+Core、transient session、journal、snapshot は復帰後に caller record、buffer、file name、path を参照しない。
+同じ canonical descriptor と logical payload は同じ registry entry に deduplicate されるが、その
+内部参照 count や allocation address は ABI の一部ではない。
+
 ### Rust-owned handle
 
 opaque handle を生成する API は `T** out_*` を受け取る。owner 変数は呼び出し前に NULL でなければ
@@ -149,6 +166,13 @@ release 後は、handle から得た tile、pixel、guide、vector、文字列�
 snapshot の raster tile storage は snapshot 側で独立して参照計数されるため、snapshot は作成元 Core より
 長く生存できる。ただし通常の shutdown では Renderer queue を drain して snapshot を先に解放すると、
 所有権の追跡が簡潔になる。
+
+canonical asset registry は `InkpodCore` が所有し、独立した ABI-v2 opaque handle や release API を
+持たない。Genesis、retained journal branch/redo tail、既知の persistent reference、live transient
+owner が retention root となる。現在の materialized document や checkpoint だけを見て解放せず、
+session close は受理済み Core work と transient owner を drain してから registry 全体を owner thread
+上で破棄する。失敗した ingestion/commit は document、history、journal、revision、dirty、公開済み
+retention edge、caller-owned output を部分変更しない。
 
 ## 出力と失敗
 
@@ -285,6 +309,34 @@ Windows の `CoreHost` は issue-time の `DocumentSessionId + Generation` を o
 query/update し、結果を同じ key の presentation cache へ deep copy する。document/view/workspace
 切替は対象 Core を再 query する。同一 document の複数 view は一つの EditorState を共有し、別
 session は分離される。workspace の以前の表示値を Core へ戻してはならない。
+
+## M4 canonical Genesis / asset ingestion under ABI v2
+
+M4 の Core は Genesis の stable Document ID と distinct Cell ID、および immutable base surface を
+所有する。blank document の base は allocation-free な `SolidWhite`、raster-open-as-document の base
+は canonical raster asset である。base は editable layer/plane、selection mask、borrowed snapshot
+buffer ではない。既存文書への raster import、private clipboard、Light Table source は同じ
+canonical registry を使う。`ImportRasterAsset` と 4 MiB 超の `ApplyRasterStroke` は外部 path や
+caller buffer ではなく immutable asset identity を procedure に固定し、小さい stroke は owned
+inline payload に固定する。
+
+ABI v2 の raster descriptor は、対応 API の既存 `struct_size`、format、dimension、stride、length、
+count 上限を満たす必要がある。canonical raster は pixel format、sRGB/alpha semantics、width、height、
+padding のない canonical stride、logical payload length を含めて識別される。別 codec/path 由来でも
+これらと logical pixel bytes が同じなら deduplicate できる。encoded bytes、file name、path、timestamp、
+optional provenance は asset identity や replay input に含めない。forged dimension、stride、length、
+digest/identity、work bound は commit 前に拒否する。
+
+この接続は既存の同期 ABI-v2 ingestion entrypoint を Core owner thread で実行する。UI thread が
+queue へ投入する前に lifetime を失う pointer を work item へ保持してはならず、`CoreHost` adapter は
+issue-time session/generation と入力値を所有してから呼び出す。M5 で予定する value/ID-only ABI v3、
+generation-tagged asset/sample ID、closed typed queue を実装済みとは扱わない。また M8 までは
+production `.inkpod` v2 が `GENS`/`ASST` を保存・復元しないため、この runtime ingestion 契約を
+successor container の end-to-end persistence とみなさない。特に raster-open 由来の asset-backed
+Genesis は M8 まで normal save、autosave/recovery、Batch `.inkpod` output ができない。Core は
+`INVALID_STATE` を file/directory 作成より前に返し、既存出力、document/revision/dirty、normal path、
+savepoint を変更しない。Windows adapter も current path と recent-file list を変更しない。一般画像への
+flat export はこの制約を受けない。
 
 ## 編集状態と排他
 

@@ -33,6 +33,7 @@ macro_rules! numeric_token {
 }
 
 numeric_token!(DocumentId, "A document stable ID. Zero is invalid.");
+numeric_token!(CellId, "A cell stable ID. Zero is invalid.");
 numeric_token!(LayerId, "A layer stable ID. Zero is invalid.");
 numeric_token!(PlaneId, "A plane stable ID. Zero is invalid.");
 numeric_token!(GuideId, "A guide stable ID. Zero is invalid.");
@@ -131,6 +132,10 @@ impl StableIdCursor {
         DocumentId::from_raw(self.take_raw())
     }
 
+    pub(crate) fn take_cell(&mut self) -> CellId {
+        CellId::from_raw(self.take_raw())
+    }
+
     pub(crate) fn take_layer(&mut self) -> LayerId {
         LayerId::from_raw(self.take_raw())
     }
@@ -170,11 +175,13 @@ mod tests {
         let document = cursor.take_document();
         let layer = cursor.take_layer();
         let plane = cursor.take_plane();
+        let cell = cursor.take_cell();
 
         assert_eq!(document.get(), 1);
         assert_eq!(layer.get(), 2);
         assert_eq!(plane.get(), 3);
-        assert_eq!(cursor.next_raw(), 4);
+        assert_eq!(cell.get(), 4);
+        assert_eq!(cursor.next_raw(), 5);
     }
 
     #[test]

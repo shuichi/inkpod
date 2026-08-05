@@ -5,15 +5,13 @@ use crate::*;
 use blake3::hazmat::HasherExt;
 use std::sync::LazyLock;
 
-const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v3";
+const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v4";
 const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v1";
 const DOCUMENT_RASTER_CONTEXT: &str = "org.inkpod.digest.document-raster.v1";
 const DOCUMENT_TILE_CONTEXT: &str = "org.inkpod.digest.document-raster-tile.v1";
-const ASSET_CONTEXT: &str = "org.inkpod.digest.asset.v1";
 const PROCEDURE_PAYLOAD_CONTEXT: &str = "org.inkpod.digest.procedure-payload.v1";
-const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 3;
+const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 4;
 const DOCUMENT_TILE_SCHEMA_VERSION: u32 = 1;
-const ASSET_SCHEMA_VERSION: u32 = 1;
 const PROCEDURE_PAYLOAD_SCHEMA_VERSION: u32 = 1;
 
 static DOCUMENT_STATE_CONTEXT_KEY: LazyLock<blake3::hazmat::ContextKey> =
@@ -24,8 +22,6 @@ static DOCUMENT_RASTER_CONTEXT_KEY: LazyLock<blake3::hazmat::ContextKey> =
     LazyLock::new(|| blake3::hazmat::hash_derive_key_context(DOCUMENT_RASTER_CONTEXT));
 static DOCUMENT_TILE_CONTEXT_KEY: LazyLock<blake3::hazmat::ContextKey> =
     LazyLock::new(|| blake3::hazmat::hash_derive_key_context(DOCUMENT_TILE_CONTEXT));
-static ASSET_CONTEXT_KEY: LazyLock<blake3::hazmat::ContextKey> =
-    LazyLock::new(|| blake3::hazmat::hash_derive_key_context(ASSET_CONTEXT));
 static PROCEDURE_PAYLOAD_CONTEXT_KEY: LazyLock<blake3::hazmat::ContextKey> =
     LazyLock::new(|| blake3::hazmat::hash_derive_key_context(PROCEDURE_PAYLOAD_CONTEXT));
 
@@ -48,7 +44,7 @@ struct CanonicalRasterCommitment {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct CanonicalDocumentStateTree {
     rasters: BTreeMap<u64, Arc<CanonicalRasterCommitment>>,
-    light_table_assets: BTreeMap<u64, [u8; 32]>,
+    light_table_assets: BTreeMap<u64, AssetId>,
     metadata_digest: [u8; 32],
 }
 
@@ -242,7 +238,10 @@ fn canonical_document_metadata_bytes(
         present(rectangle_bytes(document.frames.safe_frame)?),
         present(margins_bytes(document.frames.margins)?),
     ])?;
-    let base_surface = frame(&[present(1_u32.to_le_bytes())])?;
+    let base_surface = match document.base_surface {
+        BaseSurface::SolidWhite => frame(&[present(1_u32.to_le_bytes())])?,
+        BaseSurface::Asset(id) => frame(&[present(2_u32.to_le_bytes()), present(id.into_bytes())])?,
+    };
     let layer_tree = canonical_layer_tree(document, &tree.rasters)?;
     let selection =
         frame(&[
@@ -293,10 +292,7 @@ fn canonical_document_metadata_bytes(
     let hierarchy = frame(&[
         absent(),
         absent(),
-        // The current standalone-cell model has one persistent document
-        // identity. Its successor Cell identity is introduced with Genesis;
-        // until then the stable document ID is the standalone cell identity.
-        present(document.id.get().to_le_bytes()),
+        present(document.cell_id.get().to_le_bytes()),
         present(empty_sequence.clone()),
         present(empty_sequence.clone()),
     ])?;
@@ -358,15 +354,7 @@ fn canonical_document_state_tree(
         ));
     }
 
-    let mut light_table_assets = BTreeMap::new();
-    for plane in document.light_table.file_planes() {
-        let asset = canonical_raster_asset_id(&plane)?;
-        if light_table_assets.insert(plane.id, asset).is_some() {
-            return Err(CoreError::InvalidState(
-                "canonical light-table source plane ID is duplicated",
-            ));
-        }
-    }
+    let light_table_assets = document.light_table.asset_ids_by_source_plane()?;
     let mut tree = CanonicalDocumentStateTree {
         rasters,
         light_table_assets,
@@ -587,7 +575,7 @@ fn canonical_adjustment(adjustment: &Adjustment) -> Result<Vec<u8>, CoreError> {
 
 fn canonical_light_table(
     document: &CellDocument,
-    assets: &BTreeMap<u64, [u8; 32]>,
+    assets: &BTreeMap<u64, AssetId>,
 ) -> Result<Vec<u8>, CoreError> {
     let metadata = document.light_table.to_file();
     let sets = metadata
@@ -611,7 +599,7 @@ fn canonical_light_table(
                     };
                     frame(&[
                         present(item.id.to_le_bytes()),
-                        present(source_asset.to_vec()),
+                        present(source_asset.into_bytes()),
                         present(reference_origin_bytes(item.source_reference_frame)?),
                         present(item.name.as_bytes().to_vec()),
                         present(boolean_bytes(item.visible)),
@@ -656,110 +644,6 @@ fn canonical_light_table(
         (metadata.active_set_id != 0).then(|| metadata.active_set_id.to_le_bytes().to_vec()),
         present(sequence(sets.iter().map(Vec::as_slice))?),
     ])
-}
-
-fn canonical_raster_asset_id(plane: &FilePlane) -> Result<[u8; 32], CoreError> {
-    let pixel_format = pixel_format_code(plane.pixel_format)?;
-    let (color_space, alpha_semantics) = match plane.pixel_format {
-        PixelFormat::BinaryMask8 => (None, 3_u32),
-        PixelFormat::Grayscale8 | PixelFormat::Grayscale16 => (None, 1_u32),
-        PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16 => (Some(1_u32), 2_u32),
-        PixelFormat::PremultipliedBgra8 => {
-            return Err(CoreError::InvalidState(
-                "display-only pixel format cannot enter an asset digest",
-            ));
-        }
-    };
-    let bytes_per_pixel = u64::try_from(plane.pixel_format.bytes_per_pixel())
-        .map_err(|_| CoreError::InvalidState("asset pixel size is not representable"))?;
-    let stride = u64::from(plane.width)
-        .checked_mul(bytes_per_pixel)
-        .ok_or(CoreError::InvalidState("asset stride overflows"))?;
-    let element_count = u64::from(plane.width)
-        .checked_mul(u64::from(plane.height))
-        .ok_or(CoreError::InvalidState("asset element count overflows"))?;
-    let payload_length = stride
-        .checked_mul(u64::from(plane.height))
-        .ok_or(CoreError::InvalidState("asset payload length overflows"))?;
-
-    let mut prefix = Vec::new();
-    push_frame_prefix(&mut prefix, 11);
-    push_encoded_field(&mut prefix, 1, Some(&1_u32.to_le_bytes()))?;
-    push_encoded_field(&mut prefix, 2, Some(&1_u32.to_le_bytes()))?;
-    push_encoded_field(&mut prefix, 3, Some(&pixel_format.to_le_bytes()))?;
-    let color_space_bytes = color_space.map(u32::to_le_bytes);
-    push_encoded_field(
-        &mut prefix,
-        4,
-        color_space_bytes.as_ref().map(|bytes| bytes.as_slice()),
-    )?;
-    push_encoded_field(&mut prefix, 5, Some(&alpha_semantics.to_le_bytes()))?;
-    push_encoded_field(&mut prefix, 6, Some(&plane.width.to_le_bytes()))?;
-    push_encoded_field(&mut prefix, 7, Some(&plane.height.to_le_bytes()))?;
-    push_encoded_field(&mut prefix, 8, Some(&stride.to_le_bytes()))?;
-    push_encoded_field(&mut prefix, 9, Some(&element_count.to_le_bytes()))?;
-    push_encoded_field(&mut prefix, 10, Some(&payload_length.to_le_bytes()))?;
-    push_field_header(&mut prefix, 11, true, payload_length);
-
-    let mut tiles = BTreeMap::new();
-    for tile in &plane.tiles {
-        let expected_width = plane
-            .width
-            .saturating_sub(tile.coord.x.saturating_mul(TILE_SIZE))
-            .min(TILE_SIZE);
-        let expected_height = plane
-            .height
-            .saturating_sub(tile.coord.y.saturating_mul(TILE_SIZE))
-            .min(TILE_SIZE);
-        let expected_length = u64::from(expected_width)
-            .checked_mul(u64::from(expected_height))
-            .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
-            .ok_or(CoreError::InvalidState("asset tile length overflows"))?;
-        if expected_width == 0
-            || expected_height == 0
-            || tile.width != expected_width
-            || tile.height != expected_height
-            || u64::try_from(tile.bytes.len()).ok() != Some(expected_length)
-            || tiles.insert((tile.coord.y, tile.coord.x), tile).is_some()
-        {
-            return Err(CoreError::InvalidState(
-                "light-table asset tile layout is invalid",
-            ));
-        }
-    }
-
-    let row_length = usize::try_from(stride)
-        .map_err(|_| CoreError::InvalidState("asset row length is not representable"))?;
-    let bytes_per_pixel = usize::try_from(bytes_per_pixel)
-        .map_err(|_| CoreError::InvalidState("asset pixel size is not representable"))?;
-    let tile_columns = plane.width.div_ceil(TILE_SIZE);
-    let mut row = Vec::new();
-    row.try_reserve_exact(row_length)
-        .map_err(|_| CoreError::InvalidState("asset row allocation failed"))?;
-    row.resize(row_length, 0);
-    let mut hasher = blake3::Hasher::new_from_context_key(&ASSET_CONTEXT_KEY);
-    hasher.update(&prefix);
-    for y in 0..plane.height {
-        row.fill(0);
-        let tile_y = y / TILE_SIZE;
-        let local_y = usize::try_from(y % TILE_SIZE)
-            .map_err(|_| CoreError::InvalidState("asset row index is not representable"))?;
-        for tile_x in 0..tile_columns {
-            let Some(tile) = tiles.get(&(tile_y, tile_x)) else {
-                continue;
-            };
-            if local_y >= tile.height as usize {
-                continue;
-            }
-            let source_row_length = tile.width as usize * bytes_per_pixel;
-            let source_start = local_y * source_row_length;
-            let destination_start = tile_x as usize * TILE_SIZE as usize * bytes_per_pixel;
-            row[destination_start..destination_start + source_row_length]
-                .copy_from_slice(&tile.bytes[source_start..source_start + source_row_length]);
-        }
-        hasher.update(&row);
-    }
-    Ok(*hasher.finalize().as_bytes())
 }
 
 const fn layer_kind_code(kind: LayerKind) -> u32 {
@@ -889,33 +773,6 @@ fn round_ties_even(
     } else {
         Ok(quotient)
     }
-}
-
-fn push_frame_prefix(bytes: &mut Vec<u8>, field_count: u32) {
-    bytes.extend_from_slice(&ASSET_SCHEMA_VERSION.to_le_bytes());
-    bytes.extend_from_slice(&field_count.to_le_bytes());
-}
-
-fn push_encoded_field(
-    bytes: &mut Vec<u8>,
-    ordinal: u32,
-    value: Option<&[u8]>,
-) -> Result<(), CoreError> {
-    let length = value.map_or(0, <[u8]>::len);
-    let length = u64::try_from(length)
-        .map_err(|_| CoreError::InvalidState("canonical field length overflows"))?;
-    push_field_header(bytes, ordinal, value.is_some(), length);
-    if let Some(value) = value {
-        bytes.extend_from_slice(value);
-    }
-    Ok(())
-}
-
-fn push_field_header(bytes: &mut Vec<u8>, ordinal: u32, present: bool, length: u64) {
-    bytes.extend_from_slice(&ordinal.to_le_bytes());
-    bytes.push(u8::from(present));
-    bytes.extend_from_slice(&[0; 3]);
-    bytes.extend_from_slice(&length.to_le_bytes());
 }
 
 fn plane_has_semantic_raster(kind: PlaneType) -> bool {
@@ -1351,7 +1208,6 @@ mod tests {
             (DOCUMENT_METADATA_CONTEXT, &*DOCUMENT_METADATA_CONTEXT_KEY),
             (DOCUMENT_RASTER_CONTEXT, &*DOCUMENT_RASTER_CONTEXT_KEY),
             (DOCUMENT_TILE_CONTEXT, &*DOCUMENT_TILE_CONTEXT_KEY),
-            (ASSET_CONTEXT, &*ASSET_CONTEXT_KEY),
             (PROCEDURE_PAYLOAD_CONTEXT, &*PROCEDURE_PAYLOAD_CONTEXT_KEY),
         ] {
             let mut standard = blake3::Hasher::new_derive_key(context);
@@ -1446,10 +1302,10 @@ mod tests {
         assert_eq!(
             digest.as_bytes(),
             &[
-                225, 28, 167, 20, 217, 139, 165, 22, 59, 97, 197, 30, 62, 189, 111, 101, 236, 174,
-                147, 238, 58, 132, 40, 129, 209, 250, 179, 109, 5, 241, 85, 59,
+                45, 68, 132, 132, 36, 212, 152, 28, 128, 220, 52, 169, 214, 182, 146, 74, 71, 83,
+                204, 135, 76, 178, 31, 49, 192, 146, 144, 46, 88, 72, 133, 135,
             ],
-            "schema-3 digest changes require an explicit golden update"
+            "schema-4 digest changes require an explicit golden update"
         );
     }
 
@@ -1507,6 +1363,7 @@ mod tests {
             },
         )
         .unwrap();
+        let expected_asset_id = source.asset_id();
         core.light_table_add_item(LightTableItemInput::new("Aligned", source))
             .unwrap();
 
@@ -1521,7 +1378,7 @@ mod tests {
         let item_fields = parsed_fields(items[0]);
 
         assert_eq!(item_fields.len(), 13);
-        assert_eq!(item_fields[1].unwrap().len(), 32);
+        assert_eq!(item_fields[1].unwrap(), expected_asset_id.as_bytes());
         assert_eq!(item_fields[2].unwrap().len(), 16);
         assert_eq!(
             i64::from_le_bytes(item_fields[2].unwrap()[0..8].try_into().unwrap()),

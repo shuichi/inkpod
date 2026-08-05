@@ -4,6 +4,7 @@ mod support;
 use support::*;
 
 mod animation;
+mod assets_genesis;
 mod batch;
 mod document_selection;
 mod editor_state;

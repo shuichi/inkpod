@@ -480,7 +480,7 @@ mod tests {
         let check_snapshot = core.build_snapshot();
         assert_eq!(
             check_snapshot.feature_flags(),
-            SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA
+            SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA | SNAPSHOT_FEATURE_SOLID_WHITE_BASE
         );
         assert_ne!(
             check_snapshot.tiles()[0].tile_revision(),

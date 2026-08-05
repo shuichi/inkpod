@@ -244,6 +244,7 @@ mod tests {
                 color_plane: PlaneId::from_raw(4),
                 selection_plane: PlaneId::from_raw(5),
                 light_table_set: LightTableSetId::from_raw(6),
+                cell: CellId::from_raw(7),
             },
             7,
             PaperSpec {
@@ -256,6 +257,7 @@ mod tests {
         .unwrap();
         let mut ids = BTreeSet::new();
         assert!(ids.insert(document.id.get()));
+        assert!(ids.insert(document.cell_id.get()));
         assert!(ids.insert(document.selection_plane_id.get()));
         for layer in &document.layers {
             assert!(ids.insert(layer.id.get()));

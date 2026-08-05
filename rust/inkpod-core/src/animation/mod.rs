@@ -26,6 +26,8 @@ pub use light_table::{
     LightTableSource, RgbaRasterBytes,
 };
 pub(crate) use ordering::{natural_cmp, parse_cell_number};
+#[cfg(test)]
+pub(crate) use raster::base_raster_pixel;
 pub use sequence::{
     MotionCheckConfig, MotionFrame, SequenceCellInfo, SequenceCellSource, SequenceDirection,
     Thumbnail,

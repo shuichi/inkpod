@@ -2651,7 +2651,8 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         false);
     if (!QueryDocument(state, during_check)
         || check_snapshot_status != INKPOD_STATUS_OK
-        || check_features != INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA
+        || check_features != (INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA
+            | INKPOD_SNAPSHOT_FEATURE_SOLID_WHITE_BASE)
         || during_check.document_revision != revision_before_check
         || during_check.view_revision <= view_before_check
         || SendMessageW(state.Workspace().windows.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
@@ -3374,8 +3375,32 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         external_failure = 372;
     } else if (!state.Workspace().tools.floating_active) {
         external_failure = 373;
-    } else if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_FLOATING_CANCEL, 0) != 1) {
+    } else if (OpenClipboard(state.Workspace().windows.window) == FALSE) {
         external_failure = 374;
+    } else {
+        const bool emptied = EmptyClipboard() != FALSE;
+        CloseClipboard();
+        if (!emptied) {
+            external_failure = 375;
+        } else {
+            inkpod_clipboard_release(&state.clipboard);
+            if (SendMessageW(
+                    state.Workspace().windows.window,
+                    WM_COMMAND,
+                    IDM_EDIT_FLOATING_COMMIT,
+                    0) != 1) {
+                external_failure = 376;
+            } else if (state.Workspace().tools.floating_active) {
+                external_failure = 377;
+            }
+        }
+    }
+    if (state.Workspace().tools.floating_active) {
+        SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDIT_FLOATING_CANCEL,
+            0);
     }
     inkpod_clipboard_release(&state.clipboard);
     state.clipboard = private_clipboard;
@@ -4377,8 +4402,10 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         return 405;
     }
     DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+    std::vector<std::uint8_t> smoke_raster_source;
     if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_FILE_EXPORT_RASTER, 0) != 1
         || GetFileAttributesW(state.lifetime.smoke_raster_path.c_str()) == INVALID_FILE_ATTRIBUTES
+        || !ReadBoundedFile(state.lifetime.smoke_raster_path, smoke_raster_source)
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_FILE_IMPORT_RASTER, 0) != 1) {
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
         state.lifetime.smoke_raster_path.clear();
@@ -4393,6 +4420,96 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 407;
+    }
+    InkpodDocumentInfo imported_without_source = EmptyDocumentInfo();
+    if (DeleteFileW(state.lifetime.smoke_raster_path.c_str()) == FALSE
+        || GetFileAttributesW(state.lifetime.smoke_raster_path.c_str()) != INVALID_FILE_ATTRIBUTES
+        || !QueryDocument(state, imported_without_source)
+        || imported_without_source.document_revision != imported.document_revision
+        || imported_without_source.main_plane_checksum != imported.main_plane_checksum
+        || imported_without_source.color_plane_checksum != imported.color_plane_checksum
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1) {
+        state.lifetime.smoke_raster_path.clear();
+        return 484;
+    }
+    std::vector<std::uint8_t> imported_roundtrip;
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_FILE_EXPORT_RASTER,
+            0) != 1
+        || !ReadBoundedFile(state.lifetime.smoke_raster_path, imported_roundtrip)
+        || imported_roundtrip != smoke_raster_source
+        || DeleteFileW(state.lifetime.smoke_raster_path.c_str()) == FALSE
+        || GetFileAttributesW(state.lifetime.smoke_raster_path.c_str())
+            != INVALID_FILE_ATTRIBUTES) {
+        DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+        state.lifetime.smoke_raster_path.clear();
+        return 489;
+    }
+    const std::wstring asset_base_save = L"inkpod-asset-base-smoke.inkpod";
+    const std::wstring asset_base_recovery = asset_base_save + L".recovery.inkpod";
+    DeleteFileW(asset_base_save.c_str());
+    DeleteFileW(asset_base_recovery.c_str());
+    const std::wstring path_before_asset_base_save =
+        state.Document().shell.current_path;
+    const std::wstring source_before_asset_base_save =
+        state.Document().shell.source_path;
+    const std::wstring recovery_before_asset_base_save =
+        state.Document().shell.recovery_path;
+    const std::wstring recovery_original_before_asset_base_save =
+        state.Document().shell.recovery_original_path;
+    const std::size_t recent_before_asset_base_save =
+        state.RecentDocumentCount();
+    InkpodDocumentInfo after_asset_base_save = EmptyDocumentInfo();
+    const InkpodStatus asset_base_save_status =
+        SaveToPath(state, asset_base_save);
+    if (asset_base_save_status != INKPOD_STATUS_INVALID_STATE) {
+        DeleteFileW(asset_base_save.c_str());
+        DeleteFileW(asset_base_recovery.c_str());
+        state.lifetime.smoke_raster_path.clear();
+        return 1487;
+    }
+    if (GetFileAttributesW(asset_base_save.c_str()) != INVALID_FILE_ATTRIBUTES
+        || GetFileAttributesW(asset_base_recovery.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        DeleteFileW(asset_base_save.c_str());
+        DeleteFileW(asset_base_recovery.c_str());
+        state.lifetime.smoke_raster_path.clear();
+        return 1488;
+    }
+    if (!QueryDocument(state, after_asset_base_save)) {
+        state.lifetime.smoke_raster_path.clear();
+        return 1489;
+    }
+    if (after_asset_base_save.flags != imported_without_source.flags
+        || after_asset_base_save.document_revision
+            != imported_without_source.document_revision
+        || after_asset_base_save.view_revision != imported_without_source.view_revision
+        || after_asset_base_save.active_plane != imported_without_source.active_plane
+        || !SamePersistentMetadata(imported_without_source, after_asset_base_save)) {
+        state.lifetime.smoke_raster_path.clear();
+        return 1490;
+    }
+    if (state.Document().shell.current_path != path_before_asset_base_save
+        || state.Document().shell.source_path != source_before_asset_base_save
+        || state.Document().shell.recovery_path != recovery_before_asset_base_save
+        || state.Document().shell.recovery_original_path
+            != recovery_original_before_asset_base_save
+        || state.RecentDocumentCount() != recent_before_asset_base_save) {
+        state.lifetime.smoke_raster_path.clear();
+        return 1491;
+    }
+    if (CreateCell(state, 12U, 10U, 96000U) != INKPOD_STATUS_OK
+        || !RefreshLightTablePane(state)
+        || !WriteFileAtomically(state.lifetime.smoke_raster_path, smoke_raster_source)) {
+        DeleteFileW(asset_base_save.c_str());
+        DeleteFileW(asset_base_recovery.c_str());
+        state.lifetime.smoke_raster_path.clear();
+        return 488;
     }
     if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_COLOR_EDITOR, 0) != 1
         || state.Workspace().tools.drawing_color.depth != INKPOD_COLOR_DEPTH_16) {
@@ -4463,6 +4580,23 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             state.lifetime.smoke_raster_path.clear();
             return 414 + static_cast<int>(index);
         }
+    }
+    if (DeleteFileW(state.lifetime.smoke_raster_path.c_str()) == FALSE
+        || GetFileAttributesW(state.lifetime.smoke_raster_path.c_str()) != INVALID_FILE_ATTRIBUTES
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_LT_ITEM_SAMPLE,
+               0) != 1
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1
+        || !WriteFileAtomically(state.lifetime.smoke_raster_path, smoke_raster_source)) {
+        DeleteFileW(state.lifetime.smoke_raster_path.c_str());
+        state.lifetime.smoke_raster_path.clear();
+        return 486;
     }
     if (SendMessageW(
             state.Workspace().windows.window,
@@ -4629,25 +4763,38 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || sequence_view.cells.size() != 3U
         || sequence_view.cells[0].name != L"cell1.png"
         || sequence_view.cells[1].name != L"cell3.png"
-        || sequence_view.cells[2].name != L"cell10.png"
-        || !inkpod::windows::ui::panes::SequencePaneItemHasThumbnail(
+        || sequence_view.cells[2].name != L"cell10.png") {
+        return 1504;
+    }
+    if (!inkpod::windows::ui::panes::SequencePaneItemHasThumbnail(
             state.Workspace().sequence_palette, 0U)
         || sequence_view.cells[0].thumbnail_width == 0U
         || sequence_view.cells[0].thumbnail_height == 0U
         || sequence_view.cells[0].thumbnail_stride_bytes
-            != sequence_view.cells[0].thumbnail_width * 4U
-        || !state.GetPaneResourceUsage(
-            state.Workspace().pane_ids.sequence, sequence_resources)
-        || sequence_resources.workspace != state.Workspace().id
-        || sequence_resources.thumbnail_bytes == 0U
-        || sequence_resources.cached_item_count != 3U
-        || SaveToPath(state, swap_save) != INKPOD_STATUS_OK) {
-        return 874;
+            != sequence_view.cells[0].thumbnail_width * 4U) {
+        return 1505;
+    }
+    if (!state.GetPaneResourceUsage(
+            state.Workspace().pane_ids.sequence, sequence_resources)) {
+        return 1506;
+    }
+    if (sequence_resources.workspace != state.Workspace().id) {
+        return 1508;
+    }
+    if (sequence_resources.thumbnail_bytes == 0U) {
+        return 1509;
+    }
+    if (sequence_resources.cached_item_count != 3U) {
+        return 1510;
+    }
+    const InkpodStatus sequence_save_status = SaveToPath(state, swap_save);
+    if (sequence_save_status != INKPOD_STATUS_OK) {
+        return 1511;
     }
     InkpodDocumentInfo sequence_saved = EmptyDocumentInfo();
     if (!QueryDocument(state, sequence_saved)
         || (sequence_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
-        return 874;
+        return 1507;
     }
     const std::uint32_t sequence_prompt_count =
         state.lifetime.smoke_dirty_prompt_count;

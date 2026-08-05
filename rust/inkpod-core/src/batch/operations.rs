@@ -286,7 +286,9 @@ pub(super) fn working_core(source: &BatchSource) -> Result<Core, CoreError> {
             core.open(path)?;
             Ok(core)
         }
-        BatchSourceContent::Document(document) => Ok(core_from_document(document.as_ref().clone())),
+        BatchSourceContent::Document { document, assets } => {
+            core_from_document(document.as_ref().clone(), assets.clone())
+        }
         BatchSourceContent::Sequence(cell) => {
             let mut core = Core::new();
             core.new_cell_with_uuid(
@@ -309,14 +311,19 @@ pub(super) fn working_core(source: &BatchSource) -> Result<Core, CoreError> {
     }
 }
 
-pub(super) fn core_from_document(document: CellDocument) -> Core {
+pub(super) fn core_from_document(
+    document: CellDocument,
+    assets: asset::AssetStore,
+) -> Result<Core, CoreError> {
     let mut core = Core::new();
     core.next_id = StableIdCursor::from_next_raw(document.max_stable_id().saturating_add(1));
     core.document_revision = DocumentRevision::from_raw(1);
+    core.assets = assets;
     core.document = Some(document);
     core.reset_history(true);
     core.reset_editor_state(true);
-    core
+    core.collect_unreferenced_assets()?;
+    Ok(core)
 }
 
 pub(super) fn output_path_for(
@@ -382,6 +389,8 @@ pub(super) fn save_batch_output(
     path: &Path,
     mut is_cancelled: impl FnMut() -> bool,
 ) -> Result<(), CoreError> {
+    let document = working.document.as_ref().ok_or(CoreError::NoDocument)?;
+    crate::persistence::ensure_v2_can_represent_document_base(document)?;
     if graph.output.policy != BatchOutputPolicy::ExplicitOverwrite {
         if source.input_path.as_deref() == Some(path) {
             return Err(CoreError::InvalidState(
@@ -403,7 +412,6 @@ pub(super) fn save_batch_output(
     if let Some(parent) = parent {
         fs::create_dir_all(parent).map_err(|error| CoreError::Format(error.to_string()))?;
     }
-    let document = working.document.as_ref().ok_or(CoreError::NoDocument)?;
     inkpod_format::save_atomic_with_cancel(path, &document.to_file(), &mut is_cancelled)?;
     Ok(())
 }

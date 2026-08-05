@@ -1362,6 +1362,7 @@ fn fill_eyedropper_check_and_recovery_abi_are_transactional() {
         assert_eq!(
             check_view.feature_flags,
             INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA
+                | INKPOD_SNAPSHOT_FEATURE_SOLID_WHITE_BASE
         );
         assert_eq!(
             inkpod_snapshot_release(&mut check_snapshot),
@@ -1777,6 +1778,8 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
             INKPOD_STATUS_OK
         );
         assert_eq!(inkpod_core_paste_begin(core, clipboard), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_clipboard_release(&mut clipboard), INKPOD_STATUS_OK);
+        assert!(clipboard.is_null());
         let transform = InkpodFloatingTransform {
             struct_size: size_of::<InkpodFloatingTransform>() as u32,
             reserved: 0,
@@ -1803,7 +1806,17 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
             INKPOD_STATUS_OK
         );
         assert_eq!((color.red, color.green, color.blue), (12, 34, 56));
-        assert_eq!(inkpod_clipboard_release(&mut clipboard), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_undo(core, &mut result), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_eyedropper(core, INKPOD_EYEDROPPER_SELECTED_PLANE, 2, 2, &mut color),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(inkpod_core_redo(core, &mut result), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_eyedropper(core, INKPOD_EYEDROPPER_SELECTED_PLANE, 2, 2, &mut color),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!((color.red, color.green, color.blue), (12, 34, 56));
         assert_eq!(inkpod_clipboard_release(&mut clipboard), INKPOD_STATUS_OK);
 
         let flip = InkpodViewInput {

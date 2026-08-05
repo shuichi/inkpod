@@ -360,7 +360,10 @@ impl Core {
                         sources.push(BatchSource {
                             label,
                             input_path: self.current_path.clone(),
-                            content: BatchSourceContent::Document(Box::new(document)),
+                            content: BatchSourceContent::Document {
+                                document: Box::new(document),
+                                assets: self.assets.clone(),
+                            },
                         });
                     }
                 }
@@ -378,7 +381,7 @@ impl Core {
             let index = sources
                 .iter()
                 .position(|source| match &source.content {
-                    BatchSourceContent::Document(document) => {
+                    BatchSourceContent::Document { document, .. } => {
                         current_uuid.is_some_and(|uuid| document.uuid == uuid)
                     }
                     BatchSourceContent::Sequence(cell) => {

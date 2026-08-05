@@ -177,6 +177,7 @@ impl Core {
             document_revision: self.document_revision.get(),
             view_revision: self.view.revision.get(),
             document_id: document.id.get(),
+            cell_id: document.cell_id.get(),
             document_uuid: document.uuid,
             layer_id: layer_id.get(),
             main_plane_id: main_plane_id.get(),
@@ -257,13 +258,21 @@ impl Core {
                     .map(|session| RenderRevision::from_raw(session.preview_revision.get()))
             })
             .unwrap_or_else(|| RenderRevision::from_raw(self.document_revision.get()));
-        let feature_flags = match self.color_check {
+        let mut feature_flags = match self.color_check {
             Some(ColorCheckMode::LegacyWhiteTransparency) => {
                 SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE
             }
             Some(ColorCheckMode::NativeAlpha) => SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA,
             None => 0,
         };
+        if document.base_surface == BaseSurface::SolidWhite {
+            feature_flags |= SNAPSHOT_FEATURE_SOLID_WHITE_BASE;
+        }
+        let base_asset = match document.base_surface {
+            BaseSurface::SolidWhite => None,
+            BaseSurface::Asset(id) => self.assets.get(id),
+        };
+        let base_raster = base_asset.as_ref().and_then(|asset| asset.raster());
         let mut coords: Vec<_> = document
             .layers
             .iter()
@@ -282,6 +291,26 @@ impl Core {
                 }
             }
         }
+        if let Some(base_raster) = base_raster {
+            let unallocated_pixels_are_visible = matches!(
+                base_raster.format(),
+                PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+            );
+            if !unallocated_pixels_are_visible
+                && !self.view.alpha_view
+                && self.color_check.is_none()
+            {
+                coords.extend(base_raster.allocated_coords());
+            } else {
+                let tiles_x = document.width.div_ceil(TILE_SIZE);
+                let tiles_y = document.height.div_ceil(TILE_SIZE);
+                for y in 0..tiles_y {
+                    for x in 0..tiles_x {
+                        coords.push(TileCoord { x, y });
+                    }
+                }
+            }
+        }
         coords.sort_unstable();
         coords.dedup();
         let mut tiles = Vec::with_capacity(coords.len());
@@ -296,6 +325,7 @@ impl Core {
                     self.next_render_tile_revision.wrapping_next_nonzero();
                 if let Some(tile) = compose_tile(
                     document,
+                    base_raster.map(Arc::as_ref),
                     *coord,
                     self.color_check,
                     self.view.alpha_view,
@@ -486,6 +516,58 @@ struct PreparedLayer<'a> {
     planes: Vec<PreparedPlaneTile<'a>>,
 }
 
+#[derive(Clone, Copy)]
+struct PreparedBaseTile<'a> {
+    format: PixelFormat,
+    tile: Option<TileView<'a>>,
+}
+
+impl PreparedBaseTile<'_> {
+    fn rgba(self, local_x: u32, local_y: u32) -> [u8; 4] {
+        let Some(tile) = self.tile else {
+            return match self.format {
+                PixelFormat::Grayscale8 | PixelFormat::Grayscale16 => [0, 0, 0, u8::MAX],
+                PixelFormat::BinaryMask8
+                | PixelFormat::StraightRgba8
+                | PixelFormat::StraightRgba16
+                | PixelFormat::PremultipliedBgra8 => [0; 4],
+            };
+        };
+        let bytes = tile.bytes();
+        let row = local_y as usize * tile.row_stride_bytes() as usize;
+        match self.format {
+            PixelFormat::BinaryMask8 => [0, 0, 0, bytes[row + local_x as usize]],
+            PixelFormat::Grayscale8 => {
+                let value = bytes[row + local_x as usize];
+                [value, value, value, u8::MAX]
+            }
+            PixelFormat::Grayscale16 => {
+                let offset = row + local_x as usize * 2;
+                let value = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+                let value = ((u32::from(value) + 128) / 257) as u8;
+                [value, value, value, u8::MAX]
+            }
+            PixelFormat::StraightRgba8 | PixelFormat::PremultipliedBgra8 => {
+                let offset = row + local_x as usize * 4;
+                [
+                    bytes[offset],
+                    bytes[offset + 1],
+                    bytes[offset + 2],
+                    bytes[offset + 3],
+                ]
+            }
+            PixelFormat::StraightRgba16 => {
+                let offset = row + local_x as usize * 8;
+                std::array::from_fn(|channel| {
+                    let start = offset + channel * 2;
+                    let value = u16::from_le_bytes([bytes[start], bytes[start + 1]]);
+                    ((u32::from(value) + 128) / 257) as u8
+                })
+            }
+        }
+    }
+}
+
 fn raster_covers_tile_rect(
     raster: &TileRaster,
     origin_x: u32,
@@ -584,6 +666,7 @@ fn prepare_layers_for_tile<'a>(
 
 pub(super) fn compose_tile(
     document: &CellDocument,
+    base_raster: Option<&TileRaster>,
     coord: TileCoord,
     color_check: Option<ColorCheckMode>,
     alpha_view: bool,
@@ -599,6 +682,21 @@ pub(super) fn compose_tile(
     let height = TILE_SIZE.min(document.height - origin_y);
     let stride = width.checked_mul(4)?;
     let capacity = usize::try_from(stride.checked_mul(height)?).ok()?;
+    let base_tile = if let Some(raster) = base_raster {
+        if !raster_covers_tile_rect(raster, origin_x, origin_y, width, height) {
+            return None;
+        }
+        let tile = raster.tile_view(coord);
+        if tile.is_some() {
+            note_snapshot_payload_access();
+        }
+        Some(PreparedBaseTile {
+            format: raster.format(),
+            tile,
+        })
+    } else {
+        None
+    };
     let layers = prepare_layers_for_tile(document, coord, origin_x, origin_y, width, height)?;
     let has_light_table = document.light_table.has_visible_items();
     let selection_tile = if !alpha_view && color_check.is_none() {
@@ -618,15 +716,26 @@ pub(super) fn compose_tile(
         for x in 0..width {
             let document_x = origin_x + x;
             let document_y = origin_y + y;
-            let mut composite = if has_light_table {
+            let mut composite = base_tile.map_or_else(
+                || {
+                    if document.base_surface == BaseSurface::SolidWhite
+                        && (alpha_view || color_check.is_some())
+                    {
+                        [u8::MAX; 4]
+                    } else {
+                        [0_u8; 4]
+                    }
+                },
+                |tile| tile.rgba(x, y),
+            );
+            if has_light_table {
                 note_snapshot_payload_access();
-                document
+                let reference = document
                     .light_table
                     .composite(document.frames.reference_frame, document_x, document_y)
-                    .unwrap_or([0_u8; 4])
-            } else {
-                [0_u8; 4]
-            };
+                    .unwrap_or([0_u8; 4]);
+                composite = blend_rgba_over(composite, reference);
+            }
             for layer in &layers {
                 if let Some(adjustment) = layer.adjustment {
                     let adjusted =
@@ -980,8 +1089,14 @@ mod tests {
             let expected_composite =
                 legacy_single_plane_composite(document, &document.layers[0].planes[0], 64, 65);
             for (color_check, alpha_view) in modes {
+                let expected_composite = if alpha_view || color_check.is_some() {
+                    blend_rgba_over_reference([u8::MAX; 4], expected_composite)
+                } else {
+                    expected_composite
+                };
                 let tile = compose_tile(
                     document,
+                    None,
                     TileCoord { x: 1, y: 1 },
                     color_check,
                     alpha_view,
@@ -1149,9 +1264,96 @@ mod tests {
             blake3::hash(validation_call_graph.as_bytes())
                 .to_hex()
                 .to_string(),
-            "00bc9e15811dcd06282b69d24e95aa8653f3169bd79f18844100116b4d0039eb",
+            "e48fba576b3ae73bfd4ee272537cdb68f535ec47aa0f5d7f5b972f08f424fdf6",
             "primary snapshot validation call graph changed; audit payload/hash access before updating this lock"
         );
+    }
+
+    #[test]
+    fn prepared_asset_base_tiles_match_canonical_pixel_display_semantics() {
+        let cases = [
+            (PixelFormat::BinaryMask8, PixelValue::Binary(255)),
+            (PixelFormat::Grayscale8, PixelValue::Grayscale8(173)),
+            (PixelFormat::Grayscale16, PixelValue::Grayscale16(40_000)),
+            (
+                PixelFormat::StraightRgba8,
+                PixelValue::Rgba([12, 34, 56, 177]),
+            ),
+            (
+                PixelFormat::StraightRgba16,
+                PixelValue::Rgba16([1_000, 20_000, 50_000, 40_000]),
+            ),
+        ];
+
+        for (format, value) in cases {
+            let mut raster = TileRaster::new(65, 66, format).unwrap();
+            raster.set_pixel(64, 65, value, 7).unwrap();
+            for (coord, x, y) in [
+                (TileCoord { x: 0, y: 0 }, 0, 0),
+                (TileCoord { x: 1, y: 1 }, 64, 64),
+                (TileCoord { x: 1, y: 1 }, 64, 65),
+            ] {
+                let prepared = PreparedBaseTile {
+                    format,
+                    tile: raster.tile_view(coord),
+                };
+                assert_eq!(
+                    prepared.rgba(x % TILE_SIZE, y % TILE_SIZE),
+                    animation::base_raster_pixel(&raster, x, y).unwrap(),
+                    "format={format:?}, point=({x}, {y})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sparse_asset_base_cache_hits_do_not_read_payloads_across_view_changes() {
+        const WIDTH: u32 = 1_025;
+        const HEIGHT: u32 = 1_025;
+        let mut pixels = vec![0_u8; WIDTH as usize * HEIGHT as usize * 4];
+        let final_pixel = pixels.len() - 4;
+        pixels[final_pixel..].copy_from_slice(&[9, 8, 7, 255]);
+        let mut core = Core::new();
+        core.new_cell_from_raster_asset(
+            RasterAssetInput {
+                width: WIDTH,
+                height: HEIGHT,
+                pixel_format: PixelFormat::StraightRgba8,
+                color_space: Some(AssetColorSpace::Srgb),
+                alpha_semantics: AssetAlphaSemantics::Straight,
+                canonical_stride: u64::from(WIDTH) * 4,
+                pixels,
+                expected_id: None,
+            },
+            DEFAULT_DPI_MILLI,
+            DEFAULT_DPI_MILLI,
+            0x5a01,
+        )
+        .unwrap();
+
+        reset_snapshot_payload_access_count();
+        let initial = core.build_snapshot();
+        assert_eq!(initial.tiles().len(), 1);
+        assert!(snapshot_payload_access_count() > 0);
+        assert_eq!(core.render_cache.len(), 1);
+        let initial_revision = initial.tiles()[0].tile_revision();
+        assert_eq!(core.resource_usage().render_cache_tile_count, 1);
+        let next_render_revision = core.next_render_tile_revision;
+        reset_snapshot_payload_access_count();
+
+        for step in 0..128 {
+            core.apply_view(ViewCommand::ZoomAt {
+                factor: if step % 2 == 0 { 1.01 } else { 1.0 / 1.01 },
+                device_x: 0.5,
+                device_y: 0.5,
+            })
+            .unwrap();
+            let snapshot = core.build_snapshot();
+            assert_eq!(snapshot.tiles().len(), 1);
+            assert_eq!(snapshot.tiles()[0].tile_revision(), initial_revision);
+        }
+        assert_eq!(core.next_render_tile_revision, next_render_revision);
+        assert_eq!(snapshot_payload_access_count(), 0);
     }
 
     #[test]

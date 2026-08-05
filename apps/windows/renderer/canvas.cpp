@@ -313,14 +313,18 @@ public:
                 & INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE) != 0U;
             const bool native_check = (snapshot_view_.feature_flags
                 & INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA) != 0U;
+            const bool solid_white_base = (snapshot_view_.feature_flags
+                & INKPOD_SNAPSHOT_FEATURE_SOLID_WHITE_BASE) != 0U;
             const bool transparent_view = (overlay_.flags
                 & INKPOD_SNAPSHOT_OVERLAY_TRANSPARENT_VIEW) != 0U;
-            const D2D1_COLOR_F paper_color = legacy_check
+            const D2D1_COLOR_F paper_color = solid_white_base
+                ? D2D1::ColorF(D2D1::ColorF::White)
+                : (legacy_check
                 ? D2D1::ColorF(D2D1::ColorF::Black)
                 : (native_check ? D2D1::ColorF(D2D1::ColorF::Magenta)
                                 : (transparent_view
                                           ? D2D1::ColorF(0.78F, 0.78F, 0.78F, 1.0F)
-                                          : D2D1::ColorF(D2D1::ColorF::White)));
+                                          : D2D1::ColorF(D2D1::ColorF::White))));
             HRESULT result = d2d_context_->CreateSolidColorBrush(
                 paper_color, &paper_brush);
             if (FAILED(result)) {
@@ -340,7 +344,7 @@ public:
                 (transform_.document_width + checker_size - 1U) / checker_size;
             const std::uint64_t checker_rows =
                 (transform_.document_height + checker_size - 1U) / checker_size;
-            if (transparent_view && checker_columns != 0U
+            if (transparent_view && !solid_white_base && checker_columns != 0U
                 && checker_rows <= UINT64_C(16384) / checker_columns) {
                 paper_brush->SetColor(D2D1::ColorF(0.9F, 0.9F, 0.9F, 1.0F));
                 for (std::uint64_t y = 0; y < transform_.document_height; y += checker_size) {
@@ -1495,7 +1499,8 @@ private:
         if (snapshot_view_.tile_count > kMaximumSnapshotTiles
             || (snapshot_view_.feature_flags
                     & ~(INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE
-                        | INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA))
+                        | INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA
+                        | INKPOD_SNAPSHOT_FEATURE_SOLID_WHITE_BASE))
                 != 0U
             || (snapshot_view_.feature_flags
                     & INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE)

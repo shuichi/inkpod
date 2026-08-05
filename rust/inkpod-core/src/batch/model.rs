@@ -507,7 +507,10 @@ impl BatchRunReport {
 #[derive(Clone)]
 pub(super) enum BatchSourceContent {
     Path(PathBuf),
-    Document(Box<CellDocument>),
+    Document {
+        document: Box<CellDocument>,
+        assets: asset::AssetStore,
+    },
     Sequence(SequenceCellSource),
 }
 

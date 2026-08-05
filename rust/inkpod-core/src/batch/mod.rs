@@ -8,6 +8,7 @@ use super::{
     RotateDirection, TILE_SIZE, TileCoord, VectorWidthMode,
 };
 use crate::animation::{SequenceCellSource, parse_cell_number};
+use crate::asset;
 use crate::identity::*;
 use inkpod_format::{
     BATCH_GRAPH_VERSION, FileBatchGraph, FileBatchInput, FileBatchOperation, FileBatchOutput,

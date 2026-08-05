@@ -406,7 +406,7 @@ impl Core {
         self.next_branch = BranchId::first_unallocated();
         self.branch_tails.clear();
         self.branch_tails.push(StateId::GENESIS);
-        self.history_genesis = self.document.clone();
+        self.genesis = self.document.clone().map(genesis::Genesis::new);
     }
 
     pub(super) fn mark_journal_incomplete(&mut self) {
@@ -593,10 +593,15 @@ impl Core {
         if self.next_procedure.get() > MAX_JOURNAL_COMMITS + 1 {
             return Err(CoreError::InvalidState("journal procedure limit exceeded"));
         }
-        let genesis = self
-            .history_genesis
-            .clone()
+        let mut genesis = self
+            .genesis
+            .as_ref()
+            .map(|genesis| genesis.document.clone())
             .ok_or(CoreError::InvalidState("journal Genesis is missing"))?;
+        let mut detached_assets = self
+            .assets
+            .detached_archive_round_trip(self.asset_retention_roots())?;
+        genesis.light_table.intern_into(&mut detached_assets)?;
         let mut nodes = BTreeMap::new();
         nodes.insert(
             StateId::GENESIS,
@@ -661,13 +666,14 @@ impl Core {
                         .get(&commit.parent_state_id)
                         .ok_or(CoreError::InvalidState("journal parent state is missing"))?;
                     let mut replay = Core::new();
+                    replay.assets = detached_assets.clone();
                     replay.document = Some(parent.document.clone());
                     replay.document_revision = DocumentRevision::from_raw(1);
                     replay.current_state = commit.parent_state_id;
                     replay.next_state = commit.committed_state_id;
                     replay.next_procedure = commit.procedure.procedure_id();
                     replay.next_id = self.next_id;
-                    replay.history_genesis = Some(parent.document.clone());
+                    replay.genesis = Some(genesis::Genesis::new(parent.document.clone()));
                     replay.branch_tails.clear();
                     replay.branch_tails.push(commit.parent_state_id);
                     replay.replay_procedure(&commit.procedure)?;

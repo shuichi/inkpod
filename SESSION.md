@@ -1,8 +1,8 @@
 # Rust Core プリミティブ・Procedure Call History・`.inkpod` 再設計計画
 
-更新日: 2026-08-05
+更新日: 2026-08-06
 
-状態: M0–M3 完了、M4–M9 未完。旧 revision-max 判定式の正本化と環境別性能ゲートは反映済み
+状態: M0–M4 完了、M5–M9 未完。旧 revision-max 判定式の正本化と環境別性能ゲートは反映済み
 
 ## 1. 目的
 
@@ -520,6 +520,51 @@ Revision-max render-cache invariant:
 
 - committed procedureがexternal pathやC++ buffer lifetimeを参照しない。
 - immutable base/assetを変更するmutation pathが存在しない。
+
+実装実績（2026-08-06）:
+
+- Rust Coreへdistinct stable Document/Cell IDとtyped immutable base surfaceを導入し、
+  blankはallocation-free opaque `SolidWhite`、raster-open documentはcanonical
+  `AssetId`をGenesis baseとして保持する。baseはflat composite/exportのunderlayにだけ
+  参加し、editable layer/plane、layer-only export、selection contentには混入しない。
+- BLAKE3 content-addressed asset registryをsession単位で実装した。kind、pixel format、
+  color/alpha semantics、dimensions、canonical stride、logical element count、length、
+  payloadをboundedに検証し、最大65,536 asset、1 asset 512 MiB、session合計768 MiB、
+  stream 1,048,576 elementの閉じた上限で、path/codec/provenanceに依存せず同一内容を
+  deduplicateする。callerのencoded bytes、file名/path、buffer lifetimeは保持しない。
+- raster-open/import、private clipboard、Light Table sourceを同じcanonical ingestionへ
+  接続した。既存documentのimportはasset-only `ImportRasterAsset/v1` procedureとなり、
+  `ApplyRasterStroke/v2`のsample列は4 MiB以下をinline、それを超える入力をimmutable
+  sample assetとして保持する。invalid、stale、no-op、forged descriptor/ID、allocation/
+  work bound failureはregistry、document、history、journal、revision、dirtyを変更しない。
+- Genesis、current state、全journal commit、inactive branch/redo tail、history cache、
+  floating selection、Light Table、active strokeをretention rootとして数え、unrooted asset
+  だけを回収する。fresh replayはrooted graphを空registryへdeep-copyしてexpected IDで
+  再ingestし、`AssetRecord`、payload、raster ownershipをlive Coreと共有しない。
+- canonical procedure sliceは`SetMainLineColor/v1`、`ReplacePalette/v1`、
+  `ApplyRasterStroke/v2`、`ImportRasterAsset/v1`の4件となった。Genesis identity/baseを含む
+  schema/domain 4、`ReplayEpoch` 5、未実装successor top-level v7を固定し、旧epochの
+  compatibility decoderは追加していない。production `.inkpod`はexact-current v2のまま
+  で、asset-backed Genesisのnormal/recovery/Batch出力はM8までI/O前に拒否する。
+- public Core contractは全canonical raster format、transparent hidden RGB、SolidWhite、
+  caller/file lifetime、dedup、branch retention、detached replay、large stroke、clipboard、
+  Light Table、no-op/stale/failure atomicity、v2 pre-I/O拒否を固定した。C ABI v2のraster/
+  clipboard/Light Table owned-buffer契約とWindows raster-open/export、自動sequence attach、
+  thumbnail/pane cache lifetimeを接続し、caller buffer/file解放後も結果が不変であることを
+  ABI/GUI smokeで検証した。inventoryはRust 219、C ABI 175、Windows command 331である。
+- snapshotはasset baseをtile単位で一度prepareし、transparent RGBA/Binary sparse baseは
+  allocated coordinateだけを列挙する。初回composeでpayload accessが増え、128回の
+  view-only cache hitでは0、tile revision不変となる意味ゲートを追加し、tombstone、
+  negative cache、revision-max式、既存workload/rangeは変更していない。
+- 最終検証はRust workspace 299 test＋1 doctest、zero-warning Clippy、strict rustdoc、
+  Core quick benchmark、ARM64 Debug/Release fresh configure/build、static CRT/package、
+  ABI/GUIを含むDebug CTest 27/27を合格した。承認済みRange ID
+  `windows-arm64-apple-silicon-parallels-release-2026-08-05`のwarm-up後5回medianは
+  Core quick pan/dirty `0.921792`/`2.149459 ms`、full pan/dirty
+  `13.285625`/`9.317709 ms`、native drawing `167.134750 ms`、native wheel
+  `1.080126211 refresh intervals/event`で、全意味counterと既存rangeを満たした。
+  `git diff --check`も合格した。ABI v3/typed queueはM5、残存primitive移行はM6、
+  `GENS`/`ASST` persistenceはM8に残し、M5を先取りしていない。
 
 ### M5: ABI v3 と Typed CoreHost Queue
 
