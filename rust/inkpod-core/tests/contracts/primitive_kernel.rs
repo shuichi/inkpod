@@ -83,7 +83,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .expect("a committed primitive must return its canonical procedure")
         .clone();
     assert_eq!(main_line_procedure.primitive_id().get(), 0x0003_0001);
-    assert_eq!(main_line_procedure.replay_epoch().get(), 2);
+    assert_eq!(main_line_procedure.replay_epoch().get(), 3);
     assert_eq!(main_line_procedure.procedure_id().get(), 1);
     assert_eq!(main_line_procedure.base_state_id().get(), 1);
     assert_eq!(main_line_procedure.committed_state_id().get(), 2);

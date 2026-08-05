@@ -12,16 +12,18 @@ schema should be replaced whenever a more robust or efficient design is found.
 ## Procedure-authoritative successor contract
 
 This section is the approved contract for the successor procedure-authoritative
-container. It reserves top-level format version 4 and replay epoch 2, but no v4
-reader or writer exists yet. The earlier v3/epoch-1 design reservation was
-superseded before any reader or writer existed when M1 closed the established
-live-stroke admission bound and the Light Table source-alignment digest field.
-The latter change advances the canonical document-state frame and
-`DocumentStateDigest` derive-key domain to schema/version 2; the independent
-asset and procedure-payload digest contracts remain version 1.
+container. It reserves top-level format version 5 and replay epoch 3, but no v5
+reader or writer exists yet. The earlier v3/epoch-1 and v4/epoch-2 reservations
+were superseded before any reader or writer existed. Version 5 replaces the
+flat schema-2 state hash with the schema-3 hierarchical document commitment:
+metadata, raster, and raster-tile commitments are domain-separated so a raster
+edit hashes only changed tile payloads instead of every allocated document
+pixel. This semantic digest is independent of the renderer's canonical
+revision-max cache identity. Asset and procedure-payload digest contracts remain
+version 1.
 Version 2 remains the exact current version until the format cutover is
 implemented and tested atomically; production code must not emit a partially
-implemented v4 file. Any schema or replay-semantics change
+implemented v5 file. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
 
@@ -120,7 +122,7 @@ All stroke samples are canonical document coordinates; role-based active plane,
 view/device coordinates, pan/zoom/flip, and OS DPI are resolved before the
 procedure is formed. The three work formula IDs are respectively constant 1,
 `1 + palette entry count`, and sample count plus every clipped dab-bounding-box
-pixel tested. All three schemas have semantics revision 2, emit no output IDs,
+pixel tested. All three schemas have semantics revision 3, emit no output IDs,
 and use no assets in this first inline-bounded slice.
 
 For pressure canonicalization, the frontend value is an IEEE-754 binary32 or
@@ -277,7 +279,10 @@ ASCII context strings are:
 
 | Digest | Derive-key context |
 |---|---|
-| `DocumentStateDigest` | `org.inkpod.digest.document-state.v2` |
+| `DocumentStateDigest` | `org.inkpod.digest.document-state.v3` |
+| document metadata commitment | `org.inkpod.digest.document-metadata.v1` |
+| document raster commitment | `org.inkpod.digest.document-raster.v1` |
+| document raster-tile commitment | `org.inkpod.digest.document-raster-tile.v1` |
 | `EditorStateDigest` | `org.inkpod.digest.editor-state.v1` |
 | `JournalPrefixDigest` | `org.inkpod.digest.journal-prefix.v1` |
 | `AssetDigest` / `AssetId` | `org.inkpod.digest.asset.v1` |
@@ -290,10 +295,11 @@ ASCII context strings are:
 | primitive argument schema | `org.inkpod.digest.primitive-argument-schema.v1` |
 
 Every digest message uses the same canonical frame shape. It starts with a
-digest-schema version `u32` and field count `u32`. `DocumentStateDigest` and
-every canonical document-state frame nested within it use schema version 2.
-Every other digest message in the table, including the separately hashed
-`AssetDigest` and `ProcedurePayloadDigest`, uses schema version 1. Each field,
+digest-schema version `u32` and field count `u32`. `DocumentStateDigest`, the
+metadata commitment bytes, raster commitment bytes, and every canonical
+document-state frame nested within them use schema version 3. A raster-tile
+commitment and every other digest message in the table, including the separately
+hashed `AssetDigest` and `ProcedurePayloadDigest`, uses schema version 1. Each field,
 in consecutive ordinal order starting at 1, is `ordinal u32`, `presence u8`,
 three zero bytes, byte length `u64`, then exactly that many bytes. Presence is
 0 or 1. Absent is presence 0 plus length 0; present-empty is presence 1 plus
@@ -315,7 +321,10 @@ The exact digest messages are:
 
 | Digest | Present fields in ordinal order |
 |---|---|
-| `DocumentStateDigest` | 1 document UUID; 2 stable Document ID; 3 paper; 4 frames/margins; 5 base surface; 6 ordered layer/plane tree; 7 persistent selection record; 8 palette; 9 main-line color; 10 guides; 11 grid; 12 Light Table; 13 project/cut/cell/frame/sequence identities and animation metadata; 14 required-extension sequence, empty in schema 2 |
+| `DocumentStateDigest` | 1 32-byte document metadata commitment; 2 Plane-ID-sorted sequence of frames containing stable Plane ID then 32-byte raster commitment |
+| document metadata commitment | 1 document UUID; 2 stable Document ID; 3 paper; 4 frames/margins; 5 base surface; 6 ordered layer/plane tree; 7 persistent selection record; 8 palette; 9 main-line color; 10 guides; 11 grid; 12 Light Table; 13 project/cut/cell/frame/sequence identities and animation metadata; 14 required-extension sequence, empty in schema 3 |
+| document raster commitment | 1 width; 2 height; 3 canonical pixel format; 4 tile edge; 5 `(tile_x, tile_y)`-sorted sequence of tile coordinate, valid width/height, and 32-byte raster-tile commitment |
+| document raster-tile commitment | 1 canonical pixel format; 2 tile x; 3 tile y; 4 valid width; 5 valid height; 6 exact valid row-major pixel bytes without row padding |
 | `EditorStateDigest` | 1 editor-state schema `u32 = 1`; 2 active tool; 3 optional last color-consuming tool; 4 tool-keyed colors; 5 tool-keyed diameters; 6 fill options; 7 selection options; 8 vector options; 9 optional active layer; 10 optional active plane; 11 optional palette cursor; 12 editor-target/option records |
 | `JournalPrefixDigest` | 1 last included event count `u64`; 2 ordered sequence of the exact common-header-plus-payload `PROC` record bytes from event 1 through that count |
 | `AssetDigest` | 1 asset schema `u32 = 1`; 2 asset kind `u32`; 3 optional pixel format; 4 optional color space; 5 optional alpha semantics; 6 optional width; 7 optional height; 8 optional canonical stride; 9 logical element count `u64`; 10 logical payload length `u64`; 11 exact canonical logical payload bytes |
@@ -369,8 +378,13 @@ names are the exact ASCII bytes `SetMainLineColor`, `ReplacePalette`, and
 layout, is the sole argument-schema-digest input.
 
 `DocumentStateDigest` excludes document/editor revisions, history, paths, views,
-transient sessions, allocation/tile-cache state, and caches. Its nested schema
-is canonical as follows:
+transient sessions, allocation/tile-cache state, and caches. Its schema-3 root
+commits to one metadata digest and every semantic raster digest by stable Plane
+ID. The runtime may cache that tree at a matching document revision, but the
+revision and cache layout never enter a digest. A changed raster tile replaces
+that tile commitment, its raster commitment, and the root; unchanged tile
+payloads are neither copied nor hashed. Its nested schema is canonical as
+follows:
 
 - Paper is a frame ordering width/height `u32`, DPI x/y thousandths `u32`, and
   color-space code `u32 = 1` for sRGB. Frames/margins order the hundred,
@@ -390,11 +404,15 @@ is canonical as follows:
   Annotation, and 10 VectorColoring.
   Existing thousandth opacity is canonicalized as
   `round_ties_even(opacity_milli * 65,535 / 1,000)` after validating 0..1,000.
-- A raster frame orders width `u32`, height `u32`, canonical pixel format
-  `u32`, tile edge `u32 = 64`, and tiles sorted by `(tile_y, tile_x)`. A tile
-  orders `tile_x u32`, `tile_y u32`, valid width/height `u32`, then only valid
-  row-major pixels with no row padding. Missing tiles mean all-zero pixels;
-  all-zero stored tiles are forbidden. Pixel codes 1/2/3/4/5 are BinaryMask8,
+- A raster's metadata frame orders width `u32`, height `u32`, canonical pixel
+  format `u32`, tile edge `u32 = 64`, and a present-empty tile sequence. Pixel
+  content occurs exactly once in the separate raster commitment. That
+  commitment uses the same four structural fields and tiles sorted by
+  `(tile_x, tile_y)`; each record stores tile coordinates, valid width/height,
+  and the domain-separated tile commitment. The tile commitment hashes its
+  format, coordinates, valid dimensions, and only valid row-major pixels with
+  no row padding. Missing tiles mean all-zero pixels; all-zero stored tiles are
+  forbidden. Pixel codes 1/2/3/4/5 are BinaryMask8,
   Grayscale8, Grayscale16 little-endian, straight RGBA8, and straight RGBA16
   little-endian. Premultiplied BGRA is display-only and invalid here.
 - The layer/plane tree contains editable document planes only. The persistent
@@ -427,7 +445,7 @@ is canonical as follows:
   record orders Sequence ID, UTF-8 name, and an ordered sequence of Frame IDs;
   each referenced frame must occur in the frame-record sequence. The M1
   Core-only runtime has no Genesis-owned Cell object yet, so its nonpersistent
-  schema-2 digest temporarily encodes the current standalone Document ID again
+  schema-3 digest temporarily encodes the current standalone Document ID again
   in the required Cell slot, with absent Project/Cut IDs and empty frame/sequence
   lists. This is the sole temporary exception to cross-kind numeric-ID
   uniqueness and is not a valid successor-container Genesis representation.
@@ -478,19 +496,22 @@ The approved Rust implementation is the official `blake3` crate pinned as
 exact version `=1.8.5` with default features disabled and only `std` enabled, as
 recorded in `third-party-notices.md`; its portable/SIMD backend choice does not
 change digest output. The Core production dependency now computes the
-schema-2 `DocumentStateDigest` for canonical execution and fresh-Core replay.
-This does not activate the successor container: `.inkpod` v2 remains the exact
-current production format and no v4 reader or writer is emitted by this slice.
+hierarchical schema-3 `DocumentStateDigest` for canonical execution and
+fresh-Core replay. Its runtime commitment cache is separate from render
+caching: snapshot validation uses only the documented revision-max scalar and
+never these digests. This does not activate the successor container: `.inkpod`
+v2 remains the exact current production format and no v5 reader or writer is
+emitted by this slice.
 
 ### Header, directory, and record bytes
 
-The v4 header is exactly 128 bytes:
+The v5 header is exactly 128 bytes:
 
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic bytes `49 4E 4B 50 4F 44 00 00` |
-| 8 | 4 | top-level format version = 4 |
-| 12 | 4 | replay epoch = 2 |
+| 8 | 4 | top-level format version = 5 |
+| 12 | 4 | replay epoch = 3 |
 | 16 | 4 | header size = 128 |
 | 20 | 4 | required flags = 0 |
 | 24 | 8 | total file length |

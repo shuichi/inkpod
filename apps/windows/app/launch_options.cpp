@@ -58,6 +58,15 @@ LaunchParseStatus ParseLaunchArguments(
                 has_mode = true;
                 continue;
             }
+            if (!options_ended
+                && IsOption(argument, L"--performance-smoke-test")) {
+                if (has_mode) {
+                    return LaunchParseStatus::InvalidArguments;
+                }
+                parsed.mode = LaunchMode::PerformanceSmoke;
+                has_mode = true;
+                continue;
+            }
             if (!options_ended && IsOption(argument, L"--new-window")) {
                 if (has_new_workspace) {
                     return LaunchParseStatus::InvalidArguments;

@@ -10,4 +10,8 @@ namespace inkpod::windows::ui {
 // window, Core-engine, snapshot-queue, and renderer paths.
 int RunApplicationSmoke(app::ApplicationHost& state) noexcept;
 
+// Runs the reproducible native wheel/drawing performance scenarios used for
+// same-host revision-max comparisons. Timings are emitted to standard error.
+int RunPerformanceSmoke(app::ApplicationHost& state) noexcept;
+
 }  // namespace inkpod::windows::ui

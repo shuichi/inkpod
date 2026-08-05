@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::document::ensure_editable_plane;
-use crate::primitive::digest::{color_bytes, decode_color};
+use crate::primitive::digest::{
+    advance_canonical_document_state_cache, canonical_document_state_cache, color_bytes,
+    decode_color,
+};
 use crate::primitive::raster::{apply as apply_raster_stroke, canonicalize as canonicalize_stroke};
 use crate::*;
 
@@ -16,7 +19,6 @@ enum CachePolicy {
 }
 
 struct PrimitiveTransaction {
-    before: CellDocument,
     working: CellDocument,
     next_stable_id: StableIdCursor,
     output_ids: Vec<u64>,
@@ -24,10 +26,9 @@ struct PrimitiveTransaction {
 
 impl PrimitiveTransaction {
     fn begin(core: &Core) -> Result<Self, CoreError> {
-        let before = core.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let working = core.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
         Ok(Self {
-            working: before.clone(),
-            before,
+            working,
             next_stable_id: core.next_id,
             output_ids: Vec::new(),
         })
@@ -39,7 +40,15 @@ struct CanonicalizedRequest {
     primitive_id: PrimitiveId,
     input_ids: Vec<u64>,
     arguments: Vec<u8>,
-    payload: Vec<u8>,
+}
+
+impl CanonicalizedRequest {
+    fn payload(&self) -> &[u8] {
+        match &self.primitive {
+            CanonicalPrimitive::ApplyRasterStroke(arguments) => &arguments.payload,
+            CanonicalPrimitive::SetMainLineColor(_) | CanonicalPrimitive::ReplacePalette(_) => &[],
+        }
+    }
 }
 
 struct AppliedPrimitive {
@@ -52,7 +61,9 @@ impl Core {
     ///
     /// The request is evaluated against a private working document. Invalid,
     /// stale, overflowing, or semantic no-op work publishes no document state,
-    /// procedure/state ID, history, revision, dirty state, or cache change.
+    /// procedure/state ID, history, revision, dirty state, or render-cache
+    /// change. Validation may cold-fill the private canonical-digest memo, which
+    /// is not semantic or renderer-visible state.
     pub fn execute_primitive(
         &mut self,
         request: PrimitiveRequest,
@@ -126,8 +137,27 @@ impl Core {
     /// Session revision, history, paths, views, transient previews, allocation
     /// layout, and renderer caches do not contribute to the digest.
     pub fn document_state_digest(&self) -> Result<DocumentStateDigest, CoreError> {
+        self.ensure_canonical_state_cache_current()?;
+        self.canonical_state_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.digest())
+            .ok_or(CoreError::InvalidState("canonical state cache is missing"))
+    }
+
+    fn ensure_canonical_state_cache_current(&self) -> Result<(), CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        canonical_document_state(document).map(|(_, digest)| digest)
+        let mut slot = self.canonical_state_cache.borrow_mut();
+        if slot
+            .as_ref()
+            .is_none_or(|cache| cache.revision() != self.document_revision)
+        {
+            *slot = Some(canonical_document_state_cache(
+                document,
+                self.document_revision,
+            )?);
+        }
+        Ok(())
     }
 
     pub(crate) fn execute_canonical_stroke(
@@ -140,7 +170,6 @@ impl Core {
                 "primitive request revision is stale",
             ));
         }
-        let payload = arguments.payload.clone();
         let canonical_arguments = encode_stroke_arguments(&arguments);
         let target_plane_id = arguments.target_plane_id;
         self.execute_canonical(
@@ -149,7 +178,6 @@ impl Core {
                 primitive_id: PrimitiveId::APPLY_RASTER_STROKE,
                 input_ids: vec![target_plane_id],
                 arguments: canonical_arguments,
-                payload,
             },
             None,
         )
@@ -182,7 +210,6 @@ impl Core {
                     primitive_id: PrimitiveId::SET_MAIN_LINE_COLOR,
                     input_ids: Vec::new(),
                     arguments: color_bytes(color)?,
-                    payload: Vec::new(),
                 })
             }
             PrimitiveRequest::ReplacePalette { colors, .. } => {
@@ -192,7 +219,6 @@ impl Core {
                     primitive_id: PrimitiveId::REPLACE_PALETTE,
                     input_ids: Vec::new(),
                     arguments,
-                    payload: Vec::new(),
                 })
             }
             PrimitiveRequest::ApplyRasterStroke {
@@ -208,14 +234,12 @@ impl Core {
                     document.height,
                     target_plane_id,
                 )?;
-                let payload = arguments.payload.clone();
                 let encoded_arguments = encode_stroke_arguments(&arguments);
                 Ok(CanonicalizedRequest {
                     primitive: CanonicalPrimitive::ApplyRasterStroke(arguments),
                     primitive_id: PrimitiveId::APPLY_RASTER_STROKE,
                     input_ids: vec![target_plane_id],
                     arguments: encoded_arguments,
-                    payload,
                 })
             }
         }
@@ -226,7 +250,13 @@ impl Core {
         canonical: CanonicalizedRequest,
         replay: Option<&CanonicalProcedure>,
     ) -> Result<PrimitiveOutcome, CoreError> {
-        let pre_state_digest = self.document_state_digest()?;
+        self.ensure_canonical_state_cache_current()?;
+        let pre_state_digest = self
+            .canonical_state_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.digest())
+            .ok_or(CoreError::InvalidState("canonical state cache is missing"))?;
         let mut transaction = PrimitiveTransaction::begin(self)?;
         let staging_revision = self
             .document_revision
@@ -234,7 +264,6 @@ impl Core {
             .unwrap_or(self.document_revision);
         let applied = apply_primitive(
             &mut transaction.working,
-            &transaction.before,
             &canonical.primitive,
             staging_revision.get(),
         )?;
@@ -258,14 +287,27 @@ impl Core {
             .next_procedure
             .checked_next()
             .ok_or(CoreError::InvalidState("procedure ID overflow"))?;
-        let (_, post_state_digest) = canonical_document_state(&transaction.working)?;
+        let post_state_cache = {
+            let cache = self.canonical_state_cache.borrow();
+            let previous = cache
+                .as_ref()
+                .ok_or(CoreError::InvalidState("canonical state cache is missing"))?;
+            advance_canonical_document_state_cache(
+                &transaction.working,
+                self.document_revision,
+                revision,
+                previous,
+                &applied.history,
+            )?
+        };
+        let post_state_digest = post_state_cache.digest();
 
         if let Some(expected) = replay {
             if expected.primitive_id != canonical.primitive_id
                 || expected.input_ids != canonical.input_ids
                 || expected.output_ids != transaction.output_ids
                 || expected.canonical_arguments != canonical.arguments
-                || expected.canonical_payload != canonical.payload
+                || expected.canonical_payload != canonical.payload()
             {
                 return Err(CoreError::InvalidArgument(
                     "procedure canonical fields do not match its primitive schema",
@@ -278,18 +320,30 @@ impl Core {
             }
         }
 
-        let payload_digest = canonical_payload_digest(&canonical.payload)?;
+        let payload_digest = canonical_payload_digest(canonical.payload())?;
+        let CanonicalizedRequest {
+            primitive,
+            primitive_id,
+            input_ids,
+            arguments,
+        } = canonical;
+        let payload = match primitive {
+            CanonicalPrimitive::ApplyRasterStroke(arguments) => arguments.payload,
+            CanonicalPrimitive::SetMainLineColor(_) | CanonicalPrimitive::ReplacePalette(_) => {
+                Vec::new()
+            }
+        };
         let procedure = Arc::new(CanonicalProcedure {
             procedure_id,
-            primitive_id: canonical.primitive_id,
+            primitive_id,
             primitive_schema_version: PRIMITIVE_SCHEMA_VERSION,
             replay_epoch: ReplayEpoch::CURRENT,
             base_state_id: self.current_state,
             committed_state_id: next_state,
-            input_ids: canonical.input_ids,
+            input_ids,
             output_ids: transaction.output_ids,
-            canonical_arguments: canonical.arguments,
-            canonical_payload: canonical.payload,
+            canonical_arguments: arguments,
+            canonical_payload: payload,
             canonical_payload_digest: payload_digest,
             pre_state_digest,
             post_state_digest,
@@ -324,6 +378,7 @@ impl Core {
         self.publish_canonical_commit(journal_plan);
         self.next_state = following_state;
         self.next_procedure = following_procedure;
+        *self.canonical_state_cache.get_mut() = Some(post_state_cache);
         let dispatch = DispatchOutcome {
             revision: revision.get(),
             accepted_commands: 1,
@@ -334,7 +389,6 @@ impl Core {
 
 fn apply_primitive(
     working: &mut CellDocument,
-    before: &CellDocument,
     primitive: &CanonicalPrimitive,
     revision: u64,
 ) -> Result<Option<AppliedPrimitive>, CoreError> {
@@ -384,7 +438,6 @@ fn apply_primitive(
             }))
         }
     }
-    .map(|applied| if before == working { None } else { applied })
 }
 
 fn encode_palette(colors: &[PixelValue]) -> Result<Vec<u8>, CoreError> {
@@ -476,7 +529,6 @@ fn decode_procedure(procedure: &CanonicalProcedure) -> Result<CanonicalizedReque
                 primitive_id: procedure.primitive_id,
                 input_ids: Vec::new(),
                 arguments: procedure.canonical_arguments.clone(),
-                payload: Vec::new(),
             })
         }
         PrimitiveId::REPLACE_PALETTE => {
@@ -491,7 +543,6 @@ fn decode_procedure(procedure: &CanonicalProcedure) -> Result<CanonicalizedReque
                 primitive_id: procedure.primitive_id,
                 input_ids: Vec::new(),
                 arguments: procedure.canonical_arguments.clone(),
-                payload: Vec::new(),
             })
         }
         PrimitiveId::APPLY_RASTER_STROKE => decode_stroke_procedure(procedure),
@@ -534,7 +585,6 @@ fn decode_stroke_procedure(
         primitive_id: procedure.primitive_id,
         input_ids: procedure.input_ids.clone(),
         arguments: encoded,
-        payload: procedure.canonical_payload.clone(),
     })
 }
 
@@ -547,6 +597,75 @@ mod tests {
         core.new_cell_with_uuid(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, uuid)
             .unwrap();
         core
+    }
+
+    fn edit_pixel(core: &mut Core, x: f32, y: f32, tool: PaintTool, color: [u8; 4]) {
+        let document = core.document_info().unwrap();
+        core.execute_primitive(PrimitiveRequest::ApplyRasterStroke {
+            expected_revision: document.document_revision,
+            target_plane_id: document.color_plane_id,
+            stroke: Stroke {
+                tool,
+                plane: ActivePlane::Color,
+                color,
+                diameter: 1.0,
+                auto_erase: false,
+                pressure_size: false,
+                coordinate_space: CoordinateSpace::Document,
+                samples: vec![StrokeSample {
+                    x,
+                    y,
+                    pressure: 1.0,
+                }],
+            },
+        })
+        .unwrap();
+    }
+
+    fn paint_pixel(core: &mut Core, x: f32, y: f32, color: [u8; 4]) {
+        edit_pixel(core, x, y, PaintTool::Pencil, color);
+    }
+
+    fn assert_hot_digest_matches_cold(core: &Core) {
+        let hot = core.document_state_digest().unwrap();
+        let cold = crate::primitive::canonical_document_state(core.document.as_ref().unwrap())
+            .unwrap()
+            .1;
+        assert_eq!(hot, cold);
+    }
+
+    #[test]
+    fn hot_raster_digest_reads_only_the_changed_tile_and_revision_mismatch_rebuilds() {
+        let mut core = Core::new();
+        core.new_cell_with_uuid(4_096, 4_096, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0x17)
+            .unwrap();
+        paint_pixel(&mut core, 1.0, 1.0, [10, 20, 30, 255]);
+        assert_hot_digest_matches_cold(&core);
+        paint_pixel(&mut core, 65.0, 1.0, [40, 50, 60, 255]);
+        assert_hot_digest_matches_cold(&core);
+
+        paint_pixel(&mut core, 1.0, 1.0, [70, 80, 90, 255]);
+        assert_hot_digest_matches_cold(&core);
+        let cache = core.canonical_state_cache.borrow();
+        assert_eq!(cache.as_ref().unwrap().tile_payload_reads(), 1);
+        drop(cache);
+
+        edit_pixel(&mut core, 65.0, 1.0, PaintTool::Eraser, [0; 4]);
+        assert_hot_digest_matches_cold(&core);
+        let cache = core.canonical_state_cache.borrow();
+        assert_eq!(cache.as_ref().unwrap().tile_payload_reads(), 1);
+        drop(cache);
+
+        paint_pixel(&mut core, 65.0, 1.0, [40, 50, 60, 255]);
+        assert_hot_digest_matches_cold(&core);
+        let cache = core.canonical_state_cache.borrow();
+        assert_eq!(cache.as_ref().unwrap().tile_payload_reads(), 1);
+        drop(cache);
+
+        core.document_revision = core.document_revision.checked_next().unwrap();
+        core.document_state_digest().unwrap();
+        let cache = core.canonical_state_cache.borrow();
+        assert_eq!(cache.as_ref().unwrap().tile_payload_reads(), 2);
     }
 
     #[test]

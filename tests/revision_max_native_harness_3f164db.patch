@@ -1,0 +1,478 @@
+diff --git a/apps/windows/app/app_smoke.cpp b/apps/windows/app/app_smoke.cpp
+index bec112173add177d7da6b47d043a6e23bbd4dbc2..e30a727060e2f3777d065578a0ea8e2208387109 100644
+--- a/apps/windows/app/app_smoke.cpp
++++ b/apps/windows/app/app_smoke.cpp
+@@ -8,6 +8,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cerrno>
++#include <chrono>
+ #include <climits>
+ #include <cmath>
+ #include <cstddef>
+@@ -7953,6 +7954,303 @@ int RunMultiWorkspaceWindowSmoke(ApplicationHost& state) noexcept {
+     return 0;
+ }
+ 
++int RunRevisionMaxPerformanceSmoke(ApplicationHost& state) noexcept {
++    constexpr std::uint32_t kDocumentExtent = 1024U;
++    constexpr int kTileRows = 16;
++    constexpr int kWarmWheelPairs = 32;
++    constexpr int kMeasuredWheelPairs = 256;
++    constexpr int kMeasuredStrokes = 16;
++    constexpr int kStrokeSegments = 32;
++
++    auto* group = state.Workspace().editors.Active();
++    HWND canvas = state.Workspace().windows.canvas;
++    if (group == nullptr || canvas == nullptr || group->canvas != canvas
++        || state.engine == nullptr || state.renderer == nullptr
++        || CreateCell(state, kDocumentExtent, kDocumentExtent, 96'000U)
++            != INKPOD_STATUS_OK
++        || state.engine->WaitIdle() != INKPOD_STATUS_OK
++        || !state.renderer->WaitQueueIdleForSmokeTest()) {
++        return 901;
++    }
++    PumpPendingWindowMessages();
++
++    inkpod::renderer::CanvasDocumentBounds bounds{};
++    if (!inkpod::renderer::GetCanvasDocumentBounds(canvas, bounds)) {
++        return 902;
++    }
++    const double zoom = (bounds.right - bounds.left)
++        / static_cast<double>(kDocumentExtent);
++    if (!std::isfinite(zoom) || zoom <= 0.0
++        || std::abs(
++               (bounds.bottom - bounds.top)
++                   / static_cast<double>(kDocumentExtent)
++               - zoom)
++            > 0.001) {
++        return 903;
++    }
++
++    const auto device_x = [bounds, zoom](double document_x) noexcept {
++        return static_cast<int>(std::lround(bounds.left + document_x * zoom));
++    };
++    const auto device_y = [bounds, zoom](double document_y) noexcept {
++        return static_cast<int>(std::lround(bounds.top + document_y * zoom));
++    };
++    const auto send_stroke = [&](bool vertical, double fixed_document) noexcept {
++        const int start_x = vertical ? device_x(fixed_document) : device_x(1.0);
++        const int start_y = vertical ? device_y(1.0) : device_y(fixed_document);
++        state.renderer->SetQueuePausedForSmokeTest(true);
++        bool sent = SendMessageW(
++                        canvas,
++                        WM_LBUTTONDOWN,
++                        MK_LBUTTON,
++                        MAKELPARAM(start_x, start_y))
++            == 1;
++        for (int segment = 1; sent && segment <= kStrokeSegments; ++segment) {
++            const double moving_document = 1.0
++                + (static_cast<double>(kDocumentExtent) - 2.0)
++                    * static_cast<double>(segment)
++                    / static_cast<double>(kStrokeSegments);
++            const int x = vertical ? start_x : device_x(moving_document);
++            const int y = vertical ? device_y(moving_document) : start_y;
++            sent = SendMessageW(
++                       canvas,
++                       WM_MOUSEMOVE,
++                       MK_LBUTTON,
++                       MAKELPARAM(x, y))
++                == 1;
++        }
++        const int end_x = vertical
++            ? start_x
++            : device_x(static_cast<double>(kDocumentExtent) - 1.0);
++        const int end_y = vertical
++            ? device_y(static_cast<double>(kDocumentExtent) - 1.0)
++            : start_y;
++        if (sent) {
++            sent = SendMessageW(
++                       canvas, WM_LBUTTONUP, 0, MAKELPARAM(end_x, end_y))
++                    == 1
++                && state.engine->WaitIdle() == INKPOD_STATUS_OK;
++        }
++        state.renderer->SetQueuePausedForSmokeTest(false);
++        return sent && state.renderer->WaitQueueIdleForSmokeTest();
++    };
++
++    // Materialize every 64x64 tile before timing. This makes a payload scan in
++    // a view-only snapshot scale with the complete allocated tile grid.
++    for (int row = 0; row < kTileRows; ++row) {
++        if (!send_stroke(
++                false,
++                static_cast<double>(row * 64) + 16.0)) {
++            return 904;
++        }
++    }
++    InkpodResourceUsage core_usage{};
++    if (!state.renderer->WaitQueueIdleForSmokeTest()
++        || !QueryCoreResourceUsage(
++            state,
++            state.Document().id,
++            state.Document().generation,
++            core_usage)
++        || core_usage.document_tile_count
++            != static_cast<std::uint64_t>(kTileRows * kTileRows)
++        || core_usage.document_tile_bytes != 1'048'576U) {
++        return 905;
++    }
++
++    RECT canvas_rect{};
++    if (GetWindowRect(canvas, &canvas_rect) == FALSE) {
++        return 906;
++    }
++    const int wheel_x = canvas_rect.left
++        + (canvas_rect.right - canvas_rect.left) / 2;
++    const int wheel_y = canvas_rect.top
++        + (canvas_rect.bottom - canvas_rect.top) / 2;
++    const auto send_wheel = [&](int delta) noexcept {
++        state.renderer->SetQueuePausedForSmokeTest(true);
++        const bool sent = SendMessageW(
++                              canvas,
++                              WM_MOUSEWHEEL,
++                              MAKEWPARAM(0, delta),
++                              MAKELPARAM(wheel_x, wheel_y))
++            == 1;
++        state.renderer->SetQueuePausedForSmokeTest(false);
++        return sent && state.renderer->WaitQueueIdleForSmokeTest();
++    };
++    const auto send_wheel_pair = [&]() noexcept {
++        return send_wheel(WHEEL_DELTA) && send_wheel(-WHEEL_DELTA);
++    };
++    for (int pair = 0; pair < kWarmWheelPairs; ++pair) {
++        if (!send_wheel_pair()) {
++            return 907;
++        }
++    }
++    if (state.engine->WaitIdle() != INKPOD_STATUS_OK
++        || !state.renderer->WaitQueueIdleForSmokeTest()) {
++        return 908;
++    }
++
++    InkpodDocumentInfo before_wheel{};
++    if (!QueryDocument(state, before_wheel)) {
++        return 909;
++    }
++    const auto wheel_resources_before = state.renderer->ResourceUsage();
++    const std::uint64_t wheel_frames_before =
++        state.renderer->PresentedFrameCount(
++            group->canvas_id,
++            group->generation);
++    const auto wheel_started = std::chrono::steady_clock::now();
++    for (int pair = 0; pair < kMeasuredWheelPairs; ++pair) {
++        if (!send_wheel_pair()) {
++            return 910;
++        }
++    }
++    if (state.engine->WaitIdle() != INKPOD_STATUS_OK
++        || !state.renderer->WaitQueueIdleForSmokeTest()) {
++        return 911;
++    }
++    const auto wheel_elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
++        std::chrono::steady_clock::now() - wheel_started)
++                                   .count();
++    InkpodDocumentInfo after_wheel{};
++    const auto wheel_resources_after = state.renderer->ResourceUsage();
++    const std::uint64_t wheel_frames_after =
++        state.renderer->PresentedFrameCount(
++            group->canvas_id,
++            group->generation);
++    const bool queried_after_wheel = QueryDocument(state, after_wheel);
++    if (!queried_after_wheel
++        || after_wheel.document_revision != before_wheel.document_revision
++        || after_wheel.main_plane_checksum != before_wheel.main_plane_checksum
++        || after_wheel.view_revision == before_wheel.view_revision
++        || wheel_frames_after - wheel_frames_before
++            != static_cast<std::uint64_t>(kMeasuredWheelPairs * 2)
++        || wheel_resources_after.queue_rejection_count
++            != wheel_resources_before.queue_rejection_count
++        || wheel_resources_after.resource_limit_count
++            != wheel_resources_before.resource_limit_count) {
++        std::fprintf(
++            stderr,
++            "wheel validation query=%d document=%llu/%llu view=%llu/%llu "
++            "checksum=%llu/%llu frames=%llu replacements=%llu/%llu "
++            "rejections=%llu/%llu limits=%llu/%llu\n",
++            queried_after_wheel ? 1 : 0,
++            static_cast<unsigned long long>(before_wheel.document_revision),
++            static_cast<unsigned long long>(after_wheel.document_revision),
++            static_cast<unsigned long long>(before_wheel.view_revision),
++            static_cast<unsigned long long>(after_wheel.view_revision),
++            static_cast<unsigned long long>(before_wheel.main_plane_checksum),
++            static_cast<unsigned long long>(after_wheel.main_plane_checksum),
++            static_cast<unsigned long long>(
++                wheel_frames_after - wheel_frames_before),
++            static_cast<unsigned long long>(
++                wheel_resources_before.queue_replacement_count),
++            static_cast<unsigned long long>(
++                wheel_resources_after.queue_replacement_count),
++            static_cast<unsigned long long>(
++                wheel_resources_before.queue_rejection_count),
++            static_cast<unsigned long long>(
++                wheel_resources_after.queue_rejection_count),
++            static_cast<unsigned long long>(
++                wheel_resources_before.resource_limit_count),
++            static_cast<unsigned long long>(
++                wheel_resources_after.resource_limit_count));
++        return 912;
++    }
++    std::fprintf(
++        stderr,
++        "inkpod-native-performance scenario=wheel_zoom pairs=%d "
++        "events=%d tiles=%llu tile_bytes=%llu presented_frames=%llu "
++        "queue_replacements=%llu "
++        "elapsed_ns=%lld\n",
++        kMeasuredWheelPairs,
++        kMeasuredWheelPairs * 2,
++        static_cast<unsigned long long>(core_usage.document_tile_count),
++        static_cast<unsigned long long>(core_usage.document_tile_bytes),
++        static_cast<unsigned long long>(
++            wheel_frames_after - wheel_frames_before),
++        static_cast<unsigned long long>(
++            wheel_resources_after.queue_replacement_count
++            - wheel_resources_before.queue_replacement_count),
++        static_cast<long long>(wheel_elapsed));
++
++    // One untimed stroke warms the complete input/Core/renderer route without
++    // overlapping the measured tile-centre strokes.
++    if (!send_stroke(true, 8.0)
++        || !state.renderer->WaitQueueIdleForSmokeTest()) {
++        return 913;
++    }
++    InkpodDocumentInfo before_drawing{};
++    if (!QueryDocument(state, before_drawing)) {
++        return 914;
++    }
++    const inkpod::app::EngineMetrics drawing_metrics_before =
++        state.engine->Metrics();
++    const auto drawing_resources_before = state.renderer->ResourceUsage();
++    const std::uint64_t drawing_frames_before =
++        state.renderer->PresentedFrameCount(
++            group->canvas_id,
++            group->generation);
++    const auto drawing_started = std::chrono::steady_clock::now();
++    for (int stroke = 0; stroke < kMeasuredStrokes; ++stroke) {
++        if (!send_stroke(
++                true,
++                static_cast<double>(stroke * 64) + 32.0)) {
++            return 915;
++        }
++    }
++    if (state.engine->WaitIdle() != INKPOD_STATUS_OK
++        || !state.renderer->WaitQueueIdleForSmokeTest()) {
++        return 916;
++    }
++    const auto drawing_elapsed =
++        std::chrono::duration_cast<std::chrono::nanoseconds>(
++            std::chrono::steady_clock::now() - drawing_started)
++            .count();
++    InkpodDocumentInfo after_drawing{};
++    const inkpod::app::EngineMetrics drawing_metrics_after =
++        state.engine->Metrics();
++    const auto drawing_resources_after = state.renderer->ResourceUsage();
++    const std::uint64_t drawing_frames_after =
++        state.renderer->PresentedFrameCount(
++            group->canvas_id,
++            group->generation);
++    if (!QueryDocument(state, after_drawing)
++        || after_drawing.document_revision
++            != before_drawing.document_revision + kMeasuredStrokes
++        || after_drawing.main_plane_checksum
++            == before_drawing.main_plane_checksum
++        || drawing_metrics_after.completed_strokes
++            != drawing_metrics_before.completed_strokes + kMeasuredStrokes
++        || drawing_metrics_after.completed_samples
++            != drawing_metrics_before.completed_samples
++                + static_cast<std::uint64_t>(
++                    kMeasuredStrokes * (kStrokeSegments + 2))
++        || drawing_frames_after - drawing_frames_before
++            != static_cast<std::uint64_t>(kMeasuredStrokes)
++        || drawing_resources_after.queue_rejection_count
++            != drawing_resources_before.queue_rejection_count
++        || drawing_resources_after.resource_limit_count
++            != drawing_resources_before.resource_limit_count) {
++        return 917;
++    }
++    std::fprintf(
++        stderr,
++        "inkpod-native-performance scenario=drawing strokes=%d "
++        "samples=%llu presented_frames=%llu queue_replacements=%llu "
++        "elapsed_ns=%lld\n",
++        kMeasuredStrokes,
++        static_cast<unsigned long long>(
++            drawing_metrics_after.completed_samples
++            - drawing_metrics_before.completed_samples),
++        static_cast<unsigned long long>(
++            drawing_frames_after - drawing_frames_before),
++        static_cast<unsigned long long>(
++            drawing_resources_after.queue_replacement_count
++            - drawing_resources_before.queue_replacement_count),
++        static_cast<long long>(drawing_elapsed));
++    return 0;
++}
++
+ 
+ }  // namespace inkpod::windows::ui::runtime
+ 
+@@ -8030,4 +8328,15 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
+     return exit_code;
+ }
+ 
++int RunPerformanceSmoke(app::ApplicationHost& state) noexcept {
++    const int exit_code = runtime::RunRevisionMaxPerformanceSmoke(state);
++    if (exit_code != 0) {
++        std::fprintf(
++            stderr,
++            "inkpod native performance smoke failed: %d\n",
++            exit_code);
++    }
++    return exit_code;
++}
++
+ }  // namespace inkpod::windows::ui
+diff --git a/apps/windows/app/app_smoke.h b/apps/windows/app/app_smoke.h
+index 598ba21fb92a1fbcc8a50cf7b807247aed1d4e0a..d83da6c21714fe294eecccf65e02a5e8294bf77a 100644
+--- a/apps/windows/app/app_smoke.h
++++ b/apps/windows/app/app_smoke.h
+@@ -10,4 +10,8 @@ namespace inkpod::windows::ui {
+ // window, Core-engine, snapshot-queue, and renderer paths.
+ int RunApplicationSmoke(app::ApplicationHost& state) noexcept;
+ 
++// Runs the reproducible native wheel/drawing performance scenarios used for
++// same-host revision-max comparisons. Timings are emitted to standard error.
++int RunPerformanceSmoke(app::ApplicationHost& state) noexcept;
++
+ }  // namespace inkpod::windows::ui
+diff --git a/apps/windows/app/application.cpp b/apps/windows/app/application.cpp
+index 7e7427df22679aebcd3191ec4769af886817c271..6b7c188b82b8c0dbdc113ad2ce2806ba8f3dd85b 100644
+--- a/apps/windows/app/application.cpp
++++ b/apps/windows/app/application.cpp
+@@ -652,7 +652,9 @@ int Application::Run() {
+ 
+     int exit_code{};
+     if (launch_.smoke_test) {
+-        exit_code = windows::ui::RunApplicationSmoke(state);
++        exit_code = launch_.performance_smoke_test
++            ? windows::ui::RunPerformanceSmoke(state)
++            : windows::ui::RunApplicationSmoke(state);
+     } else {
+         for (std::size_t index = 0U; index < state.Workspaces().Count(); ++index) {
+             WorkspaceWindow* workspace = state.Workspaces().At(index);
+diff --git a/apps/windows/app/application.h b/apps/windows/app/application.h
+index f48fd949f5cd703e7b884b68b02c10c6c4aa05df..3acf9b30981921a13a2f49ae85c1a8e1883bc3b8 100644
+--- a/apps/windows/app/application.h
++++ b/apps/windows/app/application.h
+@@ -14,6 +14,7 @@ struct ApplicationLaunch {
+     HINSTANCE instance{};
+     int show_command{};
+     bool smoke_test{};
++    bool performance_smoke_test{};
+     bool open_in_new_workspace{};
+     std::vector<std::wstring> document_paths;
+ };
+diff --git a/apps/windows/app/launch_options.cpp b/apps/windows/app/launch_options.cpp
+index 423d7fa5e833db9c7c32880cff363ff05677fcfd..d85e2d71a07e162e0d60a0369d7636f59c57e87e 100644
+--- a/apps/windows/app/launch_options.cpp
++++ b/apps/windows/app/launch_options.cpp
+@@ -58,6 +58,15 @@ LaunchParseStatus ParseLaunchArguments(
+                 has_mode = true;
+                 continue;
+             }
++            if (!options_ended
++                && IsOption(argument, L"--performance-smoke-test")) {
++                if (has_mode) {
++                    return LaunchParseStatus::InvalidArguments;
++                }
++                parsed.mode = LaunchMode::PerformanceSmoke;
++                has_mode = true;
++                continue;
++            }
+             if (!options_ended && IsOption(argument, L"--new-window")) {
+                 if (has_new_workspace) {
+                     return LaunchParseStatus::InvalidArguments;
+diff --git a/apps/windows/app/launch_options.h b/apps/windows/app/launch_options.h
+index ca4f5017cf8cb7be884e40bad5c02adcefc51d3f..49fdec59e4275045a6ce8a1c65b8505a1b689a87 100644
+--- a/apps/windows/app/launch_options.h
++++ b/apps/windows/app/launch_options.h
+@@ -8,6 +8,7 @@ namespace inkpod::app {
+ enum class LaunchMode {
+     Application,
+     ApplicationSmoke,
++    PerformanceSmoke,
+     AbiSmoke,
+ };
+ 
+diff --git a/apps/windows/app/main.cpp b/apps/windows/app/main.cpp
+index f9fd691331bf42de2b9d4f8c99ed789a8d669875..8538e0ef2ae416c3729d28add7f38bcd75304aee 100644
+--- a/apps/windows/app/main.cpp
++++ b/apps/windows/app/main.cpp
+@@ -28,10 +28,14 @@ int APIENTRY wWinMain(
+     if (options.mode == inkpod::app::LaunchMode::AbiSmoke) {
+         return InkpodRunAbiSmoke();
+     }
++    const bool performance_smoke =
++        options.mode == inkpod::app::LaunchMode::PerformanceSmoke;
+     inkpod::app::ApplicationLaunch launch{
+         instance,
+         show_command,
+-        options.mode == inkpod::app::LaunchMode::ApplicationSmoke,
++        options.mode == inkpod::app::LaunchMode::ApplicationSmoke
++            || performance_smoke,
++        performance_smoke,
+         options.open_in_new_workspace,
+         std::move(options.document_paths)};
+     return inkpod::app::Application(std::move(launch)).Run();
+diff --git a/apps/windows/renderer/canvas.cpp b/apps/windows/renderer/canvas.cpp
+index ba76af24a87dc7a4d20e4549514053a3cf09b817..2820cf33ce8bfb91f97b13d347e65955ad84256d 100644
+--- a/apps/windows/renderer/canvas.cpp
++++ b/apps/windows/renderer/canvas.cpp
+@@ -1810,6 +1810,7 @@ public:
+                 }
+                 stopping_ = false;
+                 running_ = true;
++                in_flight_work_ = 0U;
+             }
+             worker_ = std::thread([this, ready] { Run(ready); });
+             const HRESULT result = future.get();
+@@ -2077,7 +2078,7 @@ public:
+             return false;
+         }
+         queue_idle_.wait(lock, [this] {
+-            return stopping_ || work_.empty();
++            return stopping_ || (work_.empty() && in_flight_work_ == 0U);
+         });
+         return !stopping_;
+     }
+@@ -2476,9 +2477,7 @@ private:
+                 }
+                 item = std::move(work_.front());
+                 work_.pop_front();
+-                if (work_.empty()) {
+-                    queue_idle_.notify_all();
+-                }
++                ++in_flight_work_;
+             }
+             HRESULT result{};
+             SurfaceRecord* failure_surface{};
+@@ -2499,6 +2498,13 @@ private:
+             if (FAILED(result) && result != E_INVALIDARG && failure_surface != nullptr) {
+                 ReportFailure(*failure_surface, result);
+             }
++            {
++                std::lock_guard lock(mutex_);
++                --in_flight_work_;
++                if (work_.empty() && in_flight_work_ == 0U) {
++                    queue_idle_.notify_all();
++                }
++            }
+         }
+         surfaces_.clear();
+         shared_.Discard();
+@@ -2513,6 +2519,7 @@ private:
+     bool stopping_{true};
+     bool running_{};
+     bool queue_paused_for_smoke_test_{};
++    std::size_t in_flight_work_{};
+     std::deque<HostWork> work_;
+     std::vector<PublishedSurface> published_;
+     std::vector<SurfaceRecord> surfaces_;

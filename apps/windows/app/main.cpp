@@ -28,10 +28,14 @@ int APIENTRY wWinMain(
     if (options.mode == inkpod::app::LaunchMode::AbiSmoke) {
         return InkpodRunAbiSmoke();
     }
+    const bool performance_smoke =
+        options.mode == inkpod::app::LaunchMode::PerformanceSmoke;
     inkpod::app::ApplicationLaunch launch{
         instance,
         show_command,
-        options.mode == inkpod::app::LaunchMode::ApplicationSmoke,
+        options.mode == inkpod::app::LaunchMode::ApplicationSmoke
+            || performance_smoke,
+        performance_smoke,
         options.open_in_new_workspace,
         std::move(options.document_paths)};
     return inkpod::app::Application(std::move(launch)).Run();

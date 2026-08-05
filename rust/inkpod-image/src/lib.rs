@@ -26,7 +26,7 @@ pub use palette::{MAX_PALETTE_COLORS, Palette};
 pub use pixel::{PixelFormat, PixelValue};
 pub use raster::{
     FNV_OFFSET, MAX_RASTER_DIMENSION, RasterError, TILE_SIZE, TileCoord, TileData, TileRaster,
-    fnv_bytes,
+    TileView, fnv_bytes,
 };
 pub use sampling::{
     ColorCheckCategory, ColorCheckMode, EyedropperSource, PlaneSample, color_check_category,

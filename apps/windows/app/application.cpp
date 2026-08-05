@@ -652,7 +652,9 @@ int Application::Run() {
 
     int exit_code{};
     if (launch_.smoke_test) {
-        exit_code = windows::ui::RunApplicationSmoke(state);
+        exit_code = launch_.performance_smoke_test
+            ? windows::ui::RunPerformanceSmoke(state)
+            : windows::ui::RunApplicationSmoke(state);
     } else {
         for (std::size_t index = 0U; index < state.Workspaces().Count(); ++index) {
             WorkspaceWindow* workspace = state.Workspaces().At(index);

@@ -14,6 +14,7 @@ struct ApplicationLaunch {
     HINSTANCE instance{};
     int show_command{};
     bool smoke_test{};
+    bool performance_smoke_test{};
     bool open_in_new_workspace{};
     std::vector<std::wstring> document_paths;
 };

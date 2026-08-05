@@ -70,6 +70,32 @@ fn sparse_tiles_are_copy_on_write_and_edge_tiles_are_compact() {
 }
 
 #[test]
+fn borrowed_tile_view_exposes_full_stride_and_logical_edge_extent() {
+    let mut raster = TileRaster::new(65, 66, PixelFormat::StraightRgba8).unwrap();
+    let coord = TileCoord { x: 1, y: 1 };
+    assert!(raster.tile_view(coord).is_none());
+    raster
+        .set_pixel(64, 64, PixelValue::Rgba([1, 2, 3, 4]), 7)
+        .unwrap();
+    raster
+        .set_pixel(64, 65, PixelValue::Rgba([5, 6, 7, 8]), 8)
+        .unwrap();
+
+    let view = raster.tile_view(coord).unwrap();
+    assert_eq!(view.coord(), coord);
+    assert_eq!((view.width(), view.height()), (1, 2));
+    assert_eq!(view.row_stride_bytes(), TILE_SIZE * 4);
+    assert_eq!(view.bytes().len(), (TILE_SIZE * TILE_SIZE * 4) as usize);
+    assert_eq!(&view.bytes()[0..4], &[1, 2, 3, 4]);
+    let second_row = view.row_stride_bytes() as usize;
+    assert_eq!(&view.bytes()[second_row..second_row + 4], &[5, 6, 7, 8]);
+    assert_eq!(view.revision(), 8);
+
+    let same_view = raster.tile_view(coord).unwrap();
+    assert_eq!(view.bytes().as_ptr(), same_view.bytes().as_ptr());
+}
+
+#[test]
 fn transparent_write_does_not_allocate_and_empty_tile_can_be_removed() {
     let mut raster = TileRaster::new(128, 128, PixelFormat::BinaryMask8).unwrap();
     raster.set_pixel(2, 3, PixelValue::Binary(0), 1).unwrap();

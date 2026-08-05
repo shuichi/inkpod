@@ -26,6 +26,46 @@ Automated success does not replace the real assistive-technology and IME rows
 below. It does make routing, lifetime, and state-preservation regressions
 repeatable on every supported build.
 
+## Native revision-max performance gate
+
+Run the private performance smoke from a native Release build. Because `inkpod`
+is a Windows GUI executable, capture its standard-error records explicitly:
+
+```powershell
+$perfLog = Join-Path $env:TEMP 'inkpod-native-performance.log'
+$process = Start-Process -FilePath '.\inkpod.exe' `
+    -ArgumentList '--performance-smoke-test' -Wait -PassThru `
+    -WindowStyle Hidden -RedirectStandardError $perfLog
+Get-Content -LiteralPath $perfLog
+if ($process.ExitCode -ne 0) { throw "performance smoke failed: $($process.ExitCode)" }
+```
+
+The command automatically rejects semantic drift, an incomplete 256-tile
+fixture, wheel edits to document state, drawing revision/sample-count drift,
+anything other than 512 wheel Presents and 16 drawing Presents, queue rejection,
+or renderer resource-limit events. Wall-clock acceptance requires the exact
+same harness in detached old revision-max commit `3f164db` and the candidate on
+the same native host, toolchain, target, Release profile, display/refresh mode,
+and power scheme. Apply the versioned
+`tests/revision_max_native_harness_3f164db.patch` (SHA-256
+`2b434f0ab5827fc987f0cb583ff68f65c4af6b9aaf89531fa8735bee071044a0`) to a
+fresh detached `3f164db` only after `git apply --check` succeeds. Confirm that
+`git status --short` then lists exactly the artifact's eight allowlisted files;
+do not reconstruct the old harness by hand. Before accepting measurements,
+verify that renderer idle means
+both an empty queue and zero in-flight work after the last GPU update/Present
+path returns; a wait that observes queue removal alone is invalid. Use internal
+warm-up and at least five order-interleaved pairs. If the first candidate median
+is above the old median, reverse the starting order and retain both the initial
+and remeasurement samples; the recorded canonical run therefore contains 18
+pairs. A confirmed candidate median above the old median for either
+`wheel_zoom` or `drawing` rejects the change; there is no general 25% or
+100-microsecond allowance. If a display-paced sub-resolution paired sign is
+explicitly classified as measurement noise, record its exact ratio, pair count,
+and decision instead of silently rounding it away. Such a decision is specific
+to that run and is not a reusable waiver. Exact fixture semantics, samples,
+medians, and paired ratios are in `core-benchmark-baseline.md`.
+
 ## Native interaction rows
 
 Perform these rows once on native x64 for a release candidate. Native ARM64

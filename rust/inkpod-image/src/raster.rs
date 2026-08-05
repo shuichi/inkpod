@@ -49,6 +49,62 @@ pub struct TileData {
     pub revision: u64,
 }
 
+/// Borrowed view of one allocated raster tile.
+///
+/// [`Self::bytes`] exposes the complete fixed-size tile backing store without
+/// copying it. For an edge tile, only the rectangle described by
+/// [`Self::width`] and [`Self::height`] is logical image content; callers must
+/// advance rows by [`Self::row_stride_bytes`] and must not interpret padding as
+/// document pixels. The borrow remains valid only while the source
+/// [`TileRaster`] is immutably borrowed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TileView<'a> {
+    coord: TileCoord,
+    width: u32,
+    height: u32,
+    row_stride_bytes: u32,
+    bytes: &'a [u8],
+    revision: u64,
+}
+
+impl<'a> TileView<'a> {
+    /// Returns the tile coordinate within its raster.
+    #[must_use]
+    pub const fn coord(self) -> TileCoord {
+        self.coord
+    }
+
+    /// Returns the logical width in pixels, excluding edge padding.
+    #[must_use]
+    pub const fn width(self) -> u32 {
+        self.width
+    }
+
+    /// Returns the logical height in pixels, excluding edge padding.
+    #[must_use]
+    pub const fn height(self) -> u32 {
+        self.height
+    }
+
+    /// Returns the byte distance between adjacent rows in [`Self::bytes`].
+    #[must_use]
+    pub const fn row_stride_bytes(self) -> u32 {
+        self.row_stride_bytes
+    }
+
+    /// Borrows the complete fixed-size tile backing bytes without allocation.
+    #[must_use]
+    pub const fn bytes(self) -> &'a [u8] {
+        self.bytes
+    }
+
+    /// Returns the revision assigned by the most recent effective tile write.
+    #[must_use]
+    pub const fn revision(self) -> u64 {
+        self.revision
+    }
+}
+
 /// Sparse raster whose allocated tiles are shared until the next write.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TileRaster {
@@ -114,6 +170,28 @@ impl TileRaster {
     #[must_use]
     pub fn tile_revision(&self, coord: TileCoord) -> u64 {
         self.tiles.get(&coord).map_or(0, |tile| tile.revision)
+    }
+
+    /// Borrows one allocated tile without copying or compacting its pixels.
+    ///
+    /// The returned bytes contain the full [`TILE_SIZE`] by [`TILE_SIZE`]
+    /// backing store. Use the view's logical dimensions and row stride when
+    /// reading an edge tile. Returns `None` for an unallocated or out-of-range
+    /// coordinate. This read-only query does not change tile revisions.
+    #[must_use]
+    pub fn tile_view(&self, coord: TileCoord) -> Option<TileView<'_>> {
+        let tile = self.tiles.get(&coord)?;
+        let (width, height) = self.tile_dimensions(coord)?;
+        let bytes_per_pixel = u32::try_from(self.format.bytes_per_pixel()).ok()?;
+        let row_stride_bytes = TILE_SIZE.checked_mul(bytes_per_pixel)?;
+        Some(TileView {
+            coord,
+            width,
+            height,
+            row_stride_bytes,
+            bytes: &tile.bytes,
+            revision: tile.revision,
+        })
     }
 
     pub fn pixel(&self, x: u32, y: u32) -> Result<PixelValue, RasterError> {

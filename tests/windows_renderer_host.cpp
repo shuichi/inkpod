@@ -233,9 +233,13 @@ int Run() {
     }
 
     host.SetQueuePausedForSmokeTest(true);
+    const std::uint64_t frames_before_queue_drain = host.PresentedFrameCount(
+        first_canvas, first_surface_generation);
     for (std::size_t index = 0U; index < 256U; ++index) {
         host.RequestRender(first_canvas, first_surface_generation);
     }
+    const std::uint64_t queued_render_work =
+        host.ResourceUsage().queued_work_count;
     inkpod::renderer::SnapshotEnvelope queue_failure{};
     if (!replacement_core.Build(first_sink->Route(), queue_failure)
         || first_sink->Submit(queue_failure)) {
@@ -246,7 +250,10 @@ int Run() {
     if (!host.WaitQueueIdleForSmokeTest()) {
         return 24;
     }
-    if (host.ResourceUsage().queue_rejection_count == 0U) {
+    if (host.ResourceUsage().queue_rejection_count == 0U
+        || queued_render_work == 0U
+        || host.PresentedFrameCount(first_canvas, first_surface_generation)
+            != frames_before_queue_drain + queued_render_work) {
         return 32;
     }
     host.SetVisible(first_canvas, first_surface_generation, true);

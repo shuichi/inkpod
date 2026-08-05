@@ -1810,6 +1810,7 @@ public:
                 }
                 stopping_ = false;
                 running_ = true;
+                in_flight_work_ = 0U;
             }
             worker_ = std::thread([this, ready] { Run(ready); });
             const HRESULT result = future.get();
@@ -2077,7 +2078,7 @@ public:
             return false;
         }
         queue_idle_.wait(lock, [this] {
-            return stopping_ || work_.empty();
+            return stopping_ || (work_.empty() && in_flight_work_ == 0U);
         });
         return !stopping_;
     }
@@ -2476,9 +2477,7 @@ private:
                 }
                 item = std::move(work_.front());
                 work_.pop_front();
-                if (work_.empty()) {
-                    queue_idle_.notify_all();
-                }
+                ++in_flight_work_;
             }
             HRESULT result{};
             SurfaceRecord* failure_surface{};
@@ -2499,6 +2498,13 @@ private:
             if (FAILED(result) && result != E_INVALIDARG && failure_surface != nullptr) {
                 ReportFailure(*failure_surface, result);
             }
+            {
+                std::lock_guard lock(mutex_);
+                --in_flight_work_;
+                if (work_.empty() && in_flight_work_ == 0U) {
+                    queue_idle_.notify_all();
+                }
+            }
         }
         surfaces_.clear();
         shared_.Discard();
@@ -2513,6 +2519,7 @@ private:
     bool stopping_{true};
     bool running_{};
     bool queue_paused_for_smoke_test_{};
+    std::size_t in_flight_work_{};
     std::deque<HostWork> work_;
     std::vector<PublishedSurface> published_;
     std::vector<SurfaceRecord> surfaces_;

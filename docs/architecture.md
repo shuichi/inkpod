@@ -148,8 +148,17 @@ against private working state, detects semantic no-op, and publishes through
 one explicit primitive transaction boundary. `Core::replay_procedure` validates
 the resulting canonical procedure and executes it through the same kernel;
 `Core::document_state_digest` observes the memory-layout-independent BLAKE3-256
-semantic state digest. The established main-line, palette, and stroke public
-Rust APIs are wrappers over this executor rather than alternate mutation
+semantic state digest. Schema 3 is a domain-separated commitment tree: one
+metadata commitment plus stable-Plane-ID-keyed raster roots, whose leaves commit
+to logical tile pixels. A revision-matched raster-tile edit reuses every
+unchanged leaf and updates only the changed tile, its raster root, and the
+document root. Metadata-only edits instead recompute the metadata commitment,
+and broader document edits use a cold rebuild; either path produces the same
+digest as a cold recomputation, independent of edit count and tile
+materialization order. This runtime state-digest cache is not the render cache,
+does not supply `RenderTile.source_revision`, and is never consulted while
+building a view-only snapshot. The established main-line, palette, and stroke
+public Rust APIs are wrappers over this executor rather than alternate mutation
 implementations.
 
 While history remains within that canonical slice, Core now owns an append-only runtime
@@ -593,6 +602,55 @@ creates D2D geometry, and reconstructs GPU resources from the retained snapshot
 after device loss. Core geometry remains in document coordinates; zoom, pan, and
 flip are render transforms only.
 
+### Canonical revision-max render-cache identity
+
+The render-cache source identity intentionally uses the pre-M1 revision-max
+design as its canonical performance contract. For each document tile coordinate,
+Core computes one scalar value as the maximum of all visible plane
+`tile_revision` values at that coordinate, the selection tile revision, and the
+Light Table source revision. Cache validation compares that value with the
+private `RenderTile.source_revision`. A match reuses the composed pixel buffer
+and renderer-facing tile revision; a mismatch composes only that coordinate and
+publishes a new tile revision. An all-transparent composition is not retained in
+the cache and may therefore be recomposed if the coordinate remains in the
+snapshot candidate set.
+
+This validation path reads only fixed-width revision scalars. It does not call
+`tile_data()`, copy or scan source pixels, compute a payload hash, or maintain a
+content digest, clone generation, deletion tombstone, epoch, or negative cache.
+Its cost is proportional to the number of visible plane sources rather than the
+number of source bytes. Zoom and pan therefore update the view transform and
+reuse unchanged composed tiles without making snapshot construction scale with
+the raster payload size.
+
+The regression boundary is executable. A normalized source lock covers the
+complete primary `build_snapshot` validation body together with the
+revision-max helper, so adding a delegated validation helper also requires an
+explicit audit. Forbidden-token checks reject direct tile/pixel/hash/digest
+access in both bodies. Test-only counters at the sanctioned composition payload
+access sites prove that the initial compose reads payload and that 128
+subsequent cache-hit wheel-style zoom snapshots perform zero payload accesses.
+
+`source_revision` is private cache bookkeeping. `RenderTile` semantic equality
+deliberately excludes it, and it is not exposed through the C ABI or included in
+canonical document/procedure digests or persistence. Opacity, visibility, layer
+order, main-line color, color-check mode, and other render metadata outside the
+revision-max formula rely on the owning edit path's existing atomic whole-cache
+invalidation.
+
+The scalar maximum is not a collision-free description of source state. A high
+Light Table source revision can mask a later raster edit with a lower numeric
+revision. If two visible plane tiles share the maximum revision, deleting one
+can leave the maximum unchanged and reuse an obsolete composition. The same
+numeric alias can occur between independent plane and selection revision
+domains. Because display mode is absent from the formula, primary and secondary
+views with different alpha modes can also reuse the shared cache incorrectly
+after the first mode switch. Transparent results have no negative cache and can
+be recomposed. These are intentional, documented constraints of choosing the
+revision-max performance baseline as canonical; they are not described as
+correctness fixes. This runtime policy is independent of the M8 native-format
+cutover and is neither serialized nor automatically changed by M8.
+
 ## Revision, preview, and transaction model
 
 Document and view revisions are independent. Successful document edits, history
@@ -720,10 +778,33 @@ allocation, distributed writes, copy-on-write isolation, and a bounded dense
 filter workload. The `core_workflows` benchmark separately covers sparse and
 dirty-tile snapshots, view-only cache reuse, Undo/Redo, light-table composition,
 vector snapshot/rasterization, and in-memory Batch preview/dry-run. Both expose
-fixed quick/full inputs and semantic counters/checksums. G13 records a warmed
-five-run Windows x64 median and a same-machine relative review threshold in
+fixed quick/full inputs and semantic counters/checksums. The old pre-M1
+revision-max implementation is the canonical same-host baseline for the
+protected `pan_zoom_snapshot` and `dirty_tile_rebuild` scenarios: a confirmed
+positive median regression is rejected. The acceptance record uses warm-up and
+nine order-alternating old/candidate pairs. Other G13 scenarios retain their
+warmed Windows x64 relative review threshold in
 `docs/core-benchmark-baseline.md`; semantic drift and resource-budget failures
 remain unconditional on every machine.
+
+The private Windows `--performance-smoke-test` is the native companion gate. It
+materializes all 256 tiles of a 1024-square raster, sends 256 alternating wheel
+pairs through the real Canvas/UI/CoreHost route, and serializes each event to
+exactly one renderer-thread GPU update and successful Present. It then sends 16
+multi-sample strokes that each traverse 16 tiles; each stroke is committed and
+rendered to exactly one final Present, for 544 input samples total. The renderer
+pause is a smoke-only synchronization barrier around enqueue, not a production
+render mode. It fixes the amount of GPU/Present work so queue coalescing cannot
+make one binary appear faster merely by presenting fewer frames. The idle side
+of that barrier is satisfied only when the queue is empty, the renderer
+in-flight work count is zero, and the last dequeued item's GPU update/Present
+path has returned; queue removal alone is not completion. A regression test
+requires an idle wait to observe exactly as many new Presents as queued render
+requests. Document/view revisions, checksums, completed samples/strokes, tile
+bytes, Present counts, queue rejection, and resource-limit counters are hard
+assertions. Native elapsed medians use the same old-revision-max, same-host,
+alternating-order, zero-confirmed-regression rule as the protected Core
+workloads.
 
 ## Initialization and shutdown
 

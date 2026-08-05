@@ -313,7 +313,8 @@ impl JournalReplayInfo {
 }
 
 pub(super) struct CanonicalCommitPlan {
-    events: Vec<JournalEntry>,
+    events: [Option<JournalEntry>; 2],
+    event_count: usize,
     branch_id: BranchId,
     committed_state_id: StateId,
     following_event_id: JournalEventId,
@@ -421,7 +422,8 @@ impl Core {
         }
         if !self.journal_complete {
             return Ok(CanonicalCommitPlan {
-                events: Vec::new(),
+                events: [None, None],
+                event_count: 0,
                 branch_id: self.active_branch,
                 committed_state_id: procedure.committed_state_id(),
                 following_event_id: self.next_journal_event,
@@ -447,10 +449,8 @@ impl Core {
         if self.journal.len().saturating_add(required_events) > MAX_JOURNAL_EVENTS {
             return Err(CoreError::InvalidState("journal event limit exceeded"));
         }
-        let mut events = Vec::new();
-        events
-            .try_reserve_exact(required_events)
-            .map_err(|_| CoreError::InvalidState("journal allocation failed"))?;
+        let mut events = [None, None];
+        let mut event_count = 0;
 
         let mut following_event = self.next_journal_event;
         let mut following_branch = self.next_branch;
@@ -480,13 +480,14 @@ impl Core {
             following_branch = following_branch
                 .checked_next()
                 .ok_or(CoreError::InvalidState("branch ID overflow"))?;
-            events.push(JournalEntry::BranchCut(JournalBranchCut {
+            events[event_count] = Some(JournalEntry::BranchCut(JournalBranchCut {
                 event_id: cut_event,
                 fork_state_id: self.current_state,
                 old_active_tail_state_id: active_tail,
                 new_branch_id: branch,
                 deactivated_branch_id: self.active_branch,
             }));
+            event_count += 1;
             (branch, Some((branch, self.current_state)))
         };
 
@@ -495,18 +496,20 @@ impl Core {
             .checked_next()
             .ok_or(CoreError::InvalidState("journal event ID overflow"))?;
         let committed_state_id = procedure.committed_state_id();
-        events.push(JournalEntry::Commit(JournalCommit {
+        events[event_count] = Some(JournalEntry::Commit(JournalCommit {
             event_id: commit_event,
             parent_state_id: procedure.base_state_id(),
             committed_state_id,
             procedure,
             branch_id,
         }));
+        event_count += 1;
         self.journal
-            .try_reserve(events.len())
+            .try_reserve(event_count)
             .map_err(|_| CoreError::InvalidState("journal allocation failed"))?;
         Ok(CanonicalCommitPlan {
             events,
+            event_count,
             branch_id,
             committed_state_id,
             following_event_id: following_event,
@@ -523,7 +526,8 @@ impl Core {
         self.set_branch_tail(self.active_branch, plan.committed_state_id);
         self.next_journal_event = plan.following_event_id;
         self.next_branch = plan.following_branch_id;
-        self.journal.extend(plan.events);
+        self.journal
+            .extend(plan.events.into_iter().take(plan.event_count).flatten());
     }
 
     pub(super) fn prepare_history_move(

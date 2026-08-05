@@ -496,7 +496,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - 操作結果は success、no-op、invalid、cancel、stale revision を区別する。Undo 対象となる一つの確定 document edit は一つの document revision と一つの history entry だけを進める。
 - no-op は document revision、history、dirty、render content を変えない。invalid、cancel、stale revision、overflow、失敗は document、history、dirty、revision、確定 snapshot、通常出力 file に部分変更を残さない。
 - 一つの document edit は一回の Undo で直前の意味状態へ戻り、一回の Redo で同じ結果へ進む。Undo 後の新規 edit は以前の redo branch を破棄する。
-- view-only edit は document revision、history、dirty を変えず、意味上の変更がある対象 view の revision だけを進める。document edit は必要な render cache invalidation を起こす。
+- view-only edit は document revision、history、dirty を変えず、意味上の変更がある対象 view の revision だけを進める。document edit は必要な render cache invalidation を起こす。render cache の source identity は永続化しない派生状態とし、対象座標にある可視 plane の `tile_revision`、selection の `tile_revision`、Light Table の `source_revision` の数値最大値を使う旧 revision-max 方式を正本とする。cache hit 判定はこれらの scalar revision だけを読み、source pixel のcopy、走査、hash、digest、generation、tombstone、epoch、negative cacheを使ってはならない。zoom、pan、flip、viewport 等の view-only snapshot は、変更されていない source tile の pixel payload を再コピー・再hashしてはならない。revision-maxへ含まれないrender metadata変更は同じcommit境界でwhole-cache invalidationを行う。数値最大値の衝突、高いLight Table revisionによるmask、同値revision sourceの削除、表示mode間の共有cache、および透明合成結果の非保持は、性能を優先した正本方式の既知制約とする。このruntime cache方針はM8 native schemaへ保存せず、M8によって自動変更しない。
 - 通常 save の成功だけが通常 savepoint を進める。autosave、recovery save、export は通常 savepoint を進めない。
 - stable ID は所属 document/session 内の生存 object 間で重複せず、保存、Undo/Redo、snapshot を通して参照関係を維持する。layer、plane、view 等の別 namespace を混同しない。
 - 長時間処理は base revision、cancel、target generation を確定し、全計算と検証が成功した場合だけ結果を公開する。
@@ -526,7 +526,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - `WORKSPACE-002`: pane scope、follow/pin/job target、発行時 `CommandContext`、ID/generation による stale routing rejection
 - `SESSION-001`: 複数 `DocumentSession` の file identity、view/document/window/application close、save/Save As、autosave/recovery lifecycle
 - `SAFE-001`: malformed/corrupted input の bounded rejection と非破壊性
-- `PERF-001`: large sparse/COW document と bounded dense workload の benchmark
+- `PERF-001`: large sparse/COW document、bounded dense workload、変更 tile だけの再合成、および source raster payload を走査しない連続 zoom/pan snapshot の benchmark。Core quick/fullで2,048/8,192 pairを測る`pan_zoom_snapshot`と、同一allocated tileへの1 pixel stroke＋snapshot rebuildを32/128回測る`dirty_tile_rebuild`に加え、private native performance smokeで1024平方・256 allocated tileに対する512 wheel eventを各1 Presentまで、16本のmulti-sample/multi-tile strokeを各1 Presentまで測る。同一host/toolchain/Release profile/workloadでwarm-up後に複数回測定した旧revision-max中央値を正本ベースラインとし、Coreの拡大縮小/dirty描画およびnativeのwheel/drawingのいずれも、環境揺らぎを再測定した後に旧中央値を上回る性能悪化を受け入れない。自動回帰検知はsnapshot validation call graphを固定し、初回composeでpayload accessを観測した同じfixtureについて、128回のcache-hit zoom snapshot後のpayload access増分が0であることを要求する
 - `PKG-001`: Rust/Win32 の静的 CRT、x64/ARM64 self-contained MSIX、ならびに ZIP 直下へ `inkpod.exe`、`README.txt`、`LICENSE.txt`、`ThirdPartyNotices.txt` だけを収録する x64/ARM64 portable payload と package/dependency 検証
 - `PORT-001`: Rust workspace の OS 非依存性と次 frontend の adapter gap
 

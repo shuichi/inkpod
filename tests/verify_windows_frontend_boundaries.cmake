@@ -12,6 +12,8 @@ set(activation_source
 set(recovery_source
     "${INKPOD_SOURCE_DIR}/apps/windows/app/session_recovery.cpp")
 set(smoke_source "${INKPOD_SOURCE_DIR}/apps/windows/app/app_smoke.cpp")
+set(revision_max_harness_patch
+    "${INKPOD_SOURCE_DIR}/tests/revision_max_native_harness_3f164db.patch")
 set(runtime_source
     "${INKPOD_SOURCE_DIR}/apps/windows/ui/main_window_runtime.cpp")
 set(chrome_source
@@ -33,6 +35,7 @@ foreach(required_source IN ITEMS
         "${activation_source}"
         "${recovery_source}"
         "${smoke_source}"
+        "${revision_max_harness_patch}"
         "${runtime_source}"
         "${chrome_source}"
         "${chrome_header}"
@@ -115,6 +118,7 @@ foreach(required_launch_token IN ITEMS
         "CommandLineToArgvW"
         "ParseLaunchArguments"
         "--smoke-test"
+        "--performance-smoke-test"
         "--abi-smoke-test"
         "--new-window")
     string(FIND "${launch_text}" "${required_launch_token}" token_offset)
@@ -153,6 +157,7 @@ foreach(required_application_token IN ITEMS
         "CreateDefaultCell"
         "RunMessageLoop"
         "RunApplicationSmoke"
+        "RunPerformanceSmoke"
         "StopCore")
     string(FIND
         "${application_text}" "${required_application_token}" token_offset)
@@ -181,6 +186,102 @@ foreach(required_smoke IN ITEMS
     if(smoke_offset LESS 0)
         message(FATAL_ERROR
             "app_smoke.cpp is missing ${required_smoke}")
+    endif()
+endforeach()
+
+file(READ "${revision_max_harness_patch}" revision_max_harness_patch_text)
+file(SHA256 "${revision_max_harness_patch}" revision_max_harness_patch_sha256)
+if(NOT revision_max_harness_patch_sha256 STREQUAL
+        "2b434f0ab5827fc987f0cb583ff68f65c4af6b9aaf89531fa8735bee071044a0")
+    message(FATAL_ERROR
+        "revision-max native harness patch changed without a baseline audit")
+endif()
+set(revision_max_harness_paths
+    "apps/windows/app/app_smoke.cpp"
+    "apps/windows/app/app_smoke.h"
+    "apps/windows/app/application.cpp"
+    "apps/windows/app/application.h"
+    "apps/windows/app/launch_options.cpp"
+    "apps/windows/app/launch_options.h"
+    "apps/windows/app/main.cpp"
+    "apps/windows/renderer/canvas.cpp")
+string(REGEX MATCHALL
+    "diff --git a/[^ \r\n]+ b/[^ \r\n]+"
+    revision_max_harness_headers
+    "${revision_max_harness_patch_text}")
+list(LENGTH revision_max_harness_headers revision_max_harness_header_count)
+if(NOT revision_max_harness_header_count EQUAL 8)
+    message(FATAL_ERROR
+        "revision-max native harness patch must change exactly eight files")
+endif()
+foreach(expected_path IN LISTS revision_max_harness_paths)
+    string(FIND
+        "${revision_max_harness_patch_text}"
+        "diff --git a/${expected_path} b/${expected_path}"
+        expected_path_offset)
+    if(expected_path_offset LESS 0)
+        message(FATAL_ERROR
+            "revision-max native harness patch is missing ${expected_path}")
+    endif()
+endforeach()
+string(REGEX MATCHALL
+    "index [0-9a-f]+\\.\\.[0-9a-f]+ 100644"
+    revision_max_harness_indexes
+    "${revision_max_harness_patch_text}")
+list(LENGTH revision_max_harness_indexes revision_max_harness_index_count)
+if(NOT revision_max_harness_index_count EQUAL 8)
+    message(FATAL_ERROR
+        "revision-max native harness patch must retain eight full-index records")
+endif()
+foreach(index_record IN LISTS revision_max_harness_indexes)
+    string(LENGTH "${index_record}" index_record_length)
+    if(NOT index_record_length EQUAL 95)
+        message(FATAL_ERROR
+            "revision-max native harness patch contains an abbreviated object ID")
+    endif()
+endforeach()
+string(FIND
+    "${revision_max_harness_patch_text}"
+    "diff --git a/apps/windows/renderer/canvas.cpp b/apps/windows/renderer/canvas.cpp"
+    revision_max_canvas_offset)
+string(SUBSTRING
+    "${revision_max_harness_patch_text}"
+    ${revision_max_canvas_offset}
+    -1
+    revision_max_canvas_patch)
+foreach(required_canvas_instrumentation IN ITEMS
+        "+                in_flight_work_ = 0U;"
+        "+            return stopping_ || (work_.empty() && in_flight_work_ == 0U);"
+        "+                ++in_flight_work_;"
+        "+                --in_flight_work_;"
+        "+    std::size_t in_flight_work_{};")
+    string(FIND
+        "${revision_max_canvas_patch}"
+        "${required_canvas_instrumentation}"
+        instrumentation_offset)
+    if(instrumentation_offset LESS 0)
+        message(FATAL_ERROR
+            "revision-max baseline patch lost renderer idle instrumentation: "
+            "${required_canvas_instrumentation}")
+    endif()
+endforeach()
+string(REGEX MATCHALL
+    "[\r\n][+-][^\r\n]*"
+    revision_max_canvas_changed_lines
+    "${revision_max_canvas_patch}")
+foreach(forbidden_canvas_algorithm IN ITEMS
+        "RenderAndCount"
+        "ProcessSnapshot"
+        "UpdateTileBudgets"
+        "Present(")
+    string(FIND
+        "${revision_max_canvas_changed_lines}"
+        "${forbidden_canvas_algorithm}"
+        changed_algorithm_offset)
+    if(NOT changed_algorithm_offset LESS 0)
+        message(FATAL_ERROR
+            "revision-max baseline patch changes renderer algorithm: "
+            "${forbidden_canvas_algorithm}")
     endif()
 endforeach()
 

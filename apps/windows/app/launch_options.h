@@ -8,6 +8,7 @@ namespace inkpod::app {
 enum class LaunchMode {
     Application,
     ApplicationSmoke,
+    PerformanceSmoke,
     AbiSmoke,
 };
 

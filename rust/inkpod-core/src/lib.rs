@@ -95,7 +95,7 @@ use inkpod_format::{
 };
 use inkpod_image::{
     ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,
-    TILE_SIZE, TileCoord, TileData, VectorFixedPoint, closed_region_fill_with_cancel,
+    TILE_SIZE, TileCoord, TileData, TileView, VectorFixedPoint, closed_region_fill_with_cancel,
     color_check_category, extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};

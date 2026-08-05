@@ -51,6 +51,14 @@ int main() {
         return 4;
     }
 
+    const wchar_t* performance[]{
+        L"inkpod.exe", L"--performance-smoke-test"};
+    if (Parse(performance, 2, options) != LaunchParseStatus::Ok
+        || options.mode != LaunchMode::PerformanceSmoke
+        || !options.document_paths.empty()) {
+        return 14;
+    }
+
     const wchar_t* option_like_name[]{
         L"inkpod.exe", L"C:\\cells\\--smoke-test drawing.inkpod"};
     if (Parse(option_like_name, 2, options) != LaunchParseStatus::Ok
@@ -94,6 +102,13 @@ int main() {
     if (Parse(duplicate_modes, 3, options)
         != LaunchParseStatus::InvalidArguments) {
         return 10;
+    }
+
+    const wchar_t* conflicting_performance[]{
+        L"inkpod.exe", L"--performance-smoke-test", L"--smoke-test"};
+    if (Parse(conflicting_performance, 3, options)
+        != LaunchParseStatus::InvalidArguments) {
+        return 15;
     }
 
     const wchar_t* new_window[]{

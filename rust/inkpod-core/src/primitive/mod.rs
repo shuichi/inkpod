@@ -10,8 +10,8 @@ pub use model::{
     ProcedureId, ReplayEpoch, StateId,
 };
 
-pub(crate) use digest::canonical_document_state;
 use digest::canonical_payload_digest;
+pub(crate) use digest::{CanonicalDocumentStateCache, canonical_document_state};
 use model::{CanonicalPrimitive, CanonicalStrokeArguments};
 pub(crate) use raster::{
     RasterStrokePreview, begin_preview as begin_stroke_preview,

@@ -29,6 +29,8 @@ const EXPECTED_FULL_CHECKSUMS: [u64; 7] = [
 struct Profile {
     name: &'static str,
     sparse_tiles: u32,
+    dirty_rebuild_steps: u32,
+    pan_zoom_steps: u32,
     undo_edits: u32,
     light_table_side: u32,
     light_table_references: u32,
@@ -44,6 +46,8 @@ impl Profile {
             Self {
                 name: "quick",
                 sparse_tiles: 8,
+                dirty_rebuild_steps: 32,
+                pan_zoom_steps: 2_048,
                 undo_edits: 12,
                 light_table_side: 128,
                 light_table_references: 3,
@@ -56,6 +60,8 @@ impl Profile {
             Self {
                 name: "full",
                 sparse_tiles: 32,
+                dirty_rebuild_steps: 128,
+                pan_zoom_steps: 8_192,
                 undo_edits: 48,
                 light_table_side: 256,
                 light_table_references: 6,
@@ -162,41 +168,61 @@ fn sparse_snapshot(profile: Profile) -> ScenarioResult {
 fn dirty_tile_rebuild(profile: Profile) -> ScenarioResult {
     let (mut core, coordinates) = sparse_core(profile.sparse_tiles);
     let before = core.build_snapshot();
-    let before_revisions = tile_revisions(&before);
+    let before_checksum = snapshot_checksum(&before);
+    let mut previous_revisions = tile_revisions(&before);
     let (x, y) = coordinates[0];
 
+    let mut after = before.clone();
+    let mut rebuilt_total = 0_u64;
+    let mut reused_total = 0_u64;
     let started = Instant::now();
-    paint_pixel(&mut core, x, y, [220, 30, 10, 255]);
-    let after = core.build_snapshot();
+    for step in 0..profile.dirty_rebuild_steps {
+        let color = if step + 1 == profile.dirty_rebuild_steps {
+            [220, 30, 10, 255]
+        } else if step % 2 == 0 {
+            [221, 31, 11, 255]
+        } else {
+            [219, 29, 9, 255]
+        };
+        paint_pixel(&mut core, x, y, color);
+        after = core.build_snapshot();
+        let after_revisions = tile_revisions(&after);
+        let rebuilt = after_revisions
+            .iter()
+            .filter(|(tile_id, revision)| previous_revisions.get(tile_id) != Some(revision))
+            .count();
+        let reused = after_revisions.len() - rebuilt;
+        assert_eq!(after.tile_count(), before.tile_count());
+        assert_eq!(rebuilt, 1);
+        assert_eq!(reused + rebuilt, profile.sparse_tiles as usize);
+        rebuilt_total += rebuilt as u64;
+        reused_total += reused as u64;
+        previous_revisions = after_revisions;
+        black_box(&after);
+    }
     let elapsed = started.elapsed();
-    let after_revisions = tile_revisions(&after);
-    let rebuilt = after_revisions
-        .iter()
-        .filter(|(tile_id, revision)| before_revisions.get(tile_id) != Some(revision))
-        .count();
-    let reused = after_revisions.len() - rebuilt;
-    assert_eq!(after.tile_count(), before.tile_count());
-    assert_eq!(rebuilt, 1);
-    assert_eq!(reused + rebuilt, profile.sparse_tiles as usize);
     assert_eq!(
         core.history_entries().len(),
-        profile.sparse_tiles as usize + 1
+        (profile.sparse_tiles + profile.dirty_rebuild_steps) as usize
     );
-    assert_eq!(after.revision(), u64::from(profile.sparse_tiles) + 2);
-    assert_ne!(snapshot_checksum(&before), snapshot_checksum(&after));
+    assert_eq!(
+        after.revision(),
+        u64::from(profile.sparse_tiles + profile.dirty_rebuild_steps) + 1
+    );
+    assert_ne!(before_checksum, snapshot_checksum(&after));
     let checksum = snapshot_checksum(&after);
     black_box(&after);
 
     ScenarioResult {
         scenario: "dirty_tile_rebuild",
         elapsed,
-        iterations: 1,
-        input_items: before.tile_count() as u64,
-        output_items: rebuilt as u64,
-        reused_items: reused as u64,
+        iterations: u64::from(profile.dirty_rebuild_steps),
+        input_items: before.tile_count() as u64 * u64::from(profile.dirty_rebuild_steps),
+        output_items: rebuilt_total,
+        reused_items: reused_total,
         document_revision: after.revision(),
         history_entries: core.history_entries().len() as u64,
-        successes: 1,
+        successes: u64::from(profile.dirty_rebuild_steps),
         failures: 0,
         checksum,
     }
@@ -212,19 +238,23 @@ fn pan_zoom_snapshot(profile: Profile) -> ScenarioResult {
         .document_revision;
     let history_entries = core.history_entries().len();
 
+    let mut after = before.clone();
     let started = Instant::now();
-    core.apply_view(ViewCommand::ZoomAt {
-        factor: 2.0,
-        device_x: 0.5,
-        device_y: 0.5,
-    })
-    .expect("bounded zoom must succeed");
-    core.apply_view(ViewCommand::PanBy {
-        device_dx: 37.0,
-        device_dy: -19.0,
-    })
-    .expect("bounded pan must succeed");
-    let after = core.build_snapshot();
+    for step in 0..profile.pan_zoom_steps {
+        core.apply_view(ViewCommand::ZoomAt {
+            factor: if step % 2 == 0 { 1.01 } else { 1.0 / 1.01 },
+            device_x: 0.5,
+            device_y: 0.5,
+        })
+        .expect("bounded zoom must succeed");
+        core.apply_view(ViewCommand::PanBy {
+            device_dx: if step % 2 == 0 { 1.0 } else { -1.0 },
+            device_dy: if step % 2 == 0 { -0.5 } else { 0.5 },
+        })
+        .expect("bounded pan must succeed");
+        after = core.build_snapshot();
+        black_box(&after);
+    }
     let elapsed = started.elapsed();
 
     assert_eq!(after.revision(), document_revision);
@@ -233,20 +263,23 @@ fn pan_zoom_snapshot(profile: Profile) -> ScenarioResult {
     assert_eq!(history_entries, profile.sparse_tiles as usize);
     assert_eq!(tile_revisions(&after), before_revisions);
     assert_eq!(snapshot_checksum(&after), snapshot_checksum(&before));
-    assert_eq!(after.view().revision(), before.view().revision() + 2);
+    assert_eq!(
+        after.view().revision(),
+        before.view().revision() + u64::from(profile.pan_zoom_steps) * 2
+    );
     let checksum = snapshot_checksum(&after);
     black_box(&after);
 
     ScenarioResult {
         scenario: "pan_zoom_snapshot",
         elapsed,
-        iterations: 2,
+        iterations: u64::from(profile.pan_zoom_steps) * 2,
         input_items: before.tile_count() as u64,
         output_items: after.tile_count() as u64,
         reused_items: after.tile_count() as u64,
         document_revision,
         history_entries: history_entries as u64,
-        successes: 2,
+        successes: u64::from(profile.pan_zoom_steps) * 2,
         failures: 0,
         checksum,
     }

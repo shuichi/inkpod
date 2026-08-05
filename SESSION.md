@@ -1,8 +1,8 @@
 # Rust Core プリミティブ・Procedure Call History・`.inkpod` 再設計計画
 
-更新日: 2026-08-04
+更新日: 2026-08-05
 
-状態: 設計方針承認済み、実装未着手
+状態: M0–M2 完了、M3–M9 未完。旧 revision-max 正本化と性能ゲートは反映済み
 
 ## 1. 目的
 
@@ -351,6 +351,16 @@ section directory、`META`、`GENS`をversioned manifest領域とし、容量の
 - 縦切り対象にexecutor外のmutation実装がない。
 - runtime結果とfresh Coreへのprocedure replay結果がbit-exact。
 
+Revision-max render-cache invariant:
+
+- render tile の cache source identity は、対象座標にある可視 plane の `tile_revision`、selection の `tile_revision`、Light Table の `source_revision` の数値最大値を取る旧 revision-max 方式を正本とする。
+- cache hit 判定はこれらの固定幅 scalar revision だけを読み、source pixel のcopy/走査/hash、content digest、generation、tombstone、epoch、negative cacheを導入しない。zoom/pan等のview-only snapshotをsource raster総byte数へ比例させない。
+- `RenderTile.source_revision` は同じCore内のcache検証専用で、公開snapshotの意味上の等価性、canonical document digest、procedure payload、C ABI、native formatへ含めない。別Core間は公開snapshot contentを比較し、cache revision/reuseは同じCore・同じbuild scheduleでのみ比較する。
+- procedure replay用のschema-3 document-state digestは別のdomain-separated commitment treeとし、revision一致したraster-tile編集では変わったtile、所属raster root、document rootだけを更新する。metadata編集はmetadata commitmentを更新し、より広いdocument編集はcold rebuildする。このtreeはrevision-maxの入力、render tile identity、snapshot validationには使用しない。
+- opacity、visibility、order、main-line color、color-check等のrevision-maxへ含まれないrender metadata editは、所有境界で既存のatomic whole-cache invalidationを必ず行う。
+- 数値最大値だけでは、高いLight Table revisionによる低いraster revisionのmask、同値revision sourceの一方の削除、独立revision namespace間の衝突、primary/secondary alpha view間の共有cacheを区別できない。また透明な合成結果は保持されず再合成され得る。これらは性能を優先してrevision-maxを正本とする意図した既知制約として文書化し、暗黙に解消済みと扱わない。
+- このruntime cache方針はM8の永続schema、format version、checkpoint authorityを変更せず、M8実装によって自動的に解消されるものでもない。
+
 ### M2: Procedure Journal と Undo/Redo の統合
 
 目的:
@@ -611,6 +621,7 @@ section directory、`META`、`GENS`をversioned manifest領域とし、容量の
 - checkpoint openとfull replayの全state/pixel/history digest一致。
 - checkpoint sectionのhash/構造/bound違反はfile reject、構造上有効なprefix/state digestまたはepoch不一致はfull replay fallbackとなることを検証する。
 - large sparse document、長いstroke、100万件級を含む設定済み上限近傍のbounded benchmark。
+- 連続zoom/pan snapshotは変更のないtile payload/revisionを再利用し、source raster byte数に比例するcopy/hashを行わないことをquick/full benchmarkで継続検証する。quick/fullで2,048/8,192 pairを測る`pan_zoom_snapshot`、同一allocated tileへの1 pixel edit＋snapshot rebuildを32/128回測る`dirty_tile_rebuild`、および1024平方・256 allocated tileの実Canvasで512 wheel eventを各1 Presentまでと16本/544 sampleのmulti-tile strokeを各1 Presentまで測るprivate native performance smokeは、同一host/toolchain/Release profile/workloadで測ったrevision-max中央値を正本ベースラインとする。Core/nativeの拡大縮小・描画はいずれも、環境揺らぎを再測定で除いた後に旧中央値を上回る性能悪化を受け入れない。snapshot validation本体とrevision-max helperのcall graphをsource-lockし、初回composeでは正に増えるpayload access counterが128回のcache-hit zoom snapshotでは0のままになることを自動検証する。
 - cargo fmt/clippy/test/bench/doc、Windows configure/build/CTest、ABI/UI/renderer smoke。
 - x64/ARM64 replay、save/open、recovery、queue saturation、shutdown raceの反復test。
 

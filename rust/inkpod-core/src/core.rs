@@ -46,6 +46,7 @@ impl Core {
             history_genesis: None,
             journal: Vec::new(),
             journal_complete: true,
+            canonical_state_cache: std::cell::RefCell::new(None),
             active_branch: BranchId::ROOT,
             next_journal_event: JournalEventId::first(),
             next_branch: BranchId::first_unallocated(),
@@ -144,6 +145,7 @@ impl Core {
         self.next_id = next_id;
         self.document = Some(document);
         self.document_revision = revision;
+        *self.canonical_state_cache.get_mut() = None;
         // A new blank cell is the initial in-memory savepoint even though it
         // does not have a normal-save path yet. Pathlessness controls whether
         // Save needs a destination; it must not make an unedited document
@@ -177,6 +179,8 @@ pub struct Core {
     pub(super) history_genesis: Option<CellDocument>,
     pub(super) journal: Vec<JournalEntry>,
     pub(super) journal_complete: bool,
+    pub(super) canonical_state_cache:
+        std::cell::RefCell<Option<primitive::CanonicalDocumentStateCache>>,
     pub(super) active_branch: BranchId,
     pub(super) next_journal_event: JournalEventId,
     pub(super) next_branch: BranchId,

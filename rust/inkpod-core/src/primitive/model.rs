@@ -88,13 +88,17 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(2);
+    pub const CURRENT: Self = Self(3);
 }
 
-/// A BLAKE3-256 digest of canonical semantic document-state schema-2 bytes.
+/// A BLAKE3-256 digest of canonical semantic document-state schema-3 bytes.
 ///
-/// The digest uses the `org.inkpod.digest.document-state.v2` derive-key domain;
-/// every nested canonical document-state frame carries schema version 2.
+/// The compact root and semantic metadata frames use schema version 3 in the
+/// `org.inkpod.digest.document-state.v3` derive-key domain. Raster payloads
+/// enter that root through separately domain-separated, content-addressed tile
+/// and raster commitments, so the digest is independent of edit order and
+/// allocation history without requiring unchanged tile bytes to be rehashed
+/// after an edit.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[repr(transparent)]
 pub struct DocumentStateDigest([u8; 32]);
