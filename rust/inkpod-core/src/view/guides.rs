@@ -1,3 +1,4 @@
+use crate::primitive::CanonicalInvocation;
 use crate::*;
 
 impl Core {
@@ -15,6 +16,14 @@ impl Core {
         axis: GuideAxis,
         position: i32,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result = self
+                .execute_canonical_invocation(CanonicalInvocation::AddGuide { axis, position })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "add-guide primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         if document.guides.len() >= MAX_GUIDES {
@@ -44,6 +53,11 @@ impl Core {
         guide_id: u64,
         position: i32,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::MoveGuide { guide_id, position })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let guide = document
@@ -71,6 +85,11 @@ impl Core {
 
     /// Deletes a guide by stable ID as one undoable document edit.
     pub fn delete_guide(&mut self, guide_id: u64) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::DeleteGuide { guide_id })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let index = document
@@ -80,6 +99,30 @@ impl Core {
             .ok_or(CoreError::InvalidArgument("guide ID does not exist"))?;
         let mut edit = self.begin_document_edit()?;
         edit.working_mut().guides.remove(index);
+        edit.commit(self)
+    }
+
+    /// Deletes all document guides as one atomic, undoable edit.
+    ///
+    /// An already empty guide list is a semantic no-op.
+    pub fn delete_all_guides(&mut self) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::DeleteAllGuides)
+                .map(|result| result.dispatch);
+        }
+        self.ensure_no_active_stroke()?;
+        if self
+            .document
+            .as_ref()
+            .ok_or(CoreError::NoDocument)?
+            .guides
+            .is_empty()
+        {
+            return Ok(self.noop_outcome());
+        }
+        let mut edit = self.begin_document_edit()?;
+        edit.working_mut().guides.clear();
         edit.commit(self)
     }
 
@@ -93,6 +136,11 @@ impl Core {
     /// Identical input is a no-op. Invalid zero or excessive spacing/subdivision
     /// values fail without changing revision or history.
     pub fn set_grid(&mut self, grid: GridConfig) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::SetGrid { grid })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         validate_grid(grid)?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;

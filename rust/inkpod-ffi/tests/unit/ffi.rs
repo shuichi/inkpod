@@ -1927,6 +1927,18 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
             inkpod_core_guide_move(core, guide_id, 3, &mut result),
             INKPOD_STATUS_OK
         );
+        let mut second_guide_id = 0;
+        assert_eq!(
+            inkpod_core_guide_add(
+                core,
+                INKPOD_GUIDE_HORIZONTAL,
+                1,
+                &mut result,
+                &mut second_guide_id,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_ne!(guide_id, second_guide_id);
         let grid = InkpodGridInput {
             struct_size: size_of::<InkpodGridInput>() as u32,
             reserved: 0,
@@ -1969,9 +1981,11 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
         );
         assert_ne!(overlay.flags & INKPOD_SNAPSHOT_OVERLAY_GRID_VISIBLE, 0);
         assert_eq!((overlay.grid_spacing_x, overlay.grid_subdivisions), (4, 2));
-        assert_eq!(overlay.guide_count, 1);
+        assert_eq!(overlay.guide_count, 2);
         assert!(!overlay.guides.is_null());
-        assert_eq!((*overlay.guides).id, guide_id);
+        let guide_ids = std::slice::from_raw_parts(overlay.guides, overlay.guide_count as usize);
+        assert!(guide_ids.iter().any(|guide| guide.id == guide_id));
+        assert!(guide_ids.iter().any(|guide| guide.id == second_guide_id));
         assert_eq!(
             inkpod_snapshot_release(&mut overlay_snapshot),
             INKPOD_STATUS_OK
@@ -1982,6 +1996,10 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
         );
         assert_eq!(
             inkpod_core_guide_delete(core, guide_id, &mut result),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_guide_delete_all(core, &mut result),
             INKPOD_STATUS_OK
         );
         let mut locator = InkpodLocatorOutput {
@@ -2549,6 +2567,44 @@ fn vector_commands_snapshot_and_nested_span_validation_are_connected() {
         assert_eq!((*vectors.fills).fill_id, fill_id);
         assert_eq!(*vectors.boundary_path_ids, boundary_path_id);
         assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
+        let atomic_new_vector_layer = InkpodRasterVectorizeInput {
+            target_layer_id: 0,
+            ..vectorize_input
+        };
+        let mut history_before_atomic_vectorize = InkpodHistoryInfo {
+            struct_size: size_of::<InkpodHistoryInfo>() as u32,
+            reserved: 0,
+            cursor: 0,
+            item_count: 0,
+        };
+        assert_eq!(
+            inkpod_core_history_info(core, &mut history_before_atomic_vectorize),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_raster_vectorize(
+                core,
+                &atomic_new_vector_layer,
+                &mut dispatch,
+                &mut vectorized_fill_count,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(vectorized_fill_count, 1);
+        let mut history_after_atomic_vectorize = InkpodHistoryInfo {
+            struct_size: size_of::<InkpodHistoryInfo>() as u32,
+            reserved: 0,
+            cursor: 0,
+            item_count: 0,
+        };
+        assert_eq!(
+            inkpod_core_history_info(core, &mut history_after_atomic_vectorize),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            history_after_atomic_vectorize.item_count,
+            history_before_atomic_vectorize.item_count + 1
+        );
         assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
     }
 }

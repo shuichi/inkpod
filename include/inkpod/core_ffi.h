@@ -499,6 +499,7 @@ typedef uint32_t InkpodTreeOperation;
 #define INKPOD_TREE_MERGE_LAYER UINT32_C(12)
 #define INKPOD_TREE_CONVERT_PLANE UINT32_C(13)
 #define INKPOD_TREE_MERGE_PLANE UINT32_C(14)
+#define INKPOD_TREE_DELETE_HIDDEN_LAYERS UINT32_C(15)
 #define INKPOD_NODE_VISIBLE (UINT64_C(1) << 0)
 #define INKPOD_NODE_EDITABLE (UINT64_C(1) << 1)
 
@@ -554,6 +555,8 @@ typedef struct InkpodTask InkpodTask;
 typedef InkpodTask InkpodBatchTask;
 /** @brief コピー済み batch 設定を保持する immutable・Rust-owned handle。 */
 typedef struct InkpodBatchGraph InkpodBatchGraph;
+/** @brief Rust-owned immutable `.inkchart` current-version decode result. */
+typedef struct InkpodColorChartFile InkpodColorChartFile;
 /** @brief batch preview item を所有する immutable・Rust-owned handle。 */
 typedef struct InkpodBatchPreview InkpodBatchPreview;
 /** @brief batch report item を所有する immutable・Rust-owned handle。 */
@@ -594,6 +597,7 @@ typedef struct InkpodDispatchResult {
 /** @brief 新規 Cell の UUID、寸法、DPI を指定する borrowed 入力。 */
 typedef struct InkpodCellCreateOptions {
     uint32_t struct_size;
+    /** `INKPOD_CELL_CREATE_INITIAL_LAYER_KIND`時だけtyped layer kind、それ以外は0。 */
     uint32_t reserved;
     uint64_t feature_flags;
     uint64_t document_uuid_high;
@@ -603,6 +607,7 @@ typedef struct InkpodCellCreateOptions {
     uint32_t dpi_x_milli;
     uint32_t dpi_y_milli;
 } InkpodCellCreateOptions;
+#define INKPOD_CELL_CREATE_INITIAL_LAYER_KIND (UINT64_C(1) << 0)
 
 /** @brief document 座標の符号付き矩形。`struct_size` を持たない値型。 */
 typedef struct InkpodFrameRect {
@@ -899,6 +904,16 @@ typedef struct InkpodColorBuffer {
     uint64_t color_stride_bytes;
     uint64_t color_count;
 } InkpodColorBuffer;
+
+/** @brief `.inkchart` save に渡す exact-depth color と borrowed UTF-8 name。 */
+typedef struct InkpodColorChartEntry {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    InkpodColorValue color;
+    const uint8_t* name_utf8;
+    uint64_t name_bytes;
+} InkpodColorChartEntry;
 
 /** @brief fill tool の Core-owned option を exact-depth 色と共にコピーする値 record。 */
 typedef struct InkpodEditorFillOptions {
@@ -2329,6 +2344,42 @@ InkpodStatus inkpod_core_palette_generate(
     uint32_t maximum_colors,
     uint32_t quantization_bits,
     InkpodDispatchResult* result);
+/** @brief exact-current `.inkpalette` schema 1 を同一directoryのtemporary file経由で保存する。 */
+InkpodStatus inkpod_palette_file_save(
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    const InkpodColorArray* input);
+/** @brief exact-current `.inkpalette` schema 1 をbounded decodeしてsize-query対応bufferへ返す。 */
+InkpodStatus inkpod_palette_file_load(
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    InkpodColorBuffer* buffer);
+/** @brief borrowed entry spanをexact-current `.inkchart` schema 1へatomic保存する。 */
+InkpodStatus inkpod_color_chart_file_save(
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    const InkpodColorChartEntry* entries,
+    uint64_t entry_count,
+    uint64_t entry_stride_bytes);
+/** @brief `.inkchart` schema 1をimmutable Rust-owned handleへbounded decodeする。 */
+InkpodStatus inkpod_color_chart_file_load(
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    InkpodColorChartFile** out_chart);
+/** @brief immutable chart の entry count を返す。 */
+InkpodStatus inkpod_color_chart_file_count(
+    const InkpodColorChartFile* chart,
+    uint64_t* out_count);
+/** @brief chart entry の color とsize-query対応UTF-8 nameをcaller bufferへコピーする。 */
+InkpodStatus inkpod_color_chart_file_get(
+    const InkpodColorChartFile* chart,
+    uint64_t index,
+    InkpodColorValue* out_color,
+    uint8_t* name_utf8,
+    uint64_t name_capacity,
+    uint64_t* out_name_bytes);
+/** @brief Rust-owned chart handleをexactly once解放しcaller pointerをNULLにする。 */
+InkpodStatus inkpod_color_chart_file_release(InkpodColorChartFile** chart);
 
 /**
  * @brief binary/grayscale main-line の exact-depth base color を設定する。
@@ -2789,6 +2840,15 @@ InkpodStatus inkpod_core_paste_begin_mode(
     const InkpodClipboard* clipboard,
     uint32_t mode);
 /**
+ * @brief create-plane targetを保持し、floating commit時だけplane作成とpasteを一括commitする。
+ * @par 契約 `target`は`INKPOD_TREE_CREATE_PLANE`、visible+editable、完全なtyped/name入力。
+ * begin/cancelはdocument不変、commit成功はplane作成とpixel適用を一つのUndo単位にする。
+ */
+InkpodStatus inkpod_core_paste_begin_new_plane(
+    InkpodCore* core,
+    const InkpodClipboard* clipboard,
+    const InkpodTreeEdit* target);
+/**
  * @brief typed clipboard を straight RGBA8 caller buffer へ rasterize する。
  * @par 契約
  * 任意スレッド。`clipboard`/`output` は非 NULL・非重複、output は完全サイズ。
@@ -2931,6 +2991,10 @@ InkpodStatus inkpod_core_guide_move(
 InkpodStatus inkpod_core_guide_delete(
     InkpodCore* core,
     uint64_t guide_id,
+    InkpodDispatchResult* result);
+/** @brief 全 document guide を一つの canonical primitive として削除する。 */
+InkpodStatus inkpod_core_guide_delete_all(
+    InkpodCore* core,
     InkpodDispatchResult* result);
 /**
  * @brief document grid 定義を置換する。
@@ -3622,6 +3686,7 @@ InkpodStatus inkpod_core_vector_rasterize_to_layer(
  * @brief raster/color plane の nonzero-alpha row run を vector path/fill topology へ変換する。
  * @par 契約
  * Core owner thread。`core`/`input`/`result`/`out_fill_count` は非 NULL・非重複、input は完全サイズ。
+ * `target_layer_id == 0` は `Vectorized` layer 作成と変換を一つの canonical primitive として行う。
  * 成功時 fill count/result を書き 1 revision/dirty/Undo 単位。予測上限超過や失敗時は部分 topology/出力を残さない。
  * stroke/preview/floating 中は `INVALID_STATE`。
  * @par 主なステータス

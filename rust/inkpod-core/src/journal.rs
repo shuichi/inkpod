@@ -225,9 +225,8 @@ pub struct JournalState {
 impl JournalState {
     /// Whether every current document commit is represented by a canonical record.
     ///
-    /// During the staged primitive migration this becomes false after a document
-    /// mutation that has not yet moved to the canonical executor. An incomplete
-    /// journal is never accepted for full replay or runtime-cache release.
+    /// Every production document mutation closes through a canonical procedure,
+    /// so a live document always reports `true`.
     #[must_use]
     pub const fn is_complete(self) -> bool {
         self.complete
@@ -337,6 +336,7 @@ struct ReplayNode {
     parent: Option<StateId>,
     document: CellDocument,
     history_entry: Option<HistoryEntry>,
+    next_id: StableIdCursor,
 }
 
 struct RebuiltRuntime {
@@ -349,15 +349,14 @@ impl Core {
     /// Borrows the append-only canonical procedure/history-control journal.
     ///
     /// Querying the journal does not change document, history, revision, dirty,
-    /// savepoint, cache, or any persistent ID. If [`JournalState::is_complete`]
-    /// is false, this slice is only the retained canonical prefix and must not
-    /// be treated as a full representation of the live document.
+    /// savepoint, cache, or any persistent ID. The slice is the complete
+    /// canonical representation of the live document history.
     #[must_use]
     pub fn journal_entries(&self) -> &[JournalEntry] {
         &self.journal
     }
 
-    /// Returns persistent state, branch, cursor, and journal-completeness metadata.
+    /// Returns persistent state, branch, cursor, and journal metadata.
     ///
     /// An empty Core has no document namespace and therefore returns `None`
     /// rather than exposing a zero sentinel through the nonzero ID types.
@@ -365,7 +364,7 @@ impl Core {
     pub fn journal_state(&self) -> Option<JournalState> {
         self.document.as_ref()?;
         Some(JournalState {
-            complete: self.journal_complete,
+            complete: true,
             current_state_id: self.current_state,
             savepoint_state_id: self.savepoint,
             active_branch_id: self.active_branch,
@@ -377,8 +376,8 @@ impl Core {
 
     /// Rebuilds the current semantic state from Genesis and the journal privately.
     ///
-    /// The live Core is never changed. An incomplete journal, malformed graph,
-    /// failed procedure replay, or digest mismatch is returned as an error.
+    /// The live Core is never changed. A malformed graph, failed procedure
+    /// replay, or digest mismatch is returned as an error.
     pub fn verify_journal_replay(&self) -> Result<JournalReplayInfo, CoreError> {
         let rebuilt = self.rebuild_runtime_from_journal()?;
         self.validate_rebuilt_runtime(&rebuilt)?;
@@ -400,7 +399,6 @@ impl Core {
 
     pub(super) fn reset_journal(&mut self) {
         self.journal.clear();
-        self.journal_complete = true;
         self.active_branch = BranchId::ROOT;
         self.next_journal_event = JournalEventId::first();
         self.next_branch = BranchId::first_unallocated();
@@ -409,27 +407,12 @@ impl Core {
         self.genesis = self.document.clone().map(genesis::Genesis::new);
     }
 
-    pub(super) fn mark_journal_incomplete(&mut self) {
-        self.journal_complete = false;
-    }
-
     pub(super) fn prepare_canonical_commit(
         &mut self,
         procedure: Arc<CanonicalProcedure>,
     ) -> Result<CanonicalCommitPlan, CoreError> {
         if procedure.procedure_id().get() > MAX_JOURNAL_COMMITS {
             return Err(CoreError::InvalidState("journal procedure limit exceeded"));
-        }
-        if !self.journal_complete {
-            return Ok(CanonicalCommitPlan {
-                events: [None, None],
-                event_count: 0,
-                branch_id: self.active_branch,
-                committed_state_id: procedure.committed_state_id(),
-                following_event_id: self.next_journal_event,
-                following_branch_id: self.next_branch,
-                fork: None,
-            });
         }
         if procedure.base_state_id() != self.current_state
             || procedure.committed_state_id() != self.next_state
@@ -536,9 +519,6 @@ impl Core {
         source_state_id: StateId,
         destination_state_id: StateId,
     ) -> Result<Option<PreparedHistoryMove>, CoreError> {
-        if !self.journal_complete {
-            return Ok(None);
-        }
         if self.journal.len() >= MAX_JOURNAL_EVENTS {
             return Err(CoreError::InvalidState("journal event limit exceeded"));
         }
@@ -582,11 +562,6 @@ impl Core {
     }
 
     fn rebuild_runtime_from_journal(&self) -> Result<RebuiltRuntime, CoreError> {
-        if !self.journal_complete {
-            return Err(CoreError::InvalidState(
-                "journal is incomplete while primitive migration is in progress",
-            ));
-        }
         if self.journal.len() > MAX_JOURNAL_EVENTS {
             return Err(CoreError::InvalidState("journal event limit exceeded"));
         }
@@ -602,6 +577,8 @@ impl Core {
             .assets
             .detached_archive_round_trip(self.asset_retention_roots())?;
         genesis.light_table.intern_into(&mut detached_assets)?;
+        let mut genesis_next_id = StableIdCursor::first();
+        genesis_next_id.advance_past_raw(genesis.max_stable_id());
         let mut nodes = BTreeMap::new();
         nodes.insert(
             StateId::GENESIS,
@@ -609,6 +586,7 @@ impl Core {
                 parent: None,
                 document: genesis,
                 history_entry: None,
+                next_id: genesis_next_id,
             },
         );
         let mut branches = BTreeMap::new();
@@ -672,7 +650,7 @@ impl Core {
                     replay.current_state = commit.parent_state_id;
                     replay.next_state = commit.committed_state_id;
                     replay.next_procedure = commit.procedure.procedure_id();
-                    replay.next_id = self.next_id;
+                    replay.next_id = parent.next_id;
                     replay.genesis = Some(genesis::Genesis::new(parent.document.clone()));
                     replay.branch_tails.clear();
                     replay.branch_tails.push(commit.parent_state_id);
@@ -684,6 +662,7 @@ impl Core {
                     cached.after_state = commit.committed_state_id;
                     cached.procedure = Some(Arc::clone(&commit.procedure));
                     cached.branch_id = commit.branch_id;
+                    let next_id = replay.next_id;
                     let document = replay.document.ok_or(CoreError::NoDocument)?;
                     nodes.insert(
                         commit.committed_state_id,
@@ -691,6 +670,7 @@ impl Core {
                             parent: Some(commit.parent_state_id),
                             document,
                             history_entry: Some(cached),
+                            next_id,
                         },
                     );
                     branches.insert(active_branch, commit.committed_state_id);

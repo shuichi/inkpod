@@ -1,6 +1,7 @@
 //! Undo, redo, and history navigation.
 
 use super::*;
+use crate::primitive::CanonicalInvocation;
 use crate::selection::mask_bounds;
 
 impl Core {
@@ -256,15 +257,47 @@ impl Core {
         if changes.is_empty() {
             return Ok(self.noop_outcome());
         }
-        let revision = self.next_document_revision()?;
-        let after_state = self.allocate_state()?;
-        let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
-        let raster = &mut document
-            .plane_by_id_mut(active_plane_id)
-            .ok_or(CoreError::InvalidState("active plane disappeared"))?
+        self.execute_canonical_invocation(CanonicalInvocation::RestoreSelectedPixels {
+            plane_id: active_plane_id.get(),
+            changes,
+        })
+        .map(|result| result.dispatch)
+    }
+
+    pub(crate) fn restore_selected_pixels(
+        &mut self,
+        plane_id: u64,
+        changes: &[PixelChange],
+    ) -> Result<DispatchOutcome, CoreError> {
+        self.ensure_no_active_stroke()?;
+        if changes.is_empty() {
+            return Ok(self.noop_outcome());
+        }
+        let plane_id = PlaneId::from_raw(plane_id);
+        let mut edit = self.begin_document_edit()?;
+        let revision = edit.revision();
+        let (before, after) = edit.documents();
+        let source = before
+            .plane_by_id(plane_id)
+            .ok_or(CoreError::InvalidArgument(
+                "restore plane ID does not exist",
+            ))?;
+        let mut coordinates = BTreeSet::new();
+        for change in changes {
+            if !coordinates.insert((change.x, change.y))
+                || source.raster.pixel(change.x, change.y)? != change.before
+            {
+                return Err(CoreError::InvalidArgument(
+                    "restore pixel precondition does not match the document",
+                ));
+            }
+        }
+        let raster = &mut after
+            .plane_by_id_mut(plane_id)
+            .ok_or(CoreError::InvalidState("restore plane disappeared"))?
             .raster;
         let mut touched = BTreeSet::new();
-        for change in &changes {
+        for change in changes {
             raster.set_pixel(change.x, change.y, change.after, revision.get())?;
             touched.insert(TileCoord {
                 x: change.x / TILE_SIZE,
@@ -274,16 +307,11 @@ impl Core {
         for coord in touched {
             raster.remove_tile_if_empty(coord);
         }
-        self.document_revision = revision;
-        self.commit_pixel_history(active_plane_id, changes, after_state);
-        Ok(DispatchOutcome {
-            revision: revision.get(),
-            accepted_commands: 1,
-        })
+        edit.commit(self)
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct PixelChange {
     pub(super) x: u32,
     pub(super) y: u32,

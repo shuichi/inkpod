@@ -197,6 +197,8 @@ fn fill_is_one_atomic_history_unit_and_never_changes_main_line() {
     );
     core.redo().unwrap();
     assert_eq!(core.plane_pixel(ActivePlane::Color, 4, 4).unwrap(), fill);
+    assert!(core.journal_state().unwrap().is_complete());
+    core.verify_journal_replay().unwrap();
 }
 
 #[test]

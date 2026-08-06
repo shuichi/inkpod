@@ -121,6 +121,215 @@ fn temporary_inkpod_path(label: &str) -> PathBuf {
     ))
 }
 
+#[test]
+fn application_palette_and_chart_codecs_are_bounded_current_version_ffi_contracts() {
+    let palette_path = temporary_inkpod_path("palette-codec").with_extension("inkpalette");
+    let chart_path = temporary_inkpod_path("chart-codec").with_extension("inkchart");
+    let colors = [color(1, 2, 3, 255), color(21, 34, 55, 144)];
+    let palette = InkpodColorArray {
+        struct_size: size_of::<InkpodColorArray>() as u32,
+        reserved: 0,
+        feature_flags: INKPOD_FEATURE_NONE,
+        colors: colors.as_ptr(),
+        color_count: colors.len() as u64,
+        color_stride_bytes: size_of::<InkpodColorValue>() as u64,
+    };
+    let palette_bytes = palette_path.to_string_lossy().into_owned().into_bytes();
+    unsafe {
+        assert_eq!(
+            inkpod_palette_file_save(palette_bytes.as_ptr(), palette_bytes.len() as u64, &palette,),
+            INKPOD_STATUS_OK
+        );
+    }
+    let mut output = InkpodColorBuffer {
+        struct_size: size_of::<InkpodColorBuffer>() as u32,
+        reserved: 0,
+        feature_flags: INKPOD_FEATURE_NONE,
+        colors: ptr::null_mut(),
+        color_capacity: 0,
+        color_stride_bytes: 0,
+        color_count: 0,
+    };
+    unsafe {
+        assert_eq!(
+            inkpod_palette_file_load(
+                palette_bytes.as_ptr(),
+                palette_bytes.len() as u64,
+                &mut output,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_eq!(output.color_count, 2);
+    let mut decoded = [InkpodColorValue::default(); 2];
+    output.colors = decoded.as_mut_ptr();
+    output.color_capacity = decoded.len() as u64;
+    output.color_stride_bytes = size_of::<InkpodColorValue>() as u64;
+    unsafe {
+        assert_eq!(
+            inkpod_palette_file_load(
+                palette_bytes.as_ptr(),
+                palette_bytes.len() as u64,
+                &mut output,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_eq!(decoded[1].green, 34);
+
+    let names = [b"Blue".as_slice(), "濃青".as_bytes()];
+    let entries = [
+        InkpodColorChartEntry {
+            struct_size: size_of::<InkpodColorChartEntry>() as u32,
+            reserved: 0,
+            feature_flags: INKPOD_FEATURE_NONE,
+            color: colors[0],
+            name_utf8: names[0].as_ptr(),
+            name_bytes: names[0].len() as u64,
+        },
+        InkpodColorChartEntry {
+            struct_size: size_of::<InkpodColorChartEntry>() as u32,
+            reserved: 0,
+            feature_flags: INKPOD_FEATURE_NONE,
+            color: colors[1],
+            name_utf8: names[1].as_ptr(),
+            name_bytes: names[1].len() as u64,
+        },
+    ];
+    let chart_bytes = chart_path.to_string_lossy().into_owned().into_bytes();
+    unsafe {
+        assert_eq!(
+            inkpod_color_chart_file_save(
+                chart_bytes.as_ptr(),
+                chart_bytes.len() as u64,
+                entries.as_ptr(),
+                entries.len() as u64,
+                size_of::<InkpodColorChartEntry>() as u64,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    let mut chart = ptr::null_mut();
+    unsafe {
+        assert_eq!(
+            inkpod_color_chart_file_load(
+                chart_bytes.as_ptr(),
+                chart_bytes.len() as u64,
+                &mut chart,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    let mut count = 0;
+    unsafe {
+        assert_eq!(
+            inkpod_color_chart_file_count(chart, &mut count),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_eq!(count, 2);
+    let mut chart_color = color(0, 0, 0, 0);
+    let mut required = 0;
+    unsafe {
+        assert_eq!(
+            inkpod_color_chart_file_get(
+                chart,
+                1,
+                &mut chart_color,
+                ptr::null_mut(),
+                0,
+                &mut required,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    let mut name = vec![0; required as usize];
+    unsafe {
+        assert_eq!(
+            inkpod_color_chart_file_get(
+                chart,
+                1,
+                &mut chart_color,
+                name.as_mut_ptr(),
+                name.len() as u64,
+                &mut required,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_color_chart_file_release(&mut chart),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_color_chart_file_release(&mut chart),
+            INKPOD_STATUS_INVALID_STATE
+        );
+    }
+    assert_eq!(name, names[1]);
+    assert_eq!(chart_color.blue, 55);
+
+    let malformed_path = temporary_inkpod_path("palette-old").with_extension("inkpalette");
+    std::fs::write(&malformed_path, b"INKPAL0\0\0\0\0\0").unwrap();
+    let malformed_bytes = malformed_path.to_string_lossy().into_owned().into_bytes();
+    let mut malformed_output = InkpodColorBuffer {
+        struct_size: size_of::<InkpodColorBuffer>() as u32,
+        reserved: 0,
+        feature_flags: INKPOD_FEATURE_NONE,
+        colors: ptr::null_mut(),
+        color_capacity: 0,
+        color_stride_bytes: 0,
+        color_count: 0,
+    };
+    unsafe {
+        assert_ne!(
+            inkpod_palette_file_load(
+                malformed_bytes.as_ptr(),
+                malformed_bytes.len() as u64,
+                &mut malformed_output,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    std::fs::remove_file(palette_path).unwrap();
+    std::fs::remove_file(chart_path).unwrap();
+    std::fs::remove_file(malformed_path).unwrap();
+}
+
+#[test]
+fn cell_creation_carries_the_typed_initial_layer_in_genesis() {
+    let mut core = ptr::null_mut();
+    let options = InkpodCellCreateOptions {
+        struct_size: size_of::<InkpodCellCreateOptions>() as u32,
+        reserved: INKPOD_LAYER_RASTER,
+        feature_flags: INKPOD_CELL_CREATE_INITIAL_LAYER_KIND,
+        document_uuid_high: 0x4d36_4745_4e45_5349,
+        document_uuid_low: TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        width: 8,
+        height: 8,
+        dpi_x_milli: 96_000,
+        dpi_y_milli: 96_000,
+    };
+    let mut info = document_info();
+    let mut node = InkpodNodeInfo {
+        struct_size: size_of::<InkpodNodeInfo>() as u32,
+        ..InkpodNodeInfo::default()
+    };
+    unsafe {
+        assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_new_cell(core, &options, &mut info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_node_get(core, 0, u32::MAX, &mut node),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(node.kind, INKPOD_LAYER_RASTER);
+        assert_eq!(queried_history_info(core).item_count, 0);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
 fn save_document(core: *mut InkpodCore, path: &Path) -> InkpodDocumentInfo {
     let path_bytes = path.to_string_lossy().into_owned().into_bytes();
     let mut info = document_info();
@@ -1084,6 +1293,54 @@ fn ffi_contract_document_history_selection_clipboard_and_raster_round_trip() {
             INKPOD_STATUS_OK
         );
         assert_eq!(rendered, expected_source_pixels);
+
+        let new_plane_name = b"Atomic Paste Plane";
+        let new_plane = InkpodTreeEdit {
+            struct_size: size_of::<InkpodTreeEdit>() as u32,
+            operation: INKPOD_TREE_CREATE_PLANE,
+            flags: INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE,
+            object_id: 0,
+            parent_id: base_layer_id,
+            destination_index: 0,
+            kind: INKPOD_TYPED_PLANE_RASTER,
+            pixel_format: INKPOD_STORAGE_RGBA8,
+            opacity_milli: 900,
+            name_utf8: new_plane_name.as_ptr(),
+            name_bytes: new_plane_name.len() as u64,
+        };
+        let history_before_new_plane = queried_history_info(core);
+        let revision_before_new_plane = queried_document_info(core).document_revision;
+        assert_eq!(
+            inkpod_core_paste_begin_new_plane(core, clipboard, &new_plane),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            queried_document_info(core).document_revision,
+            revision_before_new_plane
+        );
+        assert_eq!(
+            queried_history_info(core).item_count,
+            history_before_new_plane.item_count
+        );
+        assert_eq!(inkpod_core_floating_cancel(core), INKPOD_STATUS_OK);
+        assert_eq!(
+            queried_history_info(core).item_count,
+            history_before_new_plane.item_count
+        );
+        assert_eq!(
+            inkpod_core_paste_begin_new_plane(core, clipboard, &new_plane),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_floating_commit(core, &mut result),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            queried_history_info(core).item_count,
+            history_before_new_plane.item_count + 1
+        );
+        assert_eq!(inkpod_core_undo(core, &mut result), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_redo(core, &mut result), INKPOD_STATUS_OK);
 
         assert_eq!(
             inkpod_core_paste_begin_mode(core, clipboard, 2),

@@ -42,14 +42,158 @@ public_id!(
 );
 
 impl PrimitiveId {
+    /// Primitive ID for paper/frame metadata replacement.
+    pub const UPDATE_PAPER_FRAMES: Self = Self(0x0001_0001);
+    /// Primitive ID for creating one typed layer.
+    pub const CREATE_LAYER: Self = Self(0x0002_0001);
+    /// Primitive ID for duplicating one typed layer.
+    pub const DUPLICATE_LAYER: Self = Self(0x0002_0002);
+    /// Primitive ID for deleting one typed layer.
+    pub const DELETE_LAYER: Self = Self(0x0002_0003);
+    /// Primitive ID for reordering one typed layer.
+    pub const REORDER_LAYER: Self = Self(0x0002_0004);
+    /// Primitive ID for replacing one layer's properties.
+    pub const SET_LAYER_PROPERTIES: Self = Self(0x0002_0005);
+    /// Primitive ID for creating one typed plane.
+    pub const CREATE_PLANE: Self = Self(0x0002_0011);
+    /// Primitive ID for duplicating one typed plane.
+    pub const DUPLICATE_PLANE: Self = Self(0x0002_0012);
+    /// Primitive ID for deleting one typed plane.
+    pub const DELETE_PLANE: Self = Self(0x0002_0013);
+    /// Primitive ID for reordering one typed plane.
+    pub const REORDER_PLANE: Self = Self(0x0002_0014);
+    /// Primitive ID for replacing one plane's properties.
+    pub const SET_PLANE_PROPERTIES: Self = Self(0x0002_0015);
+    /// Primitive ID for converting one raster plane.
+    pub const CONVERT_PLANE: Self = Self(0x0002_0016);
+    /// Primitive ID for merging one raster plane into its lower sibling.
+    pub const MERGE_PLANE: Self = Self(0x0002_0017);
+    /// Primitive ID for converting one coloring layer.
+    pub const CONVERT_LAYER: Self = Self(0x0002_0021);
+    /// Primitive ID for merging one layer into its lower sibling.
+    pub const MERGE_LAYER: Self = Self(0x0002_0022);
+    /// Primitive ID for deleting every hidden layer as one atomic topology edit.
+    pub const DELETE_HIDDEN_LAYERS: Self = Self(0x0002_0023);
     /// Primitive ID for main-line display color replacement.
     pub const SET_MAIN_LINE_COLOR: Self = Self(0x0003_0001);
     /// Primitive ID for ordered palette replacement.
     pub const REPLACE_PALETTE: Self = Self(0x0003_0002);
     /// Primitive ID for one bounded raster stroke transaction.
     pub const APPLY_RASTER_STROKE: Self = Self(0x0005_0001);
+    /// Primitive ID for one bounded raster fill transaction.
+    pub const APPLY_FILL: Self = Self(0x0005_0002);
+    /// Primitive ID for applying a raster gradient.
+    pub const APPLY_GRADIENT: Self = Self(0x0005_0010);
+    /// Primitive ID for applying boundary-aware airbrush processing.
+    pub const APPLY_BOUNDARY_AIRBRUSH: Self = Self(0x0005_0011);
+    /// Primitive ID for applying a bounded raster blur.
+    pub const APPLY_BLUR: Self = Self(0x0005_0012);
+    /// Primitive ID for applying one raster airbrush dab.
+    pub const APPLY_AIRBRUSH: Self = Self(0x0005_0013);
+    /// Primitive ID for applying one canonical airbrush gesture.
+    pub const APPLY_AIRBRUSH_GESTURE: Self = Self(0x0005_0014);
+    /// Primitive ID for applying one raster stamp.
+    pub const APPLY_STAMP: Self = Self(0x0005_0015);
+    /// Primitive ID for applying one canonical stamp gesture.
+    pub const APPLY_STAMP_GESTURE: Self = Self(0x0005_0016);
+    /// Primitive ID for applying a shape-bounded blur tool operation.
+    pub const APPLY_BLUR_TOOL: Self = Self(0x0005_0017);
+    /// Primitive ID for applying bounded dust removal.
+    pub const APPLY_DUST_REMOVAL: Self = Self(0x0005_0018);
+    /// Primitive ID for replacing a raster plane's alpha from a mask.
+    pub const EDIT_PLANE_ALPHA: Self = Self(0x0005_0019);
+    /// Primitive ID for applying a gradient to raster alpha.
+    pub const APPLY_ALPHA_GRADIENT: Self = Self(0x0005_001a);
+    /// Primitive ID for committing a filter operation.
+    pub const APPLY_FILTER: Self = Self(0x0005_0020);
+    /// Primitive ID for creating an adjustment layer.
+    pub const CREATE_ADJUSTMENT_LAYER: Self = Self(0x0005_0030);
+    /// Primitive ID for replacing an adjustment layer's parameters.
+    pub const UPDATE_ADJUSTMENT_LAYER: Self = Self(0x0005_0031);
+    /// Primitive ID for exact bounded raster color replacement.
+    pub const REPLACE_RASTER_COLORS: Self = Self(0x0005_0040);
+    /// Primitive ID for separating bounded raster colors.
+    pub const SEPARATE_RASTER_COLORS: Self = Self(0x0005_0041);
+    /// Primitive ID for restoring selected raster pixels from an ingested source.
+    pub const RESTORE_SELECTED_PIXELS: Self = Self(0x0005_0042);
     /// Primitive ID for replacing one existing raster plane from an immutable asset.
     pub const IMPORT_RASTER_ASSET: Self = Self(0x0009_0001);
+    /// Primitive ID for adding one document guide.
+    pub const ADD_GUIDE: Self = Self(0x0004_0001);
+    /// Primitive ID for moving one document guide.
+    pub const MOVE_GUIDE: Self = Self(0x0004_0002);
+    /// Primitive ID for deleting one document guide.
+    pub const DELETE_GUIDE: Self = Self(0x0004_0003);
+    /// Primitive ID for replacing the document grid.
+    pub const SET_GRID: Self = Self(0x0004_0010);
+    /// Primitive ID for deleting every document guide as one atomic edit.
+    pub const DELETE_ALL_GUIDES: Self = Self(0x0004_0011);
+    /// Primitive ID for combining one selection shape.
+    pub const APPLY_SELECTION: Self = Self(0x0006_0001);
+    /// Primitive ID for inverting the selection mask.
+    pub const INVERT_SELECTION: Self = Self(0x0006_0002);
+    /// Primitive ID for clearing the selection mask.
+    pub const CLEAR_SELECTION: Self = Self(0x0006_0003);
+    /// Primitive ID for expanding or shrinking the selection mask.
+    pub const RESIZE_SELECTION: Self = Self(0x0006_0004);
+    /// Primitive ID for selecting pixels by exact-depth color.
+    pub const SELECT_COLOR: Self = Self(0x0006_0005);
+    /// Primitive ID for converting the selection mask into a layer.
+    pub const SELECTION_TO_LAYER: Self = Self(0x0006_0010);
+    /// Primitive ID for combining a selection layer into the active mask.
+    pub const SELECTION_FROM_LAYER: Self = Self(0x0006_0011);
+    /// Primitive ID for clearing selected content on a captured target.
+    pub const CLEAR_SELECTED_CONTENT: Self = Self(0x0006_0020);
+    /// Primitive ID for committing one typed floating selection.
+    pub const COMMIT_FLOATING: Self = Self(0x0006_0021);
+    /// Primitive ID for mirroring all document data.
+    pub const MIRROR_DOCUMENT: Self = Self(0x0007_0001);
+    /// Primitive ID for rotating all document data by a right angle.
+    pub const ROTATE_DOCUMENT: Self = Self(0x0007_0002);
+    /// Primitive ID for resizing document data and frame metadata.
+    pub const RESIZE_DOCUMENT: Self = Self(0x0007_0003);
+    /// Primitive ID for adding a vector path.
+    pub const VECTOR_ADD_PATH: Self = Self(0x0008_0001);
+    /// Primitive ID for adding a vector fill.
+    pub const VECTOR_ADD_FILL: Self = Self(0x0008_0002);
+    /// Primitive ID for erasing vector geometry.
+    pub const VECTOR_ERASE: Self = Self(0x0008_0003);
+    /// Primitive ID for connecting vector endpoints.
+    pub const VECTOR_CONNECT: Self = Self(0x0008_0004);
+    /// Primitive ID for correcting vector path widths.
+    pub const VECTOR_CORRECT_WIDTH: Self = Self(0x0008_0005);
+    /// Primitive ID for rasterizing a vector layer into the document.
+    pub const RASTERIZE_VECTOR_LAYER: Self = Self(0x0008_0010);
+    /// Primitive ID for vectorizing one raster plane.
+    pub const VECTORIZE_RASTER_PLANE: Self = Self(0x0008_0011);
+    /// Primitive ID for creating a vector layer and vectorizing into it atomically.
+    pub const VECTORIZE_RASTER_PLANE_INTO_NEW_LAYER: Self = Self(0x0008_0012);
+    /// Primitive ID for replacing Light Table global opacity.
+    pub const LIGHT_TABLE_SET_GLOBAL_OPACITY: Self = Self(0x000a_0001);
+    /// Primitive ID for creating a Light Table set.
+    pub const LIGHT_TABLE_CREATE_SET: Self = Self(0x000a_0002);
+    /// Primitive ID for duplicating a Light Table set.
+    pub const LIGHT_TABLE_DUPLICATE_SET: Self = Self(0x000a_0003);
+    /// Primitive ID for deleting a Light Table set.
+    pub const LIGHT_TABLE_DELETE_SET: Self = Self(0x000a_0004);
+    /// Primitive ID for renaming a Light Table set.
+    pub const LIGHT_TABLE_RENAME_SET: Self = Self(0x000a_0005);
+    /// Primitive ID for reordering a Light Table set.
+    pub const LIGHT_TABLE_REORDER_SET: Self = Self(0x000a_0006);
+    /// Primitive ID for selecting the active Light Table set.
+    pub const LIGHT_TABLE_SET_ACTIVE: Self = Self(0x000a_0007);
+    /// Primitive ID for adding a Light Table item.
+    pub const LIGHT_TABLE_ADD_ITEM: Self = Self(0x000a_0010);
+    /// Primitive ID for replacing Light Table item properties.
+    pub const LIGHT_TABLE_UPDATE_ITEM_PROPERTIES: Self = Self(0x000a_0011);
+    /// Primitive ID for replacing a Light Table item's immutable source.
+    pub const LIGHT_TABLE_UPDATE_ITEM: Self = Self(0x000a_0012);
+    /// Primitive ID for removing a Light Table item.
+    pub const LIGHT_TABLE_REMOVE_ITEM: Self = Self(0x000a_0013);
+    /// Primitive ID for reordering a Light Table item.
+    pub const LIGHT_TABLE_REORDER_ITEM: Self = Self(0x000a_0014);
+    /// Primitive ID for swapping Light Table content with the active plane.
+    pub const LIGHT_TABLE_SWAP_WITH_ACTIVE: Self = Self(0x000a_0015);
 }
 
 impl ProcedureId {
@@ -195,6 +339,7 @@ pub struct CanonicalProcedure {
     pub(crate) canonical_payload_digest: [u8; 32],
     pub(crate) pre_state_digest: DocumentStateDigest,
     pub(crate) post_state_digest: DocumentStateDigest,
+    pub(crate) runtime_invocation: Option<super::invocation::RuntimeInvocation>,
 }
 
 impl CanonicalProcedure {

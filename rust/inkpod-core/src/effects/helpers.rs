@@ -93,7 +93,7 @@ pub(super) fn filter_document_with_progress(
     plane_id: PlaneId,
     filter: &Filter,
     revision: RenderRevision,
-    progress: &mut impl FnMut(u64, u64) -> bool,
+    progress: &mut (impl FnMut(u64, u64) -> bool + ?Sized),
 ) -> Result<CellDocument, CoreError> {
     let plane = editable_color_plane(base, plane_id)?;
     let selection = (base.selection.allocated_tile_count() != 0).then_some(&base.selection);

@@ -22,5 +22,5 @@ mod operations;
 mod preview;
 mod tools;
 
-pub(crate) use model::FilterPreview;
 pub use model::FilterPreviewInfo;
+pub(crate) use model::{FilterPreview, PreviewProcedure};

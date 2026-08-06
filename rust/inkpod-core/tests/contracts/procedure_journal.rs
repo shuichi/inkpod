@@ -301,30 +301,48 @@ fn hist_001_state_id_savepoint_survives_history_moves_and_branching() {
 }
 
 #[test]
-fn hist_001_unmigrated_mutation_explicitly_disables_full_journal_replay() {
+fn hist_001_document_families_keep_the_journal_complete_and_replayable() {
     let mut core = journal_core();
     set_main_line(&mut core, 10);
+    core.verify_journal_replay().unwrap();
     replace_palette(&mut core, 20);
-    core.release_history_cache().unwrap();
+    core.verify_journal_replay().unwrap();
     core.add_guide(GuideAxis::Vertical, 7).unwrap();
+    core.verify_journal_replay().unwrap();
+    core.create_layer(LayerKind::Raster, "Replay raster")
+        .unwrap();
+    core.verify_journal_replay().unwrap();
+    core.apply_selection(
+        &SelectionShape::Rectangle(RectI32 {
+            x: 1,
+            y: 1,
+            width: 3,
+            height: 3,
+        }),
+        SelectionOperation::New,
+    )
+    .unwrap();
+    core.verify_journal_replay().unwrap();
+    core.mirror_document(MirrorAxis::Horizontal).unwrap();
+    core.verify_journal_replay().unwrap();
+    core.light_table_create_set("Replay light table").unwrap();
 
-    assert!(!core.journal_state().unwrap().is_complete());
-    assert!(matches!(
-        core.verify_journal_replay(),
-        Err(CoreError::InvalidState(
-            "journal is incomplete while primitive migration is in progress"
-        ))
-    ));
-    assert!(matches!(
-        core.release_history_cache(),
-        Err(CoreError::InvalidState(
-            "journal is incomplete while primitive migration is in progress"
-        ))
-    ));
+    let state = core.journal_state().unwrap();
+    assert!(state.is_complete());
+    assert_eq!(state.visible_history_count(), core.history_entries().len());
+    let expected_digest = core.document_state_digest().unwrap();
+    core.verify_journal_replay().unwrap();
+    core.release_history_cache().unwrap();
+    assert_eq!(
+        core.verify_journal_replay()
+            .unwrap()
+            .document_state_digest(),
+        expected_digest
+    );
     assert!(core.document_info().unwrap().can_undo);
     core.undo().unwrap();
-    core.undo().unwrap();
     core.redo().unwrap();
+    core.verify_journal_replay().unwrap();
 }
 
 #[test]

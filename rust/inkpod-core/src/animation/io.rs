@@ -1,5 +1,6 @@
 use super::raster::*;
 use super::*;
+use crate::primitive::CanonicalInvocation;
 
 impl Core {
     /// Decodes a common raster into an immutable Genesis asset and opens a clean cell.
@@ -183,6 +184,11 @@ impl Core {
         &mut self,
         frames: FrameMetadata,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::UpdatePaperFrames { frames })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         validate_frames(self.document.as_ref().ok_or(CoreError::NoDocument)?, frames)?;
         let mut edit = self.begin_document_edit()?;

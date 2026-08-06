@@ -2,6 +2,7 @@ use super::geometry::*;
 use super::model::*;
 use super::*;
 use crate::EditorTarget;
+use crate::primitive::CanonicalInvocation;
 
 impl Core {
     /// Rasterizes one vector-coloring layer into owned straight-alpha RGBA8 pixels.
@@ -179,6 +180,18 @@ impl Core {
         antialias: bool,
         name: &str,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result =
+                self.execute_canonical_invocation(CanonicalInvocation::RasterizeVectorLayer {
+                    layer_id,
+                    antialias,
+                    name: name.to_owned(),
+                })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "rasterize-vector primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         validate_node_name(name)?;
         let rasterized = self.rasterize_vector_layer(layer_id, 1, antialias)?;

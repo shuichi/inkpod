@@ -479,6 +479,8 @@ fn vector_002_connect_width_select_and_raster_vector_conversion_are_transactiona
     assert_eq!(core.vector_fills().unwrap().len(), 0);
     core.redo().unwrap();
     assert_eq!(core.vector_fills().unwrap().len(), 1);
+    assert!(core.journal_state().unwrap().is_complete());
+    core.verify_journal_replay().unwrap();
 }
 
 #[test]
@@ -583,4 +585,89 @@ fn vector_002_all_selection_modes_have_deterministic_ranges_and_ids() {
             .iter()
             .all(|range| range.start_million == 0 && range.end_million == 1_000_000)
     );
+}
+
+#[test]
+fn vectorize_into_new_layer_is_one_atomic_replayable_primitive() {
+    let mut core = Core::new();
+    core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let (_, source_layer_id) = core.create_layer(LayerKind::Raster, "Source").unwrap();
+    let source_plane_id = core
+        .layers()
+        .unwrap()
+        .into_iter()
+        .find(|layer| layer.id == source_layer_id)
+        .unwrap()
+        .planes[0]
+        .id;
+
+    let before_empty = core.journal_state();
+    let (empty, layer_id, fill_ids) = core
+        .vectorize_raster_plane_into_new_layer(source_plane_id, 1, "Vectorized")
+        .unwrap();
+    assert_eq!(layer_id, 0);
+    assert!(fill_ids.is_empty());
+    assert_eq!(core.journal_state(), before_empty);
+    assert_eq!(
+        empty.revision(),
+        core.document_info().unwrap().document_revision
+    );
+
+    core.set_active_node(source_layer_id, source_plane_id)
+        .unwrap();
+    core.apply_stroke(&Stroke {
+        tool: PaintTool::Pencil,
+        plane: ActivePlane::Color,
+        color: [10, 20, 30, 255],
+        diameter: 1.0,
+        auto_erase: false,
+        pressure_size: false,
+        coordinate_space: CoordinateSpace::Document,
+        samples: vec![StrokeSample {
+            x: 1.0,
+            y: 1.0,
+            pressure: 1.0,
+        }],
+    })
+    .unwrap();
+    let before_layers = core.layers().unwrap().len();
+    let before_history = core.history_entries().len();
+    let before_revision = core.document_info().unwrap().document_revision;
+    let (outcome, vector_layer_id, fill_ids) = core
+        .vectorize_raster_plane_into_new_layer(source_plane_id, 1, "Vectorized")
+        .unwrap();
+    assert_eq!(outcome.revision(), before_revision + 1);
+    assert_ne!(vector_layer_id, 0);
+    assert_eq!(fill_ids.len(), 1);
+    assert_eq!(core.layers().unwrap().len(), before_layers + 1);
+    assert_eq!(core.history_entries().len(), before_history + 1);
+    let primitive = core
+        .journal_entries()
+        .iter()
+        .rev()
+        .find_map(|entry| match entry {
+            JournalEntry::Commit(commit) => Some(commit.procedure().primitive_id()),
+            JournalEntry::HistoryMove(_) | JournalEntry::BranchCut(_) => None,
+        })
+        .unwrap();
+    assert_eq!(
+        primitive,
+        PrimitiveId::VECTORIZE_RASTER_PLANE_INTO_NEW_LAYER
+    );
+    core.undo().unwrap();
+    assert_eq!(core.layers().unwrap().len(), before_layers);
+    assert!(core.vector_fills().unwrap().is_empty());
+    core.redo().unwrap();
+    assert_eq!(core.layers().unwrap().len(), before_layers + 1);
+    assert_eq!(core.vector_fills().unwrap().len(), 1);
+    assert!(core.journal_state().unwrap().is_complete());
+    core.verify_journal_replay().unwrap();
+
+    let before_invalid = core.document_state_digest().unwrap();
+    assert!(matches!(
+        core.vectorize_raster_plane_into_new_layer(source_plane_id, 1, ""),
+        Err(CoreError::InvalidArgument(_))
+    ));
+    assert_eq!(core.document_state_digest().unwrap(), before_invalid);
 }

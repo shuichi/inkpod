@@ -1,4 +1,5 @@
 use super::*;
+use crate::primitive::CanonicalInvocation;
 
 impl Core {
     /// Combines a document-space shape with the current selection.
@@ -25,6 +26,15 @@ impl Core {
         operation: SelectionOperation,
         target: EditorTarget,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ApplySelection {
+                    shape: shape.clone(),
+                    operation,
+                    target,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let (_, active_plane_id) = self.editor_target_ids(target)?;
         let mut edit = self.begin_document_edit()?;
@@ -38,6 +48,11 @@ impl Core {
 
     /// Inverts selection coverage across the whole document as one undoable edit.
     pub fn invert_selection(&mut self) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::InvertSelection)
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision();
@@ -50,6 +65,11 @@ impl Core {
     ///
     /// An already-empty selection is a no-op.
     pub fn clear_selection(&mut self) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ClearSelection)
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         if mask_bounds(&document.selection)?.is_none() {
@@ -66,6 +86,11 @@ impl Core {
     /// The magnitude is bounded to 4096 document pixels. Success is one undoable
     /// edit; invalid input or processing failure is atomic.
     pub fn resize_selection(&mut self, pixels: i32) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ResizeSelection { pixels })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         if pixels == i32::MIN || pixels.unsigned_abs() > 4_096 {
             return Err(CoreError::InvalidArgument(
@@ -108,6 +133,17 @@ impl Core {
         operation: SelectionOperation,
         target: EditorTarget,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::SelectColor {
+                    color,
+                    tolerance,
+                    different,
+                    operation,
+                    target,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let (_, active_plane_id) = self.editor_target_ids(target)?;
         let mut edit = self.begin_document_edit()?;
@@ -135,6 +171,16 @@ impl Core {
     ///
     /// Success is one undoable edit and returns the stable ID of the new layer.
     pub fn selection_to_layer(&mut self, name: &str) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result =
+                self.execute_canonical_invocation(CanonicalInvocation::SelectionToLayer {
+                    name: name.to_owned(),
+                })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "selection-to-layer primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         validate_node_name(name)?;
         let selection = {
@@ -189,6 +235,14 @@ impl Core {
         layer_id: u64,
         operation: SelectionLayerOperation,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::SelectionFromLayer {
+                    layer_id,
+                    operation,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
         let mut edit = self.begin_document_edit()?;
@@ -350,7 +404,7 @@ impl Core {
         let (staged_assets, asset_ids) = stage_clipboard_assets(self, payload)?;
         self.floating = Some(FloatingSelection {
             payload: payload.clone(),
-            destination_plane_id: destination.id,
+            destination: FloatingDestination::ExistingPlane(destination.id),
             transform: FloatingTransform::default(),
             asset_ids,
         });
@@ -395,7 +449,65 @@ impl Core {
         let (staged_assets, asset_ids) = stage_clipboard_assets(self, &converted)?;
         self.floating = Some(FloatingSelection {
             payload: converted,
-            destination_plane_id: destination.id,
+            destination: FloatingDestination::ExistingPlane(destination.id),
+            transform: FloatingTransform::default(),
+            asset_ids,
+        });
+        self.assets = staged_assets;
+        Ok(())
+    }
+
+    /// Starts a converted floating paste whose destination plane is created at commit.
+    ///
+    /// The target layer and typed plane definition are validated now, but no stable
+    /// ID, topology, revision, or history entry is published until
+    /// [`Core::commit_floating`]. Cancel therefore leaves no empty plane behind.
+    pub fn begin_paste_to_new_plane_converted(
+        &mut self,
+        payload: &ClipboardPayload,
+        layer_id: u64,
+        kind: PlaneType,
+        format: PixelFormat,
+        name: &str,
+        opacity_milli: u32,
+    ) -> Result<(), CoreError> {
+        self.ensure_no_active_stroke()?;
+        if self.floating.is_some() {
+            return Err(CoreError::InvalidState("floating paste is already active"));
+        }
+        validate_node_name(name)?;
+        if opacity_milli > 1_000 {
+            return Err(CoreError::InvalidArgument(
+                "paste destination opacity exceeds 1000 milli",
+            ));
+        }
+        self.validate_plane_creation(layer_id, kind, format)?;
+        let source = payload
+            .planes
+            .first()
+            .ok_or(CoreError::InvalidArgument("clipboard has no plane payload"))?;
+        if source.pixels.len() as u64 > MAX_FILL_PIXELS {
+            return Err(CoreError::InvalidArgument(
+                "clipboard payload exceeds work limit",
+            ));
+        }
+        let mut converted = payload.clone();
+        converted.planes.truncate(1);
+        converted.planes[0].kind = kind;
+        converted.planes[0].pixel_format = format;
+        for pixel in &mut converted.planes[0].pixels {
+            pixel.value = convert_plane_pixel(pixel.value, format)?;
+        }
+        let (staged_assets, asset_ids) = stage_clipboard_assets(self, &converted)?;
+        self.floating = Some(FloatingSelection {
+            payload: converted,
+            destination: FloatingDestination::NewPlane {
+                layer_id: LayerId::from_raw(layer_id),
+                kind,
+                format,
+                name: name.to_owned(),
+                opacity_milli,
+            },
             transform: FloatingTransform::default(),
             asset_ids,
         });
@@ -408,6 +520,12 @@ impl Core {
     /// Empty selection or already-clear pixels are a no-op. A real change is one
     /// undoable document edit; failures do not publish partial clearing.
     pub fn clear_selected_content(&mut self) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let target = self.active_editor_target()?;
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ClearSelectedContent { target })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let (_, plane_id) = self.active_editor_target_ids()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
@@ -490,26 +608,50 @@ impl Core {
     /// Success clears the preview. Validation or raster failure keeps the live
     /// document unchanged so the caller may adjust or cancel the preview.
     pub fn commit_floating(&mut self) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let floating = self
+                .floating
+                .clone()
+                .ok_or(CoreError::InvalidState("there is no floating paste"))?;
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::CommitFloating { floating })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let floating = self
             .floating
             .clone()
             .ok_or(CoreError::InvalidState("there is no floating paste"))?;
         let retained_assets = self.asset_store_without_floating()?;
+        if let FloatingDestination::NewPlane {
+            layer_id,
+            kind,
+            format,
+            ..
+        } = &floating.destination
+        {
+            self.validate_plane_creation(layer_id.get(), *kind, *format)?;
+        }
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let destination =
-            document
-                .plane_by_id(floating.destination_plane_id)
-                .ok_or(CoreError::InvalidState(
-                    "paste destination no longer exists",
-                ))?;
-        ensure_editable_plane(document, floating.destination_plane_id)?;
+        let (destination_kind, destination_format) = match &floating.destination {
+            FloatingDestination::ExistingPlane(plane_id) => {
+                let destination =
+                    document
+                        .plane_by_id(*plane_id)
+                        .ok_or(CoreError::InvalidState(
+                            "paste destination no longer exists",
+                        ))?;
+                ensure_editable_plane(document, *plane_id)?;
+                (destination.kind, destination.raster.format())
+            }
+            FloatingDestination::NewPlane { kind, format, .. } => (*kind, *format),
+        };
         let source = floating
             .payload
             .planes
             .iter()
             .find(|plane| {
-                plane.kind == destination.kind && plane.pixel_format == destination.raster.format()
+                plane.kind == destination_kind && plane.pixel_format == destination_format
             })
             .ok_or(CoreError::InvalidArgument(
                 "compatible clipboard plane is missing",
@@ -608,41 +750,90 @@ impl Core {
                 "floating selection contains no content inside the destination paper",
             ));
         }
-        let revision = self.next_document_revision()?;
-        let after_state = self.allocate_state()?;
-        let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
-        let plane = document
-            .plane_by_id_mut(floating.destination_plane_id)
-            .ok_or(CoreError::InvalidState(
-                "paste destination no longer exists",
-            ))?;
-        let mut changes = Vec::with_capacity(staged.len());
-        for ((x, y), source_value) in staged {
-            let before = plane.raster.pixel(x, y)?;
-            let after = paste_value(before, source_value, plane.kind)?;
-            if before != after {
-                plane.raster.set_pixel(x, y, after, revision.get())?;
-                changes.push(PixelChange {
-                    x,
-                    y,
-                    before,
-                    after,
+        match floating.destination {
+            FloatingDestination::ExistingPlane(plane_id) => {
+                let revision = self.next_document_revision()?;
+                let after_state = self.allocate_state()?;
+                let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
+                let plane = document
+                    .plane_by_id_mut(plane_id)
+                    .ok_or(CoreError::InvalidState(
+                        "paste destination no longer exists",
+                    ))?;
+                let mut changes = Vec::with_capacity(staged.len());
+                for ((x, y), source_value) in staged {
+                    let before = plane.raster.pixel(x, y)?;
+                    let after = paste_value(before, source_value, plane.kind)?;
+                    if before != after {
+                        plane.raster.set_pixel(x, y, after, revision.get())?;
+                        changes.push(PixelChange {
+                            x,
+                            y,
+                            before,
+                            after,
+                        });
+                    }
+                }
+                if changes.is_empty() {
+                    self.floating = None;
+                    self.assets = retained_assets;
+                    return Ok(self.noop_outcome());
+                }
+                self.document_revision = revision;
+                self.commit_pixel_history(plane_id, changes, after_state);
+                self.floating = None;
+                self.assets = retained_assets;
+                Ok(DispatchOutcome {
+                    revision: revision.get(),
+                    accepted_commands: 1,
+                })
+            }
+            FloatingDestination::NewPlane {
+                layer_id,
+                kind,
+                format,
+                name,
+                opacity_milli,
+            } => {
+                let mut next_id = self.next_id;
+                let plane_id = next_id.take_plane();
+                let mut edit = self.begin_document_edit()?;
+                let revision = edit.revision();
+                let after = edit.working_mut();
+                let layer = after
+                    .layers
+                    .iter_mut()
+                    .find(|layer| layer.id == layer_id)
+                    .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
+                let mut raster = TileRaster::new(after.width, after.height, format)?;
+                let zero = zero_pixel(format)?;
+                for ((x, y), source_value) in staged {
+                    let value = paste_value(zero, source_value, kind)?;
+                    if value != zero {
+                        raster.set_pixel(x, y, value, revision.get())?;
+                    }
+                }
+                layer.planes.push(PlaneNode {
+                    id: plane_id,
+                    kind,
+                    name,
+                    visible: true,
+                    editable: true,
+                    opacity_milli,
+                    raster,
                 });
+                validate_layer_kind(layer.kind, &layer.planes)?;
+                edit.prefer_editor_target(EditorTarget {
+                    layer_id: layer_id.get(),
+                    plane_id: plane_id.get(),
+                });
+                let outcome = edit.commit(self)?;
+                self.next_id = next_id;
+                self.floating = None;
+                self.assets = retained_assets;
+                Ok(outcome)
             }
         }
-        if changes.is_empty() {
-            self.floating = None;
-            self.assets = retained_assets;
-            return Ok(self.noop_outcome());
-        }
-        self.document_revision = revision;
-        self.commit_pixel_history(floating.destination_plane_id, changes, after_state);
-        self.floating = None;
-        self.assets = retained_assets;
-        Ok(DispatchOutcome {
-            revision: revision.get(),
-            accepted_commands: 1,
-        })
     }
 }
 

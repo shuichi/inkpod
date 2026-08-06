@@ -2,13 +2,14 @@
 
 use super::*;
 use crate::document::ensure_editable_plane;
+use crate::primitive::{CanonicalInvocation, InvocationResult};
 use crate::selection::{combine_selection_masks, selection_from_rect};
 
 impl Core {
     /// Applies a fill atomically to the active editable raster plane.
     pub fn apply_fill(&mut self, request: &FillRequest) -> Result<FillOutcome, CoreError> {
         let target = self.active_editor_target()?;
-        self.apply_fill_internal(request, target, false, false, || false)
+        self.apply_fill_internal(request, target, false, false, &mut || false)
     }
 
     /// Applies a fill with optional visible light-table boundary/color sampling.
@@ -22,7 +23,13 @@ impl Core {
         use_sampled_color: bool,
     ) -> Result<FillOutcome, CoreError> {
         let target = self.active_editor_target()?;
-        self.apply_fill_internal(request, target, use_boundary, use_sampled_color, || false)
+        self.apply_fill_internal(
+            request,
+            target,
+            use_boundary,
+            use_sampled_color,
+            &mut || false,
+        )
     }
 
     /// Applies a fill to the stable target captured when an editor gesture began.
@@ -38,7 +45,13 @@ impl Core {
         use_boundary: bool,
         use_sampled_color: bool,
     ) -> Result<FillOutcome, CoreError> {
-        self.apply_fill_internal(request, target, use_boundary, use_sampled_color, || false)
+        self.apply_fill_internal(
+            request,
+            target,
+            use_boundary,
+            use_sampled_color,
+            &mut || false,
+        )
     }
 
     /// Applies a light-table-aware fill with cooperative cancellation.
@@ -50,7 +63,7 @@ impl Core {
         request: &FillRequest,
         use_boundary: bool,
         use_sampled_color: bool,
-        is_cancelled: impl FnMut() -> bool,
+        mut is_cancelled: impl FnMut() -> bool,
     ) -> Result<FillOutcome, CoreError> {
         let target = self.active_editor_target()?;
         self.apply_fill_internal(
@@ -58,7 +71,7 @@ impl Core {
             target,
             use_boundary,
             use_sampled_color,
-            is_cancelled,
+            &mut is_cancelled,
         )
     }
 
@@ -68,10 +81,10 @@ impl Core {
     pub fn apply_fill_with_cancel(
         &mut self,
         request: &FillRequest,
-        is_cancelled: impl FnMut() -> bool,
+        mut is_cancelled: impl FnMut() -> bool,
     ) -> Result<FillOutcome, CoreError> {
         let target = self.active_editor_target()?;
-        self.apply_fill_internal(request, target, false, false, is_cancelled)
+        self.apply_fill_internal(request, target, false, false, &mut is_cancelled)
     }
 
     fn apply_fill_internal(
@@ -80,8 +93,35 @@ impl Core {
         target: EditorTarget,
         use_light_table_boundary: bool,
         use_light_table_color: bool,
-        mut is_cancelled: impl FnMut() -> bool,
+        is_cancelled: &mut dyn FnMut() -> bool,
     ) -> Result<FillOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let request = request.clone();
+            let staged_request = request.clone();
+            let result = self.execute_canonical_invocation_with(
+                CanonicalInvocation::ApplyFill {
+                    request,
+                    target,
+                    use_light_table_boundary,
+                    use_light_table_color,
+                },
+                move |staged| {
+                    staged
+                        .apply_fill_internal(
+                            &staged_request,
+                            target,
+                            use_light_table_boundary,
+                            use_light_table_color,
+                            is_cancelled,
+                        )
+                        .map(InvocationResult::fill)
+                },
+            )?;
+            return Ok(FillOutcome {
+                dispatch: result.dispatch,
+                changed_pixels: result.changed_pixels,
+            });
+        }
         self.ensure_no_active_stroke()?;
         let (active_layer_id, active_plane_id) = self.editor_target_ids(target)?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
@@ -117,7 +157,7 @@ impl Core {
         let operation_selection = request
             .selection
             .map(|rect| {
-                selection_from_rect(document.width, document.height, rect, &mut is_cancelled)
+                selection_from_rect(document.width, document.height, rect, &mut *is_cancelled)
             })
             .transpose()?;
         let selection = match (request.use_document_selection, operation_selection) {
@@ -209,7 +249,7 @@ impl Core {
                 (request.seed_x, request.seed_y),
                 fill_color,
                 &options,
-                &mut is_cancelled,
+                &mut *is_cancelled,
             )?,
             FillOperation::ClosedRegion => {
                 let operation = selection.as_ref().ok_or(CoreError::InvalidArgument(
@@ -221,7 +261,7 @@ impl Core {
                     operation,
                     fill_color,
                     &options,
-                    &mut is_cancelled,
+                    &mut *is_cancelled,
                 )?
             }
             FillOperation::Extend => {
@@ -233,7 +273,7 @@ impl Core {
                     operation,
                     (request.seed_x, request.seed_y),
                     request.extension_distance,
-                    &mut is_cancelled,
+                    &mut *is_cancelled,
                 )?
             }
         };

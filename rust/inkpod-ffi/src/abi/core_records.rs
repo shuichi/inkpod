@@ -233,6 +233,17 @@ pub struct InkpodColorBuffer {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct InkpodColorChartEntry {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub color: InkpodColorValue,
+    pub name_utf8: *const u8,
+    pub name_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct InkpodFillInput {
     pub struct_size: u32,
     pub operation: u32,

@@ -123,7 +123,7 @@ validates and copies borrowed data before returning. Raster open/import,
 clipboard, and Light Table sources are interned in the canonical asset registry;
 stroke samples become an owned inline payload up to 4 MiB and one immutable
 sample asset above that cutoff. Sequence sources remain bounded Rust-owned raster
-copies, and vector-procedure asset wiring is later M6 work. Neither Core nor a
+copies, and vector edits retain their typed geometry in the canonical invocation. Neither Core nor a
 committed procedure retains the caller's record, buffer, file name, or path. A
 committed procedure contains bounded inline canonical bytes or immutable
 content-addressed `AssetId` values, never a raw pointer, path, native enum layout,
@@ -147,13 +147,14 @@ and `EditorStateDigest` are separate from document history. Exact ID start,
 ordering, canonical fixed-point, digest framing, and resource-limit rules live
 in [`file-format.md`](file-format.md).
 
-The current Core-only vertical slice implements this boundary for
-`SetMainLineColor`, `ReplacePalette`, one bounded `ApplyRasterStroke`, and
-`ImportRasterAsset` into an existing plane. `Core::execute_primitive` validates
-and canonicalizes those requests, executes
-against private working state, detects semantic no-op, and publishes through
-one explicit primitive transaction boundary. `Core::replay_procedure` validates
-the resulting canonical procedure and executes it through the same kernel;
+Every production document mutation now implements this boundary. The original
+value/ID ABI-v3 catalog (`SetMainLineColor`, `ReplacePalette`, bounded
+`ApplyRasterStroke`, and `ImportRasterAsset`) continues through
+`Core::execute_primitive`; the remaining typed public methods construct a
+`CanonicalInvocation`, execute the same method against a private staged Core,
+and publish only after it produced exactly one valid document commit.
+`Core::replay_procedure` validates the retained procedure and invokes the same
+typed route rather than a second semantic implementation;
 `Core::document_state_digest` observes the memory-layout-independent BLAKE3-256
 semantic state digest. Schema 4 is a domain-separated commitment tree: one
 metadata commitment plus stable-Plane-ID-keyed raster roots, whose leaves commit
@@ -164,33 +165,30 @@ and broader document edits use a cold rebuild; either path produces the same
 digest as a cold recomputation, independent of edit count and tile
 materialization order. This runtime state-digest cache is not the render cache,
 does not supply `RenderTile.source_revision`, and is never consulted while
-building a view-only snapshot. The established main-line, palette, and stroke
-public Rust APIs are wrappers over this executor rather than alternate mutation
-implementations.
+building a view-only snapshot. Public Rust APIs are wrappers over this boundary
+rather than alternate mutation implementations.
 
-While history remains within that canonical slice, Core now owns an append-only runtime
+For all production history, Core owns an append-only runtime
 `JournalEntry::{Commit, HistoryMove, BranchCut}` sequence. A canonical history
-entry shares its retained procedure with its `Commit`; while the journal is
-complete, an actual Undo, Redo, or jump appends one `HistoryMove` without
+entry shares its retained procedure with its `Commit`; an actual Undo, Redo, or
+jump appends one `HistoryMove` without
 creating a history item. A canonical commit away from the active branch tail
 reserves and publishes an adjacent `BranchCut` plus `Commit`, retains the
 inactive tail outside the normal redo UI, and advances State, Procedure,
 JournalEvent, and Branch IDs only at the common publish boundary. `JournalState`
 exposes the current/savepoint StateIds, active branch, visible cursor, and
-whether every current commit is canonical. A complete
-journal can rebuild its runtime inverse/COW history cache privately from the
+the canonical status of every current commit. The journal can rebuild its
+runtime inverse/COW history cache privately from the
 Genesis document and canonical procedures; digest and graph validation precede
 cache release, and later history movement reconstructs the cache on demand.
 
-This is deliberately not a generic snapshot- or diff-procedure bridge for the
-remaining document routes. Any legacy document mutation marks the runtime
-journal incomplete; existing Undo/Redo continues through its retained runtime
-cache, while journal verification and cache release reject that mixed state.
-Full primitive migration remains a later milestone. C ABI v3 and the
+This is deliberately not a generic snapshot- or diff-procedure bridge. Every
+production history entry references its route-specific canonical procedure,
+and there is no supported incomplete-journal state. C ABI v3 and the
 exact-current `.inkpod` v2 codec are unchanged: the runtime journal is not
 serialized, and a current-v2 open establishes a new Genesis/root journal rather
 than restoring the prior session's history. Production must not emit a partial
-successor container.
+successor container before M8.
 
 ## Immutable Genesis and canonical assets
 
@@ -230,8 +228,8 @@ Genesis asset base. Import into an existing document, private clipboard payloads
 and Light Table sources pass through the same bounded asset-ingestion boundary.
 Stroke samples are always copied into bounded Rust-owned canonical bytes; payloads
 larger than 4 MiB are promoted to a canonical sample asset, while smaller payloads
-stay inline. The registry can validate canonical vector streams, but connecting a
-vector document primitive is M6 work. The Windows path/clipboard adapters retain
+stay inline. Vector document primitives retain typed canonical geometry and
+stable target/output IDs. The Windows path/clipboard adapters retain
 OS authority only long enough to obtain input bytes; later replay does not reopen
 a path or borrow C++ memory.
 
@@ -249,17 +247,20 @@ after release. Variable input is synchronously copied into bounded Rust-owned
 objects before a primitive is queued. The canonical `PrimitiveWork` queue record
 contains session/generation, issue-time target context, base revision, fixed-width
 opcode/schema values, and object IDs only. It contains no caller pointer, closure,
-path, callback, or STL object. The established per-operation FFI wrappers for the
-canonical slice and `inkpod_core_primitive_execute_v3` share
-`Core::execute_primitive`, so there is one semantic mutation owner.
+path, callback, or STL object. The established per-operation FFI wrappers and
+`inkpod_core_primitive_execute_v3` delegate to their corresponding canonical
+Core boundary, so there is one semantic mutation owner.
 
 Snapshot, thumbnail, and export output uses an ID plus bounded record/byte copy;
 the caller's storage is borrowed only for that call. Saturation rolls back an
 unaccepted sequence, while accepted primitive work is resolved once through
-active-stroke deferral, close, and shutdown drain. The arbitrary-callable
-`LegacyInvokeWork` variant remains isolated for unmigrated M6 routes, queries,
-and session initialization; it is not the canonical mutation lane and does not
-add a second procedure implementation. Serializing `GENS`/`ASST` and reopening
+active-stroke deferral, close, and shutdown drain. `PrimitiveWork` remains the
+closed value/ID-only ABI-v3 lane. Other operations use a fixed `AdapterWork`
+record containing issue-time session/generation/context, flags, sequence, and a
+bounded input token; callables, optional view updates, and completions stay in a
+CoreHost registry and are removed exactly once on the owner thread. No queued
+work variant contains a callable, pointer, path, or STL container. Serializing
+`GENS`/`ASST` and reopening
 their retained graph remains the
 atomic M8 container cutover. Production `.inkpod` therefore remains exact-current
 v2. Because v2 cannot preserve an asset-backed Genesis, normal save,
@@ -798,12 +799,12 @@ revisions; only an explicit consuming commit may publish the working document.
 Commit rejects a stale base and revision/history overflow before changing live
 state, treats an unchanged working document as a no-op, and otherwise updates the
 document, revision, one history entry, and render-cache invalidation together.
-The migrated main-line-color, palette-replacement, and raster-stroke wrappers
-construct typed primitive requests and delegate validation, canonicalization,
-working-state mutation, no-op detection, and commit to the one canonical
-executor. Their canonical procedures retain the existing history labels and
-cache policy, and replay uses that same executor rather than a second pixel or
-metadata implementation. For a complete canonical slice, document, StateId,
+All public document-mutation wrappers construct a typed primitive request or
+canonical invocation and delegate validation, canonicalization, working-state
+mutation, no-op detection, and commit to the one canonical boundary. Their
+canonical procedures retain the existing history labels and cache policy, and
+replay uses the same route rather than a second pixel, geometry, topology, or
+metadata implementation. For every committed edit, document, StateId,
 visible history, journal events, document revision, cache invalidation, and all
 persistent high-watermarks publish together. A new edit after history movement
 removes the old tail from normal Redo while retaining it as an inactive journal
@@ -811,12 +812,11 @@ branch. The normal savepoint is a `StateId`, so dirty state follows Undo, Redo,
 jump, and branching independently of file timestamps.
 
 Sparse tile allocations remain shared through copy-on-write, and inverse
-history changes are an optional runtime cache. Core can validate a complete
-canonical journal against the live semantic digest, release that cache, and
-reconstruct it before the next history move. An unmigrated document transaction
-keeps the established runtime history behavior but marks the journal incomplete;
-it is never disguised as a canonical procedure and cannot use cache-free full
-replay until its real primitive route is migrated.
+history changes are an optional runtime cache. Core validates the canonical
+journal against the live semantic digest, can release that cache, and
+reconstructs it before the next history move. Production has no transition to
+an incomplete journal; a history-producing commit without its procedure is an
+invalid internal state rather than a supported fallback.
 
 Preview/session, floating-selection, cancellable Batch/effect, external reload,
 and potentially long-running raster/vector conversion paths retain their

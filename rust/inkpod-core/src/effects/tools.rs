@@ -1,5 +1,6 @@
 use super::helpers::*;
 use super::*;
+use crate::primitive::{CanonicalInvocation, InvocationResult};
 
 impl Core {
     /// Applies a gradient to an editable raster plane as one undoable edit.
@@ -8,6 +9,14 @@ impl Core {
         plane_id: u64,
         gradient: &Gradient,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ApplyGradient {
+                    plane_id,
+                    gradient: gradient.clone(),
+                })
+                .map(|result| result.dispatch);
+        }
         self.apply_raster_operation(
             PlaneId::from_raw(plane_id),
             |raster, selection, revision| apply_gradient(raster, selection, gradient, revision),
@@ -20,6 +29,14 @@ impl Core {
         plane_id: u64,
         effect: &BoundaryAirbrush,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ApplyBoundaryAirbrush {
+                    plane_id,
+                    effect: effect.clone(),
+                })
+                .map(|result| result.dispatch);
+        }
         self.apply_raster_operation(
             PlaneId::from_raw(plane_id),
             |raster, selection, revision| {
@@ -37,6 +54,15 @@ impl Core {
         radius: u32,
         strength_milli: u32,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ApplyBlur {
+                    plane_id,
+                    radius,
+                    strength_milli,
+                })
+                .map(|result| result.dispatch);
+        }
         let filter = Filter::GaussianBlur {
             radius,
             strength_milli,
@@ -53,6 +79,14 @@ impl Core {
         plane_id: u64,
         stroke: AirbrushStroke,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ApplyAirbrush {
+                    plane_id,
+                    stroke,
+                })
+                .map(|result| result.dispatch);
+        }
         self.apply_raster_operation(
             PlaneId::from_raw(plane_id),
             |raster, selection, revision| apply_airbrush(raster, selection, stroke, revision),
@@ -65,6 +99,14 @@ impl Core {
         plane_id: u64,
         gesture: &AirbrushGesture,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ApplyAirbrushGesture {
+                    plane_id,
+                    gesture: gesture.clone(),
+                })
+                .map(|result| result.dispatch);
+        }
         self.apply_raster_operation(
             PlaneId::from_raw(plane_id),
             |raster, selection, revision| {
@@ -108,6 +150,11 @@ impl Core {
         plane_id: u64,
         stamp: Stamp,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ApplyStamp { plane_id, stamp })
+                .map(|result| result.dispatch);
+        }
         self.apply_raster_operation(
             PlaneId::from_raw(plane_id),
             |raster, selection, revision| apply_stamp(raster, selection, stamp, revision),
@@ -120,6 +167,14 @@ impl Core {
         plane_id: u64,
         gesture: &StampGesture,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ApplyStampGesture {
+                    plane_id,
+                    gesture: gesture.clone(),
+                })
+                .map(|result| result.dispatch);
+        }
         self.apply_raster_operation(
             PlaneId::from_raw(plane_id),
             |raster, selection, revision| apply_stamp_gesture(raster, selection, gesture, revision),
@@ -177,6 +232,16 @@ impl Core {
         radius: u32,
         strength_milli: u32,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ApplyBlurTool {
+                    plane_id,
+                    shape: shape.clone(),
+                    radius,
+                    strength_milli,
+                })
+                .map(|result| result.dispatch);
+        }
         let filter = Filter::GaussianBlur {
             radius,
             strength_milli,
@@ -211,6 +276,37 @@ impl Core {
                     "blur pressure is supported only for the pen region",
                 ));
             }
+            if !self.canonical_invocation_is_active() {
+                let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+                let view = if view_id == 0 {
+                    self.view
+                } else {
+                    *self
+                        .secondary_views
+                        .get(&ViewId::from_raw(view_id))
+                        .ok_or(CoreError::InvalidArgument("view ID does not exist"))?
+                };
+                let samples = document_samples_for_view(
+                    view,
+                    coordinate_space,
+                    samples,
+                    document.width,
+                    document.height,
+                )?;
+                let diameter = match coordinate_space {
+                    CoordinateSpace::Document => diameter,
+                    CoordinateSpace::Device => (f64::from(diameter) / view.zoom.get()) as f32,
+                };
+                return self
+                    .execute_canonical_invocation(CanonicalInvocation::ApplyBlurPressureTrace {
+                        plane_id,
+                        samples,
+                        diameter,
+                        radius,
+                        strength_milli,
+                    })
+                    .map(|result| result.dispatch);
+            }
             let mask =
                 self.pressure_trace_mask_for_view(view_id, coordinate_space, samples, diameter)?;
             return self.apply_blur_tool_mask_to_plane(
@@ -235,6 +331,39 @@ impl Core {
         shape: Option<&SelectionShape>,
         options: DustRemoval,
         mut progress: impl FnMut(u64, u64) -> bool,
+    ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let shape = shape.cloned();
+            let staged_shape = shape.clone();
+            return self
+                .execute_canonical_invocation_with(
+                    CanonicalInvocation::ApplyDustRemoval {
+                        plane_id,
+                        shape,
+                        options,
+                    },
+                    move |staged| {
+                        staged
+                            .apply_dust_removal_internal(
+                                plane_id,
+                                staged_shape.as_ref(),
+                                options,
+                                &mut progress,
+                            )
+                            .map(InvocationResult::dispatch)
+                    },
+                )
+                .map(|result| result.dispatch);
+        }
+        self.apply_dust_removal_internal(plane_id, shape, options, &mut progress)
+    }
+
+    fn apply_dust_removal_internal(
+        &mut self,
+        plane_id: u64,
+        shape: Option<&SelectionShape>,
+        options: DustRemoval,
+        progress: &mut dyn FnMut(u64, u64) -> bool,
     ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
@@ -267,7 +396,7 @@ impl Core {
             operation_mask.as_ref(),
             options,
             revision.get(),
-            &mut progress,
+            progress,
         )?;
         if self.document_revision != base_revision {
             return Err(CoreError::InvalidState(
@@ -374,7 +503,7 @@ impl Core {
             plane_id,
             base_document,
             preview_document,
-            filter: None,
+            procedure: PreviewProcedure::Dust { shape, options },
             preview_revision,
         });
         self.render_cache.clear();
@@ -387,6 +516,14 @@ impl Core {
         plane_id: u64,
         alpha: &TileRaster,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::EditPlaneAlpha {
+                    plane_id,
+                    alpha: alpha.clone(),
+                })
+                .map(|result| result.dispatch);
+        }
         self.apply_raster_operation(
             PlaneId::from_raw(plane_id),
             |raster, selection, revision| edit_alpha(raster, selection, alpha, revision),
@@ -399,6 +536,14 @@ impl Core {
         plane_id: u64,
         gradient: &Gradient,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ApplyAlphaGradient {
+                    plane_id,
+                    gradient: gradient.clone(),
+                })
+                .map(|result| result.dispatch);
+        }
         self.apply_raster_operation(
             PlaneId::from_raw(plane_id),
             |raster, selection, revision| {

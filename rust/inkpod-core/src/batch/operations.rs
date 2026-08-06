@@ -1,6 +1,7 @@
 use super::model::{BatchSource, BatchSourceContent};
 use super::validation::{empty_pixel, ensure_pixel_matches_format, validate_operation};
 use super::*;
+use crate::primitive::{CanonicalInvocation, InvocationResult};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum OperationResult {
@@ -145,12 +146,25 @@ pub(super) fn apply_operation(
     Ok(OperationResult::Applied)
 }
 
-pub(super) fn apply_color_replacement(
+pub(crate) fn apply_color_replacement(
     core: &mut Core,
     plane_id: u64,
     pairs: &[BatchColorPair],
-    progress: &mut impl FnMut(u64, u64) -> bool,
-) -> Result<(), CoreError> {
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Result<DispatchOutcome, CoreError> {
+    if !core.canonical_invocation_is_active() {
+        let pairs = pairs.to_vec();
+        let staged_pairs = pairs.clone();
+        return core
+            .execute_canonical_invocation_with(
+                CanonicalInvocation::ReplaceRasterColors { plane_id, pairs },
+                move |staged| {
+                    apply_color_replacement(staged, plane_id, &staged_pairs, progress)
+                        .map(InvocationResult::dispatch)
+                },
+            )
+            .map(|result| result.dispatch);
+    }
     let plane_id = PlaneId::from_raw(plane_id);
     let base_revision = core.document_revision;
     let before = core.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
@@ -197,16 +211,28 @@ pub(super) fn apply_color_replacement(
     for coord in touched {
         raster.remove_tile_if_empty(coord);
     }
-    core.commit_deferred_document_edit(before, after, base_revision, revision)?;
-    Ok(())
+    core.commit_deferred_document_edit(before, after, base_revision, revision)
 }
 
-pub(super) fn apply_separation(
+pub(crate) fn apply_separation(
     core: &mut Core,
     plane_id: u64,
     options: &BatchSeparation,
-    progress: &mut impl FnMut(u64, u64) -> bool,
-) -> Result<(), CoreError> {
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Result<DispatchOutcome, CoreError> {
+    if !core.canonical_invocation_is_active() {
+        let options = options.clone();
+        let staged_options = options.clone();
+        return core
+            .execute_canonical_invocation_with(
+                CanonicalInvocation::SeparateRasterColors { plane_id, options },
+                move |staged| {
+                    apply_separation(staged, plane_id, &staged_options, progress)
+                        .map(InvocationResult::dispatch)
+                },
+            )
+            .map(|result| result.dispatch);
+    }
     let plane_id = PlaneId::from_raw(plane_id);
     let base_revision = core.document_revision;
     let before = core.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
@@ -238,8 +264,7 @@ pub(super) fn apply_separation(
             )?;
         }
     }
-    core.commit_deferred_document_edit(before, after, base_revision, revision)?;
-    Ok(())
+    core.commit_deferred_document_edit(before, after, base_revision, revision)
 }
 
 pub(super) fn resolve_target(

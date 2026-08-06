@@ -64,7 +64,7 @@ ABI v3 は value/ID-only primitive control plane を追加した。ABI v2 で公
 clipboard、Light Table 入力は ABI v2 の bounded call の中で同期的に検証、copy、canonicalize、
 intern される。stroke sample は同期的に Rust-owned canonical bytes へ copy され、4 MiB 以下は
 procedure inline payload、4 MiB 超は canonical sample asset になる。sequence source は従来どおり
-bounded な Rust-owned raster copy であり、vector primitive の asset 接続は M6 の範囲である。
+bounded な Rust-owned raster copy であり、vector primitive はtyped geometryとstable IDをprocedureへ保持する。
 ABI v3 caller は generation-tagged runtime object ID を明示 release する。ABI v2 caller が使う
 canonical asset retention は従来どおり Core 内部であり、v3 runtime object ID と persistent
 content-addressed `AssetId` は別 namespace である。
@@ -89,6 +89,11 @@ diameter/flags だけを値で持つ。現在の closed catalog は既存 canoni
 持たない。success は result を完全に書き、semantic no-op は committed flag、revision、history、
 dirty、persistent ID を進めない。stale base、active stroke、invalid target/payload、overflow、allocation
 failure は atomic error である。
+
+残るper-operation ABIも同じcanonical Core境界へ委譲する。成功したdocument mutationはstable
+`PrimitiveId`とprocedureを1件だけ公開し、旧FFI内にpixel、geometry、layer/history規則の別実装を
+持たない。previewのbegin/update/cancel、query、export、decode/ingestion自体はdocument
+procedureではなく、commit endpointだけがprocedureを生成する。
 
 snapshot、thumbnail、export、task は Rust-owned runtime ID である。snapshot metadata と tile/guide/
 vector record は `first + capacity + stride` の batched copy、tile pixels と thumbnail/export bytes は
@@ -129,8 +134,10 @@ snapshot/document-info publication flags、exactly-once sequence/completion stat
 closure、external path、STL containerを持たない。palette/sample/rasterの caller memory は enqueue 前の
 register callでRust-owned IDへ変換する。queue飽和で未受理のsequence/pending countはatomicにrollbackし、
 受理済み primitive はactive stroke終了後、close、shutdown drainでも高々一回だけ実行または明示解決する。
-未移行の production route とquery/initializerが通る`LegacyInvokeWork`はM6互換bridgeとして別 variant に
-隔離され、canonical primitive queueの意味ownerではない。M6を先取りしてそのrouteをprocedure化しない。
+query、initializer、ABI-v2 adapterは固定`AdapterWork` recordを使う。queue recordには
+session/generation、issue-time `CommandContext`、sequence、publication flags、bounded input tokenだけを置き、
+callable、view update、promise/completionはCoreHostのbounded registryが所有する。Core threadはtokenを
+exactly onceでremoveしてから実行し、queued variant自体にraw pointer、closure、path、STL objectを置かない。
 
 例外は immutable handle と atomic task である。
 
@@ -141,6 +148,23 @@ register callでRust-owned IDへ変換する。queue飽和で未受理のsequenc
   Core affinity を持たない。同じ handle の利用と release は呼び出し側で同期する。
 
 任意 thread で呼べることは、同じ owner 変数を同時に解放してよいことを意味しない。
+
+## Palette / color-chart file contract
+
+`.inkpalette` と `.inkchart` のbyte codecは `inkpod-format` が所有し、WindowsはUTF-8 path、
+exact-depth color、表示名だけを渡す。両形式はexact-current schema 1だけを受理し、最大16 MiB、
+最大4,096色、chart名はvalid UTF-8の1–1,024 byteに制限する。saveは同一directoryのexclusive
+temporary fileをwrite/flush/syncした後だけrenameし、失敗時は既存destinationを先にtruncateしない。
+
+- `inkpod_palette_file_save/load` は呼出中だけpathとcolor bufferをborrowする。loadは
+  `InkpodColorBuffer` のsize query／short-buffer契約に従い、成功時だけcaller bufferへcopyする。
+- `inkpod_color_chart_file_save` はstrided `InkpodColorChartEntry` と各UTF-8 nameを呼出中だけ
+  borrowし、復帰後に保持しない。
+- `inkpod_color_chart_file_load` はimmutable Rust-owned `InkpodColorChartFile` を返す。
+  `count/get` はread-onlyで、`get`のnameはsize query対応caller bufferへcopyする。最後に
+  `inkpod_color_chart_file_release`をexactly once呼び、成功時owner pointerはNULLになる。
+- これらはCore handleを取らずdocument/history/revisionを変更しない。loaded paletteをdocumentへ
+  適用する場合は、別のcanonical `ReplacePalette` commitが唯一のdocument mutationとなる。
 
 ## Shortcut sequence 契約
 
@@ -169,7 +193,8 @@ canonical asset ingestion を行う API もこの規則の例外ではない。C
 成功を返すまでに、raster-open/import、clipboard、Light Table の descriptor と encoded/decoded bytesを
 検証して Rust-owned canonical bytes へ copy し、内容アドレス付き registry へ intern する。stroke
 sample span も復帰前に copy し、4 MiB 以下はprocedure inline payload、4 MiB超は canonical sample
-assetへ確定する。sequenceはboundedなRust-owned raster copyであり、vector primitive asset接続はM6である。
+assetへ確定する。sequenceはboundedなRust-owned raster copyであり、vector primitiveはtyped canonical
+geometryとstable IDを保持する。
 Core、transient session、journal、snapshot は復帰後に caller record、buffer、file name、path を参照しない。
 同じ canonical descriptor と logical payload は同じ registry entry に deduplicate されるが、その
 内部参照 count や allocation address は ABI の一部ではない。

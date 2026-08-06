@@ -61,7 +61,9 @@ endforeach()
 file(READ "${CORE_SOURCE}" SOURCE)
 foreach(REQUIRED IN ITEMS
         "struct SessionBinding"
-        "struct LegacyInvokeWork"
+        "using AdapterInputToken = std::uint64_t"
+        "struct AdapterWork"
+        "struct AdapterInput"
         "struct PrimitiveWork"
         "struct StrokeWork"
         "struct ControlWork"
@@ -72,6 +74,9 @@ foreach(REQUIRED IN ITEMS
         "FindEntry(item.binding)"
         "InkpodPrimitiveRequestV3 request"
         "ProcessPrimitive("
+        "ProcessAdapter("
+        "TakeAdapterInput("
+        "std::vector<AdapterInput> adapter_inputs"
         "inkpod_core_primitive_execute_v3"
         "state.pending_operations"
         "ReadCoreErrorOnCurrentThread()"
@@ -81,6 +86,27 @@ foreach(REQUIRED IN ITEMS
     string(FIND "${SOURCE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "CoreHost implementation is missing: ${REQUIRED}")
+    endif()
+endforeach()
+string(FIND "${SOURCE}" "LegacyInvokeWork" LEGACY_INVOKE)
+if(NOT LEGACY_INVOKE LESS 0)
+    message(FATAL_ERROR "Retired LegacyInvokeWork remains in CoreHost")
+endif()
+string(FIND "${SOURCE}" "struct AdapterWork" ADAPTER_START)
+string(FIND "${SOURCE}" "struct AdapterInput" ADAPTER_END)
+if(ADAPTER_START LESS 0 OR ADAPTER_END LESS ADAPTER_START)
+    message(FATAL_ERROR "Cannot isolate the AdapterWork token record")
+endif()
+math(EXPR ADAPTER_LENGTH "${ADAPTER_END} - ${ADAPTER_START}")
+string(SUBSTRING
+    "${SOURCE}" ${ADAPTER_START} ${ADAPTER_LENGTH} ADAPTER_RECORD)
+foreach(FORBIDDEN IN ITEMS
+        "std::function" "std::string" "std::vector" "std::shared_ptr"
+        "const char*" "const wchar_t*" "InkpodCore*" "path")
+    string(FIND "${ADAPTER_RECORD}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR
+            "AdapterWork contains forbidden queued state: ${FORBIDDEN}")
     endif()
 endforeach()
 string(FIND "${SOURCE}" "struct PrimitiveWork" PRIMITIVE_START)

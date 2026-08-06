@@ -74,13 +74,13 @@ in the primitive catalog. The family allocation is:
 | `0x0001_0001..0x0001_FFFF` | document, paper, frame, and document metadata |
 | `0x0002_0001..0x0002_FFFF` | layer and plane topology |
 | `0x0003_0001..0x0003_FFFF` | palette and document color metadata |
-| `0x0004_0001..0x0004_FFFF` | selection, clipboard commit, and transform |
-| `0x0005_0001..0x0005_FFFF` | raster paint and stroke |
-| `0x0006_0001..0x0006_FFFF` | fill and line cleanup |
-| `0x0007_0001..0x0007_FFFF` | filters, effects, alpha, and adjustment |
+| `0x0004_0001..0x0004_FFFF` | guides and grid |
+| `0x0005_0001..0x0005_FFFF` | raster paint, fill, cleanup, filters, effects, alpha, and adjustment |
+| `0x0006_0001..0x0006_FFFF` | selection and floating-selection commit |
+| `0x0007_0001..0x0007_FFFF` | document transforms |
 | `0x0008_0001..0x0008_FFFF` | vector document edits |
-| `0x0009_0001..0x0009_FFFF` | Light Table, sequence, and import document edits |
-| `0x000A_0001..0x000A_FFFF` | reserved document-edit families |
+| `0x0009_0001..0x0009_FFFF` | common-raster import document edits |
+| `0x000A_0001..0x000A_FFFF` | Light Table document edits |
 | `0x8000_0000..0xFFFF_FFFF` | reserved; never emitted by the built-in catalog |
 
 `0`, family headers `0x0001_0000` through `0x000A_0000`,
@@ -90,10 +90,15 @@ and invalid in a procedure. Values in
 range does not define an extension mechanism. A reader accepts only IDs present
 in the exact catalog named by the header.
 
-The current runtime slice has fixed assignments: `SetMainLineColor` is
-`0x0003_0001/v1`, `ReplacePalette` is `0x0003_0002/v1`,
-`ApplyRasterStroke` is `0x0005_0001/v2`, and `ImportRasterAsset` is
-`0x0009_0001/v1`. Adding a primitive consumes a new ID.
+M6 assigns a stable ID to every production document mutation. The complete
+source catalog is the `PrimitiveId` constants in `inkpod-core`; it occupies the
+family ranges above without renumbering the original assignments:
+`SetMainLineColor` is `0x0003_0001/v1`, `ReplacePalette` is
+`0x0003_0002/v1`, `ApplyRasterStroke` is `0x0005_0001/v2`, and
+`ImportRasterAsset` is `0x0009_0001/v1`. All other M6 typed invocation records
+currently use schema v1. `LightTableSwapWithActive` has stable ID
+`0x000A_0015`, but replaces the session Genesis and resets history rather than
+creating a `HistoryEntry`. Adding a primitive consumes a new ID.
 Changing only its canonical argument layout while preserving the exact
 semantics increments its schema version. Changing validation, rounding, pixels,
 IDs, state digest, or any other replay result increments both `ReplayEpoch` and
@@ -115,8 +120,13 @@ primitive ID, schema version, canonical name, argument-schema digest, semantics
 revision, and work-formula ID. Query, view, transient, ingestion, export, and
 application command IDs are not `PrimitiveId` values.
 
-The current runtime schemas are closed here. M3 left the two metadata primitives
-at v1 and replaced `ApplyRasterStroke` with exact-current v2. M4 adds
+The four procedures below retain their fully specified pre-M6 byte schemas. M6
+also stores bounded canonical bytes for every new typed invocation and retains
+that typed value as the runtime replay authority. M7 still owns the
+cross-architecture bit-exact audit and catalog-digest gate; M8 will specify and
+atomically connect the persistent decoder/encoder for all invocation variants.
+Production v2 does not serialize these records. M3 left the two metadata
+primitives at v1 and replaced `ApplyRasterStroke` with exact-current v2. M4 adds
 `ImportRasterAsset/v1` and the inline-or-asset representation for stroke samples:
 
 | Primitive | Canonical input-ID roles | Canonical asset roles | Canonical arguments | Inline payload | Work formula ID |
@@ -929,6 +939,37 @@ zero-plane adjustment layers. It rejects missing or duplicate records,
 non-adjustment/wrong layer IDs, invalid channel/interpolation codes, excessive
 layer/curve counts, out-of-range parameters, unknown/reserved values, and
 trailing bytes.
+
+## Palette and color-chart formats
+
+Application palettes use `.inkpalette`; named color charts use `.inkchart`.
+Their codecs live in `inkpod-format`, not the Win32 adapter. Both are bounded,
+little-endian, exact-current schema 1 formats and reject any other magic/schema,
+truncation, invalid depth, trailing bytes, or oversized input. Before format
+freeze, a schema change must change the top-level magic/version; no compatibility
+reader is retained implicitly.
+
+An `.inkpalette` file is:
+
+1. 8-byte magic `INKPAL1\0`;
+2. `u32` color count;
+3. exactly that many 16-byte color records.
+
+An `.inkchart` file is:
+
+1. 8-byte magic `INKCHT1\0`;
+2. `u32` entry count;
+3. for each entry, one 16-byte color record, a `u32` UTF-8 name length, and the
+   name bytes.
+
+Each color record contains `u32 record_size = 16`, `u32 depth` (`8` or `16`),
+then straight-alpha red, green, blue, and alpha channels as four `u16` values.
+Depth-8 channels must be at most 255; depth-16 values retain all bits. Both
+formats allow at most 4,096 colors and 16 MiB total input. Chart names are valid,
+non-empty UTF-8 of at most 1,024 bytes; the legacy five-character limit is not
+applied. Save validates and encodes first, writes/flushes/synchronizes an
+exclusive same-directory temporary file, closes it, and only then renames it to
+the destination. Decode and failed save do not mutate a live Core document.
 
 ## Batch settings format
 

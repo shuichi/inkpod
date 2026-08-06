@@ -332,6 +332,42 @@ pub unsafe extern "C" fn inkpod_core_guide_delete(
     })
 }
 
+/// Deletes every persistent document guide as one canonical primitive.
+///
+/// # Safety
+/// `core` must be live on its owner thread and `result` must expose writable,
+/// non-overlapping storage for a complete dispatch record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_guide_delete_all(
+    core: *mut InkpodCore,
+    result: *mut InkpodDispatchResult,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by contract.
+        let core = unsafe { &mut *core };
+        let result = unsafe { &mut *result };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.delete_all_guides() {
+            Ok(outcome) => {
+                write_dispatch_result(result, outcome);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Replaces the persistent document grid configuration.
 ///
 /// # Safety

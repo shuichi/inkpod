@@ -392,6 +392,8 @@ fn full_effect_gestures_dust_and_alpha_are_atomic() {
             .unwrap();
         assert_eq!(&after[..3], &before[..3]);
     }
+    assert!(core.journal_state().unwrap().is_complete());
+    core.verify_journal_replay().unwrap();
 }
 
 #[test]

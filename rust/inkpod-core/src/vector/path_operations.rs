@@ -1,6 +1,7 @@
 use super::geometry::*;
 use super::model::*;
 use super::*;
+use crate::primitive::CanonicalInvocation;
 
 impl Core {
     /// Returns required main-line, color-trace, and fill plane IDs for a vector layer.
@@ -40,6 +41,16 @@ impl Core {
         plane_id: u64,
         input: VectorPathInput,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result = self.execute_canonical_invocation(CanonicalInvocation::VectorAddPath {
+                plane_id,
+                input,
+            })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "vector-add-path primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
         let path = fixed_path(VectorPathId::from_raw(0), plane_id, input)?;
@@ -70,6 +81,17 @@ impl Core {
         boundary_path_ids: &[u64],
         color: PixelValue,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result = self.execute_canonical_invocation(CanonicalInvocation::VectorAddFill {
+                plane_id,
+                boundary_path_ids: boundary_path_ids.to_vec(),
+                color,
+            })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "vector-add-fill primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
         let boundary_path_ids = boundary_path_ids
@@ -168,6 +190,16 @@ impl Core {
         radius: f32,
         mode: VectorEraseMode,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::VectorErase {
+                    plane_id,
+                    point,
+                    radius,
+                    mode,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
         if !point.x.is_finite()
@@ -263,6 +295,13 @@ impl Core {
         plane_id: u64,
         maximum_gap: f32,
     ) -> Result<(DispatchOutcome, Option<u64>), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result = self.execute_canonical_invocation(CanonicalInvocation::VectorConnect {
+                plane_id,
+                maximum_gap,
+            })?;
+            return Ok((result.dispatch, result.output_ids.first().copied()));
+        }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
         if !maximum_gap.is_finite() || maximum_gap <= 0.0 || maximum_gap > MAX_WIDTH {
@@ -343,6 +382,14 @@ impl Core {
         path_ids: &[u64],
         mode: VectorWidthMode,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::VectorCorrectWidth {
+                    path_ids: path_ids.to_vec(),
+                    mode,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         if path_ids.is_empty() {
             return Err(CoreError::InvalidArgument("no vector paths were selected"));

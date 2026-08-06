@@ -1,4 +1,5 @@
 use super::*;
+use crate::primitive::CanonicalInvocation;
 
 impl Core {
     /// Selects the first available conventional main-line or color plane.
@@ -91,6 +92,16 @@ impl Core {
         kind: LayerKind,
         name: &str,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result = self.execute_canonical_invocation(CanonicalInvocation::CreateLayer {
+                kind,
+                name: name.to_owned(),
+            })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "create-layer primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         validate_node_name(name)?;
         let (width, height) = {
@@ -102,91 +113,12 @@ impl Core {
         };
         let mut next_id = self.next_id;
         let layer_id = next_id.take_layer();
-        let mut planes = Vec::new();
-        match kind {
-            LayerKind::BinaryColoring | LayerKind::GrayscaleColoring => {
-                let main_id = next_id.take_plane();
-                let color_id = next_id.take_plane();
-                planes.push(PlaneNode {
-                    id: main_id,
-                    kind: PlaneType::MainLine,
-                    name: "Main Line".to_owned(),
-                    visible: true,
-                    editable: true,
-                    opacity_milli: 1_000,
-                    raster: TileRaster::new(
-                        width,
-                        height,
-                        if kind == LayerKind::BinaryColoring {
-                            PixelFormat::BinaryMask8
-                        } else {
-                            PixelFormat::Grayscale8
-                        },
-                    )?,
-                });
-                planes.push(PlaneNode {
-                    id: color_id,
-                    kind: PlaneType::Color,
-                    name: "Color".to_owned(),
-                    visible: true,
-                    editable: true,
-                    opacity_milli: 1_000,
-                    raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
-                });
-            }
-            LayerKind::Raster => planes.push(PlaneNode {
-                id: next_id.take_plane(),
-                kind: PlaneType::Raster,
-                name: "Raster".to_owned(),
-                visible: true,
-                editable: true,
-                opacity_milli: 1_000,
-                raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
-            }),
-            LayerKind::Selection => planes.push(PlaneNode {
-                id: next_id.take_plane(),
-                kind: PlaneType::Selection,
-                name: "Selection".to_owned(),
-                visible: true,
-                editable: true,
-                opacity_milli: 1_000,
-                raster: TileRaster::new(width, height, PixelFormat::BinaryMask8)?,
-            }),
-            LayerKind::VectorColoring => {
-                for (kind, name) in [
-                    (PlaneType::VectorMainLine, "Vector Main Line"),
-                    (PlaneType::ColorTrace, "Color Trace"),
-                    (PlaneType::VectorFill, "Vector Fill"),
-                ] {
-                    planes.push(PlaneNode {
-                        id: next_id.take_plane(),
-                        kind,
-                        name: name.to_owned(),
-                        visible: true,
-                        editable: true,
-                        opacity_milli: 1_000,
-                        raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
-                    });
-                }
-            }
-            LayerKind::Frame
-            | LayerKind::VanishingPoint
-            | LayerKind::Adjustment
-            | LayerKind::Text
-            | LayerKind::Annotation => {}
-        }
-        validate_layer_kind(kind, &planes)?;
+        let layer = build_layer_node(kind, name, layer_id, width, height, &mut next_id)?;
         let mut edit = self.begin_document_edit()?;
         let after = edit.working_mut();
-        after.layers.push(LayerNode {
-            id: layer_id,
-            kind,
-            name: unique_layer_name(&after.layers, name),
-            visible: true,
-            editable: true,
-            opacity_milli: 1_000,
-            planes,
-        });
+        let mut layer = layer;
+        layer.name = unique_layer_name(&after.layers, name);
+        after.layers.push(layer);
         if kind == LayerKind::Adjustment {
             after.adjustments.insert(
                 layer_id,
@@ -217,6 +149,14 @@ impl Core {
     /// All copied objects receive new stable IDs. Success is one undoable edit;
     /// invalid IDs, limits, or validation failures publish no partial copy.
     pub fn duplicate_layer(&mut self, layer_id: u64) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result = self
+                .execute_canonical_invocation(CanonicalInvocation::DuplicateLayer { layer_id })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "duplicate-layer primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
         let mut edit = self.begin_document_edit()?;
@@ -264,9 +204,17 @@ impl Core {
     /// The last coloring layer cannot be deleted. Success is one undoable edit;
     /// invalid or forbidden deletion leaves revision and history unchanged.
     pub fn delete_layer(&mut self, layer_id: u64) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::DeleteLayer { layer_id })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
-        let active_target = self.editor_state()?.state.target;
+        let active_target = self
+            .editor_session
+            .as_ref()
+            .and_then(|session| session.state.target);
         let mut edit = self.begin_document_edit()?;
         let (before, after) = edit.documents();
         let index = before
@@ -307,6 +255,70 @@ impl Core {
         edit.commit(self)
     }
 
+    /// Deletes every hidden layer as one atomic, undoable topology edit.
+    ///
+    /// A document that would lose its final coloring layer is rejected before
+    /// publication. With no hidden layers this is a semantic no-op.
+    pub fn delete_hidden_layers(&mut self) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::DeleteHiddenLayers)
+                .map(|result| result.dispatch);
+        }
+        self.ensure_no_active_stroke()?;
+        let active_target = self
+            .editor_session
+            .as_ref()
+            .and_then(|session| session.state.target);
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let hidden_ids = document
+            .layers
+            .iter()
+            .filter(|layer| !layer.visible)
+            .map(|layer| layer.id)
+            .collect::<Vec<_>>();
+        if hidden_ids.is_empty() {
+            return Ok(self.noop_outcome());
+        }
+        let remaining_coloring = document
+            .layers
+            .iter()
+            .filter(|layer| layer.visible && is_coloring_layer(layer.kind))
+            .count();
+        if remaining_coloring == 0 {
+            return Err(CoreError::InvalidState(
+                "deleting hidden layers would remove the final coloring layer",
+            ));
+        }
+
+        let active_removed = active_target.is_some_and(|target| {
+            hidden_ids
+                .iter()
+                .any(|layer_id| layer_id.get() == target.layer_id)
+        });
+        let mut edit = self.begin_document_edit()?;
+        let (before, after) = edit.documents();
+        for layer_id in &hidden_ids {
+            after.vector.remove_layer(before, *layer_id);
+            after.adjustments.remove(layer_id);
+        }
+        after.layers.retain(|layer| layer.visible);
+        if active_removed {
+            let replacement = after
+                .layers
+                .iter()
+                .find_map(|layer| layer.planes.first().map(|plane| (layer.id, plane.id)))
+                .ok_or(CoreError::InvalidState(
+                    "document must retain an editable plane",
+                ))?;
+            edit.prefer_editor_target(EditorTarget {
+                layer_id: replacement.0.get(),
+                plane_id: replacement.1.get(),
+            });
+        }
+        edit.commit(self)
+    }
+
     /// Moves a layer to a zero-based stacking index.
     ///
     /// Moving to the current index is a no-op. A real move is one undoable edit;
@@ -316,6 +328,17 @@ impl Core {
         layer_id: u64,
         destination_index: usize,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let destination_index = u64::try_from(destination_index).map_err(|_| {
+                CoreError::InvalidArgument("layer destination index is not representable")
+            })?;
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ReorderLayer {
+                    layer_id,
+                    destination_index,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
         let mut edit = self.begin_document_edit()?;
@@ -350,6 +373,17 @@ impl Core {
         opacity_milli: u32,
         name: &str,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::SetLayerProperties {
+                    layer_id,
+                    visible,
+                    editable,
+                    opacity_milli,
+                    name: name.to_owned(),
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
         validate_node_name(name)?;
@@ -404,6 +438,18 @@ impl Core {
         format: PixelFormat,
         name: &str,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result = self.execute_canonical_invocation(CanonicalInvocation::CreatePlane {
+                layer_id,
+                kind,
+                format,
+                name: name.to_owned(),
+            })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "create-plane primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
         validate_node_name(name)?;
@@ -452,6 +498,14 @@ impl Core {
     /// Success assigns a new stable plane ID and creates one undoable edit.
     /// Required singleton planes and invalid IDs fail without consuming live state.
     pub fn duplicate_plane(&mut self, plane_id: u64) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result = self
+                .execute_canonical_invocation(CanonicalInvocation::DuplicatePlane { plane_id })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "duplicate-plane primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
         let mut edit = self.begin_document_edit()?;
@@ -502,9 +556,17 @@ impl Core {
     /// Success is one undoable edit and repairs the active target when needed.
     /// Topology violations or invalid IDs fail atomically.
     pub fn delete_plane(&mut self, plane_id: u64) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::DeletePlane { plane_id })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
-        let active_target = self.editor_state()?.state.target;
+        let active_target = self
+            .editor_session
+            .as_ref()
+            .and_then(|session| session.state.target);
         let mut edit = self.begin_document_edit()?;
         let (before, after) = edit.documents();
         let (layer_index, plane_index) = find_plane_indices(before, plane_id)?;
@@ -544,6 +606,17 @@ impl Core {
         plane_id: u64,
         destination_index: usize,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let destination_index = u64::try_from(destination_index).map_err(|_| {
+                CoreError::InvalidArgument("plane destination index is not representable")
+            })?;
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ReorderPlane {
+                    plane_id,
+                    destination_index,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
         let mut edit = self.begin_document_edit()?;
@@ -576,6 +649,17 @@ impl Core {
         opacity_milli: u32,
         name: &str,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::SetPlaneProperties {
+                    plane_id,
+                    visible,
+                    editable,
+                    opacity_milli,
+                    name: name.to_owned(),
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
         validate_node_name(name)?;
@@ -607,6 +691,15 @@ impl Core {
         destination_kind: PlaneType,
         destination_format: PixelFormat,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ConvertPlane {
+                    plane_id,
+                    destination_kind,
+                    destination_format,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
         validate_plane_format(destination_kind, destination_format)?;
@@ -645,6 +738,11 @@ impl Core {
     /// Success is one undoable edit. Missing siblings, incompatible formats, and
     /// required singleton planes fail without partial raster or topology changes.
     pub fn merge_plane_into_below(&mut self, plane_id: u64) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::MergePlane { plane_id })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
         let mut edit = self.begin_document_edit()?;
@@ -703,6 +801,14 @@ impl Core {
         layer_id: u64,
         destination: LayerKind,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ConvertLayer {
+                    layer_id,
+                    destination,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
         let mut edit = self.begin_document_edit()?;
@@ -746,6 +852,11 @@ impl Core {
     /// Both layers must have compatible kind and plane topology. Success is one
     /// undoable edit; any validation or raster failure publishes no partial merge.
     pub fn merge_layer_into_below(&mut self, layer_id: u64) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::MergeLayer { layer_id })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
         let mut edit = self.begin_document_edit()?;
@@ -810,6 +921,98 @@ pub(crate) fn validate_node_name(name: &str) -> Result<(), CoreError> {
     } else {
         Ok(())
     }
+}
+
+pub(crate) fn build_layer_node(
+    kind: LayerKind,
+    name: &str,
+    layer_id: LayerId,
+    width: u32,
+    height: u32,
+    next_id: &mut StableIdCursor,
+) -> Result<LayerNode, CoreError> {
+    validate_node_name(name)?;
+    let mut planes = Vec::new();
+    match kind {
+        LayerKind::BinaryColoring | LayerKind::GrayscaleColoring => {
+            planes.push(PlaneNode {
+                id: next_id.take_plane(),
+                kind: PlaneType::MainLine,
+                name: "Main Line".to_owned(),
+                visible: true,
+                editable: true,
+                opacity_milli: 1_000,
+                raster: TileRaster::new(
+                    width,
+                    height,
+                    if kind == LayerKind::BinaryColoring {
+                        PixelFormat::BinaryMask8
+                    } else {
+                        PixelFormat::Grayscale8
+                    },
+                )?,
+            });
+            planes.push(PlaneNode {
+                id: next_id.take_plane(),
+                kind: PlaneType::Color,
+                name: "Color".to_owned(),
+                visible: true,
+                editable: true,
+                opacity_milli: 1_000,
+                raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
+            });
+        }
+        LayerKind::Raster => planes.push(PlaneNode {
+            id: next_id.take_plane(),
+            kind: PlaneType::Raster,
+            name: "Raster".to_owned(),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
+        }),
+        LayerKind::Selection => planes.push(PlaneNode {
+            id: next_id.take_plane(),
+            kind: PlaneType::Selection,
+            name: "Selection".to_owned(),
+            visible: true,
+            editable: true,
+            opacity_milli: 1_000,
+            raster: TileRaster::new(width, height, PixelFormat::BinaryMask8)?,
+        }),
+        LayerKind::VectorColoring => {
+            for (plane_kind, plane_name) in [
+                (PlaneType::VectorMainLine, "Vector Main Line"),
+                (PlaneType::ColorTrace, "Color Trace"),
+                (PlaneType::VectorFill, "Vector Fill"),
+            ] {
+                planes.push(PlaneNode {
+                    id: next_id.take_plane(),
+                    kind: plane_kind,
+                    name: plane_name.to_owned(),
+                    visible: true,
+                    editable: true,
+                    opacity_milli: 1_000,
+                    raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
+                });
+            }
+        }
+        LayerKind::Frame
+        | LayerKind::VanishingPoint
+        | LayerKind::Adjustment
+        | LayerKind::Text
+        | LayerKind::Annotation => {}
+    }
+    validate_layer_kind(kind, &planes)?;
+    Ok(LayerNode {
+        id: layer_id,
+        kind,
+        name: name.to_owned(),
+        visible: true,
+        editable: true,
+        opacity_milli: 1_000,
+        planes,
+    })
 }
 
 #[cfg(test)]

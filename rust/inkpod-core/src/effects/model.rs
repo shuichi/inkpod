@@ -14,10 +14,19 @@ pub struct FilterPreviewInfo {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) enum PreviewProcedure {
+    Filter(Filter),
+    Dust {
+        shape: Option<SelectionShape>,
+        options: DustRemoval,
+    },
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct FilterPreview {
     pub(crate) plane_id: PlaneId,
     pub(crate) base_document: CellDocument,
     pub(crate) preview_document: CellDocument,
-    pub(crate) filter: Option<Filter>,
+    pub(crate) procedure: PreviewProcedure,
     pub(crate) preview_revision: PreviewRevision,
 }

@@ -174,6 +174,9 @@ pub unsafe extern "C" fn inkpod_core_tree_edit(
                 .core
                 .merge_layer_into_below(input.object_id)
                 .map(|outcome| (outcome, 0)),
+            INKPOD_TREE_DELETE_HIDDEN_LAYERS => {
+                core.core.delete_hidden_layers().map(|outcome| (outcome, 0))
+            }
             INKPOD_TREE_CONVERT_PLANE => {
                 let kind = match parse_plane_type(input.kind) {
                     Ok(kind) => kind,

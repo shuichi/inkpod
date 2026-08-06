@@ -2,6 +2,7 @@
 
 mod digest;
 mod executor;
+mod invocation;
 mod model;
 mod raster;
 
@@ -12,6 +13,7 @@ pub use model::{
 
 use digest::canonical_payload_digest;
 pub(crate) use digest::{CanonicalDocumentStateCache, canonical_document_state};
+pub(crate) use invocation::{CanonicalInvocation, InvocationResult};
 use model::CanonicalPrimitive;
 pub(crate) use model::CanonicalStrokeArguments;
 pub(crate) use raster::{

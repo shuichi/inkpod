@@ -2,7 +2,7 @@
 
 更新日: 2026-08-06
 
-状態: M0–M5 完了、M6–M9 未完。ABI v3 と typed CoreHost queue、旧 revision-max 判定式の正本化、環境別性能ゲートは反映済み
+状態: M0–M6 完了、M7–M9 未完。全production document mutationのcanonical primitive化、ABI v3、typed CoreHost queue、旧 revision-max 判定式の正本化、環境別性能ゲートは反映済み
 
 ## 1. 目的
 
@@ -643,6 +643,47 @@ Revision-max render-cache invariant:
 - production mutationからjournal incompleteへ遷移する経路が0。
 - architecture inventoryでunclassified/direct mutationが0。
 - C++にpixel処理、fill/vector geometry、layer規則、history、native document/preset codecの別実装がない。
+
+実装結果（2026-08-06）:
+
+- 全production document mutationをstable `PrimitiveId`付きtyped
+  `CanonicalInvocation`へ移行した。canonical executorはlive Coreをstaged Coreへcloneし、
+  同じpublic実装をinvocation guard下で適用してexactly one document commitを検証し、
+  canonical procedure、`HistoryEntry`、StateId、document revision、journal event、cache
+  invalidation、高水位IDを一度にpublishする。success以外のno-op、invalid、stale、cancel、
+  overflow、failureは一切publishしない。
+- 全production `HistoryEntry`がretained canonical procedureを参照し、Commit、Undo、Redo、
+  jump、branch cut、savepoint、inverse/COW cache release/rebuildをGenesis＋journalから導出する。
+  production journalは常にcompleteで、incompleteへ遷移する経路を削除した。Light Tableの
+  whole-document swapはsession Genesis replacementとしてhistoryをresetし、通常の
+  `HistoryEntry`を作らない区別を維持する。
+- M0 inventoryで記録したC++ composite debtを閉じた。hidden layer/all guide delete、typed
+  initial layer付きnew cell、target-zero vectorize、新planeへのconverted paste、chart palette
+  replacementはそれぞれ一つのRust atomic operationになり、cancel/invalidではtopology、
+  history、frontend presentation stateを変更しない。
+- `.inkpalette`/`.inkchart` exact-current schema 1 codecを`inkpod-format`へ移し、RGBA8/16、
+  UTF-8名、4,096色、1,024-byte名、16 MiB file上限、trailing/malformed拒否、同一directory
+  temporary＋flush/sync＋replaceを実装した。205-function C ABIはpalette load/saveと
+  exactly-once releaseのopaque chart handleを公開し、Windowsはpathと表示状態だけを扱う。
+- Windows `CoreHost`から`LegacyInvokeWork`を削除した。work variantはfixed
+  `AdapterWork`/`PrimitiveWork`/`StrokeWork`/`ControlWork`だけで、adapter callable、view
+  update、promise/completionはbounded token registryが所有し、Core threadがexactly onceで
+  removeして実行する。queued recordにraw pointer、closure、path、STL objectを置かない。
+- source-derived inventoryはRust 228、C ABI 205、Windows command 331で、unclassified/direct
+  mutationは0。public契約はfamily横断replay、success/no-op/invalid/cancel、Undo/Redo、bulk
+  composite、floating-new-plane、vectorize-new-layer、typed Genesis、codec bounds/overwrite、ABI
+  ownership、queue saturation/close/shutdownを固定した。
+- 最終検証はRust workspace 311 test＋1 doctest、ignore 0、zero-warning Clippy、strict
+  rustdoc、Core quick benchmark、ARM64 Debug/Release configure/build、static CRT/package、
+  ABI/GUIを含むDebug CTest 28/28、Release private performance smoke、`git diff --check`を合格した。
+  warm-up後5回medianはCore quick pan/dirty `0.853208`/`2.156208 ms`、full pan/dirty
+  `14.913708`/`9.583542 ms`、native drawing `192.690000 ms`、native wheel
+  `1.007763 refresh intervals/event`で、全意味counterと変更していない承認済みrangeを満たした。
+  一回だけdrawingのreplaceable publicationが592でなく593だったが、8 ms preview schedulerの
+  置換可能snapshot観測であり、revision/checksum/sample/final Presentは不変だった。
+- production `.inkpod`はexact-current v2のままである。cross-architecture bit-exact hardeningは
+  M7、canonical invocationのpersistent codecと`GENS`/`ASST`/`PROC`/`EDIT` cutoverはM8に残し、
+  いずれも先取りしていない。
 
 ### M7: 決定性 Hardening と Replay Gate
 

@@ -3179,32 +3179,14 @@ void UpdateFloatingPreview(ApplicationHost& state) noexcept {
         state.Workspace().windows.canvas, preview);
 }
 
-InkpodStatus BeginFloatingPaste(ApplicationHost& state, std::uint32_t mode) noexcept {
-    if (state.engine == nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    bool imported_standard{};
-    if (state.clipboard == nullptr) {
-        if (!ImportStandardClipboard(state.Workspace().windows.window, state.clipboard)) {
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-        imported_standard = true;
-    }
-    const InkpodClipboard* clipboard = state.clipboard;
-    FloatingPasteController controller(*state.engine);
-    InkpodStatus status = controller.Begin(clipboard, mode);
-    if (status != INKPOD_STATUS_OK && imported_standard
-        && mode == INKPOD_PASTE_COMPATIBLE) {
-        status = controller.Begin(clipboard, INKPOD_PASTE_ACTIVE_CONVERTED);
-    }
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
+InkpodStatus ActivateFloatingPastePreview(
+    ApplicationHost& state, const InkpodClipboard* clipboard) noexcept {
     InkpodClipboardRasterBuffer view{};
     view.struct_size = sizeof(view);
     if (inkpod_clipboard_render_rgba8(clipboard, &view) != INKPOD_STATUS_OK
         || view.width > static_cast<std::uint32_t>(INT_MAX)
         || view.height > static_cast<std::uint32_t>(INT_MAX)) {
+        FloatingPasteController controller(*state.engine);
         controller.Finish(false);
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -3223,6 +3205,54 @@ InkpodStatus BeginFloatingPaste(ApplicationHost& state, std::uint32_t mode) noex
     }
     UpdateFloatingPreview(state);
     return INKPOD_STATUS_OK;
+}
+
+InkpodStatus BeginFloatingPaste(ApplicationHost& state, std::uint32_t mode) noexcept {
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    bool imported_standard{};
+    if (state.clipboard == nullptr) {
+        if (!ImportStandardClipboard(state.Workspace().windows.window, state.clipboard)) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        imported_standard = true;
+    }
+    const InkpodClipboard* clipboard = state.clipboard;
+    FloatingPasteController controller(*state.engine);
+    InkpodStatus status = controller.Begin(clipboard, mode);
+    if (status != INKPOD_STATUS_OK && imported_standard
+        && mode == INKPOD_PASTE_COMPATIBLE) {
+        status = controller.Begin(clipboard, INKPOD_PASTE_ACTIVE_CONVERTED);
+    }
+    return status == INKPOD_STATUS_OK
+        ? ActivateFloatingPastePreview(state, clipboard)
+        : status;
+}
+
+InkpodStatus BeginFloatingPasteToNewPlane(
+    ApplicationHost& state, InkpodTreeEdit edit, const std::string& name) noexcept {
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (state.clipboard == nullptr
+        && !ImportStandardClipboard(state.Workspace().windows.window, state.clipboard)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const InkpodClipboard* clipboard = state.clipboard;
+    const InkpodStatus status = state.engine->Invoke(
+        [clipboard, edit, name](InkpodCore* core) mutable {
+            edit.name_utf8 = name.empty()
+                ? nullptr
+                : reinterpret_cast<const std::uint8_t*>(name.data());
+            edit.name_bytes = name.size();
+            return inkpod_core_paste_begin_new_plane(core, clipboard, &edit);
+        },
+        false,
+        false);
+    return status == INKPOD_STATUS_OK
+        ? ActivateFloatingPastePreview(state, clipboard)
+        : status;
 }
 
 InkpodStatus SetFloatingTransform(
@@ -3413,6 +3443,13 @@ InkpodStatus EndFloatingPaste(ApplicationHost& state, bool commit) noexcept {
             SetEditorActiveTool(state, INKPOD_TOOL_PENCIL);
         if (tool_status != INKPOD_STATUS_OK) {
             return tool_status;
+        }
+        if (commit) {
+            if (!state.RefreshEditorPresentation(
+                    state.Document().id, state.Document().generation)) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            RefreshTreePane(state);
         }
     }
     return status;
@@ -6571,11 +6608,12 @@ InkpodStatus EditPaperFrames(ApplicationHost& state, UINT command) noexcept {
         true);
 }
 
-InkpodStatus CreateCell(
+InkpodStatus CreateCellWithLayer(
     ApplicationHost& state,
     std::uint32_t width,
     std::uint32_t height,
-    std::uint32_t dpi_milli) noexcept {
+    std::uint32_t dpi_milli,
+    std::uint32_t initial_layer_kind) noexcept {
     if (width == 0U || height == 0U || dpi_milli == 0U) {
         return INKPOD_STATUS_INVALID_ARGUMENT;
     }
@@ -6597,8 +6635,10 @@ InkpodStatus CreateCell(
     }
     const InkpodCellCreateOptions options{
         sizeof(InkpodCellCreateOptions),
-        0U,
-        INKPOD_FEATURE_NONE,
+        initial_layer_kind == INKPOD_LAYER_BINARY_COLORING ? 0U : initial_layer_kind,
+        initial_layer_kind == INKPOD_LAYER_BINARY_COLORING
+            ? INKPOD_FEATURE_NONE
+            : INKPOD_CELL_CREATE_INITIAL_LAYER_KIND,
         uuid_high,
         uuid_low,
         width,
@@ -6663,6 +6703,19 @@ InkpodStatus CreateCell(
     return view_status;
 }
 
+InkpodStatus CreateCell(
+    ApplicationHost& state,
+    std::uint32_t width,
+    std::uint32_t height,
+    std::uint32_t dpi_milli) noexcept {
+    return CreateCellWithLayer(
+        state,
+        width,
+        height,
+        dpi_milli,
+        INKPOD_LAYER_BINARY_COLORING);
+}
+
 InkpodStatus CreateDefaultCellImpl(ApplicationHost& state) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -6705,64 +6758,48 @@ bool ChoosePalettePath(HWND owner, bool save, std::wstring& path) noexcept {
 
 bool SavePaletteFile(
     const std::wstring& path, const std::vector<InkpodColorValue>& colors) noexcept {
-    if (colors.size() > 4096U) {
+    std::vector<std::uint8_t> utf8_path;
+    if (!WidePathToUtf8(path, utf8_path)) {
         return false;
     }
-    const std::uint64_t bytes_u64 = 12U
-        + static_cast<std::uint64_t>(colors.size()) * sizeof(InkpodColorValue);
-    if (bytes_u64 > static_cast<std::uint64_t>(SIZE_MAX)) {
-        return false;
-    }
-    std::vector<std::uint8_t> bytes;
-    try {
-        bytes.resize(static_cast<std::size_t>(bytes_u64));
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    const std::array<std::uint8_t, 8U> magic{'I', 'N', 'K', 'P', 'A', 'L', '1', 0};
-    std::memcpy(bytes.data(), magic.data(), magic.size());
-    const std::uint32_t count = static_cast<std::uint32_t>(colors.size());
-    std::memcpy(bytes.data() + 8U, &count, sizeof(count));
-    if (!colors.empty()) {
-        std::memcpy(
-            bytes.data() + 12U,
-            colors.data(),
-            colors.size() * sizeof(InkpodColorValue));
-    }
-    return WriteFileAtomically(path, bytes);
+    InkpodColorArray input{};
+    input.struct_size = sizeof(input);
+    input.colors = colors.empty() ? nullptr : colors.data();
+    input.color_count = colors.size();
+    input.color_stride_bytes = colors.empty() ? 0U : sizeof(InkpodColorValue);
+    return inkpod_palette_file_save(
+               utf8_path.data(), utf8_path.size(), &input)
+        == INKPOD_STATUS_OK;
 }
 
 bool LoadPaletteFile(
     const std::wstring& path, std::vector<InkpodColorValue>& colors) noexcept {
-    std::vector<std::uint8_t> bytes;
-    if (!ReadBoundedFile(path, bytes) || bytes.size() < 12U
-        || std::memcmp(bytes.data(), "INKPAL1\0", 8U) != 0) {
+    std::vector<std::uint8_t> utf8_path;
+    if (!WidePathToUtf8(path, utf8_path)) {
         return false;
     }
-    std::uint32_t count{};
-    std::memcpy(&count, bytes.data() + 8U, sizeof(count));
-    if (count > 4096U
-        || bytes.size() != 12U + static_cast<std::size_t>(count) * sizeof(InkpodColorValue)) {
+    InkpodColorBuffer buffer{};
+    buffer.struct_size = sizeof(buffer);
+    if (inkpod_palette_file_load(
+            utf8_path.data(), utf8_path.size(), &buffer)
+        != INKPOD_STATUS_OK
+        || buffer.color_count > 4096U) {
         return false;
     }
     try {
-        colors.resize(count);
+        colors.resize(static_cast<std::size_t>(buffer.color_count));
     } catch (const std::bad_alloc&) {
         return false;
     }
-    if (count != 0U) {
-        std::memcpy(
-            colors.data(), bytes.data() + 12U,
-            static_cast<std::size_t>(count) * sizeof(InkpodColorValue));
+    if (colors.empty()) {
+        return true;
     }
-    return std::all_of(colors.begin(), colors.end(), [](const InkpodColorValue& color) {
-        return color.struct_size == sizeof(InkpodColorValue)
-            && (color.depth == INKPOD_COLOR_DEPTH_8
-                || color.depth == INKPOD_COLOR_DEPTH_16)
-            && (color.depth == INKPOD_COLOR_DEPTH_16
-                || (color.red <= UINT8_MAX && color.green <= UINT8_MAX
-                    && color.blue <= UINT8_MAX && color.alpha <= UINT8_MAX));
-    });
+    buffer.colors = colors.data();
+    buffer.color_capacity = colors.size();
+    buffer.color_stride_bytes = sizeof(InkpodColorValue);
+    return inkpod_palette_file_load(
+               utf8_path.data(), utf8_path.size(), &buffer)
+        == INKPOD_STATUS_OK;
 }
 
 bool ChooseChartPath(HWND owner, bool save, std::wstring& path) noexcept {
@@ -6794,106 +6831,117 @@ bool SaveColorChartFile(
     if (colors.size() > 4096U || names.size() != colors.size()) {
         return false;
     }
+    std::vector<std::uint8_t> utf8_path;
     std::vector<std::vector<std::uint8_t>> encoded_names;
-    std::uint64_t total = 12U;
+    std::vector<InkpodColorChartEntry> entries;
     try {
+        if (!WidePathToUtf8(path, utf8_path)) {
+            return false;
+        }
         encoded_names.resize(names.size());
+        entries.resize(names.size());
         for (std::size_t index = 0U; index < names.size(); ++index) {
             if (!WidePathToUtf8(names[index], encoded_names[index])
                 || encoded_names[index].empty() || encoded_names[index].size() > 1024U) {
                 return false;
             }
-            total += sizeof(InkpodColorValue) + sizeof(std::uint32_t)
-                + encoded_names[index].size();
+            entries[index].struct_size = sizeof(InkpodColorChartEntry);
+            entries[index].color = colors[index];
+            entries[index].name_utf8 = encoded_names[index].data();
+            entries[index].name_bytes = encoded_names[index].size();
         }
-        if (total > UINT64_C(16777216) || total > SIZE_MAX) {
-            return false;
-        }
-        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(total));
-        std::memcpy(bytes.data(), "INKCHT1\0", 8U);
-        const std::uint32_t count = static_cast<std::uint32_t>(colors.size());
-        std::memcpy(bytes.data() + 8U, &count, sizeof(count));
-        std::size_t offset = 12U;
-        for (std::size_t index = 0U; index < colors.size(); ++index) {
-            std::memcpy(bytes.data() + offset, &colors[index], sizeof(InkpodColorValue));
-            offset += sizeof(InkpodColorValue);
-            const std::uint32_t name_bytes = static_cast<std::uint32_t>(
-                encoded_names[index].size());
-            std::memcpy(bytes.data() + offset, &name_bytes, sizeof(name_bytes));
-            offset += sizeof(name_bytes);
-            std::memcpy(bytes.data() + offset, encoded_names[index].data(), name_bytes);
-            offset += name_bytes;
-        }
-        return WriteFileAtomically(path, bytes);
     } catch (const std::bad_alloc&) {
         return false;
     }
+    return inkpod_color_chart_file_save(
+               utf8_path.data(),
+               utf8_path.size(),
+               entries.empty() ? nullptr : entries.data(),
+               entries.size(),
+               entries.empty() ? 0U : sizeof(InkpodColorChartEntry))
+        == INKPOD_STATUS_OK;
 }
 
 bool LoadColorChartFile(
     const std::wstring& path,
     std::vector<InkpodColorValue>& colors,
     std::vector<std::wstring>& names) noexcept {
-    std::vector<std::uint8_t> bytes;
-    if (!ReadBoundedFile(path, bytes) || bytes.size() < 12U
-        || std::memcmp(bytes.data(), "INKCHT1\0", 8U) != 0) {
+    std::vector<std::uint8_t> utf8_path;
+    if (!WidePathToUtf8(path, utf8_path)) {
         return false;
     }
-    std::uint32_t count{};
-    std::memcpy(&count, bytes.data() + 8U, sizeof(count));
-    if (count > 4096U) {
+    InkpodColorChartFile* chart{};
+    if (inkpod_color_chart_file_load(
+            utf8_path.data(), utf8_path.size(), &chart)
+        != INKPOD_STATUS_OK) {
+        return false;
+    }
+    std::uint64_t count{};
+    if (inkpod_color_chart_file_count(chart, &count) != INKPOD_STATUS_OK
+        || count > 4096U) {
+        (void)inkpod_color_chart_file_release(&chart);
         return false;
     }
     try {
         colors.clear();
         names.clear();
-        colors.reserve(count);
-        names.reserve(count);
-        std::size_t offset = 12U;
-        for (std::uint32_t index = 0U; index < count; ++index) {
-            if (bytes.size() - offset
-                < sizeof(InkpodColorValue) + sizeof(std::uint32_t)) {
-                return false;
-            }
+        colors.reserve(static_cast<std::size_t>(count));
+        names.reserve(static_cast<std::size_t>(count));
+        for (std::uint64_t index = 0U; index < count; ++index) {
             InkpodColorValue color{};
-            std::memcpy(&color, bytes.data() + offset, sizeof(color));
-            offset += sizeof(color);
-            std::uint32_t name_bytes{};
-            std::memcpy(&name_bytes, bytes.data() + offset, sizeof(name_bytes));
-            offset += sizeof(name_bytes);
-            if (name_bytes == 0U || name_bytes > 1024U
-                || name_bytes > bytes.size() - offset
-                || color.struct_size != sizeof(InkpodColorValue)
-                || (color.depth != INKPOD_COLOR_DEPTH_8
-                    && color.depth != INKPOD_COLOR_DEPTH_16)) {
+            color.struct_size = sizeof(color);
+            std::uint64_t name_bytes{};
+            if (inkpod_color_chart_file_get(
+                    chart, index, &color, nullptr, 0U, &name_bytes)
+                    != INKPOD_STATUS_OK
+                || name_bytes == 0U || name_bytes > 1024U) {
+                (void)inkpod_color_chart_file_release(&chart);
                 return false;
             }
-            const char* text = reinterpret_cast<const char*>(bytes.data() + offset);
+            std::vector<std::uint8_t> utf8_name(static_cast<std::size_t>(name_bytes));
+            if (inkpod_color_chart_file_get(
+                    chart,
+                    index,
+                    &color,
+                    utf8_name.data(),
+                    utf8_name.size(),
+                    &name_bytes)
+                != INKPOD_STATUS_OK) {
+                (void)inkpod_color_chart_file_release(&chart);
+                return false;
+            }
             const int wide_count = MultiByteToWideChar(
-                CP_UTF8, MB_ERR_INVALID_CHARS, text, static_cast<int>(name_bytes), nullptr, 0);
+                CP_UTF8,
+                MB_ERR_INVALID_CHARS,
+                reinterpret_cast<const char*>(utf8_name.data()),
+                static_cast<int>(name_bytes),
+                nullptr,
+                0);
             if (wide_count <= 0) {
+                (void)inkpod_color_chart_file_release(&chart);
                 return false;
             }
             std::wstring name(static_cast<std::size_t>(wide_count), L'\0');
             if (MultiByteToWideChar(
                     CP_UTF8,
                     MB_ERR_INVALID_CHARS,
-                    text,
+                    reinterpret_cast<const char*>(utf8_name.data()),
                     static_cast<int>(name_bytes),
                     name.data(),
                     wide_count) != wide_count) {
+                (void)inkpod_color_chart_file_release(&chart);
                 return false;
             }
             colors.push_back(color);
             names.push_back(std::move(name));
-            offset += name_bytes;
         }
-        return offset == bytes.size();
     } catch (const std::bad_alloc&) {
         colors.clear();
         names.clear();
+        (void)inkpod_color_chart_file_release(&chart);
         return false;
     }
+    return inkpod_color_chart_file_release(&chart) == INKPOD_STATUS_OK;
 }
 
 bool BeginNewDocumentTab(
@@ -10395,32 +10443,12 @@ std::optional<LRESULT> RouteDocumentCommand(
                     || dialog.values[2] <= 0) {
                     return 0;
                 }
-                InkpodStatus status = CreateCell(
+                const InkpodStatus status = CreateCellWithLayer(
                     *state,
                     static_cast<std::uint32_t>(dialog.values[0]),
                     static_cast<std::uint32_t>(dialog.values[1]),
-                    static_cast<std::uint32_t>(dialog.values[2]) * 1000U);
-                if (status == INKPOD_STATUS_OK
-                    && dialog.values[3] != INKPOD_LAYER_BINARY_COLORING) {
-                    InkpodDocumentInfo info{};
-                    if (QueryDocument(*state, info)) {
-                        InkpodTreeEdit edit{};
-                        edit.struct_size = sizeof(edit);
-                        edit.operation = INKPOD_TREE_CONVERT_LAYER;
-                        edit.object_id = info.layer_id;
-                        edit.kind = static_cast<std::uint32_t>(dialog.values[3]);
-                        status = state->engine->Invoke(
-                            [edit](InkpodCore* core) {
-                                InkpodDispatchResult result{};
-                                result.struct_size = sizeof(result);
-                                std::uint64_t ignored{};
-                                return inkpod_core_tree_edit(
-                                    core, &edit, &result, &ignored);
-                            },
-                            true,
-                            true);
-                    }
-                }
+                    static_cast<std::uint32_t>(dialog.values[2]) * 1000U,
+                    static_cast<std::uint32_t>(dialog.values[3]));
                 if (status != INKPOD_STATUS_OK) {
                     ShowCoreError(*state, window, L"新規セルの作成");
                 }
@@ -10757,25 +10785,14 @@ std::optional<LRESULT> RouteEditCommand(
             edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
             edit.opacity_milli = static_cast<std::uint32_t>(
                 std::clamp(dialog.values[2], 0, 100)) * 10U;
-            std::uint64_t plane_id{};
             InkpodStatus status = INKPOD_STATUS_INVALID_STATE;
             try {
                 const std::string plane_name(
                     reinterpret_cast<const char*>(utf8.data()), utf8.size());
-                status = ApplyTreeEditRecord(*state, edit, plane_name, plane_id);
+                status = BeginFloatingPasteToNewPlane(
+                    *state, edit, plane_name);
             } catch (const std::bad_alloc&) {
                 status = INKPOD_STATUS_INVALID_STATE;
-            }
-            if (status == INKPOD_STATUS_OK) {
-                status = SetEditorActiveTarget(
-                    *state,
-                    state->Workspace().panes.active_tree_layer_id,
-                    plane_id);
-                if (status == INKPOD_STATUS_OK) {
-                    RefreshTreePane(*state);
-                    status = BeginFloatingPaste(
-                        *state, INKPOD_PASTE_ACTIVE_CONVERTED);
-                }
             }
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"変換してペースト");
@@ -11183,37 +11200,13 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                 ? INKPOD_STATUS_INVALID_STATE
                 : state->engine->Invoke(
                       [](InkpodCore* core) {
-                          std::vector<std::uint64_t> hidden;
-                          try {
-                              for (std::uint32_t index = 0U; index < 1024U; ++index) {
-                                  InkpodNodeInfo node{};
-                                  node.struct_size = sizeof(node);
-                                  if (inkpod_core_node_get(core, index, UINT32_MAX, &node)
-                                      != INKPOD_STATUS_OK) {
-                                      break;
-                                  }
-                                  if ((node.flags & INKPOD_NODE_VISIBLE) == 0U) {
-                                      hidden.push_back(node.id);
-                                  }
-                              }
-                          } catch (const std::bad_alloc&) {
-                              return INKPOD_STATUS_INVALID_STATE;
-                          }
-                          for (const std::uint64_t id : hidden) {
-                              InkpodTreeEdit edit{};
-                              edit.struct_size = sizeof(edit);
-                              edit.operation = INKPOD_TREE_DELETE_LAYER;
-                              edit.object_id = id;
-                              InkpodDispatchResult result{};
-                              result.struct_size = sizeof(result);
-                              std::uint64_t ignored{};
-                              const InkpodStatus item_status = inkpod_core_tree_edit(
-                                  core, &edit, &result, &ignored);
-                              if (item_status != INKPOD_STATUS_OK) {
-                                  return item_status;
-                              }
-                          }
-                          return INKPOD_STATUS_OK;
+                          InkpodTreeEdit edit{};
+                          edit.struct_size = sizeof(edit);
+                          edit.operation = INKPOD_TREE_DELETE_HIDDEN_LAYERS;
+                          InkpodDispatchResult result{};
+                          result.struct_size = sizeof(result);
+                          std::uint64_t ignored{};
+                          return inkpod_core_tree_edit(core, &edit, &result, &ignored);
                       },
                       true,
                       true);
@@ -12867,27 +12860,13 @@ std::optional<LRESULT> RouteToolCommand(
                 return 0;
             }
             const std::uint64_t source_plane_id = source.id;
-            std::uint64_t target_layer_id{};
             InkpodStatus status = state->engine->Invoke(
-                [source_plane_id, &target_layer_id](InkpodCore* core) {
-                    static constexpr std::array<std::uint8_t, 10U> name{
-                        'V','e','c','t','o','r','i','z','e','d'};
-                    InkpodTreeEdit edit{};
-                    edit.struct_size = sizeof(edit);
-                    edit.operation = INKPOD_TREE_CREATE_LAYER;
-                    edit.kind = INKPOD_LAYER_VECTOR_COLORING;
-                    edit.name_utf8 = name.data();
-                    edit.name_bytes = name.size();
+                [source_plane_id](InkpodCore* core) {
                     InkpodDispatchResult result{};
                     result.struct_size = sizeof(result);
-                    InkpodStatus create_status = inkpod_core_tree_edit(
-                        core, &edit, &result, &target_layer_id);
-                    if (create_status != INKPOD_STATUS_OK) {
-                        return create_status;
-                    }
                     const InkpodRasterVectorizeInput input{
                         sizeof(InkpodRasterVectorizeInput), 1U, 0U,
-                        source_plane_id, target_layer_id};
+                        source_plane_id, 0U};
                     std::uint64_t fill_count{};
                     return inkpod_core_raster_vectorize(
                         core, &input, &result, &fill_count);
@@ -13091,7 +13070,9 @@ std::optional<LRESULT> RouteColorCommand(
                 return 0;
             }
             const InkpodStatus status = ReplacePalette(*state, context, colors);
-            RefreshColorPanes(*state);
+            if (status == INKPOD_STATUS_OK) {
+                RefreshColorPanes(*state);
+            }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_CHART_GENERATE: {
@@ -13124,10 +13105,12 @@ std::optional<LRESULT> RouteColorCommand(
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"カラーチャート生成");
             }
-            state->Workspace().panes.color_chart_names.clear();
-            state->Workspace().panes.color_chart_page = 0U;
-            state->Workspace().panes.selected_color_chart_index = 0U;
-            RefreshColorPanes(*state);
+            if (status == INKPOD_STATUS_OK) {
+                state->Workspace().panes.color_chart_names.clear();
+                state->Workspace().panes.color_chart_page = 0U;
+                state->Workspace().panes.selected_color_chart_index = 0U;
+                RefreshColorPanes(*state);
+            }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_CHART_SEARCH: {
@@ -13240,11 +13223,7 @@ std::optional<LRESULT> RouteColorCommand(
             }
             const InkpodStatus status = ReplacePalette(*state, context, colors);
             if (status == INKPOD_STATUS_OK) {
-                try {
-                    state->Workspace().panes.color_chart_names = std::move(names);
-                } catch (const std::bad_alloc&) {
-                    return 0;
-                }
+                state->Workspace().panes.color_chart_names.swap(names);
                 state->Workspace().panes.color_chart_page = 0U;
                 state->Workspace().panes.selected_color_chart_index = 0U;
                 RefreshColorPanes(*state);
@@ -13304,13 +13283,19 @@ std::optional<LRESULT> RouteColorCommand(
             if (index >= state->Workspace().panes.palette_colors.size()) {
                 return 0;
             }
-            std::vector<InkpodColorValue> colors = state->Workspace().panes.palette_colors;
-            std::vector<std::wstring> names = state->Workspace().panes.color_chart_names;
-            colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
-            names.erase(names.begin() + static_cast<std::ptrdiff_t>(index));
+            std::vector<InkpodColorValue> colors;
+            std::vector<std::wstring> names;
+            try {
+                colors = state->Workspace().panes.palette_colors;
+                names = state->Workspace().panes.color_chart_names;
+                colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
+                names.erase(names.begin() + static_cast<std::ptrdiff_t>(index));
+            } catch (const std::bad_alloc&) {
+                return 0;
+            }
             const InkpodStatus status = ReplacePalette(*state, context, colors);
             if (status == INKPOD_STATUS_OK) {
-                state->Workspace().panes.color_chart_names = std::move(names);
+                state->Workspace().panes.color_chart_names.swap(names);
                 RefreshColorPanes(*state);
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -13361,18 +13346,23 @@ std::optional<LRESULT> RouteColorCommand(
             if (!parsed) {
                 return 0;
             }
-            SetDrawingColor(*state, color);
-            std::vector<InkpodColorValue> colors = state->Workspace().panes.palette_colors;
-            if (colors.size() >= 4096U) {
+            std::vector<InkpodColorValue> colors;
+            std::vector<std::wstring> names;
+            try {
+                colors = state->Workspace().panes.palette_colors;
+                names = state->Workspace().panes.color_chart_names;
+                if (colors.size() >= 4096U) {
+                    return 0;
+                }
+                colors.push_back(color);
+                names.push_back(pasted_name.empty() ? L"Pasted" : pasted_name);
+            } catch (const std::bad_alloc&) {
                 return 0;
             }
-            colors.push_back(color);
             const InkpodStatus status = ReplacePalette(*state, context, colors);
             if (status == INKPOD_STATUS_OK) {
-                RefreshColorPanes(*state);
-                state->Workspace().panes.color_chart_names.back() = pasted_name.empty()
-                    ? L"Pasted"
-                    : pasted_name;
+                state->Workspace().panes.color_chart_names.swap(names);
+                SetDrawingColor(*state, color);
                 state->Workspace().panes.color_chart_page = static_cast<std::uint32_t>(
                     (state->Workspace().panes.palette_colors.size() - 1U) / 20U);
                 state->Workspace().panes.selected_color_chart_index = static_cast<std::uint32_t>(

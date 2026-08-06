@@ -2,10 +2,10 @@
 
 use super::{
     ActivePlane, BoundaryAirbrush, CellDocument, Channel, ColorBalance, Core, CoreError,
-    CurveInterpolation, CurvePoint, DocumentResize, DustMode, DustRemoval, FillOperation,
-    FillRequest, Filter, HsvAdjustment, InclusionMode, LayerKind, Levels, MAX_CURVE_POINTS,
-    MAX_IMAGE_EDIT_PIXELS, MirrorAxis, PixelFormat, PixelValue, PlaneType, ResizeAnchor,
-    RotateDirection, TILE_SIZE, TileCoord, VectorWidthMode,
+    CurveInterpolation, CurvePoint, DispatchOutcome, DocumentResize, DustMode, DustRemoval,
+    FillOperation, FillRequest, Filter, HsvAdjustment, InclusionMode, LayerKind, Levels,
+    MAX_CURVE_POINTS, MAX_IMAGE_EDIT_PIXELS, MirrorAxis, PixelFormat, PixelValue, PlaneType,
+    ResizeAnchor, RotateDirection, TILE_SIZE, TileCoord, VectorWidthMode,
 };
 use crate::animation::{SequenceCellSource, parse_cell_number};
 use crate::asset;
@@ -63,6 +63,8 @@ mod execute;
 mod model;
 mod operations;
 mod validation;
+
+pub(crate) use operations::{apply_color_replacement, apply_separation};
 
 pub use model::{
     BatchColorPair, BatchFailurePolicy, BatchGraph, BatchInputKind, BatchInputSelector,

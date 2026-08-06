@@ -1,5 +1,6 @@
 use super::helpers::*;
 use super::*;
+use crate::primitive::{CanonicalInvocation, InvocationResult};
 
 impl Core {
     /// Starts an isolated filter preview for an editable plane.
@@ -51,7 +52,7 @@ impl Core {
             plane_id,
             base_document,
             preview_document,
-            filter: Some(filter),
+            procedure: PreviewProcedure::Filter(filter),
             preview_revision,
         });
         self.render_cache.clear();
@@ -112,7 +113,7 @@ impl Core {
             plane_id,
             base_document,
             preview_document,
-            filter: Some(filter),
+            procedure: PreviewProcedure::Filter(filter),
             preview_revision,
         });
         self.render_cache.clear();
@@ -152,11 +153,33 @@ impl Core {
             .as_ref()
             .cloned()
             .ok_or(CoreError::InvalidState("there is no active filter preview"))?;
+        if !self.canonical_invocation_is_active() {
+            let invocation = match &preview.procedure {
+                PreviewProcedure::Filter(filter) => CanonicalInvocation::ApplyFilter {
+                    plane_id: preview.plane_id.get(),
+                    filter: filter.clone(),
+                },
+                PreviewProcedure::Dust { shape, options } => {
+                    CanonicalInvocation::ApplyDustRemoval {
+                        plane_id: preview.plane_id.get(),
+                        shape: shape.clone(),
+                        options: *options,
+                    }
+                }
+            };
+            return self
+                .execute_canonical_invocation_with(invocation, |staged| {
+                    staged
+                        .apply_filter_preview()
+                        .map(InvocationResult::dispatch)
+                })
+                .map(|result| result.dispatch);
+        }
         let result = self
             .commit_deferred_document_edit_current(preview.base_document, preview.preview_document);
         if result.is_ok() {
             self.filter_preview = None;
-            if let Some(filter) = preview.filter {
+            if let PreviewProcedure::Filter(filter) = preview.procedure {
                 self.last_filter = Some(filter);
             }
         }
@@ -176,6 +199,30 @@ impl Core {
         plane_id: u64,
         mut progress: impl FnMut(u64, u64) -> bool,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let filter = self
+                .last_filter
+                .clone()
+                .ok_or(CoreError::InvalidState("there is no last filter"))?;
+            return self
+                .execute_canonical_invocation_with(
+                    CanonicalInvocation::ApplyFilter { plane_id, filter },
+                    move |staged| {
+                        staged
+                            .apply_last_filter_internal(plane_id, &mut progress)
+                            .map(InvocationResult::dispatch)
+                    },
+                )
+                .map(|result| result.dispatch);
+        }
+        self.apply_last_filter_internal(plane_id, &mut progress)
+    }
+
+    fn apply_last_filter_internal(
+        &mut self,
+        plane_id: u64,
+        progress: &mut dyn FnMut(u64, u64) -> bool,
+    ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
         let plane_id = PlaneId::from_raw(plane_id);
         let base_revision = self.document_revision;
@@ -190,7 +237,7 @@ impl Core {
             plane_id,
             &filter,
             RenderRevision::from_raw(revision.get()),
-            &mut progress,
+            progress,
         )?;
         if self.document_revision != base_revision {
             return Err(CoreError::InvalidState(
@@ -208,6 +255,17 @@ impl Core {
         name: &str,
         adjustment: Adjustment,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result =
+                self.execute_canonical_invocation(CanonicalInvocation::CreateAdjustmentLayer {
+                    name: name.to_owned(),
+                    adjustment,
+                })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "create-adjustment primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         validate_node_name(name)?;
         inkpod_image::apply_adjustment(super::PixelValue::Rgba([0; 4]), &adjustment)?;
@@ -251,6 +309,14 @@ impl Core {
         layer_id: u64,
         adjustment: Adjustment,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::UpdateAdjustmentLayer {
+                    layer_id,
+                    adjustment,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let layer_id = LayerId::from_raw(layer_id);
         inkpod_image::apply_adjustment(super::PixelValue::Rgba([0; 4]), &adjustment)?;

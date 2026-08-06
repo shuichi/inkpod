@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod adjustment;
+mod application_data;
 mod batch;
 mod common_formats;
 mod light_table;
@@ -8,6 +9,12 @@ mod native;
 mod vector;
 
 pub use adjustment::{FileAdjustmentLayer, FileAdjustmentMetadata, MAX_ADJUSTMENT_LAYERS};
+pub use application_data::{
+    ApplicationColor, COLOR_CHART_FORMAT_VERSION, FileColorChart, FileColorChartEntry, FilePalette,
+    MAX_APPLICATION_COLORS, MAX_COLOR_CHART_NAME_BYTES, PALETTE_FORMAT_VERSION, decode_color_chart,
+    decode_palette, encode_color_chart, encode_palette, read_color_chart, read_palette,
+    save_color_chart_atomic, save_palette_atomic,
+};
 pub use batch::{
     BATCH_GRAPH_VERSION, FileBatchGraph, FileBatchInput, FileBatchOperation, FileBatchOutput,
     FileBatchTarget, decode_batch_graph, encode_batch_graph, read_batch_graph,

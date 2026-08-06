@@ -1,0 +1,2325 @@
+//! Typed canonical invocations for document primitives outside the original kernel slice.
+
+use super::*;
+use crate::history::PixelChange;
+use crate::selection::FloatingDestination;
+use crate::stroke::DocumentStrokeSample;
+use crate::*;
+use std::sync::Arc;
+
+const INVOCATION_SCHEMA_VERSION: u16 = 1;
+type InvocationApply<'a> = Box<dyn FnOnce(&mut Core) -> Result<InvocationResult, CoreError> + 'a>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum CanonicalInvocation {
+    UpdatePaperFrames {
+        frames: FrameMetadata,
+    },
+    CreateLayer {
+        kind: LayerKind,
+        name: String,
+    },
+    DuplicateLayer {
+        layer_id: u64,
+    },
+    DeleteLayer {
+        layer_id: u64,
+    },
+    ReorderLayer {
+        layer_id: u64,
+        destination_index: u64,
+    },
+    SetLayerProperties {
+        layer_id: u64,
+        visible: bool,
+        editable: bool,
+        opacity_milli: u32,
+        name: String,
+    },
+    CreatePlane {
+        layer_id: u64,
+        kind: PlaneType,
+        format: PixelFormat,
+        name: String,
+    },
+    DuplicatePlane {
+        plane_id: u64,
+    },
+    DeletePlane {
+        plane_id: u64,
+    },
+    ReorderPlane {
+        plane_id: u64,
+        destination_index: u64,
+    },
+    SetPlaneProperties {
+        plane_id: u64,
+        visible: bool,
+        editable: bool,
+        opacity_milli: u32,
+        name: String,
+    },
+    ConvertPlane {
+        plane_id: u64,
+        destination_kind: PlaneType,
+        destination_format: PixelFormat,
+    },
+    MergePlane {
+        plane_id: u64,
+    },
+    ConvertLayer {
+        layer_id: u64,
+        destination: LayerKind,
+    },
+    MergeLayer {
+        layer_id: u64,
+    },
+    DeleteHiddenLayers,
+    AddGuide {
+        axis: GuideAxis,
+        position: i32,
+    },
+    MoveGuide {
+        guide_id: u64,
+        position: i32,
+    },
+    DeleteGuide {
+        guide_id: u64,
+    },
+    SetGrid {
+        grid: GridConfig,
+    },
+    DeleteAllGuides,
+    ApplyFill {
+        request: FillRequest,
+        target: EditorTarget,
+        use_light_table_boundary: bool,
+        use_light_table_color: bool,
+    },
+    ApplyGradient {
+        plane_id: u64,
+        gradient: Gradient,
+    },
+    ApplyBoundaryAirbrush {
+        plane_id: u64,
+        effect: BoundaryAirbrush,
+    },
+    ApplyBlur {
+        plane_id: u64,
+        radius: u32,
+        strength_milli: u32,
+    },
+    ApplyAirbrush {
+        plane_id: u64,
+        stroke: AirbrushStroke,
+    },
+    ApplyAirbrushGesture {
+        plane_id: u64,
+        gesture: AirbrushGesture,
+    },
+    ApplyStamp {
+        plane_id: u64,
+        stamp: Stamp,
+    },
+    ApplyStampGesture {
+        plane_id: u64,
+        gesture: StampGesture,
+    },
+    ApplyBlurTool {
+        plane_id: u64,
+        shape: SelectionShape,
+        radius: u32,
+        strength_milli: u32,
+    },
+    ApplyBlurPressureTrace {
+        plane_id: u64,
+        samples: Vec<DocumentStrokeSample>,
+        diameter: f32,
+        radius: u32,
+        strength_milli: u32,
+    },
+    ApplyDustRemoval {
+        plane_id: u64,
+        shape: Option<SelectionShape>,
+        options: DustRemoval,
+    },
+    EditPlaneAlpha {
+        plane_id: u64,
+        alpha: TileRaster,
+    },
+    ApplyAlphaGradient {
+        plane_id: u64,
+        gradient: Gradient,
+    },
+    ApplyFilter {
+        plane_id: u64,
+        filter: Filter,
+    },
+    CreateAdjustmentLayer {
+        name: String,
+        adjustment: Adjustment,
+    },
+    UpdateAdjustmentLayer {
+        layer_id: u64,
+        adjustment: Adjustment,
+    },
+    ReplaceRasterColors {
+        plane_id: u64,
+        pairs: Vec<BatchColorPair>,
+    },
+    SeparateRasterColors {
+        plane_id: u64,
+        options: BatchSeparation,
+    },
+    RestoreSelectedPixels {
+        plane_id: u64,
+        changes: Vec<PixelChange>,
+    },
+    ApplySelection {
+        shape: SelectionShape,
+        operation: SelectionOperation,
+        target: EditorTarget,
+    },
+    InvertSelection,
+    ClearSelection,
+    ResizeSelection {
+        pixels: i32,
+    },
+    SelectColor {
+        color: PixelValue,
+        tolerance: u16,
+        different: bool,
+        operation: SelectionOperation,
+        target: EditorTarget,
+    },
+    SelectionToLayer {
+        name: String,
+    },
+    SelectionFromLayer {
+        layer_id: u64,
+        operation: SelectionLayerOperation,
+    },
+    ClearSelectedContent {
+        target: EditorTarget,
+    },
+    CommitFloating {
+        floating: FloatingSelection,
+    },
+    MirrorDocument {
+        axis: MirrorAxis,
+    },
+    RotateDocument {
+        direction: RotateDirection,
+    },
+    ResizeDocument {
+        resize: DocumentResize,
+    },
+    VectorAddPath {
+        plane_id: u64,
+        input: VectorPathInput,
+    },
+    VectorAddFill {
+        plane_id: u64,
+        boundary_path_ids: Vec<u64>,
+        color: PixelValue,
+    },
+    VectorErase {
+        plane_id: u64,
+        point: PointF32,
+        radius: f32,
+        mode: VectorEraseMode,
+    },
+    VectorConnect {
+        plane_id: u64,
+        maximum_gap: f32,
+    },
+    VectorCorrectWidth {
+        path_ids: Vec<u64>,
+        mode: VectorWidthMode,
+    },
+    RasterizeVectorLayer {
+        layer_id: u64,
+        antialias: bool,
+        name: String,
+    },
+    VectorizeRasterPlane {
+        source_plane_id: u64,
+        target_vector_layer_id: u64,
+        alpha_threshold: u8,
+    },
+    VectorizeRasterPlaneIntoNewLayer {
+        source_plane_id: u64,
+        alpha_threshold: u8,
+        name: String,
+    },
+    LightTableSetGlobalOpacity {
+        opacity_milli: u32,
+    },
+    LightTableCreateSet {
+        name: String,
+    },
+    LightTableDuplicateSet {
+        set_id: u64,
+    },
+    LightTableDeleteSet {
+        set_id: u64,
+    },
+    LightTableRenameSet {
+        set_id: u64,
+        name: String,
+    },
+    LightTableReorderSet {
+        set_id: u64,
+        destination_index: u64,
+    },
+    LightTableSetActive {
+        set_id: u64,
+    },
+    LightTableAddItem {
+        input: LightTableItemInput,
+    },
+    LightTableUpdateItemProperties {
+        item_id: u64,
+        properties: LightTableItemProperties,
+    },
+    LightTableUpdateItem {
+        item_id: u64,
+        input: LightTableItemInput,
+    },
+    LightTableRemoveItem {
+        item_id: u64,
+    },
+    LightTableReorderItem {
+        item_id: u64,
+        destination_index: u64,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RuntimeInvocation {
+    invocation: Arc<CanonicalInvocation>,
+    arguments: Arc<[u8]>,
+}
+
+impl PartialEq for RuntimeInvocation {
+    fn eq(&self, other: &Self) -> bool {
+        self.invocation.primitive_id() == other.invocation.primitive_id()
+            && self.arguments == other.arguments
+    }
+}
+
+impl Eq for RuntimeInvocation {}
+
+impl RuntimeInvocation {
+    fn new(invocation: CanonicalInvocation) -> Result<Self, CoreError> {
+        let arguments = invocation.canonical_arguments()?.into();
+        Ok(Self {
+            invocation: Arc::new(invocation),
+            arguments,
+        })
+    }
+
+    pub(super) fn invocation(&self) -> &CanonicalInvocation {
+        &self.invocation
+    }
+
+    pub(super) fn arguments(&self) -> &[u8] {
+        &self.arguments
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct InvocationResult {
+    pub(crate) dispatch: DispatchOutcome,
+    pub(crate) output_ids: Vec<u64>,
+    pub(crate) changed_pixels: u64,
+}
+
+impl InvocationResult {
+    pub(crate) fn dispatch(dispatch: DispatchOutcome) -> Self {
+        Self {
+            dispatch,
+            output_ids: Vec::new(),
+            changed_pixels: 0,
+        }
+    }
+
+    pub(crate) fn output(dispatch: DispatchOutcome, output_id: u64) -> Self {
+        Self {
+            dispatch,
+            output_ids: vec![output_id],
+            changed_pixels: 0,
+        }
+    }
+
+    pub(crate) fn outputs(dispatch: DispatchOutcome, output_ids: Vec<u64>) -> Self {
+        Self {
+            dispatch,
+            output_ids,
+            changed_pixels: 0,
+        }
+    }
+
+    pub(crate) fn fill(outcome: FillOutcome) -> Self {
+        Self {
+            dispatch: outcome.dispatch,
+            output_ids: Vec::new(),
+            changed_pixels: outcome.changed_pixels,
+        }
+    }
+}
+
+impl CanonicalInvocation {
+    pub(super) const fn primitive_id(&self) -> PrimitiveId {
+        match self {
+            Self::UpdatePaperFrames { .. } => PrimitiveId::UPDATE_PAPER_FRAMES,
+            Self::CreateLayer { .. } => PrimitiveId::CREATE_LAYER,
+            Self::DuplicateLayer { .. } => PrimitiveId::DUPLICATE_LAYER,
+            Self::DeleteLayer { .. } => PrimitiveId::DELETE_LAYER,
+            Self::ReorderLayer { .. } => PrimitiveId::REORDER_LAYER,
+            Self::SetLayerProperties { .. } => PrimitiveId::SET_LAYER_PROPERTIES,
+            Self::CreatePlane { .. } => PrimitiveId::CREATE_PLANE,
+            Self::DuplicatePlane { .. } => PrimitiveId::DUPLICATE_PLANE,
+            Self::DeletePlane { .. } => PrimitiveId::DELETE_PLANE,
+            Self::ReorderPlane { .. } => PrimitiveId::REORDER_PLANE,
+            Self::SetPlaneProperties { .. } => PrimitiveId::SET_PLANE_PROPERTIES,
+            Self::ConvertPlane { .. } => PrimitiveId::CONVERT_PLANE,
+            Self::MergePlane { .. } => PrimitiveId::MERGE_PLANE,
+            Self::ConvertLayer { .. } => PrimitiveId::CONVERT_LAYER,
+            Self::MergeLayer { .. } => PrimitiveId::MERGE_LAYER,
+            Self::DeleteHiddenLayers => PrimitiveId::DELETE_HIDDEN_LAYERS,
+            Self::AddGuide { .. } => PrimitiveId::ADD_GUIDE,
+            Self::MoveGuide { .. } => PrimitiveId::MOVE_GUIDE,
+            Self::DeleteGuide { .. } => PrimitiveId::DELETE_GUIDE,
+            Self::SetGrid { .. } => PrimitiveId::SET_GRID,
+            Self::DeleteAllGuides => PrimitiveId::DELETE_ALL_GUIDES,
+            Self::ApplyFill { .. } => PrimitiveId::APPLY_FILL,
+            Self::ApplyGradient { .. } => PrimitiveId::APPLY_GRADIENT,
+            Self::ApplyBoundaryAirbrush { .. } => PrimitiveId::APPLY_BOUNDARY_AIRBRUSH,
+            Self::ApplyBlur { .. } => PrimitiveId::APPLY_BLUR,
+            Self::ApplyAirbrush { .. } => PrimitiveId::APPLY_AIRBRUSH,
+            Self::ApplyAirbrushGesture { .. } => PrimitiveId::APPLY_AIRBRUSH_GESTURE,
+            Self::ApplyStamp { .. } => PrimitiveId::APPLY_STAMP,
+            Self::ApplyStampGesture { .. } => PrimitiveId::APPLY_STAMP_GESTURE,
+            Self::ApplyBlurTool { .. } | Self::ApplyBlurPressureTrace { .. } => {
+                PrimitiveId::APPLY_BLUR_TOOL
+            }
+            Self::ApplyDustRemoval { .. } => PrimitiveId::APPLY_DUST_REMOVAL,
+            Self::EditPlaneAlpha { .. } => PrimitiveId::EDIT_PLANE_ALPHA,
+            Self::ApplyAlphaGradient { .. } => PrimitiveId::APPLY_ALPHA_GRADIENT,
+            Self::ApplyFilter { .. } => PrimitiveId::APPLY_FILTER,
+            Self::CreateAdjustmentLayer { .. } => PrimitiveId::CREATE_ADJUSTMENT_LAYER,
+            Self::UpdateAdjustmentLayer { .. } => PrimitiveId::UPDATE_ADJUSTMENT_LAYER,
+            Self::ReplaceRasterColors { .. } => PrimitiveId::REPLACE_RASTER_COLORS,
+            Self::SeparateRasterColors { .. } => PrimitiveId::SEPARATE_RASTER_COLORS,
+            Self::RestoreSelectedPixels { .. } => PrimitiveId::RESTORE_SELECTED_PIXELS,
+            Self::ApplySelection { .. } => PrimitiveId::APPLY_SELECTION,
+            Self::InvertSelection => PrimitiveId::INVERT_SELECTION,
+            Self::ClearSelection => PrimitiveId::CLEAR_SELECTION,
+            Self::ResizeSelection { .. } => PrimitiveId::RESIZE_SELECTION,
+            Self::SelectColor { .. } => PrimitiveId::SELECT_COLOR,
+            Self::SelectionToLayer { .. } => PrimitiveId::SELECTION_TO_LAYER,
+            Self::SelectionFromLayer { .. } => PrimitiveId::SELECTION_FROM_LAYER,
+            Self::ClearSelectedContent { .. } => PrimitiveId::CLEAR_SELECTED_CONTENT,
+            Self::CommitFloating { .. } => PrimitiveId::COMMIT_FLOATING,
+            Self::MirrorDocument { .. } => PrimitiveId::MIRROR_DOCUMENT,
+            Self::RotateDocument { .. } => PrimitiveId::ROTATE_DOCUMENT,
+            Self::ResizeDocument { .. } => PrimitiveId::RESIZE_DOCUMENT,
+            Self::VectorAddPath { .. } => PrimitiveId::VECTOR_ADD_PATH,
+            Self::VectorAddFill { .. } => PrimitiveId::VECTOR_ADD_FILL,
+            Self::VectorErase { .. } => PrimitiveId::VECTOR_ERASE,
+            Self::VectorConnect { .. } => PrimitiveId::VECTOR_CONNECT,
+            Self::VectorCorrectWidth { .. } => PrimitiveId::VECTOR_CORRECT_WIDTH,
+            Self::RasterizeVectorLayer { .. } => PrimitiveId::RASTERIZE_VECTOR_LAYER,
+            Self::VectorizeRasterPlane { .. } => PrimitiveId::VECTORIZE_RASTER_PLANE,
+            Self::VectorizeRasterPlaneIntoNewLayer { .. } => {
+                PrimitiveId::VECTORIZE_RASTER_PLANE_INTO_NEW_LAYER
+            }
+            Self::LightTableSetGlobalOpacity { .. } => PrimitiveId::LIGHT_TABLE_SET_GLOBAL_OPACITY,
+            Self::LightTableCreateSet { .. } => PrimitiveId::LIGHT_TABLE_CREATE_SET,
+            Self::LightTableDuplicateSet { .. } => PrimitiveId::LIGHT_TABLE_DUPLICATE_SET,
+            Self::LightTableDeleteSet { .. } => PrimitiveId::LIGHT_TABLE_DELETE_SET,
+            Self::LightTableRenameSet { .. } => PrimitiveId::LIGHT_TABLE_RENAME_SET,
+            Self::LightTableReorderSet { .. } => PrimitiveId::LIGHT_TABLE_REORDER_SET,
+            Self::LightTableSetActive { .. } => PrimitiveId::LIGHT_TABLE_SET_ACTIVE,
+            Self::LightTableAddItem { .. } => PrimitiveId::LIGHT_TABLE_ADD_ITEM,
+            Self::LightTableUpdateItemProperties { .. } => {
+                PrimitiveId::LIGHT_TABLE_UPDATE_ITEM_PROPERTIES
+            }
+            Self::LightTableUpdateItem { .. } => PrimitiveId::LIGHT_TABLE_UPDATE_ITEM,
+            Self::LightTableRemoveItem { .. } => PrimitiveId::LIGHT_TABLE_REMOVE_ITEM,
+            Self::LightTableReorderItem { .. } => PrimitiveId::LIGHT_TABLE_REORDER_ITEM,
+        }
+    }
+
+    fn input_ids(&self) -> Vec<u64> {
+        match self {
+            Self::DuplicateLayer { layer_id }
+            | Self::DeleteLayer { layer_id }
+            | Self::ReorderLayer { layer_id, .. }
+            | Self::SetLayerProperties { layer_id, .. }
+            | Self::ConvertLayer { layer_id, .. }
+            | Self::MergeLayer { layer_id } => vec![*layer_id],
+            Self::CreatePlane { layer_id, .. } => vec![*layer_id],
+            Self::DuplicatePlane { plane_id }
+            | Self::DeletePlane { plane_id }
+            | Self::ReorderPlane { plane_id, .. }
+            | Self::SetPlaneProperties { plane_id, .. }
+            | Self::ConvertPlane { plane_id, .. }
+            | Self::MergePlane { plane_id } => vec![*plane_id],
+            Self::MoveGuide { guide_id, .. } | Self::DeleteGuide { guide_id } => vec![*guide_id],
+            Self::ApplySelection { target, .. }
+            | Self::SelectColor { target, .. }
+            | Self::ClearSelectedContent { target }
+            | Self::ApplyFill { target, .. } => {
+                vec![target.layer_id, target.plane_id]
+            }
+            Self::ApplyGradient { plane_id, .. }
+            | Self::ApplyBoundaryAirbrush { plane_id, .. }
+            | Self::ApplyBlur { plane_id, .. }
+            | Self::ApplyAirbrush { plane_id, .. }
+            | Self::ApplyAirbrushGesture { plane_id, .. }
+            | Self::ApplyStamp { plane_id, .. }
+            | Self::ApplyStampGesture { plane_id, .. }
+            | Self::ApplyBlurTool { plane_id, .. }
+            | Self::ApplyBlurPressureTrace { plane_id, .. }
+            | Self::ApplyDustRemoval { plane_id, .. }
+            | Self::EditPlaneAlpha { plane_id, .. }
+            | Self::ApplyAlphaGradient { plane_id, .. }
+            | Self::ApplyFilter { plane_id, .. } => vec![*plane_id],
+            Self::ReplaceRasterColors { plane_id, .. }
+            | Self::SeparateRasterColors { plane_id, .. }
+            | Self::RestoreSelectedPixels { plane_id, .. } => vec![*plane_id],
+            Self::UpdateAdjustmentLayer { layer_id, .. } => vec![*layer_id],
+            Self::SelectionFromLayer { layer_id, .. } => vec![*layer_id],
+            Self::CommitFloating { floating } => match &floating.destination {
+                FloatingDestination::ExistingPlane(plane_id) => vec![plane_id.get()],
+                FloatingDestination::NewPlane { layer_id, .. } => vec![layer_id.get()],
+            },
+            Self::VectorAddPath { plane_id, .. }
+            | Self::VectorAddFill { plane_id, .. }
+            | Self::VectorErase { plane_id, .. }
+            | Self::VectorConnect { plane_id, .. } => vec![*plane_id],
+            Self::VectorCorrectWidth { path_ids, .. } => path_ids.clone(),
+            Self::RasterizeVectorLayer { layer_id, .. } => vec![*layer_id],
+            Self::VectorizeRasterPlane {
+                source_plane_id,
+                target_vector_layer_id,
+                ..
+            } => vec![*source_plane_id, *target_vector_layer_id],
+            Self::VectorizeRasterPlaneIntoNewLayer {
+                source_plane_id, ..
+            } => vec![*source_plane_id],
+            Self::LightTableDuplicateSet { set_id }
+            | Self::LightTableDeleteSet { set_id }
+            | Self::LightTableRenameSet { set_id, .. }
+            | Self::LightTableReorderSet { set_id, .. }
+            | Self::LightTableSetActive { set_id } => vec![*set_id],
+            Self::LightTableUpdateItemProperties { item_id, .. }
+            | Self::LightTableUpdateItem { item_id, .. }
+            | Self::LightTableRemoveItem { item_id }
+            | Self::LightTableReorderItem { item_id, .. } => vec![*item_id],
+            Self::UpdatePaperFrames { .. }
+            | Self::CreateLayer { .. }
+            | Self::DeleteHiddenLayers
+            | Self::AddGuide { .. }
+            | Self::SetGrid { .. }
+            | Self::DeleteAllGuides
+            | Self::InvertSelection
+            | Self::ClearSelection
+            | Self::ResizeSelection { .. }
+            | Self::SelectionToLayer { .. }
+            | Self::MirrorDocument { .. }
+            | Self::RotateDocument { .. }
+            | Self::ResizeDocument { .. } => Vec::new(),
+            Self::LightTableSetGlobalOpacity { .. }
+            | Self::LightTableCreateSet { .. }
+            | Self::LightTableAddItem { .. }
+            | Self::CreateAdjustmentLayer { .. } => Vec::new(),
+        }
+    }
+
+    fn asset_ids(&self) -> Vec<AssetId> {
+        match self {
+            Self::LightTableAddItem { input } | Self::LightTableUpdateItem { input, .. } => {
+                vec![input.source.asset_id()]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn apply(&self, core: &mut Core) -> Result<InvocationResult, CoreError> {
+        match self {
+            Self::UpdatePaperFrames { frames } => core
+                .update_paper_frames(*frames)
+                .map(InvocationResult::dispatch),
+            Self::CreateLayer { kind, name } => core
+                .create_layer(*kind, name)
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::DuplicateLayer { layer_id } => core
+                .duplicate_layer(*layer_id)
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::DeleteLayer { layer_id } => {
+                core.delete_layer(*layer_id).map(InvocationResult::dispatch)
+            }
+            Self::ReorderLayer {
+                layer_id,
+                destination_index,
+            } => core
+                .reorder_layer(
+                    *layer_id,
+                    usize::try_from(*destination_index).map_err(|_| {
+                        CoreError::InvalidArgument("layer destination index is not representable")
+                    })?,
+                )
+                .map(InvocationResult::dispatch),
+            Self::SetLayerProperties {
+                layer_id,
+                visible,
+                editable,
+                opacity_milli,
+                name,
+            } => core
+                .set_layer_properties(*layer_id, *visible, *editable, *opacity_milli, name)
+                .map(InvocationResult::dispatch),
+            Self::CreatePlane {
+                layer_id,
+                kind,
+                format,
+                name,
+            } => core
+                .create_plane(*layer_id, *kind, *format, name)
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::DuplicatePlane { plane_id } => core
+                .duplicate_plane(*plane_id)
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::DeletePlane { plane_id } => {
+                core.delete_plane(*plane_id).map(InvocationResult::dispatch)
+            }
+            Self::ReorderPlane {
+                plane_id,
+                destination_index,
+            } => core
+                .reorder_plane(
+                    *plane_id,
+                    usize::try_from(*destination_index).map_err(|_| {
+                        CoreError::InvalidArgument("plane destination index is not representable")
+                    })?,
+                )
+                .map(InvocationResult::dispatch),
+            Self::SetPlaneProperties {
+                plane_id,
+                visible,
+                editable,
+                opacity_milli,
+                name,
+            } => core
+                .set_plane_properties(*plane_id, *visible, *editable, *opacity_milli, name)
+                .map(InvocationResult::dispatch),
+            Self::ConvertPlane {
+                plane_id,
+                destination_kind,
+                destination_format,
+            } => core
+                .convert_plane(*plane_id, *destination_kind, *destination_format)
+                .map(InvocationResult::dispatch),
+            Self::MergePlane { plane_id } => core
+                .merge_plane_into_below(*plane_id)
+                .map(InvocationResult::dispatch),
+            Self::ConvertLayer {
+                layer_id,
+                destination,
+            } => core
+                .convert_layer(*layer_id, *destination)
+                .map(InvocationResult::dispatch),
+            Self::MergeLayer { layer_id } => core
+                .merge_layer_into_below(*layer_id)
+                .map(InvocationResult::dispatch),
+            Self::DeleteHiddenLayers => core.delete_hidden_layers().map(InvocationResult::dispatch),
+            Self::AddGuide { axis, position } => core
+                .add_guide(*axis, *position)
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::MoveGuide { guide_id, position } => core
+                .move_guide(*guide_id, *position)
+                .map(InvocationResult::dispatch),
+            Self::DeleteGuide { guide_id } => {
+                core.delete_guide(*guide_id).map(InvocationResult::dispatch)
+            }
+            Self::SetGrid { grid } => core.set_grid(*grid).map(InvocationResult::dispatch),
+            Self::DeleteAllGuides => core.delete_all_guides().map(InvocationResult::dispatch),
+            Self::ApplyFill {
+                request,
+                target,
+                use_light_table_boundary,
+                use_light_table_color,
+            } => core
+                .apply_fill_for_editor_target(
+                    request,
+                    *target,
+                    *use_light_table_boundary,
+                    *use_light_table_color,
+                )
+                .map(InvocationResult::fill),
+            Self::ApplyGradient { plane_id, gradient } => core
+                .apply_gradient_to_plane(*plane_id, gradient)
+                .map(InvocationResult::dispatch),
+            Self::ApplyBoundaryAirbrush { plane_id, effect } => core
+                .apply_boundary_airbrush_to_plane(*plane_id, effect)
+                .map(InvocationResult::dispatch),
+            Self::ApplyBlur {
+                plane_id,
+                radius,
+                strength_milli,
+            } => core
+                .apply_blur_to_plane(*plane_id, *radius, *strength_milli)
+                .map(InvocationResult::dispatch),
+            Self::ApplyAirbrush { plane_id, stroke } => core
+                .apply_airbrush_to_plane(*plane_id, *stroke)
+                .map(InvocationResult::dispatch),
+            Self::ApplyAirbrushGesture { plane_id, gesture } => core
+                .apply_airbrush_gesture_to_plane(*plane_id, gesture)
+                .map(InvocationResult::dispatch),
+            Self::ApplyStamp { plane_id, stamp } => core
+                .apply_stamp_to_plane(*plane_id, *stamp)
+                .map(InvocationResult::dispatch),
+            Self::ApplyStampGesture { plane_id, gesture } => core
+                .apply_stamp_gesture_to_plane(*plane_id, gesture)
+                .map(InvocationResult::dispatch),
+            Self::ApplyBlurTool {
+                plane_id,
+                shape,
+                radius,
+                strength_milli,
+            } => core
+                .apply_blur_tool_to_plane(*plane_id, shape, *radius, *strength_milli)
+                .map(InvocationResult::dispatch),
+            Self::ApplyBlurPressureTrace {
+                plane_id,
+                samples,
+                diameter,
+                radius,
+                strength_milli,
+            } => {
+                let samples = samples
+                    .iter()
+                    .map(|sample| StrokeSample {
+                        x: sample.point.x,
+                        y: sample.point.y,
+                        pressure: sample.pressure,
+                    })
+                    .collect::<Vec<_>>();
+                core.apply_blur_tool_for_view(
+                    0,
+                    CoordinateSpace::Document,
+                    *plane_id,
+                    EffectRegionKind::Trace,
+                    &samples,
+                    *diameter,
+                    true,
+                    *radius,
+                    *strength_milli,
+                )
+                .map(InvocationResult::dispatch)
+            }
+            Self::ApplyDustRemoval {
+                plane_id,
+                shape,
+                options,
+            } => core
+                .apply_dust_removal_to_plane(*plane_id, shape.as_ref(), *options, |_, _| true)
+                .map(InvocationResult::dispatch),
+            Self::EditPlaneAlpha { plane_id, alpha } => core
+                .edit_plane_alpha(*plane_id, alpha)
+                .map(InvocationResult::dispatch),
+            Self::ApplyAlphaGradient { plane_id, gradient } => core
+                .apply_alpha_gradient_to_plane(*plane_id, gradient)
+                .map(InvocationResult::dispatch),
+            Self::ApplyFilter { plane_id, filter } => {
+                core.begin_filter_preview(*plane_id, filter.clone())?;
+                core.apply_filter_preview().map(InvocationResult::dispatch)
+            }
+            Self::CreateAdjustmentLayer { name, adjustment } => core
+                .create_adjustment_layer(name, adjustment.clone())
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::UpdateAdjustmentLayer {
+                layer_id,
+                adjustment,
+            } => core
+                .update_adjustment_layer(*layer_id, adjustment.clone())
+                .map(InvocationResult::dispatch),
+            Self::ReplaceRasterColors { plane_id, pairs } => {
+                crate::batch::apply_color_replacement(core, *plane_id, pairs, &mut |_, _| true)
+                    .map(InvocationResult::dispatch)
+            }
+            Self::SeparateRasterColors { plane_id, options } => {
+                crate::batch::apply_separation(core, *plane_id, options, &mut |_, _| true)
+                    .map(InvocationResult::dispatch)
+            }
+            Self::RestoreSelectedPixels { plane_id, changes } => core
+                .restore_selected_pixels(*plane_id, changes)
+                .map(InvocationResult::dispatch),
+            Self::ApplySelection {
+                shape,
+                operation,
+                target,
+            } => core
+                .apply_selection_for_editor_target(shape, *operation, *target)
+                .map(InvocationResult::dispatch),
+            Self::InvertSelection => core.invert_selection().map(InvocationResult::dispatch),
+            Self::ClearSelection => core.clear_selection().map(InvocationResult::dispatch),
+            Self::ResizeSelection { pixels } => core
+                .resize_selection(*pixels)
+                .map(InvocationResult::dispatch),
+            Self::SelectColor {
+                color,
+                tolerance,
+                different,
+                operation,
+                target,
+            } => core
+                .select_color_for_editor_target(*color, *tolerance, *different, *operation, *target)
+                .map(InvocationResult::dispatch),
+            Self::SelectionToLayer { name } => core
+                .selection_to_layer(name)
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::SelectionFromLayer {
+                layer_id,
+                operation,
+            } => core
+                .selection_from_layer(*layer_id, *operation)
+                .map(InvocationResult::dispatch),
+            Self::ClearSelectedContent { target } => {
+                set_runtime_editor_target(core, *target)?;
+                core.clear_selected_content()
+                    .map(InvocationResult::dispatch)
+            }
+            Self::CommitFloating { floating } => {
+                core.floating = Some(floating.clone());
+                core.commit_floating().map(InvocationResult::dispatch)
+            }
+            Self::MirrorDocument { axis } => {
+                core.mirror_document(*axis).map(InvocationResult::dispatch)
+            }
+            Self::RotateDocument { direction } => core
+                .rotate_document(*direction)
+                .map(InvocationResult::dispatch),
+            Self::ResizeDocument { resize } => core
+                .resize_document(*resize)
+                .map(InvocationResult::dispatch),
+            Self::VectorAddPath { plane_id, input } => core
+                .vector_add_path(*plane_id, input.clone())
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::VectorAddFill {
+                plane_id,
+                boundary_path_ids,
+                color,
+            } => core
+                .vector_add_fill(*plane_id, boundary_path_ids, *color)
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::VectorErase {
+                plane_id,
+                point,
+                radius,
+                mode,
+            } => core
+                .vector_erase(*plane_id, *point, *radius, *mode)
+                .map(InvocationResult::dispatch),
+            Self::VectorConnect {
+                plane_id,
+                maximum_gap,
+            } => core
+                .vector_connect(*plane_id, *maximum_gap)
+                .map(|(dispatch, id)| {
+                    InvocationResult::outputs(dispatch, id.into_iter().collect())
+                }),
+            Self::VectorCorrectWidth { path_ids, mode } => core
+                .vector_correct_width(path_ids, *mode)
+                .map(InvocationResult::dispatch),
+            Self::RasterizeVectorLayer {
+                layer_id,
+                antialias,
+                name,
+            } => core
+                .rasterize_vector_layer_to_document(*layer_id, *antialias, name)
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::VectorizeRasterPlane {
+                source_plane_id,
+                target_vector_layer_id,
+                alpha_threshold,
+            } => core
+                .vectorize_raster_plane(*source_plane_id, *target_vector_layer_id, *alpha_threshold)
+                .map(|(dispatch, ids)| InvocationResult::outputs(dispatch, ids)),
+            Self::VectorizeRasterPlaneIntoNewLayer {
+                source_plane_id,
+                alpha_threshold,
+                name,
+            } => core
+                .vectorize_raster_plane_into_new_layer(*source_plane_id, *alpha_threshold, name)
+                .map(|(dispatch, layer_id, fill_ids)| {
+                    if layer_id == 0 {
+                        return InvocationResult::outputs(dispatch, Vec::new());
+                    }
+                    let mut ids = Vec::with_capacity(fill_ids.len() + 1);
+                    ids.push(layer_id);
+                    ids.extend(fill_ids);
+                    InvocationResult::outputs(dispatch, ids)
+                }),
+            Self::LightTableSetGlobalOpacity { opacity_milli } => core
+                .light_table_set_global_opacity(*opacity_milli)
+                .map(InvocationResult::dispatch),
+            Self::LightTableCreateSet { name } => core
+                .light_table_create_set(name.clone())
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::LightTableDuplicateSet { set_id } => core
+                .light_table_duplicate_set(*set_id)
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::LightTableDeleteSet { set_id } => core
+                .light_table_delete_set(*set_id)
+                .map(InvocationResult::dispatch),
+            Self::LightTableRenameSet { set_id, name } => core
+                .light_table_rename_set(*set_id, name.clone())
+                .map(InvocationResult::dispatch),
+            Self::LightTableReorderSet {
+                set_id,
+                destination_index,
+            } => core
+                .light_table_reorder_set(
+                    *set_id,
+                    usize::try_from(*destination_index).map_err(|_| {
+                        CoreError::InvalidArgument("light-table set index is not representable")
+                    })?,
+                )
+                .map(InvocationResult::dispatch),
+            Self::LightTableSetActive { set_id } => core
+                .light_table_set_active(*set_id)
+                .map(InvocationResult::dispatch),
+            Self::LightTableAddItem { input } => core
+                .light_table_add_item(input.clone())
+                .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
+            Self::LightTableUpdateItemProperties {
+                item_id,
+                properties,
+            } => core
+                .light_table_update_item_properties(*item_id, *properties)
+                .map(InvocationResult::dispatch),
+            Self::LightTableUpdateItem { item_id, input } => core
+                .light_table_update_item(*item_id, input.clone())
+                .map(InvocationResult::dispatch),
+            Self::LightTableRemoveItem { item_id } => core
+                .light_table_remove_item(*item_id)
+                .map(InvocationResult::dispatch),
+            Self::LightTableReorderItem {
+                item_id,
+                destination_index,
+            } => core
+                .light_table_reorder_item(
+                    *item_id,
+                    usize::try_from(*destination_index).map_err(|_| {
+                        CoreError::InvalidArgument("light-table item index is not representable")
+                    })?,
+                )
+                .map(InvocationResult::dispatch),
+        }
+    }
+
+    fn canonical_arguments(&self) -> Result<Vec<u8>, CoreError> {
+        let mut writer = CanonicalWriter::new(self.primitive_id());
+        match self {
+            Self::UpdatePaperFrames { frames } => writer.frames(*frames),
+            Self::CreateLayer { kind, name } => {
+                writer.u32(layer_kind_code(*kind));
+                writer.string(name)?;
+            }
+            Self::DuplicateLayer { layer_id }
+            | Self::DeleteLayer { layer_id }
+            | Self::MergeLayer { layer_id } => writer.u64(*layer_id),
+            Self::DeleteHiddenLayers => {}
+            Self::ReorderLayer {
+                layer_id,
+                destination_index,
+            } => {
+                writer.u64(*layer_id);
+                writer.u64(*destination_index);
+            }
+            Self::SetLayerProperties {
+                layer_id,
+                visible,
+                editable,
+                opacity_milli,
+                name,
+            } => {
+                writer.u64(*layer_id);
+                writer.boolean(*visible);
+                writer.boolean(*editable);
+                writer.u32(*opacity_milli);
+                writer.string(name)?;
+            }
+            Self::CreatePlane {
+                layer_id,
+                kind,
+                format,
+                name,
+            } => {
+                writer.u64(*layer_id);
+                writer.u32(plane_type_code(*kind));
+                writer.u32(pixel_format_code(*format));
+                writer.string(name)?;
+            }
+            Self::DuplicatePlane { plane_id }
+            | Self::DeletePlane { plane_id }
+            | Self::MergePlane { plane_id } => writer.u64(*plane_id),
+            Self::ReorderPlane {
+                plane_id,
+                destination_index,
+            } => {
+                writer.u64(*plane_id);
+                writer.u64(*destination_index);
+            }
+            Self::SetPlaneProperties {
+                plane_id,
+                visible,
+                editable,
+                opacity_milli,
+                name,
+            } => {
+                writer.u64(*plane_id);
+                writer.boolean(*visible);
+                writer.boolean(*editable);
+                writer.u32(*opacity_milli);
+                writer.string(name)?;
+            }
+            Self::ConvertPlane {
+                plane_id,
+                destination_kind,
+                destination_format,
+            } => {
+                writer.u64(*plane_id);
+                writer.u32(plane_type_code(*destination_kind));
+                writer.u32(pixel_format_code(*destination_format));
+            }
+            Self::ConvertLayer {
+                layer_id,
+                destination,
+            } => {
+                writer.u64(*layer_id);
+                writer.u32(layer_kind_code(*destination));
+            }
+            Self::AddGuide { axis, position } => {
+                writer.u32(guide_axis_code(*axis));
+                writer.i32(*position);
+            }
+            Self::MoveGuide { guide_id, position } => {
+                writer.u64(*guide_id);
+                writer.i32(*position);
+            }
+            Self::DeleteGuide { guide_id } => writer.u64(*guide_id),
+            Self::SetGrid { grid } => writer.grid(*grid),
+            Self::DeleteAllGuides => {}
+            Self::ApplyFill {
+                request,
+                target,
+                use_light_table_boundary,
+                use_light_table_color,
+            } => {
+                writer.fill_request(request)?;
+                writer.editor_target(*target);
+                writer.boolean(*use_light_table_boundary);
+                writer.boolean(*use_light_table_color);
+            }
+            Self::ApplyGradient { plane_id, gradient } => {
+                writer.u64(*plane_id);
+                writer.gradient(gradient)?;
+            }
+            Self::ApplyBoundaryAirbrush { plane_id, effect } => {
+                writer.u64(*plane_id);
+                writer.boundary_airbrush(effect)?;
+            }
+            Self::ApplyBlur {
+                plane_id,
+                radius,
+                strength_milli,
+            } => {
+                writer.u64(*plane_id);
+                writer.u32(*radius);
+                writer.u32(*strength_milli);
+            }
+            Self::ApplyAirbrush { plane_id, stroke } => {
+                writer.u64(*plane_id);
+                writer.airbrush_stroke(*stroke);
+            }
+            Self::ApplyAirbrushGesture { plane_id, gesture } => {
+                writer.u64(*plane_id);
+                writer.airbrush_gesture(gesture)?;
+            }
+            Self::ApplyStamp { plane_id, stamp } => {
+                writer.u64(*plane_id);
+                writer.stamp(*stamp);
+            }
+            Self::ApplyStampGesture { plane_id, gesture } => {
+                writer.u64(*plane_id);
+                writer.stamp_gesture(gesture)?;
+            }
+            Self::ApplyBlurTool {
+                plane_id,
+                shape,
+                radius,
+                strength_milli,
+            } => {
+                writer.u64(*plane_id);
+                writer.u32(1);
+                writer.selection_shape(shape)?;
+                writer.u32(*radius);
+                writer.u32(*strength_milli);
+            }
+            Self::ApplyBlurPressureTrace {
+                plane_id,
+                samples,
+                diameter,
+                radius,
+                strength_milli,
+            } => {
+                writer.u64(*plane_id);
+                writer.u32(2);
+                writer.stroke_samples(samples)?;
+                writer.f32(*diameter);
+                writer.u32(*radius);
+                writer.u32(*strength_milli);
+            }
+            Self::ApplyDustRemoval {
+                plane_id,
+                shape,
+                options,
+            } => {
+                writer.u64(*plane_id);
+                writer.boolean(shape.is_some());
+                if let Some(shape) = shape {
+                    writer.selection_shape(shape)?;
+                }
+                writer.dust_removal(*options);
+            }
+            Self::EditPlaneAlpha { plane_id, alpha } => {
+                writer.u64(*plane_id);
+                writer.raster(alpha)?;
+            }
+            Self::ApplyAlphaGradient { plane_id, gradient } => {
+                writer.u64(*plane_id);
+                writer.gradient(gradient)?;
+            }
+            Self::ApplyFilter { plane_id, filter } => {
+                writer.u64(*plane_id);
+                writer.filter(filter)?;
+            }
+            Self::CreateAdjustmentLayer { name, adjustment } => {
+                writer.string(name)?;
+                writer.adjustment(adjustment)?;
+            }
+            Self::UpdateAdjustmentLayer {
+                layer_id,
+                adjustment,
+            } => {
+                writer.u64(*layer_id);
+                writer.adjustment(adjustment)?;
+            }
+            Self::ReplaceRasterColors { plane_id, pairs } => {
+                writer.u64(*plane_id);
+                writer.batch_color_pairs(pairs)?;
+            }
+            Self::SeparateRasterColors { plane_id, options } => {
+                writer.u64(*plane_id);
+                writer.batch_separation(options)?;
+            }
+            Self::RestoreSelectedPixels { plane_id, changes } => {
+                writer.u64(*plane_id);
+                writer.pixel_changes(changes)?;
+            }
+            Self::ApplySelection {
+                shape,
+                operation,
+                target,
+            } => {
+                writer.selection_shape(shape)?;
+                writer.u32(selection_operation_code(*operation));
+                writer.editor_target(*target);
+            }
+            Self::InvertSelection | Self::ClearSelection => {}
+            Self::ResizeSelection { pixels } => writer.i32(*pixels),
+            Self::SelectColor {
+                color,
+                tolerance,
+                different,
+                operation,
+                target,
+            } => {
+                writer.pixel(*color);
+                writer.u16(*tolerance);
+                writer.boolean(*different);
+                writer.u32(selection_operation_code(*operation));
+                writer.editor_target(*target);
+            }
+            Self::SelectionToLayer { name } => writer.string(name)?,
+            Self::SelectionFromLayer {
+                layer_id,
+                operation,
+            } => {
+                writer.u64(*layer_id);
+                writer.u32(selection_layer_operation_code(*operation));
+            }
+            Self::ClearSelectedContent { target } => writer.editor_target(*target),
+            Self::CommitFloating { floating } => writer.floating(floating)?,
+            Self::MirrorDocument { axis } => writer.u32(mirror_axis_code(*axis)),
+            Self::RotateDocument { direction } => writer.u32(rotate_direction_code(*direction)),
+            Self::ResizeDocument { resize } => writer.document_resize(*resize),
+            Self::VectorAddPath { plane_id, input } => {
+                writer.u64(*plane_id);
+                writer.vector_path(input)?;
+            }
+            Self::VectorAddFill {
+                plane_id,
+                boundary_path_ids,
+                color,
+            } => {
+                writer.u64(*plane_id);
+                writer.ids(boundary_path_ids)?;
+                writer.pixel(*color);
+            }
+            Self::VectorErase {
+                plane_id,
+                point,
+                radius,
+                mode,
+            } => {
+                writer.u64(*plane_id);
+                writer.point(*point);
+                writer.f32(*radius);
+                writer.u32(vector_erase_mode_code(*mode));
+            }
+            Self::VectorConnect {
+                plane_id,
+                maximum_gap,
+            } => {
+                writer.u64(*plane_id);
+                writer.f32(*maximum_gap);
+            }
+            Self::VectorCorrectWidth { path_ids, mode } => {
+                writer.ids(path_ids)?;
+                writer.vector_width_mode(*mode);
+            }
+            Self::RasterizeVectorLayer {
+                layer_id,
+                antialias,
+                name,
+            } => {
+                writer.u64(*layer_id);
+                writer.boolean(*antialias);
+                writer.string(name)?;
+            }
+            Self::VectorizeRasterPlane {
+                source_plane_id,
+                target_vector_layer_id,
+                alpha_threshold,
+            } => {
+                writer.u64(*source_plane_id);
+                writer.u64(*target_vector_layer_id);
+                writer.u8(*alpha_threshold);
+            }
+            Self::VectorizeRasterPlaneIntoNewLayer {
+                source_plane_id,
+                alpha_threshold,
+                name,
+            } => {
+                writer.u64(*source_plane_id);
+                writer.u8(*alpha_threshold);
+                writer.string(name)?;
+            }
+            Self::LightTableSetGlobalOpacity { opacity_milli } => writer.u32(*opacity_milli),
+            Self::LightTableCreateSet { name } => writer.string(name)?,
+            Self::LightTableDuplicateSet { set_id }
+            | Self::LightTableDeleteSet { set_id }
+            | Self::LightTableSetActive { set_id } => writer.u64(*set_id),
+            Self::LightTableRenameSet { set_id, name } => {
+                writer.u64(*set_id);
+                writer.string(name)?;
+            }
+            Self::LightTableReorderSet {
+                set_id,
+                destination_index,
+            } => {
+                writer.u64(*set_id);
+                writer.u64(*destination_index);
+            }
+            Self::LightTableAddItem { input } => writer.light_table_item(input)?,
+            Self::LightTableUpdateItemProperties {
+                item_id,
+                properties,
+            } => {
+                writer.u64(*item_id);
+                writer.light_table_properties(*properties);
+            }
+            Self::LightTableUpdateItem { item_id, input } => {
+                writer.u64(*item_id);
+                writer.light_table_item(input)?;
+            }
+            Self::LightTableRemoveItem { item_id } => writer.u64(*item_id),
+            Self::LightTableReorderItem {
+                item_id,
+                destination_index,
+            } => {
+                writer.u64(*item_id);
+                writer.u64(*destination_index);
+            }
+        }
+        Ok(writer.finish())
+    }
+}
+
+impl Core {
+    pub(crate) fn execute_canonical_invocation(
+        &mut self,
+        invocation: CanonicalInvocation,
+    ) -> Result<InvocationResult, CoreError> {
+        self.execute_canonical_invocation_internal(invocation, None, None)
+            .map(|(result, _)| result)
+    }
+
+    pub(crate) fn execute_canonical_invocation_with<F>(
+        &mut self,
+        invocation: CanonicalInvocation,
+        apply: F,
+    ) -> Result<InvocationResult, CoreError>
+    where
+        F: FnOnce(&mut Core) -> Result<InvocationResult, CoreError>,
+    {
+        self.execute_canonical_invocation_internal(invocation, None, Some(Box::new(apply)))
+            .map(|(result, _)| result)
+    }
+
+    pub(super) fn replay_runtime_invocation(
+        &mut self,
+        procedure: &CanonicalProcedure,
+        runtime: &RuntimeInvocation,
+    ) -> Result<PrimitiveOutcome, CoreError> {
+        let (result, procedure) = self.execute_canonical_invocation_internal(
+            runtime.invocation().clone(),
+            Some(procedure),
+            None,
+        )?;
+        let procedure = procedure.ok_or(CoreError::InvalidState(
+            "committed runtime invocation did not produce a procedure",
+        ))?;
+        Ok(PrimitiveOutcome::committed(result.dispatch, procedure))
+    }
+
+    fn execute_canonical_invocation_internal(
+        &mut self,
+        invocation: CanonicalInvocation,
+        expected: Option<&CanonicalProcedure>,
+        apply: Option<InvocationApply<'_>>,
+    ) -> Result<(InvocationResult, Option<Arc<CanonicalProcedure>>), CoreError> {
+        self.ensure_no_active_raster_stroke()?;
+        self.ensure_canonical_state_cache_current()?;
+        let pre_state_digest = self.document_state_digest()?;
+        let runtime = RuntimeInvocation::new(invocation)?;
+        let primitive_id = runtime.invocation().primitive_id();
+        let input_ids = runtime.invocation().input_ids();
+        let procedure_id = self.next_procedure;
+        let following_procedure = procedure_id
+            .checked_next()
+            .ok_or(CoreError::InvalidState("procedure ID overflow"))?;
+
+        let mut staged = self.clone();
+        staged.canonical_invocation_active = true;
+        let result = match apply {
+            Some(apply) => apply(&mut staged)?,
+            None => runtime.invocation().apply(&mut staged)?,
+        };
+        staged.canonical_invocation_active = false;
+        if staged.document_revision == self.document_revision {
+            if expected.is_some() {
+                return Err(CoreError::InvalidState(
+                    "committed procedure replays as a semantic no-op",
+                ));
+            }
+            staged.canonical_invocation_active = false;
+            *self = staged;
+            return Ok((result, None));
+        }
+        let expected_revision = self.next_document_revision()?;
+        if staged.document_revision != expected_revision
+            || staged.history_cursor != self.history_cursor.saturating_add(1)
+            || staged.history.len() != staged.history_cursor
+            || staged.current_state != self.next_state
+        {
+            return Err(CoreError::InvalidState(
+                "canonical invocation did not produce exactly one document commit",
+            ));
+        }
+        let post_state_digest = staged.document_state_digest()?;
+        let payload = Vec::new();
+        let payload_digest = canonical_payload_digest(&payload)?;
+        let procedure = Arc::new(CanonicalProcedure {
+            procedure_id,
+            primitive_id,
+            primitive_schema_version: INVOCATION_SCHEMA_VERSION,
+            replay_epoch: ReplayEpoch::CURRENT,
+            base_state_id: self.current_state,
+            committed_state_id: self.next_state,
+            input_ids,
+            output_ids: result.output_ids.clone(),
+            asset_ids: runtime.invocation().asset_ids(),
+            canonical_arguments: runtime.arguments().to_vec(),
+            canonical_payload: payload,
+            canonical_payload_digest: payload_digest,
+            pre_state_digest,
+            post_state_digest,
+            runtime_invocation: Some(runtime.clone()),
+        });
+
+        if let Some(expected) = expected {
+            if expected.primitive_id != procedure.primitive_id
+                || expected.primitive_schema_version != procedure.primitive_schema_version
+                || expected.input_ids != procedure.input_ids
+                || expected.output_ids != procedure.output_ids
+                || expected.asset_ids != procedure.asset_ids
+                || expected.canonical_arguments != procedure.canonical_arguments
+                || expected.canonical_payload != procedure.canonical_payload
+                || expected.post_state_digest != procedure.post_state_digest
+            {
+                return Err(CoreError::InvalidArgument(
+                    "procedure canonical fields do not match its invocation schema",
+                ));
+            }
+        }
+
+        let plan = self.prepare_canonical_commit(Arc::clone(&procedure))?;
+        let branch_id = plan.branch_id();
+        let entry = staged.history.last_mut().ok_or(CoreError::InvalidState(
+            "canonical history entry is missing",
+        ))?;
+        entry.procedure = Some(Arc::clone(&procedure));
+        entry.branch_id = branch_id;
+
+        staged.journal = std::mem::take(&mut self.journal);
+        staged.active_branch = self.active_branch;
+        staged.next_journal_event = self.next_journal_event;
+        staged.next_branch = self.next_branch;
+        staged.branch_tails = std::mem::take(&mut self.branch_tails);
+        staged.publish_canonical_commit(plan);
+        staged.next_procedure = following_procedure;
+        staged.canonical_invocation_active = false;
+        *self = staged;
+        Ok((result, Some(procedure)))
+    }
+
+    pub(crate) const fn canonical_invocation_is_active(&self) -> bool {
+        self.canonical_invocation_active
+    }
+}
+
+pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
+    let value = primitive_id.get();
+    if value == PrimitiveId::UPDATE_PAPER_FRAMES.get()
+        || value == PrimitiveId::CREATE_LAYER.get()
+        || value == PrimitiveId::DUPLICATE_LAYER.get()
+        || value == PrimitiveId::DELETE_LAYER.get()
+        || value == PrimitiveId::REORDER_LAYER.get()
+        || value == PrimitiveId::SET_LAYER_PROPERTIES.get()
+        || value == PrimitiveId::CREATE_PLANE.get()
+        || value == PrimitiveId::DUPLICATE_PLANE.get()
+        || value == PrimitiveId::DELETE_PLANE.get()
+        || value == PrimitiveId::REORDER_PLANE.get()
+        || value == PrimitiveId::SET_PLANE_PROPERTIES.get()
+        || value == PrimitiveId::CONVERT_PLANE.get()
+        || value == PrimitiveId::MERGE_PLANE.get()
+        || value == PrimitiveId::CONVERT_LAYER.get()
+        || value == PrimitiveId::MERGE_LAYER.get()
+        || value == PrimitiveId::DELETE_HIDDEN_LAYERS.get()
+        || value == PrimitiveId::ADD_GUIDE.get()
+        || value == PrimitiveId::MOVE_GUIDE.get()
+        || value == PrimitiveId::DELETE_GUIDE.get()
+        || value == PrimitiveId::SET_GRID.get()
+        || value == PrimitiveId::DELETE_ALL_GUIDES.get()
+        || value == PrimitiveId::APPLY_FILL.get()
+        || value == PrimitiveId::APPLY_GRADIENT.get()
+        || value == PrimitiveId::APPLY_BOUNDARY_AIRBRUSH.get()
+        || value == PrimitiveId::APPLY_BLUR.get()
+        || value == PrimitiveId::APPLY_AIRBRUSH.get()
+        || value == PrimitiveId::APPLY_AIRBRUSH_GESTURE.get()
+        || value == PrimitiveId::APPLY_STAMP.get()
+        || value == PrimitiveId::APPLY_STAMP_GESTURE.get()
+        || value == PrimitiveId::APPLY_BLUR_TOOL.get()
+        || value == PrimitiveId::APPLY_DUST_REMOVAL.get()
+        || value == PrimitiveId::EDIT_PLANE_ALPHA.get()
+        || value == PrimitiveId::APPLY_ALPHA_GRADIENT.get()
+        || value == PrimitiveId::APPLY_FILTER.get()
+        || value == PrimitiveId::CREATE_ADJUSTMENT_LAYER.get()
+        || value == PrimitiveId::UPDATE_ADJUSTMENT_LAYER.get()
+        || value == PrimitiveId::REPLACE_RASTER_COLORS.get()
+        || value == PrimitiveId::SEPARATE_RASTER_COLORS.get()
+        || value == PrimitiveId::RESTORE_SELECTED_PIXELS.get()
+        || value == PrimitiveId::APPLY_SELECTION.get()
+        || value == PrimitiveId::INVERT_SELECTION.get()
+        || value == PrimitiveId::CLEAR_SELECTION.get()
+        || value == PrimitiveId::RESIZE_SELECTION.get()
+        || value == PrimitiveId::SELECT_COLOR.get()
+        || value == PrimitiveId::SELECTION_TO_LAYER.get()
+        || value == PrimitiveId::SELECTION_FROM_LAYER.get()
+        || value == PrimitiveId::CLEAR_SELECTED_CONTENT.get()
+        || value == PrimitiveId::COMMIT_FLOATING.get()
+        || value == PrimitiveId::MIRROR_DOCUMENT.get()
+        || value == PrimitiveId::ROTATE_DOCUMENT.get()
+        || value == PrimitiveId::RESIZE_DOCUMENT.get()
+        || value == PrimitiveId::VECTOR_ADD_PATH.get()
+        || value == PrimitiveId::VECTOR_ADD_FILL.get()
+        || value == PrimitiveId::VECTOR_ERASE.get()
+        || value == PrimitiveId::VECTOR_CONNECT.get()
+        || value == PrimitiveId::VECTOR_CORRECT_WIDTH.get()
+        || value == PrimitiveId::RASTERIZE_VECTOR_LAYER.get()
+        || value == PrimitiveId::VECTORIZE_RASTER_PLANE.get()
+        || value == PrimitiveId::VECTORIZE_RASTER_PLANE_INTO_NEW_LAYER.get()
+        || value == PrimitiveId::LIGHT_TABLE_SET_GLOBAL_OPACITY.get()
+        || value == PrimitiveId::LIGHT_TABLE_CREATE_SET.get()
+        || value == PrimitiveId::LIGHT_TABLE_DUPLICATE_SET.get()
+        || value == PrimitiveId::LIGHT_TABLE_DELETE_SET.get()
+        || value == PrimitiveId::LIGHT_TABLE_RENAME_SET.get()
+        || value == PrimitiveId::LIGHT_TABLE_REORDER_SET.get()
+        || value == PrimitiveId::LIGHT_TABLE_SET_ACTIVE.get()
+        || value == PrimitiveId::LIGHT_TABLE_ADD_ITEM.get()
+        || value == PrimitiveId::LIGHT_TABLE_UPDATE_ITEM_PROPERTIES.get()
+        || value == PrimitiveId::LIGHT_TABLE_UPDATE_ITEM.get()
+        || value == PrimitiveId::LIGHT_TABLE_REMOVE_ITEM.get()
+        || value == PrimitiveId::LIGHT_TABLE_REORDER_ITEM.get()
+    {
+        Some(INVOCATION_SCHEMA_VERSION)
+    } else {
+        None
+    }
+}
+
+struct CanonicalWriter {
+    bytes: Vec<u8>,
+}
+
+impl CanonicalWriter {
+    fn new(primitive_id: PrimitiveId) -> Self {
+        let mut result = Self { bytes: Vec::new() };
+        result.u32(primitive_id.get());
+        result
+    }
+
+    fn finish(self) -> Vec<u8> {
+        self.bytes
+    }
+
+    fn boolean(&mut self, value: bool) {
+        self.bytes.push(u8::from(value));
+    }
+
+    fn u32(&mut self, value: u32) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u16(&mut self, value: u16) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u8(&mut self, value: u8) {
+        self.bytes.push(value);
+    }
+
+    fn u128(&mut self, value: u128) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn asset_id(&mut self, value: AssetId) {
+        self.bytes.extend_from_slice(value.as_bytes());
+    }
+
+    fn f32(&mut self, value: f32) {
+        self.u32(value.to_bits());
+    }
+
+    fn f64(&mut self, value: f64) {
+        self.u64(value.to_bits());
+    }
+
+    fn i32(&mut self, value: i32) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn i64(&mut self, value: i64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u64(&mut self, value: u64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn string(&mut self, value: &str) -> Result<(), CoreError> {
+        let length = u32::try_from(value.len())
+            .map_err(|_| CoreError::InvalidArgument("canonical string is too long"))?;
+        self.u32(length);
+        self.bytes.extend_from_slice(value.as_bytes());
+        Ok(())
+    }
+
+    fn rect(&mut self, rect: RectI32) {
+        self.i32(rect.x);
+        self.i32(rect.y);
+        self.i32(rect.width);
+        self.i32(rect.height);
+    }
+
+    fn frames(&mut self, frames: FrameMetadata) {
+        self.rect(frames.hundred_frame);
+        self.rect(frames.reference_frame);
+        self.rect(frames.drawing_frame);
+        self.rect(frames.safe_frame);
+        self.u32(frames.margins.left);
+        self.u32(frames.margins.top);
+        self.u32(frames.margins.right);
+        self.u32(frames.margins.bottom);
+    }
+
+    fn grid(&mut self, grid: GridConfig) {
+        self.i32(grid.origin_x);
+        self.i32(grid.origin_y);
+        self.u32(grid.spacing_x);
+        self.u32(grid.spacing_y);
+        self.u32(grid.subdivisions);
+    }
+
+    fn fill_request(&mut self, request: &FillRequest) -> Result<(), CoreError> {
+        self.u32(fill_operation_code(request.operation));
+        self.u32(request.seed_x);
+        self.u32(request.seed_y);
+        self.pixel(request.color);
+        self.boolean(request.selection.is_some());
+        if let Some(selection) = request.selection {
+            self.rect(selection);
+        }
+        self.boolean(request.use_document_selection);
+        self.u16(request.tolerance);
+        self.boolean(request.detached_regions);
+        self.boolean(request.overflow_abort);
+        self.u8(request.gap_close);
+        self.boolean(request.transparent_only);
+        self.u32(inclusion_mode_code(request.inclusion_mode));
+        let color_count = u32::try_from(request.inclusion_colors.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical inclusion colors"))?;
+        self.u32(color_count);
+        for color in &request.inclusion_colors {
+            self.pixel(*color);
+        }
+        self.u32(request.extension_distance);
+        Ok(())
+    }
+
+    fn color16(&mut self, color: [u16; 4]) {
+        for channel in color {
+            self.u16(channel);
+        }
+    }
+
+    fn gradient(&mut self, gradient: &Gradient) -> Result<(), CoreError> {
+        self.u32(match gradient.kind {
+            GradientKind::Linear => 1,
+            GradientKind::Radial => 2,
+        });
+        self.u32(match gradient.mode {
+            GradientMode::Composite => 1,
+            GradientMode::Overwrite => 2,
+        });
+        self.i64(gradient.start_x_milli);
+        self.i64(gradient.start_y_milli);
+        self.i64(gradient.end_x_milli);
+        self.i64(gradient.end_y_milli);
+        self.boolean(gradient.dither);
+        let count = u32::try_from(gradient.stops.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical gradient stops"))?;
+        self.u32(count);
+        for stop in &gradient.stops {
+            self.u32(stop.position_milli);
+            self.color16(stop.color);
+        }
+        Ok(())
+    }
+
+    fn boundary_airbrush(&mut self, effect: &BoundaryAirbrush) -> Result<(), CoreError> {
+        let count = u32::try_from(effect.colors.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical boundary colors"))?;
+        self.u32(count);
+        for color in &effect.colors {
+            self.color16(*color);
+        }
+        self.u32(effect.width);
+        self.u32(effect.strength_milli);
+        Ok(())
+    }
+
+    fn airbrush_stroke(&mut self, stroke: AirbrushStroke) {
+        self.i64(stroke.center_x_milli);
+        self.i64(stroke.center_y_milli);
+        self.u32(stroke.radius_milli);
+        self.u32(stroke.hardness_milli);
+        self.u32(stroke.opacity_milli);
+        self.color16(stroke.color);
+    }
+
+    fn effect_samples(&mut self, samples: &[EffectSample]) -> Result<(), CoreError> {
+        let count = u32::try_from(samples.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical effect samples"))?;
+        self.u32(count);
+        for sample in samples {
+            self.i64(sample.x_milli);
+            self.i64(sample.y_milli);
+            self.u32(sample.pressure_milli);
+        }
+        Ok(())
+    }
+
+    fn airbrush_gesture(&mut self, gesture: &AirbrushGesture) -> Result<(), CoreError> {
+        self.effect_samples(&gesture.samples)?;
+        self.u32(gesture.radius_milli);
+        self.u32(gesture.hardness_milli);
+        self.u32(gesture.spacing_milli);
+        self.u32(gesture.opacity_milli);
+        self.u32(gesture.fade_milli);
+        self.boolean(gesture.pressure_size);
+        self.boolean(gesture.pressure_opacity);
+        self.u32(gesture.continuous_dabs);
+        self.color16(gesture.color);
+        Ok(())
+    }
+
+    fn stamp(&mut self, stamp: Stamp) {
+        self.i32(stamp.source_x);
+        self.i32(stamp.source_y);
+        self.i32(stamp.destination_x);
+        self.i32(stamp.destination_y);
+        self.u32(stamp.width);
+        self.u32(stamp.height);
+        self.u32(stamp.opacity_milli);
+    }
+
+    fn stamp_gesture(&mut self, gesture: &StampGesture) -> Result<(), CoreError> {
+        self.i64(gesture.source_x_milli);
+        self.i64(gesture.source_y_milli);
+        self.effect_samples(&gesture.samples)?;
+        self.u32(gesture.radius_milli);
+        self.u32(gesture.hardness_milli);
+        self.u32(gesture.spacing_milli);
+        self.u32(gesture.opacity_milli);
+        self.u32(match gesture.shape {
+            StampShape::Round => 1,
+            StampShape::Square => 2,
+        });
+        self.boolean(gesture.pressure_size);
+        self.boolean(gesture.pressure_opacity);
+        Ok(())
+    }
+
+    fn stroke_samples(&mut self, samples: &[DocumentStrokeSample]) -> Result<(), CoreError> {
+        let count = u32::try_from(samples.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical stroke samples"))?;
+        self.u32(count);
+        for sample in samples {
+            self.f32(sample.point.x);
+            self.f32(sample.point.y);
+            self.f32(sample.pressure);
+        }
+        Ok(())
+    }
+
+    fn dust_removal(&mut self, options: DustRemoval) {
+        self.u32(match options.mode {
+            DustMode::RemoveForeground => 1,
+            DustMode::FillTransparentHoles => 2,
+            DustMode::ReplaceColorOutliers => 3,
+        });
+        self.u32(options.maximum_pixels);
+    }
+
+    fn raster(&mut self, raster: &TileRaster) -> Result<(), CoreError> {
+        self.u32(raster.width());
+        self.u32(raster.height());
+        self.u32(pixel_format_code(raster.format()));
+        let coords = raster.allocated_coords().collect::<Vec<_>>();
+        let count = u32::try_from(coords.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical raster tiles"))?;
+        self.u32(count);
+        for coord in coords {
+            let view = raster
+                .tile_view(coord)
+                .ok_or(CoreError::InvalidState("canonical raster tile disappeared"))?;
+            self.u32(coord.x);
+            self.u32(coord.y);
+            self.u32(view.width());
+            self.u32(view.height());
+            let row_bytes = usize::try_from(view.width())
+                .ok()
+                .and_then(|width| width.checked_mul(raster.format().bytes_per_pixel()))
+                .ok_or(CoreError::InvalidArgument("canonical raster row overflows"))?;
+            let stride = usize::try_from(view.row_stride_bytes())
+                .map_err(|_| CoreError::InvalidArgument("canonical raster stride overflows"))?;
+            for y in 0..usize::try_from(view.height())
+                .map_err(|_| CoreError::InvalidArgument("canonical raster height overflows"))?
+            {
+                let start = y.checked_mul(stride).ok_or(CoreError::InvalidArgument(
+                    "canonical raster offset overflows",
+                ))?;
+                let end = start
+                    .checked_add(row_bytes)
+                    .ok_or(CoreError::InvalidArgument(
+                        "canonical raster row end overflows",
+                    ))?;
+                self.bytes
+                    .extend_from_slice(view.bytes().get(start..end).ok_or(
+                        CoreError::InvalidState("canonical raster tile bytes are truncated"),
+                    )?);
+            }
+        }
+        Ok(())
+    }
+
+    fn curve_points(&mut self, points: &[CurvePoint]) -> Result<(), CoreError> {
+        let count = u32::try_from(points.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical curve points"))?;
+        self.u32(count);
+        for point in points {
+            self.u16(point.input);
+            self.u16(point.output);
+        }
+        Ok(())
+    }
+
+    fn channel(&mut self, channel: Channel) {
+        self.u32(match channel {
+            Channel::Rgb => 1,
+            Channel::Red => 2,
+            Channel::Green => 3,
+            Channel::Blue => 4,
+        });
+    }
+
+    fn interpolation(&mut self, interpolation: CurveInterpolation) {
+        self.u32(match interpolation {
+            CurveInterpolation::Bezier => 1,
+            CurveInterpolation::BSpline => 2,
+        });
+    }
+
+    fn levels(&mut self, levels: &Levels) {
+        self.channel(levels.channel);
+        self.u16(levels.input_shadow);
+        self.u32(levels.input_gamma_milli);
+        self.u16(levels.input_highlight);
+        self.u16(levels.output_shadow);
+        self.u16(levels.output_highlight);
+    }
+
+    fn filter(&mut self, filter: &Filter) -> Result<(), CoreError> {
+        match filter {
+            Filter::SharpenWeak => self.u32(1),
+            Filter::SharpenStrong => self.u32(2),
+            Filter::BlurWeak => self.u32(3),
+            Filter::BlurStrong => self.u32(4),
+            Filter::GaussianBlur {
+                radius,
+                strength_milli,
+            } => {
+                self.u32(5);
+                self.u32(*radius);
+                self.u32(*strength_milli);
+            }
+            Filter::UnsharpMask {
+                radius,
+                amount_milli,
+                threshold,
+            } => {
+                self.u32(6);
+                self.u32(*radius);
+                self.u32(*amount_milli);
+                self.u16(*threshold);
+            }
+            Filter::Invert { channel } => {
+                self.u32(7);
+                self.channel(*channel);
+            }
+            Filter::AutoContrast => self.u32(8),
+            Filter::BrightnessContrast {
+                brightness_milli,
+                contrast_milli,
+            } => {
+                self.u32(9);
+                self.i32(*brightness_milli);
+                self.i32(*contrast_milli);
+            }
+            Filter::ToneCurve {
+                channel,
+                interpolation,
+                points,
+            } => {
+                self.u32(10);
+                self.channel(*channel);
+                self.interpolation(*interpolation);
+                self.curve_points(points)?;
+            }
+            Filter::Levels(levels) => {
+                self.u32(11);
+                self.levels(levels);
+            }
+            Filter::Hsv(hsv) => {
+                self.u32(12);
+                self.i32(hsv.hue_degrees_milli);
+                self.i32(hsv.saturation_milli);
+                self.i32(hsv.value_milli);
+            }
+            Filter::ColorBalance(balance) => {
+                self.u32(13);
+                self.i32(balance.red_milli);
+                self.i32(balance.green_milli);
+                self.i32(balance.blue_milli);
+            }
+        }
+        Ok(())
+    }
+
+    fn adjustment(&mut self, adjustment: &Adjustment) -> Result<(), CoreError> {
+        match adjustment {
+            Adjustment::BrightnessContrast {
+                brightness_milli,
+                contrast_milli,
+            } => {
+                self.u32(1);
+                self.i32(*brightness_milli);
+                self.i32(*contrast_milli);
+            }
+            Adjustment::ToneCurve {
+                channel,
+                interpolation,
+                points,
+            } => {
+                self.u32(2);
+                self.channel(*channel);
+                self.interpolation(*interpolation);
+                self.curve_points(points)?;
+            }
+            Adjustment::Levels(levels) => {
+                self.u32(3);
+                self.levels(levels);
+            }
+        }
+        Ok(())
+    }
+
+    fn batch_color_pairs(&mut self, pairs: &[BatchColorPair]) -> Result<(), CoreError> {
+        let count = u32::try_from(pairs.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical color pairs"))?;
+        self.u32(count);
+        for pair in pairs {
+            self.boolean(pair.enabled);
+            self.pixel(pair.old);
+            self.pixel(pair.new);
+        }
+        Ok(())
+    }
+
+    fn batch_separation(&mut self, options: &BatchSeparation) -> Result<(), CoreError> {
+        let count = u32::try_from(options.colors.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical separation colors"))?;
+        self.u32(count);
+        for color in &options.colors {
+            self.pixel(*color);
+        }
+        self.pixel(options.replacement);
+        self.boolean(options.invert);
+        Ok(())
+    }
+
+    fn pixel_changes(&mut self, changes: &[PixelChange]) -> Result<(), CoreError> {
+        let count = u32::try_from(changes.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical pixel changes"))?;
+        self.u32(count);
+        for change in changes {
+            self.u32(change.x);
+            self.u32(change.y);
+            self.pixel(change.before);
+            self.pixel(change.after);
+        }
+        Ok(())
+    }
+
+    fn editor_target(&mut self, target: EditorTarget) {
+        self.u64(target.layer_id);
+        self.u64(target.plane_id);
+    }
+
+    fn point(&mut self, point: PointF32) {
+        self.f32(point.x);
+        self.f32(point.y);
+    }
+
+    fn selection_shape(&mut self, shape: &SelectionShape) -> Result<(), CoreError> {
+        match shape {
+            SelectionShape::Rectangle(rect) => {
+                self.u32(1);
+                self.rect(*rect);
+            }
+            SelectionShape::Ellipse(rect) => {
+                self.u32(2);
+                self.rect(*rect);
+            }
+            SelectionShape::Lasso(points) => {
+                self.u32(3);
+                self.points(points)?;
+            }
+            SelectionShape::Polyline(points) => {
+                self.u32(4);
+                self.points(points)?;
+            }
+            SelectionShape::Trace { points, diameter } => {
+                self.u32(5);
+                self.points(points)?;
+                self.f32(*diameter);
+            }
+            SelectionShape::Wand {
+                x,
+                y,
+                tolerance,
+                gap_close,
+            } => {
+                self.u32(6);
+                self.u32(*x);
+                self.u32(*y);
+                self.u16(*tolerance);
+                self.u8(*gap_close);
+            }
+        }
+        Ok(())
+    }
+
+    fn points(&mut self, points: &[PointF32]) -> Result<(), CoreError> {
+        let count = u32::try_from(points.len())
+            .map_err(|_| CoreError::InvalidArgument("canonical point stream is too long"))?;
+        self.u32(count);
+        for point in points {
+            self.point(*point);
+        }
+        Ok(())
+    }
+
+    fn pixel(&mut self, value: PixelValue) {
+        match value {
+            PixelValue::Binary(value) => {
+                self.u32(1);
+                self.u8(value);
+            }
+            PixelValue::Grayscale8(value) => {
+                self.u32(2);
+                self.u8(value);
+            }
+            PixelValue::Grayscale16(value) => {
+                self.u32(3);
+                self.u16(value);
+            }
+            PixelValue::Rgba(value) => {
+                self.u32(4);
+                self.bytes.extend_from_slice(&value);
+            }
+            PixelValue::Rgba16(value) => {
+                self.u32(5);
+                for channel in value {
+                    self.u16(channel);
+                }
+            }
+        }
+    }
+
+    fn floating(&mut self, floating: &FloatingSelection) -> Result<(), CoreError> {
+        match &floating.destination {
+            FloatingDestination::ExistingPlane(plane_id) => {
+                self.u8(0);
+                self.u64(plane_id.get());
+            }
+            FloatingDestination::NewPlane {
+                layer_id,
+                kind,
+                format,
+                name,
+                opacity_milli,
+            } => {
+                self.u8(1);
+                self.u64(layer_id.get());
+                self.u32(plane_type_code(*kind));
+                self.u32(pixel_format_code(*format));
+                self.string(name)?;
+                self.u32(*opacity_milli);
+            }
+        }
+        self.u128(floating.payload.source_document_uuid);
+        self.rect(floating.payload.bounds);
+        let plane_count = u32::try_from(floating.payload.planes.len())
+            .map_err(|_| CoreError::InvalidArgument("canonical clipboard has too many planes"))?;
+        self.u32(plane_count);
+        for plane in &floating.payload.planes {
+            self.u32(plane_type_code(plane.kind));
+            self.u32(pixel_format_code(plane.pixel_format));
+            self.i32(plane.origin_x);
+            self.i32(plane.origin_y);
+            let pixel_count = u32::try_from(plane.pixels.len()).map_err(|_| {
+                CoreError::InvalidArgument("canonical clipboard has too many pixels")
+            })?;
+            self.u32(pixel_count);
+            for pixel in &plane.pixels {
+                self.i32(pixel.x);
+                self.i32(pixel.y);
+                self.pixel(pixel.value);
+            }
+        }
+        self.f64(floating.transform.translate_x);
+        self.f64(floating.transform.translate_y);
+        self.f64(floating.transform.scale_x);
+        self.f64(floating.transform.scale_y);
+        self.f64(floating.transform.rotation_degrees);
+        Ok(())
+    }
+
+    fn document_resize(&mut self, resize: DocumentResize) {
+        self.u32(resize.width);
+        self.u32(resize.height);
+        self.u32(resize.dpi_x_milli);
+        self.u32(resize.dpi_y_milli);
+        self.u32(resize_anchor_code(resize.anchor));
+        self.boolean(resize.resample);
+    }
+
+    fn ids(&mut self, ids: &[u64]) -> Result<(), CoreError> {
+        let count = u32::try_from(ids.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical stable IDs"))?;
+        self.u32(count);
+        for id in ids {
+            self.u64(*id);
+        }
+        Ok(())
+    }
+
+    fn vector_path(&mut self, input: &VectorPathInput) -> Result<(), CoreError> {
+        let count = u32::try_from(input.segments.len())
+            .map_err(|_| CoreError::InvalidArgument("too many canonical vector segments"))?;
+        self.u32(count);
+        for segment in &input.segments {
+            self.point(segment.p0);
+            self.point(segment.p1);
+            self.point(segment.p2);
+            self.point(segment.p3);
+            self.f32(segment.width_start);
+            self.f32(segment.width_end);
+        }
+        self.pixel(input.color);
+        self.boolean(input.closed);
+        Ok(())
+    }
+
+    fn vector_width_mode(&mut self, mode: VectorWidthMode) {
+        match mode {
+            VectorWidthMode::Add(value) => {
+                self.u32(1);
+                self.f32(value);
+            }
+            VectorWidthMode::Subtract(value) => {
+                self.u32(2);
+                self.f32(value);
+            }
+            VectorWidthMode::Scale(value) => {
+                self.u32(3);
+                self.f32(value);
+            }
+            VectorWidthMode::Constant(value) => {
+                self.u32(4);
+                self.f32(value);
+            }
+        }
+    }
+
+    fn light_table_source(&mut self, source: &LightTableSource) {
+        self.u128(source.document_uuid);
+        self.u64(source.source_revision);
+        self.rect(source.reference_frame);
+        self.u32(source.dpi_x_milli);
+        self.u32(source.dpi_y_milli);
+        self.asset_id(source.asset_id());
+    }
+
+    fn light_table_properties(&mut self, properties: LightTableItemProperties) {
+        self.boolean(properties.visible);
+        self.u32(properties.opacity_milli);
+        self.u32(light_table_display_mode_code(properties.display_mode));
+        self.pixel(properties.display_color);
+        self.i32(properties.translate_x_milli);
+        self.i32(properties.translate_y_milli);
+        self.u32(properties.scale_x_milli);
+        self.u32(properties.scale_y_milli);
+        self.i32(properties.rotation_milli_degrees);
+    }
+
+    fn light_table_item(&mut self, input: &LightTableItemInput) -> Result<(), CoreError> {
+        self.string(&input.name)?;
+        self.light_table_source(&input.source);
+        self.light_table_properties(LightTableItemProperties {
+            visible: input.visible,
+            opacity_milli: input.opacity_milli,
+            display_mode: input.display_mode,
+            display_color: input.display_color,
+            translate_x_milli: input.translate_x_milli,
+            translate_y_milli: input.translate_y_milli,
+            scale_x_milli: input.scale_x_milli,
+            scale_y_milli: input.scale_y_milli,
+            rotation_milli_degrees: input.rotation_milli_degrees,
+        });
+        Ok(())
+    }
+}
+
+fn set_runtime_editor_target(core: &mut Core, target: EditorTarget) -> Result<(), CoreError> {
+    let document = core.document.as_ref().ok_or(CoreError::NoDocument)?;
+    let layer = document
+        .layers
+        .iter()
+        .find(|layer| layer.id.get() == target.layer_id)
+        .ok_or(CoreError::InvalidArgument(
+            "captured layer ID does not exist",
+        ))?;
+    if !layer
+        .planes
+        .iter()
+        .any(|plane| plane.id.get() == target.plane_id)
+    {
+        return Err(CoreError::InvalidArgument(
+            "captured plane ID does not belong to its layer",
+        ));
+    }
+    let session = core
+        .editor_session
+        .as_mut()
+        .ok_or(CoreError::InvalidState("editor state is unavailable"))?;
+    session.state.target = Some(target);
+    Ok(())
+}
+
+const fn layer_kind_code(value: LayerKind) -> u32 {
+    match value {
+        LayerKind::BinaryColoring => 1,
+        LayerKind::GrayscaleColoring => 2,
+        LayerKind::Raster => 3,
+        LayerKind::Selection => 4,
+        LayerKind::Frame => 5,
+        LayerKind::VanishingPoint => 6,
+        LayerKind::Adjustment => 7,
+        LayerKind::Text => 8,
+        LayerKind::Annotation => 9,
+        LayerKind::VectorColoring => 10,
+    }
+}
+
+const fn plane_type_code(value: PlaneType) -> u32 {
+    match value {
+        PlaneType::MainLine => 1,
+        PlaneType::Color => 2,
+        PlaneType::Raster => 3,
+        PlaneType::Selection => 4,
+        PlaneType::VectorMainLine => 5,
+        PlaneType::ColorTrace => 6,
+        PlaneType::VectorFill => 7,
+    }
+}
+
+const fn pixel_format_code(value: PixelFormat) -> u32 {
+    match value {
+        PixelFormat::BinaryMask8 => 1,
+        PixelFormat::Grayscale8 => 2,
+        PixelFormat::Grayscale16 => 3,
+        PixelFormat::StraightRgba8 => 4,
+        PixelFormat::StraightRgba16 => 5,
+        PixelFormat::PremultipliedBgra8 => 6,
+    }
+}
+
+const fn guide_axis_code(value: GuideAxis) -> u32 {
+    match value {
+        GuideAxis::Horizontal => 1,
+        GuideAxis::Vertical => 2,
+    }
+}
+
+const fn selection_operation_code(value: SelectionOperation) -> u32 {
+    match value {
+        SelectionOperation::New => 1,
+        SelectionOperation::Add => 2,
+        SelectionOperation::Subtract => 3,
+        SelectionOperation::Intersect => 4,
+    }
+}
+
+const fn selection_layer_operation_code(value: SelectionLayerOperation) -> u32 {
+    match value {
+        SelectionLayerOperation::Replace => 1,
+        SelectionLayerOperation::Add => 2,
+        SelectionLayerOperation::Subtract => 3,
+    }
+}
+
+const fn fill_operation_code(value: FillOperation) -> u32 {
+    match value {
+        FillOperation::Seed => 1,
+        FillOperation::ClosedRegion => 2,
+        FillOperation::Extend => 3,
+    }
+}
+
+const fn inclusion_mode_code(value: InclusionMode) -> u32 {
+    match value {
+        InclusionMode::None => 1,
+        InclusionMode::Specified => 2,
+        InclusionMode::ExceptSpecified => 3,
+    }
+}
+
+const fn mirror_axis_code(value: MirrorAxis) -> u32 {
+    match value {
+        MirrorAxis::Horizontal => 1,
+        MirrorAxis::Vertical => 2,
+    }
+}
+
+const fn rotate_direction_code(value: RotateDirection) -> u32 {
+    match value {
+        RotateDirection::Left90 => 1,
+        RotateDirection::Right90 => 2,
+    }
+}
+
+const fn resize_anchor_code(value: ResizeAnchor) -> u32 {
+    match value {
+        ResizeAnchor::TopLeft => 1,
+        ResizeAnchor::TopRight => 2,
+        ResizeAnchor::Center => 3,
+        ResizeAnchor::BottomLeft => 4,
+        ResizeAnchor::BottomRight => 5,
+    }
+}
+
+const fn vector_erase_mode_code(value: VectorEraseMode) -> u32 {
+    match value {
+        VectorEraseMode::Partial => 1,
+        VectorEraseMode::ToIntersection => 2,
+        VectorEraseMode::WholePath => 3,
+    }
+}
+
+const fn light_table_display_mode_code(value: LightTableDisplayMode) -> u32 {
+    match value {
+        LightTableDisplayMode::Color => 1,
+        LightTableDisplayMode::Monotone => 2,
+        LightTableDisplayMode::Halftone => 3,
+    }
+}

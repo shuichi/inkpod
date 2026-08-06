@@ -748,6 +748,75 @@ pub unsafe extern "C" fn inkpod_core_paste_begin_mode(
     })
 }
 
+/// Starts a converted floating paste whose typed destination plane is created
+/// only when the floating transaction is committed.
+///
+/// # Safety
+/// `core`, `clipboard`, and `target` must remain live, aligned, and readable for
+/// the call on the Core owner thread. Any target name span is borrowed only for
+/// this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_paste_begin_new_plane(
+    core: *mut InkpodCore,
+    clipboard: *const InkpodClipboard,
+    target: *const InkpodTreeEdit,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || clipboard.is_null() || !is_aligned(clipboard) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "paste pointer is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(target, "InkpodTreeEdit") } {
+            return status;
+        }
+        // SAFETY: Live handles and a complete target record are required by contract.
+        let core = unsafe { &mut *core };
+        let clipboard = unsafe { &*clipboard };
+        let target = unsafe { &*target };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if target.operation != INKPOD_TREE_CREATE_PLANE
+            || target.object_id != 0
+            || target.destination_index != 0
+            || target.flags != (INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "new-plane paste target is not a canonical create-plane request",
+            );
+        }
+        let kind = match parse_plane_type(target.kind) {
+            Ok(kind) => kind,
+            Err(status) => return status,
+        };
+        let format = match parse_storage_format(target.pixel_format) {
+            Ok(format) => format,
+            Err(status) => return status,
+        };
+        // SAFETY: The input contract includes the advertised name byte range.
+        let name = match unsafe { name_from_utf8(target.name_utf8, target.name_bytes) } {
+            Ok(name) => name,
+            Err(status) => return status,
+        };
+        match core.core.begin_paste_to_new_plane_converted(
+            &clipboard.payload,
+            target.parent_id,
+            kind,
+            format,
+            name,
+            target.opacity_milli,
+        ) {
+            Ok(()) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Replaces the current floating paste transform.
 ///
 /// # Safety

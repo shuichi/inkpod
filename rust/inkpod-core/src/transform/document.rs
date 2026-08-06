@@ -2,6 +2,7 @@ use super::frame::*;
 use super::numeric::*;
 use super::raster::*;
 use crate::document::bounded_document_pixels;
+use crate::primitive::CanonicalInvocation;
 use crate::*;
 
 impl Core {
@@ -10,6 +11,11 @@ impl Core {
     /// This is a destructive document transform, distinct from view flip. Success
     /// is one undoable edit; any raster/vector failure is atomic.
     pub fn mirror_document(&mut self, axis: MirrorAxis) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::MirrorDocument { axis })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision();
@@ -71,6 +77,11 @@ impl Core {
         &mut self,
         direction: RotateDirection,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::RotateDocument { direction })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision();
@@ -142,6 +153,11 @@ impl Core {
         &mut self,
         resize: DocumentResize,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::ResizeDocument { resize })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         bounded_document_pixels(resize.width, resize.height)?;
         if resize.width == 0

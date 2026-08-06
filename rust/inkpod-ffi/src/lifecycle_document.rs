@@ -281,20 +281,32 @@ pub unsafe extern "C" fn inkpod_core_new_cell(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        if options.reserved != 0 || options.feature_flags != INKPOD_FEATURE_NONE {
+        if options.feature_flags & !INKPOD_CELL_CREATE_INITIAL_LAYER_KIND != 0
+            || (options.feature_flags == INKPOD_FEATURE_NONE && options.reserved != 0)
+        {
             return fail(
                 INKPOD_STATUS_UNSUPPORTED,
                 "cell options contain unsupported flags or reserved values",
             );
         }
+        let initial_layer_kind =
+            if options.feature_flags & INKPOD_CELL_CREATE_INITIAL_LAYER_KIND != 0 {
+                match parse_layer_kind(options.reserved) {
+                    Ok(kind) => kind,
+                    Err(status) => return status,
+                }
+            } else {
+                LayerKind::BinaryColoring
+            };
         let document_uuid =
             (u128::from(options.document_uuid_high) << 64) | u128::from(options.document_uuid_low);
-        match core.core.new_cell_with_uuid(
+        match core.core.new_cell_with_uuid_and_layer(
             options.width,
             options.height,
             options.dpi_x_milli,
             options.dpi_y_milli,
             document_uuid,
+            initial_layer_kind,
         ) {
             Ok(info) => {
                 write_document_info(out_info, info);

@@ -14,7 +14,7 @@ const RASTER_STROKE_PRIMITIVE_SCHEMA_VERSION: u16 = 2;
 const IMPORT_RASTER_ASSET_PRIMITIVE_SCHEMA_VERSION: u16 = 1;
 const MAX_INLINE_PROCEDURE_PAYLOAD_BYTES: usize = 4 * 1_024 * 1_024;
 
-const fn current_primitive_schema_version(primitive_id: PrimitiveId) -> Option<u16> {
+pub(super) const fn current_primitive_schema_version(primitive_id: PrimitiveId) -> Option<u16> {
     if primitive_id.get() == PrimitiveId::SET_MAIN_LINE_COLOR.get()
         || primitive_id.get() == PrimitiveId::REPLACE_PALETTE.get()
     {
@@ -24,7 +24,7 @@ const fn current_primitive_schema_version(primitive_id: PrimitiveId) -> Option<u
     } else if primitive_id.get() == PrimitiveId::IMPORT_RASTER_ASSET.get() {
         Some(IMPORT_RASTER_ASSET_PRIMITIVE_SCHEMA_VERSION)
     } else {
-        None
+        super::invocation::schema_version(primitive_id)
     }
 }
 
@@ -149,11 +149,6 @@ impl Core {
                 "procedure committed state ID is not the next expected value",
             ));
         }
-        if !procedure.output_ids.is_empty() {
-            return Err(CoreError::InvalidArgument(
-                "primitive schema does not emit output object IDs",
-            ));
-        }
         if canonical_payload_digest(&procedure.canonical_payload)?
             != procedure.canonical_payload_digest
         {
@@ -164,6 +159,14 @@ impl Core {
         if self.document_state_digest()? != procedure.pre_state_digest {
             return Err(CoreError::InvalidState(
                 "procedure pre-state digest does not match current state",
+            ));
+        }
+        if let Some(runtime) = procedure.runtime_invocation.clone() {
+            return self.replay_runtime_invocation(procedure, &runtime);
+        }
+        if !procedure.output_ids.is_empty() {
+            return Err(CoreError::InvalidArgument(
+                "primitive schema does not emit output object IDs",
             ));
         }
         let canonical = decode_procedure(procedure, &self.assets)?;
@@ -183,7 +186,7 @@ impl Core {
             .ok_or(CoreError::InvalidState("canonical state cache is missing"))
     }
 
-    fn ensure_canonical_state_cache_current(&self) -> Result<(), CoreError> {
+    pub(super) fn ensure_canonical_state_cache_current(&self) -> Result<(), CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let mut slot = self.canonical_state_cache.borrow_mut();
         if slot
@@ -443,6 +446,7 @@ impl Core {
             canonical_payload_digest: payload_digest,
             pre_state_digest,
             post_state_digest,
+            runtime_invocation: None,
         });
         let journal_plan = self.prepare_canonical_commit(Arc::clone(&procedure))?;
 

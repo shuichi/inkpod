@@ -201,6 +201,7 @@ impl LightTableSource {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 /// Complete input for a new light-table item.
 pub struct LightTableItemInput {
     /// User-visible item name.

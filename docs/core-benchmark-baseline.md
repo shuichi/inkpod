@@ -124,6 +124,40 @@ approval to be recorded here. The historical A/B evidence below remains the
 calibration provenance and an exceptional rebaseline tool, not a routine build
 requirement.
 
+## 2026-08-06 M6 routine acceptance
+
+M6 retained Range ID
+`windows-arm64-apple-silicon-parallels-release-2026-08-05` without changing a
+workload, semantic assertion, reference envelope, revision-max formula, or
+acceptance rule. One unmeasured warm-up preceded five measured Core quick runs
+and five measured Core full runs. Five independent Release native processes
+each performed the fixture's internal warm-up.
+
+| Protected score | Five measured samples (ns) | Median | Result |
+|---|---|---:|---|
+| quick `pan_zoom_snapshot` | 853,208; 857,375; 902,083; 812,042; 832,292 | 853,208 (`0.853208 ms`) | within 0.70–1.05 ms |
+| quick `dirty_tile_rebuild` | 2,536,375; 2,156,208; 1,856,042; 2,387,792; 1,993,458 | 2,156,208 (`2.156208 ms`) | within 1.8–2.4 ms |
+| full `pan_zoom_snapshot` | 13,698,167; 14,445,459; 32,983,750; 14,913,708; 19,474,250 | 14,913,708 (`14.913708 ms`) | within 12–16 ms; isolated high samples did not move the prescribed median outside the range |
+| full `dirty_tile_rebuild` | 9,547,292; 10,309,541; 9,988,458; 9,583,542; 9,548,667 | 9,583,542 (`9.583542 ms`) | within 8.5–11 ms |
+
+All seven benchmark scenarios retained their fixed semantic checksums, revision,
+history, reuse/rebuild, payload-access, and Batch no-output assertions. Because
+no Core median exceeded an upper edge, the independent second-batch rule did
+not apply.
+
+| Native scenario | Five independent elapsed samples (ns) | Median | Normalized result |
+|---|---|---:|---:|
+| `wheel_zoom`, 512 events/Presents | 4,300,039,708; 4,266,714,833; 4,290,689,500; 4,299,792,208; 4,349,874,792 | 4,299,792,208 | `1.007763` refresh intervals/event at 8,333,333.33 ns |
+| `drawing`, 16 strokes/544 samples/16 Presents | 196,865,333; 193,120,417; 192,323,166; 192,690,000; 189,079,334 | 192,690,000 (`192.690000 ms`) | within 150–200 ms |
+
+Every native run retained 256 tiles, 1,048,576 payload bytes, 512 wheel
+events/Presents, 16 drawing strokes, 544 samples, 16 drawing Presents, and zero
+queue rejection or resource-limit failure. Four drawing runs reported 592
+replaceable queue publications and one reported 593. The latter is an allowed
+8 ms preview-scheduler observation while the renderer is paused: it did not
+change committed revision, checksum, sample count, final Present count, or any
+acceptance gate. No timing range or semantic tolerance was changed.
+
 ## 2026-08-06 M5 routine acceptance
 
 M5 retained Range ID

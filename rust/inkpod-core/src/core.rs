@@ -75,7 +75,6 @@ impl Core {
             savepoint: None,
             genesis: None,
             journal: Vec::new(),
-            journal_complete: true,
             canonical_state_cache: std::cell::RefCell::new(None),
             active_branch: BranchId::ROOT,
             next_journal_event: JournalEventId::first(),
@@ -101,6 +100,7 @@ impl Core {
             subpalette_index: None,
             editor_defaults,
             editor_session: None,
+            canonical_invocation_active: false,
         }
     }
 
@@ -130,7 +130,14 @@ impl Core {
     ) -> Result<DocumentInfo, CoreError> {
         let uuid = (u128::from(0x494e_4b50_4f44_4d31_u64) << 64)
             | u128::from(self.next_document_revision()?.get());
-        self.new_cell_with_uuid(width, height, dpi_x_milli, dpi_y_milli, uuid)
+        self.new_cell_with_uuid_and_layer(
+            width,
+            height,
+            dpi_x_milli,
+            dpi_y_milli,
+            uuid,
+            LayerKind::BinaryColoring,
+        )
     }
 
     /// Replaces the current document with a blank cell using `document_uuid`.
@@ -144,6 +151,30 @@ impl Core {
         dpi_x_milli: u32,
         dpi_y_milli: u32,
         document_uuid: u128,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.new_cell_with_uuid_and_layer(
+            width,
+            height,
+            dpi_x_milli,
+            dpi_y_milli,
+            document_uuid,
+            LayerKind::BinaryColoring,
+        )
+    }
+
+    /// Replaces the current document with a blank cell and typed initial layer.
+    ///
+    /// The complete Genesis topology is validated and allocated before live
+    /// state is published. This session-replacement operation resets history;
+    /// it never creates an intermediate default-layer document or a procedure.
+    pub fn new_cell_with_uuid_and_layer(
+        &mut self,
+        width: u32,
+        height: u32,
+        dpi_x_milli: u32,
+        dpi_y_milli: u32,
+        document_uuid: u128,
+        initial_layer_kind: LayerKind,
     ) -> Result<DocumentInfo, CoreError> {
         // Construct the complete replacement and its advanced cursor privately
         // so invalid paper/UUID input cannot consume stable IDs or disturb the
@@ -159,7 +190,8 @@ impl Core {
             light_table_set: next_id.take_light_table_set(),
             cell: next_id.take_cell(),
         };
-        let document = CellDocument::new(
+        let mut initial_layer_id = ids.layer;
+        let mut document = CellDocument::new(
             ids,
             document_uuid,
             PaperSpec {
@@ -169,6 +201,38 @@ impl Core {
                 dpi_y_milli,
             },
         )?;
+        if initial_layer_kind == LayerKind::GrayscaleColoring {
+            document.layers[0] = document::build_layer_node(
+                initial_layer_kind,
+                "Layer 1",
+                initial_layer_id,
+                width,
+                height,
+                &mut next_id,
+            )?;
+        } else if initial_layer_kind != LayerKind::BinaryColoring {
+            initial_layer_id = next_id.take_layer();
+            let requested = document::build_layer_node(
+                initial_layer_kind,
+                "Layer 1",
+                initial_layer_id,
+                width,
+                height,
+                &mut next_id,
+            )?;
+            // Non-coloring layers cannot replace the required coloring base.
+            // Put the requested layer first so reset_editor_state selects it.
+            document.layers.insert(0, requested);
+            if initial_layer_kind == LayerKind::Adjustment {
+                document.adjustments.insert(
+                    initial_layer_id,
+                    Adjustment::BrightnessContrast {
+                        brightness_milli: 0,
+                        contrast_milli: 0,
+                    },
+                );
+            }
+        }
         let revision = self.next_document_revision()?;
 
         self.cancel_stroke();
@@ -200,7 +264,7 @@ impl Core {
 }
 
 /// Single-writer application core. Document and view revisions are independent.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Core {
     pub(super) assets: asset::AssetStore,
     pub(super) document: Option<CellDocument>,
@@ -214,7 +278,6 @@ pub struct Core {
     pub(super) savepoint: Option<StateId>,
     pub(super) genesis: Option<genesis::Genesis>,
     pub(super) journal: Vec<JournalEntry>,
-    pub(super) journal_complete: bool,
     pub(super) canonical_state_cache:
         std::cell::RefCell<Option<primitive::CanonicalDocumentStateCache>>,
     pub(super) active_branch: BranchId,
@@ -241,6 +304,7 @@ pub struct Core {
     pub(super) subpalette_index: Option<usize>,
     pub(super) editor_defaults: EditorDefaults,
     pub(super) editor_session: Option<EditorSessionState>,
+    pub(super) canonical_invocation_active: bool,
 }
 
 /// One synchronous document edit staged independently from the live Core state.
@@ -301,6 +365,11 @@ impl DocumentEdit {
     }
 
     pub(super) fn commit(self, core: &mut Core) -> Result<DispatchOutcome, CoreError> {
+        if !core.canonical_invocation_is_active() {
+            return Err(CoreError::InvalidState(
+                "document edit commit requires a canonical primitive",
+            ));
+        }
         if core.document_revision != self.base_revision {
             return Err(CoreError::InvalidState(
                 "document edit base revision is stale",
@@ -408,10 +477,18 @@ impl Core {
         }
     }
 
+    pub(super) fn ensure_no_active_raster_stroke(&self) -> Result<(), CoreError> {
+        if self.active_stroke.is_some() {
+            Err(CoreError::InvalidState(
+                "operation is not allowed during an active stroke transaction",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     pub(super) fn allocate_state(&mut self) -> Result<StateId, CoreError> {
-        // Restore every optional inverse cache before the first unmigrated
-        // document route makes the journal incomplete, so its established
-        // Undo/Redo contract remains usable.
+        // Restore optional inverse data before staging a canonical commit.
         self.ensure_history_cache()?;
         let state = self.next_state;
         self.next_state = self
@@ -452,7 +529,10 @@ impl Core {
     }
 
     pub(super) fn commit_history_change(&mut self, change: HistoryChange, after_state: StateId) {
-        self.mark_journal_incomplete();
+        debug_assert!(
+            self.canonical_invocation_active,
+            "document history may only be staged by a canonical invocation"
+        );
         self.history.truncate(self.history_cursor);
         let before_state = self.current_state;
         let label = change.label();
@@ -477,6 +557,7 @@ mod tests {
     fn initialized_core() -> Core {
         let mut core = Core::new();
         core.new_cell(4, 4, 96_000, 96_000).unwrap();
+        core.canonical_invocation_active = true;
         core
     }
 

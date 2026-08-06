@@ -668,11 +668,22 @@ pub unsafe extern "C" fn inkpod_core_raster_vectorize(
                 "raster vectorize contains unsupported flags or alpha threshold",
             );
         }
-        match core.core.vectorize_raster_plane(
-            input.source_plane_id,
-            input.target_layer_id,
-            input.alpha_threshold as u8,
-        ) {
+        let vectorized = if input.target_layer_id == 0 {
+            core.core
+                .vectorize_raster_plane_into_new_layer(
+                    input.source_plane_id,
+                    input.alpha_threshold as u8,
+                    "Vectorized",
+                )
+                .map(|(outcome, _, fill_ids)| (outcome, fill_ids))
+        } else {
+            core.core.vectorize_raster_plane(
+                input.source_plane_id,
+                input.target_layer_id,
+                input.alpha_threshold as u8,
+            )
+        };
+        match vectorized {
             Ok((outcome, fill_ids)) => {
                 write_dispatch_result(result, outcome);
                 // SAFETY: Writable output storage was checked above.

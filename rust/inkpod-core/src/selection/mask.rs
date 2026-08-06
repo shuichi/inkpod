@@ -185,12 +185,24 @@ pub(crate) fn validate_floating_transform(transform: FloatingTransform) -> Resul
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FloatingSelection {
     pub(crate) payload: ClipboardPayload,
-    pub(crate) destination_plane_id: PlaneId,
+    pub(crate) destination: FloatingDestination,
     pub(crate) transform: FloatingTransform,
     pub(crate) asset_ids: Vec<AssetId>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum FloatingDestination {
+    ExistingPlane(PlaneId),
+    NewPlane {
+        layer_id: LayerId,
+        kind: PlaneType,
+        format: PixelFormat,
+        name: String,
+        opacity_milli: u32,
+    },
 }
 
 #[cfg(test)]

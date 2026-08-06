@@ -575,6 +575,8 @@ fn light_table_set_item_management_is_transactional_and_stable_id_based() {
     assert_eq!(sets.len(), 1);
     let final_set_id = sets[0].id;
     assert!(core.light_table_delete_set(final_set_id).is_err());
+    assert!(core.journal_state().unwrap().is_complete());
+    core.verify_journal_replay().unwrap();
     std::fs::remove_file(path).unwrap();
 }
 

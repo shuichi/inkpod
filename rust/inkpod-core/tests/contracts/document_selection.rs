@@ -1,5 +1,110 @@
 use super::*;
 
+fn last_commit_primitive(core: &Core) -> PrimitiveId {
+    core.journal_entries()
+        .iter()
+        .rev()
+        .find_map(|entry| match entry {
+            JournalEntry::Commit(commit) => Some(commit.procedure().primitive_id()),
+            JournalEntry::HistoryMove(_) | JournalEntry::BranchCut(_) => None,
+        })
+        .expect("a committed document primitive must exist")
+}
+
+#[test]
+fn bulk_layer_and_guide_deletes_are_single_replayable_primitives() {
+    let mut core = Core::new();
+    core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let (_, hidden_one) = core.create_layer(LayerKind::Raster, "Hidden One").unwrap();
+    let (_, hidden_two) = core.create_layer(LayerKind::Raster, "Hidden Two").unwrap();
+    core.set_layer_properties(hidden_one, false, true, 1_000, "Hidden One")
+        .unwrap();
+    core.set_layer_properties(hidden_two, false, true, 1_000, "Hidden Two")
+        .unwrap();
+    let before_layers = core.layers().unwrap().len();
+    let before_revision = core.document_info().unwrap().document_revision;
+    let before_history = core.history_entries().len();
+
+    let deleted = core.delete_hidden_layers().unwrap();
+    assert_eq!(deleted.revision(), before_revision + 1);
+    assert_eq!(core.layers().unwrap().len(), before_layers - 2);
+    assert_eq!(core.history_entries().len(), before_history + 1);
+    assert_eq!(
+        last_commit_primitive(&core),
+        PrimitiveId::DELETE_HIDDEN_LAYERS
+    );
+    let procedures = core
+        .journal_entries()
+        .iter()
+        .filter_map(|entry| match entry {
+            JournalEntry::Commit(commit) => Some(commit.procedure().clone()),
+            JournalEntry::HistoryMove(_) | JournalEntry::BranchCut(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let mut direct_replay = Core::new();
+    direct_replay
+        .new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    for procedure in &procedures {
+        direct_replay
+            .replay_procedure(procedure)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "primitive {:08x} failed direct replay: {error:?}",
+                    procedure.primitive_id().get()
+                )
+            });
+    }
+    core.verify_journal_replay().unwrap();
+    core.undo().unwrap();
+    assert_eq!(core.layers().unwrap().len(), before_layers);
+    core.redo().unwrap();
+    assert_eq!(core.layers().unwrap().len(), before_layers - 2);
+
+    let (_, first_guide) = core.add_guide(GuideAxis::Horizontal, 2).unwrap();
+    let (_, second_guide) = core.add_guide(GuideAxis::Vertical, 3).unwrap();
+    assert_ne!(first_guide, second_guide);
+    core.verify_journal_replay().unwrap();
+    let before_delete_all = core.document_info().unwrap().document_revision;
+    assert_eq!(
+        core.delete_all_guides().unwrap().revision(),
+        before_delete_all + 1
+    );
+    assert!(core.guides().unwrap().is_empty());
+    assert_eq!(last_commit_primitive(&core), PrimitiveId::DELETE_ALL_GUIDES);
+    core.verify_journal_replay().unwrap();
+    core.undo().unwrap();
+    assert_eq!(core.guides().unwrap().len(), 2);
+    core.redo().unwrap();
+    assert!(core.guides().unwrap().is_empty());
+    let before_noop = core.journal_state();
+    let before_noop_revision = core.document_info().unwrap().document_revision;
+    assert_eq!(
+        core.delete_all_guides().unwrap().revision(),
+        before_noop_revision
+    );
+    assert_eq!(core.journal_state(), before_noop);
+    assert!(core.journal_state().unwrap().is_complete());
+    core.verify_journal_replay().unwrap();
+
+    let mut invalid = Core::new();
+    invalid
+        .new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let only_layer = invalid.layers().unwrap()[0].id;
+    invalid
+        .set_layer_properties(only_layer, false, true, 1_000, "Hidden")
+        .unwrap();
+    let before_invalid = invalid.document_state_digest().unwrap();
+    assert!(matches!(
+        invalid.delete_hidden_layers(),
+        Err(CoreError::InvalidState(_))
+    ));
+    assert_eq!(invalid.document_state_digest().unwrap(), before_invalid);
+    invalid.verify_journal_replay().unwrap();
+}
+
 #[test]
 fn selected_raster_layer_receives_stroke_preview_commit_and_history() {
     let mut core = Core::new();
@@ -636,6 +741,8 @@ fn acceptance_coordinate_preserving_typed_paste_and_floating_transform() {
         })
         .unwrap();
     destination.commit_floating().unwrap();
+    assert!(destination.journal_state().unwrap().is_complete());
+    destination.verify_journal_replay().unwrap();
     assert_eq!(
         destination.plane_pixel(ActivePlane::Color, 2, 2).unwrap(),
         PixelValue::Rgba([12, 34, 56, 255])
@@ -723,6 +830,115 @@ fn acceptance_coordinate_preserving_typed_paste_and_floating_transform() {
         destination.document_info().unwrap().document_revision,
         revision
     );
+}
+
+#[test]
+fn converted_paste_to_new_plane_is_one_atomic_replayable_commit() {
+    let payload = ClipboardPayload {
+        source_document_uuid: 7,
+        bounds: RectI32 {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        },
+        planes: vec![ClipboardPlane {
+            kind: PlaneType::Color,
+            pixel_format: PixelFormat::StraightRgba8,
+            origin_x: 0,
+            origin_y: 0,
+            pixels: vec![ClipboardPixel {
+                x: 0,
+                y: 0,
+                value: PixelValue::Rgba([21, 34, 55, 255]),
+            }],
+        }],
+    };
+    let mut core = Core::new();
+    let created = core
+        .new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let initial_layers = core.layers().unwrap();
+    let initial_revision = core.document_info().unwrap().document_revision;
+    let initial_history = core.history_entries().len();
+    let initial_journal = core.journal_state();
+
+    core.begin_paste_to_new_plane_converted(
+        &payload,
+        created.layer_id,
+        PlaneType::Raster,
+        PixelFormat::StraightRgba8,
+        "Atomic Paste",
+        875,
+    )
+    .unwrap();
+    assert_eq!(core.layers().unwrap(), initial_layers);
+    assert_eq!(
+        core.document_info().unwrap().document_revision,
+        initial_revision
+    );
+    assert_eq!(core.history_entries().len(), initial_history);
+    assert_eq!(core.journal_state(), initial_journal);
+    core.cancel_floating();
+    assert_eq!(core.layers().unwrap(), initial_layers);
+    assert_eq!(core.journal_state(), initial_journal);
+
+    let invalid_revision = core.document_info().unwrap().document_revision;
+    assert!(matches!(
+        core.begin_paste_to_new_plane_converted(
+            &payload,
+            u64::MAX,
+            PlaneType::Raster,
+            PixelFormat::StraightRgba8,
+            "Missing Layer",
+            1_000,
+        ),
+        Err(CoreError::InvalidArgument(_))
+    ));
+    assert_eq!(
+        core.document_info().unwrap().document_revision,
+        invalid_revision
+    );
+
+    core.begin_paste_to_new_plane_converted(
+        &payload,
+        created.layer_id,
+        PlaneType::Raster,
+        PixelFormat::StraightRgba8,
+        "Atomic Paste",
+        875,
+    )
+    .unwrap();
+    let committed = core.commit_floating().unwrap();
+    assert_eq!(committed.revision(), initial_revision + 1);
+    assert_eq!(core.history_entries().len(), initial_history + 1);
+    assert_eq!(last_commit_primitive(&core), PrimitiveId::COMMIT_FLOATING);
+    let layers = core.layers().unwrap();
+    let pasted = layers[0]
+        .planes
+        .iter()
+        .find(|plane| plane.name == "Atomic Paste")
+        .expect("the pending plane is created at commit");
+    assert_eq!(pasted.kind, PlaneType::Raster);
+    assert_eq!(pasted.pixel_format, PixelFormat::StraightRgba8);
+    assert_eq!(pasted.opacity_milli, 875);
+    assert_eq!(
+        core.build_snapshot().tiles()[0].pixels()[..4],
+        [48, 30, 18, 223]
+    );
+    assert!(core.journal_state().unwrap().is_complete());
+    core.verify_journal_replay().unwrap();
+
+    core.undo().unwrap();
+    assert_eq!(core.layers().unwrap(), initial_layers);
+    core.redo().unwrap();
+    assert!(
+        core.layers().unwrap()[0]
+            .planes
+            .iter()
+            .any(|plane| plane.name == "Atomic Paste")
+    );
+    core.verify_journal_replay().unwrap();
 }
 
 #[test]

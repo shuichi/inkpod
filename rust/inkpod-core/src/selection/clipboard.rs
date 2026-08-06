@@ -4,7 +4,7 @@ pub(crate) fn selection_from_rect(
     width: u32,
     height: u32,
     rect: RectI32,
-    is_cancelled: &mut impl FnMut() -> bool,
+    is_cancelled: &mut (impl FnMut() -> bool + ?Sized),
 ) -> Result<TileRaster, CoreError> {
     if rect.width <= 0 || rect.height <= 0 || rect.x < 0 || rect.y < 0 {
         return Err(CoreError::InvalidArgument(

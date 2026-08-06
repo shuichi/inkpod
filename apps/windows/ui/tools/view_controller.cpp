@@ -71,48 +71,9 @@ InkpodStatus ViewController::DeleteGuide(std::uint64_t guide_id) noexcept {
 InkpodStatus ViewController::DeleteAllGuides() noexcept {
     return engine_.Invoke(
         [](InkpodCore* core) {
-            const InkpodSnapshotOptions options{
-                sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
-            InkpodSnapshot* snapshot{};
-            InkpodStatus status = inkpod_core_build_snapshot(core, &options, &snapshot);
-            InkpodSnapshotOverlay overlay{};
-            overlay.struct_size = sizeof(overlay);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_snapshot_get_overlay(snapshot, &overlay);
-            }
-            std::vector<std::uint64_t> guide_ids;
-            if (status == INKPOD_STATUS_OK) {
-                try {
-                    guide_ids.reserve(static_cast<std::size_t>(overlay.guide_count));
-                    const auto* bytes =
-                        reinterpret_cast<const std::uint8_t*>(overlay.guides);
-                    for (std::uint64_t index = 0; index < overlay.guide_count; ++index) {
-                        const auto* guide =
-                            reinterpret_cast<const InkpodSnapshotGuide*>(
-                                bytes + static_cast<std::size_t>(
-                                            index * overlay.guide_stride_bytes));
-                        guide_ids.push_back(guide->id);
-                    }
-                } catch (const std::bad_alloc&) {
-                    status = INKPOD_STATUS_INVALID_STATE;
-                }
-            }
-            const InkpodStatus release_status = inkpod_snapshot_release(&snapshot);
-            if (status != INKPOD_STATUS_OK) {
-                return status;
-            }
-            if (release_status != INKPOD_STATUS_OK) {
-                return release_status;
-            }
-            for (const std::uint64_t guide_id : guide_ids) {
-                InkpodDispatchResult result{};
-                result.struct_size = sizeof(result);
-                status = inkpod_core_guide_delete(core, guide_id, &result);
-                if (status != INKPOD_STATUS_OK) {
-                    return status;
-                }
-            }
-            return INKPOD_STATUS_OK;
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            return inkpod_core_guide_delete_all(core, &result);
         },
         true,
         true);

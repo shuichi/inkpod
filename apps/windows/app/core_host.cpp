@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <deque>
 #include <future>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <new>
@@ -81,18 +82,25 @@ CommandContext SessionContext(SessionBinding binding) noexcept {
     return context;
 }
 
-struct LegacyInvokeWork {
+using AdapterInputToken = std::uint64_t;
+
+struct AdapterWork {
     SessionBinding binding;
     std::uint64_t sequence{};
     CommandContext context;
-    CoreHost::CoreOperation operation;
+    AdapterInputToken input_token{};
     bool publish_snapshot{};
     bool refresh_document_info{};
     bool defer_during_active_stroke{};
+    std::chrono::steady_clock::time_point queued_at{std::chrono::steady_clock::now()};
+};
+
+struct AdapterInput {
+    AdapterInputToken token{};
+    CoreHost::CoreOperation operation;
     std::optional<std::uint64_t> active_view_update;
     std::shared_ptr<std::promise<InkpodStatus>> completion;
     std::function<void(InkpodStatus)> async_completion;
-    std::chrono::steady_clock::time_point queued_at{std::chrono::steady_clock::now()};
 };
 
 struct StrokeWork {
@@ -129,7 +137,7 @@ struct ControlWork {
 };
 
 using WorkItem =
-    std::variant<LegacyInvokeWork, PrimitiveWork, StrokeWork, ControlWork>;
+    std::variant<AdapterWork, PrimitiveWork, StrokeWork, ControlWork>;
 
 struct PublishedSession {
     SessionBinding binding;
@@ -175,6 +183,7 @@ struct CoreHost::Impl final {
                 notifications.clear();
             }
             entries.reserve(kMaximumSessions);
+            adapter_inputs.reserve(kMaximumQueuedWork + kReservedStrokeControlWork);
             auto ready = std::make_shared<std::promise<InkpodStatus>>();
             auto future = ready->get_future();
             worker = std::thread([this, ready] { Run(ready); });
@@ -514,18 +523,17 @@ struct CoreHost::Impl final {
         try {
             auto completion = std::make_shared<std::promise<InkpodStatus>>();
             auto future = completion->get_future();
-            LegacyInvokeWork item{
+            AdapterWork item{
                 binding,
                 0U,
                 SessionContext(binding),
-                std::move(operation),
+                0U,
                 publish_snapshot,
                 refresh_document_info,
-                false,
-                std::nullopt,
-                completion,
-                {}};
-            if (!PushLegacyInvoke(std::move(item))) {
+                false};
+            AdapterInput input{
+                0U, std::move(operation), std::nullopt, completion, {}};
+            if (!PushAdapter(std::move(item), std::move(input))) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
             return future.get();
@@ -576,18 +584,22 @@ struct CoreHost::Impl final {
             || !operation) {
             return false;
         }
-        return PushLegacyInvoke(LegacyInvokeWork{
-            SessionBinding{
-                context.document_session.value(), context.generation.value()},
-            0U,
-            context,
-            std::move(operation),
-            publish_snapshot,
-            refresh_document_info,
-            defer_during_active_stroke,
-            std::nullopt,
-            nullptr,
-            std::move(completion)});
+        return PushAdapter(
+            AdapterWork{
+                SessionBinding{
+                    context.document_session.value(), context.generation.value()},
+                0U,
+                context,
+                0U,
+                publish_snapshot,
+                refresh_document_info,
+                defer_during_active_stroke},
+            AdapterInput{
+                0U,
+                std::move(operation),
+                std::nullopt,
+                nullptr,
+                std::move(completion)});
     }
 
     InkpodStatus InvokePrimitive(
@@ -640,7 +652,7 @@ struct CoreHost::Impl final {
             nullptr});
     }
 
-    bool PushLegacyInvoke(LegacyInvokeWork item) noexcept {
+    bool PushAdapter(AdapterWork item, AdapterInput input) noexcept {
         std::lock_guard acceptance_lock(acceptance_mutex);
         const SessionBinding binding = item.binding;
         {
@@ -656,14 +668,26 @@ struct CoreHost::Impl final {
             ++session->state.pending_operations;
         }
         const std::uint64_t sequence = item.sequence;
+        AdapterInputToken registered_token{};
         bool queued{};
         try {
             std::lock_guard lock(mutex);
-            if (!stopping && work.size() < kMaximumQueuedWork) {
+            if (!stopping && work.size() < kMaximumQueuedWork
+                && next_adapter_input_token != 0U
+                && adapter_inputs.size() < kMaximumQueuedWork) {
+                item.input_token = next_adapter_input_token;
+                input.token = next_adapter_input_token;
+                adapter_inputs.push_back(std::move(input));
+                registered_token = next_adapter_input_token;
                 work.emplace_back(std::move(item));
+                ++next_adapter_input_token;
                 queued = true;
             }
         } catch (const std::bad_alloc&) {
+            if (!adapter_inputs.empty()
+                && adapter_inputs.back().token == registered_token) {
+                adapter_inputs.pop_back();
+            }
             queued = false;
         }
         if (!queued) {
@@ -1091,18 +1115,36 @@ struct CoreHost::Impl final {
             item.binding, item.sequence, item.pending_units, entry->stroke_active);
     }
 
-    void ProcessLegacyInvoke(LegacyInvokeWork item) noexcept {
+    std::optional<AdapterInput> TakeAdapterInput(AdapterInputToken token) noexcept {
+        std::lock_guard lock(mutex);
+        const auto found = std::find_if(
+            adapter_inputs.begin(),
+            adapter_inputs.end(),
+            [token](const AdapterInput& input) { return input.token == token; });
+        if (found == adapter_inputs.end()) {
+            return std::nullopt;
+        }
+        AdapterInput input = std::move(*found);
+        if (found != std::prev(adapter_inputs.end())) {
+            *found = std::move(adapter_inputs.back());
+        }
+        adapter_inputs.pop_back();
+        return input;
+    }
+
+    void ProcessAdapter(AdapterWork item) noexcept {
         RecordQueueWait(item.binding, item.queued_at);
+        std::optional<AdapterInput> input = TakeAdapterInput(item.input_token);
         CoreEntry* entry = FindEntry(item.binding);
         InkpodStatus status = entry == nullptr
             ? INKPOD_STATUS_CANCELLED
-            : INKPOD_STATUS_OK;
-        if (entry != nullptr) {
-            if (item.active_view_update.has_value()) {
-                entry->active_view_id = item.active_view_update.value();
+            : input.has_value() ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
+        if (entry != nullptr && input.has_value()) {
+            if (input->active_view_update.has_value()) {
+                entry->active_view_id = input->active_view_update.value();
             }
             try {
-                status = item.operation(entry->core);
+                status = input->operation(entry->core);
             } catch (...) {
                 status = INKPOD_STATUS_INVALID_STATE;
             }
@@ -1113,20 +1155,20 @@ struct CoreHost::Impl final {
                 status = PublishSnapshot(*entry, false);
             }
         }
-        const bool asynchronous = item.completion == nullptr;
+        const bool asynchronous = !input.has_value() || input->completion == nullptr;
         if (entry != nullptr) {
             CaptureFailure(*entry, status, asynchronous, item.context);
         }
         CompletePending(item.binding, item.sequence, 1U, entry != nullptr && entry->stroke_active);
-        if (item.completion != nullptr) {
+        if (input.has_value() && input->completion != nullptr) {
             try {
-                item.completion->set_value(status);
+                input->completion->set_value(status);
             } catch (const std::future_error&) {
             }
         }
-        if (item.async_completion) {
+        if (input.has_value() && input->async_completion) {
             try {
-                item.async_completion(status);
+                input->async_completion(status);
             } catch (...) {
                 if (entry != nullptr) {
                     CaptureFailure(
@@ -1271,7 +1313,7 @@ struct CoreHost::Impl final {
     }
 
     bool CanProcess(const WorkItem& item) const noexcept {
-        if (const auto* sync = std::get_if<LegacyInvokeWork>(&item)) {
+        if (const auto* sync = std::get_if<AdapterWork>(&item)) {
             const CoreEntry* entry = FindEntry(sync->binding);
             return entry == nullptr || !entry->stroke_active
                 || !sync->defer_during_active_stroke;
@@ -1413,8 +1455,8 @@ struct CoreHost::Impl final {
                 continue;
             }
             if (has_item) {
-                if (auto* sync = std::get_if<LegacyInvokeWork>(&item)) {
-                    ProcessLegacyInvoke(std::move(*sync));
+                if (auto* sync = std::get_if<AdapterWork>(&item)) {
+                    ProcessAdapter(std::move(*sync));
                 } else if (auto* primitive = std::get_if<PrimitiveWork>(&item)) {
                     ProcessPrimitive(std::move(*primitive));
                 } else if (auto* stroke = std::get_if<StrokeWork>(&item)) {
@@ -1684,6 +1726,8 @@ struct CoreHost::Impl final {
     mutable std::mutex mutex;
     std::condition_variable wake;
     std::deque<WorkItem> work;
+    std::vector<AdapterInput> adapter_inputs;
+    AdapterInputToken next_adapter_input_token{1U};
     bool stopping{};
     std::thread worker;
     std::atomic<DWORD> thread_id{};
@@ -1706,18 +1750,21 @@ struct CoreHost::Impl final {
         try {
             auto completion = std::make_shared<std::promise<InkpodStatus>>();
             auto future = completion->get_future();
-            LegacyInvokeWork item{
+            AdapterWork item{
                 binding,
                 0U,
                 SessionContext(binding),
-                [](InkpodCore*) { return INKPOD_STATUS_OK; },
+                0U,
                 true,
                 false,
-                false,
+                false};
+            AdapterInput input{
+                0U,
+                [](InkpodCore*) { return INKPOD_STATUS_OK; },
                 view_id,
                 completion,
                 {}};
-            if (!PushLegacyInvoke(std::move(item))) {
+            if (!PushAdapter(std::move(item), std::move(input))) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
             return future.get();

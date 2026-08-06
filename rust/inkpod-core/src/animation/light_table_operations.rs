@@ -1,6 +1,7 @@
 use super::light_table::*;
 use super::raster::*;
 use super::*;
+use crate::primitive::CanonicalInvocation;
 
 impl Core {
     /// Sets active light-table set opacity in `0..=1000` as one undoable edit.
@@ -8,6 +9,13 @@ impl Core {
         &mut self,
         opacity_milli: u32,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableSetGlobalOpacity {
+                    opacity_milli,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         if opacity_milli > 1_000 {
             return Err(CoreError::InvalidArgument(
@@ -30,8 +38,16 @@ impl Core {
         &mut self,
         name: impl Into<String>,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
-        self.ensure_no_active_stroke()?;
         let name = name.into();
+        if !self.canonical_invocation_is_active() {
+            let result = self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableCreateSet { name })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "light-table-create-set primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
+        self.ensure_no_active_stroke()?;
         validate_node_name(&name)?;
         if self
             .document
@@ -67,6 +83,16 @@ impl Core {
         &mut self,
         set_id: u64,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result =
+                self.execute_canonical_invocation(CanonicalInvocation::LightTableDuplicateSet {
+                    set_id,
+                })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "light-table-duplicate-set primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         let set_id = LightTableSetId::from_raw(set_id);
         let source = {
@@ -117,6 +143,11 @@ impl Core {
     ///
     /// The final set cannot be deleted; active-set selection is repaired on success.
     pub fn light_table_delete_set(&mut self, set_id: u64) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableDeleteSet { set_id })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let set_id = LightTableSetId::from_raw(set_id);
         let mut edit = self.begin_document_edit()?;
@@ -149,9 +180,17 @@ impl Core {
         set_id: u64,
         name: impl Into<String>,
     ) -> Result<DispatchOutcome, CoreError> {
+        let name = name.into();
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableRenameSet {
+                    set_id,
+                    name,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let set_id = LightTableSetId::from_raw(set_id);
-        let name = name.into();
         validate_node_name(&name)?;
         let mut edit = self.begin_document_edit()?;
         let after = edit.working_mut();
@@ -183,6 +222,17 @@ impl Core {
         set_id: u64,
         destination_index: usize,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let destination_index = u64::try_from(destination_index).map_err(|_| {
+                CoreError::InvalidArgument("light-table set destination is not representable")
+            })?;
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableReorderSet {
+                    set_id,
+                    destination_index,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let set_id = LightTableSetId::from_raw(set_id);
         let mut edit = self.begin_document_edit()?;
@@ -207,6 +257,11 @@ impl Core {
 
     /// Activates an existing set as one undoable document metadata edit.
     pub fn light_table_set_active(&mut self, set_id: u64) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableSetActive { set_id })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let set_id = LightTableSetId::from_raw(set_id);
         let mut edit = self.begin_document_edit()?;
@@ -227,6 +282,14 @@ impl Core {
         &mut self,
         mut input: LightTableItemInput,
     ) -> Result<(DispatchOutcome, u64), CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let result = self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableAddItem { input })?;
+            let id = *result.output_ids.first().ok_or(CoreError::InvalidState(
+                "light-table-add-item primitive did not return its output ID",
+            ))?;
+            return Ok((result.dispatch, id));
+        }
         self.ensure_no_active_stroke()?;
         validate_item_input(&input)?;
         if self
@@ -318,6 +381,14 @@ impl Core {
         item_id: u64,
         properties: LightTableItemProperties,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableUpdateItemProperties {
+                    item_id,
+                    properties,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let item_id = LightTableItemId::from_raw(item_id);
         let mut edit = self.begin_document_edit()?;
@@ -378,31 +449,38 @@ impl Core {
             height: i32::try_from(raster.info.height)
                 .map_err(|_| CoreError::InvalidArgument("reference height exceeds i32"))?,
         };
-        let mut replacement = LightTableSource::from_common_raster(
+        let replacement = LightTableSource::from_common_raster(
             document_uuid,
             source_revision,
             reference_frame,
             &raster,
         )?;
-        let mut staged_assets = self.assets.clone();
-        replacement.intern_into(&mut staged_assets)?;
-        let base_revision = self.document_revision;
-        let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-        let mut after = before.clone();
-        after
-            .light_table
-            .active_mut()
-            .and_then(|set| set.items.iter_mut().find(|item| item.id == item_id))
-            .ok_or(CoreError::InvalidArgument(
-                "light-table item ID does not exist",
-            ))?
-            .source = replacement;
-        staged_assets = self.prepare_asset_store_for_document_edit(staged_assets, &after)?;
-        let outcome = self.commit_deferred_document_edit_current(before, after)?;
-        if outcome.revision() != base_revision.get() {
-            self.assets = staged_assets;
-        }
-        Ok(outcome)
+        let input = {
+            let item = self
+                .document
+                .as_ref()
+                .ok_or(CoreError::NoDocument)?
+                .light_table
+                .active()
+                .and_then(|set| set.items.iter().find(|item| item.id == item_id))
+                .ok_or(CoreError::InvalidArgument(
+                    "light-table item ID does not exist",
+                ))?;
+            LightTableItemInput {
+                name: item.name.clone(),
+                source: replacement,
+                visible: item.visible,
+                opacity_milli: item.opacity_milli,
+                display_mode: item.display_mode,
+                display_color: item.display_color,
+                translate_x_milli: item.translate_x_milli,
+                translate_y_milli: item.translate_y_milli,
+                scale_x_milli: item.scale_x_milli,
+                scale_y_milli: item.scale_y_milli,
+                rotation_milli_degrees: item.rotation_milli_degrees,
+            }
+        };
+        self.light_table_update_item(item_id.get(), input)
     }
 
     /// Returns owned metadata for items in the active set, in stacking order.
@@ -469,6 +547,14 @@ impl Core {
         item_id: u64,
         mut input: LightTableItemInput,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableUpdateItem {
+                    item_id,
+                    input,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let item_id = LightTableItemId::from_raw(item_id);
         validate_item_input(&input)?;
@@ -510,6 +596,11 @@ impl Core {
 
     /// Removes an item from the active set as one undoable edit.
     pub fn light_table_remove_item(&mut self, item_id: u64) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableRemoveItem { item_id })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let item_id = LightTableItemId::from_raw(item_id);
         let mut edit = self.begin_document_edit()?;
@@ -538,6 +629,17 @@ impl Core {
         item_id: u64,
         destination_index: usize,
     ) -> Result<DispatchOutcome, CoreError> {
+        if !self.canonical_invocation_is_active() {
+            let destination_index = u64::try_from(destination_index).map_err(|_| {
+                CoreError::InvalidArgument("light-table item destination is not representable")
+            })?;
+            return self
+                .execute_canonical_invocation(CanonicalInvocation::LightTableReorderItem {
+                    item_id,
+                    destination_index,
+                })
+                .map(|result| result.dispatch);
+        }
         self.ensure_no_active_stroke()?;
         let item_id = LightTableItemId::from_raw(item_id);
         let mut edit = self.begin_document_edit()?;
