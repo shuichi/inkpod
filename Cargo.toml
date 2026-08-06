@@ -5,6 +5,7 @@ members = [
     "rust/inkpod-format",
     "rust/inkpod-image",
 ]
+exclude = ["rust/inkpod-format/fuzz"]
 resolver = "3"
 
 [workspace.package]

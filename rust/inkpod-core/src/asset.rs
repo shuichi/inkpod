@@ -286,6 +286,56 @@ pub(crate) struct AssetStore {
 }
 
 impl AssetStore {
+    pub(crate) fn persistent_records(&self) -> Vec<(AssetId, AssetDescriptor, Vec<u8>)> {
+        self.records
+            .values()
+            .map(|record| (record.id(), record.descriptor(), record.payload().to_vec()))
+            .collect()
+    }
+
+    pub(crate) fn ingest_persistent(
+        &mut self,
+        id: AssetId,
+        descriptor: AssetDescriptor,
+        payload: Vec<u8>,
+    ) -> Result<(), CoreError> {
+        let record = match descriptor.kind {
+            AssetKind::CanonicalRaster => self.ingest_raster(RasterAssetInput {
+                width: descriptor.width.ok_or(CoreError::Format(
+                    "persistent raster asset width is missing".to_owned(),
+                ))?,
+                height: descriptor.height.ok_or(CoreError::Format(
+                    "persistent raster asset height is missing".to_owned(),
+                ))?,
+                pixel_format: descriptor.pixel_format.ok_or(CoreError::Format(
+                    "persistent raster asset format is missing".to_owned(),
+                ))?,
+                color_space: descriptor.color_space,
+                alpha_semantics: descriptor.alpha_semantics.ok_or(CoreError::Format(
+                    "persistent raster alpha semantics are missing".to_owned(),
+                ))?,
+                canonical_stride: descriptor.canonical_stride.ok_or(CoreError::Format(
+                    "persistent raster stride is missing".to_owned(),
+                ))?,
+                pixels: payload,
+                expected_id: Some(id),
+            })?,
+            AssetKind::CanonicalVectorStream | AssetKind::CanonicalSampleStream => self
+                .ingest_stream(CanonicalStreamInput {
+                    kind: descriptor.kind,
+                    element_count: descriptor.logical_element_count,
+                    payload,
+                    expected_id: Some(id),
+                })?,
+        };
+        if record.descriptor() != descriptor {
+            return Err(CoreError::Format(
+                "persistent asset descriptor is not canonical".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Interns a validated immutable record produced by another store.
     ///
     /// The record's canonical identity and payload were already validated at

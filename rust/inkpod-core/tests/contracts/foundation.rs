@@ -98,8 +98,8 @@ fn acceptance_saved_drawing_vertical_slice() {
     ));
     let saved = core.save(&path).unwrap();
     assert!(
-        saved.dirty,
-        "production v2 saves document pixels but cannot claim the changed editor target was saved"
+        !saved.dirty,
+        "v8 normal save persists both document and editor savepoints"
     );
     let expected_snapshot = core.build_snapshot();
     drop(core);

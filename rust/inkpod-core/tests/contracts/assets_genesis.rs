@@ -244,29 +244,35 @@ fn codec_path_and_external_file_lifetime_do_not_change_asset_identity() {
         "inkpod-asset-base-recovery-{}-{sequence}.inkpod",
         std::process::id()
     ));
-    let sentinel = b"existing file must survive rejected asset-base save";
+    let sentinel = b"existing file is atomically replaced by an asset-base save";
     fs::write(&normal_path, sentinel).unwrap();
     fs::write(&recovery_path, sentinel).unwrap();
     let before_info = file_core.document_info().unwrap();
     let before_usage = file_core.asset_store_usage();
-    assert!(matches!(
-        file_core.save(&normal_path),
-        Err(CoreError::InvalidState(
-            "production native format cannot preserve an immutable asset base"
-        ))
-    ));
-    assert!(matches!(
-        file_core.autosave(&recovery_path),
-        Err(CoreError::InvalidState(
-            "production native format cannot preserve an immutable asset base"
-        ))
-    ));
-    assert_eq!(fs::read(&normal_path).unwrap(), sentinel);
-    assert_eq!(fs::read(&recovery_path).unwrap(), sentinel);
-    assert_eq!(file_core.document_info().unwrap(), before_info);
+    file_core.save(&normal_path).unwrap();
+    file_core.autosave(&recovery_path).unwrap();
+    assert_ne!(fs::read(&normal_path).unwrap(), sentinel);
+    assert_ne!(fs::read(&recovery_path).unwrap(), sentinel);
+    assert!(!file_core.document_info().unwrap().dirty);
+    assert_eq!(
+        file_core.document_info().unwrap().document_uuid,
+        before_info.document_uuid
+    );
     assert_eq!(file_core.asset_store_usage(), before_usage);
     assert_eq!(
         file_core
+            .export_common_raster(CommonRasterFormat::Png, false)
+            .unwrap(),
+        expected
+    );
+    let mut reopened = Core::new();
+    reopened.open(&normal_path).unwrap();
+    assert_eq!(
+        reopened.genesis_info().unwrap().base_surface,
+        BaseSurface::Asset(png_id)
+    );
+    assert_eq!(
+        reopened
             .export_common_raster(CommonRasterFormat::Png, false)
             .unwrap(),
         expected
@@ -556,7 +562,7 @@ fn large_stroke_payload_promotes_to_bounded_sample_asset() {
 }
 
 #[test]
-fn batch_copies_asset_backed_sources_but_rejects_unrepresentable_v2_output_before_io() {
+fn batch_copies_asset_backed_sources_and_writes_current_native_output() {
     let mut core = Core::new();
     core.import_common_raster(
         CommonRasterFormat::Png,
@@ -625,17 +631,19 @@ fn batch_copies_asset_backed_sources_but_rejects_unrepresentable_v2_output_befor
             |_, _| true,
         )
         .unwrap();
-    assert_eq!(report.failure_count(), 1);
-    assert_eq!(report.items[0].outcome, BatchItemOutcome::Failed);
-    assert!(
-        report.items[0]
-            .message
-            .contains("cannot preserve an immutable asset base")
-    );
-    assert!(
-        !output.exists(),
-        "v2 rejection must precede directory creation"
-    );
+    assert_eq!(report.failure_count(), 0);
+    assert_eq!(report.items[0].outcome, BatchItemOutcome::Succeeded);
+    let output_path = report.items[0]
+        .output_path
+        .as_ref()
+        .expect("successful native batch output has a path");
+    assert!(output_path.exists());
+    let mut reopened = Core::new();
+    reopened.open(output_path).unwrap();
+    assert!(matches!(
+        reopened.genesis_info().unwrap().base_surface,
+        BaseSurface::Asset(_)
+    ));
     assert_eq!(core.document_info().unwrap(), before_info);
     assert_eq!(core.document_state_digest().unwrap(), before_digest);
     assert_eq!(core.asset_store_usage(), before_usage);

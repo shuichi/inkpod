@@ -199,8 +199,7 @@ impl Core {
         let Some(bounds) = mask_bounds(&current.selection)? else {
             return Err(CoreError::InvalidState("selection is empty"));
         };
-        let file = inkpod_format::read(&path)?;
-        let saved = CellDocument::from_file(file, self.document_revision)?;
+        let saved = self.staged_saved_document(&path)?;
         if saved.uuid != current.uuid
             || saved.width != current.width
             || saved.height != current.height

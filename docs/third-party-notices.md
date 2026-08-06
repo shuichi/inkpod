@@ -18,7 +18,7 @@ license expression は配布される crate manifest に基づく。
 TIFF、TGA、BMP は project の format crate 内で実装しており、別の codec dependency を追加しない。
 配布 package には、上記 expression に基づいて選択した upstream license text を同梱する。
 
-次期 `.inkpod` の canonical/section digest と Core の canonical document-state digest には、
+現行 `.inkpod` v8 の canonical/section digest と Core の canonical document-state digest には、
 公式 Rust 実装の [`blake3`](https://github.com/BLAKE3-team/BLAKE3) crate を使用する。
 公式 crate manifest（1.8.5）は
 `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` を宣言しており、inkpod は
@@ -28,8 +28,9 @@ exact version `=1.8.5`、`default-features = false`、feature `std` のみとし
 有効にしない。upstream build は target 既定の x64 assembly または ARM64 NEON C
 backend を選択し得るが、backend の選択は digest bytes を変えない。
 
-`cargo tree -p inkpod-core --target x86_64-pc-windows-msvc --edges normal,build`
-と `--target aarch64-pc-windows-msvc` の和集合で解決された、BLAKE3 の実際の
+`cargo tree -p inkpod-core` と `cargo tree -p inkpod-format` を
+`--target x86_64-pc-windows-msvc --edges normal,build` および
+`--target aarch64-pc-windows-msvc` で確認した和集合として、BLAKE3 の実際の
 Windows production 通常依存と build 依存は次のとおりである。未使用の optional
 依存は含めない。
 

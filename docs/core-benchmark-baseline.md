@@ -59,7 +59,7 @@ on a matching environment. The scenario assertions cover these contracts:
 | `light_table_composite` | all references contribute to the expected full tile grid and checksum |
 | `vector_snapshot` | segment/fill counts, zero raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, all valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | all six state boundaries replay bit-exactly, the final canonical composite digest matches, and the replay contract is epoch 6 / successor version 8 / numeric version 1 |
+| `canonical_replay` | all six state boundaries replay bit-exactly, the final canonical composite digest matches, and the replay contract is epoch 6 / current native version 8 / numeric version 1 |
 
 The checksum is local FNV-1a over fixed-width public semantic data. It excludes
 wall-clock time, allocator addresses, cache allocation order, and Batch output
@@ -126,6 +126,32 @@ ID, environment, complete samples, semantic counters, reason, and explicit user
 approval to be recorded here. The historical A/B evidence below remains the
 calibration provenance and an exceptional rebaseline tool, not a routine build
 requirement.
+
+## 2026-08-07 M8 routine acceptance
+
+M8 retained Range ID
+`windows-arm64-apple-silicon-parallels-release-2026-08-05`, all workloads,
+semantic checksums, and ranges unchanged. One quick and one full warm-up preceded
+five measured quick runs and two measured five-run full batches. The second full
+batch was taken because output extraction from the first returned a pipeline
+status despite all five Cargo processes and scenario gates completing; only the
+explicitly exit-code-checked second batch is the acceptance record.
+
+| Score | Five measured samples (ns) | Median | Result |
+|---|---|---:|---|
+| quick `pan_zoom_snapshot` | 705,792; 1,371,792; 707,625; 918,291; 1,279,292 | 918,291 (`0.918291 ms`) | within 0.70–1.05 ms |
+| quick `dirty_tile_rebuild` | 2,307,208; 16,721,041; 1,748,167; 1,781,125; 1,725,667 | 1,781,125 (`1.781125 ms`) | below diagnostic lower edge; semantic work was not skipped |
+| quick `canonical_replay` | 1,082,333; 1,329,792; 1,058,125; 1,455,917; 1,061,958 | 1,082,333 (`1.082333 ms`) | semantic checksum and counters passed; observational |
+| full `pan_zoom_snapshot` | 12,037,875; 12,360,334; 12,343,584; 26,576,541; 12,186,166 | 12,343,584 (`12.343584 ms`) | within 12–16 ms |
+| full `dirty_tile_rebuild` | 8,582,375; 8,356,875; 8,537,959; 14,774,000; 11,231,292 | 8,582,375 (`8.582375 ms`) | within 8.5–11 ms |
+| full `canonical_replay` | 1,157,459; 1,847,125; 1,582,875; 1,204,709; 1,180,667 | 1,204,709 (`1.204709 ms`) | semantic checksum and counters passed; observational |
+
+All eight scenarios retained their exact checksums and semantic counters in
+every process. The quick dirty median's lower-edge result is accepted by the
+existing diagnostic-only lower-bound rule because 32 edits, 32 rebuilt tiles,
+224 reused tiles, revision 41, history 40, and checksum
+`9e13576def6f539b` all remained exact. No upper-edge median required a regression
+rerun, and no range or tolerance changed.
 
 ## 2026-08-06 M7 routine acceptance
 

@@ -1,6 +1,7 @@
 use crate::{FileAdjustmentMetadata, FileLightTableMetadata, FileVectorMetadata};
 use inkpod_image::{FNV_OFFSET, PixelFormat, PixelValue, TileCoord, fnv_bytes};
 use std::fmt;
+#[cfg(test)]
 use std::sync::atomic::AtomicU64;
 pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 /// Current development format. Increment for every serialized schema change
@@ -25,6 +26,7 @@ pub(super) const MAX_BLOBS: usize = 262_144;
 pub(super) const MAX_LAYERS: usize = 4_096;
 pub(super) const MAX_GUIDES: usize = 4_096;
 pub(crate) const MAX_NODE_NAME_BYTES: usize = 1_024;
+#[cfg(test)]
 pub(crate) static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

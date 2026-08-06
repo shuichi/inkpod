@@ -100,6 +100,7 @@ impl Core {
             subpalette_index: None,
             editor_defaults,
             editor_session: None,
+            native_opaque_sections: Vec::new(),
             canonical_invocation_active: false,
         }
     }
@@ -304,6 +305,7 @@ pub struct Core {
     pub(super) subpalette_index: Option<usize>,
     pub(super) editor_defaults: EditorDefaults,
     pub(super) editor_session: Option<EditorSessionState>,
+    pub(super) native_opaque_sections: Vec<NativeSection>,
     pub(super) canonical_invocation_active: bool,
 }
 

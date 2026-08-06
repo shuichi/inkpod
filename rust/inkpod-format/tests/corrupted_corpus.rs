@@ -1,10 +1,11 @@
 use inkpod_format::{
-    BATCH_GRAPH_VERSION, CellFile, CommonRaster, CommonRasterFormat, FileBatchGraph,
-    FileBatchInput, FileBatchOperation, FileBatchOutput, FileBatchTarget, FilePlane, FileTile,
-    FrameMetadata, Margins, PlaneKind, RectI32, decode, decode_batch_graph, decode_common_raster,
-    encode, encode_batch_graph, encode_common_raster, read, read_batch_graph,
+    BATCH_GRAPH_VERSION, CommonRaster, CommonRasterFormat, FileBatchGraph, FileBatchInput,
+    FileBatchOperation, FileBatchOutput, FileBatchTarget, NativeFile, NativeRecord, NativeSection,
+    SECTION_CRITICAL, decode_batch_graph, decode_common_raster, decode_procedure_file,
+    encode_batch_graph, encode_common_raster, encode_procedure_file, read_batch_graph,
+    read_procedure_file,
 };
-use inkpod_image::{PixelFormat, PixelValue, TileCoord};
+use inkpod_image::PixelFormat;
 use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
@@ -28,7 +29,7 @@ fn parse_hex(source: &str) -> Vec<u8> {
 
 fn decode_without_panic(decoder: Decoder, bytes: &[u8]) -> Result<(), inkpod_format::FormatError> {
     catch_unwind(AssertUnwindSafe(|| match decoder {
-        Decoder::Native => decode(bytes).map(|_| ()),
+        Decoder::Native => decode_procedure_file(bytes).map(|_| ()),
         Decoder::Batch => decode_batch_graph(bytes).map(|_| ()),
         Decoder::Raster(format) => decode_common_raster(format, bytes).map(|_| ()),
     }))
@@ -57,78 +58,23 @@ impl Drop for TemporaryDirectory {
 }
 
 fn native_seed() -> Vec<u8> {
-    let frames = FrameMetadata {
-        hundred_frame: RectI32 {
-            x: 0,
-            y: 0,
-            width: 65,
-            height: 65,
-        },
-        reference_frame: RectI32 {
-            x: 32,
-            y: 32,
-            width: 65,
-            height: 65,
-        },
-        drawing_frame: RectI32 {
-            x: 0,
-            y: 0,
-            width: 65,
-            height: 65,
-        },
-        safe_frame: RectI32 {
-            x: 3,
-            y: 3,
-            width: 59,
-            height: 59,
-        },
-        margins: Margins::default(),
+    let section = |fourcc| NativeSection {
+        fourcc,
+        schema_version: 1,
+        flags: SECTION_CRITICAL,
+        records: vec![NativeRecord {
+            kind: 1,
+            schema_version: 1,
+            flags: 0,
+            payload: fourcc.to_vec(),
+        }],
     };
-    encode(&CellFile {
-        document_uuid: [0x5a; 16],
-        document_id: 1,
-        layer_id: 2,
-        main_plane_id: 3,
-        color_plane_id: 4,
-        width: 65,
-        height: 65,
-        dpi_x_milli: 96_000,
-        dpi_y_milli: 96_000,
-        frames,
-        main_line_color: PixelValue::Rgba([0, 0, 0, 255]),
-        palette: vec![PixelValue::Rgba([1, 2, 3, 255])],
-        planes: vec![
-            FilePlane {
-                id: 3,
-                kind: PlaneKind::MainLine,
-                pixel_format: PixelFormat::BinaryMask8,
-                width: 65,
-                height: 65,
-                tiles: vec![FileTile {
-                    coord: TileCoord { x: 1, y: 1 },
-                    width: 1,
-                    height: 1,
-                    bytes: vec![255],
-                }],
-            },
-            FilePlane {
-                id: 4,
-                kind: PlaneKind::Color,
-                pixel_format: PixelFormat::StraightRgba8,
-                width: 65,
-                height: 65,
-                tiles: vec![FileTile {
-                    coord: TileCoord { x: 1, y: 1 },
-                    width: 1,
-                    height: 1,
-                    bytes: vec![1, 2, 3, 255],
-                }],
-            },
-        ],
-        document_metadata: None,
-        light_table_metadata: None,
-        vector_metadata: None,
-        adjustment_metadata: None,
+    encode_procedure_file(&NativeFile {
+        primitive_catalog_digest: [0x5a; 32],
+        sections: [*b"META", *b"GENS", *b"ASST", *b"PROC", *b"EDIT"]
+            .into_iter()
+            .map(section)
+            .collect(),
     })
     .expect("native mutation seed must encode")
 }
@@ -186,7 +132,7 @@ fn acceptance_corrupted_file_corpus_is_bounded_and_non_destructive() {
             "native_manifest_overflow",
             Decoder::Native,
             include_str!("corpus/corrupted/native_manifest_overflow.hex"),
-            "manifest length is outside bounds",
+            "native header is truncated",
         ),
         (
             "batch_body_overflow",
@@ -235,7 +181,7 @@ fn acceptance_corrupted_file_corpus_is_bounded_and_non_destructive() {
             "{name} took the wrong bounded rejection path: {decode_error}"
         );
         let file_result = catch_unwind(AssertUnwindSafe(|| match decoder {
-            Decoder::Native => read(&input).map(|_| ()),
+            Decoder::Native => read_procedure_file(&input).map(|_| ()),
             Decoder::Batch => read_batch_graph(&input).map(|_| ()),
             Decoder::Raster(format) => decode_common_raster(format, &bytes).map(|_| ()),
         }));
@@ -294,7 +240,7 @@ fn mutation_fuzz_all_file_decoders_never_panics() {
                 let mut mutated = seed.clone();
                 mutated[index] ^= mask;
                 let result = catch_unwind(AssertUnwindSafe(|| match decoder {
-                    Decoder::Native => decode(&mutated).map(|_| ()),
+                    Decoder::Native => decode_procedure_file(&mutated).map(|_| ()),
                     Decoder::Batch => decode_batch_graph(&mutated).map(|_| ()),
                     Decoder::Raster(format) => decode_common_raster(format, &mutated).map(|_| ()),
                 }));

@@ -42,6 +42,9 @@ public_id!(
 );
 
 impl PrimitiveId {
+    pub(crate) const fn from_raw(value: u32) -> Self {
+        Self(value)
+    }
     /// Primitive ID for paper/frame metadata replacement.
     pub const UPDATE_PAPER_FRAMES: Self = Self(0x0001_0001);
     /// Primitive ID for creating one typed layer.
@@ -197,7 +200,6 @@ impl PrimitiveId {
 }
 
 impl ProcedureId {
-    #[cfg(test)]
     pub(crate) const fn from_raw(value: u64) -> Self {
         Self(value)
     }
@@ -237,11 +239,10 @@ impl ReplayEpoch {
     pub const CURRENT: Self = Self(6);
 }
 
-/// Top-level version reserved for the procedure-authoritative successor format.
+/// Exact current top-level procedure-authoritative native format version.
 ///
-/// Production `.inkpod` remains exact-current version 2 until the atomic
-/// successor cutover. This value is the build/replay contract a successor writer must use;
-/// it deliberately does not enable a partial successor reader or writer.
+/// The build, reader, writer, and replay contract all use this value. Earlier
+/// and later top-level versions are rejected without migration.
 pub const PROCEDURE_FORMAT_VERSION: u32 = 8;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
@@ -269,7 +270,7 @@ impl ReplayContract {
         self.replay_epoch
     }
 
-    /// Returns the reserved top-level successor format version.
+    /// Returns the exact current top-level native format version.
     #[must_use]
     pub const fn procedure_format_version(self) -> u32 {
         self.procedure_format_version

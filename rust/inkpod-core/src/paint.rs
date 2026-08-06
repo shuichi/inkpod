@@ -500,6 +500,9 @@ mod tests {
                 document.layers[0].planes[0].id.get(),
             )
         };
+        // The test-only direct fixture mutation establishes Genesis; production
+        // topology changes always reach this boundary through a canonical primitive.
+        core.reset_history(true);
         core.set_active_node(layer_id, plane_id).unwrap();
         let line_color = PixelValue::Rgba16([1_001, 2_002, 3_003, 65_535]);
         core.set_main_line_color(line_color).unwrap();

@@ -276,7 +276,7 @@ fn io_001_manifest_and_blobs_round_trip() {
 
 #[test]
 fn non_current_container_versions_are_rejected_before_format_freeze() {
-    for version in [FORMAT_VERSION - 1, FORMAT_VERSION + 1] {
+    for version in [1_u32, 3_u32] {
         let mut encoded = encode(&base_fixture()).unwrap();
         encoded[8..12].copy_from_slice(&version.to_le_bytes());
         assert!(matches!(
@@ -284,6 +284,193 @@ fn non_current_container_versions_are_rejected_before_format_freeze() {
             Err(FormatError::Unsupported("format version is not supported"))
         ));
     }
+}
+
+fn procedure_file_fixture() -> NativeFile {
+    let singleton = |fourcc| NativeSection {
+        fourcc,
+        schema_version: 1,
+        flags: SECTION_CRITICAL,
+        records: vec![NativeRecord {
+            kind: 1,
+            schema_version: 1,
+            flags: 0,
+            payload: fourcc.to_vec(),
+        }],
+    };
+    NativeFile {
+        primitive_catalog_digest: [0x5a; 32],
+        sections: vec![
+            singleton(*b"PROC"),
+            singleton(*b"EDIT"),
+            singleton(*b"META"),
+            NativeSection {
+                fourcc: *b"ASST",
+                schema_version: 1,
+                flags: SECTION_CRITICAL,
+                records: Vec::new(),
+            },
+            singleton(*b"GENS"),
+            NativeSection {
+                fourcc: *b"VEND",
+                schema_version: 3,
+                flags: OPAQUE_PRESERVE,
+                records: vec![NativeRecord {
+                    kind: 42,
+                    schema_version: 7,
+                    flags: 0x1020_3040,
+                    payload: vec![9, 8, 7, 6],
+                }],
+            },
+        ],
+    }
+}
+
+#[test]
+fn io_001_v8_directory_digest_and_opaque_sections_round_trip() {
+    let file = procedure_file_fixture();
+    let bytes = encode_procedure_file(&file).unwrap();
+    assert_eq!(&bytes[0..8], b"INKPOD\0\0");
+    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 8);
+    assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 6);
+    assert_eq!(u32::from_le_bytes(bytes[16..20].try_into().unwrap()), 128);
+    let mut expected = file;
+    expected
+        .sections
+        .sort_by_key(|section| (section.fourcc, section.schema_version));
+    assert_eq!(decode_procedure_file(&bytes).unwrap(), expected);
+
+    let directory_offset = u64::from_le_bytes(bytes[32..40].try_into().unwrap()) as usize;
+    let identities = bytes[directory_offset..]
+        .chunks_exact(128)
+        .map(|entry| {
+            (
+                entry[0..4].to_vec(),
+                u16::from_le_bytes(entry[4..6].try_into().unwrap()),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(identities.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn io_001_v8_rejects_v2_missing_duplicate_overlap_and_bad_digest() {
+    let file = procedure_file_fixture();
+    let encoded = encode_procedure_file(&file).unwrap();
+
+    let mut v2 = encoded.clone();
+    v2[8..12].copy_from_slice(&2_u32.to_le_bytes());
+    assert!(matches!(
+        decode_procedure_file(&v2),
+        Err(FormatError::Unsupported("format version is not supported"))
+    ));
+
+    let mut missing = file.clone();
+    missing
+        .sections
+        .retain(|section| section.fourcc != *b"GENS");
+    assert!(matches!(
+        encode_procedure_file(&missing),
+        Err(FormatError::Invalid("required native section is missing"))
+    ));
+
+    let mut duplicate = file.clone();
+    duplicate.sections.push(duplicate.sections[0].clone());
+    assert!(matches!(
+        encode_procedure_file(&duplicate),
+        Err(FormatError::Invalid("native section is duplicated"))
+    ));
+
+    let mut checkpoint = file.clone();
+    checkpoint.sections.push(NativeSection {
+        fourcc: *b"CKPT",
+        schema_version: 1,
+        flags: 0,
+        records: vec![NativeRecord {
+            kind: 1,
+            schema_version: 1,
+            flags: 0,
+            payload: Vec::new(),
+        }],
+    });
+    assert!(matches!(
+        encode_procedure_file(&checkpoint),
+        Err(FormatError::Unsupported(
+            "checkpoint sections are not supported by this format epoch"
+        ))
+    ));
+
+    let directory_offset = u64::from_le_bytes(encoded[32..40].try_into().unwrap()) as usize;
+    let mut overlap = encoded.clone();
+    let edit_offset = overlap[directory_offset + 128 + 16..directory_offset + 128 + 24].to_vec();
+    overlap[directory_offset + 256 + 16..directory_offset + 256 + 24].copy_from_slice(&edit_offset);
+    assert!(decode_procedure_file(&overlap).is_err());
+
+    let mut bad_digest = encoded;
+    bad_digest[80] ^= 1;
+    assert!(matches!(
+        decode_procedure_file(&bad_digest),
+        Err(FormatError::ChecksumMismatch)
+    ));
+}
+
+#[test]
+fn io_001_v8_chunked_cancel_keeps_existing_destination_and_removes_temp() {
+    let directory = std::env::temp_dir().join(format!(
+        "inkpod-v8-cancel-test-{}-{}",
+        std::process::id(),
+        TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir(&directory).unwrap();
+    let path = directory.join("cell.inkpod");
+    fs::write(&path, b"original").unwrap();
+    let mut file = procedure_file_fixture();
+    file.sections
+        .iter_mut()
+        .find(|section| section.fourcc == *b"VEND")
+        .unwrap()
+        .records[0]
+        .payload = vec![0x5a; 2_500_000];
+    let mut checks = 0;
+    let result = save_procedure_file_atomic_with_cancel(&path, &file, || {
+        checks += 1;
+        checks == 3
+    });
+    assert!(matches!(result, Err(FormatError::Cancelled)));
+    assert_eq!(fs::read(&path).unwrap(), b"original");
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+    fs::remove_file(path).unwrap();
+    fs::remove_dir(directory).unwrap();
+}
+
+#[test]
+fn io_001_v8_atomic_save_replaces_an_existing_container() {
+    let directory = std::env::temp_dir().join(format!(
+        "inkpod-v8-replace-test-{}-{}",
+        std::process::id(),
+        TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir(&directory).unwrap();
+    let path = directory.join("cell.inkpod");
+    let first = procedure_file_fixture();
+    save_procedure_file_atomic(&path, &first).unwrap();
+    let mut second = first;
+    second
+        .sections
+        .iter_mut()
+        .find(|section| section.fourcc == *b"VEND")
+        .unwrap()
+        .records[0]
+        .payload = vec![1, 2, 3, 4];
+    save_procedure_file_atomic(&path, &second).unwrap();
+    let mut expected = second;
+    expected
+        .sections
+        .sort_by_key(|section| (section.fourcc, section.schema_version));
+    assert_eq!(read_procedure_file(&path).unwrap(), expected);
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+    fs::remove_file(path).unwrap();
+    fs::remove_dir(directory).unwrap();
 }
 
 #[test]

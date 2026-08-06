@@ -509,7 +509,10 @@ fn acceptance_layer_tree_undo_redo_save_reopen_and_validation() {
     let mut reopened = Core::new();
     reopened.open(&path).unwrap();
     assert_eq!(reopened.layers().unwrap().len(), 1);
-    reopened.undo().unwrap_err();
+    reopened.undo().unwrap();
+    assert_eq!(reopened.layers().unwrap().len(), 2);
+    reopened.redo().unwrap();
+    assert_eq!(reopened.layers().unwrap().len(), 1);
 
     let revision = reopened.document_info().unwrap().document_revision;
     assert!(matches!(

@@ -131,7 +131,7 @@ impl LightTableSource {
         )
     }
 
-    fn from_record(
+    pub(crate) fn from_record(
         document_uuid: u128,
         source_revision: u64,
         reference_frame: RectI32,

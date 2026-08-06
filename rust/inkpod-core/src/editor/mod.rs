@@ -1,6 +1,6 @@
 //! Core-owned EditorDefaults, per-document-session EditorState, and canonical EDIT DTOs.
 
-mod codec;
+pub(crate) mod codec;
 mod model;
 mod operations;
 

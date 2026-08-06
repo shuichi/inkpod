@@ -74,7 +74,7 @@ content-addressed `AssetId` は別 namespace である。
 M7 adds two read-only, fixed-layout queries without transferring ownership:
 
 - `inkpod_core_get_replay_contract` writes a caller-owned
-  `InkpodReplayContract`. It reports replay epoch 6, reserved successor
+  `InkpodReplayContract`. It reports replay epoch 6, current
   procedure/container version 8, canonical-numeric version 1, the closed
   primitive count, and the BLAKE3-256 catalog digest. It is Core-owner-thread
   only and changes no document, revision, history, dirty state, registry, or
@@ -91,8 +91,8 @@ and no unknown feature flags. `algorithm` is
 `INKPOD_DIGEST_BLAKE3_256`; all 32 digest bytes are copied into the caller's
 record. NULL, short records, unknown flags, wrong thread, and panic follow the
 normal ABI status contract and do not partially write the output record. These
-queries expose verification values only: they do not add a v8 production
-reader or writer, and production `.inkpod` remains exact-current v2 until M8.
+queries expose verification values only; the production save/open ABI uses the
+same v8/replay/catalog contract and rejects every noncurrent native version.
 
 ## ABI v3 value/ID control plane
 
@@ -429,13 +429,10 @@ queue へ投入する前に lifetime を失う pointer を work item へ保持�
 issue-time session/generation と入力値を所有してから呼び出す。ABI v3 では variable payload を
 同期 bounded call で generation-tagged asset/sample ID に変換し、closed typed queue には
 `CommandContext`、base revision、target、opcode/schema、固定値、ID だけを格納する。caller buffer は
-queue item に入らない。また M8 までは
-production `.inkpod` v2 が `GENS`/`ASST` を保存・復元しないため、この runtime ingestion 契約を
-successor container の end-to-end persistence とみなさない。特に raster-open 由来の asset-backed
-Genesis は M8 まで normal save、autosave/recovery、Batch `.inkpod` output ができない。Core は
-`INVALID_STATE` を file/directory 作成より前に返し、既存出力、document/revision/dirty、normal path、
-savepoint を変更しない。Windows adapter も current path と recent-file list を変更しない。一般画像への
-flat export はこの制約を受けない。
+queue item に入らない。V8 は `GENS`/`ASST` に asset-backed Genesis と全 retained branch の asset graph
+を保存し、normal save、autosave/recovery、Batch `.inkpod` output、reopen を同じ Core-owned mapping へ
+接続する。Windows adapter は成功後だけ current path、recent-file list、dirty 表示を更新する。一般画像への
+flat export は別の出力経路である。
 
 ## 編集状態と排他
 
@@ -468,9 +465,10 @@ preview の描画更新は snapshot 側の transient revision で区別する。
 | stroke end、preview apply、floating commit                    | 実変更時に 1 回進む  | dirty                             | 高々 1 単位                       |
 | 直接の文書編集                                                | 実変更時に 1 回進む  | dirty                             | 原則 1 単位                       |
 | Undo/Redo/history jump                                        | 結果状態へ進む       | savepoint との位置で再計算        | cursor を移動し item は増やさない |
-| 現行 v2 の通常保存                                            | 不変                 | document だけ clean。editor dirty は保持 | 不変                         |
+| 現行 v8 の通常保存                                            | 不変                 | replace 成功時に document/editor とも clean | 不変                       |
 | autosave                                                      | 不変                 | 不変                              | 不変                              |
-| new/open/import/recovery                                      | 新しい文書情報が正本 | 戻り情報が正本                    | 旧 history を引き継がない         |
+| new/import                                                    | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis/history            |
+| v8 open/recovery                                              | generation 内で rebase | 戻り情報が正本                  | file の全 journal/history を復元   |
 
 no-op の厳密な出力や revision は各関数の Doxygen 契約に従う。frontend は file timestamp ではなく、
 Core が返す document flags と savepoint に基づいて未保存状態を表示する。
@@ -582,17 +580,16 @@ batch execution だけは cancel/失敗時にも report owner を返し得る。
 
 ## 保存、autosave、recovery
 
-通常保存は同一 directory の temporary file を完成・flush・close してから置換する。成功時だけ normal path と
-document savepoint が進む。現行 production `.inkpod` v2 は canonical EDIT frame を保存・復元しないため、
-M3 の editor savepoint は進めず、editor dirty があれば session dirty は解消しない。失敗時に元 file を
-truncate せず、document/editor のどちらの savepoint も変更しない。M8 の atomic format cutover までは
-`session_dirty = document_dirty || editor_dirty` がこの差分を利用者へ正しく公開する。
+通常保存は v8 `META/GENS/ASST/PROC/EDIT` と prospective document/editor savepoint を構築し、同一
+directory の temporary file を chunk write・flush・sync・close してから置換する。成功後だけ normal path と
+両 savepoint を Core へ公開するため、EditorState だけが dirty な場合も reopen 直後は clean になる。失敗時に
+元 file を truncate せず、document/editor のどちらの savepoint も変更しない。
 
 autosave、export は出力を atomic に書いても normal path、document/editor savepoint、dirty を変えない。
-recovery open は文書と built-in defaults からコピーした EditorState を dirty・recovered・pathless として
-開く。通常 v2 open は built-in defaults の clean EditorState を作るが、保存前の EditorState を復元した
-ものとはみなさない。以前の通常 file を上書きするには、ユーザーが明示した path で改めて通常保存する
-必要がある。
+通常 v8 open は Genesis/assets/procedure journal、cursor/branches、全 ID authority、EditorState、両 savepoint
+を staged Core で検証・復元してから generation を一回だけ置換する。recovery open も同じ内容を復元するが、
+両 savepoint と path authority を消して dirty・recovered・pathless にする。以前の通常 file を上書きするには、
+ユーザーが明示した path で改めて通常保存する必要がある。
 
 active stroke/preview/floating 中は保存や open を実行せず、Core queue 上で完了または cancel 後に行う。
 

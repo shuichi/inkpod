@@ -105,6 +105,7 @@ use selection::FloatingSelection;
 use stroke::StrokeSession;
 use view::default_shortcuts;
 
+use inkpod_format::NativeSection;
 use inkpod_format::{
     CellFile, CommonRaster, FileAdjustmentLayer, FileAdjustmentMetadata, FileDocumentMetadata,
     FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties, FileTile, FormatError,

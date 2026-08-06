@@ -787,7 +787,7 @@ fn reopen_resolves_target_past_a_leading_layer_without_planes() {
 }
 
 #[test]
-fn editor_savepoint_transitions_are_honest_while_production_v2_omits_edit() {
+fn editor_savepoint_and_edit_frame_round_trip_with_current_native_format() {
     let sequence = TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir();
     let normal = root.join(format!("inkpod-editor-contract-{sequence}.inkpod"));
@@ -816,11 +816,8 @@ fn editor_savepoint_transitions_are_honest_while_production_v2_omits_edit() {
     assert!(!encoded_export.is_empty());
     assert!(core.editor_state().unwrap().dirty);
     core.save(&normal).unwrap();
-    assert!(
-        core.editor_state().unwrap().dirty,
-        "production v2 cannot advance the editor savepoint before the atomic format cutover"
-    );
-    assert!(core.document_info().unwrap().dirty);
+    assert!(!core.editor_state().unwrap().dirty);
+    assert!(!core.document_info().unwrap().dirty);
 
     let frame = core.editor_state_frame().unwrap();
     let token = core.editor_savepoint_token().unwrap();
@@ -830,10 +827,10 @@ fn editor_savepoint_transitions_are_honest_while_production_v2_omits_edit() {
 
     let mut reopened = Core::new();
     reopened.open(&normal).unwrap();
-    assert_ne!(reopened.editor_state_frame().unwrap(), frame);
+    assert_eq!(reopened.editor_state_frame().unwrap(), frame);
     assert_eq!(
         reopened.editor_state().unwrap().state.active_tool,
-        EditorTool::Pencil
+        EditorTool::Brush
     );
     assert!(!reopened.document_info().unwrap().dirty);
 

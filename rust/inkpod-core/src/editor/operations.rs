@@ -68,8 +68,8 @@ impl Core {
     /// Encodes the target canonical EDIT frame without changing any Core state.
     ///
     /// The frame contains EditorRevision, the canonical EditorState frame, and
-    /// its domain-separated digest. It is the target DTO for a future atomic
-    /// format cutover and is not written to the production `.inkpod` v2 container.
+    /// its domain-separated digest. Normal and recovery native saves write this
+    /// exact frame to the required `EDIT` section.
     pub fn editor_state_frame(&self) -> Result<Vec<u8>, CoreError> {
         let session = self.editor_session.as_ref().ok_or(CoreError::NoDocument)?;
         Ok(encode_edit_frame(session))

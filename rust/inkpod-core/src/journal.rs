@@ -22,7 +22,6 @@ macro_rules! journal_id {
                 self.0
             }
 
-            #[cfg(test)]
             pub(crate) const fn from_raw(value: u64) -> Self {
                 Self(value)
             }
@@ -84,6 +83,21 @@ pub struct JournalCommit {
 }
 
 impl JournalCommit {
+    pub(crate) fn from_persistent(
+        event_id: JournalEventId,
+        procedure: Arc<CanonicalProcedure>,
+        parent_state_id: StateId,
+        committed_state_id: StateId,
+        branch_id: BranchId,
+    ) -> Self {
+        Self {
+            event_id,
+            procedure,
+            parent_state_id,
+            committed_state_id,
+            branch_id,
+        }
+    }
     /// Returns this record's monotonic event ID.
     #[must_use]
     pub const fn event_id(&self) -> JournalEventId {
@@ -126,6 +140,21 @@ pub struct JournalHistoryMove {
 }
 
 impl JournalHistoryMove {
+    pub(crate) const fn from_persistent(
+        event_id: JournalEventId,
+        kind: HistoryMoveKind,
+        source_state_id: StateId,
+        destination_state_id: StateId,
+        active_branch_id: BranchId,
+    ) -> Self {
+        Self {
+            event_id,
+            kind,
+            source_state_id,
+            destination_state_id,
+            active_branch_id,
+        }
+    }
     /// Returns this record's monotonic event ID.
     #[must_use]
     pub const fn event_id(self) -> JournalEventId {
@@ -168,6 +197,21 @@ pub struct JournalBranchCut {
 }
 
 impl JournalBranchCut {
+    pub(crate) const fn from_persistent(
+        event_id: JournalEventId,
+        fork_state_id: StateId,
+        old_active_tail_state_id: StateId,
+        new_branch_id: BranchId,
+        deactivated_branch_id: BranchId,
+    ) -> Self {
+        Self {
+            event_id,
+            fork_state_id,
+            old_active_tail_state_id,
+            new_branch_id,
+            deactivated_branch_id,
+        }
+    }
     /// Returns this record's monotonic event ID.
     #[must_use]
     pub const fn event_id(self) -> JournalEventId {
@@ -339,10 +383,12 @@ struct ReplayNode {
     next_id: StableIdCursor,
 }
 
-struct RebuiltRuntime {
-    history: Vec<HistoryEntry>,
-    history_cursor: usize,
-    info: JournalReplayInfo,
+pub(super) struct RebuiltRuntime {
+    pub(super) document: CellDocument,
+    pub(super) history: Vec<HistoryEntry>,
+    pub(super) history_cursor: usize,
+    pub(super) next_id: StableIdCursor,
+    pub(super) info: JournalReplayInfo,
 }
 
 impl Core {
@@ -561,7 +607,7 @@ impl Core {
         Ok(())
     }
 
-    fn rebuild_runtime_from_journal(&self) -> Result<RebuiltRuntime, CoreError> {
+    pub(super) fn rebuild_runtime_from_journal(&self) -> Result<RebuiltRuntime, CoreError> {
         if self.journal.len() > MAX_JOURNAL_EVENTS {
             return Err(CoreError::InvalidState("journal event limit exceeded"));
         }
@@ -808,14 +854,17 @@ impl Core {
                     "current state is not on the active branch",
                 ))?
         };
-        let document = &nodes
+        let current_node = nodes
             .get(&current_state)
-            .ok_or(CoreError::InvalidState("current journal state is missing"))?
-            .document;
-        let (_, document_state_digest) = canonical_document_state(document)?;
+            .ok_or(CoreError::InvalidState("current journal state is missing"))?;
+        let document = current_node.document.clone();
+        let next_id = current_node.next_id;
+        let (_, document_state_digest) = canonical_document_state(&document)?;
         Ok(RebuiltRuntime {
+            document,
             history,
             history_cursor,
+            next_id,
             info: JournalReplayInfo {
                 document_state_digest,
                 current_state_id: current_state,

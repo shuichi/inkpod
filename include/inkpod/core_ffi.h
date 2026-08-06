@@ -36,8 +36,8 @@
  * 文書編集 API は、成功して実変更があると document revision を 1 回進め、document dirty にし、
  * 原則 1 Undo 単位を追加する。EditorState の意味変更は独立した EditorRevision/digest/editor dirty
  * だけを進める。公開 session dirty は `document_dirty || editor_dirty` である。query、view、shortcut、
- * snapshot、task はいずれの意味状態も変えない。production v2の通常保存はrevision/Undoを変えず
- * document savepointだけを現在位置へ移し、未保存のEditorStateがあればsession dirtyを維持する。
+ * snapshot、task はいずれの意味状態も変えない。current native formatの通常保存はrevision/Undoを変えず
+ * document/editor両savepointを現在位置へ移し、session dirtyを解消する。
  * autosaveは両方の通常savepointを変えない。個別に部分出力を明記した
  * `BUFFER_TOO_SMALL`、`FILL_OVERFLOW`、cancelled batch report、error-message API を除き、失敗時は
  * 文書、履歴、所有権出力を変更せず、通常の値出力は未使用とする。
@@ -2573,9 +2573,9 @@ InkpodStatus inkpod_core_revert_active_selection(
  * @par 契約
  * Core owner thread。`core`/path/`out_info` は非 NULL・非重複、path は非空 UTF-8 byte span として呼び出し中だけ borrowed。
  * 同一 directory の一時 file を完成・flush・close 後に置換する。成功時 revision/Undo は不変、
- * document normal savepoint/pathだけを更新してout_infoを書く。production v2はEditorStateを保存しないため
- * editor savepointを進めず、editor dirtyならsession dirtyを維持する。失敗時既存file・文書・両savepoint・
- * 出力は不変。production v2が保持できないasset-backed Genesisはfile I/O前に`INVALID_STATE`。
+ * document/editor normal savepointとpathを、durable replacement成功後だけ更新してout_infoを書く。
+ * Genesis、Assets、procedure/history journal、EditorStateを一つのcurrent native containerへ保存する。
+ * 失敗時既存file・文書・両savepoint・出力は不変。
  * stroke/preview/floating 中も `INVALID_STATE`。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
@@ -2603,8 +2603,8 @@ InkpodStatus inkpod_core_open(
  * @brief current document を recovery 用 `.inkpod` へ atomic 保存する。
  * @par 契約
  * Core owner thread。通常 save と同じ非 NULL/UTF-8/borrowed path・出力サイズ規則。
- * 成功時 out_info を書くが document revision、dirty、Undo、normal path/savepoint は変えない。失敗時文書と既存出力 file は不変。
- * production v2が保持できないasset-backed Genesisはfile I/O前に`INVALID_STATE`。stroke/preview/floating 中も `INVALID_STATE`。
+ * 成功時 out_info を書くが document revision、dirty、Undo、normal path/savepoint は変えない。Genesis、Assets、
+ * journal、EditorStateを復元可能な回復containerへ書く。失敗時文書と既存出力 file は不変。stroke/preview/floating 中は `INVALID_STATE`。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`INVALID_STATE`、`IO_ERROR`、`WRONG_THREAD`、`PANIC`。
  */

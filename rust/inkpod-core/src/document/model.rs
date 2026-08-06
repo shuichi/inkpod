@@ -221,9 +221,9 @@ impl CellDocument {
             palette: self.palette.colors().to_vec(),
             planes,
             document_metadata: Some(FileDocumentMetadata {
-                // Production v2 has no EDIT section. Keep its mandatory legacy
-                // fields deterministic without treating them as EditorState
-                // persistence; a future atomic format cutover owns that change.
+                // The Genesis archive retains these historical DTO fields for
+                // canonical byte stability. The authoritative EditorState is
+                // stored separately in the native EDIT section.
                 active_layer_id: layer_id.get(),
                 active_plane_id: main_plane_id.get(),
                 selection_plane_id: self.selection_plane_id.get(),
@@ -470,9 +470,8 @@ impl CellDocument {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: DocumentId::from_raw(file.document_id),
             cell_id: CellId::from_raw(synthetic_cell_id),
-            // Production v2 has no Genesis section. Before the successor
-            // container cutover, a validated v2 document reconstructs the
-            // specified allocation-free paper base.
+            // The archive DTO predates the explicit Genesis base field. Its
+            // caller installs the validated GENS discriminant after decoding.
             base_surface: BaseSurface::SolidWhite,
             width: file.width,
             height: file.height,

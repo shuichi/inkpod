@@ -247,7 +247,7 @@ fn light_table_swap_rejects_document_dirty_atomically() {
 }
 
 #[test]
-fn light_table_swap_accepts_editor_only_dirty_after_v2_save() {
+fn light_table_swap_accepts_saved_editor_state() {
     let mut core = Core::new();
     core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
@@ -286,12 +286,11 @@ fn light_table_swap_accepts_editor_only_dirty_after_v2_save() {
     let _ = std::fs::remove_file(&path);
     core.save(&path).unwrap();
     let before_swap = core.editor_state().unwrap();
-    assert_eq!(before_swap, changed_editor);
-    assert!(before_swap.dirty);
-    assert!(
-        core.document_info().unwrap().dirty,
-        "public session dirty remains document_dirty || editor_dirty"
-    );
+    assert_eq!(before_swap.revision, changed_editor.revision);
+    assert_eq!(before_swap.digest, changed_editor.digest);
+    assert_eq!(before_swap.state, changed_editor.state);
+    assert!(!before_swap.dirty);
+    assert!(!core.document_info().unwrap().dirty);
 
     let swapped = core.light_table_swap_with_active(item_id).unwrap();
     assert_eq!(swapped.document_uuid, 0x1414);
@@ -708,7 +707,7 @@ fn sequence_activate_and_step_reject_document_dirty_without_discarding_it() {
 }
 
 #[test]
-fn sequence_activate_and_step_accept_editor_only_dirty_after_v2_save() {
+fn sequence_activate_and_step_accept_after_editor_state_save() {
     let mut core = Core::new();
     let current = core
         .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
@@ -737,12 +736,11 @@ fn sequence_activate_and_step_accept_editor_only_dirty_after_v2_save() {
     let _ = std::fs::remove_file(&path);
     core.save(&path).unwrap();
     let before_activate = core.editor_state().unwrap();
-    assert_eq!(before_activate, changed_editor);
-    assert!(before_activate.dirty);
-    assert!(
-        core.document_info().unwrap().dirty,
-        "public session dirty remains document_dirty || editor_dirty"
-    );
+    assert_eq!(before_activate.revision, changed_editor.revision);
+    assert_eq!(before_activate.digest, changed_editor.digest);
+    assert_eq!(before_activate.state, changed_editor.state);
+    assert!(!before_activate.dirty);
+    assert!(!core.document_info().unwrap().dirty);
 
     let activated = core.sequence_activate(1).unwrap();
     assert_eq!(activated.document_uuid, 0x5555);

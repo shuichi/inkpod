@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+blake3 = { version = "=1.8.5", default-features = false, features = ["std"] }
 inkpod-image = { path = "../inkpod-image" }
 png = "0.17.16"
 

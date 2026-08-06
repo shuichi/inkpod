@@ -2066,6 +2066,16 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         GetCurrentProcessId(),
         static_cast<unsigned long long>(GetTickCount64()));
     const std::wstring path(temporary_file.data());
+    InkpodEditorStateInfo editor_before_save{};
+    editor_before_save.struct_size = sizeof(editor_before_save);
+    if (state.engine->Invoke(
+            [&editor_before_save](InkpodCore* core) {
+                return inkpod_core_get_editor_state(core, &editor_before_save);
+            },
+            false,
+            false) != INKPOD_STATUS_OK) {
+        return 48;
+    }
     if (SaveToPath(state, path) != INKPOD_STATUS_OK) {
         return 48;
     }
@@ -2074,7 +2084,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         ? path
         : path.substr(path_separator + 1U);
     if (!ReadDocumentTabLabel(state.Workspace().windows.document_tabs, 0, tab_label)
-        || tab_label != expected_saved_tab + L" *") {
+        || tab_label != expected_saved_tab) {
         DeleteFileW(path.c_str());
         return 717;
     }
@@ -2092,8 +2102,22 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 222;
     }
     InkpodDocumentInfo saved{};
+    InkpodEditorStateInfo editor_after_save{};
+    editor_after_save.struct_size = sizeof(editor_after_save);
     if (!QueryDocument(state, saved)
-        || (saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+        || (saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || state.engine->Invoke(
+               [&editor_after_save](InkpodCore* core) {
+                   return inkpod_core_get_editor_state(core, &editor_after_save);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || (editor_after_save.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || editor_after_save.editor_revision != editor_before_save.editor_revision
+        || std::memcmp(
+               editor_after_save.editor_digest,
+               editor_before_save.editor_digest,
+               sizeof(editor_after_save.editor_digest)) != 0) {
         DeleteFileW(path.c_str());
         return 49;
     }
@@ -2116,6 +2140,23 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if ((reopened.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
         DeleteFileW(path.c_str());
         return 251;
+    }
+    InkpodEditorStateInfo editor_after_reopen{};
+    editor_after_reopen.struct_size = sizeof(editor_after_reopen);
+    if (state.engine->Invoke(
+            [&editor_after_reopen](InkpodCore* core) {
+                return inkpod_core_get_editor_state(core, &editor_after_reopen);
+            },
+            false,
+            false) != INKPOD_STATUS_OK
+        || (editor_after_reopen.flags & INKPOD_EDITOR_STATE_DIRTY) != 0U
+        || editor_after_reopen.editor_revision != editor_before_save.editor_revision
+        || std::memcmp(
+               editor_after_reopen.editor_digest,
+               editor_before_save.editor_digest,
+               sizeof(editor_after_reopen.editor_digest)) != 0) {
+        DeleteFileW(path.c_str());
+        return 252;
     }
     const InkpodStrokeSample history_sample{
         sizeof(InkpodStrokeSample), 0U, 10.0F, 10.0F, 1.0F, 0U};
@@ -4463,26 +4504,18 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     const std::wstring asset_base_recovery = asset_base_save + L".recovery.inkpod";
     DeleteFileW(asset_base_save.c_str());
     DeleteFileW(asset_base_recovery.c_str());
-    const std::wstring path_before_asset_base_save =
-        state.Document().shell.current_path;
-    const std::wstring source_before_asset_base_save =
-        state.Document().shell.source_path;
-    const std::wstring recovery_before_asset_base_save =
-        state.Document().shell.recovery_path;
-    const std::wstring recovery_original_before_asset_base_save =
-        state.Document().shell.recovery_original_path;
     const std::size_t recent_before_asset_base_save =
         state.RecentDocumentCount();
     InkpodDocumentInfo after_asset_base_save = EmptyDocumentInfo();
     const InkpodStatus asset_base_save_status =
         SaveToPath(state, asset_base_save);
-    if (asset_base_save_status != INKPOD_STATUS_INVALID_STATE) {
+    if (asset_base_save_status != INKPOD_STATUS_OK) {
         DeleteFileW(asset_base_save.c_str());
         DeleteFileW(asset_base_recovery.c_str());
         state.lifetime.smoke_raster_path.clear();
         return 1487;
     }
-    if (GetFileAttributesW(asset_base_save.c_str()) != INVALID_FILE_ATTRIBUTES
+    if (GetFileAttributesW(asset_base_save.c_str()) == INVALID_FILE_ATTRIBUTES
         || GetFileAttributesW(asset_base_recovery.c_str()) != INVALID_FILE_ATTRIBUTES) {
         DeleteFileW(asset_base_save.c_str());
         DeleteFileW(asset_base_recovery.c_str());
@@ -4493,7 +4526,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         state.lifetime.smoke_raster_path.clear();
         return 1489;
     }
-    if (after_asset_base_save.flags != imported_without_source.flags
+    if ((after_asset_base_save.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
         || after_asset_base_save.document_revision
             != imported_without_source.document_revision
         || after_asset_base_save.view_revision != imported_without_source.view_revision
@@ -4502,15 +4535,15 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         state.lifetime.smoke_raster_path.clear();
         return 1490;
     }
-    if (state.Document().shell.current_path != path_before_asset_base_save
-        || state.Document().shell.source_path != source_before_asset_base_save
-        || state.Document().shell.recovery_path != recovery_before_asset_base_save
-        || state.Document().shell.recovery_original_path
-            != recovery_original_before_asset_base_save
-        || state.RecentDocumentCount() != recent_before_asset_base_save) {
+    if (state.Document().shell.current_path != asset_base_save
+        || !state.Document().shell.source_path.empty()
+        || state.Document().shell.recovery_path.empty()
+        || !state.Document().shell.recovery_original_path.empty()
+        || state.RecentDocumentCount() != recent_before_asset_base_save + 1U) {
         state.lifetime.smoke_raster_path.clear();
         return 1491;
     }
+    DeleteFileW(asset_base_save.c_str());
     if (CreateCell(state, 12U, 10U, 96000U) != INKPOD_STATUS_OK
         || !RefreshLightTablePane(state)
         || !WriteFileAtomically(state.lifetime.smoke_raster_path, smoke_raster_source)) {
@@ -4688,7 +4721,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     }
     InkpodDocumentInfo after_swap_save = EmptyDocumentInfo();
     if (!QueryDocument(state, after_swap_save)
-        || (after_swap_save.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+        || (after_swap_save.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
         DeleteFileW(swap_save.c_str());
         DeleteFileW((swap_save + L".recovery.inkpod").c_str());
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
@@ -4711,7 +4744,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         state.lifetime.smoke_raster_path.clear();
         return 4093;
     }
-    if (state.lifetime.smoke_dirty_prompt_count != swap_prompt_count + 1U) {
+    if (state.lifetime.smoke_dirty_prompt_count != swap_prompt_count) {
         DeleteFileW(swap_save.c_str());
         DeleteFileW((swap_save + L".recovery.inkpod").c_str());
         DeleteFileW(state.lifetime.smoke_raster_path.c_str());
@@ -4801,7 +4834,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     }
     InkpodDocumentInfo sequence_saved = EmptyDocumentInfo();
     if (!QueryDocument(state, sequence_saved)
-        || (sequence_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U) {
+        || (sequence_saved.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
         return 1507;
     }
     const std::uint32_t sequence_prompt_count =
@@ -4818,7 +4851,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (!QueryDocument(state, selected_ten)
         || state.Workspace().sequence_dialog.view.active_index != 2U
         || state.lifetime.smoke_dirty_prompt_count
-            != sequence_prompt_count + 1U) {
+            != sequence_prompt_count) {
         return 875;
     }
     SendMessageW(

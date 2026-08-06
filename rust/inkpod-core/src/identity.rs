@@ -113,7 +113,6 @@ impl StableIdCursor {
         Self(if value == 0 { 1 } else { value })
     }
 
-    #[cfg(test)]
     pub(crate) const fn next_raw(self) -> u64 {
         self.0
     }

@@ -414,8 +414,7 @@ pub(super) fn save_batch_output(
     path: &Path,
     mut is_cancelled: impl FnMut() -> bool,
 ) -> Result<(), CoreError> {
-    let document = working.document.as_ref().ok_or(CoreError::NoDocument)?;
-    crate::persistence::ensure_v2_can_represent_document_base(document)?;
+    working.document.as_ref().ok_or(CoreError::NoDocument)?;
     if graph.output.policy != BatchOutputPolicy::ExplicitOverwrite {
         if source.input_path.as_deref() == Some(path) {
             return Err(CoreError::InvalidState(
@@ -437,7 +436,13 @@ pub(super) fn save_batch_output(
     if let Some(parent) = parent {
         fs::create_dir_all(parent).map_err(|error| CoreError::Format(error.to_string()))?;
     }
-    inkpod_format::save_atomic_with_cancel(path, &document.to_file(), &mut is_cancelled)?;
+    let editor_savepoint = working
+        .editor_session
+        .as_ref()
+        .ok_or(CoreError::NoDocument)?
+        .digest;
+    let file = working.build_procedure_file(Some(working.current_state), Some(editor_savepoint))?;
+    inkpod_format::save_procedure_file_atomic_with_cancel(path, &file, &mut is_cancelled)?;
     Ok(())
 }
 

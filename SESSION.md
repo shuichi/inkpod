@@ -1,8 +1,8 @@
 # Rust Core プリミティブ・Procedure Call History・`.inkpod` 再設計計画
 
-更新日: 2026-08-06
+更新日: 2026-08-07
 
-状態: M0–M7 完了、M8–M9 未完。全production document mutationのcanonical primitive化、ABI v3、typed CoreHost queue、cross-architecture replay gate、旧 revision-max 判定式の正本化、環境別性能ゲートは反映済み
+状態: M0–M8 完了、M9 未完。全production document mutationのcanonical primitive化、ABI v3、typed CoreHost queue、cross-architecture replay gate、旧 revision-max 判定式の正本化、環境別性能ゲート、current-only `.inkpod` v8 cutoverは反映済み
 
 ## 1. 目的
 
@@ -773,6 +773,37 @@ Revision-max render-cache invariant:
 - `.inkpod` にmaterialized final rasterだけでは文書を成立させられず、Genesis/Assets/Proceduresから再構成できる。
 - reopen直後のUndo/Redoを含む利用者向け縦切りがWindows UIから通る。
 - `IO-001`、`HIST-001`、`ABI-001`の新契約がtestと文書で追跡される。
+
+完了記録 (2026-08-07):
+
+- production `.inkpod`をexact-current version 8へ切り替え、128-byte header、order-independent
+  section directory、required `META/GENS/ASST/PROC/EDIT`、section/file BLAKE3-256、8-byte
+  alignment、zero padding、opaque optional section round-trip、bounded current-only decodeを
+  `inkpod-format`へ実装した。v2を含む全non-current versionとreserved `CKPT`を拒否し、
+  migration、checkpoint、compressionは追加していない。
+- CoreはGenesis、rooted asset graph、全Commit/HistoryMove/BranchCut、76種のtyped canonical
+  invocation、cursor/inactive branch、document/editor savepoint、EditorState、stable-object・
+  Procedure・State・JournalEvent・Branch high-watermarkを保存し、open時にstaged fresh replayと
+  final digest照合後だけlive sessionを置換する。runtime `DocumentRevision`は新generationへ
+  rebaseし、Undo/Redo/jump/branch continuationとID非再利用をpublic contractで固定した。
+- normal saveはprospective document/editor savepointをencodeし、同一directoryのchunked
+  temporary write/flush/close/replace成功後だけpathと両savepointを公開する。autosaveは通常
+  authorityを進めず、recovery openはpathlessかつdirty、partial revertとBatch outputも同じ
+  v8 reader/writerへ接続した。cancel、corruption、non-current、replace failureは既存fileと
+  live Coreを変更しない。
+- Windowsの既存CoreHost/ABI save/open経路をv8へ接続し、通常save直後の両dirty解除、
+  EditorState復元、asset-backed Genesis、Light Table、sequenceのsave/reopenをGUI smokeで
+  通した。`native_v8`と`native_core_v8`のcoverage-guided fuzz targetを追加し、両targetの
+  buildを確認した。
+- Rustは330 tests、zero ignored、fmt、all-target/all-feature Clippy `-D warnings`、strict
+  rustdoc、8-scenario quick benchmarkを通過した。Core quick/fullはwarm-up後各5回で、
+  pan/dirty中央値が`0.918291/1.781125 ms`と`12.343584/8.582375 ms`、canonical replayが
+  `1.082333/1.204709 ms`となった。quick dirtyの下限未満は32 edit/32 rebuild/224 reuseと
+  checksumが一致する診断上の高速化であり、range、tolerance、workloadは変更していない。
+- Windows ARM64 Debug/Releaseをfresh configure/buildして各111 target、static CRT、portable
+  ZIP、unsigned MSIXを通過した。最終Debug CTestは28/28（ABI 24.80秒、GUI 176.88秒、全体
+  208.27秒）、Release private performance smokeはwheel 512 event/512 Presentとdrawing
+  16 stroke/544 sample/16 Presentを保持してexit 0、`git diff --check`も通過した。
 
 ### M9: Checkpoint・性能・安全性・旧経路削除
 

@@ -1,6 +1,7 @@
 # Native file format
 
-`.inkpod` v2 is a bounded little-endian container.
+`.inkpod` v8 is the bounded, procedure-authoritative, little-endian native
+container. Version 8 and replay epoch 6 are the only accepted native contract.
 
 Until the user explicitly declares a format freeze, Inkpod accepts only the
 current version of each application-owned file format. It provides no older-
@@ -9,11 +10,10 @@ schema change before code freeze must increment the format's top-level version;
 changing only a section or record version is not a substitute. The current
 schema should be replaced whenever a more robust or efficient design is found.
 
-## Procedure-authoritative successor contract
+## Current procedure-authoritative contract
 
-This section is the approved contract for the successor procedure-authoritative
-container. It reserves top-level format version 8 and replay epoch 6, but no v8
-reader or writer exists yet. The earlier v3/epoch-1, v4/epoch-2,
+This section defines the implemented procedure-authoritative container at
+top-level format version 8 and replay epoch 6. The earlier v3/epoch-1, v4/epoch-2,
 v5/epoch-3, v6/epoch-4, and v7/epoch-5 reservations were superseded before any
 reader or writer existed. Version 8 retains the hierarchical document commitment and the
 exact-depth, target-explicit `ApplyRasterStroke/v2` schema from the superseded
@@ -25,14 +25,14 @@ edit hashes only changed tile payloads instead of every allocated document
 pixel. This semantic digest is independent of the renderer's canonical
 revision-max cache identity. Asset and procedure-payload digest contracts remain
 version 1.
-Version 2 remains the exact current version until the format cutover is
-implemented and tested atomically; production code must not emit a partially
-implemented v8 file. Any schema or replay-semantics change
+Version 2 and every other version are rejected before Core state replacement;
+there is no migration or compatibility reader. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
 
 The authoritative sections are `META`, `GENS`, `ASST`, `PROC`, and `EDIT`.
-`CKPT` and `EXTM` are optional. There is no `HIST` section: history moves and
+`EXTM` and unknown opaque-preserve sections are optional. `CKPT` is reserved for
+M9 and is rejected by the v8 encoder and decoder. There is no `HIST` section: history moves and
 branch cuts are records in `PROC`, while cursor, active branch, savepoints, and
 ID high-watermarks are fields in `META`. A materialized document or checkpoint
 is never sufficient without Genesis, retained assets, and the procedure/control
@@ -125,9 +125,9 @@ application command IDs are not `PrimitiveId` values.
 The four procedures below retain their fully specified pre-M6 byte schemas. M6
 also stores bounded canonical bytes for every new typed invocation and retains
 that typed value as the runtime replay authority. M7 closes the
-cross-architecture bit-exact audit and catalog-digest gate; M8 will specify and
-atomically connect the persistent decoder/encoder for all invocation variants.
-Production v2 does not serialize these records. M3 left the two metadata
+cross-architecture bit-exact audit and catalog-digest gate; v8 atomically
+connects the persistent decoder/encoder for all invocation variants through the
+kind-7 canonical-invocation envelope described below. M3 left the two metadata
 primitives at v1 and replaced `ApplyRasterStroke` with exact-current v2. M4 adds
 `ImportRasterAsset/v1` and the inline-or-asset representation for stroke samples:
 
@@ -214,9 +214,15 @@ The schema-1 argument `value-kind` catalog is closed: 0 is the absent sentinel,
 1 Boolean (one byte, exactly 0 or 1), 2 U32 (four bytes), 3 Q16 document scalar
 (signed `i64`), 4 TaggedColor (tag 1 plus four RGBA8 bytes or tag 2 plus four
 little-endian RGBA16 channels), and 5 OrderedColorSequence (`u64` count, then
-`u64` element length plus one TaggedColor per element), and 6 StableObjectId
-(one nonzero little-endian `u64` in the document-wide namespace). Kind 0 is
-forbidden in a present argument; any other code is invalid.
+`u64` element length plus one TaggedColor per element), 6 StableObjectId
+(one nonzero little-endian `u64` in the document-wide namespace), and 7
+CanonicalInvocation (the exact bounded `canonical_arguments` byte string).
+Kind 7 is the persistence envelope used by the complete current primitive
+catalog: a Commit has either no argument record or exactly ordinal 1/kind
+7/present. The selected `PrimitiveId` and schema version determine the typed
+decoder. Decode must consume every byte, resolve required assets, and re-encode
+to identical canonical bytes before replay. Kind 0 is forbidden in a present
+argument; any other code is invalid.
 `ApplyRasterStroke/v2` accepts kind-4 tag 1/length 5 and tag 2/length 9 without
 reducing its canonical argument depth. The two color metadata primitives also
 accept either tag without depth conversion.
@@ -264,13 +270,14 @@ the common 16-byte record header defined below, then these exact payload bytes:
   by argument records, asset-reference records, input-ID records, output-ID
   records, then inline payload bytes.
 - A canonical argument record is `ordinal u32`, `value-kind u16`, `presence
-  u8`, zero `u8`, `length u64`, and `length` bytes. Ordinals are consecutive
-  from 1 in the primitive schema. Presence 0 requires kind 0 and length 0;
-  presence 1 requires the schema's exact fixed/sequence kind. The concatenated
-  argument records must equal the prefix length exactly.
+  u8`, zero `u8`, `length u64`, and `length` bytes. Current Commit records use
+  zero records for an empty canonical invocation or exactly ordinal 1, kind 7,
+  presence 1 for its complete canonical invocation. The concatenated argument
+  records must equal the prefix length exactly.
 - An asset-reference record is `argument ordinal u32`, zero `u32`, then the
-  32-byte `AssetId`. Input/output-ID records are `role ordinal u32`, typed
-  object-kind `u32`, and stable ID `u64`. Each sequence is strictly increasing
+  32-byte `AssetId`. Input/output-ID records are `role ordinal u32`, reserved
+  zero `u32`, and stable ID `u64`; the typed canonical invocation is the object-
+  kind authority in v8. Each sequence is strictly increasing
   by ordinal with no duplicate role. The primitive schema fixes whether each
   input/output role is required; transient object IDs are forbidden.
 - When payload length is zero, `ProcedurePayloadDigest` is 32 zero bytes and no
@@ -383,12 +390,12 @@ The exact digest messages are:
 A primitive catalog entry stream has fields 1 `PrimitiveId u32`, 2 schema
 version `u16`, 3 length-prefixed canonical ASCII name, 4 32-byte argument-schema
 digest, 5 semantics revision `u32`, 6 work-formula ID `u32`, and 7 replay-policy
-`u8`. Entries are strictly ascending by PrimitiveId. In the M7 build gate the
+`u8`. Entries are strictly ascending by PrimitiveId. In the build gate the
 argument-schema digest is BLAKE3 `derive_key` over the exact canonical ASCII
 label `<canonical-name>/canonical-v<schema-version>` using the primitive-
-argument-schema context above. This label identifies the closed in-memory
-schema; M8 remains responsible for specifying and connecting persistent
-argument descriptors and codecs.
+argument-schema context above. This label identifies the closed typed schema;
+the v8 reader selects its decoder through the same catalog entry and accepts
+only a byte-exact canonical re-encoding.
 
 An argument descriptor is a schema-1 frame with fields 1 ordinal `u32`; 2
 value-kind `u16`; 3 presence policy `u8` (1 Required, 2 Optional); 4 minimum
@@ -599,16 +606,16 @@ owners. The current materialized document and checkpoints are not sufficient
 roots by themselves. Assets referenced only by an inactive branch remain
 available for cache-free replay, and the owning Core session releases its
 registry only after transient work has drained. These runtime rules establish
-the graph that future `GENS`/`ASST` serialization must preserve; they do not add
-those sections to production v2 files.
+the exact graph serialized by v8 `GENS` and `ASST`.
 
-M4's save/reopen-equivalent verification is deliberately detached from that
+M4's historical save/reopen-equivalent verification was deliberately detached from that
 live registry: it walks the same roots, deep-copies every unique payload in
 `AssetId` order, re-ingests it into an empty store with the expected identity,
 then rebinds Genesis and retained procedures before fresh replay. Descriptor,
 payload, identity, and duplicate-root reference counts must match, while the
 source and rebuilt `AssetRecord`, payload, and raster allocations must not share
-ownership. This runtime archive is test infrastructure, not a v8 encoder.
+ownership. That detached archive remains test infrastructure; v8 now provides
+the production encoder and staged reader.
 
 Self-referential digest fields are present as thirty-two zero bytes during
 calculation. The only absent-digest sentinel is paired with an explicit absent
@@ -621,13 +628,12 @@ content.
 The approved Rust implementation is the official `blake3` crate pinned as
 exact version `=1.8.5` with default features disabled and only `std` enabled, as
 recorded in `third-party-notices.md`; its portable/SIMD backend choice does not
-change digest output. The Core production dependency now computes the
+change digest output. The Core production dependency computes the
 hierarchical schema-4 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render
 caching: snapshot validation uses only the documented revision-max scalar and
-never these digests. This does not activate the successor container: `.inkpod`
-v2 remains the exact current production format and no v8 reader or writer is
-emitted by this slice.
+never these digests. The same pinned implementation computes the v8 section,
+root, asset-chunk, journal, document, editor, and procedure-payload commitments.
 
 ### Header, directory, and record bytes
 
@@ -691,12 +697,12 @@ Required-section identity is closed and exact:
 | `ASST` | 1 | critical | one section; zero or more kind-1 descriptor plus kind-2 chunk records |
 | `PROC` | 1 | critical | one section; zero or more kind-1 Commit, kind-2 HistoryMove, kind-3 BranchCut records |
 | `EDIT` | 1 | critical | exactly one kind-1/v1 record |
-| `CKPT` | 1 | 0 | zero or one kind-1/v1 record |
+| `CKPT` | reserved | n/a | rejected in M8; no current record schema |
 | `EXTM` | 1 | opaque-preserve | zero or one section of opaque records |
 
 All five required sections must occur once even when `ASST` or `PROC` has no
 records. Required sections set directory critical bit 0; `EXTM` sets only bit 1.
-`CKPT` is known optional and sets neither bit. Unknown optional sections must
+`CKPT` is a known reserved FourCC and is rejected. Unknown optional sections must
 set only opaque-preserve and are retained as exact stored bytes and their exact
 directory descriptor, except that physical offset is reassigned on save.
 
@@ -729,33 +735,32 @@ high-watermarks, referenced IDs, and the actual sections/journal graph must
 agree exactly.
 
 `GENS` kind-1 payload is a schema-1 frame: 1 document UUID; 2 Genesis
-`StateId(1)`; 3 root `BranchId(1)`; 4 the exact canonical Genesis document-state
-frame described above; 5 its `DocumentStateDigest`. It therefore includes
-paper, DPI, sRGB, frames/margins, initial typed topology/IDs, and base-surface
-discriminant/reference explicitly. No replay default comes from the build.
+`StateId(1)`; 3 root `BranchId(1)`; 4 a Genesis archive; 5 its
+`DocumentStateDigest`. The archive starts with base-surface code `u8` (1
+SolidWhite, 2 Asset followed by its 32-byte `AssetId`), then nested payload
+length `u64` and the exact current schema-2 `CellFile` payload. That nested
+payload is not a standalone v2 `.inkpod` container and is not accepted through
+the native-file entrypoint; it is the bounded Genesis document DTO owned by the
+v8 GENS schema. UUID, base asset, and digest are cross-checked after decode and
+before replay. No replay default comes from the build.
 
 `EDIT` kind-1 payload is a schema-1 frame: 1 editor-state schema `u32 = 1`; 2
 persisted `EditorRevision u64`; 3 exact canonical EditorState frame; 4 its
 `EditorStateDigest`. Revision starts at 1, is excluded from the digest, and the
 stored digest must match both the frame and `META`.
 
-M3 implements this bounded canonical EDIT payload as a Core frame/DTO, including
-round-trip validation, digest verification, editor revision, and editor
-savepoint transitions. The decoder rejects an EDIT frame larger than 4 MiB.
-This is an in-memory target-format contract only: M3 did not emit or consume its
-then-reserved successor container, add an EDIT section to production files, or connect
-`META`/`GENS`/`ASST`/`PROC`/`EDIT` save/reopen. Those changes remain one atomic
-M8 format cutover against the then-current successor contract; production stays
-exact-current v2.
+The v8 writer emits this bounded canonical EDIT payload and the staged reader
+verifies its digest, target IDs, revision, and META savepoint before replacing
+the live Core. The decoder rejects an EDIT frame larger than 4 MiB.
 
-An `ASST` kind-1 descriptor payload is a schema-1 frame whose ordinals are 1
-`AssetId`; 2 asset schema; 3 kind; 4 optional pixel format; 5 optional color
-space; 6 optional alpha semantics; 7 optional width; 8 optional height; 9
-optional canonical stride; 10 element count; 11 logical payload length; 12
-fixed chunk size `u32 = 4,194,304`; 13 ordered chunk-descriptor sequence. Each
-chunk descriptor orders index `u32`, logical offset `u64`, length `u32`, and
-32-byte asset-chunk digest. Chunks are a gap-free partition beginning at offset
-0; every nonfinal chunk has the fixed size and the final chunk is nonempty.
+An `ASST` kind-1 descriptor payload is the following fixed sequence: `AssetId
+[32]`; kind `u32`; pixel format `u32`; color space `u32`; alpha semantics
+`u32`; width `u32`; height `u32`; canonical stride `u64`; logical element count
+`u64`; logical payload length `u64`; chunk count `u32`; fixed chunk size `u32 =
+4,194,304`. Optional numeric descriptor values use zero for absent and are
+validated against the selected asset kind. Chunks are a gap-free partition
+beginning at offset 0; every nonfinal chunk has the fixed size and the final
+chunk is nonempty.
 
 The descriptor is immediately followed by its kind-2 chunk records in ascending
 index; asset groups are sorted by unsigned `AssetId`. A kind-2 payload is
@@ -764,14 +769,9 @@ zero `u32`, asset-chunk digest `[32]`, then exact bytes. Concatenated bytes must
 match the descriptor's length and recomputed `AssetId`. A zero-length logical
 asset has no chunks. Provenance belongs in `EXTM`, not canonical asset records.
 
-`CKPT` kind-1 payload is a schema-1 frame: 1 checkpoint epoch `u32 = 1`; 2
-included journal-event count; 3 matching `JournalPrefixDigest`; 4 materialized
-`StateId`; 5 matching `DocumentStateDigest`; 6 exact canonical materialized
-document-state frame. Invalid section/record digest, structure, or resource
-bounds rejects the whole file. If structure is valid but checkpoint epoch,
-prefix digest, StateId, or state digest does not match the authoritative journal,
-the reader ignores the checkpoint and performs full replay. Failure of that
-full replay or its final authoritative digest rejects the file.
+`CKPT` has no v8 record schema in M8. Encountering the FourCC is an unsupported-
+format error. Checkpoint acceleration belongs exclusively to M9 and cannot
+replace or weaken full Genesis/assets/procedure replay in this milestone.
 
 ### Exact resource limits
 
@@ -808,31 +808,18 @@ work limits.
 | raster width or height | 1,048,576 pixels |
 | materialized pixels visited by one image edit | 67,108,864 |
 | sparse tiles in one raster / all retained rasters | 262,144 / 1,048,576 |
-| canonical raster bytes in one asset or checkpoint / all decoded at open | 512 MiB / 768 MiB |
+| canonical raster bytes in one asset / all decoded at open | 512 MiB / 768 MiB |
 | UTF-8 node name / general string | 1 KiB / 32 KiB |
 | `EDIT` logical bytes | 4 MiB |
 | all opaque optional `EXTM` bytes | 16 MiB |
-| one checkpoint logical payload | 512 MiB |
 | stroke samples in one canonical procedure | 1,048,576 |
-| total replay work units | 1,100,000,000 |
 
-Work is summed with checked `u64` arithmetic using exactly
-`W = journal_event_count + ceil(B / 64) + sum(primitive_execution_charge)`.
-`B` is the aggregate of every Commit's argument-record byte length, every
-Commit's inline-payload byte length, and every distinct asset's canonical
-logical-payload byte length; it excludes record headers, directory bytes, and
-checkpoints. The ceiling is applied once to that aggregate. Formula 1 charges
-1; formula 2 charges `1 + palette_entry_count`; formula 3 charges
-`stroke_sample_count + sum((2*radius_at_dab+1)^2)` over every dab visited by
-the exact rasterizer above, including candidates outside the circle/document
-and repeated segment endpoints. Thus event, decode, sample, and candidate costs
-are each counted exactly once. Future vector/output-pixel primitives must state
-their charge in their catalog descriptor before they can be emitted.
-
-The M1 live synchronous stroke executor additionally retains the established
-per-stroke admission bound of 16,777,216 formula-3 work units. That live bound
-is checked before publication and is distinct from the future journal-wide
-`total replay work units` limit above.
+Every Commit is first bounded by its record, argument, payload, asset, object,
+and catalog-specific operation limits. Replay then invokes the same canonical
+executor used by live editing, including the established per-stroke admission
+bound of 16,777,216 formula-3 work units. Oversized image edits, sample streams,
+selection/vector collections, asset graphs, event journals, and ID authorities
+therefore fail within the staged Core and never partly replace the live Core.
 
 Every primitive catalog entry selects one closed nonzero work-formula ID; there
 is no implementation-selected surcharge. A new formula or changed charge
@@ -840,9 +827,11 @@ requires a semantics revision, top-level format version, and replay epoch
 change. Exceeding a count, byte, object, or work limit rejects the entire staged
 open/replay without changing the live Core or existing file.
 
-## Current v2 container layout
+## Rejected historical v2 container layout
 
-The current production v2 file separates a manifest from binary tile blobs:
+The pre-M8 v2 file separated a manifest from binary tile blobs. This section is
+historical implementation context only: the native reader now rejects v2 before
+payload decode, and none of these bytes form a compatibility path.
 
 ```text
 32-byte header
@@ -869,7 +858,7 @@ blob area
   compact edge-aware tile bytes in manifest order
 ```
 
-The current cell DTO retains exactly one main-line plane and one color plane.
+The historical cell DTO retained exactly one main-line plane and one color plane.
 DTO. The main-line descriptor accepts binary mask, grayscale 8-bit, or
 grayscale 16-bit storage. The color descriptor accepts straight-alpha sRGB
 RGBA8 or RGBA16 storage. Header flag bit 0 marks the required color-metadata
@@ -895,7 +884,7 @@ The persistent selection is a normal sparse binary-mask plane referenced by
 ruler visibility, locator position, secondary-view transforms, floating paste,
 and shortcut bindings are transient/application state and are not serialized.
 
-The unchanged v2 `DOCM` active-ID fields do not constitute the M3 canonical
+The historical v2 `DOCM` active-ID fields did not constitute the M3 canonical
 EditorState and do not restore its tool/color/diameter/options, palette cursor,
 `EditorRevision`, digest, or editor savepoint. A normal v2 open copies the
 built-in immutable defaults into a fresh clean session EditorState and resolves
@@ -903,15 +892,15 @@ its document target in Core. Because v2 reopen cannot reproduce a modified
 EditorState, a successful v2 normal save advances only the document savepoint;
 it does not mark editor dirty clean. Autosave, recovery, and export likewise do
 not advance the editor savepoint, and recovery initializes its EditorState
-dirty. Full EDIT restoration remains M8 work.
+dirty. V8 EDIT now restores the complete editor session and editor savepoint.
 
-Production v2 also has no representation for the M4 immutable Genesis base.
+Historical production v2 also had no representation for the M4 immutable Genesis base.
 `SolidWhite` documents remain representable by the established implicit-white
 paper contract. A raster-open document whose Genesis is an asset is rejected by
 normal save and autosave/recovery before destination I/O; the existing file,
 document/revisions/dirty state, path, and savepoints remain unchanged. General
 raster export still flattens that base normally. `GENS`/`ASST` persistence and
-native reopen arrive only in the atomic M8 cutover.
+native reopen are now provided by the atomic v8 cutover.
 
 Header flag bit 2 advertises the `"LTBL"` version-1 section. It stores
 stable-ID light-table sets, the active set, global opacity, and ordered items.
@@ -1025,9 +1014,9 @@ working Core, enabled operations run in order, and only a fully encoded result
 is atomically installed. Dry-run creates no output or temporary file. Duplicate
 is the default and is forbidden from resolving to its input path; overwrite is
 available only through the explicit output policy. A current-document source
-retains a copy of its canonical asset store while operations run. If its Genesis
-is asset-backed, production-v2 output fails before creating the output directory
-or file instead of silently dropping the base image.
+retains a copy of its canonical asset store while operations run. Asset-backed
+Genesis and every retained journal asset are written through the same v8
+GENS/ASST path as an interactive save.
 
 The decoder bounds the whole file (1 GiB), including a post-read check against
 concurrent file growth, plus manifest (16 MiB), dimensions, plane/blob counts,
@@ -1061,18 +1050,21 @@ storage, and public DTO metadata is revalidated before every conversion.
 
 ## Save and savepoint
 
-Encoding finishes in memory before a short-named same-directory temporary file is opened.
-The temporary file is created with exclusive create, fully written, flushed,
+Section layout and digests are finalized before a short-named same-directory
+temporary file is opened. The temporary file is created with exclusive create,
+written in 1 MiB chunks with cancellation checks, flushed,
 `sync_all`'d, and closed before `rename` replaces the destination on the same
 volume. An error or cancellation removes only the exact temporary file and
 leaves an existing destination unchanged. Tests cover cancellation before
 commit and replacement of an existing Windows destination.
 
-Only a successful normal save advances the Core savepoint and normal-save path.
-New documents have no savepoint and are dirty. Open/revert create a clean
-savepoint; Undo/Redo compare history-state identity rather than file timestamp.
-The asset-backed-Genesis v2 rejection above is a failed save: it advances no
-savepoint/path and leaves an existing destination untouched.
+Only a successful normal save publishes the prospective document StateId and
+EditorStateDigest savepoints plus the normal-save path. New documents have no
+savepoint and are dirty. A file produced by normal save reopens clean with its
+cursor, branches, history, EditorState, and both savepoints restored; Undo/Redo
+compare persistent state identity rather than file timestamp. Any encode,
+write, flush, cancellation, or replacement failure advances neither savepoint
+or path and leaves an existing destination untouched.
 
 The format crate exposes a cancellation hook and tests no-partial-commit
 semantics. `save_recovery_atomic` uses the same same-directory temporary-file
@@ -1096,8 +1088,8 @@ itself retains the contract above.
 
 ## Corrupted-input regression corpus
 
-The checked-in `rust/inkpod-format/tests/corpus/corrupted` corpus covers forged native
-manifest and batch-body lengths plus malformed/oversized PNG, TIFF, TGA, and BMP
+The checked-in `rust/inkpod-format/tests/corpus/corrupted` corpus covers forged
+historical native and batch-body lengths plus malformed/oversized PNG, TIFF, TGA, and BMP
 headers. `acceptance_corrupted_file_corpus_is_bounded_and_non_destructive`
 passes each case through its public byte decoder and, where available, public
 file reader under panic containment. Each corpus entry asserts the intended
@@ -1108,4 +1100,7 @@ of the current Core document plus its normal file after a failed corrupt open. A
 deterministic mutation harness truncates and bit-flips valid native, batch, and
 all four common-raster seeds across every decoder. These regression tests do not
 replace coverage-guided fuzzing, but keep the accepted corruption corpus and
-allocation-bound paths executable on every normal `cargo test` run.
+allocation-bound paths executable on every normal `cargo test` run. The
+`rust/inkpod-format/fuzz` package adds `native_v8` for the current container and
+directory parser and `native_core_v8` for staged Core journal/replay parsing;
+both call public production entrypoints.

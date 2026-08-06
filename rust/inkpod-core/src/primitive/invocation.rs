@@ -402,6 +402,412 @@ impl RuntimeInvocation {
     pub(super) fn arguments(&self) -> &[u8] {
         &self.arguments
     }
+
+    pub(crate) fn from_persistent(
+        primitive_id: PrimitiveId,
+        schema_version: u16,
+        arguments: &[u8],
+        assets: &crate::asset::AssetStore,
+    ) -> Result<Option<Self>, CoreError> {
+        if matches!(
+            primitive_id,
+            PrimitiveId::SET_MAIN_LINE_COLOR
+                | PrimitiveId::REPLACE_PALETTE
+                | PrimitiveId::APPLY_RASTER_STROKE
+                | PrimitiveId::IMPORT_RASTER_ASSET
+        ) {
+            return Ok(None);
+        }
+        if schema_version != INVOCATION_SCHEMA_VERSION {
+            return Err(CoreError::Format(
+                "persisted primitive invocation schema is unsupported".to_owned(),
+            ));
+        }
+        let invocation = decode_persistent_invocation(primitive_id, arguments, assets)?;
+        let runtime = Self::new(invocation.canonicalized()?)?;
+        if runtime.arguments() != arguments {
+            return Err(CoreError::Format(
+                "persisted primitive invocation is not canonical".to_owned(),
+            ));
+        }
+        Ok(Some(runtime))
+    }
+}
+
+fn decode_persistent_invocation(
+    primitive_id: PrimitiveId,
+    arguments: &[u8],
+    assets: &crate::asset::AssetStore,
+) -> Result<CanonicalInvocation, CoreError> {
+    let mut reader = CanonicalReader::new(arguments);
+    if reader.u32()? != primitive_id.get() {
+        return Err(CoreError::Format(
+            "persisted primitive ID does not match its canonical arguments".to_owned(),
+        ));
+    }
+    let invocation = if primitive_id == PrimitiveId::UPDATE_PAPER_FRAMES {
+        CanonicalInvocation::UpdatePaperFrames {
+            frames: reader.frames()?,
+        }
+    } else if primitive_id == PrimitiveId::CREATE_LAYER {
+        CanonicalInvocation::CreateLayer {
+            kind: reader.layer_kind()?,
+            name: reader.string()?,
+        }
+    } else if primitive_id == PrimitiveId::DUPLICATE_LAYER {
+        CanonicalInvocation::DuplicateLayer {
+            layer_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::DELETE_LAYER {
+        CanonicalInvocation::DeleteLayer {
+            layer_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::REORDER_LAYER {
+        CanonicalInvocation::ReorderLayer {
+            layer_id: reader.u64()?,
+            destination_index: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::SET_LAYER_PROPERTIES {
+        CanonicalInvocation::SetLayerProperties {
+            layer_id: reader.u64()?,
+            visible: reader.boolean()?,
+            editable: reader.boolean()?,
+            opacity_milli: reader.u32()?,
+            name: reader.string()?,
+        }
+    } else if primitive_id == PrimitiveId::CREATE_PLANE {
+        CanonicalInvocation::CreatePlane {
+            layer_id: reader.u64()?,
+            kind: reader.plane_type()?,
+            format: reader.pixel_format()?,
+            name: reader.string()?,
+        }
+    } else if primitive_id == PrimitiveId::DUPLICATE_PLANE {
+        CanonicalInvocation::DuplicatePlane {
+            plane_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::DELETE_PLANE {
+        CanonicalInvocation::DeletePlane {
+            plane_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::REORDER_PLANE {
+        CanonicalInvocation::ReorderPlane {
+            plane_id: reader.u64()?,
+            destination_index: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::SET_PLANE_PROPERTIES {
+        CanonicalInvocation::SetPlaneProperties {
+            plane_id: reader.u64()?,
+            visible: reader.boolean()?,
+            editable: reader.boolean()?,
+            opacity_milli: reader.u32()?,
+            name: reader.string()?,
+        }
+    } else if primitive_id == PrimitiveId::CONVERT_PLANE {
+        CanonicalInvocation::ConvertPlane {
+            plane_id: reader.u64()?,
+            destination_kind: reader.plane_type()?,
+            destination_format: reader.pixel_format()?,
+        }
+    } else if primitive_id == PrimitiveId::MERGE_PLANE {
+        CanonicalInvocation::MergePlane {
+            plane_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::CONVERT_LAYER {
+        CanonicalInvocation::ConvertLayer {
+            layer_id: reader.u64()?,
+            destination: reader.layer_kind()?,
+        }
+    } else if primitive_id == PrimitiveId::MERGE_LAYER {
+        CanonicalInvocation::MergeLayer {
+            layer_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::DELETE_HIDDEN_LAYERS {
+        CanonicalInvocation::DeleteHiddenLayers
+    } else if primitive_id == PrimitiveId::ADD_GUIDE {
+        CanonicalInvocation::AddGuide {
+            axis: reader.guide_axis()?,
+            position: reader.i32()?,
+        }
+    } else if primitive_id == PrimitiveId::MOVE_GUIDE {
+        CanonicalInvocation::MoveGuide {
+            guide_id: reader.u64()?,
+            position: reader.i32()?,
+        }
+    } else if primitive_id == PrimitiveId::DELETE_GUIDE {
+        CanonicalInvocation::DeleteGuide {
+            guide_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::SET_GRID {
+        CanonicalInvocation::SetGrid {
+            grid: reader.grid()?,
+        }
+    } else if primitive_id == PrimitiveId::DELETE_ALL_GUIDES {
+        CanonicalInvocation::DeleteAllGuides
+    } else if primitive_id == PrimitiveId::APPLY_FILL {
+        CanonicalInvocation::ApplyFill {
+            request: reader.fill_request()?,
+            target: reader.editor_target()?,
+            use_light_table_boundary: reader.boolean()?,
+            use_light_table_color: reader.boolean()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_GRADIENT {
+        CanonicalInvocation::ApplyGradient {
+            plane_id: reader.u64()?,
+            gradient: reader.gradient()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_BOUNDARY_AIRBRUSH {
+        CanonicalInvocation::ApplyBoundaryAirbrush {
+            plane_id: reader.u64()?,
+            effect: reader.boundary_airbrush()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_BLUR {
+        CanonicalInvocation::ApplyBlur {
+            plane_id: reader.u64()?,
+            radius: reader.u32()?,
+            strength_milli: reader.u32()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_AIRBRUSH {
+        CanonicalInvocation::ApplyAirbrush {
+            plane_id: reader.u64()?,
+            stroke: reader.airbrush_stroke()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_AIRBRUSH_GESTURE {
+        CanonicalInvocation::ApplyAirbrushGesture {
+            plane_id: reader.u64()?,
+            gesture: reader.airbrush_gesture()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_STAMP {
+        CanonicalInvocation::ApplyStamp {
+            plane_id: reader.u64()?,
+            stamp: reader.stamp()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_STAMP_GESTURE {
+        CanonicalInvocation::ApplyStampGesture {
+            plane_id: reader.u64()?,
+            gesture: reader.stamp_gesture()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_BLUR_TOOL {
+        let plane_id = reader.u64()?;
+        match reader.u32()? {
+            1 => CanonicalInvocation::ApplyBlurTool {
+                plane_id,
+                shape: reader.selection_shape()?,
+                radius: reader.u32()?,
+                strength_milli: reader.u32()?,
+            },
+            2 => CanonicalInvocation::ApplyBlurPressureTrace {
+                plane_id,
+                samples: reader.stroke_samples()?,
+                diameter: reader.q16_f32()?,
+                radius: reader.u32()?,
+                strength_milli: reader.u32()?,
+            },
+            _ => return Err(reader.invalid("blur-tool invocation kind is invalid")),
+        }
+    } else if primitive_id == PrimitiveId::APPLY_DUST_REMOVAL {
+        let plane_id = reader.u64()?;
+        let has_shape = reader.boolean()?;
+        CanonicalInvocation::ApplyDustRemoval {
+            plane_id,
+            shape: has_shape.then(|| reader.selection_shape()).transpose()?,
+            options: reader.dust_removal()?,
+        }
+    } else if primitive_id == PrimitiveId::EDIT_PLANE_ALPHA {
+        CanonicalInvocation::EditPlaneAlpha {
+            plane_id: reader.u64()?,
+            alpha: reader.raster()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_ALPHA_GRADIENT {
+        CanonicalInvocation::ApplyAlphaGradient {
+            plane_id: reader.u64()?,
+            gradient: reader.gradient()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_FILTER {
+        CanonicalInvocation::ApplyFilter {
+            plane_id: reader.u64()?,
+            filter: reader.filter()?,
+        }
+    } else if primitive_id == PrimitiveId::CREATE_ADJUSTMENT_LAYER {
+        CanonicalInvocation::CreateAdjustmentLayer {
+            name: reader.string()?,
+            adjustment: reader.adjustment()?,
+        }
+    } else if primitive_id == PrimitiveId::UPDATE_ADJUSTMENT_LAYER {
+        CanonicalInvocation::UpdateAdjustmentLayer {
+            layer_id: reader.u64()?,
+            adjustment: reader.adjustment()?,
+        }
+    } else if primitive_id == PrimitiveId::REPLACE_RASTER_COLORS {
+        CanonicalInvocation::ReplaceRasterColors {
+            plane_id: reader.u64()?,
+            pairs: reader.batch_color_pairs()?,
+        }
+    } else if primitive_id == PrimitiveId::SEPARATE_RASTER_COLORS {
+        CanonicalInvocation::SeparateRasterColors {
+            plane_id: reader.u64()?,
+            options: reader.batch_separation()?,
+        }
+    } else if primitive_id == PrimitiveId::RESTORE_SELECTED_PIXELS {
+        CanonicalInvocation::RestoreSelectedPixels {
+            plane_id: reader.u64()?,
+            changes: reader.pixel_changes()?,
+        }
+    } else if primitive_id == PrimitiveId::APPLY_SELECTION {
+        CanonicalInvocation::ApplySelection {
+            shape: reader.selection_shape()?,
+            operation: reader.selection_operation()?,
+            target: reader.editor_target()?,
+        }
+    } else if primitive_id == PrimitiveId::INVERT_SELECTION {
+        CanonicalInvocation::InvertSelection
+    } else if primitive_id == PrimitiveId::CLEAR_SELECTION {
+        CanonicalInvocation::ClearSelection
+    } else if primitive_id == PrimitiveId::RESIZE_SELECTION {
+        CanonicalInvocation::ResizeSelection {
+            pixels: reader.i32()?,
+        }
+    } else if primitive_id == PrimitiveId::SELECT_COLOR {
+        CanonicalInvocation::SelectColor {
+            color: reader.pixel()?,
+            tolerance: reader.u16()?,
+            different: reader.boolean()?,
+            operation: reader.selection_operation()?,
+            target: reader.editor_target()?,
+        }
+    } else if primitive_id == PrimitiveId::SELECTION_TO_LAYER {
+        CanonicalInvocation::SelectionToLayer {
+            name: reader.string()?,
+        }
+    } else if primitive_id == PrimitiveId::SELECTION_FROM_LAYER {
+        CanonicalInvocation::SelectionFromLayer {
+            layer_id: reader.u64()?,
+            operation: reader.selection_layer_operation()?,
+        }
+    } else if primitive_id == PrimitiveId::CLEAR_SELECTED_CONTENT {
+        CanonicalInvocation::ClearSelectedContent {
+            target: reader.editor_target()?,
+        }
+    } else if primitive_id == PrimitiveId::COMMIT_FLOATING {
+        CanonicalInvocation::CommitFloating {
+            floating: reader.floating()?,
+        }
+    } else if primitive_id == PrimitiveId::MIRROR_DOCUMENT {
+        CanonicalInvocation::MirrorDocument {
+            axis: reader.mirror_axis()?,
+        }
+    } else if primitive_id == PrimitiveId::ROTATE_DOCUMENT {
+        CanonicalInvocation::RotateDocument {
+            direction: reader.rotate_direction()?,
+        }
+    } else if primitive_id == PrimitiveId::RESIZE_DOCUMENT {
+        CanonicalInvocation::ResizeDocument {
+            resize: reader.document_resize()?,
+        }
+    } else if primitive_id == PrimitiveId::VECTOR_ADD_PATH {
+        CanonicalInvocation::VectorAddPath {
+            plane_id: reader.u64()?,
+            input: reader.vector_path()?,
+        }
+    } else if primitive_id == PrimitiveId::VECTOR_ADD_FILL {
+        CanonicalInvocation::VectorAddFill {
+            plane_id: reader.u64()?,
+            boundary_path_ids: reader.ids()?,
+            color: reader.pixel()?,
+        }
+    } else if primitive_id == PrimitiveId::VECTOR_ERASE {
+        CanonicalInvocation::VectorErase {
+            plane_id: reader.u64()?,
+            point: reader.point()?,
+            radius: reader.q16_f32()?,
+            mode: reader.vector_erase_mode()?,
+        }
+    } else if primitive_id == PrimitiveId::VECTOR_CONNECT {
+        CanonicalInvocation::VectorConnect {
+            plane_id: reader.u64()?,
+            maximum_gap: reader.q16_f32()?,
+        }
+    } else if primitive_id == PrimitiveId::VECTOR_CORRECT_WIDTH {
+        CanonicalInvocation::VectorCorrectWidth {
+            path_ids: reader.ids()?,
+            mode: reader.vector_width_mode()?,
+        }
+    } else if primitive_id == PrimitiveId::RASTERIZE_VECTOR_LAYER {
+        CanonicalInvocation::RasterizeVectorLayer {
+            layer_id: reader.u64()?,
+            antialias: reader.boolean()?,
+            name: reader.string()?,
+        }
+    } else if primitive_id == PrimitiveId::VECTORIZE_RASTER_PLANE {
+        CanonicalInvocation::VectorizeRasterPlane {
+            source_plane_id: reader.u64()?,
+            target_vector_layer_id: reader.u64()?,
+            alpha_threshold: reader.u8()?,
+        }
+    } else if primitive_id == PrimitiveId::VECTORIZE_RASTER_PLANE_INTO_NEW_LAYER {
+        CanonicalInvocation::VectorizeRasterPlaneIntoNewLayer {
+            source_plane_id: reader.u64()?,
+            alpha_threshold: reader.u8()?,
+            name: reader.string()?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_SET_GLOBAL_OPACITY {
+        CanonicalInvocation::LightTableSetGlobalOpacity {
+            opacity_milli: reader.u32()?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_CREATE_SET {
+        CanonicalInvocation::LightTableCreateSet {
+            name: reader.string()?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_DUPLICATE_SET {
+        CanonicalInvocation::LightTableDuplicateSet {
+            set_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_DELETE_SET {
+        CanonicalInvocation::LightTableDeleteSet {
+            set_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_RENAME_SET {
+        CanonicalInvocation::LightTableRenameSet {
+            set_id: reader.u64()?,
+            name: reader.string()?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_REORDER_SET {
+        CanonicalInvocation::LightTableReorderSet {
+            set_id: reader.u64()?,
+            destination_index: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_SET_ACTIVE {
+        CanonicalInvocation::LightTableSetActive {
+            set_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_ADD_ITEM {
+        CanonicalInvocation::LightTableAddItem {
+            input: reader.light_table_item(assets)?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_UPDATE_ITEM_PROPERTIES {
+        CanonicalInvocation::LightTableUpdateItemProperties {
+            item_id: reader.u64()?,
+            properties: reader.light_table_properties()?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_UPDATE_ITEM {
+        CanonicalInvocation::LightTableUpdateItem {
+            item_id: reader.u64()?,
+            input: reader.light_table_item(assets)?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_REMOVE_ITEM {
+        CanonicalInvocation::LightTableRemoveItem {
+            item_id: reader.u64()?,
+        }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_REORDER_ITEM {
+        CanonicalInvocation::LightTableReorderItem {
+            item_id: reader.u64()?,
+            destination_index: reader.u64()?,
+        }
+    } else {
+        return Err(reader.invalid("persisted primitive invocation is unsupported"));
+    };
+    reader.finish()?;
+    Ok(invocation)
 }
 
 #[derive(Clone, Debug)]
@@ -1667,6 +2073,864 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         Some(INVOCATION_SCHEMA_VERSION)
     } else {
         None
+    }
+}
+
+struct CanonicalReader<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> CanonicalReader<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    fn invalid(&self, message: &'static str) -> CoreError {
+        CoreError::Format(message.to_owned())
+    }
+
+    fn take(&mut self, length: usize) -> Result<&'a [u8], CoreError> {
+        let end = self
+            .offset
+            .checked_add(length)
+            .ok_or_else(|| self.invalid("canonical invocation offset overflows"))?;
+        let result = self
+            .bytes
+            .get(self.offset..end)
+            .ok_or_else(|| self.invalid("canonical invocation is truncated"))?;
+        self.offset = end;
+        Ok(result)
+    }
+
+    fn finish(self) -> Result<(), CoreError> {
+        if self.offset == self.bytes.len() {
+            Ok(())
+        } else {
+            Err(self.invalid("canonical invocation has trailing bytes"))
+        }
+    }
+
+    fn array<const N: usize>(&mut self) -> Result<[u8; N], CoreError> {
+        self.take(N)?
+            .try_into()
+            .map_err(|_| self.invalid("canonical invocation field is truncated"))
+    }
+
+    fn u8(&mut self) -> Result<u8, CoreError> {
+        Ok(self.array::<1>()?[0])
+    }
+
+    fn u16(&mut self) -> Result<u16, CoreError> {
+        Ok(u16::from_le_bytes(self.array()?))
+    }
+
+    fn u32(&mut self) -> Result<u32, CoreError> {
+        Ok(u32::from_le_bytes(self.array()?))
+    }
+
+    fn i32(&mut self) -> Result<i32, CoreError> {
+        Ok(i32::from_le_bytes(self.array()?))
+    }
+
+    fn u64(&mut self) -> Result<u64, CoreError> {
+        Ok(u64::from_le_bytes(self.array()?))
+    }
+
+    fn i64(&mut self) -> Result<i64, CoreError> {
+        Ok(i64::from_le_bytes(self.array()?))
+    }
+
+    fn u128(&mut self) -> Result<u128, CoreError> {
+        Ok(u128::from_le_bytes(self.array()?))
+    }
+
+    fn boolean(&mut self) -> Result<bool, CoreError> {
+        match self.u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(self.invalid("canonical boolean is invalid")),
+        }
+    }
+
+    fn count(&mut self, minimum_item_bytes: usize) -> Result<usize, CoreError> {
+        let count = usize::try_from(self.u32()?)
+            .map_err(|_| self.invalid("canonical item count is not representable"))?;
+        if count > 1_048_576
+            || count
+                .checked_mul(minimum_item_bytes)
+                .is_none_or(|minimum| minimum > self.bytes.len().saturating_sub(self.offset))
+        {
+            return Err(self.invalid("canonical item count exceeds its bounded payload"));
+        }
+        Ok(count)
+    }
+
+    fn string(&mut self) -> Result<String, CoreError> {
+        let length = self.count(1)?;
+        let bytes = self.take(length)?;
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|_| self.invalid("canonical string is not valid UTF-8"))
+    }
+
+    fn q16_f32(&mut self) -> Result<f32, CoreError> {
+        Ok(self.i64()? as f32 / CANONICAL_DOCUMENT_ONE as f32)
+    }
+
+    fn q16_f64(&mut self) -> Result<f64, CoreError> {
+        Ok(self.i64()? as f64 / CANONICAL_DOCUMENT_ONE as f64)
+    }
+
+    fn unit_u16_f32(&mut self) -> Result<f32, CoreError> {
+        Ok(f32::from(self.u16()?) / f32::from(u16::MAX))
+    }
+
+    fn rect(&mut self) -> Result<RectI32, CoreError> {
+        Ok(RectI32 {
+            x: self.i32()?,
+            y: self.i32()?,
+            width: self.i32()?,
+            height: self.i32()?,
+        })
+    }
+
+    fn frames(&mut self) -> Result<FrameMetadata, CoreError> {
+        Ok(FrameMetadata {
+            hundred_frame: self.rect()?,
+            reference_frame: self.rect()?,
+            drawing_frame: self.rect()?,
+            safe_frame: self.rect()?,
+            margins: Margins {
+                left: self.u32()?,
+                top: self.u32()?,
+                right: self.u32()?,
+                bottom: self.u32()?,
+            },
+        })
+    }
+
+    fn grid(&mut self) -> Result<GridConfig, CoreError> {
+        Ok(GridConfig {
+            origin_x: self.i32()?,
+            origin_y: self.i32()?,
+            spacing_x: self.u32()?,
+            spacing_y: self.u32()?,
+            subdivisions: self.u32()?,
+        })
+    }
+
+    fn layer_kind(&mut self) -> Result<LayerKind, CoreError> {
+        match self.u32()? {
+            1 => Ok(LayerKind::BinaryColoring),
+            2 => Ok(LayerKind::GrayscaleColoring),
+            3 => Ok(LayerKind::Raster),
+            4 => Ok(LayerKind::Selection),
+            5 => Ok(LayerKind::Frame),
+            6 => Ok(LayerKind::VanishingPoint),
+            7 => Ok(LayerKind::Adjustment),
+            8 => Ok(LayerKind::Text),
+            9 => Ok(LayerKind::Annotation),
+            10 => Ok(LayerKind::VectorColoring),
+            _ => Err(self.invalid("canonical layer kind is invalid")),
+        }
+    }
+
+    fn plane_type(&mut self) -> Result<PlaneType, CoreError> {
+        match self.u32()? {
+            1 => Ok(PlaneType::MainLine),
+            2 => Ok(PlaneType::Color),
+            3 => Ok(PlaneType::Raster),
+            4 => Ok(PlaneType::Selection),
+            5 => Ok(PlaneType::VectorMainLine),
+            6 => Ok(PlaneType::ColorTrace),
+            7 => Ok(PlaneType::VectorFill),
+            _ => Err(self.invalid("canonical plane kind is invalid")),
+        }
+    }
+
+    fn pixel_format(&mut self) -> Result<PixelFormat, CoreError> {
+        match self.u32()? {
+            1 => Ok(PixelFormat::BinaryMask8),
+            2 => Ok(PixelFormat::Grayscale8),
+            3 => Ok(PixelFormat::Grayscale16),
+            4 => Ok(PixelFormat::StraightRgba8),
+            5 => Ok(PixelFormat::StraightRgba16),
+            6 => Ok(PixelFormat::PremultipliedBgra8),
+            _ => Err(self.invalid("canonical pixel format is invalid")),
+        }
+    }
+
+    fn guide_axis(&mut self) -> Result<GuideAxis, CoreError> {
+        match self.u32()? {
+            1 => Ok(GuideAxis::Horizontal),
+            2 => Ok(GuideAxis::Vertical),
+            _ => Err(self.invalid("canonical guide axis is invalid")),
+        }
+    }
+
+    fn selection_operation(&mut self) -> Result<SelectionOperation, CoreError> {
+        match self.u32()? {
+            1 => Ok(SelectionOperation::New),
+            2 => Ok(SelectionOperation::Add),
+            3 => Ok(SelectionOperation::Subtract),
+            4 => Ok(SelectionOperation::Intersect),
+            _ => Err(self.invalid("canonical selection operation is invalid")),
+        }
+    }
+
+    fn selection_layer_operation(&mut self) -> Result<SelectionLayerOperation, CoreError> {
+        match self.u32()? {
+            1 => Ok(SelectionLayerOperation::Replace),
+            2 => Ok(SelectionLayerOperation::Add),
+            3 => Ok(SelectionLayerOperation::Subtract),
+            _ => Err(self.invalid("canonical selection-layer operation is invalid")),
+        }
+    }
+
+    fn mirror_axis(&mut self) -> Result<MirrorAxis, CoreError> {
+        match self.u32()? {
+            1 => Ok(MirrorAxis::Horizontal),
+            2 => Ok(MirrorAxis::Vertical),
+            _ => Err(self.invalid("canonical mirror axis is invalid")),
+        }
+    }
+
+    fn rotate_direction(&mut self) -> Result<RotateDirection, CoreError> {
+        match self.u32()? {
+            1 => Ok(RotateDirection::Left90),
+            2 => Ok(RotateDirection::Right90),
+            _ => Err(self.invalid("canonical rotate direction is invalid")),
+        }
+    }
+
+    fn fill_request(&mut self) -> Result<FillRequest, CoreError> {
+        let operation = match self.u32()? {
+            1 => FillOperation::Seed,
+            2 => FillOperation::ClosedRegion,
+            3 => FillOperation::Extend,
+            _ => return Err(self.invalid("canonical fill operation is invalid")),
+        };
+        let seed_x = self.u32()?;
+        let seed_y = self.u32()?;
+        let color = self.pixel()?;
+        let selection = self.boolean()?.then(|| self.rect()).transpose()?;
+        let use_document_selection = self.boolean()?;
+        let tolerance = self.u16()?;
+        let detached_regions = self.boolean()?;
+        let overflow_abort = self.boolean()?;
+        let gap_close = self.u8()?;
+        let transparent_only = self.boolean()?;
+        let inclusion_mode = match self.u32()? {
+            1 => InclusionMode::None,
+            2 => InclusionMode::Specified,
+            3 => InclusionMode::ExceptSpecified,
+            _ => return Err(self.invalid("canonical inclusion mode is invalid")),
+        };
+        let color_count = self.count(5)?;
+        let mut inclusion_colors = Vec::with_capacity(color_count);
+        for _ in 0..color_count {
+            inclusion_colors.push(self.pixel()?);
+        }
+        Ok(FillRequest {
+            operation,
+            seed_x,
+            seed_y,
+            color,
+            selection,
+            use_document_selection,
+            tolerance,
+            detached_regions,
+            overflow_abort,
+            gap_close,
+            transparent_only,
+            inclusion_mode,
+            inclusion_colors,
+            extension_distance: self.u32()?,
+        })
+    }
+
+    fn color16(&mut self) -> Result<[u16; 4], CoreError> {
+        Ok([self.u16()?, self.u16()?, self.u16()?, self.u16()?])
+    }
+
+    fn gradient(&mut self) -> Result<Gradient, CoreError> {
+        let kind = match self.u32()? {
+            1 => GradientKind::Linear,
+            2 => GradientKind::Radial,
+            _ => return Err(self.invalid("canonical gradient kind is invalid")),
+        };
+        let mode = match self.u32()? {
+            1 => GradientMode::Composite,
+            2 => GradientMode::Overwrite,
+            _ => return Err(self.invalid("canonical gradient mode is invalid")),
+        };
+        let start_x_milli = self.i64()?;
+        let start_y_milli = self.i64()?;
+        let end_x_milli = self.i64()?;
+        let end_y_milli = self.i64()?;
+        let dither = self.boolean()?;
+        let count = self.count(12)?;
+        let mut stops = Vec::with_capacity(count);
+        for _ in 0..count {
+            stops.push(GradientStop {
+                position_milli: self.u32()?,
+                color: self.color16()?,
+            });
+        }
+        Ok(Gradient {
+            kind,
+            mode,
+            start_x_milli,
+            start_y_milli,
+            end_x_milli,
+            end_y_milli,
+            dither,
+            stops,
+        })
+    }
+
+    fn boundary_airbrush(&mut self) -> Result<BoundaryAirbrush, CoreError> {
+        let count = self.count(8)?;
+        let mut colors = Vec::with_capacity(count);
+        for _ in 0..count {
+            colors.push(self.color16()?);
+        }
+        Ok(BoundaryAirbrush {
+            colors,
+            width: self.u32()?,
+            strength_milli: self.u32()?,
+        })
+    }
+
+    fn airbrush_stroke(&mut self) -> Result<AirbrushStroke, CoreError> {
+        Ok(AirbrushStroke {
+            center_x_milli: self.i64()?,
+            center_y_milli: self.i64()?,
+            radius_milli: self.u32()?,
+            hardness_milli: self.u32()?,
+            opacity_milli: self.u32()?,
+            color: self.color16()?,
+        })
+    }
+
+    fn effect_samples(&mut self) -> Result<Vec<EffectSample>, CoreError> {
+        let count = self.count(20)?;
+        let mut result = Vec::with_capacity(count);
+        for _ in 0..count {
+            result.push(EffectSample {
+                x_milli: self.i64()?,
+                y_milli: self.i64()?,
+                pressure_milli: self.u32()?,
+            });
+        }
+        Ok(result)
+    }
+
+    fn airbrush_gesture(&mut self) -> Result<AirbrushGesture, CoreError> {
+        Ok(AirbrushGesture {
+            samples: self.effect_samples()?,
+            radius_milli: self.u32()?,
+            hardness_milli: self.u32()?,
+            spacing_milli: self.u32()?,
+            opacity_milli: self.u32()?,
+            fade_milli: self.u32()?,
+            pressure_size: self.boolean()?,
+            pressure_opacity: self.boolean()?,
+            continuous_dabs: self.u32()?,
+            color: self.color16()?,
+        })
+    }
+
+    fn stamp(&mut self) -> Result<Stamp, CoreError> {
+        Ok(Stamp {
+            source_x: self.i32()?,
+            source_y: self.i32()?,
+            destination_x: self.i32()?,
+            destination_y: self.i32()?,
+            width: self.u32()?,
+            height: self.u32()?,
+            opacity_milli: self.u32()?,
+        })
+    }
+
+    fn stamp_gesture(&mut self) -> Result<StampGesture, CoreError> {
+        let source_x_milli = self.i64()?;
+        let source_y_milli = self.i64()?;
+        let samples = self.effect_samples()?;
+        let radius_milli = self.u32()?;
+        let hardness_milli = self.u32()?;
+        let spacing_milli = self.u32()?;
+        let opacity_milli = self.u32()?;
+        let shape = match self.u32()? {
+            1 => StampShape::Round,
+            2 => StampShape::Square,
+            _ => return Err(self.invalid("canonical stamp shape is invalid")),
+        };
+        Ok(StampGesture {
+            source_x_milli,
+            source_y_milli,
+            samples,
+            radius_milli,
+            hardness_milli,
+            spacing_milli,
+            opacity_milli,
+            shape,
+            pressure_size: self.boolean()?,
+            pressure_opacity: self.boolean()?,
+        })
+    }
+
+    fn stroke_samples(&mut self) -> Result<Vec<DocumentStrokeSample>, CoreError> {
+        let count = self.count(18)?;
+        let mut result = Vec::with_capacity(count);
+        for _ in 0..count {
+            result.push(DocumentStrokeSample {
+                point: DocumentPointF32::new(self.q16_f32()?, self.q16_f32()?)?,
+                pressure: self.unit_u16_f32()?,
+            });
+        }
+        Ok(result)
+    }
+
+    fn dust_removal(&mut self) -> Result<DustRemoval, CoreError> {
+        let mode = match self.u32()? {
+            1 => DustMode::RemoveForeground,
+            2 => DustMode::FillTransparentHoles,
+            3 => DustMode::ReplaceColorOutliers,
+            _ => return Err(self.invalid("canonical dust-removal mode is invalid")),
+        };
+        Ok(DustRemoval {
+            mode,
+            maximum_pixels: self.u32()?,
+        })
+    }
+
+    fn raster(&mut self) -> Result<TileRaster, CoreError> {
+        let width = self.u32()?;
+        let height = self.u32()?;
+        let format = self.pixel_format()?;
+        let mut raster = TileRaster::new(width, height, format)?;
+        let count = self.count(16)?;
+        for _ in 0..count {
+            let coord = TileCoord {
+                x: self.u32()?,
+                y: self.u32()?,
+            };
+            let tile_width = self.u32()?;
+            let tile_height = self.u32()?;
+            let length = usize::try_from(tile_width)
+                .ok()
+                .and_then(|width| width.checked_mul(usize::try_from(tile_height).ok()?))
+                .and_then(|pixels| pixels.checked_mul(format.bytes_per_pixel()))
+                .ok_or_else(|| self.invalid("canonical raster tile length overflows"))?;
+            raster.insert_tile(TileData {
+                coord,
+                width: tile_width,
+                height: tile_height,
+                bytes: self.take(length)?.to_vec(),
+                revision: 1,
+            })?;
+        }
+        Ok(raster)
+    }
+
+    fn channel(&mut self) -> Result<Channel, CoreError> {
+        match self.u32()? {
+            1 => Ok(Channel::Rgb),
+            2 => Ok(Channel::Red),
+            3 => Ok(Channel::Green),
+            4 => Ok(Channel::Blue),
+            _ => Err(self.invalid("canonical channel is invalid")),
+        }
+    }
+
+    fn interpolation(&mut self) -> Result<CurveInterpolation, CoreError> {
+        match self.u32()? {
+            1 => Ok(CurveInterpolation::Bezier),
+            2 => Ok(CurveInterpolation::BSpline),
+            _ => Err(self.invalid("canonical curve interpolation is invalid")),
+        }
+    }
+
+    fn curve_points(&mut self) -> Result<Vec<CurvePoint>, CoreError> {
+        let count = self.count(4)?;
+        let mut result = Vec::with_capacity(count);
+        for _ in 0..count {
+            result.push(CurvePoint {
+                input: self.u16()?,
+                output: self.u16()?,
+            });
+        }
+        Ok(result)
+    }
+
+    fn levels(&mut self) -> Result<Levels, CoreError> {
+        Ok(Levels {
+            channel: self.channel()?,
+            input_shadow: self.u16()?,
+            input_gamma_milli: self.u32()?,
+            input_highlight: self.u16()?,
+            output_shadow: self.u16()?,
+            output_highlight: self.u16()?,
+        })
+    }
+
+    fn filter(&mut self) -> Result<Filter, CoreError> {
+        Ok(match self.u32()? {
+            1 => Filter::SharpenWeak,
+            2 => Filter::SharpenStrong,
+            3 => Filter::BlurWeak,
+            4 => Filter::BlurStrong,
+            5 => Filter::GaussianBlur {
+                radius: self.u32()?,
+                strength_milli: self.u32()?,
+            },
+            6 => Filter::UnsharpMask {
+                radius: self.u32()?,
+                amount_milli: self.u32()?,
+                threshold: self.u16()?,
+            },
+            7 => Filter::Invert {
+                channel: self.channel()?,
+            },
+            8 => Filter::AutoContrast,
+            9 => Filter::BrightnessContrast {
+                brightness_milli: self.i32()?,
+                contrast_milli: self.i32()?,
+            },
+            10 => Filter::ToneCurve {
+                channel: self.channel()?,
+                interpolation: self.interpolation()?,
+                points: self.curve_points()?,
+            },
+            11 => Filter::Levels(self.levels()?),
+            12 => Filter::Hsv(HsvAdjustment {
+                hue_degrees_milli: self.i32()?,
+                saturation_milli: self.i32()?,
+                value_milli: self.i32()?,
+            }),
+            13 => Filter::ColorBalance(ColorBalance {
+                red_milli: self.i32()?,
+                green_milli: self.i32()?,
+                blue_milli: self.i32()?,
+            }),
+            _ => return Err(self.invalid("canonical filter kind is invalid")),
+        })
+    }
+
+    fn adjustment(&mut self) -> Result<Adjustment, CoreError> {
+        Ok(match self.u32()? {
+            1 => Adjustment::BrightnessContrast {
+                brightness_milli: self.i32()?,
+                contrast_milli: self.i32()?,
+            },
+            2 => Adjustment::ToneCurve {
+                channel: self.channel()?,
+                interpolation: self.interpolation()?,
+                points: self.curve_points()?,
+            },
+            3 => Adjustment::Levels(self.levels()?),
+            _ => return Err(self.invalid("canonical adjustment kind is invalid")),
+        })
+    }
+
+    fn batch_color_pairs(&mut self) -> Result<Vec<BatchColorPair>, CoreError> {
+        let count = self.count(11)?;
+        let mut result = Vec::with_capacity(count);
+        for _ in 0..count {
+            result.push(BatchColorPair {
+                enabled: self.boolean()?,
+                old: self.pixel()?,
+                new: self.pixel()?,
+            });
+        }
+        Ok(result)
+    }
+
+    fn batch_separation(&mut self) -> Result<BatchSeparation, CoreError> {
+        let count = self.count(5)?;
+        let mut colors = Vec::with_capacity(count);
+        for _ in 0..count {
+            colors.push(self.pixel()?);
+        }
+        Ok(BatchSeparation {
+            colors,
+            replacement: self.pixel()?,
+            invert: self.boolean()?,
+        })
+    }
+
+    fn pixel_changes(&mut self) -> Result<Vec<PixelChange>, CoreError> {
+        let count = self.count(18)?;
+        let mut result = Vec::with_capacity(count);
+        for _ in 0..count {
+            result.push(PixelChange {
+                x: self.u32()?,
+                y: self.u32()?,
+                before: self.pixel()?,
+                after: self.pixel()?,
+            });
+        }
+        Ok(result)
+    }
+
+    fn editor_target(&mut self) -> Result<EditorTarget, CoreError> {
+        Ok(EditorTarget {
+            layer_id: self.u64()?,
+            plane_id: self.u64()?,
+        })
+    }
+
+    fn point(&mut self) -> Result<PointF32, CoreError> {
+        Ok(PointF32 {
+            x: self.q16_f32()?,
+            y: self.q16_f32()?,
+        })
+    }
+
+    fn points(&mut self) -> Result<Vec<PointF32>, CoreError> {
+        let count = self.count(16)?;
+        let mut result = Vec::with_capacity(count);
+        for _ in 0..count {
+            result.push(self.point()?);
+        }
+        Ok(result)
+    }
+
+    fn selection_shape(&mut self) -> Result<SelectionShape, CoreError> {
+        Ok(match self.u32()? {
+            1 => SelectionShape::Rectangle(self.rect()?),
+            2 => SelectionShape::Ellipse(self.rect()?),
+            3 => SelectionShape::Lasso(self.points()?),
+            4 => SelectionShape::Polyline(self.points()?),
+            5 => SelectionShape::Trace {
+                points: self.points()?,
+                diameter: self.q16_f32()?,
+            },
+            6 => SelectionShape::Wand {
+                x: self.u32()?,
+                y: self.u32()?,
+                tolerance: self.u16()?,
+                gap_close: self.u8()?,
+            },
+            _ => return Err(self.invalid("canonical selection shape is invalid")),
+        })
+    }
+
+    fn pixel(&mut self) -> Result<PixelValue, CoreError> {
+        Ok(match self.u32()? {
+            1 => PixelValue::Binary(self.u8()?),
+            2 => PixelValue::Grayscale8(self.u8()?),
+            3 => PixelValue::Grayscale16(self.u16()?),
+            4 => PixelValue::Rgba(self.array()?),
+            5 => PixelValue::Rgba16([self.u16()?, self.u16()?, self.u16()?, self.u16()?]),
+            _ => return Err(self.invalid("canonical pixel value is invalid")),
+        })
+    }
+
+    fn floating(&mut self) -> Result<FloatingSelection, CoreError> {
+        let destination = match self.u8()? {
+            0 => FloatingDestination::ExistingPlane(PlaneId::from_raw(self.u64()?)),
+            1 => FloatingDestination::NewPlane {
+                layer_id: LayerId::from_raw(self.u64()?),
+                kind: self.plane_type()?,
+                format: self.pixel_format()?,
+                name: self.string()?,
+                opacity_milli: self.u32()?,
+            },
+            _ => return Err(self.invalid("canonical floating destination is invalid")),
+        };
+        let source_document_uuid = self.u128()?;
+        let bounds = self.rect()?;
+        let count = self.count(20)?;
+        let mut planes = Vec::with_capacity(count);
+        for _ in 0..count {
+            let kind = self.plane_type()?;
+            let pixel_format = self.pixel_format()?;
+            let origin_x = self.i32()?;
+            let origin_y = self.i32()?;
+            let pixel_count = self.count(13)?;
+            let mut pixels = Vec::with_capacity(pixel_count);
+            for _ in 0..pixel_count {
+                pixels.push(ClipboardPixel {
+                    x: self.i32()?,
+                    y: self.i32()?,
+                    value: self.pixel()?,
+                });
+            }
+            planes.push(ClipboardPlane {
+                kind,
+                pixel_format,
+                origin_x,
+                origin_y,
+                pixels,
+            });
+        }
+        let translate_x = self.q16_f64()?;
+        let translate_y = self.q16_f64()?;
+        let scale_x = self.q16_f64()?;
+        let scale_y = self.q16_f64()?;
+        let rotation_degrees = f64::from(self.u32()?) * 360.0 / 4_294_967_296.0;
+        Ok(FloatingSelection {
+            payload: ClipboardPayload {
+                source_document_uuid,
+                bounds,
+                planes,
+            },
+            destination,
+            transform: FloatingTransform {
+                translate_x,
+                translate_y,
+                scale_x,
+                scale_y,
+                rotation_degrees,
+            },
+            asset_ids: Vec::new(),
+        })
+    }
+
+    fn document_resize(&mut self) -> Result<DocumentResize, CoreError> {
+        let width = self.u32()?;
+        let height = self.u32()?;
+        let dpi_x_milli = self.u32()?;
+        let dpi_y_milli = self.u32()?;
+        let anchor = match self.u32()? {
+            1 => ResizeAnchor::TopLeft,
+            2 => ResizeAnchor::TopRight,
+            3 => ResizeAnchor::Center,
+            4 => ResizeAnchor::BottomLeft,
+            5 => ResizeAnchor::BottomRight,
+            _ => return Err(self.invalid("canonical resize anchor is invalid")),
+        };
+        Ok(DocumentResize {
+            width,
+            height,
+            dpi_x_milli,
+            dpi_y_milli,
+            anchor,
+            resample: self.boolean()?,
+        })
+    }
+
+    fn ids(&mut self) -> Result<Vec<u64>, CoreError> {
+        let count = self.count(8)?;
+        let mut result = Vec::with_capacity(count);
+        for _ in 0..count {
+            result.push(self.u64()?);
+        }
+        Ok(result)
+    }
+
+    fn vector_path(&mut self) -> Result<VectorPathInput, CoreError> {
+        let count = self.count(48)?;
+        let mut segments = Vec::with_capacity(count);
+        for _ in 0..count {
+            segments.push(VectorCubicSegment {
+                p0: self.point()?,
+                p1: self.point()?,
+                p2: self.point()?,
+                p3: self.point()?,
+                width_start: self.q16_f32()?,
+                width_end: self.q16_f32()?,
+            });
+        }
+        Ok(VectorPathInput {
+            segments,
+            color: self.pixel()?,
+            closed: self.boolean()?,
+        })
+    }
+
+    fn vector_erase_mode(&mut self) -> Result<VectorEraseMode, CoreError> {
+        match self.u32()? {
+            1 => Ok(VectorEraseMode::Partial),
+            2 => Ok(VectorEraseMode::ToIntersection),
+            3 => Ok(VectorEraseMode::WholePath),
+            _ => Err(self.invalid("canonical vector eraser mode is invalid")),
+        }
+    }
+
+    fn vector_width_mode(&mut self) -> Result<VectorWidthMode, CoreError> {
+        Ok(match self.u32()? {
+            1 => VectorWidthMode::Add(self.q16_f32()?),
+            2 => VectorWidthMode::Subtract(self.q16_f32()?),
+            3 => VectorWidthMode::Scale(self.q16_f32()?),
+            4 => VectorWidthMode::Constant(self.q16_f32()?),
+            _ => return Err(self.invalid("canonical vector-width mode is invalid")),
+        })
+    }
+
+    fn asset_id(&mut self) -> Result<AssetId, CoreError> {
+        Ok(AssetId::from_bytes(self.array()?))
+    }
+
+    fn light_table_source(
+        &mut self,
+        assets: &crate::asset::AssetStore,
+    ) -> Result<LightTableSource, CoreError> {
+        let document_uuid = self.u128()?;
+        let source_revision = self.u64()?;
+        let reference_frame = self.rect()?;
+        let dpi_x_milli = self.u32()?;
+        let dpi_y_milli = self.u32()?;
+        let asset_id = self.asset_id()?;
+        let asset = assets
+            .get(asset_id)
+            .ok_or_else(|| self.invalid("canonical light-table asset is missing"))?;
+        LightTableSource::from_record(
+            document_uuid,
+            source_revision,
+            reference_frame,
+            dpi_x_milli,
+            dpi_y_milli,
+            asset,
+        )
+    }
+
+    fn light_table_display_mode(&mut self) -> Result<LightTableDisplayMode, CoreError> {
+        match self.u32()? {
+            1 => Ok(LightTableDisplayMode::Color),
+            2 => Ok(LightTableDisplayMode::Monotone),
+            3 => Ok(LightTableDisplayMode::Halftone),
+            _ => Err(self.invalid("canonical light-table display mode is invalid")),
+        }
+    }
+
+    fn light_table_properties(&mut self) -> Result<LightTableItemProperties, CoreError> {
+        Ok(LightTableItemProperties {
+            visible: self.boolean()?,
+            opacity_milli: self.u32()?,
+            display_mode: self.light_table_display_mode()?,
+            display_color: self.pixel()?,
+            translate_x_milli: self.i32()?,
+            translate_y_milli: self.i32()?,
+            scale_x_milli: self.u32()?,
+            scale_y_milli: self.u32()?,
+            rotation_milli_degrees: self.i32()?,
+        })
+    }
+
+    fn light_table_item(
+        &mut self,
+        assets: &crate::asset::AssetStore,
+    ) -> Result<LightTableItemInput, CoreError> {
+        let name = self.string()?;
+        let source = self.light_table_source(assets)?;
+        let properties = self.light_table_properties()?;
+        Ok(LightTableItemInput {
+            name,
+            source,
+            visible: properties.visible,
+            opacity_milli: properties.opacity_milli,
+            display_mode: properties.display_mode,
+            display_color: properties.display_color,
+            translate_x_milli: properties.translate_x_milli,
+            translate_y_milli: properties.translate_y_milli,
+            scale_x_milli: properties.scale_x_milli,
+            scale_y_milli: properties.scale_y_milli,
+            rotation_milli_degrees: properties.rotation_milli_degrees,
+        })
     }
 }
 

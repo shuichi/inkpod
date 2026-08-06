@@ -1,11 +1,22 @@
+#[cfg(test)]
 use super::decode::decode;
+#[cfg(test)]
 use super::encode::encode;
-use super::model::{CellFile, FormatError, MAX_FILE_BYTES, TEMP_SEQUENCE};
-use std::fs::{self, OpenOptions};
+use super::model::FormatError;
+#[cfg(test)]
+use super::model::{CellFile, MAX_FILE_BYTES, TEMP_SEQUENCE};
+use std::fs;
+#[cfg(test)]
+use std::fs::OpenOptions;
+#[cfg(test)]
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
+#[cfg(test)]
 use std::sync::atomic::Ordering;
-pub fn read(path: &Path) -> Result<CellFile, FormatError> {
+#[cfg(test)]
+pub(crate) fn read(path: &Path) -> Result<CellFile, FormatError> {
     let metadata = fs::metadata(path)?;
     if metadata.len() > MAX_FILE_BYTES {
         return Err(FormatError::Invalid("file exceeds the bounded size"));
@@ -21,14 +32,9 @@ pub fn read(path: &Path) -> Result<CellFile, FormatError> {
     decode(&bytes)
 }
 
-pub fn save_atomic(path: &Path, document: &CellFile) -> Result<(), FormatError> {
+#[cfg(test)]
+pub(crate) fn save_atomic(path: &Path, document: &CellFile) -> Result<(), FormatError> {
     save_atomic_with_cancel(path, document, || false)
-}
-
-/// Recovery uses the same bounded, atomic container write as a normal save.
-/// Savepoint and normal-path semantics deliberately remain a Core concern.
-pub fn save_recovery_atomic(path: &Path, document: &CellFile) -> Result<(), FormatError> {
-    save_atomic(path, document)
 }
 
 pub fn recovery_is_newer(normal_path: &Path, recovery_path: &Path) -> Result<bool, FormatError> {
@@ -53,7 +59,8 @@ pub fn discard_recovery(path: &Path) -> Result<(), FormatError> {
     }
 }
 
-pub fn save_atomic_with_cancel(
+#[cfg(test)]
+pub(crate) fn save_atomic_with_cancel(
     path: &Path,
     document: &CellFile,
     mut is_cancelled: impl FnMut() -> bool,
@@ -88,6 +95,7 @@ pub fn save_atomic_with_cancel(
     result
 }
 
+#[cfg(test)]
 fn create_temporary(path: &Path) -> Result<(PathBuf, std::fs::File), FormatError> {
     let parent = path
         .parent()
