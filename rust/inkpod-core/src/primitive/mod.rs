@@ -17,6 +17,7 @@ pub use catalog::replay_contract;
 
 use digest::canonical_payload_digest;
 pub(crate) use digest::{CanonicalDocumentStateCache, canonical_document_state};
+pub(crate) use executor::validate_persisted_procedure;
 pub(crate) use invocation::{CanonicalInvocation, InvocationResult, RuntimeInvocation};
 use model::CanonicalPrimitive;
 pub(crate) use model::CanonicalStrokeArguments;

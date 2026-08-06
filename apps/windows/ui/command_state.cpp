@@ -72,7 +72,10 @@ void ProvideDocumentCommandStates(
     const DocumentCommandStateInput& input, CommandStateSet& states) noexcept {
     SetEnabled(
         states,
-        {IDM_FILE_SAVE, IDM_FILE_SAVE_AS, IDM_FILE_AUTOSAVE_NOW},
+        {IDM_FILE_SAVE,
+         IDM_FILE_SAVE_AS,
+         IDM_FILE_COMPACT_COPY,
+         IDM_FILE_AUTOSAVE_NOW},
         input.has_document);
     SetEnabled(
         states,

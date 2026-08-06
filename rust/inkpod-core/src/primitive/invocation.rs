@@ -1921,14 +1921,20 @@ impl Core {
                 ));
             }
             staged.canonical_invocation_active = false;
+            if staged.staged_history.is_some() {
+                return Err(CoreError::InvalidState(
+                    "semantic no-op left a staged history entry",
+                ));
+            }
             *self = staged;
             return Ok((result, None));
         }
         let expected_revision = self.next_document_revision()?;
         if staged.document_revision != expected_revision
-            || staged.history_cursor != self.history_cursor.saturating_add(1)
-            || staged.history.len() != staged.history_cursor
+            || staged.history_cursor != self.history_cursor
+            || staged.history.len() != self.history.len()
             || staged.current_state != self.next_state
+            || staged.staged_history.is_none()
         {
             return Err(CoreError::InvalidState(
                 "canonical invocation did not produce exactly one document commit",
@@ -1973,11 +1979,28 @@ impl Core {
 
         let plan = self.prepare_canonical_commit(Arc::clone(&procedure))?;
         let branch_id = plan.branch_id();
-        let entry = staged.history.last_mut().ok_or(CoreError::InvalidState(
-            "canonical history entry is missing",
+        let pending = staged.staged_history.take().ok_or(CoreError::InvalidState(
+            "canonical staged history entry is missing",
         ))?;
-        entry.procedure = Some(Arc::clone(&procedure));
-        entry.branch_id = branch_id;
+        if pending.before_state != self.current_state || pending.after_state != self.next_state {
+            return Err(CoreError::InvalidState(
+                "canonical staged history state IDs do not match the procedure",
+            ));
+        }
+        staged.history.truncate(staged.history_cursor);
+        staged
+            .history
+            .try_reserve(1)
+            .map_err(|_| CoreError::InvalidState("history allocation failed"))?;
+        staged.history.push(HistoryEntry {
+            change: Some(pending.change),
+            label: pending.label,
+            before_state: pending.before_state,
+            after_state: pending.after_state,
+            procedure: Arc::clone(&procedure),
+            branch_id,
+        });
+        staged.history_cursor = staged.history.len();
 
         staged.journal = std::mem::take(&mut self.journal);
         staged.active_branch = self.active_branch;

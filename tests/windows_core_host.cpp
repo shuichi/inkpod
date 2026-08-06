@@ -587,7 +587,7 @@ int wmain() {
     InkpodReplayContract replay_contract{};
     if (host.GetReplayContract(first, generation, replay_contract) != INKPOD_STATUS_OK
         || replay_contract.replay_epoch != 6U
-        || replay_contract.procedure_format_version != 8U
+        || replay_contract.procedure_format_version != 9U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U) {
         host.Stop();
@@ -1031,25 +1031,14 @@ int wmain() {
     const std::uint64_t marked_checksum = first_info.color_plane_checksum;
     const std::uint64_t second_revision = second_info.document_revision;
 
-    const InkpodStatus no_op_status = host.Invoke(
-        second,
-        generation,
-        [](InkpodCore* core) {
-            const InkpodCommandBatch batch{
-                sizeof(InkpodCommandBatch),
-                0U,
-                INKPOD_FEATURE_NONE,
-                nullptr,
-                0U,
-                sizeof(InkpodCommand)};
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            return inkpod_core_dispatch_batch(core, &batch, &result);
-        },
-        false,
-        true);
+    InkpodPersistenceInfo persistence{};
+    const InkpodStatus persistence_status =
+        host.GetPersistenceInfo(second, generation, persistence);
     second_info = EmptyDocumentInfo();
-    if (no_op_status != INKPOD_STATUS_OK
+    if (persistence_status != INKPOD_STATUS_OK
+        || persistence.format_version != 9U
+        || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
+        || persistence.feature_flags != INKPOD_FEATURE_NONE
         || !host.GetDocumentInfo(second, generation, second_info)
         || second_info.document_revision != second_revision
         || (second_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
@@ -1243,6 +1232,28 @@ int wmain() {
         return 16;
     }
     first_info = EmptyDocumentInfo();
+    InkpodCompactionPlan compaction{};
+    std::wstring compact_path;
+    std::vector<std::uint8_t> compact_path_utf8;
+    if (host.GetCompactionPlan(first, generation, compaction) != INKPOD_STATUS_OK
+        || compaction.history_procedure_count == 0U
+        || !TemporaryPath(compact_path)
+        || !ToUtf8(compact_path, compact_path_utf8)
+        || host.WriteCompactedCopy(
+               first,
+               generation,
+               std::string_view{
+                   reinterpret_cast<const char*>(compact_path_utf8.data()),
+                   compact_path_utf8.size()},
+               compaction)
+            != INKPOD_STATUS_OK) {
+        DeleteFileW(compact_path.c_str());
+        DeleteFileW(save_path.c_str());
+        host.Stop();
+        DestroyWindow(owner);
+        return 34;
+    }
+    DeleteFileW(compact_path.c_str());
     const std::wstring invalid_save_path = save_path + L"\\child.inkpod";
     std::vector<std::uint8_t> invalid_save_path_utf8;
     if (!host.GetDocumentInfo(first, generation, first_info)

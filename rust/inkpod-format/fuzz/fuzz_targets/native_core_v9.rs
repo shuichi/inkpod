@@ -13,7 +13,12 @@ fuzz_target!(|bytes: &[u8]| {
     ));
     if std::fs::write(&path, bytes).is_ok() {
         let mut core = inkpod_core::Core::new();
-        let _ = core.open(&path);
+        if core.open(&path).is_ok() {
+            let _ = core.persistence_info();
+            let _ = core.compaction_plan();
+            let _ = core.verify_journal_replay();
+            let _ = core.collect_unreferenced_assets();
+        }
         let _ = std::fs::remove_file(path);
     }
 });

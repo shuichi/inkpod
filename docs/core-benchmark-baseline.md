@@ -19,11 +19,11 @@ cargo bench --package inkpod-core --bench core_workflows -- --quick
 cargo bench --package inkpod-core --bench core_workflows
 ```
 
-Both commands use the release benchmark profile and the same eight scenarios.
+Both commands use the release benchmark profile and the same nine scenarios.
 Quick is the bounded Linux CI profile; full increases inputs for local
-before/after comparison. Neither profile reads or writes native `.inkpod`
-files. Batch uses in-memory sequence cells, and its dry-run asserts that its
-absent output directory remains absent.
+before/after comparison. The checkpoint fixture is written outside its timed
+open interval and removed after the scenario. Batch uses in-memory sequence
+cells, and its dry-run asserts that its absent output directory remains absent.
 
 | Parameter | Quick | Full |
 | --- | ---: | ---: |
@@ -36,6 +36,7 @@ absent output directory remains absent.
 | vector document | 128 square, 8 closed paths/fills | 256 square, 32 closed paths/fills |
 | Batch sequence | 4 cells at 16 square | 16 cells at 32 square |
 | canonical replay fixture | 64 square, 5 canonical edits | same |
+| checkpoint policy fixture | 256 procedures, 175,000 stroke samples | 256 procedures, 1,000,000 stroke samples |
 
 ## Output and assertions
 
@@ -59,7 +60,8 @@ on a matching environment. The scenario assertions cover these contracts:
 | `light_table_composite` | all references contribute to the expected full tile grid and checksum |
 | `vector_snapshot` | segment/fill counts, zero raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, all valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | all six state boundaries replay bit-exactly, the final canonical composite digest matches, and the replay contract is epoch 6 / current native version 8 / numeric version 1 |
+| `canonical_replay` | all six state boundaries replay bit-exactly, the final canonical composite digest matches, and the replay contract is epoch 6 / current native version 9 / numeric version 1 |
+| `checkpoint_open` | deterministic policy emits CKPT, verified checkpoint open restores the exact journal/document digest, and Undo/Redo remains bit-exact; full crosses the one-million replay-work threshold |
 
 The checksum is local FNV-1a over fixed-width public semantic data. It excludes
 wall-clock time, allocator addresses, cache allocation order, and Batch output
@@ -75,6 +77,7 @@ paths. The expected values embedded in the benchmark are:
 | `vector_snapshot` | `688dd42c93a71bec` | `27e6aa988b125683` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
 | `canonical_replay` | `20de057cc9cc3ca1` | `20de057cc9cc3ca1` |
+| `checkpoint_open` | `bf8114914500d6e8` | `bf8114914500d6e8` |
 
 The M4 vector checksums supersede the earlier values because the new distinct
 Genesis Cell ID advances the shared stable-ID cursor before vector plane, path,
@@ -126,6 +129,34 @@ ID, environment, complete samples, semantic counters, reason, and explicit user
 approval to be recorded here. The historical A/B evidence below remains the
 calibration provenance and an exceptional rebaseline tool, not a routine build
 requirement.
+
+## 2026-08-07 M9 routine acceptance
+
+M9 retained Range ID
+`windows-arm64-apple-silicon-parallels-release-2026-08-05`, the four protected
+workloads, their semantic checksums, and every range unchanged. One complete
+quick benchmark was the warm-up; five measured quick runs and five measured full
+runs followed. `checkpoint_open` is a new observational score with a hard
+semantic checksum and no retrospectively invented timing envelope.
+
+| Score | Five measured samples (ns) | Median | Result |
+|---|---|---:|---|
+| quick `pan_zoom_snapshot` | 720,292; 703,083; 1,830,792; 705,208; 713,125 | 713,125 (`0.713125 ms`) | within 0.70–1.05 ms |
+| quick `dirty_tile_rebuild` | 1,803,209; 1,797,375; 1,907,333; 1,649,458; 1,785,833 | 1,797,375 (`1.797375 ms`) | below diagnostic lower edge; semantic work was not skipped |
+| quick `canonical_replay` | 1,018,708; 1,015,417; 1,020,958; 1,661,709; 1,202,916 | 1,020,958 (`1.020958 ms`) | semantic checksum and counters passed; observational |
+| quick `checkpoint_open` | 29,075,083; 28,065,125; 27,810,375; 28,834,500; 27,212,709 | 28,065,125 (`28.065125 ms`) | verified CKPT path and full-replay-equivalent digest passed; observational |
+| full `pan_zoom_snapshot` | 12,376,875; 11,992,041; 12,289,834; 38,471,250; 12,230,250 | 12,289,834 (`12.289834 ms`) | within 12–16 ms |
+| full `dirty_tile_rebuild` | 8,249,917; 8,550,750; 8,946,042; 25,473,917; 8,221,834 | 8,550,750 (`8.550750 ms`) | within 8.5–11 ms |
+| full `canonical_replay` | 1,190,917; 1,218,625; 1,295,667; 1,181,459; 1,221,792 | 1,218,625 (`1.218625 ms`) | semantic checksum and counters passed; observational |
+| full `checkpoint_open` | 116,759,334; 120,525,666; 132,308,208; 116,589,292; 116,257,708 | 116,759,334 (`116.759334 ms`) | one-million-work policy and verified CKPT path passed; observational |
+
+All nine scenarios retained their exact checksums and semantic counters in every
+process. The quick dirty median is 0.002625 ms below the lower edge; 32 edits,
+32 rebuilt tiles, 224 reused tiles, revision 41, history 40, and checksum
+`9e13576def6f539b` remained exact, so the existing diagnostic-only rule accepts
+it. The isolated scheduler outliers do not affect the five-run median rule. No
+protected median exceeded an upper edge, and no range, tolerance, or protected
+workload changed.
 
 ## 2026-08-07 M8 routine acceptance
 

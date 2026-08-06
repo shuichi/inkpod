@@ -174,7 +174,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .unwrap()
         .as_bytes();
     assert_eq!(contract.replay_epoch().get(), 6);
-    assert_eq!(contract.procedure_format_version(), 8);
+    assert_eq!(contract.procedure_format_version(), 9);
     assert_eq!(contract.canonical_numeric_version(), 1);
     assert_eq!(contract.primitive_count(), 76);
     assert_eq!(

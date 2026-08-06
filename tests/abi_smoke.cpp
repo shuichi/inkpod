@@ -18,8 +18,8 @@ static_assert(std::is_standard_layout_v<InkpodReplayContract>);
 static_assert(std::is_standard_layout_v<InkpodCanonicalDigest>);
 static_assert(sizeof(InkpodReplayContract) == 64U);
 static_assert(sizeof(InkpodCanonicalDigest) == 40U);
-static_assert(sizeof(InkpodCommand) == 16U);
-static_assert(sizeof(InkpodCommandBatch) == 40U);
+static_assert(sizeof(InkpodPersistenceInfo) == 72U);
+static_assert(sizeof(InkpodCompactionPlan) == 128U);
 static_assert(sizeof(InkpodDispatchResult) == 24U);
 static_assert(sizeof(InkpodSnapshotOptions) == 16U);
 static_assert(sizeof(InkpodSnapshotTile) == 64U);
@@ -151,45 +151,15 @@ int InkpodRunAbiSmoke() {
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
         || replay_contract.replay_epoch != 6U
-        || replay_contract.procedure_format_version != 8U
+        || replay_contract.procedure_format_version != 9U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
         return 96;
     }
 
-    const InkpodCommand command{
-        sizeof(InkpodCommand), INKPOD_COMMAND_NO_OP, 0U};
-    const InkpodCommandBatch batch{
-        sizeof(InkpodCommandBatch),
-        0U,
-        INKPOD_FEATURE_NONE,
-        &command,
-        1U,
-        sizeof(InkpodCommand)};
     InkpodDispatchResult dispatch{};
     dispatch.struct_size = sizeof(dispatch);
-    if (inkpod_core_dispatch_batch(core, &batch, &dispatch) != INKPOD_STATUS_OK
-        || dispatch.revision != 0U
-        || dispatch.accepted_command_count != 1U) {
-        return 3;
-    }
-
-    InkpodCommand unknown_command = command;
-    unknown_command.kind = UINT32_MAX;
-    InkpodCommandBatch unknown_batch = batch;
-    unknown_batch.commands = &unknown_command;
-    if (inkpod_core_dispatch_batch(core, &unknown_batch, &dispatch)
-        != INKPOD_STATUS_UNSUPPORTED) {
-        return 19;
-    }
-
-    InkpodCommandBatch invalid_stride_batch = batch;
-    invalid_stride_batch.command_stride_bytes = sizeof(InkpodCommand) - 1U;
-    if (inkpod_core_dispatch_batch(core, &invalid_stride_batch, &dispatch)
-        != INKPOD_STATUS_INVALID_ARGUMENT) {
-        return 20;
-    }
 
     const InkpodSnapshotOptions options{
         sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
@@ -252,19 +222,9 @@ int InkpodRunAbiSmoke() {
     wrong_thread_usage.feature_flags = UINT64_MAX;
     std::thread wrong_thread(
         [core, &wrong_thread_status, &wrong_thread_resource_status, &wrong_thread_usage]() {
-        const InkpodCommand local_command{
-            sizeof(InkpodCommand), INKPOD_COMMAND_NO_OP, 0U};
-        const InkpodCommandBatch local_batch{
-            sizeof(InkpodCommandBatch),
-            0U,
-            INKPOD_FEATURE_NONE,
-            &local_command,
-            1U,
-            sizeof(InkpodCommand)};
-        InkpodDispatchResult local_result{};
-        local_result.struct_size = sizeof(local_result);
-        wrong_thread_status = inkpod_core_dispatch_batch(
-            core, &local_batch, &local_result);
+        InkpodPersistenceInfo persistence{};
+        persistence.struct_size = sizeof(persistence);
+        wrong_thread_status = inkpod_core_get_persistence_info(core, &persistence);
         wrong_thread_resource_status = inkpod_core_get_resource_usage(
             core, &wrong_thread_usage);
     });
@@ -339,6 +299,24 @@ int InkpodRunAbiSmoke() {
         || document.width != 1920U || document.height != 1080U
         || (document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
         return 24;
+    }
+    InkpodPersistenceInfo persistence{};
+    persistence.struct_size = sizeof(persistence);
+    InkpodCompactionPlan compaction{};
+    compaction.struct_size = sizeof(compaction);
+    if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
+        || persistence.format_version != 9U
+        || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
+        || persistence.flags != 0U
+        || persistence.feature_flags != INKPOD_FEATURE_NONE
+        || persistence.journal_event_count != 0U
+        || inkpod_core_compaction_plan(core, &compaction) != INKPOD_STATUS_OK
+        || compaction.history_event_count != 0U
+        || compaction.history_procedure_count != 0U
+        || compaction.feature_flags != INKPOD_FEATURE_NONE
+        || inkpod_core_write_compacted_copy(core, nullptr, 0U, &compaction)
+            != INKPOD_STATUS_INVALID_ARGUMENT) {
+        return 131;
     }
     InkpodCore* v3_core = nullptr;
     InkpodDocumentInfo v3_document{};

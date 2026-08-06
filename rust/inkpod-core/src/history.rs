@@ -355,8 +355,16 @@ pub(super) struct HistoryEntry {
     pub(super) label: &'static str,
     pub(super) before_state: StateId,
     pub(super) after_state: StateId,
-    pub(super) procedure: Option<Arc<CanonicalProcedure>>,
+    pub(super) procedure: Arc<CanonicalProcedure>,
     pub(super) branch_id: BranchId,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct StagedHistoryEntry {
+    pub(super) change: HistoryChange,
+    pub(super) label: &'static str,
+    pub(super) before_state: StateId,
+    pub(super) after_state: StateId,
 }
 
 pub(super) fn apply_history_change(

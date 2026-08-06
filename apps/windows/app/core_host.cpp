@@ -2079,6 +2079,68 @@ InkpodStatus CoreHost::GetReplayContract(
         false);
 }
 
+InkpodStatus CoreHost::GetPersistenceInfo(
+    DocumentSessionId session,
+    Generation generation,
+    InkpodPersistenceInfo& info) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    info = {};
+    info.struct_size = sizeof(info);
+    return impl_->Invoke(
+        SessionBinding{session, generation},
+        [&info](InkpodCore* core) {
+            return inkpod_core_get_persistence_info(core, &info);
+        },
+        false,
+        false);
+}
+
+InkpodStatus CoreHost::GetCompactionPlan(
+    DocumentSessionId session,
+    Generation generation,
+    InkpodCompactionPlan& plan) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    plan = {};
+    plan.struct_size = sizeof(plan);
+    return impl_->Invoke(
+        SessionBinding{session, generation},
+        [&plan](InkpodCore* core) {
+            return inkpod_core_compaction_plan(core, &plan);
+        },
+        false,
+        false);
+}
+
+InkpodStatus CoreHost::WriteCompactedCopy(
+    DocumentSessionId session,
+    Generation generation,
+    std::string_view path_utf8,
+    const InkpodCompactionPlan& plan) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    try {
+        std::string path{path_utf8};
+        return impl_->Invoke(
+            SessionBinding{session, generation},
+            [path = std::move(path), plan](InkpodCore* core) {
+                return inkpod_core_write_compacted_copy(
+                    core,
+                    reinterpret_cast<const std::uint8_t*>(path.data()),
+                    static_cast<std::uint64_t>(path.size()),
+                    &plan);
+            },
+            false,
+            false);
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+}
+
 InkpodStatus CoreHost::GetEditorDefaults(
     DocumentSessionId session,
     Generation generation,

@@ -5,7 +5,7 @@ use crate::light_table::decode_light_table_metadata;
 use crate::vector::decode_vector_metadata;
 use inkpod_image::{MAX_PALETTE_COLORS, PixelFormat, PixelValue, TileCoord};
 use std::collections::BTreeSet;
-pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
+pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatError> {
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err(FormatError::Invalid("file exceeds the bounded size"));
     }
@@ -13,7 +13,7 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
     if reader.take(8)? != MAGIC {
         return Err(FormatError::Invalid("magic does not match"));
     }
-    if reader.u32()? != FORMAT_VERSION {
+    if reader.u32()? != DOCUMENT_ARCHIVE_VERSION {
         return Err(FormatError::Unsupported("format version is not supported"));
     }
     let container_flags = reader.u32()?;
@@ -358,7 +358,7 @@ pub fn decode(bytes: &[u8]) -> Result<CellFile, FormatError> {
         });
     }
 
-    let document = CellFile {
+    let document = DocumentArchive {
         document_uuid,
         document_id,
         layer_id,

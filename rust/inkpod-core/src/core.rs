@@ -69,6 +69,7 @@ impl Core {
             view: ViewState::default(),
             history: Vec::new(),
             history_cursor: 0,
+            staged_history: None,
             current_state: StateId::from_raw(0),
             next_state: StateId::GENESIS,
             next_procedure: ProcedureId::first(),
@@ -101,19 +102,8 @@ impl Core {
             editor_defaults,
             editor_session: None,
             native_opaque_sections: Vec::new(),
+            last_open_strategy: NativeOpenStrategy::NotOpened,
             canonical_invocation_active: false,
-        }
-    }
-
-    /// Accepts a batch of lightweight commands without mutating document state.
-    ///
-    /// The current command vocabulary contains only [`Command::NoOp`], so the
-    /// document revision, history, dirty state, and savepoint remain unchanged.
-    #[must_use]
-    pub fn dispatch(&mut self, commands: &[Command]) -> DispatchOutcome {
-        DispatchOutcome {
-            revision: self.document_revision.get(),
-            accepted_commands: commands.len() as u64,
         }
     }
 
@@ -253,6 +243,8 @@ impl Core {
         self.reset_view();
         self.current_path = None;
         self.recovered = false;
+        self.native_opaque_sections.clear();
+        self.last_open_strategy = NativeOpenStrategy::NotOpened;
         self.color_check = None;
         self.secondary_views.clear();
         self.floating = None;
@@ -273,6 +265,7 @@ pub struct Core {
     pub(super) view: ViewState,
     pub(super) history: Vec<HistoryEntry>,
     pub(super) history_cursor: usize,
+    pub(super) staged_history: Option<StagedHistoryEntry>,
     pub(super) current_state: StateId,
     pub(super) next_state: StateId,
     pub(super) next_procedure: ProcedureId,
@@ -306,6 +299,7 @@ pub struct Core {
     pub(super) editor_defaults: EditorDefaults,
     pub(super) editor_session: Option<EditorSessionState>,
     pub(super) native_opaque_sections: Vec<NativeSection>,
+    pub(super) last_open_strategy: NativeOpenStrategy,
     pub(super) canonical_invocation_active: bool,
 }
 
@@ -503,6 +497,7 @@ impl Core {
     pub(super) fn reset_history(&mut self, saved: bool) {
         self.history.clear();
         self.history_cursor = 0;
+        self.staged_history = None;
         // Persistent state/procedure IDs belong to the logical document. A
         // replacement document always starts at the closed Genesis values,
         // independently of the Core session's prior document.
@@ -535,20 +530,19 @@ impl Core {
             self.canonical_invocation_active,
             "document history may only be staged by a canonical invocation"
         );
-        self.history.truncate(self.history_cursor);
+        debug_assert!(
+            self.staged_history.is_none(),
+            "a canonical invocation may stage only one history entry"
+        );
         let before_state = self.current_state;
         let label = change.label();
-        self.history.push(HistoryEntry {
-            change: Some(change),
+        self.staged_history = Some(StagedHistoryEntry {
+            change,
             label,
             before_state,
             after_state,
-            procedure: None,
-            branch_id: self.active_branch,
         });
-        self.history_cursor = self.history.len();
         self.current_state = after_state;
-        self.set_branch_tail(self.active_branch, after_state);
     }
 }
 
@@ -600,15 +594,21 @@ mod tests {
             outcome.revision,
             before_revision.checked_next().unwrap().get()
         );
-        assert_eq!(core.history.len(), 1);
-        assert_eq!(core.history_cursor, 1);
+        assert_eq!(core.history.len(), 0);
+        assert_eq!(core.history_cursor, 0);
+        assert!(core.staged_history.is_some());
         assert!(core.render_cache.is_empty());
         assert_eq!(core.document.as_ref(), Some(&expected));
-
-        core.undo().unwrap();
-        assert_eq!(core.document.as_ref(), Some(&before));
-        core.redo().unwrap();
-        assert_eq!(core.document.as_ref(), Some(&expected));
+        let staged = core.staged_history.as_ref().unwrap();
+        let HistoryChange::Document {
+            before: staged_before,
+            after: staged_after,
+        } = &staged.change
+        else {
+            panic!("changed document transaction staged the wrong history kind");
+        };
+        assert_eq!(staged_before.as_ref(), &before);
+        assert_eq!(staged_after.as_ref(), &expected);
     }
 
     #[test]
@@ -671,17 +671,18 @@ mod tests {
     #[test]
     fn commit_after_undo_truncates_the_redo_branch() {
         let mut core = initialized_core();
+        core.canonical_invocation_active = false;
         for origin in [1, 2] {
-            let mut edit = core.begin_document_edit().unwrap();
-            edit.working_mut().grid.origin_x = origin;
-            edit.commit(&mut core).unwrap();
+            let mut grid = core.grid().unwrap();
+            grid.origin_x = origin;
+            core.set_grid(grid).unwrap();
         }
         core.undo().unwrap();
         assert_eq!(core.history_cursor, 1);
 
-        let mut edit = core.begin_document_edit().unwrap();
-        edit.working_mut().grid.origin_y = 3;
-        edit.commit(&mut core).unwrap();
+        let mut grid = core.grid().unwrap();
+        grid.origin_y = 3;
+        core.set_grid(grid).unwrap();
 
         assert_eq!(core.history.len(), 2);
         assert_eq!(core.history_cursor, 2);

@@ -464,7 +464,7 @@ impl Core {
             change: Some(applied.history),
             before_state: self.current_state,
             after_state: next_state,
-            procedure: Some(Arc::clone(&procedure)),
+            procedure: Arc::clone(&procedure),
             branch_id: journal_plan.branch_id(),
         };
         self.document = Some(transaction.working);
@@ -714,6 +714,26 @@ fn decode_procedure(
             "primitive ID is not in the catalog",
         )),
     }
+}
+
+pub(crate) fn validate_persisted_procedure(
+    procedure: &CanonicalProcedure,
+    assets: &asset::AssetStore,
+) -> Result<(), CoreError> {
+    if procedure.replay_epoch() != ReplayEpoch::CURRENT
+        || current_primitive_schema_version(procedure.primitive_id())
+            != Some(procedure.primitive_schema_version())
+        || canonical_payload_digest(procedure.canonical_payload())?
+            != *procedure.canonical_payload_digest()
+    {
+        return Err(CoreError::Format(
+            "persisted procedure replay contract is invalid".to_owned(),
+        ));
+    }
+    if procedure.runtime_invocation.is_none() {
+        let _ = decode_procedure(procedure, assets)?;
+    }
+    Ok(())
 }
 
 fn decode_stroke_procedure(

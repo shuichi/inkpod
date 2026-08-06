@@ -92,6 +92,7 @@ BEGIN
         END
         MENUITEM "保存(&S)\tCtrl+S", IDM_FILE_SAVE
         MENUITEM "名前を付けて保存(&A)...", IDM_FILE_SAVE_AS
+        MENUITEM "履歴を破棄してコピー...", IDM_FILE_COMPACT_COPY
         MENUITEM "復帰(&R)", IDM_FILE_REVERT
         MENUITEM "レイヤーを部分的に復帰", IDM_FILE_REVERT_PARTIAL
         MENUITEM "ラスタ－を読み込み...", IDM_FILE_IMPORT_RASTER

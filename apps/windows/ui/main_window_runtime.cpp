@@ -7765,6 +7765,77 @@ InkpodStatus SaveDocument(ApplicationHost& state, bool force_dialog) noexcept {
     return SaveToPath(state, path);
 }
 
+InkpodStatus WriteCompactedDocumentCopy(
+    ApplicationHost& state,
+    const CommandContext& context) noexcept {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    InkpodCompactionPlan plan{};
+    plan.struct_size = sizeof(plan);
+    InkpodStatus status = state.engine->GetCompactionPlan(
+        context.document_session.value(), context.generation.value(), plan);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    if (state.lifetime.smoke_test) {
+        return INKPOD_STATUS_CANCELLED;
+    }
+
+    std::array<wchar_t, 384U> warning{};
+    _snwprintf_s(
+        warning.data(),
+        warning.size(),
+        _TRUNCATE,
+        L"このコピーでは履歴イベント %llu 件（編集手順 %llu 件）を破棄し、\n"
+        L"現在の状態を新しい Genesis として保存します。\n\n"
+        L"元の文書、保存先、履歴は変更しません。続行しますか？",
+        static_cast<unsigned long long>(plan.history_event_count),
+        static_cast<unsigned long long>(plan.history_procedure_count));
+    if (MessageBoxW(
+            state.Workspace().windows.window,
+            warning.data(),
+            L"履歴を破棄してコピー",
+            MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2)
+        != IDOK) {
+        return INKPOD_STATUS_CANCELLED;
+    }
+
+    std::wstring path;
+    if (!ChooseInkpodPath(state.Workspace().windows.window, true, path)) {
+        return INKPOD_STATUS_CANCELLED;
+    }
+    DocumentIdentity target_identity{};
+    if (!ResolveDocumentFileIdentity(path, target_identity)) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    if (state.Documents().FindByIdentity(target_identity) != nullptr) {
+        state.engine->SetLocalFailure(
+            L"履歴を破棄したコピーは、開いている文書とは別の保存先を選んでください。");
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    std::vector<std::uint8_t> path_utf8;
+    if (!WidePathToUtf8(path, path_utf8)) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    status = state.engine->WriteCompactedCopy(
+        context.document_session.value(),
+        context.generation.value(),
+        std::string_view{
+            reinterpret_cast<const char*>(path_utf8.data()),
+            path_utf8.size()},
+        plan);
+    if (status == INKPOD_STATUS_OK) {
+        MessageBoxW(
+            state.Workspace().windows.window,
+            L"履歴を破棄したコピーを保存しました。現在の文書は変更されていません。",
+            L"履歴を破棄してコピー",
+            MB_OK | MB_ICONINFORMATION);
+    }
+    return status;
+}
+
 InkpodStatus SwitchSequenceTarget(
     ApplicationHost& state,
     const CommandContext& context,
@@ -10571,6 +10642,15 @@ std::optional<LRESULT> RouteDocumentCommand(
                 ShowCoreError(*state, window, L"保存");
             }
             return 0;
+        }
+        case IDM_FILE_COMPACT_COPY: {
+            const InkpodStatus status =
+                WriteCompactedDocumentCopy(*state, context);
+            if (status != INKPOD_STATUS_OK
+                && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"履歴を破棄してコピー");
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_FILE_REVERT: {
             const InkpodStatus revert_status = state->engine == nullptr

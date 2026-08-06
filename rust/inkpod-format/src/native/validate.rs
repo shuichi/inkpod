@@ -86,7 +86,7 @@ fn validate_name(name: &str) -> Result<(), FormatError> {
     }
 }
 
-pub(super) fn validate_document(document: &CellFile) -> Result<(), FormatError> {
+pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), FormatError> {
     if document.width == 0
         || document.height == 0
         || document.width > inkpod_image::MAX_RASTER_DIMENSION

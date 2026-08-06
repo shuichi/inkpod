@@ -185,6 +185,19 @@ public:
         DocumentSessionId session,
         Generation generation,
         InkpodReplayContract& contract) noexcept;
+    InkpodStatus GetPersistenceInfo(
+        DocumentSessionId session,
+        Generation generation,
+        InkpodPersistenceInfo& info) noexcept;
+    InkpodStatus GetCompactionPlan(
+        DocumentSessionId session,
+        Generation generation,
+        InkpodCompactionPlan& plan) noexcept;
+    InkpodStatus WriteCompactedCopy(
+        DocumentSessionId session,
+        Generation generation,
+        std::string_view path_utf8,
+        const InkpodCompactionPlan& plan) noexcept;
     InkpodStatus GetEditorDefaults(
         DocumentSessionId session,
         Generation generation,

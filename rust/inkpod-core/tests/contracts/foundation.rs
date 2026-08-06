@@ -11,15 +11,6 @@ fn empty_snapshot_remains_stable() {
 }
 
 #[test]
-fn noop_batch_does_not_change_document_revision() {
-    let mut core = Core::new();
-    let outcome = core.dispatch(&[Command::NoOp, Command::NoOp]);
-    assert_eq!(outcome.accepted_commands(), 2);
-    assert_eq!(outcome.revision(), 0);
-    assert_eq!(core.build_snapshot().revision(), 0);
-}
-
-#[test]
 fn acceptance_saved_drawing_vertical_slice() {
     let mut core = Core::new();
     let created = core
@@ -99,7 +90,7 @@ fn acceptance_saved_drawing_vertical_slice() {
     let saved = core.save(&path).unwrap();
     assert!(
         !saved.dirty,
-        "v8 normal save persists both document and editor savepoints"
+        "v9 normal save persists both document and editor savepoints"
     );
     let expected_snapshot = core.build_snapshot();
     drop(core);

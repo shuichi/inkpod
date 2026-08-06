@@ -1,10 +1,10 @@
 #[cfg(test)]
-use super::decode::decode;
+use super::decode::decode_document_archive;
 #[cfg(test)]
-use super::encode::encode;
+use super::encode::encode_document_archive;
 use super::model::FormatError;
 #[cfg(test)]
-use super::model::{CellFile, MAX_FILE_BYTES, TEMP_SEQUENCE};
+use super::model::{DocumentArchive, MAX_FILE_BYTES, TEMP_SEQUENCE};
 use std::fs;
 #[cfg(test)]
 use std::fs::OpenOptions;
@@ -16,7 +16,7 @@ use std::path::PathBuf;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
 #[cfg(test)]
-pub(crate) fn read(path: &Path) -> Result<CellFile, FormatError> {
+pub(crate) fn read(path: &Path) -> Result<DocumentArchive, FormatError> {
     let metadata = fs::metadata(path)?;
     if metadata.len() > MAX_FILE_BYTES {
         return Err(FormatError::Invalid("file exceeds the bounded size"));
@@ -29,11 +29,11 @@ pub(crate) fn read(path: &Path) -> Result<CellFile, FormatError> {
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err(FormatError::Invalid("file exceeds the bounded size"));
     }
-    decode(&bytes)
+    decode_document_archive(&bytes)
 }
 
 #[cfg(test)]
-pub(crate) fn save_atomic(path: &Path, document: &CellFile) -> Result<(), FormatError> {
+pub(crate) fn save_atomic(path: &Path, document: &DocumentArchive) -> Result<(), FormatError> {
     save_atomic_with_cancel(path, document, || false)
 }
 
@@ -62,13 +62,13 @@ pub fn discard_recovery(path: &Path) -> Result<(), FormatError> {
 #[cfg(test)]
 pub(crate) fn save_atomic_with_cancel(
     path: &Path,
-    document: &CellFile,
+    document: &DocumentArchive,
     mut is_cancelled: impl FnMut() -> bool,
 ) -> Result<(), FormatError> {
     if is_cancelled() {
         return Err(FormatError::Cancelled);
     }
-    let bytes = encode(document)?;
+    let bytes = encode_document_archive(document)?;
     if is_cancelled() {
         return Err(FormatError::Cancelled);
     }

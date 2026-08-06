@@ -3,13 +3,6 @@
 use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// A command accepted by [`Core::dispatch`].
-pub enum Command {
-    /// Performs no document or view mutation while still counting as accepted.
-    NoOp,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Result metadata shared by synchronous Core operations.
 ///
 /// A successful document change increments `revision`; a no-op reports the
@@ -823,6 +816,61 @@ pub struct DocumentInfo {
     pub main_plane_checksum: u64,
     /// Deterministic checksum of the active color plane.
     pub color_plane_checksum: u64,
+}
+
+/// Strategy used by the most recent successful native open.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum NativeOpenStrategy {
+    /// The Core has not opened a native file in this session generation.
+    NotOpened = 0,
+    /// Genesis and the complete authoritative journal were replayed.
+    FullReplay = 1,
+    /// A validated optional checkpoint supplied the materialized current state.
+    Checkpoint = 2,
+}
+
+/// Read-only deterministic resource and checkpoint policy diagnostics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PersistenceInfo {
+    /// Exact current top-level `.inkpod` version.
+    pub format_version: u32,
+    /// Strategy used by the most recent successful native open.
+    pub open_strategy: NativeOpenStrategy,
+    /// Number of authoritative `PROC` events.
+    pub journal_event_count: u64,
+    /// Number of committed canonical procedures.
+    pub procedure_count: u64,
+    /// Bounded deterministic replay-work estimate for checkpoint policy.
+    pub replay_work: u64,
+    /// Bounded deterministic changed/payload byte estimate for checkpoint policy.
+    pub dirty_bytes: u64,
+    /// Number of content-addressed assets retained by the authoritative graph.
+    pub asset_count: u64,
+    /// Logical bytes retained by those assets after content deduplication.
+    pub asset_bytes: u64,
+    /// Whether a normal save would emit a checkpoint under the current policy.
+    pub checkpoint_due: bool,
+}
+
+/// Immutable preview token for an explicit history-losing compaction export.
+///
+/// The caller presents `history_event_count` and `history_procedure_count` to
+/// the user before confirmation, then passes this exact value to
+/// [`Core::write_compacted_copy`](crate::Core::write_compacted_copy). A change
+/// to the document, editor state, or journal makes the token stale.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CompactionPlan {
+    /// Authoritative journal events omitted from the compacted copy.
+    pub history_event_count: u64,
+    /// Committed procedures omitted from the compacted copy.
+    pub history_procedure_count: u64,
+    /// Current semantic document digest guarded by this token.
+    pub document_digest: DocumentStateDigest,
+    /// Current EditorState digest guarded by this token.
+    pub editor_digest: EditorStateDigest,
+    /// Prefix digest of the authoritative journal guarded by this token.
+    pub journal_digest: [u8; 32],
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

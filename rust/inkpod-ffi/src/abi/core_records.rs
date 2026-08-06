@@ -6,23 +6,6 @@ pub struct InkpodCoreConfig {
 }
 
 #[repr(C)]
-pub struct InkpodCommand {
-    pub struct_size: u32,
-    pub kind: u32,
-    pub flags: u64,
-}
-
-#[repr(C)]
-pub struct InkpodCommandBatch {
-    pub struct_size: u32,
-    pub reserved: u32,
-    pub feature_flags: u64,
-    pub commands: *const InkpodCommand,
-    pub command_count: u64,
-    pub command_stride_bytes: u64,
-}
-
-#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct InkpodShortcutStroke {
     pub virtual_key: u32,
@@ -248,6 +231,35 @@ pub struct InkpodCanonicalDigest {
     pub struct_size: u32,
     pub algorithm: u32,
     pub bytes: [u8; 32],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodPersistenceInfo {
+    pub struct_size: u32,
+    pub format_version: u32,
+    pub open_strategy: u32,
+    pub flags: u32,
+    pub feature_flags: u64,
+    pub journal_event_count: u64,
+    pub procedure_count: u64,
+    pub replay_work: u64,
+    pub dirty_bytes: u64,
+    pub asset_count: u64,
+    pub asset_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodCompactionPlan {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub history_event_count: u64,
+    pub history_procedure_count: u64,
+    pub document_digest: [u8; 32],
+    pub editor_digest: [u8; 32],
+    pub journal_digest: [u8; 32],
 }
 
 #[repr(C)]

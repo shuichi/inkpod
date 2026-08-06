@@ -4,7 +4,7 @@ use crate::adjustment::encode_adjustment_metadata;
 use crate::light_table::encode_light_table_metadata;
 use crate::vector::encode_vector_metadata;
 use inkpod_image::{PixelFormat, PixelValue};
-pub fn encode(document: &CellFile) -> Result<Vec<u8>, FormatError> {
+pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, FormatError> {
     validate_document(document)?;
     let document_metadata = document
         .document_metadata
@@ -118,7 +118,7 @@ pub fn encode(document: &CellFile) -> Result<Vec<u8>, FormatError> {
 
     let mut output = Vec::with_capacity(total_len);
     output.extend_from_slice(&MAGIC);
-    push_u32(&mut output, FORMAT_VERSION);
+    push_u32(&mut output, DOCUMENT_ARCHIVE_VERSION);
     push_u32(
         &mut output,
         CONTAINER_FLAG_COLOR_METADATA

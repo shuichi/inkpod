@@ -34,9 +34,9 @@ native-format model.
 | Crate           | Responsibility                                                                                                                                                                     |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, vector geometry, and deterministic raster/filter/effect operations |
-| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v8 DTO/container and `.inkbatch` models, encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs                                  |
+| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v9 DTO/container and `.inkbatch` models, streaming encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs                                  |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v3 fixed records and generation-tagged runtime IDs, validation/conversion, panic containment, legacy opaque-handle bridges, ownership functions, and feature-specific exports                 |
+| `inkpod-ffi`    | ABI v4 fixed records and generation-tagged runtime IDs, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports                 |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Core stores vector geometry in
@@ -184,11 +184,13 @@ cache release, and later history movement reconstructs the cache on demand.
 
 This is deliberately not a generic snapshot- or diff-procedure bridge. Every
 production history entry references its route-specific canonical procedure,
-and there is no supported incomplete-journal state. The v8 writer serializes
+and there is no supported incomplete-journal state. The v9 writer serializes
 Genesis, retained assets, the complete journal/control-event sequence, editor
 state, savepoints, cursor, branch graph, and ID authorities. Open validates and
-fully replays that graph in a staged Core before one replacement of the live
-generation; v2 and every noncurrent version are rejected.
+either fully replays that graph or uses a prefix/state/policy-verified optional
+checkpoint in a staged Core before one replacement of the live generation.
+Checkpoint mismatch selects full replay; malformed/hash/bound failure rejects.
+The journal remains authoritative and v2/every noncurrent version is rejected.
 
 ## Immutable Genesis and canonical assets
 
@@ -201,7 +203,7 @@ selection mask. `BaseSurface::Asset` instead names one immutable canonical raste
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge changes canonical document-state
 bytes, so the document-state commitment remains schema/domain 4. The current
-replay contract is epoch 6 and native format version 8 for canonical fixed-
+replay contract is epoch 6 and native format version 9 for canonical fixed-
 point/image-result semantics.
 The numeric audit, prohibited platform-math list, public golden fixture, and
 benchmark gate are specified in [`determinism.md`](determinism.md).
@@ -241,9 +243,9 @@ retention root, deep-copies each logical payload, and re-ingests it into an empt
 registry with the expected `AssetId`. Fresh Genesis/journal replay uses only that
 detached registry, so passing verification cannot be an artifact of shared
 `AssetRecord`, payload, or `TileRaster` ownership. This remains an independent
-M4 retention check; production v8 persists the same rooted graph in GENS/ASST.
+M4 retention check; production v9 persists the same rooted graph in GENS/ASST.
 
-The present ABI is v3. `InkpodObjectId` separates Core, snapshot, task, color,
+The present ABI is v4. `InkpodObjectId` separates Core, snapshot, task, color,
 sample, raster, thumbnail, and export runtime objects by type and Core generation;
 IDs are monotonic within one Core and are never accepted across generation or
 after release. Variable input is synchronously copied into bounded Rust-owned
@@ -258,11 +260,11 @@ Snapshot, thumbnail, and export output uses an ID plus bounded record/byte copy;
 the caller's storage is borrowed only for that call. Saturation rolls back an
 unaccepted sequence, while accepted primitive work is resolved once through
 active-stroke deferral, close, and shutdown drain. `PrimitiveWork` remains the
-closed value/ID-only ABI-v3 lane. Other operations use a fixed `AdapterWork`
+closed value/ID-only primitive lane. Other operations use a fixed `AdapterWork`
 record containing issue-time session/generation/context, flags, sequence, and a
 bounded input token; callables, optional view updates, and completions stay in a
 CoreHost registry and are removed exactly once on the owner thread. No queued
-work variant contains a callable, pointer, path, or STL container. V8 normal
+work variant contains a callable, pointer, path, or STL container. V9 normal
 save, autosave/recovery, and Batch output all serialize asset-backed Genesis and
 every retained asset through the same Core-owned GENS/ASST mapping. Flat common-
 raster export remains a separate operation.
@@ -482,7 +484,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 331 production commands exactly one
+The fixed command-state catalog assigns all 332 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
@@ -686,7 +688,7 @@ viewport resize.
 Core keeps document points/sizes/rectangles, device points/sizes/offsets, and
 zoom as distinct private types. Public Rust commands and state accessors retain
 their established scalar/record shapes, and the legacy C records retain their
-fixed layout beside the additive ABI v3 ID records; those boundaries validate and convert before calling the typed
+fixed layout beside the additive runtime-ID records; those boundaries validate and convert before calling the typed
 `ViewTransform`. Locator sampling, guide/grid snapping, and stroke/effect input
 use document points after their single `CoordinateSpace` conversion. Snapshot
 raster origins/sizes are likewise typed internally, while raster, vector, and
@@ -780,7 +782,7 @@ planes, vector paths/fills, light-table sets/items, and secondary views. History
 state plus document, view, render-cache, and preview revisions are separate
 tokens with their own increment policy. A typed cursor allocates the one
 document-wide stable-ID namespace through domain-specific methods; there is no
-conversion between identity domains. Public Rust records, legacy C records, ABI v3 runtime IDs, and
+conversion between identity domains. Public Rust records, C records, runtime IDs, and
 `.inkpod` DTOs intentionally retain their established `u64` representation and
 convert only at those boundaries. The public `Guide` slice and
 `LightTableSource` input value remain raw compatibility boundary objects because
@@ -850,10 +852,12 @@ stroke. Long-running tasks expose progress and cancellation; cancellation,
 failure, or stale revision does not partially commit. Format limits and recovery
 details are specified in [`file-format.md`](file-format.md).
 
-The current `.inkpod` v8 container requires `META`, `GENS`, `ASST`, `PROC`, and
+The current `.inkpod` v9 container requires `META`, `GENS`, `ASST`, `PROC`, and
 `EDIT`. Save first verifies cache-free journal replay, encodes prospective
 document/editor savepoints, and streams the complete validated container to an
-exclusive same-directory temporary file. Only successful flush, sync, close,
+exclusive same-directory temporary file. Header, records, asset chunks,
+procedure payloads, and directory are streamed without a second complete file
+allocation. Only successful flush, sync, close,
 and replacement publish the path and both live savepoints. Open validates all
 container/section/record digests, assets, typed invocation bytes, references,
 branch/cursor relationships, high-watermarks, and final document/editor
@@ -861,8 +865,19 @@ digests in a staged Core, then swaps once and rebases `DocumentRevision` to 1.
 Normal-save output therefore reopens clean with Undo/Redo and inactive branches
 intact. Autosave retains the existing normal path/savepoints; recovery open
 clears both savepoints and path authority and marks the restored session dirty.
-Partial selection revert reconstructs the saved document through this same v8
+Partial selection revert reconstructs the saved document through this same v9
 reader and commits the selected delta as one new canonical undo unit.
+
+Checkpoint policy is deterministic over procedure count, replay work, and dirty
+bytes. A materialized checkpoint is an optimization only: inactive branches and
+all retained assets remain rooted by the journal. Explicit compaction first
+returns the history-event/procedure counts and document/editor/journal digests
+as a confirmation token, then writes a separate new-Genesis file only if that
+token is still exact. It never auto-squashes or mutates/adopts the live session.
+The Windows File menu obtains that token through `CoreHost`, displays both loss
+counts before showing the save dialog, rejects a path belonging to any open
+session, and reports success without changing current path, dirty state, or
+history.
 
 Each successful autosave is paired with an atomically replaced, current-version,
 bounded metadata sidecar containing `DocumentSessionId`, generation, document UUID,

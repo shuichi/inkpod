@@ -32,17 +32,19 @@ pub use light_table::{
     FileLightTableItem, FileLightTableMetadata, FileLightTableSet, LightTableDisplayMode,
 };
 pub use native::{
-    CellFile, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties,
-    FileTile, FormatError, FrameMetadata, GuideAxis, LayerKind, Margins, PlaneKind, RectI32,
-    checksum, discard_recovery, recovery_is_newer,
+    DocumentArchive, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
+    FilePlaneProperties, FileTile, FormatError, FrameMetadata, GuideAxis, LayerKind, Margins,
+    PlaneKind, RectI32, checksum, discard_recovery, recovery_is_newer,
 };
 use native::{
     MAX_MANIFEST_BYTES, MAX_NODE_NAME_BYTES, MAX_PLANES, Reader, push_color_value, push_i32,
     push_u32, push_u64,
 };
 #[cfg(test)]
-use native::{TEMP_SEQUENCE, decode, encode, read, save_atomic, save_atomic_with_cancel};
-pub use native::{decode as decode_cell_payload, encode as encode_cell_payload};
+use native::{TEMP_SEQUENCE, read, save_atomic, save_atomic_with_cancel};
+#[cfg(test)]
+use native::{decode_document_archive as decode, encode_document_archive as encode};
+pub use native::{decode_document_archive, encode_document_archive};
 pub use procedure::{
     FORMAT_VERSION, NativeFile, NativeRecord, NativeSection, OPAQUE_PRESERVE, SECTION_CRITICAL,
     decode_procedure_file, encode_procedure_file, read_procedure_file, save_procedure_file_atomic,

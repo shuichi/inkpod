@@ -286,10 +286,10 @@ pub(crate) struct AssetStore {
 }
 
 impl AssetStore {
-    pub(crate) fn persistent_records(&self) -> Vec<(AssetId, AssetDescriptor, Vec<u8>)> {
+    pub(crate) fn persistent_records(&self) -> Vec<(AssetId, AssetDescriptor, &[u8])> {
         self.records
             .values()
-            .map(|record| (record.id(), record.descriptor(), record.payload().to_vec()))
+            .map(|record| (record.id(), record.descriptor(), record.payload()))
             .collect()
     }
 

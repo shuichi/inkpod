@@ -98,7 +98,7 @@ pub use vector::{
 pub(crate) use coordinate::*;
 use document::{CellDocument, DocumentIds, LayerNode, PaperSpec, PlaneNode};
 use editor::EditorSessionState;
-use history::{HistoryChange, HistoryEntry, PixelChange};
+use history::{HistoryChange, HistoryEntry, PixelChange, StagedHistoryEntry};
 pub(crate) use identity::*;
 use persistence::{file_plane_to_raster, raster_to_file_plane};
 use selection::FloatingSelection;
@@ -107,9 +107,9 @@ use view::default_shortcuts;
 
 use inkpod_format::NativeSection;
 use inkpod_format::{
-    CellFile, CommonRaster, FileAdjustmentLayer, FileAdjustmentMetadata, FileDocumentMetadata,
-    FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties, FileTile, FormatError,
-    PlaneKind as FilePlaneKind,
+    CommonRaster, DocumentArchive, FileAdjustmentLayer, FileAdjustmentMetadata,
+    FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties, FileTile,
+    FormatError, PlaneKind as FilePlaneKind,
 };
 use inkpod_image::{
     ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,

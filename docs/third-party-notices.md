@@ -18,7 +18,7 @@ license expression は配布される crate manifest に基づく。
 TIFF、TGA、BMP は project の format crate 内で実装しており、別の codec dependency を追加しない。
 配布 package には、上記 expression に基づいて選択した upstream license text を同梱する。
 
-現行 `.inkpod` v8 の canonical/section digest と Core の canonical document-state digest には、
+現行 `.inkpod` v9 の canonical/section digest と Core の canonical document-state digest には、
 公式 Rust 実装の [`blake3`](https://github.com/BLAKE3-team/BLAKE3) crate を使用する。
 公式 crate manifest（1.8.5）は
 `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` を宣言しており、inkpod は

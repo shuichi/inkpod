@@ -1,11 +1,133 @@
 use super::*;
 
+static PERSISTENCE_PATH_SEQUENCE: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
 fn config() -> InkpodCoreConfig {
     InkpodCoreConfig {
         struct_size: size_of::<InkpodCoreConfig>() as u32,
         abi_version: INKPOD_ABI_VERSION,
         feature_flags: INKPOD_FEATURE_NONE,
     }
+}
+
+#[test]
+fn persistence_checkpoint_and_compaction_abi_are_bounded_confirmed_and_atomic() {
+    let mut core = ptr::null_mut();
+    let mut document = InkpodDocumentInfo {
+        struct_size: size_of::<InkpodDocumentInfo>() as u32,
+        ..InkpodDocumentInfo::default()
+    };
+    let create = InkpodCellCreateOptions {
+        struct_size: size_of::<InkpodCellCreateOptions>() as u32,
+        reserved: 0,
+        feature_flags: INKPOD_FEATURE_NONE,
+        document_uuid_high: 1,
+        document_uuid_low: 9,
+        width: 4,
+        height: 4,
+        dpi_x_milli: 96_000,
+        dpi_y_milli: 96_000,
+    };
+    let path = std::env::temp_dir().join(format!(
+        "inkpod-ffi-compaction-{}-{}.inkpod",
+        std::process::id(),
+        PERSISTENCE_PATH_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let path_bytes = path.to_str().unwrap().as_bytes().to_vec();
+    // SAFETY: All public records, handles, and exact UTF-8 spans remain live.
+    unsafe {
+        assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_new_cell(core, &create, &mut document),
+            INKPOD_STATUS_OK
+        );
+        let mut short = InkpodPersistenceInfo {
+            struct_size: size_of::<InkpodPersistenceInfo>() as u32 - 1,
+            format_version: u32::MAX,
+            ..InkpodPersistenceInfo::default()
+        };
+        assert_eq!(
+            inkpod_core_get_persistence_info(core, &mut short),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(short.format_version, u32::MAX);
+        let mut persistence = InkpodPersistenceInfo {
+            struct_size: size_of::<InkpodPersistenceInfo>() as u32,
+            ..InkpodPersistenceInfo::default()
+        };
+        assert_eq!(
+            inkpod_core_get_persistence_info(core, &mut persistence),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(persistence.format_version, 9);
+        assert_eq!(persistence.open_strategy, INKPOD_NATIVE_OPEN_NOT_OPENED);
+        assert_eq!(persistence.flags, 0);
+
+        let mut stale = InkpodCompactionPlan {
+            struct_size: size_of::<InkpodCompactionPlan>() as u32,
+            ..InkpodCompactionPlan::default()
+        };
+        assert_eq!(
+            inkpod_core_compaction_plan(core, &mut stale),
+            INKPOD_STATUS_OK
+        );
+        let color = InkpodColorValue {
+            struct_size: size_of::<InkpodColorValue>() as u32,
+            depth: INKPOD_COLOR_DEPTH_8,
+            red: 1,
+            green: 2,
+            blue: 3,
+            alpha: 255,
+        };
+        let mut dispatch = InkpodDispatchResult {
+            struct_size: size_of::<InkpodDispatchResult>() as u32,
+            reserved: 0,
+            revision: 0,
+            accepted_command_count: 0,
+        };
+        assert_eq!(
+            inkpod_core_set_main_line_color(core, &color, &mut dispatch),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_write_compacted_copy(
+                core,
+                path_bytes.as_ptr(),
+                path_bytes.len() as u64,
+                &stale,
+            ),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert!(!path.exists());
+        let mut current = InkpodCompactionPlan {
+            struct_size: size_of::<InkpodCompactionPlan>() as u32,
+            ..InkpodCompactionPlan::default()
+        };
+        assert_eq!(
+            inkpod_core_compaction_plan(core, &mut current),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(current.history_procedure_count, 1);
+        assert_eq!(
+            inkpod_core_write_compacted_copy(
+                core,
+                path_bytes.as_ptr(),
+                path_bytes.len() as u64,
+                &current,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let before_revision = dispatch.revision;
+        assert_eq!(
+            inkpod_core_get_document_info(core, &mut document),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(document.document_revision, before_revision);
+        assert_ne!(document.flags & INKPOD_DOCUMENT_FLAG_CAN_UNDO, 0);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+    std::fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -534,124 +656,6 @@ fn abi_001_lifecycle_and_double_release_are_safe() {
 }
 
 #[test]
-fn abi_001_dispatch_validates_commands_before_applying() {
-    let mut core = ptr::null_mut();
-    // SAFETY: All pointers reference initialized local storage.
-    assert_eq!(
-        unsafe { inkpod_core_create(&config(), &mut core) },
-        INKPOD_STATUS_OK
-    );
-    let command = InkpodCommand {
-        struct_size: size_of::<InkpodCommand>() as u32,
-        kind: INKPOD_COMMAND_NO_OP,
-        flags: 0,
-    };
-    let batch = InkpodCommandBatch {
-        struct_size: size_of::<InkpodCommandBatch>() as u32,
-        reserved: 0,
-        feature_flags: 0,
-        commands: &command,
-        command_count: 1,
-        command_stride_bytes: size_of::<InkpodCommand>() as u64,
-    };
-    let mut result = InkpodDispatchResult {
-        struct_size: size_of::<InkpodDispatchResult>() as u32,
-        reserved: u32::MAX,
-        revision: u64::MAX,
-        accepted_command_count: 0,
-    };
-    // SAFETY: The core and all batch/result storage are live for the call.
-    assert_eq!(
-        unsafe { inkpod_core_dispatch_batch(core, &batch, &mut result) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(result.revision, 0);
-    assert_eq!(result.accepted_command_count, 1);
-
-    #[repr(C)]
-    struct ExtendedCommand {
-        command: InkpodCommand,
-        extension: u64,
-    }
-    let extended_commands = [
-        ExtendedCommand {
-            command: InkpodCommand {
-                struct_size: size_of::<ExtendedCommand>() as u32,
-                kind: INKPOD_COMMAND_NO_OP,
-                flags: 0,
-            },
-            extension: 1,
-        },
-        ExtendedCommand {
-            command: InkpodCommand {
-                struct_size: size_of::<ExtendedCommand>() as u32,
-                kind: INKPOD_COMMAND_NO_OP,
-                flags: 0,
-            },
-            extension: 2,
-        },
-    ];
-    let extended_batch = InkpodCommandBatch {
-        commands: &extended_commands[0].command,
-        command_count: extended_commands.len() as u64,
-        command_stride_bytes: size_of::<ExtendedCommand>() as u64,
-        ..batch
-    };
-    // SAFETY: The explicit stride describes both extended records.
-    assert_eq!(
-        unsafe { inkpod_core_dispatch_batch(core, &extended_batch, &mut result) },
-        INKPOD_STATUS_OK
-    );
-    assert_eq!(result.accepted_command_count, 2);
-
-    let invalid_stride_batch = InkpodCommandBatch {
-        command_stride_bytes: (size_of::<InkpodCommand>() - 1) as u64,
-        ..batch
-    };
-    // SAFETY: Storage is valid; the record stride is intentionally short.
-    assert_eq!(
-        unsafe { inkpod_core_dispatch_batch(core, &invalid_stride_batch, &mut result) },
-        INKPOD_STATUS_INVALID_ARGUMENT
-    );
-
-    let invalid_command = InkpodCommand {
-        kind: 99,
-        ..command
-    };
-    let invalid_batch = InkpodCommandBatch {
-        commands: &invalid_command,
-        ..batch
-    };
-    // SAFETY: Storage is valid; the enum value is intentionally unsupported.
-    assert_eq!(
-        unsafe { inkpod_core_dispatch_batch(core, &invalid_batch, &mut result) },
-        INKPOD_STATUS_UNSUPPORTED
-    );
-
-    let mut required = 0;
-    // SAFETY: required is writable local storage.
-    assert_eq!(
-        unsafe { inkpod_error_message_size(&mut required) },
-        INKPOD_STATUS_OK
-    );
-    assert!(required > 1);
-    let mut message = vec![0_u8; required as usize];
-    let mut written = 0;
-    // SAFETY: message has the queried capacity and written is writable.
-    assert_eq!(
-        unsafe {
-            inkpod_error_message_copy(message.as_mut_ptr(), message.len() as u64, &mut written)
-        },
-        INKPOD_STATUS_OK
-    );
-    assert!(written > 0);
-    assert_eq!(message[written as usize], 0);
-
-    // SAFETY: The owner variable contains the live handle.
-    assert_eq!(unsafe { inkpod_core_destroy(&mut core) }, INKPOD_STATUS_OK);
-}
-
-#[test]
 fn abi_001_rejects_null_and_short_structures() {
     #[repr(C, align(8))]
     struct StructSizePrefix {
@@ -680,45 +684,7 @@ fn abi_001_rejects_null_and_short_structures() {
         unsafe { inkpod_core_create(&config(), &mut core) },
         INKPOD_STATUS_OK
     );
-    let mut result = InkpodDispatchResult {
-        struct_size: size_of::<InkpodDispatchResult>() as u32,
-        reserved: 0,
-        revision: 0,
-        accepted_command_count: 0,
-    };
-    // SAFETY: The short batch exposes only its aligned size prefix.
-    assert_eq!(
-        unsafe {
-            inkpod_core_dispatch_batch(
-                core,
-                (&raw const short).cast::<InkpodCommandBatch>(),
-                &mut result,
-            )
-        },
-        INKPOD_STATUS_INCOMPATIBLE_ABI
-    );
-
-    let empty_batch = InkpodCommandBatch {
-        struct_size: size_of::<InkpodCommandBatch>() as u32,
-        reserved: 0,
-        feature_flags: 0,
-        commands: ptr::null(),
-        command_count: 0,
-        command_stride_bytes: size_of::<InkpodCommand>() as u64,
-    };
     let mut short_output = StructSizePrefix { struct_size: 4 };
-    // SAFETY: The short result exposes only its writable size prefix.
-    assert_eq!(
-        unsafe {
-            inkpod_core_dispatch_batch(
-                core,
-                &empty_batch,
-                (&raw mut short_output).cast::<InkpodDispatchResult>(),
-            )
-        },
-        INKPOD_STATUS_INCOMPATIBLE_ABI
-    );
-
     let mut snapshot = ptr::null_mut();
     // SAFETY: The short options expose only their aligned size prefix.
     assert_eq!(

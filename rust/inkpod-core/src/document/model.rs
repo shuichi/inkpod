@@ -190,7 +190,7 @@ impl CellDocument {
         })
     }
 
-    pub(crate) fn to_file(&self) -> CellFile {
+    pub(crate) fn to_archive(&self) -> DocumentArchive {
         let (layer_id, main_plane_id, color_plane_id) = self.primary_ids();
         let mut planes: Vec<_> = self
             .layers
@@ -206,7 +206,7 @@ impl CellDocument {
             &self.selection,
         ));
         planes.extend(self.light_table.file_planes());
-        CellFile {
+        DocumentArchive {
             document_uuid: self.uuid.to_le_bytes(),
             document_id: self.id.get(),
             layer_id: layer_id.get(),
@@ -286,7 +286,10 @@ impl CellDocument {
         }
     }
 
-    pub(crate) fn from_file(file: CellFile, revision: DocumentRevision) -> Result<Self, CoreError> {
+    pub(crate) fn from_archive(
+        file: DocumentArchive,
+        revision: DocumentRevision,
+    ) -> Result<Self, CoreError> {
         let main_file = file
             .planes
             .iter()

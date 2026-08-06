@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const BENCHMARK_UUID: u128 = 0x494e_4b50_4f44_2d4d_322d_4245_4e43_4801;
-const EXPECTED_QUICK_CHECKSUMS: [u64; 8] = [
+const EXPECTED_QUICK_CHECKSUMS: [u64; 9] = [
     0x517e_d7ae_78bf_0487,
     0x9e13_576d_ef6f_539b,
     0x517e_d7ae_78bf_0487,
@@ -15,8 +15,9 @@ const EXPECTED_QUICK_CHECKSUMS: [u64; 8] = [
     0x688d_d42c_93a7_1bec,
     0xf31d_31fe_1bb0_0fd7,
     0x20de_057c_c9cc_3ca1,
+    0xbf81_1491_4500_d6e8,
 ];
-const EXPECTED_FULL_CHECKSUMS: [u64; 8] = [
+const EXPECTED_FULL_CHECKSUMS: [u64; 9] = [
     0x4390_40e0_244d_5773,
     0xa33f_7534_fcdd_61e7,
     0x4390_40e0_244d_5773,
@@ -25,6 +26,7 @@ const EXPECTED_FULL_CHECKSUMS: [u64; 8] = [
     0x27e6_aa98_8b12_5683,
     0x6732_b8b0_a656_5d03,
     0x20de_057c_c9cc_3ca1,
+    0xbf81_1491_4500_d6e8,
 ];
 
 #[derive(Clone, Copy)]
@@ -40,6 +42,7 @@ struct Profile {
     vector_paths: u32,
     batch_cells: u32,
     batch_side: u32,
+    checkpoint_samples: u32,
 }
 
 impl Profile {
@@ -57,6 +60,7 @@ impl Profile {
                 vector_paths: 8,
                 batch_cells: 4,
                 batch_side: 16,
+                checkpoint_samples: 175_000,
             }
         } else {
             Self {
@@ -71,6 +75,7 @@ impl Profile {
                 vector_paths: 32,
                 batch_cells: 16,
                 batch_side: 32,
+                checkpoint_samples: 1_000_000,
             }
         }
     }
@@ -122,6 +127,7 @@ fn main() {
         vector_snapshot(profile),
         batch_preview(profile),
         canonical_replay(profile),
+        checkpoint_open(profile),
     ];
 
     for result in &results {
@@ -134,6 +140,106 @@ fn main() {
         EXPECTED_FULL_CHECKSUMS
     };
     assert_eq!(actual, expected, "benchmark semantic checksums changed");
+}
+
+fn checkpoint_open(profile: Profile) -> ScenarioResult {
+    let path = std::env::temp_dir().join(format!(
+        "inkpod-core-benchmark-checkpoint-{}-{}.inkpod",
+        std::process::id(),
+        profile.name
+    ));
+    let mut core = Core::new();
+    let created = core
+        .new_cell_with_uuid(
+            1,
+            1,
+            DEFAULT_DPI_MILLI,
+            DEFAULT_DPI_MILLI,
+            BENCHMARK_UUID + 4,
+        )
+        .expect("bounded checkpoint document must be valid");
+    let samples = (0..profile.checkpoint_samples)
+        .map(|index| StrokeSample {
+            x: 0.25 + f32::from((index & 1) as u8) * 0.25,
+            y: 0.25,
+            pressure: 1.0,
+        })
+        .collect();
+    core.execute_primitive(PrimitiveRequest::ApplyRasterStroke {
+        expected_revision: created.document_revision,
+        target_plane_id: created.color_plane_id,
+        stroke: Stroke {
+            tool: PaintTool::Pencil,
+            plane: ActivePlane::Color,
+            color: [17, 43, 91, 255],
+            diameter: 1.0,
+            auto_erase: false,
+            pressure_size: false,
+            coordinate_space: CoordinateSpace::Document,
+            samples,
+        },
+    })
+    .expect("bounded long stroke must commit");
+    for index in 0..255 {
+        let value = if index % 2 == 0 { 1 } else { 2 };
+        core.set_main_line_color(PixelValue::Rgba([value, value, value, 255]))
+            .expect("checkpoint policy edit must commit");
+    }
+    let policy = core
+        .persistence_info()
+        .expect("persistence diagnostics must be available");
+    assert_eq!(policy.procedure_count, 256);
+    assert!(policy.checkpoint_due);
+    if profile.checkpoint_samples == 1_000_000 {
+        assert!(policy.replay_work >= 1_000_000);
+    }
+    let expected_digest = core
+        .document_state_digest()
+        .expect("checkpoint source digest must be available");
+    core.save(&path)
+        .expect("checkpoint benchmark fixture must save");
+
+    let started = Instant::now();
+    let mut opened = Core::new();
+    opened
+        .open(&path)
+        .expect("checkpoint benchmark fixture must open");
+    let elapsed = started.elapsed();
+    assert_eq!(
+        opened
+            .persistence_info()
+            .expect("opened persistence diagnostics must be available")
+            .open_strategy,
+        NativeOpenStrategy::Checkpoint
+    );
+    assert_eq!(
+        opened
+            .document_state_digest()
+            .expect("opened checkpoint digest must be available"),
+        expected_digest
+    );
+    assert_eq!(opened.journal_entries(), core.journal_entries());
+    opened
+        .undo()
+        .expect("checkpoint history cache must rebuild");
+    opened.redo().expect("checkpoint history cache must redo");
+    let checksum = u64::from_le_bytes(expected_digest.as_bytes()[..8].try_into().unwrap());
+    std::fs::remove_file(&path).expect("checkpoint benchmark file must be removable");
+    black_box(&opened);
+
+    ScenarioResult {
+        scenario: "checkpoint_open",
+        elapsed,
+        iterations: 1,
+        input_items: u64::from(profile.checkpoint_samples) + policy.procedure_count,
+        output_items: opened.history_entries().len() as u64,
+        reused_items: policy.asset_count,
+        document_revision: opened.document_info().unwrap().document_revision,
+        history_entries: opened.history_entries().len() as u64,
+        successes: 1,
+        failures: 0,
+        checksum,
+    }
 }
 
 fn canonical_replay(_profile: Profile) -> ScenarioResult {

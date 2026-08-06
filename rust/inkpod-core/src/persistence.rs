@@ -116,6 +116,90 @@ impl Core {
             .ok_or(CoreError::InvalidState("document has no normal-save path"))?;
         self.open(&path)
     }
+
+    /// Returns bounded native persistence and checkpoint-policy diagnostics.
+    ///
+    /// The deterministic counters are derived from immutable assets and the
+    /// authoritative journal. This query performs no replay, I/O, allocation
+    /// authority change, savepoint update, or cache invalidation.
+    pub fn persistence_info(&self) -> Result<PersistenceInfo, CoreError> {
+        self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let counters = self.persistence_counters()?;
+        let assets = self.assets.usage();
+        Ok(PersistenceInfo {
+            format_version: inkpod_format::FORMAT_VERSION,
+            open_strategy: self.last_open_strategy,
+            journal_event_count: self.journal.len() as u64,
+            procedure_count: counters.procedure_count,
+            replay_work: counters.replay_work,
+            dirty_bytes: counters.dirty_bytes,
+            asset_count: assets.asset_count,
+            asset_bytes: assets.logical_payload_bytes,
+            checkpoint_due: counters.checkpoint_due(),
+        })
+    }
+
+    /// Builds a side-effect-free preview token for an explicit compacted copy.
+    ///
+    /// The returned counts are the history that the separate output will omit.
+    /// No automatic squash occurs and the live document, journal, path,
+    /// savepoints, dirty state, and assets remain unchanged.
+    pub fn compaction_plan(&self) -> Result<CompactionPlan, CoreError> {
+        self.ensure_no_active_stroke()?;
+        self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let records = encode_journal_records(&self.journal)?;
+        Ok(CompactionPlan {
+            history_event_count: self.journal.len() as u64,
+            history_procedure_count: self
+                .journal
+                .iter()
+                .filter(|entry| matches!(entry, JournalEntry::Commit(_)))
+                .count() as u64,
+            document_digest: self.document_state_digest()?,
+            editor_digest: self
+                .editor_session
+                .as_ref()
+                .ok_or(CoreError::NoDocument)?
+                .digest,
+            journal_digest: journal_prefix_digest(&records),
+        })
+    }
+
+    /// Writes a separate current-version file whose current state is a new Genesis.
+    ///
+    /// `plan` must be the exact value most recently presented for confirmation;
+    /// any intervening document, editor, or journal change is rejected as stale.
+    /// Success never changes the live Core or adopts `path` as its save target.
+    /// The compacted file intentionally has no prior Undo/Redo or inactive branch.
+    pub fn write_compacted_copy(&self, path: &Path, plan: CompactionPlan) -> Result<(), CoreError> {
+        self.ensure_no_active_stroke()?;
+        if self.compaction_plan()? != plan {
+            return Err(CoreError::InvalidState("compaction plan is stale"));
+        }
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
+        let editor = self
+            .editor_session
+            .as_ref()
+            .ok_or(CoreError::NoDocument)?
+            .clone();
+        let mut compacted = Core::new();
+        compacted.document = Some(document.clone());
+        compacted.genesis = Some(genesis::Genesis::new(document));
+        compacted.document_revision = DocumentRevision::from_raw(1);
+        compacted.next_id = self.next_id;
+        compacted.reset_history(true);
+        compacted.editor_session = Some(EditorSessionState {
+            state: editor.state,
+            revision: editor.revision,
+            digest: editor.digest,
+            savepoint: Some(editor.digest),
+        });
+        compacted.assets = self.assets_for_current_document()?;
+        compacted.reset_view();
+        let file = compacted.build_procedure_file(Some(StateId::GENESIS), Some(editor.digest))?;
+        inkpod_format::save_procedure_file_atomic(path, &file)?;
+        Ok(())
+    }
 }
 
 // Shared implementation helpers for this responsibility.
@@ -124,8 +208,26 @@ const ASSET_CHUNK_BYTES: usize = 4 * 1_024 * 1_024;
 const MAX_PERSISTED_ARGUMENT_BYTES: usize = 1_024 * 1_024;
 const MAX_PERSISTED_PAYLOAD_BYTES: usize = 32 * 1_024 * 1_024;
 const MAX_PERSISTED_RECORD_BYTES: usize = 40 * 1_024 * 1_024;
+const CHECKPOINT_PROCEDURE_INTERVAL: u64 = 256;
+const CHECKPOINT_REPLAY_WORK_INTERVAL: u64 = 1_000_000;
+const CHECKPOINT_DIRTY_BYTES_INTERVAL: u64 = 8 * 1_024 * 1_024;
 const JOURNAL_PREFIX_CONTEXT: &str = "org.inkpod.digest.journal-prefix.v1";
 const ASSET_CHUNK_CONTEXT: &str = "org.inkpod.digest.asset-chunk.v1";
+
+#[derive(Clone, Copy)]
+struct PersistenceCounters {
+    procedure_count: u64,
+    replay_work: u64,
+    dirty_bytes: u64,
+}
+
+impl PersistenceCounters {
+    const fn checkpoint_due(self) -> bool {
+        self.procedure_count >= CHECKPOINT_PROCEDURE_INTERVAL
+            || self.replay_work >= CHECKPOINT_REPLAY_WORK_INTERVAL
+            || self.dirty_bytes >= CHECKPOINT_DIRTY_BYTES_INTERVAL
+    }
+}
 
 #[derive(Clone, Copy)]
 struct PersistentMeta {
@@ -148,7 +250,69 @@ struct PersistentMeta {
     journal_digest: [u8; 32],
 }
 
+struct DecodedCheckpoint {
+    replay_epoch: u32,
+    prefix_event_count: u64,
+    prefix_procedure_count: u64,
+    prefix_digest: [u8; 32],
+    state_id: StateId,
+    state_digest: DocumentStateDigest,
+    next_stable_id: u64,
+    active_branch: BranchId,
+    history_cursor: usize,
+    replay_work: u64,
+    dirty_bytes: u64,
+    document: CellDocument,
+}
+
 impl Core {
+    fn persistence_counters(&self) -> Result<PersistenceCounters, CoreError> {
+        let mut counters = PersistenceCounters {
+            procedure_count: 0,
+            replay_work: 0,
+            dirty_bytes: 0,
+        };
+        for entry in &self.journal {
+            let JournalEntry::Commit(commit) = entry else {
+                continue;
+            };
+            let procedure = commit.procedure();
+            counters.procedure_count =
+                counters
+                    .procedure_count
+                    .checked_add(1)
+                    .ok_or(CoreError::InvalidState(
+                        "checkpoint procedure count overflows",
+                    ))?;
+            counters.replay_work = counters
+                .replay_work
+                .checked_add(1)
+                .and_then(|value| value.checked_add(procedure.canonical_arguments().len() as u64))
+                .and_then(|value| value.checked_add(procedure.canonical_payload().len() as u64))
+                .ok_or(CoreError::InvalidState("checkpoint replay work overflows"))?;
+            counters.dirty_bytes = counters
+                .dirty_bytes
+                .checked_add(procedure.canonical_arguments().len() as u64)
+                .and_then(|value| value.checked_add(procedure.canonical_payload().len() as u64))
+                .ok_or(CoreError::InvalidState("checkpoint dirty bytes overflow"))?;
+            for id in procedure.asset_ids() {
+                let record = self.assets.get(*id).ok_or(CoreError::InvalidState(
+                    "checkpoint policy references a missing asset",
+                ))?;
+                let descriptor = record.descriptor();
+                counters.replay_work = counters
+                    .replay_work
+                    .checked_add(descriptor.logical_element_count)
+                    .ok_or(CoreError::InvalidState("checkpoint replay work overflows"))?;
+                counters.dirty_bytes = counters
+                    .dirty_bytes
+                    .checked_add(descriptor.logical_payload_length)
+                    .ok_or(CoreError::InvalidState("checkpoint dirty bytes overflow"))?;
+            }
+        }
+        Ok(counters)
+    }
+
     pub(super) fn build_procedure_file(
         &self,
         document_savepoint: Option<StateId>,
@@ -172,6 +336,7 @@ impl Core {
 
         let proc_records = encode_journal_records(&self.journal)?;
         let journal_digest = journal_prefix_digest(&proc_records);
+        let counters = self.persistence_counters()?;
         let assets = self.assets.persistent_records();
         let asset_records = encode_asset_records(&assets)?;
         let document_digest = self.document_state_digest()?;
@@ -190,11 +355,7 @@ impl Core {
             next_state: self.next_state,
             next_event: self.next_journal_event,
             next_branch: self.next_branch,
-            procedure_count: self
-                .journal
-                .iter()
-                .filter(|entry| matches!(entry, JournalEntry::Commit(_)))
-                .count() as u64,
+            procedure_count: counters.procedure_count,
             event_count: self.journal.len() as u64,
             asset_count: assets.len() as u64,
             document_digest,
@@ -214,6 +375,17 @@ impl Core {
             critical_section(*b"PROC", proc_records),
             critical_section(*b"EDIT", vec![record(1, editor_frame)]),
         ];
+        if counters.checkpoint_due() {
+            sections.push(inkpod_format::NativeSection {
+                fourcc: *b"CKPT",
+                schema_version: 1,
+                flags: 0,
+                records: vec![record(
+                    1,
+                    encode_checkpoint(document, document_digest, journal_digest, meta, counters)?,
+                )],
+            });
+        }
         sections.extend(self.native_opaque_sections.iter().cloned());
         Ok(inkpod_format::NativeFile {
             primitive_catalog_digest: *contract.primitive_catalog_digest(),
@@ -226,15 +398,6 @@ impl Core {
         if file.primitive_catalog_digest != *contract.primitive_catalog_digest() {
             return Err(format_error(
                 "native primitive catalog digest does not match this build",
-            ));
-        }
-        if file
-            .sections
-            .iter()
-            .any(|section| section.fourcc == *b"CKPT")
-        {
-            return Err(format_error(
-                "checkpoint sections are reserved and are not accepted by this format epoch",
             ));
         }
         let meta_record = singleton_payload(&file.sections, *b"META")?;
@@ -275,6 +438,17 @@ impl Core {
                 "META journal counts or digest do not match PROC",
             ));
         }
+        let mut checkpoint = file
+            .sections
+            .iter()
+            .find(|section| section.fourcc == *b"CKPT")
+            .map(|section| {
+                if section.records.len() != 1 {
+                    return Err(format_error("CKPT record count is invalid"));
+                }
+                decode_checkpoint(&section.records[0].payload)
+            })
+            .transpose()?;
 
         let mut staged = Core::new();
         staged.assets = assets;
@@ -291,7 +465,49 @@ impl Core {
         staged.next_journal_event = meta.next_event;
         staged.next_branch = meta.next_branch;
         staged.branch_tails = branch_tails_from_journal(&staged.journal, meta.next_branch)?;
-        let rebuilt = staged.rebuild_runtime_from_journal()?;
+        if let Some(checkpoint) = checkpoint.as_mut() {
+            checkpoint
+                .document
+                .light_table
+                .intern_into(&mut staged.assets)?;
+            if let BaseSurface::Asset(id) = checkpoint.document.base_surface
+                && staged.assets.get(id).is_none()
+            {
+                return Err(format_error("checkpoint base asset is missing"));
+            }
+        }
+        let counters = staged.persistence_counters()?;
+        let checkpoint_matches = checkpoint.as_ref().is_some_and(|checkpoint| {
+            let digest = primitive::canonical_document_state(&checkpoint.document)
+                .map(|value| value.1)
+                .ok();
+            checkpoint.replay_epoch == ReplayEpoch::CURRENT.get()
+                && checkpoint.prefix_event_count == meta.event_count
+                && checkpoint.prefix_procedure_count == meta.procedure_count
+                && checkpoint.prefix_digest == meta.journal_digest
+                && checkpoint.state_id == meta.current_state
+                && checkpoint.state_digest == meta.document_digest
+                && digest == Some(checkpoint.state_digest)
+                && checkpoint.next_stable_id == meta.next_stable_id
+                && checkpoint.active_branch == meta.active_branch
+                && checkpoint.history_cursor == meta.history_cursor
+                && checkpoint.replay_work == counters.replay_work
+                && checkpoint.dirty_bytes == counters.dirty_bytes
+                && checkpoint.document.uuid.to_le_bytes() == meta.document_uuid
+        });
+        let rebuilt = if checkpoint_matches {
+            let checkpoint = checkpoint.expect("matching checkpoint is present");
+            let rebuilt = staged.rebuild_runtime_from_checkpoint(
+                checkpoint.document,
+                StableIdCursor::from_next_raw(checkpoint.next_stable_id),
+            )?;
+            staged.last_open_strategy = NativeOpenStrategy::Checkpoint;
+            rebuilt
+        } else {
+            let rebuilt = staged.rebuild_runtime_from_journal()?;
+            staged.last_open_strategy = NativeOpenStrategy::FullReplay;
+            rebuilt
+        };
         if rebuilt.next_id.next_raw() != meta.next_stable_id
             || rebuilt.history_cursor != meta.history_cursor
             || rebuilt.info.document_state_digest() != meta.document_digest
@@ -330,7 +546,6 @@ impl Core {
         staged.current_path = None;
         staged.recovered = false;
         staged.reset_view();
-        staged.verify_journal_replay()?;
         Ok(staged)
     }
 
@@ -455,6 +670,17 @@ fn encode_genesis(
     document: &CellDocument,
     digest: DocumentStateDigest,
 ) -> Result<Vec<u8>, CoreError> {
+    let archive = encode_document_archive(document)?;
+    Ok(encode_frame(&[
+        Some(document.uuid.to_le_bytes().to_vec()),
+        Some(StateId::GENESIS.get().to_le_bytes().to_vec()),
+        Some(BranchId::ROOT.get().to_le_bytes().to_vec()),
+        Some(archive),
+        Some(digest.as_bytes().to_vec()),
+    ]))
+}
+
+fn encode_document_archive(document: &CellDocument) -> Result<Vec<u8>, CoreError> {
     let mut archive = Vec::new();
     match document.base_surface {
         BaseSurface::SolidWhite => archive.push(1),
@@ -463,16 +689,10 @@ fn encode_genesis(
             archive.extend_from_slice(id.as_bytes());
         }
     }
-    let cell_bytes = inkpod_format::encode_cell_payload(&document.to_file())?;
+    let cell_bytes = inkpod_format::encode_document_archive(&document.to_archive())?;
     archive.extend_from_slice(&(cell_bytes.len() as u64).to_le_bytes());
     archive.extend_from_slice(&cell_bytes);
-    Ok(encode_frame(&[
-        Some(document.uuid.to_le_bytes().to_vec()),
-        Some(StateId::GENESIS.get().to_le_bytes().to_vec()),
-        Some(BranchId::ROOT.get().to_le_bytes().to_vec()),
-        Some(archive),
-        Some(digest.as_bytes().to_vec()),
-    ]))
+    Ok(archive)
 }
 
 fn decode_genesis(bytes: &[u8]) -> Result<(CellDocument, DocumentStateDigest), CoreError> {
@@ -483,7 +703,16 @@ fn decode_genesis(bytes: &[u8]) -> Result<(CellDocument, DocumentStateDigest), C
     {
         return Err(format_error("GENS root identities are invalid"));
     }
-    let archive = required(fields[3])?;
+    let document = decode_document_archive(required(fields[3])?)?;
+    if document.uuid.to_le_bytes() != uuid {
+        return Err(format_error("GENS UUID and document payload differ"));
+    }
+    let digest =
+        DocumentStateDigest::from_bytes(fixed::<32>(required(fields[4])?, "GENS document digest")?);
+    Ok((document, digest))
+}
+
+fn decode_document_archive(archive: &[u8]) -> Result<CellDocument, CoreError> {
     let mut reader = ByteReader::new(archive);
     let base_surface = match reader.u8()? {
         1 => BaseSurface::SolidWhite,
@@ -491,20 +720,61 @@ fn decode_genesis(bytes: &[u8]) -> Result<(CellDocument, DocumentStateDigest), C
         _ => return Err(format_error("GENS base-surface code is invalid")),
     };
     let length = reader.length()?;
-    let cell = inkpod_format::decode_cell_payload(reader.take(length)?)?;
+    let cell = inkpod_format::decode_document_archive(reader.take(length)?)?;
     reader.finish()?;
-    let mut document = CellDocument::from_file(cell, DocumentRevision::from_raw(1))?;
-    if document.uuid.to_le_bytes() != uuid {
-        return Err(format_error("GENS UUID and document payload differ"));
-    }
+    let mut document = CellDocument::from_archive(cell, DocumentRevision::from_raw(1))?;
     document.base_surface = base_surface;
-    let digest =
-        DocumentStateDigest::from_bytes(fixed::<32>(required(fields[4])?, "GENS document digest")?);
-    Ok((document, digest))
+    Ok(document)
+}
+
+fn encode_checkpoint(
+    document: &CellDocument,
+    state_digest: DocumentStateDigest,
+    prefix_digest: [u8; 32],
+    meta: PersistentMeta,
+    counters: PersistenceCounters,
+) -> Result<Vec<u8>, CoreError> {
+    Ok(encode_frame(&[
+        Some(ReplayEpoch::CURRENT.get().to_le_bytes().to_vec()),
+        Some(meta.event_count.to_le_bytes().to_vec()),
+        Some(meta.procedure_count.to_le_bytes().to_vec()),
+        Some(prefix_digest.to_vec()),
+        Some(meta.current_state.get().to_le_bytes().to_vec()),
+        Some(state_digest.as_bytes().to_vec()),
+        Some(meta.next_stable_id.to_le_bytes().to_vec()),
+        Some(meta.active_branch.get().to_le_bytes().to_vec()),
+        Some((meta.history_cursor as u64).to_le_bytes().to_vec()),
+        Some(counters.replay_work.to_le_bytes().to_vec()),
+        Some(counters.dirty_bytes.to_le_bytes().to_vec()),
+        Some(encode_document_archive(document)?),
+    ]))
+}
+
+fn decode_checkpoint(bytes: &[u8]) -> Result<DecodedCheckpoint, CoreError> {
+    let fields = decode_frame(bytes, 12)?;
+    let history_cursor = usize::try_from(read_u64(required(fields[8])?)?)
+        .map_err(|_| format_error("CKPT history cursor is not addressable"))?;
+    Ok(DecodedCheckpoint {
+        replay_epoch: read_u32(required(fields[0])?)?,
+        prefix_event_count: read_u64(required(fields[1])?)?,
+        prefix_procedure_count: read_u64(required(fields[2])?)?,
+        prefix_digest: fixed::<32>(required(fields[3])?, "CKPT prefix digest")?,
+        state_id: state_id(required(fields[4])?)?,
+        state_digest: DocumentStateDigest::from_bytes(fixed::<32>(
+            required(fields[5])?,
+            "CKPT state digest",
+        )?),
+        next_stable_id: persistent_id(required(fields[6])?)?,
+        active_branch: branch_id(required(fields[7])?)?,
+        history_cursor,
+        replay_work: read_u64(required(fields[9])?)?,
+        dirty_bytes: read_u64(required(fields[10])?)?,
+        document: decode_document_archive(required(fields[11])?)?,
+    })
 }
 
 fn encode_asset_records(
-    assets: &[(AssetId, AssetDescriptor, Vec<u8>)],
+    assets: &[(AssetId, AssetDescriptor, &[u8])],
 ) -> Result<Vec<inkpod_format::NativeRecord>, CoreError> {
     let mut records = Vec::new();
     for (id, descriptor, payload) in assets {
@@ -1235,4 +1505,35 @@ pub(super) fn file_plane_to_raster(
         })?;
     }
     Ok(raster)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checkpoint_policy_uses_each_closed_threshold_without_changing_ranges() {
+        let below = PersistenceCounters {
+            procedure_count: CHECKPOINT_PROCEDURE_INTERVAL - 1,
+            replay_work: CHECKPOINT_REPLAY_WORK_INTERVAL - 1,
+            dirty_bytes: CHECKPOINT_DIRTY_BYTES_INTERVAL - 1,
+        };
+        assert!(!below.checkpoint_due());
+        for counters in [
+            PersistenceCounters {
+                procedure_count: CHECKPOINT_PROCEDURE_INTERVAL,
+                ..below
+            },
+            PersistenceCounters {
+                replay_work: CHECKPOINT_REPLAY_WORK_INTERVAL,
+                ..below
+            },
+            PersistenceCounters {
+                dirty_bytes: CHECKPOINT_DIRTY_BYTES_INTERVAL,
+                ..below
+            },
+        ] {
+            assert!(counters.checkpoint_due());
+        }
+    }
 }

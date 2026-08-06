@@ -383,6 +383,13 @@ struct ReplayNode {
     next_id: StableIdCursor,
 }
 
+struct CheckpointNode {
+    parent: Option<StateId>,
+    procedure: Option<Arc<CanonicalProcedure>>,
+    branch_id: BranchId,
+    digest: DocumentStateDigest,
+}
+
 pub(super) struct RebuiltRuntime {
     pub(super) document: CellDocument,
     pub(super) history: Vec<HistoryEntry>,
@@ -706,7 +713,7 @@ impl Core {
                     ))?;
                     cached.before_state = commit.parent_state_id;
                     cached.after_state = commit.committed_state_id;
-                    cached.procedure = Some(Arc::clone(&commit.procedure));
+                    cached.procedure = Arc::clone(&commit.procedure);
                     cached.branch_id = commit.branch_id;
                     let next_id = replay.next_id;
                     let document = replay.document.ok_or(CoreError::NoDocument)?;
@@ -875,6 +882,265 @@ impl Core {
         })
     }
 
+    pub(super) fn rebuild_runtime_from_checkpoint(
+        &self,
+        document: CellDocument,
+        next_id: StableIdCursor,
+    ) -> Result<RebuiltRuntime, CoreError> {
+        if self.journal.len() > MAX_JOURNAL_EVENTS
+            || self.next_procedure.get() > MAX_JOURNAL_COMMITS + 1
+        {
+            return Err(CoreError::InvalidState("journal limit exceeded"));
+        }
+        let genesis = self
+            .genesis
+            .as_ref()
+            .ok_or(CoreError::InvalidState("journal Genesis is missing"))?;
+        let genesis_digest = canonical_document_state(&genesis.document)?.1;
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            StateId::GENESIS,
+            CheckpointNode {
+                parent: None,
+                procedure: None,
+                branch_id: BranchId::ROOT,
+                digest: genesis_digest,
+            },
+        );
+        let mut branches = BTreeMap::new();
+        branches.insert(BranchId::ROOT, StateId::GENESIS);
+        let mut current_state = StateId::GENESIS;
+        let mut active_branch = BranchId::ROOT;
+        let mut expected_event = JournalEventId::first();
+        let mut expected_procedure = ProcedureId::first();
+        let mut expected_state = StateId::GENESIS
+            .checked_next()
+            .ok_or(CoreError::InvalidState("Genesis state cannot advance"))?;
+        let mut next_branch = BranchId::first_unallocated();
+        let mut pending_cut: Option<(BranchId, StateId)> = None;
+
+        for record in &self.journal {
+            let event_id = match record {
+                JournalEntry::Commit(commit) => commit.event_id,
+                JournalEntry::HistoryMove(movement) => movement.event_id,
+                JournalEntry::BranchCut(cut) => cut.event_id,
+            };
+            if event_id != expected_event {
+                return Err(CoreError::InvalidState(
+                    "journal event IDs are not contiguous",
+                ));
+            }
+            expected_event = expected_event
+                .checked_next()
+                .ok_or(CoreError::InvalidState("journal event ID overflow"))?;
+            match record {
+                JournalEntry::Commit(commit) => {
+                    primitive::validate_persisted_procedure(commit.procedure(), &self.assets)?;
+                    let parent = nodes
+                        .get(&commit.parent_state_id)
+                        .ok_or(CoreError::InvalidState("journal parent state is missing"))?;
+                    if commit.procedure.procedure_id() != expected_procedure
+                        || commit.committed_state_id != expected_state
+                        || commit.parent_state_id != current_state
+                        || commit.procedure.base_state_id() != commit.parent_state_id
+                        || commit.procedure.committed_state_id() != commit.committed_state_id
+                        || commit.procedure.pre_state_digest() != parent.digest
+                        || commit.branch_id != active_branch
+                        || branches.get(&active_branch).copied() != Some(current_state)
+                    {
+                        return Err(CoreError::InvalidState(
+                            "journal Commit violates procedure, digest, state, or branch ordering",
+                        ));
+                    }
+                    if let Some((branch, fork)) = pending_cut.take()
+                        && (branch != commit.branch_id || fork != commit.parent_state_id)
+                    {
+                        return Err(CoreError::InvalidState(
+                            "BranchCut is not followed by its matching Commit",
+                        ));
+                    }
+                    nodes.insert(
+                        commit.committed_state_id,
+                        CheckpointNode {
+                            parent: Some(commit.parent_state_id),
+                            procedure: Some(Arc::clone(&commit.procedure)),
+                            branch_id: commit.branch_id,
+                            digest: commit.procedure.post_state_digest(),
+                        },
+                    );
+                    branches.insert(active_branch, commit.committed_state_id);
+                    current_state = commit.committed_state_id;
+                    expected_procedure = expected_procedure
+                        .checked_next()
+                        .ok_or(CoreError::InvalidState("procedure ID overflow"))?;
+                    expected_state = expected_state
+                        .checked_next()
+                        .ok_or(CoreError::InvalidState("history state overflow"))?;
+                }
+                JournalEntry::HistoryMove(movement) => {
+                    let branch_changes = movement.active_branch_id != active_branch;
+                    if pending_cut.is_some()
+                        || movement.source_state_id != current_state
+                        || (movement.source_state_id == movement.destination_state_id
+                            && !branch_changes)
+                        || (branch_changes && movement.kind != HistoryMoveKind::Jump)
+                        || !branches.contains_key(&movement.active_branch_id)
+                        || !is_checkpoint_ancestor(
+                            movement.destination_state_id,
+                            branches[&movement.active_branch_id],
+                            &nodes,
+                        )
+                    {
+                        return Err(CoreError::InvalidState(
+                            "journal HistoryMove violates branch ancestry",
+                        ));
+                    }
+                    match movement.kind {
+                        HistoryMoveKind::Undo
+                            if nodes
+                                .get(&movement.source_state_id)
+                                .and_then(|node| node.parent)
+                                != Some(movement.destination_state_id) =>
+                        {
+                            return Err(CoreError::InvalidState(
+                                "Undo does not move to the parent state",
+                            ));
+                        }
+                        HistoryMoveKind::Redo
+                            if nodes
+                                .get(&movement.destination_state_id)
+                                .and_then(|node| node.parent)
+                                != Some(movement.source_state_id) =>
+                        {
+                            return Err(CoreError::InvalidState(
+                                "Redo does not move to a child state",
+                            ));
+                        }
+                        HistoryMoveKind::Undo | HistoryMoveKind::Redo | HistoryMoveKind::Jump => {}
+                    }
+                    current_state = movement.destination_state_id;
+                    active_branch = movement.active_branch_id;
+                }
+                JournalEntry::BranchCut(cut) => {
+                    if pending_cut.is_some()
+                        || cut.deactivated_branch_id != active_branch
+                        || cut.fork_state_id != current_state
+                        || branches.get(&active_branch).copied()
+                            != Some(cut.old_active_tail_state_id)
+                        || cut.fork_state_id == cut.old_active_tail_state_id
+                        || cut.new_branch_id != next_branch
+                        || cut.new_branch_id.get() > MAX_JOURNAL_BRANCHES
+                        || branches.contains_key(&cut.new_branch_id)
+                        || !is_checkpoint_ancestor(
+                            cut.fork_state_id,
+                            cut.old_active_tail_state_id,
+                            &nodes,
+                        )
+                    {
+                        return Err(CoreError::InvalidState(
+                            "journal BranchCut violates branch ordering",
+                        ));
+                    }
+                    branches.insert(cut.new_branch_id, cut.fork_state_id);
+                    active_branch = cut.new_branch_id;
+                    pending_cut = Some((cut.new_branch_id, cut.fork_state_id));
+                    next_branch = next_branch
+                        .checked_next()
+                        .ok_or(CoreError::InvalidState("branch ID overflow"))?;
+                }
+            }
+        }
+        if pending_cut.is_some() {
+            return Err(CoreError::InvalidState(
+                "journal ends with an uncommitted BranchCut",
+            ));
+        }
+        if self
+            .savepoint
+            .is_some_and(|savepoint| !nodes.contains_key(&savepoint))
+        {
+            return Err(CoreError::InvalidState(
+                "journal savepoint state is missing",
+            ));
+        }
+        if current_state != self.current_state
+            || active_branch != self.active_branch
+            || !self.branch_tails_match(&branches)
+            || expected_event != self.next_journal_event
+            || expected_procedure != self.next_procedure
+            || expected_state != self.next_state
+            || next_branch != self.next_branch
+        {
+            return Err(CoreError::InvalidState(
+                "journal replay high-watermarks do not match Core state",
+            ));
+        }
+        let tail = branches[&active_branch];
+        let mut state_path = Vec::new();
+        let mut state = tail;
+        while state != StateId::GENESIS {
+            state_path.push(state);
+            state = nodes
+                .get(&state)
+                .and_then(|node| node.parent)
+                .ok_or(CoreError::InvalidState("active branch ancestry is broken"))?;
+        }
+        state_path.reverse();
+        let history = state_path
+            .iter()
+            .map(|state| {
+                let node = &nodes[state];
+                let procedure = node
+                    .procedure
+                    .as_ref()
+                    .ok_or(CoreError::InvalidState("history procedure is missing"))?;
+                Ok(HistoryEntry {
+                    change: None,
+                    label: checkpoint_history_label(procedure.primitive_id()),
+                    before_state: node
+                        .parent
+                        .ok_or(CoreError::InvalidState("history parent state is missing"))?,
+                    after_state: *state,
+                    procedure: Arc::clone(procedure),
+                    branch_id: node.branch_id,
+                })
+            })
+            .collect::<Result<Vec<_>, CoreError>>()?;
+        let history_cursor = if current_state == StateId::GENESIS {
+            0
+        } else {
+            state_path
+                .iter()
+                .position(|state| *state == current_state)
+                .map(|index| index + 1)
+                .ok_or(CoreError::InvalidState(
+                    "current state is not on the active branch",
+                ))?
+        };
+        let document_state_digest = canonical_document_state(&document)?.1;
+        if nodes
+            .get(&current_state)
+            .is_none_or(|node| node.digest != document_state_digest)
+        {
+            return Err(CoreError::InvalidState(
+                "checkpoint document digest does not match journal state",
+            ));
+        }
+        Ok(RebuiltRuntime {
+            document,
+            history,
+            history_cursor,
+            next_id,
+            info: JournalReplayInfo {
+                document_state_digest,
+                current_state_id: current_state,
+                active_branch_id: active_branch,
+                history_cursor,
+                visible_history_count: state_path.len(),
+            },
+        })
+    }
+
     fn validate_rebuilt_runtime(&self, rebuilt: &RebuiltRuntime) -> Result<(), CoreError> {
         if rebuilt.info.document_state_digest != self.document_state_digest()? {
             return Err(CoreError::InvalidState(
@@ -944,6 +1210,33 @@ fn is_ancestor(
     false
 }
 
+fn is_checkpoint_ancestor(
+    ancestor: StateId,
+    descendant: StateId,
+    nodes: &BTreeMap<StateId, CheckpointNode>,
+) -> bool {
+    let mut cursor = Some(descendant);
+    while let Some(state) = cursor {
+        if state == ancestor {
+            return true;
+        }
+        cursor = nodes.get(&state).and_then(|node| node.parent);
+    }
+    false
+}
+
+const fn checkpoint_history_label(primitive: PrimitiveId) -> &'static str {
+    if primitive.get() == PrimitiveId::SET_MAIN_LINE_COLOR.get() {
+        "Main-line color"
+    } else if primitive.get() == PrimitiveId::REPLACE_PALETTE.get() {
+        "Palette edit"
+    } else if primitive.get() == PrimitiveId::APPLY_RASTER_STROKE.get() {
+        "Raster edit"
+    } else {
+        "Document edit"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -966,7 +1259,7 @@ mod tests {
     fn canonical_history_entry_references_the_journal_procedure() {
         let mut core = initialized_core();
         set_main_line(&mut core, 7).unwrap();
-        let history_procedure = core.history[0].procedure.as_ref().unwrap();
+        let history_procedure = &core.history[0].procedure;
         let JournalEntry::Commit(commit) = &core.journal[0] else {
             panic!("first journal record must be a commit");
         };

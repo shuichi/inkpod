@@ -1,7 +1,7 @@
 use super::*;
 
-fn base_fixture() -> CellFile {
-    CellFile {
+fn base_fixture() -> DocumentArchive {
+    DocumentArchive {
         document_uuid: [
             0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x10, 0x32, 0x54, 0x76, 0x98, 0xba,
             0xdc, 0xfe,
@@ -81,7 +81,7 @@ fn base_fixture() -> CellFile {
     }
 }
 
-fn document_tree_fixture() -> CellFile {
+fn document_tree_fixture() -> DocumentArchive {
     let mut document = base_fixture();
     document.planes.push(FilePlane {
         id: 5,
@@ -135,7 +135,7 @@ fn document_tree_fixture() -> CellFile {
     document
 }
 
-fn light_table_fixture() -> CellFile {
+fn light_table_fixture() -> DocumentArchive {
     let mut document = document_tree_fixture();
     document.planes.push(FilePlane {
         id: 9,
@@ -185,7 +185,7 @@ fn light_table_fixture() -> CellFile {
     document
 }
 
-fn vector_fixture() -> CellFile {
+fn vector_fixture() -> DocumentArchive {
     let mut document = document_tree_fixture();
     for (id, kind) in [
         (8, PlaneKind::VectorMainLine),
@@ -276,7 +276,7 @@ fn io_001_manifest_and_blobs_round_trip() {
 
 #[test]
 fn non_current_container_versions_are_rejected_before_format_freeze() {
-    for version in [1_u32, 3_u32] {
+    for version in [2_u32, 3_u32] {
         let mut encoded = encode(&base_fixture()).unwrap();
         encoded[8..12].copy_from_slice(&version.to_le_bytes());
         assert!(matches!(
@@ -327,11 +327,11 @@ fn procedure_file_fixture() -> NativeFile {
 }
 
 #[test]
-fn io_001_v8_directory_digest_and_opaque_sections_round_trip() {
+fn io_001_v9_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
-    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 8);
+    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 9);
     assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 6);
     assert_eq!(u32::from_le_bytes(bytes[16..20].try_into().unwrap()), 128);
     let mut expected = file;
@@ -354,7 +354,7 @@ fn io_001_v8_directory_digest_and_opaque_sections_round_trip() {
 }
 
 #[test]
-fn io_001_v8_rejects_v2_missing_duplicate_overlap_and_bad_digest() {
+fn io_001_v9_accepts_checkpoint_and_rejects_v2_missing_duplicate_overlap_and_bad_digest() {
     let file = procedure_file_fixture();
     let encoded = encode_procedure_file(&file).unwrap();
 
@@ -393,12 +393,14 @@ fn io_001_v8_rejects_v2_missing_duplicate_overlap_and_bad_digest() {
             payload: Vec::new(),
         }],
     });
-    assert!(matches!(
-        encode_procedure_file(&checkpoint),
-        Err(FormatError::Unsupported(
-            "checkpoint sections are not supported by this format epoch"
-        ))
-    ));
+    let checkpoint_bytes = encode_procedure_file(&checkpoint).unwrap();
+    assert!(
+        decode_procedure_file(&checkpoint_bytes)
+            .unwrap()
+            .sections
+            .iter()
+            .any(|section| section.fourcc == *b"CKPT")
+    );
 
     let directory_offset = u64::from_le_bytes(encoded[32..40].try_into().unwrap()) as usize;
     let mut overlap = encoded.clone();
@@ -415,9 +417,9 @@ fn io_001_v8_rejects_v2_missing_duplicate_overlap_and_bad_digest() {
 }
 
 #[test]
-fn io_001_v8_chunked_cancel_keeps_existing_destination_and_removes_temp() {
+fn io_001_v9_streaming_cancel_keeps_existing_destination_and_removes_temp() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v8-cancel-test-{}-{}",
+        "inkpod-v9-cancel-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -444,9 +446,9 @@ fn io_001_v8_chunked_cancel_keeps_existing_destination_and_removes_temp() {
 }
 
 #[test]
-fn io_001_v8_atomic_save_replaces_an_existing_container() {
+fn io_001_v9_atomic_save_replaces_an_existing_container() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v8-replace-test-{}-{}",
+        "inkpod-v9-replace-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));

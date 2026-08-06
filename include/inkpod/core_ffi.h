@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v3 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v4 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(3)
+#define INKPOD_ABI_VERSION UINT32_C(4)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -105,9 +105,10 @@ typedef uint32_t InkpodPrimitiveOpcode;
 #define INKPOD_PRIMITIVE_IMPORT_RASTER_ASSET UINT32_C(0x00090001)
 #define INKPOD_PRIMITIVE_RESULT_COMMITTED (UINT32_C(1) << 0)
 
-/** @brief `InkpodCommand` の command 識別子型。未知値は受理しない。 */
-typedef uint32_t InkpodCommandKind;
-#define INKPOD_COMMAND_NO_OP UINT32_C(0)
+#define INKPOD_PERSISTENCE_CHECKPOINT_DUE (UINT32_C(1) << 0)
+#define INKPOD_NATIVE_OPEN_NOT_OPENED UINT32_C(0)
+#define INKPOD_NATIVE_OPEN_FULL_REPLAY UINT32_C(1)
+#define INKPOD_NATIVE_OPEN_CHECKPOINT UINT32_C(2)
 
 /** @brief snapshot が公開する表示用 pixel format 型。 */
 typedef uint32_t InkpodPixelFormat;
@@ -590,23 +591,6 @@ typedef struct InkpodCanonicalDigest {
     uint8_t bytes[32];
 } InkpodCanonicalDigest;
 
-/** @brief dispatch batch 内の固定幅 command record。stride ごとに borrowed で読み取る。 */
-typedef struct InkpodCommand {
-    uint32_t struct_size;
-    InkpodCommandKind kind;
-    uint64_t flags;
-} InkpodCommand;
-
-/** @brief caller-owned `InkpodCommand` span を 1 回の FFI 呼び出しへまとめる入力。 */
-typedef struct InkpodCommandBatch {
-    uint32_t struct_size;
-    uint32_t reserved;
-    uint64_t feature_flags;
-    const InkpodCommand* commands;
-    uint64_t command_count;
-    uint64_t command_stride_bytes;
-} InkpodCommandBatch;
-
 /** @brief 成功した編集後の revision と受理件数を受け取る caller-owned 出力。 */
 typedef struct InkpodDispatchResult {
     uint32_t struct_size;
@@ -614,6 +598,33 @@ typedef struct InkpodDispatchResult {
     uint64_t revision;
     uint64_t accepted_command_count;
 } InkpodDispatchResult;
+
+/** @brief Deterministic native persistence and checkpoint-policy diagnostics. */
+typedef struct InkpodPersistenceInfo {
+    uint32_t struct_size;
+    uint32_t format_version;
+    uint32_t open_strategy;
+    uint32_t flags;
+    uint64_t feature_flags;
+    uint64_t journal_event_count;
+    uint64_t procedure_count;
+    uint64_t replay_work;
+    uint64_t dirty_bytes;
+    uint64_t asset_count;
+    uint64_t asset_bytes;
+} InkpodPersistenceInfo;
+
+/** @brief Exact confirmation token for a separate history-losing compacted copy. */
+typedef struct InkpodCompactionPlan {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t history_event_count;
+    uint64_t history_procedure_count;
+    uint8_t document_digest[32];
+    uint8_t editor_digest[32];
+    uint8_t journal_digest[32];
+} InkpodCompactionPlan;
 
 /** @brief 新規 Cell の UUID、寸法、DPI を指定する borrowed 入力。 */
 typedef struct InkpodCellCreateOptions {
@@ -2136,21 +2147,6 @@ InkpodStatus inkpod_core_create(
 InkpodStatus inkpod_core_destroy(InkpodCore** core);
 
 /**
- * @brief versioned command span を順番に dispatch する。
- * @par 契約
- * Core owner thread。`core`、`batch`、`result` は非 NULL・非重複で borrowed/caller-owned。
- * 両構造体と各 command は完全な `struct_size`、stride は空 batch でも `sizeof(InkpodCommand)` 以上。
- * 成功時 `result` に revision/受理数を格納する。ABI v1 の NO_OP は文書、dirty、Undo を変えない。
- * 失敗時 result は未使用、Core と履歴は不変。live stroke/preview と競合する command は `INVALID_STATE`。
- * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`WRONG_THREAD`、`INVALID_STATE`、`PANIC`。
- */
-InkpodStatus inkpod_core_dispatch_batch(
-    InkpodCore* core,
-    const InkpodCommandBatch* batch,
-    InkpodDispatchResult* result);
-
-/**
  * @brief sparse な main-line/color 2-plane CellDocument を新規作成する。
  * @par 契約
  * Core owner thread。`core`、`options`、`out_info` は非 NULL・非重複。
@@ -2567,6 +2563,40 @@ InkpodStatus inkpod_core_history_jump(
 InkpodStatus inkpod_core_revert_active_selection(
     InkpodCore* core,
     InkpodDispatchResult* result);
+
+/**
+ * @brief Reads native format, checkpoint strategy, journal work, and asset counters.
+ * @par Contract
+ * Owner-thread query. Success writes a complete `InkpodPersistenceInfo`; failure
+ * leaves it unchanged. The call never performs replay or changes revisions,
+ * savepoints, history, dirty state, or caches.
+ */
+InkpodStatus inkpod_core_get_persistence_info(
+    InkpodCore* core,
+    InkpodPersistenceInfo* out_info);
+
+/**
+ * @brief Builds the exact confirmation token for an explicit compacted copy.
+ * @par Contract
+ * The caller must present both history counts before confirmation. The token is
+ * invalidated by any document, editor, or journal change. This query has no side effects.
+ */
+InkpodStatus inkpod_core_compaction_plan(
+    InkpodCore* core,
+    InkpodCompactionPlan* out_plan);
+
+/**
+ * @brief Writes a separate current-version file with current state as new Genesis.
+ * @par Contract
+ * `plan` must exactly match the current confirmation token. Success intentionally
+ * omits prior Undo/Redo and inactive branches, but never changes or rebinds the live
+ * Core, current path, revisions, savepoints, dirty state, or history.
+ */
+InkpodStatus inkpod_core_write_compacted_copy(
+    InkpodCore* core,
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    const InkpodCompactionPlan* plan);
 
 /**
  * @brief current document を `.inkpod` へ atomic に通常保存する。

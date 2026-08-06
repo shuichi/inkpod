@@ -18,7 +18,7 @@ mod ffi_contract_tests;
 use inkpod_core::{
     ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, ApplicationColor,
     AssetAlphaSemantics, AssetColorSpace, BoundaryAirbrush, Channel, ClipboardPayload,
-    ClipboardPixel, ClipboardPlane, ColorBalance, ColorCheckMode, Command, CommonRasterFormat,
+    ClipboardPixel, ClipboardPlane, ColorBalance, ColorCheckMode, CommonRasterFormat,
     CoordinateSpace, Core, CoreError, CurveInterpolation, CurvePoint, DocumentInfo, DocumentResize,
     DustMode, DustRemoval, EditorDefaults, EditorFillOptions, EditorSelectionOptions,
     EditorSelectionShape, EditorState, EditorStateInfo, EditorStateUpdate, EditorStrokeInput,
@@ -62,8 +62,8 @@ mod vector_snapshot;
 
 pub use abi::*;
 pub(crate) use abi::{
-    ERROR_CAPACITY, MAX_COMMAND_COUNT, MAX_NODE_NAME_BYTES, MAX_PALETTE_COLOR_COUNT,
-    MAX_PATH_BYTES, MAX_SELECTION_POINT_COUNT, MAX_STROKE_SAMPLE_COUNT,
+    ERROR_CAPACITY, MAX_NODE_NAME_BYTES, MAX_PALETTE_COLOR_COUNT, MAX_PATH_BYTES,
+    MAX_SELECTION_POINT_COUNT, MAX_STROKE_SAMPLE_COUNT,
 };
 pub use animation::*;
 pub use application_data::*;

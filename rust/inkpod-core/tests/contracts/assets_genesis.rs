@@ -460,7 +460,7 @@ fn forged_raster_descriptor_and_identity_are_atomic() {
 }
 
 #[test]
-fn redo_and_inactive_branch_assets_survive_cache_release_and_full_replay() {
+fn redo_and_inactive_branch_assets_survive_cache_release_full_replay_and_checkpoint() {
     let mut core = Core::new();
     let document = core
         .new_cell_with_uuid(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0x4601)
@@ -513,6 +513,34 @@ fn redo_and_inactive_branch_assets_survive_cache_release_and_full_replay() {
         core.plane_pixel(ActivePlane::Color, 0, 0).unwrap(),
         PixelValue::Rgba([9, 8, 7, 255])
     );
+
+    for index in 0..254 {
+        let value = if index % 2 == 0 { 11 } else { 12 };
+        core.set_main_line_color(PixelValue::Rgba([value, value, value, 255]))
+            .unwrap();
+    }
+    assert!(core.persistence_info().unwrap().checkpoint_due);
+    let path = std::env::temp_dir().join(format!(
+        "inkpod-checkpoint-assets-{}-{}.inkpod",
+        std::process::id(),
+        TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    core.save(&path).unwrap();
+    let expected_digest = core.document_state_digest().unwrap();
+    let mut reopened = Core::new();
+    reopened.open(&path).unwrap();
+    assert_eq!(
+        reopened.persistence_info().unwrap().open_strategy,
+        NativeOpenStrategy::Checkpoint
+    );
+    assert_eq!(reopened.document_state_digest().unwrap(), expected_digest);
+    assert_eq!(reopened.asset_store_usage().asset_count, 2);
+    assert!(reopened.asset_info(first).is_some());
+    assert!(reopened.asset_info(second).is_some());
+    reopened.undo().unwrap();
+    reopened.redo().unwrap();
+    assert_eq!(reopened.document_state_digest().unwrap(), expected_digest);
+    fs::remove_file(path).unwrap();
 }
 
 #[test]

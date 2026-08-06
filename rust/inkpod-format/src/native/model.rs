@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicU64;
 pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 /// Current development format. Increment for every serialized schema change
 /// until the user declares a format freeze; older versions are not migrated.
-pub const FORMAT_VERSION: u32 = 2;
+pub const DOCUMENT_ARCHIVE_VERSION: u32 = 1;
 pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
 pub(super) const HEADER_BYTES: usize = 32;
 pub(super) const FIXED_MANIFEST_BYTES: usize = 160;
@@ -213,7 +213,7 @@ pub struct FilePlane {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CellFile {
+pub struct DocumentArchive {
     pub document_uuid: [u8; 16],
     pub document_id: u64,
     pub layer_id: u64,

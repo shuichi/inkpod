@@ -2,7 +2,7 @@
 
 更新日: 2026-08-07
 
-状態: M0–M8 完了、M9 未完。全production document mutationのcanonical primitive化、ABI v3、typed CoreHost queue、cross-architecture replay gate、旧 revision-max 判定式の正本化、環境別性能ゲート、current-only `.inkpod` v8 cutoverは反映済み
+状態: M0–M9 完了。全production document mutationのcanonical primitive化、ABI v4、typed CoreHost queue、cross-architecture replay gate、旧 revision-max 判定式の正本化、環境別性能ゲート、streaming current-only `.inkpod` v9、optional checkpoint、明示compaction copyまで反映済み
 
 ## 1. 目的
 
@@ -840,6 +840,44 @@ Revision-max render-cache invariant:
 - journal/asset/checkpointのmemory、disk、CPU workが定義済み上限内。
 - 旧mutation/file/history正本へのproduction参照が0。
 - 現在状態、既知差分、代表検証がstatus/compatibility文書へ反映される。
+
+完了記録 (2026-08-07):
+
+- production `.inkpod`をexact-current version 9へ切り替え、header/directory/record、
+  section payload/hash、asset chunk、optional `CKPT`をseek/read/writeするbounded streaming
+  codecへ置換した。writerは二つ目のfile全体bufferを作らず同一directoryのtemporary fileへ
+  順次出力する。最大record数、section/record/chunk長、checkpoint 512 MiB上限、padding、
+  overlap、digestをdecode前後で検証し、全non-v9を拒否する。
+- Coreはprocedure数256、replay work 1,000,000、dirty bytes 8 MiBの決定的閾値でcheckpointを
+  作り、epoch、journal prefix count/digest、StateId/state digest、cursor/branch/high-watermarkを
+  検証する。malformed/hash/bound違反はfile reject、構造上有効なepoch/prefix/state不一致は
+  full replayへfallbackする。checkpoint openとCKPT除去full replayのstate/pixel/history digest、
+  Undo/Redo、inactive branch asset retention、次IDが一致するpublic contractを追加した。
+- published history entryは必ず`Arc<CanonicalProcedure>`を所有し、procedureなしの中間状態は
+  transaction内private stagingだけに限定した。旧`CellFile`正本は`DocumentArchive`へ置換し、
+  旧NoOp mutating Core/FFI batch dispatchを削除した。source inventoryは230 Rust route、209 C ABI
+  export、332 Windows commandを分類し、unclassified/direct mutation ownerを0とした。
+- ABI v4は固定layoutのpersistence info、revision-bound compaction plan、exact-token compaction
+  copyを追加した。Windowsの「履歴を破棄してコピー...」は破棄するevent/procedure数をsave
+  dialogより前に表示し、open session pathへの上書きを拒否して別fileへ新Genesisを書き出す。
+  live path、history、dirty、savepointは変更せず、stale plan、short/null/wrong-threadを拒否する。
+- `native_v9`/`native_core_v9` fuzz targetをoperation-cost、長大branch、checkpoint除去・fallback、
+  compaction、asset retentionへ拡張し、両binaryの`cargo check --bins`を通した。このhostには任意の
+  `cargo fuzz` subcommandが未installのため、coverage-guided実行自体は未実行である。
+  compressionはcheckpoint benchmarkで複雑性を正当化しなかったため追加せず、format v9は
+  compression code 0だけを受理する。
+- Rustは333 tests（doctest 1を含む）、zero ignored、fmt、all-target/all-feature Clippy
+  `-D warnings`、strict rustdoc、9-scenario quick benchmarkを通過した。warm-up後各5回のCore
+  quick pan/dirty/canonical/checkpoint中央値は`0.713125/1.797375/1.020958/28.065125 ms`、fullは
+  `12.289834/8.550750/1.218625/116.759334 ms`だった。quick dirtyの下限未満は32 edit、
+  32 rebuild、224 reuse、revision/history/checksumが一致する診断上の高速化であり、range、
+  tolerance、workloadは変更していない。
+- Windows ARM64 Debug/Releaseをfresh configure/buildして各111 target、static CRT、portable ZIP、
+  unsigned MSIXを通し、UI接続後の最終rebuildも成功した。最終Debug CTestは28/28（ABI smoke
+  25.13秒、GUI smoke 145.86秒、全体177.96秒）。Release private native performance smokeは
+  wheel 512 event/512 Presentを`4,273,905,833 ns`（`1.001697` refresh interval/event）、drawing
+  16 stroke/544 sample/16 Presentを`155,309,375 ns`で通し、意味counterはすべて一致した。
+  `git diff --check`も通過した。
 
 ## 8. 実装中の不変条件
 

@@ -1,5 +1,170 @@
 use super::*;
 
+/// Returns deterministic native-format/checkpoint policy diagnostics.
+///
+/// # Safety
+/// Core/output must be live owner-thread objects with non-overlapping storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_get_persistence_info(
+    core: *mut InkpodCore,
+    out_info: *mut InkpodPersistenceInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: The output prefix is readable before the validated write.
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodPersistenceInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by the caller contract.
+        let core = unsafe { &*core };
+        let output = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.persistence_info() {
+            Ok(info) => {
+                output.format_version = info.format_version;
+                output.open_strategy = match info.open_strategy {
+                    inkpod_core::NativeOpenStrategy::NotOpened => INKPOD_NATIVE_OPEN_NOT_OPENED,
+                    inkpod_core::NativeOpenStrategy::FullReplay => INKPOD_NATIVE_OPEN_FULL_REPLAY,
+                    inkpod_core::NativeOpenStrategy::Checkpoint => INKPOD_NATIVE_OPEN_CHECKPOINT,
+                };
+                output.flags = if info.checkpoint_due {
+                    INKPOD_PERSISTENCE_CHECKPOINT_DUE
+                } else {
+                    0
+                };
+                output.feature_flags = INKPOD_FEATURE_NONE;
+                output.journal_event_count = info.journal_event_count;
+                output.procedure_count = info.procedure_count;
+                output.replay_work = info.replay_work;
+                output.dirty_bytes = info.dirty_bytes;
+                output.asset_count = info.asset_count;
+                output.asset_bytes = info.asset_bytes;
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Returns the exact history-loss confirmation token for a compacted copy.
+///
+/// # Safety
+/// Core/output must be live owner-thread objects with non-overlapping storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_compaction_plan(
+    core: *mut InkpodCore,
+    out_plan: *mut InkpodCompactionPlan,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: The output prefix is readable before the validated write.
+        if let Err(status) =
+            unsafe { validate_struct(out_plan.cast_const(), "InkpodCompactionPlan") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live objects are required by the caller contract.
+        let core = unsafe { &*core };
+        let output = unsafe { &mut *out_plan };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.compaction_plan() {
+            Ok(plan) => {
+                write_compaction_plan(output, plan);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Writes a separate compacted copy after exact token confirmation.
+///
+/// # Safety
+/// Path and plan bytes must remain readable, and Core must be a live owner-thread
+/// object for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_write_compacted_copy(
+    core: *mut InkpodCore,
+    path_utf8: *const u8,
+    path_bytes: u64,
+    plan: *const InkpodCompactionPlan,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        // SAFETY: The input exposes a readable public-structure prefix.
+        if let Err(status) = unsafe { validate_struct(plan, "InkpodCompactionPlan") } {
+            return status;
+        }
+        // SAFETY: The path range is readable for this call by contract.
+        let path = match unsafe { path_from_utf8(path_utf8, path_bytes) } {
+            Ok(path) => path,
+            Err(status) => return status,
+        };
+        // SAFETY: Complete live objects are required by the caller contract.
+        let core = unsafe { &*core };
+        let input = unsafe { &*plan };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        if input.reserved != 0 || input.feature_flags != INKPOD_FEATURE_NONE {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "compaction plan contains unsupported flags or reserved values",
+            );
+        }
+        let current = match core.core.compaction_plan() {
+            Ok(plan) => plan,
+            Err(error) => return map_core_error(error),
+        };
+        if !compaction_plan_matches(input, current) {
+            return fail(INKPOD_STATUS_INVALID_STATE, "compaction plan is stale");
+        }
+        match core.core.write_compacted_copy(path, current) {
+            Ok(()) => INKPOD_STATUS_OK,
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+fn write_compaction_plan(output: &mut InkpodCompactionPlan, plan: inkpod_core::CompactionPlan) {
+    output.reserved = 0;
+    output.feature_flags = INKPOD_FEATURE_NONE;
+    output.history_event_count = plan.history_event_count;
+    output.history_procedure_count = plan.history_procedure_count;
+    output.document_digest = *plan.document_digest.as_bytes();
+    output.editor_digest = *plan.editor_digest.as_bytes();
+    output.journal_digest = plan.journal_digest;
+}
+
+fn compaction_plan_matches(
+    input: &InkpodCompactionPlan,
+    plan: inkpod_core::CompactionPlan,
+) -> bool {
+    input.history_event_count == plan.history_event_count
+        && input.history_procedure_count == plan.history_procedure_count
+        && input.document_digest == *plan.document_digest.as_bytes()
+        && input.editor_digest == *plan.editor_digest.as_bytes()
+        && input.journal_digest == plan.journal_digest
+}
+
 /// Saves to a UTF-8 path using same-directory temporary-file replacement.
 ///
 /// # Safety

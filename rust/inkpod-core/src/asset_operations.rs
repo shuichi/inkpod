@@ -76,6 +76,15 @@ impl Core {
         Ok(staged)
     }
 
+    pub(super) fn assets_for_current_document(&self) -> Result<asset::AssetStore, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let mut roots = Vec::new();
+        append_document_asset_roots(document, &mut roots);
+        let mut staged = self.assets.clone();
+        staged.garbage_collect(roots)?;
+        Ok(staged)
+    }
+
     fn asset_retention_roots_with_floating(&self, include_floating: bool) -> Vec<AssetId> {
         let mut roots = Vec::new();
         if let Some(genesis) = &self.genesis {
@@ -90,9 +99,7 @@ impl Core {
             }
         }
         for entry in &self.history {
-            if let Some(procedure) = &entry.procedure {
-                roots.extend(procedure.asset_ids().iter().copied());
-            }
+            roots.extend(entry.procedure.asset_ids().iter().copied());
             if let Some(HistoryChange::Document { before, after }) = &entry.change {
                 append_document_asset_roots(before, &mut roots);
                 append_document_asset_roots(after, &mut roots);

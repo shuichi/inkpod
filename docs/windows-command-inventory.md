@@ -36,7 +36,7 @@ test, so this prose inventory does not need manual handler lists.
 
 - Layer and Plane commands are nested under Cell; shortcut settings are under
   Edit > Settings.
-- All 331 production commands have a command-unique, prefix-free sequence of one
+- All 332 production commands have a command-unique, prefix-free sequence of one
   to four strokes, and every menu-leaf occurrence displays its active binding.
 - Conventional file/edit commands retain standard Ctrl combinations. Frequent
   drawing, fill, eyedropper, selection, gradient, and airbrush tools use single

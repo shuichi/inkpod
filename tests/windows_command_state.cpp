@@ -266,6 +266,7 @@ int main() {
     const CommandStateSet dirty_states = ComputeCommandStates(dirty_inputs);
     if (!SameStates(states, dirty_states)
         || !IsCommandEnabled(states, IDM_FILE_SAVE)
+        || !IsCommandEnabled(states, IDM_FILE_COMPACT_COPY)
         || !IsCommandEnabled(states, IDM_FILE_REVERT)
         || !IsCommandEnabled(states, IDM_DOCUMENT_CLOSE)
         || !IsCommandEnabled(states, IDM_VIEW_CLOSE)

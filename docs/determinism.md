@@ -1,9 +1,10 @@
 # Cross-architecture determinism contract
 
-M7 closes the runtime replay determinism gate. The build contract is successor
-procedure format 8, replay epoch 6, canonical numeric version 1, and the digest
-of the closed 76-entry primitive catalog. Production `.inkpod` remains
-exact-current v2; this contract does not implement or accept a v8 container.
+M7 closes the runtime replay determinism gate. The current build contract is
+procedure format 9, replay epoch 6, canonical numeric version 1, and the digest
+of the closed 76-entry primitive catalog. Production `.inkpod` is exact-current
+v9; a verified M9 checkpoint preserves this contract and never replaces the
+authoritative journal.
 
 ## Canonical numeric authority
 
@@ -42,7 +43,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 8 and replay epoch 6. A semantic change that updates
+together with format version 9 and replay epoch 6. A semantic change that updates
 the catalog or any golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 
