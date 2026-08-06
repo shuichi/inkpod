@@ -125,6 +125,24 @@ public:
         CoreOperation operation,
         bool publish_snapshot,
         bool refresh_document_info) noexcept;
+    InkpodStatus InvokePrimitive(
+        const InkpodPrimitiveRequestV3& request,
+        bool publish_snapshot,
+        bool refresh_document_info,
+        bool defer_during_active_stroke = true) noexcept;
+    InkpodStatus InvokePrimitive(
+        DocumentSessionId session,
+        Generation generation,
+        const InkpodPrimitiveRequestV3& request,
+        bool publish_snapshot,
+        bool refresh_document_info,
+        bool defer_during_active_stroke = true) noexcept;
+    bool EnqueuePrimitive(
+        const CommandContext& context,
+        const InkpodPrimitiveRequestV3& request,
+        bool publish_snapshot,
+        bool refresh_document_info,
+        bool defer_during_active_stroke = true) noexcept;
     bool Enqueue(
         const CommandContext& context,
         CoreOperation operation,
@@ -178,6 +196,15 @@ public:
         DocumentSessionId session,
         Generation generation,
         InkpodEditorStateInfo& state) const noexcept;
+    InkpodStatus RegisterColorArray(
+        DocumentSessionId session,
+        Generation generation,
+        const InkpodColorArray& input,
+        InkpodObjectId& object_id) noexcept;
+    InkpodStatus ReleaseObject(
+        DocumentSessionId session,
+        Generation generation,
+        const InkpodObjectId& object_id) noexcept;
     std::wstring LastError() const;
     std::wstring LastError(
         DocumentSessionId session,

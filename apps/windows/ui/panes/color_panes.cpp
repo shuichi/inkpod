@@ -8,6 +8,22 @@
 #include "app/core_host.h"
 
 namespace inkpod::windows::ui::panes {
+namespace {
+
+InkpodPrimitiveRequestV3 PrimitiveRequest(
+    std::uint32_t opcode,
+    std::uint32_t schema_version,
+    std::uint64_t base_revision) noexcept {
+    InkpodPrimitiveRequestV3 request{};
+    request.struct_size = sizeof(request);
+    request.opcode = opcode;
+    request.schema_version = schema_version;
+    request.base_revision = base_revision;
+    request.payload_id.struct_size = sizeof(request.payload_id);
+    return request;
+}
+
+}  // namespace
 
 ColorPanesController::ColorPanesController(app::CoreHost& engine) noexcept
     : engine_(engine) {}
@@ -198,35 +214,48 @@ InkpodStatus ColorPanesController::ReplacePalette(
     app::DocumentSessionId session,
     app::Generation generation,
     const std::vector<InkpodColorValue>& colors) noexcept {
-    return engine_.Invoke(
-        session,
-        generation,
-        [&colors](InkpodCore* core) {
-            InkpodColorArray input{};
-            input.struct_size = sizeof(input);
-            input.colors = colors.empty() ? nullptr : colors.data();
-            input.color_count = colors.size();
-            input.color_stride_bytes = colors.empty()
-                ? 0U
-                : sizeof(InkpodColorValue);
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            return inkpod_core_palette_set(core, &input, &result);
-        },
-        true,
-        true);
+    InkpodDocumentInfo document{};
+    document.struct_size = sizeof(document);
+    if (!engine_.GetDocumentInfo(session, generation, document)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    InkpodColorArray input{};
+    input.struct_size = sizeof(input);
+    input.colors = colors.empty() ? nullptr : colors.data();
+    input.color_count = colors.size();
+    input.color_stride_bytes = colors.empty()
+        ? 0U
+        : sizeof(InkpodColorValue);
+    InkpodObjectId payload{};
+    payload.struct_size = sizeof(payload);
+    InkpodStatus status = engine_.RegisterColorArray(
+        session, generation, input, payload);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    auto request = PrimitiveRequest(
+        INKPOD_PRIMITIVE_REPLACE_PALETTE, 1U, document.document_revision);
+    request.payload_id = payload;
+    status = engine_.InvokePrimitive(
+        session, generation, request, true, true);
+    const InkpodStatus release = engine_.ReleaseObject(
+        session, generation, payload);
+    return status == INKPOD_STATUS_OK ? release : status;
 }
 
 InkpodStatus ColorPanesController::SetMainLineColor(
     const InkpodColorValue& color) noexcept {
-    return engine_.Invoke(
-        [&color](InkpodCore* core) {
-            InkpodDispatchResult result{};
-            result.struct_size = sizeof(result);
-            return inkpod_core_set_main_line_color(core, &color, &result);
-        },
-        true,
-        true);
+    InkpodDocumentInfo document{};
+    document.struct_size = sizeof(document);
+    if (!engine_.GetDocumentInfo(document)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    auto request = PrimitiveRequest(
+        INKPOD_PRIMITIVE_SET_MAIN_LINE_COLOR,
+        1U,
+        document.document_revision);
+    request.color = color;
+    return engine_.InvokePrimitive(request, true, true);
 }
 
 } // namespace inkpod::windows::ui::panes

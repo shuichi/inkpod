@@ -624,16 +624,26 @@ void ChangeDockMainLineColor(
     if (target.status == PaneTargetStatus::Ok
         && target.context.document_session.has_value()
         && target.context.generation.has_value()) {
-        InkpodDispatchResult result{};
-        result.struct_size = sizeof(result);
-        status = state->engine->Invoke(
-            target.context.document_session.value(),
-            target.context.generation.value(),
-            [color, &result](InkpodCore* core) {
-                return inkpod_core_set_main_line_color(core, &color, &result);
-            },
-            true,
-            true);
+        InkpodDocumentInfo document{};
+        document.struct_size = sizeof(document);
+        if (state->engine->GetDocumentInfo(
+                target.context.document_session.value(),
+                target.context.generation.value(),
+                document)) {
+            InkpodPrimitiveRequestV3 request{};
+            request.struct_size = sizeof(request);
+            request.opcode = INKPOD_PRIMITIVE_SET_MAIN_LINE_COLOR;
+            request.schema_version = 1U;
+            request.base_revision = document.document_revision;
+            request.payload_id.struct_size = sizeof(request.payload_id);
+            request.color = color;
+            status = state->engine->InvokePrimitive(
+                target.context.document_session.value(),
+                target.context.generation.value(),
+                request,
+                true,
+                true);
+        }
     }
     if (status == INKPOD_STATUS_OK) {
         state->Workspace().panes.main_line_color = color;

@@ -124,6 +124,41 @@ approval to be recorded here. The historical A/B evidence below remains the
 calibration provenance and an exceptional rebaseline tool, not a routine build
 requirement.
 
+## 2026-08-06 M5 routine acceptance
+
+M5 retained Range ID
+`windows-arm64-apple-silicon-parallels-release-2026-08-05` for the matching
+Core Release workloads without changing a workload, semantic assertion,
+reference envelope, or the revision-max formula. One quick run was used as the
+unmeasured warm-up, followed by five measured quick and full runs. Acceptance
+uses the prescribed median; isolated high samples did not move any Core median
+outside its unchanged envelope.
+
+| Protected score | Five measured samples (ns) | Median | Result |
+| --- | --- | ---: | --- |
+| quick `pan_zoom_snapshot` | 1,103,500; 825,167; 813,250; 809,958; 809,250 | 813,250 ns (0.813250 ms) | Within 0.70–1.05 ms |
+| quick `dirty_tile_rebuild` | 1,860,291; 1,889,500; 2,132,250; 4,550,750; 2,029,417 | 2,029,417 ns (2.029417 ms) | Within 1.8–2.4 ms |
+| full `pan_zoom_snapshot` | 12,747,208; 13,516,209; 12,826,959; 13,995,042; 14,786,542 | 13,516,209 ns (13.516209 ms) | Within 12–16 ms |
+| full `dirty_tile_rebuild` | 10,693,167; 9,712,375; 8,982,291; 9,475,375; 13,600,708 | 9,712,375 ns (9.712375 ms) | Within 8.5–11 ms |
+
+Every Core run retained the expected checksum, document revision, history,
+input/output, reuse/rebuild, success, and failure counters. The ABI/queue change
+does not alter these protected Core workloads.
+
+The Release private native smoke also ran in five independent processes and
+passed its executable semantic gate each time. Wheel samples were
+8,533,981,250; 8,533,049,709; 8,551,619,916; 8,601,030,709; and 8,547,517,125 ns
+(median 8,547,517,125 ns). Drawing samples were 266,622,500; 266,678,708;
+266,585,375; 267,516,167; and 265,913,792 ns (median 266,622,500 ns). Each run
+retained 256 tiles, 1,048,576 payload bytes, 512 wheel events/Presents, and 16
+drawing strokes/544 samples/16 Presents. The current display was paced at about
+60 Hz rather than the range record's 120 Hz: wheel was about one current refresh
+interval per event and drawing about one current refresh interval per final
+Present. Therefore the recorded 120-Hz native wall-clock envelope is not
+applicable to this observation and was neither reported as a regression nor
+widened. The Core portion of the environment range remains applicable and
+passed above.
+
 ## 2026-08-06 M4 routine acceptance
 
 M4 final validation reused Range ID

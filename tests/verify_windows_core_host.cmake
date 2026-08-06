@@ -44,6 +44,10 @@ foreach(REQUIRED IN ITEMS
         "UnregisterSnapshotSinks("
         "SnapshotSinkCount()"
         "InvokeAll("
+        "InvokePrimitive("
+        "EnqueuePrimitive("
+        "RegisterColorArray("
+        "ReleaseObject("
         "SetSessionInitializer("
         "CoreSessionState"
         "CoreNotification"
@@ -57,7 +61,8 @@ endforeach()
 file(READ "${CORE_SOURCE}" SOURCE)
 foreach(REQUIRED IN ITEMS
         "struct SessionBinding"
-        "struct SyncWork"
+        "struct LegacyInvokeWork"
+        "struct PrimitiveWork"
         "struct StrokeWork"
         "struct ControlWork"
         "struct CoreEntry"
@@ -65,6 +70,9 @@ foreach(REQUIRED IN ITEMS
         "inkpod_core_create"
         "inkpod_core_destroy"
         "FindEntry(item.binding)"
+        "InkpodPrimitiveRequestV3 request"
+        "ProcessPrimitive("
+        "inkpod_core_primitive_execute_v3"
         "state.pending_operations"
         "ReadCoreErrorOnCurrentThread()"
         "CoreNotificationKind::StateChanged"
@@ -73,6 +81,21 @@ foreach(REQUIRED IN ITEMS
     string(FIND "${SOURCE}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
         message(FATAL_ERROR "CoreHost implementation is missing: ${REQUIRED}")
+    endif()
+endforeach()
+string(FIND "${SOURCE}" "struct PrimitiveWork" PRIMITIVE_START)
+string(FIND "${SOURCE}" "enum class ControlKind" PRIMITIVE_END)
+if(PRIMITIVE_START LESS 0 OR PRIMITIVE_END LESS PRIMITIVE_START)
+    message(FATAL_ERROR "Cannot isolate the typed PrimitiveWork record")
+endif()
+math(EXPR PRIMITIVE_LENGTH "${PRIMITIVE_END} - ${PRIMITIVE_START}")
+string(SUBSTRING
+    "${SOURCE}" ${PRIMITIVE_START} ${PRIMITIVE_LENGTH} PRIMITIVE_RECORD)
+foreach(FORBIDDEN IN ITEMS "std::function" "std::string" "const char*" "const wchar_t*" "path")
+    string(FIND "${PRIMITIVE_RECORD}" "${FORBIDDEN}" OFFSET)
+    if(NOT OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Typed PrimitiveWork contains forbidden queued state: ${FORBIDDEN}")
     endif()
 endforeach()
 string(REGEX MATCH
@@ -146,6 +169,12 @@ foreach(REQUIRED IN ITEMS
         "inkpod_core_redo"
         "inkpod_core_save"
         "inkpod_core_open"
+        "queued_colors[0].red = 240U"
+        "PrimitiveQueueSaturationIsExactlyOnce("
+        "PrimitiveShutdownCompletesExactlyOnce("
+        "host.EnqueuePrimitive("
+        "host.ReleaseObject(first, generation, palette_id)"
+        "stale_primitive_rejected"
         "host.CloseSession"
         "host.ThreadId()")
     string(FIND "${TEST}" "${REQUIRED}" OFFSET)
@@ -166,5 +195,5 @@ foreach(REQUIRED IN ITEMS
 endforeach()
 
 message(STATUS
-    "Verified session-keyed CoreHost ownership, routing, notification, "
-    "shutdown, and native G3 test boundaries")
+    "Verified session-keyed CoreHost ownership, typed primitive queue, "
+    "routing, notification, shutdown, and native test boundaries")

@@ -93,6 +93,13 @@ impl Core {
     /// procedure/state ID, history, revision, dirty state, or render-cache
     /// change. Validation may cold-fill the private canonical-digest memo, which
     /// is not semantic or renderer-visible state.
+    ///
+    /// `request` owns all scalar and variable arguments for the duration of this
+    /// call; it contains no borrowed frontend buffer, callback, or external path.
+    /// The caller must hold the Core's single-writer authority. The synchronous
+    /// operation has no cancellation callback and returns only after commit,
+    /// semantic no-op, or an explicit [`CoreError`]. Invalid input is reported
+    /// without panicking or partially consuming document/procedure/state IDs.
     pub fn execute_primitive(
         &mut self,
         request: PrimitiveRequest,

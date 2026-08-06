@@ -2,7 +2,7 @@
 
 更新日: 2026-08-06
 
-状態: M0–M4 完了、M5–M9 未完。旧 revision-max 判定式の正本化と環境別性能ゲートは反映済み
+状態: M0–M5 完了、M6–M9 未完。ABI v3 と typed CoreHost queue、旧 revision-max 判定式の正本化、環境別性能ゲートは反映済み
 
 ## 1. 目的
 
@@ -598,6 +598,15 @@ Revision-max render-cache invariant:
 - mutation queueとprimitive recordにraw pointer、closure、external pathがない。
 - data-plane pointerを使用する箇所が文書化されたbounded call/lifetime内だけである。
 - C header、Rust declaration、FFI文書、rustdocのownership/thread/error契約が一致する。
+
+実装結果（2026-08-06）:
+
+- ABI v3 は Core、snapshot、task、asset、sample streamをtype/generation付きruntime IDで公開し、fixed recordとstable opcodeだけをcontrol planeへ置く。
+- 可変入力はbounded callでRust所有objectへdeep-copyし、snapshot、thumbnail、exportはIDからbounded batched copyで取得する。wrong type/generation、stale、double release、short structure、unknown schema/opcode、caller buffer mutationを公開契約テストで固定した。
+- WindowsのM5対象routeはissue-time contextとrequest valueだけを持つclosed `PrimitiveWork` queueへ接続した。saturation、close、shutdown、active strokeで受理件数とcompletionがexactly onceになるnative testを追加した。
+- 旧個別FFIは同じcanonical executorへ委譲する。未移行routeの`LegacyInvokeWork`はM6の明示的bridgeとして残し、M6のprimitive family移行は先取りしていない。
+- Rust 303 tests + 1 doctest、ARM64 Debug/Release configure/build、Debug CTest 28/28、ABI/GUI/private performance smoke、Core quick/full各5回以上、strict rustdoc、format/Clippy、`git diff --check`を完了した。Core mediansは承認済みrange内で、native smokeは全意味counterを維持した。現在の約60 Hz表示は記録済み120 Hz native wall-clock rangeと一致しないため、そのrangeを変更せず観測値として記録した。
+- `.inkpod`はexact-current v2のままであり、journal/Genesis/assets/EDIT persistenceはM8に残る。
 
 ### M6: 全 Primitive Family と Win32 Thin Shell
 

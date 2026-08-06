@@ -36,7 +36,7 @@ native-format model.
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, vector geometry, and deterministic raster/filter/effect operations |
 | `inkpod-format` | Bounded `.inkpod` v2 and `.inkbatch` models, encode/decode/validation, atomic file I/O, feature metadata, and PNG/TIFF/TGA/BMP codecs                                              |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v2 records, validation/conversion, panic containment, opaque handles, ownership functions, and feature-specific exports                                                        |
+| `inkpod-ffi`    | ABI v3 fixed records and generation-tagged runtime IDs, validation/conversion, panic containment, legacy opaque-handle bridges, ownership functions, and feature-specific exports                 |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Core stores vector geometry in
@@ -186,7 +186,7 @@ This is deliberately not a generic snapshot- or diff-procedure bridge for the
 remaining document routes. Any legacy document mutation marks the runtime
 journal incomplete; existing Undo/Redo continues through its retained runtime
 cache, while journal verification and cache release reject that mixed state.
-Full primitive migration remains a later milestone. C ABI v2 and the
+Full primitive migration remains a later milestone. C ABI v3 and the
 exact-current `.inkpod` v2 codec are unchanged: the runtime journal is not
 serialized, and a current-v2 open establishes a new Genesis/root journal rather
 than restoring the prior session's history. Production must not emit a partial
@@ -242,9 +242,25 @@ detached registry, so passing verification cannot be an artifact of shared
 `AssetRecord`, payload, or `TileRaster` ownership. This is an in-memory
 save/reopen-equivalent for M4 retention tests, not a production container.
 
-The present ABI remains v2 and `CoreHost` still uses its existing queue model.
-Value/ID-only ABI v3 records and the closed typed CoreHost queue remain M5 work,
-while serializing `GENS`/`ASST` and reopening their retained graph remains the
+The present ABI is v3. `InkpodObjectId` separates Core, snapshot, task, color,
+sample, raster, thumbnail, and export runtime objects by type and Core generation;
+IDs are monotonic within one Core and are never accepted across generation or
+after release. Variable input is synchronously copied into bounded Rust-owned
+objects before a primitive is queued. The canonical `PrimitiveWork` queue record
+contains session/generation, issue-time target context, base revision, fixed-width
+opcode/schema values, and object IDs only. It contains no caller pointer, closure,
+path, callback, or STL object. The established per-operation FFI wrappers for the
+canonical slice and `inkpod_core_primitive_execute_v3` share
+`Core::execute_primitive`, so there is one semantic mutation owner.
+
+Snapshot, thumbnail, and export output uses an ID plus bounded record/byte copy;
+the caller's storage is borrowed only for that call. Saturation rolls back an
+unaccepted sequence, while accepted primitive work is resolved once through
+active-stroke deferral, close, and shutdown drain. The arbitrary-callable
+`LegacyInvokeWork` variant remains isolated for unmigrated M6 routes, queries,
+and session initialization; it is not the canonical mutation lane and does not
+add a second procedure implementation. Serializing `GENS`/`ASST` and reopening
+their retained graph remains the
 atomic M8 container cutover. Production `.inkpod` therefore remains exact-current
 v2. Because v2 cannot preserve an asset-backed Genesis, normal save,
 autosave/recovery, and Batch `.inkpod` output reject that document before file or
@@ -669,8 +685,8 @@ viewport resize.
 
 Core keeps document points/sizes/rectangles, device points/sizes/offsets, and
 zoom as distinct private types. Public Rust commands and state accessors retain
-their established scalar/record shapes, and C ABI v2 retains the same fixed
-layout; those boundaries validate and convert before calling the typed
+their established scalar/record shapes, and the legacy C records retain their
+fixed layout beside the additive ABI v3 ID records; those boundaries validate and convert before calling the typed
 `ViewTransform`. Locator sampling, guide/grid snapping, and stroke/effect input
 use document points after their single `CoordinateSpace` conversion. Snapshot
 raster origins/sizes are likewise typed internally, while raster, vector, and
@@ -764,7 +780,7 @@ planes, vector paths/fills, light-table sets/items, and secondary views. History
 state plus document, view, render-cache, and preview revisions are separate
 tokens with their own increment policy. A typed cursor allocates the one
 document-wide stable-ID namespace through domain-specific methods; there is no
-conversion between identity domains. Public Rust records, C ABI v2 records, and
+conversion between identity domains. Public Rust records, legacy C records, ABI v3 runtime IDs, and
 `.inkpod` DTOs intentionally retain their established `u64` representation and
 convert only at those boundaries. The public `Guide` slice and
 `LightTableSource` input value remain raw compatibility boundary objects because

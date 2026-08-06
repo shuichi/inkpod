@@ -2211,6 +2211,7 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
     let header = read(&repository.join("include/inkpod/core_ffi.h"));
     let contract_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/contracts.rs"));
     let ffi_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/ffi.rs"));
+    let v3_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/v3.rs"));
     let batch_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/batch.rs"));
     let cpp_tests = read(&repository.join("tests/abi_smoke.cpp"));
 
@@ -2225,6 +2226,7 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
     );
 
     let mut referenced = names_followed_by_parenthesis(&ffi_tests);
+    referenced.extend(names_followed_by_parenthesis(&v3_tests));
     referenced.extend(names_followed_by_parenthesis(&batch_tests));
     referenced.extend(names_followed_by_parenthesis(&contract_tests));
     referenced.extend(names_followed_by_parenthesis(&cpp_tests));

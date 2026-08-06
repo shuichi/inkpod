@@ -47,9 +47,19 @@ pub unsafe extern "C" fn inkpod_core_create(
             );
         }
 
+        let objects = match crate::v3::ObjectRegistry::new() {
+            Some(objects) => objects,
+            None => {
+                return fail(
+                    INKPOD_STATUS_INVALID_STATE,
+                    "ABI-v3 Core generation space is exhausted",
+                );
+            }
+        };
         let handle = Box::new(InkpodCore {
             owner_thread: thread::current().id(),
             core: Core::new(),
+            objects,
         });
         // SAFETY: out_core is writable by contract and now receives Box ownership.
         unsafe { out_core.write(Box::into_raw(handle)) };

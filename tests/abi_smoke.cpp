@@ -29,6 +29,22 @@ static_assert(sizeof(InkpodSnapshotTransform) == 48U);
 static_assert(sizeof(InkpodSnapshotGuide) == 24U);
 static_assert(sizeof(InkpodSnapshotOverlay) == 56U);
 static_assert(sizeof(InkpodColorValue) == 16U);
+static_assert(std::is_standard_layout_v<InkpodObjectId>);
+static_assert(std::is_standard_layout_v<InkpodPrimitiveRequestV3>);
+static_assert(std::is_standard_layout_v<InkpodPrimitiveResultV3>);
+static_assert(std::is_standard_layout_v<InkpodRasterAssetInputV3>);
+static_assert(std::is_standard_layout_v<InkpodObjectInfoV3>);
+static_assert(std::is_standard_layout_v<InkpodSnapshotInfoV3>);
+static_assert(std::is_standard_layout_v<InkpodSnapshotTileInfoV3>);
+static_assert(std::is_standard_layout_v<InkpodBufferCopyV3>);
+static_assert(sizeof(InkpodObjectId) == 32U);
+static_assert(sizeof(InkpodPrimitiveRequestV3) == 120U);
+static_assert(sizeof(InkpodPrimitiveResultV3) == 48U);
+static_assert(sizeof(InkpodRasterAssetInputV3) == 56U);
+static_assert(sizeof(InkpodObjectInfoV3) == 72U);
+static_assert(sizeof(InkpodSnapshotInfoV3) == 104U);
+static_assert(sizeof(InkpodSnapshotTileInfoV3) == 56U);
+static_assert(sizeof(InkpodBufferCopyV3) == 56U);
 static_assert(sizeof(InkpodColorArray) == 40U);
 static_assert(sizeof(InkpodColorBuffer) == 48U);
 static_assert(std::is_standard_layout_v<InkpodEditorStateInfo>);
@@ -114,6 +130,17 @@ int InkpodRunAbiSmoke() {
     if (inkpod_core_create(&config, &core) != INKPOD_STATUS_OK
         || core == nullptr) {
         return 2;
+    }
+    InkpodObjectId core_id{};
+    core_id.struct_size = sizeof(core_id);
+    InkpodObjectId short_core_id{};
+    short_core_id.struct_size = sizeof(short_core_id) - 1U;
+    if (inkpod_core_get_id_v3(core, &core_id) != INKPOD_STATUS_OK
+        || core_id.object_type != INKPOD_OBJECT_CORE
+        || core_id.generation == 0U || core_id.value == 0U
+        || inkpod_core_get_id_v3(core, &short_core_id)
+            != INKPOD_STATUS_INCOMPATIBLE_ABI) {
+        return 32;
     }
 
     const InkpodCommand command{
@@ -286,6 +313,44 @@ int InkpodRunAbiSmoke() {
         || document.width != 1920U || document.height != 1080U
         || (document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
         return 24;
+    }
+    InkpodCore* v3_core = nullptr;
+    InkpodDocumentInfo v3_document{};
+    v3_document.struct_size = sizeof(v3_document);
+    if (inkpod_core_create(&config, &v3_core) != INKPOD_STATUS_OK
+        || inkpod_core_new_cell(v3_core, &cell_options, &v3_document)
+            != INKPOD_STATUS_OK) {
+        return 33;
+    }
+    InkpodPrimitiveRequestV3 primitive{};
+    primitive.struct_size = sizeof(primitive);
+    primitive.opcode = INKPOD_PRIMITIVE_SET_MAIN_LINE_COLOR;
+    primitive.schema_version = 1U;
+    primitive.base_revision = v3_document.document_revision;
+    primitive.payload_id.struct_size = sizeof(primitive.payload_id);
+    primitive.color = InkpodColorValue{
+        sizeof(InkpodColorValue),
+        INKPOD_COLOR_DEPTH_8,
+        18U,
+        52U,
+        86U,
+        255U};
+    InkpodPrimitiveResultV3 primitive_result{};
+    primitive_result.struct_size = sizeof(primitive_result);
+    if (inkpod_core_primitive_execute_v3(v3_core, &primitive, &primitive_result)
+            != INKPOD_STATUS_OK
+        || (primitive_result.flags & INKPOD_PRIMITIVE_RESULT_COMMITTED) == 0U
+        || primitive_result.revision != v3_document.document_revision + 1U) {
+        return 33;
+    }
+    InkpodPrimitiveRequestV3 unknown_primitive = primitive;
+    unknown_primitive.opcode = UINT32_MAX;
+    unknown_primitive.base_revision = primitive_result.revision;
+    if (inkpod_core_primitive_execute_v3(
+            v3_core, &unknown_primitive, &primitive_result)
+            != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_core_destroy(&v3_core) != INKPOD_STATUS_OK) {
+        return 34;
     }
     InkpodResourceUsage usage{};
     usage.struct_size = sizeof(usage);

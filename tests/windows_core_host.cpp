@@ -171,6 +171,19 @@ CommandContext Context(DocumentSessionId session, Generation generation) noexcep
     return context;
 }
 
+InkpodPrimitiveRequestV3 PrimitiveRequest(
+    std::uint32_t opcode,
+    std::uint32_t schema_version,
+    std::uint64_t base_revision) noexcept {
+    InkpodPrimitiveRequestV3 request{};
+    request.struct_size = sizeof(request);
+    request.opcode = opcode;
+    request.schema_version = schema_version;
+    request.base_revision = base_revision;
+    request.payload_id.struct_size = sizeof(request.payload_id);
+    return request;
+}
+
 bool WaitForPendingOperations(
     CoreHost& host,
     DocumentSessionId session,
@@ -186,6 +199,113 @@ bool WaitForPendingOperations(
         std::this_thread::yield();
     } while (std::chrono::steady_clock::now() < deadline);
     return false;
+}
+
+bool PrimitiveQueueSaturationIsExactlyOnce(
+    CoreHost& host,
+    DocumentSessionId session,
+    Generation generation,
+    std::uint64_t base_revision) {
+    auto request = PrimitiveRequest(
+        INKPOD_PRIMITIVE_SET_MAIN_LINE_COLOR, 1U, base_revision);
+    request.color = InkpodColorValue{
+        sizeof(InkpodColorValue),
+        INKPOD_COLOR_DEPTH_8,
+        91U,
+        37U,
+        143U,
+        255U};
+    if (host.InvokePrimitive(
+            session, generation, request, false, false, true)
+        != INKPOD_STATUS_OK) {
+        return false;
+    }
+
+    InkpodDocumentInfo stable_info = EmptyDocumentInfo();
+    if (host.Invoke(
+            session,
+            generation,
+            [&stable_info](InkpodCore* core) {
+                return inkpod_core_get_document_info(core, &stable_info);
+            },
+            false,
+            false) != INKPOD_STATUS_OK) {
+        return false;
+    }
+    request.base_revision = stable_info.document_revision;
+
+    std::promise<void> blocker_started;
+    std::promise<void> release_blocker;
+    const std::shared_future<void> release = release_blocker.get_future().share();
+    if (!host.Enqueue(
+            Context(session, generation),
+            [&blocker_started, release](InkpodCore*) {
+                blocker_started.set_value();
+                release.wait();
+                return INKPOD_STATUS_OK;
+            },
+            false,
+            false,
+            false)) {
+        return false;
+    }
+    blocker_started.get_future().wait();
+
+    CoreSessionState before{};
+    EngineMetrics metrics_before{};
+    if (!host.GetSessionState(session, generation, before)
+        || !host.GetMetrics(session, generation, metrics_before)) {
+        release_blocker.set_value();
+        return false;
+    }
+
+    constexpr std::size_t queue_capacity = 4096U;
+    for (std::size_t index = 0; index < queue_capacity; ++index) {
+        if (!host.EnqueuePrimitive(
+                Context(session, generation), request, false, false, true)) {
+            release_blocker.set_value();
+            return false;
+        }
+    }
+    const bool saturated = !host.EnqueuePrimitive(
+        Context(session, generation), request, false, false, true);
+    release_blocker.set_value();
+
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        CoreSessionState draining{};
+        if (host.GetSessionState(session, generation, draining)
+            && draining.pending_operations < queue_capacity) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (host.WaitIdle(session, generation) != INKPOD_STATUS_OK) {
+        return false;
+    }
+
+    CoreSessionState after{};
+    EngineMetrics metrics_after{};
+    InkpodDocumentInfo after_info = EmptyDocumentInfo();
+    const InkpodStatus info_status = host.Invoke(
+        session,
+        generation,
+        [&after_info](InkpodCore* core) {
+            return inkpod_core_get_document_info(core, &after_info);
+        },
+        false,
+        false);
+    return saturated && host.GetSessionState(session, generation, after)
+        && host.GetMetrics(session, generation, metrics_after)
+        && info_status == INKPOD_STATUS_OK
+        && after.pending_operations == 0U
+        && after.last_completed_sequence == after.last_accepted_sequence
+        && after.last_accepted_sequence
+            == before.last_accepted_sequence + queue_capacity + 2U
+        && metrics_after.accepted_work_items
+            == metrics_before.accepted_work_items + queue_capacity + 2U
+        && metrics_after.rejected_work_items
+            == metrics_before.rejected_work_items + 1U
+        && after_info.document_revision == stable_info.document_revision;
 }
 
 bool EditorCachePublicationIsOrdered(
@@ -341,6 +461,76 @@ bool DrainNotifications(
     return saw_first && saw_second;
 }
 
+bool PrimitiveShutdownCompletesExactlyOnce(HWND owner) {
+    SnapshotSink sink;
+    CoreHost host;
+    constexpr DocumentSessionId session{91U};
+    constexpr Generation generation{13U};
+    sink.Bind(session, generation);
+    if (host.Start(&sink, owner) != INKPOD_STATUS_OK
+        || host.CreateSession(session, generation) != INKPOD_STATUS_OK
+        || !host.SetActiveSession(session, generation)
+        || !host.RegisterDocumentView(
+            session,
+            generation,
+            inkpod::app::DocumentViewId{21U},
+            0U)
+        || host.Invoke(
+               session,
+               generation,
+               [](InkpodCore* core) { return NewCell(core, 91U, 16U, 16U); },
+               false,
+               true) != INKPOD_STATUS_OK) {
+        host.Stop();
+        return false;
+    }
+    InkpodDocumentInfo info = EmptyDocumentInfo();
+    if (!host.GetDocumentInfo(session, generation, info)) {
+        host.Stop();
+        return false;
+    }
+    auto request = PrimitiveRequest(
+        INKPOD_PRIMITIVE_SET_MAIN_LINE_COLOR, 1U, info.document_revision);
+    request.color = InkpodColorValue{
+        sizeof(InkpodColorValue),
+        INKPOD_COLOR_DEPTH_8,
+        22U,
+        44U,
+        66U,
+        255U};
+
+    std::promise<void> blocker_started;
+    std::promise<void> release_blocker;
+    const std::shared_future<void> release = release_blocker.get_future().share();
+    if (!host.Enqueue(
+            Context(session, generation),
+            [&blocker_started, release](InkpodCore*) {
+                blocker_started.set_value();
+                release.wait();
+                return INKPOD_STATUS_OK;
+            },
+            false,
+            false,
+            false)) {
+        host.Stop();
+        return false;
+    }
+    blocker_started.get_future().wait();
+    if (!host.EnqueuePrimitive(
+            Context(session, generation), request, true, true, true)) {
+        release_blocker.set_value();
+        host.Stop();
+        return false;
+    }
+    auto stop = std::async(std::launch::async, [&host] { host.Stop(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    release_blocker.set_value();
+    stop.get();
+    return sink.submitted.load(std::memory_order_acquire) == 1U
+        && sink.last_revision.load(std::memory_order_acquire)
+            == request.base_revision + 1U;
+}
+
 }  // namespace
 
 int wmain() {
@@ -493,6 +683,130 @@ int wmain() {
         host.Stop();
         DestroyWindow(owner);
         return 5;
+    }
+
+    std::array<InkpodColorValue, 1> queued_colors{{
+        {sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 12U, 34U, 56U, 255U}}};
+    const InkpodColorArray queued_palette{
+        sizeof(InkpodColorArray),
+        0U,
+        INKPOD_FEATURE_NONE,
+        queued_colors.data(),
+        queued_colors.size(),
+        sizeof(InkpodColorValue)};
+    InkpodObjectId palette_id{};
+    palette_id.struct_size = sizeof(palette_id);
+    if (host.RegisterColorArray(
+            first, generation, queued_palette, palette_id)
+        != INKPOD_STATUS_OK) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 31;
+    }
+    std::promise<void> typed_blocker_started;
+    std::promise<void> release_typed_blocker;
+    const std::shared_future<void> typed_release =
+        release_typed_blocker.get_future().share();
+    if (!host.Enqueue(
+            Context(first, generation),
+            [&typed_blocker_started, typed_release](InkpodCore*) {
+                typed_blocker_started.set_value();
+                typed_release.wait();
+                return INKPOD_STATUS_OK;
+            },
+            false,
+            false,
+            false)) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 31;
+    }
+    typed_blocker_started.get_future().wait();
+    auto palette_request = PrimitiveRequest(
+        INKPOD_PRIMITIVE_REPLACE_PALETTE,
+        1U,
+        first_info.document_revision);
+    palette_request.payload_id = palette_id;
+    if (!host.EnqueuePrimitive(
+            Context(first, generation),
+            palette_request,
+            true,
+            true,
+            true)) {
+        release_typed_blocker.set_value();
+        host.Stop();
+        DestroyWindow(owner);
+        return 31;
+    }
+    queued_colors[0].red = 240U;
+    queued_colors[0].green = 241U;
+    queued_colors[0].blue = 242U;
+    release_typed_blocker.set_value();
+    if (host.WaitIdle(first, generation) != INKPOD_STATUS_OK) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 31;
+    }
+    std::array<InkpodColorValue, 1> copied_colors{};
+    copied_colors[0].struct_size = sizeof(InkpodColorValue);
+    InkpodColorBuffer copied_palette{};
+    copied_palette.struct_size = sizeof(copied_palette);
+    copied_palette.colors = copied_colors.data();
+    copied_palette.color_capacity = copied_colors.size();
+    copied_palette.color_stride_bytes = sizeof(InkpodColorValue);
+    CoreSessionState typed_state{};
+    first_info = EmptyDocumentInfo();
+    if (host.Invoke(
+            first,
+            generation,
+            [&copied_palette](InkpodCore* core) {
+                return inkpod_core_palette_get(core, &copied_palette);
+            },
+            false,
+            false) != INKPOD_STATUS_OK
+        || copied_palette.color_count != 1U
+        || copied_colors[0].red != 12U
+        || copied_colors[0].green != 34U
+        || copied_colors[0].blue != 56U
+        || !host.GetDocumentInfo(first, generation, first_info)
+        || first_info.document_revision != palette_request.base_revision + 1U
+        || !host.GetSessionState(first, generation, typed_state)
+        || typed_state.last_completed_sequence
+            != typed_state.last_accepted_sequence
+        || typed_state.pending_operations != 0U
+        || host.ReleaseObject(first, generation, palette_id)
+            != INKPOD_STATUS_OK
+        || host.ReleaseObject(first, generation, palette_id)
+            != INKPOD_STATUS_INVALID_STATE
+        || host.Invoke(
+               second,
+               generation,
+               [](InkpodCore*) { return INKPOD_STATUS_OK; },
+               false,
+               true) != INKPOD_STATUS_OK
+        || !DrainNotifications(owner, host, first, second)) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 31;
+    }
+    if (!PrimitiveQueueSaturationIsExactlyOnce(
+            host, first, generation, first_info.document_revision)
+        || host.Invoke(
+               first,
+               generation,
+               [](InkpodCore*) { return INKPOD_STATUS_OK; },
+               false,
+               true) != INKPOD_STATUS_OK
+        || host.Invoke(
+               second,
+               generation,
+               [](InkpodCore*) { return INKPOD_STATUS_OK; },
+               false,
+               true) != INKPOD_STATUS_OK
+        || !DrainNotifications(owner, host, first, second)) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 32;
     }
 
     InkpodEditorStateInfo second_editor_before{};
@@ -763,7 +1077,52 @@ int wmain() {
     StrokeEvent cancel{};
     cancel.kind = StrokeEventKind::Cancel;
     cancel.context = Context(first, generation);
-    if (!host.EnqueueStroke(std::move(begin))
+    if (!host.EnqueueStroke(std::move(begin))) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 11;
+    }
+    bool stroke_became_active{};
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        CoreSessionState active_state{};
+        if (host.GetSessionState(first, generation, active_state)
+            && active_state.stroke_active) {
+            stroke_became_active = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    auto deferred_request = PrimitiveRequest(
+        INKPOD_PRIMITIVE_SET_MAIN_LINE_COLOR,
+        1U,
+        first_info.document_revision);
+    deferred_request.color = InkpodColorValue{
+        sizeof(InkpodColorValue),
+        INKPOD_COLOR_DEPTH_8,
+        91U,
+        37U,
+        143U,
+        255U};
+    if (!stroke_became_active
+        || !host.EnqueuePrimitive(
+            Context(first, generation),
+            deferred_request,
+            false,
+            true,
+            true)) {
+        (void)host.EnqueueStroke(std::move(cancel));
+        host.Stop();
+        DestroyWindow(owner);
+        return 11;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    CoreSessionState deferred_state{};
+    InkpodDocumentInfo deferred_info = EmptyDocumentInfo();
+    if (!host.GetSessionState(first, generation, deferred_state)
+        || !host.GetDocumentInfo(first, generation, deferred_info)
+        || !deferred_state.stroke_active
+        || deferred_state.pending_operations == 0U
+        || deferred_info.document_revision != first_info.document_revision
         || !host.EnqueueStroke(std::move(cancel))
         || host.WaitIdle(first, generation) != INKPOD_STATUS_OK) {
         host.Stop();
@@ -771,8 +1130,15 @@ int wmain() {
         return 11;
     }
     first_info = EmptyDocumentInfo();
+    CoreSessionState after_deferred_state{};
     if (!host.GetDocumentInfo(first, generation, first_info)
-        || first_info.color_plane_checksum != marked_checksum) {
+        || !host.GetSessionState(first, generation, after_deferred_state)
+        || first_info.color_plane_checksum != marked_checksum
+        || first_info.document_revision != deferred_request.base_revision
+        || after_deferred_state.stroke_active
+        || after_deferred_state.pending_operations != 0U
+        || after_deferred_state.last_completed_sequence
+            != after_deferred_state.last_accepted_sequence) {
         host.Stop();
         DestroyWindow(owner);
         return 12;
@@ -1004,11 +1370,28 @@ int wmain() {
         true,
         false,
         false);
+    auto stale_primitive_request = PrimitiveRequest(
+        INKPOD_PRIMITIVE_SET_MAIN_LINE_COLOR,
+        1U,
+        second_info.document_revision);
+    stale_primitive_request.color = InkpodColorValue{
+        sizeof(InkpodColorValue),
+        INKPOD_COLOR_DEPTH_8,
+        1U,
+        2U,
+        3U,
+        255U};
+    const bool stale_primitive_rejected = !host.EnqueuePrimitive(
+        Context(second, generation),
+        stale_primitive_request,
+        false,
+        true,
+        true);
     release_operation.set_value();
     const InkpodStatus completion_status = completion.get_future().get();
     const InkpodStatus close_status = close_future.get();
     if (!close_started || !stale_rejected || !stale_input_rejected
-        || !stale_snapshot_rejected
+        || !stale_snapshot_rejected || !stale_primitive_rejected
         || completion_status != INKPOD_STATUS_OK
         || close_status != INKPOD_STATUS_OK || host.SessionCount() != 1U
         || host.HasSession(second, generation)
@@ -1044,6 +1427,8 @@ int wmain() {
     }
 
     host.Stop();
+    const bool shutdown_completed_once =
+        PrimitiveShutdownCompletesExactlyOnce(owner);
     DestroyWindow(owner);
-    return 0;
+    return shutdown_completed_once ? 0 : 33;
 }

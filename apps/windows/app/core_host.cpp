@@ -81,7 +81,7 @@ CommandContext SessionContext(SessionBinding binding) noexcept {
     return context;
 }
 
-struct SyncWork {
+struct LegacyInvokeWork {
     SessionBinding binding;
     std::uint64_t sequence{};
     CommandContext context;
@@ -103,6 +103,18 @@ struct StrokeWork {
     std::chrono::steady_clock::time_point queued_at{std::chrono::steady_clock::now()};
 };
 
+struct PrimitiveWork {
+    SessionBinding binding;
+    std::uint64_t sequence{};
+    CommandContext context;
+    InkpodPrimitiveRequestV3 request{};
+    bool publish_snapshot{};
+    bool refresh_document_info{};
+    bool defer_during_active_stroke{};
+    std::shared_ptr<std::promise<InkpodStatus>> completion;
+    std::chrono::steady_clock::time_point queued_at{std::chrono::steady_clock::now()};
+};
+
 enum class ControlKind : std::uint8_t {
     Create,
     Rebind,
@@ -116,7 +128,8 @@ struct ControlWork {
     std::shared_ptr<std::promise<InkpodStatus>> completion;
 };
 
-using WorkItem = std::variant<SyncWork, StrokeWork, ControlWork>;
+using WorkItem =
+    std::variant<LegacyInvokeWork, PrimitiveWork, StrokeWork, ControlWork>;
 
 struct PublishedSession {
     SessionBinding binding;
@@ -501,7 +514,7 @@ struct CoreHost::Impl final {
         try {
             auto completion = std::make_shared<std::promise<InkpodStatus>>();
             auto future = completion->get_future();
-            SyncWork item{
+            LegacyInvokeWork item{
                 binding,
                 0U,
                 SessionContext(binding),
@@ -512,7 +525,7 @@ struct CoreHost::Impl final {
                 std::nullopt,
                 completion,
                 {}};
-            if (!PushSync(std::move(item))) {
+            if (!PushLegacyInvoke(std::move(item))) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
             return future.get();
@@ -563,7 +576,7 @@ struct CoreHost::Impl final {
             || !operation) {
             return false;
         }
-        return PushSync(SyncWork{
+        return PushLegacyInvoke(LegacyInvokeWork{
             SessionBinding{
                 context.document_session.value(), context.generation.value()},
             0U,
@@ -577,7 +590,58 @@ struct CoreHost::Impl final {
             std::move(completion)});
     }
 
-    bool PushSync(SyncWork item) noexcept {
+    InkpodStatus InvokePrimitive(
+        SessionBinding binding,
+        const InkpodPrimitiveRequestV3& request,
+        bool publish_snapshot,
+        bool refresh_document_info,
+        bool defer_during_active_stroke) noexcept {
+        try {
+            auto completion = std::make_shared<std::promise<InkpodStatus>>();
+            auto future = completion->get_future();
+            PrimitiveWork item{
+                binding,
+                0U,
+                SessionContext(binding),
+                request,
+                publish_snapshot,
+                refresh_document_info,
+                defer_during_active_stroke,
+                completion};
+            if (!PushPrimitive(std::move(item))) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            return future.get();
+        } catch (const std::future_error&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+    }
+
+    bool EnqueuePrimitive(
+        const CommandContext& context,
+        const InkpodPrimitiveRequestV3& request,
+        bool publish_snapshot,
+        bool refresh_document_info,
+        bool defer_during_active_stroke) noexcept {
+        if (!context.document_session.has_value() || !context.generation.has_value()) {
+            return false;
+        }
+        return PushPrimitive(PrimitiveWork{
+            SessionBinding{
+                context.document_session.value(), context.generation.value()},
+            0U,
+            context,
+            request,
+            publish_snapshot,
+            refresh_document_info,
+            defer_during_active_stroke,
+            nullptr});
+    }
+
+    bool PushLegacyInvoke(LegacyInvokeWork item) noexcept {
+        std::lock_guard acceptance_lock(acceptance_mutex);
         const SessionBinding binding = item.binding;
         {
             std::lock_guard state_lock(state_mutex);
@@ -591,6 +655,7 @@ struct CoreHost::Impl final {
             item.sequence = ++session->state.last_accepted_sequence;
             ++session->state.pending_operations;
         }
+        const std::uint64_t sequence = item.sequence;
         bool queued{};
         try {
             std::lock_guard lock(mutex);
@@ -602,7 +667,7 @@ struct CoreHost::Impl final {
             queued = false;
         }
         if (!queued) {
-            RollbackPending(binding);
+            RollbackPending(binding, sequence);
             RecordRejected(binding);
             return false;
         }
@@ -612,6 +677,7 @@ struct CoreHost::Impl final {
     }
 
     bool PushStroke(StrokeEvent event) noexcept {
+        std::lock_guard acceptance_lock(acceptance_mutex);
         if (!event.context.document_session.has_value()
             || !event.context.generation.has_value()
             || event.samples.size() > kMaximumStrokeSamples) {
@@ -637,6 +703,7 @@ struct CoreHost::Impl final {
             ++session->state.pending_operations;
         }
 
+        const std::uint64_t sequence = item.sequence;
         bool queued{};
         try {
             std::lock_guard lock(mutex);
@@ -671,7 +738,7 @@ struct CoreHost::Impl final {
             queued = false;
         }
         if (!queued) {
-            RollbackPending(item.binding);
+            RollbackPending(item.binding, sequence);
             RecordRejected(item.binding);
             return false;
         }
@@ -694,11 +761,14 @@ struct CoreHost::Impl final {
         return true;
     }
 
-    void RollbackPending(SessionBinding binding) noexcept {
+    void RollbackPending(SessionBinding binding, std::uint64_t sequence) noexcept {
         std::lock_guard lock(state_mutex);
         const auto found = FindPublishedLocked(binding);
         if (found != published.end() && found->state.pending_operations != 0U) {
             --found->state.pending_operations;
+            if (found->state.last_accepted_sequence == sequence) {
+                --found->state.last_accepted_sequence;
+            }
         }
     }
 
@@ -1021,7 +1091,7 @@ struct CoreHost::Impl final {
             item.binding, item.sequence, item.pending_units, entry->stroke_active);
     }
 
-    void ProcessSync(SyncWork item) noexcept {
+    void ProcessLegacyInvoke(LegacyInvokeWork item) noexcept {
         RecordQueueWait(item.binding, item.queued_at);
         CoreEntry* entry = FindEntry(item.binding);
         InkpodStatus status = entry == nullptr
@@ -1065,6 +1135,41 @@ struct CoreHost::Impl final {
                         true,
                         item.context);
                 }
+            }
+        }
+    }
+
+    void ProcessPrimitive(PrimitiveWork item) noexcept {
+        RecordQueueWait(item.binding, item.queued_at);
+        CoreEntry* entry = FindEntry(item.binding);
+        InkpodStatus status = entry == nullptr
+            ? INKPOD_STATUS_CANCELLED
+            : INKPOD_STATUS_OK;
+        if (entry != nullptr) {
+            InkpodPrimitiveResultV3 result{};
+            result.struct_size = sizeof(result);
+            status = inkpod_core_primitive_execute_v3(
+                entry->core, &item.request, &result);
+            if (status == INKPOD_STATUS_OK && item.refresh_document_info) {
+                status = RefreshDocumentInfo(*entry, item.context);
+            }
+            if (status == INKPOD_STATUS_OK && item.publish_snapshot) {
+                status = PublishSnapshot(*entry, false);
+            }
+        }
+        const bool asynchronous = item.completion == nullptr;
+        if (entry != nullptr) {
+            CaptureFailure(*entry, status, asynchronous, item.context);
+        }
+        CompletePending(
+            item.binding,
+            item.sequence,
+            1U,
+            entry != nullptr && entry->stroke_active);
+        if (item.completion != nullptr) {
+            try {
+                item.completion->set_value(status);
+            } catch (const std::future_error&) {
             }
         }
     }
@@ -1166,10 +1271,15 @@ struct CoreHost::Impl final {
     }
 
     bool CanProcess(const WorkItem& item) const noexcept {
-        if (const auto* sync = std::get_if<SyncWork>(&item)) {
+        if (const auto* sync = std::get_if<LegacyInvokeWork>(&item)) {
             const CoreEntry* entry = FindEntry(sync->binding);
             return entry == nullptr || !entry->stroke_active
                 || !sync->defer_during_active_stroke;
+        }
+        if (const auto* primitive = std::get_if<PrimitiveWork>(&item)) {
+            const CoreEntry* entry = FindEntry(primitive->binding);
+            return entry == nullptr || !entry->stroke_active
+                || !primitive->defer_during_active_stroke;
         }
         if (const auto* control = std::get_if<ControlWork>(&item)) {
             if (control->kind == ControlKind::Create) {
@@ -1303,8 +1413,10 @@ struct CoreHost::Impl final {
                 continue;
             }
             if (has_item) {
-                if (auto* sync = std::get_if<SyncWork>(&item)) {
-                    ProcessSync(std::move(*sync));
+                if (auto* sync = std::get_if<LegacyInvokeWork>(&item)) {
+                    ProcessLegacyInvoke(std::move(*sync));
+                } else if (auto* primitive = std::get_if<PrimitiveWork>(&item)) {
+                    ProcessPrimitive(std::move(*primitive));
                 } else if (auto* stroke = std::get_if<StrokeWork>(&item)) {
                     ProcessStroke(std::move(*stroke));
                 } else {
@@ -1368,6 +1480,42 @@ struct CoreHost::Impl final {
             return false;
         }
         output = found->document_info;
+        return true;
+    }
+
+    bool PushPrimitive(PrimitiveWork item) noexcept {
+        std::lock_guard acceptance_lock(acceptance_mutex);
+        const SessionBinding binding = item.binding;
+        {
+            std::lock_guard state_lock(state_mutex);
+            const auto session = FindPublishedLocked(binding);
+            if (session == published.end() || !session->state.accepting_work) {
+                if (session != published.end()) {
+                    ++session->metrics.rejected_work_items;
+                }
+                return false;
+            }
+            item.sequence = ++session->state.last_accepted_sequence;
+            ++session->state.pending_operations;
+        }
+        const std::uint64_t sequence = item.sequence;
+        bool queued{};
+        try {
+            std::lock_guard lock(mutex);
+            if (!stopping && work.size() < kMaximumQueuedWork) {
+                work.emplace_back(std::move(item));
+                queued = true;
+            }
+        } catch (const std::bad_alloc&) {
+            queued = false;
+        }
+        if (!queued) {
+            RollbackPending(binding, sequence);
+            RecordRejected(binding);
+            return false;
+        }
+        RecordAccepted(binding);
+        wake.notify_one();
         return true;
     }
 
@@ -1532,6 +1680,7 @@ struct CoreHost::Impl final {
     mutable std::mutex notification_owner_mutex;
     HWND owner{};
 
+    mutable std::mutex acceptance_mutex;
     mutable std::mutex mutex;
     std::condition_variable wake;
     std::deque<WorkItem> work;
@@ -1557,7 +1706,7 @@ struct CoreHost::Impl final {
         try {
             auto completion = std::make_shared<std::promise<InkpodStatus>>();
             auto future = completion->get_future();
-            SyncWork item{
+            LegacyInvokeWork item{
                 binding,
                 0U,
                 SessionContext(binding),
@@ -1568,7 +1717,7 @@ struct CoreHost::Impl final {
                 view_id,
                 completion,
                 {}};
-            if (!PushSync(std::move(item))) {
+            if (!PushLegacyInvoke(std::move(item))) {
                 return INKPOD_STATUS_INVALID_STATE;
             }
             return future.get();
@@ -1697,6 +1846,57 @@ InkpodStatus CoreHost::InvokeAll(
         ? INKPOD_STATUS_INVALID_STATE
         : impl_->InvokeAll(
               std::move(operation), publish_snapshot, refresh_document_info);
+}
+
+InkpodStatus CoreHost::InvokePrimitive(
+    const InkpodPrimitiveRequestV3& request,
+    bool publish_snapshot,
+    bool refresh_document_info,
+    bool defer_during_active_stroke) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const auto binding = impl_->ActiveBinding();
+    return binding.has_value()
+        ? impl_->InvokePrimitive(
+              binding.value(),
+              request,
+              publish_snapshot,
+              refresh_document_info,
+              defer_during_active_stroke)
+        : INKPOD_STATUS_INVALID_STATE;
+}
+
+InkpodStatus CoreHost::InvokePrimitive(
+    DocumentSessionId session,
+    Generation generation,
+    const InkpodPrimitiveRequestV3& request,
+    bool publish_snapshot,
+    bool refresh_document_info,
+    bool defer_during_active_stroke) noexcept {
+    return impl_ == nullptr
+        ? INKPOD_STATUS_INVALID_STATE
+        : impl_->InvokePrimitive(
+              SessionBinding{session, generation},
+              request,
+              publish_snapshot,
+              refresh_document_info,
+              defer_during_active_stroke);
+}
+
+bool CoreHost::EnqueuePrimitive(
+    const CommandContext& context,
+    const InkpodPrimitiveRequestV3& request,
+    bool publish_snapshot,
+    bool refresh_document_info,
+    bool defer_during_active_stroke) noexcept {
+    return impl_ != nullptr
+        && impl_->EnqueuePrimitive(
+            context,
+            request,
+            publish_snapshot,
+            refresh_document_info,
+            defer_during_active_stroke);
 }
 
 bool CoreHost::Enqueue(
@@ -1899,6 +2099,41 @@ bool CoreHost::GetEditorState(
     InkpodEditorStateInfo& state) const noexcept {
     return impl_ != nullptr
         && impl_->CopyEditorState(SessionBinding{session, generation}, state);
+}
+
+InkpodStatus CoreHost::RegisterColorArray(
+    DocumentSessionId session,
+    Generation generation,
+    const InkpodColorArray& input,
+    InkpodObjectId& object_id) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    object_id = {};
+    object_id.struct_size = sizeof(object_id);
+    return impl_->Invoke(
+        SessionBinding{session, generation},
+        [&input, &object_id](InkpodCore* core) {
+            return inkpod_core_register_color_array_v3(
+                core, &input, &object_id);
+        },
+        false,
+        false);
+}
+
+InkpodStatus CoreHost::ReleaseObject(
+    DocumentSessionId session,
+    Generation generation,
+    const InkpodObjectId& object_id) noexcept {
+    return impl_ == nullptr
+        ? INKPOD_STATUS_INVALID_STATE
+        : impl_->Invoke(
+              SessionBinding{session, generation},
+              [&object_id](InkpodCore* core) {
+                  return inkpod_core_object_release_v3(core, &object_id);
+              },
+              false,
+              false);
 }
 
 std::wstring CoreHost::LastError() const {

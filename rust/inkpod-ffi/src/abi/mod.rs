@@ -5,6 +5,7 @@ mod core_records;
 mod document_records;
 mod editor_records;
 mod handles;
+mod v3_records;
 mod vector_effect_records;
 
 pub use constants::*;
@@ -16,4 +17,5 @@ pub use core_records::*;
 pub use document_records::*;
 pub use editor_records::*;
 pub use handles::*;
+pub use v3_records::*;
 pub use vector_effect_records::*;

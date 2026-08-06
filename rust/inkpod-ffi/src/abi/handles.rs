@@ -3,6 +3,7 @@ use super::*;
 pub struct InkpodCore {
     pub(crate) owner_thread: ThreadId,
     pub(crate) core: Core,
+    pub(crate) objects: crate::v3::ObjectRegistry,
 }
 
 pub struct InkpodSnapshot {

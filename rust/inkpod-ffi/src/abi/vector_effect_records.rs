@@ -362,6 +362,7 @@ pub struct InkpodTaskInfo {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct InkpodSnapshotVectorSegment {
     pub struct_size: u32,
     pub flags: u32,
@@ -380,6 +381,7 @@ pub struct InkpodSnapshotVectorSegment {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct InkpodSnapshotVectorFill {
     pub struct_size: u32,
     pub reserved: u32,

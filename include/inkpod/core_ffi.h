@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v2 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v3 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(2)
+#define INKPOD_ABI_VERSION UINT32_C(3)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -84,6 +84,26 @@ typedef uint32_t InkpodStatus;
 #define INKPOD_STATUS_CANCELLED UINT32_C(10)
 #define INKPOD_STATUS_FILL_OVERFLOW UINT32_C(11)
 #define INKPOD_STATUS_UNSAVED_CHANGES UINT32_C(12)
+
+/** @brief ABI-v3 Rust-owned object の閉じた type namespace。 */
+typedef uint32_t InkpodObjectType;
+#define INKPOD_OBJECT_NONE UINT32_C(0)
+#define INKPOD_OBJECT_CORE UINT32_C(1)
+#define INKPOD_OBJECT_SNAPSHOT UINT32_C(2)
+#define INKPOD_OBJECT_TASK UINT32_C(3)
+#define INKPOD_OBJECT_ASSET UINT32_C(4)
+#define INKPOD_OBJECT_SAMPLE_STREAM UINT32_C(5)
+#define INKPOD_OBJECT_COLOR_ARRAY UINT32_C(6)
+#define INKPOD_OBJECT_THUMBNAIL UINT32_C(7)
+#define INKPOD_OBJECT_EXPORT UINT32_C(8)
+
+/** @brief canonical primitive catalog の stable opcode。 */
+typedef uint32_t InkpodPrimitiveOpcode;
+#define INKPOD_PRIMITIVE_SET_MAIN_LINE_COLOR UINT32_C(0x00030001)
+#define INKPOD_PRIMITIVE_REPLACE_PALETTE UINT32_C(0x00030002)
+#define INKPOD_PRIMITIVE_APPLY_RASTER_STROKE UINT32_C(0x00050001)
+#define INKPOD_PRIMITIVE_IMPORT_RASTER_ASSET UINT32_C(0x00090001)
+#define INKPOD_PRIMITIVE_RESULT_COMMITTED (UINT32_C(1) << 0)
 
 /** @brief `InkpodCommand` の command 識別子型。未知値は受理しない。 */
 typedef uint32_t InkpodCommandKind;
@@ -737,6 +757,127 @@ typedef struct InkpodColorValue {
     uint16_t blue;
     uint16_t alpha;
 } InkpodColorValue;
+
+/**
+ * @brief 一つの Core generation に属する Rust-owned object の value identity。
+ *
+ * `generation + object_type + value` の全組で identity を表す。別 Core、解放済み、
+ * type違いの ID は受理しない。`NONE/0/0` は所有権を持たない空 ID である。
+ */
+typedef struct InkpodObjectId {
+    uint32_t struct_size;
+    InkpodObjectType object_type;
+    uint64_t feature_flags;
+    uint64_t generation;
+    uint64_t value;
+} InkpodObjectId;
+
+/** @brief pointer/path/callbackを含まないABI-v3 canonical primitive request。 */
+typedef struct InkpodPrimitiveRequestV3 {
+    uint32_t struct_size;
+    InkpodPrimitiveOpcode opcode;
+    uint32_t schema_version;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t base_revision;
+    uint64_t target_id;
+    InkpodObjectId payload_id;
+    InkpodPaintTool tool;
+    InkpodPlaneKind plane;
+    InkpodCoordinateSpace coordinate_space;
+    uint32_t reserved_2;
+    uint64_t stroke_flags;
+    InkpodColorValue color;
+    float diameter;
+    uint32_t reserved_3;
+} InkpodPrimitiveRequestV3;
+
+/** @brief canonical primitive のcommit/no-op結果。 */
+typedef struct InkpodPrimitiveResultV3 {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t revision;
+    uint64_t accepted_command_count;
+    uint64_t procedure_id;
+    uint64_t committed_state_id;
+    InkpodPrimitiveOpcode opcode;
+    uint32_t schema_version;
+} InkpodPrimitiveResultV3;
+
+/** @brief 1 bounded call中だけborrowし、canonical dense rasterへコピーする入力。 */
+typedef struct InkpodRasterAssetInputV3 {
+    uint32_t struct_size;
+    InkpodStoragePixelFormat pixel_format;
+    uint64_t feature_flags;
+    uint32_t width;
+    uint32_t height;
+    uint32_t reserved;
+    uint32_t reserved_2;
+    uint64_t row_stride_bytes;
+    const uint8_t* pixels;
+    uint64_t pixel_bytes;
+} InkpodRasterAssetInputV3;
+
+/** @brief live ABI-v3 object のpointer-free metadata。 */
+typedef struct InkpodObjectInfoV3 {
+    uint32_t struct_size;
+    InkpodObjectType object_type;
+    uint64_t feature_flags;
+    uint64_t generation;
+    uint64_t value;
+    uint64_t element_count;
+    uint64_t byte_count;
+    uint32_t width;
+    uint32_t height;
+    uint64_t stride_bytes;
+    uint64_t revision;
+} InkpodObjectInfoV3;
+
+/** @brief live snapshot ID のpointer-free metadata。 */
+typedef struct InkpodSnapshotInfoV3 {
+    uint32_t struct_size;
+    uint32_t transform_flags;
+    uint64_t feature_flags;
+    uint64_t revision;
+    uint64_t view_revision;
+    uint64_t tile_count;
+    uint64_t guide_count;
+    uint64_t vector_segment_count;
+    uint64_t vector_fill_count;
+    uint64_t vector_boundary_path_count;
+    double zoom;
+    double pan_x;
+    double pan_y;
+    uint32_t document_width;
+    uint32_t document_height;
+} InkpodSnapshotInfoV3;
+
+/** @brief batched copyで返すpointer-free snapshot tile descriptor。 */
+typedef struct InkpodSnapshotTileInfoV3 {
+    uint32_t struct_size;
+    InkpodPixelFormat pixel_format;
+    uint64_t tile_id;
+    int32_t origin_x;
+    int32_t origin_y;
+    uint32_t width;
+    uint32_t height;
+    uint32_t stride_bytes;
+    uint32_t reserved;
+    uint64_t pixel_bytes;
+    uint64_t tile_revision;
+} InkpodSnapshotTileInfoV3;
+
+/** @brief caller-owned byte storageへのoffset付きbounded copy。 */
+typedef struct InkpodBufferCopyV3 {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t offset;
+    uint8_t* bytes;
+    uint64_t byte_capacity;
+    uint64_t written_bytes;
+    uint64_t total_bytes;
+} InkpodBufferCopyV3;
 
 /** @brief exact-depth color record の caller-owned borrowed span。 */
 typedef struct InkpodColorArray {
@@ -4087,6 +4228,160 @@ InkpodStatus inkpod_snapshot_get_vectors(
  * `OK`、`INVALID_ARGUMENT`、`PANIC`。
  */
 InkpodStatus inkpod_snapshot_release(InkpodSnapshot** snapshot);
+
+/**
+ * @brief Core handleのgeneration付きABI-v3 identityを値コピーする。
+ * @par 契約 Core owner thread。`out_id`は完全サイズの空ID。queryで状態変更なし。
+ */
+InkpodStatus inkpod_core_get_id_v3(InkpodCore* core, InkpodObjectId* out_id);
+
+/**
+ * @brief exact-depth color spanをRust-owned immutable objectへ同期コピーする。
+ * @par 契約 Core owner thread。戻り後はinput/spanを変更・解放可能。成功IDは同じCore generationで
+ * primitive payloadとして使い、`inkpod_core_object_release_v3`またはCore destroyまで有効。
+ */
+InkpodStatus inkpod_core_register_color_array_v3(
+    InkpodCore* core,
+    const InkpodColorArray* input,
+    InkpodObjectId* out_id);
+
+/** @brief strided stroke sample spanをRust-owned immutable sample-stream IDへ同期コピーする。 */
+InkpodStatus inkpod_core_register_sample_stream_v3(
+    InkpodCore* core,
+    const InkpodStrokeSampleSpan* input,
+    InkpodObjectId* out_id);
+
+/** @brief bounded raster spanをpadding除去済みRust-owned immutable asset IDへ同期コピーする。 */
+InkpodStatus inkpod_core_register_raster_asset_v3(
+    InkpodCore* core,
+    const InkpodRasterAssetInputV3* input,
+    InkpodObjectId* out_id);
+
+/**
+ * @brief stable opcode/version/value/ID recordを唯一のCore canonical executorで実行する。
+ * @par 契約 Core owner thread。requestはpointer-freeで、payloadは同generationの正しいtypeのlive ID。
+ * success実変更は1 revision/1 history/1 procedure、semantic no-opはCOMMITTEDなしでrevision不変。
+ * invalid/stale/wrong-type/wrong-generation/active-preview failureはCoreと全IDを変更しない。
+ */
+InkpodStatus inkpod_core_primitive_execute_v3(
+    InkpodCore* core,
+    const InkpodPrimitiveRequestV3* request,
+    InkpodPrimitiveResultV3* result);
+
+/** @brief primary render snapshotをCore generation所有のimmutable snapshot IDとして構築する。 */
+InkpodStatus inkpod_core_build_snapshot_id_v3(
+    InkpodCore* core,
+    const InkpodSnapshotOptions* options,
+    InkpodObjectId* out_id);
+
+/** @brief live snapshot IDのpointer-free metadataを値コピーする。 */
+InkpodStatus inkpod_core_snapshot_get_info_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id,
+    InkpodSnapshotInfoV3* out_info);
+
+/** @brief snapshot tile descriptorsを`first`からcaller-owned strided batchへbounded copyする。 */
+InkpodStatus inkpod_core_snapshot_tiles_copy_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id,
+    uint64_t first,
+    InkpodSnapshotTileInfoV3* output,
+    uint64_t capacity,
+    uint64_t stride_bytes,
+    uint64_t* out_copied);
+
+/** @brief 一つのsnapshot tile pixel列をoffset付きcaller bufferへbounded copyする。 */
+InkpodStatus inkpod_core_snapshot_tile_pixels_copy_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id,
+    uint64_t tile_index,
+    InkpodBufferCopyV3* copy);
+
+/** @brief snapshot guide recordsをcaller-owned strided batchへbounded copyする。 */
+InkpodStatus inkpod_core_snapshot_guides_copy_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id,
+    uint64_t first,
+    InkpodSnapshotGuide* output,
+    uint64_t capacity,
+    uint64_t stride_bytes,
+    uint64_t* out_copied);
+
+/** @brief snapshot vector segment recordsをcaller-owned strided batchへbounded copyする。 */
+InkpodStatus inkpod_core_snapshot_vector_segments_copy_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id,
+    uint64_t first,
+    InkpodSnapshotVectorSegment* output,
+    uint64_t capacity,
+    uint64_t stride_bytes,
+    uint64_t* out_copied);
+
+/** @brief snapshot vector fill recordsをcaller-owned strided batchへbounded copyする。 */
+InkpodStatus inkpod_core_snapshot_vector_fills_copy_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id,
+    uint64_t first,
+    InkpodSnapshotVectorFill* output,
+    uint64_t capacity,
+    uint64_t stride_bytes,
+    uint64_t* out_copied);
+
+/** @brief snapshot vector boundary path IDsをcaller-owned strided batchへbounded copyする。 */
+InkpodStatus inkpod_core_snapshot_vector_boundary_ids_copy_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id,
+    uint64_t first,
+    uint64_t* output,
+    uint64_t capacity,
+    uint64_t stride_bytes,
+    uint64_t* out_copied);
+
+/** @brief layer thumbnail RGBA8をRust-owned thumbnail IDとして生成する。 */
+InkpodStatus inkpod_core_layer_thumbnail_id_v3(
+    InkpodCore* core,
+    uint64_t layer_id,
+    uint32_t maximum_width,
+    uint32_t maximum_height,
+    InkpodObjectId* out_id);
+
+/** @brief common raster export bytesをRust-owned export IDとして生成する。 */
+InkpodStatus inkpod_core_export_common_raster_id_v3(
+    InkpodCore* core,
+    InkpodCommonRasterFormat format,
+    uint32_t composite_white,
+    InkpodObjectId* out_id);
+
+/** @brief live ABI-v3 objectのtype/generation/count/byte metadataを値コピーする。 */
+InkpodStatus inkpod_core_object_get_info_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id,
+    InkpodObjectInfoV3* out_info);
+
+/** @brief thumbnail/export IDのbytesをoffset付きcaller bufferへbounded copyする。 */
+InkpodStatus inkpod_core_object_bytes_copy_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id,
+    InkpodBufferCopyV3* copy);
+
+/** @brief 同generationに属するRust-owned task IDを生成する。 */
+InkpodStatus inkpod_core_task_create_v3(InkpodCore* core, InkpodObjectId* out_id);
+/** @brief task IDのatomic state/progressを値コピーする。 */
+InkpodStatus inkpod_core_task_query_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id,
+    InkpodTaskInfo* out_info);
+/** @brief task IDをcooperative cancelled stateへ遷移させる。 */
+InkpodStatus inkpod_core_task_cancel_v3(InkpodCore* core, const InkpodObjectId* id);
+
+/**
+ * @brief live ABI-v3 object IDをexactly onceで解放する。
+ * @par 契約 Core owner thread。同じ値の再releaseは`INVALID_STATE`。Core IDは個別release不可。
+ * 成功後ID値はstaleとなり、borrow/copy期限は直ちに終了する。Core destroyは残存objectを全解放する。
+ */
+InkpodStatus inkpod_core_object_release_v3(
+    InkpodCore* core,
+    const InkpodObjectId* id);
 
 /**
  * @brief current thread の直近 FFI diagnostic に必要な UTF-8 buffer size を得る。

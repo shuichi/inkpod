@@ -311,6 +311,7 @@ pub struct InkpodSnapshotTransform {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct InkpodSnapshotGuide {
     pub struct_size: u32,
     pub axis: u32,

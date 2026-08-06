@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 2U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 3U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodCoreConfig) == 16U, "core config layout drift");
 _Static_assert(sizeof(InkpodCommand) == 16U, "command layout drift");
 _Static_assert(sizeof(InkpodSnapshotOptions) == 16U, "snapshot options layout drift");
@@ -18,6 +18,14 @@ _Static_assert(sizeof(InkpodViewInput) == 48U, "view input layout drift");
 _Static_assert(sizeof(InkpodSnapshotTransform) == 48U, "snapshot transform layout drift");
 _Static_assert(sizeof(InkpodSnapshotGuide) == 24U, "snapshot guide layout drift");
 _Static_assert(sizeof(InkpodSnapshotOverlay) == 56U, "snapshot overlay layout drift");
+_Static_assert(sizeof(InkpodObjectId) == 32U, "object id layout drift");
+_Static_assert(sizeof(InkpodPrimitiveRequestV3) == 120U, "primitive request layout drift");
+_Static_assert(sizeof(InkpodPrimitiveResultV3) == 48U, "primitive result layout drift");
+_Static_assert(sizeof(InkpodRasterAssetInputV3) == 56U, "raster asset layout drift");
+_Static_assert(sizeof(InkpodObjectInfoV3) == 72U, "object info layout drift");
+_Static_assert(sizeof(InkpodSnapshotInfoV3) == 104U, "snapshot info layout drift");
+_Static_assert(sizeof(InkpodSnapshotTileInfoV3) == 56U, "snapshot tile info layout drift");
+_Static_assert(sizeof(InkpodBufferCopyV3) == 56U, "buffer copy layout drift");
 _Static_assert(sizeof(InkpodRasterSourceInput) == 96U, "raster source layout drift");
 _Static_assert(sizeof(InkpodLightTableItemInput) == 168U, "light-table input layout drift");
 _Static_assert(sizeof(InkpodSequenceCellInput) == 120U, "sequence cell layout drift");

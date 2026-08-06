@@ -43,7 +43,7 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ```
 
 - `struct_size` は必ず呼び出し側が設定する。出力構造体でも同じである。
-- ABI v2 で既知の構造体末尾まで読み書きできるサイズが必要である。
+- ABI v3 で既知の構造体末尾まで読み書きできるサイズが必要である。
 - `reserved` は 0、未知の必須 feature flag は指定しない。
 - record span は各 record の `struct_size` と `*_stride_bytes` の両方を設定する。
 - count、stride、alignment、全 span の byte 範囲が有効でなければならない。
@@ -53,19 +53,54 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ABI version は Core 作成前に比較できる。`INKPOD_ABI_VERSION` と library の戻り値が異なる場合は、
 Core を作らず互換性エラーとして扱う。
 
-ABI v2 は、公開名から実装時のマイルストーン番号を除いた。task API は
+ABI v3 は value/ID-only primitive control plane を追加した。ABI v2 で公開名から実装時の
+マイルストーン番号を除いた task API は引き続き
 `InkpodTask` / `InkpodTaskInfo` / `INKPOD_TASK_*` / `inkpod_task_*`、共有raster入力は
 `InkpodRasterSourceInput` を使用する。v1のマイルストーン名は公開aliasとして残していないため、
 旧headerを使うcallerはv2 headerへ更新して再ビルドする必要がある。構造体レイアウト、数値定数、
 所有権、thread、statusの契約はこの名称変更では変えていない。
 
-M4 の canonical asset ingestion も ABI version を変更しない。既存の raster-open/import、
+既存の raster-open/import、
 clipboard、Light Table 入力は ABI v2 の bounded call の中で同期的に検証、copy、canonicalize、
 intern される。stroke sample は同期的に Rust-owned canonical bytes へ copy され、4 MiB 以下は
 procedure inline payload、4 MiB 超は canonical sample asset になる。sequence source は従来どおり
 bounded な Rust-owned raster copy であり、vector primitive の asset 接続は M6 の範囲である。
-asset ID を control-plane record として公開する ABI v3 と、typed `CoreHost` queue は M5 の範囲であり、
-この段階の ABI v2 caller が Rust-owned asset registry を直接所有または解放することはない。
+ABI v3 caller は generation-tagged runtime object ID を明示 release する。ABI v2 caller が使う
+canonical asset retention は従来どおり Core 内部であり、v3 runtime object ID と persistent
+content-addressed `AssetId` は別 namespace である。
+
+## ABI v3 value/ID control plane
+
+`InkpodObjectId` は `object_type + Core generation + monotonic value` からなる固定幅 record である。
+Core、snapshot、task、color array、sample stream、raster asset、thumbnail、export は異なる type を持つ。
+ID は発行元 Core generation だけで有効であり、別 Core、destroy/recreate 後、release 後には使えない。
+wrong type/zero value/unknown opcode は `INKPOD_STATUS_INVALID_ARGUMENT`、wrong generation/stale/double release は
+`INKPOD_STATUS_INVALID_STATE`、未知 feature/schema は `INKPOD_STATUS_UNSUPPORTED` となる。
+失敗時に document、history、journal、revision、dirty、object registry、出力 record の部分変更はない。
+
+`InkpodPrimitiveRequestV3` は pointer、callback、path、native/STL object を含まない。stable opcode、
+schema version、base document revision、target ID、generation-tagged payload ID、固定幅 tool/plane/color/
+diameter/flags だけを値で持つ。現在の closed catalog は既存 canonical executor slice の
+`SetMainLineColor` schema 1、`ReplacePalette` schema 1、`ApplyRasterStroke` schema 2、
+`ImportRasterAsset` schema 1 である。可変 palette/sample/raster は先に
+`inkpod_core_register_*_v3` の一回の bounded call で deep copy し、primitive request は返された ID
+だけを参照する。caller は登録 call 復帰後に元 buffer を変更・解放できる。実行は
+`Core::execute_primitive` に委譲され、旧 main-line/palette/stroke/import FFI wrapper と別の意味実装を
+持たない。success は result を完全に書き、semantic no-op は committed flag、revision、history、
+dirty、persistent ID を進めない。stale base、active stroke、invalid target/payload、overflow、allocation
+failure は atomic error である。
+
+snapshot、thumbnail、export、task は Rust-owned runtime ID である。snapshot metadata と tile/guide/
+vector record は `first + capacity + stride` の batched copy、tile pixels と thumbnail/export bytes は
+`InkpodBufferCopyV3 { offset, bytes, byte_capacity, written_bytes, total_bytes }` で取得する。capacity 0 の
+byte query は `bytes == NULL`、record query は output NULL/stride 0 とし、実 storage はその一回の call
+だけ borrowed である。Core は caller output pointer を保持しない。ID 自体は copy できるが、同じ live
+object の query/release は Core owner thread 上で直列化し、最後に `inkpod_core_object_release_v3` を
+正確に一回呼ぶ。Core ID は独立 release せず `inkpod_core_destroy` で終端する。
+
+全 `inkpod_core_*_v3` call は、task query/cancel を含め Core owner thread 限定である。ID record は UI
+queue へ値で渡せるが、その解決、copy、release は発行元 Core の owner thread で行う。旧 opaque
+snapshot/task API の任意-thread例外は、それら固有の既存 contract であり v3 ID registry へは適用しない。
 
 ## スレッド契約
 
@@ -87,6 +122,15 @@ Windows frontend の `CoreHost` は複数の `InkpodCore` owner 変数を一つ�
 しない。session close は先に新規投入を拒否し、受理済み work と live stroke を解決してから、作成した
 同じ thread 上で該当 owner だけを destroy する。この frontend registry は C ABI や Rust handle の
 ownership 契約を変更しない。
+
+canonical document mutation は closed `PrimitiveWork` variant で queue される。record は issue-time の
+session/generation、`CommandContext` の target IDs、base revision、`InkpodPrimitiveRequestV3` の値、
+snapshot/document-info publication flags、exactly-once sequence/completion stateだけを持ち、raw pointer、
+closure、external path、STL containerを持たない。palette/sample/rasterの caller memory は enqueue 前の
+register callでRust-owned IDへ変換する。queue飽和で未受理のsequence/pending countはatomicにrollbackし、
+受理済み primitive はactive stroke終了後、close、shutdown drainでも高々一回だけ実行または明示解決する。
+未移行の production route とquery/initializerが通る`LegacyInvokeWork`はM6互換bridgeとして別 variant に
+隔離され、canonical primitive queueの意味ownerではない。M6を先取りしてそのrouteをprocedure化しない。
 
 例外は immutable handle と atomic task である。
 
@@ -167,8 +211,11 @@ snapshot の raster tile storage は snapshot 側で独立して参照計数さ�
 長く生存できる。ただし通常の shutdown では Renderer queue を drain して snapshot を先に解放すると、
 所有権の追跡が簡潔になる。
 
-canonical asset registry は `InkpodCore` が所有し、独立した ABI-v2 opaque handle や release API を
-持たない。Genesis、retained journal branch/redo tail、既知の persistent reference、live transient
+canonical asset registry は `InkpodCore` が所有し、ABI-v2 caller に独立した opaque handle や release
+API を公開しない。ABI-v3 の raster/sample ID は bounded ingestion 後の runtime object を所有するための
+別 registry entry であり、primitive canonicalization/commit 時に inline payload または persistent
+`AssetId` へ解決される。runtime object ID を release しても committed procedure の asset retention は
+失われない。Genesis、retained journal branch/redo tail、既知の persistent reference、live transient
 owner が retention root となる。現在の materialized document や checkpoint だけを見て解放せず、
 session close は受理済み Core work と transient owner を drain してから registry 全体を owner thread
 上で破棄する。失敗した ingestion/commit は document、history、journal、revision、dirty、公開済み
@@ -329,8 +376,10 @@ digest/identity、work bound は commit 前に拒否する。
 
 この接続は既存の同期 ABI-v2 ingestion entrypoint を Core owner thread で実行する。UI thread が
 queue へ投入する前に lifetime を失う pointer を work item へ保持してはならず、`CoreHost` adapter は
-issue-time session/generation と入力値を所有してから呼び出す。M5 で予定する value/ID-only ABI v3、
-generation-tagged asset/sample ID、closed typed queue を実装済みとは扱わない。また M8 までは
+issue-time session/generation と入力値を所有してから呼び出す。ABI v3 では variable payload を
+同期 bounded call で generation-tagged asset/sample ID に変換し、closed typed queue には
+`CommandContext`、base revision、target、opcode/schema、固定値、ID だけを格納する。caller buffer は
+queue item に入らない。また M8 までは
 production `.inkpod` v2 が `GENS`/`ASST` を保存・復元しないため、この runtime ingestion 契約を
 successor container の end-to-end persistence とみなさない。特に raster-open 由来の asset-backed
 Genesis は M8 まで normal save、autosave/recovery、Batch `.inkpod` output ができない。Core は

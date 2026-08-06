@@ -120,6 +120,7 @@ fn graph_preview_dry_run_and_owned_report_cross_ffi() {
     let mut core = InkpodCore {
         owner_thread: thread::current().id(),
         core: Core::new(),
+        objects: crate::v3::ObjectRegistry::new().expect("test Core generation"),
     };
     core.core.new_cell(2, 2, 96_000, 96_000).unwrap();
     let mut preview = ptr::null_mut();

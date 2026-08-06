@@ -15,19 +15,20 @@ mod batch;
 mod ffi_contract_tests;
 
 use inkpod_core::{
-    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel,
-    ClipboardPayload, ClipboardPixel, ClipboardPlane, ColorBalance, ColorCheckMode, Command,
-    CommonRasterFormat, CoordinateSpace, Core, CoreError, CurveInterpolation, CurvePoint,
-    DocumentInfo, DocumentResize, DustMode, DustRemoval, EditorDefaults, EditorFillOptions,
-    EditorSelectionOptions, EditorSelectionShape, EditorState, EditorStateInfo, EditorStateUpdate,
-    EditorStrokeInput, EditorTarget, EditorTool, EditorVectorOptions, EffectRegionKind,
-    EyedropperSource, FillOperation, FillRequest, Filter, FloatingTransform, FrameMetadata,
-    Gradient, GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis, HsvAdjustment,
-    InclusionMode, LayerKind, Levels, LightTableDisplayMode, LightTableItemInput,
-    LightTableItemProperties, LightTableSource, MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS,
-    MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION, MAX_SHORTCUT_STROKES, MAX_SHORTCUTS, Margins,
-    MirrorAxis, MotionCheckConfig, MotionFrame, PaintTool, PaletteCursor, PixelFormat, PixelValue,
-    PlaneType, PointF32, RectI32, RenderSnapshot, ResizeAnchor, ResourceUsage, RgbaRasterBytes,
+    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, AssetAlphaSemantics, AssetColorSpace,
+    BoundaryAirbrush, Channel, ClipboardPayload, ClipboardPixel, ClipboardPlane, ColorBalance,
+    ColorCheckMode, Command, CommonRasterFormat, CoordinateSpace, Core, CoreError,
+    CurveInterpolation, CurvePoint, DocumentInfo, DocumentResize, DustMode, DustRemoval,
+    EditorDefaults, EditorFillOptions, EditorSelectionOptions, EditorSelectionShape, EditorState,
+    EditorStateInfo, EditorStateUpdate, EditorStrokeInput, EditorTarget, EditorTool,
+    EditorVectorOptions, EffectRegionKind, EyedropperSource, FillOperation, FillRequest, Filter,
+    FloatingTransform, FrameMetadata, Gradient, GradientKind, GradientMode, GradientStop,
+    GridConfig, GuideAxis, HsvAdjustment, InclusionMode, LayerKind, Levels, LightTableDisplayMode,
+    LightTableItemInput, LightTableItemProperties, LightTableSource, MAX_COMMON_RASTER_BYTES,
+    MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION, MAX_SHORTCUT_STROKES,
+    MAX_SHORTCUTS, Margins, MirrorAxis, MotionCheckConfig, MotionFrame, PaintTool, PaletteCursor,
+    PixelFormat, PixelValue, PlaneType, PointF32, PrimitiveOutcome, PrimitiveRequest,
+    RasterAssetInput, RectI32, RenderSnapshot, ResizeAnchor, ResourceUsage, RgbaRasterBytes,
     RotateDirection, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
     SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SNAPSHOT_FEATURE_SOLID_WHITE_BASE,
     SelectionLayerOperation, SelectionOperation, SelectionShape, SequenceCellSource,
@@ -52,6 +53,7 @@ mod effects;
 mod lifecycle_document;
 mod paint_history;
 mod support;
+mod v3;
 mod vector_snapshot;
 
 pub use abi::*;
@@ -67,4 +69,5 @@ pub use lifecycle_document::*;
 pub(crate) use paint_history::parse_view_command;
 pub use paint_history::*;
 pub(crate) use support::*;
+pub use v3::*;
 pub use vector_snapshot::*;
