@@ -234,7 +234,64 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(5);
+    pub const CURRENT: Self = Self(6);
+}
+
+/// Top-level version reserved for the procedure-authoritative successor format.
+///
+/// Production `.inkpod` remains exact-current version 2 until the atomic
+/// successor cutover. This value is the build/replay contract a successor writer must use;
+/// it deliberately does not enable a partial successor reader or writer.
+pub const PROCEDURE_FORMAT_VERSION: u32 = 8;
+
+/// Version of the canonical scalar, rounding, alpha, and geometry contract.
+pub const CANONICAL_NUMERIC_VERSION: u32 = 1;
+
+/// Immutable build contract for canonical procedure replay.
+///
+/// The catalog digest covers every stable built-in primitive ID, its exact
+/// schema version, canonical name, argument-schema digest, semantics revision,
+/// work-formula ID, and replay policy. Querying this value is side-effect free and does not
+/// require a document.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReplayContract {
+    pub(crate) replay_epoch: ReplayEpoch,
+    pub(crate) procedure_format_version: u32,
+    pub(crate) canonical_numeric_version: u32,
+    pub(crate) primitive_count: u32,
+    pub(crate) primitive_catalog_digest: [u8; 32],
+}
+
+impl ReplayContract {
+    /// Returns the exact replay-semantics epoch accepted by this build.
+    #[must_use]
+    pub const fn replay_epoch(self) -> ReplayEpoch {
+        self.replay_epoch
+    }
+
+    /// Returns the reserved top-level successor format version.
+    #[must_use]
+    pub const fn procedure_format_version(self) -> u32 {
+        self.procedure_format_version
+    }
+
+    /// Returns the canonical numeric-contract version.
+    #[must_use]
+    pub const fn canonical_numeric_version(self) -> u32 {
+        self.canonical_numeric_version
+    }
+
+    /// Returns the number of stable entries covered by the catalog digest.
+    #[must_use]
+    pub const fn primitive_count(self) -> u32 {
+        self.primitive_count
+    }
+
+    /// Borrows the BLAKE3-256 primitive-catalog digest.
+    #[must_use]
+    pub const fn primitive_catalog_digest(&self) -> &[u8; 32] {
+        &self.primitive_catalog_digest
+    }
 }
 
 /// A BLAKE3-256 digest of canonical semantic document-state schema-4 bytes.

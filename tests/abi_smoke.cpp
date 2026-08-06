@@ -1,5 +1,6 @@
 #include "inkpod/core_ffi.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +14,10 @@
 static_assert(std::is_standard_layout_v<InkpodCoreConfig>);
 static_assert(std::is_standard_layout_v<InkpodSnapshotView>);
 static_assert(sizeof(InkpodCoreConfig) == 16U);
+static_assert(std::is_standard_layout_v<InkpodReplayContract>);
+static_assert(std::is_standard_layout_v<InkpodCanonicalDigest>);
+static_assert(sizeof(InkpodReplayContract) == 64U);
+static_assert(sizeof(InkpodCanonicalDigest) == 40U);
 static_assert(sizeof(InkpodCommand) == 16U);
 static_assert(sizeof(InkpodCommandBatch) == 40U);
 static_assert(sizeof(InkpodDispatchResult) == 24U);
@@ -142,6 +147,16 @@ int InkpodRunAbiSmoke() {
             != INKPOD_STATUS_INCOMPATIBLE_ABI) {
         return 32;
     }
+    InkpodReplayContract replay_contract{};
+    replay_contract.struct_size = sizeof(replay_contract);
+    if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
+        || replay_contract.replay_epoch != 6U
+        || replay_contract.procedure_format_version != 8U
+        || replay_contract.canonical_numeric_version != 1U
+        || replay_contract.primitive_count == 0U
+        || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
+        return 96;
+    }
 
     const InkpodCommand command{
         sizeof(InkpodCommand), INKPOD_COMMAND_NO_OP, 0U};
@@ -206,6 +221,17 @@ int InkpodRunAbiSmoke() {
         || view.tile_count != 0U
         || view.tile_stride_bytes != sizeof(InkpodSnapshotTile)) {
         return 5;
+    }
+    InkpodCanonicalDigest canonical_digest{};
+    canonical_digest.struct_size = sizeof(canonical_digest);
+    if (inkpod_snapshot_get_canonical_digest(snapshot, &canonical_digest)
+            != INKPOD_STATUS_OK
+        || canonical_digest.algorithm != INKPOD_DIGEST_BLAKE3_256
+        || std::all_of(
+            std::begin(canonical_digest.bytes),
+            std::end(canonical_digest.bytes),
+            [](std::uint8_t value) { return value == 0U; })) {
+        return 97;
     }
 
     InkpodStatus renderer_release_status = INKPOD_STATUS_INVALID_ARGUMENT;

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod canonical;
 mod edit;
 mod fill;
 mod palette;
@@ -43,3 +44,10 @@ pub use vector::{
 #[cfg(test)]
 #[path = "../tests/unit/raster_fill.rs"]
 mod tests;
+pub use canonical::{
+    CANONICAL_DOCUMENT_FRACTION_BITS, CANONICAL_DOCUMENT_ONE, Q30_ONE, canonical_pow_unit_u16,
+    canonical_q16_from_f32, canonical_q16_from_f64, canonical_scaled_i64_from_f32,
+    canonical_scaled_i64_from_f64, canonical_turns_from_degrees_f64, canonical_unit_u16_from_f32,
+    ceil_div_i128, color_within_tolerance, div_round_ties_even_i128, floor_div_i128, integer_sqrt,
+    premultiply_u8, rotate_q16, sin_cos_turns_q30, source_over_rgba8, source_over_rgba16,
+};

@@ -1,5 +1,5 @@
 use super::MAX_IMAGE_EDIT_PIXELS;
-use crate::{PixelFormat, PixelValue, RasterError, TileRaster};
+use crate::{PixelFormat, PixelValue, RasterError, TileRaster, source_over_rgba16};
 
 pub(super) fn validate_color_raster(raster: &TileRaster) -> Result<(), RasterError> {
     let pixels = u64::from(raster.width())
@@ -57,19 +57,7 @@ pub(super) fn source_over(
     let background = background
         .rgba16()
         .ok_or(RasterError::PixelFormatMismatch)?;
-    let foreground_alpha = u64::from(foreground[3]);
-    let inverse = u64::from(u16::MAX) - foreground_alpha;
-    let background_alpha = u64::from(background[3]);
-    let output_alpha = foreground_alpha + (background_alpha * inverse + 32_767) / 65_535;
-    let mut output = [0_u16; 4];
-    output[3] = output_alpha as u16;
-    for channel in 0..3 {
-        let numerator = u64::from(foreground[channel]) * foreground_alpha
-            + (u64::from(background[channel]) * background_alpha * inverse + 32_767) / 65_535;
-        output[channel] = (numerator + output_alpha / 2)
-            .checked_div(output_alpha)
-            .unwrap_or(0) as u16;
-    }
+    let output = source_over_rgba16(background, foreground);
     Ok(from_rgba16(format, output))
 }
 

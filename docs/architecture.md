@@ -200,8 +200,11 @@ is not an editable layer or plane and never enters a layer-only export or the
 selection mask. `BaseSurface::Asset` instead names one immutable canonical raster
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge changes canonical document-state
-bytes, so this Core slice uses document-state schema/domain 4 and replay epoch 5;
-the unimplemented successor container reservation advances to version 7.
+bytes, so the document-state commitment remains schema/domain 4. M7 advances
+the replay contract to epoch 6 and the unimplemented successor reservation to
+version 8 for canonical fixed-point/image-result semantics.
+The numeric audit, prohibited platform-math list, public golden fixture, and
+benchmark gate are specified in [`determinism.md`](determinism.md).
 
 The Core-owned asset registry interns canonical descriptors and logical payload
 bytes under a content-addressed `AssetId`. A raster descriptor fixes pixel format,

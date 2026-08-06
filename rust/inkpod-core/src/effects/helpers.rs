@@ -8,8 +8,9 @@ pub(super) fn pressure_trace_contains(
 ) -> bool {
     if samples.len() == 1 {
         let radius = diameter * f64::from(samples[0].pressure.clamp(0.0, 1.0)) / 2.0;
-        return (x - f64::from(samples[0].point.x)).hypot(y - f64::from(samples[0].point.y))
-            <= radius;
+        let dx = x - f64::from(samples[0].point.x);
+        let dy = y - f64::from(samples[0].point.y);
+        return dx.mul_add(dx, dy * dy) <= radius * radius;
     }
     samples.windows(2).any(|segment| {
         let start_x = f64::from(segment[0].point.x);
@@ -28,7 +29,9 @@ pub(super) fn pressure_trace_contains(
         let end_pressure = f64::from(segment[1].pressure.clamp(0.0, 1.0));
         let pressure = (end_pressure - start_pressure).mul_add(t, start_pressure);
         let radius = diameter * pressure / 2.0;
-        (x - center_x).hypot(y - center_y) <= radius
+        let distance_x = x - center_x;
+        let distance_y = y - center_y;
+        distance_x.mul_add(distance_x, distance_y * distance_y) <= radius * radius
     })
 }
 
@@ -38,21 +41,26 @@ pub(super) fn effect_samples(
     samples
         .into_iter()
         .map(|sample| {
-            let x = (f64::from(sample.point.x) * 1_000.0).round();
-            let y = (f64::from(sample.point.y) * 1_000.0).round();
-            if !(i64::MIN as f64..=i64::MAX as f64).contains(&x)
-                || !(i64::MIN as f64..=i64::MAX as f64).contains(&y)
-            {
-                return Err(CoreError::InvalidArgument(
+            let x = inkpod_image::canonical_scaled_i64_from_f32(sample.point.x, 1_000, 1).ok_or(
+                CoreError::InvalidArgument(
                     "effect sample coordinate is outside fixed-point bounds",
-                ));
-            }
+                ),
+            )?;
+            let y = inkpod_image::canonical_scaled_i64_from_f32(sample.point.y, 1_000, 1).ok_or(
+                CoreError::InvalidArgument(
+                    "effect sample coordinate is outside fixed-point bounds",
+                ),
+            )?;
+            let pressure = inkpod_image::canonical_scaled_i64_from_f32(
+                sample.pressure.clamp(0.0, 1.0),
+                1_000,
+                1,
+            )
+            .ok_or(CoreError::InvalidArgument("effect pressure is non-finite"))?;
             Ok(EffectSample {
-                x_milli: x as i64,
-                y_milli: y as i64,
-                pressure_milli: (f64::from(sample.pressure) * 1_000.0)
-                    .round()
-                    .clamp(0.0, 1_000.0) as u32,
+                x_milli: x,
+                y_milli: y,
+                pressure_milli: pressure.clamp(0, 1_000) as u32,
             })
         })
         .collect()

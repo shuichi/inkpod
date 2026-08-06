@@ -394,22 +394,12 @@ pub(crate) unsafe fn parse_gradient_input(input: &InkpodGradientInput) -> Result
     }
     let (end_x_milli, end_y_milli) = if input.feature_flags & INKPOD_GRADIENT_FLAG_CONSTRAIN_45 != 0
     {
-        let dx = input.end_x_milli as f64 - input.start_x_milli as f64;
-        let dy = input.end_y_milli as f64 - input.start_y_milli as f64;
-        let length = dx.hypot(dy);
-        let angle =
-            (dy.atan2(dx) / std::f64::consts::FRAC_PI_4).round() * std::f64::consts::FRAC_PI_4;
-        let end_x = input.start_x_milli as f64 + length * angle.cos();
-        let end_y = input.start_y_milli as f64 + length * angle.sin();
-        if !(i64::MIN as f64..=i64::MAX as f64).contains(&end_x)
-            || !(i64::MIN as f64..=i64::MAX as f64).contains(&end_y)
-        {
-            return Err(fail(
-                INKPOD_STATUS_INVALID_ARGUMENT,
-                "constrained gradient endpoint is outside bounds",
-            ));
-        }
-        (end_x.round() as i64, end_y.round() as i64)
+        constrain_gradient_endpoint_45(
+            input.start_x_milli,
+            input.start_y_milli,
+            input.end_x_milli,
+            input.end_y_milli,
+        )?
     } else {
         (input.end_x_milli, input.end_y_milli)
     };
@@ -423,6 +413,84 @@ pub(crate) unsafe fn parse_gradient_input(input: &InkpodGradientInput) -> Result
         dither: input.dither != 0,
         stops,
     })
+}
+
+fn constrain_gradient_endpoint_45(
+    start_x: i64,
+    start_y: i64,
+    end_x: i64,
+    end_y: i64,
+) -> Result<(i64, i64), u32> {
+    let dx = i128::from(end_x) - i128::from(start_x);
+    let dy = i128::from(end_y) - i128::from(start_y);
+    let dx2 = dx
+        .unsigned_abs()
+        .checked_mul(dx.unsigned_abs())
+        .ok_or_else(|| fail(INKPOD_STATUS_INVALID_ARGUMENT, "gradient length overflows"))?;
+    let dy2 = dy
+        .unsigned_abs()
+        .checked_mul(dy.unsigned_abs())
+        .ok_or_else(|| fail(INKPOD_STATUS_INVALID_ARGUMENT, "gradient length overflows"))?;
+    let length = integer_sqrt_u128(
+        dx2.checked_add(dy2)
+            .ok_or_else(|| fail(INKPOD_STATUS_INVALID_ARGUMENT, "gradient length overflows"))?,
+    );
+    let abs_x = dx.unsigned_abs();
+    let abs_y = dy.unsigned_abs();
+    let diagonal =
+        abs_x.min(abs_y).saturating_mul(1_000_000) > abs_x.max(abs_y).saturating_mul(414_214);
+    let component = if diagonal {
+        ((length * 759_250_125 + (1_u128 << 29)) >> 30) as i128
+    } else {
+        length as i128
+    };
+    let signed =
+        |magnitude: i128, original: i128| if original < 0 { -magnitude } else { magnitude };
+    let (offset_x, offset_y) = if diagonal {
+        (signed(component, dx), signed(component, dy))
+    } else if abs_x >= abs_y {
+        (signed(component, dx), 0)
+    } else {
+        (0, signed(component, dy))
+    };
+    let x = i128::from(start_x) + offset_x;
+    let y = i128::from(start_y) + offset_y;
+    Ok((
+        x.try_into().map_err(|_| {
+            fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "gradient X is outside bounds",
+            )
+        })?,
+        y.try_into().map_err(|_| {
+            fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "gradient Y is outside bounds",
+            )
+        })?,
+    ))
+}
+
+const fn integer_sqrt_u128(value: u128) -> u128 {
+    if value < 2 {
+        return value;
+    }
+    let mut bit = 1_u128 << 126;
+    while bit > value {
+        bit >>= 2;
+    }
+    let mut remainder = value;
+    let mut root = 0_u128;
+    while bit != 0 {
+        if remainder >= root + bit {
+            remainder -= root + bit;
+            root = (root >> 1) + bit;
+        } else {
+            root >>= 1;
+        }
+        bit >>= 2;
+    }
+    root
 }
 
 // SAFETY: `input` and its borrowed nested color record are complete and readable.

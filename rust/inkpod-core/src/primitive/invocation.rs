@@ -5,9 +5,13 @@ use crate::history::PixelChange;
 use crate::selection::FloatingDestination;
 use crate::stroke::DocumentStrokeSample;
 use crate::*;
+use inkpod_image::{
+    CANONICAL_DOCUMENT_ONE, canonical_q16_from_f32, canonical_q16_from_f64,
+    canonical_turns_from_degrees_f64, canonical_unit_u16_from_f32,
+};
 use std::sync::Arc;
 
-const INVOCATION_SCHEMA_VERSION: u16 = 1;
+const INVOCATION_SCHEMA_VERSION: u16 = 2;
 type InvocationApply<'a> = Box<dyn FnOnce(&mut Core) -> Result<InvocationResult, CoreError> + 'a>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -295,6 +299,78 @@ pub(crate) enum CanonicalInvocation {
     },
 }
 
+fn canonical_f32_q16(value: f32) -> Result<f32, CoreError> {
+    let fixed = canonical_q16_from_f32(value).ok_or(CoreError::InvalidArgument(
+        "canonical binary32 scalar is not representable",
+    ))?;
+    Ok(fixed as f32 / CANONICAL_DOCUMENT_ONE as f32)
+}
+
+fn canonical_f64_q16(value: f64) -> Result<f64, CoreError> {
+    let fixed = canonical_q16_from_f64(value).ok_or(CoreError::InvalidArgument(
+        "canonical binary64 scalar is not representable",
+    ))?;
+    Ok(fixed as f64 / CANONICAL_DOCUMENT_ONE as f64)
+}
+
+fn canonical_point(point: PointF32) -> Result<PointF32, CoreError> {
+    Ok(PointF32 {
+        x: canonical_f32_q16(point.x)?,
+        y: canonical_f32_q16(point.y)?,
+    })
+}
+
+fn canonical_document_stroke_sample(
+    sample: DocumentStrokeSample,
+) -> Result<DocumentStrokeSample, CoreError> {
+    let pressure = canonical_unit_u16_from_f32(sample.pressure).ok_or(
+        CoreError::InvalidArgument("canonical pressure is outside the unit interval"),
+    )?;
+    Ok(DocumentStrokeSample {
+        point: DocumentPointF32::new(
+            canonical_f32_q16(sample.point.x)?,
+            canonical_f32_q16(sample.point.y)?,
+        )?,
+        pressure: f32::from(pressure) / f32::from(u16::MAX),
+    })
+}
+
+fn canonical_selection_shape(shape: SelectionShape) -> Result<SelectionShape, CoreError> {
+    Ok(match shape {
+        SelectionShape::Rectangle(_) | SelectionShape::Ellipse(_) | SelectionShape::Wand { .. } => {
+            shape
+        }
+        SelectionShape::Lasso(points) => SelectionShape::Lasso(
+            points
+                .into_iter()
+                .map(canonical_point)
+                .collect::<Result<_, _>>()?,
+        ),
+        SelectionShape::Polyline(points) => SelectionShape::Polyline(
+            points
+                .into_iter()
+                .map(canonical_point)
+                .collect::<Result<_, _>>()?,
+        ),
+        SelectionShape::Trace { points, diameter } => SelectionShape::Trace {
+            points: points
+                .into_iter()
+                .map(canonical_point)
+                .collect::<Result<_, _>>()?,
+            diameter: canonical_f32_q16(diameter)?,
+        },
+    })
+}
+
+fn canonical_vector_width_mode(mode: VectorWidthMode) -> Result<VectorWidthMode, CoreError> {
+    Ok(match mode {
+        VectorWidthMode::Add(value) => VectorWidthMode::Add(canonical_f32_q16(value)?),
+        VectorWidthMode::Subtract(value) => VectorWidthMode::Subtract(canonical_f32_q16(value)?),
+        VectorWidthMode::Scale(value) => VectorWidthMode::Scale(canonical_f32_q16(value)?),
+        VectorWidthMode::Constant(value) => VectorWidthMode::Constant(canonical_f32_q16(value)?),
+    })
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct RuntimeInvocation {
     invocation: Arc<CanonicalInvocation>,
@@ -370,6 +446,105 @@ impl InvocationResult {
 }
 
 impl CanonicalInvocation {
+    fn canonicalized(self) -> Result<Self, CoreError> {
+        match self {
+            Self::ApplyBlurTool {
+                plane_id,
+                shape,
+                radius,
+                strength_milli,
+            } => Ok(Self::ApplyBlurTool {
+                plane_id,
+                shape: canonical_selection_shape(shape)?,
+                radius,
+                strength_milli,
+            }),
+            Self::ApplyBlurPressureTrace {
+                plane_id,
+                samples,
+                diameter,
+                radius,
+                strength_milli,
+            } => Ok(Self::ApplyBlurPressureTrace {
+                plane_id,
+                samples: samples
+                    .into_iter()
+                    .map(canonical_document_stroke_sample)
+                    .collect::<Result<_, _>>()?,
+                diameter: canonical_f32_q16(diameter)?,
+                radius,
+                strength_milli,
+            }),
+            Self::ApplyDustRemoval {
+                plane_id,
+                shape,
+                options,
+            } => Ok(Self::ApplyDustRemoval {
+                plane_id,
+                shape: shape.map(canonical_selection_shape).transpose()?,
+                options,
+            }),
+            Self::ApplySelection {
+                shape,
+                operation,
+                target,
+            } => Ok(Self::ApplySelection {
+                shape: canonical_selection_shape(shape)?,
+                operation,
+                target,
+            }),
+            Self::CommitFloating { mut floating } => {
+                floating.transform.translate_x = canonical_f64_q16(floating.transform.translate_x)?;
+                floating.transform.translate_y = canonical_f64_q16(floating.transform.translate_y)?;
+                floating.transform.scale_x = canonical_f64_q16(floating.transform.scale_x)?;
+                floating.transform.scale_y = canonical_f64_q16(floating.transform.scale_y)?;
+                let turns = canonical_turns_from_degrees_f64(floating.transform.rotation_degrees)
+                    .ok_or(CoreError::InvalidArgument(
+                    "floating rotation is not finite",
+                ))?;
+                floating.transform.rotation_degrees = f64::from(turns) * 360.0 / 4_294_967_296.0;
+                Ok(Self::CommitFloating { floating })
+            }
+            Self::VectorAddPath {
+                plane_id,
+                mut input,
+            } => {
+                for segment in &mut input.segments {
+                    segment.p0 = canonical_point(segment.p0)?;
+                    segment.p1 = canonical_point(segment.p1)?;
+                    segment.p2 = canonical_point(segment.p2)?;
+                    segment.p3 = canonical_point(segment.p3)?;
+                    segment.width_start = canonical_f32_q16(segment.width_start)?;
+                    segment.width_end = canonical_f32_q16(segment.width_end)?;
+                }
+                Ok(Self::VectorAddPath { plane_id, input })
+            }
+            Self::VectorErase {
+                plane_id,
+                point,
+                radius,
+                mode,
+            } => Ok(Self::VectorErase {
+                plane_id,
+                point: canonical_point(point)?,
+                radius: canonical_f32_q16(radius)?,
+                mode,
+            }),
+            Self::VectorConnect {
+                plane_id,
+                maximum_gap,
+            } => Ok(Self::VectorConnect {
+                plane_id,
+                maximum_gap: canonical_f32_q16(maximum_gap)?,
+            }),
+            Self::VectorCorrectWidth { path_ids, mode } => Ok(Self::VectorCorrectWidth {
+                path_ids,
+                mode: canonical_vector_width_mode(mode)?,
+            }),
+            other => Ok(other),
+        }
+    }
+
     pub(super) const fn primitive_id(&self) -> PrimitiveId {
         match self {
             Self::UpdatePaperFrames { .. } => PrimitiveId::UPDATE_PAPER_FRAMES,
@@ -1081,7 +1256,7 @@ impl CanonicalInvocation {
                 writer.u64(*plane_id);
                 writer.u32(2);
                 writer.stroke_samples(samples)?;
-                writer.f32(*diameter);
+                writer.q16_f32(*diameter)?;
                 writer.u32(*radius);
                 writer.u32(*strength_milli);
             }
@@ -1189,8 +1364,8 @@ impl CanonicalInvocation {
                 mode,
             } => {
                 writer.u64(*plane_id);
-                writer.point(*point);
-                writer.f32(*radius);
+                writer.point(*point)?;
+                writer.q16_f32(*radius)?;
                 writer.u32(vector_erase_mode_code(*mode));
             }
             Self::VectorConnect {
@@ -1198,11 +1373,11 @@ impl CanonicalInvocation {
                 maximum_gap,
             } => {
                 writer.u64(*plane_id);
-                writer.f32(*maximum_gap);
+                writer.q16_f32(*maximum_gap)?;
             }
             Self::VectorCorrectWidth { path_ids, mode } => {
                 writer.ids(path_ids)?;
-                writer.vector_width_mode(*mode);
+                writer.vector_width_mode(*mode)?;
             }
             Self::RasterizeVectorLayer {
                 layer_id,
@@ -1318,7 +1493,7 @@ impl Core {
         self.ensure_no_active_raster_stroke()?;
         self.ensure_canonical_state_cache_current()?;
         let pre_state_digest = self.document_state_digest()?;
-        let runtime = RuntimeInvocation::new(invocation)?;
+        let runtime = RuntimeInvocation::new(invocation.canonicalized()?)?;
         let primitive_id = runtime.invocation().primitive_id();
         let input_ids = runtime.invocation().input_ids();
         let procedure_id = self.next_procedure;
@@ -1534,12 +1709,28 @@ impl CanonicalWriter {
         self.bytes.extend_from_slice(value.as_bytes());
     }
 
-    fn f32(&mut self, value: f32) {
-        self.u32(value.to_bits());
+    fn q16_f32(&mut self, value: f32) -> Result<(), CoreError> {
+        let value = canonical_q16_from_f32(value).ok_or(CoreError::InvalidArgument(
+            "canonical binary32 scalar is not representable",
+        ))?;
+        self.i64(value);
+        Ok(())
     }
 
-    fn f64(&mut self, value: f64) {
-        self.u64(value.to_bits());
+    fn q16_f64(&mut self, value: f64) -> Result<(), CoreError> {
+        let value = canonical_q16_from_f64(value).ok_or(CoreError::InvalidArgument(
+            "canonical binary64 scalar is not representable",
+        ))?;
+        self.i64(value);
+        Ok(())
+    }
+
+    fn unit_u16_f32(&mut self, value: f32) -> Result<(), CoreError> {
+        let value = canonical_unit_u16_from_f32(value).ok_or(CoreError::InvalidArgument(
+            "canonical unit scalar is outside bounds",
+        ))?;
+        self.u16(value);
+        Ok(())
     }
 
     fn i32(&mut self, value: i32) {
@@ -1723,9 +1914,9 @@ impl CanonicalWriter {
             .map_err(|_| CoreError::InvalidArgument("too many canonical stroke samples"))?;
         self.u32(count);
         for sample in samples {
-            self.f32(sample.point.x);
-            self.f32(sample.point.y);
-            self.f32(sample.pressure);
+            self.q16_f32(sample.point.x)?;
+            self.q16_f32(sample.point.y)?;
+            self.unit_u16_f32(sample.pressure)?;
         }
         Ok(())
     }
@@ -1954,9 +2145,9 @@ impl CanonicalWriter {
         self.u64(target.plane_id);
     }
 
-    fn point(&mut self, point: PointF32) {
-        self.f32(point.x);
-        self.f32(point.y);
+    fn point(&mut self, point: PointF32) -> Result<(), CoreError> {
+        self.q16_f32(point.x)?;
+        self.q16_f32(point.y)
     }
 
     fn selection_shape(&mut self, shape: &SelectionShape) -> Result<(), CoreError> {
@@ -1980,7 +2171,7 @@ impl CanonicalWriter {
             SelectionShape::Trace { points, diameter } => {
                 self.u32(5);
                 self.points(points)?;
-                self.f32(*diameter);
+                self.q16_f32(*diameter)?;
             }
             SelectionShape::Wand {
                 x,
@@ -2003,7 +2194,7 @@ impl CanonicalWriter {
             .map_err(|_| CoreError::InvalidArgument("canonical point stream is too long"))?;
         self.u32(count);
         for point in points {
-            self.point(*point);
+            self.point(*point)?;
         }
         Ok(())
     }
@@ -2076,11 +2267,15 @@ impl CanonicalWriter {
                 self.pixel(pixel.value);
             }
         }
-        self.f64(floating.transform.translate_x);
-        self.f64(floating.transform.translate_y);
-        self.f64(floating.transform.scale_x);
-        self.f64(floating.transform.scale_y);
-        self.f64(floating.transform.rotation_degrees);
+        self.q16_f64(floating.transform.translate_x)?;
+        self.q16_f64(floating.transform.translate_y)?;
+        self.q16_f64(floating.transform.scale_x)?;
+        self.q16_f64(floating.transform.scale_y)?;
+        self.u32(
+            canonical_turns_from_degrees_f64(floating.transform.rotation_degrees).ok_or(
+                CoreError::InvalidArgument("canonical rotation is not finite"),
+            )?,
+        );
         Ok(())
     }
 
@@ -2108,37 +2303,38 @@ impl CanonicalWriter {
             .map_err(|_| CoreError::InvalidArgument("too many canonical vector segments"))?;
         self.u32(count);
         for segment in &input.segments {
-            self.point(segment.p0);
-            self.point(segment.p1);
-            self.point(segment.p2);
-            self.point(segment.p3);
-            self.f32(segment.width_start);
-            self.f32(segment.width_end);
+            self.point(segment.p0)?;
+            self.point(segment.p1)?;
+            self.point(segment.p2)?;
+            self.point(segment.p3)?;
+            self.q16_f32(segment.width_start)?;
+            self.q16_f32(segment.width_end)?;
         }
         self.pixel(input.color);
         self.boolean(input.closed);
         Ok(())
     }
 
-    fn vector_width_mode(&mut self, mode: VectorWidthMode) {
+    fn vector_width_mode(&mut self, mode: VectorWidthMode) -> Result<(), CoreError> {
         match mode {
             VectorWidthMode::Add(value) => {
                 self.u32(1);
-                self.f32(value);
+                self.q16_f32(value)?;
             }
             VectorWidthMode::Subtract(value) => {
                 self.u32(2);
-                self.f32(value);
+                self.q16_f32(value)?;
             }
             VectorWidthMode::Scale(value) => {
                 self.u32(3);
-                self.f32(value);
+                self.q16_f32(value)?;
             }
             VectorWidthMode::Constant(value) => {
                 self.u32(4);
-                self.f32(value);
+                self.q16_f32(value)?;
             }
         }
+        Ok(())
     }
 
     fn light_table_source(&mut self, source: &LightTableSource) {

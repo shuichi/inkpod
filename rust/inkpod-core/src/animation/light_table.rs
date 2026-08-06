@@ -704,28 +704,59 @@ fn sample_item_source(
     x: u32,
     y: u32,
 ) -> Result<Option<(PixelValue, i64, i64)>, CoreError> {
-    let destination_x = f64::from(x)
-        - f64::from(destination_reference.x)
-        - f64::from(item.translate_x_milli) / 1_000.0;
-    let destination_y = f64::from(y)
-        - f64::from(destination_reference.y)
-        - f64::from(item.translate_y_milli) / 1_000.0;
-    let radians = -f64::from(item.rotation_milli_degrees) / 1_000.0 * std::f64::consts::PI / 180.0;
-    let cosine = radians.cos();
-    let sine = radians.sin();
-    let rotated_x = destination_x * cosine - destination_y * sine;
-    let rotated_y = destination_x * sine + destination_y * cosine;
-    let source_x = f64::from(item.source.reference_frame.x)
-        + rotated_x * 1_000.0 / f64::from(item.scale_x_milli);
-    let source_y = f64::from(item.source.reference_frame.y)
-        + rotated_y * 1_000.0 / f64::from(item.scale_y_milli);
-    if !source_x.is_finite() || !source_y.is_finite() {
-        return Err(CoreError::InvalidState(
-            "light-table transform produced a non-finite coordinate",
-        ));
-    }
-    let source_x = source_x.round() as i64;
-    let source_y = source_y.round() as i64;
+    use inkpod_image::{CANONICAL_DOCUMENT_ONE, div_round_ties_even_i128, rotate_q16};
+
+    let local_q16 = |coordinate: u32, origin: i32, translation_milli: i64| {
+        let milli = (i128::from(coordinate) - i128::from(origin))
+            .checked_mul(1_000)?
+            .checked_sub(i128::from(translation_milli))?;
+        div_round_ties_even_i128(
+            milli.checked_mul(i128::from(CANONICAL_DOCUMENT_ONE))?,
+            1_000,
+        )?
+        .try_into()
+        .ok()
+    };
+    let local_x = local_q16(
+        x,
+        destination_reference.x,
+        i64::from(item.translate_x_milli),
+    )
+    .ok_or(CoreError::InvalidState("light-table transform overflowed"))?;
+    let local_y = local_q16(
+        y,
+        destination_reference.y,
+        i64::from(item.translate_y_milli),
+    )
+    .ok_or(CoreError::InvalidState("light-table transform overflowed"))?;
+    let turns = div_round_ties_even_i128(
+        -i128::from(item.rotation_milli_degrees) * (1_i128 << 32),
+        360_000,
+    )
+    .ok_or(CoreError::InvalidState("light-table angle overflowed"))?
+    .rem_euclid(1_i128 << 32) as u32;
+    let (rotated_x, rotated_y) = rotate_q16(local_x, local_y, turns)
+        .ok_or(CoreError::InvalidState("light-table rotation overflowed"))?;
+    let source_coordinate = |frame: i32, rotated: i64, scale_milli: u32| {
+        let scaled = div_round_ties_even_i128(
+            i128::from(rotated).checked_mul(1_000)?,
+            i128::from(scale_milli),
+        )?;
+        let q16 = i128::from(frame)
+            .checked_mul(i128::from(CANONICAL_DOCUMENT_ONE))?
+            .checked_add(scaled)?;
+        div_round_ties_even_i128(q16, i128::from(CANONICAL_DOCUMENT_ONE))?
+            .try_into()
+            .ok()
+    };
+    let source_x = source_coordinate(item.source.reference_frame.x, rotated_x, item.scale_x_milli)
+        .ok_or(CoreError::InvalidState(
+            "light-table source coordinate overflowed",
+        ))?;
+    let source_y = source_coordinate(item.source.reference_frame.y, rotated_y, item.scale_y_milli)
+        .ok_or(CoreError::InvalidState(
+            "light-table source coordinate overflowed",
+        ))?;
     if source_x < 0
         || source_y < 0
         || source_x >= i64::from(item.source.width())

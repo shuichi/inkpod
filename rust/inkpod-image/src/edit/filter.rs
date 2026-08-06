@@ -301,15 +301,8 @@ fn blur_progress(
 ) -> Result<TileRaster, RasterError> {
     validate_radius_work(source, radius)?;
     let radius = i32::try_from(radius).map_err(|_| RasterError::InvalidDimensions)?;
-    let sigma = (f64::from(radius) / 2.0).max(0.5);
-    let mut kernel = Vec::new();
-    let mut kernel_sum = 0_u64;
-    for offset in -radius..=radius {
-        let weight = (-(f64::from(offset * offset)) / (2.0 * sigma * sigma)).exp();
-        let fixed = (weight * 1_000_000.0).round().max(1.0) as u64;
-        kernel.push(fixed);
-        kernel_sum += fixed;
-    }
+    let kernel = canonical_blur_kernel(radius as u32);
+    let kernel_sum = kernel.iter().sum::<u64>();
     let mut result = source.clone();
     for y in 0..source.height() {
         for x in 0..source.width() {
@@ -363,6 +356,24 @@ fn blur_progress(
         }
     }
     Ok(result)
+}
+
+fn canonical_blur_kernel(radius: u32) -> Vec<u64> {
+    let mut row = vec![1_u64];
+    for _ in 0..radius.saturating_mul(2) {
+        let mut next = vec![1_u64; row.len() + 1];
+        for index in 1..row.len() {
+            next[index] = row[index - 1] + row[index];
+        }
+        if next.iter().copied().max().unwrap_or(1) > 1_000_000_000_000 {
+            for value in &mut next {
+                *value = (*value + 512) / 1_024;
+                *value = (*value).max(1);
+            }
+        }
+        row = next;
+    }
+    row
 }
 
 pub(super) fn validate_radius_work(source: &TileRaster, radius: u32) -> Result<(), RasterError> {
@@ -534,14 +545,16 @@ fn curve_value(points: &[CurvePoint], value: u16, interpolation: CurveInterpolat
 }
 
 fn level_value(levels: &Levels, value: u16) -> u16 {
-    let normalized = ((f64::from(value) - f64::from(levels.input_shadow))
-        / f64::from(levels.input_highlight - levels.input_shadow))
-    .clamp(0.0, 1.0);
-    let gamma = f64::from(levels.input_gamma_milli) / 1_000.0;
-    let corrected = normalized.powf(1.0 / gamma);
-    let output = f64::from(levels.output_shadow)
-        + corrected * f64::from(levels.output_highlight - levels.output_shadow);
-    output.round().clamp(0.0, 65_535.0) as u16
+    let span = u32::from(levels.input_highlight - levels.input_shadow);
+    let offset = u32::from(value.saturating_sub(levels.input_shadow)).min(span);
+    let normalized =
+        ((u64::from(offset) * u64::from(u16::MAX) + u64::from(span / 2)) / u64::from(span)) as u16;
+    let corrected = crate::canonical_pow_unit_u16(normalized, 1_000, levels.input_gamma_milli)
+        .expect("validated positive gamma");
+    let output_span = u64::from(levels.output_highlight - levels.output_shadow);
+    (u64::from(levels.output_shadow)
+        + (u64::from(corrected) * output_span + u64::from(u16::MAX / 2)) / u64::from(u16::MAX))
+        as u16
 }
 
 fn apply_hsv(color: &mut [u16; 4], adjustment: HsvAdjustment) {

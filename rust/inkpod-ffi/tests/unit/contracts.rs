@@ -2418,6 +2418,61 @@ fn names_followed_by_parenthesis(source: &str) -> BTreeSet<String> {
     names
 }
 
+#[test]
+fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
+    let (mut core, before) = create_core(8, 8, 0x4d37);
+    let mut contract = InkpodReplayContract {
+        struct_size: size_of::<InkpodReplayContract>() as u32,
+        replay_epoch: 0,
+        procedure_format_version: 0,
+        canonical_numeric_version: 0,
+        primitive_count: 0,
+        reserved: u32::MAX,
+        feature_flags: u64::MAX,
+        primitive_catalog_digest: [0; 32],
+    };
+    let options = InkpodSnapshotOptions {
+        struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+        reserved: 0,
+        feature_flags: INKPOD_FEATURE_NONE,
+    };
+    let mut snapshot = ptr::null_mut();
+    let mut digest = InkpodCanonicalDigest {
+        struct_size: size_of::<InkpodCanonicalDigest>() as u32,
+        algorithm: 0,
+        bytes: [0; 32],
+    };
+    // SAFETY: All handles and complete non-overlapping outputs are live for the calls.
+    unsafe {
+        assert_eq!(
+            inkpod_core_get_replay_contract(core, &mut contract),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(contract.replay_epoch, 6);
+        assert_eq!(contract.procedure_format_version, 8);
+        assert_eq!(contract.canonical_numeric_version, 1);
+        assert!(contract.primitive_count > 0);
+        assert_ne!(contract.primitive_catalog_digest, [0; 32]);
+        assert_eq!(
+            inkpod_core_build_snapshot(core, &options, &mut snapshot),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_snapshot_get_canonical_digest(snapshot, &mut digest),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(digest.algorithm, INKPOD_DIGEST_BLAKE3_256);
+        assert_ne!(digest.bytes, [0; 32]);
+        let after = queried_document_info(core);
+        assert_eq!(after.document_revision, before.document_revision);
+        assert_eq!(after.view_revision, before.view_revision);
+        assert_eq!(after.main_plane_checksum, before.main_plane_checksum);
+        assert_eq!(after.color_plane_checksum, before.color_plane_checksum);
+        assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
 fn exported_function_names(source: &str) -> BTreeSet<String> {
     source
         .lines()

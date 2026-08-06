@@ -19,7 +19,7 @@ cargo bench --package inkpod-core --bench core_workflows -- --quick
 cargo bench --package inkpod-core --bench core_workflows
 ```
 
-Both commands use the release benchmark profile and the same seven scenarios.
+Both commands use the release benchmark profile and the same eight scenarios.
 Quick is the bounded Linux CI profile; full increases inputs for local
 before/after comparison. Neither profile reads or writes native `.inkpod`
 files. Batch uses in-memory sequence cells, and its dry-run asserts that its
@@ -35,6 +35,7 @@ absent output directory remains absent.
 | light-table document | 128 square, 3 references | 256 square, 6 references |
 | vector document | 128 square, 8 closed paths/fills | 256 square, 32 closed paths/fills |
 | Batch sequence | 4 cells at 16 square | 16 cells at 32 square |
+| canonical replay fixture | 64 square, 5 canonical edits | same |
 
 ## Output and assertions
 
@@ -58,6 +59,7 @@ on a matching environment. The scenario assertions cover these contracts:
 | `light_table_composite` | all references contribute to the expected full tile grid and checksum |
 | `vector_snapshot` | segment/fill counts, zero raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, all valid inputs dry-run successfully, and no output is generated |
+| `canonical_replay` | all six state boundaries replay bit-exactly, the final canonical composite digest matches, and the replay contract is epoch 6 / successor version 8 / numeric version 1 |
 
 The checksum is local FNV-1a over fixed-width public semantic data. It excludes
 wall-clock time, allocator addresses, cache allocation order, and Batch output
@@ -72,6 +74,7 @@ paths. The expected values embedded in the benchmark are:
 | `light_table_composite` | `255ab9bad114dfdd` | `77f63d83e130185f` |
 | `vector_snapshot` | `688dd42c93a71bec` | `27e6aa988b125683` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
+| `canonical_replay` | `20de057cc9cc3ca1` | `20de057cc9cc3ca1` |
 
 The M4 vector checksums supersede the earlier values because the new distinct
 Genesis Cell ID advances the shared stable-ID cursor before vector plane, path,
@@ -123,6 +126,32 @@ ID, environment, complete samples, semantic counters, reason, and explicit user
 approval to be recorded here. The historical A/B evidence below remains the
 calibration provenance and an exceptional rebaseline tool, not a routine build
 requirement.
+
+## 2026-08-06 M7 routine acceptance
+
+M7 retained Range ID
+`windows-arm64-apple-silicon-parallels-release-2026-08-05` and all four Core
+reference envelopes without changing a range, workload, acceptance rule, or
+existing semantic checksum. The new deterministic-replay scenario is an
+observational score with a hard semantic checksum; it has no retrospectively
+invented timing envelope. One unmeasured warm-up preceded five measured quick
+runs and five measured full runs.
+
+| Score | Five measured samples (ns) | Median | Result |
+|---|---|---:|---|
+| quick `pan_zoom_snapshot` | 953,041; 877,375; 835,542; 866,041; 971,333 | 877,375 (`0.877375 ms`) | within 0.70–1.05 ms |
+| quick `dirty_tile_rebuild` | 1,893,292; 2,193,792; 1,801,125; 2,093,084; 1,930,792 | 1,930,792 (`1.930792 ms`) | within 1.8–2.4 ms |
+| quick `canonical_replay` | 1,091,042; 1,297,750; 1,010,500; 1,017,292; 1,153,000 | 1,091,042 (`1.091042 ms`) | semantic checksum and counters passed; observational |
+| full `pan_zoom_snapshot` | 13,382,959; 13,461,209; 13,160,459; 13,432,000; 13,353,875 | 13,382,959 (`13.382959 ms`) | within 12–16 ms |
+| full `dirty_tile_rebuild` | 9,206,375; 9,295,209; 8,969,500; 9,171,542; 9,230,000 | 9,206,375 (`9.206375 ms`) | within 8.5–11 ms |
+| full `canonical_replay` | 1,391,250; 1,166,125; 1,536,083; 1,291,084; 1,775,750 | 1,391,250 (`1.391250 ms`) | semantic checksum and counters passed; observational |
+
+All eight scenarios retained their fixed checksums and semantic counters in
+every run. The M7 fixture retained all six state-boundary digests, its final
+canonical-composite digest, a five-entry journal, and zero replay failures. No
+protected median exceeded an upper edge, so the independent second-batch rule
+did not apply. The Release private native performance smoke also exited 0 after
+the final ARM64 relink; it retained the established internal hard gates.
 
 ## 2026-08-06 M6 routine acceptance
 

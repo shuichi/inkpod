@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const BENCHMARK_UUID: u128 = 0x494e_4b50_4f44_2d4d_322d_4245_4e43_4801;
-const EXPECTED_QUICK_CHECKSUMS: [u64; 7] = [
+const EXPECTED_QUICK_CHECKSUMS: [u64; 8] = [
     0x517e_d7ae_78bf_0487,
     0x9e13_576d_ef6f_539b,
     0x517e_d7ae_78bf_0487,
@@ -14,8 +14,9 @@ const EXPECTED_QUICK_CHECKSUMS: [u64; 7] = [
     0x255a_b9ba_d114_dfdd,
     0x688d_d42c_93a7_1bec,
     0xf31d_31fe_1bb0_0fd7,
+    0x20de_057c_c9cc_3ca1,
 ];
-const EXPECTED_FULL_CHECKSUMS: [u64; 7] = [
+const EXPECTED_FULL_CHECKSUMS: [u64; 8] = [
     0x4390_40e0_244d_5773,
     0xa33f_7534_fcdd_61e7,
     0x4390_40e0_244d_5773,
@@ -23,6 +24,7 @@ const EXPECTED_FULL_CHECKSUMS: [u64; 7] = [
     0x77f6_3d83_e130_185f,
     0x27e6_aa98_8b12_5683,
     0x6732_b8b0_a656_5d03,
+    0x20de_057c_c9cc_3ca1,
 ];
 
 #[derive(Clone, Copy)]
@@ -119,6 +121,7 @@ fn main() {
         light_table_composite(profile),
         vector_snapshot(profile),
         batch_preview(profile),
+        canonical_replay(profile),
     ];
 
     for result in &results {
@@ -131,6 +134,114 @@ fn main() {
         EXPECTED_FULL_CHECKSUMS
     };
     assert_eq!(actual, expected, "benchmark semantic checksums changed");
+}
+
+fn canonical_replay(_profile: Profile) -> ScenarioResult {
+    const UUID: u128 = 0x494e_4b50_4f44_2d4d_372d_474f_4c44_454e;
+    let started = Instant::now();
+    let mut core = Core::new();
+    let created = core
+        .new_cell_with_uuid(16, 16, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, UUID)
+        .unwrap();
+    core.apply_stroke(&Stroke {
+        tool: PaintTool::Brush,
+        plane: ActivePlane::Color,
+        color: [17, 43, 91, 219],
+        diameter: 3.375,
+        auto_erase: false,
+        pressure_size: true,
+        coordinate_space: CoordinateSpace::Document,
+        samples: vec![
+            StrokeSample {
+                x: 1.125,
+                y: 2.875,
+                pressure: 0.375,
+            },
+            StrokeSample {
+                x: 13.625,
+                y: 5.25,
+                pressure: 0.9375,
+            },
+        ],
+    })
+    .unwrap();
+    core.apply_gradient_to_plane(
+        created.color_plane_id,
+        &Gradient {
+            kind: GradientKind::Radial,
+            mode: GradientMode::Composite,
+            start_x_milli: 3_250,
+            start_y_milli: 4_750,
+            end_x_milli: 12_125,
+            end_y_milli: 9_375,
+            dither: true,
+            stops: vec![
+                GradientStop {
+                    position_milli: 0,
+                    color: [1_000, 2_000, 3_000, 50_000],
+                },
+                GradientStop {
+                    position_milli: 425,
+                    color: [12_345, 23_456, 34_567, 40_000],
+                },
+                GradientStop {
+                    position_milli: 1_000,
+                    color: [60_000, 40_000, 20_000, 30_000],
+                },
+            ],
+        },
+    )
+    .unwrap();
+    core.apply_blur_to_plane(created.color_plane_id, 2, 725)
+        .unwrap();
+    core.begin_filter_preview(
+        created.color_plane_id,
+        Filter::Levels(Levels {
+            channel: Channel::Rgb,
+            input_shadow: 321,
+            input_gamma_milli: 1_375,
+            input_highlight: 64_123,
+            output_shadow: 777,
+            output_highlight: 63_999,
+        }),
+    )
+    .unwrap();
+    core.apply_filter_preview().unwrap();
+    core.apply_airbrush_to_plane(
+        created.color_plane_id,
+        AirbrushStroke {
+            center_x_milli: 7_625,
+            center_y_milli: 10_375,
+            radius_milli: 3_125,
+            hardness_milli: 375,
+            opacity_milli: 625,
+            color: [50_000, 5_000, 42_000, 55_000],
+        },
+    )
+    .unwrap();
+    let replay = core.verify_journal_replay().unwrap();
+    assert_eq!(
+        replay.document_state_digest(),
+        core.document_state_digest().unwrap()
+    );
+    let snapshot = core.build_snapshot();
+    let digest = snapshot.canonical_composite_digest().unwrap().as_bytes();
+    let checksum = u64::from_le_bytes(digest[..8].try_into().unwrap());
+    let elapsed = started.elapsed();
+    black_box((&core, &snapshot));
+    ScenarioResult {
+        scenario: "canonical_replay",
+        elapsed,
+        iterations: 5,
+        input_items: 6,
+        output_items: snapshot.tile_count() as u64,
+        reused_items: 0,
+        document_revision: core.document_info().unwrap().document_revision,
+        history_entries: core.history_entries().len() as u64,
+        successes: 5,
+        failures: 0,
+        checksum,
+    }
 }
 
 fn sparse_snapshot(profile: Profile) -> ScenarioResult {

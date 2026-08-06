@@ -1,5 +1,6 @@
 //! Canonical document primitive requests, procedures, replay, and state digests.
 
+mod catalog;
 mod digest;
 mod executor;
 mod invocation;
@@ -7,9 +8,12 @@ mod model;
 mod raster;
 
 pub use model::{
-    CanonicalProcedure, DocumentStateDigest, PrimitiveId, PrimitiveOutcome, PrimitiveRequest,
-    ProcedureId, ReplayEpoch, StateId,
+    CANONICAL_NUMERIC_VERSION, CanonicalProcedure, DocumentStateDigest, PROCEDURE_FORMAT_VERSION,
+    PrimitiveId, PrimitiveOutcome, PrimitiveRequest, ProcedureId, ReplayContract, ReplayEpoch,
+    StateId,
 };
+
+pub use catalog::replay_contract;
 
 use digest::canonical_payload_digest;
 pub(crate) use digest::{CanonicalDocumentStateCache, canonical_document_state};

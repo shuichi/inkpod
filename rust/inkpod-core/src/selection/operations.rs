@@ -657,60 +657,95 @@ impl Core {
                 "compatible clipboard plane is missing",
             ))?;
         let mut staged = BTreeMap::new();
-        let center_x = f64::from(floating.payload.bounds.x)
-            + f64::from(floating.payload.bounds.width - 1) / 2.0;
-        let center_y = f64::from(floating.payload.bounds.y)
-            + f64::from(floating.payload.bounds.height - 1) / 2.0;
-        let radians = floating.transform.rotation_degrees.to_radians();
-        let (sin, cos) = radians.sin_cos();
-        let transform_point = |x: f64, y: f64| {
-            let local_x = (x - center_x) * floating.transform.scale_x;
-            let local_y = (y - center_y) * floating.transform.scale_y;
-            (
-                center_x + local_x * cos - local_y * sin + floating.transform.translate_x,
-                center_y + local_x * sin + local_y * cos + floating.transform.translate_y,
-            )
+        use inkpod_image::{
+            CANONICAL_DOCUMENT_ONE, canonical_q16_from_f64, canonical_turns_from_degrees_f64,
+            ceil_div_i128, div_round_ties_even_i128, floor_div_i128, rotate_q16,
         };
-        let left = f64::from(floating.payload.bounds.x);
-        let top = f64::from(floating.payload.bounds.y);
-        let right = f64::from(floating.payload.bounds.x + floating.payload.bounds.width - 1);
-        let bottom = f64::from(floating.payload.bounds.y + floating.payload.bounds.height - 1);
+        let one = CANONICAL_DOCUMENT_ONE;
+        let center_x = i64::from(floating.payload.bounds.x)
+            .checked_mul(one)
+            .and_then(|value| {
+                value.checked_add(i64::from(floating.payload.bounds.width - 1) * one / 2)
+            })
+            .ok_or(CoreError::InvalidArgument("floating center overflowed"))?;
+        let center_y = i64::from(floating.payload.bounds.y)
+            .checked_mul(one)
+            .and_then(|value| {
+                value.checked_add(i64::from(floating.payload.bounds.height - 1) * one / 2)
+            })
+            .ok_or(CoreError::InvalidArgument("floating center overflowed"))?;
+        let translate_x = canonical_q16_from_f64(floating.transform.translate_x).ok_or(
+            CoreError::InvalidArgument("floating translation is outside canonical Q16"),
+        )?;
+        let translate_y = canonical_q16_from_f64(floating.transform.translate_y).ok_or(
+            CoreError::InvalidArgument("floating translation is outside canonical Q16"),
+        )?;
+        let scale_x = canonical_q16_from_f64(floating.transform.scale_x)
+            .filter(|value| *value > 0)
+            .ok_or(CoreError::InvalidArgument(
+                "floating scale is outside canonical Q16",
+            ))?;
+        let scale_y = canonical_q16_from_f64(floating.transform.scale_y)
+            .filter(|value| *value > 0)
+            .ok_or(CoreError::InvalidArgument(
+                "floating scale is outside canonical Q16",
+            ))?;
+        let turns = canonical_turns_from_degrees_f64(floating.transform.rotation_degrees).ok_or(
+            CoreError::InvalidArgument("floating angle is outside canonical turns"),
+        )?;
+        let transform_point = |x: i64, y: i64| -> Result<(i64, i64), CoreError> {
+            let local_x = div_round_ties_even_i128(
+                i128::from(x - center_x) * i128::from(scale_x),
+                i128::from(one),
+            )
+            .and_then(|value| value.try_into().ok())
+            .ok_or(CoreError::InvalidArgument("floating scale overflowed"))?;
+            let local_y = div_round_ties_even_i128(
+                i128::from(y - center_y) * i128::from(scale_y),
+                i128::from(one),
+            )
+            .and_then(|value| value.try_into().ok())
+            .ok_or(CoreError::InvalidArgument("floating scale overflowed"))?;
+            let (rotated_x, rotated_y) = rotate_q16(local_x, local_y, turns)
+                .ok_or(CoreError::InvalidArgument("floating rotation overflowed"))?;
+            Ok((
+                center_x
+                    .checked_add(rotated_x)
+                    .and_then(|value| value.checked_add(translate_x))
+                    .ok_or(CoreError::InvalidArgument("floating transform overflowed"))?,
+                center_y
+                    .checked_add(rotated_y)
+                    .and_then(|value| value.checked_add(translate_y))
+                    .ok_or(CoreError::InvalidArgument("floating transform overflowed"))?,
+            ))
+        };
+        let left = i64::from(floating.payload.bounds.x) * one;
+        let top = i64::from(floating.payload.bounds.y) * one;
+        let right = i64::from(floating.payload.bounds.x + floating.payload.bounds.width - 1) * one;
+        let bottom =
+            i64::from(floating.payload.bounds.y + floating.payload.bounds.height - 1) * one;
         let corners = [
-            transform_point(left, top),
-            transform_point(right, top),
-            transform_point(left, bottom),
-            transform_point(right, bottom),
+            transform_point(left, top)?,
+            transform_point(right, top)?,
+            transform_point(left, bottom)?,
+            transform_point(right, bottom)?,
         ];
-        if corners
-            .iter()
-            .any(|(x, y)| !x.is_finite() || !y.is_finite())
-        {
-            return Err(CoreError::InvalidArgument("floating transform overflowed"));
-        }
-        let min_x = corners
-            .iter()
-            .map(|corner| corner.0)
-            .fold(f64::INFINITY, f64::min)
-            .floor()
-            .max(0.0) as i64;
-        let max_x = corners
-            .iter()
-            .map(|corner| corner.0)
-            .fold(f64::NEG_INFINITY, f64::max)
-            .ceil()
-            .min(f64::from(document.width.saturating_sub(1))) as i64;
-        let min_y = corners
-            .iter()
-            .map(|corner| corner.1)
-            .fold(f64::INFINITY, f64::min)
-            .floor()
-            .max(0.0) as i64;
-        let max_y = corners
-            .iter()
-            .map(|corner| corner.1)
-            .fold(f64::NEG_INFINITY, f64::max)
-            .ceil()
-            .min(f64::from(document.height.saturating_sub(1))) as i64;
+        let min_x_q16 = corners.iter().map(|corner| corner.0).min().unwrap();
+        let max_x_q16 = corners.iter().map(|corner| corner.0).max().unwrap();
+        let min_y_q16 = corners.iter().map(|corner| corner.1).min().unwrap();
+        let max_y_q16 = corners.iter().map(|corner| corner.1).max().unwrap();
+        let min_x = floor_div_i128(i128::from(min_x_q16), i128::from(one))
+            .unwrap()
+            .max(0) as i64;
+        let max_x = ceil_div_i128(i128::from(max_x_q16), i128::from(one))
+            .unwrap()
+            .min(i128::from(document.width.saturating_sub(1))) as i64;
+        let min_y = floor_div_i128(i128::from(min_y_q16), i128::from(one))
+            .unwrap()
+            .max(0) as i64;
+        let max_y = ceil_div_i128(i128::from(max_y_q16), i128::from(one))
+            .unwrap()
+            .min(i128::from(document.height.saturating_sub(1))) as i64;
         if min_x <= max_x && min_y <= max_y {
             let work = u64::try_from(max_x - min_x + 1)
                 .ok()
@@ -732,13 +767,36 @@ impl Core {
                 .collect();
             for y in min_y..=max_y {
                 for x in min_x..=max_x {
-                    let translated_x = x as f64 - center_x - floating.transform.translate_x;
-                    let translated_y = y as f64 - center_y - floating.transform.translate_y;
-                    let source_x = center_x
-                        + (translated_x * cos + translated_y * sin) / floating.transform.scale_x;
-                    let source_y = center_y
-                        + (-translated_x * sin + translated_y * cos) / floating.transform.scale_y;
-                    let source_coord = (source_x.round() as i32, source_y.round() as i32);
+                    let translated_x = x * one - center_x - translate_x;
+                    let translated_y = y * one - center_y - translate_y;
+                    let (unrotated_x, unrotated_y) =
+                        rotate_q16(translated_x, translated_y, turns.wrapping_neg()).ok_or(
+                            CoreError::InvalidArgument("floating inverse rotation overflowed"),
+                        )?;
+                    let source_x = i128::from(center_x)
+                        + div_round_ties_even_i128(
+                            i128::from(unrotated_x) * i128::from(one),
+                            i128::from(scale_x),
+                        )
+                        .ok_or(CoreError::InvalidArgument(
+                            "floating inverse scale overflowed",
+                        ))?;
+                    let source_y = i128::from(center_y)
+                        + div_round_ties_even_i128(
+                            i128::from(unrotated_y) * i128::from(one),
+                            i128::from(scale_y),
+                        )
+                        .ok_or(CoreError::InvalidArgument(
+                            "floating inverse scale overflowed",
+                        ))?;
+                    let source_coord = (
+                        div_round_ties_even_i128(source_x, i128::from(one))
+                            .and_then(|value| i32::try_from(value).ok())
+                            .ok_or(CoreError::InvalidArgument("floating source X overflowed"))?,
+                        div_round_ties_even_i128(source_y, i128::from(one))
+                            .and_then(|value| i32::try_from(value).ok())
+                            .ok_or(CoreError::InvalidArgument("floating source Y overflowed"))?,
+                    );
                     if let Some(value) = source_pixels.get(&source_coord) {
                         staged.insert((x as u32, y as u32), *value);
                     }

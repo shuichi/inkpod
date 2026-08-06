@@ -9,6 +9,10 @@ use crate::{
     PixelFormat, PixelValue, PlaneId, PlaneType, Stroke, StrokeSample, TILE_SIZE, TileCoord,
     ViewState,
 };
+use inkpod_image::{
+    canonical_q16_from_f32 as image_q16_from_f32, canonical_q16_from_f64 as image_q16_from_f64,
+    canonical_unit_u16_from_f32, div_round_ties_even_i128,
+};
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
@@ -1143,11 +1147,9 @@ fn greatest_common_divisor(mut left: u128, mut right: u128) -> u128 {
 }
 
 fn canonical_q16_from_f32(value: f32) -> Result<i64, CoreError> {
-    let (negative, significand, exponent) = decompose_f32(value)?;
-    let scaled = round_binary_integer(negative, significand, exponent + 16)?;
-    let scaled = i64::try_from(scaled).map_err(|_| {
-        CoreError::InvalidArgument("canonical document coordinate is not representable")
-    })?;
+    let scaled = image_q16_from_f32(value).ok_or(CoreError::InvalidArgument(
+        "canonical document coordinate is not representable",
+    ))?;
     if scaled.abs() > MAX_Q16_COORDINATE {
         return Err(CoreError::InvalidArgument(
             "canonical document coordinate is outside bounds",
@@ -1157,11 +1159,9 @@ fn canonical_q16_from_f32(value: f32) -> Result<i64, CoreError> {
 }
 
 fn canonical_q16_from_f64(value: f64) -> Result<i64, CoreError> {
-    let (negative, significand, exponent) = decompose_f64(value)?;
-    let scaled = round_binary_integer(negative, significand, exponent + 16)?;
-    let scaled = i64::try_from(scaled).map_err(|_| {
-        CoreError::InvalidArgument("canonical document coordinate is not representable")
-    })?;
+    let scaled = image_q16_from_f64(value).ok_or(CoreError::InvalidArgument(
+        "canonical document coordinate is not representable",
+    ))?;
     if scaled.abs() > MAX_Q16_COORDINATE {
         return Err(CoreError::InvalidArgument(
             "canonical document coordinate is outside bounds",
@@ -1171,129 +1171,15 @@ fn canonical_q16_from_f64(value: f64) -> Result<i64, CoreError> {
 }
 
 fn canonical_pressure_from_f32(value: f32) -> Result<u16, CoreError> {
-    let (negative, significand, exponent) = decompose_f32(value)?;
-    if negative && significand != 0 {
-        return Err(CoreError::InvalidArgument(
-            "stroke pressure is outside bounds",
-        ));
-    }
-    let numerator =
-        significand
-            .checked_mul(u128::from(PRESSURE_MAX))
-            .ok_or(CoreError::InvalidArgument(
-                "canonical pressure conversion overflows",
-            ))?;
-    let result = round_unsigned_binary_integer(numerator, exponent)?;
-    u16::try_from(result)
-        .map_err(|_| CoreError::InvalidArgument("stroke pressure is outside bounds"))
-}
-
-fn decompose_f32(value: f32) -> Result<(bool, u128, i32), CoreError> {
-    let bits = value.to_bits();
-    let negative = bits >> 31 != 0;
-    let exponent = (bits >> 23) & 0xff;
-    let fraction = bits & 0x7f_ffff;
-    if exponent == 0xff {
-        return Err(CoreError::InvalidArgument(
-            "canonical binary32 input is not finite",
-        ));
-    }
-    if exponent == 0 {
-        Ok((negative && fraction != 0, u128::from(fraction), -149))
-    } else {
-        Ok((
-            negative,
-            u128::from((1_u32 << 23) | fraction),
-            exponent as i32 - 127 - 23,
-        ))
-    }
-}
-
-fn decompose_f64(value: f64) -> Result<(bool, u128, i32), CoreError> {
-    let bits = value.to_bits();
-    let negative = bits >> 63 != 0;
-    let exponent = (bits >> 52) & 0x7ff;
-    let fraction = bits & 0x000f_ffff_ffff_ffff;
-    if exponent == 0x7ff {
-        return Err(CoreError::InvalidArgument(
-            "canonical binary64 input is not finite",
-        ));
-    }
-    if exponent == 0 {
-        Ok((negative && fraction != 0, u128::from(fraction), -1074))
-    } else {
-        Ok((
-            negative,
-            u128::from((1_u64 << 52) | fraction),
-            exponent as i32 - 1023 - 52,
-        ))
-    }
-}
-
-fn round_binary_integer(
-    negative: bool,
-    significand: u128,
-    exponent: i32,
-) -> Result<i128, CoreError> {
-    let magnitude = round_unsigned_binary_integer(significand, exponent)?;
-    let magnitude = i128::try_from(magnitude).map_err(|_| {
-        CoreError::InvalidArgument("canonical binary conversion is not representable")
-    })?;
-    if negative && magnitude != 0 {
-        magnitude.checked_neg().ok_or(CoreError::InvalidArgument(
-            "canonical binary conversion overflows",
-        ))
-    } else {
-        Ok(magnitude)
-    }
-}
-
-fn round_unsigned_binary_integer(significand: u128, exponent: i32) -> Result<u128, CoreError> {
-    if significand == 0 {
-        return Ok(0);
-    }
-    if exponent >= 0 {
-        return significand
-            .checked_shl(exponent as u32)
-            .ok_or(CoreError::InvalidArgument(
-                "canonical binary conversion overflows",
-            ));
-    }
-    let shift = exponent.unsigned_abs();
-    if shift >= 128 {
-        return Ok(0);
-    }
-    let quotient = significand >> shift;
-    let mask = (1_u128 << shift) - 1;
-    let remainder = significand & mask;
-    let half = 1_u128 << (shift - 1);
-    if remainder > half || (remainder == half && quotient & 1 != 0) {
-        quotient.checked_add(1).ok_or(CoreError::InvalidArgument(
-            "canonical binary rounding overflows",
-        ))
-    } else {
-        Ok(quotient)
-    }
+    canonical_unit_u16_from_f32(value).ok_or(CoreError::InvalidArgument(
+        "stroke pressure is outside bounds",
+    ))
 }
 
 fn divide_round_ties_even(numerator: i128, denominator: i128) -> Result<i128, CoreError> {
-    if denominator <= 0 {
-        return Err(CoreError::InvalidArgument(
-            "canonical division denominator is not positive",
-        ));
-    }
-    let quotient = numerator.div_euclid(denominator);
-    let remainder = numerator.rem_euclid(denominator);
-    let doubled = remainder.checked_mul(2).ok_or(CoreError::InvalidArgument(
-        "canonical division remainder overflows",
-    ))?;
-    if doubled > denominator || (doubled == denominator && quotient & 1 != 0) {
-        quotient.checked_add(1).ok_or(CoreError::InvalidArgument(
-            "canonical division rounding overflows",
-        ))
-    } else {
-        Ok(quotient)
-    }
+    div_round_ties_even_i128(numerator, denominator).ok_or(CoreError::InvalidArgument(
+        "canonical division is invalid or overflows",
+    ))
 }
 
 const fn q16_floor(value: i64) -> i64 {

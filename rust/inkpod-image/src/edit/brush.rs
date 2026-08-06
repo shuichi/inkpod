@@ -1,7 +1,9 @@
 use super::common::*;
 use super::filter::validate_radius_work;
 use super::*;
-use crate::{RasterError, TileRaster};
+use crate::{
+    RasterError, TileRaster, ceil_div_i128, div_round_ties_even_i128, floor_div_i128, integer_sqrt,
+};
 
 pub fn apply_airbrush(
     source: &TileRaster,
@@ -88,8 +90,8 @@ fn apply_airbrush_dab(
     stroke: AirbrushStroke,
     revision: u64,
 ) -> Result<(), RasterError> {
-    let radius = f64::from(stroke.radius_milli);
-    let hard_radius = radius * f64::from(stroke.hardness_milli) / 1_000.0;
+    let radius = u128::from(stroke.radius_milli);
+    let hard_radius = (radius * u128::from(stroke.hardness_milli) + 500) / 1_000;
     let (left, right) =
         clipped_effect_bounds(stroke.center_x_milli, stroke.radius_milli, result.width());
     let (top, bottom) =
@@ -99,21 +101,23 @@ fn apply_airbrush_dab(
             if !selected(selection, x, y)? {
                 continue;
             }
-            let dx = f64::from(x).mul_add(1_000.0, 500.0) - stroke.center_x_milli as f64;
-            let dy = f64::from(y).mul_add(1_000.0, 500.0) - stroke.center_y_milli as f64;
-            let distance = dx.hypot(dy);
+            let dx =
+                (i128::from(x) * 1_000 + 500 - i128::from(stroke.center_x_milli)).unsigned_abs();
+            let dy =
+                (i128::from(y) * 1_000 + 500 - i128::from(stroke.center_y_milli)).unsigned_abs();
+            let distance = integer_sqrt(dx * dx + dy * dy);
             if distance > radius {
                 continue;
             }
-            let falloff = if distance <= hard_radius || hard_radius == radius {
-                1.0
+            let falloff_milli = if distance <= hard_radius || hard_radius == radius {
+                1_000
             } else {
-                1.0 - (distance - hard_radius) / (radius - hard_radius)
+                ((radius - distance) * 1_000 + (radius - hard_radius) / 2) / (radius - hard_radius)
             };
             let mut color = stroke.color;
-            color[3] = ((f64::from(color[3]) * f64::from(stroke.opacity_milli) * falloff) / 1_000.0)
-                .round()
-                .clamp(0.0, 65_535.0) as u16;
+            color[3] = ((u128::from(color[3]) * u128::from(stroke.opacity_milli) * falloff_milli
+                + 500_000)
+                / 1_000_000) as u16;
             let after = source_over(result.pixel(x, y)?, color)?;
             result.set_pixel(x, y, after, revision)?;
         }
@@ -325,8 +329,8 @@ fn apply_stamp_dab(
     shape: StampShape,
     revision: u64,
 ) -> Result<(), RasterError> {
-    let radius = f64::from(radius_milli);
-    let hard_radius = radius * f64::from(hardness_milli) / 1_000.0;
+    let radius = u128::from(radius_milli);
+    let hard_radius = (radius * u128::from(hardness_milli) + 500) / 1_000;
     let (left, right) = clipped_effect_bounds(center_x, radius_milli, source.width());
     let (top, bottom) = clipped_effect_bounds(center_y, radius_milli, source.height());
     let offset_x = i128::from(source_anchor_x) - i128::from(destination_anchor_x);
@@ -338,10 +342,10 @@ fn apply_stamp_dab(
             }
             let pixel_x = i64::from(x) * 1_000 + 500;
             let pixel_y = i64::from(y) * 1_000 + 500;
-            let dx = (pixel_x as f64 - center_x as f64).abs();
-            let dy = (pixel_y as f64 - center_y as f64).abs();
+            let dx = (i128::from(pixel_x) - i128::from(center_x)).unsigned_abs();
+            let dy = (i128::from(pixel_y) - i128::from(center_y)).unsigned_abs();
             let distance = match shape {
-                StampShape::Round => dx.hypot(dy),
+                StampShape::Round => integer_sqrt(dx * dx + dy * dy),
                 StampShape::Square => dx.max(dy),
             };
             if distance > radius {
@@ -359,18 +363,18 @@ fn apply_stamp_dab(
             if source_x >= source.width() || source_y >= source.height() {
                 continue;
             }
-            let falloff = if distance <= hard_radius || hard_radius == radius {
-                1.0
+            let falloff_milli = if distance <= hard_radius || hard_radius == radius {
+                1_000
             } else {
-                1.0 - (distance - hard_radius) / (radius - hard_radius)
+                ((radius - distance) * 1_000 + (radius - hard_radius) / 2) / (radius - hard_radius)
             };
             let mut color = source
                 .pixel(source_x, source_y)?
                 .rgba16()
                 .ok_or(RasterError::PixelFormatMismatch)?;
-            color[3] = ((f64::from(color[3]) * f64::from(opacity_milli) * falloff) / 1_000.0)
-                .round()
-                .clamp(0.0, 65_535.0) as u16;
+            color[3] = ((u128::from(color[3]) * u128::from(opacity_milli) * falloff_milli
+                + 500_000)
+                / 1_000_000) as u16;
             let after = source_over(result.pixel(x, y)?, color)?;
             result.set_pixel(x, y, after, revision)?;
         }
@@ -379,13 +383,16 @@ fn apply_stamp_dab(
 }
 
 fn clipped_effect_bounds(center_milli: i64, radius_milli: u32, bound: u32) -> (u32, u32) {
-    let center = center_milli as f64;
-    let radius = f64::from(radius_milli);
-    let bound = f64::from(bound);
-    let first = ((center - radius) / 1_000.0 - 1.0)
-        .floor()
-        .clamp(0.0, bound) as u32;
-    let last = ((center + radius) / 1_000.0 + 1.0).ceil().clamp(0.0, bound) as u32;
+    let center = i128::from(center_milli);
+    let radius = i128::from(radius_milli);
+    let first = floor_div_i128(center - radius, 1_000)
+        .unwrap_or(0)
+        .saturating_sub(1)
+        .clamp(0, i128::from(bound)) as u32;
+    let last = ceil_div_i128(center + radius, 1_000)
+        .unwrap_or(i128::from(bound))
+        .saturating_add(1)
+        .clamp(0, i128::from(bound)) as u32;
     (first, last)
 }
 
@@ -412,22 +419,39 @@ fn interpolated_effect_samples(
     let mut result = Vec::new();
     result.push(samples[0]);
     for pair in samples.windows(2) {
-        let dx = pair[1].x_milli as f64 - pair[0].x_milli as f64;
-        let dy = pair[1].y_milli as f64 - pair[0].y_milli as f64;
-        let distance = dx.hypot(dy);
-        let steps = (distance / f64::from(spacing_milli)).ceil().max(1.0) as u64;
+        let dx = i128::from(pair[1].x_milli) - i128::from(pair[0].x_milli);
+        let dy = i128::from(pair[1].y_milli) - i128::from(pair[0].y_milli);
+        let squared = dx
+            .unsigned_abs()
+            .checked_mul(dx.unsigned_abs())
+            .and_then(|value| value.checked_add(dy.unsigned_abs().checked_mul(dy.unsigned_abs())?))
+            .ok_or(RasterError::InvalidDimensions)?;
+        let floor_distance = integer_sqrt(squared);
+        let distance = floor_distance + u128::from(floor_distance * floor_distance != squared);
+        let steps = distance.div_ceil(u128::from(spacing_milli)).max(1) as u64;
         if result.len().saturating_add(steps as usize) > 1_048_576 {
             return Err(RasterError::InvalidDimensions);
         }
         for step in 1..=steps {
-            let ratio = step as f64 / steps as f64;
             result.push(EffectSample {
-                x_milli: (pair[0].x_milli as f64 + dx * ratio).round() as i64,
-                y_milli: (pair[0].y_milli as f64 + dy * ratio).round() as i64,
-                pressure_milli: (f64::from(pair[0].pressure_milli)
-                    + (pair[1].pressure_milli as f64 - pair[0].pressure_milli as f64) * ratio)
-                    .round()
-                    .clamp(0.0, 1_000.0) as u32,
+                x_milli: (i128::from(pair[0].x_milli)
+                    + div_round_ties_even_i128(dx * i128::from(step), i128::from(steps))
+                        .ok_or(RasterError::InvalidDimensions)?)
+                .try_into()
+                .map_err(|_| RasterError::InvalidDimensions)?,
+                y_milli: (i128::from(pair[0].y_milli)
+                    + div_round_ties_even_i128(dy * i128::from(step), i128::from(steps))
+                        .ok_or(RasterError::InvalidDimensions)?)
+                .try_into()
+                .map_err(|_| RasterError::InvalidDimensions)?,
+                pressure_milli: (i128::from(pair[0].pressure_milli)
+                    + div_round_ties_even_i128(
+                        (i128::from(pair[1].pressure_milli) - i128::from(pair[0].pressure_milli))
+                            * i128::from(step),
+                        i128::from(steps),
+                    )
+                    .ok_or(RasterError::InvalidDimensions)?)
+                .clamp(0, 1_000) as u32,
             });
         }
     }

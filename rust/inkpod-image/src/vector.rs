@@ -227,7 +227,26 @@ pub fn vector_distance_to_segment(
             .clamp(0.0, 1.0)
     };
     let closest = (start.0 + delta.0 * fraction, start.1 + delta.1 * fraction);
-    (vector_squared_distance(point, closest).sqrt(), fraction)
+    (
+        canonical_sqrt_f64(vector_squared_distance(point, closest)),
+        fraction,
+    )
+}
+
+fn canonical_sqrt_f64(value: f64) -> f64 {
+    if value <= 0.0 {
+        return 0.0;
+    }
+    if !value.is_finite() {
+        return value;
+    }
+    let exponent = ((value.to_bits() >> 52) & 0x7ff) as i32 - 1_023;
+    let guess_exponent = exponent.div_euclid(2) + 1_023;
+    let mut estimate = f64::from_bits((guess_exponent.clamp(1, 2_046) as u64) << 52);
+    for _ in 0..32 {
+        estimate = (estimate + value / estimate) * 0.5;
+    }
+    estimate
 }
 
 pub fn vector_stroke_contains(

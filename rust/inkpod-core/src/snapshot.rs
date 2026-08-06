@@ -1,6 +1,25 @@
 //! Document inspection and immutable render snapshots.
 
 use super::*;
+use inkpod_image::{canonical_q16_from_f32, source_over_rgba8, source_over_rgba16};
+
+const COMPOSITE_DIGEST_CONTEXT: &str = "org.inkpod.digest.canonical-composite.v1";
+
+/// Architecture-independent digest of one snapshot's document result.
+///
+/// View-only state, transient revision numbers, and cache revisions are excluded.
+/// Raster pixels are hashed as their public premultiplied BGRA8 tile stream and
+/// vector document coordinates are first normalized to canonical signed Q16.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CanonicalCompositeDigest([u8; 32]);
+
+impl CanonicalCompositeDigest {
+    /// Returns the canonical 32-byte digest.
+    #[must_use]
+    pub const fn as_bytes(self) -> [u8; 32] {
+        self.0
+    }
+}
 
 /// One immutable raster tile positioned in document pixel coordinates.
 ///
@@ -163,6 +182,83 @@ impl RenderSnapshot {
     #[must_use]
     pub fn vector_fills(&self) -> &[RenderVectorFill] {
         &self.vector_fills
+    }
+
+    /// Computes the canonical document-result digest for this immutable snapshot.
+    ///
+    /// This operation is deterministic across supported architectures and does
+    /// not alter revision, history, dirty state, or ownership. It returns an
+    /// error only if an internally produced vector coordinate is non-finite or
+    /// outside the canonical signed-Q16 range.
+    pub fn canonical_composite_digest(&self) -> Result<CanonicalCompositeDigest, CoreError> {
+        let mut hasher = blake3::Hasher::new_derive_key(COMPOSITE_DIGEST_CONTEXT);
+        hasher.update(&1_u32.to_le_bytes());
+        hasher.update(&self.feature_flags.to_le_bytes());
+        hasher.update(&self.document_size.width.to_le_bytes());
+        hasher.update(&self.document_size.height.to_le_bytes());
+        let mut tiles = self.tiles.iter().collect::<Vec<_>>();
+        tiles.sort_unstable_by_key(|tile| (tile.origin.y, tile.origin.x, tile.tile_id));
+        hasher.update(&(tiles.len() as u64).to_le_bytes());
+        for tile in tiles {
+            hasher.update(&tile.tile_id.to_le_bytes());
+            hasher.update(&tile.origin.x.to_le_bytes());
+            hasher.update(&tile.origin.y.to_le_bytes());
+            hasher.update(&tile.size.width.to_le_bytes());
+            hasher.update(&tile.size.height.to_le_bytes());
+            hasher.update(&tile.stride_bytes.to_le_bytes());
+            hasher.update(&(tile.pixels.len() as u64).to_le_bytes());
+            hasher.update(&tile.pixels);
+        }
+        let mut vector_segments = self.vector_segments.iter().collect::<Vec<_>>();
+        vector_segments.sort_unstable_by_key(|segment| {
+            (
+                segment.z_order,
+                segment.plane_id,
+                segment.path_id,
+                segment.segment_index,
+            )
+        });
+        hasher.update(&(vector_segments.len() as u64).to_le_bytes());
+        for segment in vector_segments {
+            hasher.update(&segment.path_id.to_le_bytes());
+            hasher.update(&segment.plane_id.to_le_bytes());
+            hasher.update(&segment.z_order.to_le_bytes());
+            hasher.update(&segment.segment_index.to_le_bytes());
+            hasher.update(&segment.segment_count.to_le_bytes());
+            hasher.update(&segment.color_rgba);
+            hasher.update(&[u8::from(segment.closed), u8::from(segment.stroke_visible)]);
+            for value in [
+                segment.cubic.p0.x,
+                segment.cubic.p0.y,
+                segment.cubic.p1.x,
+                segment.cubic.p1.y,
+                segment.cubic.p2.x,
+                segment.cubic.p2.y,
+                segment.cubic.p3.x,
+                segment.cubic.p3.y,
+                segment.cubic.width_start,
+                segment.cubic.width_end,
+            ] {
+                let canonical = canonical_q16_from_f32(value).ok_or(CoreError::InvalidState(
+                    "render snapshot vector geometry is outside canonical Q16",
+                ))?;
+                hasher.update(&canonical.to_le_bytes());
+            }
+        }
+        let mut vector_fills = self.vector_fills.iter().collect::<Vec<_>>();
+        vector_fills.sort_unstable_by_key(|fill| (fill.z_order, fill.plane_id, fill.fill_id));
+        hasher.update(&(vector_fills.len() as u64).to_le_bytes());
+        for fill in vector_fills {
+            hasher.update(&fill.fill_id.to_le_bytes());
+            hasher.update(&fill.plane_id.to_le_bytes());
+            hasher.update(&fill.z_order.to_le_bytes());
+            hasher.update(&fill.color_rgba);
+            hasher.update(&(fill.boundary_path_ids.len() as u64).to_le_bytes());
+            for path_id in &fill.boundary_path_ids {
+                hasher.update(&path_id.to_le_bytes());
+            }
+        }
+        Ok(CanonicalCompositeDigest(*hasher.finalize().as_bytes()))
     }
 }
 
@@ -861,52 +957,11 @@ fn compose_reference_tile(
 }
 
 pub(super) fn blend_rgba_over(background: [u8; 4], foreground: [u8; 4]) -> [u8; 4] {
-    let foreground_alpha = u32::from(foreground[3]);
-    let background_alpha = u32::from(background[3]);
-    if foreground_alpha == 0 {
-        return if background_alpha == 0 {
-            [0; 4]
-        } else {
-            background
-        };
-    }
-    if foreground_alpha == 255 || background_alpha == 0 {
-        return foreground;
-    }
-    let inverse = 255 - foreground_alpha;
-    let output_alpha = foreground_alpha + (background_alpha * inverse + 127) / 255;
-    if output_alpha == 0 {
-        return [0; 4];
-    }
-    let channel = |index: usize| -> u8 {
-        let foreground_premultiplied = u32::from(foreground[index]) * foreground_alpha;
-        let background_premultiplied = u32::from(background[index]) * background_alpha;
-        ((foreground_premultiplied
-            + (background_premultiplied * inverse + 127) / 255
-            + output_alpha / 2)
-            / output_alpha) as u8
-    };
-    [channel(0), channel(1), channel(2), output_alpha as u8]
+    source_over_rgba8(background, foreground)
 }
 
 pub(super) fn blend_rgba16_over(background: [u16; 4], foreground: [u16; 4]) -> [u16; 4] {
-    let foreground_alpha = u64::from(foreground[3]);
-    let background_alpha = u64::from(background[3]);
-    let inverse = u64::from(u16::MAX) - foreground_alpha;
-    let output_alpha =
-        foreground_alpha + (background_alpha * inverse + 32_767) / u64::from(u16::MAX);
-    if output_alpha == 0 {
-        return [0; 4];
-    }
-    let channel = |index: usize| -> u16 {
-        let foreground_premultiplied = u64::from(foreground[index]) * foreground_alpha;
-        let background_premultiplied = u64::from(background[index]) * background_alpha;
-        ((foreground_premultiplied
-            + (background_premultiplied * inverse + 32_767) / u64::from(u16::MAX)
-            + output_alpha / 2)
-            / output_alpha) as u16
-    };
-    [channel(0), channel(1), channel(2), output_alpha as u16]
+    source_over_rgba16(background, foreground)
 }
 
 pub(super) fn rgba8_for_display(value: PixelValue) -> Option<[u8; 4]> {

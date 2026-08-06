@@ -70,6 +70,7 @@ fn assert_semantically_equal(left: &mut Core, right: &mut Core) {
 fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary() {
     let mut runtime = primitive_core();
     let mut replay = primitive_core();
+    let mut boundary_digests = vec![document_digest(&runtime)];
 
     let revision = runtime.document_info().unwrap().document_revision;
     let main_line = runtime
@@ -84,7 +85,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(main_line_procedure.primitive_id().get(), 0x0003_0001);
     assert_eq!(main_line_procedure.primitive_schema_version(), 1);
-    assert_eq!(main_line_procedure.replay_epoch().get(), 5);
+    assert_eq!(main_line_procedure.replay_epoch().get(), 6);
     assert_eq!(main_line_procedure.procedure_id().get(), 1);
     assert_eq!(main_line_procedure.base_state_id().get(), 1);
     assert_eq!(main_line_procedure.committed_state_id().get(), 2);
@@ -92,6 +93,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
     assert!(main_line_procedure.canonical_payload().is_empty());
     replay.replay_procedure(&main_line_procedure).unwrap();
     assert_semantically_equal(&mut runtime, &mut replay);
+    boundary_digests.push(document_digest(&runtime));
 
     let palette_colors = vec![
         PixelValue::Rgba([2, 4, 8, 255]),
@@ -110,7 +112,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(palette_procedure.primitive_id().get(), 0x0003_0002);
     assert_eq!(palette_procedure.primitive_schema_version(), 1);
-    assert_eq!(palette_procedure.replay_epoch().get(), 5);
+    assert_eq!(palette_procedure.replay_epoch().get(), 6);
     assert_eq!(palette_procedure.procedure_id().get(), 2);
     assert_eq!(palette_procedure.base_state_id().get(), 2);
     assert_eq!(palette_procedure.committed_state_id().get(), 3);
@@ -118,6 +120,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
     assert!(palette_procedure.canonical_payload().is_empty());
     replay.replay_procedure(&palette_procedure).unwrap();
     assert_semantically_equal(&mut runtime, &mut replay);
+    boundary_digests.push(document_digest(&runtime));
 
     let document = runtime.document_info().unwrap();
     let stroke = Stroke {
@@ -154,7 +157,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(stroke_procedure.primitive_id().get(), 0x0005_0001);
     assert_eq!(stroke_procedure.primitive_schema_version(), 2);
-    assert_eq!(stroke_procedure.replay_epoch().get(), 5);
+    assert_eq!(stroke_procedure.replay_epoch().get(), 6);
     assert_eq!(stroke_procedure.procedure_id().get(), 3);
     assert_eq!(stroke_procedure.base_state_id().get(), 3);
     assert_eq!(stroke_procedure.committed_state_id().get(), 4);
@@ -162,6 +165,53 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
     assert_canonical_stroke_payload(stroke_procedure.canonical_payload());
     replay.replay_procedure(&stroke_procedure).unwrap();
     assert_semantically_equal(&mut runtime, &mut replay);
+    boundary_digests.push(document_digest(&runtime));
+
+    let contract = replay_contract();
+    let composite = runtime
+        .build_snapshot()
+        .canonical_composite_digest()
+        .unwrap()
+        .as_bytes();
+    assert_eq!(contract.replay_epoch().get(), 6);
+    assert_eq!(contract.procedure_format_version(), 8);
+    assert_eq!(contract.canonical_numeric_version(), 1);
+    assert_eq!(contract.primitive_count(), 76);
+    assert_eq!(
+        *contract.primitive_catalog_digest(),
+        [
+            206, 12, 128, 124, 106, 176, 33, 145, 4, 172, 30, 236, 84, 240, 142, 25, 164, 149, 101,
+            252, 183, 167, 178, 234, 173, 121, 76, 227, 69, 122, 249, 90
+        ]
+    );
+    assert_eq!(
+        boundary_digests,
+        vec![
+            [
+                39, 206, 71, 253, 1, 237, 237, 200, 223, 82, 178, 239, 134, 85, 176, 198, 147, 181,
+                166, 37, 222, 112, 80, 251, 212, 231, 1, 125, 243, 239, 254, 62
+            ],
+            [
+                202, 30, 76, 38, 124, 161, 237, 20, 197, 168, 4, 137, 4, 28, 15, 108, 243, 167,
+                201, 44, 160, 153, 201, 227, 115, 233, 12, 213, 159, 158, 99, 122
+            ],
+            [
+                78, 108, 34, 171, 0, 174, 215, 232, 240, 3, 118, 60, 124, 111, 78, 210, 249, 31,
+                226, 252, 57, 79, 213, 136, 55, 58, 12, 146, 232, 110, 216, 146
+            ],
+            [
+                240, 238, 217, 212, 164, 124, 100, 14, 114, 61, 76, 32, 242, 221, 180, 174, 251,
+                183, 27, 216, 90, 84, 70, 132, 179, 246, 42, 100, 28, 92, 58, 241
+            ],
+        ]
+    );
+    assert_eq!(
+        composite,
+        [
+            134, 70, 155, 35, 97, 243, 230, 161, 56, 240, 209, 106, 22, 45, 201, 54, 150, 185, 37,
+            245, 136, 64, 66, 186, 244, 96, 111, 121, 255, 0, 156, 25
+        ]
+    );
 }
 
 #[test]

@@ -60,14 +60,20 @@ public:
         view.struct_size = sizeof(view);
         InkpodSnapshotTransform transform{};
         transform.struct_size = sizeof(transform);
+        InkpodCanonicalDigest digest{};
+        digest.struct_size = sizeof(digest);
         if (inkpod_snapshot_get_view(envelope.snapshot, &view) != INKPOD_STATUS_OK
             || inkpod_snapshot_get_transform(envelope.snapshot, &transform)
-                != INKPOD_STATUS_OK) {
+                != INKPOD_STATUS_OK
+            || inkpod_snapshot_get_canonical_digest(envelope.snapshot, &digest)
+                != INKPOD_STATUS_OK
+            || digest.algorithm != INKPOD_DIGEST_BLAKE3_256) {
             inkpod_snapshot_release(&envelope.snapshot);
             return false;
         }
         last_revision.store(view.revision, std::memory_order_release);
         last_pan_x.store(transform.pan_x, std::memory_order_release);
+        last_digest_byte.store(digest.bytes[0], std::memory_order_release);
         ++submitted;
         return inkpod_snapshot_release(&envelope.snapshot) == INKPOD_STATUS_OK;
     }
@@ -75,6 +81,7 @@ public:
     std::atomic<std::uint64_t> submitted{};
     std::atomic<std::uint64_t> last_revision{};
     std::atomic<double> last_pan_x{};
+    std::atomic<std::uint8_t> last_digest_byte{};
 
 private:
     inkpod::renderer::SnapshotRoute route_{};
@@ -576,6 +583,16 @@ int wmain() {
         host.Stop();
         DestroyWindow(owner);
         return 3;
+    }
+    InkpodReplayContract replay_contract{};
+    if (host.GetReplayContract(first, generation, replay_contract) != INKPOD_STATUS_OK
+        || replay_contract.replay_epoch != 6U
+        || replay_contract.procedure_format_version != 8U
+        || replay_contract.canonical_numeric_version != 1U
+        || replay_contract.primitive_count == 0U) {
+        host.Stop();
+        DestroyWindow(owner);
+        return 34;
     }
 
     std::atomic<DWORD> first_thread{};

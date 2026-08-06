@@ -232,6 +232,25 @@ pub struct InkpodColorBuffer {
 }
 
 #[repr(C)]
+pub struct InkpodReplayContract {
+    pub struct_size: u32,
+    pub replay_epoch: u32,
+    pub procedure_format_version: u32,
+    pub canonical_numeric_version: u32,
+    pub primitive_count: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub primitive_catalog_digest: [u8; 32],
+}
+
+#[repr(C)]
+pub struct InkpodCanonicalDigest {
+    pub struct_size: u32,
+    pub algorithm: u32,
+    pub bytes: [u8; 32],
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodColorChartEntry {
     pub struct_size: u32,

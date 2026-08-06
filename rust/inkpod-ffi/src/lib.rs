@@ -50,6 +50,7 @@ use std::thread::{self, ThreadId};
 
 mod abi;
 mod animation;
+mod determinism;
 mod document_edit;
 mod editor_state;
 mod effects;
@@ -66,6 +67,7 @@ pub(crate) use abi::{
 };
 pub use animation::*;
 pub use application_data::*;
+pub use determinism::*;
 pub use document_edit::*;
 pub use editor_state::*;
 pub use effects::*;

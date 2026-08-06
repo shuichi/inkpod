@@ -624,9 +624,7 @@ fn within_tolerance(left: PixelValue, right: PixelValue, tolerance: u16) -> bool
     let (Some(left), Some(right)) = (left.rgba16(), right.rgba16()) else {
         return left == right;
     };
-    left.into_iter()
-        .zip(right)
-        .all(|(left, right)| left.abs_diff(right) <= tolerance)
+    crate::color_within_tolerance(left, right, tolerance)
 }
 
 fn virtual_gap_boundary(

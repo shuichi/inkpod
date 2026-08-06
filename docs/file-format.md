@@ -12,10 +12,10 @@ schema should be replaced whenever a more robust or efficient design is found.
 ## Procedure-authoritative successor contract
 
 This section is the approved contract for the successor procedure-authoritative
-container. It reserves top-level format version 7 and replay epoch 5, but no v7
+container. It reserves top-level format version 8 and replay epoch 6, but no v8
 reader or writer exists yet. The earlier v3/epoch-1, v4/epoch-2,
-v5/epoch-3, and v6/epoch-4 reservations were superseded before any reader or
-writer existed. Version 7 retains the hierarchical document commitment and the
+v5/epoch-3, v6/epoch-4, and v7/epoch-5 reservations were superseded before any
+reader or writer existed. Version 8 retains the hierarchical document commitment and the
 exact-depth, target-explicit `ApplyRasterStroke/v2` schema from the superseded
 v6 reservation, while document-state schema/domain 4 replaces the temporary
 Document-ID-as-Cell bridge with a distinct stable Cell ID and an explicit
@@ -27,7 +27,7 @@ revision-max cache identity. Asset and procedure-payload digest contracts remain
 version 1.
 Version 2 remains the exact current version until the format cutover is
 implemented and tested atomically; production code must not emit a partially
-implemented v7 file. Any schema or replay-semantics change
+implemented v8 file. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
 
@@ -96,7 +96,8 @@ family ranges above without renumbering the original assignments:
 `SetMainLineColor` is `0x0003_0001/v1`, `ReplacePalette` is
 `0x0003_0002/v1`, `ApplyRasterStroke` is `0x0005_0001/v2`, and
 `ImportRasterAsset` is `0x0009_0001/v1`. All other M6 typed invocation records
-currently use schema v1. `LightTableSwapWithActive` has stable ID
+use M7 canonical schema v2: document geometry is signed Q16, normalized pressure
+is `u16`, and angles are `u32` turns. `LightTableSwapWithActive` has stable ID
 `0x000A_0015`, but replaces the session Genesis and resets history rather than
 creating a `HistoryEntry`. Adding a primitive consumes a new ID.
 Changing only its canonical argument layout while preserving the exact
@@ -117,12 +118,13 @@ none of them. Revisions are never decremented or reused.
 
 The primitive catalog digest is computed over ascending entries containing
 primitive ID, schema version, canonical name, argument-schema digest, semantics
-revision, and work-formula ID. Query, view, transient, ingestion, export, and
+revision, work-formula ID, and replay-policy byte (`1` journal-replayable, `0`
+session Genesis replacement). Query, view, transient, ingestion, export, and
 application command IDs are not `PrimitiveId` values.
 
 The four procedures below retain their fully specified pre-M6 byte schemas. M6
 also stores bounded canonical bytes for every new typed invocation and retains
-that typed value as the runtime replay authority. M7 still owns the
+that typed value as the runtime replay authority. M7 closes the
 cross-architecture bit-exact audit and catalog-digest gate; M8 will specify and
 atomically connect the persistent decoder/encoder for all invocation variants.
 Production v2 does not serialize these records. M3 left the two metadata
@@ -318,10 +320,13 @@ ASCII context strings are:
 | stored section bytes | `org.inkpod.digest.section-stored.v1` |
 | logical section bytes | `org.inkpod.digest.section-logical.v1` |
 | `FileRootDigest` | `org.inkpod.digest.file-root.v1` |
-| primitive catalog | `org.inkpod.digest.primitive-catalog.v1` |
-| primitive argument schema | `org.inkpod.digest.primitive-argument-schema.v1` |
+| primitive catalog | `org.inkpod.primitive-catalog.v1` |
+| primitive argument schema | `org.inkpod.primitive-argument-schema.v1` |
+| canonical snapshot composite | `org.inkpod.digest.canonical-composite.v1` |
 
-Every digest message uses the same canonical frame shape. It starts with a
+Every document/container digest message uses the same canonical frame shape.
+The primitive catalog and canonical snapshot composite instead use their closed
+ordered streams described in their respective sections. A framed message starts with a
 digest-schema version `u32` and field count `u32`. `DocumentStateDigest`, the
 metadata commitment bytes, raster commitment bytes, and every canonical
 document-state frame nested within them use schema version 4. A raster-tile
@@ -332,6 +337,19 @@ three zero bytes, byte length `u64`, then exactly that many bytes. Presence is
 0 or 1. Absent is presence 0 plus length 0; present-empty is presence 1 plus
 length 0, so the two never collide. A required field is always present. No
 padding occurs between fields.
+
+The canonical snapshot-composite stream begins with schema `u32 = 1`, semantic
+snapshot feature flags, document width/height, then the public tile sequence in
+`(origin y, origin x, tile ID)` order. Each tile contributes ID, origin, dimensions, stride, byte count,
+and exact premultiplied BGRA8 bytes; cache/source revisions are excluded. It then
+contains the ordered public vector segments and fills. Segment point/width values
+are canonicalized to signed Q16 before hashing; fill boundary path IDs retain
+their semantic order. View revision, zoom, pan, flip, guides, grid, renderer
+resources, and OS DPI are excluded. Vector segments use
+`(z-order, plane ID, path ID, segment index)` order and fills use
+`(z-order, plane ID, fill ID)` order. `RenderSnapshot::canonical_composite_digest`
+and `inkpod_snapshot_get_canonical_digest` expose this result without a test-only
+state accessor.
 
 A sequence field is `element-count u64`, then for every element `element-length
 u64` and exact element bytes. A schema-declared ordered sequence retains its
@@ -362,15 +380,15 @@ The exact digest messages are:
 | `FileRootDigest` | 1 complete 128-byte header with only its FileRootDigest bytes zero; 2 exact directory bytes |
 | primitive catalog | 1 ordered sequence of catalog-entry frames |
 
-A primitive catalog entry frame has fields 1 `PrimitiveId u32`, 2 schema
-version `u16`, 3 canonical ASCII name, 4 32-byte argument-schema digest, 5
-semantics revision `u32`, and 6 work-formula ID `u32`. Entries are strictly
-ascending by PrimitiveId. The argument-schema digest uses the primitive-
-argument-schema context above and the universal digest frame. Its six fields
-are: 1 primitive schema version `u16`; 2 ordered argument-descriptor sequence; 3 ordered asset-role
-descriptor sequence; 4 ordered input-ID-role descriptor sequence; 5 ordered
-output-ID-role descriptor sequence; and 6 payload descriptor. Empty sequences
-are present-empty, not absent.
+A primitive catalog entry stream has fields 1 `PrimitiveId u32`, 2 schema
+version `u16`, 3 length-prefixed canonical ASCII name, 4 32-byte argument-schema
+digest, 5 semantics revision `u32`, 6 work-formula ID `u32`, and 7 replay-policy
+`u8`. Entries are strictly ascending by PrimitiveId. In the M7 build gate the
+argument-schema digest is BLAKE3 `derive_key` over the exact canonical ASCII
+label `<canonical-name>/canonical-v<schema-version>` using the primitive-
+argument-schema context above. This label identifies the closed in-memory
+schema; M8 remains responsible for specifying and connecting persistent
+argument descriptors and codecs.
 
 An argument descriptor is a schema-1 frame with fields 1 ordinal `u32`; 2
 value-kind `u16`; 3 presence policy `u8` (1 Required, 2 Optional); 4 minimum
@@ -486,8 +504,10 @@ follows:
   plane, selection, and other stable object IDs therefore obey cross-kind
   numeric-ID uniqueness without the earlier bridge exception. Introducing the
   distinct Cell identity and immutable Genesis base changes the document-state
-  bytes; schema/domain 4, replay epoch 5, and successor version 7 advance
-  together. Collections whose UI order is not semantic are ID-sorted.
+  bytes; schema/domain 4 historically advanced replay epoch 5 and successor
+  version 7 together. M7 canonical numeric semantics advance the current build
+  contract to replay epoch 6 and successor version 8 without changing this
+  state-digest schema. Collections whose UI order is not semantic are ID-sorted.
 - An adjustment frame orders kind, channel, interpolation, six signed `i32`
   parameters, and an ordered point sequence of `(input u16, output u16)`.
   Kinds 1/2/3 are BrightnessContrast, ToneCurve, and Levels; channels 0/1/2/3/4
@@ -588,7 +608,7 @@ live registry: it walks the same roots, deep-copies every unique payload in
 then rebinds Genesis and retained procedures before fresh replay. Descriptor,
 payload, identity, and duplicate-root reference counts must match, while the
 source and rebuilt `AssetRecord`, payload, and raster allocations must not share
-ownership. This runtime archive is test infrastructure, not a v7 encoder.
+ownership. This runtime archive is test infrastructure, not a v8 encoder.
 
 Self-referential digest fields are present as thirty-two zero bytes during
 calculation. The only absent-digest sentinel is paired with an explicit absent
@@ -606,18 +626,18 @@ hierarchical schema-4 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render
 caching: snapshot validation uses only the documented revision-max scalar and
 never these digests. This does not activate the successor container: `.inkpod`
-v2 remains the exact current production format and no v7 reader or writer is
+v2 remains the exact current production format and no v8 reader or writer is
 emitted by this slice.
 
 ### Header, directory, and record bytes
 
-The v7 header is exactly 128 bytes:
+The v8 header is exactly 128 bytes:
 
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic bytes `49 4E 4B 50 4F 44 00 00` |
-| 8 | 4 | top-level format version = 7 |
-| 12 | 4 | replay epoch = 5 |
+| 8 | 4 | top-level format version = 8 |
+| 12 | 4 | replay epoch = 6 |
 | 16 | 4 | header size = 128 |
 | 20 | 4 | required flags = 0 |
 | 24 | 8 | total file length |

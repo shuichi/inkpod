@@ -2629,8 +2629,9 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_COLOR_CHECK_NATIVE, 0);
     InkpodDocumentInfo during_check{};
     std::uint64_t check_features{};
+    std::uint32_t check_digest_algorithm{};
     const InkpodStatus check_snapshot_status = state.engine->Invoke(
-        [&check_features](InkpodCore* core) {
+        [&check_features, &check_digest_algorithm](InkpodCore* core) {
             const InkpodSnapshotOptions options{
                 sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
             InkpodSnapshot* snapshot{};
@@ -2644,6 +2645,12 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
             if (status == INKPOD_STATUS_OK) {
                 check_features = view.feature_flags;
             }
+            InkpodCanonicalDigest digest{};
+            digest.struct_size = sizeof(digest);
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_snapshot_get_canonical_digest(snapshot, &digest);
+                check_digest_algorithm = digest.algorithm;
+            }
             const InkpodStatus release_status = inkpod_snapshot_release(&snapshot);
             return status == INKPOD_STATUS_OK ? release_status : status;
         },
@@ -2653,6 +2660,7 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         || check_snapshot_status != INKPOD_STATUS_OK
         || check_features != (INKPOD_SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA
             | INKPOD_SNAPSHOT_FEATURE_SOLID_WHITE_BASE)
+        || check_digest_algorithm != INKPOD_DIGEST_BLAKE3_256
         || during_check.document_revision != revision_before_check
         || during_check.view_revision <= view_before_check
         || SendMessageW(state.Workspace().windows.canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {

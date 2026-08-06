@@ -181,6 +181,10 @@ public:
         DocumentSessionId session,
         Generation generation,
         InkpodDocumentInfo& info) const noexcept;
+    InkpodStatus GetReplayContract(
+        DocumentSessionId session,
+        Generation generation,
+        InkpodReplayContract& contract) noexcept;
     InkpodStatus GetEditorDefaults(
         DocumentSessionId session,
         Generation generation,

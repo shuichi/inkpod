@@ -569,6 +569,27 @@ typedef struct InkpodCoreConfig {
     uint64_t feature_flags;
 } InkpodCoreConfig;
 
+#define INKPOD_DIGEST_BLAKE3_256 UINT32_C(1)
+
+/** @brief Build-time procedure replay contract. */
+typedef struct InkpodReplayContract {
+    uint32_t struct_size;
+    uint32_t replay_epoch;
+    uint32_t procedure_format_version;
+    uint32_t canonical_numeric_version;
+    uint32_t primitive_count;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint8_t primitive_catalog_digest[32];
+} InkpodReplayContract;
+
+/** @brief Canonical architecture-independent 256-bit digest. */
+typedef struct InkpodCanonicalDigest {
+    uint32_t struct_size;
+    uint32_t algorithm;
+    uint8_t bytes[32];
+} InkpodCanonicalDigest;
+
 /** @brief dispatch batch 内の固定幅 command record。stride ごとに borrowed で読み取る。 */
 typedef struct InkpodCommand {
     uint32_t struct_size;
@@ -4283,6 +4304,30 @@ InkpodStatus inkpod_snapshot_get_overlay(
 InkpodStatus inkpod_snapshot_get_vectors(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotVectorView* out_vectors);
+
+/**
+ * @brief Copies the fixed build/replay contract on the Core owner thread.
+ * @par Contract
+ * `core` remains caller-owned. `out_contract` is caller-owned and must have
+ * exact current `struct_size`, zero `reserved`, and no unknown feature flags.
+ * Success changes no Core state; failure does not partially write the record.
+ */
+InkpodStatus inkpod_core_get_replay_contract(
+    InkpodCore* core,
+    InkpodReplayContract* out_contract);
+
+/**
+ * @brief Copies the view-independent canonical document-result digest.
+ * @par Contract
+ * The immutable snapshot remains Rust-owned and must stay live for the whole
+ * call. This query may run on any snapshot read thread, transfers no ownership,
+ * and changes no Core or snapshot state. Concurrent release is invalid.
+ * `out_digest` is caller-owned with exact current `struct_size`; failure does
+ * not partially write the record.
+ */
+InkpodStatus inkpod_snapshot_get_canonical_digest(
+    const InkpodSnapshot* snapshot,
+    InkpodCanonicalDigest* out_digest);
 
 /**
  * @brief snapshot の Rust 所有権を解放し owner 変数を NULL にする。

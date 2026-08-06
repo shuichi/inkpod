@@ -2061,6 +2061,24 @@ bool CoreHost::GetDocumentInfo(
         && impl_->CopyDocumentInfo(SessionBinding{session, generation}, info);
 }
 
+InkpodStatus CoreHost::GetReplayContract(
+    DocumentSessionId session,
+    Generation generation,
+    InkpodReplayContract& contract) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    contract = {};
+    contract.struct_size = sizeof(contract);
+    return impl_->Invoke(
+        SessionBinding{session, generation},
+        [&contract](InkpodCore* core) {
+            return inkpod_core_get_replay_contract(core, &contract);
+        },
+        false,
+        false);
+}
+
 InkpodStatus CoreHost::GetEditorDefaults(
     DocumentSessionId session,
     Generation generation,

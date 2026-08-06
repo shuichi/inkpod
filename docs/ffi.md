@@ -69,6 +69,31 @@ ABI v3 caller は generation-tagged runtime object ID を明示 release する�
 canonical asset retention は従来どおり Core 内部であり、v3 runtime object ID と persistent
 content-addressed `AssetId` は別 namespace である。
 
+## Deterministic replay contract and composite digest
+
+M7 adds two read-only, fixed-layout queries without transferring ownership:
+
+- `inkpod_core_get_replay_contract` writes a caller-owned
+  `InkpodReplayContract`. It reports replay epoch 6, reserved successor
+  procedure/container version 8, canonical-numeric version 1, the closed
+  primitive count, and the BLAKE3-256 catalog digest. It is Core-owner-thread
+  only and changes no document, revision, history, dirty state, registry, or
+  snapshot.
+- `inkpod_snapshot_get_canonical_digest` writes a caller-owned
+  `InkpodCanonicalDigest` for an immutable snapshot. It may be called on any
+  thread that is permitted to read that snapshot. The caller must keep the
+  snapshot alive for the complete call; concurrent access and release of the
+  same snapshot are invalid. The query does not release or retain the
+  snapshot.
+
+Both outputs require their exact current `struct_size`, zero `reserved` fields,
+and no unknown feature flags. `algorithm` is
+`INKPOD_DIGEST_BLAKE3_256`; all 32 digest bytes are copied into the caller's
+record. NULL, short records, unknown flags, wrong thread, and panic follow the
+normal ABI status contract and do not partially write the output record. These
+queries expose verification values only: they do not add a v8 production
+reader or writer, and production `.inkpod` remains exact-current v2 until M8.
+
 ## ABI v3 value/ID control plane
 
 `InkpodObjectId` は `object_type + Core generation + monotonic value` からなる固定幅 record である。

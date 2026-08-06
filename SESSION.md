@@ -2,7 +2,7 @@
 
 更新日: 2026-08-06
 
-状態: M0–M6 完了、M7–M9 未完。全production document mutationのcanonical primitive化、ABI v3、typed CoreHost queue、旧 revision-max 判定式の正本化、環境別性能ゲートは反映済み
+状態: M0–M7 完了、M8–M9 未完。全production document mutationのcanonical primitive化、ABI v3、typed CoreHost queue、cross-architecture replay gate、旧 revision-max 判定式の正本化、環境別性能ゲートは反映済み
 
 ## 1. 目的
 
@@ -711,6 +711,30 @@ Revision-max render-cache invariant:
 - 対応architectureのgolden replayがbit-exact。
 - 未監査の画像結果依存floating/transcendental pathが0。
 - primitive semantics変更時にepoch/versionを上げない変更をCI guardが拒否する。
+
+完了記録 (2026-08-06):
+
+- `inkpod-image::canonical`をfixed numeric authorityとし、IEEE-754からQ16/u16/turnsへの
+  exact変換、ties-to-even、integer sqrt、CORDIC、alpha/premultiplication、color distance、
+  fixed log2/exp2を集約した。Gaussian、Levels、gradient、airbrush/stamp、Light Table、
+  floating selection、ABI angle constraintの画像結果依存transcendental pathをinteger/fixed
+  algorithmへ置換し、Core/image/FFI production sourceの再導入guardを追加した。
+- 全production typed invocationをcanonical schemaへ正規化し、76-entry closed primitive
+  catalog、catalog digest、canonical-numeric version 1、replay epoch 6、reserved successor
+  version 8を一つのbuild contractとして公開した。production `.inkpod`はexact-current v2の
+  ままで、v8 reader/writerとpersistent invocation codecは実装していない。
+- public contract fixtureはGenesisと5 procedure後の全6 state digest、各境界のfresh replay、
+  最終immutable snapshot composite digestを固定した。同じgoldenはnative Windows ARM64と
+  `x86_64-pc-windows-msvc`でbit-exactに通過し、Linux/macOS CI matrixも同一testを実行する。
+- C ABIは207 exportとなり、caller-owned replay contractとsnapshot digest queryを追加した。
+  `CoreHost`、ABI smoke、GUI smoke、renderer sinkで実製品のCore/Windows経路へ接続した。
+- Rustは321 testsと1 doctest、zero ignored、fmt、all-target/all-feature Clippy `-D warnings`、
+  strict rustdoc、8-scenario quick benchmarkを通過した。Core quick/fullはwarm-up後各5回で、
+  pan/dirty中央値が`0.877375/1.930792 ms`と`13.382959/9.206375 ms`、canonical replayが
+  `1.091042/1.391250 ms`となり、既存rangeと全semantic gateを変更せず満たした。
+- Windows ARM64 Debug/Releaseのfresh configure/buildと最終relink、static CRT、portable ZIP、
+  unsigned MSIXを通過した。最終Debug CTestは28/28（ABI 27.21秒、GUI 177.70秒、全体
+  212.90秒）、Release private performance smokeはexit 0、`git diff --check`も通過した。
 
 ### M8: 次期 `.inkpod` Format Cutover
 

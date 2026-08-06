@@ -84,10 +84,11 @@ pub use journal::{
     JournalHistoryMove, JournalReplayInfo, JournalState,
 };
 pub use primitive::{
-    CanonicalProcedure, DocumentStateDigest, PrimitiveId, PrimitiveOutcome, PrimitiveRequest,
-    ProcedureId, ReplayEpoch, StateId,
+    CANONICAL_NUMERIC_VERSION, CanonicalProcedure, DocumentStateDigest, PROCEDURE_FORMAT_VERSION,
+    PrimitiveId, PrimitiveOutcome, PrimitiveRequest, ProcedureId, ReplayContract, ReplayEpoch,
+    StateId, replay_contract,
 };
-pub use snapshot::{RenderSnapshot, RenderTile};
+pub use snapshot::{CanonicalCompositeDigest, RenderSnapshot, RenderTile};
 pub use vector::{
     RenderVectorFill, RenderVectorSegment, VectorCubicSegment, VectorEraseMode, VectorFillInfo,
     VectorPathInfo, VectorPathInput, VectorRaster, VectorSelectionMode, VectorSelectionRange,

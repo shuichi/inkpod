@@ -133,23 +133,7 @@ fn sample_plane_display(
 fn blend_over(background: PixelValue, foreground: PixelValue) -> PixelValue {
     let background16 = background.rgba16().expect("validated RGBA background");
     let foreground16 = foreground.rgba16().expect("validated RGBA foreground");
-    let foreground_alpha = u64::from(foreground16[3]);
-    let inverse = u64::from(u16::MAX) - foreground_alpha;
-    let background_alpha = u64::from(background16[3]);
-    let output_alpha = foreground_alpha + (background_alpha * inverse + 32_767) / 65_535;
-    let mut output = [0_u16; 4];
-    output[3] = output_alpha as u16;
-    if output_alpha != 0 {
-        for channel in 0..3 {
-            let foreground_premultiplied = u64::from(foreground16[channel]) * foreground_alpha;
-            let background_premultiplied = u64::from(background16[channel]) * background_alpha;
-            let numerator =
-                foreground_premultiplied + (background_premultiplied * inverse + 32_767) / 65_535;
-            output[channel] = (numerator + output_alpha / 2)
-                .checked_div(output_alpha)
-                .unwrap_or(0) as u16;
-        }
-    }
+    let output = crate::source_over_rgba16(background16, foreground16);
     if matches!(background, PixelValue::Rgba(_)) && matches!(foreground, PixelValue::Rgba(_)) {
         PixelValue::Rgba(output.map(|channel| ((u32::from(channel) + 128) / 257) as u8))
     } else {
