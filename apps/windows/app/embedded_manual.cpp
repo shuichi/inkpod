@@ -19,9 +19,34 @@
 namespace inkpod::app {
 namespace {
 
-constexpr DWORD kMaximumManualBytes = 8U * 1024U * 1024U;
+constexpr DWORD kMaximumHelpDocumentBytes = 8U * 1024U * 1024U;
 constexpr std::size_t kMaximumPathCharacters = 32700U;
 constexpr DWORD kComparisonBufferBytes = 64U * 1024U;
+
+struct EmbeddedHelpDocumentSpec {
+    UINT resource_id;
+    const wchar_t* file_name;
+};
+
+const EmbeddedHelpDocumentSpec* DocumentSpec(
+    EmbeddedHelpDocument document) noexcept {
+    static constexpr EmbeddedHelpDocumentSpec kManual{
+        IDR_MANUAL_HTML,
+        L"manual.html",
+    };
+    static constexpr EmbeddedHelpDocumentSpec kFileFormat{
+        IDR_FILE_FORMAT_HTML,
+        L"file_format.html",
+    };
+    switch (document) {
+        case EmbeddedHelpDocument::Manual:
+            return &kManual;
+        case EmbeddedHelpDocument::FileFormat:
+            return &kFileFormat;
+        default:
+            return nullptr;
+    }
+}
 
 bool EnsureDirectory(const std::wstring& path) noexcept {
     if (path.empty()) {
@@ -51,12 +76,14 @@ bool AppendPathComponent(
     return path.size() <= kMaximumPathCharacters;
 }
 
-bool BuildManualPath(
+bool BuildHelpDocumentPath(
     const std::wstring& local_app_data_root,
+    const wchar_t* file_name,
     std::wstring& output_path) {
     if (local_app_data_root.empty()
         || local_app_data_root.size() > kMaximumPathCharacters
-        || local_app_data_root.find(L'\0') != std::wstring::npos) {
+        || local_app_data_root.find(L'\0') != std::wstring::npos
+        || file_name == nullptr || file_name[0] == L'\0') {
         return false;
     }
     std::wstring path = local_app_data_root;
@@ -67,7 +94,7 @@ bool BuildManualPath(
         || !EnsureDirectory(path)
         || !AppendPathComponent(path, INKPOD_FILE_VERSION_STRING_WIDE)
         || !EnsureDirectory(path)
-        || !AppendPathComponent(path, L"manual.html")) {
+        || !AppendPathComponent(path, file_name)) {
         return false;
     }
     output_path = std::move(path);
@@ -172,53 +199,57 @@ bool WriteFileAtomic(
 
 }  // namespace
 
-EmbeddedManualStatus ExtractEmbeddedManual(
+EmbeddedHelpStatus ExtractEmbeddedHelpDocument(
     HINSTANCE instance,
     const std::wstring& local_app_data_root,
+    EmbeddedHelpDocument document,
     std::wstring& output_path) noexcept {
     output_path.clear();
-    if (instance == nullptr || local_app_data_root.empty()) {
-        return EmbeddedManualStatus::InvalidArgument;
+    const EmbeddedHelpDocumentSpec* spec = DocumentSpec(document);
+    if (instance == nullptr || local_app_data_root.empty() || spec == nullptr) {
+        return EmbeddedHelpStatus::InvalidArgument;
     }
 
     const HRSRC resource = FindResourceW(
         instance,
-        MAKEINTRESOURCEW(IDR_MANUAL_HTML),
+        MAKEINTRESOURCEW(spec->resource_id),
         RT_RCDATA);
     if (resource == nullptr) {
-        return EmbeddedManualStatus::ResourceUnavailable;
+        return EmbeddedHelpStatus::ResourceUnavailable;
     }
     const HGLOBAL loaded = LoadResource(instance, resource);
     const DWORD byte_count = SizeofResource(instance, resource);
     const void* locked = loaded == nullptr ? nullptr : LockResource(loaded);
     if (loaded == nullptr || locked == nullptr || byte_count == 0U
-        || byte_count > kMaximumManualBytes) {
-        return EmbeddedManualStatus::ResourceUnavailable;
+        || byte_count > kMaximumHelpDocumentBytes) {
+        return EmbeddedHelpStatus::ResourceUnavailable;
     }
     const auto* bytes = static_cast<const std::byte*>(locked);
 
     try {
-        std::wstring manual_path;
-        if (!BuildManualPath(local_app_data_root, manual_path)) {
-            return EmbeddedManualStatus::CacheDirectoryUnavailable;
+        std::wstring document_path;
+        if (!BuildHelpDocumentPath(
+                local_app_data_root, spec->file_name, document_path)) {
+            return EmbeddedHelpStatus::CacheDirectoryUnavailable;
         }
-        if (!FileMatchesBytes(manual_path, bytes, byte_count)
-            && !WriteFileAtomic(manual_path, bytes, byte_count)) {
-            return EmbeddedManualStatus::WriteFailed;
+        if (!FileMatchesBytes(document_path, bytes, byte_count)
+            && !WriteFileAtomic(document_path, bytes, byte_count)) {
+            return EmbeddedHelpStatus::WriteFailed;
         }
-        output_path = std::move(manual_path);
-        return EmbeddedManualStatus::Ok;
+        output_path = std::move(document_path);
+        return EmbeddedHelpStatus::Ok;
     } catch (const std::bad_alloc&) {
-        return EmbeddedManualStatus::CacheDirectoryUnavailable;
+        return EmbeddedHelpStatus::CacheDirectoryUnavailable;
     }
 }
 
-EmbeddedManualStatus PrepareEmbeddedManual(
+EmbeddedHelpStatus PrepareEmbeddedHelpDocument(
     HINSTANCE instance,
+    EmbeddedHelpDocument document,
     std::wstring& output_path) noexcept {
     output_path.clear();
-    if (instance == nullptr) {
-        return EmbeddedManualStatus::InvalidArgument;
+    if (instance == nullptr || DocumentSpec(document) == nullptr) {
+        return EmbeddedHelpStatus::InvalidArgument;
     }
 
     PWSTR local_app_data{};
@@ -228,24 +259,26 @@ EmbeddedManualStatus PrepareEmbeddedManual(
             nullptr,
             &local_app_data))
         || local_app_data == nullptr) {
-        return EmbeddedManualStatus::CacheDirectoryUnavailable;
+        return EmbeddedHelpStatus::CacheDirectoryUnavailable;
     }
     try {
         const std::wstring root(local_app_data);
         CoTaskMemFree(local_app_data);
-        return ExtractEmbeddedManual(instance, root, output_path);
+        return ExtractEmbeddedHelpDocument(instance, root, document, output_path);
     } catch (const std::bad_alloc&) {
         CoTaskMemFree(local_app_data);
-        return EmbeddedManualStatus::CacheDirectoryUnavailable;
+        return EmbeddedHelpStatus::CacheDirectoryUnavailable;
     }
 }
 
-EmbeddedManualStatus OpenEmbeddedManual(
+EmbeddedHelpStatus OpenEmbeddedHelpDocument(
     HINSTANCE instance,
-    HWND owner) noexcept {
+    HWND owner,
+    EmbeddedHelpDocument document) noexcept {
     std::wstring path;
-    const EmbeddedManualStatus prepared = PrepareEmbeddedManual(instance, path);
-    if (prepared != EmbeddedManualStatus::Ok) {
+    const EmbeddedHelpStatus prepared =
+        PrepareEmbeddedHelpDocument(instance, document, path);
+    if (prepared != EmbeddedHelpStatus::Ok) {
         return prepared;
     }
     const HINSTANCE launched = ShellExecuteW(
@@ -256,8 +289,8 @@ EmbeddedManualStatus OpenEmbeddedManual(
         nullptr,
         SW_SHOWNORMAL);
     return reinterpret_cast<INT_PTR>(launched) > 32
-        ? EmbeddedManualStatus::Ok
-        : EmbeddedManualStatus::LaunchFailed;
+        ? EmbeddedHelpStatus::Ok
+        : EmbeddedHelpStatus::LaunchFailed;
 }
 
 }  // namespace inkpod::app

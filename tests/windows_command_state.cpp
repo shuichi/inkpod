@@ -176,6 +176,7 @@ int main() {
     if (!CatalogHasExactlyOneOwner(states)
         || !ShortcutCatalogIsCompleteAndPrefixFree()
         || FindCommandState(states, IDM_HELP_MANUAL) == nullptr
+        || FindCommandState(states, IDM_HELP_FILE_FORMAT) == nullptr
         || FindCommandState(states, IDM_HELP_ABOUT) == nullptr
         || IsCommandEnabled(states, IDM_FILE_SAVE)
         || IsCommandEnabled(states, IDM_VIEW_FIT)

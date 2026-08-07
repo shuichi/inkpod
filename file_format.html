@@ -1,0 +1,1697 @@
+<!doctype html>
+<html lang="ja" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="現行 .inkpod v9 ファイルフォーマットの人間向け技術解説">
+  <title>.inkpod ファイルフォーマット — v9</title>
+  <style>
+    :root {
+      --paper: #f4f0e8;
+      --surface: #fffdf8;
+      --surface-2: #ece6da;
+      --ink: #172321;
+      --muted: #596461;
+      --line: #d5cec0;
+      --strong-line: #aaa396;
+      --accent: #087f72;
+      --accent-ink: #055b53;
+      --accent-soft: #d9eee9;
+      --warm: #bc4b2c;
+      --warm-soft: #f6e1d7;
+      --code: #e9e3d8;
+      --shadow: 0 18px 45px rgba(36, 47, 43, .09);
+      --radius: 18px;
+      --sidebar: 278px;
+      --content: 1040px;
+    }
+
+    html[data-theme="dark"] {
+      --paper: #111816;
+      --surface: #18211f;
+      --surface-2: #202b28;
+      --ink: #eff5f1;
+      --muted: #aebbb6;
+      --line: #35423e;
+      --strong-line: #52615c;
+      --accent: #54c7b7;
+      --accent-ink: #89dfd1;
+      --accent-soft: #173f39;
+      --warm: #ef8b67;
+      --warm-soft: #472a21;
+      --code: #25312e;
+      --shadow: 0 18px 45px rgba(0, 0, 0, .2);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Yu Gothic UI", "Hiragino Sans", "Meiryo", system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.75;
+      text-rendering: optimizeLegibility;
+    }
+
+    a { color: var(--accent-ink); text-underline-offset: .18em; }
+    a:hover { text-decoration-thickness: 2px; }
+    button, input { font: inherit; }
+    code, kbd, .mono {
+      font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    code {
+      padding: .12em .38em;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--code);
+      font-size: .9em;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 100;
+      transform: translateY(-150%);
+      padding: 8px 12px;
+      border-radius: 8px;
+      background: var(--ink);
+      color: var(--surface);
+    }
+    .skip-link:focus { transform: none; }
+
+    .reading-progress {
+      position: fixed;
+      inset: 0 auto auto 0;
+      z-index: 60;
+      width: 0;
+      height: 3px;
+      background: var(--accent);
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 64px;
+      padding: 10px clamp(18px, 4vw, 56px);
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+      background: color-mix(in srgb, var(--paper) 90%, transparent);
+      backdrop-filter: blur(16px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 800;
+      letter-spacing: -.02em;
+    }
+    .brand-mark {
+      width: 24px;
+      height: 24px;
+      border: 6px solid var(--accent);
+      border-radius: 50% 50% 50% 8px;
+      transform: rotate(-12deg);
+    }
+    .top-actions { display: flex; gap: 8px; }
+    .icon-button {
+      min-width: 42px;
+      min-height: 42px;
+      padding: 6px 11px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .icon-button:hover { border-color: var(--accent); }
+
+    .hero {
+      width: min(100% - 36px, calc(var(--sidebar) + var(--content) + 56px));
+      margin: 0 auto;
+      padding: clamp(58px, 9vw, 116px) 0 clamp(48px, 7vw, 84px);
+    }
+    .eyebrow {
+      margin: 0 0 18px;
+      color: var(--accent-ink);
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    h1 {
+      max-width: 950px;
+      margin: 0;
+      font-size: clamp(2.55rem, 7.8vw, 6.9rem);
+      font-weight: 850;
+      letter-spacing: -.065em;
+      line-height: .92;
+    }
+    h1 .dot { color: var(--accent); }
+    .lead {
+      max-width: 780px;
+      margin: 28px 0 0;
+      color: var(--muted);
+      font-size: clamp(1.08rem, 2.1vw, 1.35rem);
+      line-height: 1.75;
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 18px;
+      margin-top: 44px;
+    }
+    .verdict {
+      position: relative;
+      overflow: hidden;
+      padding: 26px 28px;
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      background: var(--accent-soft);
+    }
+    .verdict::after {
+      content: "09";
+      position: absolute;
+      right: 18px;
+      bottom: -25px;
+      color: color-mix(in srgb, var(--accent) 22%, transparent);
+      font: 900 8rem/1 "Cascadia Mono", monospace;
+    }
+    .verdict strong { display: block; margin-bottom: 6px; font-size: 1.12rem; }
+    .verdict p { position: relative; z-index: 1; max-width: 650px; margin: 0; }
+    .spec-strip {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--line);
+    }
+    .spec-strip div { padding: 16px; background: var(--surface); }
+    .spec-strip dt { color: var(--muted); font-size: .74rem; font-weight: 700; letter-spacing: .08em; }
+    .spec-strip dd { margin: 1px 0 0; font: 750 1rem/1.5 "Cascadia Mono", monospace; }
+
+    .shell {
+      display: grid;
+      grid-template-columns: var(--sidebar) minmax(0, var(--content));
+      gap: 56px;
+      width: min(100% - 36px, calc(var(--sidebar) + var(--content) + 56px));
+      margin: 0 auto 100px;
+      align-items: start;
+    }
+    .sidebar {
+      position: sticky;
+      top: 86px;
+      max-height: calc(100vh - 106px);
+      overflow: auto;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--surface) 93%, transparent);
+      box-shadow: var(--shadow);
+    }
+    .sidebar-title { margin: 0 0 8px 10px; color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .12em; }
+    .sidebar nav { display: grid; gap: 3px; }
+    .sidebar a {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      padding: 8px 10px;
+      border-radius: 8px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: .88rem;
+      line-height: 1.35;
+    }
+    .sidebar a span { color: var(--strong-line); font: 650 .73rem/1 "Cascadia Mono", monospace; }
+    .sidebar a:hover, .sidebar a[aria-current="true"] { background: var(--accent-soft); color: var(--accent-ink); }
+    .sidebar a[aria-current="true"] span { color: var(--accent); }
+
+    main { min-width: 0; }
+    .doc-section {
+      margin-bottom: 72px;
+      padding-top: 8px;
+    }
+    .section-kicker {
+      display: inline-block;
+      margin-bottom: 8px;
+      color: var(--warm);
+      font: 750 .78rem/1.5 "Cascadia Mono", monospace;
+    }
+    h2 {
+      margin: 0 0 24px;
+      font-size: clamp(1.75rem, 4vw, 3rem);
+      letter-spacing: -.045em;
+      line-height: 1.15;
+    }
+    h3 { margin: 30px 0 10px; font-size: 1.14rem; letter-spacing: -.015em; }
+    p { margin: 0 0 1em; }
+    .intro { max-width: 800px; color: var(--muted); font-size: 1.05rem; }
+
+    .callout {
+      margin: 24px 0;
+      padding: 18px 20px;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      border-radius: 0 12px 12px 0;
+    }
+    .callout.warning { border-color: var(--warm); background: var(--warm-soft); }
+    .callout > :last-child { margin-bottom: 0; }
+
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 24px 0; }
+    .card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+    }
+    .card-number { color: var(--accent); font: 800 .78rem/1 "Cascadia Mono", monospace; }
+    .card h3 { margin: 12px 0 8px; }
+    .card p { margin: 0; color: var(--muted); font-size: .93rem; }
+
+    .authority-map {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 72px minmax(0, .85fr);
+      gap: 16px;
+      align-items: stretch;
+      margin: 30px 0;
+    }
+    .section-stack { display: grid; gap: 9px; }
+    .data-node {
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      gap: 12px;
+      padding: 13px 15px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface);
+    }
+    .data-node.optional { border-style: dashed; }
+    .fourcc { color: var(--accent-ink); font: 850 .85rem/1.6 "Cascadia Mono", monospace; }
+    .data-node small { color: var(--muted); line-height: 1.45; }
+    .map-arrow { display: grid; place-items: center; color: var(--accent); font-size: 2.1rem; }
+    .result-node {
+      display: grid;
+      place-content: center;
+      min-height: 210px;
+      padding: 26px;
+      border: 2px solid var(--accent);
+      border-radius: var(--radius);
+      background: var(--accent-soft);
+      text-align: center;
+    }
+    .result-node strong { display: block; font-size: 1.22rem; }
+    .result-node small { display: block; margin-top: 7px; color: var(--muted); }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin: 22px 0;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); background: var(--surface-2); font-size: .77rem; letter-spacing: .04em; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    td:first-child { font-weight: 700; }
+
+    .flow { counter-reset: flow; display: grid; gap: 0; margin: 24px 0; }
+    .flow-step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr);
+      gap: 14px;
+      padding: 4px 0 24px;
+    }
+    .flow-step::before {
+      counter-increment: flow;
+      content: counter(flow, decimal-leading-zero);
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--accent);
+      border-radius: 50%;
+      background: var(--surface);
+      color: var(--accent-ink);
+      font: 750 .76rem/1 "Cascadia Mono", monospace;
+    }
+    .flow-step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 42px;
+      bottom: 3px;
+      left: 18px;
+      width: 1px;
+      background: var(--line);
+    }
+    .flow-step strong { display: block; margin: 3px 0 2px; }
+    .flow-step p { margin: 0; color: var(--muted); font-size: .93rem; }
+
+    .record-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 22px 0; }
+    .record {
+      padding: 18px;
+      border-top: 4px solid var(--accent);
+      border-radius: 8px 8px 13px 13px;
+      background: var(--surface);
+      box-shadow: 0 8px 22px rgba(36, 47, 43, .06);
+    }
+    .record h3 { margin: 0 0 8px; font-family: "Cascadia Mono", monospace; font-size: 1rem; }
+    .record p { margin: 0; color: var(--muted); font-size: .9rem; }
+
+    .catalog-summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin: 24px 0;
+    }
+    .catalog-stat {
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .catalog-stat span { display: block; color: var(--muted); font-size: .72rem; font-weight: 750; letter-spacing: .06em; }
+    .catalog-stat strong { display: block; margin-top: 3px; color: var(--accent-ink); font: 800 1.22rem/1.35 "Cascadia Mono", monospace; }
+    .catalog-toolbar {
+      position: sticky;
+      top: 74px;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      align-items: center;
+      margin: 24px 0 14px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: color-mix(in srgb, var(--surface) 94%, transparent);
+      box-shadow: 0 10px 26px rgba(36, 47, 43, .08);
+      backdrop-filter: blur(12px);
+    }
+    .catalog-toolbar input {
+      width: 100%;
+      min-height: 42px;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      outline: none;
+      background: var(--paper);
+      color: var(--ink);
+    }
+    .catalog-toolbar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .catalog-count { min-width: 64px; color: var(--muted); text-align: center; font: 700 .78rem/1.4 "Cascadia Mono", monospace; }
+    .catalog-clear {
+      min-height: 42px;
+      padding: 7px 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface-2);
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .catalog-clear:hover { border-color: var(--accent); }
+    .primitive-family { scroll-margin-top: 132px; }
+    .primitive-family > summary {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .primitive-family > summary::after { margin-left: auto; }
+    .family-code { color: var(--accent-ink); font: 800 .75rem/1.4 "Cascadia Mono", monospace; }
+    .family-count { color: var(--muted); font: 650 .72rem/1.4 "Cascadia Mono", monospace; }
+    .primitive-table { min-width: 850px; }
+    .primitive-table th:nth-child(1), .primitive-table td:nth-child(1) { width: 126px; }
+    .primitive-table th:nth-child(2), .primitive-table td:nth-child(2) { width: 238px; }
+    .primitive-table th:nth-child(4), .primitive-table td:nth-child(4),
+    .primitive-table th:nth-child(5), .primitive-table td:nth-child(5) { width: 78px; text-align: center; }
+    .primitive-table th:nth-child(6), .primitive-table td:nth-child(6) { width: 108px; }
+    .primitive-table th:nth-child(7), .primitive-table td:nth-child(7) { width: 100px; }
+    .primitive-table td:nth-child(2) { color: var(--accent-ink); font: 700 .8rem/1.55 "Cascadia Mono", monospace; overflow-wrap: anywhere; }
+    .primitive-table td:nth-child(3) { color: var(--muted); }
+    .primitive-id { white-space: nowrap; font: 700 .76rem/1.5 "Cascadia Mono", monospace; }
+    .policy-badge {
+      display: inline-block;
+      padding: 3px 7px;
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      color: var(--accent-ink);
+      background: var(--accent-soft);
+      font: 700 .68rem/1.3 "Cascadia Mono", monospace;
+      white-space: nowrap;
+    }
+    .policy-badge.session { border-color: var(--warm); color: var(--warm); background: var(--warm-soft); }
+    .primitive-table tr[hidden], .primitive-family[hidden] { display: none; }
+
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 22px 0; }
+    .compare-panel { padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    .compare-panel.good { border-top: 5px solid var(--accent); }
+    .compare-panel.neutral { border-top: 5px solid var(--strong-line); }
+    .compare-panel h3 { margin: 0 0 12px; }
+    .clean-list { margin: 0; padding-left: 1.2em; }
+    .clean-list li { margin: .38em 0; }
+    .clean-list li::marker { color: var(--accent); }
+
+    details {
+      margin: 18px 0;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+    }
+    summary {
+      padding: 16px 18px;
+      cursor: pointer;
+      font-weight: 750;
+      list-style: none;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; float: right; color: var(--accent); font: 700 1.2rem/1 monospace; }
+    details[open] summary::after { content: "−"; }
+    .details-body { padding: 0 18px 18px; }
+
+    .byte-layout { display: grid; gap: 7px; margin: 20px 0; }
+    .byte-row { display: grid; grid-template-columns: 100px 70px 1fr; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+    .byte-row > span { padding: 9px 11px; border-right: 1px solid var(--line); }
+    .byte-row > span:last-child { border-right: 0; }
+    .byte-row .offset, .byte-row .size { background: var(--surface-2); color: var(--muted); font: .78rem/1.7 "Cascadia Mono", monospace; }
+
+    .layout-figure {
+      margin: 26px 0;
+      padding: clamp(16px, 3vw, 26px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .figure-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    .figure-head h3 { margin: 0; font-size: 1rem; }
+    .figure-head p { margin: 3px 0 0; color: var(--muted); font-size: .86rem; }
+    .scale-note {
+      flex: 0 0 auto;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font: 700 .68rem/1.4 "Cascadia Mono", monospace;
+      letter-spacing: .05em;
+      white-space: nowrap;
+    }
+    .file-map { display: grid; gap: 5px; }
+    .file-map-row {
+      display: grid;
+      grid-template-columns: minmax(112px, .42fr) minmax(0, 1fr) minmax(116px, .45fr);
+      align-items: stretch;
+      min-height: 58px;
+    }
+    .file-offset,
+    .file-formula {
+      display: flex;
+      align-items: center;
+      padding: 10px 12px;
+      color: var(--muted);
+      font: .73rem/1.5 "Cascadia Mono", monospace;
+    }
+    .file-offset { justify-content: flex-end; text-align: right; }
+    .file-formula { justify-content: flex-start; }
+    .file-region {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      min-width: 0;
+      padding: 12px 15px;
+      border: 1px solid var(--strong-line);
+      border-radius: 10px;
+      background: var(--surface-2);
+    }
+    .file-region strong { font: 800 .88rem/1.4 "Cascadia Mono", monospace; }
+    .file-region small { color: var(--muted); text-align: right; line-height: 1.4; }
+    .file-region.header-region { border-color: var(--warm); background: var(--warm-soft); }
+    .file-region.section-region { border-color: var(--accent); background: var(--accent-soft); }
+    .file-region.directory-region { border: 2px solid var(--accent); background: var(--surface); }
+    .file-region.padding-region {
+      min-height: 34px;
+      border-style: dashed;
+      color: var(--muted);
+      background: transparent;
+    }
+    .file-map-row.compact { min-height: 34px; }
+    .file-map-row.ellipsis { min-height: 26px; }
+    .file-map-row.ellipsis .file-region {
+      justify-content: center;
+      min-height: 26px;
+      padding-block: 2px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      letter-spacing: .22em;
+    }
+    .layout-caption { margin: 14px 0 0; color: var(--muted); font-size: .83rem; }
+
+    .byte-ruler-scroll {
+      overflow-x: auto;
+      padding: 3px 0 12px;
+      scrollbar-color: var(--strong-line) transparent;
+    }
+    .byte-ruler {
+      display: grid;
+      grid-auto-flow: row;
+      gap: 3px;
+      min-width: 920px;
+      padding-top: 23px;
+    }
+    .byte-ruler.units-4 { grid-template-columns: repeat(32, minmax(22px, 1fr)); }
+    .byte-ruler.units-2 { grid-template-columns: repeat(64, minmax(14px, 1fr)); }
+    .byte-ruler.record-units { min-width: 600px; grid-template-columns: repeat(8, minmax(54px, 1fr)); }
+    .byte-block {
+      position: relative;
+      display: flex;
+      min-height: 72px;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+      min-width: 0;
+      padding: 9px 8px;
+      border: 1px solid var(--strong-line);
+      border-radius: 8px;
+      background: var(--surface-2);
+      overflow: visible;
+      text-align: center;
+    }
+    .byte-block::before {
+      content: attr(data-offset);
+      position: absolute;
+      top: -21px;
+      left: -1px;
+      color: var(--muted);
+      font: .66rem/1 "Cascadia Mono", monospace;
+    }
+    .byte-block strong { font: 750 .72rem/1.2 "Cascadia Mono", monospace; overflow-wrap: anywhere; }
+    .byte-block small { color: var(--muted); font: .65rem/1.25 "Cascadia Mono", monospace; }
+    .byte-block.identity { border-color: var(--warm); background: var(--warm-soft); }
+    .byte-block.location { border-color: var(--accent); background: var(--accent-soft); }
+    .byte-block.digest { border: 2px solid var(--accent); background: var(--surface); }
+    .byte-block.reserved { border-style: dashed; color: var(--muted); background: transparent; }
+    .byte-block.payload { border-color: var(--accent); background: var(--accent-soft); }
+    .span-1 { grid-column: span 1; }
+    .span-2 { grid-column: span 2; }
+    .span-4 { grid-column: span 4; }
+    .span-8 { grid-column: span 8; }
+    .span-16 { grid-column: span 16; }
+    .byte-ruler-end {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: space-between;
+      margin-top: 2px;
+      color: var(--muted);
+      font: .66rem/1.4 "Cascadia Mono", monospace;
+    }
+
+    .record-stream {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr) 40px 90px;
+      align-items: stretch;
+      gap: 8px;
+      margin: 18px 0;
+    }
+    .record-unit {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+      border: 1px solid var(--accent);
+      border-radius: 11px;
+    }
+    .record-unit strong { padding: 8px 11px; background: var(--accent-soft); font: 750 .76rem/1.4 "Cascadia Mono", monospace; }
+    .record-unit span { display: grid; place-items: center; min-height: 58px; padding: 10px; color: var(--muted); text-align: center; font-size: .8rem; }
+    .stream-join { display: grid; place-items: center; color: var(--accent); font: 800 1rem/1 monospace; }
+    .stream-more { display: grid; place-items: center; color: var(--muted); letter-spacing: .15em; }
+
+    .formula-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0; }
+    .formula-box { padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+    .formula-box span { display: block; color: var(--muted); font-size: .72rem; font-weight: 700; letter-spacing: .05em; }
+    .formula-box code { display: inline-block; margin-top: 5px; font-size: .82rem; }
+
+    .digest-chain {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr) 34px minmax(0, 1fr);
+      align-items: stretch;
+      gap: 8px;
+      margin: 18px 0 6px;
+    }
+    .digest-node { display: grid; place-content: center; min-height: 84px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); text-align: center; }
+    .digest-node strong { font-size: .82rem; }
+    .digest-node small { margin-top: 3px; color: var(--muted); line-height: 1.35; }
+    .digest-node.final { border: 2px solid var(--accent); background: var(--accent-soft); }
+    .digest-arrow { display: grid; place-items: center; color: var(--accent); }
+
+    .checklist { display: grid; gap: 10px; margin: 22px 0; }
+    .check-item {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 12px;
+      padding: 15px 17px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .check-mark {
+      display: grid;
+      place-items: center;
+      width: 25px;
+      height: 25px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--surface);
+      font-weight: 900;
+      line-height: 1;
+    }
+    .check-item strong { display: block; }
+    .check-item p { margin: 2px 0 0; color: var(--muted); font-size: .91rem; }
+
+    .source-list { display: grid; gap: 8px; padding: 0; list-style: none; }
+    .source-list a { display: inline-block; font-family: "Cascadia Mono", monospace; font-size: .9rem; }
+
+    footer {
+      padding: 34px 18px 48px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      text-align: center;
+      font-size: .84rem;
+    }
+
+    @media (max-width: 1050px) {
+      .shell { grid-template-columns: 1fr; gap: 24px; }
+      .sidebar { position: relative; top: 0; max-height: none; }
+      .sidebar nav { grid-template-columns: repeat(3, 1fr); }
+      .hero-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 760px) {
+      .topbar { padding-inline: 14px; }
+      .hero, .shell { width: min(100% - 24px, 100%); }
+      .hero { padding-top: 50px; }
+      .hero-grid, .authority-map, .cards, .record-grid, .compare { grid-template-columns: 1fr; }
+      .map-arrow { transform: rotate(90deg); min-height: 40px; }
+      .sidebar nav { grid-template-columns: repeat(2, 1fr); }
+      .byte-row { grid-template-columns: 76px 55px 1fr; font-size: .86rem; }
+      .byte-row > span { padding: 8px; }
+      .file-map-row { grid-template-columns: 82px minmax(0, 1fr); }
+      .file-formula { display: none; }
+      .file-offset { padding-inline: 5px 9px; font-size: .63rem; }
+      .file-region { align-items: flex-start; flex-direction: column; gap: 3px; }
+      .file-region small { text-align: left; }
+      .record-stream { grid-template-columns: 1fr; }
+      .stream-join { min-height: 24px; transform: rotate(90deg); }
+      .stream-more { min-height: 24px; }
+      .formula-grid { grid-template-columns: 1fr; }
+      .digest-chain { grid-template-columns: 1fr; }
+      .digest-arrow { min-height: 22px; transform: rotate(90deg); }
+      .catalog-summary { grid-template-columns: repeat(2, 1fr); }
+      .catalog-toolbar { top: 68px; grid-template-columns: minmax(0, 1fr) auto; }
+      .catalog-count { grid-column: 1 / -1; grid-row: 2; }
+    }
+    @media (max-width: 480px) {
+      .sidebar nav { grid-template-columns: 1fr; }
+      .spec-strip { grid-template-columns: 1fr; }
+      .brand-version { display: none; }
+      .verdict { padding: 22px; }
+      th, td { padding: 11px; }
+      .catalog-summary { grid-template-columns: 1fr; }
+    }
+    @media print {
+      :root { --paper: #fff; --surface: #fff; --surface-2: #f2f2f2; --ink: #111; --muted: #444; --line: #bbb; }
+      .topbar, .sidebar, .reading-progress { display: none !important; }
+      .hero, .shell { width: 100%; margin: 0; }
+      .hero { padding: 24px 0 32px; }
+      .shell { display: block; }
+      .doc-section { break-inside: avoid; margin-bottom: 38px; }
+      details { break-inside: avoid; }
+      details > .details-body { display: block; }
+      a { color: inherit; text-decoration: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ移動</a>
+  <div class="reading-progress" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="ページ先頭へ">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>inkpod <span class="brand-version">/ file format</span></span>
+    </a>
+    <div class="top-actions">
+      <button class="icon-button" id="theme-toggle" type="button" aria-label="配色を切り替える" title="配色を切り替える">◐</button>
+      <button class="icon-button" id="print-button" type="button" aria-label="印刷する" title="印刷する">印刷</button>
+    </div>
+  </header>
+
+  <section class="hero" id="top" aria-labelledby="page-title">
+    <p class="eyebrow">Native document container / current contract</p>
+    <h1 id="page-title"><span class="dot">.</span>inkpod<br>ファイルフォーマット</h1>
+    <p class="lead">現在の文書を保存するだけでなく、その文書を成立させた初期状態・不変アセット・確定操作・履歴分岐・編集状態までを、検証可能な形で保持するネイティブ形式です。</p>
+
+    <div class="hero-grid">
+      <div class="verdict">
+        <strong>形式上の性質：非破壊的な手続き正本</strong>
+        <p>現行状態の可変ラスターだけを正本にせず、再構築に必要な意味データと履歴を保存します。通常保存・読込はともに、失敗やキャンセルで既存ファイルや使用中の文書を途中状態へ置き換えません。</p>
+      </div>
+      <dl class="spec-strip">
+        <div><dt>FORMAT</dt><dd>v9</dd></div>
+        <div><dt>REPLAY EPOCH</dt><dd>6</dd></div>
+        <div><dt>BYTE ORDER</dt><dd>little-endian</dd></div>
+        <div><dt>MAX FILE</dt><dd>1 GiB</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <div class="shell">
+    <aside class="sidebar" aria-label="目次">
+      <p class="sidebar-title">CONTENTS</p>
+      <nav>
+        <a href="#principle"><span>01</span>設計原則</a>
+        <a href="#sections"><span>02</span>セクション</a>
+        <a href="#reconstruction"><span>03</span>復元手順</a>
+        <a href="#history"><span>04</span>履歴モデル</a>
+        <a href="#primitives"><span>05</span>Primitive一覧</a>
+        <a href="#integrity"><span>06</span>完全性</a>
+        <a href="#layout"><span>07</span>バイト構造</a>
+        <a href="#assets"><span>08</span>アセット</a>
+        <a href="#atomicity"><span>09</span>原子性</a>
+        <a href="#scope"><span>10</span>保存範囲</a>
+        <a href="#limits"><span>11</span>上限と拒否</a>
+        <a href="#compatibility"><span>12</span>互換方針</a>
+        <a href="#verification"><span>13</span>検証観点</a>
+      </nav>
+    </aside>
+
+    <main id="main">
+      <section class="doc-section" id="principle">
+        <span class="section-kicker">01 / PRINCIPLE</span>
+        <h2>手続き正本モデル</h2>
+        <p class="intro">`.inkpod` は procedure-authoritative（手続き正本）です。編集後の画素配列だけでなく、文書の起点と確定した操作列を保存し、読込時に同じ規則で文書を再構築します。</p>
+
+        <div class="authority-map" role="img" aria-label="GENS、ASST、PROC、META、EDITを検証して文書と履歴を復元し、CKPTは任意の高速化にだけ使う構造">
+          <div class="section-stack">
+            <div class="data-node"><span class="fourcc">GENS</span><small>不変の初期文書とベース面</small></div>
+            <div class="data-node"><span class="fourcc">ASST</span><small>内容で識別される不変データ</small></div>
+            <div class="data-node"><span class="fourcc">PROC</span><small>確定操作と履歴制御イベント</small></div>
+            <div class="data-node"><span class="fourcc">META</span><small>現在位置・分岐・ID・savepoint</small></div>
+            <div class="data-node"><span class="fourcc">EDIT</span><small>文書単位の編集再開状態</small></div>
+            <div class="data-node optional"><span class="fourcc">CKPT</span><small>任意。削除可能な復元高速化キャッシュ</small></div>
+          </div>
+          <div class="map-arrow" aria-hidden="true">→</div>
+          <div class="result-node">
+            <strong>検証済みの文書状態</strong>
+            <small>現在の内容 + 履歴 + Undo/Redo + 編集状態</small>
+          </div>
+        </div>
+
+        <div class="cards">
+          <article class="card"><span class="card-number">A</span><h3>再現可能</h3><p>同じ Genesis・Assets・Procedures と replay epoch から、同じ意味状態を得ます。</p></article>
+          <article class="card"><span class="card-number">B</span><h3>履歴を保持</h3><p>現在位置だけでなく、分岐、非アクティブ branch、Undo/Redo に必要な参照を残します。</p></article>
+          <article class="card"><span class="card-number">C</span><h3>途中公開しない</h3><p>保存も読込も全検証が成功してから一度だけ結果を公開します。</p></article>
+        </div>
+
+        <div class="callout warning">
+          <strong>「非破壊」の定義と範囲</strong>
+          <p>非破壊とは、文書の意味状態、保持対象の履歴、編集再開状態、既存保存先、使用中のCore状態を、保存・読込の失敗途中で変更しない性質を指します。旧versionの読込互換性や、表示専用cache・window配置の永続化はこの定義に含みません。</p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="sections">
+        <span class="section-kicker">02 / SECTIONS</span>
+        <h2>七つの既知セクション</h2>
+        <p class="intro">五つの必須セクションが文書の意味を構成します。二つの既知セクションは任意で、意味を変えずに高速化またはメタデータ保持を担います。独立した <code>HIST</code> セクションはありません。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>FourCC</th><th>要否</th><th>役割</th><th>レコード</th></tr></thead>
+            <tbody>
+              <tr><td><code>META</code></td><td>必須・critical</td><td>UUID、replay 契約、現在 State、履歴 cursor、active branch、文書／Editor savepoint、各 ID の次値、件数、期待 digest。</td><td>kind 1 を 1 件</td></tr>
+              <tr><td><code>GENS</code></td><td>必須・critical</td><td>Genesis の文書アーカイブ、初期 State/Branch、SolidWhite または Asset の不変ベース面。</td><td>kind 1 を 1 件</td></tr>
+              <tr><td><code>ASST</code></td><td>必須・critical</td><td>不変 asset の descriptor と、最大 4 MiB に分割した payload chunk。</td><td>kind 1 / 2 を 0 件以上</td></tr>
+              <tr><td><code>PROC</code></td><td>必須・critical</td><td>Commit、Undo/Redo/Jump、branch cut をファイル順に保持する append-only journal。</td><td>kind 1 / 2 / 3 を 0 件以上</td></tr>
+              <tr><td><code>EDIT</code></td><td>必須・critical</td><td>active tool、tool 別の色・径、fill/selection/vector 設定、active layer/plane、palette cursor。</td><td>kind 1 を 1 件</td></tr>
+              <tr><td><code>CKPT</code></td><td>任意</td><td>検証に成功した場合だけ使う再生高速化キャッシュ。削除しても復元結果は不変。</td><td>kind 1 を 1 件</td></tr>
+              <tr><td><code>EXTM</code></td><td>任意・opaque</td><td>replay に影響しない拡張メタデータ。Core は内容を解釈せず保持。</td><td>opaque record</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>未知の critical セクションは、意味を安全に解釈できないため拒否します。未知の任意セクションは <code>opaque-preserve</code> のときだけ受理し、再保存時に内容を byte-for-byte で保持します。</p>
+      </section>
+
+      <section class="doc-section" id="reconstruction">
+        <span class="section-kicker">03 / RECONSTRUCTION</span>
+        <h2>読込と再構築</h2>
+        <p class="intro">ファイルを開く処理は、使用中の文書を直接書き換えません。別の staged Core で構造・参照・digest・再生結果を確定し、成功した完成状態だけを置き換えます。</p>
+
+        <div class="flow">
+          <div class="flow-step"><div><strong>ヘッダーと directory を検証</strong><p>magic、v9、epoch 6、サイズ、整列、範囲重複、ゼロ予約領域、FileRootDigest を確認します。</p></div></div>
+          <div class="flow-step"><div><strong>セクションを検証</strong><p>必須セクション、record schema、stored/logical digest、件数とリソース上限を確認します。</p></div></div>
+          <div class="flow-step"><div><strong>Genesis と Assets を構築</strong><p>asset descriptor・chunk・AssetId を照合し、初期状態と参照可能な不変データを staged Core に用意します。</p></div></div>
+          <div class="flow-step"><div><strong>Journal を再生</strong><p>有効な CKPT があれば接頭辞を厳密照合して利用し、不一致なら Genesis から全 PROC を再生します。</p></div></div>
+          <div class="flow-step"><div><strong>META と EDIT を照合</strong><p>現在 State、branch、cursor、ID 次値、文書／Editor／journal digest、savepoint が再生結果と一致することを確認します。</p></div></div>
+          <div class="flow-step"><div><strong>一度だけ公開</strong><p>すべて成功したときだけ staged Core を live Core と置き換えます。失敗時は使用中の文書を変更しません。</p></div></div>
+        </div>
+
+        <div class="callout">
+          <strong>CKPT は正本ではありません</strong>
+          <p>epoch・journal prefix・state・policy counter がすべて一致したときだけ使われます。意味上の不一致は全 replay へフォールバックし、壊れた framing・範囲・hash はファイル全体の拒否になります。</p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="history">
+        <span class="section-kicker">04 / HISTORY</span>
+        <h2>永続履歴モデル</h2>
+        <p class="intro">Genesis は <code>StateId(1)</code>／<code>BranchId(1)</code> から始まります。永続 ID は非ゼロで再利用されず、<code>META</code> は「次に割り当てる値」を保持します。</p>
+
+        <div class="record-grid">
+          <article class="record"><h3>Commit</h3><p>primitive、canonical arguments、asset/ID 参照、前後の State digest、payload digest を記録する確定編集です。</p></article>
+          <article class="record"><h3>HistoryMove</h3><p>Undo、Redo、Jump の source/destination State と移動後の active branch を記録します。</p></article>
+          <article class="record"><h3>BranchCut</h3><p>branch の途中から新しく編集したとき、fork State、旧 tail、新旧 branch を直後の Commit と対で記録します。</p></article>
+        </div>
+
+        <ul class="clean-list">
+          <li>event ID はファイル順に 1 ずつ増えます。procedure ID と committed State ID も各 namespace で単調増加します。</li>
+          <li>Undo/Redo/Jump の no-op、意味上の編集 no-op、失敗、キャンセル、stale base、overflow は ID を消費せず record を追加しません。</li>
+          <li>非アクティブ branch と redo tail から参照される asset も保持されるため、再保存後も branch の再生が成立します。</li>
+          <li>通常保存は履歴を自動 squash しません。</li>
+        </ul>
+
+        <div class="callout warning">
+          <strong>履歴を落とす操作は「明示的 compaction」のみ</strong>
+          <p>compaction は省略される event/procedure 数と digest を含む最新の確認 token を要求し、現在文書を新しい Genesis とする別ファイルを書き出します。live 文書の path、journal、savepoint、dirty、ID は変更しません。</p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="primitives">
+        <span class="section-kicker">05 / PRIMITIVE CATALOG</span>
+        <h2>Coreの現行Primitive catalog</h2>
+        <p class="intro">文書を変更する確定操作は、<code>PROC</code>のkind-1 <code>Commit</code>にPrimitive呼び出しとして記録されます。ファイルの再構築にはこの呼び出し列に加え、<code>GENS</code>、<code>ASST</code>、履歴制御event、<code>META</code>、<code>EDIT</code>が必要です。</p>
+
+        <div class="record-grid">
+          <article class="record"><h3>01 / Commit</h3><p>PrimitiveId、schema、epoch、前後のState digest、canonical引数、asset／stable-ID参照、payloadを保持します。</p></article>
+          <article class="record"><h3>02 / Catalog gate</h3><p>headerのcatalog digestが、ID・schema・名前・意味revision・work式・replay方針を含む現行カタログと一致する必要があります。</p></article>
+          <article class="record"><h3>03 / Replay</h3><p>typed decoderが全byteを消費し、同一canonical bytesへ再encodeできたjournal-replayable呼び出しだけをlive編集と同じexecutorで実行します。</p></article>
+        </div>
+
+        <div class="callout">
+          <strong><code>PROC</code>のすべてがPrimitiveではありません</strong>
+          <p>kind 1の<code>Commit</code>だけがPrimitive実行です。kind 2の<code>HistoryMove</code>とkind 3の<code>BranchCut</code>は履歴制御eventです。query、view、transient preview、ingestion、export、application command IDはPrimitiveIdではありません。76件のcatalog entryのうち<code>LightTableSwapWithActive</code>はsession-levelのGenesis置換であり、<code>Commit</code>には出現しません。</p>
+        </div>
+
+        <div class="catalog-summary" aria-label="Primitive catalog概要">
+          <div class="catalog-stat"><span>CATALOG ENTRIES</span><strong>76</strong></div>
+          <div class="catalog-stat"><span>JOURNAL REPLAYABLE</span><strong>75</strong></div>
+          <div class="catalog-stat"><span>GENESIS REPLACE</span><strong>1</strong></div>
+          <div class="catalog-stat"><span>ID FAMILIES</span><strong>10</strong></div>
+        </div>
+
+        <h3>列の読み方</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>列</th><th>意味</th></tr></thead>
+            <tbody>
+              <tr><td>ID</td><td>非ゼロのstable <code>u32</code>。再番号付け・再利用をせず、上位16 bitのfamilyで責務を分けます。</td></tr>
+              <tr><td>Schema</td><td>canonical引数layoutのversion。76件中72件がtyped invocation schema 2です。</td></tr>
+              <tr><td>Sem.</td><td>validation、pixel、ID、no-op、workなどreplay結果に関わる意味revision。</td></tr>
+              <tr><td>Work</td><td>resource admissionに使う閉じたwork-formula ID。<code>同ID</code>はPrimitiveIdと同じ数値です。</td></tr>
+              <tr><td>保存</td><td><code>Commit</code>はPROCで再生可能。<code>Genesis置換</code>はjournalへ積まず、sessionの起点を置き換えます。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="catalog-toolbar" role="search">
+          <input id="primitive-search" type="search" placeholder="名前・ID・用途・familyで絞り込み" aria-label="Primitive一覧を絞り込む" autocomplete="off">
+          <span class="catalog-count" id="primitive-count" aria-live="polite">76 / 76</span>
+          <button class="catalog-clear" id="primitive-clear" type="button">解除</button>
+        </div>
+
+        <details class="primitive-family" id="family-01" open>
+          <summary><span class="family-code">0x0001</span> 文書・用紙・frame metadata <span class="family-count">1 primitive</span></summary>
+          <div class="details-body table-wrap">
+            <table class="primitive-table">
+              <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
+              <tbody>
+                <tr data-primitive-id="0x00010001" data-name="UpdatePaperFrames" data-schema="2" data-semantics="2" data-work="0x00010001" data-replay="commit" data-family="文書 用紙 frame metadata"><td class="primitive-id">0x0001_0001</td><td>UpdatePaperFrames</td><td>用紙、DPI、frame、margin metadataを置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="primitive-family" id="family-02" open>
+          <summary><span class="family-code">0x0002</span> Layer・Plane topology <span class="family-count">15 primitives</span></summary>
+          <div class="details-body table-wrap">
+            <table class="primitive-table">
+              <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
+              <tbody>
+                <tr data-primitive-id="0x00020001" data-name="CreateLayer" data-schema="2" data-semantics="2" data-work="0x00020001" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0001</td><td>CreateLayer</td><td>型付きlayerを1つ作成する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020002" data-name="DuplicateLayer" data-schema="2" data-semantics="2" data-work="0x00020002" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0002</td><td>DuplicateLayer</td><td>型付きlayerを複製する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020003" data-name="DeleteLayer" data-schema="2" data-semantics="2" data-work="0x00020003" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0003</td><td>DeleteLayer</td><td>指定layerを削除する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020004" data-name="ReorderLayer" data-schema="2" data-semantics="2" data-work="0x00020004" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0004</td><td>ReorderLayer</td><td>layerのstack順を変更する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020005" data-name="SetLayerProperties" data-schema="2" data-semantics="2" data-work="0x00020005" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0005</td><td>SetLayerProperties</td><td>layerの名前、表示、編集可否、opacityを置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020011" data-name="CreatePlane" data-schema="2" data-semantics="2" data-work="0x00020011" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0011</td><td>CreatePlane</td><td>layer内に型・pixel format付きplaneを作成する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020012" data-name="DuplicatePlane" data-schema="2" data-semantics="2" data-work="0x00020012" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0012</td><td>DuplicatePlane</td><td>指定planeを複製する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020013" data-name="DeletePlane" data-schema="2" data-semantics="2" data-work="0x00020013" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0013</td><td>DeletePlane</td><td>指定planeを削除する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020014" data-name="ReorderPlane" data-schema="2" data-semantics="2" data-work="0x00020014" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0014</td><td>ReorderPlane</td><td>layer内のplane順を変更する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020015" data-name="SetPlaneProperties" data-schema="2" data-semantics="2" data-work="0x00020015" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0015</td><td>SetPlaneProperties</td><td>planeの名前、表示、編集可否、opacityを置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020016" data-name="ConvertPlane" data-schema="2" data-semantics="2" data-work="0x00020016" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0016</td><td>ConvertPlane</td><td>raster planeの型とpixel formatを変換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020017" data-name="MergePlane" data-schema="2" data-semantics="2" data-work="0x00020017" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0017</td><td>MergePlane</td><td>raster planeを直下のsiblingへ統合する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020021" data-name="ConvertLayer" data-schema="2" data-semantics="2" data-work="0x00020021" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0021</td><td>ConvertLayer</td><td>coloring layerの型を変換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020022" data-name="MergeLayer" data-schema="2" data-semantics="2" data-work="0x00020022" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0022</td><td>MergeLayer</td><td>layerを直下のsiblingへ統合する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00020023" data-name="DeleteHiddenLayers" data-schema="2" data-semantics="2" data-work="0x00020023" data-replay="commit" data-family="layer plane topology"><td class="primitive-id">0x0002_0023</td><td>DeleteHiddenLayers</td><td>すべての非表示layerを1回のatomic編集で削除する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="primitive-family" id="family-03" open>
+          <summary><span class="family-code">0x0003</span> Palette・文書色metadata <span class="family-count">2 primitives</span></summary>
+          <div class="details-body table-wrap">
+            <table class="primitive-table">
+              <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
+              <tbody>
+                <tr data-primitive-id="0x00030001" data-name="SetMainLineColor" data-schema="1" data-semantics="3" data-work="1" data-replay="commit" data-family="palette color 色"><td class="primitive-id">0x0003_0001</td><td>SetMainLineColor</td><td>主線の表示色をexact-depth colorで置換する。</td><td>1</td><td>3</td><td>1</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00030002" data-name="ReplacePalette" data-schema="1" data-semantics="3" data-work="2" data-replay="commit" data-family="palette color 色"><td class="primitive-id">0x0003_0002</td><td>ReplacePalette</td><td>順序付き文書palette全体を置換する。</td><td>1</td><td>3</td><td>2</td><td><span class="policy-badge">Commit</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="primitive-family" id="family-04" open>
+          <summary><span class="family-code">0x0004</span> Guide・Grid <span class="family-count">5 primitives</span></summary>
+          <div class="details-body table-wrap">
+            <table class="primitive-table">
+              <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
+              <tbody>
+                <tr data-primitive-id="0x00040001" data-name="AddGuide" data-schema="2" data-semantics="2" data-work="0x00040001" data-replay="commit" data-family="guide grid ガイド グリッド"><td class="primitive-id">0x0004_0001</td><td>AddGuide</td><td>文書guideを1本追加する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00040002" data-name="MoveGuide" data-schema="2" data-semantics="2" data-work="0x00040002" data-replay="commit" data-family="guide grid ガイド グリッド"><td class="primitive-id">0x0004_0002</td><td>MoveGuide</td><td>指定guideの位置を変更する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00040003" data-name="DeleteGuide" data-schema="2" data-semantics="2" data-work="0x00040003" data-replay="commit" data-family="guide grid ガイド グリッド"><td class="primitive-id">0x0004_0003</td><td>DeleteGuide</td><td>指定guideを削除する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00040010" data-name="SetGrid" data-schema="2" data-semantics="2" data-work="0x00040010" data-replay="commit" data-family="guide grid ガイド グリッド"><td class="primitive-id">0x0004_0010</td><td>SetGrid</td><td>文書gridの原点、間隔、分割数を置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00040011" data-name="DeleteAllGuides" data-schema="2" data-semantics="2" data-work="0x00040011" data-replay="commit" data-family="guide grid ガイド グリッド"><td class="primitive-id">0x0004_0011</td><td>DeleteAllGuides</td><td>全guideを1回のatomic編集で削除する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="primitive-family" id="family-05" open>
+          <summary><span class="family-code">0x0005</span> Raster paint・Fill・Effect・Filter <span class="family-count">19 primitives</span></summary>
+          <div class="details-body table-wrap">
+            <table class="primitive-table">
+              <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
+              <tbody>
+                <tr data-primitive-id="0x00050001" data-name="ApplyRasterStroke" data-schema="2" data-semantics="4" data-work="3" data-replay="commit" data-family="raster paint stroke 描画"><td class="primitive-id">0x0005_0001</td><td>ApplyRasterStroke</td><td>boundedなraster stroke transactionを確定する。</td><td>2</td><td>4</td><td>3</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050002" data-name="ApplyFill" data-schema="2" data-semantics="2" data-work="0x00050002" data-replay="commit" data-family="raster fill 塗りつぶし"><td class="primitive-id">0x0005_0002</td><td>ApplyFill</td><td>selection・Light Table条件を含むbounded fillを適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050010" data-name="ApplyGradient" data-schema="2" data-semantics="2" data-work="0x00050010" data-replay="commit" data-family="raster gradient グラデーション"><td class="primitive-id">0x0005_0010</td><td>ApplyGradient</td><td>raster planeへgradientを適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050011" data-name="ApplyBoundaryAirbrush" data-schema="2" data-semantics="2" data-work="0x00050011" data-replay="commit" data-family="raster airbrush effect エアブラシ"><td class="primitive-id">0x0005_0011</td><td>ApplyBoundaryAirbrush</td><td>境界を考慮したairbrush処理を適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050012" data-name="ApplyBlur" data-schema="2" data-semantics="2" data-work="0x00050012" data-replay="commit" data-family="raster blur ぼかし"><td class="primitive-id">0x0005_0012</td><td>ApplyBlur</td><td>boundedなraster blurを適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050013" data-name="ApplyAirbrush" data-schema="2" data-semantics="2" data-work="0x00050013" data-replay="commit" data-family="raster airbrush dab エアブラシ"><td class="primitive-id">0x0005_0013</td><td>ApplyAirbrush</td><td>raster airbrush dabを1回適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050014" data-name="ApplyAirbrushGesture" data-schema="2" data-semantics="2" data-work="0x00050014" data-replay="commit" data-family="raster airbrush gesture エアブラシ"><td class="primitive-id">0x0005_0014</td><td>ApplyAirbrushGesture</td><td>canonical airbrush gestureを1回適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050015" data-name="ApplyStamp" data-schema="2" data-semantics="2" data-work="0x00050015" data-replay="commit" data-family="raster stamp スタンプ"><td class="primitive-id">0x0005_0015</td><td>ApplyStamp</td><td>raster stampを1回適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050016" data-name="ApplyStampGesture" data-schema="2" data-semantics="2" data-work="0x00050016" data-replay="commit" data-family="raster stamp gesture スタンプ"><td class="primitive-id">0x0005_0016</td><td>ApplyStampGesture</td><td>canonical stamp gestureを1回適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050017" data-name="ApplyBlurTool" data-schema="2" data-semantics="2" data-work="0x00050017" data-replay="commit" data-family="raster blur tool pressure trace ぼかし"><td class="primitive-id">0x0005_0017</td><td>ApplyBlurTool</td><td>shapeまたはpressure traceで限定したblur tool操作を適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050018" data-name="ApplyDustRemoval" data-schema="2" data-semantics="2" data-work="0x00050018" data-replay="commit" data-family="raster dust removal ゴミ取り"><td class="primitive-id">0x0005_0018</td><td>ApplyDustRemoval</td><td>boundedなdust removalを適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050019" data-name="EditPlaneAlpha" data-schema="2" data-semantics="2" data-work="0x00050019" data-replay="commit" data-family="raster alpha mask アルファ"><td class="primitive-id">0x0005_0019</td><td>EditPlaneAlpha</td><td>raster planeのalphaをmaskから置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x0005001a" data-name="ApplyAlphaGradient" data-schema="2" data-semantics="2" data-work="0x0005001a" data-replay="commit" data-family="raster alpha gradient アルファ"><td class="primitive-id">0x0005_001A</td><td>ApplyAlphaGradient</td><td>raster alphaへgradientを適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050020" data-name="ApplyFilter" data-schema="2" data-semantics="2" data-work="0x00050020" data-replay="commit" data-family="raster filter フィルター"><td class="primitive-id">0x0005_0020</td><td>ApplyFilter</td><td>filter操作を確定する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050030" data-name="CreateAdjustmentLayer" data-schema="2" data-semantics="2" data-work="0x00050030" data-replay="commit" data-family="adjustment layer 調整"><td class="primitive-id">0x0005_0030</td><td>CreateAdjustmentLayer</td><td>parameter付きadjustment layerを作成する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050031" data-name="UpdateAdjustmentLayer" data-schema="2" data-semantics="2" data-work="0x00050031" data-replay="commit" data-family="adjustment layer 調整"><td class="primitive-id">0x0005_0031</td><td>UpdateAdjustmentLayer</td><td>adjustment layerのparameterを置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050040" data-name="ReplaceRasterColors" data-schema="2" data-semantics="2" data-work="0x00050040" data-replay="commit" data-family="raster color replace 色置換"><td class="primitive-id">0x0005_0040</td><td>ReplaceRasterColors</td><td>exact-depth color pairでbounded raster色を置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050041" data-name="SeparateRasterColors" data-schema="2" data-semantics="2" data-work="0x00050041" data-replay="commit" data-family="raster color separation 色分解"><td class="primitive-id">0x0005_0041</td><td>SeparateRasterColors</td><td>bounded rasterの色分解を実行する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050042" data-name="RestoreSelectedPixels" data-schema="2" data-semantics="2" data-work="0x00050042" data-replay="commit" data-family="raster selection restore 復元"><td class="primitive-id">0x0005_0042</td><td>RestoreSelectedPixels</td><td>ingest済みsourceから選択pixelを復元する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="primitive-family" id="family-06" open>
+          <summary><span class="family-code">0x0006</span> Selection・Floating selection <span class="family-count">9 primitives</span></summary>
+          <div class="details-body table-wrap">
+            <table class="primitive-table">
+              <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
+              <tbody>
+                <tr data-primitive-id="0x00060001" data-name="ApplySelection" data-schema="2" data-semantics="2" data-work="0x00060001" data-replay="commit" data-family="selection 選択"><td class="primitive-id">0x0006_0001</td><td>ApplySelection</td><td>selection shapeをNew/Add/Subtract/Intersectで合成する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060002" data-name="InvertSelection" data-schema="2" data-semantics="2" data-work="0x00060002" data-replay="commit" data-family="selection 選択 反転"><td class="primitive-id">0x0006_0002</td><td>InvertSelection</td><td>selection maskを反転する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060003" data-name="ClearSelection" data-schema="2" data-semantics="2" data-work="0x00060003" data-replay="commit" data-family="selection 選択 解除"><td class="primitive-id">0x0006_0003</td><td>ClearSelection</td><td>selection maskを消去する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060004" data-name="ResizeSelection" data-schema="2" data-semantics="2" data-work="0x00060004" data-replay="commit" data-family="selection 選択 拡張 縮小"><td class="primitive-id">0x0006_0004</td><td>ResizeSelection</td><td>selection maskを指定pixel数だけ拡張・縮小する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060005" data-name="SelectColor" data-schema="2" data-semantics="2" data-work="0x00060005" data-replay="commit" data-family="selection color 色選択"><td class="primitive-id">0x0006_0005</td><td>SelectColor</td><td>exact-depth colorとtoleranceからpixelを選択する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060010" data-name="SelectionToLayer" data-schema="2" data-semantics="2" data-work="0x00060010" data-replay="commit" data-family="selection layer 選択"><td class="primitive-id">0x0006_0010</td><td>SelectionToLayer</td><td>selection maskをselection layerへ変換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060011" data-name="SelectionFromLayer" data-schema="2" data-semantics="2" data-work="0x00060011" data-replay="commit" data-family="selection layer 選択"><td class="primitive-id">0x0006_0011</td><td>SelectionFromLayer</td><td>selection layerをactive maskへ合成する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060020" data-name="ClearSelectedContent" data-schema="2" data-semantics="2" data-work="0x00060020" data-replay="commit" data-family="selection clear content 消去"><td class="primitive-id">0x0006_0020</td><td>ClearSelectedContent</td><td>captured targetの選択範囲内を消去する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060021" data-name="CommitFloating" data-schema="2" data-semantics="2" data-work="0x00060021" data-replay="commit" data-family="floating selection commit フローティング"><td class="primitive-id">0x0006_0021</td><td>CommitFloating</td><td>型付きfloating selectionを文書へ確定する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="primitive-family" id="family-07" open>
+          <summary><span class="family-code">0x0007</span> Document transform <span class="family-count">3 primitives</span></summary>
+          <div class="details-body table-wrap">
+            <table class="primitive-table">
+              <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
+              <tbody>
+                <tr data-primitive-id="0x00070001" data-name="MirrorDocument" data-schema="2" data-semantics="2" data-work="0x00070001" data-replay="commit" data-family="document transform mirror 反転"><td class="primitive-id">0x0007_0001</td><td>MirrorDocument</td><td>文書の全意味データを水平または垂直反転する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00070002" data-name="RotateDocument" data-schema="2" data-semantics="2" data-work="0x00070002" data-replay="commit" data-family="document transform rotate 回転"><td class="primitive-id">0x0007_0002</td><td>RotateDocument</td><td>文書の全意味データを直角回転する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00070003" data-name="ResizeDocument" data-schema="2" data-semantics="2" data-work="0x00070003" data-replay="commit" data-family="document transform resize リサイズ"><td class="primitive-id">0x0007_0003</td><td>ResizeDocument</td><td>文書dataとframe metadataをresizeする。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="primitive-family" id="family-08" open>
+          <summary><span class="family-code">0x0008</span> Vector document edit <span class="family-count">8 primitives</span></summary>
+          <div class="details-body table-wrap">
+            <table class="primitive-table">
+              <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
+              <tbody>
+                <tr data-primitive-id="0x00080001" data-name="VectorAddPath" data-schema="2" data-semantics="2" data-work="0x00080001" data-replay="commit" data-family="vector path ベクター"><td class="primitive-id">0x0008_0001</td><td>VectorAddPath</td><td>vector pathを追加する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00080002" data-name="VectorAddFill" data-schema="2" data-semantics="2" data-work="0x00080002" data-replay="commit" data-family="vector fill ベクター"><td class="primitive-id">0x0008_0002</td><td>VectorAddFill</td><td>boundary path列と色を持つvector fillを追加する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00080003" data-name="VectorErase" data-schema="2" data-semantics="2" data-work="0x00080003" data-replay="commit" data-family="vector erase ベクター 消去"><td class="primitive-id">0x0008_0003</td><td>VectorErase</td><td>指定modeでvector geometryを消去する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00080004" data-name="VectorConnect" data-schema="2" data-semantics="2" data-work="0x00080004" data-replay="commit" data-family="vector connect ベクター 接続"><td class="primitive-id">0x0008_0004</td><td>VectorConnect</td><td>許容gap内のvector endpointを接続する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00080005" data-name="VectorCorrectWidth" data-schema="2" data-semantics="2" data-work="0x00080005" data-replay="commit" data-family="vector width ベクター 線幅"><td class="primitive-id">0x0008_0005</td><td>VectorCorrectWidth</td><td>指定vector pathの線幅を補正する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00080010" data-name="RasterizeVectorLayer" data-schema="2" data-semantics="2" data-work="0x00080010" data-replay="commit" data-family="vector rasterize ベクター ラスタライズ"><td class="primitive-id">0x0008_0010</td><td>RasterizeVectorLayer</td><td>vector layerを文書内のrasterへ変換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00080011" data-name="VectorizeRasterPlane" data-schema="2" data-semantics="2" data-work="0x00080011" data-replay="commit" data-family="vectorize raster plane ベクター化"><td class="primitive-id">0x0008_0011</td><td>VectorizeRasterPlane</td><td>raster planeを既存vector layerへvectorizeする。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00080012" data-name="VectorizeRasterPlaneIntoNewLayer" data-schema="2" data-semantics="2" data-work="0x00080012" data-replay="commit" data-family="vectorize raster plane new layer ベクター化"><td class="primitive-id">0x0008_0012</td><td>VectorizeRasterPlaneIntoNewLayer</td><td>新規vector layer作成とraster vectorizeをatomicに行う。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="primitive-family" id="family-09" open>
+          <summary><span class="family-code">0x0009</span> Common-raster import <span class="family-count">1 primitive</span></summary>
+          <div class="details-body table-wrap">
+            <table class="primitive-table">
+              <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
+              <tbody>
+                <tr data-primitive-id="0x00090001" data-name="ImportRasterAsset" data-schema="1" data-semantics="1" data-work="4" data-replay="commit" data-family="import raster asset インポート"><td class="primitive-id">0x0009_0001</td><td>ImportRasterAsset</td><td>immutable CanonicalRaster assetから既存raster planeの内容を置換する。</td><td>1</td><td>1</td><td>4</td><td><span class="policy-badge">Commit</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="primitive-family" id="family-10" open>
+          <summary><span class="family-code">0x000A</span> Light Table document edit <span class="family-count">13 primitives</span></summary>
+          <div class="details-body table-wrap">
+            <table class="primitive-table">
+              <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
+              <tbody>
+                <tr data-primitive-id="0x000a0001" data-name="LightTableSetGlobalOpacity" data-schema="2" data-semantics="2" data-work="0x000a0001" data-replay="commit" data-family="light table ライトテーブル opacity"><td class="primitive-id">0x000A_0001</td><td>LightTableSetGlobalOpacity</td><td>active Light Table setのglobal opacityを置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0002" data-name="LightTableCreateSet" data-schema="2" data-semantics="2" data-work="0x000a0002" data-replay="commit" data-family="light table ライトテーブル set"><td class="primitive-id">0x000A_0002</td><td>LightTableCreateSet</td><td>Light Table setを作成する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0003" data-name="LightTableDuplicateSet" data-schema="2" data-semantics="2" data-work="0x000a0003" data-replay="commit" data-family="light table ライトテーブル set"><td class="primitive-id">0x000A_0003</td><td>LightTableDuplicateSet</td><td>Light Table setを複製する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0004" data-name="LightTableDeleteSet" data-schema="2" data-semantics="2" data-work="0x000a0004" data-replay="commit" data-family="light table ライトテーブル set"><td class="primitive-id">0x000A_0004</td><td>LightTableDeleteSet</td><td>Light Table setを削除する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0005" data-name="LightTableRenameSet" data-schema="2" data-semantics="2" data-work="0x000a0005" data-replay="commit" data-family="light table ライトテーブル set rename"><td class="primitive-id">0x000A_0005</td><td>LightTableRenameSet</td><td>Light Table setをrenameする。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0006" data-name="LightTableReorderSet" data-schema="2" data-semantics="2" data-work="0x000a0006" data-replay="commit" data-family="light table ライトテーブル set reorder"><td class="primitive-id">0x000A_0006</td><td>LightTableReorderSet</td><td>Light Table setの順序を変更する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0007" data-name="LightTableSetActive" data-schema="2" data-semantics="2" data-work="0x000a0007" data-replay="commit" data-family="light table ライトテーブル active set"><td class="primitive-id">0x000A_0007</td><td>LightTableSetActive</td><td>active Light Table setを選択する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0010" data-name="LightTableAddItem" data-schema="2" data-semantics="2" data-work="0x000a0010" data-replay="commit" data-family="light table ライトテーブル item add"><td class="primitive-id">0x000A_0010</td><td>LightTableAddItem</td><td>immutable sourceを参照するLight Table itemを追加する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0011" data-name="LightTableUpdateItemProperties" data-schema="2" data-semantics="2" data-work="0x000a0011" data-replay="commit" data-family="light table ライトテーブル item properties"><td class="primitive-id">0x000A_0011</td><td>LightTableUpdateItemProperties</td><td>itemの表示、opacity、mode、色、transform等を置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0012" data-name="LightTableUpdateItem" data-schema="2" data-semantics="2" data-work="0x000a0012" data-replay="commit" data-family="light table ライトテーブル item source"><td class="primitive-id">0x000A_0012</td><td>LightTableUpdateItem</td><td>item IDを維持したまま、名前、immutable source、display propertiesを置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0013" data-name="LightTableRemoveItem" data-schema="2" data-semantics="2" data-work="0x000a0013" data-replay="commit" data-family="light table ライトテーブル item remove"><td class="primitive-id">0x000A_0013</td><td>LightTableRemoveItem</td><td>Light Table itemを削除する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0014" data-name="LightTableReorderItem" data-schema="2" data-semantics="2" data-work="0x000a0014" data-replay="commit" data-family="light table ライトテーブル item reorder"><td class="primitive-id">0x000A_0014</td><td>LightTableReorderItem</td><td>set内のLight Table item順を変更する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x000a0015" data-name="LightTableSwapWithActive" data-schema="1" data-semantics="2" data-work="0x000a0015" data-replay="session" data-family="light table ライトテーブル swap genesis session"><td class="primitive-id">0x000A_0015</td><td>LightTableSwapWithActive</td><td>Light Table内容とactive planeを交換し、session Genesisを置換して履歴をresetする。</td><td>1</td><td>2</td><td>同ID</td><td><span class="policy-badge session">Genesis置換</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details>
+          <summary>特殊なwork formula 1–4</summary>
+          <div class="details-body">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Work ID</th><th>Primitive</th><th>正確なcharge</th></tr></thead>
+                <tbody>
+                  <tr><td>1</td><td><code>SetMainLineColor</code></td><td>定数 1</td></tr>
+                  <tr><td>2</td><td><code>ReplacePalette</code></td><td><code>1 + palette entry count</code></td></tr>
+                  <tr><td>3</td><td><code>ApplyRasterStroke</code></td><td>sample count + clip後の各dab bounding squareで検査した全candidate pixel数</td></tr>
+                  <tr><td>4</td><td><code>ImportRasterAsset</code></td><td><code>1 + raster logical element count</code></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>その他72件は各PrimitiveIdと同じ数値の閉じたwork-formula IDを使います。work式やcharge規則を変える場合は、意味revision、replay epoch、top-level format versionの更新が必要です。</p>
+          </div>
+        </details>
+      </section>
+
+      <section class="doc-section" id="integrity">
+        <span class="section-kicker">06 / INTEGRITY</span>
+        <h2>完全性とcanonical表現</h2>
+        <p class="intro">すべての意味 digest と container digest は BLAKE3-256 の derive-key mode を使い、用途別の context で domain separation されます。これは改変・破損検出であり、暗号化や署名ではありません。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>検証対象</th><th>digest が保証する範囲</th></tr></thead>
+            <tbody>
+              <tr><td>File root</td><td>root 欄だけをゼロ化した 128-byte header と、directory 全体。</td></tr>
+              <tr><td>Section</td><td>FourCC・schema・compression と、格納 bytes／論理 bytes。二つを別 context で検証。</td></tr>
+              <tr><td>Document state</td><td>文書 metadata commitment と、Plane ID 順の raster commitment。tile 単位で階層化。</td></tr>
+              <tr><td>Journal prefix</td><td>event 1 から指定件数までの <code>PROC</code> record bytes と順序。</td></tr>
+              <tr><td>Asset / chunk</td><td>canonical descriptor と logical payload、および 4 MiB chunk の identity・位置・bytes。</td></tr>
+              <tr><td>Procedure payload</td><td>非空 inline payload の canonical bytes。</td></tr>
+              <tr><td>Editor state</td><td>12-field の canonical EditorState。revision と savepoint 自体は digest 外。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>canonical 表現</h3>
+        <ul class="clean-list">
+          <li>整数はすべて little-endian の固定幅。boolean は <code>u8</code> の 0 または 1 だけです。</li>
+          <li>文書座標は小数部 16 bit の signed Q16。浮動小数入力は nearest／ties-to-even で正規化します。</li>
+          <li>色は straight-alpha sRGB の RGBA8 または RGBA16 をタグ付きで保持し、RGBA16 を 8 bit に量子化しません。</li>
+          <li>sequence は意味順を維持し、set/map は canonical bytes 順。予約 bit/byte と padding はゼロです。</li>
+          <li>NaN、infinity、非 canonical な別表現、未知 code、余分な trailing bytes は拒否します。</li>
+        </ul>
+      </section>
+
+      <section class="doc-section" id="layout">
+        <span class="section-kicker">07 / BYTE LAYOUT</span>
+        <h2>ファイル全体から 1 record まで</h2>
+        <p class="intro">ファイルは、固定 128 byte の header、8-byte 境界に置かれる可変長 section 群、末尾の section directory で構成されます。directory entry は 1 section につき 128 byte、section 内の各 record header は 16 byte です。</p>
+
+        <figure class="layout-figure" aria-labelledby="file-map-title">
+          <figcaption class="figure-head">
+            <div>
+              <h3 id="file-map-title">`.inkpod` コンテナ全体</h3>
+              <p>左が開始 offset、右が長さまたは境界条件です。</p>
+            </div>
+            <span class="scale-note">NOT TO SCALE</span>
+          </figcaption>
+          <div class="file-map">
+            <div class="file-map-row">
+              <span class="file-offset">0</span>
+              <div class="file-region header-region"><strong>HEADER</strong><small>version・全長・directory位置・root digest</small></div>
+              <span class="file-formula">128 bytes</span>
+            </div>
+            <div class="file-map-row">
+              <span class="file-offset">section offset ≥ 128</span>
+              <div class="file-region section-region"><strong>SECTION BODY #?</strong><small>packed record stream</small></div>
+              <span class="file-formula">8-byte aligned / stored_length</span>
+            </div>
+            <div class="file-map-row compact">
+              <span class="file-offset">section end</span>
+              <div class="file-region padding-region"><strong>ZERO GAP / PADDING</strong><small>0 bytes 以上</small></div>
+              <span class="file-formula">全 byte = 0</span>
+            </div>
+            <div class="file-map-row ellipsis" aria-hidden="true">
+              <span class="file-offset"></span>
+              <div class="file-region">•••</div>
+              <span class="file-formula"></span>
+            </div>
+            <div class="file-map-row">
+              <span class="file-offset">section offset</span>
+              <div class="file-region section-region"><strong>SECTION BODY #?</strong><small>物理順には意味がない</small></div>
+              <span class="file-formula">stored_length</span>
+            </div>
+            <div class="file-map-row compact">
+              <span class="file-offset">section end</span>
+              <div class="file-region padding-region"><strong>ZERO GAP / PADDING</strong><small>0 bytes 以上</small></div>
+              <span class="file-formula">全 byte = 0</span>
+            </div>
+            <div class="file-map-row">
+              <span class="file-offset">directory_offset</span>
+              <div class="file-region directory-region"><strong>SECTION DIRECTORY</strong><small>FourCC・version の unsigned 昇順</small></div>
+              <span class="file-formula">section_count × 128 bytes</span>
+            </div>
+            <div class="file-map-row compact">
+              <span class="file-offset">total_file_length</span>
+              <div class="file-region padding-region"><strong>EOF</strong><small>trailing bytes 禁止</small></div>
+              <span class="file-formula">directory の直後</span>
+            </div>
+          </div>
+          <p class="layout-caption">section の位置と長さは directory entry が指します。directory 自体の並びは規定されていますが、section body の物理配置順は意味を持ちません。図の <code>#?</code> は任意の section を表します。</p>
+        </figure>
+
+        <div class="formula-grid" aria-label="ファイルレイアウトの境界式">
+          <div class="formula-box"><span>SECTION RANGE</span><code>[offset, offset + stored_length)</code></div>
+          <div class="formula-box"><span>DIRECTORY LENGTH</span><code>section_count × 128</code></div>
+          <div class="formula-box"><span>EXACT EOF</span><code>directory_offset + directory_length = total_file_length</code></div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>領域</th><th>範囲</th><th>配置規則</th><th>検証</th></tr></thead>
+            <tbody>
+              <tr><td>Header</td><td><code>[0, 128)</code></td><td>常にファイル先頭</td><td>固定値、予約領域、version/epoch、FileRootDigest</td></tr>
+              <tr><td>Section body</td><td><code>[offset, offset + stored_length)</code></td><td>開始 offset は 8 の倍数</td><td>範囲、重複、record_count、stored/logical digest</td></tr>
+              <tr><td>Gap / padding</td><td>領域間の未使用 byte</td><td>必要最小限に限定されない</td><td>すべてゼロ。意味データを置けない</td></tr>
+              <tr><td>Directory</td><td><code>[directory_offset, total_file_length)</code></td><td>8-byte aligned、必ず末尾</td><td>entry 数と長さが完全一致。後続 byte は禁止</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details open>
+          <summary>v9 header — 128 bytes</summary>
+          <div class="details-body">
+            <figure class="layout-figure" aria-labelledby="header-map-title">
+              <figcaption class="figure-head">
+                <div><h3 id="header-map-title">4-byte 単位の header map</h3><p>block 幅は実 byte 数に比例します。</p></div>
+                <span class="scale-note">1 UNIT = 4 B</span>
+              </figcaption>
+              <div class="byte-ruler-scroll">
+                <div class="byte-ruler units-4">
+                  <div class="byte-block identity span-2" data-offset="0"><strong>MAGIC</strong><small>8 B</small></div>
+                  <div class="byte-block identity span-1" data-offset="8"><strong>FORMAT</strong><small>u32 = 9</small></div>
+                  <div class="byte-block identity span-1" data-offset="12"><strong>EPOCH</strong><small>u32 = 6</small></div>
+                  <div class="byte-block span-1" data-offset="16"><strong>HEADER SIZE</strong><small>u32 = 128</small></div>
+                  <div class="byte-block reserved span-1" data-offset="20"><strong>FLAGS</strong><small>u32 = 0</small></div>
+                  <div class="byte-block location span-2" data-offset="24"><strong>TOTAL LENGTH</strong><small>u64</small></div>
+                  <div class="byte-block location span-2" data-offset="32"><strong>DIR OFFSET</strong><small>u64</small></div>
+                  <div class="byte-block location span-1" data-offset="40"><strong>COUNT</strong><small>u32</small></div>
+                  <div class="byte-block span-1" data-offset="44"><strong>ENTRY SIZE</strong><small>u32 = 128</small></div>
+                  <div class="byte-block digest span-8" data-offset="48"><strong>PRIMITIVE CATALOG DIGEST</strong><small>32 B</small></div>
+                  <div class="byte-block digest span-8" data-offset="80"><strong>FILE ROOT DIGEST</strong><small>32 B</small></div>
+                  <div class="byte-block reserved span-4" data-offset="112"><strong>RESERVED = 0</strong><small>16 B</small></div>
+                  <div class="byte-ruler-end"><span>offset 0</span><span>offset 128 / header end</span></div>
+                </div>
+              </div>
+            </figure>
+
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Offset</th><th>Size</th><th>型／bytes</th><th>Field</th><th>必須条件</th></tr></thead>
+                <tbody>
+                  <tr><td>0</td><td>8</td><td><code>[u8; 8]</code></td><td>magic</td><td><code>49 4E 4B 50 4F 44 00 00</code></td></tr>
+                  <tr><td>8</td><td>4</td><td><code>u32</code></td><td>top-level format version</td><td><code>9</code></td></tr>
+                  <tr><td>12</td><td>4</td><td><code>u32</code></td><td>replay epoch</td><td><code>6</code></td></tr>
+                  <tr><td>16</td><td>4</td><td><code>u32</code></td><td>header size</td><td><code>128</code></td></tr>
+                  <tr><td>20</td><td>4</td><td><code>u32</code></td><td>required flags</td><td><code>0</code></td></tr>
+                  <tr><td>24</td><td>8</td><td><code>u64</code></td><td>total file length</td><td>実ファイル長と完全一致</td></tr>
+                  <tr><td>32</td><td>8</td><td><code>u64</code></td><td>section-directory offset</td><td>8-byte aligned</td></tr>
+                  <tr><td>40</td><td>4</td><td><code>u32</code></td><td>section count</td><td>最大 64</td></tr>
+                  <tr><td>44</td><td>4</td><td><code>u32</code></td><td>directory-entry size</td><td><code>128</code></td></tr>
+                  <tr><td>48</td><td>32</td><td><code>[u8; 32]</code></td><td>primitive catalog digest</td><td>現在の catalog と一致</td></tr>
+                  <tr><td>80</td><td>32</td><td><code>[u8; 32]</code></td><td>file-root digest</td><td>再計算結果と一致</td></tr>
+                  <tr><td>112</td><td>16</td><td><code>[u8; 16]</code></td><td>reserved</td><td>全 byte が 0</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details>
+          <summary>directory entry — 128 bytes</summary>
+          <div class="details-body">
+            <figure class="layout-figure" aria-labelledby="directory-map-title">
+              <figcaption class="figure-head">
+                <div><h3 id="directory-map-title">2-byte 単位の directory entry map</h3><p>1 entry が 1 section の位置・長さ・検証値を記述します。</p></div>
+                <span class="scale-note">1 UNIT = 2 B</span>
+              </figcaption>
+              <div class="byte-ruler-scroll">
+                <div class="byte-ruler units-2">
+                  <div class="byte-block identity span-2" data-offset="0"><strong>FOURCC</strong><small>4 B</small></div>
+                  <div class="byte-block identity span-1" data-offset="4"><strong>SCHEMA</strong><small>u16</small></div>
+                  <div class="byte-block identity span-1" data-offset="6"><strong>FLAGS</strong><small>u16</small></div>
+                  <div class="byte-block span-2" data-offset="8"><strong>COMPRESSION</strong><small>u32 = 0</small></div>
+                  <div class="byte-block span-2" data-offset="12"><strong>ALIGN</strong><small>u32 = 8</small></div>
+                  <div class="byte-block location span-4" data-offset="16"><strong>STORED OFFSET</strong><small>u64</small></div>
+                  <div class="byte-block location span-4" data-offset="24"><strong>STORED LENGTH</strong><small>u64</small></div>
+                  <div class="byte-block location span-4" data-offset="32"><strong>LOGICAL LENGTH</strong><small>u64</small></div>
+                  <div class="byte-block location span-4" data-offset="40"><strong>RECORD COUNT</strong><small>u64</small></div>
+                  <div class="byte-block digest span-16" data-offset="48"><strong>STORED-BYTE DIGEST</strong><small>32 B</small></div>
+                  <div class="byte-block digest span-16" data-offset="80"><strong>LOGICAL-BYTE DIGEST</strong><small>32 B</small></div>
+                  <div class="byte-block reserved span-8" data-offset="112"><strong>RESERVED = 0</strong><small>16 B</small></div>
+                  <div class="byte-ruler-end"><span>offset 0</span><span>offset 128 / entry end</span></div>
+                </div>
+              </div>
+            </figure>
+
+            <div class="table-wrap">
+              <table><thead><tr><th>Offset</th><th>Size</th><th>型／bytes</th><th>Field</th><th>必須条件</th></tr></thead><tbody>
+                <tr><td>0</td><td>4</td><td><code>[u8; 4]</code></td><td>ASCII section FourCC</td><td>directory 内で identity が一意</td></tr>
+                <tr><td>4</td><td>2</td><td><code>u16</code></td><td>section schema version</td><td>FourCC と組にして昇順</td></tr>
+                <tr><td>6</td><td>2</td><td><code>u16</code></td><td>flags</td><td>bit 0 critical、bit 1 opaque-preserve、他は 0</td></tr>
+                <tr><td>8</td><td>4</td><td><code>u32</code></td><td>compression</td><td><code>0</code>（None）のみ</td></tr>
+                <tr><td>12</td><td>4</td><td><code>u32</code></td><td>required alignment</td><td><code>8</code></td></tr>
+                <tr><td>16</td><td>8</td><td><code>u64</code></td><td>stored-byte offset</td><td>8 の倍数</td></tr>
+                <tr><td>24</td><td>8</td><td><code>u64</code></td><td>stored-byte length</td><td>現在は logical length と等しい</td></tr>
+                <tr><td>32</td><td>8</td><td><code>u64</code></td><td>logical-byte length</td><td>最大 768 MiB</td></tr>
+                <tr><td>40</td><td>8</td><td><code>u64</code></td><td>record count</td><td>最大 2,097,152</td></tr>
+                <tr><td>48</td><td>32</td><td><code>[u8; 32]</code></td><td>stored-byte digest</td><td>stored section bytes と一致</td></tr>
+                <tr><td>80</td><td>32</td><td><code>[u8; 32]</code></td><td>logical-byte digest</td><td>decompression 後 bytes と一致</td></tr>
+                <tr><td>112</td><td>16</td><td><code>[u8; 16]</code></td><td>reserved</td><td>全 byte が 0</td></tr>
+              </tbody></table>
+            </div>
+
+            <div class="callout">
+              <strong>現在は stored bytes = logical bytes</strong>
+              <p>compression code 0 だけを受理するため長さと内容は同じですが、stored と logical は異なる BLAKE3 context でそれぞれ digest を持ちます。将来の圧縮を暗黙に解釈することはありません。</p>
+            </div>
+          </div>
+        </details>
+
+        <details>
+          <summary>section body と record header — 16 bytes + payload</summary>
+          <div class="details-body">
+            <figure class="layout-figure" aria-labelledby="record-map-title">
+              <figcaption class="figure-head">
+                <div><h3 id="record-map-title">2-byte 単位の record header map</h3><p>header の直後に <code>payload_length</code> byte の payload が続きます。</p></div>
+                <span class="scale-note">1 UNIT = 2 B</span>
+              </figcaption>
+              <div class="byte-ruler-scroll">
+                <div class="byte-ruler record-units">
+                  <div class="byte-block identity span-1" data-offset="0"><strong>KIND</strong><small>u16</small></div>
+                  <div class="byte-block identity span-1" data-offset="2"><strong>SCHEMA</strong><small>u16</small></div>
+                  <div class="byte-block reserved span-2" data-offset="4"><strong>FLAGS</strong><small>u32</small></div>
+                  <div class="byte-block location span-4" data-offset="8"><strong>PAYLOAD LENGTH</strong><small>u64</small></div>
+                  <div class="byte-ruler-end"><span>record offset + 0</span><span>record offset + 16 / payload start</span></div>
+                </div>
+              </div>
+            </figure>
+
+            <div class="record-stream" aria-label="section logical bytes内のrecord配列">
+              <div class="record-unit"><strong>RECORD #0</strong><span>16 B header<br>+ N₀ B payload</span></div>
+              <div class="stream-join" aria-hidden="true">→</div>
+              <div class="record-unit"><strong>RECORD #1</strong><span>16 B header<br>+ N₁ B payload</span></div>
+              <div class="stream-join" aria-hidden="true">→</div>
+              <div class="stream-more" aria-hidden="true">•••</div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Offset</th><th>Size</th><th>型</th><th>Field</th><th>規則</th></tr></thead>
+                <tbody>
+                  <tr><td>0</td><td>2</td><td><code>u16</code></td><td>record kind</td><td>既知 section は許可された kind。opaque section は値を保持</td></tr>
+                  <tr><td>2</td><td>2</td><td><code>u16</code></td><td>record schema version</td><td>既知 record は現在 <code>1</code>。opaque record は値を保持</td></tr>
+                  <tr><td>4</td><td>4</td><td><code>u32</code></td><td>record flags</td><td>既知 record は現在 <code>0</code>。opaque record は値を保持</td></tr>
+                  <tr><td>8</td><td>8</td><td><code>u64</code></td><td>payload length</td><td>直後の payload byte 数</td></tr>
+                  <tr><td>16</td><td>可変</td><td><code>[u8; payload_length]</code></td><td>payload</td><td>section 固有 schema。暗黙 padding なし</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>directory の <code>record_count</code> 件を順に読むと、最後の payload end が logical section end と完全一致しなければなりません。record 間の alignment、padding、trailing bytes はありません。</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>directory と digest の被覆関係</summary>
+          <div class="details-body">
+            <div class="digest-chain" role="img" aria-label="section bytesを検証したdigestがdirectory entryに格納され、headerとdirectory全体からFileRootDigestを計算する関係">
+              <div class="digest-node"><strong>SECTION MESSAGE</strong><small>FourCC・version・compression・stored/logical bytes</small></div>
+              <div class="digest-arrow" aria-hidden="true">→</div>
+              <div class="digest-node"><strong>DIRECTORY ENTRY</strong><small>offset・length・count・両 digest を格納</small></div>
+              <div class="digest-arrow" aria-hidden="true">→</div>
+              <div class="digest-node final"><strong>FILE ROOT DIGEST</strong><small>root欄を0にしたheader + directory全体</small></div>
+            </div>
+            <p>FileRootDigest は section bytes を直接連結して hash しませんが、directory に section の二つの digest が含まれるため、header、配置情報、section 内容が階層的に結び付けられます。padding は独立に全ゼロであることを検証します。</p>
+          </div>
+        </details>
+
+        <h3>レイアウト不変条件</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>対象</th><th>正確な規則</th><th>違反時</th></tr></thead>
+            <tbody>
+              <tr><td>Directory order</td><td>unsigned FourCC bytes、次に section version の厳密昇順。同一 identity は重複不可。</td><td>ファイル拒否</td></tr>
+              <tr><td>Known sections</td><td><code>META/GENS/ASST/PROC/EDIT</code> は各 1 section 必須。<code>CKPT</code> と <code>EXTM</code> は各 0 または 1。</td><td>欠落・重複を拒否</td></tr>
+              <tr><td>Alignment</td><td>全 section offset と directory offset は 8-byte aligned。</td><td>ファイル拒否</td></tr>
+              <tr><td>Ranges</td><td>header、directory、section 同士は重ならず、total length を越えない。</td><td>ファイル拒否</td></tr>
+              <tr><td>Padding</td><td>領域間の全 gap byte は 0。</td><td>ファイル拒否</td></tr>
+              <tr><td>EOF</td><td>directory end が total file length と一致。trailing bytes は存在しない。</td><td>ファイル拒否</td></tr>
+              <tr><td>Compression</td><td>現行 reader は code 0（None）のみ。stored length = logical length。</td><td>非対応として拒否</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="doc-section" id="assets">
+        <span class="section-kicker">08 / ASSETS</span>
+        <h2>Content-addressed asset</h2>
+        <p class="intro"><code>AssetId</code>は32-byteの<code>AssetDigest</code>です。同じcanonical descriptorとlogical payloadからは、取り込み元やcodecにかかわらず同じAssetIdが得られ、同一assetとして重複排除されます。</p>
+
+        <div class="cards">
+          <article class="card"><span class="card-number">01</span><h3>CanonicalRaster</h3><p>BinaryMask8、Grayscale8/16、straight RGBA8/16。row padding なしの top-to-bottom bytes。</p></article>
+          <article class="card"><span class="card-number">02</span><h3>CanonicalVectorStream</h3><p>順序と Q16 数値規則を含む canonical vector sequence。</p></article>
+          <article class="card"><span class="card-number">03</span><h3>CanonicalSampleStream</h3><p>大きな stroke sample payload など、primitive schema が定める canonical sequence。</p></article>
+        </div>
+
+        <ul class="clean-list">
+          <li>storage 上は 4 MiB 境界で決定的に chunk 化しますが、chunk 分割は AssetId を変えません。</li>
+          <li>descriptor、logical length、element count、stride、chunk 順序と digest を照合してから公開します。</li>
+          <li>encoded source bytes、ファイル名、path、timestamp、provenance は AssetDigest に入りません。</li>
+          <li>Genesis、全 retained branch／redo tail、既知の永続参照が asset retention root です。</li>
+        </ul>
+      </section>
+
+      <section class="doc-section" id="atomicity">
+        <span class="section-kicker">09 / ATOMICITY</span>
+        <h2>Atomic saveとstaged open</h2>
+        <p class="intro">非破壊性は container の中身だけでなく、I/O の commit 境界にも適用されます。</p>
+
+        <div class="compare">
+          <article class="compare-panel good">
+            <h3>通常保存</h3>
+            <ol class="clean-list">
+              <li>section layout と digest を先に確定</li>
+              <li>同じ directory に排他的 temporary file を作成</li>
+              <li>1 MiB ごとに cancellation を確認しながら stream 書込</li>
+              <li>flush → <code>sync_all</code> → close</li>
+              <li>同一 volume で destination を replace</li>
+              <li>成功後にだけ path と document/editor savepoint を公開</li>
+            </ol>
+          </article>
+          <article class="compare-panel neutral">
+            <h3>失敗・キャンセル</h3>
+            <ul class="clean-list">
+              <li>既存 destination を変更しない</li>
+              <li>この保存用の temporary file だけを除去</li>
+              <li>path と savepoint を進めない</li>
+              <li>Core の文書・revision・dirty・history を変更しない</li>
+            </ul>
+          </article>
+        </div>
+
+        <h3>recovery の分離</h3>
+        <p>recovery save も同じ atomic replacement を使いますが、通常 savepoint や通常 path を更新しません。recovery open は dirty・pathless として開くため、その後の通常保存が元ファイルを暗黙に上書きすることはありません。</p>
+      </section>
+
+      <section class="doc-section" id="scope">
+        <span class="section-kicker">10 / SCOPE</span>
+        <h2>意味状態の永続化範囲</h2>
+        <p class="intro">フォーマットは「同じ編集文書を再開するための意味」を保存します。表示装置や runtime 実装に依存する状態は切り離します。</p>
+
+        <div class="compare">
+          <article class="compare-panel good">
+            <h3>正本として保存</h3>
+            <ul class="clean-list">
+              <li>UUID、paper、DPI、sRGB、frame、margin、base surface</li>
+              <li>layer/plane tree、stable IDs、可視性、編集可否、opacity</li>
+              <li>raster tile、selection、vector path/fill、adjustment</li>
+              <li>palette、main-line color、guide、grid、Light Table</li>
+              <li>project/cut/cell/frame/sequence identity と animation metadata</li>
+              <li>journal、履歴分岐、cursor、Undo/Redo、ID high-watermark</li>
+              <li>EditorState と document/editor savepoint</li>
+            </ul>
+          </article>
+          <article class="compare-panel neutral">
+            <h3>意味上の正本から除外</h3>
+            <ul class="clean-list">
+              <li>current materialized documentとcheckpoint archive（cacheとして保存される場合がある）</li>
+              <li>inverse delta、COW snapshot、render/GPU/tile cache</li>
+              <li>zoom、pan、view flip、monitor、OS DPI、antialiasing</li>
+              <li>session-localな<code>DocumentRevision</code>（open時に1へrebase）</li>
+              <li>外部sourceのpath、ファイル名、timestamp、encoded codec bytes</li>
+              <li>source UUID/revision/DPIなどreplayに不要なprovenance</li>
+            </ul>
+          </article>
+        </div>
+
+        <p>除外対象のうちview・runtime cache・<code>DocumentRevision</code>はnative文書へ永続化しません。任意provenanceを保持する場合は、replayの意味へ混ぜず<code>EXTM</code>などのopaque metadataとして扱います。checkpoint内のmaterialized archiveは保存される場合がありますが、Genesis・Assets・PROCの代わりにはなりません。</p>
+      </section>
+
+      <section class="doc-section" id="limits">
+        <span class="section-kicker">11 / LIMITS</span>
+        <h2>Resource limitと拒否条件</h2>
+        <p class="intro">サイズ・個数・ID・work を allocation や replay の前に overflow-safe arithmetic で検査します。上限超過は staged open 全体の失敗になり、部分結果は live Core へ入りません。</p>
+
+        <details>
+          <summary>主要な resource limit</summary>
+          <div class="details-body">
+            <div class="table-wrap">
+              <table><thead><tr><th>Resource</th><th>Maximum</th></tr></thead><tbody>
+                <tr><td>`.inkpod` 全体</td><td>1 GiB</td></tr>
+                <tr><td>directory entries</td><td>64</td></tr>
+                <tr><td>1 logical section</td><td>768 MiB</td></tr>
+                <tr><td>必須section + 保持する任意sectionのlogical bytes合計</td><td>1 GiB</td></tr>
+                <tr><td>1 section の records</td><td>2,097,152</td></tr>
+                <tr><td><code>CKPT</code></td><td>512 MiB</td></tr>
+                <tr><td>Commit procedures / 全 journal events</td><td>1,048,576 / 2,097,152</td></tr>
+                <tr><td>branches</td><td>65,536</td></tr>
+                <tr><td>persistent-ID high-watermark</td><td><code>0x7FFF_FFFF_FFFF_FFFF</code></td></tr>
+                <tr><td>1 procedure の arguments / inline payload / record</td><td>1 MiB / 32 MiB / 40 MiB</td></tr>
+                <tr><td><code>PROC</code> logical bytes</td><td>512 MiB</td></tr>
+                <tr><td>immutable assets</td><td>65,536</td></tr>
+                <tr><td>1 asset / 1 chunk / 全 asset payload</td><td>512 MiB / 4 MiB / 768 MiB</td></tr>
+                <tr><td>retained stable objects</td><td>1,048,576</td></tr>
+                <tr><td>document / project / cut / sequence objects</td><td>1 / 1,024 / 1,024 / 1,024</td></tr>
+                <tr><td>cells / frames</td><td>65,536 / 1 cellあたり100</td></tr>
+                <tr><td>layers / persisted planes / guides</td><td>各 4,096</td></tr>
+                <tr><td>Light Table sets / items</td><td>256 / 4,096</td></tr>
+                <tr><td>vector paths / segments / fills / boundary refs</td><td>65,536 / 262,144 / 65,536 / 262,144</td></tr>
+                <tr><td>palette entries</td><td>4,096</td></tr>
+                <tr><td>raster width または height</td><td>1,048,576 px</td></tr>
+                <tr><td>1 image edit の visited pixels</td><td>67,108,864</td></tr>
+                <tr><td>1 raster / 全 retained raster の sparse tiles</td><td>262,144 / 1,048,576</td></tr>
+                <tr><td>1 assetのcanonical raster bytes / open時にdecodeする合計</td><td>512 MiB / 768 MiB</td></tr>
+                <tr><td><code>EDIT</code> / opaque optional bytes</td><td>4 MiB / 16 MiB</td></tr>
+                <tr><td>1 procedure の stroke samples</td><td>1,048,576</td></tr>
+                <tr><td>node name / general UTF-8 string</td><td>1 KiB / 32 KiB</td></tr>
+              </tbody></table>
+            </div>
+          </div>
+        </details>
+
+        <h3>代表的な拒否条件</h3>
+        <p>未知 version/epoch/catalog、未知 critical section、欠落・重複 section、範囲重複、truncation、checksum 不一致、不正 UTF-8、非ゼロ予約領域、非 canonical 順序、重複 ID、参照切れ、循環・不正 topology、chunk 欠落、work/size/count overflow、trailing bytes を拒否します。</p>
+      </section>
+
+      <section class="doc-section" id="compatibility">
+        <span class="section-kicker">12 / COMPATIBILITY</span>
+        <h2>Versionと互換方針</h2>
+        <p class="intro">現行 reader/writer が受理する native contract は、top-level version 9／replay epoch 6／現在の primitive catalog の組み合わせだけです。</p>
+
+        <div class="cards">
+          <article class="card"><span class="card-number">VERSION</span><h3>v9 only</h3><p>v9 以外は payload decode や live Core の置換前に拒否します。</p></article>
+          <article class="card"><span class="card-number">SEMANTICS</span><h3>epoch 6</h3><p>replay 結果を変える規則変更は epoch と top-level version を同時に更新します。</p></article>
+          <article class="card"><span class="card-number">COMPRESSION</span><h3>None</h3><p>現在受理する compression code は 0 のみです。</p></article>
+        </div>
+
+        <div class="callout warning">
+          <strong>後方互換性は未提供</strong>
+          <p>フォーマットフリーズが明示されるまでは current-only です。旧版 reader、migration、compatibility shim はありません。この制約は、同一 v9 ファイル内の意味データを非破壊に保持する設計とは別の軸です。</p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="verification">
+        <span class="section-kicker">13 / VERIFICATION</span>
+        <h2>非破壊性の検証契約</h2>
+        <p class="intro">現行実装におけるIO-001の状態は<code>Verified</code>です。非破壊性の検証対象は、単純な再openに加えて以下の契約を含みます。</p>
+
+        <div class="checklist">
+          <div class="check-item"><span class="check-mark">✓</span><div><strong>意味状態の round-trip</strong><p>保存前後で DocumentStateDigest と canonical composite を比較し、RGBA16 を含む全 pixel format が無量子化で一致すること。</p></div></div>
+          <div class="check-item"><span class="check-mark">✓</span><div><strong>履歴 authority の round-trip</strong><p>journal record、cursor、active/non-active branch、Undo/Redo、両 savepoint、すべての next-ID authority が一致すること。</p></div></div>
+          <div class="check-item"><span class="check-mark">✓</span><div><strong>checkpoint 非依存</strong><p>CKPT あり、CKPT 削除、意味上の mismatch から full replay の三経路が同じ結果になること。壊れた CKPT は拒否されること。</p></div></div>
+          <div class="check-item"><span class="check-mark">✓</span><div><strong>非アクティブ branch の asset 保持</strong><p>現在状態から見えない branch／redo tail の asset も再オープン後に replay できること。</p></div></div>
+          <div class="check-item"><span class="check-mark">✓</span><div><strong>atomic save</strong><p>encode、write、flush、cancel、replace の失敗時に既存 bytes、path、savepoint、dirty、history が変化しないこと。</p></div></div>
+          <div class="check-item"><span class="check-mark">✓</span><div><strong>staged open</strong><p>破損・過大・旧版ファイルの open 失敗後も、使用中の Core 文書と通常ファイルが完全に不変であること。</p></div></div>
+          <div class="check-item"><span class="check-mark">✓</span><div><strong>opaque extension の round-trip</strong><p>未知の optional/opaque-preserve section が Core 経由の再保存後も同一 payload を保つこと。</p></div></div>
+          <div class="check-item"><span class="check-mark">✓</span><div><strong>compaction の隔離</strong><p>stale token を拒否し、成功時も別 copy だけが新 Genesis となり、live authority を変更しないこと。</p></div></div>
+        </div>
+
+        <details>
+          <summary>正本と実装・テストの参照先</summary>
+          <div class="details-body">
+            <ul class="source-list">
+              <li><a href="SPEC.md">SPEC.md</a> — native 永続化の要求</li>
+              <li><a href="docs/file-format.md">docs/file-format.md</a> — normative byte/schema contract</li>
+              <li><a href="rust/inkpod-format/src/procedure.rs">rust/inkpod-format/src/procedure.rs</a> — current v9 container codec</li>
+              <li><a href="rust/inkpod-core/src/persistence.rs">rust/inkpod-core/src/persistence.rs</a> — Core mapping、replay、checkpoint、compaction</li>
+              <li><a href="rust/inkpod-core/src/primitive/catalog.rs">rust/inkpod-core/src/primitive/catalog.rs</a> — closed Primitive catalogとreplay contract</li>
+              <li><a href="rust/inkpod-core/src/primitive/model.rs">rust/inkpod-core/src/primitive/model.rs</a> — stable PrimitiveId定義</li>
+              <li><a href="rust/inkpod-core/tests/contracts/native_v9.rs">rust/inkpod-core/tests/contracts/native_v9.rs</a> — public Core contract tests</li>
+              <li><a href="rust/inkpod-format/tests/unit/native.rs">rust/inkpod-format/tests/unit/native.rs</a> — byte layout、digest、atomic I/O tests</li>
+            </ul>
+          </div>
+        </details>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <p>対象契約: <span class="mono">.inkpod v9 / replay epoch 6</span> — 本文は現在の形式だけを説明します。</p>
+  </footer>
+
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const themeButton = document.querySelector('#theme-toggle');
+      const storedTheme = localStorage.getItem('inkpod-format-theme');
+      const preferredDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.dataset.theme = storedTheme || (preferredDark ? 'dark' : 'light');
+
+      themeButton.addEventListener('click', () => {
+        root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('inkpod-format-theme', root.dataset.theme);
+      });
+
+      document.querySelector('#print-button').addEventListener('click', () => window.print());
+
+      const progress = document.querySelector('.reading-progress');
+      const updateProgress = () => {
+        const range = document.documentElement.scrollHeight - window.innerHeight;
+        const ratio = range > 0 ? Math.min(1, Math.max(0, window.scrollY / range)) : 0;
+        progress.style.width = `${ratio * 100}%`;
+      };
+      updateProgress();
+      window.addEventListener('scroll', updateProgress, { passive: true });
+      window.addEventListener('resize', updateProgress);
+
+      const links = [...document.querySelectorAll('.sidebar a')];
+      const sections = [...document.querySelectorAll('main .doc-section')];
+      const setCurrent = (id) => {
+        links.forEach((link) => {
+          if (link.getAttribute('href') === `#${id}`) link.setAttribute('aria-current', 'true');
+          else link.removeAttribute('aria-current');
+        });
+      };
+      setCurrent(sections[0]?.id);
+      const observer = new IntersectionObserver((entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (visible) setCurrent(visible.target.id);
+      }, { rootMargin: '-18% 0px -65% 0px', threshold: [0, .15, .4] });
+      sections.forEach((section) => observer.observe(section));
+
+      const primitiveSearch = document.querySelector('#primitive-search');
+      const primitiveClear = document.querySelector('#primitive-clear');
+      const primitiveCount = document.querySelector('#primitive-count');
+      const primitiveRows = [...document.querySelectorAll('tr[data-primitive-id]')];
+      const primitiveFamilies = [...document.querySelectorAll('.primitive-family')];
+      const filterPrimitives = () => {
+        const query = primitiveSearch.value.trim().toLocaleLowerCase('ja');
+        let visibleCount = 0;
+        primitiveRows.forEach((row) => {
+          const haystack = `${row.textContent} ${row.dataset.family}`.toLocaleLowerCase('ja');
+          const visible = !query || haystack.includes(query);
+          row.hidden = !visible;
+          if (visible) visibleCount += 1;
+        });
+        primitiveFamilies.forEach((family) => {
+          const familyRows = [...family.querySelectorAll('tr[data-primitive-id]')];
+          const hasVisible = familyRows.some((row) => !row.hidden);
+          family.hidden = !hasVisible;
+          if (query && hasVisible) family.open = true;
+        });
+        primitiveCount.textContent = `${visibleCount} / ${primitiveRows.length}`;
+      };
+      primitiveSearch.addEventListener('input', filterPrimitives);
+      primitiveClear.addEventListener('click', () => {
+        primitiveSearch.value = '';
+        filterPrimitives();
+        primitiveSearch.focus();
+      });
+    })();
+  </script>
+</body>
+</html>

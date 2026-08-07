@@ -7,7 +7,12 @@
 
 namespace inkpod::app {
 
-enum class EmbeddedManualStatus : std::uint8_t {
+enum class EmbeddedHelpDocument : std::uint8_t {
+    Manual,
+    FileFormat,
+};
+
+enum class EmbeddedHelpStatus : std::uint8_t {
     Ok,
     InvalidArgument,
     ResourceUnavailable,
@@ -16,21 +21,25 @@ enum class EmbeddedManualStatus : std::uint8_t {
     LaunchFailed,
 };
 
-// Extracts the embedded UTF-8 manual below the supplied LocalAppData root.
+// Extracts an embedded, self-contained UTF-8 help document below the supplied
+// LocalAppData root.
 // Existing byte-identical content is reused; stale content is replaced atomically.
-[[nodiscard]] EmbeddedManualStatus ExtractEmbeddedManual(
+[[nodiscard]] EmbeddedHelpStatus ExtractEmbeddedHelpDocument(
     HINSTANCE instance,
     const std::wstring& local_app_data_root,
+    EmbeddedHelpDocument document,
     std::wstring& output_path) noexcept;
 
-// Resolves the current user's LocalAppData directory and extracts the manual.
-[[nodiscard]] EmbeddedManualStatus PrepareEmbeddedManual(
+// Resolves the current user's LocalAppData directory and extracts the document.
+[[nodiscard]] EmbeddedHelpStatus PrepareEmbeddedHelpDocument(
     HINSTANCE instance,
+    EmbeddedHelpDocument document,
     std::wstring& output_path) noexcept;
 
-// Prepares the manual and opens it with the user's default HTML handler.
-[[nodiscard]] EmbeddedManualStatus OpenEmbeddedManual(
+// Prepares the document and opens it with the user's default HTML handler.
+[[nodiscard]] EmbeddedHelpStatus OpenEmbeddedHelpDocument(
     HINSTANCE instance,
-    HWND owner) noexcept;
+    HWND owner,
+    EmbeddedHelpDocument document) noexcept;
 
 }  // namespace inkpod::app

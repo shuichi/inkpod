@@ -15,10 +15,11 @@ namespace {
 
 bool FileMatchesResource(
     HINSTANCE instance,
-    const std::wstring& path) noexcept {
+    const std::wstring& path,
+    UINT resource_id) noexcept {
     const HRSRC resource = FindResourceW(
         instance,
-        MAKEINTRESOURCEW(IDR_MANUAL_HTML),
+        MAKEINTRESOURCEW(resource_id),
         RT_RCDATA);
     if (resource == nullptr) {
         return false;
@@ -97,8 +98,10 @@ bool OverwriteWithStaleContent(const std::wstring& path) noexcept {
 
 void CleanupTestDirectory(
     const std::wstring& root,
-    const std::wstring& manual_path) noexcept {
+    const std::wstring& manual_path,
+    const std::wstring& file_format_path) noexcept {
     DeleteFileW(manual_path.c_str());
+    DeleteFileW(file_format_path.c_str());
     const std::wstring version_directory =
         root + L"\\inkpod\\Help\\" INKPOD_FILE_VERSION_STRING_WIDE;
     RemoveDirectoryW(version_directory.c_str());
@@ -110,15 +113,30 @@ void CleanupTestDirectory(
 }  // namespace
 
 int main() {
-    using inkpod::app::EmbeddedManualStatus;
-    using inkpod::app::ExtractEmbeddedManual;
+    using inkpod::app::EmbeddedHelpDocument;
+    using inkpod::app::EmbeddedHelpStatus;
+    using inkpod::app::ExtractEmbeddedHelpDocument;
 
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     std::wstring output;
-    if (ExtractEmbeddedManual(nullptr, L"C:\\invalid", output)
-            != EmbeddedManualStatus::InvalidArgument
-        || ExtractEmbeddedManual(instance, L"", output)
-            != EmbeddedManualStatus::InvalidArgument) {
+    if (ExtractEmbeddedHelpDocument(
+            nullptr,
+            L"C:\\invalid",
+            EmbeddedHelpDocument::Manual,
+            output)
+            != EmbeddedHelpStatus::InvalidArgument
+        || ExtractEmbeddedHelpDocument(
+               instance,
+               L"",
+               EmbeddedHelpDocument::Manual,
+               output)
+            != EmbeddedHelpStatus::InvalidArgument
+        || ExtractEmbeddedHelpDocument(
+               instance,
+               L"C:\\invalid",
+               static_cast<EmbeddedHelpDocument>(255U),
+               output)
+            != EmbeddedHelpStatus::InvalidArgument) {
         return 1;
     }
 
@@ -140,35 +158,56 @@ int main() {
         return 3;
     }
 
-    const EmbeddedManualStatus first = ExtractEmbeddedManual(instance, root, output);
-    const std::wstring expected =
-        root + L"\\inkpod\\Help\\" INKPOD_FILE_VERSION_STRING_WIDE L"\\manual.html";
-    if (first != EmbeddedManualStatus::Ok || output != expected
-        || !FileMatchesResource(instance, output)) {
-        CleanupTestDirectory(root, output);
-        return 4;
+    struct TestDocument {
+        EmbeddedHelpDocument document;
+        UINT resource_id;
+        const wchar_t* file_name;
+    };
+    constexpr std::array<TestDocument, 2U> documents{{
+        {EmbeddedHelpDocument::Manual, IDR_MANUAL_HTML, L"manual.html"},
+        {EmbeddedHelpDocument::FileFormat,
+         IDR_FILE_FORMAT_HTML,
+         L"file_format.html"},
+    }};
+    std::array<std::wstring, documents.size()> extracted_paths{};
+    for (std::size_t index = 0U; index < documents.size(); ++index) {
+        const TestDocument& test = documents[index];
+        const std::wstring expected = root + L"\\inkpod\\Help\\"
+            INKPOD_FILE_VERSION_STRING_WIDE L"\\" + test.file_name;
+        const EmbeddedHelpStatus first = ExtractEmbeddedHelpDocument(
+            instance, root, test.document, output);
+        extracted_paths[index] = output;
+        if (first != EmbeddedHelpStatus::Ok || output != expected
+            || !FileMatchesResource(instance, output, test.resource_id)) {
+            CleanupTestDirectory(root, extracted_paths[0], extracted_paths[1]);
+            return 4;
+        }
+
+        std::wstring reused_path;
+        if (ExtractEmbeddedHelpDocument(
+                instance, root, test.document, reused_path)
+                != EmbeddedHelpStatus::Ok
+            || reused_path != expected
+            || !FileMatchesResource(instance, reused_path, test.resource_id)) {
+            CleanupTestDirectory(root, extracted_paths[0], extracted_paths[1]);
+            return 5;
+        }
+
+        if (!OverwriteWithStaleContent(output)) {
+            CleanupTestDirectory(root, extracted_paths[0], extracted_paths[1]);
+            return 6;
+        }
+        std::wstring replaced_path;
+        if (ExtractEmbeddedHelpDocument(
+                instance, root, test.document, replaced_path)
+                != EmbeddedHelpStatus::Ok
+            || replaced_path != expected
+            || !FileMatchesResource(instance, replaced_path, test.resource_id)) {
+            CleanupTestDirectory(root, extracted_paths[0], extracted_paths[1]);
+            return 7;
+        }
     }
 
-    std::wstring reused_path;
-    if (ExtractEmbeddedManual(instance, root, reused_path) != EmbeddedManualStatus::Ok
-        || reused_path != expected || !FileMatchesResource(instance, reused_path)) {
-        CleanupTestDirectory(root, output);
-        return 5;
-    }
-
-    if (!OverwriteWithStaleContent(output)) {
-        CleanupTestDirectory(root, output);
-        return 6;
-    }
-    std::wstring replaced_path;
-    if (ExtractEmbeddedManual(instance, root, replaced_path)
-            != EmbeddedManualStatus::Ok
-        || replaced_path != expected
-        || !FileMatchesResource(instance, replaced_path)) {
-        CleanupTestDirectory(root, output);
-        return 7;
-    }
-
-    CleanupTestDirectory(root, output);
+    CleanupTestDirectory(root, extracted_paths[0], extracted_paths[1]);
     return 0;
 }

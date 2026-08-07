@@ -7,6 +7,7 @@
 1 RT_MANIFEST "app.manifest"
 IDI_APP_ICON ICON "../package/Assets/app.ico"
 IDR_MANUAL_HTML RCDATA "../../../manual.html"
+IDR_FILE_FORMAT_HTML RCDATA "../../../file_format.html"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION INKPOD_VERSION_RESOURCE
@@ -71,6 +72,7 @@ BEGIN
     IDS_PANE_REFERENCE "参照"
     IDS_PANE_BATCH "バッチ"
     IDS_HELP_MANUAL_OPEN_FAILED "inkpod ヘルプを表示できませんでした。保存先へのアクセスと既定ブラウザーの設定を確認してください。"
+    IDS_HELP_FILE_FORMAT_OPEN_FAILED "Inkpodファイルフォーマットを表示できませんでした。保存先へのアクセスと既定ブラウザーの設定を確認してください。"
 END
 
 IDR_MAIN_MENU MENU
@@ -566,6 +568,7 @@ BEGIN
     POPUP "ヘルプ(&H)"
     BEGIN
         MENUITEM "inkpod ヘルプ(&H)\tF1", IDM_HELP_MANUAL
+        MENUITEM "Inkpodファイルフォーマット(&F)", IDM_HELP_FILE_FORMAT
         MENUITEM SEPARATOR
         MENUITEM "Inkpodについて(&A)...", IDM_HELP_ABOUT
     END

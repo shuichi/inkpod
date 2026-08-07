@@ -101,7 +101,8 @@ using inkpod::app::DocumentViewId;
 using inkpod::app::EditorGroupId;
 using inkpod::app::EditorGroup;
 using inkpod::app::EditorSplitOrientation;
-using inkpod::app::EmbeddedManualStatus;
+using inkpod::app::EmbeddedHelpDocument;
+using inkpod::app::EmbeddedHelpStatus;
 using inkpod::app::WorkspaceWindowId;
 using inkpod::app::WorkspaceWindow;
 
@@ -3122,14 +3123,17 @@ void ShowCoreError(const ApplicationHost& state, HWND owner, const wchar_t* oper
     MessageBoxW(owner, message.data(), L"inkpod", MB_OK | MB_ICONERROR);
 }
 
-void ShowEmbeddedManualError(const ApplicationHost& state, HWND owner) noexcept {
+void ShowEmbeddedHelpError(
+    const ApplicationHost& state,
+    HWND owner,
+    UINT message_id) noexcept {
     if (state.lifetime.smoke_test) {
         return;
     }
     std::array<wchar_t, 256U> message{};
     if (LoadStringW(
             state.lifetime.instance,
-            IDS_HELP_MANUAL_OPEN_FAILED,
+            message_id,
             message.data(),
             static_cast<int>(message.size()))
         <= 0) {
@@ -13901,15 +13905,23 @@ std::optional<LRESULT> RouteApplicationCommand(
             UpdateMenuState(*state);
             return 1;
         }
-        case IDM_HELP_MANUAL: {
-            std::wstring manual_path;
-            const EmbeddedManualStatus status = state->lifetime.smoke_test
-                ? inkpod::app::PrepareEmbeddedManual(
-                      state->lifetime.instance, manual_path)
-                : inkpod::app::OpenEmbeddedManual(
-                      state->lifetime.instance, window);
-            if (status != EmbeddedManualStatus::Ok) {
-                ShowEmbeddedManualError(*state, window);
+        case IDM_HELP_MANUAL:
+        case IDM_HELP_FILE_FORMAT: {
+            const bool is_manual = LOWORD(wparam) == IDM_HELP_MANUAL;
+            const EmbeddedHelpDocument document = is_manual
+                ? EmbeddedHelpDocument::Manual
+                : EmbeddedHelpDocument::FileFormat;
+            const UINT error_message = is_manual
+                ? IDS_HELP_MANUAL_OPEN_FAILED
+                : IDS_HELP_FILE_FORMAT_OPEN_FAILED;
+            std::wstring document_path;
+            const EmbeddedHelpStatus status = state->lifetime.smoke_test
+                ? inkpod::app::PrepareEmbeddedHelpDocument(
+                      state->lifetime.instance, document, document_path)
+                : inkpod::app::OpenEmbeddedHelpDocument(
+                      state->lifetime.instance, window, document);
+            if (status != EmbeddedHelpStatus::Ok) {
+                ShowEmbeddedHelpError(*state, window, error_message);
                 return 0;
             }
             return 1;
