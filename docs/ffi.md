@@ -1,38 +1,39 @@
 # FFI 利用ガイド
 
 Inkpod の公開 C ABI は `include/inkpod/core_ffi.h` を仕様の正本とする。
-各型・関数の引数、`struct_size`、NULL 可否、スレッド、所有権、出力、revision、dirty、Undo、
+各型・関数の引数、`struct_size`、NULL 可否、スレッド、所有権、出力、リビジョン、未保存状態、Undo、
 排他状態、戻りステータスはヘッダーの Doxygen コメントに記載している。この文書は関数一覧を
-複製せず、frontend が ABI を安全に利用するための横断的な契約と典型的な呼び出し順序を説明する。
+複製せず、フロントエンドが ABI を安全に利用するための横断的な契約と典型的な呼び出し順序を説明する。
 
 ## 全体像
 
-Windows frontend は UI/Input、Core engine、Renderer の三つの長寿命 thread に分かれる。
+Windows フロントエンドは、UI/Input、Core エンジン、レンダラーの三つの長寿命スレッドに分かれる。
 
-- UI/Input thread は Windows message と pointer history を受け取り、入力を bounded C++ queue へ渡す。
-- Core engine thread は `InkpodCore` を作成し、すべての Core 操作と snapshot 構築を行う。
-- Renderer thread は D3D11/DXGI/Direct2D resource と `Present` を所有し、immutable snapshot だけを読む。
+- UI/Input スレッドは Windows メッセージとポインター履歴を受け取り、入力を上限付き C++ キューへ渡す。
+- Core エンジンスレッドは `InkpodCore` を作成し、すべての Core 操作とスナップショット構築を行う。
+- レンダラースレッドは D3D11/DXGI/Direct2D リソースと `Present` を所有し、不変スナップショットだけを読む。
 
-Core は C++ callback を呼ばない。UI thread は Core や Renderer の完了を同期的に待たず、Renderer は
-古い未描画 snapshot だけを置き換えてよい。stroke の begin/end/cancel と入力 sample 自体は捨てない。
+Core は C++ コールバックを呼ばない。UI スレッドは Core やレンダラーの完了を同期的に待たず、
+レンダラーは古い未描画スナップショットだけを置き換えてよい。ストロークの開始・終了・キャンセルと
+入力サンプル自体は捨てない。
 
 ```text
-UI/Input thread
-  └─ 正規化した入力 batch
-       → Core engine thread
-           ├─ Core command / stroke
-           └─ immutable snapshot 構築
-                → snapshot queue（所有権を1回だけ移動）
-                    → Renderer thread
-                        ├─ borrowed view を描画
-                        └─ snapshot release
+UI/Input スレッド
+  └─ 正規化した入力バッチ
+       → Core エンジンスレッド
+           ├─ Core コマンド／ストローク
+           └─ 不変スナップショットを構築
+                → スナップショットキュー（所有権を1回だけ移動）
+                    → レンダラースレッド
+                        ├─ 借用ビューを描画
+                        └─ スナップショットを解放
 ```
 
 ## ABI と構造体
 
-数値は固定幅 C 型を使う。Rust の `Vec`、`String`、slice、enum layout、trait object、reference と、
-C++ の STL、reference、exception は ABI を越えない。文字列は UTF-8 pointer と byte count、配列は
-pointer、count、byte stride で表す。
+数値は固定幅 C 型を使う。Rust の `Vec`、`String`、スライス、列挙型のメモリ配置、トレイトオブジェクト、
+参照と、C++ の STL、参照、例外は ABI を越えない。文字列は UTF-8 ポインターとバイト数、配列は
+ポインター、要素数、バイト単位のストライドで表す。
 
 拡張可能な構造体を渡すときは、少なくとも次を守る。
 
@@ -44,208 +45,225 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 
 - `struct_size` は必ず呼び出し側が設定する。出力構造体でも同じである。
 - ABI v4 で既知の構造体末尾まで読み書きできるサイズが必要である。
-- `reserved` は 0、未知の必須 feature flag は指定しない。
-- record span は各 record の `struct_size` と `*_stride_bytes` の両方を設定する。
-- count、stride、alignment、全 span の byte 範囲が有効でなければならない。
-- count が 0 の任意 span だけはデータ pointer を NULL にできる。各 API の例外はヘッダーを参照する。
-- 入力、出力、opaque object の記憶域を重ねない。
+- `reserved` は 0 とし、未知の必須機能フラグは指定しない。
+- レコード列では、各レコードの `struct_size` と `*_stride_bytes` の両方を設定する。
+- 要素数、ストライド、アラインメント、列全体のバイト範囲が有効でなければならない。
+- 要素数が 0 の任意指定の列に限り、データポインターを NULL にできる。各 API の例外はヘッダーを参照する。
+- 入力、出力、不透明オブジェクトの記憶域を重ねない。
 
-ABI version は Core 作成前に比較できる。`INKPOD_ABI_VERSION` と library の戻り値が異なる場合は、
+ABI バージョンは Core 作成前に比較できる。`INKPOD_ABI_VERSION` とライブラリの戻り値が異なる場合は、
 Core を作らず互換性エラーとして扱う。
 
-ABI v4 は v3 の value/ID-only primitive control plane を保持し、旧 NoOp
-`inkpod_core_dispatch_batch` ingress を削除して persistence/checkpoint/compaction record を追加した。ABI v2 で公開名から実装時の
-マイルストーン番号を除いた task API は引き続き
-`InkpodTask` / `InkpodTaskInfo` / `INKPOD_TASK_*` / `inkpod_task_*`、共有raster入力は
-`InkpodRasterSourceInput` を使用する。v1のマイルストーン名は公開aliasとして残していないため、
-旧headerを使うcallerはv2 headerへ更新して再ビルドする必要がある。構造体レイアウト、数値定数、
-所有権、thread、statusの契約はこの名称変更では変えていない。
+現行ライブラリは ABI v4 だけを受理し、`InkpodCoreConfig::abi_version` が完全一致しなければ
+`INKPOD_STATUS_INCOMPATIBLE_ABI` を返す。関数名や型名の `_v3` は、値／ID API 群が導入された世代を
+示す接尾辞であり、ABI v3 の呼び出し側との実行時互換性を意味しない。ABI v1-v3 の呼び出し側は、
+現行の v4 ヘッダーへ更新して再ビルドする。
 
-既存の raster-open/import、
-clipboard、Light Table 入力は ABI v2 の bounded call の中で同期的に検証、copy、canonicalize、
-intern される。stroke sample は同期的に Rust-owned canonical bytes へ copy され、4 MiB 以下は
-procedure inline payload、4 MiB 超は canonical sample asset になる。sequence source は従来どおり
-bounded な Rust-owned raster copy であり、vector primitive はtyped geometryとstable IDをprocedureへ保持する。
-ABI v3 caller は generation-tagged runtime object ID を明示 release する。ABI v2 caller が使う
-canonical asset retention は従来どおり Core 内部であり、v3 runtime object ID と persistent
-content-addressed `AssetId` は別 namespace である。
+ABI v4 は `_v3` の値／ID 専用プリミティブ制御 API を保持し、旧 `NoOp` の入口だった
+`inkpod_core_dispatch_batch` を削除して、永続化、チェックポイント、履歴破棄コピー用のレコードを追加した。
+ABI v2 で公開名から実装時のマイルストーン番号を除いたタスク API は、現行 v4 でも引き続き
+`InkpodTask` / `InkpodTaskInfo` / `INKPOD_TASK_*` / `inkpod_task_*`、共有ラスタ入力は
+`InkpodRasterSourceInput` を使用する。v1 のマイルストーン名は公開別名として残していない。
 
-## Deterministic replay contract and composite digest
+既存のラスタ文書オープン／インポート、クリップボード、ライトテーブル入力は、現行 v4 の操作別 API の
+一回の上限付き呼び出し中に、同期的に検証、コピー、正規化、登録される。ストロークサンプルも同期的に
+Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下ならプロシージャ内のペイロード、4 MiB 超なら
+正規化済みサンプルアセットになる。シーケンスの入力元は従来どおり上限付きの Rust 所有ラスタコピーであり、
+ベクタープリミティブは型付きジオメトリと安定 ID をプロシージャに保持する。
+`*_v3` API 群の呼び出し側は、世代付き実行時オブジェクト ID を明示的に解放する。操作別 API 群が使う
+正規アセットの保持は Core 内部で行われ、`_v3` 付き実行時オブジェクト ID と、永続的で内容アドレス方式の
+`AssetId` は別の名前空間に属する。
 
-M7 adds two read-only, fixed-layout queries without transferring ownership:
+## 決定的リプレイ契約と複合ダイジェスト
 
-- `inkpod_core_get_replay_contract` writes a caller-owned
-  `InkpodReplayContract`. It reports replay epoch 6, current
-  procedure/container version 9, canonical-numeric version 1, the closed
-  primitive count, and the BLAKE3-256 catalog digest. It is Core-owner-thread
-  only and changes no document, revision, history, dirty state, registry, or
-  snapshot.
-- `inkpod_snapshot_get_canonical_digest` writes a caller-owned
-  `InkpodCanonicalDigest` for an immutable snapshot. It may be called on any
-  thread that is permitted to read that snapshot. The caller must keep the
-  snapshot alive for the complete call; concurrent access and release of the
-  same snapshot are invalid. The query does not release or retain the
-  snapshot.
+M7 では、所有権を移さない読み取り専用の固定レイアウト照会を二つ追加した。
 
-Both outputs require their exact current `struct_size`, zero `reserved` fields,
-and no unknown feature flags. `algorithm` is
-`INKPOD_DIGEST_BLAKE3_256`; all 32 digest bytes are copied into the caller's
-record. NULL, short records, unknown flags, wrong thread, and panic follow the
-normal ABI status contract and do not partially write the output record. These
-queries expose verification values only; the production save/open ABI uses the
-same v9/replay/catalog contract and rejects every noncurrent native version.
+- `inkpod_core_get_replay_contract` は、呼び出し側が所有する `InkpodReplayContract` へ値を書き込む。
+  リプレイエポック 6、現行のプロシージャ／コンテナバージョン 9、正規数値バージョン 1、閉じた
+  プリミティブカタログの件数、BLAKE3-256 カタログダイジェストを返す。Core 所有スレッド専用であり、
+  文書、リビジョン、履歴、未保存状態、レジストリ、スナップショットを変更しない。
+- `inkpod_snapshot_get_canonical_digest` は、不変スナップショットの `InkpodCanonicalDigest` を、
+  呼び出し側が所有するレコードへ書き込む。そのスナップショットを読める任意のスレッドから呼び出せる。
+  呼び出し中はスナップショットを生存させる必要があり、同じスナップショットへのアクセスと解放を
+  同時に行ってはならない。この照会はスナップショットの解放も参照保持も行わない。
 
-M9 adds three owner-thread ABI v4 operations. `inkpod_core_get_persistence_info`
-returns format version, the last successful open strategy, authoritative journal
-counts, deterministic replay-work/dirty-byte counters, asset usage, and the
-checkpoint-due flag without replay or mutation. `inkpod_core_compaction_plan`
-returns the event/procedure counts that will be lost plus exact document,
-editor, and journal digests. The UI must display the history counts and obtain
-confirmation before passing that unchanged record to
-`inkpod_core_write_compacted_copy`. A stale token is `INVALID_STATE`; unknown
-flags/reserved values are `UNSUPPORTED`. Success writes a separate new-Genesis
-v9 file and changes no live path, revision, dirty state, savepoint, ID, or history.
-CoreHost routes all three through the Core engine queue. There is no automatic
-squash and CKPT is not a history or asset-retention authority. Windows exposes
-this as `ファイル > 履歴を破棄してコピー...`: it presents the event/procedure
-loss counts first, writes only to a path not owned by an open session, and does
-not adopt the copy as the live save target.
+どちらの出力も呼び出し側が所有し、`struct_size` には現行レコード全体を収められる値が必要である。
+その他のフィールドは出力であり、呼び出し側が動作を選ぶための指定値ではない。公開契約上、呼び出し側は
+`InkpodReplayContract::reserved` と `feature_flags` を 0 に初期化し、現行実装も成功時にそれぞれ 0 と
+`INKPOD_FEATURE_NONE` を書き込む。`InkpodCanonicalDigest` にはこれらのフィールドがない。
+`algorithm` は `INKPOD_DIGEST_BLAKE3_256` で、32 バイトのダイジェスト全体が呼び出し側のレコードへ
+コピーされる。NULL、短いレコード、パニックでは通常の ABI ステータス契約に従い、出力を部分更新しない。
+スレッド違反が成立するのは Core 所有スレッド専用のリプレイ契約照会だけであり、スナップショットの
+ダイジェスト照会は、外部同期された任意の読み取りスレッドから呼び出せる。これらは検証値を公開するだけで、
+製品の保存／オープン API は同じ v9 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
+バージョンをすべて拒否する。
 
-## ABI v4 and the value/ID control plane
+M9 では、Core 所有スレッド専用の ABI v4 操作を三つ追加した。`inkpod_core_get_persistence_info` は、
+形式バージョン、最後に成功したオープン方式、正本であるジャーナルの件数、決定的なリプレイ作業量と
+未保存変更量（`dirty_bytes`）、アセット使用量、`INKPOD_PERSISTENCE_CHECKPOINT_DUE` フラグを、
+リプレイや状態変更を行わずに返す。`open_strategy` は `INKPOD_NATIVE_OPEN_NOT_OPENED`、
+`INKPOD_NATIVE_OPEN_FULL_REPLAY`、`INKPOD_NATIVE_OPEN_CHECKPOINT` のいずれかである。
+`inkpod_core_compaction_plan` は、破棄されるイベント数とプロシージャ数に加え、文書、EditorState、
+ジャーナルの正確なダイジェストを返す。UI は履歴件数を表示して確認を得た後、そのレコードを変更せずに
+`inkpod_core_write_compacted_copy` へ渡す。書き込み時に確認トークンが古ければ `INVALID_STATE`、
+トークンのフラグまたは予約領域が 0 でなければ `UNSUPPORTED` になる。成功時は、現在状態を新しい Genesis
+とする別の v9 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
+`CoreHost` は三つの操作すべてを Core エンジンキュー経由で実行する。自動的な履歴圧縮は行わず、`CKPT` は
+履歴やアセット保持の正本ではない。Windows では `ファイル > 履歴を破棄してコピー...` として公開し、
+最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
+許可し、作成したコピーを現在の保存先として採用しない。
 
-`InkpodObjectId` は `object_type + Core generation + monotonic value` からなる固定幅 record である。
-Core、snapshot、task、color array、sample stream、raster asset、thumbnail、export は異なる type を持つ。
-ID は発行元 Core generation だけで有効であり、別 Core、destroy/recreate 後、release 後には使えない。
-wrong type/zero value/unknown opcode は `INKPOD_STATUS_INVALID_ARGUMENT`、wrong generation/stale/double release は
-`INKPOD_STATUS_INVALID_STATE`、未知 feature/schema は `INKPOD_STATUS_UNSUPPORTED` となる。
-失敗時に document、history、journal、revision、dirty、object registry、出力 record の部分変更はない。
+## ABI v4 の `_v3` 付き値／ID 制御 API
 
-`InkpodPrimitiveRequestV3` は pointer、callback、path、native/STL object を含まない。stable opcode、
-schema version、base document revision、target ID、generation-tagged payload ID、固定幅 tool/plane/color/
-diameter/flags だけを値で持つ。現在の closed catalog は既存 canonical executor slice の
-`SetMainLineColor` schema 1、`ReplacePalette` schema 1、`ApplyRasterStroke` schema 2、
-`ImportRasterAsset` schema 1 である。可変 palette/sample/raster は先に
-`inkpod_core_register_*_v3` の一回の bounded call で deep copy し、primitive request は返された ID
-だけを参照する。caller は登録 call 復帰後に元 buffer を変更・解放できる。実行は
-`Core::execute_primitive` に委譲され、旧 main-line/palette/stroke/import FFI wrapper と別の意味実装を
-持たない。success は result を完全に書き、semantic no-op は committed flag、revision、history、
-dirty、persistent ID を進めない。stale base、active stroke、invalid target/payload、overflow、allocation
-failure は atomic error である。
+この節の `V3` / `_v3` は API 群とレコード名の一部である。すべての呼び出しは、全体として
+ABI v4 に一致するヘッダーとライブラリの組み合わせで使用する。
 
-残るper-operation ABIも同じcanonical Core境界へ委譲する。成功したdocument mutationはstable
-`PrimitiveId`とprocedureを1件だけ公開し、旧FFI内にpixel、geometry、layer/history規則の別実装を
-持たない。previewのbegin/update/cancel、query、export、decode/ingestion自体はdocument
-procedureではなく、commit endpointだけがprocedureを生成する。
+`InkpodObjectId` は、オブジェクト種別、Core 世代、単調増加値からなる固定幅レコードである。Core、
+スナップショット、タスク、色配列、サンプル列、ラスタアセット、サムネイル、エクスポートは異なる種別を持つ。
+ID は発行元の Core 世代でだけ有効であり、別の Core、破棄後の再作成、解放後には使えない。種別違い、
+値 0、未知のオペコードは `INKPOD_STATUS_INVALID_ARGUMENT`、世代違い、期限切れ、二重解放は
+`INKPOD_STATUS_INVALID_STATE`、未知の機能やスキーマは `INKPOD_STATUS_UNSUPPORTED` となる。
+失敗時に、文書、履歴、ジャーナル、リビジョン、未保存状態、オブジェクトレジストリ、出力レコードを
+部分的に変更しない。
 
-snapshot、thumbnail、export、task は Rust-owned runtime ID である。snapshot metadata と tile/guide/
-vector record は `first + capacity + stride` の batched copy、tile pixels と thumbnail/export bytes は
-`InkpodBufferCopyV3 { offset, bytes, byte_capacity, written_bytes, total_bytes }` で取得する。capacity 0 の
-byte query は `bytes == NULL`、record query は output NULL/stride 0 とし、実 storage はその一回の call
-だけ borrowed である。Core は caller output pointer を保持しない。ID 自体は copy できるが、同じ live
-object の query/release は Core owner thread 上で直列化し、最後に `inkpod_core_object_release_v3` を
-正確に一回呼ぶ。Core ID は独立 release せず `inkpod_core_destroy` で終端する。
+`InkpodPrimitiveRequestV3` はポインター、コールバック、パス、ネイティブオブジェクト、STL オブジェクトを
+含まない。安定したオペコード、スキーマバージョン、基準文書リビジョン、対象 ID、世代付きペイロード ID、
+固定幅のツール、プレーン、色、直径、フラグだけを値で持つ。この API 群が受理する閉じたオペコード集合は、
+既存の正規実行器のうち `SetMainLineColor` スキーマ 1、`ReplacePalette` スキーマ 1、
+`ApplyRasterStroke` スキーマ 2、`ImportRasterAsset` スキーマ 1 である。可変長のパレット、サンプル、ラスタは、
+先に `inkpod_core_register_*_v3` の一回の上限付き呼び出しで完全コピーし、プリミティブ要求は返された ID
+だけを参照する。呼び出し側は登録から戻った後、元のバッファを変更または解放できる。実行は
+`Core::execute_primitive` に委譲され、従来の主線色、パレット、ストローク、インポート用 FFI ラッパーと
+別の意味実装を持たない。成功時は結果全体を書き込み、意味上の変更がない場合は確定済みフラグ、
+リビジョン、履歴、未保存状態、永続 ID を進めない。基準リビジョンの不一致、実行中のストローク、
+不正な対象やペイロード、オーバーフロー、割り当て失敗はいずれも原子的なエラーとなる。
 
-全 `inkpod_core_*_v3` call は、task query/cancel を含め Core owner thread 限定である。ID record は UI
-queue へ値で渡せるが、その解決、copy、release は発行元 Core の owner thread で行う。旧 opaque
-snapshot/task API の任意-thread例外は、それら固有の既存 contract であり v3 ID registry へは適用しない。
+その他の操作別 ABI も同じ正規 Core 境界へ委譲する。成功した文書変更は、安定した `PrimitiveId` と
+プロシージャを一件だけ公開し、従来の FFI 内にピクセル、ジオメトリ、レイヤー、履歴規則の別実装を持たない。
+プレビューの開始、更新、キャンセル、照会、エクスポート、デコード、取り込み自体は文書プロシージャではなく、
+確定処理の終端だけがプロシージャを生成する。
+
+スナップショット、サムネイル、エクスポート、タスクは Rust 所有の実行時 ID である。スナップショットの
+メタデータとタイル、ガイド、ベクターレコードは `first + capacity + stride` の一括コピーで取得し、
+タイルピクセルとサムネイル／エクスポートのバイト列は
+`InkpodBufferCopyV3 { offset, bytes, byte_capacity, written_bytes, total_bytes }` で取得する。容量 0 の
+バイト数照会では `bytes == NULL`、レコード件数照会では出力 NULL、ストライド 0 とする。実記憶域は
+その一回の呼び出し中だけ借用され、Core は呼び出し側の出力ポインターを保持しない。ID 値自体はコピーできるが、
+同じ有効オブジェクトの照会と解放は Core 所有スレッド上で直列化し、最後に
+`inkpod_core_object_release_v3` を必ず一回だけ呼ぶ。Core ID は個別に解放せず、
+`inkpod_core_destroy` で終端する。
+
+`inkpod_core_*_v3` の全呼び出しは、タスクの照会とキャンセルを含め、Core 所有スレッドに限定される。
+ID レコードは値として UI キューへ渡せるが、その解決、コピー、解放は発行元 Core の所有スレッドで行う。
+従来の不透明スナップショット／タスク API にある任意スレッドの例外は、それら固有の契約であり、
+v3 ID レジストリには適用しない。
 
 ## スレッド契約
 
-`InkpodCore` は single-writer かつ thread-affine である。作成、文書操作、view 操作、stroke、履歴、
-保存／open、snapshot 構築、destroy は、すべて Core を作成した Core engine thread から呼ぶ。
-違反は `INKPOD_STATUS_WRONG_THREAD` となり、handle や出力の所有権は移動しない。
+`InkpodCore` は単一書き込みかつスレッド固定である。作成、文書操作、ビュー操作、ストローク、履歴、
+保存／オープン、スナップショット構築、破棄は、すべて Core を作成した Core エンジンスレッドから呼ぶ。
+違反時は `INKPOD_STATUS_WRONG_THREAD` となり、ハンドルや出力の所有権は移動しない。
 
-`inkpod_core_get_resource_usage` も Core owner thread 限定の read-only query である。
-caller-owned の完全な `InkpodResourceUsage` を一回の呼び出し中だけ借用し、成功時だけ値を
-copy する。NULL、短い構造体、wrong thread、panic では出力を変更しない。tile/history、
-render cache、CPU staging、light table/reference、sequence source、thumbnail cache は
-logical payload の category 別推定値であり、allocator や GPU driver の private resident
-size と COW clone の物理共有量は推測しない。query は snapshot を構築せず、document/view
-revision、dirty、history、savepoint を変更しない。
+`inkpod_core_get_resource_usage` も Core 所有スレッド専用の読み取り照会である。呼び出し側が所有する
+完全な `InkpodResourceUsage` を一回の呼び出し中だけ借用し、成功時だけ値をコピーする。NULL、短い構造体、
+スレッド違反、パニックでは出力を変更しない。タイル／履歴、描画キャッシュ、CPU ステージング、
+ライトテーブル／参照画像、シーケンス入力元、サムネイルキャッシュの値は、論理ペイロードをカテゴリ別に
+見積もったものである。アロケーターや GPU ドライバー内部の常駐量、COW 複製間の物理共有量は推測しない。
+この照会はスナップショットを構築せず、文書／ビューのリビジョン、未保存状態、履歴、保存点を変更しない。
 
-Windows frontend の `CoreHost` は複数の `InkpodCore` owner 変数を一つの Core engine thread 上に
-保持する。各 owner は `DocumentSessionId` と `Generation` の組で選択し、work item は投入時にその組を
-値で確定する。同じ数値の Core-local document/view ID や revision は session をまたいだ routing key に
-しない。session close は先に新規投入を拒否し、受理済み work と live stroke を解決してから、作成した
-同じ thread 上で該当 owner だけを destroy する。この frontend registry は C ABI や Rust handle の
-ownership 契約を変更しない。
+Windows フロントエンドの `CoreHost` は、複数の `InkpodCore` 所有変数を一つの Core エンジンスレッド上に
+保持する。各所有変数は `DocumentSessionId` と `Generation` の組で選択し、作業項目は投入時にその組を
+値として確定する。同じ数値の Core 内文書／ビュー ID やリビジョンを、セッションをまたぐ経路選択キーに
+してはならない。セッションを閉じるときは、先に新規投入を拒否し、受理済み作業と実行中ストロークを
+解決してから、作成時と同じスレッド上で該当する所有変数だけを破棄する。このフロントエンドレジストリは、
+C ABI や Rust ハンドルの所有権契約を変更しない。
 
-canonical document mutation は closed `PrimitiveWork` variant で queue される。record は issue-time の
-session/generation、`CommandContext` の target IDs、base revision、`InkpodPrimitiveRequestV3` の値、
-snapshot/document-info publication flags、exactly-once sequence/completion stateだけを持ち、raw pointer、
-closure、external path、STL containerを持たない。palette/sample/rasterの caller memory は enqueue 前の
-register callでRust-owned IDへ変換する。queue飽和で未受理のsequence/pending countはatomicにrollbackし、
-受理済み primitive はactive stroke終了後、close、shutdown drainでも高々一回だけ実行または明示解決する。
-query、initializer、ABI-v2 adapterは固定`AdapterWork` recordを使う。queue recordには
-session/generation、issue-time `CommandContext`、sequence、publication flags、bounded input tokenだけを置き、
-callable、view update、promise/completionはCoreHostのbounded registryが所有する。Core threadはtokenを
-exactly onceでremoveしてから実行し、queued variant自体にraw pointer、closure、path、STL objectを置かない。
+正規の文書変更は、閉じた `PrimitiveWork` バリアントとしてキューへ入れる。レコードが持つのは、発行時の
+セッション／世代、`CommandContext` の対象 ID、基準リビジョン、`InkpodPrimitiveRequestV3` の値、
+スナップショット／文書情報の公開フラグ、一度だけ処理するためのシーケンス／完了状態だけである。
+生ポインター、クロージャ、外部パス、STL コンテナーは持たない。パレット、サンプル、ラスタの呼び出し側
+メモリは、キュー投入前の登録呼び出しで Rust 所有 ID へ変換する。キュー飽和で受理されなかった場合は、
+シーケンスと保留件数を原子的に巻き戻す。受理済みプリミティブは、実行中ストロークの終了後、クローズ時、
+終了処理でのキュー排出時にも、高々一回だけ実行または明示的に解決する。
 
-例外は immutable handle と atomic task である。
+照会、初期化、操作別アダプターは固定 `AdapterWork` レコードを使う。キューレコードには、セッション／世代、
+発行時の `CommandContext`、シーケンス、公開フラグ、上限付き入力トークンだけを置く。呼び出し可能オブジェクト、
+ビュー更新と完了通知オブジェクトは `CoreHost` の上限付きレジストリが所有する。Core スレッドはトークンを
+一度だけ削除してから実行し、キュー内のバリアント自体に生ポインター、クロージャ、パス、STL オブジェクトを
+置かない。
 
-- snapshot の accessor と release は任意 thread で呼べる。同じ snapshot の参照と release は外部同期する。
-- task と batch task の query/cancel は、Core operation の実行中に別 thread から呼べる。
-- task の release は任意 thread でよいが、その task を使う Core call が戻るまで待つ。
-- immutable batch graph、preview、report、byte buffer、encoded sequence、clipboard の accessor/release は
-  Core affinity を持たない。同じ handle の利用と release は呼び出し側で同期する。
+例外は、不変ハンドル、Core を取らないコーデック、アトミックなタスクである。
 
-任意 thread で呼べることは、同じ owner 変数を同時に解放してよいことを意味しない。
+- スナップショットの参照と解放は任意のスレッドから行える。同じスナップショットの参照と解放は外部同期する。
+- タスクとバッチタスクの作成、照会、キャンセル、解放は任意のスレッドから行える。照会とキャンセルは、
+  そのタスクを使う Core 操作の実行中に別スレッドから呼べるが、解放は Core 呼び出しが戻るまで待つ。
+- 不変バッチグラフ、プレビュー、レポート、バイトバッファ、エンコード済みシーケンス、クリップボードの
+  参照と解放には Core のスレッド制約がない。同じハンドルの利用と解放は呼び出し側で同期する。
+- パレット／カラーチャートのファイル API にも Core のスレッド制約はない。不変の
+  `InkpodColorChartFile` に対する件数取得、要素取得、解放では、同じハンドルの参照と解放を呼び出し側で同期する。
 
-## Palette / color-chart file contract
+任意のスレッドから呼べることは、同じ所有変数を同時に解放してよいことを意味しない。
 
-`.inkpalette` と `.inkchart` のbyte codecは `inkpod-format` が所有し、WindowsはUTF-8 path、
-exact-depth color、表示名だけを渡す。両形式はexact-current schema 1だけを受理し、最大16 MiB、
-最大4,096色、chart名はvalid UTF-8の1–1,024 byteに制限する。saveは同一directoryのexclusive
-temporary fileをwrite/flush/syncした後だけrenameし、失敗時は既存destinationを先にtruncateしない。
+## パレット／カラーチャートのファイル契約
 
-- `inkpod_palette_file_save/load` は呼出中だけpathとcolor bufferをborrowする。loadは
-  `InkpodColorBuffer` のsize query／short-buffer契約に従い、成功時だけcaller bufferへcopyする。
-- `inkpod_color_chart_file_save` はstrided `InkpodColorChartEntry` と各UTF-8 nameを呼出中だけ
-  borrowし、復帰後に保持しない。
-- `inkpod_color_chart_file_load` はimmutable Rust-owned `InkpodColorChartFile` を返す。
-  `count/get` はread-onlyで、`get`のnameはsize query対応caller bufferへcopyする。最後に
-  `inkpod_color_chart_file_release`をexactly once呼び、成功時owner pointerはNULLになる。
-- これらはCore handleを取らずdocument/history/revisionを変更しない。loaded paletteをdocumentへ
-  適用する場合は、別のcanonical `ReplacePalette` commitが唯一のdocument mutationとなる。
+`.inkpalette` と `.inkchart` のバイトコーデックは `inkpod-format` が所有し、Windows 側は UTF-8 パス、
+元の色深度を保つ色、表示名だけを渡す。両形式は現行のスキーマ 1 だけを受理する。ファイルは最大 16 MiB、
+色は最大 4,096 個、チャート名は有効な UTF-8 の 1–1,024 バイトに制限する。保存時は同じディレクトリに
+排他的な一時ファイルを作り、書き込み、フラッシュ、同期を終えた後だけ名前を変更する。失敗時に既存の
+出力先を先に切り詰めない。
 
-## Shortcut sequence 契約
+- `inkpod_palette_file_save/load` は呼び出し中だけパスと色バッファを借用する。読み込みは
+  `InkpodColorBuffer` の必要量照会／短いバッファの契約に従い、成功時だけ呼び出し側のバッファへコピーする。
+- `inkpod_color_chart_file_save` は、ストライド付き `InkpodColorChartEntry` と各 UTF-8 名を呼び出し中だけ
+  借用し、復帰後は保持しない。
+- `inkpod_color_chart_file_load` は不変の Rust 所有 `InkpodColorChartFile` を返す。件数取得と要素取得は
+  読み取り専用であり、要素取得時の名前は必要量照会に対応した呼び出し側バッファへコピーする。最後に
+  `inkpod_color_chart_file_release` を必ず一回だけ呼び、成功時は所有ポインターが NULL になる。
+- これらは任意のスレッドから利用でき、Core ハンドルを取らず、文書、履歴、リビジョンを変更しない。
+  同じチャートハンドルの参照と解放は外部同期する。読み込んだパレットを文書へ適用する場合は、別途行う
+  正規の `ReplacePalette` 確定処理だけが文書変更となる。
 
-Windows frontend は menu command と同じ `command_id` を持つ
-`InkpodShortcutSequence` 表を Core engine thread で登録する。各列は1–4個の
-`InkpodShortcutStroke` からなり、command ID の重複、完全一致、一方が他方の
-prefix になる表は Core が transactional に拒否する。
+## ショートカット列の契約
+
+Windows フロントエンドは、メニューコマンドと同じ `command_id` を持つ `InkpodShortcutSequence` 表を
+Core エンジンスレッドで登録する。各列は 1–4 個の `InkpodShortcutStroke` からなる。コマンド ID の重複、
+列の完全一致、一方が他方の接頭列になる表は、Core がトランザクションとして拒否する。
 
 - `inkpod_core_shortcut_defaults_set` は検証済み既定値と現在値を同時に置き換える。
-- `inkpod_core_shortcut_sequences_set` は現在値だけを置き換え、`reset` は登録済み既定値へ戻す。
-- `inkpod_core_shortcut_sequences_copy` は件数queryとcaller-owned strided buffer copyに対応する。これら3関数は Core owner thread 限定である。
-- `inkpod_shortcut_sequence_resolve` は Core handle を取らない pure helper で、Core からcopyした immutable形状の表に対して任意 thread から `NONE` / `PREFIX` / `EXACT` を返す。UI keydown ごとに Core engine thread へ往復しないためのAPIである。
+- `inkpod_core_shortcut_sequences_set` は現在値だけを置き換え、リセット操作は登録済み既定値へ戻す。
+- `inkpod_core_shortcut_sequences_copy` は、件数照会と呼び出し側所有のストライド付きバッファへのコピーに
+  対応する。これら三関数は Core 所有スレッド専用である。
+- `inkpod_shortcut_sequence_resolve` は Core ハンドルを取らない純粋な補助関数である。Core からコピーした
+  不変形式の表に対し、任意のスレッドから `NONE` / `PREFIX` / `EXACT` を返す。UI のキー入力ごとに
+  Core エンジンスレッドへ往復しないための API である。
 
-これらは document revision、dirty、Undo を変更しない。永続化形式や
-text-focus guard、入力timeout、衝突時のUI上の交換policyはfrontendの責務である。
+これらは文書リビジョン、未保存状態、Undo を変更しない。永続化形式、テキスト入力フォーカスの保護、
+入力タイムアウト、衝突時に UI 上で割り当てを交換する方針は、フロントエンドの責務である。
 
 ## 所有権と有効期間
 
-### borrowed 入力
+### 借用入力
 
-通常の `const T*` 入力、UTF-8 span、byte span、sample span は、その API 呼び出し中だけ borrowed
-（借用）である。保持が必要な API は戻る前に意味値をコピーする。caller は API が戻った後に入力
-buffer を再利用または解放できる。
+通常の `const T*` 入力、UTF-8 列、バイト列、サンプル列は、その API 呼び出し中だけ借用される。
+保持が必要な API は戻る前に意味値をコピーする。呼び出し側は API から戻った後に入力バッファを
+再利用または解放できる。
 
-canonical asset ingestion を行う API もこの規則の例外ではない。Core owner thread 上の call が
-成功を返すまでに、raster-open/import、clipboard、Light Table の descriptor と encoded/decoded bytesを
-検証して Rust-owned canonical bytes へ copy し、内容アドレス付き registry へ intern する。stroke
-sample span も復帰前に copy し、4 MiB 以下はprocedure inline payload、4 MiB超は canonical sample
-assetへ確定する。sequenceはboundedなRust-owned raster copyであり、vector primitiveはtyped canonical
-geometryとstable IDを保持する。
-Core、transient session、journal、snapshot は復帰後に caller record、buffer、file name、path を参照しない。
-同じ canonical descriptor と logical payload は同じ registry entry に deduplicate されるが、その
-内部参照 count や allocation address は ABI の一部ではない。
+正規アセットを取り込む API も、この規則の例外ではない。Core 所有スレッド上の呼び出しが成功を返すまでに、
+ラスタ文書オープン／インポート、クリップボード、ライトテーブルの記述子とエンコード前後のバイト列を検証し、
+Rust 所有の正規バイト列へコピーして、内容アドレス付きレジストリへ登録する。ストロークのサンプル列も
+復帰前にコピーし、4 MiB 以下ならプロシージャ内のペイロード、4 MiB 超なら正規サンプルアセットとして確定する。
+シーケンスは上限付きの Rust 所有ラスタコピーであり、ベクタープリミティブは型付きの正規ジオメトリと
+安定 ID を保持する。
 
-### Rust-owned handle
+Core、一時セッション、ジャーナル、スナップショットは、復帰後に呼び出し側のレコード、バッファ、
+ファイル名、パスを参照しない。同じ正規記述子と論理ペイロードは同じレジストリエントリへ重複排除されるが、
+内部参照数や割り当てアドレスは ABI の一部ではない。
 
-opaque handle を生成する API は `T** out_*` を受け取る。owner 変数は呼び出し前に NULL でなければ
-ならず、成功時だけ Rust-owned handle が入る。対応する release/destroy は pointer-to-owner を受け、
-所有権を消費して同じ owner 変数を NULL にする。
+### Rust 所有ハンドル
+
+不透明ハンドルを生成する API は `T** out_*` を受け取る。所有変数は呼び出し前に NULL でなければならず、
+成功時だけ Rust 所有ハンドルが入る。対応する解放／破棄関数は所有変数へのポインターを受け取り、
+所有権を消費して同じ変数を NULL にする。
 
 ```cpp
 InkpodSnapshot* snapshot = nullptr;
@@ -255,66 +273,69 @@ if (status == INKPOD_STATUS_OK) {
 }
 
 inkpod_snapshot_release(&snapshot);
-// snapshot == nullptr。同じ owner 変数での再 release は成功 no-op。
+// snapshot == nullptr。同じ所有変数で再び解放しても、何もせず成功する。
 ```
 
-release 後は、handle から得た tile、pixel、guide、vector、文字列、byte span と、コピーしておいた
-別名 pointer を一切使わない。Rust が確保した object を `free`、`delete`、`CoTaskMemFree` で解放しない。
+解放後は、ハンドルから得たタイル、ピクセル、ガイド、ベクター、文字列、バイト列と、コピーしておいた
+別名ポインターを一切使わない。Rust が確保したオブジェクトを `free`、`delete`、`CoTaskMemFree` で解放しない。
 
-主な owner と borrowed view の関係は次のとおりである。
+主な所有者と借用データの関係は次のとおりである。
 
-| owner                | 生成                              | borrowed view の有効期間                                  | 解放                          |
+| 所有対象             | 所有期間                          | 借用データの有効期間                                      | 解放                          |
 | -------------------- | --------------------------------- | --------------------------------------------------------- | ----------------------------- |
-| Core                 | create 成功から destroy まで      | Core pointer は owner thread の call 中だけ利用           | Core owner thread             |
-| snapshot             | build 成功から release まで       | tile/pixel/transform/guide/vector view は release まで    | 外部同期した任意 thread       |
-| clipboard            | copy/create 成功から release まで | raster export は caller buffer。内部 payload は公開しない | 外部同期した任意 thread       |
-| byte buffer          | export 成功から release まで      | byte span は release まで                                 | 外部同期した任意 thread       |
-| encoded sequence     | export 成功から release まで      | item name/byte span は release まで                       | 外部同期した任意 thread       |
-| task / batch task    | create 成功から release まで      | query 値は caller へのコピー                              | Core call 終了後に任意 thread |
-| batch graph          | create/load 成功から release まで | execute/preview 中は graph が生存する必要がある           | 外部同期した任意 thread       |
-| batch preview/report | Core call の出力から release まで | item の UTF-8 span は親 handle の release まで            | 外部同期した任意 thread       |
+| Core                 | 作成成功から破棄まで              | Core ポインターは所有スレッドでの呼び出し中だけ利用       | Core 所有スレッド             |
+| スナップショット     | 構築成功から解放まで              | タイル、ピクセル、変換、ガイド、ベクターは解放まで        | 外部同期した任意スレッド      |
+| クリップボード       | コピー／作成成功から解放まで     | ラスタ出力は呼び出し側バッファ。内部ペイロードは非公開   | 外部同期した任意スレッド      |
+| バイトバッファ       | 出力成功から解放まで              | バイト列は解放まで                                        | 外部同期した任意スレッド      |
+| エンコード済み列     | 出力成功から解放まで              | 要素名とバイト列は解放まで                                | 外部同期した任意スレッド      |
+| タスク／バッチタスク | 作成成功から解放まで              | 照会値は呼び出し側へのコピー                              | Core 呼び出し終了後の任意スレッド |
+| バッチグラフ         | 作成／読込成功から解放まで        | 実行／プレビュー中はグラフが生存している必要がある       | 外部同期した任意スレッド      |
+| バッチプレビュー／レポート | Core 出力から解放まで       | 要素の UTF-8 列は親ハンドルの解放まで                    | 外部同期した任意スレッド      |
+| カラーチャート       | 読込成功から解放まで              | 取得時に色と名前を呼び出し側バッファへコピー              | 外部同期した任意スレッド      |
 
-snapshot の raster tile storage は snapshot 側で独立して参照計数されるため、snapshot は作成元 Core より
-長く生存できる。ただし通常の shutdown では Renderer queue を drain して snapshot を先に解放すると、
-所有権の追跡が簡潔になる。
+スナップショットのラスタタイル記憶域はスナップショット側で独立して参照計数されるため、作成元 Core より
+長く生存できる。ただし通常の終了処理では、レンダラーキューを空にしてスナップショットを先に解放すると、
+所有権を追跡しやすい。
 
-canonical asset registry は `InkpodCore` が所有し、ABI-v2 caller に独立した opaque handle や release
-API を公開しない。ABI-v3 の raster/sample ID は bounded ingestion 後の runtime object を所有するための
-別 registry entry であり、primitive canonicalization/commit 時に inline payload または persistent
-`AssetId` へ解決される。runtime object ID を release しても committed procedure の asset retention は
-失われない。Genesis、retained journal branch/redo tail、既知の persistent reference、live transient
-owner が retention root となる。現在の materialized document や checkpoint だけを見て解放せず、
-session close は受理済み Core work と transient owner を drain してから registry 全体を owner thread
-上で破棄する。失敗した ingestion/commit は document、history、journal、revision、dirty、公開済み
-retention edge、caller-owned output を部分変更しない。
+正規アセットレジストリは `InkpodCore` が所有し、操作別 API 群には独立した不透明ハンドルや解放 API を
+公開しない。`_v3` 付きのラスタ／サンプル ID は、上限付き取り込み後の実行時オブジェクトを所有する
+別のレジストリエントリであり、プリミティブの正規化／確定時に、プロシージャ内ペイロードまたは永続的な
+`AssetId` へ解決される。実行時オブジェクト ID を解放しても、確定済みプロシージャによるアセット保持は
+失われない。Genesis、保持対象のジャーナル分岐と無効な Redo 末尾、既知の永続参照、生存中の一時所有者が
+保持ルートとなる。現在実体化されている文書やチェックポイントだけを見て解放してはならない。セッションを
+閉じるときは、受理済み Core 作業と一時所有者を空にしてから、レジストリ全体を所有スレッド上で破棄する。
+取り込みや確定の失敗時は、文書、履歴、ジャーナル、リビジョン、未保存状態、公開済み保持関係、
+呼び出し側所有の出力を部分変更しない。
 
 ## 出力と失敗
 
-値出力は caller-owned である。成功時だけ利用し、失敗時はヘッダーが部分出力を保証する場合を除いて
-読まない。特に owner 出力は呼び出し前に NULL にし、戻り値が失敗でも念のため NULL のままか確認する。
+値出力は呼び出し側が所有する。成功時だけ利用し、失敗時はヘッダーが部分出力を保証する場合を除いて
+読み取らない。特に所有権を返す出力は呼び出し前に NULL にし、失敗時にも NULL のままか確認する。
 
 部分出力を意図的に返す代表的なパターンは次のとおりである。
 
-- `INKPOD_STATUS_BUFFER_TOO_SMALL` は必要な count/byte 数を返す。
+- `INKPOD_STATUS_BUFFER_TOO_SMALL` は必要な要素数またはバイト数を返す。
 - `INKPOD_STATUS_FILL_OVERFLOW` は漏れ候補座標を返すが、文書を変更しない。
-- cancelled batch execution は `INKPOD_STATUS_CANCELLED` と owned report を同時に返すことがある。
-- error-message copy の失敗は written byte 数を 0 にし、同じ thread の diagnostic を保持する。
-- `inkpod_core_validate_plane_creation` は UI の確定前に種類と形式を検査する owner-thread 限定の読み取り専用 query である。成功・失敗のどちらでも文書、stable ID、revision、dirty、history を変更しない。実際の `inkpod_core_tree_edit` も同じ制約を再検証するため、query 後に状態が変わっても不正な作成は commit されない。
+- キャンセルされたバッチ実行は、`INKPOD_STATUS_CANCELLED` と所有レポートを同時に返すことがある。
+- エラーメッセージのコピーに失敗すると、書き込みバイト数を 0 にし、同じスレッドの診断を保持する。
+- `inkpod_core_validate_plane_creation` は、UI で確定する前に種類と形式を検査する、所有スレッド専用の
+  読み取り照会である。成功・失敗のどちらでも、文書、安定 ID、リビジョン、未保存状態、履歴を変更しない。
+  実際の `inkpod_core_tree_edit` も同じ制約を再検証するため、照会後に状態が変わっても不正な作成は
+  確定されない。
 
-Rust panic は ABI 境界で捕捉され `INKPOD_STATUS_PANIC` になる。C++ exception も ABI を越えさせない。
+Rust のパニックは ABI 境界で捕捉され `INKPOD_STATUS_PANIC` になる。C++ の例外も ABI を越えさせない。
 
-## size query と caller-owned buffer
+## 必要量照会と呼び出し側所有バッファ
 
-`inkpod_core_locator_neighborhood` は modeless locator の magnified view に必要な
-複数 pixel を一回の owner-thread ABI call で返す。`radius` は 0..16、出力は常に
-`(radius * 2 + 1)` の正方形 packed straight RGBA8 で、文書外は透明になる。
-`pixel_capacity == 0` かつ `pixels_rgba8 == NULL` で metadata と
-`required_bytes` を問い合わせ、十分な caller-owned buffer を設定して再度呼ぶ。
-buffer は call 中だけ借用され、Core は保持しない。query/copy とも document、view、
-revision、dirty、Undo を変更しない。
+`inkpod_core_locator_neighborhood` は、モードレスなロケーターの拡大表示に必要な複数ピクセルを、
+所有スレッド上の一回の ABI 呼び出しで返す。`radius` は 0..16 で、出力は常に
+`(radius * 2 + 1)` の正方形に密配置した非乗算アルファの RGBA8 となり、文書外は透明になる。
+`pixel_capacity == 0` かつ `pixels_rgba8 == NULL` でメタデータと `required_bytes` を問い合わせ、
+十分な大きさの呼び出し側所有バッファを設定して再度呼ぶ。バッファは呼び出し中だけ借用され、Core は
+保持しない。必要量照会とコピーのどちらも、文書、ビュー、リビジョン、未保存状態、Undo を変更しない。
 
-可変長出力は、まず NULL/容量 0 で必要量を問い合わせ、caller が確保した後に再度呼ぶ。API により
-必要量の field 名は異なるため、各構造体の Doxygen 契約を確認する。
+可変長出力は、まず NULL／容量 0 で必要量を問い合わせ、呼び出し側が確保した後に再度呼ぶ。API ごとに
+必要量を返すフィールド名が異なるため、各構造体の Doxygen 契約を確認する。
 
 ```cpp
 InkpodClipboardRasterBuffer output{};
@@ -322,7 +343,7 @@ output.struct_size = sizeof(output);
 
 InkpodStatus status = inkpod_clipboard_render_rgba8(clipboard, &output);
 if (status != INKPOD_STATUS_BUFFER_TOO_SMALL && status != INKPOD_STATUS_OK) {
-    // diagnostic を取得して中止
+    // 診断を取得して中止
 }
 
 std::vector<std::uint8_t> pixels(static_cast<std::size_t>(output.required_bytes));
@@ -331,170 +352,170 @@ output.pixel_capacity = pixels.size();
 status = inkpod_clipboard_render_rgba8(clipboard, &output);
 ```
 
-2 回の call の間に対象 object を変更または解放しない。Core 文書を対象とする query では、必要量取得と
-本取得を同じ Core engine work item 内で行うと revision drift を避けられる。
+二回の呼び出しの間に対象オブジェクトを変更または解放しない。Core 文書を対象とする照会では、必要量取得と
+本取得を同じ Core エンジン作業項目内で行うと、リビジョンのずれを避けられる。
 
-`inkpod_core_layer_thumbnail` もこの caller-owned buffer 方式を使う。最初の call は
+`inkpod_core_layer_thumbnail` もこの呼び出し側所有バッファ方式を使う。最初の呼び出しでは
 `InkpodLayerThumbnailBuffer::pixels_rgba8 = NULL`、`pixel_capacity = 0` とし、返された
-`required_bytes` を確保してから同じ stable layer ID と最大寸法で再度呼ぶ。結果は上から下へ packed
-された straight-alpha RGBA8 で、`revision` は生成元の committed document revision である。
-buffer の確保・解放は caller が担い、Core は pointer を保持しない。レイヤー自体が非表示でも内容を
-確認できる一方、プレーンの表示状態とレイヤー／プレーン不透明度は thumbnail に反映される。
+`required_bytes` を確保してから、同じ安定レイヤー ID と最大寸法で再度呼ぶ。結果は上から下へ密配置した
+非乗算アルファの RGBA8 で、`revision` は生成元の確定済み文書リビジョンである。バッファの確保と解放は
+呼び出し側が担い、Core はポインターを保持しない。レイヤー自体が非表示でも内容を確認できる一方、
+プレーンの表示状態とレイヤー／プレーン不透明度はサムネイルに反映される。
 
-`inkpod_core_sequence_thumbnail_get` も同じ caller-owned query/copy 契約を使う。
-`pixels_rgba8 = NULL`、`pixel_capacity = 0` の query で `required_bytes`、寸法、stride、
-checksum を取得し、確保後の二回目で bounded straight-alpha RGBA8 をコピーする。pointer は
-呼び出し中だけ借用され、Core は保持しない。二回の call は同じ
-`DocumentSessionId + generation` の CoreHost work item 内で行い、別 active document を再解決しない。
+`inkpod_core_sequence_thumbnail_get` も同じ呼び出し側所有の照会／コピー契約を使う。
+`pixels_rgba8 = NULL`、`pixel_capacity = 0` の照会で `required_bytes`、寸法、ストライド、チェックサムを
+取得し、確保後の二回目で上限付きの非乗算アルファ RGBA8 をコピーする。ポインターは呼び出し中だけ
+借用され、Core は保持しない。二回の呼び出しは同じ `DocumentSessionId + Generation` の
+`CoreHost` 作業項目内で行い、別のアクティブ文書へ解決し直さない。
 
-`inkpod_core_sequence_import_mixed_encoded` の `InkpodNamedRasterInput` span は caller-owned
-borrowed 入力である。record、UTF-8 名、encoded bytes は呼び出し終了まで有効とし、Core は全 record
-の構造、format、長さを検証してから各画像を decode する。全件成功時だけ sequence を一括置換し、
-一件でも invalid/decode/allocation failure なら旧 sequence と current document、dirty、Undo を保つ。
+`inkpod_core_sequence_import_mixed_encoded` の `InkpodNamedRasterInput` 列は、呼び出し側所有の借用入力である。
+レコード、UTF-8 名、エンコード済みバイト列は呼び出し終了まで有効とする。Core は全レコードの構造、形式、
+長さを検証してから各画像をデコードする。全件成功時だけシーケンスを一括置換し、一件でも入力不正、
+デコード失敗、割り当て失敗があれば、以前のシーケンス、現在の文書、未保存状態、Undo を保つ。
 
-## subpalette/reference snapshot 契約
+## サブパレット参照スナップショットの契約
 
-read-only reference viewer は、対象 `DocumentSessionId + Generation` の Core owner thread で
-`inkpod_core_subpalette_set` と `inkpod_core_view_create` を呼び、返った Core-local view ID を
-その session namespace の外へ routing key として使わない。
+読み取り専用の参照ビューアーは、対象 `DocumentSessionId + Generation` の Core 所有スレッドで
+`inkpod_core_subpalette_set` と `inkpod_core_view_create` を呼び、返された Core 内のビュー ID を
+そのセッション名前空間の外で経路選択キーとして使わない。
 
-- `inkpod_core_subpalette_view_apply` はその view の zoom、pan、flip、viewport だけを変更する。
-- `inkpod_core_subpalette_view_sample` は同じ view transform を通した device 座標を half-open bounds で
-  検証し、source の RGBA8/16 depth を caller-owned `InkpodColorValue` へコピーする。
-- `inkpod_core_subpalette_build_snapshot` は NULL の owner 変数へ Rust-owned immutable snapshot を返す。
-  通常 snapshot と同様に、成功後は sink または caller のどちらか一方だけが
+- `inkpod_core_subpalette_view_apply` は、そのビューのズーム、パン、反転、ビューポートだけを変更する。
+- `inkpod_core_subpalette_view_sample` は、同じビュー変換を通したデバイス座標を半開区間の境界で検証し、
+  入力元の RGBA8/16 色深度を保って、呼び出し側所有の `InkpodColorValue` へコピーする。
+- `inkpod_core_subpalette_build_snapshot` は、NULL の所有変数へ Rust 所有の不変スナップショットを返す。
+  通常のスナップショットと同様に、成功後は受け取り先または呼び出し側のどちらか一方だけが
   `inkpod_snapshot_release` の責任を持つ。
 
-これら三関数と view close は Core owner thread 限定である。snapshot accessor/release だけが
-外部同期した任意 thread で利用できる。reference raster は editable document へ install されず、
-document revision、dirty、Undo/Redo、savepoint を変更しない。Windows Canvas は stroke を consume し、
-編集 command を Core へ送らない。target rebind/close/shutdown では先に Canvas sink を unbind し、
-捕捉済み session/generation の Core 上で view を close してから Canvas owner を破棄する。
+これら三関数とビューのクローズは Core 所有スレッド専用である。スナップショットの参照と解放だけが、
+外部同期した任意のスレッドから利用できる。参照ラスタは編集可能文書へ組み込まれず、文書リビジョン、
+未保存状態、Undo/Redo、保存点を変更しない。Windows Canvas はストローク入力を消費し、編集コマンドを
+Core へ送らない。対象の再割り当て、クローズ、終了処理では、先に Canvas の受け取り先を解除し、
+捕捉済みセッション／世代の Core 上でビューを閉じてから Canvas 所有者を破棄する。
 
-## EditorDefaults / EditorState ABI v2
+## EditorDefaults / EditorState（現行 ABI v4）
 
-M3 は ABI version を変更せず、次の七つの Core-owner-thread API と固定幅 record を ABI v2 へ
-additive に追加する。
+次の七つの Core 所有スレッド用 API と固定幅レコードは ABI v2 で追加され、現行 ABI v4 に保持されている。
+ABI v2 のライブラリや呼び出し側を受理するという意味ではない。
 
-- `inkpod_core_get_editor_defaults` は document 作成前にも有効な Rust-owned immutable
-  `InkpodEditorDefaults` を caller-owned record へコピーする。built-in initial document spec と
-  built-in editor values は application preference ではなく、新規 document 作成時に Core が
-  session の Genesis/EditorState へ明示的にコピーする。
+- `inkpod_core_get_editor_defaults` は文書作成前にも有効な Rust 所有の不変 `InkpodEditorDefaults` を、
+  呼び出し側所有のレコードへコピーする。組み込みの初期文書仕様と EditorState 初期値はアプリケーション設定
+  ではなく、新規文書の作成時に Core がセッションの Genesis／EditorState へ明示的にコピーする。
 - `inkpod_core_get_editor_state` は現在の `InkpodEditorStateInfo` を副作用なくコピーする。
-- `inkpod_core_update_editor_state` は `InkpodEditorStateUpdate` の kind と exact expected
-  `EditorRevision` を検証し、成功時の完全な `InkpodEditorStateInfo` をコピーする。update kind は
-  active tool、tool color、tool diameter、fill、selection、vector、active target、palette cursor の
-  closed set である。
-- `inkpod_core_editor_stroke_begin` は caller-owned `InkpodEditorStrokeInput` の sample span を call 中だけ
-  borrow し、tool 0 なら active tool、非0なら指定 raster tool の Core-owned styleを選び、RGBA8/RGBA16
-  exact-depth color、Q16 diameter、stable target を begin 時に一度だけ canonical stroke argument へ
-  コピーする。selector は locator の固定鉛筆等に使うが、caller は color/diameter/target を渡さない。
-  append/end は後続の EditorState を再参照しない。
+- `inkpod_core_update_editor_state` は `InkpodEditorStateUpdate` の種類と、期待する正確な
+  `EditorRevision` を検証し、成功時の完全な `InkpodEditorStateInfo` をコピーする。更新種別は、
+  アクティブツール、ツール色、ツール直径、塗り、選択、ベクター、アクティブ対象、パレットカーソルの
+  閉じた集合である。
+- `inkpod_core_editor_stroke_begin` は、呼び出し側所有の `InkpodEditorStrokeInput` のサンプル列を
+  呼び出し中だけ借用する。`tool` が 0 ならアクティブツール、0 でなければ指定ラスタツールについて、
+  Core 所有のスタイルを選び、RGBA8/RGBA16 の色深度を保つ色、Q16 直径、安定した対象を、開始時に一度だけ
+  正規ストローク引数へコピーする。ツール指定はロケーター用の固定鉛筆などに使うが、呼び出し側は色、直径、
+  対象を渡さない。追加／終了処理は、その後の EditorState を再参照しない。
 - `inkpod_core_apply_fill_for_editor_target` と
-  `inkpod_core_apply_selection_for_editor_target` は既存の bounded input/output record に、gesture beginで
-  captureしたstable layer/plane ID pairを添えて実行する。pairは同じdocument namespace内で再検証し、
-  gesture中のEditorState変更で別targetへ再解決しない。既存entrypointは一回の同期command開始時に
-  current targetをCore内でcaptureする経路として維持する。
-- `inkpod_core_select_color_for_editor_target` は色選択command開始時にcaptureしたstable layer/plane
-  ID pairとexact-depth `InkpodColorValue`を使う。後続EditorState変更でsource planeをretargetせず、
-  既存`inkpod_core_select_color`は同期command開始時のcurrent targetをCore内でcaptureして委譲する。
+  `inkpod_core_apply_selection_for_editor_target` は、既存の上限付き入出力レコードに、操作開始時に捕捉した
+  安定レイヤー／プレーン ID の組を添えて実行する。この組は同じ文書名前空間内で再検証し、操作中に
+  EditorState が変わっても別の対象へ解決し直さない。既存の入口関数は、一回の同期コマンド開始時に
+  現在の対象を Core 内で捕捉する経路として維持する。
+- `inkpod_core_select_color_for_editor_target` は、色選択コマンドの開始時に捕捉した安定レイヤー／プレーン ID
+  の組と、色深度を保つ `InkpodColorValue` を使う。その後に EditorState が変わっても入力元プレーンを
+  切り替えない。既存の `inkpod_core_select_color` は、同期コマンド開始時に現在の対象を Core 内で捕捉して
+  委譲する。
 
-公開 record は `InkpodEditorFillOptions`、`InkpodEditorSelectionOptions`、
+公開レコードは `InkpodEditorFillOptions`、`InkpodEditorSelectionOptions`、
 `InkpodEditorVectorOptions`、`InkpodEditorStateInfo`、`InkpodEditorDefaults`、
-`InkpodEditorStateUpdate`、`InkpodEditorStrokeInput` である。caller は入力の
-top-level recordと、その入力がadvertiseする各nested recordの`struct_size`をABI v2 headerの
-完全な`sizeof(record)`以上に設定し、reservedと未知flagを0にする。query/updateの出力は
-callerがtop-level outputの`struct_size`だけを提示し、Coreが成功時に完全なcaller-owned copyと
-各nested outputの`struct_size`を書き込む。短いtop-level record、使用する短いnested input、
-NULL、未知enum/update kind、非有限・範囲外の値、0または存在しないstable target IDは拒否する。
-RGBA8/RGBA16 は既存の `InkpodColorValue` tag と channel 幅を保持し、
-alpha を含め packed RGBA8 へ縮小しない。diameter と option scalar は ABI record で定義した exact
-integer/Q16 表現を使う。
+`InkpodEditorStateUpdate`、`InkpodEditorStrokeInput` である。呼び出し側は、最上位の入力レコードと、
+その入力が使用する各入れ子レコードの `struct_size` を、現行 ABI v4 ヘッダーにある完全な
+`sizeof(record)` 以上に設定し、予約領域と未知フラグを 0 にする。照会／更新の出力では、呼び出し側は
+最上位出力の `struct_size` だけを提示する。Core は成功時に、呼び出し側所有の完全なコピーと、各入れ子出力の
+`struct_size` を書き込む。短い最上位レコード、使用対象の短い入れ子入力、NULL、未知の列挙値／更新種別、
+非有限値、範囲外の値、0 または存在しない安定対象 ID は拒否する。RGBA8/RGBA16 は既存の
+`InkpodColorValue` タグとチャンネル幅を保持し、アルファを含む密配置 RGBA8 へ縮小しない。直径とオプションの
+スカラー値には、ABI レコードで定義した正確な整数／Q16 表現を使う。
 
-七 API の入力は call 中だけ borrowed、出力 record は caller-owned copy であり、release 関数を
-必要としない。query は editor/document revision、digest、dirty、history、journal、render content を
-変更しない。update は expected revision が一致したときだけ一括適用する。semantic no-op は
-`EditorRevision`、`EditorStateDigest`、dirty を保持し、semantic change は editor revision/digest と
-editor dirty だけを更新する。stale、invalid、overflow、allocation failure、panic では Core と出力
-record のどちらも変更しない。active target は layer/plane の stable-ID pair で、document topology
-変更後の検証と決定的な再解決も Core が行う。
+七つの API の入力は呼び出し中だけ借用され、出力レコードは呼び出し側所有のコピーなので解放関数を
+必要としない。照会は EditorState／文書のリビジョン、ダイジェスト、未保存状態、履歴、ジャーナル、描画内容を
+変更しない。更新は期待リビジョンが一致したときだけ一括適用する。意味上の変更がない場合は `EditorRevision`、
+`EditorStateDigest`、未保存状態を保ち、意味上の変更は EditorState のリビジョン、ダイジェスト、未保存状態だけを
+更新する。期限切れ、不正入力、オーバーフロー、割り当て失敗、パニックでは Core と出力レコードのどちらも
+変更しない。アクティブ対象はレイヤー／プレーンの安定 ID の組であり、文書構造変更後の検証と決定的な
+再解決も Core が行う。
 
-Windows の `CoreHost` は issue-time の `DocumentSessionId + Generation` を owner thread で解決して
-query/update し、結果を同じ key の presentation cache へ deep copy する。document/view/workspace
-切替は対象 Core を再 query する。同一 document の複数 view は一つの EditorState を共有し、別
-session は分離される。workspace の以前の表示値を Core へ戻してはならない。
+Windows の `CoreHost` は、発行時の `DocumentSessionId + Generation` を所有スレッドで解決して照会／更新し、
+結果を同じキーの表示キャッシュへ完全コピーする。文書、ビュー、ワークスペースを切り替えたときは対象 Core を
+再照会する。同一文書の複数ビューは一つの EditorState を共有し、別セッションは分離される。ワークスペースに
+残った以前の表示値を Core へ書き戻してはならない。
 
-## M4 canonical Genesis / asset ingestion under ABI v2
+## 正規 Genesis とアセット取り込み（現行 ABI v4）
 
-M4 の Core は Genesis の stable Document ID と distinct Cell ID、および immutable base surface を
-所有する。blank document の base は allocation-free な `SolidWhite`、raster-open-as-document の base
-は canonical raster asset である。base は editable layer/plane、selection mask、borrowed snapshot
-buffer ではない。既存文書への raster import、private clipboard、Light Table source は同じ
-canonical registry を使う。`ImportRasterAsset` と 4 MiB 超の `ApplyRasterStroke` は外部 path や
-caller buffer ではなく immutable asset identity を procedure に固定し、小さい stroke は owned
-inline payload に固定する。
+M4 の Core は、Genesis の安定した文書 ID、別個の Cell ID、不変の基底面を所有する。空の文書では
+割り当て不要の `SolidWhite`、ラスタを文書として開く場合は正規ラスタアセットが基底面となる。基底面は、
+編集可能なレイヤー／プレーン、選択マスク、借用スナップショットバッファではない。既存文書へのラスタ
+インポート、アプリ内クリップボード、ライトテーブル入力元は同じ正規レジストリを使う。
+`ImportRasterAsset` と 4 MiB 超の `ApplyRasterStroke` は、外部パスや呼び出し側バッファではなく、
+不変のアセット識別子をプロシージャへ固定する。小さいストロークは所有済みのプロシージャ内ペイロードにする。
 
-ABI v2 の raster descriptor は、対応 API の既存 `struct_size`、format、dimension、stride、length、
-count 上限を満たす必要がある。canonical raster は pixel format、sRGB/alpha semantics、width、height、
-padding のない canonical stride、logical payload length を含めて識別される。別 codec/path 由来でも
-これらと logical pixel bytes が同じなら deduplicate できる。encoded bytes、file name、path、timestamp、
-optional provenance は asset identity や replay input に含めない。forged dimension、stride、length、
-digest/identity、work bound は commit 前に拒否する。
+操作別ラスタ記述子は、対応 API の現行 `struct_size`、形式、寸法、ストライド、長さ、件数の上限を満たす
+必要がある。正規ラスタは、ピクセル形式、sRGB／アルファの意味、幅、高さ、パディングのない正規ストライド、
+論理ペイロード長を含めて識別する。別のコーデックやパスに由来していても、これらと論理ピクセル列が同じなら
+重複排除できる。エンコード済みバイト列、ファイル名、パス、時刻、任意の出自情報は、アセット識別子や
+リプレイ入力に含めない。偽装された寸法、ストライド、長さ、ダイジェスト／識別子、作業量上限は
+確定前に拒否する。
 
-この接続は既存の同期 ABI-v2 ingestion entrypoint を Core owner thread で実行する。UI thread が
-queue へ投入する前に lifetime を失う pointer を work item へ保持してはならず、`CoreHost` adapter は
-issue-time session/generation と入力値を所有してから呼び出す。ABI v3 では variable payload を
-同期 bounded call で generation-tagged asset/sample ID に変換し、closed typed queue には
-`CommandContext`、base revision、target、opcode/schema、固定値、ID だけを格納する。caller buffer は
-queue item に入らない。V9 は `GENS`/`ASST` に asset-backed Genesis と全 retained branch の asset graph
-を保存し、normal save、autosave/recovery、Batch `.inkpod` output、reopen を同じ Core-owned mapping へ
-接続する。Windows adapter は成功後だけ current path、recent-file list、dirty 表示を更新する。一般画像への
-flat export は別の出力経路である。
+この接続では、既存の同期式操作別取り込み関数を Core 所有スレッドで実行する。UI スレッド側で寿命が切れる
+ポインターを作業項目へ保持してはならない。`CoreHost` アダプターは、発行時のセッション／世代と入力値を
+所有してから呼び出す。`_v3` 付き API 群では、可変長ペイロードを一回の同期式上限付き呼び出しで世代付きの
+アセット／サンプル ID に変換する。閉じた型付きキューに格納するのは、`CommandContext`、基準リビジョン、
+対象、オペコード／スキーマ、固定値、ID だけであり、呼び出し側バッファは作業項目に入れない。
+
+V9 は `GENS` / `ASST` に、アセットを基底とする Genesis と、保持対象の全分岐のアセットグラフを保存する。
+通常保存、自動保存／復旧、バッチによる `.inkpod` 出力、再オープンは、同じ Core 所有の対応付けを使う。
+Windows アダプターは成功後だけ、現在のパス、最近使ったファイル一覧、未保存表示を更新する。一般画像への
+平坦化エクスポートは別の出力経路である。
 
 ## 編集状態と排他
 
-Core が持つ transient editing state は、committed document と分離される。
+Core が持つ一時編集状態は、確定済み文書と分離される。
 
-| 状態                | 開始／更新中の committed revision・dirty・Undo | snapshot                                | 完了                                                          |
+| 状態                    | 開始／更新中の確定済みリビジョン・未保存状態・Undo | スナップショット                 | 完了                                                    |
 | ------------------- | ---------------------------------------------- | --------------------------------------- | ------------------------------------------------------------- |
-| live stroke         | begin/append では不変                          | stroke preview を観測できる             | end が実変更を高々 1 Undo 単位で commit。cancel は完全復元    |
-| filter/dust preview | begin/update では不変                          | transient preview revision を観測できる | apply が 1 Undo 単位で commit。cancel は original base を保持 |
-| floating paste      | begin/transform では不変                       | floating preview を観測できる           | commit が高々 1 Undo 単位。cancel は base を保持              |
+| 実行中ストローク        | 開始／追加では不変                                  | ストロークプレビューを観測できる | 終了時に実変更を高々 1 Undo 単位で確定。キャンセルは完全復元 |
+| フィルター／ごみ取りプレビュー | 開始／更新では不変                           | 一時プレビューリビジョンを観測できる | 適用時に 1 Undo 単位で確定。キャンセルは元の基底を保持 |
+| 浮動貼り付け            | 開始／変換では不変                                  | 浮動プレビューを観測できる       | 確定は高々 1 Undo 単位。キャンセルは基底を保持       |
 
-1 Core に各 state は高々 1 個であり、live stroke と filter/dust preview は同時に存在できない。
-競合する文書編集、履歴移動、保存、open、layer/plane 操作、別 preview 開始は
-`INKPOD_STATUS_INVALID_STATE` になる。immutable snapshot 構築は transient state 中も許される。
+一つの Core に各状態は高々一つであり、実行中ストロークとフィルター／ごみ取りプレビューは同時に存在できない。
+競合する文書編集、履歴移動、保存、オープン、レイヤー／プレーン操作、別プレビューの開始は
+`INKPOD_STATUS_INVALID_STATE` になる。不変スナップショットの構築は一時状態中も許される。
 
-live stroke の append が失敗した場合、部分的な preview を後から end で commit してはならない。
-Core は session を無効化するため、frontend は stroke を打ち切り、必要なら cancel を行って次の begin へ進む。
+実行中ストロークへのサンプル追加が失敗した場合、部分的なプレビューを後から終了処理で確定してはならない。
+Core はセッションを無効化するため、フロントエンドはストロークを打ち切り、必要ならキャンセルしてから
+次の開始へ進む。
 
-## revision、dirty、Undo の読み方
+## リビジョン、未保存状態、Undo の読み方
 
-`document_revision` は committed document の識別に使う。view-only 状態は `view_revision`、filter/stroke
-preview の描画更新は snapshot 側の transient revision で区別する。
+`document_revision` は確定済み文書の識別に使う。ビューだけの状態は `view_revision`、
+フィルター／ストロークプレビューの描画更新は、スナップショット側の一時リビジョンで区別する。
 
-| 操作の種類                                                    | document revision    | dirty                             | Undo                              |
+| 操作の種類                                                    | 文書リビジョン       | 未保存状態                        | Undo                              |
 | ------------------------------------------------------------- | -------------------- | --------------------------------- | --------------------------------- |
-| query、snapshot accessor、task、shortcut、view-only 操作      | 不変                 | 不変                              | 不変                              |
-| EditorState query または semantic no-op                      | 不変                 | 不変                              | 不変                              |
-| EditorState の semantic update                               | 不変                 | editor savepoint との差だけ変化   | 不変                              |
-| stroke begin/append、preview begin/update、floating transform | 不変                 | 不変                              | 不変                              |
-| stroke end、preview apply、floating commit                    | 実変更時に 1 回進む  | dirty                             | 高々 1 単位                       |
-| 直接の文書編集                                                | 実変更時に 1 回進む  | dirty                             | 原則 1 単位                       |
-| Undo/Redo/history jump                                        | 結果状態へ進む       | savepoint との位置で再計算        | cursor を移動し item は増やさない |
-| 現行 v9 の通常保存                                            | 不変                 | replace 成功時に document/editor とも clean | 不変                       |
-| autosave                                                      | 不変                 | 不変                              | 不変                              |
-| new/import                                                    | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis/history            |
-| v9 open/recovery                                              | generation 内で rebase | 戻り情報が正本                  | file の全 journal/history を復元   |
+| 照会、スナップショット参照、タスク、ショートカット、ビューだけの操作 | 不変           | 不変                              | 不変                              |
+| EditorState の照会または意味上の変更なし                      | 不変                 | 不変                              | 不変                              |
+| EditorState の意味上の更新                                    | 不変                 | EditorState 保存点との差だけ変化 | 不変                              |
+| ストローク開始／追加、プレビュー開始／更新、浮動変換          | 不変                 | 不変                              | 不変                              |
+| ストローク終了、プレビュー適用、浮動状態の確定                 | 実変更時に 1 回進む  | 未保存                            | 高々 1 単位                       |
+| 直接の文書編集                                                | 実変更時に 1 回進む  | 未保存                            | 原則 1 単位                       |
+| Undo／Redo／履歴位置の移動                                    | 結果状態へ進む       | 保存点との位置で再計算            | カーソルを移動し項目は増やさない  |
+| 現行 v9 の通常保存                                            | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
+| 自動保存                                                      | 不変                 | 不変                              | 不変                              |
+| 新規作成／インポート                                          | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis／履歴              |
+| v9 のオープン／復旧                                           | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
 
-no-op の厳密な出力や revision は各関数の Doxygen 契約に従う。frontend は file timestamp ではなく、
-Core が返す document flags と savepoint に基づいて未保存状態を表示する。
+意味上の変更がない場合の厳密な出力やリビジョンは、各関数の Doxygen 契約に従う。フロントエンドはファイル時刻ではなく、
+Core が返す文書フラグと保存点に基づいて未保存状態を表示する。
 
 ## 典型的な起動から終了まで
 
 ### 1. Core を作る
 
-Core engine thread を開始し、その thread 上で ABI version を確認して Core を作る。
+Core エンジンスレッドを開始し、そのスレッド上で ABI バージョンを確認して Core を作る。
 
 ```cpp
 InkpodCoreConfig config{};
@@ -506,115 +527,129 @@ InkpodCore* core = nullptr;
 Check(inkpod_core_create(&config, &core));
 ```
 
-各 `core` owner 変数は CoreHost の session entry が一意に保持する。raw Core pointer を UI message の
-`WPARAM`/`LPARAM` に積まず、UI 通知は session ID/generation を含む bounded queue の value token で
-取り出す。
+各 `core` 所有変数は `CoreHost` のセッションエントリが一意に保持する。生の Core ポインターを UI
+メッセージの `WPARAM` / `LPARAM` に積まず、UI 通知はセッション ID／世代を含む上限付きキューの
+値トークンで取り出す。
 
-### 2. new または open
+### 2. 新規作成またはオープン
 
-新規作成では platform adapter が非 0 の 128-bit UUID、寸法、DPI を用意する。open では Windows file
-dialog が得た path を UTF-8 byte span に変換し、Core engine thread へコピーして渡す。いずれも成功時の
-`InkpodDocumentInfo` を UI state の初期値とする。
+新規作成ではプラットフォームアダプターが 0 でない 128 ビット UUID、寸法、DPI を用意する。オープンでは、
+Windows ファイルダイアログが得たパスを UTF-8 バイト列へ変換し、Core エンジンスレッドへコピーして渡す。
+いずれも成功時の `InkpodDocumentInfo` を UI 状態の初期値とする。
 
-open/decode が失敗した場合、現在の文書は保持される。frontend は失敗前に tab や Renderer state を
+オープン／デコードに失敗した場合、現在の文書は保持される。フロントエンドは失敗前にタブやレンダラー状態を
 破棄せず、成功通知を受けてから切り替える。
 
-### 3. stroke を streaming する
+### 3. ストロークを逐次入力する
 
-UI/Input thread は pointer history を client device pixel 座標で正規化し、bounded queue へ batch で入れる。
-Core engine thread は style と最初の sample で begin し、後続 sample を append する。sample ごとに FFI を
-往復したり snapshot を作ったりしない。
+UI/Input スレッドはポインター履歴をクライアントのデバイスピクセル座標で正規化し、上限付きキューへ
+バッチで入れる。Core エンジンスレッドはスタイルと最初のサンプルでストロークを開始し、後続サンプルを
+追加する。サンプルごとに FFI を往復したり、スナップショットを作ったりしない。
 
 ```text
-pointer down
-  → stroke begin（style + initial samples）
-  → stroke append（0回以上の sample batch）
-  → stroke end
-pointer cancel / capture lost
-  → stroke cancel
+ポインター押下
+  → ストローク開始（スタイル + 初期サンプル）
+  → ストローク追加（0回以上のサンプルバッチ）
+  → ストローク終了
+ポインターのキャンセル／キャプチャ喪失
+  → ストロークをキャンセル
 ```
 
-描画中の見た目が必要なら、frame cadence に合わせて begin/append 後に snapshot を作る。end は pointer up
-と同じ順序で必ず Core queue に入り、成功した stroke 全体を 1 Undo 単位にする。
+描画中の見た目が必要なら、フレーム周期に合わせて開始／追加後にスナップショットを作る。終了処理は
+ポインター解放と同じ順序で必ず Core キューに入り、成功したストローク全体を 1 Undo 単位にする。
 
-### 4. snapshot の所有権を Renderer へ移す
+### 4. スナップショットの所有権をレンダラーへ移す
 
-Core engine thread は owner 変数を NULL から構築し、snapshot sink へ raw owner をちょうど 1 回渡す。
-sink は enqueue 成否にかかわらず release 責任を引き受ける。
+Core エンジンスレッドは所有変数を NULL から構築し、スナップショットの受け取り先へ生の所有ポインターを
+ちょうど一回渡す。受け取り先は、キュー投入の成否にかかわらず解放責任を引き受ける。
 
 ```cpp
 InkpodSnapshot* next = nullptr;
 Check(inkpod_core_build_snapshot(core, &options, &next));
 
 snapshot_sink.Submit(next); // この呼び出しで所有権を移動する
-next = nullptr;             // Core engine 側は以後参照・release しない
+next = nullptr;             // Core エンジン側は以後参照・解放しない
 ```
 
-`Submit` が queue full で snapshot を採用しない場合も、sink 内で直ちに release する。呼び出し元へ所有権を
-戻す設計と混在させない。snapshot pointer を `PostMessage` の値引数として送らず、所有権を明示した C++ queue
-を使う。
+`Submit` がキュー飽和でスナップショットを採用しない場合も、受け取り先の内部で直ちに解放する。
+呼び出し元へ所有権を戻す設計と混在させない。スナップショットポインターを `PostMessage` の値引数として
+送らず、所有権を明示した C++ キューを使う。
 
-### 5. Renderer が読み、release する
+### 5. レンダラーが読み取り、解放する
 
-Renderer thread は snapshot から raster view、transform、overlay、vector view を取得し、親 snapshot の
-生存中だけ借用する。古い pending snapshot を最新のものへ置き換える場合、置換された owner をその場で
-release する。描画完了、device reset、window shutdown の各経路でも owner を一度だけ release する。
+レンダラースレッドはスナップショットからラスタビュー、変換、オーバーレイ、ベクタービューを取得し、
+親スナップショットの生存中だけ借用する。古い保留中スナップショットを最新のものへ置き換える場合、
+置換された所有者をその場で解放する。描画完了、デバイスリセット、ウィンドウ終了の各経路でも、
+所有者を一度だけ解放する。
 
-### 6. shutdown する
+### 6. 終了する
 
 推奨順序は次のとおりである。
 
 ```text
 UI/Input の新規投入を停止
-  → active stroke/preview/floating を end/apply または cancel
-  → Core work queue を drain
-  → snapshot sink を閉じる
-  → Renderer の pending/current snapshot をすべて release
-  → task/report/preview/graph/clipboard/byte buffer を release
-  → Core engine thread 上で core destroy
-  → Core engine / Renderer thread を join
+  → 実行中のストローク／プレビュー／浮動状態を終了／適用またはキャンセル
+  → Core 作業キューを空にする
+  → スナップショットの受け取り先を閉じる
+  → レンダラーの保留中／現在のスナップショットをすべて解放
+  → タスク／レポート／プレビュー／グラフ／クリップボード／バイトバッファを解放
+  → Core エンジンスレッド上で Core を破棄
+  → Core エンジン／レンダラースレッドを終了待ち
 ```
 
-`inkpod_core_destroy` は live transient state を commit せず破棄し、owner 変数を NULL にする。snapshot は Core
-より長く生存できるが、通常 shutdown では先に Renderer owner を解放して leak 検出を単純にする。
+`inkpod_core_destroy` は生存中の一時状態を確定せず破棄し、所有変数を NULL にする。スナップショットは
+Core より長く生存できるが、通常の終了処理では先にレンダラー側の所有者を解放すると、漏れを検出しやすい。
 
-## task、進捗、cancel
+## タスク、進捗、キャンセル
 
-長時間処理では、task handle を先に作り、その handle を Core operation が戻るまで所有する。UI thread は
-query で進捗を読み、ユーザー操作で cancel を要求できる。
+長時間処理では、任意のスレッドでタスクハンドルを先に作り、そのハンドルを Core 操作が戻るまで所有する。
+UI スレッドは照会で進捗を読み、ユーザー操作でキャンセルを要求できる。
 
 ```text
-Core engine: task create → Core operation(task) ─────────→ return → task release
-UI thread:                         query / query / cancel
+任意スレッド: タスク作成
+Core エンジン:      Core 操作（タスク）─────────→ 復帰
+UI スレッド:                 照会／照会／キャンセル
+任意スレッド:                                           タスク解放
 ```
 
-cancel は要求であり、即時終了の保証ではない。Core が cancellation を poll すると staged result を破棄し、
-`INKPOD_STATUS_CANCELLED` を返す。file 出力を伴う処理は完成済み temporary file だけを置換対象とし、cancel や
-failure で部分出力を commit しない。
+キャンセルは要求であり、即時終了の保証ではない。Core がキャンセル状態を確認すると、段階的に構築した結果を
+破棄して `INKPOD_STATUS_CANCELLED` を返す。ファイル出力を伴う処理は、完成した一時ファイルだけを
+置換対象とし、キャンセルや失敗で部分出力を確定しない。
 
-batch execution だけは cancel/失敗時にも report owner を返し得る。戻り status を確認した後も
-`out_report != NULL` なら内容を読み、必ず release する。
+バッチ実行だけは、キャンセル／失敗時にもレポートの所有権を返すことがある。戻りステータスを確認した後も、
+`out_report != NULL` なら内容を読み、必ず解放する。
 
-## 保存、autosave、recovery
+## 保存、自動保存、復旧
 
-通常保存は v9 `META/GENS/ASST/PROC/EDIT` と prospective document/editor savepoint を構築し、同一
-directory の temporary file を chunk write・flush・sync・close してから置換する。成功後だけ normal path と
-両 savepoint を Core へ公開するため、EditorState だけが dirty な場合も reopen 直後は clean になる。失敗時に
-元 file を truncate せず、document/editor のどちらの savepoint も変更しない。
+通常保存では、v9 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
+セクション、チェックポイントの作成条件を満たす場合だけ任意の `CKPT` を構築する。保存後に設定予定の
+文書／EditorState 保存点を含むコンテナは、同じディレクトリの一時ファイルへ複数回に分けて書き込む。
+フラッシュ、同期、クローズを終えてから置換する。成功後だけ通常保存パスと両保存点を Core へ公開するため、
+EditorState だけが
+未保存の場合も、再オープン直後は保存済みになる。失敗時に元ファイルを切り詰めず、文書／EditorState の
+どちらの保存点も変更しない。
 
-autosave、export は出力を atomic に書いても normal path、document/editor savepoint、dirty を変えない。
-通常 v9 open は Genesis/assets/procedure journal、cursor/branches、全 ID authority、EditorState、両 savepoint
-を staged Core で検証・復元してから generation を一回だけ置換する。recovery open も同じ内容を復元するが、
-両 savepoint と path authority を消して dirty・recovered・pathless にする。以前の通常 file を上書きするには、
-ユーザーが明示した path で改めて通常保存する必要がある。
+自動保存とエクスポートは、出力を原子的に書いても通常保存パス、文書／EditorState 保存点、未保存状態を
+変えない。通常の v9 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
+ID 発行状態、EditorState、両保存点を、段階的に構築した Core で検証・復元してから、現在の Core 状態を
+一回だけ置換する。`InkpodCore` の `_v3` 付きオブジェクトレジストリの世代自体は、オープンで更新されない。
 
-active stroke/preview/floating 中は保存や open を実行せず、Core queue 上で完了または cancel 後に行う。
+`CKPT` は、リプレイエポック、ジャーナル接頭部、状態ダイジェスト、次に発行する安定 ID、履歴カーソル、
+作業量などがすべて一致するときだけ採用する。不一致なら正本である `PROC` から全リプレイする。不正形式の
+チェックポイント、
+またはコンテナハッシュが壊れたチェックポイントはオープン全体を拒否し、既存 Core を変更しない。実際に
+採用した経路は `inkpod_core_get_persistence_info` の `open_strategy` で取得できる。復旧オープンも同じ内容を
+復元するが、通常保存先としてのパスを引き継がず、両保存点を解除して、未保存、復旧済み、パスなしの状態にする。
+以前の通常ファイルを上書きするには、ユーザーが明示したパスで改めて通常保存する必要がある。
 
-## diagnostic の取得
+ストローク、プレビュー、浮動状態の実行中は保存やオープンを実行せず、Core キュー上で完了または
+キャンセルした後に行う。
 
-error text は thread-local UTF-8 である。失敗した API と同じ thread で、まず trailing NUL を含む必要 byte 数を
-取得し、次に caller buffer へコピーする。別 thread へ status と text を通知する場合は、Core engine thread で
-text を `std::string` へコピーしてから queue へ渡す。
+## 診断メッセージの取得
+
+エラーメッセージはスレッドローカルな UTF-8 文字列である。失敗した API と同じスレッドで、まず末尾の NUL を
+含む必要バイト数を取得し、次に呼び出し側のバッファへコピーする。別スレッドへステータスとメッセージを
+通知する場合は、Core エンジンスレッドで `std::string` へコピーしてからキューへ渡す。
 
 ```cpp
 std::string CopyInkpodError() {
@@ -635,17 +670,17 @@ std::string CopyInkpodError() {
 }
 ```
 
-診断文にはユーザー path や画像内容を無制限に記録せず、UI 表示や log 側でも同じ方針を守る。
+診断文にはユーザーのパスや画像内容を無制限に記録せず、UI 表示やログ側でも同じ方針を守る。
 
 ## 実装時の確認項目
 
-- Core の create/全操作/destroy が同じ Core engine thread に固定されている。
-- すべての構造体で `struct_size`、reserved、feature flags、record stride を初期化している。
-- owned 出力変数を NULL で開始し、所有権移動後に元変数を NULL にしている。
-- release 後に borrowed span や copied alias を使っていない。
-- stroke/preview/floating の state machine と失敗時 cancel 経路がある。
-- snapshot sink が enqueue 成否の両方で release 責任を一意に持つ。
-- task を Core call 終了前に release していない。
-- 戻り status が失敗でも返り得る batch report を解放している。
-- dirty を file timestamp から推測せず、Core の document flags を使っている。
-- C11 と C++20 の両方でヘッダーを include し、Rust 宣言との drift test を通している。
+- Core の作成、全操作、破棄が同じ Core エンジンスレッドに固定されている。
+- すべての構造体で `struct_size`、予約領域、機能フラグ、レコードストライドを初期化している。
+- 所有権を返す出力変数を NULL で開始し、所有権移動後に元変数を NULL にしている。
+- 解放後に借用列やコピー済みの別名ポインターを使っていない。
+- ストローク、プレビュー、浮動状態の状態機械と、失敗時のキャンセル経路がある。
+- スナップショットの受け取り先が、キュー投入の成否にかかわらず解放責任を一意に持つ。
+- Core 呼び出しが終わる前にタスクを解放していない。
+- 戻りステータスが失敗でも返り得るバッチレポートを解放している。
+- 未保存状態をファイル時刻から推測せず、Core の文書フラグを使っている。
+- C11 と C++20 の両方でヘッダーをインクルードし、Rust 宣言とのずれを検査するテストを通している。
