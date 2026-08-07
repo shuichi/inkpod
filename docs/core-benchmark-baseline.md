@@ -308,6 +308,37 @@ No queue/resource-limit failure was published.
 
 ## 2026-08-05 canonical revision-max calibration provenance
 
+### Adoption decision
+
+Before M1, production snapshot validation used the scalar revision-max formula.
+The initial procedure-history refactoring introduced semantic-digest and tile-
+handling work that substantially regressed the protected zoom/pan and dirty-
+tile workflows. The recovery criterion was not merely to improve that regressed
+state: it was to retain the procedure-history semantics while meeting or
+beating the last pre-M1 production behavior under the same complete workloads.
+
+The final design therefore keeps document-state digests and procedure replay
+independent from render-cache validation, restores revision-max as the only
+cache identity, borrows changed source tiles instead of copying them, and
+prepares dirty-tile composition once per tile. It also locks the validation
+call graph and requires an initial positive payload-access count followed by
+zero accesses over 128 cache-hit zoom snapshots. In the A/B results below, all
+four protected candidate medians are 12.7% to 27.3% lower than the detached
+pre-M1 baseline.
+
+This choice is intentionally a performance trade-off, not a claim that a scalar
+maximum uniquely identifies source state. A richer tuple containing source
+identities, revisions, display mode, generation, tombstones, and negative-cache
+state would reduce aliasing but increase construction, storage, invalidation,
+and audit work. Pixel or semantic hashing is rejected on the validation hot
+path because it can couple view-only cost to raster or commitment work. The
+accepted disadvantages are revision-domain aliasing, masking by a higher Light
+Table revision, unchanged maxima after some source removals, display-mode cache
+sharing, transparent-result recomposition, and the requirement that metadata
+outside the formula perform atomic whole-cache invalidation. The current
+contract can be replaced only by an explicitly approved design with equivalent
+semantic gates and recalibrated same-workload evidence.
+
 The `pan_zoom_snapshot` workload performs 2,048 quick or 8,192 full alternating
 zoom/pan pairs and builds a snapshot after every pair. It asserts that every
 composed tile and renderer-facing tile revision is reused. The

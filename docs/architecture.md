@@ -757,6 +757,32 @@ revision-max performance baseline as canonical; they are not described as
 correctness fixes. This runtime policy is independent of the M8 native-format
 cutover and is neither serialized nor automatically changed by M8.
 
+#### Rationale and adoption record
+
+Production before the procedure-history refactoring used the scalar
+revision-max formula. The initial M1 work added semantic digest and canonical
+procedure costs and substantially regressed the protected zoom/pan and
+dirty-tile workflows. Recovery did not weaken those workloads or accept the new
+cost. It restored revision-max as the renderer's sole cache-validation
+authority, separated the document-state commitment tree from rendering,
+borrowed changed source tiles without copying, and prepared each dirty-tile
+composition once. Same-host A/B measurements then placed all four protected
+Core medians below the detached pre-M1 production baseline; the exact samples
+and reproduction procedure are the provenance in
+[`core-benchmark-baseline.md`](core-benchmark-baseline.md#2026-08-05-canonical-revision-max-calibration-provenance).
+
+The decision favors byte-independent, fixed-scalar validation and minimal cache
+bookkeeping over a collision-free source fingerprint. A key containing every
+source identity, revision, display mode, generation, deletion tombstone, and
+negative-cache state could distinguish more transitions, but would increase key
+construction, storage, invalidation, and audit complexity. A pixel or semantic
+digest would be stronger still but is explicitly rejected on this hot path
+because it can make validation scale with payload or commitment work. The
+accepted costs of revision-max are the aliasing and transparent-recomposition
+limits above plus strict whole-cache invalidation for metadata outside the
+formula. Changing this trade-off requires an explicit product decision and
+recalibration; it is not an incidental renderer refactor.
+
 ## Revision, preview, and transaction model
 
 Document, editor, and view revisions are independent. Successful document

@@ -57,17 +57,19 @@ Windows frontend の所有権は process 単位の `ApplicationHost`、top-level
 - raster 寸法、stride、index は固定幅整数で overflow と境界を検査する。
 - 2 値、grayscale、RGBA 8/16 bit、selection mask を型付き `PixelFormat` で区別する。
 - sRGB RGBA を損失なく保持し、straight alpha と premultiplied alpha を型または明示 API で区別する。
-- project/cut、cell、layer、plane、frame、sequence は永続化可能な安定 ID を持つ。名前や配列添字を ID の代用にしない。
+- project/cut、cell、layer、plane、frame、sequence は永続化可能な安定 ID を持つ。名前や配列添字を ID の代用にせず、生成 ID は transaction commit 時だけ消費し、削除後も同じ namespace で再利用しない。
 - layer type ごとに許可 plane、変換、統合条件を検証する。主線保護中の彩色 command は主線 plane を変更しない。
 - 大画像は tile、遅延割当、copy-on-write を基本とし、Undo、snapshot、light table ごとの全画像複製を避ける。
 - UI 操作は型付き command/input を通す。破壊的編集は transaction として成功時だけ commit する。
 - stroke は begin/append/end を一つの履歴単位とし、preview の Cancel は元状態へ完全復元、OK は一つの Undo 単位にする。
-- Undo 後の新規編集では redo branch を破棄する。保存成功時の savepoint を持ち、dirty 判定を file timestamp だけに依存させない。
+- Undo 後の新規編集では旧 tail を通常 Redo の対象から外すが、非 active journal branch は自動削除しない。保存成功時の savepoint を持ち、dirty 判定を file timestamp だけに依存させない。
 - 長時間処理は進捗と cancellation を持ち、cancel、failure、stale revision で部分結果を commit しない。
-- 同じ状態と入力から同じ結果を返す。tile 順、thread 数、hash iteration 順で画像結果を変えない。
+- 同じ replay epoch、Genesis、asset、入力列から同じ結果を返す。replay を外部 path、clock、locale、OS entropy、thread 数、hash iteration 順、GPU state に依存させない。
 - fill は再帰を使わず、scanline または上限付き明示 queue で selection、tile boundary、訪問数を検査する。color distance、alpha、rounding を固定し、gap close は仮想境界または別 transaction、overflow abort は all-or-nothing とする。
 
-同期 document edit は共通 transaction 境界を通す。transaction は開始時の document と base revision、作業状態、commit revision を保持し、作業状態だけを変更する。commit 前に stale base と overflow を検査し、明示的な一回の commit だけが document、revision、history、dirty、cache invalidation を同時に公開する。`Drop` で commit しない。意味上の no-op は revision、history、dirty、render content を進めない。長寿命 preview/stroke/floating selection と一回の同期 edit を同じ transaction 型へ押し込まない。
+全 production document mutation は型付き request を一つの Rust primitive へ正規化し、live commit、Undo/Redo、replay で同じ executor を使う。永続化する `CanonicalProcedure` は固定幅値、stable ID、Rust-owned immutable `AssetId` だけを参照し、raw pointer、外部 path、frontend command ID、一時 object ID を含めない。可変長入力は上限付き data-plane API で Rust 所有 object へ取り込み、commit 時に inline payload または asset へ確定する。
+
+同期 document edit は共通 transaction 境界を通す。transaction は開始時の document と base revision、作業状態、commit revision を保持し、作業状態だけを変更する。commit 前に stale base と overflow を検査し、明示的な一回の commit だけが document、`StateId`、revision、history、journal、dirty、persistent ID high-watermark、cache invalidation を同時に公開する。`Drop` で commit しない。no-op、invalid、cancel、stale、overflow、失敗はこれらを進めず、ID も消費しない。長寿命 preview/stroke/floating selection と一回の同期 edit を同じ transaction 型へ押し込まない。
 
 stable ID、document/view/render/preview revision、history state は意味ごとの newtype にし、異なる型同士の暗黙変換を許さない。raw 固定幅整数との変換は C ABI、公開互換 API、file DTO の境界へ集約し、C ABI layout を Rust newtype の表現へ依存させない。zero の意味、ID の所属 namespace と lifetime、increment/overflow を型ごとに定義する。
 
@@ -87,6 +89,7 @@ Rust は Direct2D command ではなく immutable render snapshot を生成する
 - exported Rust function は panic を捕捉して status/diagnostic に変換する。C++ exception も ABI 境界を越えさせない。
 - error text は caller buffer の二段階 API 等で取得し、共有 global mutable string を使わない。
 - 高頻度データは batch/span/snapshot 単位で渡し、sample、pixel、path element ごとに FFI 往復しない。
+- primitive の control plane は固定幅値と Rust-owned ID だけで構成する。C record の一時 pointer は call-by-value として扱い、Rust は call 復帰後に保持しない。大容量入出力は generation 付き ID と bounded bulk API を使う。
 - `InkpodCore` は原則 single-writer。immutable snapshot だけを release まで renderer thread から読めるようにする。
 - Core が lock 保持中に C++ callback を呼ばない。worker 結果は queue と revision 検査を経て commit する。
 - Windows frontend は UI/Input、Core engine、Renderer の三つの長寿命 thread に分ける。`InkpodCore` の create/全操作/destroy は Core engine thread、D3D11/DXGI/Direct2D/swap chain/Present は Renderer thread に固定する。
@@ -98,10 +101,12 @@ Rust は Direct2D command ではなく immutable render snapshot を生成する
 
 native extension は `.inkpod` とし、versioned manifest と圧縮可能な blob を分離する。manifest には format version、UUID、寸法、DPI、色空間、frame、layer/plane tree、blob length/checksum を含め、形式を `docs/file-format.md` に記録する。
 
-ユーザーがフォーマットフリーズを明示的に宣言するまで、native file format と application 固有の永続化ファイル形式に下位互換性を設けない。decoder は現在の version だけを受理し、旧 version 用 migration、互換 reader、互換 writer、互換 shim を追加しない。常に現在の要件に対して最も頑健で効率的な形式を選び、コードフリーズまでは serialized schema を変更するたびに最上位の file format version を必ずインクリメントする。section version だけの変更で最上位 version の更新を代用しない。フォーマットフリーズ後の互換性方針は、その宣言時のユーザー指示で定める。この規則は `.inkpod`、`.inkbatch`、native preset 等のファイルに適用し、HKCU の workspace layout record には適用しない。
+ユーザーがフォーマットフリーズを明示的に宣言するまで、native file format と application 固有の永続化ファイル形式に下位互換性を設けない。decoder は現在の version だけを受理し、旧 version 用 migration、互換 reader、互換 writer、互換 shim を追加しない。常に現在の要件に対して最も頑健で効率的な形式を選び、コードフリーズまでは serialized schema または replay 結果を変える primitive semantics を変更するたびに最上位の file format/replay version を同じ変更で必ずインクリメントする。section version だけの変更で代用しない。フォーマットフリーズ後の互換性方針は、その宣言時のユーザー指示で定める。この規則は `.inkpod`、`.inkbatch`、native preset 等のファイルに適用し、HKCU の workspace layout record には適用しない。
 
 - 保存は同一 volume の temporary file を完成・flush・close してから置換する。元 file を先に truncate しない。
-- autosave/recovery/export と通常保存を区別し、autosave 成功だけで通常 savepoint を進めない。
+- decode、参照検証、asset 検証、replay は staged Core で完了し、成功時だけ live Core を一回で置換する。
+- 通常保存は prospective document/editor savepoint を書き、destination 置換成功後だけ live savepoint を進める。autosave/recovery/export は通常 savepoint と path authority を進めない。
+- checkpoint、inverse delta、COW/materialized snapshot は派生 cache とし、Genesis、asset、procedure journal の代替にしない。履歴を失う compaction は自動実行せず、明示確認を伴う別 file への新 Genesis 書き出しにする。
 - decoder は path traversal、zip bomb 相当、巨大寸法・個数、重複 ID、循環参照、checksum 不一致、不正 UTF を拒否する。
 - 未知の必須 feature は拒否し、未知の任意 metadata は可能な範囲で round-trip する。
 - 一般画像入出力は `SPEC.md` に列挙された対応形式だけを実装し、未対応形式の placeholder、disabled entry、拡張子だけの偽装形式を作らない。
@@ -135,7 +140,7 @@ native extension は `.inkpod` とし、versioned manifest と圧縮可能な bl
 - allocation、寸法、stride、圧縮後 size、文字列長等に上限を設け、任意入力で panic、範囲外 access、制御不能な OOM を起こさない。
 - container、decoder、FFI に malformed tests と fuzz target を用意する。
 - user path、画像内容、未保存 document を log へ無制限に出さない。
-- 最適化は再現可能な benchmark と before/after に基づく。画質低下は暗黙に行わず明示設定にする。
+- 最適化は再現可能な benchmark と before/after に基づく。`SPEC.md` の canonical `revision-max` 式、payload 非走査、意味 counter、承認済み workload/envelope を性能契約として保護し、測定値に合わせて暗黙に緩和しない。画質低下は暗黙に行わず明示設定にする。
 - placeholder、常時成功する stub、未接続 button、コンパイルしない巨大雛形を完成扱いしない。
 - test failure を削除、ignore、過大 tolerance で隠さない。
 - 既存のユーザー変更を上書きせず、対象外の refactor や formatting を混ぜない。
@@ -144,7 +149,7 @@ native extension は `.inkpod` とし、versioned manifest と圧縮可能な bl
 
 公開契約の regression test は public API から観測し、private helper の局所的不変条件だけを実装 file に colocate する。固定 seed、bounded case、失敗時の replay 情報を持つ state-machine/property test で determinism、failure/cancel atomicity、no-op stability、Undo/Redo round-trip、redo branch truncation、revision separation、savepoint、ID integrity を検証する。OS entropy、test 実行順、private field bridge に依存させない。
 
-benchmark は quick/full で同じ scenario と意味上の counter/checksum を使う。共有 CI の wall-clock 絶対値だけで失敗判定せず、同じ machine・profile・入力の複数回中央値で before/after を比較する。重い検証を理由なく ignored test に隠さない。
+benchmark は quick/full で同じ scenario と意味上の counter/checksum を使う。wall-clock より先に payload access、tile reuse/rebuild、revision、sample、Present、queue/resource 等の意味ゲートを検証する。同じ machine・profile・入力で warm-up 後の複数回中央値を承認済み環境別 envelope と比較し、上限超過は独立再測定でも再現した場合だけ回帰とする。workload、harness、envelope、canonical cache 式の変更は理由、環境、全 sample、意味 counter を記録してユーザーの明示承認を得る。重い検証を理由なく ignored test に隠さない。
 
 ## 9. 検証と完了条件
 

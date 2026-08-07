@@ -427,11 +427,11 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 
 ### 17. 履歴、復帰、preview
 
-- undo/redo は直前 command と複数段階移動を扱う。Undo 後の新規編集で redo branch を破棄する。
+- undo/redo は直前 command と複数段階移動を扱う。Undo または history jump 後の新規編集では旧 tail を通常 Redo の対象から外すが、procedure と asset は非 active journal branch として保持し、自動削除しない。
 - pointer down から up までの stroke、shape 確定、fill、filter apply、layer operation、paste commit をそれぞれ一 command とする。
 - dialog preview は base state から毎回再計算し、parameter slider を動かすたびに結果へ累積適用しない。
 - `実行`/`OK` は一回の commit、`キャンセル` は base state へ完全復元する。
-- `復帰` は最後の通常保存、`部分復帰` は保存 snapshot の active plane/selection 部分を使う。
+- `復帰` は最後の通常保存を staged Core で再構成して置換する。`部分復帰` は保存済み journal state から対象を再構成し、成功時だけ一件の新しい Undo 可能な canonical procedure として commit する。
 
 ### 18. フィルタ、特効、レタッチ、調整レイヤー
 
@@ -469,11 +469,14 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 ### 20. 形式、白透過、一般画像入出力
 
 - native `.inkpod` は、保存時点の可変 raster snapshot を意味上の正本にしない。正本は immutable な `Genesis`、content-addressed な `Assets`、Core が検証・正規化して実変更を確定した `Procedures` と history control event、history の現在位置と high-watermark を持つ `META`、文書単位の `EditorState` とする。materialized document、inverse delta、COW snapshot、render/checkpoint cache は派生物であり、これらだけで文書を成立させない。
+- frontend request は target/revision/ID と上限を検証し、座標、色、option、可変長入力、transaction 内の output ID を正規化してから一つの `CanonicalProcedure` として確定する。procedure は monotonic ID、primitive ID/schema、replay epoch、base/committed `StateId`、固定幅引数、stable input/output ID、immutable `AssetId` または bounded inline payload、pre/post document-state digest を持ち、raw pointer、外部 path、native enum layout、frontend command ID、一時 object ID を含めない。
 - `Genesis` は document UUID、paper、DPI、sRGB、frame、margin、初期 stable-ID topology、immutable base surface を完全記述する。白紙の base surface は全面 tile を割り当てない opaque white の `SolidWhite` underlay とし、flat canonical composite/export には参加するが、個別 layer/plane export や selection mask へ暗黙に混入させない。
 - import、clipboard、Light Table 等の外部入力は ingestion 時に Rust が canonical pixel/vector payload へ変換し、immutable `AssetId` を発行する。procedure は外部 path、codec の再実行、caller buffer の lifetime を参照しない。元 encoded bytes や provenance は replay に影響しない任意 metadata としてのみ保持できる。
 - 永続 journal は閉じた型 `Commit`、`HistoryMove`、`BranchCut` だけを持つ。実変更を確定した document transaction、実際に移動した Undo/Redo/history jump、history cursor が active branch の tail 以外にある状態からの新規 commit による branch cut だけを順序どおり記録し、query、invalid、failure、cancel、stale、overflow、no-op、stroke/preview の途中更新は記録しない。stroke end、preview apply、floating commit は成功時にそれぞれ一つの canonical procedure とする。
-- `.inkpod` section は history procedure/control event を `PROC`、history cursor、active branch、document/editor savepoint と各 persistent ID の high-watermark を `META` に置く。独立した `HIST` section は作らない。`EDIT` は active tool、最後の色付き command、tool ごとの exact-depth color、diameter、fill/selection/vector option、active layer/plane、palette cursor 等の再開に必要な文書単位 editor state を保持する。`CKPT` は任意の open 高速化 cache、`EXTM` は replay に影響しない任意 metadata とする。
+- `.inkpod` section は history procedure/control event を `PROC`、history cursor、active branch、document/editor savepoint と各 persistent ID の high-watermark を `META` に置く。独立した `HIST` section は作らない。`EDIT` は active tool、最後の色付き command、tool ごとの exact-depth color、diameter、fill/selection/vector option、active layer/plane、palette cursor 等の再開に必要な文書単位 editor state を保持する。`CKPT` は任意の open 高速化 cache、`EXTM` は replay に影響しない任意 metadata とする。checkpoint の hash、構造、resource bound 違反は file corruption として拒否し、構造上有効な epoch/prefix/state 不一致だけは checkpoint を無視して full replay する。checkpoint を全て除いても同じ state、pixel、history、次 ID を再構成できなければならない。
 - 通常保存後の reopen は画像だけでなく、history list/cursor、Undo/Redo availability、active/non-active branch、document/editor savepoint、persistent ID high-watermark、EditorState を復元する。通常 UI から外れた redo branch も監査可能な append-only journal と asset retention root に残し、自動 squash しない。
+- open は decode、全参照・asset 検証、replay を staged Core で完了し、成功時だけ live Core を一回で置換する。通常保存は current `StateId` と `EditorStateDigest` を prospective savepoint として一時 file へ書き、flush、close、destination 置換の成功後だけ live path と両 savepoint を公開する。autosave、recovery、export は通常 savepoint を進めず、recovery open は以前の通常保存先への authority を継承しない pathless かつ dirty な session とする。
+- 履歴を失う compaction は自動実行しない。利用者へ失われる event/procedure 数を事前表示し、revision と digest で対象を再確認したうえで、open session の path とは別の file へ新しい Genesis として書き出す。成功しても live path、history、dirty、savepoint を変更しない。
 - persistent `StateId` は Genesis と commit 済み意味状態を参照し、procedure の precondition、history、savepoint に使う。`DocumentRevision` は stale request 検出用の session-local counter であり file へ保存せず、open 時に新しい Core generation 内で rebase する。EditorState は document history と別の persisted editor revision/digest/savepoint を持ち、session dirty は document state または editor state のいずれかが各 savepoint と異なれば成立する。
 - 同じ replay epoch、Genesis、Assets、canonical procedure/control-event 列から、x64、ARM64、非 Windows Rust target で同じ canonical Core state と bit-exact な canonical composite を得る。Direct2D/D3D の画面 antialiasing や monitor 表示の一致はこの契約に含めない。primitive semantics が replay 結果を変える場合は replay epoch と top-level format version を更新する。
 - ユーザーがフォーマットフリーズを宣言するまで、`.inkpod`、`.inkbatch`、native preset等のapplication固有の永続化ファイル形式は現在versionだけを読み書きし、下位互換reader/writer、migration、互換shimを持たない。現在の要件に対して最も頑健で効率的なschemaを選ぶ。この規則はHKCUのworkspace layout recordには適用しない。
@@ -494,12 +497,23 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 
 - 同じ初期状態と入力列は、thread 数、tile 順、hash iteration 順にかかわらず同じ result class と意味上の結果を返す。
 - 操作結果は success、no-op、invalid、cancel、stale revision を区別する。Undo 対象となる一つの確定 document edit は一つの document revision と一つの history entry だけを進める。
-- no-op は document revision、history、dirty、render content を変えない。invalid、cancel、stale revision、overflow、失敗は document、history、dirty、revision、確定 snapshot、通常出力 file に部分変更を残さない。
-- 一つの document edit は一回の Undo で直前の意味状態へ戻り、一回の Redo で同じ結果へ進む。Undo 後の新規 edit は以前の redo branch を破棄する。
-- view-only edit は document revision、history、dirty を変えず、意味上の変更がある対象 view の revision だけを進める。document edit は必要な render cache invalidation を起こす。render cache の source identity は永続化しない派生状態とし、対象座標にある可視 plane の `tile_revision`、selection の `tile_revision`、Light Table の `source_revision` の数値最大値を使う旧 revision-max 方式を正本とする。cache hit 判定はこれらの scalar revision だけを読み、source pixel のcopy、走査、hash、digest、generation、tombstone、epoch、negative cacheを使ってはならない。zoom、pan、flip、viewport 等の view-only snapshot は、変更されていない source tile の pixel payload を再コピー・再hashしてはならない。revision-maxへ含まれないrender metadata変更は同じcommit境界でwhole-cache invalidationを行う。数値最大値の衝突、高いLight Table revisionによるmask、同値revision sourceの削除、表示mode間の共有cache、および透明合成結果の非保持は、性能を優先した正本方式の既知制約とする。このruntime cache方針はM8 native schemaへ保存せず、M8によって自動変更しない。
+- no-op は document revision、`StateId`、history、journal、persistent ID、dirty、render content を変えない。invalid、cancel、stale revision、overflow、失敗は document、history、journal、ID、dirty、revision、確定 snapshot、通常出力 file に部分変更を残さない。
+- 一つの document edit は一回の Undo で直前の意味状態へ戻り、一回の Redo で同じ結果へ進む。Undo 後の新規 edit は旧 redo tail を通常 UI の対象から外すが、非 active journal branch は保持する。
+- view-only edit は document revision、`StateId`、history、journal、dirty を変えず、意味上の変更がある対象 view の revision だけを進める。document edit は必要な render cache invalidation を起こす。
 - 通常 save の成功だけが通常 savepoint を進める。autosave、recovery save、export は通常 savepoint を進めない。
-- stable ID は所属 document/session 内の生存 object 間で重複せず、保存、Undo/Redo、snapshot を通して参照関係を維持する。layer、plane、view 等の別 namespace を混同しない。
+- stable ID は所属 document/session 内で重複せず、保存、Undo/Redo、snapshot を通して参照関係を維持する。生成 ID は commit 時だけ消費し、削除後も再利用せず、layer、plane、view 等の別 namespace を混同しない。
 - 長時間処理は base revision、cancel、target generation を確定し、全計算と検証が成功した場合だけ結果を公開する。
+
+## 横断的な性能契約
+
+- 大画像は sparse tile、遅延割当、copy-on-write を基本とし、Undo、snapshot、Light Table、checkpoint のために画像全体を無条件に複製しない。snapshot は変更 tile だけを再合成し、pan、zoom、flip、viewport 変更では既存の合成済み tile と renderer resource を再利用する。
+- `revision-max` を採用する理由は、procedure journal や semantic digest の強度を render-cache 検証 cost へ転嫁せず、view-only 操作を source raster byte 数から独立させるためである。完全な source fingerprint より、固定幅 scalar による高速で予測可能な cache hit 判定を優先する。採用経緯、代替案、測定根拠は `docs/architecture.md` と `docs/core-benchmark-baseline.md` を正本とする。
+- render tile cache の canonical source identity は `revision-max` 方式とする。各 document tile 座標について、可視 layer 内の可視 plane の `tile_revision`、selection の `tile_revision`、Light Table の `source_revision` の数値最大値を一つの scalar として求める。cache 内の `source_revision` と一致すれば合成済み pixel buffer と renderer-facing tile revision を再利用し、不一致ならその座標だけを再合成して新しい tile revision を公開する。透明な合成結果は cache に保持せず、必要なら再合成してよい。
+- cache hit 判定は上記の固定幅 revision scalar だけを読み、source pixel の取得・copy・走査、payload hash/digest、clone generation、削除 tombstone、epoch、negative cache を追加しない。検証 cost は source byte 数ではなく可視 source 数に比例させ、cache hit の zoom/pan snapshot が raster payload size に比例する work を行ってはならない。cache の `source_revision` は非公開の派生 bookkeeping であり、semantic equality、C ABI、document/procedure digest、永続化へ含めない。
+- opacity、visibility、layer/plane order、main-line color、color-check mode 等、`revision-max` 式に含まれない render metadata の変更は、同じ commit 境界で whole-cache invalidation を行う。
+- 数値最大値は衝突のない source 記述ではない。高い Light Table revision が後続の低い raster revision を mask する場合、同じ最大値を持つ source の一方を削除しても値が変わらない場合、独立 revision namespace が同値になる場合、表示 mode の異なる view が cache を共有する場合がある。また透明結果は negative cache を持たない。これらは `revision-max` を性能上の正本とする際の既知制約であり、暗黙に別方式へ変更しない。
+- 性能回帰は wall-clock だけで判定しない。`pan_zoom_snapshot` は quick/full で 2,048/8,192 pair、`dirty_tile_rebuild` は同一 allocated tile への 1 pixel edit と snapshot rebuild を 32/128 回実行し、checksum、revision、tile reuse/rebuild、payload access を固定する。初回 compose では payload access が正に増え、同じ fixture の cache-hit zoom snapshot 128 回では増分 0 を必須とする。private native smoke は 1024 平方・256 allocated tile の 512 wheel event を各一回の Present まで、16 stroke/544 sample の multi-tile drawing を各一回の Present まで測り、sample、Present、queue、resource counter を固定する。
+- wall-clock は同じ workload、profile、入力と一致する `docs/core-benchmark-baseline.md` の承認済み環境別 envelope を使い、warm-up 後 5 回以上の中央値で比較する。下限未満は処理省略を疑う診断値にだけ使い、意味ゲートが正常な高速化を拒否しない。上限超過は独立した 5 回以上の再測定でも中央値が上限を超えた場合だけ回帰とする。workload、harness、reference 環境、envelope、`revision-max` 式を変更する場合は、理由、環境、全 sample、意味 counter を記録し、ユーザーの明示承認を得る。envelope を測定結果に合わせて自動緩和しない。
 
 ## 仕様と追跡
 
@@ -526,7 +540,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - `WORKSPACE-002`: pane scope、follow/pin/job target、発行時 `CommandContext`、ID/generation による stale routing rejection
 - `SESSION-001`: 複数 `DocumentSession` の file identity、view/document/window/application close、save/Save As、autosave/recovery lifecycle
 - `SAFE-001`: malformed/corrupted input の bounded rejection と非破壊性
-- `PERF-001`: large sparse/COW document、bounded dense workload、変更 tile だけの再合成、およびsource raster payloadを走査しない連続zoom/pan snapshotを保護する。Core quick/fullの`pan_zoom_snapshot`は2,048/8,192 pair、`dirty_tile_rebuild`は同一allocated tileへの1 pixel stroke＋snapshot rebuildを32/128回測り、private native performance smokeは1024平方・256 allocated tileに対する512 wheel eventを各1 Presentまで、16本のmulti-sample/multi-tile strokeを各1 Presentまで測る。checksum、revision、再利用/rebuild tile数、payload access、sample数、Present数、queue/resource counterはwall-clockと独立した意味ゲートとして常時一致させ、初回composeでpayload accessを観測した同じfixtureについて128回のcache-hit zoom snapshot後のpayload access増分を0とする。通常のwall-clock判定は、同一workload/profileと一致する`docs/core-benchmark-baseline.md`の承認済み環境別reference envelopeを使い、一回以上のwarm-up後5回以上の中央値を比較する。下限未満は処理省略の診断値であり、意味ゲートが正常な高速化は許可する。上限を超えた場合は独立した5回以上を再測定し、両方の中央値が上限を超えた場合に回帰として拒否する。native wheelは記録したdisplay refresh intervalで正規化し、CPU側zoom回帰はCore scenarioで判定する。detached旧revision-max buildとのA/Bはworkload/harness変更、reference環境追加・変更、envelope再設定、または境界結果の明示監査時だけ行う。envelopeは自動緩和せず、変更には環境、全sample、意味counter、理由の記録とユーザーの明示承認を必要とする
+- `PERF-001`: 「横断的な性能契約」に定める sparse/COW、変更 tile だけの再合成、canonical `revision-max` cache、payload 非走査、意味 counter、固定 workload、承認済み環境別 envelope を維持する
 - `PKG-001`: Rust/Win32 の静的 CRT、x64/ARM64 self-contained MSIX、ならびに ZIP 直下へ `inkpod.exe`、`README.txt`、`LICENSE.txt`、`ThirdPartyNotices.txt` だけを収録する x64/ARM64 portable payload と package/dependency 検証
 - `PORT-001`: Rust workspace の OS 非依存性と次 frontend の adapter gap
 
