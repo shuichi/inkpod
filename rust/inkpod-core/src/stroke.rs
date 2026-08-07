@@ -58,7 +58,7 @@ impl Core {
             document.height,
             target_plane_id.get(),
         )?;
-        self.begin_canonical_stroke_preview(stroke.clone(), arguments)
+        self.begin_canonical_stroke_preview(stroke.clone(), arguments, self.view)
     }
 
     /// Begins a raster stroke using exact Core-owned EditorState values.
@@ -70,7 +70,30 @@ impl Core {
     /// started procedure. A tool selector chooses another Core-owned style; it
     /// never supplies color or diameter from the caller.
     pub fn begin_editor_stroke(&mut self, input: &EditorStrokeInput) -> Result<(), CoreError> {
+        self.begin_editor_stroke_for_view(0, input)
+    }
+
+    /// Begins an EditorState-backed raster stroke using a primary or secondary view.
+    ///
+    /// `view_id == 0` selects the primary view; any other value must identify a
+    /// live secondary view owned by this document. Device coordinates are
+    /// converted through a copy of that view captured at begin, and every append
+    /// in the same stroke continues to use the captured transform. Invalid input or view IDs leave document, history,
+    /// dirty state, revisions, and persistent IDs unchanged. This method does not panic.
+    pub fn begin_editor_stroke_for_view(
+        &mut self,
+        view_id: u64,
+        input: &EditorStrokeInput,
+    ) -> Result<(), CoreError> {
         self.ensure_no_active_stroke()?;
+        let captured_view = if view_id == 0 {
+            self.view
+        } else {
+            *self
+                .secondary_views
+                .get(&ViewId::from_raw(view_id))
+                .ok_or(CoreError::InvalidArgument("view ID does not exist"))?
+        };
         let (tool, color, diameter_q16, layer_id, target_plane_id) =
             {
                 let state = &self
@@ -135,18 +158,19 @@ impl Core {
             &stroke,
             color,
             diameter_q16,
-            &self.view,
+            &captured_view,
             document.width,
             document.height,
             target_plane_id.get(),
         )?;
-        self.begin_canonical_stroke_preview(stroke, arguments)
+        self.begin_canonical_stroke_preview(stroke, arguments, captured_view)
     }
 
     fn begin_canonical_stroke_preview(
         &mut self,
         mut settings: Stroke,
         arguments: crate::primitive::CanonicalStrokeArguments,
+        captured_view: ViewState,
     ) -> Result<(), CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let target_plane_id = PlaneId::from_raw(arguments.target_plane_id);
@@ -163,6 +187,7 @@ impl Core {
             settings,
             captured_color,
             captured_diameter_q16,
+            captured_view,
             preview,
             base_revision: self.document_revision.get(),
             base_document,
@@ -193,7 +218,7 @@ impl Core {
             &batch,
             session.captured_color,
             session.captured_diameter_q16,
-            &self.view,
+            &session.captured_view,
             session.preview_document.width,
             session.preview_document.height,
             session.preview.target_plane_id(),
@@ -304,6 +329,7 @@ pub(super) struct StrokeSession {
     settings: Stroke,
     captured_color: PixelValue,
     captured_diameter_q16: i64,
+    captured_view: ViewState,
     preview: RasterStrokePreview,
     base_revision: u64,
     base_document: CellDocument,

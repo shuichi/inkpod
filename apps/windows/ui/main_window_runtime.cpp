@@ -14703,6 +14703,24 @@ std::optional<LRESULT> RouteCanvasMessage(
                     return 0;
                 }
                 event.context = state->ActiveView().presentation.active_drag->context;
+                if (!event.context.document_view.has_value()
+                    || !event.context.generation.has_value()) {
+                    state->ActiveView().presentation.active_drag.reset();
+                    return 0;
+                }
+                auto* stroke_document = state->Documents().FindByView(
+                    event.context.document_view.value());
+                auto* stroke_view = stroke_document == nullptr
+                    ? nullptr
+                    : stroke_document->FindView(
+                          event.context.document_view.value());
+                if (stroke_view == nullptr
+                    || stroke_document->generation
+                        != event.context.generation.value()) {
+                    state->ActiveView().presentation.active_drag.reset();
+                    return 0;
+                }
+                event.core_view_id = stroke_view->core_view_id;
                 switch (input->kind) {
                     case inkpod::renderer::CanvasStrokeEventKind::Begin:
                         event.kind = inkpod::app::StrokeEventKind::Begin;

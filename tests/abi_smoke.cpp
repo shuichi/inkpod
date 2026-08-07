@@ -1631,6 +1631,11 @@ int InkpodRunAbiSmoke() {
         || inkpod_core_stroke_cancel(core) != INKPOD_STATUS_OK) {
         return 136;
     }
+    if (inkpod_core_editor_stroke_begin_for_view(core, 0U, &editor_stroke)
+            != INKPOD_STATUS_OK
+        || inkpod_core_stroke_cancel(core) != INKPOD_STATUS_OK) {
+        return 136;
+    }
     if (inkpod_core_apply_fill_for_editor_target(
             nullptr, 0U, 0U, nullptr, nullptr)
             != INKPOD_STATUS_INVALID_ARGUMENT

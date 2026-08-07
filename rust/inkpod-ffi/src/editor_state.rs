@@ -545,6 +545,23 @@ pub unsafe extern "C" fn inkpod_core_editor_stroke_begin(
     core: *mut InkpodCore,
     input: *const InkpodEditorStrokeInput,
 ) -> u32 {
+    unsafe { inkpod_core_editor_stroke_begin_for_view(core, 0, input) }
+}
+
+/// Starts a transient raster stroke through a primary or secondary Core view.
+///
+/// `view_id == 0` selects the primary view. Device-coordinate samples use the
+/// selected view captured at begin for the entire stroke.
+///
+/// # Safety
+/// `core` and `input` must be live owner-thread objects. The strided sample span
+/// is borrowed only for this call and is copied before the function returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_editor_stroke_begin_for_view(
+    core: *mut InkpodCore,
+    view_id: u64,
+    input: *const InkpodEditorStrokeInput,
+) -> u32 {
     ffi_boundary(|| {
         clear_last_error();
         if core.is_null() || !is_aligned(core) {
@@ -595,7 +612,10 @@ pub unsafe extern "C" fn inkpod_core_editor_stroke_begin(
             pressure_size: input.flags & INKPOD_STROKE_FLAG_PRESSURE_SIZE != 0,
             samples,
         };
-        match core.core.begin_editor_stroke(&editor_input) {
+        match core
+            .core
+            .begin_editor_stroke_for_view(view_id, &editor_input)
+        {
             Ok(()) => INKPOD_STATUS_OK,
             Err(error) => map_core_error(error),
         }

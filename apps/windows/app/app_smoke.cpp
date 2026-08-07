@@ -6778,6 +6778,132 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
     }
     SendMessageW(second_canvas, WM_SETFOCUS, reinterpret_cast<WPARAM>(first_canvas), 0);
 
+    const std::int32_t split_document_x = static_cast<std::int32_t>(
+        second_after_flip.document_width / 3U);
+    const std::int32_t split_document_y = static_cast<std::int32_t>(
+        second_after_flip.document_height / 3U);
+    const double split_document_center_x =
+        static_cast<double>(split_document_x) + 0.5;
+    const double split_document_center_y =
+        static_cast<double>(split_document_y) + 0.5;
+    const double split_device_x =
+        ((second_after_flip.flags & INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL) != 0U
+             ? static_cast<double>(second_after_flip.document_width)
+                 - split_document_center_x
+             : split_document_center_x)
+            * second_after_flip.zoom
+        + second_after_flip.pan_x;
+    const double split_device_y =
+        ((second_after_flip.flags & INKPOD_SNAPSHOT_TRANSFORM_FLIP_VERTICAL) != 0U
+             ? static_cast<double>(second_after_flip.document_height)
+                 - split_document_center_y
+             : split_document_center_y)
+            * second_after_flip.zoom
+        + second_after_flip.pan_y;
+    InkpodLocatorOutput split_locator{};
+    split_locator.struct_size = sizeof(split_locator);
+    if (second_after_flip.document_width == 0U
+        || second_after_flip.document_height == 0U
+        || !std::isfinite(split_device_x) || !std::isfinite(split_device_y)
+        || state.engine->Invoke(
+               shared_session,
+               shared_generation,
+               [core_view = second_document_view->core_view_id,
+                split_device_x,
+                split_device_y,
+                &split_locator](InkpodCore* core) {
+                   return inkpod_core_locator_sample(
+                       core,
+                       core_view,
+                       split_device_x,
+                       split_device_y,
+                       &split_locator);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || split_locator.document_x != split_document_x
+        || split_locator.document_y != split_document_y) {
+        return 1050;
+    }
+
+    const InkpodStrokeSample split_document_sample{
+        sizeof(InkpodStrokeSample),
+        0U,
+        static_cast<float>(split_document_center_x),
+        static_cast<float>(split_document_center_y),
+        1.0F,
+        0U};
+    const auto apply_split_document_sample =
+        [&state,
+         shared_session,
+         shared_generation,
+         split_document_sample](InkpodPaintTool tool) noexcept {
+            return state.engine->Invoke(
+                shared_session,
+                shared_generation,
+                [split_document_sample, tool](InkpodCore* core) {
+                    const InkpodStrokeInput input{
+                        sizeof(InkpodStrokeInput),
+                        tool,
+                        INKPOD_PLANE_MAIN_LINE,
+                        INKPOD_COORDINATE_SPACE_DOCUMENT,
+                        INKPOD_FEATURE_NONE,
+                        UINT32_C(0x000000ff),
+                        1.0F,
+                        &split_document_sample,
+                        1U,
+                        sizeof(split_document_sample)};
+                    InkpodDispatchResult result{};
+                    result.struct_size = sizeof(result);
+                    InkpodStatus status = inkpod_core_set_active_plane(
+                        core, INKPOD_PLANE_MAIN_LINE);
+                    if (status == INKPOD_STATUS_OK) {
+                        status = inkpod_core_apply_stroke(core, &input, &result);
+                    }
+                    return status;
+                },
+                true,
+                true);
+        };
+    InkpodDocumentInfo split_cleared = EmptyDocumentInfo();
+    InkpodDocumentInfo split_seeded = EmptyDocumentInfo();
+    InkpodDocumentInfo split_erased = EmptyDocumentInfo();
+    if (apply_split_document_sample(INKPOD_TOOL_ERASER) != INKPOD_STATUS_OK
+        || !QueryDocument(state, split_cleared)
+        || apply_split_document_sample(INKPOD_TOOL_PENCIL) != INKPOD_STATUS_OK
+        || !QueryDocument(state, split_seeded)
+        || split_seeded.main_plane_checksum == split_cleared.main_plane_checksum
+        || SetEditorActiveTarget(
+               state, split_seeded.layer_id, split_seeded.main_plane_id)
+            != INKPOD_STATUS_OK
+        || SetEditorActiveTool(state, INKPOD_TOOL_PENCIL) != INKPOD_STATUS_OK) {
+        return 1051;
+    }
+    const InkpodStrokeSample split_device_sample{
+        sizeof(InkpodStrokeSample),
+        0U,
+        static_cast<float>(split_device_x),
+        static_cast<float>(split_device_y),
+        1.0F,
+        0U};
+    if (!renderer::SubmitCanvasStrokeEvent(
+            second_canvas,
+            renderer::CanvasStrokeEventKind::Begin,
+            &split_device_sample,
+            1U)
+        || !renderer::SubmitCanvasStrokeEvent(
+            second_canvas,
+            renderer::CanvasStrokeEventKind::End,
+            &split_device_sample,
+            1U)
+        || state.engine->WaitIdle(shared_session, shared_generation)
+            != INKPOD_STATUS_OK
+        || !QueryDocument(state, split_erased)
+        || split_erased.document_revision != split_seeded.document_revision + 1U
+        || split_erased.main_plane_checksum != split_cleared.main_plane_checksum) {
+        return 1052;
+    }
+
     InkpodDocumentInfo before_edit = EmptyDocumentInfo();
     InkpodDocumentInfo after_edit = EmptyDocumentInfo();
     const InkpodStrokeSample shared_sample{

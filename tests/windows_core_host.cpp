@@ -1077,12 +1077,16 @@ int wmain() {
     StrokeEvent begin{};
     begin.kind = StrokeEventKind::Begin;
     begin.context = Context(first, generation);
+    begin.context.document_view = first_frontend_view;
+    begin.core_view_id = 0U;
     begin.style.coordinate_space = INKPOD_COORDINATE_SPACE_DOCUMENT;
     begin.samples.push_back(InkpodStrokeSample{
         sizeof(InkpodStrokeSample), 0U, 10.0F, 10.0F, 1.0F, 0U});
     StrokeEvent cancel{};
     cancel.kind = StrokeEventKind::Cancel;
     cancel.context = Context(first, generation);
+    cancel.context.document_view = first_frontend_view;
+    cancel.core_view_id = 0U;
     if (!host.EnqueueStroke(std::move(begin))) {
         host.Stop();
         DestroyWindow(owner);

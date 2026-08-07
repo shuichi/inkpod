@@ -561,6 +561,25 @@ fn editor_defaults_and_state_ffi_are_caller_owned_exact_depth_and_side_effect_fr
             INKPOD_STATUS_OK
         );
         assert_eq!(inkpod_core_stroke_cancel(core), INKPOD_STATUS_OK);
+        let mut secondary_view_id = 0;
+        assert_eq!(
+            inkpod_core_view_create(core, &mut secondary_view_id),
+            INKPOD_STATUS_OK
+        );
+        assert_ne!(secondary_view_id, 0);
+        assert_eq!(
+            inkpod_core_editor_stroke_begin_for_view(core, secondary_view_id, &pencil_stroke,),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_stroke_cancel(core), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_editor_stroke_begin_for_view(core, u64::MAX, &pencil_stroke),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_view_close(core, secondary_view_id),
+            INKPOD_STATUS_OK
+        );
 
         let mut after_document = document_info();
         assert_eq!(
@@ -597,6 +616,10 @@ fn editor_state_ffi_rejects_short_unknown_stale_and_invalid_updates_atomically()
         );
         assert_eq!(
             inkpod_core_editor_stroke_begin(ptr::null_mut(), ptr::null()),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_editor_stroke_begin_for_view(ptr::null_mut(), 0, ptr::null(),),
             INKPOD_STATUS_INVALID_ARGUMENT
         );
         let short_stroke = InkpodEditorStrokeInput {

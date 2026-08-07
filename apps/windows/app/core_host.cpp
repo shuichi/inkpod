@@ -703,6 +703,7 @@ struct CoreHost::Impl final {
     bool PushStroke(StrokeEvent event) noexcept {
         std::lock_guard acceptance_lock(acceptance_mutex);
         if (!event.context.document_session.has_value()
+            || !event.context.document_view.has_value()
             || !event.context.generation.has_value()
             || event.samples.size() > kMaximumStrokeSamples) {
             return false;
@@ -723,6 +724,19 @@ struct CoreHost::Impl final {
                 }
                 return false;
             }
+            const auto mapped_view = std::find_if(
+                frontend_views.cbegin(),
+                frontend_views.cend(),
+                [&item](const FrontendViewBinding& view) {
+                    return view.session == item.binding
+                        && view.frontend_view
+                            == item.event.context.document_view.value();
+                });
+            if (mapped_view == frontend_views.cend()
+                || mapped_view->core_view_id != item.event.core_view_id) {
+                ++session->metrics.rejected_work_items;
+                return false;
+            }
             item.sequence = ++session->state.last_accepted_sequence;
             ++session->state.pending_operations;
         }
@@ -737,6 +751,7 @@ struct CoreHost::Impl final {
                     pending != nullptr
                     && pending->event.kind == StrokeEventKind::Append
                     && pending->binding == item.binding
+                    && pending->event.core_view_id == item.event.core_view_id
                     && pending->event.context == item.event.context
                     && pending->event.samples.size()
                             <= kMaximumStrokeSamples - std::min(
@@ -1043,7 +1058,8 @@ struct CoreHost::Impl final {
                     item.event.samples.data(),
                     static_cast<std::uint64_t>(item.event.samples.size()),
                     sizeof(InkpodStrokeSample)};
-                status = inkpod_core_editor_stroke_begin(entry->core, &input);
+                status = inkpod_core_editor_stroke_begin_for_view(
+                    entry->core, item.event.core_view_id, &input);
                 if (status == INKPOD_STATUS_OK) {
                     entry->stroke_active = true;
                     entry->active_sample_count = item.event.samples.size();

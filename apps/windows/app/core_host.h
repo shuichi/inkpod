@@ -36,6 +36,7 @@ struct StrokeStyle {
 struct StrokeEvent {
     StrokeEventKind kind{StrokeEventKind::Cancel};
     CommandContext context;
+    std::uint64_t core_view_id{};
     StrokeStyle style{};
     std::vector<InkpodStrokeSample> samples;
 };

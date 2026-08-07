@@ -44,7 +44,7 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ```
 
 - `struct_size` は必ず呼び出し側が設定する。出力構造体でも同じである。
-- ABI v4 で既知の構造体末尾まで読み書きできるサイズが必要である。
+- ABI v5 で既知の構造体末尾まで読み書きできるサイズが必要である。
 - `reserved` は 0 とし、未知の必須機能フラグは指定しない。
 - レコード列では、各レコードの `struct_size` と `*_stride_bytes` の両方を設定する。
 - 要素数、ストライド、アラインメント、列全体のバイト範囲が有効でなければならない。
@@ -54,12 +54,12 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ABI バージョンは Core 作成前に比較できる。`INKPOD_ABI_VERSION` とライブラリの戻り値が異なる場合は、
 Core を作らず互換性エラーとして扱う。
 
-現行ライブラリは ABI v4 だけを受理し、`InkpodCoreConfig::abi_version` が完全一致しなければ
+現行ライブラリは ABI v5 だけを受理し、`InkpodCoreConfig::abi_version` が完全一致しなければ
 `INKPOD_STATUS_INCOMPATIBLE_ABI` を返す。関数名や型名の `_v3` は、値／ID API 群が導入された世代を
 示す接尾辞であり、ABI v3 の呼び出し側との実行時互換性を意味しない。ABI v1-v3 の呼び出し側は、
 現行の v4 ヘッダーへ更新して再ビルドする。
 
-ABI v4 は `_v3` の値／ID 専用プリミティブ制御 API を保持し、旧 `NoOp` の入口だった
+ABI v5 は `_v3` の値／ID 専用プリミティブ制御 API を保持し、旧 `NoOp` の入口だった
 `inkpod_core_dispatch_batch` を削除して、永続化、チェックポイント、履歴破棄コピー用のレコードを追加した。
 ABI v2 で公開名から実装時のマイルストーン番号を除いたタスク API は、現行 v4 でも引き続き
 `InkpodTask` / `InkpodTaskInfo` / `INKPOD_TASK_*` / `inkpod_task_*`、共有ラスタ入力は
@@ -98,7 +98,7 @@ M7 では、所有権を移さない読み取り専用の固定レイアウト�
 製品の保存／オープン API は同じ v9 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
-M9 では、Core 所有スレッド専用の ABI v4 操作を三つ追加した。`inkpod_core_get_persistence_info` は、
+M9 では、Core 所有スレッド専用の ABI v5 操作を三つ追加した。`inkpod_core_get_persistence_info` は、
 形式バージョン、最後に成功したオープン方式、正本であるジャーナルの件数、決定的なリプレイ作業量と
 未保存変更量（`dirty_bytes`）、アセット使用量、`INKPOD_PERSISTENCE_CHECKPOINT_DUE` フラグを、
 リプレイや状態変更を行わずに返す。`open_strategy` は `INKPOD_NATIVE_OPEN_NOT_OPENED`、
@@ -113,10 +113,10 @@ M9 では、Core 所有スレッド専用の ABI v4 操作を三つ追加した�
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
 許可し、作成したコピーを現在の保存先として採用しない。
 
-## ABI v4 の `_v3` 付き値／ID 制御 API
+## ABI v5 の `_v3` 付き値／ID 制御 API
 
 この節の `V3` / `_v3` は API 群とレコード名の一部である。すべての呼び出しは、全体として
-ABI v4 に一致するヘッダーとライブラリの組み合わせで使用する。
+ABI v5 に一致するヘッダーとライブラリの組み合わせで使用する。
 
 `InkpodObjectId` は、オブジェクト種別、Core 世代、単調増加値からなる固定幅レコードである。Core、
 スナップショット、タスク、色配列、サンプル列、ラスタアセット、サムネイル、エクスポートは異なる種別を持つ。
@@ -392,9 +392,9 @@ status = inkpod_clipboard_render_rgba8(clipboard, &output);
 Core へ送らない。対象の再割り当て、クローズ、終了処理では、先に Canvas の受け取り先を解除し、
 捕捉済みセッション／世代の Core 上でビューを閉じてから Canvas 所有者を破棄する。
 
-## EditorDefaults / EditorState（現行 ABI v4）
+## EditorDefaults / EditorState（現行 ABI v5）
 
-次の七つの Core 所有スレッド用 API と固定幅レコードは ABI v2 で追加され、現行 ABI v4 に保持されている。
+次の八つの Core 所有スレッド用 API と固定幅レコードは ABI v2 以降に追加され、現行 ABI v5 に保持されている。
 ABI v2 のライブラリや呼び出し側を受理するという意味ではない。
 
 - `inkpod_core_get_editor_defaults` は文書作成前にも有効な Rust 所有の不変 `InkpodEditorDefaults` を、
@@ -409,7 +409,11 @@ ABI v2 のライブラリや呼び出し側を受理するという意味では�
   呼び出し中だけ借用する。`tool` が 0 ならアクティブツール、0 でなければ指定ラスタツールについて、
   Core 所有のスタイルを選び、RGBA8/RGBA16 の色深度を保つ色、Q16 直径、安定した対象を、開始時に一度だけ
   正規ストローク引数へコピーする。ツール指定はロケーター用の固定鉛筆などに使うが、呼び出し側は色、直径、
-  対象を渡さない。追加／終了処理は、その後の EditorState を再参照しない。
+  対象を渡さない。primary view を使う互換入口であり、追加／終了処理は、その後の EditorState を再参照しない。
+- `inkpod_core_editor_stroke_begin_for_view` は ABI v5 で追加した view-aware 入口である。`view_id == 0` は
+  primary view、それ以外は同じ Core が所有する live secondary view を表す。device-pixel サンプルは開始時に
+  指定 view の変換を捕捉して文書座標へ正規化し、後続の append/end でも同じ変換を使う。存在しない view ID は
+  副作用なく拒否する。
 - `inkpod_core_apply_fill_for_editor_target` と
   `inkpod_core_apply_selection_for_editor_target` は、既存の上限付き入出力レコードに、操作開始時に捕捉した
   安定レイヤー／プレーン ID の組を添えて実行する。この組は同じ文書名前空間内で再検証し、操作中に
@@ -423,7 +427,7 @@ ABI v2 のライブラリや呼び出し側を受理するという意味では�
 公開レコードは `InkpodEditorFillOptions`、`InkpodEditorSelectionOptions`、
 `InkpodEditorVectorOptions`、`InkpodEditorStateInfo`、`InkpodEditorDefaults`、
 `InkpodEditorStateUpdate`、`InkpodEditorStrokeInput` である。呼び出し側は、最上位の入力レコードと、
-その入力が使用する各入れ子レコードの `struct_size` を、現行 ABI v4 ヘッダーにある完全な
+その入力が使用する各入れ子レコードの `struct_size` を、現行 ABI v5 ヘッダーにある完全な
 `sizeof(record)` 以上に設定し、予約領域と未知フラグを 0 にする。照会／更新の出力では、呼び出し側は
 最上位出力の `struct_size` だけを提示する。Core は成功時に、呼び出し側所有の完全なコピーと、各入れ子出力の
 `struct_size` を書き込む。短い最上位レコード、使用対象の短い入れ子入力、NULL、未知の列挙値／更新種別、
@@ -431,7 +435,7 @@ ABI v2 のライブラリや呼び出し側を受理するという意味では�
 `InkpodColorValue` タグとチャンネル幅を保持し、アルファを含む密配置 RGBA8 へ縮小しない。直径とオプションの
 スカラー値には、ABI レコードで定義した正確な整数／Q16 表現を使う。
 
-七つの API の入力は呼び出し中だけ借用され、出力レコードは呼び出し側所有のコピーなので解放関数を
+八つの API の入力は呼び出し中だけ借用され、出力レコードは呼び出し側所有のコピーなので解放関数を
 必要としない。照会は EditorState／文書のリビジョン、ダイジェスト、未保存状態、履歴、ジャーナル、描画内容を
 変更しない。更新は期待リビジョンが一致したときだけ一括適用する。意味上の変更がない場合は `EditorRevision`、
 `EditorStateDigest`、未保存状態を保ち、意味上の変更は EditorState のリビジョン、ダイジェスト、未保存状態だけを
@@ -444,7 +448,7 @@ Windows の `CoreHost` は、発行時の `DocumentSessionId + Generation` を�
 再照会する。同一文書の複数ビューは一つの EditorState を共有し、別セッションは分離される。ワークスペースに
 残った以前の表示値を Core へ書き戻してはならない。
 
-## 正規 Genesis とアセット取り込み（現行 ABI v4）
+## 正規 Genesis とアセット取り込み（現行 ABI v5）
 
 M4 の Core は、Genesis の安定した文書 ID、別個の Cell ID、不変の基底面を所有する。空の文書では
 割り当て不要の `SolidWhite`、ラスタを文書として開く場合は正規ラスタアセットが基底面となる。基底面は、
@@ -542,8 +546,9 @@ Windows ファイルダイアログが得たパスを UTF-8 バイト列へ変�
 
 ### 3. ストロークを逐次入力する
 
-UI/Input スレッドはポインター履歴をクライアントのデバイスピクセル座標で正規化し、上限付きキューへ
-バッチで入れる。Core エンジンスレッドはスタイルと最初のサンプルでストロークを開始し、後続サンプルを
+UI/Input スレッドはポインター履歴を入力元 Canvas のクライアントデバイスピクセル座標で正規化し、
+その Canvas に結び付く view ID とともに上限付きキューへバッチで入れる。Core エンジンスレッドは指定 view の
+変換、スタイル、最初のサンプルでストロークを開始し、後続サンプルを
 追加する。サンプルごとに FFI を往復したり、スナップショットを作ったりしない。
 
 ```text

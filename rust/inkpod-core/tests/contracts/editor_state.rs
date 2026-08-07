@@ -1066,6 +1066,84 @@ fn editor_stroke_captures_exact_values_and_stable_target_at_begin() {
 }
 
 #[test]
+fn editor_stroke_uses_the_captured_secondary_view_for_device_samples() {
+    let mut core = editor_core();
+    let main_line_target = target_for(&core, PlaneType::MainLine);
+    let state = core.editor_state().unwrap();
+    let state = core
+        .update_editor_state(
+            state.revision,
+            EditorStateUpdate::SetActiveTarget(main_line_target),
+        )
+        .unwrap();
+    core.update_editor_state(
+        state.revision,
+        EditorStateUpdate::SetActiveTool(EditorTool::Pencil),
+    )
+    .unwrap();
+
+    let secondary = core.create_view().unwrap();
+    let secondary_view = core
+        .apply_view_for(
+            secondary,
+            ViewCommand::PanBy {
+                device_dx: 10.0,
+                device_dy: 5.0,
+            },
+        )
+        .unwrap();
+    let device_x =
+        |document_x: f64| document_x.mul_add(secondary_view.zoom(), secondary_view.pan_x()) as f32;
+    let device_y = 2.0_f64.mul_add(secondary_view.zoom(), secondary_view.pan_y()) as f32;
+    let located = core
+        .locator_sample(
+            Some(secondary),
+            f64::from(device_x(2.0)),
+            f64::from(device_y),
+        )
+        .unwrap();
+    assert_eq!((located.document_x, located.document_y), (2, 2));
+    core.begin_editor_stroke_for_view(
+        secondary,
+        &EditorStrokeInput {
+            tool: None,
+            coordinate_space: CoordinateSpace::Device,
+            auto_erase: false,
+            pressure_size: false,
+            samples: vec![StrokeSample {
+                x: device_x(2.0),
+                y: device_y,
+                pressure: 1.0,
+            }],
+        },
+    )
+    .unwrap();
+
+    // Append must retain the secondary transform selected at begin rather than
+    // falling back to the primary view.
+    core.append_stroke(&[StrokeSample {
+        x: device_x(3.0),
+        y: device_y,
+        pressure: 1.0,
+    }])
+    .unwrap();
+    core.end_stroke().unwrap();
+
+    let painted = (0..24)
+        .flat_map(|y| (0..32).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            core.plane_pixel(ActivePlane::MainLine, x, y).unwrap() == PixelValue::Binary(255)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(painted, vec![(2, 2), (3, 2)]);
+    assert_eq!(
+        core.plane_pixel(ActivePlane::MainLine, 12, 7).unwrap(),
+        PixelValue::Binary(0),
+        "device samples must not use the primary view transform"
+    );
+}
+
+#[test]
 fn editor_stroke_tool_selector_uses_core_owned_style_without_switching_active_tool() {
     let mut core = editor_core();
     let color_target = target_for(&core, PlaneType::Color);

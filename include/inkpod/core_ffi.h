@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v4 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v5 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(4)
+#define INKPOD_ABI_VERSION UINT32_C(5)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -2228,6 +2228,22 @@ InkpodStatus inkpod_core_update_editor_state(
  */
 InkpodStatus inkpod_core_editor_stroke_begin(
     InkpodCore* core,
+    const InkpodEditorStrokeInput* input);
+
+/**
+ * @brief Core-owned EditorState で primary/secondary view の stroke を開始する。
+ * @par 契約
+ * Core owner thread。`view_id == 0` は primary view、それ以外は同じ Core が所有する
+ * live secondary view でなければならない。device 座標は開始時に選択した view transform
+ * で document 座標へ正規化し、append/end まで同じ transform を使用する。`input` と sample
+ * span は呼出中だけ borrowed で、Core は必要な値を所有する。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INCOMPATIBLE_ABI`、`UNSUPPORTED`、`WRONG_THREAD`、
+ * `NO_DOCUMENT`、`INVALID_STATE`、`PANIC`。
+ */
+InkpodStatus inkpod_core_editor_stroke_begin_for_view(
+    InkpodCore* core,
+    uint64_t view_id,
     const InkpodEditorStrokeInput* input);
 
 /**
