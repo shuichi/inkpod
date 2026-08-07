@@ -38,7 +38,7 @@
       EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="inkpod"
-        Description="アニメーション彩色のための制作アプリ"
+        Description="Inkpod"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\MedTile.png"
         Square44x44Logo="Assets\AppList.png">
