@@ -39,3 +39,4 @@ pub use model::{
     VectorPathInfo, VectorPathInput, VectorRaster, VectorSelectionMode, VectorSelectionRange,
     VectorSelectionResult, VectorWidthMode,
 };
+pub(crate) use rasterization::rasterize_vector_layer_content;

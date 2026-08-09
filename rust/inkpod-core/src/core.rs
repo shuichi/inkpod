@@ -284,7 +284,7 @@ pub struct Core {
     pub(super) active_stroke: Option<StrokeSession>,
     pub(super) filter_preview: Option<effects::FilterPreview>,
     pub(super) last_filter: Option<Filter>,
-    pub(super) render_cache: BTreeMap<TileCoord, RenderTile>,
+    pub(super) render_cache: BTreeMap<(u64, TileCoord), RenderTile>,
     pub(super) next_render_tile_revision: RenderRevision,
     pub(super) next_preview_revision: PreviewRevision,
     pub(super) color_check: Option<ColorCheckMode>,

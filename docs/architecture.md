@@ -709,6 +709,20 @@ creates D2D geometry, and reconstructs GPU resources from the retained snapshot
 after device loss. Core geometry remains in document coordinates; zoom, pan, and
 flip are render transforms only.
 
+Snapshots also own a bottom-to-top render plan. Layer/plane index 0 is the
+palette top, so Core walks each tree in reverse and emits closed layer groups,
+raster-tile spans, vector-fill spans, vector-stroke spans, and adjustment LUT
+references in one semantic order. Layer opacity is applied once by the group;
+plane opacity is already resolved into its raster or vector records. The C ABI
+publishes only borrowed bounded spans, and the renderer rejects malformed group
+structure, kinds, or item ranges before retaining the snapshot. Direct2D draws
+the plan sequentially. An adjustment boundary closes the current command list,
+applies the Core-resolved RGB lookup tables through TableTransfer, and continues
+in a new command list, preserving editable vector geometry and document-scale
+quality. Device-loss recovery rebuilds the same plan from the retained snapshot.
+Thumbnail and flat export use the same bottom-to-top Core semantics. Raster-only
+documents retain the existing precomposed tile path and its revision-max cache.
+
 ### Canonical revision-max render-cache identity
 
 The render-cache source identity uses `revision-max` as its canonical

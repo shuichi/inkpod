@@ -20,6 +20,13 @@ struct CanvasDocumentBounds {
     double bottom;
 };
 
+struct CanvasPixelRgba8 {
+    std::uint8_t red{};
+    std::uint8_t green{};
+    std::uint8_t blue{};
+    std::uint8_t alpha{};
+};
+
 struct CanvasFloatingPreview {
     std::uint32_t struct_size;
     std::uint32_t active;
@@ -156,6 +163,12 @@ public:
     HRESULT ValidateClosedVectorStroke(
         app::CanvasId canvas,
         app::Generation surface_generation) noexcept;
+    HRESULT ReadPixelForSmokeTest(
+        app::CanvasId canvas,
+        app::Generation surface_generation,
+        UINT x,
+        UINT y,
+        CanvasPixelRgba8& pixel) noexcept;
     HRESULT GetDocumentBounds(
         app::CanvasId canvas,
         app::Generation surface_generation,

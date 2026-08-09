@@ -88,7 +88,10 @@ pub use primitive::{
     PrimitiveId, PrimitiveOutcome, PrimitiveRequest, ProcedureId, ReplayContract, ReplayEpoch,
     StateId, replay_contract,
 };
-pub use snapshot::{CanonicalCompositeDigest, RenderSnapshot, RenderTile};
+pub use snapshot::{
+    CanonicalCompositeDigest, RenderAdjustmentLut, RenderPass, RenderPassKind, RenderSnapshot,
+    RenderTile,
+};
 pub use vector::{
     RenderVectorFill, RenderVectorSegment, VectorCubicSegment, VectorEraseMode, VectorFillInfo,
     VectorPathInfo, VectorPathInput, VectorRaster, VectorSelectionMode, VectorSelectionRange,

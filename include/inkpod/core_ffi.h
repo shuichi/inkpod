@@ -331,6 +331,15 @@ typedef uint32_t InkpodVectorSelectionMode;
 #define INKPOD_SNAPSHOT_VECTOR_CLOSED (UINT32_C(1) << 0)
 #define INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE (UINT32_C(1) << 1)
 
+/** @brief Semantic operation in an ordered immutable snapshot render plan. */
+typedef uint32_t InkpodRenderPassKind;
+#define INKPOD_RENDER_PASS_LAYER_BEGIN UINT32_C(1)
+#define INKPOD_RENDER_PASS_RASTER_TILES UINT32_C(2)
+#define INKPOD_RENDER_PASS_VECTOR_FILLS UINT32_C(3)
+#define INKPOD_RENDER_PASS_VECTOR_STROKES UINT32_C(4)
+#define INKPOD_RENDER_PASS_ADJUSTMENT UINT32_C(5)
+#define INKPOD_RENDER_PASS_LAYER_END UINT32_C(6)
+
 /** @brief filter catalog の処理識別子型。 */
 typedef uint32_t InkpodFilterKind;
 #define INKPOD_FILTER_SHARPEN_WEAK UINT32_C(1)
@@ -1696,6 +1705,37 @@ typedef struct InkpodSnapshotVectorView {
     const uint64_t* boundary_path_ids;
     uint64_t boundary_path_count;
 } InkpodSnapshotVectorView;
+
+/** @brief One bottom-to-top operation in a snapshot-owned render plan. */
+typedef struct InkpodSnapshotRenderPass {
+    uint32_t struct_size;
+    InkpodRenderPassKind kind;
+    uint64_t layer_id;
+    uint64_t plane_id;
+    uint32_t opacity_milli;
+    uint32_t reserved;
+    uint64_t first_item;
+    uint64_t item_count;
+} InkpodSnapshotRenderPass;
+
+/**
+ * @brief Borrowed ordered render passes and RGB8 adjustment lookup tables.
+ *
+ * `passes` and `adjustment_luts_rgb8` remain valid until the parent snapshot is
+ * released. Each LUT stores red, green, and blue tables consecutively, with
+ * 256 bytes per channel.
+ */
+typedef struct InkpodSnapshotRenderPlan {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint64_t feature_flags;
+    const InkpodSnapshotRenderPass* passes;
+    uint64_t pass_count;
+    uint64_t pass_stride_bytes;
+    const uint8_t* adjustment_luts_rgb8;
+    uint64_t adjustment_lut_count;
+    uint64_t adjustment_lut_stride_bytes;
+} InkpodSnapshotRenderPlan;
 
 /** @brief tree operation、stable ID、properties、UTF-8 名を渡す borrowed 入力。 */
 typedef struct InkpodTreeEdit {
@@ -4350,6 +4390,19 @@ InkpodStatus inkpod_snapshot_get_overlay(
 InkpodStatus inkpod_snapshot_get_vectors(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotVectorView* out_vectors);
+
+/**
+ * @brief Copies the bottom-to-top render plan for a live immutable snapshot.
+ * @par Contract
+ * `snapshot` and exact-size `out_plan` are non-NULL and externally synchronized.
+ * Returned spans are snapshot-owned and valid until release. Pass item ranges
+ * index the tile, vector-fill, vector-segment, or adjustment-LUT span selected
+ * by `kind`. Unknown kinds are not emitted. Failure does not partially write
+ * document state or transfer ownership.
+ */
+InkpodStatus inkpod_snapshot_get_render_plan(
+    const InkpodSnapshot* snapshot,
+    InkpodSnapshotRenderPlan* out_plan);
 
 /**
  * @brief Copies the fixed build/replay contract on the Core owner thread.

@@ -276,6 +276,24 @@ inkpod_snapshot_release(&snapshot);
 // snapshot == nullptr。同じ所有変数で再び解放しても、何もせず成功する。
 ```
 
+### Ordered snapshot render plan
+
+`inkpod_snapshot_get_render_plan` writes an exact-size caller-owned
+`InkpodSnapshotRenderPlan`. Its pass and adjustment-LUT pointers are borrowed
+from the immutable parent snapshot, may be read on an externally synchronized
+renderer thread, and remain valid only until `inkpod_snapshot_release`.
+`pass_stride_bytes` is `sizeof(InkpodSnapshotRenderPass)` and each adjustment
+LUT is exactly 768 bytes: 256 red entries, then green, then blue.
+
+Passes are emitted in bottom-to-top execution order. Layer begin/end records
+form a non-nested group whose opacity applies once to the group. Raster, fill,
+and stroke records index the corresponding snapshot view span; adjustment
+records index one LUT. The adapter rejects NULL, short/misaligned records,
+unknown pass kinds, invalid group structure, out-of-range item spans, nonzero
+reserved fields, and opacity above 1000 before the renderer retains a snapshot.
+The records transfer no ownership. ABI v5 is retained because this is an
+additive export and no existing record layout changed.
+
 解放後は、ハンドルから得たタイル、ピクセル、ガイド、ベクター、文字列、バイト列と、コピーしておいた
 別名ポインターを一切使わない。Rust が確保したオブジェクトを `free`、`delete`、`CoTaskMemFree` で解放しない。
 

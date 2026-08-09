@@ -12,9 +12,9 @@ const EXPECTED_QUICK_CHECKSUMS: [u64; 9] = [
     0x517e_d7ae_78bf_0487,
     0x3f10_53b9_fde3_7d35,
     0x255a_b9ba_d114_dfdd,
-    0x688d_d42c_93a7_1bec,
+    0x2813_c527_f273_11c8,
     0xf31d_31fe_1bb0_0fd7,
-    0x20de_057c_c9cc_3ca1,
+    0xf521_d658_a470_51e9,
     0xbf81_1491_4500_d6e8,
 ];
 const EXPECTED_FULL_CHECKSUMS: [u64; 9] = [
@@ -23,9 +23,9 @@ const EXPECTED_FULL_CHECKSUMS: [u64; 9] = [
     0x4390_40e0_244d_5773,
     0xa2c1_a74e_7f97_81a3,
     0x77f6_3d83_e130_185f,
-    0x27e6_aa98_8b12_5683,
+    0xb975_f3cf_db78_24fd,
     0x6732_b8b0_a656_5d03,
-    0x20de_057c_c9cc_3ca1,
+    0xf521_d658_a470_51e9,
     0xbf81_1491_4500_d6e8,
 ];
 

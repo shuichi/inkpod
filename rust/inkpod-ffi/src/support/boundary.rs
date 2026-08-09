@@ -85,6 +85,32 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
             output
         })
         .collect();
+    let render_passes = snapshot
+        .render_passes()
+        .iter()
+        .map(|pass| InkpodSnapshotRenderPass {
+            struct_size: size_of::<InkpodSnapshotRenderPass>() as u32,
+            kind: match pass.kind() {
+                RenderPassKind::LayerBegin => INKPOD_RENDER_PASS_LAYER_BEGIN,
+                RenderPassKind::RasterTiles => INKPOD_RENDER_PASS_RASTER_TILES,
+                RenderPassKind::VectorFills => INKPOD_RENDER_PASS_VECTOR_FILLS,
+                RenderPassKind::VectorStrokes => INKPOD_RENDER_PASS_VECTOR_STROKES,
+                RenderPassKind::Adjustment => INKPOD_RENDER_PASS_ADJUSTMENT,
+                RenderPassKind::LayerEnd => INKPOD_RENDER_PASS_LAYER_END,
+            },
+            layer_id: pass.layer_id(),
+            plane_id: pass.plane_id(),
+            opacity_milli: pass.opacity_milli(),
+            reserved: 0,
+            first_item: pass.first_item(),
+            item_count: pass.item_count(),
+        })
+        .collect();
+    let adjustment_luts_rgb8 = snapshot
+        .adjustment_luts()
+        .iter()
+        .flat_map(|lut| lut.channels().iter().flatten().copied())
+        .collect();
     Box::new(InkpodSnapshot {
         snapshot,
         tiles,
@@ -92,6 +118,8 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         vector_segments,
         vector_fills,
         vector_boundary_path_ids,
+        render_passes,
+        adjustment_luts_rgb8,
     })
 }
 

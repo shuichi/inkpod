@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstdint>
@@ -37,7 +38,167 @@ public:
             96000U};
         InkpodDocumentInfo info{};
         info.struct_size = sizeof(info);
-        return inkpod_core_new_cell(core_, &options, &info) == INKPOD_STATUS_OK;
+        if (inkpod_core_new_cell(core_, &options, &info) != INKPOD_STATUS_OK) {
+            return false;
+        }
+        document_ = info;
+        return true;
+    }
+
+    bool ConfigureMixedOrder() noexcept {
+        const InkpodStrokeSample sample{
+            sizeof(InkpodStrokeSample),
+            0U,
+            static_cast<float>(document_.width) * 0.5F,
+            static_cast<float>(document_.height) * 0.5F,
+            1.0F,
+            0U};
+        const InkpodStrokeInput stroke{
+            sizeof(InkpodStrokeInput),
+            INKPOD_TOOL_PENCIL,
+            INKPOD_PLANE_COLOR,
+            INKPOD_COORDINATE_SPACE_DOCUMENT,
+            0U,
+            UINT32_C(0x0000ffff),
+            static_cast<float>(document_.width + document_.height) * 4.0F,
+            &sample,
+            1U,
+            sizeof(InkpodStrokeSample)};
+        InkpodDispatchResult dispatch{};
+        dispatch.struct_size = sizeof(dispatch);
+        if (inkpod_core_apply_stroke(core_, &stroke, &dispatch) != INKPOD_STATUS_OK) {
+            return false;
+        }
+        constexpr std::array<std::uint8_t, 12U> name{
+            'O', 'r', 'd', 'e', 'r', 'e', 'd', ' ', 'V', 'e', 'c', 't'};
+        InkpodTreeEdit edit{};
+        edit.struct_size = sizeof(edit);
+        edit.operation = INKPOD_TREE_CREATE_LAYER;
+        edit.kind = INKPOD_LAYER_VECTOR_COLORING;
+        edit.name_utf8 = name.data();
+        edit.name_bytes = name.size();
+        if (inkpod_core_tree_edit(core_, &edit, &dispatch, &vector_layer_id_)
+                != INKPOD_STATUS_OK
+            || vector_layer_id_ == 0U) {
+            return false;
+        }
+        std::uint32_t vector_index = UINT32_MAX;
+        InkpodNodeInfo layer{};
+        layer.struct_size = sizeof(layer);
+        for (std::uint32_t index = 0U; index < 32U; ++index) {
+            if (inkpod_core_node_get(core_, index, UINT32_MAX, &layer) != INKPOD_STATUS_OK) {
+                break;
+            }
+            if (layer.id == vector_layer_id_) {
+                vector_index = index;
+                break;
+            }
+        }
+        InkpodNodeInfo plane{};
+        plane.struct_size = sizeof(plane);
+        if (vector_index == UINT32_MAX
+            || inkpod_core_node_get(core_, vector_index, 1U, &plane) != INKPOD_STATUS_OK
+            || plane.kind != INKPOD_TYPED_PLANE_COLOR_TRACE) {
+            return false;
+        }
+        const std::uint64_t trace_plane_id = plane.id;
+        if (inkpod_core_node_get(core_, vector_index, 2U, &plane) != INKPOD_STATUS_OK
+            || plane.kind != INKPOD_TYPED_PLANE_VECTOR_FILL) {
+            return false;
+        }
+        const std::uint64_t fill_plane_id = plane.id;
+        const auto line = [](InkpodVectorPoint start, InkpodVectorPoint end) noexcept {
+            return InkpodVectorCubicSegment{
+                sizeof(InkpodVectorCubicSegment),
+                0U,
+                start,
+                InkpodVectorPoint{
+                    (start.x * 2.0F + end.x) / 3.0F,
+                    (start.y * 2.0F + end.y) / 3.0F},
+                InkpodVectorPoint{
+                    (start.x + end.x * 2.0F) / 3.0F,
+                    (start.y + end.y * 2.0F) / 3.0F},
+                end,
+                1.0F,
+                1.0F};
+        };
+        const std::array<InkpodVectorPoint, 5U> points{
+            InkpodVectorPoint{-4.0F, -4.0F},
+            InkpodVectorPoint{static_cast<float>(document_.width) + 4.0F, -4.0F},
+            InkpodVectorPoint{
+                static_cast<float>(document_.width) + 4.0F,
+                static_cast<float>(document_.height) + 4.0F},
+            InkpodVectorPoint{-4.0F, static_cast<float>(document_.height) + 4.0F},
+            InkpodVectorPoint{-4.0F, -4.0F}};
+        const std::array<InkpodVectorCubicSegment, 4U> segments{
+            line(points[0], points[1]),
+            line(points[1], points[2]),
+            line(points[2], points[3]),
+            line(points[3], points[4])};
+        const InkpodVectorPathInput path{
+            sizeof(InkpodVectorPathInput),
+            0U,
+            INKPOD_VECTOR_PATH_CLOSED,
+            trace_plane_id,
+            InkpodColorValue{
+                sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 0U},
+            segments.data(),
+            segments.size(),
+            sizeof(InkpodVectorCubicSegment)};
+        std::uint64_t path_id{};
+        if (inkpod_core_vector_add_path(core_, &path, &dispatch, &path_id)
+                != INKPOD_STATUS_OK
+            || path_id == 0U) {
+            return false;
+        }
+        const InkpodVectorFillInput fill{
+            sizeof(InkpodVectorFillInput),
+            0U,
+            0U,
+            fill_plane_id,
+            InkpodColorValue{
+                sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 255U, 0U, 0U, 255U},
+            &path_id,
+            1U};
+        std::uint64_t fill_id{};
+        return inkpod_core_vector_add_fill(core_, &fill, &dispatch, &fill_id)
+                == INKPOD_STATUS_OK
+            && fill_id != 0U;
+    }
+
+    bool ReorderVectorTop() noexcept {
+        InkpodTreeEdit edit{};
+        edit.struct_size = sizeof(edit);
+        edit.operation = INKPOD_TREE_REORDER_LAYER;
+        edit.object_id = vector_layer_id_;
+        edit.destination_index = 0U;
+        InkpodDispatchResult dispatch{};
+        dispatch.struct_size = sizeof(dispatch);
+        std::uint64_t ignored{};
+        return vector_layer_id_ != 0U
+            && inkpod_core_tree_edit(core_, &edit, &dispatch, &ignored) == INKPOD_STATUS_OK;
+    }
+
+    bool CreateAdjustmentTop() noexcept {
+        InkpodFilterInput filter{};
+        filter.struct_size = sizeof(filter);
+        filter.kind = INKPOD_FILTER_BRIGHTNESS_CONTRAST;
+        filter.parameter_0 = 100;
+        filter.parameter_1 = 0;
+        constexpr std::array<std::uint8_t, 18U> name{
+            'O', 'r', 'd', 'e', 'r', 'e', 'd', ' ', 'B', 'r', 'i', 'g', 'h', 't', 'n', 'e', 's', 's'};
+        InkpodDispatchResult dispatch{};
+        dispatch.struct_size = sizeof(dispatch);
+        std::uint64_t adjustment_layer{};
+        return inkpod_core_adjustment_create(
+                   core_,
+                   &filter,
+                   name.data(),
+                   name.size(),
+                   &dispatch,
+                   &adjustment_layer)
+                == INKPOD_STATUS_OK
+            && adjustment_layer != 0U;
     }
 
     bool Build(
@@ -65,6 +226,8 @@ public:
 
 private:
     InkpodCore* core_{};
+    InkpodDocumentInfo document_{};
+    std::uint64_t vector_layer_id_{};
 };
 
 class WindowOwner final {
@@ -176,7 +339,9 @@ int Run() {
 
     CoreOwner first_core;
     CoreOwner second_core;
-    if (!first_core.Create(1U, 32U, 24U) || !second_core.Create(2U, 48U, 16U)) {
+    if (!first_core.Create(1U, 32U, 24U)
+        || !first_core.ConfigureMixedOrder()
+        || !second_core.Create(2U, 48U, 16U)) {
         return 7;
     }
     inkpod::renderer::SnapshotEnvelope first_envelope{};
@@ -188,6 +353,35 @@ int Run() {
         || !HasBounds(host, first_canvas, first_surface_generation, 32.0, 24.0)
         || !HasBounds(host, second_canvas, second_surface_generation, 48.0, 16.0)) {
         return 8;
+    }
+    host.Resize(first_canvas, first_surface_generation, 32U, 24U);
+    inkpod::renderer::CanvasPixelRgba8 ordered_pixel{};
+    if (FAILED(host.ReadPixelForSmokeTest(
+            first_canvas, first_surface_generation, 16U, 12U, ordered_pixel))
+        || ordered_pixel.red != 0U || ordered_pixel.green != 0U
+        || ordered_pixel.blue != 255U) {
+        return 35;
+    }
+    inkpod::renderer::SnapshotEnvelope reordered_envelope{};
+    if (!first_core.ReorderVectorTop()
+        || !first_core.Build(first_sink->Route(), reordered_envelope)
+        || !first_sink->Submit(reordered_envelope)
+        || FAILED(host.ReadPixelForSmokeTest(
+            first_canvas, first_surface_generation, 16U, 12U, ordered_pixel))
+        || ordered_pixel.red != 255U || ordered_pixel.green != 0U
+        || ordered_pixel.blue != 0U) {
+        return 36;
+    }
+    inkpod::renderer::SnapshotEnvelope adjusted_envelope{};
+    if (!first_core.CreateAdjustmentTop()
+        || !first_core.Build(first_sink->Route(), adjusted_envelope)
+        || !first_sink->Submit(adjusted_envelope)
+        || FAILED(host.ReadPixelForSmokeTest(
+            first_canvas, first_surface_generation, 16U, 12U, ordered_pixel))
+        || ordered_pixel.red != 255U
+        || ordered_pixel.green < 24U || ordered_pixel.green > 27U
+        || ordered_pixel.blue < 24U || ordered_pixel.blue > 27U) {
+        return 37;
     }
     const inkpod::renderer::RendererResourceUsage initial_usage = host.ResourceUsage();
     inkpod::renderer::RendererSurfaceResourceUsage first_surface_usage{};

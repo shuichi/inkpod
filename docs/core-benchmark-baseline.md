@@ -56,7 +56,7 @@ scenario assertions are:
 | `pan_zoom_snapshot` | every zoom/pan pair builds a snapshot without changing document revision, history, pixels, or tile revisions |
 | `undo_redo` | every edit is one history entry, Undo reaches the clean savepoint, and Redo restores the exact checksum |
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
-| `vector_snapshot` | segment/fill counts, zero raster snapshot tiles, and rasterized pixels match |
+| `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
 | `canonical_replay` | six boundaries replay bit-exactly; final digest and epoch 6 / native v9 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
@@ -71,9 +71,9 @@ wall-clock time, addresses, cache allocation order, and Batch output paths.
 | `pan_zoom_snapshot` | `517ed7ae78bf0487` | `439040e0244d5773` |
 | `undo_redo` | `3f1053b9fde37d35` | `a2c1a74e7f9781a3` |
 | `light_table_composite` | `255ab9bad114dfdd` | `77f63d83e130185f` |
-| `vector_snapshot` | `688dd42c93a71bec` | `27e6aa988b125683` |
+| `vector_snapshot` | `2813c527f27311c8` | `b975f3cfdb7824fd` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
-| `canonical_replay` | `20de057cc9cc3ca1` | `20de057cc9cc3ca1` |
+| `canonical_replay` | `f521d658a47051e9` | `f521d658a47051e9` |
 | `checkpoint_open` | `bf8114914500d6e8` | `bf8114914500d6e8` |
 
 ## Approved routine envelope

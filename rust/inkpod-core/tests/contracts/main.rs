@@ -12,6 +12,7 @@ mod editor_state;
 mod effects;
 mod foundation;
 mod history_stroke;
+mod mixed_order;
 mod native_v9;
 mod primitive_kernel;
 mod procedure_journal;

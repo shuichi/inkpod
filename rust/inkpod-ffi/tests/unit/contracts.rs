@@ -2465,6 +2465,17 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
         algorithm: 0,
         bytes: [0; 32],
     };
+    let mut render_plan = InkpodSnapshotRenderPlan {
+        struct_size: size_of::<InkpodSnapshotRenderPlan>() as u32,
+        abi_version: 0,
+        feature_flags: u64::MAX,
+        passes: ptr::null(),
+        pass_count: u64::MAX,
+        pass_stride_bytes: 0,
+        adjustment_luts_rgb8: ptr::null(),
+        adjustment_lut_count: u64::MAX,
+        adjustment_lut_stride_bytes: 0,
+    };
     // SAFETY: All handles and complete non-overlapping outputs are live for the calls.
     unsafe {
         assert_eq!(
@@ -2486,6 +2497,31 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
         );
         assert_eq!(digest.algorithm, INKPOD_DIGEST_BLAKE3_256);
         assert_ne!(digest.bytes, [0; 32]);
+        let mut short_plan = render_plan;
+        short_plan.struct_size -= 1;
+        assert_eq!(
+            inkpod_snapshot_get_render_plan(snapshot, &mut short_plan),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(
+            inkpod_snapshot_get_render_plan(ptr::null(), &mut render_plan),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_snapshot_get_render_plan(snapshot, &mut render_plan),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(render_plan.abi_version, INKPOD_ABI_VERSION);
+        assert_eq!(render_plan.feature_flags, INKPOD_FEATURE_NONE);
+        assert_eq!(
+            render_plan.pass_stride_bytes,
+            size_of::<InkpodSnapshotRenderPass>() as u64
+        );
+        assert_eq!(render_plan.adjustment_lut_stride_bytes, 3 * 256);
+        assert_eq!(render_plan.pass_count, 0);
+        assert!(render_plan.passes.is_null());
+        assert_eq!(render_plan.adjustment_lut_count, 0);
+        assert!(render_plan.adjustment_luts_rgb8.is_null());
         let after = queried_document_info(core);
         assert_eq!(after.document_revision, before.document_revision);
         assert_eq!(after.view_revision, before.view_revision);

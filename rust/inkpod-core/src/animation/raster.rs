@@ -49,6 +49,24 @@ pub(super) fn flatten_document(
             Some(record)
         }
     };
+    let vector_rasters = document
+        .layers
+        .iter()
+        .map(|layer| {
+            (layer.kind == LayerKind::VectorColoring)
+                .then(|| {
+                    crate::vector::rasterize_vector_layer_content(
+                        document,
+                        layer,
+                        document.width,
+                        document.height,
+                        document.width.saturating_mul(4),
+                        true,
+                    )
+                })
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     for y in 0..document.height {
         for x in 0..document.width {
             let mut composite = match &base_asset {
@@ -61,19 +79,48 @@ pub(super) fn flatten_document(
                     y,
                 )?,
             };
-            for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
+            for (layer, vector_raster) in document
+                .layers
+                .iter()
+                .zip(&vector_rasters)
+                .rev()
+                .filter(|(layer, _)| layer.visible)
+            {
+                if layer.kind == LayerKind::Adjustment {
+                    let adjustment =
+                        document
+                            .adjustments
+                            .get(&layer.id)
+                            .ok_or(CoreError::InvalidState(
+                                "adjustment layer metadata is missing",
+                            ))?;
+                    let adjusted =
+                        inkpod_image::apply_adjustment(PixelValue::Rgba(composite), adjustment)?
+                            .rgba16()
+                            .ok_or(CoreError::InvalidState(
+                                "adjustment output is not displayable",
+                            ))?
+                            .map(|channel| ((u32::from(channel) + 128) / 257) as u8);
+                    composite = std::array::from_fn(|channel| {
+                        ((u32::from(composite[channel]) * (1_000 - layer.opacity_milli)
+                            + u32::from(adjusted[channel]) * layer.opacity_milli
+                            + 500)
+                            / 1_000) as u8
+                    });
+                    continue;
+                }
+                if let Some(vector_raster) = vector_raster {
+                    let offset = y as usize * vector_raster.stride_bytes as usize + x as usize * 4;
+                    composite = blend_rgba_over(
+                        composite,
+                        vector_raster.pixels[offset..offset + 4]
+                            .try_into()
+                            .map_err(|_| CoreError::InvalidState("vector raster is truncated"))?,
+                    );
+                    continue;
+                }
                 let mut layer_pixel = [0_u8; 4];
-                for plane in layer
-                    .planes
-                    .iter()
-                    .filter(|plane| plane.visible && plane.kind != PlaneType::MainLine)
-                    .chain(
-                        layer
-                            .planes
-                            .iter()
-                            .filter(|plane| plane.visible && plane.kind == PlaneType::MainLine),
-                    )
-                {
+                for plane in layer.planes.iter().rev().filter(|plane| plane.visible) {
                     let value = plane.raster.pixel(x, y)?;
                     let mut rgba = match plane.kind {
                         PlaneType::MainLine => {

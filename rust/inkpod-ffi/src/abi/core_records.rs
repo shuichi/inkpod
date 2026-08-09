@@ -340,6 +340,33 @@ pub struct InkpodSnapshotView {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodSnapshotRenderPass {
+    pub struct_size: u32,
+    pub kind: u32,
+    pub layer_id: u64,
+    pub plane_id: u64,
+    pub opacity_milli: u32,
+    pub reserved: u32,
+    pub first_item: u64,
+    pub item_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodSnapshotRenderPlan {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub feature_flags: u64,
+    pub passes: *const InkpodSnapshotRenderPass,
+    pub pass_count: u64,
+    pub pass_stride_bytes: u64,
+    pub adjustment_luts_rgb8: *const u8,
+    pub adjustment_lut_count: u64,
+    pub adjustment_lut_stride_bytes: u64,
+}
+
+#[repr(C)]
 #[derive(Default)]
 pub struct InkpodSnapshotTransform {
     pub struct_size: u32,

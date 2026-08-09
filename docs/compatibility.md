@@ -17,7 +17,7 @@ verified at their natural build, ABI, Core, format, or renderer boundary.
 | Requirement | Status | Representative evidence | Known difference / next work |
 | --- | --- | --- | --- |
 | `ARCH-001`, `ARCH-002` | Verified | CMake/Cargo source tracking, crate-boundary guards, OS-dependency scans, public integration tests, strict Rust/Windows builds | Rust domain crates contain no Windows API dependency |
-| `ABI-001`, `ABI-002` | Verified | Header/export/catalog parity for 210 ABI v5 exports; C11/C++20 layout, NULL/short/stale/wrong-thread/ownership tests; snapshot queue, stale, device-loss and GUI smoke | ABI v1-v4 callers must rebuild against the current header |
+| `ABI-001`, `ABI-002` | Verified | Header/export/catalog parity for 211 ABI v5 exports; C11/C++20 layout, NULL/short/stale/wrong-thread/ownership tests; ordered render-plan spans, snapshot queue, stale, device-loss and GUI smoke | ABI v1-v4 callers must rebuild against the current header |
 | `IO-001` | Verified | V9 stream/layout/digest/current-only tests; checkpoint equivalence/fallback/rejection; staged save/open, recovery, failure/cancel, compaction, ABI and Windows smoke | Non-v9 files are rejected without migration; compression code 0 only |
 | `IO-002` | Verified | PNG/TIFF/TGA/BMP 8/16-bit, alpha/DPI round-trips; caller/file lifetime, sequence, export, ABI and Windows smoke | Flat common-raster export remains distinct from native save |
 | `WIN-001` | In progress | Startup/shutdown, Help/About, owner-centered work-area-clamped modal dialogs, DPI/theme/layout, keyboard, MSAA/UIA, accessibility-name and GUI smoke; reproducible [release checklist](windows-release-checklist.md) | Japanese-only resources; high contrast, 200% DPI, complete screen-reader and Japanese IME work remains |
@@ -31,6 +31,7 @@ verified at their natural build, ABI, Core, format, or renderer boundary.
 | `PORT-001` | Verified | Zero-Windows-import acceptance guard and shared Linux/macOS replay/workspace checks | Future sandboxed frontends still need byte/stream and file-authority adapters |
 | `DOC-001` | Verified | Metadata, paper/frame/DPI equality, mixed-paper alignment, native round-trip and Windows dialog smoke | — |
 | `DOC-002`, `DOC-003` | In progress | Stable-ID typed topology, validation, save/reopen, thumbnails, create/delete/reorder/visibility/editability, Undo and Windows Layer pane smoke | Multi-target editing presentation remains |
+| `RENDER-001` | Verified | R/V/R and V/R/V Core pixel/digest goldens; layer/plane reorder, visibility, 0/50/100% opacity, alpha, adjustment, thumbnail/export/save/reopen; ABI plan negatives; Windows offscreen GPU reorder and adjustment pixels plus device-loss smoke | — |
 | `VIEW-001`, `VIEW-002` | Verified | Zoom/box/fit/1:1/pan/flip, ruler/guide/grid/snap/transparent-view Core, FFI, coordinate and Windows gesture/render smoke | The main-window zoom slider is intentionally absent |
 | `VIEW-003` | Verified | Bounded locator sampling/neighborhood, DPI/flip/half-open coordinates, FFI buffers, target/pin/stale and native pane smoke | — |
 | `VIEW-004` | Verified | Multi-view revision/history, per-view device-coordinate stroke placement, split/group/window move/copy, same/different-session isolation, active-stroke and native lifecycle smoke | — |
@@ -50,7 +51,7 @@ verified at their natural build, ABI, Core, format, or renderer boundary.
 | `EFFECT-001` | Verified | Gradient/airbrush/boundary/blur/stamp acceptance, deterministic pressure/gesture/bounds, ABI and Windows smoke | — |
 | `ADJUST-001` | Verified | Non-destructive order/source/opacity/visibility/save-reopen, malformed metadata, alpha RGB preservation, ABI and Windows smoke | — |
 | `BATCH-001`, `BATCH-002`, `BATCH-003` | Verified | Current-version graph round-trip, complete operation catalog, dry-run/preview/shared Job Progress/cancel/failure/atomic output, FFI and Batch-pane smoke | Native `.inkpod` is the only output format; boundary airbrush begins with two colors |
-| `VECTOR-001`, `VECTOR-002` | Verified | Geometry/render goldens, path editing, width/connect/select/vectorize/rasterize transactions, zoom/save/replay, ABI and Windows Canvas smoke | Vector content composites after raster tiles; rasterize preserves its source layer |
+| `VECTOR-001`, `VECTOR-002` | Verified | Geometry/render goldens, path editing, width/connect/select/vectorize/rasterize transactions, mixed-order zoom/save/replay, ABI and Windows Canvas smoke | Rasterize preserves its source layer |
 
 ## Maintenance rule
 

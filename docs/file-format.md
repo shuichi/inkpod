@@ -321,7 +321,7 @@ ASCII context strings are:
 | `FileRootDigest` | `org.inkpod.digest.file-root.v1` |
 | primitive catalog | `org.inkpod.primitive-catalog.v1` |
 | primitive argument schema | `org.inkpod.primitive-argument-schema.v1` |
-| canonical snapshot composite | `org.inkpod.digest.canonical-composite.v1` |
+| canonical snapshot composite | `org.inkpod.digest.canonical-composite.v2` |
 
 Every document/container digest message uses the same canonical frame shape.
 The primitive catalog and canonical snapshot composite instead use their closed
@@ -337,18 +337,22 @@ three zero bytes, byte length `u64`, then exactly that many bytes. Presence is
 length 0, so the two never collide. A required field is always present. No
 padding occurs between fields.
 
-The canonical snapshot-composite stream begins with schema `u32 = 1`, semantic
-snapshot feature flags, document width/height, then the public tile sequence in
-`(origin y, origin x, tile ID)` order. Each tile contributes ID, origin, dimensions, stride, byte count,
-and exact premultiplied BGRA8 bytes; cache/source revisions are excluded. It then
-contains the ordered public vector segments and fills. Segment point/width values
-are canonicalized to signed Q16 before hashing; fill boundary path IDs retain
-their semantic order. View revision, zoom, pan, flip, guides, grid, renderer
-resources, and OS DPI are excluded. Vector segments use
-`(z-order, plane ID, path ID, segment index)` order and fills use
-`(z-order, plane ID, fill ID)` order. `RenderSnapshot::canonical_composite_digest`
-and `inkpod_snapshot_get_canonical_digest` expose this result without a test-only
-state accessor.
+The canonical snapshot-composite stream begins with schema `u32 = 2`, semantic
+snapshot feature flags, document width/height, then the tile, vector-segment,
+and vector-fill sequences in their exact snapshot storage order. Each tile
+contributes ID, origin, dimensions, stride, byte count, and exact premultiplied
+BGRA8 bytes; cache/source revisions are excluded. Segment point/width values are
+canonicalized to signed Q16 before hashing, and fill boundary path IDs retain
+their semantic order. The stream then contains the bottom-to-top render-pass
+sequence. Each pass contributes its closed kind code (1 layer-begin, 2 raster
+tiles, 3 vector fills, 4 vector strokes, 5 adjustment, 6 layer-end), layer ID,
+plane ID, opacity-milli, first-item index, and item count. Finally it contains
+the ordered adjustment-LUT sequence, each as red, green, and blue 256-byte
+tables. View revision, zoom, pan, flip, guides, grid, renderer resources, and OS
+DPI are excluded. `RenderSnapshot::canonical_composite_digest` and
+`inkpod_snapshot_get_canonical_digest` expose this result without a test-only
+state accessor. This derived snapshot digest is not serialized in `.inkpod` and
+does not change native format v9 or replay epoch 6.
 
 A sequence field is `element-count u64`, then for every element `element-length
 u64` and exact element bytes. A schema-declared ordered sequence retains its

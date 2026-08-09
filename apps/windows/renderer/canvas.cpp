@@ -1,6 +1,7 @@
 #include "canvas.h"
 
 #include <d2d1_1.h>
+#include <d2d1effects.h>
 #include <d3d11.h>
 #include <dxgi1_3.h>
 #include <windowsx.h>
@@ -38,6 +39,8 @@ constexpr std::uint64_t kMaximumSnapshotGuides = 4096U;
 constexpr std::uint64_t kMaximumVectorSegments = 262144U;
 constexpr std::uint64_t kMaximumVectorFills = 65536U;
 constexpr std::uint64_t kMaximumVectorBoundaries = 262144U;
+constexpr std::uint64_t kMaximumRenderPasses = 1048576U;
+constexpr std::uint64_t kMaximumAdjustmentLuts = 4096U;
 constexpr std::uint64_t kMaximumOverlayLines = 8192U;
 constexpr std::size_t kMaximumPointerHistory = 256U;
 constexpr std::size_t kMaximumPendingCanvasInput = 64U;
@@ -77,13 +80,17 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     overlay.struct_size = sizeof(overlay);
     InkpodSnapshotVectorView vectors{};
     vectors.struct_size = sizeof(vectors);
+    InkpodSnapshotRenderPlan plan{};
+    plan.struct_size = sizeof(plan);
     if (inkpod_snapshot_get_view(snapshot, &view) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_overlay(snapshot, &overlay) != INKPOD_STATUS_OK
-        || inkpod_snapshot_get_vectors(snapshot, &vectors) != INKPOD_STATUS_OK) {
+        || inkpod_snapshot_get_vectors(snapshot, &vectors) != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_render_plan(snapshot, &plan) != INKPOD_STATUS_OK) {
         return 0U;
     }
     std::uint64_t bytes = sizeof(InkpodSnapshotView) + sizeof(InkpodSnapshotTransform)
-        + sizeof(InkpodSnapshotOverlay) + sizeof(InkpodSnapshotVectorView);
+        + sizeof(InkpodSnapshotOverlay) + sizeof(InkpodSnapshotVectorView)
+        + sizeof(InkpodSnapshotRenderPlan);
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         view.tile_count, view.tile_stride_bytes));
     if (view.tiles != nullptr && view.tile_stride_bytes >= sizeof(InkpodSnapshotTile)
@@ -107,6 +114,10 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
         vectors.fill_count, vectors.fill_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         vectors.boundary_path_count, sizeof(std::uint64_t)));
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        plan.pass_count, plan.pass_stride_bytes));
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        plan.adjustment_lut_count, plan.adjustment_lut_stride_bytes));
     return bytes;
 }
 
@@ -208,6 +219,10 @@ public:
         return d3d_device_.Get();
     }
 
+    [[nodiscard]] ID3D11DeviceContext* D3dContext() const noexcept {
+        return d3d_context_.Get();
+    }
+
     [[nodiscard]] IDXGIFactory2* DxgiFactory() const noexcept {
         return dxgi_factory_.Get();
     }
@@ -280,7 +295,10 @@ public:
         return result;
     }
 
-    HRESULT Render() noexcept {
+    HRESULT Render(
+        CanvasPixelRgba8* sampled_pixel = nullptr,
+        UINT sample_x = 0U,
+        UINT sample_y = 0U) noexcept {
         if (frame_latency_waitable_ != nullptr) {
             const DWORD wait = WaitForSingleObjectEx(frame_latency_waitable_, 100U, FALSE);
             if (wait == WAIT_TIMEOUT) {
@@ -298,6 +316,14 @@ public:
             const HRESULT cache_result = RebuildTileCache();
             if (FAILED(cache_result)) {
                 return cache_result;
+            }
+        }
+
+        ComPtr<ID2D1Image> adjusted_content;
+        if (HasAdjustmentPass()) {
+            const HRESULT adjusted_result = BuildAdjustedContent(adjusted_content);
+            if (FAILED(adjusted_result)) {
+                return adjusted_result;
             }
         }
 
@@ -364,23 +390,12 @@ public:
                     }
                 }
             }
-            for (const auto& entry : tile_cache_) {
-                const CachedTile& tile = entry.second;
-                if (!tile.active) {
-                    continue;
-                }
-                const D2D1_RECT_F destination = D2D1::RectF(
-                    static_cast<float>(tile.origin_x),
-                    static_cast<float>(tile.origin_y),
-                    static_cast<float>(tile.origin_x) + static_cast<float>(tile.width),
-                    static_cast<float>(tile.origin_y) + static_cast<float>(tile.height));
-                d2d_context_->DrawBitmap(
-                    tile.bitmap.Get(),
-                    destination,
-                    1.0F,
-                    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+            if (adjusted_content) {
+                d2d_context_->DrawImage(adjusted_content.Get());
+                result = S_OK;
+            } else {
+                result = DrawOrderedContent();
             }
-            result = DrawVectors();
             if (FAILED(result)) {
                 d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
                 d2d_context_->EndDraw();
@@ -417,6 +432,13 @@ public:
             return result;
         }
 
+        if (sampled_pixel != nullptr) {
+            result = CopyBackBufferPixel(sample_x, sample_y, *sampled_pixel);
+            if (FAILED(result)) {
+                return result;
+            }
+        }
+
         result = swap_chain_->Present(1U, 0U);
         if (result == DXGI_STATUS_OCCLUDED) {
             return result;
@@ -437,6 +459,8 @@ public:
         overlay.struct_size = sizeof(overlay);
         InkpodSnapshotVectorView vectors{};
         vectors.struct_size = sizeof(vectors);
+        InkpodSnapshotRenderPlan render_plan{};
+        render_plan.struct_size = sizeof(render_plan);
         const InkpodStatus view_status = inkpod_snapshot_get_view(snapshot, &view);
         const InkpodStatus transform_status = view_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_transform(snapshot, &transform)
@@ -447,9 +471,14 @@ public:
         const InkpodStatus vector_status = overlay_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_vectors(snapshot, &vectors)
             : overlay_status;
+        const InkpodStatus render_plan_status = vector_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_render_plan(snapshot, &render_plan)
+            : vector_status;
         if (view_status != INKPOD_STATUS_OK || transform_status != INKPOD_STATUS_OK
             || overlay_status != INKPOD_STATUS_OK || vector_status != INKPOD_STATUS_OK
-            || !ValidateOverlay(overlay) || !ValidateVectors(vectors)) {
+            || render_plan_status != INKPOD_STATUS_OK
+            || !ValidateOverlay(overlay) || !ValidateVectors(vectors)
+            || !ValidateRenderPlan(render_plan, view, vectors)) {
             inkpod_snapshot_release(&snapshot);
             return E_INVALIDARG;
         }
@@ -461,6 +490,7 @@ public:
         transform_ = transform;
         overlay_ = overlay;
         vectors_ = vectors;
+        render_plan_ = render_plan;
         retained_snapshot_bytes_ = EstimateSnapshotPayloadBytes(snapshot);
         return RebuildTileCache();
     }
@@ -535,6 +565,7 @@ public:
         transform_ = {};
         overlay_ = {};
         vectors_ = {};
+        render_plan_ = {};
         tile_cache_.clear();
         retained_snapshot_bytes_ = 0U;
         gpu_tile_bytes_ = 0U;
@@ -698,6 +729,51 @@ public:
             index += path.count;
         }
         return E_INVALIDARG;
+    }
+
+    HRESULT RenderAndReadPixelForSmokeTest(
+        UINT x,
+        UINT y,
+        CanvasPixelRgba8& pixel) noexcept {
+        return Render(&pixel, x, y);
+    }
+
+    HRESULT CopyBackBufferPixel(
+        UINT x,
+        UINT y,
+        CanvasPixelRgba8& pixel) noexcept {
+        if (!swap_chain_ || x >= surface_width_ || y >= surface_height_) {
+            return E_INVALIDARG;
+        }
+        ComPtr<ID3D11Texture2D> source;
+        HRESULT result = swap_chain_->GetBuffer(0U, IID_PPV_ARGS(&source));
+        if (FAILED(result)) {
+            return result;
+        }
+        D3D11_TEXTURE2D_DESC description{};
+        source->GetDesc(&description);
+        description.Usage = D3D11_USAGE_STAGING;
+        description.BindFlags = 0U;
+        description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        description.MiscFlags = 0U;
+        ComPtr<ID3D11Texture2D> staging;
+        result = shared_.D3dDevice()->CreateTexture2D(&description, nullptr, &staging);
+        if (FAILED(result)) {
+            return result;
+        }
+        shared_.D3dContext()->CopyResource(staging.Get(), source.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        result = shared_.D3dContext()->Map(
+            staging.Get(), 0U, D3D11_MAP_READ, 0U, &mapped);
+        if (FAILED(result)) {
+            return result;
+        }
+        const auto* bgra = static_cast<const std::uint8_t*>(mapped.pData)
+            + static_cast<std::size_t>(y) * mapped.RowPitch
+            + static_cast<std::size_t>(x) * 4U;
+        pixel = CanvasPixelRgba8{bgra[2], bgra[1], bgra[0], bgra[3]};
+        shared_.D3dContext()->Unmap(staging.Get(), 0U);
+        return S_OK;
     }
 
     CanvasDocumentBounds DocumentBounds() const noexcept {
@@ -873,6 +949,101 @@ private:
             }
         }
         return true;
+    }
+
+    static bool ValidateRenderPlan(
+        const InkpodSnapshotRenderPlan& plan,
+        const InkpodSnapshotView& view,
+        const InkpodSnapshotVectorView& vectors) noexcept {
+        constexpr std::uint64_t adjustment_lut_bytes = 3U * 256U;
+        if (plan.abi_version != INKPOD_ABI_VERSION || plan.feature_flags != 0U
+            || plan.pass_count > kMaximumRenderPasses
+            || plan.adjustment_lut_count > kMaximumAdjustmentLuts
+            || plan.pass_stride_bytes < sizeof(InkpodSnapshotRenderPass)
+            || plan.pass_stride_bytes % alignof(InkpodSnapshotRenderPass) != 0U
+            || plan.adjustment_lut_stride_bytes != adjustment_lut_bytes
+            || (plan.pass_count != 0U && plan.passes == nullptr)
+            || (plan.adjustment_lut_count != 0U && plan.adjustment_luts_rgb8 == nullptr)
+            || (plan.passes != nullptr
+                && reinterpret_cast<std::uintptr_t>(plan.passes)
+                    % alignof(InkpodSnapshotRenderPass) != 0U)
+            || plan.pass_stride_bytes
+                > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+            || (plan.pass_count > 1U
+                && plan.pass_stride_bytes
+                    > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+                        / (plan.pass_count - 1U))) {
+            return false;
+        }
+        const auto range_is_valid = [](std::uint64_t first, std::uint64_t count,
+                                        std::uint64_t total) noexcept {
+            return first <= total && count <= total - first;
+        };
+        const auto* pass_bytes = reinterpret_cast<const std::byte*>(plan.passes);
+        std::uint64_t active_layer{};
+        for (std::uint64_t index = 0; index < plan.pass_count; ++index) {
+            const auto* pass = reinterpret_cast<const InkpodSnapshotRenderPass*>(
+                pass_bytes + static_cast<std::size_t>(index * plan.pass_stride_bytes));
+            if (pass->struct_size < sizeof(InkpodSnapshotRenderPass)
+                || pass->struct_size > plan.pass_stride_bytes || pass->reserved != 0U
+                || pass->opacity_milli > 1000U) {
+                return false;
+            }
+            switch (pass->kind) {
+                case INKPOD_RENDER_PASS_LAYER_BEGIN:
+                    if (active_layer != 0U || pass->layer_id == 0U || pass->plane_id != 0U
+                        || pass->first_item != 0U || pass->item_count != 0U) {
+                        return false;
+                    }
+                    active_layer = pass->layer_id;
+                    break;
+                case INKPOD_RENDER_PASS_LAYER_END:
+                    if (active_layer == 0U || pass->layer_id != active_layer
+                        || pass->plane_id != 0U || pass->opacity_milli != 1000U
+                        || pass->first_item != 0U || pass->item_count != 0U) {
+                        return false;
+                    }
+                    active_layer = 0U;
+                    break;
+                case INKPOD_RENDER_PASS_RASTER_TILES:
+                    if (pass->item_count == 0U || pass->opacity_milli != 1000U
+                        || !range_is_valid(
+                            pass->first_item, pass->item_count, view.tile_count)
+                        || (active_layer != 0U && pass->layer_id != active_layer)
+                        || (active_layer == 0U && pass->layer_id != 0U)) {
+                        return false;
+                    }
+                    break;
+                case INKPOD_RENDER_PASS_VECTOR_FILLS:
+                    if (active_layer == 0U || pass->layer_id != active_layer
+                        || pass->plane_id == 0U || pass->item_count == 0U
+                        || pass->opacity_milli != 1000U
+                        || !range_is_valid(
+                            pass->first_item, pass->item_count, vectors.fill_count)) {
+                        return false;
+                    }
+                    break;
+                case INKPOD_RENDER_PASS_VECTOR_STROKES:
+                    if (active_layer == 0U || pass->layer_id != active_layer
+                        || pass->plane_id == 0U || pass->item_count == 0U
+                        || pass->opacity_milli != 1000U
+                        || !range_is_valid(
+                            pass->first_item, pass->item_count, vectors.segment_count)) {
+                        return false;
+                    }
+                    break;
+                case INKPOD_RENDER_PASS_ADJUSTMENT:
+                    if (active_layer != 0U || pass->layer_id == 0U || pass->plane_id != 0U
+                        || pass->opacity_milli != 1000U || pass->item_count != 1U
+                        || !range_is_valid(pass->first_item, 1U, plan.adjustment_lut_count)) {
+                        return false;
+                    }
+                    break;
+                default:
+                    return false;
+            }
+        }
+        return active_layer == 0U;
     }
 
     struct VectorPathSpan {
@@ -1138,6 +1309,321 @@ private:
         brush->SetColor(VectorColor(path.first->color_rgba));
         d2d_context_->FillGeometry(geometry.Get(), brush);
         return S_OK;
+    }
+
+    HRESULT BuildVectorPathMap(
+        std::unordered_map<std::uint64_t, VectorPathSpan>& paths) const noexcept {
+        try {
+            paths.clear();
+            paths.reserve(static_cast<std::size_t>(vectors_.segment_count));
+            const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
+            for (std::uint64_t index = 0; index < vectors_.segment_count;) {
+                const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                    segment_bytes + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
+                const VectorPathSpan span{
+                    segment->path_id,
+                    segment->z_order,
+                    segment->flags,
+                    segment,
+                    segment->segment_count};
+                if (!paths.emplace(span.id, span).second) {
+                    return E_INVALIDARG;
+                }
+                index += span.count;
+            }
+            return S_OK;
+        } catch (const std::bad_alloc&) {
+            return E_OUTOFMEMORY;
+        }
+    }
+
+    HRESULT DrawRenderPass(
+        const InkpodSnapshotRenderPass& pass,
+        const std::unordered_map<std::uint64_t, VectorPathSpan>& paths,
+        ID2D1SolidColorBrush* brush,
+        bool& layer_active) noexcept {
+        switch (pass.kind) {
+            case INKPOD_RENDER_PASS_LAYER_BEGIN: {
+                if (layer_active) {
+                    return E_INVALIDARG;
+                }
+                D2D1_LAYER_PARAMETERS1 parameters{};
+                parameters.contentBounds = D2D1::InfiniteRect();
+                parameters.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
+                parameters.maskTransform = D2D1::Matrix3x2F::Identity();
+                parameters.opacity = static_cast<float>(pass.opacity_milli) / 1000.0F;
+                parameters.layerOptions = D2D1_LAYER_OPTIONS1_NONE;
+                d2d_context_->PushLayer(parameters, nullptr);
+                layer_active = true;
+                return S_OK;
+            }
+            case INKPOD_RENDER_PASS_LAYER_END:
+                if (!layer_active) {
+                    return E_INVALIDARG;
+                }
+                d2d_context_->PopLayer();
+                layer_active = false;
+                return S_OK;
+            case INKPOD_RENDER_PASS_RASTER_TILES: {
+                const auto* tile_bytes = reinterpret_cast<const std::byte*>(snapshot_view_.tiles);
+                for (std::uint64_t offset = 0; offset < pass.item_count; ++offset) {
+                    const std::uint64_t index = pass.first_item + offset;
+                    const auto* tile = reinterpret_cast<const InkpodSnapshotTile*>(
+                        tile_bytes
+                        + static_cast<std::size_t>(index * snapshot_view_.tile_stride_bytes));
+                    const auto cached = tile_cache_.find(tile->tile_id);
+                    if (cached == tile_cache_.end() || !cached->second.active) {
+                        return E_INVALIDARG;
+                    }
+                    const CachedTile& value = cached->second;
+                    d2d_context_->DrawBitmap(
+                        value.bitmap.Get(),
+                        D2D1::RectF(
+                            static_cast<float>(value.origin_x),
+                            static_cast<float>(value.origin_y),
+                            static_cast<float>(value.origin_x) + static_cast<float>(value.width),
+                            static_cast<float>(value.origin_y) + static_cast<float>(value.height)),
+                        1.0F,
+                        D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+                }
+                return S_OK;
+            }
+            case INKPOD_RENDER_PASS_VECTOR_FILLS: {
+                const auto* fill_bytes = reinterpret_cast<const std::byte*>(vectors_.fills);
+                for (std::uint64_t offset = 0; offset < pass.item_count; ++offset) {
+                    const auto* fill = reinterpret_cast<const InkpodSnapshotVectorFill*>(
+                        fill_bytes + static_cast<std::size_t>(
+                            (pass.first_item + offset) * vectors_.fill_stride_bytes));
+                    if ((fill->color_rgba & 0xffU) != 0U) {
+                        const HRESULT result = DrawFillGeometry(*fill, paths, brush);
+                        if (FAILED(result)) {
+                            return result;
+                        }
+                    }
+                }
+                return S_OK;
+            }
+            case INKPOD_RENDER_PASS_VECTOR_STROKES: {
+                const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
+                std::uint64_t index = pass.first_item;
+                const std::uint64_t end = pass.first_item + pass.item_count;
+                while (index < end) {
+                    const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                        segment_bytes
+                        + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
+                    const VectorPathSpan path{
+                        segment->path_id,
+                        segment->z_order,
+                        segment->flags,
+                        segment,
+                        segment->segment_count};
+                    if (path.count == 0U || path.count > end - index) {
+                        return E_INVALIDARG;
+                    }
+                    if ((path.flags & INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE) != 0U
+                        && (path.first->color_rgba & 0xffU) != 0U) {
+                        const HRESULT result = DrawStrokeGeometry(path, brush);
+                        if (FAILED(result)) {
+                            return result;
+                        }
+                    }
+                    index += path.count;
+                }
+                return S_OK;
+            }
+            case INKPOD_RENDER_PASS_ADJUSTMENT:
+                return E_UNEXPECTED;
+            default:
+                return E_INVALIDARG;
+        }
+    }
+
+    [[nodiscard]] bool HasAdjustmentPass() const noexcept {
+        const auto* pass_bytes = reinterpret_cast<const std::byte*>(render_plan_.passes);
+        for (std::uint64_t index = 0; index < render_plan_.pass_count; ++index) {
+            const auto* pass = reinterpret_cast<const InkpodSnapshotRenderPass*>(
+                pass_bytes + static_cast<std::size_t>(index * render_plan_.pass_stride_bytes));
+            if (pass->kind == INKPOD_RENDER_PASS_ADJUSTMENT) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    HRESULT DrawOrderedContent() noexcept {
+        std::unordered_map<std::uint64_t, VectorPathSpan> paths;
+        HRESULT result = BuildVectorPathMap(paths);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<ID2D1SolidColorBrush> brush;
+        result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(D2D1::ColorF::Black), &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        bool layer_active{};
+        const auto* pass_bytes = reinterpret_cast<const std::byte*>(render_plan_.passes);
+        for (std::uint64_t index = 0; index < render_plan_.pass_count; ++index) {
+            const auto* pass = reinterpret_cast<const InkpodSnapshotRenderPass*>(
+                pass_bytes + static_cast<std::size_t>(index * render_plan_.pass_stride_bytes));
+            result = DrawRenderPass(*pass, paths, brush.Get(), layer_active);
+            if (FAILED(result)) {
+                if (layer_active) {
+                    d2d_context_->PopLayer();
+                }
+                return result;
+            }
+        }
+        return layer_active ? E_INVALIDARG : S_OK;
+    }
+
+    HRESULT SetAdjustmentEffectTables(
+        ID2D1Effect& effect,
+        const InkpodSnapshotRenderPass& pass) const noexcept {
+        const auto* lut = render_plan_.adjustment_luts_rgb8
+            + static_cast<std::size_t>(
+                pass.first_item * render_plan_.adjustment_lut_stride_bytes);
+        std::array<std::array<float, 256>, 3> tables{};
+        for (std::size_t channel = 0; channel < tables.size(); ++channel) {
+            for (std::size_t value = 0; value < tables[channel].size(); ++value) {
+                tables[channel][value] = static_cast<float>(lut[channel * 256U + value]) / 255.0F;
+            }
+        }
+        constexpr std::array<D2D1_TABLETRANSFER_PROP, 3> properties{
+            D2D1_TABLETRANSFER_PROP_RED_TABLE,
+            D2D1_TABLETRANSFER_PROP_GREEN_TABLE,
+            D2D1_TABLETRANSFER_PROP_BLUE_TABLE};
+        for (std::size_t channel = 0; channel < tables.size(); ++channel) {
+            const HRESULT result = effect.SetValue(
+                properties[channel],
+                D2D1_PROPERTY_TYPE_BLOB,
+                reinterpret_cast<const BYTE*>(tables[channel].data()),
+                static_cast<UINT32>(sizeof(tables[channel])));
+            if (FAILED(result)) {
+                return result;
+            }
+        }
+        HRESULT result = effect.SetValue(D2D1_TABLETRANSFER_PROP_RED_DISABLE, FALSE);
+        if (SUCCEEDED(result)) {
+            result = effect.SetValue(D2D1_TABLETRANSFER_PROP_GREEN_DISABLE, FALSE);
+        }
+        if (SUCCEEDED(result)) {
+            result = effect.SetValue(D2D1_TABLETRANSFER_PROP_BLUE_DISABLE, FALSE);
+        }
+        if (SUCCEEDED(result)) {
+            result = effect.SetValue(D2D1_TABLETRANSFER_PROP_ALPHA_DISABLE, TRUE);
+        }
+        if (SUCCEEDED(result)) {
+            result = effect.SetValue(D2D1_TABLETRANSFER_PROP_CLAMP_OUTPUT, TRUE);
+        }
+        return result;
+    }
+
+    HRESULT BuildAdjustedContent(ComPtr<ID2D1Image>& output) noexcept {
+        output.Reset();
+        ComPtr<ID2D1Image> original_target;
+        d2d_context_->GetTarget(&original_target);
+        std::unordered_map<std::uint64_t, VectorPathSpan> paths;
+        HRESULT result = BuildVectorPathMap(paths);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<ID2D1SolidColorBrush> brush;
+        result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(D2D1::ColorF::Black), &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<ID2D1CommandList> current;
+        result = d2d_context_->CreateCommandList(&current);
+        if (FAILED(result)) {
+            return result;
+        }
+        d2d_context_->SetTarget(current.Get());
+        d2d_context_->BeginDraw();
+        bool recording = true;
+        d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+        if ((snapshot_view_.feature_flags & INKPOD_SNAPSHOT_FEATURE_SOLID_WHITE_BASE) != 0U) {
+            brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+            d2d_context_->FillRectangle(
+                D2D1::RectF(
+                    0.0F,
+                    0.0F,
+                    static_cast<float>(transform_.document_width),
+                    static_cast<float>(transform_.document_height)),
+                brush.Get());
+        }
+        bool layer_active{};
+        const auto* pass_bytes = reinterpret_cast<const std::byte*>(render_plan_.passes);
+        for (std::uint64_t index = 0; index < render_plan_.pass_count; ++index) {
+            const auto* pass = reinterpret_cast<const InkpodSnapshotRenderPass*>(
+                pass_bytes + static_cast<std::size_t>(index * render_plan_.pass_stride_bytes));
+            if (pass->kind != INKPOD_RENDER_PASS_ADJUSTMENT) {
+                result = DrawRenderPass(*pass, paths, brush.Get(), layer_active);
+                if (FAILED(result)) {
+                    break;
+                }
+                continue;
+            }
+            if (layer_active) {
+                result = E_INVALIDARG;
+                break;
+            }
+            result = d2d_context_->EndDraw();
+            recording = false;
+            if (SUCCEEDED(result)) {
+                result = current->Close();
+            }
+            ComPtr<ID2D1Effect> effect;
+            if (SUCCEEDED(result)) {
+                result = d2d_context_->CreateEffect(CLSID_D2D1TableTransfer, &effect);
+            }
+            if (SUCCEEDED(result)) {
+                effect->SetInput(0U, current.Get());
+                result = SetAdjustmentEffectTables(*effect.Get(), *pass);
+            }
+            ComPtr<ID2D1CommandList> next;
+            if (SUCCEEDED(result)) {
+                result = d2d_context_->CreateCommandList(&next);
+            }
+            if (FAILED(result)) {
+                break;
+            }
+            d2d_context_->SetTarget(next.Get());
+            d2d_context_->BeginDraw();
+            recording = true;
+            d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+            d2d_context_->DrawImage(effect.Get());
+            current = next;
+        }
+        if (SUCCEEDED(result)) {
+            if (layer_active) {
+                d2d_context_->PopLayer();
+                result = E_INVALIDARG;
+            }
+            const HRESULT end_result = recording ? d2d_context_->EndDraw() : S_OK;
+            recording = false;
+            if (SUCCEEDED(result)) {
+                result = end_result;
+            }
+            if (SUCCEEDED(result)) {
+                result = current->Close();
+            }
+        } else {
+            if (layer_active && recording) {
+                d2d_context_->PopLayer();
+            }
+            if (recording) {
+                d2d_context_->EndDraw();
+            }
+        }
+        d2d_context_->SetTarget(original_target.Get());
+        d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+        if (SUCCEEDED(result)) {
+            output = current;
+        }
+        return result;
     }
 
     HRESULT DrawVectors() noexcept {
@@ -1722,6 +2208,7 @@ private:
     InkpodSnapshotTransform transform_{};
     InkpodSnapshotOverlay overlay_{};
     InkpodSnapshotVectorView vectors_{};
+    InkpodSnapshotRenderPlan render_plan_{};
     CanvasFloatingPreview floating_preview_{};
     CanvasGeometryPreview geometry_preview_{};
     std::unordered_map<std::uint64_t, CachedTile> tile_cache_;
@@ -1747,6 +2234,7 @@ enum class HostControlKind {
     DpiChanged,
     SimulateDeviceLoss,
     ValidateClosedVectorStroke,
+    ReadPixel,
     GetDocumentBounds,
     GetGeometryPreview,
     SetFloatingPreview,
@@ -1764,6 +2252,9 @@ struct HostControl {
     UINT height{};
     bool visible{};
     CanvasDocumentBounds* out_bounds{};
+    CanvasPixelRgba8* out_pixel{};
+    UINT pixel_x{};
+    UINT pixel_y{};
     CanvasGeometryPreview* out_geometry_preview{};
     CanvasFloatingPreview floating_preview{};
     CanvasGeometryPreview geometry_preview{};
@@ -2406,6 +2897,17 @@ private:
                 break;
             case HostControlKind::ValidateClosedVectorStroke:
                 result = surface.surface->ValidateClosedVectorStrokeForSmokeTest();
+                break;
+            case HostControlKind::ReadPixel:
+                if (control.out_pixel == nullptr) {
+                    result = E_POINTER;
+                } else {
+                    result = surface.surface->RenderAndReadPixelForSmokeTest(
+                        control.pixel_x, control.pixel_y, *control.out_pixel);
+                    if (SUCCEEDED(result)) {
+                        ++surface.presented_frames;
+                    }
+                }
                 break;
             case HostControlKind::GetDocumentBounds:
                 if (control.out_bounds == nullptr) {
@@ -3402,6 +3904,25 @@ HRESULT RendererHost::ValidateClosedVectorStroke(
     control.kind = HostControlKind::ValidateClosedVectorStroke;
     control.canvas = canvas;
     control.surface_generation = surface_generation;
+    return impl_->state.Invoke(std::move(control));
+}
+
+HRESULT RendererHost::ReadPixelForSmokeTest(
+    app::CanvasId canvas,
+    app::Generation surface_generation,
+    UINT x,
+    UINT y,
+    CanvasPixelRgba8& pixel) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::ReadPixel;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    control.out_pixel = &pixel;
+    control.pixel_x = x;
+    control.pixel_y = y;
     return impl_->state.Invoke(std::move(control));
 }
 

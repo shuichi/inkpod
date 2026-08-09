@@ -214,6 +214,53 @@ pub unsafe extern "C" fn inkpod_snapshot_get_vectors(
     })
 }
 
+/// Copies the immutable ordered render plan. All returned spans borrow storage
+/// owned by `snapshot` and remain valid only until that snapshot is released.
+///
+/// # Safety
+/// Snapshot/output must be complete, aligned, live, externally synchronized,
+/// writable/non-overlapping objects.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_snapshot_get_render_plan(
+    snapshot: *const InkpodSnapshot,
+    out_plan: *mut InkpodSnapshotRenderPlan,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if snapshot.is_null() || !is_aligned(snapshot) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "snapshot is null or misaligned",
+            );
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_plan.cast_const(), "InkpodSnapshotRenderPlan") }
+        {
+            return status;
+        }
+        // SAFETY: Live snapshot and writable output are required by contract.
+        let snapshot = unsafe { &*snapshot };
+        let output = unsafe { &mut *out_plan };
+        output.abi_version = INKPOD_ABI_VERSION;
+        output.feature_flags = INKPOD_FEATURE_NONE;
+        output.passes = if snapshot.render_passes.is_empty() {
+            ptr::null()
+        } else {
+            snapshot.render_passes.as_ptr()
+        };
+        output.pass_count = snapshot.render_passes.len() as u64;
+        output.pass_stride_bytes = size_of::<InkpodSnapshotRenderPass>() as u64;
+        output.adjustment_luts_rgb8 = if snapshot.adjustment_luts_rgb8.is_empty() {
+            ptr::null()
+        } else {
+            snapshot.adjustment_luts_rgb8.as_ptr()
+        };
+        output.adjustment_lut_count = (snapshot.adjustment_luts_rgb8.len() / (3 * 256)) as u64;
+        output.adjustment_lut_stride_bytes = (3 * 256) as u64;
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Releases a snapshot and nulls the caller's pointer. Snapshots may be viewed
 /// and released from a renderer thread after publication.
 ///

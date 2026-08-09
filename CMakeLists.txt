@@ -543,6 +543,7 @@ if(WIN32)
         inkpod_ffi_static
         d2d1
         d3d11
+        dxguid
         dxgi
         user32)
     if(MSVC)
@@ -668,6 +669,7 @@ if(WIN32)
         comctl32
         d2d1
         d3d11
+        dxguid
         dxgi
         ole32
         oleacc

@@ -219,6 +219,7 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - `指示`: 手書き annotation。通常の完成画像 export から除外する。
 
 composite は layer/plane 順、visibility、opacity、alpha、adjustment を決定的に適用してください。プレーンは所属 layer を越えて並べ替えず、layer 同士と同一 layer 内 plane 同士を別に並べ替えます。
+layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最上段、すなわち合成結果の最上位とする。Canvas、layer thumbnail、flatten export は、raster と vector が任意に混在しても同じ木順序を下から上へ合成し、adjustment は置かれた位置までの合成結果へ適用する。
 
 ### 6. レイヤー・プレーンパレット
 
@@ -549,6 +550,7 @@ composite は layer/plane 順、visibility、opacity、alpha、adjustment を決
 - `DOC-001`: CellDocument、用紙、DPI、100 frame、基準/作画/安全 frame、余白
 - `DOC-002`: stable ID を持つ typed layer/plane tree
 - `DOC-003`: create/duplicate/delete/reorder/show/edit/opacity/convert/merge
+- `RENDER-001`: raster/vector 混在時の layer/plane 木順序、visibility、opacity、alpha、adjustment を共有する Canvas/thumbnail/flatten 合成
 - `VIEW-001`: zoom、box zoom、fit、1:1、pan、horizontal/vertical flip
 - `VIEW-002`: ruler、guide/grid、snap、transparent view
 - `VIEW-003`: color locator の座標/RGBA/selection sampling と magnified neighborhood 表示・編集

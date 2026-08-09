@@ -3,7 +3,7 @@
 use super::*;
 use inkpod_image::{canonical_q16_from_f32, source_over_rgba8, source_over_rgba16};
 
-const COMPOSITE_DIGEST_CONTEXT: &str = "org.inkpod.digest.canonical-composite.v1";
+const COMPOSITE_DIGEST_CONTEXT: &str = "org.inkpod.digest.canonical-composite.v2";
 
 /// Architecture-independent digest of one snapshot's document result.
 ///
@@ -98,6 +98,91 @@ impl RenderTile {
     }
 }
 
+/// Closed kind of one ordered immutable render pass.
+///
+/// Passes are stored in execution order from the bottom of the document toward
+/// palette index zero. A layer begin/end pair scopes one layer's opacity so
+/// overlapping child content is attenuated exactly once.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RenderPassKind {
+    /// Begins one visible logical layer group.
+    LayerBegin,
+    /// Draws a contiguous span of premultiplied raster tiles.
+    RasterTiles,
+    /// Draws a contiguous span of vector fills.
+    VectorFills,
+    /// Draws a contiguous span of vector paths.
+    VectorStrokes,
+    /// Applies one Core-resolved RGB lookup table to the accumulated result.
+    Adjustment,
+    /// Ends the current logical layer group.
+    LayerEnd,
+}
+
+/// One immutable entry in a snapshot's ordered render plan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RenderPass {
+    kind: RenderPassKind,
+    layer_id: u64,
+    plane_id: u64,
+    opacity_milli: u32,
+    first_item: u64,
+    item_count: u64,
+}
+
+impl RenderPass {
+    /// Returns the closed pass kind.
+    #[must_use]
+    pub const fn kind(&self) -> RenderPassKind {
+        self.kind
+    }
+
+    /// Returns the stable source layer ID, or zero for document-level content.
+    #[must_use]
+    pub const fn layer_id(&self) -> u64 {
+        self.layer_id
+    }
+
+    /// Returns the stable source plane ID, or zero for group/adjustment passes.
+    #[must_use]
+    pub const fn plane_id(&self) -> u64 {
+        self.plane_id
+    }
+
+    /// Returns layer opacity for `LayerBegin`; other pass kinds report 1000.
+    #[must_use]
+    pub const fn opacity_milli(&self) -> u32 {
+        self.opacity_milli
+    }
+
+    /// Returns the first item in the kind-specific snapshot span.
+    #[must_use]
+    pub const fn first_item(&self) -> u64 {
+        self.first_item
+    }
+
+    /// Returns the number of items in the kind-specific snapshot span.
+    #[must_use]
+    pub const fn item_count(&self) -> u64 {
+        self.item_count
+    }
+}
+
+/// Three exact 8-bit display lookup tables resolved by the Core for one
+/// adjustment pass. Alpha is preserved by adjustment rendering.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderAdjustmentLut {
+    channels: [[u8; 256]; 3],
+}
+
+impl RenderAdjustmentLut {
+    /// Borrows red, green, and blue lookup tables in that order.
+    #[must_use]
+    pub const fn channels(&self) -> &[[u8; 256]; 3] {
+        &self.channels
+    }
+}
+
 /// Immutable document render data with a separate device-pixel view transform.
 ///
 /// Raster tile origins, vector control points, guides, and grid values are all
@@ -115,6 +200,8 @@ pub struct RenderSnapshot {
     tiles: Vec<RenderTile>,
     vector_segments: Vec<RenderVectorSegment>,
     vector_fills: Vec<RenderVectorFill>,
+    render_passes: Vec<RenderPass>,
+    adjustment_luts: Vec<RenderAdjustmentLut>,
 }
 
 impl RenderSnapshot {
@@ -184,6 +271,18 @@ impl RenderSnapshot {
         &self.vector_fills
     }
 
+    /// Borrows the immutable bottom-to-top render plan.
+    #[must_use]
+    pub fn render_passes(&self) -> &[RenderPass] {
+        &self.render_passes
+    }
+
+    /// Borrows Core-resolved adjustment lookup tables referenced by passes.
+    #[must_use]
+    pub fn adjustment_luts(&self) -> &[RenderAdjustmentLut] {
+        &self.adjustment_luts
+    }
+
     /// Computes the canonical document-result digest for this immutable snapshot.
     ///
     /// This operation is deterministic across supported architectures and does
@@ -192,14 +291,12 @@ impl RenderSnapshot {
     /// outside the canonical signed-Q16 range.
     pub fn canonical_composite_digest(&self) -> Result<CanonicalCompositeDigest, CoreError> {
         let mut hasher = blake3::Hasher::new_derive_key(COMPOSITE_DIGEST_CONTEXT);
-        hasher.update(&1_u32.to_le_bytes());
+        hasher.update(&2_u32.to_le_bytes());
         hasher.update(&self.feature_flags.to_le_bytes());
         hasher.update(&self.document_size.width.to_le_bytes());
         hasher.update(&self.document_size.height.to_le_bytes());
-        let mut tiles = self.tiles.iter().collect::<Vec<_>>();
-        tiles.sort_unstable_by_key(|tile| (tile.origin.y, tile.origin.x, tile.tile_id));
-        hasher.update(&(tiles.len() as u64).to_le_bytes());
-        for tile in tiles {
+        hasher.update(&(self.tiles.len() as u64).to_le_bytes());
+        for tile in &self.tiles {
             hasher.update(&tile.tile_id.to_le_bytes());
             hasher.update(&tile.origin.x.to_le_bytes());
             hasher.update(&tile.origin.y.to_le_bytes());
@@ -209,17 +306,8 @@ impl RenderSnapshot {
             hasher.update(&(tile.pixels.len() as u64).to_le_bytes());
             hasher.update(&tile.pixels);
         }
-        let mut vector_segments = self.vector_segments.iter().collect::<Vec<_>>();
-        vector_segments.sort_unstable_by_key(|segment| {
-            (
-                segment.z_order,
-                segment.plane_id,
-                segment.path_id,
-                segment.segment_index,
-            )
-        });
-        hasher.update(&(vector_segments.len() as u64).to_le_bytes());
-        for segment in vector_segments {
+        hasher.update(&(self.vector_segments.len() as u64).to_le_bytes());
+        for segment in &self.vector_segments {
             hasher.update(&segment.path_id.to_le_bytes());
             hasher.update(&segment.plane_id.to_le_bytes());
             hasher.update(&segment.z_order.to_le_bytes());
@@ -245,10 +333,8 @@ impl RenderSnapshot {
                 hasher.update(&canonical.to_le_bytes());
             }
         }
-        let mut vector_fills = self.vector_fills.iter().collect::<Vec<_>>();
-        vector_fills.sort_unstable_by_key(|fill| (fill.z_order, fill.plane_id, fill.fill_id));
-        hasher.update(&(vector_fills.len() as u64).to_le_bytes());
-        for fill in vector_fills {
+        hasher.update(&(self.vector_fills.len() as u64).to_le_bytes());
+        for fill in &self.vector_fills {
             hasher.update(&fill.fill_id.to_le_bytes());
             hasher.update(&fill.plane_id.to_le_bytes());
             hasher.update(&fill.z_order.to_le_bytes());
@@ -256,6 +342,29 @@ impl RenderSnapshot {
             hasher.update(&(fill.boundary_path_ids.len() as u64).to_le_bytes());
             for path_id in &fill.boundary_path_ids {
                 hasher.update(&path_id.to_le_bytes());
+            }
+        }
+        hasher.update(&(self.render_passes.len() as u64).to_le_bytes());
+        for pass in &self.render_passes {
+            let kind = match pass.kind {
+                RenderPassKind::LayerBegin => 1_u32,
+                RenderPassKind::RasterTiles => 2,
+                RenderPassKind::VectorFills => 3,
+                RenderPassKind::VectorStrokes => 4,
+                RenderPassKind::Adjustment => 5,
+                RenderPassKind::LayerEnd => 6,
+            };
+            hasher.update(&kind.to_le_bytes());
+            hasher.update(&pass.layer_id.to_le_bytes());
+            hasher.update(&pass.plane_id.to_le_bytes());
+            hasher.update(&pass.opacity_milli.to_le_bytes());
+            hasher.update(&pass.first_item.to_le_bytes());
+            hasher.update(&pass.item_count.to_le_bytes());
+        }
+        hasher.update(&(self.adjustment_luts.len() as u64).to_le_bytes());
+        for lut in &self.adjustment_luts {
+            for channel in &lut.channels {
+                hasher.update(channel);
             }
         }
         Ok(CanonicalCompositeDigest(*hasher.finalize().as_bytes()))
@@ -342,6 +451,8 @@ impl Core {
                 tiles: Vec::new(),
                 vector_segments: Vec::new(),
                 vector_fills: Vec::new(),
+                render_passes: Vec::new(),
+                adjustment_luts: Vec::new(),
             };
         };
         let snapshot_revision = self
@@ -369,6 +480,34 @@ impl Core {
             BaseSurface::Asset(id) => self.assets.get(id),
         };
         let base_raster = base_asset.as_ref().and_then(|asset| asset.raster());
+        let has_visible_vector_layer = document
+            .layers
+            .iter()
+            .any(|layer| layer.visible && layer.kind == LayerKind::VectorColoring);
+        if has_visible_vector_layer && !self.view.alpha_view && self.color_check.is_none() {
+            let document_size = DocumentSizeU32::new(document.width, document.height);
+            let (tiles, vector_segments, vector_fills, render_passes, adjustment_luts) =
+                build_ordered_content(
+                    document,
+                    base_raster.map(Arc::as_ref),
+                    &mut cache,
+                    &mut self.next_render_tile_revision,
+                );
+            self.render_cache = cache;
+            return RenderSnapshot {
+                revision: snapshot_revision,
+                feature_flags,
+                view: self.view,
+                document_size,
+                guides: document.guides.clone(),
+                grid: document.grid,
+                tiles,
+                vector_segments,
+                vector_fills,
+                render_passes,
+                adjustment_luts,
+            };
+        }
         let mut coords: Vec<_> = document
             .layers
             .iter()
@@ -412,8 +551,9 @@ impl Core {
         let mut tiles = Vec::with_capacity(coords.len());
         for coord in &coords {
             let source_revision = revision_max_tile_source_revision(document, *coord);
+            let cache_key = (0, *coord);
             if cache
-                .get(coord)
+                .get(&cache_key)
                 .is_none_or(|tile| tile.source_revision != source_revision)
             {
                 let tile_revision = self.next_render_tile_revision;
@@ -428,16 +568,16 @@ impl Core {
                     source_revision,
                     tile_revision,
                 ) {
-                    cache.insert(*coord, tile);
+                    cache.insert(cache_key, tile);
                 } else {
-                    cache.remove(coord);
+                    cache.remove(&cache_key);
                 }
             }
-            if let Some(tile) = cache.get(coord) {
+            if let Some(tile) = cache.get(&cache_key) {
                 tiles.push(tile.clone());
             }
         }
-        cache.retain(|coord, _| coords.binary_search(coord).is_ok());
+        cache.retain(|(band, coord), _| *band == 0 && coords.binary_search(coord).is_ok());
         let document_size = DocumentSizeU32::new(document.width, document.height);
         let (vector_segments, vector_fills) = if self.view.alpha_view {
             (Vec::new(), Vec::new())
@@ -445,6 +585,17 @@ impl Core {
             document.vector.render_items(document)
         };
         self.render_cache = cache;
+        let render_passes = (!tiles.is_empty())
+            .then_some(RenderPass {
+                kind: RenderPassKind::RasterTiles,
+                layer_id: 0,
+                plane_id: 0,
+                opacity_milli: 1_000,
+                first_item: 0,
+                item_count: tiles.len() as u64,
+            })
+            .into_iter()
+            .collect();
         RenderSnapshot {
             revision: snapshot_revision,
             feature_flags,
@@ -455,6 +606,8 @@ impl Core {
             tiles,
             vector_segments,
             vector_fills,
+            render_passes,
+            adjustment_luts: Vec::new(),
         }
     }
 
@@ -489,6 +642,7 @@ impl Core {
                 tiles.push(tile);
             }
         }
+        let tile_count = tiles.len() as u64;
         Ok(RenderSnapshot {
             revision: RenderRevision::from_raw(raster.checksum()),
             feature_flags: 0,
@@ -499,6 +653,15 @@ impl Core {
             tiles,
             vector_segments: Vec::new(),
             vector_fills: Vec::new(),
+            render_passes: vec![RenderPass {
+                kind: RenderPassKind::RasterTiles,
+                layer_id: 0,
+                plane_id: 0,
+                opacity_milli: 1_000,
+                first_item: 0,
+                item_count: tile_count,
+            }],
+            adjustment_luts: Vec::new(),
         })
     }
 }
@@ -521,6 +684,293 @@ fn revision_max_tile_source_revision(document: &CellDocument, coord: TileCoord) 
         .max(document.light_table.source_revision())
         .max(document.selection.tile_revision(coord));
     RenderRevision::from_raw(source_revision)
+}
+
+type OrderedContent = (
+    Vec<RenderTile>,
+    Vec<RenderVectorSegment>,
+    Vec<RenderVectorFill>,
+    Vec<RenderPass>,
+    Vec<RenderAdjustmentLut>,
+);
+
+fn build_ordered_content(
+    document: &CellDocument,
+    base_raster: Option<&TileRaster>,
+    cache: &mut BTreeMap<(u64, TileCoord), RenderTile>,
+    next_tile_revision: &mut RenderRevision,
+) -> OrderedContent {
+    const BACKGROUND_CACHE_KEY: u64 = u64::MAX;
+    const SELECTION_CACHE_KEY: u64 = u64::MAX - 1;
+    let mut tiles = Vec::new();
+    let mut vector_segments = Vec::new();
+    let mut vector_fills = Vec::new();
+    let mut passes = Vec::new();
+    let mut adjustment_luts = Vec::new();
+    let mut active_cache_keys = BTreeSet::new();
+    let mut raster_pass_index = 0_u32;
+
+    let mut background_coords = Vec::new();
+    if let Some(raster) = base_raster {
+        if matches!(
+            raster.format(),
+            PixelFormat::Grayscale8 | PixelFormat::Grayscale16
+        ) {
+            for y in 0..document.height.div_ceil(TILE_SIZE) {
+                for x in 0..document.width.div_ceil(TILE_SIZE) {
+                    background_coords.push(TileCoord { x, y });
+                }
+            }
+        } else {
+            background_coords.extend(raster.allocated_coords());
+        }
+    }
+    if document.light_table.has_visible_items() {
+        for y in 0..document.height.div_ceil(TILE_SIZE) {
+            for x in 0..document.width.div_ceil(TILE_SIZE) {
+                background_coords.push(TileCoord { x, y });
+            }
+        }
+    }
+    background_coords.sort_unstable();
+    background_coords.dedup();
+    if !background_coords.is_empty() {
+        let first = tiles.len() as u64;
+        for coord in background_coords {
+            let cache_key = (BACKGROUND_CACHE_KEY, coord);
+            active_cache_keys.insert(cache_key);
+            let source_revision = revision_max_tile_source_revision(document, coord);
+            if cache
+                .get(&cache_key)
+                .is_none_or(|tile| tile.source_revision != source_revision)
+            {
+                let tile_revision = *next_tile_revision;
+                *next_tile_revision = next_tile_revision.wrapping_next_nonzero();
+                if let Some(tile) = compose_background_tile(
+                    document,
+                    base_raster,
+                    coord,
+                    source_revision,
+                    tile_revision,
+                    ordered_tile_id(raster_pass_index, coord),
+                ) {
+                    cache.insert(cache_key, tile);
+                } else {
+                    cache.remove(&cache_key);
+                }
+            }
+            if let Some(tile) = cache.get(&cache_key) {
+                tiles.push(tile.clone());
+            }
+        }
+        let count = tiles.len() as u64 - first;
+        if count != 0 {
+            passes.push(RenderPass {
+                kind: RenderPassKind::RasterTiles,
+                layer_id: 0,
+                plane_id: 0,
+                opacity_milli: 1_000,
+                first_item: first,
+                item_count: count,
+            });
+            raster_pass_index = raster_pass_index.saturating_add(1);
+        }
+    }
+
+    for layer in document.layers.iter().rev().filter(|layer| layer.visible) {
+        if let Some(adjustment) = document.adjustments.get(&layer.id) {
+            let index = adjustment_luts.len() as u64;
+            adjustment_luts.push(resolve_adjustment_lut(adjustment, layer.opacity_milli));
+            passes.push(RenderPass {
+                kind: RenderPassKind::Adjustment,
+                layer_id: layer.id.get(),
+                plane_id: 0,
+                opacity_milli: 1_000,
+                first_item: index,
+                item_count: 1,
+            });
+            continue;
+        }
+        passes.push(RenderPass {
+            kind: RenderPassKind::LayerBegin,
+            layer_id: layer.id.get(),
+            plane_id: 0,
+            opacity_milli: layer.opacity_milli,
+            first_item: 0,
+            item_count: 0,
+        });
+        for plane in layer.planes.iter().rev() {
+            match plane.kind {
+                PlaneType::MainLine
+                | PlaneType::Color
+                | PlaneType::Raster
+                | PlaneType::Selection => {
+                    if !plane.visible || plane.opacity_milli == 0 {
+                        continue;
+                    }
+                    let first = tiles.len() as u64;
+                    let mut coords: Vec<_> = plane.raster.allocated_coords().collect();
+                    coords.sort_unstable();
+                    for coord in coords {
+                        let cache_key = (plane.id.get(), coord);
+                        active_cache_keys.insert(cache_key);
+                        let source_revision = revision_max_tile_source_revision(document, coord);
+                        if cache
+                            .get(&cache_key)
+                            .is_none_or(|tile| tile.source_revision != source_revision)
+                        {
+                            let tile_revision = *next_tile_revision;
+                            *next_tile_revision = next_tile_revision.wrapping_next_nonzero();
+                            if let Some(tile) = compose_raster_plane_tile(
+                                document,
+                                plane,
+                                coord,
+                                source_revision,
+                                tile_revision,
+                                ordered_tile_id(raster_pass_index, coord),
+                            ) {
+                                cache.insert(cache_key, tile);
+                            } else {
+                                cache.remove(&cache_key);
+                            }
+                        }
+                        if let Some(tile) = cache.get(&cache_key) {
+                            tiles.push(tile.clone());
+                        }
+                    }
+                    let count = tiles.len() as u64 - first;
+                    if count != 0 {
+                        passes.push(RenderPass {
+                            kind: RenderPassKind::RasterTiles,
+                            layer_id: layer.id.get(),
+                            plane_id: plane.id.get(),
+                            opacity_milli: 1_000,
+                            first_item: first,
+                            item_count: count,
+                        });
+                        raster_pass_index = raster_pass_index.saturating_add(1);
+                    }
+                }
+                PlaneType::VectorFill => {
+                    let (_, fills) = document
+                        .vector
+                        .render_plane_items(plane, u32::try_from(passes.len()).unwrap_or(u32::MAX));
+                    if !fills.is_empty() {
+                        let first = vector_fills.len() as u64;
+                        vector_fills.extend(fills);
+                        passes.push(RenderPass {
+                            kind: RenderPassKind::VectorFills,
+                            layer_id: layer.id.get(),
+                            plane_id: plane.id.get(),
+                            opacity_milli: 1_000,
+                            first_item: first,
+                            item_count: vector_fills.len() as u64 - first,
+                        });
+                    }
+                }
+                PlaneType::VectorMainLine | PlaneType::ColorTrace => {
+                    let (segments, _) = document
+                        .vector
+                        .render_plane_items(plane, u32::try_from(passes.len()).unwrap_or(u32::MAX));
+                    let first = vector_segments.len() as u64;
+                    vector_segments.extend(segments);
+                    if plane.visible && vector_segments.len() as u64 != first {
+                        passes.push(RenderPass {
+                            kind: RenderPassKind::VectorStrokes,
+                            layer_id: layer.id.get(),
+                            plane_id: plane.id.get(),
+                            opacity_milli: 1_000,
+                            first_item: first,
+                            item_count: vector_segments.len() as u64 - first,
+                        });
+                    }
+                }
+            }
+        }
+        passes.push(RenderPass {
+            kind: RenderPassKind::LayerEnd,
+            layer_id: layer.id.get(),
+            plane_id: 0,
+            opacity_milli: 1_000,
+            first_item: 0,
+            item_count: 0,
+        });
+    }
+
+    let selection_coords: Vec<_> = document.selection.allocated_coords().collect();
+    if !selection_coords.is_empty() {
+        let first = tiles.len() as u64;
+        for coord in selection_coords {
+            let cache_key = (SELECTION_CACHE_KEY, coord);
+            active_cache_keys.insert(cache_key);
+            let source_revision = revision_max_tile_source_revision(document, coord);
+            if cache
+                .get(&cache_key)
+                .is_none_or(|tile| tile.source_revision != source_revision)
+            {
+                let tile_revision = *next_tile_revision;
+                *next_tile_revision = next_tile_revision.wrapping_next_nonzero();
+                if let Some(tile) = compose_selection_overlay_tile(
+                    document,
+                    coord,
+                    source_revision,
+                    tile_revision,
+                    ordered_tile_id(raster_pass_index, coord),
+                ) {
+                    cache.insert(cache_key, tile);
+                } else {
+                    cache.remove(&cache_key);
+                }
+            }
+            if let Some(tile) = cache.get(&cache_key) {
+                tiles.push(tile.clone());
+            }
+        }
+        let count = tiles.len() as u64 - first;
+        if count != 0 {
+            passes.push(RenderPass {
+                kind: RenderPassKind::RasterTiles,
+                layer_id: 0,
+                plane_id: document.selection_plane_id.get(),
+                opacity_milli: 1_000,
+                first_item: first,
+                item_count: count,
+            });
+        }
+    }
+    cache.retain(|key, _| active_cache_keys.contains(key));
+    (
+        tiles,
+        vector_segments,
+        vector_fills,
+        passes,
+        adjustment_luts,
+    )
+}
+
+fn ordered_tile_id(pass_index: u32, coord: TileCoord) -> u64 {
+    (1_u64 << 63) | (u64::from(pass_index) << 28) | (u64::from(coord.y) << 14) | u64::from(coord.x)
+}
+
+fn resolve_adjustment_lut(adjustment: &Adjustment, opacity_milli: u32) -> RenderAdjustmentLut {
+    let mut channels = [[0_u8; 256]; 3];
+    for channel in 0..3 {
+        for value in 0_u16..=255 {
+            let mut input = [0_u8; 4];
+            input[channel] = value as u8;
+            input[3] = u8::MAX;
+            let adjusted = inkpod_image::apply_adjustment(PixelValue::Rgba(input), adjustment)
+                .ok()
+                .and_then(PixelValue::rgba16)
+                .map(|rgba| ((u32::from(rgba[channel]) + 128) / 257) as u8)
+                .unwrap_or(value as u8);
+            channels[channel][value as usize] = ((u32::from(value) * (1_000 - opacity_milli)
+                + u32::from(adjusted) * opacity_milli
+                + 500)
+                / 1_000) as u8;
+        }
+    }
+    RenderAdjustmentLut { channels }
 }
 
 // Shared implementation helpers for this responsibility.
@@ -758,6 +1208,197 @@ fn prepare_layers_for_tile<'a>(
         });
     }
     Some(layers)
+}
+
+fn compose_raster_plane_tile(
+    document: &CellDocument,
+    plane: &PlaneNode,
+    coord: TileCoord,
+    source_revision: RenderRevision,
+    tile_revision: RenderRevision,
+    tile_id: u64,
+) -> Option<RenderTile> {
+    let origin_x = coord.x.checked_mul(TILE_SIZE)?;
+    let origin_y = coord.y.checked_mul(TILE_SIZE)?;
+    if origin_x >= document.width || origin_y >= document.height {
+        return None;
+    }
+    let width = TILE_SIZE.min(document.width - origin_x);
+    let height = TILE_SIZE.min(document.height - origin_y);
+    if !raster_covers_tile_rect(&plane.raster, origin_x, origin_y, width, height) {
+        return None;
+    }
+    note_snapshot_payload_access();
+    let tile = plane.raster.tile_view(coord)?;
+    let kind = match (plane.kind, plane.raster.format()) {
+        (PlaneType::MainLine, PixelFormat::BinaryMask8 | PixelFormat::Grayscale8) => {
+            PreparedPlaneKind::MainLine8(rgba8_for_display(document.main_line_color)?)
+        }
+        (PlaneType::MainLine, PixelFormat::Grayscale16) => {
+            PreparedPlaneKind::MainLine16(rgba8_for_display(document.main_line_color)?)
+        }
+        (
+            PlaneType::Color | PlaneType::Raster,
+            PixelFormat::StraightRgba8 | PixelFormat::PremultipliedBgra8,
+        ) => PreparedPlaneKind::Color8,
+        (PlaneType::Color | PlaneType::Raster, PixelFormat::StraightRgba16) => {
+            PreparedPlaneKind::Color16
+        }
+        (PlaneType::Selection, PixelFormat::BinaryMask8) => PreparedPlaneKind::Selection8,
+        _ => return None,
+    };
+    let prepared = PreparedPlaneTile {
+        kind,
+        opacity_milli: plane.opacity_milli,
+        tile,
+    };
+    let mut straight = Vec::with_capacity(width as usize * height as usize * 4);
+    for y in 0..height {
+        for x in 0..width {
+            let mut rgba = prepared.rgba(x, y);
+            rgba[3] = ((u32::from(rgba[3]) * plane.opacity_milli + 500) / 1_000) as u8;
+            straight.extend_from_slice(&rgba);
+        }
+    }
+    render_tile_from_straight_rgba(
+        coord,
+        width,
+        height,
+        tile_id,
+        straight,
+        source_revision,
+        tile_revision,
+    )
+}
+
+fn compose_background_tile(
+    document: &CellDocument,
+    base_raster: Option<&TileRaster>,
+    coord: TileCoord,
+    source_revision: RenderRevision,
+    tile_revision: RenderRevision,
+    tile_id: u64,
+) -> Option<RenderTile> {
+    let origin_x = coord.x.checked_mul(TILE_SIZE)?;
+    let origin_y = coord.y.checked_mul(TILE_SIZE)?;
+    if origin_x >= document.width || origin_y >= document.height {
+        return None;
+    }
+    let width = TILE_SIZE.min(document.width - origin_x);
+    let height = TILE_SIZE.min(document.height - origin_y);
+    let base = if let Some(raster) = base_raster {
+        if !raster_covers_tile_rect(raster, origin_x, origin_y, width, height) {
+            return None;
+        }
+        let tile = raster.tile_view(coord);
+        if tile.is_some() {
+            note_snapshot_payload_access();
+        }
+        Some(PreparedBaseTile {
+            format: raster.format(),
+            tile,
+        })
+    } else {
+        None
+    };
+    let mut straight = Vec::with_capacity(width as usize * height as usize * 4);
+    for y in 0..height {
+        for x in 0..width {
+            let document_x = origin_x + x;
+            let document_y = origin_y + y;
+            let mut rgba = base.map_or([0; 4], |tile| tile.rgba(x, y));
+            if document.light_table.has_visible_items() {
+                note_snapshot_payload_access();
+                let reference = document
+                    .light_table
+                    .composite(document.frames.reference_frame, document_x, document_y)
+                    .unwrap_or([0; 4]);
+                rgba = blend_rgba_over(rgba, reference);
+            }
+            straight.extend_from_slice(&rgba);
+        }
+    }
+    render_tile_from_straight_rgba(
+        coord,
+        width,
+        height,
+        tile_id,
+        straight,
+        source_revision,
+        tile_revision,
+    )
+}
+
+fn compose_selection_overlay_tile(
+    document: &CellDocument,
+    coord: TileCoord,
+    source_revision: RenderRevision,
+    tile_revision: RenderRevision,
+    tile_id: u64,
+) -> Option<RenderTile> {
+    let origin_x = coord.x.checked_mul(TILE_SIZE)?;
+    let origin_y = coord.y.checked_mul(TILE_SIZE)?;
+    if origin_x >= document.width || origin_y >= document.height {
+        return None;
+    }
+    let width = TILE_SIZE.min(document.width - origin_x);
+    let height = TILE_SIZE.min(document.height - origin_y);
+    note_snapshot_payload_access();
+    let tile = document.selection.tile_view(coord)?;
+    let mut straight = Vec::with_capacity(width as usize * height as usize * 4);
+    for y in 0..height {
+        let row = y as usize * tile.row_stride_bytes() as usize;
+        for x in 0..width {
+            let coverage = tile.bytes()[row + x as usize];
+            straight.extend_from_slice(&[0, 160, 255, coverage / 3]);
+        }
+    }
+    render_tile_from_straight_rgba(
+        coord,
+        width,
+        height,
+        tile_id,
+        straight,
+        source_revision,
+        tile_revision,
+    )
+}
+
+fn render_tile_from_straight_rgba(
+    coord: TileCoord,
+    width: u32,
+    height: u32,
+    tile_id: u64,
+    straight: Vec<u8>,
+    source_revision: RenderRevision,
+    tile_revision: RenderRevision,
+) -> Option<RenderTile> {
+    if straight.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+        return None;
+    }
+    let mut pixels = Vec::with_capacity(straight.len());
+    for rgba in straight.chunks_exact(4) {
+        let alpha = u32::from(rgba[3]);
+        let premultiply = |channel: u8| ((u32::from(channel) * alpha + 127) / 255) as u8;
+        pixels.extend_from_slice(&[
+            premultiply(rgba[2]),
+            premultiply(rgba[1]),
+            premultiply(rgba[0]),
+            rgba[3],
+        ]);
+    }
+    Some(RenderTile {
+        tile_id,
+        origin: DocumentPointI32 {
+            x: coord.x.checked_mul(TILE_SIZE)? as i32,
+            y: coord.y.checked_mul(TILE_SIZE)? as i32,
+        },
+        size: DocumentSizeU32::new(width, height),
+        stride_bytes: width.checked_mul(4)?,
+        pixels: Arc::from(pixels),
+        source_revision,
+        tile_revision,
+    })
 }
 
 pub(super) fn compose_tile(
@@ -1319,7 +1960,7 @@ mod tests {
             blake3::hash(validation_call_graph.as_bytes())
                 .to_hex()
                 .to_string(),
-            "e48fba576b3ae73bfd4ee272537cdb68f535ec47aa0f5d7f5b972f08f424fdf6",
+            "3364584309179852b34636383362655338ba2877a74ce830671f927207b4d6f6",
             "primary snapshot validation call graph changed; audit payload/hash access before updating this lock"
         );
     }

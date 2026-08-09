@@ -41,34 +41,22 @@ impl Core {
             .checked_mul(height)
             .and_then(|bytes| usize::try_from(bytes).ok())
             .ok_or(CoreError::InvalidState("layer thumbnail bytes overflow"))?;
-        let mut pixels = vec![0_u8; byte_count];
-        for output_y in 0..height {
-            for output_x in 0..width {
-                let rgba = sample_layer_thumbnail_pixel(
-                    document, layer, output_x, output_y, width, height,
-                )?;
-                let offset = output_y as usize * stride_bytes as usize + output_x as usize * 4;
-                pixels[offset..offset + 4].copy_from_slice(&rgba);
+        let pixels = if layer.kind == LayerKind::VectorColoring {
+            self.rasterize_vector_layer_dimensions(layer_id, width, height, stride_bytes, true)?
+                .pixels
+        } else {
+            let mut pixels = vec![0_u8; byte_count];
+            for output_y in 0..height {
+                for output_x in 0..width {
+                    let rgba = sample_layer_thumbnail_pixel(
+                        document, layer, output_x, output_y, width, height,
+                    )?;
+                    let offset = output_y as usize * stride_bytes as usize + output_x as usize * 4;
+                    pixels[offset..offset + 4].copy_from_slice(&rgba);
+                }
             }
-        }
-        if layer.kind == LayerKind::VectorColoring {
-            let vectors = self.rasterize_vector_layer_dimensions(
-                layer_id,
-                width,
-                height,
-                stride_bytes,
-                true,
-            )?;
-            for (raster, vector) in pixels
-                .chunks_exact_mut(4)
-                .zip(vectors.pixels.chunks_exact(4))
-            {
-                raster.copy_from_slice(&source_over_rgba(
-                    [raster[0], raster[1], raster[2], raster[3]],
-                    [vector[0], vector[1], vector[2], vector[3]],
-                ));
-            }
-        }
+            pixels
+        };
         Ok(LayerThumbnail {
             revision: self.document_revision.get(),
             layer_id: layer_id.get(),
@@ -155,17 +143,7 @@ fn sample_layer_raster(
     y: u32,
 ) -> Result<[u8; 4], CoreError> {
     let mut composite = [0_u8; 4];
-    for plane in layer
-        .planes
-        .iter()
-        .filter(|plane| plane.visible && plane.kind != PlaneType::MainLine)
-        .chain(
-            layer
-                .planes
-                .iter()
-                .filter(|plane| plane.visible && plane.kind == PlaneType::MainLine),
-        )
-    {
+    for plane in layer.planes.iter().rev().filter(|plane| plane.visible) {
         let mut rgba = match plane.kind {
             PlaneType::MainLine => {
                 let coverage = match plane.raster.pixel(x, y)? {

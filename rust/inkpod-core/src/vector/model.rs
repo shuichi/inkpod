@@ -516,6 +516,48 @@ impl VectorState {
         }
         (segments, fills)
     }
+
+    pub(crate) fn render_plane_items(
+        &self,
+        plane: &PlaneNode,
+        z_order: u32,
+    ) -> (Vec<RenderVectorSegment>, Vec<RenderVectorFill>) {
+        let mut segments = Vec::new();
+        let mut fills = Vec::new();
+        if plane.kind == PlaneType::VectorFill && plane.visible {
+            for fill in self.fills.iter().filter(|fill| fill.plane_id == plane.id) {
+                fills.push(RenderVectorFill {
+                    fill_id: fill.id.get(),
+                    plane_id: fill.plane_id.get(),
+                    z_order,
+                    color_rgba: display_color(fill.color, 1_000, plane.opacity_milli),
+                    boundary_path_ids: fill.boundary_path_ids.iter().map(|id| id.get()).collect(),
+                });
+            }
+        }
+        if matches!(
+            plane.kind,
+            PlaneType::ColorTrace | PlaneType::VectorMainLine
+        ) {
+            for path in self.paths.iter().filter(|path| path.plane_id == plane.id) {
+                let color = display_color(path.color, 1_000, plane.opacity_milli);
+                for (index, segment) in path.segments.iter().enumerate() {
+                    segments.push(RenderVectorSegment {
+                        path_id: path.id.get(),
+                        plane_id: path.plane_id.get(),
+                        z_order,
+                        segment_index: index as u32,
+                        segment_count: path.segments.len() as u32,
+                        color_rgba: color,
+                        closed: path.closed,
+                        stroke_visible: plane.visible,
+                        cubic: public_segment(*segment),
+                    });
+                }
+            }
+        }
+        (segments, fills)
+    }
 }
 
 fn scaled_vector_width(width_milli: u32, scale: f64) -> Result<u32, CoreError> {

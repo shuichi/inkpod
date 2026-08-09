@@ -24,6 +24,10 @@ static_assert(sizeof(InkpodDispatchResult) == 24U);
 static_assert(sizeof(InkpodSnapshotOptions) == 16U);
 static_assert(sizeof(InkpodSnapshotTile) == 64U);
 static_assert(sizeof(InkpodSnapshotView) == 48U);
+static_assert(std::is_standard_layout_v<InkpodSnapshotRenderPass>);
+static_assert(std::is_standard_layout_v<InkpodSnapshotRenderPlan>);
+static_assert(sizeof(InkpodSnapshotRenderPass) == 48U);
+static_assert(sizeof(InkpodSnapshotRenderPlan) == 64U);
 static_assert(sizeof(InkpodCellCreateOptions) == 48U);
 static_assert(sizeof(InkpodDocumentInfo) == 192U);
 static_assert(sizeof(InkpodResourceUsage) == 112U);
@@ -810,9 +814,39 @@ int InkpodRunAbiSmoke() {
         || vector_view.segments->width_start != 1.0F
         || vector_view.segments->width_end != 3.0F
         || vector_view.fills->fill_id != vector_fill_id
-        || *vector_view.boundary_path_ids != vector_path_id
-        || inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK) {
+        || *vector_view.boundary_path_ids != vector_path_id) {
         return 55;
+    }
+    InkpodSnapshotRenderPlan short_render_plan{};
+    short_render_plan.struct_size = sizeof(std::uint32_t);
+    InkpodSnapshotRenderPlan render_plan{};
+    render_plan.struct_size = sizeof(render_plan);
+    if (inkpod_snapshot_get_render_plan(snapshot, &short_render_plan)
+            != INKPOD_STATUS_INCOMPATIBLE_ABI
+        || inkpod_snapshot_get_render_plan(nullptr, &render_plan)
+            != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_snapshot_get_render_plan(snapshot, &render_plan) != INKPOD_STATUS_OK
+        || render_plan.abi_version != INKPOD_ABI_VERSION
+        || render_plan.pass_stride_bytes != sizeof(InkpodSnapshotRenderPass)
+        || render_plan.pass_count == 0U || render_plan.passes == nullptr
+        || render_plan.adjustment_lut_count != 0U
+        || render_plan.adjustment_luts_rgb8 != nullptr) {
+        return 107;
+    }
+    bool has_fill_pass{};
+    bool has_stroke_pass{};
+    for (std::uint64_t index = 0; index < render_plan.pass_count; ++index) {
+        const auto& pass = render_plan.passes[index];
+        if (pass.struct_size != sizeof(InkpodSnapshotRenderPass)
+            || pass.opacity_milli > 1000U || pass.reserved != 0U) {
+            return 108;
+        }
+        has_fill_pass = has_fill_pass || pass.kind == INKPOD_RENDER_PASS_VECTOR_FILLS;
+        has_stroke_pass = has_stroke_pass || pass.kind == INKPOD_RENDER_PASS_VECTOR_STROKES;
+    }
+    if (!has_fill_pass || !has_stroke_pass
+        || inkpod_snapshot_release(&snapshot) != INKPOD_STATUS_OK) {
+        return 109;
     }
     const InkpodRasterVectorizeInput raster_vectorize{
         sizeof(InkpodRasterVectorizeInput), 1U, 0U, document.color_plane_id, vector_layer_id};
