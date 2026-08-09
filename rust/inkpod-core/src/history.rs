@@ -32,7 +32,7 @@ impl Core {
             false,
             revision,
         )?;
-        let editor = self.stage_reconciled_editor_target(&document, None)?;
+        let editor = self.stage_reconciled_editor_target(&document, None, None)?;
         self.document = Some(document);
         self.history_cursor -= 1;
         self.current_state = entry.before_state;
@@ -74,7 +74,7 @@ impl Core {
             true,
             revision,
         )?;
-        let editor = self.stage_reconciled_editor_target(&document, None)?;
+        let editor = self.stage_reconciled_editor_target(&document, None, None)?;
         self.document = Some(document);
         self.history_cursor += 1;
         self.current_state = entry.after_state;
@@ -167,7 +167,7 @@ impl Core {
             )?;
             cursor += 1;
         }
-        let editor = self.stage_reconciled_editor_target(&document, None)?;
+        let editor = self.stage_reconciled_editor_target(&document, None, None)?;
         self.document = Some(document);
         self.history_cursor = target_cursor;
         self.current_state = destination_state;

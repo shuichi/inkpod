@@ -85,7 +85,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(main_line_procedure.primitive_id().get(), 0x0003_0001);
     assert_eq!(main_line_procedure.primitive_schema_version(), 1);
-    assert_eq!(main_line_procedure.replay_epoch().get(), 7);
+    assert_eq!(main_line_procedure.replay_epoch().get(), 8);
     assert_eq!(main_line_procedure.procedure_id().get(), 1);
     assert_eq!(main_line_procedure.base_state_id().get(), 1);
     assert_eq!(main_line_procedure.committed_state_id().get(), 2);
@@ -112,7 +112,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(palette_procedure.primitive_id().get(), 0x0003_0002);
     assert_eq!(palette_procedure.primitive_schema_version(), 1);
-    assert_eq!(palette_procedure.replay_epoch().get(), 7);
+    assert_eq!(palette_procedure.replay_epoch().get(), 8);
     assert_eq!(palette_procedure.procedure_id().get(), 2);
     assert_eq!(palette_procedure.base_state_id().get(), 2);
     assert_eq!(palette_procedure.committed_state_id().get(), 3);
@@ -157,7 +157,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(stroke_procedure.primitive_id().get(), 0x0005_0001);
     assert_eq!(stroke_procedure.primitive_schema_version(), 2);
-    assert_eq!(stroke_procedure.replay_epoch().get(), 7);
+    assert_eq!(stroke_procedure.replay_epoch().get(), 8);
     assert_eq!(stroke_procedure.procedure_id().get(), 3);
     assert_eq!(stroke_procedure.base_state_id().get(), 3);
     assert_eq!(stroke_procedure.committed_state_id().get(), 4);
@@ -173,15 +173,15 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .canonical_composite_digest()
         .unwrap()
         .as_bytes();
-    assert_eq!(contract.replay_epoch().get(), 7);
-    assert_eq!(contract.procedure_format_version(), 10);
+    assert_eq!(contract.replay_epoch().get(), 8);
+    assert_eq!(contract.procedure_format_version(), 11);
     assert_eq!(contract.canonical_numeric_version(), 1);
-    assert_eq!(contract.primitive_count(), 76);
+    assert_eq!(contract.primitive_count(), 77);
     assert_eq!(
         *contract.primitive_catalog_digest(),
         [
-            206, 12, 128, 124, 106, 176, 33, 145, 4, 172, 30, 236, 84, 240, 142, 25, 164, 149, 101,
-            252, 183, 167, 178, 234, 173, 121, 76, 227, 69, 122, 249, 90
+            82, 25, 97, 121, 12, 210, 40, 203, 99, 227, 205, 39, 147, 205, 91, 220, 94, 152, 91,
+            161, 186, 144, 14, 60, 158, 33, 83, 170, 181, 139, 196, 14
         ]
     );
     assert_eq!(

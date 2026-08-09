@@ -77,6 +77,8 @@ impl PrimitiveId {
     pub const MERGE_LAYER: Self = Self(0x0002_0022);
     /// Primitive ID for deleting every hidden layer as one atomic topology edit.
     pub const DELETE_HIDDEN_LAYERS: Self = Self(0x0002_0023);
+    /// Primitive ID for one grouped layer/plane edit-target command.
+    pub const EDIT_TARGETS: Self = Self(0x0002_0030);
     /// Primitive ID for main-line display color replacement.
     pub const SET_MAIN_LINE_COLOR: Self = Self(0x0003_0001);
     /// Primitive ID for ordered palette replacement.
@@ -236,14 +238,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(7);
+    pub const CURRENT: Self = Self(8);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 10;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 11;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;

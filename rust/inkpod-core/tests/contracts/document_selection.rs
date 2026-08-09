@@ -782,6 +782,8 @@ fn acceptance_coordinate_preserving_typed_paste_and_floating_transform() {
                     value: PixelValue::Rgba([0, 0, 255, 255]),
                 },
             ],
+            vector_paths: Vec::new(),
+            vector_fills: Vec::new(),
         }],
     };
     destination.begin_paste(&transform_payload).unwrap();
@@ -855,6 +857,8 @@ fn converted_paste_to_new_plane_is_one_atomic_replayable_commit() {
                 y: 0,
                 value: PixelValue::Rgba([21, 34, 55, 255]),
             }],
+            vector_paths: Vec::new(),
+            vector_fills: Vec::new(),
         }],
     };
     let mut core = Core::new();

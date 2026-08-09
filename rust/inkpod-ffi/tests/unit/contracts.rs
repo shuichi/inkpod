@@ -705,6 +705,270 @@ fn editor_state_ffi_rejects_short_unknown_stale_and_invalid_updates_atomically()
 }
 
 #[test]
+fn grouped_edit_target_ffi_owns_normalized_spans_and_rejects_stale_or_short_records() {
+    let (mut core, document) = create_core(8, 8, 0x4544_5447);
+    // SAFETY: Complete records and the live owner-thread Core remain valid for every call.
+    unsafe {
+        let mut state = editor_state_info();
+        assert_eq!(
+            inkpod_core_get_editor_state(core, &mut state),
+            INKPOD_STATUS_OK
+        );
+        let targets = [
+            InkpodEditTarget {
+                struct_size: size_of::<InkpodEditTarget>() as u32,
+                kind: INKPOD_EDIT_TARGET_PLANE,
+                layer_id: document.layer_id,
+                plane_id: document.color_plane_id,
+                reserved: 0,
+            },
+            InkpodEditTarget {
+                struct_size: size_of::<InkpodEditTarget>() as u32,
+                kind: INKPOD_EDIT_TARGET_PLANE,
+                layer_id: document.layer_id,
+                plane_id: document.main_plane_id,
+                reserved: 0,
+            },
+        ];
+        let mut changed = editor_state_info();
+        assert_eq!(
+            inkpod_core_set_edit_targets(
+                core,
+                state.editor_revision,
+                targets.as_ptr(),
+                targets.len() as u64,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut changed,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(changed.editor_revision, state.editor_revision + 1);
+
+        let mut required = 0;
+        assert_eq!(
+            inkpod_core_get_edit_targets(core, ptr::null_mut(), 0, 0, &mut required),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        assert_eq!(required, 2);
+        let mut copied = [InkpodEditTarget::default(); 2];
+        assert_eq!(
+            inkpod_core_get_edit_targets(
+                core,
+                copied.as_mut_ptr(),
+                copied.len() as u64,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut required,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(copied[0].plane_id, document.main_plane_id);
+        assert_eq!(copied[1].plane_id, document.color_plane_id);
+        copied[0].plane_id = u64::MAX;
+        assert_eq!(copied[0].plane_id, u64::MAX);
+        let mut recopy = [InkpodEditTarget::default(); 2];
+        assert_eq!(
+            inkpod_core_get_edit_targets(
+                core,
+                recopy.as_mut_ptr(),
+                2,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut required,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(recopy[0].plane_id, document.main_plane_id);
+        let mut capabilities = InkpodEditTargetCapabilities {
+            struct_size: size_of::<InkpodEditTargetCapabilities>() as u32,
+            ..InkpodEditTargetCapabilities::default()
+        };
+        assert_eq!(
+            inkpod_core_get_edit_target_capabilities(core, &mut capabilities),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(capabilities.can_set_visibility, 1);
+        assert_eq!(capabilities.can_set_editability, 1);
+        assert_eq!(capabilities.can_merge, 0);
+        capabilities.struct_size -= 1;
+        assert_eq!(
+            inkpod_core_get_edit_target_capabilities(core, &mut capabilities),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+
+        assert_eq!(
+            inkpod_core_set_edit_targets(
+                core,
+                state.editor_revision,
+                targets.as_ptr(),
+                2,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut state,
+            ),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        let mut short = targets;
+        short[0].struct_size -= 1;
+        assert_eq!(
+            inkpod_core_set_edit_targets(
+                core,
+                changed.editor_revision,
+                short.as_ptr(),
+                2,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut state,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+
+        let duplicate_targets = [targets[1], targets[1]];
+        assert_eq!(
+            inkpod_core_set_edit_targets(
+                core,
+                changed.editor_revision,
+                duplicate_targets.as_ptr(),
+                duplicate_targets.len() as u64,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut changed,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_get_edit_targets(core, ptr::null_mut(), 0, 0, &mut required),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        assert_eq!(required, 1);
+        let foreign = InkpodEditTarget {
+            layer_id: u64::MAX,
+            plane_id: u64::MAX - 1,
+            ..targets[0]
+        };
+        let before_foreign = changed;
+        assert_eq!(
+            inkpod_core_set_edit_targets(
+                core,
+                changed.editor_revision,
+                &foreign,
+                1,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut changed,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(changed.editor_revision, before_foreign.editor_revision);
+        assert_eq!(
+            inkpod_core_set_edit_targets(
+                core,
+                changed.editor_revision,
+                targets.as_ptr(),
+                u64::from(INKPOD_MAX_EDIT_TARGETS) + 1,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut changed,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(changed.editor_revision, before_foreign.editor_revision);
+
+        let layer = InkpodEditTarget {
+            struct_size: size_of::<InkpodEditTarget>() as u32,
+            kind: INKPOD_EDIT_TARGET_LAYER,
+            layer_id: document.layer_id,
+            plane_id: 0,
+            reserved: 0,
+        };
+        assert_eq!(
+            inkpod_core_set_edit_targets(
+                core,
+                changed.editor_revision,
+                &layer,
+                1,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut changed,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let command = InkpodEditTargetCommand {
+            struct_size: size_of::<InkpodEditTargetCommand>() as u32,
+            operation: INKPOD_EDIT_TARGET_DUPLICATE,
+            flags: 0,
+            kind: 0,
+            pixel_format: 0,
+            reserved: 0,
+        };
+        let mut dispatch = dispatch();
+        let mut output_count = 0;
+        assert_eq!(
+            inkpod_core_apply_edit_target_command(
+                core,
+                &command,
+                &mut dispatch,
+                ptr::null_mut(),
+                0,
+                0,
+                &mut output_count,
+            ),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        assert_eq!(output_count, 1);
+        let history_before = queried_history_info(core);
+        assert_eq!(history_before.item_count, 0);
+        let mut output = InkpodEditTarget::default();
+        assert_eq!(
+            inkpod_core_apply_edit_target_command(
+                core,
+                &command,
+                &mut dispatch,
+                &mut output,
+                1,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut output_count,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(dispatch.accepted_command_count, 1);
+        assert_eq!(output.kind, INKPOD_EDIT_TARGET_LAYER);
+        assert_ne!(output.layer_id, document.layer_id);
+        assert_eq!(queried_history_info(core).item_count, 1);
+
+        let deleted_target = output;
+        let delete_command = InkpodEditTargetCommand {
+            operation: INKPOD_EDIT_TARGET_DELETE,
+            ..command
+        };
+        output_count = u64::MAX;
+        assert_eq!(
+            inkpod_core_apply_edit_target_command(
+                core,
+                &delete_command,
+                &mut dispatch,
+                ptr::null_mut(),
+                0,
+                0,
+                &mut output_count,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(output_count, 0);
+        assert_eq!(dispatch.accepted_command_count, 1);
+        assert_eq!(
+            inkpod_core_get_editor_state(core, &mut changed),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_set_edit_targets(
+                core,
+                changed.editor_revision,
+                &deleted_target,
+                1,
+                size_of::<InkpodEditTarget>() as u64,
+                &mut changed,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn captured_editor_target_ffi_routes_fill_selection_and_color_without_live_retargeting() {
     let (mut core, document) = create_core(4, 4, 0x4544_4954);
     let fill = InkpodFillInput {
@@ -1082,6 +1346,99 @@ fn rectangle_selection(core: *mut InkpodCore, bounds: InkpodFrameRect) -> Inkpod
         );
     }
     result
+}
+
+#[test]
+fn clear_selected_content_journal_saves_and_reopens_through_the_abi() {
+    let (mut core, _) = create_core(8, 8, 0x434c_4541_5253_4156);
+    let normal_path = temporary_inkpod_path("clear-selected-normal");
+    let recovery_path = temporary_inkpod_path("clear-selected-recovery");
+    let normal_bytes = normal_path.to_string_lossy().into_owned().into_bytes();
+    let recovery_bytes = recovery_path.to_string_lossy().into_owned().into_bytes();
+    let sample = InkpodStrokeSample {
+        struct_size: size_of::<InkpodStrokeSample>() as u32,
+        flags: 0,
+        x: 2.0,
+        y: 3.0,
+        pressure: 1.0,
+        reserved: 0,
+    };
+    let stroke = InkpodStrokeInput {
+        struct_size: size_of::<InkpodStrokeInput>() as u32,
+        tool: INKPOD_TOOL_PENCIL,
+        plane: INKPOD_PLANE_COLOR,
+        coordinate_space: INKPOD_COORDINATE_SPACE_DOCUMENT,
+        flags: 0,
+        color_rgba: 0x0c22_38ff,
+        diameter: 1.0,
+        samples: &sample,
+        sample_count: 1,
+        sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
+    };
+    let mut result = dispatch();
+    let mut info = document_info();
+
+    unsafe {
+        assert_eq!(
+            inkpod_core_set_active_plane(core, INKPOD_PLANE_COLOR),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_apply_stroke(core, &stroke, &mut result),
+            INKPOD_STATUS_OK
+        );
+    }
+    rectangle_selection(
+        core,
+        InkpodFrameRect {
+            x: 2,
+            y: 3,
+            width: 1,
+            height: 1,
+        },
+    );
+    unsafe {
+        assert_eq!(
+            inkpod_core_clear_selected_content(core, &mut result),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_autosave(
+                core,
+                recovery_bytes.as_ptr(),
+                recovery_bytes.len() as u64,
+                &mut info,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_save(
+                core,
+                normal_bytes.as_ptr(),
+                normal_bytes.len() as u64,
+                &mut info,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+
+        assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_open(
+                core,
+                normal_bytes.as_ptr(),
+                normal_bytes.len() as u64,
+                &mut info,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_undo(core, &mut result), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_redo(core, &mut result), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+
+    std::fs::remove_file(normal_path).unwrap();
+    std::fs::remove_file(recovery_path).unwrap();
 }
 
 #[test]
@@ -2484,8 +2841,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 7);
-        assert_eq!(contract.procedure_format_version, 10);
+        assert_eq!(contract.replay_epoch, 8);
+        assert_eq!(contract.procedure_format_version, 11);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);

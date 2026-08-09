@@ -701,6 +701,8 @@ fn clipboard_pixels_are_interned_for_preview_and_released_after_commit() {
                 y: 0,
                 value: PixelValue::Rgba([7, 8, 9, 255]),
             }],
+            vector_paths: Vec::new(),
+            vector_fills: Vec::new(),
         }],
     };
     core.begin_paste(&payload).unwrap();

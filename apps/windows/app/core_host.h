@@ -214,6 +214,25 @@ public:
         DocumentSessionId session,
         Generation generation,
         InkpodEditorStateInfo& state) const noexcept;
+    InkpodStatus GetEditTargets(
+        DocumentSessionId session,
+        Generation generation,
+        std::vector<InkpodEditTarget>& targets) noexcept;
+    InkpodStatus GetEditTargetCapabilities(
+        DocumentSessionId session,
+        Generation generation,
+        InkpodEditTargetCapabilities& capabilities) noexcept;
+    InkpodStatus SetEditTargets(
+        DocumentSessionId session,
+        Generation generation,
+        std::uint64_t expected_editor_revision,
+        const std::vector<InkpodEditTarget>& targets) noexcept;
+    InkpodStatus ApplyEditTargetCommand(
+        DocumentSessionId session,
+        Generation generation,
+        const InkpodEditTargetCommand& command,
+        InkpodDispatchResult& result,
+        std::vector<InkpodEditTarget>& output_targets) noexcept;
     InkpodStatus RegisterColorArray(
         DocumentSessionId session,
         Generation generation,

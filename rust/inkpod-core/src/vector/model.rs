@@ -443,6 +443,93 @@ impl VectorState {
         }
     }
 
+    pub(crate) fn paste_clipboard_paths<F>(
+        &mut self,
+        source: &ClipboardPlane,
+        destination_plane_id: PlaneId,
+        mut transform_segment: F,
+        next_id: &mut StableIdCursor,
+        path_map: &mut BTreeMap<u64, VectorPathId>,
+    ) -> Result<(), CoreError>
+    where
+        F: FnMut(VectorCubicSegment) -> Result<VectorCubicSegment, CoreError>,
+    {
+        let segment_count = source
+            .vector_paths
+            .iter()
+            .try_fold(0_usize, |count, path| {
+                count.checked_add(path.segments.len())
+            })
+            .ok_or(CoreError::InvalidState(
+                "clipboard vector segment count overflows",
+            ))?;
+        self.ensure_additional_limits(source.vector_paths.len(), 0, segment_count, 0)?;
+        for path in &source.vector_paths {
+            let id = next_id.take_vector_path();
+            let input = VectorPathInput {
+                segments: path
+                    .segments
+                    .iter()
+                    .copied()
+                    .map(&mut transform_segment)
+                    .collect::<Result<Vec<_>, _>>()?,
+                color: path.color,
+                closed: path.closed,
+            };
+            self.paths.push(super::geometry::fixed_path(
+                id,
+                destination_plane_id,
+                input,
+            )?);
+            if path_map.insert(path.id, id).is_some() {
+                return Err(CoreError::InvalidArgument(
+                    "clipboard contains a duplicate vector path id",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn paste_clipboard_fills(
+        &mut self,
+        source: &ClipboardPlane,
+        destination_plane_id: PlaneId,
+        next_id: &mut StableIdCursor,
+        path_map: &BTreeMap<u64, VectorPathId>,
+    ) -> Result<(), CoreError> {
+        let boundary_count = source
+            .vector_fills
+            .iter()
+            .try_fold(0_usize, |count, fill| {
+                count.checked_add(fill.boundary_path_ids.len())
+            })
+            .ok_or(CoreError::InvalidState(
+                "clipboard vector boundary count overflows",
+            ))?;
+        self.ensure_additional_limits(0, source.vector_fills.len(), 0, boundary_count)?;
+        for fill in &source.vector_fills {
+            let boundary_path_ids = fill
+                .boundary_path_ids
+                .iter()
+                .map(|path_id| {
+                    path_map
+                        .get(path_id)
+                        .copied()
+                        .ok_or(CoreError::InvalidArgument(
+                            "clipboard vector fill references a missing copied path",
+                        ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            self.fills.push(VectorFill {
+                id: next_id.take_vector_fill(),
+                plane_id: destination_plane_id,
+                color: fill.color,
+                boundary_path_ids,
+            });
+        }
+        Ok(())
+    }
+
     pub(crate) fn reassign_plane(&mut self, old_plane_id: PlaneId, new_plane_id: PlaneId) {
         for path in self
             .paths

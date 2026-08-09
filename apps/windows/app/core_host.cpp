@@ -2244,6 +2244,162 @@ bool CoreHost::GetEditorState(
         && impl_->CopyEditorState(SessionBinding{session, generation}, state);
 }
 
+InkpodStatus CoreHost::GetEditTargets(
+    DocumentSessionId session,
+    Generation generation,
+    std::vector<InkpodEditTarget>& targets) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    targets.clear();
+    return impl_->Invoke(
+        SessionBinding{session, generation},
+        [&targets](InkpodCore* core) {
+            std::uint64_t count{};
+            InkpodStatus status = inkpod_core_get_edit_targets(
+                core, nullptr, 0U, 0U, &count);
+            if (status == INKPOD_STATUS_OK) {
+                return status;
+            }
+            if (status != INKPOD_STATUS_BUFFER_TOO_SMALL
+                || count > INKPOD_MAX_EDIT_TARGETS) {
+                return status == INKPOD_STATUS_BUFFER_TOO_SMALL
+                    ? INKPOD_STATUS_INVALID_STATE
+                    : status;
+            }
+            try {
+                targets.resize(static_cast<std::size_t>(count));
+            } catch (const std::bad_alloc&) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            return inkpod_core_get_edit_targets(
+                core,
+                targets.data(),
+                targets.size(),
+                sizeof(InkpodEditTarget),
+                &count);
+        },
+        false,
+        false);
+}
+
+InkpodStatus CoreHost::GetEditTargetCapabilities(
+    DocumentSessionId session,
+    Generation generation,
+    InkpodEditTargetCapabilities& capabilities) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    capabilities = {};
+    capabilities.struct_size = sizeof(capabilities);
+    return impl_->Invoke(
+        SessionBinding{session, generation},
+        [&capabilities](InkpodCore* core) {
+            return inkpod_core_get_edit_target_capabilities(core, &capabilities);
+        },
+        false,
+        false);
+}
+
+InkpodStatus CoreHost::SetEditTargets(
+    DocumentSessionId session,
+    Generation generation,
+    std::uint64_t expected_editor_revision,
+    const std::vector<InkpodEditTarget>& targets) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const SessionBinding binding{session, generation};
+    Impl* const impl = impl_.get();
+    return impl_->Invoke(
+        binding,
+        [impl, binding, expected_editor_revision, &targets](InkpodCore* core) {
+            InkpodEditorStateInfo updated{};
+            updated.struct_size = sizeof(updated);
+            const InkpodStatus status = inkpod_core_set_edit_targets(
+                core,
+                expected_editor_revision,
+                targets.empty() ? nullptr : targets.data(),
+                targets.size(),
+                targets.empty() ? 0U : sizeof(InkpodEditTarget),
+                &updated);
+            if (status != INKPOD_STATUS_OK) {
+                return status;
+            }
+            InkpodDocumentInfo document{};
+            document.struct_size = sizeof(document);
+            const InkpodStatus query_status =
+                inkpod_core_get_document_info(core, &document);
+            return query_status == INKPOD_STATUS_OK
+                && impl->StoreDocumentAndEditorState(binding, document, updated)
+                ? INKPOD_STATUS_OK
+                : (query_status == INKPOD_STATUS_OK
+                    ? INKPOD_STATUS_INVALID_STATE
+                    : query_status);
+        },
+        false,
+        false);
+}
+
+InkpodStatus CoreHost::ApplyEditTargetCommand(
+    DocumentSessionId session,
+    Generation generation,
+    const InkpodEditTargetCommand& command,
+    InkpodDispatchResult& result,
+    std::vector<InkpodEditTarget>& output_targets) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const SessionBinding binding{session, generation};
+    Impl* const impl = impl_.get();
+    output_targets.clear();
+    result = {};
+    result.struct_size = sizeof(result);
+    return impl_->Invoke(
+        binding,
+        [impl, binding, &command, &result, &output_targets](InkpodCore* core) {
+            std::uint64_t count{};
+            InkpodStatus status = inkpod_core_apply_edit_target_command(
+                core, &command, &result, nullptr, 0U, 0U, &count);
+            if (status == INKPOD_STATUS_BUFFER_TOO_SMALL) {
+                if (count > INKPOD_MAX_EDIT_TARGETS) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                try {
+                    output_targets.resize(static_cast<std::size_t>(count));
+                } catch (const std::bad_alloc&) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                status = inkpod_core_apply_edit_target_command(
+                    core,
+                    &command,
+                    &result,
+                    output_targets.data(),
+                    output_targets.size(),
+                    sizeof(InkpodEditTarget),
+                    &count);
+            }
+            if (status != INKPOD_STATUS_OK) {
+                return status;
+            }
+            InkpodDocumentInfo document{};
+            document.struct_size = sizeof(document);
+            InkpodEditorStateInfo editor{};
+            editor.struct_size = sizeof(editor);
+            const InkpodStatus document_status =
+                inkpod_core_get_document_info(core, &document);
+            const InkpodStatus editor_status =
+                inkpod_core_get_editor_state(core, &editor);
+            return document_status == INKPOD_STATUS_OK
+                && editor_status == INKPOD_STATUS_OK
+                && impl->StoreDocumentAndEditorState(binding, document, editor)
+                ? INKPOD_STATUS_OK
+                : INKPOD_STATUS_INVALID_STATE;
+        },
+        false,
+        false);
+}
+
 InkpodStatus CoreHost::RegisterColorArray(
     DocumentSessionId session,
     Generation generation,

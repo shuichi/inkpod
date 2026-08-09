@@ -305,6 +305,7 @@ impl Core {
                 layer_id: target_layer_id.get(),
                 plane_id: target_plane_id.get(),
             }),
+            None,
         )?;
         let after_state = self.allocate_state()?;
         let mut changes = Vec::with_capacity(plan.edits.len());

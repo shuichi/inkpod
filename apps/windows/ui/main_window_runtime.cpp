@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
@@ -775,6 +776,153 @@ void SelectLayerPalettePlane(void* context, std::uint64_t plane_id) noexcept {
     UpdateMenuState(*state);
 }
 
+void ToggleLayerPaletteTarget(
+    void* context,
+    std::uint64_t id,
+    bool plane,
+    bool range) noexcept {
+    auto* state = ActivateWorkspaceContext(context);
+    if (state == nullptr || state->engine == nullptr || id == 0U
+        || !state->RefreshEditorPresentation(
+            state->Document().id, state->Document().generation)) {
+        return;
+    }
+    const InkpodEditorStateInfo* editor = PresentedEditorState(*state);
+    if (editor == nullptr) {
+        return;
+    }
+    std::vector<InkpodEditTarget> targets;
+    if (state->engine->GetEditTargets(
+            state->Document().id,
+            state->Document().generation,
+            targets) != INKPOD_STATUS_OK) {
+        return;
+    }
+    const std::uint64_t layer_id = plane
+        ? state->Workspace().panes.active_tree_layer_id
+        : id;
+    const auto same_target = [=](const InkpodEditTarget& target) noexcept {
+        return plane
+            ? target.kind == INKPOD_EDIT_TARGET_PLANE
+                && target.layer_id == layer_id && target.plane_id == id
+            : target.kind == INKPOD_EDIT_TARGET_LAYER
+                && target.layer_id == id;
+    };
+    const auto exact = std::find_if(targets.begin(), targets.end(), same_target);
+    const auto parent = plane
+        ? std::find_if(
+              targets.begin(),
+              targets.end(),
+              [=](const InkpodEditTarget& target) noexcept {
+                  return target.kind == INKPOD_EDIT_TARGET_LAYER
+                      && target.layer_id == layer_id;
+              })
+        : targets.end();
+    if (parent != targets.end()) {
+        targets.erase(parent);
+        for (const auto& item : state->Workspace().panes.layer_palette_dialog.plane_items) {
+            if (item.id != id) {
+                targets.push_back(InkpodEditTarget{
+                    sizeof(InkpodEditTarget),
+                    INKPOD_EDIT_TARGET_PLANE,
+                    layer_id,
+                    item.id,
+                    0U});
+            }
+        }
+    } else if (exact != targets.end() && !range) {
+        targets.erase(exact);
+    } else {
+        const auto& items = plane
+            ? state->Workspace().panes.layer_palette_dialog.plane_items
+            : state->Workspace().panes.layer_palette_dialog.items;
+        const auto target_item = std::find_if(
+            items.begin(), items.end(), [=](const auto& item) { return item.id == id; });
+        if (target_item == items.end()) {
+            return;
+        }
+        std::size_t first = static_cast<std::size_t>(
+            std::distance(items.begin(), target_item));
+        std::size_t last = first;
+        if (range) {
+            const std::uint64_t anchor = plane
+                ? state->Workspace().panes.layer_palette_dialog.selected_plane_id
+                : state->Workspace().panes.layer_palette_dialog.selected_layer_id;
+            const auto anchor_item = std::find_if(
+                items.begin(), items.end(), [=](const auto& item) { return item.id == anchor; });
+            if (anchor_item != items.end()) {
+                last = static_cast<std::size_t>(
+                    std::distance(items.begin(), anchor_item));
+                if (first > last) {
+                    std::swap(first, last);
+                }
+            }
+        }
+        for (std::size_t index = first; index <= last; ++index) {
+            const InkpodEditTarget candidate{
+                sizeof(InkpodEditTarget),
+                plane ? INKPOD_EDIT_TARGET_PLANE : INKPOD_EDIT_TARGET_LAYER,
+                plane ? layer_id : items[index].id,
+                plane ? items[index].id : 0U,
+                0U};
+            if (std::none_of(
+                    targets.begin(), targets.end(), [&](const InkpodEditTarget& target) {
+                        return target.kind == candidate.kind
+                            && target.layer_id == candidate.layer_id
+                            && target.plane_id == candidate.plane_id;
+                    })) {
+                targets.push_back(candidate);
+            }
+        }
+    }
+    const InkpodStatus status = state->engine->SetEditTargets(
+        state->Document().id,
+        state->Document().generation,
+        editor->editor_revision,
+        targets);
+    if (status != INKPOD_STATUS_OK) {
+        ShowCoreError(*state, state->Workspace().windows.window, L"編集対象の変更");
+    } else {
+        RefreshTreePane(*state);
+    }
+    UpdateMenuState(*state);
+}
+
+InkpodStatus ApplyGroupedEditTargetCommand(
+    ApplicationHost& state,
+    std::uint32_t operation,
+    std::uint64_t flags,
+    std::uint32_t kind,
+    std::uint32_t pixel_format,
+    bool& applied) noexcept {
+    applied = false;
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    std::vector<InkpodEditTarget> targets;
+    InkpodStatus status = state.engine->GetEditTargets(
+        state.Document().id, state.Document().generation, targets);
+    if (status != INKPOD_STATUS_OK || targets.empty()) {
+        return status;
+    }
+    applied = true;
+    const InkpodEditTargetCommand command{
+        sizeof(InkpodEditTargetCommand),
+        operation,
+        flags,
+        kind,
+        pixel_format,
+        0U};
+    InkpodDispatchResult result{};
+    std::vector<InkpodEditTarget> outputs;
+    return state.engine->ApplyEditTargetCommand(
+        state.Document().id,
+        state.Document().generation,
+        command,
+        result,
+        outputs);
+}
+
 void ReorderLayerPaletteLayer(
     void* context,
     std::uint64_t layer_id,
@@ -1333,6 +1481,13 @@ bool RefreshTreePane(ApplicationHost& state) noexcept {
     std::vector<TreePaneNode> planes;
     const std::uint64_t requested_layer_id = editor->active_layer_id;
     const std::uint64_t requested_plane_id = editor->active_plane_id;
+    std::vector<InkpodEditTarget> edit_targets;
+    if (state.engine->GetEditTargets(
+            state.Document().id,
+            state.Document().generation,
+            edit_targets) != INKPOD_STATUS_OK) {
+        return false;
+    }
     std::uint32_t selected_layer_index{};
     DocumentPanesController controller(*state.engine);
     const InkpodStatus status = controller.LoadTree(
@@ -1351,6 +1506,7 @@ bool RefreshTreePane(ApplicationHost& state) noexcept {
             state.Workspace().panes.layer_palette,
             layers,
             planes,
+            edit_targets,
             0U,
             0U,
             state.Workspace().windows.workspace.layer_split_milli);
@@ -1417,6 +1573,7 @@ bool RefreshTreePane(ApplicationHost& state) noexcept {
         state.Workspace().panes.layer_palette,
         layers,
         planes,
+        edit_targets,
         state.Workspace().panes.active_tree_layer_id,
         state.Workspace().panes.active_tree_plane_id,
         state.Workspace().windows.workspace.layer_split_milli);
@@ -3231,9 +3388,22 @@ InkpodStatus BeginFloatingPaste(ApplicationHost& state, std::uint32_t mode) noex
         && mode == INKPOD_PASTE_COMPATIBLE) {
         status = controller.Begin(clipboard, INKPOD_PASTE_ACTIVE_CONVERTED);
     }
-    return status == INKPOD_STATUS_OK
-        ? ActivateFloatingPastePreview(state, clipboard)
-        : status;
+    if (status != INKPOD_STATUS_OK) {
+        if (state.lifetime.smoke_test) {
+            const std::wstring detail = state.engine->LastError();
+            std::fwprintf(
+                stderr,
+                L"inkpod floating paste begin failed: %u (%ls)\n",
+                status,
+                detail.c_str());
+        }
+        return status;
+    }
+    status = ActivateFloatingPastePreview(state, clipboard);
+    if (status != INKPOD_STATUS_OK && state.lifetime.smoke_test) {
+        std::fprintf(stderr, "inkpod floating paste preview failed: %u\n", status);
+    }
+    return status;
 }
 
 InkpodStatus BeginFloatingPasteToNewPlane(
@@ -5470,6 +5640,27 @@ void UpdateMainWindowStatus(
                 ? L"文書なし"
                 : ((info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U ? L"変更あり" : L"保存済み"));
     }
+    if (!has_progress && has_document && state.engine != nullptr) {
+        std::vector<InkpodEditTarget> edit_targets;
+        if (state.engine->GetEditTargets(
+                state.Document().id,
+                state.Document().generation,
+                edit_targets) == INKPOD_STATUS_OK
+            && !edit_targets.empty()) {
+            std::array<wchar_t, 48U> target_text{};
+            _snwprintf_s(
+                target_text.data(),
+                target_text.size(),
+                _TRUNCATE,
+                L" | 編集対象 %zu",
+                edit_targets.size());
+            wcsncat_s(
+                state_text.data(),
+                state_text.size(),
+                target_text.data(),
+                _TRUNCATE);
+        }
+    }
     StatusBarPresentation presentation{};
     presentation.parts[0] = tool_text.data();
     presentation.parts[1] = zoom_text.data();
@@ -5498,6 +5689,55 @@ void UpdateMenuState(ApplicationHost& state) noexcept {
     // This is the only state computation. Every interactive surface below reads
     // the same immutable result; no tool or preview transition happens here.
     state.Workspace().command_states = ComputeCommandStates(inputs);
+    if (has_document && state.engine != nullptr) {
+        std::vector<InkpodEditTarget> edit_targets;
+        InkpodEditTargetCapabilities capabilities{};
+        capabilities.struct_size = sizeof(capabilities);
+        if (state.engine->GetEditTargets(
+                state.Document().id,
+                state.Document().generation,
+                edit_targets) == INKPOD_STATUS_OK
+            && !edit_targets.empty()
+            && state.engine->GetEditTargetCapabilities(
+                   state.Document().id,
+                   state.Document().generation,
+                   capabilities) == INKPOD_STATUS_OK) {
+            for (auto& command_state : state.Workspace().command_states) {
+                bool capable = true;
+                switch (command_state.command) {
+                    case IDM_LAYER_DUPLICATE:
+                    case IDM_PLANE_DUPLICATE:
+                        capable = capabilities.can_duplicate != 0U;
+                        break;
+                    case IDM_LAYER_DELETE:
+                    case IDM_PLANE_DELETE:
+                        capable = capabilities.can_delete != 0U;
+                        break;
+                    case IDM_LAYER_TOGGLE_VISIBLE:
+                    case IDM_PLANE_TOGGLE_VISIBLE:
+                        capable = capabilities.can_set_visibility != 0U;
+                        break;
+                    case IDM_LAYER_TOGGLE_EDITABLE:
+                    case IDM_PLANE_TOGGLE_EDITABLE:
+                        capable = capabilities.can_set_editability != 0U;
+                        break;
+                    case IDM_LAYER_MERGE:
+                    case IDM_PLANE_MERGE:
+                        capable = capabilities.can_merge != 0U;
+                        break;
+                    case IDM_LAYER_CONVERT:
+                        capable = capabilities.can_convert_layers != 0U;
+                        break;
+                    case IDM_PLANE_CONVERT:
+                        capable = capabilities.can_convert_planes != 0U;
+                        break;
+                    default:
+                        break;
+                }
+                command_state.enabled = command_state.enabled && capable;
+            }
+        }
+    }
     const CommandContext command_context = state.routing.targets.Capture();
     state.routing.command_state_context = command_context;
     for (auto& command_state : state.Workspace().command_states) {
@@ -10057,6 +10297,7 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     layer_dialog.select_plane = SelectLayerPalettePlane;
     layer_dialog.reorder_layer = ReorderLayerPaletteLayer;
     layer_dialog.reorder_plane = ReorderLayerPalettePlane;
+    layer_dialog.toggle_target = ToggleLayerPaletteTarget;
     layer_dialog.change_split = ChangeLayerPaletteSplit;
     layer_dialog.visibility_changed = NotifyLayerPaletteVisibilityChanged;
     layer_dialog.split_milli = state.Workspace().windows.workspace.layer_split_milli;
@@ -11320,14 +11561,19 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             const std::uint64_t source_id = state->Workspace().panes.active_tree_layer_id != 0U
                 ? state->Workspace().panes.active_tree_layer_id
                 : (QueryDocument(*state, info) ? info.layer_id : 0U);
-            InkpodStatus status = source_id != 0U
-                ? ApplyTreeEdit(
-                      *state,
-                      INKPOD_TREE_DUPLICATE_LAYER,
-                      source_id,
-                      0U,
-                      duplicate_id)
-                : INKPOD_STATUS_INVALID_STATE;
+            bool grouped{};
+            InkpodStatus status = ApplyGroupedEditTargetCommand(
+                *state, INKPOD_EDIT_TARGET_DUPLICATE, 0U, 0U, 0U, grouped);
+            if (status == INKPOD_STATUS_OK && !grouped) {
+                status = source_id != 0U
+                    ? ApplyTreeEdit(
+                          *state,
+                          INKPOD_TREE_DUPLICATE_LAYER,
+                          source_id,
+                          0U,
+                          duplicate_id)
+                    : INKPOD_STATUS_INVALID_STATE;
+            }
             if (status == INKPOD_STATUS_OK) {
                 state->Document().shell.smoke_layer_id = duplicate_id;
                 if (!state->RefreshEditorPresentation(
@@ -11348,14 +11594,19 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             const std::uint64_t target = state->Workspace().panes.active_tree_layer_id != 0U
                 ? state->Workspace().panes.active_tree_layer_id
                 : state->Document().shell.smoke_layer_id;
-            InkpodStatus status = target == 0U
-                ? INKPOD_STATUS_INVALID_STATE
-                : ApplyTreeEdit(
-                      *state,
-                      INKPOD_TREE_DELETE_LAYER,
-                      target,
-                      0U,
-                      ignored);
+            bool grouped{};
+            InkpodStatus status = ApplyGroupedEditTargetCommand(
+                *state, INKPOD_EDIT_TARGET_DELETE, 0U, 0U, 0U, grouped);
+            if (status == INKPOD_STATUS_OK && !grouped) {
+                status = target == 0U
+                    ? INKPOD_STATUS_INVALID_STATE
+                    : ApplyTreeEdit(
+                          *state,
+                          INKPOD_TREE_DELETE_LAYER,
+                          target,
+                          0U,
+                          ignored);
+            }
             if (status == INKPOD_STATUS_OK) {
                 if (state->Document().shell.smoke_layer_id == target) {
                     state->Document().shell.smoke_layer_id = 0U;
@@ -11418,8 +11669,31 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         case IDM_LAYER_TOGGLE_VISIBLE:
         case IDM_LAYER_TOGGLE_EDITABLE:
         case IDM_LAYER_OPACITY: {
-            const InkpodStatus status = SetSelectedTreeNodeProperties(
-                *state, false, LOWORD(wparam));
+            InkpodStatus status{};
+            bool grouped{};
+            if (LOWORD(wparam) != IDM_LAYER_OPACITY) {
+                TreePaneNode node{};
+                if (!QueryTreeNode(*state, false, node)) {
+                    status = INKPOD_STATUS_INVALID_STATE;
+                } else {
+                    const bool visible = LOWORD(wparam) == IDM_LAYER_TOGGLE_VISIBLE;
+                    const bool value = visible
+                        ? (node.flags & INKPOD_NODE_VISIBLE) == 0U
+                        : (node.flags & INKPOD_NODE_EDITABLE) == 0U;
+                    status = ApplyGroupedEditTargetCommand(
+                        *state,
+                        visible ? INKPOD_EDIT_TARGET_SET_VISIBILITY
+                                : INKPOD_EDIT_TARGET_SET_EDITABILITY,
+                        value ? 1U : 0U,
+                        0U,
+                        0U,
+                        grouped);
+                }
+            }
+            if (status == INKPOD_STATUS_OK && !grouped) {
+                status = SetSelectedTreeNodeProperties(
+                    *state, false, LOWORD(wparam));
+            }
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
                 ShowCoreError(*state, window, L"レイヤープロパティ");
             }
@@ -11452,7 +11726,17 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             edit.object_id = state->Workspace().panes.active_tree_layer_id;
             edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
             std::uint64_t ignored{};
-            InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            bool grouped{};
+            InkpodStatus status = ApplyGroupedEditTargetCommand(
+                *state,
+                INKPOD_EDIT_TARGET_CONVERT_LAYERS,
+                0U,
+                edit.kind,
+                0U,
+                grouped);
+            if (status == INKPOD_STATUS_OK && !grouped) {
+                status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            }
             if (status == INKPOD_STATUS_OK
                 && !state->RefreshEditorPresentation(
                     state->Document().id, state->Document().generation)) {
@@ -11470,7 +11754,12 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             edit.operation = INKPOD_TREE_MERGE_LAYER;
             edit.object_id = state->Workspace().panes.active_tree_layer_id;
             std::uint64_t ignored{};
-            InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            bool grouped{};
+            InkpodStatus status = ApplyGroupedEditTargetCommand(
+                *state, INKPOD_EDIT_TARGET_MERGE, 0U, 0U, 0U, grouped);
+            if (status == INKPOD_STATUS_OK && !grouped) {
+                status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            }
             if (status == INKPOD_STATUS_OK
                 && !state->RefreshEditorPresentation(
                     state->Document().id, state->Document().generation)) {
@@ -11582,12 +11871,27 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
                     std::max(0, count - 1), static_cast<int>(destination) + 1));
             }
             std::uint64_t object_id{};
-            InkpodStatus status = ApplyTreeEdit(
-                *state,
-                operation,
-                state->Workspace().panes.active_tree_plane_id,
-                destination,
-                object_id);
+            bool grouped{};
+            InkpodStatus status = INKPOD_STATUS_OK;
+            if (command == IDM_PLANE_DUPLICATE || command == IDM_PLANE_DELETE) {
+                status = ApplyGroupedEditTargetCommand(
+                    *state,
+                    command == IDM_PLANE_DUPLICATE
+                        ? INKPOD_EDIT_TARGET_DUPLICATE
+                        : INKPOD_EDIT_TARGET_DELETE,
+                    0U,
+                    0U,
+                    0U,
+                    grouped);
+            }
+            if (status == INKPOD_STATUS_OK && !grouped) {
+                status = ApplyTreeEdit(
+                    *state,
+                    operation,
+                    state->Workspace().panes.active_tree_plane_id,
+                    destination,
+                    object_id);
+            }
             if (status == INKPOD_STATUS_OK
                 && !state->RefreshEditorPresentation(
                     state->Document().id, state->Document().generation)) {
@@ -11602,8 +11906,31 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
         case IDM_PLANE_TOGGLE_VISIBLE:
         case IDM_PLANE_TOGGLE_EDITABLE:
         case IDM_PLANE_OPACITY: {
-            const InkpodStatus status = SetSelectedTreeNodeProperties(
-                *state, true, LOWORD(wparam));
+            InkpodStatus status{};
+            bool grouped{};
+            if (LOWORD(wparam) != IDM_PLANE_OPACITY) {
+                TreePaneNode node{};
+                if (!QueryTreeNode(*state, true, node)) {
+                    status = INKPOD_STATUS_INVALID_STATE;
+                } else {
+                    const bool visible = LOWORD(wparam) == IDM_PLANE_TOGGLE_VISIBLE;
+                    const bool value = visible
+                        ? (node.flags & INKPOD_NODE_VISIBLE) == 0U
+                        : (node.flags & INKPOD_NODE_EDITABLE) == 0U;
+                    status = ApplyGroupedEditTargetCommand(
+                        *state,
+                        visible ? INKPOD_EDIT_TARGET_SET_VISIBILITY
+                                : INKPOD_EDIT_TARGET_SET_EDITABILITY,
+                        value ? 1U : 0U,
+                        0U,
+                        0U,
+                        grouped);
+                }
+            }
+            if (status == INKPOD_STATUS_OK && !grouped) {
+                status = SetSelectedTreeNodeProperties(
+                    *state, true, LOWORD(wparam));
+            }
             if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
                 ShowCoreError(*state, window, L"プレーンプロパティ");
             }
@@ -11648,7 +11975,17 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             edit.kind = static_cast<std::uint32_t>(dialog.values[0]);
             edit.pixel_format = static_cast<std::uint32_t>(dialog.values[1]);
             std::uint64_t ignored{};
-            const InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            bool grouped{};
+            InkpodStatus status = ApplyGroupedEditTargetCommand(
+                *state,
+                INKPOD_EDIT_TARGET_CONVERT_PLANES,
+                0U,
+                edit.kind,
+                edit.pixel_format,
+                grouped);
+            if (status == INKPOD_STATUS_OK && !grouped) {
+                status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            }
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"プレーン変換");
             }
@@ -11661,7 +11998,12 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             edit.operation = INKPOD_TREE_MERGE_PLANE;
             edit.object_id = state->Workspace().panes.active_tree_plane_id;
             std::uint64_t ignored{};
-            InkpodStatus status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            bool grouped{};
+            InkpodStatus status = ApplyGroupedEditTargetCommand(
+                *state, INKPOD_EDIT_TARGET_MERGE, 0U, 0U, 0U, grouped);
+            if (status == INKPOD_STATUS_OK && !grouped) {
+                status = ApplyTreeEditRecord(*state, edit, {}, ignored);
+            }
             if (status == INKPOD_STATUS_OK
                 && !state->RefreshEditorPresentation(
                     state->Document().id, state->Document().generation)) {

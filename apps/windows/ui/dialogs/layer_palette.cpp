@@ -413,6 +413,11 @@ void DrawItem(
         draw.hDC,
         &draw.rcItem,
         GetSysColorBrush(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW));
+    if (item.edit_target) {
+        RECT marker = draw.rcItem;
+        marker.right = marker.left + std::max(3, ScaleForDpi(4, GetDpiForWindow(draw.hwndItem)));
+        FillRect(draw.hDC, &marker, GetSysColorBrush(COLOR_HOTLIGHT));
+    }
     RECT inner = draw.rcItem;
     const UINT dpi = GetDpiForWindow(draw.hwndItem);
     const int margin = ScaleForDpi(kMargin, dpi);
@@ -527,6 +532,19 @@ LRESULT CALLBACK ListSubclassProcedure(
             const POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
             const int index = ItemFromPoint(list, point);
             if (index < 0) break;
+            const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            if ((control || shift) && state->toggle_target != nullptr) {
+                const auto& items = ItemsFor(*state, plane);
+                if (static_cast<std::size_t>(index) < items.size()) {
+                    state->toggle_target(
+                        state->context,
+                        items[static_cast<std::size_t>(index)].id,
+                        plane,
+                        shift);
+                }
+                return 0;
+            }
             SelectItem(list, *state, index);
             RECT client{};
             GetClientRect(list, &client);
@@ -552,6 +570,22 @@ LRESULT CALLBACK ListSubclassProcedure(
             InvalidateRect(list, nullptr, FALSE);
             break;
         }
+        case WM_KEYDOWN:
+            if (state != nullptr && wparam == VK_SPACE
+                && state->toggle_target != nullptr) {
+                const int index = static_cast<int>(
+                    SendMessageW(list, LB_GETCURSEL, 0, 0));
+                const auto& items = ItemsFor(*state, plane);
+                if (index >= 0 && static_cast<std::size_t>(index) < items.size()) {
+                    state->toggle_target(
+                        state->context,
+                        items[static_cast<std::size_t>(index)].id,
+                        plane,
+                        (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+                    return 0;
+                }
+            }
+            break;
         case WM_MOUSEMOVE:
             if (state != nullptr && GetCapture() == list
                 && state->drag_source >= 0) {
@@ -687,7 +721,7 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
             if (state == nullptr || state->dispatch_command == nullptr
                 || state->select_layer == nullptr || state->select_plane == nullptr
                 || state->reorder_layer == nullptr || state->reorder_plane == nullptr
-                || state->change_split == nullptr) {
+                || state->change_split == nullptr || state->toggle_target == nullptr) {
                 return FALSE;
             }
             SetWindowLongPtrW(
@@ -790,10 +824,26 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
 }
 
 std::vector<LayerPaletteItem> MakeItems(
-    const std::vector<panes::TreePaneNode>& nodes) {
+    const std::vector<panes::TreePaneNode>& nodes,
+    const std::vector<InkpodEditTarget>& targets,
+    bool plane,
+    std::uint64_t layer_id) {
     std::vector<LayerPaletteItem> items;
     items.reserve(nodes.size());
     for (const auto& node : nodes) {
+        const bool target = std::any_of(
+            targets.begin(),
+            targets.end(),
+            [&](const InkpodEditTarget& candidate) {
+                return plane
+                    ? (candidate.kind == INKPOD_EDIT_TARGET_LAYER
+                           && candidate.layer_id == layer_id)
+                        || (candidate.kind == INKPOD_EDIT_TARGET_PLANE
+                            && candidate.layer_id == layer_id
+                            && candidate.plane_id == node.id)
+                    : candidate.kind == INKPOD_EDIT_TARGET_LAYER
+                        && candidate.layer_id == node.id;
+            });
         items.push_back(LayerPaletteItem{
             node.id,
             node.index,
@@ -802,6 +852,7 @@ std::vector<LayerPaletteItem> MakeItems(
             node.opacity_milli,
             node.child_count,
             node.flags,
+            target,
             Utf8ToWide(node.name),
             node.thumbnail_width,
             node.thumbnail_height,
@@ -823,7 +874,9 @@ void PopulateList(
             list,
             LB_ADDSTRING,
             0,
-            reinterpret_cast<LPARAM>(items[index].name.c_str()));
+            reinterpret_cast<LPARAM>((items[index].edit_target
+                ? std::wstring{L"[編集対象] "} + items[index].name
+                : items[index].name).c_str()));
         if (added == LB_ERR || added == LB_ERRSPACE) {
             SendMessageW(list, LB_RESETCONTENT, 0, 0);
             break;
@@ -857,6 +910,7 @@ void UpdateLayerPaletteDialog(
     HWND dialog,
     const std::vector<panes::TreePaneNode>& layers,
     const std::vector<panes::TreePaneNode>& planes,
+    const std::vector<InkpodEditTarget>& edit_targets,
     std::uint64_t selected_layer_id,
     std::uint64_t selected_plane_id,
     std::uint32_t split_milli) noexcept {
@@ -866,8 +920,9 @@ void UpdateLayerPaletteDialog(
     }
     try {
         state->updating = true;
-        state->items = MakeItems(layers);
-        state->plane_items = MakeItems(planes);
+        state->items = MakeItems(layers, edit_targets, false, 0U);
+        state->plane_items = MakeItems(
+            planes, edit_targets, true, selected_layer_id);
         state->selected_layer_id = selected_layer_id;
         state->selected_plane_id = selected_plane_id;
         state->split_milli = std::clamp<std::uint32_t>(split_milli, 200U, 800U);

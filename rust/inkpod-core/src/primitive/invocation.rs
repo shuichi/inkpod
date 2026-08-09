@@ -79,6 +79,10 @@ pub(crate) enum CanonicalInvocation {
         layer_id: u64,
     },
     DeleteHiddenLayers,
+    EditTargets {
+        targets: Vec<EditTarget>,
+        command: EditTargetCommand,
+    },
     AddGuide {
         axis: GuideAxis,
         position: i32,
@@ -524,6 +528,33 @@ fn decode_persistent_invocation(
         }
     } else if primitive_id == PrimitiveId::DELETE_HIDDEN_LAYERS {
         CanonicalInvocation::DeleteHiddenLayers
+    } else if primitive_id == PrimitiveId::EDIT_TARGETS {
+        let count = usize::try_from(reader.u32()?)
+            .map_err(|_| CoreError::Format("edit-target count is not representable".to_owned()))?;
+        if count == 0 || count > MAX_EDIT_TARGETS {
+            return Err(CoreError::Format(
+                "invalid canonical edit-target count".to_owned(),
+            ));
+        }
+        let mut targets = Vec::with_capacity(count);
+        for _ in 0..count {
+            targets.push(match reader.u32()? {
+                1 => EditTarget::Layer(reader.u64()?),
+                2 => EditTarget::Plane(EditorTarget {
+                    layer_id: reader.u64()?,
+                    plane_id: reader.u64()?,
+                }),
+                _ => {
+                    return Err(CoreError::Format(
+                        "unknown canonical edit-target kind".to_owned(),
+                    ));
+                }
+            });
+        }
+        CanonicalInvocation::EditTargets {
+            targets,
+            command: read_edit_target_command(&mut reader)?,
+        }
     } else if primitive_id == PrimitiveId::ADD_GUIDE {
         CanonicalInvocation::AddGuide {
             axis: reader.guide_axis()?,
@@ -969,6 +1000,7 @@ impl CanonicalInvocation {
             Self::ConvertLayer { .. } => PrimitiveId::CONVERT_LAYER,
             Self::MergeLayer { .. } => PrimitiveId::MERGE_LAYER,
             Self::DeleteHiddenLayers => PrimitiveId::DELETE_HIDDEN_LAYERS,
+            Self::EditTargets { .. } => PrimitiveId::EDIT_TARGETS,
             Self::AddGuide { .. } => PrimitiveId::ADD_GUIDE,
             Self::MoveGuide { .. } => PrimitiveId::MOVE_GUIDE,
             Self::DeleteGuide { .. } => PrimitiveId::DELETE_GUIDE,
@@ -1041,6 +1073,13 @@ impl CanonicalInvocation {
             | Self::SetLayerProperties { layer_id, .. }
             | Self::ConvertLayer { layer_id, .. }
             | Self::MergeLayer { layer_id } => vec![*layer_id],
+            Self::EditTargets { targets, .. } => targets
+                .iter()
+                .flat_map(|target| match target {
+                    EditTarget::Layer(layer_id) => vec![*layer_id],
+                    EditTarget::Plane(target) => vec![target.layer_id, target.plane_id],
+                })
+                .collect(),
             Self::CreatePlane { layer_id, .. } => vec![*layer_id],
             Self::DuplicatePlane { plane_id }
             | Self::DeletePlane { plane_id }
@@ -1074,7 +1113,9 @@ impl CanonicalInvocation {
             Self::UpdateAdjustmentLayer { layer_id, .. } => vec![*layer_id],
             Self::SelectionFromLayer { layer_id, .. } => vec![*layer_id],
             Self::CommitFloating { floating } => match &floating.destination {
-                FloatingDestination::ExistingPlane(plane_id) => vec![plane_id.get()],
+                FloatingDestination::ExistingPlanes(plane_ids) => {
+                    plane_ids.iter().map(|plane_id| plane_id.get()).collect()
+                }
                 FloatingDestination::NewPlane { layer_id, .. } => vec![layer_id.get()],
             },
             Self::VectorAddPath { plane_id, .. }
@@ -1217,6 +1258,21 @@ impl CanonicalInvocation {
                 .merge_layer_into_below(*layer_id)
                 .map(InvocationResult::dispatch),
             Self::DeleteHiddenLayers => core.delete_hidden_layers().map(InvocationResult::dispatch),
+            Self::EditTargets { targets, command } => core
+                .apply_edit_target_command_to(targets.clone(), *command)
+                .map(|result| {
+                    InvocationResult::outputs(
+                        result.dispatch,
+                        result
+                            .output_targets
+                            .iter()
+                            .map(|target| match target {
+                                EditTarget::Layer(layer_id) => *layer_id,
+                                EditTarget::Plane(target) => target.plane_id,
+                            })
+                            .collect(),
+                    )
+                }),
             Self::AddGuide { axis, position } => core
                 .add_guide(*axis, *position)
                 .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
@@ -1369,11 +1425,9 @@ impl CanonicalInvocation {
             } => core
                 .selection_from_layer(*layer_id, *operation)
                 .map(InvocationResult::dispatch),
-            Self::ClearSelectedContent { target } => {
-                set_runtime_editor_target(core, *target)?;
-                core.clear_selected_content()
-                    .map(InvocationResult::dispatch)
-            }
+            Self::ClearSelectedContent { target } => core
+                .clear_selected_content_for_editor_target(*target)
+                .map(InvocationResult::dispatch),
             Self::CommitFloating { floating } => {
                 core.floating = Some(floating.clone());
                 core.commit_floating().map(InvocationResult::dispatch)
@@ -1515,6 +1569,25 @@ impl CanonicalInvocation {
             | Self::DeleteLayer { layer_id }
             | Self::MergeLayer { layer_id } => writer.u64(*layer_id),
             Self::DeleteHiddenLayers => {}
+            Self::EditTargets { targets, command } => {
+                writer.u32(u32::try_from(targets.len()).map_err(|_| {
+                    CoreError::InvalidArgument("edit-target count is not representable")
+                })?);
+                for target in targets {
+                    match target {
+                        EditTarget::Layer(layer_id) => {
+                            writer.u32(1);
+                            writer.u64(*layer_id);
+                        }
+                        EditTarget::Plane(target) => {
+                            writer.u32(2);
+                            writer.u64(target.layer_id);
+                            writer.u64(target.plane_id);
+                        }
+                    }
+                }
+                write_edit_target_command(&mut writer, *command);
+            }
             Self::ReorderLayer {
                 layer_id,
                 destination_index,
@@ -2037,6 +2110,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::CONVERT_LAYER.get()
         || value == PrimitiveId::MERGE_LAYER.get()
         || value == PrimitiveId::DELETE_HIDDEN_LAYERS.get()
+        || value == PrimitiveId::EDIT_TARGETS.get()
         || value == PrimitiveId::ADD_GUIDE.get()
         || value == PrimitiveId::MOVE_GUIDE.get()
         || value == PrimitiveId::DELETE_GUIDE.get()
@@ -2756,7 +2830,17 @@ impl<'a> CanonicalReader<'a> {
 
     fn floating(&mut self) -> Result<FloatingSelection, CoreError> {
         let destination = match self.u8()? {
-            0 => FloatingDestination::ExistingPlane(PlaneId::from_raw(self.u64()?)),
+            0 => {
+                let count = self.count(8)?;
+                if count == 0 || count > MAX_PLANES_PER_LAYER {
+                    return Err(self.invalid("canonical floating destination count is invalid"));
+                }
+                let mut plane_ids = Vec::with_capacity(count);
+                for _ in 0..count {
+                    plane_ids.push(PlaneId::from_raw(self.u64()?));
+                }
+                FloatingDestination::ExistingPlanes(plane_ids)
+            }
             1 => FloatingDestination::NewPlane {
                 layer_id: LayerId::from_raw(self.u64()?),
                 kind: self.plane_type()?,
@@ -2784,12 +2868,38 @@ impl<'a> CanonicalReader<'a> {
                     value: self.pixel()?,
                 });
             }
+            let path_count = self.count(32)?;
+            let mut vector_paths = Vec::with_capacity(path_count);
+            for _ in 0..path_count {
+                let id = self.u64()?;
+                let plane_id = self.u64()?;
+                let input = self.vector_path()?;
+                vector_paths.push(VectorPathInfo {
+                    id,
+                    plane_id,
+                    segments: input.segments,
+                    color: input.color,
+                    closed: input.closed,
+                });
+            }
+            let fill_count = self.count(32)?;
+            let mut vector_fills = Vec::with_capacity(fill_count);
+            for _ in 0..fill_count {
+                vector_fills.push(VectorFillInfo {
+                    id: self.u64()?,
+                    plane_id: self.u64()?,
+                    color: self.pixel()?,
+                    boundary_path_ids: self.ids()?,
+                });
+            }
             planes.push(ClipboardPlane {
                 kind,
                 pixel_format,
                 origin_x,
                 origin_y,
                 pixels,
+                vector_paths,
+                vector_fills,
             });
         }
         let translate_x = self.q16_f64()?;
@@ -3519,9 +3629,14 @@ impl CanonicalWriter {
 
     fn floating(&mut self, floating: &FloatingSelection) -> Result<(), CoreError> {
         match &floating.destination {
-            FloatingDestination::ExistingPlane(plane_id) => {
+            FloatingDestination::ExistingPlanes(plane_ids) => {
                 self.u8(0);
-                self.u64(plane_id.get());
+                self.u32(u32::try_from(plane_ids.len()).map_err(|_| {
+                    CoreError::InvalidArgument("canonical destination count is not representable")
+                })?);
+                for plane_id in plane_ids {
+                    self.u64(plane_id.get());
+                }
             }
             FloatingDestination::NewPlane {
                 layer_id,
@@ -3556,6 +3671,27 @@ impl CanonicalWriter {
                 self.i32(pixel.x);
                 self.i32(pixel.y);
                 self.pixel(pixel.value);
+            }
+            self.u32(u32::try_from(plane.vector_paths.len()).map_err(|_| {
+                CoreError::InvalidArgument("canonical clipboard has too many vector paths")
+            })?);
+            for path in &plane.vector_paths {
+                self.u64(path.id);
+                self.u64(path.plane_id);
+                self.vector_path(&VectorPathInput {
+                    segments: path.segments.clone(),
+                    color: path.color,
+                    closed: path.closed,
+                })?;
+            }
+            self.u32(u32::try_from(plane.vector_fills.len()).map_err(|_| {
+                CoreError::InvalidArgument("canonical clipboard has too many vector fills")
+            })?);
+            for fill in &plane.vector_fills {
+                self.u64(fill.id);
+                self.u64(fill.plane_id);
+                self.pixel(fill.color);
+                self.ids(&fill.boundary_path_ids)?;
             }
         }
         self.q16_f64(floating.transform.translate_x)?;
@@ -3667,30 +3803,51 @@ impl CanonicalWriter {
     }
 }
 
-fn set_runtime_editor_target(core: &mut Core, target: EditorTarget) -> Result<(), CoreError> {
-    let document = core.document.as_ref().ok_or(CoreError::NoDocument)?;
-    let layer = document
-        .layers
-        .iter()
-        .find(|layer| layer.id.get() == target.layer_id)
-        .ok_or(CoreError::InvalidArgument(
-            "captured layer ID does not exist",
-        ))?;
-    if !layer
-        .planes
-        .iter()
-        .any(|plane| plane.id.get() == target.plane_id)
-    {
-        return Err(CoreError::InvalidArgument(
-            "captured plane ID does not belong to its layer",
-        ));
+fn write_edit_target_command(writer: &mut CanonicalWriter, command: EditTargetCommand) {
+    match command {
+        EditTargetCommand::Duplicate => writer.u32(1),
+        EditTargetCommand::Delete => writer.u32(2),
+        EditTargetCommand::SetVisibility(value) => {
+            writer.u32(3);
+            writer.boolean(value);
+        }
+        EditTargetCommand::SetEditability(value) => {
+            writer.u32(4);
+            writer.boolean(value);
+        }
+        EditTargetCommand::ConvertPlanes { kind, format } => {
+            writer.u32(5);
+            writer.u32(plane_type_code(kind));
+            writer.u32(pixel_format_code(format));
+        }
+        EditTargetCommand::ConvertLayers { kind } => {
+            writer.u32(6);
+            writer.u32(layer_kind_code(kind));
+        }
+        EditTargetCommand::Merge => writer.u32(7),
     }
-    let session = core
-        .editor_session
-        .as_mut()
-        .ok_or(CoreError::InvalidState("editor state is unavailable"))?;
-    session.state.target = Some(target);
-    Ok(())
+}
+
+fn read_edit_target_command(
+    reader: &mut CanonicalReader<'_>,
+) -> Result<EditTargetCommand, CoreError> {
+    match reader.u32()? {
+        1 => Ok(EditTargetCommand::Duplicate),
+        2 => Ok(EditTargetCommand::Delete),
+        3 => Ok(EditTargetCommand::SetVisibility(reader.boolean()?)),
+        4 => Ok(EditTargetCommand::SetEditability(reader.boolean()?)),
+        5 => Ok(EditTargetCommand::ConvertPlanes {
+            kind: reader.plane_type()?,
+            format: reader.pixel_format()?,
+        }),
+        6 => Ok(EditTargetCommand::ConvertLayers {
+            kind: reader.layer_kind()?,
+        }),
+        7 => Ok(EditTargetCommand::Merge),
+        _ => Err(CoreError::Format(
+            "unknown canonical edit-target command".to_owned(),
+        )),
+    }
 }
 
 const fn layer_kind_code(value: LayerKind) -> u32 {

@@ -304,6 +304,16 @@ typedef uint32_t InkpodTypedPlaneKind;
 #define INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE UINT32_C(5)
 #define INKPOD_TYPED_PLANE_COLOR_TRACE UINT32_C(6)
 #define INKPOD_TYPED_PLANE_VECTOR_FILL UINT32_C(7)
+#define INKPOD_EDIT_TARGET_LAYER UINT32_C(1)
+#define INKPOD_EDIT_TARGET_PLANE UINT32_C(2)
+#define INKPOD_EDIT_TARGET_DUPLICATE UINT32_C(1)
+#define INKPOD_EDIT_TARGET_DELETE UINT32_C(2)
+#define INKPOD_EDIT_TARGET_SET_VISIBILITY UINT32_C(3)
+#define INKPOD_EDIT_TARGET_SET_EDITABILITY UINT32_C(4)
+#define INKPOD_EDIT_TARGET_CONVERT_PLANES UINT32_C(5)
+#define INKPOD_EDIT_TARGET_CONVERT_LAYERS UINT32_C(6)
+#define INKPOD_EDIT_TARGET_MERGE UINT32_C(7)
+#define INKPOD_MAX_EDIT_TARGETS UINT32_C(4096)
 
 #define INKPOD_VECTOR_PATH_CLOSED (UINT64_C(1) << 0)
 /** @brief vector 消去範囲のモード型。 */
@@ -1125,6 +1135,38 @@ typedef struct InkpodEditorStrokeInput {
     uint64_t sample_count;
     uint64_t sample_stride_bytes;
 } InkpodEditorStrokeInput;
+
+/** Core-owned grouped edit target. Caller storage is never retained. */
+typedef struct InkpodEditTarget {
+    uint32_t struct_size;
+    uint32_t kind;
+    uint64_t layer_id;
+    uint64_t plane_id; /**< layer target では 0。 */
+    uint64_t reserved;
+} InkpodEditTarget;
+
+/** One grouped layer/plane command. `flags` is the boolean value for SET operations. */
+typedef struct InkpodEditTargetCommand {
+    uint32_t struct_size;
+    uint32_t operation;
+    uint64_t flags;
+    uint32_t kind;
+    uint32_t pixel_format;
+    uint64_t reserved;
+} InkpodEditTargetCommand;
+
+/** @brief 現在の有効な編集対象集合に対する副作用のない capability matrix。 */
+typedef struct InkpodEditTargetCapabilities {
+    uint32_t struct_size;
+    uint32_t can_duplicate;
+    uint32_t can_delete;
+    uint32_t can_set_visibility;
+    uint32_t can_set_editability;
+    uint32_t can_merge;
+    uint32_t can_convert_planes;
+    uint32_t can_convert_layers;
+    uint32_t reserved;
+} InkpodEditTargetCapabilities;
 
 /**
  * @brief fill の演算、色、seed、選択範囲、包含色 span を渡す borrowed 入力。
@@ -2355,6 +2397,51 @@ InkpodStatus inkpod_core_update_editor_state(
     InkpodCore* core,
     const InkpodEditorStateUpdate* update,
     InkpodEditorStateInfo* out_state);
+
+/**
+ * Persisted grouped edit targetsをdocument tree順でcaller-owned strided storageへ複写する。
+ * capacity 0/NULLはsize query。Rustはstorageを保持せず、active targetは集合へ暗黙追加しない。
+ */
+InkpodStatus inkpod_core_get_edit_targets(
+    InkpodCore* core,
+    InkpodEditTarget* targets,
+    uint64_t capacity,
+    uint64_t target_stride_bytes,
+    uint64_t* out_count);
+
+/**
+ * @brief 現在の有効な編集対象集合の capability matrix を caller-owned record へ返す。
+ *
+ * Core owner thread 限定の read-only query で、revision、履歴、ID を変更しない。
+ */
+InkpodStatus inkpod_core_get_edit_target_capabilities(
+    InkpodCore* core,
+    InkpodEditTargetCapabilities* output);
+
+/**
+ * exact EditorRevisionに対してbounded/unique grouped target setを置換する。
+ * spanはcall中だけ借用し、Coreが検証・tree-order正規化したowned setだけを保持する。
+ */
+InkpodStatus inkpod_core_set_edit_targets(
+    InkpodCore* core,
+    uint64_t expected_editor_revision,
+    const InkpodEditTarget* targets,
+    uint64_t target_count,
+    uint64_t target_stride_bytes,
+    InkpodEditorStateInfo* out_state);
+
+/**
+ * grouped target commandを一つのcanonical procedure/transaction/Undo単位として適用する。
+ * duplicate/merge出力はcaller-owned strided storageへ返し、capacity不足時は変更前に失敗する。
+ */
+InkpodStatus inkpod_core_apply_edit_target_command(
+    InkpodCore* core,
+    const InkpodEditTargetCommand* command,
+    InkpodDispatchResult* result,
+    InkpodEditTarget* output_targets,
+    uint64_t output_capacity,
+    uint64_t output_stride_bytes,
+    uint64_t* out_output_count);
 
 /**
  * @brief Core-owned EditorStateのexact tool/color/diameter/stable targetでstrokeを開始する。

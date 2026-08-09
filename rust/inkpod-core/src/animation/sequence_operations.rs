@@ -207,7 +207,7 @@ impl Core {
         let revision = self.next_document_revision()?;
         let mut next_id = self.next_id;
         let document = Self::document_from_sequence_source(&source, revision, &mut next_id)?;
-        let editor = self.stage_reconciled_editor_target(&document, None)?;
+        let editor = self.stage_reconciled_editor_target(&document, None, None)?;
         self.sequence
             .as_mut()
             .ok_or(CoreError::InvalidState("sequence disappeared"))?

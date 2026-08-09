@@ -95,6 +95,12 @@ impl Core {
             "a document editor frame requires an active target",
         ))?;
         self.validate_editor_target(target)?;
+        let normalized = self.normalize_edit_targets(&decoded.state.edit_targets)?;
+        if normalized != decoded.state.edit_targets {
+            return Err(CoreError::InvalidArgument(
+                "editor edit targets are not in canonical document-tree order",
+            ));
+        }
         let savepoint = match disposition {
             EditorFrameDisposition::Saved => Some(decoded.digest),
             EditorFrameDisposition::Unsaved => None,
@@ -140,6 +146,7 @@ impl Core {
         let target = self.document.as_ref().and_then(Self::first_editor_target);
         let mut state = self.editor_defaults.state.clone();
         state.target = target;
+        state.edit_targets.clear();
         let digest = state_digest(&state);
         self.editor_session = Some(EditorSessionState {
             state,
@@ -186,6 +193,7 @@ impl Core {
         &self,
         document: &CellDocument,
         preferred: Option<EditorTarget>,
+        preferred_edit_targets: Option<&[EditTarget]>,
     ) -> Result<Option<EditorSessionState>, CoreError> {
         let resolved = preferred
             .filter(|target| Self::document_has_editor_target(document, *target))
@@ -199,7 +207,9 @@ impl Core {
         let Some(session) = self.editor_session.as_ref() else {
             return Ok(None);
         };
-        if session.state.target == resolved {
+        let source_targets = preferred_edit_targets.unwrap_or(&session.state.edit_targets);
+        let edit_targets = Self::normalize_edit_targets_in(document, source_targets, false)?;
+        if session.state.target == resolved && session.state.edit_targets == edit_targets {
             return Ok(None);
         }
         let revision = session
@@ -208,6 +218,7 @@ impl Core {
             .ok_or(CoreError::InvalidState("editor revision overflow"))?;
         let mut state = session.state.clone();
         state.target = resolved;
+        state.edit_targets = edit_targets;
         validate_state(&state)?;
         let digest = state_digest(&state);
         let savepoint = session.savepoint;
@@ -265,6 +276,9 @@ impl Core {
                 self.validate_editor_target(target)?;
                 state.target = Some(target);
             }
+            EditorStateUpdate::SetEditTargets(targets) => {
+                state.edit_targets = self.normalize_edit_targets(&targets)?;
+            }
             EditorStateUpdate::SetPaletteCursor(cursor) => state.palette_cursor = cursor,
         }
         Ok(())
@@ -289,6 +303,75 @@ impl Core {
                     .iter()
                     .any(|plane| plane.id.get() == target.plane_id)
         })
+    }
+
+    pub(crate) fn effective_edit_targets(&self) -> Result<Vec<EditTarget>, CoreError> {
+        let state = &self
+            .editor_session
+            .as_ref()
+            .ok_or(CoreError::NoDocument)?
+            .state;
+        if state.edit_targets.is_empty() {
+            Ok(state.target.map(EditTarget::Plane).into_iter().collect())
+        } else {
+            Ok(state.edit_targets.clone())
+        }
+    }
+
+    fn normalize_edit_targets(&self, targets: &[EditTarget]) -> Result<Vec<EditTarget>, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        Self::normalize_edit_targets_in(document, targets, true)
+    }
+
+    pub(crate) fn normalize_edit_targets_in(
+        document: &CellDocument,
+        targets: &[EditTarget],
+        reject_missing: bool,
+    ) -> Result<Vec<EditTarget>, CoreError> {
+        if targets.len() > MAX_EDIT_TARGETS {
+            return Err(CoreError::InvalidArgument(
+                "editor edit-target count exceeds the supported maximum",
+            ));
+        }
+        let requested = targets
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut normalized = Vec::with_capacity(requested.len());
+        let mut matched = std::collections::BTreeSet::new();
+        for layer in &document.layers {
+            let layer_target = EditTarget::Layer(layer.id.get());
+            if requested.contains(&layer_target) {
+                normalized.push(layer_target);
+                matched.insert(layer_target);
+                for plane in &layer.planes {
+                    let child = EditTarget::Plane(EditorTarget {
+                        layer_id: layer.id.get(),
+                        plane_id: plane.id.get(),
+                    });
+                    if requested.contains(&child) {
+                        matched.insert(child);
+                    }
+                }
+                continue;
+            }
+            for plane in &layer.planes {
+                let target = EditTarget::Plane(EditorTarget {
+                    layer_id: layer.id.get(),
+                    plane_id: plane.id.get(),
+                });
+                if requested.contains(&target) {
+                    normalized.push(target);
+                    matched.insert(target);
+                }
+            }
+        }
+        if reject_missing && matched.len() != requested.len() {
+            return Err(CoreError::InvalidArgument(
+                "editor edit target does not exist in the document",
+            ));
+        }
+        Ok(normalized)
     }
 
     fn first_editor_target(document: &CellDocument) -> Option<EditorTarget> {

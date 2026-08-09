@@ -107,3 +107,38 @@ pub struct InkpodEditorStrokeInput {
     pub sample_count: u64,
     pub sample_stride_bytes: u64,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodEditTarget {
+    pub struct_size: u32,
+    pub kind: u32,
+    pub layer_id: u64,
+    pub plane_id: u64,
+    pub reserved: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodEditTargetCommand {
+    pub struct_size: u32,
+    pub operation: u32,
+    pub flags: u64,
+    pub kind: u32,
+    pub pixel_format: u32,
+    pub reserved: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodEditTargetCapabilities {
+    pub struct_size: u32,
+    pub can_duplicate: u32,
+    pub can_delete: u32,
+    pub can_set_visibility: u32,
+    pub can_set_editability: u32,
+    pub can_merge: u32,
+    pub can_convert_planes: u32,
+    pub can_convert_layers: u32,
+    pub reserved: u32,
+}

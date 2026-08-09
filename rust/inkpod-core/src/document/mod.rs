@@ -4,6 +4,7 @@ use super::*;
 use crate::transform::{convert_main_line_raster, convert_plane_raster, merge_raster};
 
 mod model;
+mod multi_target;
 mod operations;
 mod validation;
 

@@ -26,6 +26,61 @@ impl DispatchOutcome {
     }
 }
 
+/// One atomic command applied to the Core-owned grouped edit-target set.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EditTargetCommand {
+    /// Duplicates every target immediately after its source.
+    Duplicate,
+    /// Deletes every target while retaining valid document topology.
+    Delete,
+    /// Replaces visibility for every target.
+    SetVisibility(bool),
+    /// Replaces editability for every target.
+    SetEditability(bool),
+    /// Converts every selected raster plane to one typed representation.
+    ConvertPlanes {
+        /// Destination semantic plane kind.
+        kind: PlaneType,
+        /// Destination exact-depth pixel format.
+        format: PixelFormat,
+    },
+    /// Converts every selected coloring layer to one representation.
+    ConvertLayers {
+        /// Destination layer kind.
+        kind: LayerKind,
+    },
+    /// Merges one selected upper node into its immediately lower selected sibling.
+    Merge,
+}
+
+/// Atomic grouped edit result and any newly selected output nodes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EditTargetCommandResult {
+    /// Revision and accepted-command metadata.
+    pub dispatch: DispatchOutcome,
+    /// Tree-ordered targets produced by duplicate or merge.
+    pub output_targets: Vec<EditTarget>,
+}
+
+/// Side-effect-free capability matrix for the current grouped target set.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EditTargetCapabilities {
+    /// All targets can be duplicated atomically.
+    pub duplicate: bool,
+    /// All targets can be deleted without invalidating topology.
+    pub delete: bool,
+    /// Visibility can be changed for every target.
+    pub visibility: bool,
+    /// Editability can be changed for every target.
+    pub editability: bool,
+    /// The target set is a supported adjacent merge pair.
+    pub merge: bool,
+    /// Every target is a raster plane eligible for explicit conversion.
+    pub convert_planes: bool,
+    /// Every target is a coloring layer eligible for explicit conversion.
+    pub convert_layers: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// The conventional raster plane targeted by paint operations.
 pub enum ActivePlane {
@@ -329,7 +384,7 @@ pub struct ClipboardPixel {
     pub value: PixelValue,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// Clipboard samples and metadata for one plane.
 pub struct ClipboardPlane {
     /// Semantic role of the source plane.
@@ -342,9 +397,13 @@ pub struct ClipboardPlane {
     pub origin_y: i32,
     /// Owned non-transparent pixel samples.
     pub pixels: Vec<ClipboardPixel>,
+    /// Owned vector paths when this is a vector plane.
+    pub vector_paths: Vec<VectorPathInfo>,
+    /// Owned vector fills whose boundaries are entirely present in `vector_paths`.
+    pub vector_fills: Vec<VectorFillInfo>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// Application clipboard payload preserving document-space plane structure.
 pub struct ClipboardPayload {
     /// UUID of the source document.

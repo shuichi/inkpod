@@ -193,7 +193,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M02 — PM-GAP-003: 完全な制作条件による新規セル作成
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: DOC-001、SESSION-001、IO-001。
 
@@ -252,7 +252,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M03 — PM-GAP-006: 複数レイヤー／プレーンの一体編集
 
-状態: 未着手
+状態: 手動確認待ち
 
 関連要件: DOC-002、DOC-003、CLIP-001。
 

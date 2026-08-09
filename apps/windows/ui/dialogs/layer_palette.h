@@ -19,6 +19,7 @@ struct LayerPaletteItem {
     std::uint32_t opacity_milli{};
     std::uint32_t plane_count{};
     std::uint32_t flags{};
+    bool edit_target{};
     std::wstring name;
     std::uint32_t thumbnail_width{};
     std::uint32_t thumbnail_height{};
@@ -34,6 +35,8 @@ using LayerPaletteReorderCallback = void (*)(
 using LayerPaletteSplitCallback = void (*)(
     void* context, std::uint32_t split_milli) noexcept;
 using LayerPaletteVisibilityCallback = void (*)(void* context) noexcept;
+using LayerPaletteTargetCallback = void (*)(
+    void* context, std::uint64_t id, bool plane, bool range) noexcept;
 
 struct LayerPaletteDialogState {
     void* context{};
@@ -45,6 +48,7 @@ struct LayerPaletteDialogState {
     LayerPaletteReorderCallback reorder_plane{};
     LayerPaletteSplitCallback change_split{};
     LayerPaletteVisibilityCallback visibility_changed{};
+    LayerPaletteTargetCallback toggle_target{};
     std::vector<LayerPaletteItem> items;
     std::vector<LayerPaletteItem> plane_items;
     std::uint64_t selected_layer_id{};
@@ -69,6 +73,7 @@ void UpdateLayerPaletteDialog(
     HWND dialog,
     const std::vector<panes::TreePaneNode>& layers,
     const std::vector<panes::TreePaneNode>& planes,
+    const std::vector<InkpodEditTarget>& edit_targets,
     std::uint64_t selected_layer_id,
     std::uint64_t selected_plane_id,
     std::uint32_t split_milli) noexcept;

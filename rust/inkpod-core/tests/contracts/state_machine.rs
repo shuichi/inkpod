@@ -1501,6 +1501,8 @@ fn cancel_sessions_and_cancellable_fill_restore_the_common_observation() {
                 y: 0,
                 value: PixelValue::Rgba([1, 2, 3, 255]),
             }],
+            vector_paths: Vec::new(),
+            vector_fills: Vec::new(),
         }],
     };
     core.begin_paste(&payload).unwrap();

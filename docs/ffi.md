@@ -95,7 +95,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 コピーされる。NULL、短いレコード、パニックでは通常の ABI ステータス契約に従い、出力を部分更新しない。
 スレッド違反が成立するのは Core 所有スレッド専用のリプレイ契約照会だけであり、スナップショットの
 ダイジェスト照会は、外部同期された任意の読み取りスレッドから呼び出せる。これらは検証値を公開するだけで、
-製品の保存／オープン API は同じ v10 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
+製品の保存／オープン API は同じ v11 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
 現行 ABI v6 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
@@ -107,7 +107,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 ジャーナルの正確なダイジェストを返す。UI は履歴件数を表示して確認を得た後、そのレコードを変更せずに
 `inkpod_core_write_compacted_copy` へ渡す。書き込み時に確認トークンが古ければ `INVALID_STATE`、
 トークンのフラグまたは予約領域が 0 でなければ `UNSUPPORTED` になる。成功時は、現在状態を新しい Genesis
-とする別の v10 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
+とする別の v11 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
 `CoreHost` は三つの操作すべてを Core エンジンキュー経由で実行する。自動的な履歴圧縮は行わず、`CKPT` は
 履歴やアセット保持の正本ではない。Windows では `ファイル > 履歴を破棄してコピー...` として公開し、
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
@@ -444,6 +444,36 @@ Core へ送らない。対象の再割り当て、クローズ、終了処理で
 
 ## EditorDefaults / EditorState（現行 ABI v6）
 
+### 複数 edit target
+
+- `InkpodEditTarget` は kind（Layer/Plane）と document 所属の stable Layer ID、
+  必要な Plane ID だけを持つ caller-owned value record である。
+  `inkpod_core_get_edit_targets` は二段階の count query と `count/capacity/stride`
+  付き出力を使い、`inkpod_core_set_edit_targets` は完全な入力 span を呼び出し中に
+  Core 所有の bounded collection へコピーする。呼び出し後に pointer は保持しない。
+- count は 0..4,096、stride は `sizeof(InkpodEditTarget)` 以上かつ alignment の倍数、
+  各 `struct_size` は完全長以上、reserved は 0 とする。空 span は NULL/count 0/
+  stride 0 の組だけを受理する。Core は重複を除き document tree 順へ正規化し、
+  foreign、deleted、cross-layer、oversized、malformed target を公開前に拒否する。
+- `inkpod_core_set_edit_targets` は exact `EditorRevision` を precondition とする。
+  成功して集合の意味が変わった場合だけ EditorRevision、EditorStateDigest、editor
+  dirty を進め、document revision、StateId、history、journal、document dirty、stable
+  ID は変えない。active row/active plane は集合とは独立する。
+- `inkpod_core_get_edit_target_capabilities` は現在の effective target set に対する
+  duplicate/delete/visibility/editability/merge/plane-convert/layer-convert の matrix を
+  `InkpodEditTargetCapabilities` へコピーする read-only query である。
+- `inkpod_core_apply_edit_target_command` は一つの command を一つの canonical
+  invocation/transaction/Undo 単位として実行し、duplicate/merge の tree-ordered
+  出力 target を caller-owned strided span へ返す。必要容量の query では
+  `INKPOD_STATUS_BUFFER_TOO_SMALL` と必要 count だけを返し、document を変更しない。
+  invalid、incompatible、stale、overflow、failure は結果 span、revision、history、ID
+  を部分公開しない。
+- これらは Core owner thread 限定で、Windows `CoreHost` は issue-time の
+  `DocumentSessionId + Generation` を固定して query/update/command を実行する。
+  private clipboard handle は ordered raster/vector plane payload、document origin、型、
+  8/16-bit 値、vector path/fill topology を Rust 側で所有し、paste/cancel/release まで
+  C++ が内部 pointer を参照しない。
+
 次の八つの Core 所有スレッド用 API と固定幅レコードは ABI v2 以降に追加され、現行 ABI v6 に保持されている。
 ABI v2 のライブラリや呼び出し側を受理するという意味ではない。
 
@@ -520,7 +550,7 @@ Core は、Genesis の安定した文書 ID、別個の Cell ID、不変の基�
 アセット／サンプル ID に変換する。閉じた型付きキューに格納するのは、`CommandContext`、基準リビジョン、
 対象、オペコード／スキーマ、固定値、ID だけであり、呼び出し側バッファは作業項目に入れない。
 
-V10 は `GENS` / `ASST` に、アセットを基底とする Genesis と、保持対象の全分岐のアセットグラフを保存する。
+V11 は `GENS` / `ASST` に、アセットを基底とする Genesis と、保持対象の全分岐のアセットグラフを保存する。
 通常保存、自動保存／復旧、バッチによる `.inkpod` 出力、再オープンは、同じ Core 所有の対応付けを使う。
 Windows アダプターは成功後だけ、現在のパス、最近使ったファイル一覧、未保存表示を更新する。一般画像への
 平坦化エクスポートは別の出力経路である。
@@ -557,10 +587,10 @@ Core はセッションを無効化するため、フロントエンドはスト
 | ストローク終了、プレビュー適用、浮動状態の確定                 | 実変更時に 1 回進む  | 未保存                            | 高々 1 単位                       |
 | 直接の文書編集                                                | 実変更時に 1 回進む  | 未保存                            | 原則 1 単位                       |
 | Undo／Redo／履歴位置の移動                                    | 結果状態へ進む       | 保存点との位置で再計算            | カーソルを移動し項目は増やさない  |
-| 現行 v10 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
+| 現行 v11 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
 | 自動保存                                                      | 不変                 | 不変                              | 不変                              |
 | 新規作成／インポート                                          | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis／履歴              |
-| v10 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
+| v11 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
 
 意味上の変更がない場合の厳密な出力やリビジョンは、各関数の Doxygen 契約に従う。フロントエンドはファイル時刻ではなく、
 Core が返す文書フラグと保存点に基づいて未保存状態を表示する。
@@ -676,7 +706,7 @@ UI スレッド:                 照会／照会／キャンセル
 
 ## 保存、自動保存、復旧
 
-通常保存では、v10 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
+通常保存では、v11 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
 セクション、チェックポイントの作成条件を満たす場合だけ任意の `CKPT` を構築する。保存後に設定予定の
 文書／EditorState 保存点を含むコンテナは、同じディレクトリの一時ファイルへ複数回に分けて書き込む。
 フラッシュ、同期、クローズを終えてから置換する。成功後だけ通常保存パスと両保存点を Core へ公開するため、
@@ -685,7 +715,7 @@ EditorState だけが
 どちらの保存点も変更しない。
 
 自動保存とエクスポートは、出力を原子的に書いても通常保存パス、文書／EditorState 保存点、未保存状態を
-変えない。通常の v10 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
+変えない。通常の v11 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
 ID 発行状態、EditorState、両保存点を、段階的に構築した Core で検証・復元してから、現在の Core 状態を
 一回だけ置換する。`InkpodCore` の `_v3` 付きオブジェクトレジストリの世代自体は、オープンで更新されない。
 

@@ -19,7 +19,7 @@ cache invalidation を同時公開する形へ統一した。preview、stroke、
 文書全体の置換は、それぞれ固有の長寿命 staging/lifecycle 境界を維持した。
 
 その後、別個の Cell ID、不変 Genesis、内容アドレス方式 asset、型付き canonical procedure、
-append-only journal、cache-free replay、cross-architecture digest、現行 v10 container と任意 CKPT が
+append-only journal、cache-free replay、cross-architecture digest、現行 v11 container と任意 CKPT が
 順に接続された。M0 の関数一覧、移行 wave、当時の例外一覧、test 件数は完了時点で陳腐化したため、
 現行 route は [`primitive-route-inventory.md`](primitive-route-inventory.md)、現行 transaction と
 journal は [`architecture.md`](architecture.md) を正本とする。
@@ -49,7 +49,7 @@ procedure/control-event journal を表現できなかった。
 
 この形式は互換 reader を持たず廃止された。現行 reader は v2 を payload decode 前に拒否し、v2 の
 header flag、section、DTO、checksum は現行 bytes の一部ではない。現行の唯一の形式契約は
-[`file-format.md`](file-format.md) の v10 である。
+[`file-format.md`](file-format.md) の v11 である。
 
 ## `revision-max` 採用と性能校正
 

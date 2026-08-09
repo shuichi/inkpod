@@ -279,47 +279,109 @@ impl Core {
     /// Coordinates and half-open bounds remain in document space. The query does
     /// not change revision, history, selection, or dirty state.
     pub fn copy_selection(&self) -> Result<ClipboardPayload, CoreError> {
-        let (_, active_plane_id) = self.active_editor_target_ids()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let bounds = mask_bounds(&document.selection)?
             .ok_or(CoreError::InvalidState("selection is empty"))?;
-        let plane = document
-            .plane_by_id(active_plane_id)
-            .ok_or(CoreError::InvalidState("active plane is missing"))?;
-        if !matches!(
-            plane.kind,
-            PlaneType::MainLine | PlaneType::Color | PlaneType::Raster | PlaneType::Selection
-        ) {
-            return Err(CoreError::InvalidState("active plane is not copyable"));
-        }
-        let mut pixels = Vec::new();
-        for y in bounds.y..bounds.y + bounds.height {
-            for x in bounds.x..bounds.x + bounds.width {
-                let (Ok(x_u32), Ok(y_u32)) = (u32::try_from(x), u32::try_from(y)) else {
-                    continue;
-                };
-                if !matches!(
-                    document.selection.pixel(x_u32, y_u32)?,
-                    PixelValue::Binary(255)
-                ) {
-                    continue;
+        let vector_selection = self.vector_select(bounds, VectorSelectionMode::FullyContained)?;
+        let selected_path_ids = vector_selection
+            .path_ranges
+            .iter()
+            .map(|range| range.path_id)
+            .collect::<BTreeSet<_>>();
+        let vector_paths = self.vector_paths()?;
+        let vector_fills = self.vector_fills()?;
+        let targets = self.effective_edit_targets()?;
+        let mut selected_planes = BTreeSet::new();
+        for target in targets {
+            match target {
+                EditTarget::Layer(layer_id) => {
+                    let layer = document
+                        .layers
+                        .iter()
+                        .find(|layer| layer.id.get() == layer_id)
+                        .ok_or(CoreError::InvalidArgument(
+                            "clipboard layer target is missing",
+                        ))?;
+                    selected_planes.extend(layer.planes.iter().map(|plane| plane.id));
                 }
-                let value = plane.raster.pixel(x_u32, y_u32)?;
-                if !value.is_zero() {
-                    pixels.push(ClipboardPixel { x, y, value });
+                EditTarget::Plane(target) => {
+                    selected_planes.insert(PlaneId::from_raw(target.plane_id));
                 }
             }
         }
-        Ok(ClipboardPayload {
-            source_document_uuid: document.uuid,
-            bounds,
-            planes: vec![ClipboardPlane {
+        let mut planes = Vec::new();
+        for plane in document.layers.iter().flat_map(|layer| &layer.planes) {
+            if !selected_planes.contains(&plane.id) {
+                continue;
+            }
+            if !matches!(
+                plane.kind,
+                PlaneType::MainLine
+                    | PlaneType::Color
+                    | PlaneType::Raster
+                    | PlaneType::Selection
+                    | PlaneType::VectorMainLine
+                    | PlaneType::ColorTrace
+                    | PlaneType::VectorFill
+            ) {
+                return Err(CoreError::InvalidState(
+                    "an edit target is not copyable as raster content",
+                ));
+            }
+            let mut pixels = Vec::new();
+            for y in bounds.y..bounds.y + bounds.height {
+                for x in bounds.x..bounds.x + bounds.width {
+                    let (Ok(x_u32), Ok(y_u32)) = (u32::try_from(x), u32::try_from(y)) else {
+                        continue;
+                    };
+                    if !matches!(
+                        document.selection.pixel(x_u32, y_u32)?,
+                        PixelValue::Binary(255)
+                    ) {
+                        continue;
+                    }
+                    let value = plane.raster.pixel(x_u32, y_u32)?;
+                    if !value.is_zero() {
+                        pixels.push(ClipboardPixel { x, y, value });
+                    }
+                }
+            }
+            planes.push(ClipboardPlane {
                 kind: plane.kind,
                 pixel_format: plane.raster.format(),
                 origin_x: bounds.x,
                 origin_y: bounds.y,
                 pixels,
-            }],
+                vector_paths: vector_paths
+                    .iter()
+                    .filter(|path| {
+                        path.plane_id == plane.id.get() && selected_path_ids.contains(&path.id)
+                    })
+                    .cloned()
+                    .collect(),
+                vector_fills: vector_fills
+                    .iter()
+                    .filter(|fill| {
+                        fill.plane_id == plane.id.get()
+                            && !fill.boundary_path_ids.is_empty()
+                            && fill
+                                .boundary_path_ids
+                                .iter()
+                                .all(|path_id| selected_path_ids.contains(path_id))
+                    })
+                    .cloned()
+                    .collect(),
+            });
+        }
+        if planes.is_empty() {
+            return Err(CoreError::InvalidState(
+                "edit targets contain no copyable planes",
+            ));
+        }
+        Ok(ClipboardPayload {
+            source_document_uuid: document.uuid,
+            bounds,
+            planes,
         })
     }
 
@@ -355,56 +417,63 @@ impl Core {
         let active_destination = document
             .plane_by_id(active_plane_id)
             .ok_or(CoreError::InvalidState("active plane is missing"))?;
-        let compatible_source = |destination: &PlaneNode| {
-            payload.planes.iter().find(|plane| {
-                plane.kind == destination.kind && plane.pixel_format == destination.raster.format()
-            })
-        };
         let active_layer = document.layers.iter().find(|layer| {
             layer
                 .planes
                 .iter()
                 .any(|plane| plane.id == active_destination.id)
         });
-        let (destination, source) =
-            compatible_source(active_destination)
-                .map(|source| (active_destination, source))
-                .or_else(|| {
-                    active_layer.and_then(|layer| {
-                        layer.planes.iter().find_map(|plane| {
-                            compatible_source(plane).map(|source| (plane, source))
-                        })
-                    })
+        let mut candidates = vec![active_destination];
+        if let Some(layer) = active_layer {
+            candidates.extend(
+                layer
+                    .planes
+                    .iter()
+                    .filter(|plane| plane.id != active_destination.id),
+            );
+        }
+        let mut candidate_ids = candidates
+            .iter()
+            .map(|candidate| candidate.id)
+            .collect::<BTreeSet<_>>();
+        for plane in document.layers.iter().flat_map(|layer| &layer.planes) {
+            if candidate_ids.insert(plane.id) {
+                candidates.push(plane);
+            }
+        }
+        let mut used = BTreeSet::new();
+        let mut destinations = Vec::with_capacity(payload.planes.len());
+        for source in &payload.planes {
+            if source.pixels.len() as u64 > MAX_FILL_PIXELS
+                || source.pixels.iter().any(|pixel| {
+                    pixel.x < payload.bounds.x
+                        || pixel.y < payload.bounds.y
+                        || pixel.x >= payload.bounds.x + payload.bounds.width
+                        || pixel.y >= payload.bounds.y + payload.bounds.height
                 })
-                .or_else(|| {
-                    document.layers.iter().find_map(|layer| {
-                        layer.planes.iter().find_map(|plane| {
-                            compatible_source(plane).map(|source| (plane, source))
-                        })
-                    })
+            {
+                return Err(CoreError::InvalidArgument(
+                    "clipboard payload exceeds bounds or work limit",
+                ));
+            }
+            let destination = candidates
+                .iter()
+                .find(|destination| {
+                    !used.contains(&destination.id)
+                        && source.kind == destination.kind
+                        && source.pixel_format == destination.raster.format()
                 })
                 .ok_or(CoreError::InvalidArgument(
-                    "clipboard has no compatible typed destination payload",
+                    "clipboard plane has no compatible typed destination",
                 ))?;
-        if source.pixels.len() as u64 > MAX_FILL_PIXELS {
-            return Err(CoreError::InvalidArgument(
-                "clipboard payload exceeds work limit",
-            ));
-        }
-        if source.pixels.iter().any(|pixel| {
-            pixel.x < payload.bounds.x
-                || pixel.y < payload.bounds.y
-                || pixel.x >= payload.bounds.x + payload.bounds.width
-                || pixel.y >= payload.bounds.y + payload.bounds.height
-        }) {
-            return Err(CoreError::InvalidArgument(
-                "clipboard pixel lies outside its bounds",
-            ));
+            ensure_editable_plane(document, destination.id)?;
+            used.insert(destination.id);
+            destinations.push(destination.id);
         }
         let (staged_assets, asset_ids) = stage_clipboard_assets(self, payload)?;
         self.floating = Some(FloatingSelection {
             payload: payload.clone(),
-            destination: FloatingDestination::ExistingPlane(destination.id),
+            destination: FloatingDestination::ExistingPlanes(destinations),
             transform: FloatingTransform::default(),
             asset_ids,
         });
@@ -449,7 +518,7 @@ impl Core {
         let (staged_assets, asset_ids) = stage_clipboard_assets(self, &converted)?;
         self.floating = Some(FloatingSelection {
             payload: converted,
-            destination: FloatingDestination::ExistingPlane(destination.id),
+            destination: FloatingDestination::ExistingPlanes(vec![destination.id]),
             transform: FloatingTransform::default(),
             asset_ids,
         });
@@ -520,14 +589,17 @@ impl Core {
     /// Empty selection or already-clear pixels are a no-op. A real change is one
     /// undoable document edit; failures do not publish partial clearing.
     pub fn clear_selected_content(&mut self) -> Result<DispatchOutcome, CoreError> {
-        if !self.canonical_invocation_is_active() {
-            let target = self.active_editor_target()?;
-            return self
-                .execute_canonical_invocation(CanonicalInvocation::ClearSelectedContent { target })
-                .map(|result| result.dispatch);
-        }
+        let target = self.active_editor_target()?;
+        self.execute_canonical_invocation(CanonicalInvocation::ClearSelectedContent { target })
+            .map(|result| result.dispatch)
+    }
+
+    pub(crate) fn clear_selected_content_for_editor_target(
+        &mut self,
+        target: EditorTarget,
+    ) -> Result<DispatchOutcome, CoreError> {
         self.ensure_no_active_stroke()?;
-        let (_, plane_id) = self.active_editor_target_ids()?;
+        let (_, plane_id) = self.editor_target_ids(target)?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         ensure_editable_plane(document, plane_id)?;
         let zero = zero_pixel(
@@ -633,30 +705,45 @@ impl Core {
             self.validate_plane_creation(layer_id.get(), *kind, *format)?;
         }
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        let (destination_kind, destination_format) = match &floating.destination {
-            FloatingDestination::ExistingPlane(plane_id) => {
-                let destination =
-                    document
-                        .plane_by_id(*plane_id)
-                        .ok_or(CoreError::InvalidState(
-                            "paste destination no longer exists",
-                        ))?;
-                ensure_editable_plane(document, *plane_id)?;
-                (destination.kind, destination.raster.format())
+        let source_planes = match &floating.destination {
+            FloatingDestination::ExistingPlanes(plane_ids) => {
+                if plane_ids.len() != floating.payload.planes.len() || plane_ids.is_empty() {
+                    return Err(CoreError::InvalidArgument(
+                        "floating source/destination plane counts do not match",
+                    ));
+                }
+                let mut sources = Vec::with_capacity(plane_ids.len());
+                for (plane_id, source) in plane_ids.iter().zip(&floating.payload.planes) {
+                    let destination =
+                        document
+                            .plane_by_id(*plane_id)
+                            .ok_or(CoreError::InvalidState(
+                                "paste destination no longer exists",
+                            ))?;
+                    ensure_editable_plane(document, *plane_id)?;
+                    if source.kind != destination.kind
+                        || source.pixel_format != destination.raster.format()
+                    {
+                        return Err(CoreError::InvalidArgument(
+                            "clipboard plane no longer matches its typed destination",
+                        ));
+                    }
+                    sources.push(source);
+                }
+                sources
             }
-            FloatingDestination::NewPlane { kind, format, .. } => (*kind, *format),
+            FloatingDestination::NewPlane { kind, format, .. } => vec![
+                floating
+                    .payload
+                    .planes
+                    .iter()
+                    .find(|plane| plane.kind == *kind && plane.pixel_format == *format)
+                    .ok_or(CoreError::InvalidArgument(
+                        "compatible clipboard plane is missing",
+                    ))?,
+            ],
         };
-        let source = floating
-            .payload
-            .planes
-            .iter()
-            .find(|plane| {
-                plane.kind == destination_kind && plane.pixel_format == destination_format
-            })
-            .ok_or(CoreError::InvalidArgument(
-                "compatible clipboard plane is missing",
-            ))?;
-        let mut staged = BTreeMap::new();
+        let mut staged_planes = Vec::with_capacity(source_planes.len());
         use inkpod_image::{
             CANONICAL_DOCUMENT_ONE, canonical_q16_from_f64, canonical_turns_from_degrees_f64,
             ceil_div_i128, div_round_ties_even_i128, floor_div_i128, rotate_q16,
@@ -746,105 +833,150 @@ impl Core {
         let max_y = ceil_div_i128(i128::from(max_y_q16), i128::from(one))
             .unwrap()
             .min(i128::from(document.height.saturating_sub(1))) as i64;
-        if min_x <= max_x && min_y <= max_y {
-            let work = u64::try_from(max_x - min_x + 1)
-                .ok()
-                .and_then(|width| {
-                    u64::try_from(max_y - min_y + 1)
-                        .ok()
-                        .and_then(|height| width.checked_mul(height))
-                })
-                .ok_or(CoreError::InvalidArgument("floating work size overflows"))?;
-            if work > MAX_FILL_PIXELS {
-                return Err(CoreError::InvalidArgument(
-                    "floating transform exceeds the bounded work limit",
-                ));
-            }
-            let source_pixels: BTreeMap<_, _> = source
-                .pixels
-                .iter()
-                .map(|pixel| ((pixel.x, pixel.y), pixel.value))
-                .collect();
-            for y in min_y..=max_y {
-                for x in min_x..=max_x {
-                    let translated_x = x * one - center_x - translate_x;
-                    let translated_y = y * one - center_y - translate_y;
-                    let (unrotated_x, unrotated_y) =
-                        rotate_q16(translated_x, translated_y, turns.wrapping_neg()).ok_or(
-                            CoreError::InvalidArgument("floating inverse rotation overflowed"),
-                        )?;
-                    let source_x = i128::from(center_x)
-                        + div_round_ties_even_i128(
-                            i128::from(unrotated_x) * i128::from(one),
-                            i128::from(scale_x),
-                        )
-                        .ok_or(CoreError::InvalidArgument(
-                            "floating inverse scale overflowed",
-                        ))?;
-                    let source_y = i128::from(center_y)
-                        + div_round_ties_even_i128(
-                            i128::from(unrotated_y) * i128::from(one),
-                            i128::from(scale_y),
-                        )
-                        .ok_or(CoreError::InvalidArgument(
-                            "floating inverse scale overflowed",
-                        ))?;
-                    let source_coord = (
-                        div_round_ties_even_i128(source_x, i128::from(one))
-                            .and_then(|value| i32::try_from(value).ok())
-                            .ok_or(CoreError::InvalidArgument("floating source X overflowed"))?,
-                        div_round_ties_even_i128(source_y, i128::from(one))
-                            .and_then(|value| i32::try_from(value).ok())
-                            .ok_or(CoreError::InvalidArgument("floating source Y overflowed"))?,
-                    );
-                    if let Some(value) = source_pixels.get(&source_coord) {
-                        staged.insert((x as u32, y as u32), *value);
+        let mut contains_content = false;
+        for source in source_planes {
+            let mut staged = BTreeMap::new();
+            if min_x <= max_x && min_y <= max_y {
+                let work = u64::try_from(max_x - min_x + 1)
+                    .ok()
+                    .and_then(|width| {
+                        u64::try_from(max_y - min_y + 1)
+                            .ok()
+                            .and_then(|height| width.checked_mul(height))
+                    })
+                    .ok_or(CoreError::InvalidArgument("floating work size overflows"))?;
+                if work > MAX_FILL_PIXELS {
+                    return Err(CoreError::InvalidArgument(
+                        "floating transform exceeds the bounded work limit",
+                    ));
+                }
+                let source_pixels: BTreeMap<_, _> = source
+                    .pixels
+                    .iter()
+                    .map(|pixel| ((pixel.x, pixel.y), pixel.value))
+                    .collect();
+                for y in min_y..=max_y {
+                    for x in min_x..=max_x {
+                        let translated_x = x * one - center_x - translate_x;
+                        let translated_y = y * one - center_y - translate_y;
+                        let (unrotated_x, unrotated_y) =
+                            rotate_q16(translated_x, translated_y, turns.wrapping_neg()).ok_or(
+                                CoreError::InvalidArgument("floating inverse rotation overflowed"),
+                            )?;
+                        let source_x = i128::from(center_x)
+                            + div_round_ties_even_i128(
+                                i128::from(unrotated_x) * i128::from(one),
+                                i128::from(scale_x),
+                            )
+                            .ok_or(CoreError::InvalidArgument(
+                                "floating inverse scale overflowed",
+                            ))?;
+                        let source_y = i128::from(center_y)
+                            + div_round_ties_even_i128(
+                                i128::from(unrotated_y) * i128::from(one),
+                                i128::from(scale_y),
+                            )
+                            .ok_or(CoreError::InvalidArgument(
+                                "floating inverse scale overflowed",
+                            ))?;
+                        let source_coord = (
+                            div_round_ties_even_i128(source_x, i128::from(one))
+                                .and_then(|value| i32::try_from(value).ok())
+                                .ok_or(CoreError::InvalidArgument(
+                                    "floating source X overflowed",
+                                ))?,
+                            div_round_ties_even_i128(source_y, i128::from(one))
+                                .and_then(|value| i32::try_from(value).ok())
+                                .ok_or(CoreError::InvalidArgument(
+                                    "floating source Y overflowed",
+                                ))?,
+                        );
+                        if let Some(value) = source_pixels.get(&source_coord) {
+                            staged.insert((x as u32, y as u32), *value);
+                        }
                     }
                 }
             }
+            contains_content |= !staged.is_empty()
+                || !source.vector_paths.is_empty()
+                || !source.vector_fills.is_empty();
+            staged_planes.push(staged);
         }
-        if staged.is_empty() {
+        if !contains_content {
             return Err(CoreError::InvalidState(
                 "floating selection contains no content inside the destination paper",
             ));
         }
+        let payload_planes = floating.payload.planes;
         match floating.destination {
-            FloatingDestination::ExistingPlane(plane_id) => {
-                let revision = self.next_document_revision()?;
-                let after_state = self.allocate_state()?;
-                let document = self.document.as_mut().ok_or(CoreError::NoDocument)?;
-                let plane = document
-                    .plane_by_id_mut(plane_id)
-                    .ok_or(CoreError::InvalidState(
-                        "paste destination no longer exists",
-                    ))?;
-                let mut changes = Vec::with_capacity(staged.len());
-                for ((x, y), source_value) in staged {
-                    let before = plane.raster.pixel(x, y)?;
-                    let after = paste_value(before, source_value, plane.kind)?;
-                    if before != after {
-                        plane.raster.set_pixel(x, y, after, revision.get())?;
-                        changes.push(PixelChange {
-                            x,
-                            y,
-                            before,
-                            after,
-                        });
+            FloatingDestination::ExistingPlanes(plane_ids) => {
+                let mut next_id = self.next_id;
+                let mut edit = self.begin_document_edit()?;
+                let revision = edit.revision().get();
+                let after = edit.working_mut();
+                let width_scale = (scale_x as f64 + scale_y as f64) / (2.0 * one as f64);
+                let transform_vector_point = |point: PointF32| -> Result<PointF32, CoreError> {
+                    let x = canonical_q16_from_f64(f64::from(point.x)).ok_or(
+                        CoreError::InvalidArgument("clipboard vector X is outside canonical Q16"),
+                    )?;
+                    let y = canonical_q16_from_f64(f64::from(point.y)).ok_or(
+                        CoreError::InvalidArgument("clipboard vector Y is outside canonical Q16"),
+                    )?;
+                    let (x, y) = transform_point(x, y)?;
+                    Ok(PointF32 {
+                        x: (x as f64 / one as f64) as f32,
+                        y: (y as f64 / one as f64) as f32,
+                    })
+                };
+                let mut path_map = BTreeMap::new();
+                for ((plane_id, staged), source) in plane_ids
+                    .iter()
+                    .copied()
+                    .zip(staged_planes)
+                    .zip(&payload_planes)
+                {
+                    let plane = after
+                        .plane_by_id_mut(plane_id)
+                        .ok_or(CoreError::InvalidState(
+                            "paste destination no longer exists",
+                        ))?;
+                    for ((x, y), source_value) in staged {
+                        let before = plane.raster.pixel(x, y)?;
+                        let value = paste_value(before, source_value, plane.kind)?;
+                        if before != value {
+                            plane.raster.set_pixel(x, y, value, revision)?;
+                        }
                     }
+                    after.vector.paste_clipboard_paths(
+                        source,
+                        plane_id,
+                        |mut segment| {
+                            segment.p0 = transform_vector_point(segment.p0)?;
+                            segment.p1 = transform_vector_point(segment.p1)?;
+                            segment.p2 = transform_vector_point(segment.p2)?;
+                            segment.p3 = transform_vector_point(segment.p3)?;
+                            segment.width_start =
+                                (f64::from(segment.width_start) * width_scale) as f32;
+                            segment.width_end = (f64::from(segment.width_end) * width_scale) as f32;
+                            Ok(segment)
+                        },
+                        &mut next_id,
+                        &mut path_map,
+                    )?;
                 }
-                if changes.is_empty() {
-                    self.floating = None;
-                    self.assets = retained_assets;
-                    return Ok(self.noop_outcome());
+                for (plane_id, source) in plane_ids.iter().copied().zip(&payload_planes) {
+                    after.vector.paste_clipboard_fills(
+                        source,
+                        plane_id,
+                        &mut next_id,
+                        &path_map,
+                    )?;
                 }
-                self.document_revision = revision;
-                self.commit_pixel_history(plane_id, changes, after_state);
+                let outcome = edit.commit(self)?;
+                self.next_id = next_id;
                 self.floating = None;
                 self.assets = retained_assets;
-                Ok(DispatchOutcome {
-                    revision: revision.get(),
-                    accepted_commands: 1,
-                })
+                Ok(outcome)
             }
             FloatingDestination::NewPlane {
                 layer_id,
@@ -865,6 +997,10 @@ impl Core {
                     .ok_or(CoreError::InvalidArgument("layer ID does not exist"))?;
                 let mut raster = TileRaster::new(after.width, after.height, format)?;
                 let zero = zero_pixel(format)?;
+                let staged = staged_planes
+                    .into_iter()
+                    .next()
+                    .ok_or(CoreError::InvalidState("floating plane staging is missing"))?;
                 for ((x, y), source_value) in staged {
                     let value = paste_value(zero, source_value, kind)?;
                     if value != zero {

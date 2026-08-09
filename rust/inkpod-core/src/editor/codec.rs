@@ -7,7 +7,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
-const FRAME_SCHEMA: u32 = 1;
+const FRAME_SCHEMA: u32 = 2;
 const STATE_FIELD_COUNT: usize = 12;
 const EDIT_FIELD_COUNT: usize = 4;
 const DIGEST_CONTEXT: &str = "org.inkpod.digest.editor-state.v1";
@@ -68,6 +68,21 @@ pub(crate) fn decode_edit_frame(bytes: &[u8]) -> Result<DecodedEditFrame, CoreEr
 }
 
 pub(crate) fn validate_state(state: &EditorState) -> Result<(), CoreError> {
+    if state.edit_targets.len() > MAX_EDIT_TARGETS {
+        return Err(CoreError::InvalidArgument(
+            "editor edit-target count exceeds the supported maximum",
+        ));
+    }
+    let mut unique = std::collections::BTreeSet::new();
+    if state
+        .edit_targets
+        .iter()
+        .any(|target| !unique.insert(*target))
+    {
+        return Err(CoreError::InvalidArgument(
+            "editor edit targets must be unique",
+        ));
+    }
     if state.tool_styles.len() != EditorTool::ALL.len() {
         return Err(CoreError::InvalidArgument(
             "editor state must contain one style for every tool",
@@ -191,7 +206,20 @@ fn encode_state_frame(state: &EditorState) -> Vec<u8> {
                 Some(cursor.index.to_le_bytes().to_vec()),
             ])
         }),
-        Some(encode_sequence(std::iter::empty::<Vec<u8>>())),
+        Some(encode_sequence(state.edit_targets.iter().map(
+            |target| match target {
+                EditTarget::Layer(layer_id) => encode_frame(&[
+                    Some(1_u32.to_le_bytes().to_vec()),
+                    Some(layer_id.to_le_bytes().to_vec()),
+                    None,
+                ]),
+                EditTarget::Plane(target) => encode_frame(&[
+                    Some(2_u32.to_le_bytes().to_vec()),
+                    Some(target.layer_id.to_le_bytes().to_vec()),
+                    Some(target.plane_id.to_le_bytes().to_vec()),
+                ]),
+            },
+        ))),
     ])
 }
 
@@ -241,9 +269,22 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
             })
         })
         .transpose()?;
-    if !decode_sequence(required(fields[11])?, 0)?.is_empty() {
-        return malformed("unsupported editor option records");
-    }
+    let edit_targets = decode_sequence(required(fields[11])?, MAX_EDIT_TARGETS)?
+        .into_iter()
+        .map(|record| {
+            let fields = decode_frame(record, 3)?;
+            let kind = read_u32(required(fields[0])?)?;
+            let layer_id = read_u64(required(fields[1])?)?;
+            match (kind, fields[2]) {
+                (1, None) => Ok(EditTarget::Layer(layer_id)),
+                (2, Some(plane_id)) => Ok(EditTarget::Plane(EditorTarget {
+                    layer_id,
+                    plane_id: read_u64(plane_id)?,
+                })),
+                _ => malformed("invalid editor edit-target record"),
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let state = EditorState {
         active_tool,
         last_color_consuming_tool,
@@ -252,6 +293,7 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
         selection: decode_selection(required(fields[6])?)?,
         vector: decode_vector(required(fields[7])?)?,
         target,
+        edit_targets,
         palette_cursor,
     };
     validate_state(&state).map_err(|error| format_error(&error.to_string()))?;
@@ -732,8 +774,8 @@ mod tests {
         assert_eq!(
             state_digest(&state).as_bytes(),
             &[
-                77, 242, 234, 252, 249, 94, 193, 221, 227, 167, 152, 165, 153, 117, 116, 65, 98,
-                24, 208, 30, 209, 124, 1, 142, 68, 164, 243, 212, 126, 165, 61, 228,
+                117, 46, 41, 31, 242, 192, 200, 213, 146, 134, 164, 234, 178, 211, 122, 243, 238,
+                156, 207, 35, 145, 78, 129, 168, 138, 231, 219, 135, 104, 179, 37, 185,
             ]
         );
     }

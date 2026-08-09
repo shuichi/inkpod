@@ -74,10 +74,11 @@ pub use cell_creation::{
 };
 pub use core::Core;
 pub use editor::{
-    EditorDefaults, EditorFillOptions, EditorFrameDisposition, EditorRevision,
+    EditTarget, EditorDefaults, EditorFillOptions, EditorFrameDisposition, EditorRevision,
     EditorSavepointToken, EditorSelectionOptions, EditorSelectionShape, EditorState,
     EditorStateDigest, EditorStateInfo, EditorStateUpdate, EditorStrokeInput, EditorTarget,
-    EditorTool, EditorToolStyle, EditorVectorOptions, InitialDocumentSpec, PaletteCursor,
+    EditorTool, EditorToolStyle, EditorVectorOptions, InitialDocumentSpec, MAX_EDIT_TARGETS,
+    PaletteCursor,
 };
 pub use effects::FilterPreviewInfo;
 pub use error::CoreError;

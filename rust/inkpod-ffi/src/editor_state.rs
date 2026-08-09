@@ -535,6 +535,433 @@ pub unsafe extern "C" fn inkpod_core_update_editor_state(
     })
 }
 
+fn edit_target_record(target: EditTarget) -> InkpodEditTarget {
+    let (kind, layer_id, plane_id) = match target {
+        EditTarget::Layer(layer_id) => (INKPOD_EDIT_TARGET_LAYER, layer_id, 0),
+        EditTarget::Plane(target) => (INKPOD_EDIT_TARGET_PLANE, target.layer_id, target.plane_id),
+    };
+    InkpodEditTarget {
+        struct_size: size_of::<InkpodEditTarget>() as u32,
+        kind,
+        layer_id,
+        plane_id,
+        reserved: 0,
+    }
+}
+
+unsafe fn parse_edit_targets(
+    records: *const InkpodEditTarget,
+    count: u64,
+    stride_bytes: u64,
+) -> Result<Vec<EditTarget>, u32> {
+    let count = usize::try_from(count).map_err(|_| {
+        fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "edit-target count is not representable",
+        )
+    })?;
+    if count > inkpod_core::MAX_EDIT_TARGETS {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "edit-target count exceeds the Core limit",
+        ));
+    }
+    if count == 0 {
+        if !records.is_null() || stride_bytes != 0 {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "an empty edit-target span must use null storage and zero stride",
+            ));
+        }
+        return Ok(Vec::new());
+    }
+    let stride = usize::try_from(stride_bytes).map_err(|_| {
+        fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "edit-target stride is not representable",
+        )
+    })?;
+    if records.is_null()
+        || !is_aligned(records)
+        || stride < size_of::<InkpodEditTarget>()
+        || stride % align_of::<InkpodEditTarget>() != 0
+        || count.checked_mul(stride).is_none()
+    {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "edit-target pointer, count, or stride is invalid",
+        ));
+    }
+    let mut targets = Vec::with_capacity(count);
+    for index in 0..count {
+        // SAFETY: The caller contract and checked count/stride cover this record.
+        let record = unsafe {
+            &*(records
+                .cast::<u8>()
+                .add(index * stride)
+                .cast::<InkpodEditTarget>())
+        };
+        if record.struct_size < size_of::<InkpodEditTarget>() as u32
+            || u64::from(record.struct_size) > stride_bytes
+            || record.reserved != 0
+        {
+            return Err(fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "edit-target record is incomplete or malformed",
+            ));
+        }
+        targets.push(match (record.kind, record.plane_id) {
+            (INKPOD_EDIT_TARGET_LAYER, 0) => EditTarget::Layer(record.layer_id),
+            (INKPOD_EDIT_TARGET_PLANE, plane_id) if plane_id != 0 => {
+                EditTarget::Plane(EditorTarget {
+                    layer_id: record.layer_id,
+                    plane_id,
+                })
+            }
+            _ => {
+                return Err(fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "edit-target kind or IDs are invalid",
+                ));
+            }
+        });
+    }
+    Ok(targets)
+}
+
+unsafe fn write_edit_targets(
+    targets: &[EditTarget],
+    records: *mut InkpodEditTarget,
+    capacity: u64,
+    stride_bytes: u64,
+    out_count: *mut u64,
+) -> u32 {
+    if out_count.is_null() || !is_aligned(out_count) {
+        return fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "edit-target count output is null or misaligned",
+        );
+    }
+    // SAFETY: The caller provides writable count storage.
+    unsafe { out_count.write(targets.len() as u64) };
+    if capacity == 0 {
+        if !records.is_null() || stride_bytes != 0 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "zero edit-target capacity requires null storage and zero stride",
+            );
+        }
+        return if targets.is_empty() {
+            INKPOD_STATUS_OK
+        } else {
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        };
+    }
+    let capacity = match usize::try_from(capacity) {
+        Ok(capacity) => capacity,
+        Err(_) => {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "edit-target capacity is not representable",
+            );
+        }
+    };
+    let stride = match usize::try_from(stride_bytes) {
+        Ok(stride)
+            if stride >= size_of::<InkpodEditTarget>()
+                && stride % align_of::<InkpodEditTarget>() == 0 =>
+        {
+            stride
+        }
+        _ => {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "edit-target output stride is too small or misaligned",
+            );
+        }
+    };
+    if records.is_null() || !is_aligned(records) || capacity.checked_mul(stride).is_none() {
+        return fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "edit-target output storage is invalid",
+        );
+    }
+    if capacity < targets.len() {
+        return INKPOD_STATUS_BUFFER_TOO_SMALL;
+    }
+    for (index, target) in targets.iter().enumerate() {
+        let value = edit_target_record(*target);
+        // SAFETY: Checked writable strided storage covers each output record.
+        unsafe {
+            records
+                .cast::<u8>()
+                .add(index * stride)
+                .cast::<InkpodEditTarget>()
+                .write(value)
+        };
+    }
+    INKPOD_STATUS_OK
+}
+
+/// Copies the persisted grouped edit-target set through caller-owned strided storage.
+///
+/// # Safety
+/// `core` must be a live owner-thread handle and `out_count` writable. When
+/// `capacity` is nonzero, `records` must name writable strided storage covering
+/// that many complete records; zero capacity requires a null record pointer and
+/// zero stride. The storage is borrowed only for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_get_edit_targets(
+    core: *mut InkpodCore,
+    records: *mut InkpodEditTarget,
+    capacity: u64,
+    stride_bytes: u64,
+    out_count: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let targets = match core.core.editor_state() {
+            Ok(info) => info.state.edit_targets,
+            Err(error) => return map_core_error(error),
+        };
+        unsafe { write_edit_targets(&targets, records, capacity, stride_bytes, out_count) }
+    })
+}
+
+/// Copies the side-effect-free capability matrix for the effective target set.
+///
+/// # Safety
+/// `core` must be a live owner-thread handle and `output` a complete writable
+/// record that does not overlap the Core handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_get_edit_target_capabilities(
+    core: *mut InkpodCore,
+    output: *mut InkpodEditTargetCapabilities,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodEditTargetCapabilities") }
+        {
+            return status;
+        }
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let capabilities = match core.core.edit_target_capabilities() {
+            Ok(capabilities) => capabilities,
+            Err(error) => return map_core_error(error),
+        };
+        unsafe {
+            output.write(InkpodEditTargetCapabilities {
+                struct_size: size_of::<InkpodEditTargetCapabilities>() as u32,
+                can_duplicate: u32::from(capabilities.duplicate),
+                can_delete: u32::from(capabilities.delete),
+                can_set_visibility: u32::from(capabilities.visibility),
+                can_set_editability: u32::from(capabilities.editability),
+                can_merge: u32::from(capabilities.merge),
+                can_convert_planes: u32::from(capabilities.convert_planes),
+                can_convert_layers: u32::from(capabilities.convert_layers),
+                reserved: 0,
+            })
+        };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Replaces grouped edit targets against one exact EditorRevision.
+///
+/// # Safety
+/// `core` must be a live owner-thread handle and `output` a complete writable
+/// record. For a nonempty input, `records` must name readable strided storage
+/// covering `count` complete records; an empty input requires a null pointer and
+/// zero stride. All storage is borrowed only for this call and must not overlap.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_set_edit_targets(
+    core: *mut InkpodCore,
+    expected_editor_revision: u64,
+    records: *const InkpodEditTarget,
+    count: u64,
+    stride_bytes: u64,
+    output: *mut InkpodEditorStateInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(output.cast_const(), "InkpodEditorStateInfo") }
+        {
+            return status;
+        }
+        let targets = match unsafe { parse_edit_targets(records, count, stride_bytes) } {
+            Ok(targets) => targets,
+            Err(status) => return status,
+        };
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let base_revision = match core.core.editor_state() {
+            Ok(info) if info.revision.get() == expected_editor_revision => info.revision,
+            Ok(_) => {
+                return fail(
+                    INKPOD_STATUS_INVALID_STATE,
+                    "editor state base revision is stale",
+                );
+            }
+            Err(error) => return map_core_error(error),
+        };
+        let info = match core
+            .core
+            .update_editor_state(base_revision, EditorStateUpdate::SetEditTargets(targets))
+        {
+            Ok(info) => info,
+            Err(error) => return map_core_error(error),
+        };
+        let mut value = InkpodEditorStateInfo::default();
+        if let Err(status) = write_editor_state(&mut value, Some(&info), &info.state) {
+            return status;
+        }
+        unsafe { output.write(value) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Applies one grouped target command and returns any tree-ordered output targets.
+///
+/// # Safety
+/// `core` must be a live owner-thread handle; `input`, `result`, and
+/// `out_output_count` must name complete nonoverlapping records. When output
+/// capacity is nonzero, `output_targets` must name writable strided storage
+/// covering that many complete records; zero capacity requires a null pointer
+/// and zero stride. All caller storage is borrowed only for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_apply_edit_target_command(
+    core: *mut InkpodCore,
+    input: *const InkpodEditTargetCommand,
+    result: *mut InkpodDispatchResult,
+    output_targets: *mut InkpodEditTarget,
+    output_capacity: u64,
+    output_stride_bytes: u64,
+    out_output_count: *mut u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodEditTargetCommand") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(result.cast_const(), "InkpodDispatchResult") }
+        {
+            return status;
+        }
+        let input = unsafe { &*input };
+        if input.reserved != 0 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "edit-target command reserved field is nonzero",
+            );
+        }
+        let command = match input.operation {
+            INKPOD_EDIT_TARGET_DUPLICATE if input.flags == 0 => EditTargetCommand::Duplicate,
+            INKPOD_EDIT_TARGET_DELETE if input.flags == 0 => EditTargetCommand::Delete,
+            INKPOD_EDIT_TARGET_SET_VISIBILITY if input.flags <= 1 => {
+                EditTargetCommand::SetVisibility(input.flags != 0)
+            }
+            INKPOD_EDIT_TARGET_SET_EDITABILITY if input.flags <= 1 => {
+                EditTargetCommand::SetEditability(input.flags != 0)
+            }
+            INKPOD_EDIT_TARGET_CONVERT_PLANES if input.flags == 0 => {
+                let kind = match parse_plane_type(input.kind) {
+                    Ok(kind) => kind,
+                    Err(status) => return status,
+                };
+                let format = match parse_storage_format(input.pixel_format) {
+                    Ok(format) => format,
+                    Err(status) => return status,
+                };
+                EditTargetCommand::ConvertPlanes { kind, format }
+            }
+            INKPOD_EDIT_TARGET_CONVERT_LAYERS if input.flags == 0 => {
+                let kind = match parse_layer_kind(input.kind) {
+                    Ok(kind) => kind,
+                    Err(status) => return status,
+                };
+                EditTargetCommand::ConvertLayers { kind }
+            }
+            INKPOD_EDIT_TARGET_MERGE if input.flags == 0 => EditTargetCommand::Merge,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "edit-target command is malformed",
+                );
+            }
+        };
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let required = match command {
+            EditTargetCommand::Duplicate => match core.core.editor_state() {
+                Ok(info) if info.state.edit_targets.is_empty() => 1,
+                Ok(info) => info.state.edit_targets.len(),
+                Err(error) => return map_core_error(error),
+            },
+            EditTargetCommand::Merge => 1,
+            _ => 0,
+        };
+        if output_capacity < required as u64 {
+            let placeholders = vec![EditTarget::Layer(0); required];
+            return unsafe {
+                write_edit_targets(
+                    &placeholders,
+                    output_targets,
+                    output_capacity,
+                    output_stride_bytes,
+                    out_output_count,
+                )
+            };
+        }
+        let command_result = match core.core.apply_edit_target_command(command) {
+            Ok(result) => result,
+            Err(error) => return map_core_error(error),
+        };
+        let write_status = unsafe {
+            write_edit_targets(
+                &command_result.output_targets,
+                output_targets,
+                output_capacity,
+                output_stride_bytes,
+                out_output_count,
+            )
+        };
+        if write_status != INKPOD_STATUS_OK {
+            return write_status;
+        }
+        write_dispatch_result(unsafe { &mut *result }, command_result.dispatch);
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Starts a transient raster stroke from exact values captured from Core-owned EditorState.
 ///
 /// # Safety

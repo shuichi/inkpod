@@ -195,7 +195,7 @@ pub(crate) struct FloatingSelection {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum FloatingDestination {
-    ExistingPlane(PlaneId),
+    ExistingPlanes(Vec<PlaneId>),
     NewPlane {
         layer_id: LayerId,
         kind: PlaneType,

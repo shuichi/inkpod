@@ -4542,6 +4542,226 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_MOVE_DOWN, 0);
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_MERGE, 0);
 
+    auto query_grouped_active_nodes = [&state](
+                                          InkpodNodeInfo& layer,
+                                          InkpodNodeInfo& plane) {
+        layer = {};
+        layer.struct_size = sizeof(layer);
+        plane = {};
+        plane.struct_size = sizeof(plane);
+        return state.engine->Invoke(
+            [&state, &layer, &plane](InkpodCore* core) {
+                InkpodStatus status = inkpod_core_node_get(
+                    core,
+                    state.Workspace().panes.active_tree_layer_index,
+                    UINT32_MAX,
+                    &layer);
+                if (status == INKPOD_STATUS_OK) {
+                    status = inkpod_core_node_get(
+                        core,
+                        state.Workspace().panes.active_tree_layer_index,
+                        state.Workspace().panes.active_tree_plane_index,
+                        &plane);
+                }
+                return status;
+            },
+            false,
+            false);
+    };
+    InkpodNodeInfo grouped_layer_node{};
+    InkpodNodeInfo grouped_plane_node{};
+    if (query_grouped_active_nodes(grouped_layer_node, grouped_plane_node)
+        != INKPOD_STATUS_OK) {
+        return 7831;
+    }
+    if ((grouped_layer_node.flags & INKPOD_NODE_EDITABLE) == 0U) {
+        SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_LAYER_TOGGLE_EDITABLE,
+            0);
+    }
+    if ((grouped_plane_node.flags & INKPOD_NODE_EDITABLE) == 0U) {
+        SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_PLANE_TOGGLE_EDITABLE,
+            0);
+    }
+    if (query_grouped_active_nodes(grouped_layer_node, grouped_plane_node)
+            != INKPOD_STATUS_OK
+        || (grouped_layer_node.flags & INKPOD_NODE_EDITABLE) == 0U
+        || (grouped_plane_node.flags & INKPOD_NODE_EDITABLE) == 0U) {
+        return 7832;
+    }
+    std::vector<InkpodEditTarget> grouped_plane_targets;
+    try {
+        grouped_plane_targets.reserve(state.Workspace().panes.tree_plane_count);
+    } catch (const std::bad_alloc&) {
+        return 7833;
+    }
+    for (std::uint32_t index = 0U;
+         index < state.Workspace().panes.tree_plane_count;
+         ++index) {
+        InkpodNodeInfo node{};
+        node.struct_size = sizeof(node);
+        const InkpodStatus status = state.engine->Invoke(
+            [&state, index, &node](InkpodCore* core) {
+                return inkpod_core_node_get(
+                    core,
+                    state.Workspace().panes.active_tree_layer_index,
+                    index,
+                    &node);
+            },
+            false,
+            false);
+        if (status != INKPOD_STATUS_OK || node.id == 0U) {
+            return 7833;
+        }
+        grouped_plane_targets.push_back(InkpodEditTarget{
+            sizeof(InkpodEditTarget),
+            INKPOD_EDIT_TARGET_PLANE,
+            grouped_layer_node.id,
+            node.id,
+            0U});
+    }
+    InkpodEditorStateInfo grouped_editor{};
+    grouped_editor.struct_size = sizeof(grouped_editor);
+    const InkpodEditTargetCommand make_editable{
+        sizeof(InkpodEditTargetCommand),
+        INKPOD_EDIT_TARGET_SET_EDITABILITY,
+        1U,
+        0U,
+        0U,
+        0U};
+    InkpodDispatchResult grouped_dispatch{};
+    std::vector<InkpodEditTarget> grouped_outputs;
+    if (!state.engine->GetEditorState(
+            state.Document().id,
+            state.Document().generation,
+            grouped_editor)
+        || state.engine->SetEditTargets(
+               state.Document().id,
+               state.Document().generation,
+               grouped_editor.editor_revision,
+               grouped_plane_targets) != INKPOD_STATUS_OK
+        || state.engine->ApplyEditTargetCommand(
+               state.Document().id,
+               state.Document().generation,
+               make_editable,
+               grouped_dispatch,
+               grouped_outputs) != INKPOD_STATUS_OK) {
+        return 7833;
+    }
+
+    const std::uint32_t grouped_layer_count = state.Workspace().panes.tree_layer_count;
+    if (state.Workspace().panes.layer_palette_dialog.toggle_target == nullptr
+        || state.Workspace().panes.active_tree_layer_id == 0U) {
+        return 783;
+    }
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_SELECTION_ALL,
+        0);
+    const std::uint64_t grouped_active_layer =
+        state.Workspace().panes.active_tree_layer_id;
+    const std::uint64_t grouped_active_plane =
+        state.Workspace().panes.active_tree_plane_id;
+    state.Workspace().panes.layer_palette_dialog.toggle_target(
+        state.Workspace().panes.layer_palette_dialog.context,
+        state.Workspace().panes.active_tree_layer_id,
+        false,
+        false);
+    std::vector<InkpodEditTarget> grouped_targets;
+    if (state.engine->GetEditTargets(
+            state.Document().id,
+            state.Document().generation,
+            grouped_targets) != INKPOD_STATUS_OK
+        || grouped_targets.size() != 1U
+        || grouped_targets[0].kind != INKPOD_EDIT_TARGET_LAYER
+        || state.Workspace().panes.active_tree_layer_id != grouped_active_layer
+        || state.Workspace().panes.active_tree_plane_id != grouped_active_plane
+        || !inkpod::windows::ui::IsCommandEnabled(
+            state.Workspace().command_states, IDM_EDIT_COPY)) {
+        return 784;
+    }
+    grouped_dispatch = {};
+    grouped_outputs.clear();
+    if (state.engine->ApplyEditTargetCommand(
+            state.Document().id,
+            state.Document().generation,
+            make_editable,
+            grouped_dispatch,
+            grouped_outputs) != INKPOD_STATUS_OK) {
+        return 7834;
+    }
+    InkpodDocumentInfo grouped_before_clipboard = EmptyDocumentInfo();
+    InkpodDocumentInfo grouped_after_clipboard = EmptyDocumentInfo();
+    if (!QueryDocument(state, grouped_before_clipboard)) {
+        return 7871;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDIT_COPY,
+            0) != 1) {
+        return 7872;
+    }
+    if (!inkpod::windows::ui::IsCommandEnabled(
+            state.Workspace().command_states, IDM_EDIT_PASTE)) {
+        return 7873;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDIT_PASTE,
+            0) != 1) {
+        return 7874;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_EDIT_FLOATING_CANCEL,
+            0) != 1) {
+        return 7875;
+    }
+    if (!QueryDocument(state, grouped_after_clipboard)
+        || grouped_after_clipboard.document_revision
+            != grouped_before_clipboard.document_revision
+        || grouped_after_clipboard.main_plane_checksum
+            != grouped_before_clipboard.main_plane_checksum
+        || grouped_after_clipboard.color_plane_checksum
+            != grouped_before_clipboard.color_plane_checksum) {
+        return 7876;
+    }
+    InkpodEditTargetCapabilities grouped_capabilities{};
+    grouped_capabilities.struct_size = sizeof(grouped_capabilities);
+    if (state.engine->GetEditTargetCapabilities(
+            state.Document().id,
+            state.Document().generation,
+            grouped_capabilities) != INKPOD_STATUS_OK
+        || grouped_capabilities.can_duplicate == 0U
+        || !inkpod::windows::ui::IsCommandEnabled(
+            state.Workspace().command_states, IDM_LAYER_DUPLICATE)) {
+        return 788;
+    }
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_LAYER_DUPLICATE,
+        0);
+    if (state.Workspace().panes.tree_layer_count != grouped_layer_count + 1U
+        || state.engine->GetEditTargets(
+               state.Document().id,
+               state.Document().generation,
+               grouped_targets) != INKPOD_STATUS_OK
+        || grouped_targets.size() != 1U
+        || grouped_targets[0].layer_id
+            != state.Workspace().panes.active_tree_layer_id) {
+        return 785;
+    }
+
     if (CreateCell(state, 12U, 10U, 96000U) != INKPOD_STATUS_OK) {
         return 404;
     }
@@ -7290,7 +7510,7 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
     SetFocus(second_canvas);
     if (!RouteKeyboardKey(state, VK_F6, false, false)
         || GetFocus() != state.Workspace().windows.status_bar) {
-        return 1002;
+        return 10021;
     }
     if (!HandleWorkspaceNavigation(
             state,
@@ -7921,7 +8141,7 @@ int RunG13ResourceScenarioSmoke(ApplicationHost& state) noexcept {
 
     WorkspaceWindow* source = state.Workspaces().At(0U);
     if (source == nullptr || source->editors.Active() == nullptr) {
-        return 1002;
+        return 10022;
     }
     const WorkspaceWindowId source_workspace = source->id;
     const auto source_first_group = source->editors.Active()->id;
@@ -8718,7 +8938,7 @@ int RunEditorStateOwnershipSmoke(ApplicationHost& state) noexcept {
                first_session, first_generation, defaults) != INKPOD_STATUS_OK
         || !state.engine->GetEditorState(
             first_session, first_generation, editor_before)) {
-        return 1002;
+        return 10023;
     }
 
     InkpodEditorStateUpdate tool_update{};

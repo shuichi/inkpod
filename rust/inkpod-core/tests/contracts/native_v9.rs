@@ -48,7 +48,7 @@ fn frame_field(payload: &[u8], wanted: u32) -> std::ops::Range<usize> {
 
 #[test]
 fn io_001_save_reopen_restores_full_journal_editor_and_all_next_id_authorities() {
-    let path = native_path("v10-full-session");
+    let path = native_path("v11-full-session");
     let mut core = Core::new();
     core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
@@ -124,7 +124,7 @@ fn io_001_save_reopen_restores_full_journal_editor_and_all_next_id_authorities()
 }
 
 #[test]
-fn io_001_v9_and_corrupt_open_are_current_only_and_atomic_for_the_live_core() {
+fn io_001_v10_and_corrupt_open_are_current_only_and_atomic_for_the_live_core() {
     let path = native_path("v9-rejected");
     let mut legacy = vec![0_u8; 32];
     legacy[0..8].copy_from_slice(b"INKPOD\0\0");
@@ -151,6 +151,78 @@ fn io_001_v9_and_corrupt_open_are_current_only_and_atomic_for_the_live_core() {
     assert_eq!(core.editor_state_frame().unwrap(), before_editor);
     assert_eq!(core.journal_entries(), before_journal);
     fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn io_001_clear_selected_content_journal_supports_save_autosave_and_reopen() {
+    let normal_path = native_path("v11-clear-selected-normal");
+    let recovery_path = native_path("v11-clear-selected-recovery");
+    let mut core = Core::new();
+    core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_active_plane(ActivePlane::Color).unwrap();
+    core.apply_stroke(&color_stroke(
+        PaintTool::Pencil,
+        1.0,
+        StrokeSample {
+            x: 2.0,
+            y: 3.0,
+            pressure: 1.0,
+        },
+    ))
+    .unwrap();
+    core.apply_selection(
+        &SelectionShape::Rectangle(RectI32 {
+            x: 2,
+            y: 3,
+            width: 1,
+            height: 1,
+        }),
+        SelectionOperation::New,
+    )
+    .unwrap();
+    core.clear_selected_content().unwrap();
+    assert!(
+        core.plane_pixel(ActivePlane::Color, 2, 3)
+            .unwrap()
+            .is_zero()
+    );
+
+    core.verify_journal_replay().unwrap();
+    core.autosave(&recovery_path).unwrap();
+    core.save(&normal_path).unwrap();
+
+    let mut reopened = Core::new();
+    reopened.open(&normal_path).unwrap();
+    assert!(
+        reopened
+            .plane_pixel(ActivePlane::Color, 2, 3)
+            .unwrap()
+            .is_zero()
+    );
+    reopened.undo().unwrap();
+    assert_eq!(
+        reopened.plane_pixel(ActivePlane::Color, 2, 3).unwrap(),
+        PixelValue::Rgba([12, 34, 56, 255])
+    );
+    reopened.redo().unwrap();
+    reopened.verify_journal_replay().unwrap();
+
+    let mut recovered = Core::new();
+    recovered.open_recovery(&recovery_path).unwrap();
+    assert!(recovered.document_info().unwrap().recovered);
+    assert!(
+        recovered
+            .plane_pixel(ActivePlane::Color, 2, 3)
+            .unwrap()
+            .is_zero()
+    );
+    recovered.undo().unwrap();
+    recovered.redo().unwrap();
+    recovered.verify_journal_replay().unwrap();
+
+    fs::remove_file(normal_path).unwrap();
+    fs::remove_file(recovery_path).unwrap();
 }
 
 #[test]
@@ -227,11 +299,11 @@ fn io_001_failed_replace_does_not_publish_prospective_document_or_editor_savepoi
 
 #[test]
 fn io_001_checkpoint_is_optional_verified_and_exactly_equivalent_to_full_replay() {
-    let checkpoint_path = native_path("v10-checkpoint");
-    let replay_path = native_path("v10-full-replay");
-    let epoch_mismatch_path = native_path("v10-checkpoint-epoch-mismatch");
-    let prefix_mismatch_path = native_path("v10-checkpoint-prefix-mismatch");
-    let state_mismatch_path = native_path("v10-checkpoint-state-mismatch");
+    let checkpoint_path = native_path("v11-checkpoint");
+    let replay_path = native_path("v11-full-replay");
+    let epoch_mismatch_path = native_path("v11-checkpoint-epoch-mismatch");
+    let prefix_mismatch_path = native_path("v11-checkpoint-prefix-mismatch");
+    let state_mismatch_path = native_path("v11-checkpoint-state-mismatch");
     let mut core = Core::new();
     core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
@@ -319,8 +391,8 @@ fn io_001_checkpoint_is_optional_verified_and_exactly_equivalent_to_full_replay(
 
 #[test]
 fn safe_001_malformed_or_hash_corrupt_checkpoint_rejects_without_live_publication() {
-    let malformed_path = native_path("v10-malformed-checkpoint");
-    let corrupt_path = native_path("v10-corrupt-checkpoint");
+    let malformed_path = native_path("v11-malformed-checkpoint");
+    let corrupt_path = native_path("v11-corrupt-checkpoint");
     let mut source = Core::new();
     source
         .new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
@@ -379,9 +451,9 @@ fn safe_001_malformed_or_hash_corrupt_checkpoint_rejects_without_live_publicatio
 
 #[test]
 fn io_001_compaction_requires_an_exact_confirmation_token_and_never_mutates_live_history() {
-    let normal_path = native_path("v10-compaction-source");
-    let stale_path = native_path("v10-compaction-stale");
-    let compact_path = native_path("v10-compaction-output");
+    let normal_path = native_path("v11-compaction-source");
+    let stale_path = native_path("v11-compaction-stale");
+    let compact_path = native_path("v11-compaction-output");
     let mut core = Core::new();
     core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();

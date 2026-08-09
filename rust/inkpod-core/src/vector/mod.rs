@@ -1,8 +1,8 @@
 //! Vector path and fill state.
 
 use super::{
-    CellDocument, Core, CoreError, DispatchOutcome, LayerKind, LayerNode, LayerThumbnail,
-    PixelFormat, PixelValue, PlaneNode, PlaneType, PointF32, RectI32, TileRaster,
+    CellDocument, ClipboardPlane, Core, CoreError, DispatchOutcome, LayerKind, LayerNode,
+    LayerThumbnail, PixelFormat, PixelValue, PlaneNode, PlaneType, PointF32, RectI32, TileRaster,
 };
 use crate::document::{unique_layer_name, validate_node_name};
 use crate::identity::*;

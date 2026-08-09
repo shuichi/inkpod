@@ -5,10 +5,11 @@ mod model;
 mod operations;
 
 pub use model::{
-    EditorDefaults, EditorFillOptions, EditorFrameDisposition, EditorRevision,
+    EditTarget, EditorDefaults, EditorFillOptions, EditorFrameDisposition, EditorRevision,
     EditorSavepointToken, EditorSelectionOptions, EditorSelectionShape, EditorState,
     EditorStateDigest, EditorStateInfo, EditorStateUpdate, EditorStrokeInput, EditorTarget,
-    EditorTool, EditorToolStyle, EditorVectorOptions, InitialDocumentSpec, PaletteCursor,
+    EditorTool, EditorToolStyle, EditorVectorOptions, InitialDocumentSpec, MAX_EDIT_TARGETS,
+    PaletteCursor,
 };
 
 pub(crate) use model::EditorSessionState;

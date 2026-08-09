@@ -753,7 +753,7 @@ impl Core {
         staged_assets = self.prepare_asset_store_for_session_reset(staged_assets, &next)?;
 
         let revision = self.next_document_revision()?;
-        let editor = self.stage_reconciled_editor_target(&next, None)?;
+        let editor = self.stage_reconciled_editor_target(&next, None, None)?;
         self.document = Some(next);
         self.document_revision = revision;
         self.next_id = next_id;

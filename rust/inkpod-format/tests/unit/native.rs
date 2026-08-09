@@ -340,11 +340,11 @@ fn procedure_file_fixture() -> NativeFile {
 }
 
 #[test]
-fn io_001_v10_directory_digest_and_opaque_sections_round_trip() {
+fn io_001_v11_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
-    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 10);
+    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 11);
     assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 7);
     assert_eq!(u32::from_le_bytes(bytes[16..20].try_into().unwrap()), 128);
     let mut expected = file;
@@ -367,7 +367,7 @@ fn io_001_v10_directory_digest_and_opaque_sections_round_trip() {
 }
 
 #[test]
-fn io_001_v10_accepts_checkpoint_and_rejects_v9_missing_duplicate_overlap_and_bad_digest() {
+fn io_001_v11_accepts_checkpoint_and_rejects_v10_missing_duplicate_overlap_and_bad_digest() {
     let file = procedure_file_fixture();
     let encoded = encode_procedure_file(&file).unwrap();
 
@@ -430,9 +430,9 @@ fn io_001_v10_accepts_checkpoint_and_rejects_v9_missing_duplicate_overlap_and_ba
 }
 
 #[test]
-fn io_001_v10_streaming_cancel_keeps_existing_destination_and_removes_temp() {
+fn io_001_v11_streaming_cancel_keeps_existing_destination_and_removes_temp() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v10-cancel-test-{}-{}",
+        "inkpod-v11-cancel-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -459,9 +459,9 @@ fn io_001_v10_streaming_cancel_keeps_existing_destination_and_removes_temp() {
 }
 
 #[test]
-fn io_001_v10_atomic_save_replaces_an_existing_container() {
+fn io_001_v11_atomic_save_replaces_an_existing_container() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v10-replace-test-{}-{}",
+        "inkpod-v11-replace-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));

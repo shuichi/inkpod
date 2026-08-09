@@ -41,6 +41,8 @@ route|rust|asset-data-plane|rust-format|inkpod_format::read_batch_graph inkpod_f
 route|rust|os-application-adapter|rust-core|BatchGraph::save Core::batch_execute Core::discard_recovery Core::new Core::rebind_shortcut Core::rebind_shortcut_sequence Core::recovery_is_newer Core::replace_shortcut_sequences Core::reset_shortcuts Core::set_shortcut_defaults
 route|rust|os-application-adapter|rust-core|BatchOperation::swap_color_replacements
 route|rust|os-application-adapter|rust-format|inkpod_format::discard_recovery inkpod_format::recovery_is_newer
+route|rust|document-primitive|rust-core|Core::apply_edit_target_command
+route|rust|query-snapshot|rust-core|Core::edit_target_capabilities
 
 ## C ABI surface
 
@@ -55,6 +57,9 @@ route|ffi|asset-data-plane|rust-ffi-adapter|inkpod_byte_buffer_release inkpod_by
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_get_replay_contract inkpod_snapshot_get_canonical_digest
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_cell_creation_plan_copy inkpod_cell_creation_plan_count
 route|ffi|os-application-adapter|rust-ffi-adapter|inkpod_abi_version inkpod_batch_graph_create inkpod_batch_graph_get_info inkpod_batch_graph_load inkpod_batch_graph_release inkpod_batch_graph_save inkpod_batch_task_cancel inkpod_batch_task_create inkpod_batch_task_release inkpod_cell_creation_plan_create inkpod_cell_creation_plan_release inkpod_core_batch_execute inkpod_core_create inkpod_core_destroy inkpod_core_get_id_v3 inkpod_core_shortcut_defaults_set inkpod_core_shortcut_rebind inkpod_core_shortcut_reset inkpod_core_shortcut_resolve inkpod_core_shortcut_sequences_copy inkpod_core_shortcut_sequences_set inkpod_core_task_cancel_v3 inkpod_core_task_create_v3 inkpod_shortcut_sequence_resolve inkpod_task_cancel inkpod_task_create inkpod_task_release
+route|ffi|document-primitive|rust-core|inkpod_core_apply_edit_target_command
+route|ffi|editor-state-command|rust-core|inkpod_core_set_edit_targets
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_get_edit_target_capabilities inkpod_core_get_edit_targets
 
 ## Windows production command surface
 
@@ -84,11 +89,11 @@ route|windows|os-application-adapter|windows-adapter|IDM_APP_EXIT IDM_BATCH_ADD_
   it exactly once; there is no queued arbitrary-callable work variant.
 - Palette and color-chart codecs are owned by `inkpod-format`; Windows supplies
   paths and presentation names but does not encode their native bytes.
-- Production `.inkpod` is exact-current v10. Its authoritative journal retains
+- Production `.inkpod` is exact-current v11. Its authoritative journal retains
   Genesis/assets/procedures/EditorState; optional CKPT is verified acceleration
   only, and explicit compaction writes a separate new-Genesis file.
 
-The source-derived inventory currently contains 231 Rust routes, 214 C ABI
+The source-derived inventory currently contains 233 Rust routes, 218 C ABI
 exports, and 333 Windows commands. Its architecture test requires every symbol
 to have exactly one class and owner; unclassified and direct C++ document
 mutation counts are both zero.

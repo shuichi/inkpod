@@ -374,6 +374,7 @@ pub(super) struct DocumentEdit {
     base_revision: DocumentRevision,
     commit_revision: DocumentRevision,
     preferred_editor_target: Option<EditorTarget>,
+    preferred_edit_targets: Option<Vec<EditTarget>>,
 }
 
 impl DocumentEdit {
@@ -385,6 +386,7 @@ impl DocumentEdit {
             base_revision: core.document_revision,
             commit_revision: core.next_document_revision()?,
             preferred_editor_target: None,
+            preferred_edit_targets: None,
         })
     }
 
@@ -400,6 +402,7 @@ impl DocumentEdit {
             base_revision,
             commit_revision,
             preferred_editor_target: None,
+            preferred_edit_targets: None,
         }
     }
 
@@ -417,6 +420,10 @@ impl DocumentEdit {
 
     pub(super) fn prefer_editor_target(&mut self, target: EditorTarget) {
         self.preferred_editor_target = Some(target);
+    }
+
+    pub(super) fn prefer_edit_targets(&mut self, targets: Vec<EditTarget>) {
+        self.preferred_edit_targets = Some(targets);
     }
 
     pub(super) fn commit(self, core: &mut Core) -> Result<DispatchOutcome, CoreError> {
@@ -439,8 +446,11 @@ impl DocumentEdit {
             return Ok(core.noop_outcome());
         }
 
-        let editor =
-            core.stage_reconciled_editor_target(&self.working, self.preferred_editor_target)?;
+        let editor = core.stage_reconciled_editor_target(
+            &self.working,
+            self.preferred_editor_target,
+            self.preferred_edit_targets.as_deref(),
+        )?;
         let after_state = core.allocate_state()?;
         let change = HistoryChange::Document {
             before: Box::new(self.before),

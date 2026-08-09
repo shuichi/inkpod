@@ -54,6 +54,7 @@ impl EditorDefaults {
                 selection: EditorSelectionOptions::default(),
                 vector: EditorVectorOptions::default(),
                 target: None,
+                edit_targets: Vec::new(),
                 palette_cursor: None,
             },
         }
@@ -305,13 +306,28 @@ impl Default for EditorVectorOptions {
 }
 
 /// Stable active edit target in the current document namespace.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct EditorTarget {
     /// Stable layer ID.
     pub layer_id: u64,
     /// Stable plane ID belonging to `layer_id`.
     pub plane_id: u64,
 }
+
+/// Stable layer or plane selected for grouped edit commands.
+///
+/// The set is stored in document tree order. A selected layer represents the
+/// whole layer and therefore suppresses redundant child-plane targets.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum EditTarget {
+    /// One complete layer and all of its owned plane/vector content.
+    Layer(u64),
+    /// One plane identified together with its owning layer.
+    Plane(EditorTarget),
+}
+
+/// Maximum number of grouped edit targets retained by one editor session.
+pub const MAX_EDIT_TARGETS: usize = 4_096;
 
 /// Cursor into palette presentation; palette content remains document-owned.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -338,6 +354,8 @@ pub struct EditorState {
     pub vector: EditorVectorOptions,
     /// Stable active document target, absent only before a document exists.
     pub target: Option<EditorTarget>,
+    /// Ordered, unique grouped edit targets, independent from the active target.
+    pub edit_targets: Vec<EditTarget>,
     /// Palette presentation cursor.
     pub palette_cursor: Option<PaletteCursor>,
 }
@@ -349,11 +367,12 @@ impl EditorState {
         self.tool_styles.get(&tool)
     }
 
-    /// Returns a copy with only the document-specific stable target removed.
+    /// Returns a copy with all document-specific stable targets removed.
     #[must_use]
     pub fn without_target(&self) -> Self {
         let mut state = self.clone();
         state.target = None;
+        state.edit_targets.clear();
         state
     }
 
@@ -432,6 +451,8 @@ pub enum EditorStateUpdate {
     SetVectorOptions(EditorVectorOptions),
     /// Selects a stable active layer/plane pair.
     SetActiveTarget(EditorTarget),
+    /// Replaces the grouped edit-target set after document-tree normalization.
+    SetEditTargets(Vec<EditTarget>),
     /// Replaces or clears the palette cursor.
     SetPaletteCursor(Option<PaletteCursor>),
 }
