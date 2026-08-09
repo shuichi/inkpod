@@ -127,7 +127,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M01 — PM-GAP-007: raster／vector混在時の正しいレイヤー順
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: DOC-002、DOC-003、VECTOR-001、RENDER-001、ABI-002、PERF-001。
 
@@ -193,7 +193,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M02 — PM-GAP-003: 完全な制作条件による新規セル作成
 
-状態: 未着手
+状態: 手動確認待ち
 
 関連要件: DOC-001、SESSION-001、IO-001。
 

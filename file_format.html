@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="description" content="現行 .inkpod v9 ファイルフォーマットの人間向け技術解説">
-  <title>.inkpod ファイルフォーマット — v9</title>
+  <meta name="description" content="現行 .inkpod v10 ファイルフォーマットの人間向け技術解説">
+  <title>.inkpod ファイルフォーマット — v10</title>
   <style>
     :root {
       --paper: #f4f0e8;
@@ -777,8 +777,8 @@
         <p>現行状態の可変ラスターだけを正本にせず、再構築に必要な意味データと履歴を保存します。通常保存・読込はともに、失敗やキャンセルで既存ファイルや使用中の文書を途中状態へ置き換えません。</p>
       </div>
       <dl class="spec-strip">
-        <div><dt>FORMAT</dt><dd>v9</dd></div>
-        <div><dt>REPLAY EPOCH</dt><dd>6</dd></div>
+        <div><dt>FORMAT</dt><dd>v10</dd></div>
+        <div><dt>REPLAY EPOCH</dt><dd>7</dd></div>
         <div><dt>BYTE ORDER</dt><dd>little-endian</dd></div>
         <div><dt>MAX FILE</dt><dd>1 GiB</dd></div>
       </dl>
@@ -868,7 +868,7 @@
         <p class="intro">ファイルを開く処理は、使用中の文書を直接書き換えません。別の staged Core で構造・参照・digest・再生結果を確定し、成功した完成状態だけを置き換えます。</p>
 
         <div class="flow">
-          <div class="flow-step"><div><strong>ヘッダーと directory を検証</strong><p>magic、v9、epoch 6、サイズ、整列、範囲重複、ゼロ予約領域、FileRootDigest を確認します。</p></div></div>
+          <div class="flow-step"><div><strong>ヘッダーと directory を検証</strong><p>magic、v10、epoch 7、サイズ、整列、範囲重複、ゼロ予約領域、FileRootDigest を確認します。</p></div></div>
           <div class="flow-step"><div><strong>セクションを検証</strong><p>必須セクション、record schema、stored/logical digest、件数とリソース上限を確認します。</p></div></div>
           <div class="flow-step"><div><strong>Genesis と Assets を構築</strong><p>asset descriptor・chunk・AssetId を照合し、初期状態と参照可能な不変データを staged Core に用意します。</p></div></div>
           <div class="flow-step"><div><strong>Journal を再生</strong><p>有効な CKPT があれば接頭辞を厳密照合して利用し、不一致なら Genesis から全 PROC を再生します。</p></div></div>
@@ -1261,7 +1261,7 @@
         </div>
 
         <details open>
-          <summary>v9 header — 128 bytes</summary>
+          <summary>v10 header — 128 bytes</summary>
           <div class="details-body">
             <figure class="layout-figure" aria-labelledby="header-map-title">
               <figcaption class="figure-head">
@@ -1271,8 +1271,8 @@
               <div class="byte-ruler-scroll">
                 <div class="byte-ruler units-4">
                   <div class="byte-block identity span-2" data-offset="0"><strong>MAGIC</strong><small>8 B</small></div>
-                  <div class="byte-block identity span-1" data-offset="8"><strong>FORMAT</strong><small>u32 = 9</small></div>
-                  <div class="byte-block identity span-1" data-offset="12"><strong>EPOCH</strong><small>u32 = 6</small></div>
+                  <div class="byte-block identity span-1" data-offset="8"><strong>FORMAT</strong><small>u32 = 10</small></div>
+                  <div class="byte-block identity span-1" data-offset="12"><strong>EPOCH</strong><small>u32 = 7</small></div>
                   <div class="byte-block span-1" data-offset="16"><strong>HEADER SIZE</strong><small>u32 = 128</small></div>
                   <div class="byte-block reserved span-1" data-offset="20"><strong>FLAGS</strong><small>u32 = 0</small></div>
                   <div class="byte-block location span-2" data-offset="24"><strong>TOTAL LENGTH</strong><small>u64</small></div>
@@ -1292,8 +1292,8 @@
                 <thead><tr><th>Offset</th><th>Size</th><th>型／bytes</th><th>Field</th><th>必須条件</th></tr></thead>
                 <tbody>
                   <tr><td>0</td><td>8</td><td><code>[u8; 8]</code></td><td>magic</td><td><code>49 4E 4B 50 4F 44 00 00</code></td></tr>
-                  <tr><td>8</td><td>4</td><td><code>u32</code></td><td>top-level format version</td><td><code>9</code></td></tr>
-                  <tr><td>12</td><td>4</td><td><code>u32</code></td><td>replay epoch</td><td><code>6</code></td></tr>
+                  <tr><td>8</td><td>4</td><td><code>u32</code></td><td>top-level format version</td><td><code>10</code></td></tr>
+                  <tr><td>12</td><td>4</td><td><code>u32</code></td><td>replay epoch</td><td><code>7</code></td></tr>
                   <tr><td>16</td><td>4</td><td><code>u32</code></td><td>header size</td><td><code>128</code></td></tr>
                   <tr><td>20</td><td>4</td><td><code>u32</code></td><td>required flags</td><td><code>0</code></td></tr>
                   <tr><td>24</td><td>8</td><td><code>u64</code></td><td>total file length</td><td>実ファイル長と完全一致</td></tr>
@@ -1568,17 +1568,17 @@
       <section class="doc-section" id="compatibility">
         <span class="section-kicker">12 / COMPATIBILITY</span>
         <h2>Versionと互換方針</h2>
-        <p class="intro">現行 reader/writer が受理する native contract は、top-level version 9／replay epoch 6／現在の primitive catalog の組み合わせだけです。</p>
+        <p class="intro">現行 reader/writer が受理する native contract は、top-level version 10／replay epoch 7／現在の primitive catalog の組み合わせだけです。</p>
 
         <div class="cards">
-          <article class="card"><span class="card-number">VERSION</span><h3>v9 only</h3><p>v9 以外は payload decode や live Core の置換前に拒否します。</p></article>
-          <article class="card"><span class="card-number">SEMANTICS</span><h3>epoch 6</h3><p>replay 結果を変える規則変更は epoch と top-level version を同時に更新します。</p></article>
+          <article class="card"><span class="card-number">VERSION</span><h3>v10 only</h3><p>v10 以外は payload decode や live Core の置換前に拒否します。</p></article>
+          <article class="card"><span class="card-number">SEMANTICS</span><h3>epoch 7</h3><p>replay 結果を変える規則変更は epoch と top-level version を同時に更新します。</p></article>
           <article class="card"><span class="card-number">COMPRESSION</span><h3>None</h3><p>現在受理する compression code は 0 のみです。</p></article>
         </div>
 
         <div class="callout warning">
           <strong>後方互換性は未提供</strong>
-          <p>フォーマットフリーズが明示されるまでは current-only です。旧版 reader、migration、compatibility shim はありません。この制約は、同一 v9 ファイル内の意味データを非破壊に保持する設計とは別の軸です。</p>
+          <p>フォーマットフリーズが明示されるまでは current-only です。旧版 reader、migration、compatibility shim はありません。この制約は、同一 v10 ファイル内の意味データを非破壊に保持する設計とは別の軸です。</p>
         </div>
       </section>
 
@@ -1604,11 +1604,11 @@
             <ul class="source-list">
               <li><a href="SPEC.md">SPEC.md</a> — native 永続化の要求</li>
               <li><a href="docs/file-format.md">docs/file-format.md</a> — normative byte/schema contract</li>
-              <li><a href="rust/inkpod-format/src/procedure.rs">rust/inkpod-format/src/procedure.rs</a> — current v9 container codec</li>
+              <li><a href="rust/inkpod-format/src/procedure.rs">rust/inkpod-format/src/procedure.rs</a> — current v10 container codec</li>
               <li><a href="rust/inkpod-core/src/persistence.rs">rust/inkpod-core/src/persistence.rs</a> — Core mapping、replay、checkpoint、compaction</li>
               <li><a href="rust/inkpod-core/src/primitive/catalog.rs">rust/inkpod-core/src/primitive/catalog.rs</a> — closed Primitive catalogとreplay contract</li>
               <li><a href="rust/inkpod-core/src/primitive/model.rs">rust/inkpod-core/src/primitive/model.rs</a> — stable PrimitiveId定義</li>
-              <li><a href="rust/inkpod-core/tests/contracts/native_v9.rs">rust/inkpod-core/tests/contracts/native_v9.rs</a> — public Core contract tests</li>
+              <li><a href="rust/inkpod-core/tests/contracts/native_v9.rs">rust/inkpod-core/tests/contracts/native_v9.rs</a> — current v10 public Core contract tests</li>
               <li><a href="rust/inkpod-format/tests/unit/native.rs">rust/inkpod-format/tests/unit/native.rs</a> — byte layout、digest、atomic I/O tests</li>
             </ul>
           </div>
@@ -1618,7 +1618,7 @@
   </div>
 
   <footer>
-    <p>対象契約: <span class="mono">.inkpod v9 / replay epoch 6</span> — 本文は現在の形式だけを説明します。</p>
+    <p>対象契約: <span class="mono">.inkpod v10 / replay epoch 7</span> — 本文は現在の形式だけを説明します。</p>
   </footer>
 
   <script>

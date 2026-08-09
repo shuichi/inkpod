@@ -931,7 +931,35 @@ pub(crate) fn build_layer_node(
     height: u32,
     next_id: &mut StableIdCursor,
 ) -> Result<LayerNode, CoreError> {
+    build_layer_node_with_format(
+        kind,
+        name,
+        layer_id,
+        width,
+        height,
+        PixelFormat::StraightRgba8,
+        next_id,
+    )
+}
+
+pub(crate) fn build_layer_node_with_format(
+    kind: LayerKind,
+    name: &str,
+    layer_id: LayerId,
+    width: u32,
+    height: u32,
+    color_format: PixelFormat,
+    next_id: &mut StableIdCursor,
+) -> Result<LayerNode, CoreError> {
     validate_node_name(name)?;
+    if !matches!(
+        color_format,
+        PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+    ) {
+        return Err(CoreError::InvalidArgument(
+            "initial layer color format is unsupported",
+        ));
+    }
     let mut planes = Vec::new();
     match kind {
         LayerKind::BinaryColoring | LayerKind::GrayscaleColoring => {
@@ -948,7 +976,11 @@ pub(crate) fn build_layer_node(
                     if kind == LayerKind::BinaryColoring {
                         PixelFormat::BinaryMask8
                     } else {
-                        PixelFormat::Grayscale8
+                        if color_format == PixelFormat::StraightRgba16 {
+                            PixelFormat::Grayscale16
+                        } else {
+                            PixelFormat::Grayscale8
+                        }
                     },
                 )?,
             });
@@ -959,7 +991,7 @@ pub(crate) fn build_layer_node(
                 visible: true,
                 editable: true,
                 opacity_milli: 1_000,
-                raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
+                raster: TileRaster::new(width, height, color_format)?,
             });
         }
         LayerKind::Raster => planes.push(PlaneNode {
@@ -969,7 +1001,7 @@ pub(crate) fn build_layer_node(
             visible: true,
             editable: true,
             opacity_milli: 1_000,
-            raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
+            raster: TileRaster::new(width, height, color_format)?,
         }),
         LayerKind::Selection => planes.push(PlaneNode {
             id: next_id.take_plane(),
@@ -993,7 +1025,7 @@ pub(crate) fn build_layer_node(
                     visible: true,
                     editable: true,
                     opacity_milli: 1_000,
-                    raster: TileRaster::new(width, height, PixelFormat::StraightRgba8)?,
+                    raster: TileRaster::new(width, height, color_format)?,
                 });
             }
         }

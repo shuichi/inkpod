@@ -102,6 +102,8 @@ pub(super) fn translate_frame_metadata(
         &mut frames.reference_frame,
         &mut frames.drawing_frame,
         &mut frames.safe_frame,
+        &mut frames.shooting_frame,
+        &mut frames.maximum_close_frame,
     ] {
         let rect = DocumentRectI32::from_public(*frame);
         *frame = translate_document_rect(rect, offset)?.into_public();
@@ -118,6 +120,8 @@ pub(super) fn scale_frame_metadata(
         &mut frames.reference_frame,
         &mut frames.drawing_frame,
         &mut frames.safe_frame,
+        &mut frames.shooting_frame,
+        &mut frames.maximum_close_frame,
     ] {
         let rect = DocumentRectI32::from_public(*frame);
         *frame = scale_document_rect(rect, scale)?.into_public();
@@ -143,6 +147,8 @@ pub(super) fn rotate_frame_metadata(
         &mut frames.reference_frame,
         &mut frames.drawing_frame,
         &mut frames.safe_frame,
+        &mut frames.shooting_frame,
+        &mut frames.maximum_close_frame,
     ] {
         let previous = DocumentRectI32::from_public(*frame);
         *frame = rotate_document_rect(previous, width, height, direction).into_public();
@@ -212,6 +218,8 @@ pub(super) fn mirror_frame_metadata(
         &mut frames.reference_frame,
         &mut frames.drawing_frame,
         &mut frames.safe_frame,
+        &mut frames.shooting_frame,
+        &mut frames.maximum_close_frame,
     ] {
         let rect = DocumentRectI32::from_public(*frame);
         *frame = mirror_document_rect(rect, width, height, axis).into_public();
@@ -247,6 +255,18 @@ mod tests {
                 x: 3,
                 y: 2,
                 width: 4,
+                height: 2,
+            },
+            shooting_frame: RectI32 {
+                x: 1,
+                y: 1,
+                width: 8,
+                height: 4,
+            },
+            maximum_close_frame: RectI32 {
+                x: 2,
+                y: 2,
+                width: 5,
                 height: 2,
             },
             margins: Margins {

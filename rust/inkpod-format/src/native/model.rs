@@ -9,7 +9,7 @@ pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 pub const DOCUMENT_ARCHIVE_VERSION: u32 = 1;
 pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
 pub(super) const HEADER_BYTES: usize = 32;
-pub(super) const FIXED_MANIFEST_BYTES: usize = 160;
+pub(super) const FIXED_MANIFEST_BYTES: usize = 200;
 pub(super) const COLOR_METADATA_FIXED_BYTES: usize = 24;
 pub(super) const COLOR_VALUE_BYTES: usize = 16;
 pub(super) const PLANE_DESCRIPTOR_BYTES: usize = 32;
@@ -191,6 +191,8 @@ pub struct FrameMetadata {
     pub reference_frame: RectI32,
     pub drawing_frame: RectI32,
     pub safe_frame: RectI32,
+    pub shooting_frame: RectI32,
+    pub maximum_close_frame: RectI32,
     pub margins: Margins,
 }
 
@@ -216,6 +218,7 @@ pub struct FilePlane {
 pub struct DocumentArchive {
     pub document_uuid: [u8; 16],
     pub document_id: u64,
+    pub cell_id: u64,
     pub layer_id: u64,
     pub main_plane_id: u64,
     pub color_plane_id: u64,

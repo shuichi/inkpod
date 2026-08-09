@@ -236,14 +236,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(6);
+    pub const CURRENT: Self = Self(7);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 9;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 10;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;
@@ -295,7 +295,7 @@ impl ReplayContract {
     }
 }
 
-/// A BLAKE3-256 digest of canonical semantic document-state schema-4 bytes.
+/// A BLAKE3-256 digest of canonical semantic document-state schema-5 bytes.
 ///
 /// The compact root and semantic metadata frames use schema version 4 in the
 /// `org.inkpod.digest.document-state.v4` derive-key domain. Raster payloads

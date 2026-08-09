@@ -44,7 +44,7 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ```
 
 - `struct_size` は必ず呼び出し側が設定する。出力構造体でも同じである。
-- ABI v5 で既知の構造体末尾まで読み書きできるサイズが必要である。
+- ABI v6 で既知の構造体末尾まで読み書きできるサイズが必要である。
 - `reserved` は 0 とし、未知の必須機能フラグは指定しない。
 - レコード列では、各レコードの `struct_size` と `*_stride_bytes` の両方を設定する。
 - 要素数、ストライド、アラインメント、列全体のバイト範囲が有効でなければならない。
@@ -54,18 +54,18 @@ options.feature_flags = INKPOD_FEATURE_NONE;
 ABI バージョンは Core 作成前に比較できる。`INKPOD_ABI_VERSION` とライブラリの戻り値が異なる場合は、
 Core を作らず互換性エラーとして扱う。
 
-現行ライブラリは ABI v5 だけを受理し、`InkpodCoreConfig::abi_version` が完全一致しなければ
+現行ライブラリは ABI v6 だけを受理し、`InkpodCoreConfig::abi_version` が完全一致しなければ
 `INKPOD_STATUS_INCOMPATIBLE_ABI` を返す。関数名や型名の `_v3` は、値／ID API 群が導入された世代を
-示す接尾辞であり、ABI v3 の呼び出し側との実行時互換性を意味しない。ABI v1-v3 の呼び出し側は、
-現行の v4 ヘッダーへ更新して再ビルドする。
+示す接尾辞であり、ABI v3 の呼び出し側との実行時互換性を意味しない。ABI v1-v5 の呼び出し側は、
+現行の v6 ヘッダーへ更新して再ビルドする。
 
-ABI v5 は `_v3` の値／ID 専用プリミティブ制御 API を保持し、旧 `NoOp` の入口だった
+ABI v6 は `_v3` の値／ID 専用プリミティブ制御 API を保持し、旧 `NoOp` の入口だった
 `inkpod_core_dispatch_batch` を削除して、永続化、チェックポイント、履歴破棄コピー用のレコードを追加した。
-ABI v2 で公開名から実装時のマイルストーン番号を除いたタスク API は、現行 v4 でも引き続き
+ABI v2 で公開名から実装時のマイルストーン番号を除いたタスク API は、現行 v6 でも引き続き
 `InkpodTask` / `InkpodTaskInfo` / `INKPOD_TASK_*` / `inkpod_task_*`、共有ラスタ入力は
 `InkpodRasterSourceInput` を使用する。v1 のマイルストーン名は公開別名として残していない。
 
-既存のラスタ文書オープン／インポート、クリップボード、ライトテーブル入力は、現行 v4 の操作別 API の
+既存のラスタ文書オープン／インポート、クリップボード、ライトテーブル入力は、現行 v6 の操作別 API の
 一回の上限付き呼び出し中に、同期的に検証、コピー、正規化、登録される。ストロークサンプルも同期的に
 Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下ならプロシージャ内のペイロード、4 MiB 超なら
 正規化済みサンプルアセットになる。シーケンスの入力元は従来どおり上限付きの Rust 所有ラスタコピーであり、
@@ -79,7 +79,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 現行 ABI は、所有権を移さない読み取り専用の固定レイアウト照会を二つ提供する。
 
 - `inkpod_core_get_replay_contract` は、呼び出し側が所有する `InkpodReplayContract` へ値を書き込む。
-  リプレイエポック 6、現行のプロシージャ／コンテナバージョン 9、正規数値バージョン 1、閉じた
+  リプレイエポック 7、現行のプロシージャ／コンテナバージョン 10、正規数値バージョン 1、閉じた
   プリミティブカタログの件数、BLAKE3-256 カタログダイジェストを返す。Core 所有スレッド専用であり、
   文書、リビジョン、履歴、未保存状態、レジストリ、スナップショットを変更しない。
 - `inkpod_snapshot_get_canonical_digest` は、不変スナップショットの `InkpodCanonicalDigest` を、
@@ -95,10 +95,10 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 コピーされる。NULL、短いレコード、パニックでは通常の ABI ステータス契約に従い、出力を部分更新しない。
 スレッド違反が成立するのは Core 所有スレッド専用のリプレイ契約照会だけであり、スナップショットの
 ダイジェスト照会は、外部同期された任意の読み取りスレッドから呼び出せる。これらは検証値を公開するだけで、
-製品の保存／オープン API は同じ v9 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
+製品の保存／オープン API は同じ v10 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
-現行 ABI v5 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
+現行 ABI v6 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
 形式バージョン、最後に成功したオープン方式、正本であるジャーナルの件数、決定的なリプレイ作業量と
 未保存変更量（`dirty_bytes`）、アセット使用量、`INKPOD_PERSISTENCE_CHECKPOINT_DUE` フラグを、
 リプレイや状態変更を行わずに返す。`open_strategy` は `INKPOD_NATIVE_OPEN_NOT_OPENED`、
@@ -107,16 +107,46 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 ジャーナルの正確なダイジェストを返す。UI は履歴件数を表示して確認を得た後、そのレコードを変更せずに
 `inkpod_core_write_compacted_copy` へ渡す。書き込み時に確認トークンが古ければ `INVALID_STATE`、
 トークンのフラグまたは予約領域が 0 でなければ `UNSUPPORTED` になる。成功時は、現在状態を新しい Genesis
-とする別の v9 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
+とする別の v10 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
 `CoreHost` は三つの操作すべてを Core エンジンキュー経由で実行する。自動的な履歴圧縮は行わず、`CKPT` は
 履歴やアセット保持の正本ではない。Windows では `ファイル > 履歴を破棄してコピー...` として公開し、
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
 許可し、作成したコピーを現在の保存先として採用しない。
 
-## ABI v5 の `_v3` 付き値／ID 制御 API
+## 新規 Cell creation plan（現行 ABI v6）
+
+`InkpodCellCreationOptions` は sizing mode、入力寸法、軸別 DPI、各辺余白率、
+安全／最大寄り比率、五点 anchor、初期 layer kind、RGBA8/16 storage format、
+1..64 の枚数を一つの 64-byte size-prefixed record で渡す。未知 enum、未知 flag、
+短い record、0／上限外、換算 overflow、非対応 topology は、出力 plan を NULL の
+まま拒否する。
+
+`inkpod_cell_creation_plan_create` が返す `InkpodCellCreationPlan` は Rust 所有の
+immutable opaque object で、Core や document stable ID を所有しない。
+`inkpod_cell_creation_plan_count` と `inkpod_cell_creation_plan_copy` は同じ plan
+から計算済み寸法、DPI、100%／基準／作画／安全／撮影／最大寄り frame、余白、
+layer kind、format を caller-owned `InkpodCellCreationPlanItem` 列へコピーする。
+copy は完全な 144-byte record、`struct_size`、capacity、stride、整列を検証し、
+失敗時に `out_written` と要素を部分更新しない。preview と commit はこの同じ
+immutable plan を使い、C++ 側で frame 換算を再実装しない。
+
+plan は Core 所有スレッドへ移送できるが、照会と解放を同時に行ってはならない。
+最後の所有者が `inkpod_cell_creation_plan_release` に owner pointer のアドレスを
+渡すと Rust が解放して caller の変数を NULL にする。同じ NULL owner variable の
+再解放は no-op success である。別名 pointer、解放後 pointer、同時利用は無効である。
+
+`inkpod_core_new_cell_from_plan` は Core 所有スレッド専用で、plan index と非ゼロの
+document UUID だけを frontend authority として受け取る。layer／plane／Cell の
+stable ID は Rust の staged Genesis が確定するまで発行せず、invalid index、UUID、
+割当、overflow、topology failure は既存 document、revision、history、savepoint、
+ID cursor、出力 `InkpodDocumentInfo` を変更しない。ABI v6 の
+`InkpodDocumentInfo` と `InkpodPaperFramesInput` は撮影／最大寄り frame を含み、
+前世代 layout を暗黙に受理しない。
+
+## ABI v6 の `_v3` 付き値／ID 制御 API
 
 この節の `V3` / `_v3` は API 群とレコード名の一部である。すべての呼び出しは、全体として
-ABI v5 に一致するヘッダーとライブラリの組み合わせで使用する。
+ABI v6 に一致するヘッダーとライブラリの組み合わせで使用する。
 
 `InkpodObjectId` は、オブジェクト種別、Core 世代、単調増加値からなる固定幅レコードである。Core、
 スナップショット、タスク、色配列、サンプル列、ラスタアセット、サムネイル、エクスポートは異なる種別を持つ。
@@ -291,8 +321,9 @@ and stroke records index the corresponding snapshot view span; adjustment
 records index one LUT. The adapter rejects NULL, short/misaligned records,
 unknown pass kinds, invalid group structure, out-of-range item spans, nonzero
 reserved fields, and opacity above 1000 before the renderer retains a snapshot.
-The records transfer no ownership. ABI v5 is retained because this is an
-additive export and no existing record layout changed.
+The records transfer no ownership. The render-plan export was additive in ABI
+v5; the current library nevertheless requires ABI v6 because the cell-creation
+contract extends document/frame records.
 
 解放後は、ハンドルから得たタイル、ピクセル、ガイド、ベクター、文字列、バイト列と、コピーしておいた
 別名ポインターを一切使わない。Rust が確保したオブジェクトを `free`、`delete`、`CoTaskMemFree` で解放しない。
@@ -309,6 +340,7 @@ additive export and no existing record layout changed.
 | タスク／バッチタスク | 作成成功から解放まで              | 照会値は呼び出し側へのコピー                              | Core 呼び出し終了後の任意スレッド |
 | バッチグラフ         | 作成／読込成功から解放まで        | 実行／プレビュー中はグラフが生存している必要がある       | 外部同期した任意スレッド      |
 | バッチプレビュー／レポート | Core 出力から解放まで       | 要素の UTF-8 列は親ハンドルの解放まで                    | 外部同期した任意スレッド      |
+| Cell creation plan   | plan 作成成功から解放まで          | copy/commit 呼出中は plan が生存し、解放と同時実行しない | 外部同期した任意スレッド      |
 | カラーチャート       | 読込成功から解放まで              | 取得時に色と名前を呼び出し側バッファへコピー              | 外部同期した任意スレッド      |
 
 スナップショットのラスタタイル記憶域はスナップショット側で独立して参照計数されるため、作成元 Core より
@@ -410,9 +442,9 @@ status = inkpod_clipboard_render_rgba8(clipboard, &output);
 Core へ送らない。対象の再割り当て、クローズ、終了処理では、先に Canvas の受け取り先を解除し、
 捕捉済みセッション／世代の Core 上でビューを閉じてから Canvas 所有者を破棄する。
 
-## EditorDefaults / EditorState（現行 ABI v5）
+## EditorDefaults / EditorState（現行 ABI v6）
 
-次の八つの Core 所有スレッド用 API と固定幅レコードは ABI v2 以降に追加され、現行 ABI v5 に保持されている。
+次の八つの Core 所有スレッド用 API と固定幅レコードは ABI v2 以降に追加され、現行 ABI v6 に保持されている。
 ABI v2 のライブラリや呼び出し側を受理するという意味ではない。
 
 - `inkpod_core_get_editor_defaults` は文書作成前にも有効な Rust 所有の不変 `InkpodEditorDefaults` を、
@@ -445,7 +477,7 @@ ABI v2 のライブラリや呼び出し側を受理するという意味では�
 公開レコードは `InkpodEditorFillOptions`、`InkpodEditorSelectionOptions`、
 `InkpodEditorVectorOptions`、`InkpodEditorStateInfo`、`InkpodEditorDefaults`、
 `InkpodEditorStateUpdate`、`InkpodEditorStrokeInput` である。呼び出し側は、最上位の入力レコードと、
-その入力が使用する各入れ子レコードの `struct_size` を、現行 ABI v5 ヘッダーにある完全な
+その入力が使用する各入れ子レコードの `struct_size` を、現行 ABI v6 ヘッダーにある完全な
 `sizeof(record)` 以上に設定し、予約領域と未知フラグを 0 にする。照会／更新の出力では、呼び出し側は
 最上位出力の `struct_size` だけを提示する。Core は成功時に、呼び出し側所有の完全なコピーと、各入れ子出力の
 `struct_size` を書き込む。短い最上位レコード、使用対象の短い入れ子入力、NULL、未知の列挙値／更新種別、
@@ -466,7 +498,7 @@ Windows の `CoreHost` は、発行時の `DocumentSessionId + Generation` を�
 再照会する。同一文書の複数ビューは一つの EditorState を共有し、別セッションは分離される。ワークスペースに
 残った以前の表示値を Core へ書き戻してはならない。
 
-## 正規 Genesis とアセット取り込み（現行 ABI v5）
+## 正規 Genesis とアセット取り込み（現行 ABI v6）
 
 Core は、Genesis の安定した文書 ID、別個の Cell ID、不変の基底面を所有する。空の文書では
 割り当て不要の `SolidWhite`、ラスタを文書として開く場合は正規ラスタアセットが基底面となる。基底面は、
@@ -488,7 +520,7 @@ Core は、Genesis の安定した文書 ID、別個の Cell ID、不変の基�
 アセット／サンプル ID に変換する。閉じた型付きキューに格納するのは、`CommandContext`、基準リビジョン、
 対象、オペコード／スキーマ、固定値、ID だけであり、呼び出し側バッファは作業項目に入れない。
 
-V9 は `GENS` / `ASST` に、アセットを基底とする Genesis と、保持対象の全分岐のアセットグラフを保存する。
+V10 は `GENS` / `ASST` に、アセットを基底とする Genesis と、保持対象の全分岐のアセットグラフを保存する。
 通常保存、自動保存／復旧、バッチによる `.inkpod` 出力、再オープンは、同じ Core 所有の対応付けを使う。
 Windows アダプターは成功後だけ、現在のパス、最近使ったファイル一覧、未保存表示を更新する。一般画像への
 平坦化エクスポートは別の出力経路である。
@@ -525,10 +557,10 @@ Core はセッションを無効化するため、フロントエンドはスト
 | ストローク終了、プレビュー適用、浮動状態の確定                 | 実変更時に 1 回進む  | 未保存                            | 高々 1 単位                       |
 | 直接の文書編集                                                | 実変更時に 1 回進む  | 未保存                            | 原則 1 単位                       |
 | Undo／Redo／履歴位置の移動                                    | 結果状態へ進む       | 保存点との位置で再計算            | カーソルを移動し項目は増やさない  |
-| 現行 v9 の通常保存                                            | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
+| 現行 v10 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
 | 自動保存                                                      | 不変                 | 不変                              | 不変                              |
 | 新規作成／インポート                                          | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis／履歴              |
-| v9 のオープン／復旧                                           | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
+| v10 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
 
 意味上の変更がない場合の厳密な出力やリビジョンは、各関数の Doxygen 契約に従う。フロントエンドはファイル時刻ではなく、
 Core が返す文書フラグと保存点に基づいて未保存状態を表示する。
@@ -644,7 +676,7 @@ UI スレッド:                 照会／照会／キャンセル
 
 ## 保存、自動保存、復旧
 
-通常保存では、v9 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
+通常保存では、v10 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
 セクション、チェックポイントの作成条件を満たす場合だけ任意の `CKPT` を構築する。保存後に設定予定の
 文書／EditorState 保存点を含むコンテナは、同じディレクトリの一時ファイルへ複数回に分けて書き込む。
 フラッシュ、同期、クローズを終えてから置換する。成功後だけ通常保存パスと両保存点を Core へ公開するため、
@@ -653,7 +685,7 @@ EditorState だけが
 どちらの保存点も変更しない。
 
 自動保存とエクスポートは、出力を原子的に書いても通常保存パス、文書／EditorState 保存点、未保存状態を
-変えない。通常の v9 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
+変えない。通常の v10 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
 ID 発行状態、EditorState、両保存点を、段階的に構築した Core で検証・復元してから、現在の Core 状態を
 一回だけ置換する。`InkpodCore` の `_v3` 付きオブジェクトレジストリの世代自体は、オープンで更新されない。
 

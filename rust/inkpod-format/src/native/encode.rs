@@ -147,6 +147,7 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
     push_u64(&mut output, blob_count as u64);
 
     push_u64(&mut output, document.document_id);
+    push_u64(&mut output, document.cell_id);
     push_u64(&mut output, document.layer_id);
     push_u64(&mut output, document.main_plane_id);
     push_u64(&mut output, document.color_plane_id);
@@ -162,6 +163,8 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
         document.frames.reference_frame,
         document.frames.drawing_frame,
         document.frames.safe_frame,
+        document.frames.shooting_frame,
+        document.frames.maximum_close_frame,
     ] {
         push_i32(&mut output, frame.x);
         push_i32(&mut output, frame.y);

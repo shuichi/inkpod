@@ -62,6 +62,27 @@ INT_PTR ShowViewOptions(
     bool close_immediately,
     ViewOptionsDialogState& state) noexcept;
 
+struct CellCreationDialogState {
+    using PreviewCallback = bool (*)(
+        void* context,
+        const InkpodCellCreationOptions& options,
+        InkpodCellCreationPlanItem& preview) noexcept;
+    InkpodCellCreationOptions options{};
+    const ViewOptionsDialogState::Choice* layer_choices{};
+    std::uint32_t layer_choice_count{};
+    void* preview_context{};
+    PreviewCallback build_preview{};
+    InkpodCellCreationPlanItem preview{};
+    bool close_immediately{};
+    bool centered_on_owner{};
+};
+
+INT_PTR ShowCellCreationOptions(
+    HINSTANCE instance,
+    HWND owner,
+    bool close_immediately,
+    CellCreationDialogState& state) noexcept;
+
 struct TextInputDialogState {
     const wchar_t* title{};
     const wchar_t* label{};

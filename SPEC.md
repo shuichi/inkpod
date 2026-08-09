@@ -236,7 +236,10 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 ### 7. 用紙とフレーム
 
-- 新規セルは `frame size` または `image size` で作る。frame size は100 frame基準に対する横/縦比、image size は width/height pixel と DPI を使う。
+- 新規 Cell は一つの条件入力で `frame size` または `image size`、DPI、各辺余白、初期 layer 種類、8/16 bit 色深度、五点 anchor、作成枚数を指定する。作成枚数は 1 以上 64 以下とし、複数作成は全件成功時だけ focused workspace の active EditorGroup へ独立した untitled document として公開する。Cancel、invalid、overflow、UUID/割当/途中 staging failure では Core、session、tab、recent file、stable ID を一件も進めない。
+- `image size` の入力幅・高さは最終 raster の正確な pixel 数である。各辺余白率を `m/1000` とすると、100% frame の幅・高さはそれぞれ `round_ties_even(image * 1000 / (1000 + 2m))` とし、残差は左/上へ切り捨て半分、右/下へ残りを置く。
+- `frame size` の入力幅・高さは 100% frame の物理寸法 μm である。各軸の frame pixel 数は `round_ties_even(μm * dpi_milli / 25,400,000)`、各辺余白 pixel 数は `round_ties_even(frame * m / 1000)` とし、最終 raster は frame と両辺余白の和とする。全換算は整数の ties-to-even、checked arithmetic、現在の raster 寸法上限を用い、OS DPI を適用しない。
+- 作画 frame と撮影 frame は新規作成時の 100% frame と一致する。安全 frame は 100% frame の指定比率を中央 anchor で縮尺し、最大寄り frame は指定比率を左上/右上/中央/左下/右下の選択 anchor で縮尺する。基準 frame の X/Y は同じ五点 anchor における 100% frame 上の基準座標とし、frame 寸法自体は 100% frame 寸法を保持する。preview と commit は同じ immutable な Core creation plan を使う。
 - 作画 frame は描くべき範囲、安全 frame は必ず見せたい範囲、余白は作画 frame 外の保存領域として別データで保持する。
 - 基準 frame は用紙左上から中心までの X/Y と、左上/右上/中央/左下/右下の簡易配置を持つ。drag と数値のどちらでも移動できる。
 - 最大寄り frame は zoom-in/camera frame が100 frame相当となる比率と anchor を保持する。
@@ -548,6 +551,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 ### Document and view
 
 - `DOC-001`: CellDocument、用紙、DPI、100 frame、基準/作画/安全 frame、余白
+- `CELL-001`: image/frame size、DPI、六種 frame、五点 anchor、初期 layer、8/16 bit、bounded 複数枚を同一 plan から all-or-none で作る新規 Cell workflow
 - `DOC-002`: stable ID を持つ typed layer/plane tree
 - `DOC-003`: create/duplicate/delete/reorder/show/edit/opacity/convert/merge
 - `RENDER-001`: raster/vector 混在時の layer/plane 木順序、visibility、opacity、alpha、adjustment を共有する Canvas/thumbnail/flatten 合成

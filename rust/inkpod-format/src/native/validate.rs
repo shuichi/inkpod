@@ -103,6 +103,7 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
     }
     let ids = [
         document.document_id,
+        document.cell_id,
         document.layer_id,
         document.main_plane_id,
         document.color_plane_id,
@@ -117,6 +118,8 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
         document.frames.reference_frame,
         document.frames.drawing_frame,
         document.frames.safe_frame,
+        document.frames.shooting_frame,
+        document.frames.maximum_close_frame,
     ] {
         if frame.width <= 0 || frame.height <= 0 {
             return Err(FormatError::Invalid("frame dimensions must be positive"));
@@ -198,7 +201,10 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
             || (matches!(
                 plane.kind,
                 PlaneKind::VectorMainLine | PlaneKind::ColorTrace | PlaneKind::VectorFill
-            ) && (plane.pixel_format != PixelFormat::StraightRgba8 || !plane.tiles.is_empty()))
+            ) && (!matches!(
+                plane.pixel_format,
+                PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+            ) || !plane.tiles.is_empty()))
         {
             return Err(FormatError::Invalid("plane manifest is inconsistent"));
         }

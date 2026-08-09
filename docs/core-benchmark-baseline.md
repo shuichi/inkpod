@@ -58,7 +58,7 @@ scenario assertions are:
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and epoch 6 / native v9 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and epoch 7 / native v10 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 
 The checksum is local FNV-1a over fixed-width public semantic data and excludes
@@ -74,7 +74,7 @@ wall-clock time, addresses, cache allocation order, and Batch output paths.
 | `vector_snapshot` | `2813c527f27311c8` | `b975f3cfdb7824fd` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
 | `canonical_replay` | `f521d658a47051e9` | `f521d658a47051e9` |
-| `checkpoint_open` | `bf8114914500d6e8` | `bf8114914500d6e8` |
+| `checkpoint_open` | `eca2df7e74020108` | `eca2df7e74020108` |
 
 ## Approved routine envelope
 

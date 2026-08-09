@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v5 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v6 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(5)
+#define INKPOD_ABI_VERSION UINT32_C(6)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -551,6 +551,8 @@ typedef uint32_t InkpodSelectionOperation;
 
 /** @brief 作成スレッドに固定された Rust-owned Core opaque handle。 */
 typedef struct InkpodCore InkpodCore;
+/** @brief Rust-owned immutable validated blank-cell creation plan. */
+typedef struct InkpodCellCreationPlan InkpodCellCreationPlan;
 /** @brief Core から独立して生存できる immutable・Rust-owned snapshot handle。 */
 typedef struct InkpodSnapshot InkpodSnapshot;
 /** @brief typed clipboard payload を保持する immutable・Rust-owned handle。 */
@@ -650,6 +652,34 @@ typedef struct InkpodCellCreateOptions {
 } InkpodCellCreateOptions;
 #define INKPOD_CELL_CREATE_INITIAL_LAYER_KIND (UINT64_C(1) << 0)
 
+#define INKPOD_CELL_SIZING_IMAGE_PIXELS UINT32_C(1)
+#define INKPOD_CELL_SIZING_FRAME_MICROMETRES UINT32_C(2)
+#define INKPOD_FRAME_ANCHOR_TOP_LEFT UINT32_C(1)
+#define INKPOD_FRAME_ANCHOR_TOP_RIGHT UINT32_C(2)
+#define INKPOD_FRAME_ANCHOR_CENTER UINT32_C(3)
+#define INKPOD_FRAME_ANCHOR_BOTTOM_LEFT UINT32_C(4)
+#define INKPOD_FRAME_ANCHOR_BOTTOM_RIGHT UINT32_C(5)
+#define INKPOD_MAX_CELL_CREATION_COUNT UINT32_C(64)
+
+/** @brief Complete bounded input for an immutable multi-cell creation plan. */
+typedef struct InkpodCellCreationOptions {
+    uint32_t struct_size;
+    uint32_t sizing_mode;
+    uint64_t feature_flags;
+    uint32_t width;
+    uint32_t height;
+    uint32_t dpi_x_milli;
+    uint32_t dpi_y_milli;
+    uint32_t margin_milli;
+    uint32_t safe_frame_ratio_milli;
+    uint32_t maximum_close_ratio_milli;
+    uint32_t anchor;
+    InkpodLayerKind initial_layer_kind;
+    uint32_t pixel_format;
+    uint32_t count;
+    uint32_t reserved;
+} InkpodCellCreationOptions;
+
 /** @brief document 座標の符号付き矩形。`struct_size` を持たない値型。 */
 typedef struct InkpodFrameRect {
     int32_t x;
@@ -657,6 +687,28 @@ typedef struct InkpodFrameRect {
     int32_t width;
     int32_t height;
 } InkpodFrameRect;
+
+/** @brief Caller-owned copy of one immutable cell creation plan item. */
+typedef struct InkpodCellCreationPlanItem {
+    uint32_t struct_size;
+    uint32_t sizing_mode;
+    uint32_t width;
+    uint32_t height;
+    uint32_t dpi_x_milli;
+    uint32_t dpi_y_milli;
+    InkpodLayerKind initial_layer_kind;
+    uint32_t pixel_format;
+    InkpodFrameRect hundred_frame;
+    InkpodFrameRect reference_frame;
+    InkpodFrameRect drawing_frame;
+    InkpodFrameRect safe_frame;
+    InkpodFrameRect shooting_frame;
+    InkpodFrameRect maximum_close_frame;
+    uint32_t margin_left;
+    uint32_t margin_top;
+    uint32_t margin_right;
+    uint32_t margin_bottom;
+} InkpodCellCreationPlanItem;
 
 /** @brief 文書・view revision、dirty/history flags、stable ID と紙情報の caller-owned 出力。 */
 typedef struct InkpodDocumentInfo {
@@ -678,6 +730,8 @@ typedef struct InkpodDocumentInfo {
     InkpodFrameRect reference_frame;
     InkpodFrameRect drawing_frame;
     InkpodFrameRect safe_frame;
+    InkpodFrameRect shooting_frame;
+    InkpodFrameRect maximum_close_frame;
     uint32_t margin_left;
     uint32_t margin_top;
     uint32_t margin_right;
@@ -713,7 +767,7 @@ typedef struct InkpodResourceUsage {
     uint64_t thumbnail_cache_bytes;
 } InkpodResourceUsage;
 
-/** @brief 100F/基準/作画/安全 frame と margin を更新する borrowed 入力。 */
+/** @brief 100F/基準/作画/安全/撮影/最大クローズ frame と margin を更新する borrowed 入力。 */
 typedef struct InkpodPaperFramesInput {
     uint32_t struct_size;
     uint32_t reserved;
@@ -722,6 +776,8 @@ typedef struct InkpodPaperFramesInput {
     InkpodFrameRect reference_frame;
     InkpodFrameRect drawing_frame;
     InkpodFrameRect safe_frame;
+    InkpodFrameRect shooting_frame;
+    InkpodFrameRect maximum_close_frame;
     uint32_t margin_left;
     uint32_t margin_top;
     uint32_t margin_right;
@@ -2201,6 +2257,50 @@ InkpodStatus inkpod_core_destroy(InkpodCore** core);
 InkpodStatus inkpod_core_new_cell(
     InkpodCore* core,
     const InkpodCellCreateOptions* options,
+    InkpodDocumentInfo* out_info);
+
+/**
+ * @brief Validate dimensions, DPI, frames, topology, depth, and count into one immutable plan.
+ * @par Ownership
+ * The returned Rust-owned handle is independent of a Core and remains live until
+ * `inkpod_cell_creation_plan_release`. Invalid input leaves `*out_plan == NULL`.
+ */
+InkpodStatus inkpod_cell_creation_plan_create(
+    const InkpodCellCreationOptions* options,
+    InkpodCellCreationPlan** out_plan);
+
+/** @brief Copy the bounded item count without changing plan or Core state. */
+InkpodStatus inkpod_cell_creation_plan_count(
+    const InkpodCellCreationPlan* plan,
+    uint32_t* out_count);
+
+/**
+ * @brief Copy all plan items to caller-owned initialized size-prefixed strided records.
+ * Invalid capacity, stride, or any record prefix leaves every output record unchanged
+ * and writes zero to `out_written`.
+ */
+InkpodStatus inkpod_cell_creation_plan_copy(
+    const InkpodCellCreationPlan* plan,
+    InkpodCellCreationPlanItem* output,
+    uint32_t capacity,
+    uint64_t stride_bytes,
+    uint32_t* out_written);
+
+/** @brief Release a plan, nulling the owner pointer; a repeated null release is a no-op. */
+InkpodStatus inkpod_cell_creation_plan_release(InkpodCellCreationPlan** plan);
+
+/**
+ * @brief Replace one owner-thread Core document from one immutable plan item.
+ * @par Atomicity
+ * Invalid index, UUID, topology, allocation failure, or other failure leaves the
+ * Core document, revision, history, savepoint, and stable-ID cursor unchanged.
+ */
+InkpodStatus inkpod_core_new_cell_from_plan(
+    InkpodCore* core,
+    const InkpodCellCreationPlan* plan,
+    uint32_t index,
+    uint64_t document_uuid_high,
+    uint64_t document_uuid_low,
     InkpodDocumentInfo* out_info);
 
 /**

@@ -90,7 +90,7 @@ fn acceptance_saved_drawing_vertical_slice() {
     let saved = core.save(&path).unwrap();
     assert!(
         !saved.dirty,
-        "v9 normal save persists both document and editor savepoints"
+        "v10 normal save persists both document and editor savepoints"
     );
     let expected_snapshot = core.build_snapshot();
     drop(core);

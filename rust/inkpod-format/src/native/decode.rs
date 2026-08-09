@@ -48,6 +48,7 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
     }
 
     let document_id = reader.u64()?;
+    let cell_id = reader.u64()?;
     let layer_id = reader.u64()?;
     let main_plane_id = reader.u64()?;
     let color_plane_id = reader.u64()?;
@@ -67,7 +68,7 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
             "manifest reserved field is not zero",
         ));
     }
-    let mut rects = [RectI32::default(); 4];
+    let mut rects = [RectI32::default(); 6];
     for rect in &mut rects {
         *rect = RectI32 {
             x: reader.i32()?,
@@ -361,6 +362,7 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
     let document = DocumentArchive {
         document_uuid,
         document_id,
+        cell_id,
         layer_id,
         main_plane_id,
         color_plane_id,
@@ -373,6 +375,8 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
             reference_frame: rects[1],
             drawing_frame: rects[2],
             safe_frame: rects[3],
+            shooting_frame: rects[4],
+            maximum_close_frame: rects[5],
             margins,
         },
         main_line_color,

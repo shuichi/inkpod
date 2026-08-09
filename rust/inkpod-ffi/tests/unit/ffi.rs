@@ -12,6 +12,169 @@ fn config() -> InkpodCoreConfig {
 }
 
 #[test]
+fn complete_cell_creation_plan_is_bounded_owned_and_atomic() {
+    let mut plan = ptr::null_mut();
+    let options = InkpodCellCreationOptions {
+        struct_size: size_of::<InkpodCellCreationOptions>() as u32,
+        sizing_mode: INKPOD_CELL_SIZING_IMAGE_PIXELS,
+        feature_flags: INKPOD_FEATURE_NONE,
+        width: 320,
+        height: 180,
+        dpi_x_milli: 144_000,
+        dpi_y_milli: 144_000,
+        margin_milli: 50,
+        safe_frame_ratio_milli: 900,
+        maximum_close_ratio_milli: 500,
+        anchor: INKPOD_FRAME_ANCHOR_CENTER,
+        initial_layer_kind: INKPOD_LAYER_GRAYSCALE_COLORING,
+        pixel_format: INKPOD_STORAGE_RGBA16,
+        count: 3,
+        reserved: 0,
+    };
+    // SAFETY: All size-prefixed records and owner pointers remain live and aligned.
+    unsafe {
+        assert_eq!(
+            inkpod_cell_creation_plan_create(&options, ptr::null_mut()),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut short = options;
+        short.struct_size -= 1;
+        assert_eq!(
+            inkpod_cell_creation_plan_create(&short, &mut plan),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert!(plan.is_null());
+        let mut unknown = options;
+        unknown.sizing_mode = u32::MAX;
+        assert_eq!(
+            inkpod_cell_creation_plan_create(&unknown, &mut plan),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut oversized = options;
+        oversized.count = MAX_CELL_CREATION_COUNT + 1;
+        assert_eq!(
+            inkpod_cell_creation_plan_create(&oversized, &mut plan),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_cell_creation_plan_create(&options, &mut plan),
+            INKPOD_STATUS_OK
+        );
+        assert!(!plan.is_null());
+        let mut count = 0_u32;
+        assert_eq!(
+            inkpod_cell_creation_plan_count(plan, &mut count),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(count, 3);
+        assert_eq!(
+            inkpod_cell_creation_plan_count(ptr::null(), &mut count),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_cell_creation_plan_count(plan, ptr::null_mut()),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut items = [InkpodCellCreationPlanItem {
+            struct_size: size_of::<InkpodCellCreationPlanItem>() as u32,
+            ..InkpodCellCreationPlanItem::default()
+        }; 3];
+        let mut written = 0_u32;
+        items[0].width = 41;
+        items[1].width = 42;
+        items[2].width = 43;
+        items[1].struct_size -= 1;
+        assert_eq!(
+            inkpod_cell_creation_plan_copy(
+                plan,
+                items.as_mut_ptr(),
+                items.len() as u32,
+                size_of::<InkpodCellCreationPlanItem>() as u64,
+                &mut written,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(written, 0);
+        assert_eq!(
+            [items[0].width, items[1].width, items[2].width],
+            [41, 42, 43]
+        );
+        items[1].struct_size = size_of::<InkpodCellCreationPlanItem>() as u32;
+        assert_eq!(
+            inkpod_cell_creation_plan_copy(
+                plan,
+                items.as_mut_ptr(),
+                items.len() as u32,
+                size_of::<InkpodCellCreationPlanItem>() as u64 - 1,
+                &mut written,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(written, 0);
+        assert_eq!(
+            inkpod_cell_creation_plan_copy(
+                plan,
+                ptr::null_mut(),
+                items.len() as u32,
+                size_of::<InkpodCellCreationPlanItem>() as u64,
+                &mut written,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(written, 0);
+        assert_eq!(
+            inkpod_cell_creation_plan_copy(
+                plan,
+                items.as_mut_ptr(),
+                items.len() as u32,
+                size_of::<InkpodCellCreationPlanItem>() as u64,
+                &mut written,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(written, 3);
+        assert_eq!(items[0].width, 320);
+        assert_eq!(items[0].height, 180);
+        assert_eq!(items[0].pixel_format, INKPOD_STORAGE_RGBA16);
+        assert_eq!(items[0].shooting_frame, items[0].hundred_frame);
+        assert_eq!(items[0], items[1]);
+
+        let mut core = ptr::null_mut();
+        assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
+        let mut info = InkpodDocumentInfo {
+            struct_size: size_of::<InkpodDocumentInfo>() as u32,
+            ..InkpodDocumentInfo::default()
+        };
+        assert_eq!(
+            inkpod_core_new_cell_from_plan(core, plan, 3, 1, 1, &mut info),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_get_document_info(core, &mut info),
+            INKPOD_STATUS_NO_DOCUMENT
+        );
+        assert_eq!(
+            inkpod_core_new_cell_from_plan(core, plan, 0, 1, 1, &mut info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(info.width, 320);
+        assert_eq!(info.height, 180);
+        assert_eq!(info.shooting_frame, items[0].shooting_frame);
+        assert_eq!(info.maximum_close_frame, items[0].maximum_close_frame);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_cell_creation_plan_release(&mut plan),
+            INKPOD_STATUS_OK
+        );
+        assert!(plan.is_null());
+        assert_eq!(
+            inkpod_cell_creation_plan_release(&mut plan),
+            INKPOD_STATUS_OK
+        );
+    }
+}
+
+#[test]
 fn persistence_checkpoint_and_compaction_abi_are_bounded_confirmed_and_atomic() {
     let mut core = ptr::null_mut();
     let mut document = InkpodDocumentInfo {
@@ -60,7 +223,7 @@ fn persistence_checkpoint_and_compaction_abi_are_bounded_confirmed_and_atomic() 
             inkpod_core_get_persistence_info(core, &mut persistence),
             INKPOD_STATUS_OK
         );
-        assert_eq!(persistence.format_version, 9);
+        assert_eq!(persistence.format_version, 10);
         assert_eq!(persistence.open_strategy, INKPOD_NATIVE_OPEN_NOT_OPENED);
         assert_eq!(persistence.flags, 0);
 

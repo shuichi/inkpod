@@ -2224,6 +2224,8 @@ impl<'a> CanonicalReader<'a> {
             reference_frame: self.rect()?,
             drawing_frame: self.rect()?,
             safe_frame: self.rect()?,
+            shooting_frame: self.rect()?,
+            maximum_close_frame: self.rect()?,
             margins: Margins {
                 left: self.u32()?,
                 top: self.u32()?,
@@ -3052,6 +3054,8 @@ impl CanonicalWriter {
         self.rect(frames.reference_frame);
         self.rect(frames.drawing_frame);
         self.rect(frames.safe_frame);
+        self.rect(frames.shooting_frame);
+        self.rect(frames.maximum_close_frame);
         self.u32(frames.margins.left);
         self.u32(frames.margins.top);
         self.u32(frames.margins.right);

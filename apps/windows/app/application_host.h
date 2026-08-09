@@ -89,6 +89,13 @@ public:
     [[nodiscard]] DocumentRegistry& Documents() noexcept;
     [[nodiscard]] const DocumentRegistry& Documents() const noexcept;
     [[nodiscard]] std::optional<DocumentBinding> AddDocumentSession() noexcept;
+    [[nodiscard]] std::optional<DocumentBinding>
+    PrepareDocumentSession() noexcept;
+    [[nodiscard]] bool PublishPreparedDocumentSession(
+        const DocumentBinding& binding,
+        EditorGroupId destination_group) noexcept;
+    [[nodiscard]] bool DiscardPreparedDocumentSession(
+        const DocumentBinding& binding) noexcept;
     [[nodiscard]] bool ActivateDocumentView(DocumentViewId view) noexcept;
     [[nodiscard]] bool RefreshEditorPresentation(
         DocumentSessionId session,

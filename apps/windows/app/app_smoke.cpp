@@ -73,6 +73,8 @@ using inkpod::app::RecoveryMetadata;
 using inkpod::app::RecoveryMetadataPath;
 using inkpod::app::WriteFileAtomically;
 using inkpod::app::CommandTimerKind;
+using inkpod::app::DocumentSessionId;
+using inkpod::app::DocumentViewId;
 using inkpod::windows::ui::tools::kInteractionEffectAirbrush;
 
 constexpr wchar_t kVectorStrokePlaneRequired[] =
@@ -198,6 +200,10 @@ bool IsCaptionlessAccessibleSplitter(HWND window) noexcept {
 }
 
 InkpodStatus CreateCell(ApplicationHost& state, std::uint32_t width, std::uint32_t height, std::uint32_t dpi_milli) noexcept;
+InkpodStatus CreateCellsFromOptions(
+    ApplicationHost& state,
+    const InkpodCellCreationOptions& options,
+    std::optional<std::uint32_t> smoke_failure_index) noexcept;
 bool DispatchEnabledCommand(
     ApplicationHost& state,
     HWND window,
@@ -8881,6 +8887,142 @@ int RunEditorStateOwnershipSmoke(ApplicationHost& state) noexcept {
     return 0;
 }
 
+int RunCellCreationSmoke(ApplicationHost& state) noexcept {
+    const std::size_t baseline_count = state.Documents().Count();
+    const std::size_t engine_baseline = state.engine == nullptr
+        ? 0U
+        : state.engine->SessionCount();
+    const std::size_t recent_baseline = state.RecentDocumentCount();
+    const DocumentViewId previous_view = state.routing.targets.ActiveDocumentView();
+    std::array<DocumentSessionId, inkpod::app::DocumentRegistry::kMaximumSessions> baseline{};
+    for (std::size_t index = 0U; index < baseline_count; ++index) {
+        const auto* document = state.Documents().SessionAt(index);
+        if (document == nullptr) {
+            return 920;
+        }
+        baseline[index] = document->id;
+    }
+
+    (void)SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_FILE_NEW,
+        0);
+    if (state.Documents().Count() != baseline_count + 3U
+        || state.engine == nullptr
+        || state.engine->SessionCount() != engine_baseline + 3U) {
+        return 921;
+    }
+    std::array<DocumentSessionId, 3U> created{};
+    std::size_t created_count{};
+    for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
+        const auto* document = state.Documents().SessionAt(index);
+        if (document == nullptr) {
+            return 924;
+        }
+        const bool existed = std::find(
+            baseline.cbegin(), baseline.cbegin() + baseline_count, document->id)
+            != baseline.cbegin() + baseline_count;
+        if (!existed && created_count < created.size()) {
+            created[created_count++] = document->id;
+        }
+    }
+    if (created_count != created.size()) {
+        return 925;
+    }
+    InkpodDocumentInfo expected{};
+    for (std::size_t index = 0U; index < created_count; ++index) {
+        auto* document = state.Documents().Find(created[index]);
+        const auto* view = document == nullptr ? nullptr : document->ViewAt(0U);
+        InkpodDocumentInfo info{};
+        if (view == nullptr || !state.ActivateDocumentView(view->id)
+            || !QueryDocument(state, info)
+            || info.width == 0U || info.height == 0U
+            || std::memcmp(
+                   &info.shooting_frame,
+                   &info.hundred_frame,
+                   sizeof(info.hundred_frame)) != 0
+            || info.maximum_close_frame.width >= info.hundred_frame.width
+            || info.maximum_close_frame.height >= info.hundred_frame.height
+            || info.margin_left == 0U || info.margin_top == 0U) {
+            return 922;
+        }
+        if (index == 0U) {
+            expected = info;
+        } else if (info.width != expected.width
+            || info.height != expected.height
+            || info.dpi_x_milli != expected.dpi_x_milli
+            || info.dpi_y_milli != expected.dpi_y_milli
+            || std::memcmp(
+                   &info.hundred_frame,
+                   &expected.hundred_frame,
+                   sizeof(info.hundred_frame) * 6U) != 0
+            || info.margin_left != expected.margin_left
+            || info.margin_top != expected.margin_top
+            || info.margin_right != expected.margin_right
+            || info.margin_bottom != expected.margin_bottom) {
+            return 923;
+        }
+        std::array<std::uint8_t, 32U> name{};
+        InkpodNodeInfo color{};
+        color.struct_size = sizeof(color);
+        color.name_utf8 = name.data();
+        color.name_capacity = name.size();
+        if (state.engine->Invoke(
+                [&color](InkpodCore* core) {
+                    return inkpod_core_node_get(core, 0U, 1U, &color);
+                },
+                false,
+                true) != INKPOD_STATUS_OK
+            || color.pixel_format != INKPOD_STORAGE_RGBA8) {
+            return 924;
+        }
+    }
+
+    const std::size_t before_failure_documents = state.Documents().Count();
+    const std::size_t before_failure_engines = state.engine->SessionCount();
+    const std::size_t before_failure_recent = state.RecentDocumentCount();
+    const DocumentViewId before_failure_view =
+        state.routing.targets.ActiveDocumentView();
+    const InkpodCellCreationOptions failure_options{
+        sizeof(InkpodCellCreationOptions),
+        INKPOD_CELL_SIZING_IMAGE_PIXELS,
+        INKPOD_FEATURE_NONE,
+        64U,
+        48U,
+        96'000U,
+        96'000U,
+        50U,
+        900U,
+        500U,
+        INKPOD_FRAME_ANCHOR_CENTER,
+        INKPOD_LAYER_GRAYSCALE_COLORING,
+        INKPOD_STORAGE_RGBA8,
+        3U,
+        0U};
+    if (CreateCellsFromOptions(state, failure_options, 1U)
+            != INKPOD_STATUS_INVALID_STATE
+        || state.Documents().Count() != before_failure_documents
+        || state.engine->SessionCount() != before_failure_engines
+        || state.RecentDocumentCount() != before_failure_recent
+        || state.routing.targets.ActiveDocumentView() != before_failure_view) {
+        return 929;
+    }
+    for (std::size_t index = created_count; index != 0U; --index) {
+        if (!state.CloseDocumentSession(created[index - 1U])) {
+            return 926;
+        }
+    }
+    if (previous_view && !state.ActivateDocumentView(previous_view)) {
+        return 927;
+    }
+    return state.Documents().Count() == baseline_count
+            && state.engine->SessionCount() == engine_baseline
+            && state.RecentDocumentCount() == recent_baseline
+        ? 0
+        : 928;
+}
+
 int RunRevisionMaxPerformanceSmoke(ApplicationHost& state) noexcept {
     constexpr std::uint32_t kDocumentExtent = 1024U;
     constexpr int kTileRows = 16;
@@ -9254,6 +9396,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunEditorStateOwnershipSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunCellCreationSmoke(state);
     }
     if (exit_code != 0) {
         std::fprintf(stderr, "inkpod application smoke failed: %d\n", exit_code);

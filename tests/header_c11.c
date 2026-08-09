@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 5U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 6U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodCoreConfig) == 16U, "core config layout drift");
 _Static_assert(sizeof(InkpodSnapshotOptions) == 16U, "snapshot options layout drift");
 _Static_assert(sizeof(InkpodPersistenceInfo) == 72U, "persistence info layout drift");
@@ -11,7 +11,9 @@ _Static_assert(sizeof(InkpodSnapshotView) == 48U, "snapshot view layout drift");
 _Static_assert(sizeof(InkpodSnapshotRenderPass) == 48U, "render pass layout drift");
 _Static_assert(sizeof(InkpodSnapshotRenderPlan) == 64U, "render plan layout drift");
 _Static_assert(sizeof(InkpodCellCreateOptions) == 48U, "cell options layout drift");
-_Static_assert(sizeof(InkpodDocumentInfo) == 192U, "document info layout drift");
+_Static_assert(sizeof(InkpodCellCreationOptions) == 64U, "cell creation options layout drift");
+_Static_assert(sizeof(InkpodCellCreationPlanItem) == 144U, "cell creation plan item layout drift");
+_Static_assert(sizeof(InkpodDocumentInfo) == 224U, "document info layout drift");
 _Static_assert(sizeof(InkpodResourceUsage) == 112U, "resource usage layout drift");
 _Static_assert(sizeof(InkpodStrokeSample) == 24U, "stroke sample layout drift");
 _Static_assert(sizeof(InkpodStrokeInput) == 56U, "stroke input layout drift");

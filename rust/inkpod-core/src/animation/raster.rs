@@ -194,6 +194,8 @@ pub(super) fn validate_frame_metadata(
         frames.reference_frame,
         frames.drawing_frame,
         frames.safe_frame,
+        frames.shooting_frame,
+        frames.maximum_close_frame,
     ] {
         validate_reference_frame(frame)?;
     }

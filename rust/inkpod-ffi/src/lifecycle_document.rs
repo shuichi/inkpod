@@ -175,6 +175,315 @@ pub unsafe extern "C" fn inkpod_core_new_cell(
     })
 }
 
+/// Builds one Rust-owned immutable cell-creation plan without consuming Core IDs.
+///
+/// # Safety
+/// `options` must expose a complete readable record and `out_plan` must point to
+/// writable owner storage. On success the caller releases the handle with
+/// [`inkpod_cell_creation_plan_release`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_cell_creation_plan_create(
+    options: *const InkpodCellCreationOptions,
+    out_plan: *mut *mut InkpodCellCreationPlan,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if out_plan.is_null() || !is_aligned(out_plan) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "cell plan owner pointer is null or misaligned",
+            );
+        }
+        // SAFETY: The caller provides writable owner storage.
+        unsafe { out_plan.write(ptr::null_mut()) };
+        // SAFETY: The caller contract provides a readable size-prefixed input.
+        if let Err(status) = unsafe { validate_struct(options, "InkpodCellCreationOptions") } {
+            return status;
+        }
+        // SAFETY: The validated complete input remains readable for this call.
+        let options = unsafe { &*options };
+        if options.feature_flags != INKPOD_FEATURE_NONE || options.reserved != 0 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "cell creation options contain unsupported flags",
+            );
+        }
+        let sizing = match options.sizing_mode {
+            INKPOD_CELL_SIZING_IMAGE_PIXELS => CellSizing::ImagePixels {
+                width: options.width,
+                height: options.height,
+            },
+            INKPOD_CELL_SIZING_FRAME_MICROMETRES => CellSizing::FrameMicrometres {
+                width: options.width,
+                height: options.height,
+            },
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "cell sizing mode is not defined",
+                );
+            }
+        };
+        let anchor = match options.anchor {
+            INKPOD_FRAME_ANCHOR_TOP_LEFT => FrameAnchor::TopLeft,
+            INKPOD_FRAME_ANCHOR_TOP_RIGHT => FrameAnchor::TopRight,
+            INKPOD_FRAME_ANCHOR_CENTER => FrameAnchor::Center,
+            INKPOD_FRAME_ANCHOR_BOTTOM_LEFT => FrameAnchor::BottomLeft,
+            INKPOD_FRAME_ANCHOR_BOTTOM_RIGHT => FrameAnchor::BottomRight,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "frame anchor is not defined",
+                );
+            }
+        };
+        let initial_layer_kind = match parse_layer_kind(options.initial_layer_kind) {
+            Ok(kind) => kind,
+            Err(status) => return status,
+        };
+        let pixel_format = match parse_storage_format(options.pixel_format) {
+            Ok(format) => format,
+            Err(status) => return status,
+        };
+        let input = CellCreationOptions {
+            sizing,
+            dpi_x_milli: options.dpi_x_milli,
+            dpi_y_milli: options.dpi_y_milli,
+            margin_milli: options.margin_milli,
+            safe_frame_ratio_milli: options.safe_frame_ratio_milli,
+            maximum_close_ratio_milli: options.maximum_close_ratio_milli,
+            anchor,
+            initial_layer_kind,
+            pixel_format,
+            count: options.count,
+        };
+        match plan_cell_creation(&input) {
+            Ok(plan) => {
+                let handle = Box::new(InkpodCellCreationPlan {
+                    plan,
+                    sizing_mode: options.sizing_mode,
+                });
+                // SAFETY: The caller-owned pointer was validated above.
+                unsafe { out_plan.write(Box::into_raw(handle)) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Returns the bounded number of immutable items in a creation plan.
+///
+/// # Safety
+/// `plan` must be a live plan handle and `out_count` writable aligned storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_cell_creation_plan_count(
+    plan: *const InkpodCellCreationPlan,
+    out_count: *mut u32,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if plan.is_null() || !is_aligned(plan) || out_count.is_null() || !is_aligned(out_count) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "cell plan or count output is null or misaligned",
+            );
+        }
+        // SAFETY: The caller guarantees a live immutable handle and writable count.
+        let count = unsafe { &*plan }.plan.len() as u32;
+        unsafe { out_count.write(count) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Copies all immutable plan items to a caller-owned strided output.
+///
+/// # Safety
+/// `plan` must be live. `output` must expose `capacity` writable records at the
+/// supplied stride, each initialized with its exact `struct_size`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_cell_creation_plan_copy(
+    plan: *const InkpodCellCreationPlan,
+    output: *mut InkpodCellCreationPlanItem,
+    capacity: u32,
+    stride_bytes: u64,
+    out_written: *mut u32,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if plan.is_null() || !is_aligned(plan) || out_written.is_null() || !is_aligned(out_written)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "cell plan or written output is null or misaligned",
+            );
+        }
+        // SAFETY: Writable scalar storage is required by the caller contract.
+        unsafe { out_written.write(0) };
+        // SAFETY: The caller guarantees a live immutable handle.
+        let plan = unsafe { &*plan };
+        let count = plan.plan.len();
+        if capacity < count as u32
+            || capacity > MAX_CELL_CREATION_COUNT
+            || output.is_null()
+            || !is_aligned(output)
+            || stride_bytes < size_of::<InkpodCellCreationPlanItem>() as u64
+            || stride_bytes > isize::MAX as u64
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "cell plan output span is invalid or too small",
+            );
+        }
+        let total = (count.saturating_sub(1) as u64)
+            .checked_mul(stride_bytes)
+            .and_then(|bytes| bytes.checked_add(size_of::<InkpodCellCreationPlanItem>() as u64));
+        if total.is_none_or(|bytes| bytes > isize::MAX as u64) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "cell plan output span overflows",
+            );
+        }
+        for index in 0..count {
+            // SAFETY: The validated total span contains this record start.
+            let destination = unsafe {
+                output
+                    .cast::<u8>()
+                    .add(index * stride_bytes as usize)
+                    .cast::<InkpodCellCreationPlanItem>()
+            };
+            // SAFETY: Each advertised record prefix is readable by contract.
+            if let Err(status) =
+                unsafe { validate_struct(destination.cast_const(), "InkpodCellCreationPlanItem") }
+            {
+                return status;
+            }
+        }
+        for (index, item) in plan.plan.iter().enumerate() {
+            // SAFETY: The preceding pass validated the complete output span and
+            // every advertised destination record before any record is changed.
+            let destination = unsafe {
+                output
+                    .cast::<u8>()
+                    .add(index * stride_bytes as usize)
+                    .cast::<InkpodCellCreationPlanItem>()
+            };
+            let frames = item.frames();
+            let record = InkpodCellCreationPlanItem {
+                struct_size: size_of::<InkpodCellCreationPlanItem>() as u32,
+                sizing_mode: plan.sizing_mode,
+                width: item.width(),
+                height: item.height(),
+                dpi_x_milli: item.dpi_x_milli(),
+                dpi_y_milli: item.dpi_y_milli(),
+                initial_layer_kind: layer_kind_code(item.initial_layer_kind()),
+                pixel_format: storage_format_code(item.pixel_format()),
+                hundred_frame: frame_rect(frames.hundred_frame),
+                reference_frame: frame_rect(frames.reference_frame),
+                drawing_frame: frame_rect(frames.drawing_frame),
+                safe_frame: frame_rect(frames.safe_frame),
+                shooting_frame: frame_rect(frames.shooting_frame),
+                maximum_close_frame: frame_rect(frames.maximum_close_frame),
+                margin_left: frames.margins.left,
+                margin_top: frames.margins.top,
+                margin_right: frames.margins.right,
+                margin_bottom: frames.margins.bottom,
+            };
+            // SAFETY: The destination record is writable and non-overlapping.
+            unsafe { destination.write(record) };
+        }
+        // SAFETY: Writable scalar storage was validated above.
+        unsafe { out_written.write(count as u32) };
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Releases a Rust-owned immutable creation plan and nulls its owner pointer.
+///
+/// # Safety
+/// `plan` must be writable owner storage containing null or one live plan handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_cell_creation_plan_release(
+    plan: *mut *mut InkpodCellCreationPlan,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if plan.is_null() || !is_aligned(plan) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "cell plan owner pointer is null or misaligned",
+            );
+        }
+        // SAFETY: Owner storage is readable and writable by contract.
+        let handle = unsafe { plan.read() };
+        if handle.is_null() {
+            return INKPOD_STATUS_OK;
+        }
+        if !is_aligned(handle) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "cell plan handle is misaligned",
+            );
+        }
+        unsafe { plan.write(ptr::null_mut()) };
+        // SAFETY: Ownership originated from Box::into_raw and is consumed once.
+        drop(unsafe { Box::from_raw(handle) });
+        INKPOD_STATUS_OK
+    })
+}
+
+/// Replaces one Core document from an immutable plan item and caller-supplied UUID.
+///
+/// # Safety
+/// Handles must be live, `core` must be used on its owner thread, and `out_info`
+/// must expose a complete writable size-prefixed record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_new_cell_from_plan(
+    core: *mut InkpodCore,
+    plan: *const InkpodCellCreationPlan,
+    index: u32,
+    document_uuid_high: u64,
+    document_uuid_low: u64,
+    out_info: *mut InkpodDocumentInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || plan.is_null() || !is_aligned(plan) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "core or cell plan is null or misaligned",
+            );
+        }
+        // SAFETY: The output has a readable advertised prefix by contract.
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodDocumentInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Live handles and writable output are required by contract.
+        let core = unsafe { &mut *core };
+        let plan = unsafe { &*plan };
+        let out_info = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        let Some(item) = plan.plan.item(index as usize) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "cell plan item index is out of range",
+            );
+        };
+        let uuid = (u128::from(document_uuid_high) << 64) | u128::from(document_uuid_low);
+        match core.core.new_cell_from_creation_plan(item, uuid) {
+            Ok(info) => {
+                write_document_info(out_info, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Copies current document metadata and checksums.
 ///
 /// # Safety
@@ -245,7 +554,7 @@ pub unsafe extern "C" fn inkpod_core_get_resource_usage(
     })
 }
 
-/// Transactionally updates the four production frames and independent margins.
+/// Transactionally updates the six production frames and independent margins.
 ///
 /// # Safety
 /// `core` must be live on its owner thread, `input` must be a complete readable
@@ -289,6 +598,8 @@ pub unsafe extern "C" fn inkpod_core_update_paper_frames(
             reference_frame: frame(input.reference_frame),
             drawing_frame: frame(input.drawing_frame),
             safe_frame: frame(input.safe_frame),
+            shooting_frame: frame(input.shooting_frame),
+            maximum_close_frame: frame(input.maximum_close_frame),
             margins: Margins {
                 left: input.margin_left,
                 top: input.margin_top,

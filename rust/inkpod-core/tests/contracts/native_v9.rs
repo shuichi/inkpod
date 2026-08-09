@@ -48,7 +48,7 @@ fn frame_field(payload: &[u8], wanted: u32) -> std::ops::Range<usize> {
 
 #[test]
 fn io_001_save_reopen_restores_full_journal_editor_and_all_next_id_authorities() {
-    let path = native_path("v9-full-session");
+    let path = native_path("v10-full-session");
     let mut core = Core::new();
     core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
@@ -124,11 +124,11 @@ fn io_001_save_reopen_restores_full_journal_editor_and_all_next_id_authorities()
 }
 
 #[test]
-fn io_001_v2_and_corrupt_open_are_current_only_and_atomic_for_the_live_core() {
-    let path = native_path("v2-rejected");
+fn io_001_v9_and_corrupt_open_are_current_only_and_atomic_for_the_live_core() {
+    let path = native_path("v9-rejected");
     let mut legacy = vec![0_u8; 32];
     legacy[0..8].copy_from_slice(b"INKPOD\0\0");
-    legacy[8..12].copy_from_slice(&2_u32.to_le_bytes());
+    legacy[8..12].copy_from_slice(&9_u32.to_le_bytes());
     fs::write(&path, legacy).unwrap();
 
     let mut core = Core::new();
@@ -227,11 +227,11 @@ fn io_001_failed_replace_does_not_publish_prospective_document_or_editor_savepoi
 
 #[test]
 fn io_001_checkpoint_is_optional_verified_and_exactly_equivalent_to_full_replay() {
-    let checkpoint_path = native_path("v9-checkpoint");
-    let replay_path = native_path("v9-full-replay");
-    let epoch_mismatch_path = native_path("v9-checkpoint-epoch-mismatch");
-    let prefix_mismatch_path = native_path("v9-checkpoint-prefix-mismatch");
-    let state_mismatch_path = native_path("v9-checkpoint-state-mismatch");
+    let checkpoint_path = native_path("v10-checkpoint");
+    let replay_path = native_path("v10-full-replay");
+    let epoch_mismatch_path = native_path("v10-checkpoint-epoch-mismatch");
+    let prefix_mismatch_path = native_path("v10-checkpoint-prefix-mismatch");
+    let state_mismatch_path = native_path("v10-checkpoint-state-mismatch");
     let mut core = Core::new();
     core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
@@ -319,8 +319,8 @@ fn io_001_checkpoint_is_optional_verified_and_exactly_equivalent_to_full_replay(
 
 #[test]
 fn safe_001_malformed_or_hash_corrupt_checkpoint_rejects_without_live_publication() {
-    let malformed_path = native_path("v9-malformed-checkpoint");
-    let corrupt_path = native_path("v9-corrupt-checkpoint");
+    let malformed_path = native_path("v10-malformed-checkpoint");
+    let corrupt_path = native_path("v10-corrupt-checkpoint");
     let mut source = Core::new();
     source
         .new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
@@ -379,9 +379,9 @@ fn safe_001_malformed_or_hash_corrupt_checkpoint_rejects_without_live_publicatio
 
 #[test]
 fn io_001_compaction_requires_an_exact_confirmation_token_and_never_mutates_live_history() {
-    let normal_path = native_path("v9-compaction-source");
-    let stale_path = native_path("v9-compaction-stale");
-    let compact_path = native_path("v9-compaction-output");
+    let normal_path = native_path("v10-compaction-source");
+    let stale_path = native_path("v10-compaction-stale");
+    let compact_path = native_path("v10-compaction-output");
     let mut core = Core::new();
     core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();

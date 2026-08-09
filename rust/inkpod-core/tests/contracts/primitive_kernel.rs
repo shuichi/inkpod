@@ -85,7 +85,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(main_line_procedure.primitive_id().get(), 0x0003_0001);
     assert_eq!(main_line_procedure.primitive_schema_version(), 1);
-    assert_eq!(main_line_procedure.replay_epoch().get(), 6);
+    assert_eq!(main_line_procedure.replay_epoch().get(), 7);
     assert_eq!(main_line_procedure.procedure_id().get(), 1);
     assert_eq!(main_line_procedure.base_state_id().get(), 1);
     assert_eq!(main_line_procedure.committed_state_id().get(), 2);
@@ -112,7 +112,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(palette_procedure.primitive_id().get(), 0x0003_0002);
     assert_eq!(palette_procedure.primitive_schema_version(), 1);
-    assert_eq!(palette_procedure.replay_epoch().get(), 6);
+    assert_eq!(palette_procedure.replay_epoch().get(), 7);
     assert_eq!(palette_procedure.procedure_id().get(), 2);
     assert_eq!(palette_procedure.base_state_id().get(), 2);
     assert_eq!(palette_procedure.committed_state_id().get(), 3);
@@ -157,7 +157,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(stroke_procedure.primitive_id().get(), 0x0005_0001);
     assert_eq!(stroke_procedure.primitive_schema_version(), 2);
-    assert_eq!(stroke_procedure.replay_epoch().get(), 6);
+    assert_eq!(stroke_procedure.replay_epoch().get(), 7);
     assert_eq!(stroke_procedure.procedure_id().get(), 3);
     assert_eq!(stroke_procedure.base_state_id().get(), 3);
     assert_eq!(stroke_procedure.committed_state_id().get(), 4);
@@ -173,8 +173,8 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .canonical_composite_digest()
         .unwrap()
         .as_bytes();
-    assert_eq!(contract.replay_epoch().get(), 6);
-    assert_eq!(contract.procedure_format_version(), 9);
+    assert_eq!(contract.replay_epoch().get(), 7);
+    assert_eq!(contract.procedure_format_version(), 10);
     assert_eq!(contract.canonical_numeric_version(), 1);
     assert_eq!(contract.primitive_count(), 76);
     assert_eq!(
@@ -188,20 +188,20 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         boundary_digests,
         vec![
             [
-                39, 206, 71, 253, 1, 237, 237, 200, 223, 82, 178, 239, 134, 85, 176, 198, 147, 181,
-                166, 37, 222, 112, 80, 251, 212, 231, 1, 125, 243, 239, 254, 62
+                157, 39, 222, 250, 197, 81, 73, 180, 16, 206, 100, 55, 168, 228, 60, 16, 72, 252,
+                226, 86, 212, 176, 116, 55, 184, 175, 221, 134, 75, 4, 68, 61
             ],
             [
-                202, 30, 76, 38, 124, 161, 237, 20, 197, 168, 4, 137, 4, 28, 15, 108, 243, 167,
-                201, 44, 160, 153, 201, 227, 115, 233, 12, 213, 159, 158, 99, 122
+                47, 152, 210, 188, 93, 64, 199, 40, 8, 85, 194, 168, 220, 245, 81, 196, 222, 31,
+                103, 193, 109, 133, 10, 54, 228, 40, 11, 45, 183, 83, 232, 187
             ],
             [
-                78, 108, 34, 171, 0, 174, 215, 232, 240, 3, 118, 60, 124, 111, 78, 210, 249, 31,
-                226, 252, 57, 79, 213, 136, 55, 58, 12, 146, 232, 110, 216, 146
+                100, 156, 195, 98, 187, 93, 48, 218, 88, 140, 146, 169, 43, 4, 113, 240, 119, 52,
+                35, 21, 33, 31, 76, 93, 251, 5, 238, 50, 63, 240, 202, 207
             ],
             [
-                240, 238, 217, 212, 164, 124, 100, 14, 114, 61, 76, 32, 242, 221, 180, 174, 251,
-                183, 27, 216, 90, 84, 70, 132, 179, 246, 42, 100, 28, 92, 58, 241
+                185, 84, 9, 16, 125, 188, 182, 250, 159, 45, 203, 93, 117, 111, 217, 32, 240, 107,
+                109, 105, 96, 95, 19, 99, 104, 99, 170, 62, 225, 108, 194, 154
             ],
         ]
     );

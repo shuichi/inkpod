@@ -424,6 +424,280 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
     return FALSE;
 }
 
+constexpr std::array<ViewOptionsDialogState::Choice, 5U> kCellAnchorChoices{{
+    {L"左上", INKPOD_FRAME_ANCHOR_TOP_LEFT},
+    {L"右上", INKPOD_FRAME_ANCHOR_TOP_RIGHT},
+    {L"中央", INKPOD_FRAME_ANCHOR_CENTER},
+    {L"左下", INKPOD_FRAME_ANCHOR_BOTTOM_LEFT},
+    {L"右下", INKPOD_FRAME_ANCHOR_BOTTOM_RIGHT},
+}};
+
+constexpr std::array<ViewOptionsDialogState::Choice, 2U> kCellDepthChoices{{
+    {L"8 bit/channel", INKPOD_STORAGE_RGBA8},
+    {L"16 bit/channel", INKPOD_STORAGE_RGBA16},
+}};
+
+bool PopulateCellChoice(
+    HWND dialog,
+    int control_id,
+    const ViewOptionsDialogState::Choice* choices,
+    std::uint32_t choice_count,
+    std::uint32_t selected_value) noexcept {
+    if (choices == nullptr || choice_count == 0U) {
+        return false;
+    }
+    const HWND control = GetDlgItem(dialog, control_id);
+    int selected = CB_ERR;
+    for (std::uint32_t index = 0U; index < choice_count; ++index) {
+        if (choices[index].label == nullptr || choices[index].value < 0) {
+            return false;
+        }
+        const LRESULT added = SendMessageW(
+            control, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(choices[index].label));
+        if (added == CB_ERR || added == CB_ERRSPACE
+            || SendMessageW(
+                   control,
+                   CB_SETITEMDATA,
+                   static_cast<WPARAM>(added),
+                   static_cast<LPARAM>(choices[index].value))
+                == CB_ERR) {
+            return false;
+        }
+        if (static_cast<std::uint32_t>(choices[index].value) == selected_value) {
+            selected = static_cast<int>(added);
+        }
+    }
+    return selected != CB_ERR
+        && SendMessageW(control, CB_SETCURSEL, static_cast<WPARAM>(selected), 0) != CB_ERR;
+}
+
+bool ReadCellUnsigned(HWND dialog, int control_id, std::uint32_t& output) noexcept {
+    std::array<wchar_t, 32U> text{};
+    if (GetDlgItemTextW(
+            dialog, control_id, text.data(), static_cast<int>(text.size())) <= 0) {
+        return false;
+    }
+    wchar_t* end{};
+    errno = 0;
+    const unsigned long value = std::wcstoul(text.data(), &end, 10);
+    if (errno == ERANGE || end == text.data() || *end != L'\0' || value > UINT32_MAX) {
+        return false;
+    }
+    output = static_cast<std::uint32_t>(value);
+    return true;
+}
+
+bool ReadCellChoice(HWND dialog, int control_id, std::uint32_t& output) noexcept {
+    const LRESULT selected = SendDlgItemMessageW(dialog, control_id, CB_GETCURSEL, 0, 0);
+    if (selected == CB_ERR) {
+        return false;
+    }
+    const LRESULT value = SendDlgItemMessageW(
+        dialog, control_id, CB_GETITEMDATA, static_cast<WPARAM>(selected), 0);
+    if (value == CB_ERR || value < 0 || static_cast<std::uint64_t>(value) > UINT32_MAX) {
+        return false;
+    }
+    output = static_cast<std::uint32_t>(value);
+    return true;
+}
+
+void SetCellUnsigned(HWND dialog, int control_id, std::uint32_t value) noexcept {
+    std::array<wchar_t, 32U> text{};
+    _snwprintf_s(text.data(), text.size(), _TRUNCATE, L"%u", value);
+    SetDlgItemTextW(dialog, control_id, text.data());
+}
+
+bool BuildCellCreationPreview(
+    HWND dialog,
+    const CellCreationDialogState& state,
+    InkpodCellCreationOptions& options,
+    InkpodCellCreationPlanItem& preview) noexcept {
+    options = state.options;
+    options.struct_size = sizeof(options);
+    options.sizing_mode = IsDlgButtonChecked(dialog, IDC_CELL_SIZING_FRAME) == BST_CHECKED
+        ? INKPOD_CELL_SIZING_FRAME_MICROMETRES
+        : INKPOD_CELL_SIZING_IMAGE_PIXELS;
+    std::uint32_t dpi{};
+    if (!ReadCellUnsigned(dialog, IDC_CELL_WIDTH, options.width)
+        || !ReadCellUnsigned(dialog, IDC_CELL_HEIGHT, options.height)
+        || !ReadCellUnsigned(dialog, IDC_CELL_DPI, dpi)
+        || !ReadCellUnsigned(dialog, IDC_CELL_MARGIN, options.margin_milli)
+        || !ReadCellUnsigned(dialog, IDC_CELL_SAFE_RATIO, options.safe_frame_ratio_milli)
+        || !ReadCellUnsigned(
+            dialog,
+            IDC_CELL_MAXIMUM_CLOSE_RATIO,
+            options.maximum_close_ratio_milli)
+        || !ReadCellChoice(dialog, IDC_CELL_ANCHOR, options.anchor)
+        || !ReadCellChoice(dialog, IDC_CELL_LAYER_KIND, options.initial_layer_kind)
+        || !ReadCellChoice(dialog, IDC_CELL_DEPTH, options.pixel_format)
+        || !ReadCellUnsigned(dialog, IDC_CELL_COUNT, options.count)
+        || dpi == 0U || dpi > 2'400U) {
+        return false;
+    }
+    options.dpi_x_milli = dpi * 1'000U;
+    options.dpi_y_milli = dpi * 1'000U;
+
+    preview = {};
+    preview.struct_size = sizeof(preview);
+    return state.build_preview != nullptr
+        && state.build_preview(state.preview_context, options, preview);
+}
+
+bool RefreshCellCreationPreview(HWND dialog, CellCreationDialogState& state) noexcept {
+    const bool physical =
+        IsDlgButtonChecked(dialog, IDC_CELL_SIZING_FRAME) == BST_CHECKED;
+    SetDlgItemTextW(
+        dialog, IDC_CELL_WIDTH_LABEL, physical ? L"幅 (μm)" : L"幅 (px)");
+    SetDlgItemTextW(
+        dialog, IDC_CELL_HEIGHT_LABEL, physical ? L"高さ (μm)" : L"高さ (px)");
+
+    InkpodCellCreationOptions options{};
+    InkpodCellCreationPlanItem preview{};
+    if (!BuildCellCreationPreview(dialog, state, options, preview)) {
+        SetDlgItemTextW(
+            dialog,
+            IDC_CELL_SUMMARY,
+            L"入力条件から有効な作成計画を計算できません。値と上限を確認してください。");
+        EnableWindow(GetDlgItem(dialog, IDOK), FALSE);
+        return false;
+    }
+    std::array<wchar_t, 512U> summary{};
+    _snwprintf_s(
+        summary.data(),
+        summary.size(),
+        _TRUNCATE,
+        L"画像 %u x %u px / DPI %.3f / %u Cell\r\n"
+        L"100%%フレーム (%d, %d) %d x %d / 安全 %d x %d\r\n"
+        L"最大寄り (%d, %d) %d x %d / 余白 L%u T%u R%u B%u",
+        preview.width,
+        preview.height,
+        static_cast<double>(preview.dpi_x_milli) / 1000.0,
+        options.count,
+        preview.hundred_frame.x,
+        preview.hundred_frame.y,
+        preview.hundred_frame.width,
+        preview.hundred_frame.height,
+        preview.safe_frame.width,
+        preview.safe_frame.height,
+        preview.maximum_close_frame.x,
+        preview.maximum_close_frame.y,
+        preview.maximum_close_frame.width,
+        preview.maximum_close_frame.height,
+        preview.margin_left,
+        preview.margin_top,
+        preview.margin_right,
+        preview.margin_bottom);
+    SetDlgItemTextW(dialog, IDC_CELL_SUMMARY, summary.data());
+    state.preview = preview;
+    EnableWindow(GetDlgItem(dialog, IDOK), TRUE);
+    return true;
+}
+
+INT_PTR CALLBACK CellCreationDialogProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<CellCreationDialogState*>(
+        GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    switch (message) {
+        case WM_INITDIALOG: {
+            state = reinterpret_cast<CellCreationDialogState*>(lparam);
+            if (state == nullptr || state->options.struct_size != sizeof(state->options)
+                || state->build_preview == nullptr
+                || !PopulateCellChoice(
+                    dialog,
+                    IDC_CELL_ANCHOR,
+                    kCellAnchorChoices.data(),
+                    static_cast<std::uint32_t>(kCellAnchorChoices.size()),
+                    state->options.anchor)
+                || !PopulateCellChoice(
+                    dialog,
+                    IDC_CELL_LAYER_KIND,
+                    state->layer_choices,
+                    state->layer_choice_count,
+                    state->options.initial_layer_kind)
+                || !PopulateCellChoice(
+                    dialog,
+                    IDC_CELL_DEPTH,
+                    kCellDepthChoices.data(),
+                    static_cast<std::uint32_t>(kCellDepthChoices.size()),
+                    state->options.pixel_format)) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            CheckRadioButton(
+                dialog,
+                IDC_CELL_SIZING_IMAGE,
+                IDC_CELL_SIZING_FRAME,
+                state->options.sizing_mode == INKPOD_CELL_SIZING_FRAME_MICROMETRES
+                    ? IDC_CELL_SIZING_FRAME
+                    : IDC_CELL_SIZING_IMAGE);
+            SetCellUnsigned(dialog, IDC_CELL_WIDTH, state->options.width);
+            SetCellUnsigned(dialog, IDC_CELL_HEIGHT, state->options.height);
+            SetCellUnsigned(dialog, IDC_CELL_DPI, state->options.dpi_x_milli / 1'000U);
+            SetCellUnsigned(dialog, IDC_CELL_MARGIN, state->options.margin_milli);
+            SetCellUnsigned(
+                dialog, IDC_CELL_SAFE_RATIO, state->options.safe_frame_ratio_milli);
+            SetCellUnsigned(
+                dialog,
+                IDC_CELL_MAXIMUM_CLOSE_RATIO,
+                state->options.maximum_close_ratio_milli);
+            SetCellUnsigned(dialog, IDC_CELL_COUNT, state->options.count);
+            SendDlgItemMessageW(dialog, IDC_CELL_WIDTH_SPIN, UDM_SETRANGE32, 1, 1'048'576);
+            SendDlgItemMessageW(dialog, IDC_CELL_HEIGHT_SPIN, UDM_SETRANGE32, 1, 1'048'576);
+            SendDlgItemMessageW(dialog, IDC_CELL_DPI_SPIN, UDM_SETRANGE32, 1, 2'400);
+            SendDlgItemMessageW(dialog, IDC_CELL_MARGIN_SPIN, UDM_SETRANGE32, 0, 1'000);
+            SendDlgItemMessageW(dialog, IDC_CELL_SAFE_RATIO_SPIN, UDM_SETRANGE32, 1, 1'000);
+            SendDlgItemMessageW(
+                dialog, IDC_CELL_MAXIMUM_CLOSE_RATIO_SPIN, UDM_SETRANGE32, 1, 1'000);
+            SendDlgItemMessageW(
+                dialog,
+                IDC_CELL_COUNT_SPIN,
+                UDM_SETRANGE32,
+                1,
+                INKPOD_MAX_CELL_CREATION_COUNT);
+            SetWindowLongPtrW(
+                dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            state->centered_on_owner = CenterModalDialogOnOwner(dialog);
+            (void)RefreshCellCreationPreview(dialog, *state);
+            if (state->close_immediately) {
+                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
+            }
+            return TRUE;
+        }
+        case WM_COMMAND:
+            if (state == nullptr) {
+                break;
+            }
+            if (LOWORD(wparam) == IDOK) {
+                InkpodCellCreationOptions options{};
+                InkpodCellCreationPlanItem preview{};
+                if (!BuildCellCreationPreview(dialog, *state, options, preview)) {
+                    (void)RefreshCellCreationPreview(dialog, *state);
+                    return TRUE;
+                }
+                state->options = options;
+                state->preview = preview;
+                EndDialog(dialog, IDOK);
+                return TRUE;
+            }
+            if (LOWORD(wparam) == IDCANCEL) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            if (HIWORD(wparam) == EN_CHANGE || HIWORD(wparam) == CBN_SELCHANGE
+                || HIWORD(wparam) == BN_CLICKED) {
+                (void)RefreshCellCreationPreview(dialog, *state);
+                return TRUE;
+            }
+            break;
+        case WM_CLOSE:
+            EndDialog(dialog, IDCANCEL);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
 INT_PTR CALLBACK TextInputDialogProcedure(
     HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
     auto* state = reinterpret_cast<TextInputDialogState*>(
@@ -858,6 +1132,25 @@ INT_PTR ShowViewOptions(
         MAKEINTRESOURCEW(IDD_VIEW_OPTIONS),
         owner,
         ViewOptionsDialogProcedure,
+        reinterpret_cast<LPARAM>(&candidate));
+    if (result == IDOK) {
+        state = candidate;
+    }
+    return result;
+}
+
+INT_PTR ShowCellCreationOptions(
+    HINSTANCE instance,
+    HWND owner,
+    bool close_immediately,
+    CellCreationDialogState& state) noexcept {
+    CellCreationDialogState candidate = state;
+    candidate.close_immediately = close_immediately;
+    const INT_PTR result = DialogBoxParamW(
+        instance,
+        MAKEINTRESOURCEW(IDD_CELL_CREATION),
+        owner,
+        CellCreationDialogProcedure,
         reinterpret_cast<LPARAM>(&candidate));
     if (result == IDOK) {
         state = candidate;

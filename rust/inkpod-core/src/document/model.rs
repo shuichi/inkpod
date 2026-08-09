@@ -139,6 +139,8 @@ impl CellDocument {
                 width: full.width - inset_x * 2,
                 height: full.height - inset_y * 2,
             },
+            shooting_frame: full,
+            maximum_close_frame: full,
             margins: Margins::default(),
         };
         let main_plane = PlaneNode {
@@ -209,6 +211,7 @@ impl CellDocument {
         DocumentArchive {
             document_uuid: self.uuid.to_le_bytes(),
             document_id: self.id.get(),
+            cell_id: self.cell_id.get(),
             layer_id: layer_id.get(),
             main_plane_id: main_plane_id.get(),
             color_plane_id: color_plane_id.get(),
@@ -449,32 +452,11 @@ impl CellDocument {
                     .collect()
             })
             .unwrap_or_default();
-        let synthetic_cell_id = file
-            .planes
-            .iter()
-            .map(|plane| plane.id)
-            .chain(layers.iter().flat_map(|layer| {
-                std::iter::once(layer.id.get())
-                    .chain(layer.planes.iter().map(|plane| plane.id.get()))
-            }))
-            .chain(guides.iter().map(|guide| guide.id))
-            .chain([
-                light_table.maximum_id(),
-                vector.maximum_id(),
-                file.document_id,
-                selection_plane_id.get(),
-            ])
-            .max()
-            .unwrap_or(0)
-            .checked_add(1)
-            .filter(|id| *id <= MAX_PERSISTENT_NUMERIC_ID)
-            .ok_or(CoreError::InvalidState("synthetic cell ID overflow"))?;
         Ok(Self {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: DocumentId::from_raw(file.document_id),
-            cell_id: CellId::from_raw(synthetic_cell_id),
-            // The archive DTO predates the explicit Genesis base field. Its
-            // caller installs the validated GENS discriminant after decoding.
+            cell_id: CellId::from_raw(file.cell_id),
+            // The caller installs the validated GENS base discriminant after decoding.
             base_surface: BaseSurface::SolidWhite,
             width: file.width,
             height: file.height,

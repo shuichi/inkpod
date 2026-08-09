@@ -1101,6 +1101,8 @@ fn ffi_contract_document_history_selection_clipboard_and_raster_round_trip() {
         reference_frame: info.reference_frame,
         drawing_frame: info.drawing_frame,
         safe_frame: info.safe_frame,
+        shooting_frame: info.shooting_frame,
+        maximum_close_frame: info.maximum_close_frame,
         margin_left: 1,
         margin_top: 1,
         margin_right: 1,
@@ -2482,8 +2484,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 6);
-        assert_eq!(contract.procedure_format_version, 9);
+        assert_eq!(contract.replay_epoch, 7);
+        assert_eq!(contract.procedure_format_version, 10);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);

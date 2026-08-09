@@ -29,6 +29,7 @@ mod api;
 mod asset;
 mod asset_operations;
 mod batch;
+mod cell_creation;
 mod coordinate;
 mod core;
 mod document;
@@ -66,6 +67,10 @@ pub use batch::{
     BatchOperation, BatchOperationKind, BatchOutputPolicy, BatchOutputSettings, BatchPreview,
     BatchPreviewItem, BatchRunOptions, BatchRunReport, BatchRunScope, BatchSeed, BatchSeparation,
     BatchTargetSelector,
+};
+pub use cell_creation::{
+    CellCreationOptions, CellCreationPlan, CellCreationPlanItem, CellSizing, FrameAnchor,
+    MAX_CELL_CREATION_COUNT, MAX_CELL_CREATION_DPI_MILLI, plan_cell_creation,
 };
 pub use core::Core;
 pub use editor::{

@@ -8,5 +8,5 @@ mod operations;
 mod validation;
 
 pub(super) use model::{CellDocument, DocumentIds, LayerNode, PaperSpec, PlaneNode};
-pub(super) use operations::{build_layer_node, validate_node_name};
+pub(super) use operations::{build_layer_node_with_format, validate_node_name};
 pub(super) use validation::*;

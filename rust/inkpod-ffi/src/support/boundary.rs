@@ -306,6 +306,8 @@ pub(crate) fn write_document_info(output: &mut InkpodDocumentInfo, info: Documen
     output.reference_frame = frame_rect(info.frames.reference_frame);
     output.drawing_frame = frame_rect(info.frames.drawing_frame);
     output.safe_frame = frame_rect(info.frames.safe_frame);
+    output.shooting_frame = frame_rect(info.frames.shooting_frame);
+    output.maximum_close_frame = frame_rect(info.frames.maximum_close_frame);
     output.margin_left = info.frames.margins.left;
     output.margin_top = info.frames.margins.top;
     output.margin_right = info.frames.margins.right;

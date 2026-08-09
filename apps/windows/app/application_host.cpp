@@ -746,6 +746,79 @@ ApplicationHost::AddDocumentSession() noexcept {
     return binding;
 }
 
+std::optional<ApplicationHost::DocumentBinding>
+ApplicationHost::PrepareDocumentSession() noexcept {
+    if (engine == nullptr) {
+        return std::nullopt;
+    }
+    const CommandContext previous = routing.targets.Capture();
+    const auto issued = routing.targets.AddDocument();
+    if (!issued.has_value()) {
+        return std::nullopt;
+    }
+    const DocumentBinding binding{
+        issued.value(),
+        routing.targets.ActiveDocumentView(),
+        routing.targets.CurrentGeneration()};
+    if (engine->CreateSession(binding.session, binding.generation)
+            != INKPOD_STATUS_OK
+        || !engine->RegisterDocumentView(
+            binding.session, binding.generation, binding.view, 0U)) {
+        (void)engine->UnregisterDocumentView(
+            binding.session, binding.generation, binding.view);
+        (void)engine->CloseSession(binding.session, binding.generation);
+        (void)routing.targets.RemoveDocument(binding.session);
+        if (previous.document_session.has_value()
+            && previous.document_view.has_value()) {
+            (void)routing.targets.ActivateDocument(
+                previous.document_session.value(),
+                previous.document_view.value());
+        }
+        return std::nullopt;
+    }
+    if (previous.document_session.has_value()
+        && previous.document_view.has_value()
+        && !routing.targets.ActivateDocument(
+            previous.document_session.value(), previous.document_view.value())) {
+        (void)DiscardPreparedDocumentSession(binding);
+        return std::nullopt;
+    }
+    return binding;
+}
+
+bool ApplicationHost::PublishPreparedDocumentSession(
+    const DocumentBinding& binding,
+    EditorGroupId destination_group) noexcept {
+    if (engine == nullptr
+        || !engine->HasSession(binding.session, binding.generation)
+        || documents_.Find(binding.session) != nullptr
+        || !documents_.Add(
+            binding.session,
+            binding.generation,
+            binding.view,
+            engine.get())) {
+        return false;
+    }
+    if (!Workspace().editors.AddView(destination_group, binding.view)) {
+        (void)documents_.Remove(binding.session);
+        return false;
+    }
+    return true;
+}
+
+bool ApplicationHost::DiscardPreparedDocumentSession(
+    const DocumentBinding& binding) noexcept {
+    if (engine == nullptr || documents_.Find(binding.session) != nullptr) {
+        return false;
+    }
+    const bool unregistered = engine->UnregisterDocumentView(
+        binding.session, binding.generation, binding.view);
+    const bool closed = engine->CloseSession(
+        binding.session, binding.generation) == INKPOD_STATUS_OK;
+    const bool removed = routing.targets.RemoveDocument(binding.session);
+    return unregistered && closed && removed;
+}
+
 bool ApplicationHost::ActivateDocumentView(DocumentViewId view) noexcept {
     DocumentSession* document = documents_.FindByView(view);
     DocumentView* target = document == nullptr ? nullptr : document->FindView(view);

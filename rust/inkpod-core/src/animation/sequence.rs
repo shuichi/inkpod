@@ -93,6 +93,8 @@ impl SequenceCellSource {
                 reference_frame,
                 drawing_frame: full,
                 safe_frame: full,
+                shooting_frame: full,
+                maximum_close_frame: full,
                 margins: Margins::default(),
             },
             raster: common_to_tile_raster(raster, 1)?,

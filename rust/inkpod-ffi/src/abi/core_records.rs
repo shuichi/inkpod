@@ -44,12 +44,55 @@ pub struct InkpodCellCreateOptions {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
+pub struct InkpodCellCreationOptions {
+    pub struct_size: u32,
+    pub sizing_mode: u32,
+    pub feature_flags: u64,
+    pub width: u32,
+    pub height: u32,
+    pub dpi_x_milli: u32,
+    pub dpi_y_milli: u32,
+    pub margin_milli: u32,
+    pub safe_frame_ratio_milli: u32,
+    pub maximum_close_ratio_milli: u32,
+    pub anchor: u32,
+    pub initial_layer_kind: u32,
+    pub pixel_format: u32,
+    pub count: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct InkpodFrameRect {
     pub x: i32,
     pub y: i32,
     pub width: i32,
     pub height: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct InkpodCellCreationPlanItem {
+    pub struct_size: u32,
+    pub sizing_mode: u32,
+    pub width: u32,
+    pub height: u32,
+    pub dpi_x_milli: u32,
+    pub dpi_y_milli: u32,
+    pub initial_layer_kind: u32,
+    pub pixel_format: u32,
+    pub hundred_frame: InkpodFrameRect,
+    pub reference_frame: InkpodFrameRect,
+    pub drawing_frame: InkpodFrameRect,
+    pub safe_frame: InkpodFrameRect,
+    pub shooting_frame: InkpodFrameRect,
+    pub maximum_close_frame: InkpodFrameRect,
+    pub margin_left: u32,
+    pub margin_top: u32,
+    pub margin_right: u32,
+    pub margin_bottom: u32,
 }
 
 #[repr(C)]
@@ -73,6 +116,8 @@ pub struct InkpodDocumentInfo {
     pub reference_frame: InkpodFrameRect,
     pub drawing_frame: InkpodFrameRect,
     pub safe_frame: InkpodFrameRect,
+    pub shooting_frame: InkpodFrameRect,
+    pub maximum_close_frame: InkpodFrameRect,
     pub margin_left: u32,
     pub margin_top: u32,
     pub margin_right: u32,
@@ -112,6 +157,8 @@ pub struct InkpodPaperFramesInput {
     pub reference_frame: InkpodFrameRect,
     pub drawing_frame: InkpodFrameRect,
     pub safe_frame: InkpodFrameRect,
+    pub shooting_frame: InkpodFrameRect,
+    pub maximum_close_frame: InkpodFrameRect,
     pub margin_left: u32,
     pub margin_top: u32,
     pub margin_right: u32,

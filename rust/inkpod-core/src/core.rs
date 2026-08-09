@@ -167,6 +167,52 @@ impl Core {
         document_uuid: u128,
         initial_layer_kind: LayerKind,
     ) -> Result<DocumentInfo, CoreError> {
+        self.new_cell_with_creation_spec(
+            width,
+            height,
+            dpi_x_milli,
+            dpi_y_milli,
+            document_uuid,
+            initial_layer_kind,
+            PixelFormat::StraightRgba8,
+            None,
+        )
+    }
+
+    /// Replaces the current document from one validated immutable creation-plan item.
+    ///
+    /// Planning owns no Core state. This commit validates and constructs the complete
+    /// Genesis privately, consumes stable IDs only on success, resets history to a
+    /// clean savepoint, and never publishes an intermediate document.
+    pub fn new_cell_from_creation_plan(
+        &mut self,
+        item: &CellCreationPlanItem,
+        document_uuid: u128,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.new_cell_with_creation_spec(
+            item.width(),
+            item.height(),
+            item.dpi_x_milli(),
+            item.dpi_y_milli(),
+            document_uuid,
+            item.initial_layer_kind(),
+            item.pixel_format(),
+            Some(item.frames()),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_cell_with_creation_spec(
+        &mut self,
+        width: u32,
+        height: u32,
+        dpi_x_milli: u32,
+        dpi_y_milli: u32,
+        document_uuid: u128,
+        initial_layer_kind: LayerKind,
+        color_format: PixelFormat,
+        frames: Option<FrameMetadata>,
+    ) -> Result<DocumentInfo, CoreError> {
         // Construct the complete replacement and its advanced cursor privately
         // so invalid paper/UUID input cannot consume stable IDs or disturb the
         // current live document. The established public surface keeps object
@@ -192,23 +238,36 @@ impl Core {
                 dpi_y_milli,
             },
         )?;
+        if let Some(frames) = frames {
+            document.frames = frames;
+        }
+        let base_color = document.layers[0]
+            .planes
+            .iter_mut()
+            .find(|plane| plane.kind == PlaneType::Color)
+            .ok_or(CoreError::InvalidState(
+                "blank coloring base has no color plane",
+            ))?;
+        base_color.raster = TileRaster::new(width, height, color_format)?;
         if initial_layer_kind == LayerKind::GrayscaleColoring {
-            document.layers[0] = document::build_layer_node(
+            document.layers[0] = document::build_layer_node_with_format(
                 initial_layer_kind,
                 "Layer 1",
                 initial_layer_id,
                 width,
                 height,
+                color_format,
                 &mut next_id,
             )?;
         } else if initial_layer_kind != LayerKind::BinaryColoring {
             initial_layer_id = next_id.take_layer();
-            let requested = document::build_layer_node(
+            let requested = document::build_layer_node_with_format(
                 initial_layer_kind,
                 "Layer 1",
                 initial_layer_id,
                 width,
                 height,
+                color_format,
                 &mut next_id,
             )?;
             // Non-coloring layers cannot replace the required coloring base.

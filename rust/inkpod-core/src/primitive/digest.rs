@@ -10,7 +10,7 @@ const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v1"
 const DOCUMENT_RASTER_CONTEXT: &str = "org.inkpod.digest.document-raster.v1";
 const DOCUMENT_TILE_CONTEXT: &str = "org.inkpod.digest.document-raster-tile.v1";
 const PROCEDURE_PAYLOAD_CONTEXT: &str = "org.inkpod.digest.procedure-payload.v1";
-const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 4;
+const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 5;
 const DOCUMENT_TILE_SCHEMA_VERSION: u32 = 1;
 const PROCEDURE_PAYLOAD_SCHEMA_VERSION: u32 = 1;
 
@@ -236,6 +236,8 @@ fn canonical_document_metadata_bytes(
         present(rectangle_bytes(document.frames.reference_frame)?),
         present(rectangle_bytes(document.frames.drawing_frame)?),
         present(rectangle_bytes(document.frames.safe_frame)?),
+        present(rectangle_bytes(document.frames.shooting_frame)?),
+        present(rectangle_bytes(document.frames.maximum_close_frame)?),
         present(margins_bytes(document.frames.margins)?),
     ])?;
     let base_surface = match document.base_surface {
@@ -1302,10 +1304,10 @@ mod tests {
         assert_eq!(
             digest.as_bytes(),
             &[
-                45, 68, 132, 132, 36, 212, 152, 28, 128, 220, 52, 169, 214, 182, 146, 74, 71, 83,
-                204, 135, 76, 178, 31, 49, 192, 146, 144, 46, 88, 72, 133, 135,
+                60, 25, 205, 63, 158, 25, 62, 121, 221, 163, 181, 4, 211, 183, 107, 215, 200, 40,
+                245, 87, 152, 165, 111, 110, 249, 36, 81, 107, 79, 229, 185, 221,
             ],
-            "schema-4 digest changes require an explicit golden update"
+            "schema-5 digest changes require an explicit golden update"
         );
     }
 

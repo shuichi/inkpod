@@ -19,7 +19,10 @@ pub(crate) fn validate_plane_format(kind: PlaneType, format: PixelFormat) -> Res
         ),
         PlaneType::Selection => format == PixelFormat::BinaryMask8,
         PlaneType::VectorMainLine | PlaneType::ColorTrace | PlaneType::VectorFill => {
-            format == PixelFormat::StraightRgba8
+            matches!(
+                format,
+                PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+            )
         }
     };
     if valid {

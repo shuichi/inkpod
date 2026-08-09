@@ -66,11 +66,13 @@ namespace inkpod::windows::ui::runtime {
 inline constexpr UINT kLocatorSampleReady = WM_APP + 0x172U;
 
 using inkpod::windows::ui::HistoryDialogState;
+using inkpod::windows::ui::CellCreationDialogState;
 using inkpod::windows::ui::EffectEditorState;
 using inkpod::windows::ui::ShortcutDialogState;
 using inkpod::windows::ui::TextInputDialogState;
 using inkpod::windows::ui::ViewOptionsDialogState;
 using inkpod::windows::ui::ShowAboutDialog;
+using inkpod::windows::ui::ShowCellCreationOptions;
 using inkpod::windows::ui::ShowHistoryDialog;
 using inkpod::windows::ui::ShowEffectEditor;
 using inkpod::windows::ui::ShowShortcutEditor;
@@ -96,6 +98,7 @@ using inkpod::app::CommandTargetScope;
 using inkpod::app::CommandTimerKind;
 using inkpod::app::DocumentSessionId;
 using inkpod::app::DocumentSession;
+using inkpod::app::DocumentView;
 using inkpod::app::DocumentViewId;
 using inkpod::app::EditorGroupId;
 using inkpod::app::EditorGroup;
@@ -6539,6 +6542,8 @@ InkpodStatus EditPaperFrames(ApplicationHost& state, UINT command) noexcept {
     input.reference_frame = info.reference_frame;
     input.drawing_frame = info.drawing_frame;
     input.safe_frame = info.safe_frame;
+    input.shooting_frame = info.shooting_frame;
+    input.maximum_close_frame = info.maximum_close_frame;
     input.margin_left = info.margin_left;
     input.margin_top = info.margin_top;
     input.margin_right = info.margin_right;
@@ -6619,99 +6624,270 @@ InkpodStatus EditPaperFrames(ApplicationHost& state, UINT command) noexcept {
         true);
 }
 
+InkpodStatus CreateCellsFromOptions(
+    ApplicationHost& state,
+    const InkpodCellCreationOptions& options,
+    std::optional<std::uint32_t> smoke_failure_index = std::nullopt) noexcept {
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (smoke_failure_index.has_value() && !state.lifetime.smoke_test) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    InkpodCellCreationPlan* plan{};
+    InkpodStatus status = inkpod_cell_creation_plan_create(&options, &plan);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    const auto release_plan = [&plan]() noexcept {
+        (void)inkpod_cell_creation_plan_release(&plan);
+    };
+    std::uint32_t count{};
+    status = inkpod_cell_creation_plan_count(plan, &count);
+    InkpodDocumentInfo current_info{};
+    const bool reuse_empty_bootstrap_session = count == 1U
+        && state.routing.targets.DocumentSession()
+        && !QueryDocument(state, current_info);
+    const std::uint32_t added_count = count
+        - (reuse_empty_bootstrap_session ? 1U : 0U);
+    if (status != INKPOD_STATUS_OK || count == 0U
+        || count > INKPOD_MAX_CELL_CREATION_COUNT
+        || added_count + state.Documents().Count()
+            > INKPOD_MAX_CELL_CREATION_COUNT) {
+        release_plan();
+        return status == INKPOD_STATUS_OK ? INKPOD_STATUS_INVALID_STATE : status;
+    }
+    if (smoke_failure_index.has_value()
+        && smoke_failure_index.value() >= count) {
+        release_plan();
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    struct PendingIdentity final {
+        std::uint64_t high{};
+        std::uint64_t low{};
+        std::wstring recovery_path;
+    };
+    std::array<PendingIdentity, INKPOD_MAX_CELL_CREATION_COUNT> identities{};
+    for (std::uint32_t index = 0U; index < count; ++index) {
+        GUID uuid{};
+        if (FAILED(CoCreateGuid(&uuid))) {
+            release_plan();
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        static_assert(sizeof(uuid) == sizeof(std::uint64_t) * 2U);
+        std::memcpy(&identities[index].high, &uuid, sizeof(std::uint64_t));
+        std::memcpy(
+            &identities[index].low,
+            reinterpret_cast<const std::uint8_t*>(&uuid) + sizeof(std::uint64_t),
+            sizeof(std::uint64_t));
+        if (!PrivateRecoveryPath(
+                identities[index].high,
+                identities[index].low,
+                identities[index].recovery_path)) {
+            release_plan();
+            return INKPOD_STATUS_IO_ERROR;
+        }
+    }
+
+    if (reuse_empty_bootstrap_session) {
+        if (smoke_failure_index.has_value()) {
+            release_plan();
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        const std::uint64_t uuid_high = identities[0].high;
+        const std::uint64_t uuid_low = identities[0].low;
+        status = state.engine->Invoke(
+            [plan, uuid_high, uuid_low](InkpodCore* core) {
+                InkpodDocumentInfo info = EmptyDocumentInfo();
+                return inkpod_core_new_cell_from_plan(
+                    core, plan, 0U, uuid_high, uuid_low, &info);
+            },
+            false,
+            true);
+        const DocumentIdentity identity = UntitledDocumentIdentity(
+            identities[0].high, identities[0].low);
+        if (status != INKPOD_STATUS_OK
+            || !state.Documents().AssignIdentity(state.Document().id, identity)) {
+            release_plan();
+            return status == INKPOD_STATUS_OK
+                ? INKPOD_STATUS_INVALID_STATE
+                : status;
+        }
+        state.Document().untitled_number = state.IssueUntitledNumber();
+        state.Document().shell.current_path.clear();
+        state.Document().shell.source_path.clear();
+        state.Document().shell.recovery_path =
+            std::move(identities[0].recovery_path);
+        state.Document().shell.recovery_original_path.clear();
+        state.ActiveView().presentation.color_check_mode =
+            INKPOD_COLOR_CHECK_OFF;
+        if (!state.RefreshEditorPresentation(
+                state.Document().id, state.Document().generation)) {
+            release_plan();
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        ResetUiForNewActiveDocument(state);
+        status = FitCanvas(state, INKPOD_VIEW_FIT);
+        release_plan();
+        UpdateMenuState(state);
+        return status;
+    }
+
+    const DocumentViewId previous_view = state.routing.targets.ActiveDocumentView();
+    const EditorGroupId destination_group = state.routing.targets.EditorGroup();
+    std::array<ApplicationHost::DocumentBinding, INKPOD_MAX_CELL_CREATION_COUNT> staged{};
+    std::size_t staged_count{};
+    std::size_t published_count{};
+    const auto rollback = [
+                              &state,
+                              &staged,
+                              &staged_count,
+                              &published_count,
+                              previous_view]() noexcept {
+        while (staged_count > published_count) {
+            --staged_count;
+            (void)state.DiscardPreparedDocumentSession(staged[staged_count]);
+        }
+        while (published_count != 0U) {
+            --published_count;
+            (void)state.CloseDocumentSession(staged[published_count].session);
+        }
+        staged_count = 0U;
+        if (previous_view) {
+            (void)state.ActivateDocumentView(previous_view);
+        }
+    };
+
+    for (std::uint32_t index = 0U; index < count; ++index) {
+        if (smoke_failure_index.has_value()
+            && smoke_failure_index.value() == index) {
+            rollback();
+            release_plan();
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        const auto binding = state.PrepareDocumentSession();
+        if (!binding.has_value()) {
+            rollback();
+            release_plan();
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        staged[staged_count++] = binding.value();
+        const std::uint64_t uuid_high = identities[index].high;
+        const std::uint64_t uuid_low = identities[index].low;
+        status = state.engine->Invoke(
+            binding->session,
+            binding->generation,
+            [plan, index, uuid_high, uuid_low](InkpodCore* core) {
+                InkpodDocumentInfo info = EmptyDocumentInfo();
+                return inkpod_core_new_cell_from_plan(
+                    core,
+                    plan,
+                    index,
+                    uuid_high,
+                    uuid_low,
+                    &info);
+            },
+            false,
+            true);
+        if (status != INKPOD_STATUS_OK) {
+            rollback();
+            release_plan();
+            return status;
+        }
+    }
+
+    for (std::uint32_t index = 0U; index < count; ++index) {
+        const auto& binding = staged[index];
+        if (!state.PublishPreparedDocumentSession(binding, destination_group)) {
+            rollback();
+            release_plan();
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        ++published_count;
+        DocumentSession* document = state.Documents().Find(binding.session);
+        DocumentView* view = document == nullptr
+            ? nullptr
+            : document->FindView(binding.view);
+        const DocumentIdentity document_identity = UntitledDocumentIdentity(
+            identities[index].high, identities[index].low);
+        if (document == nullptr || view == nullptr
+            || !state.Documents().AssignIdentity(
+                binding.session, document_identity)) {
+            rollback();
+            release_plan();
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        document->untitled_number = state.IssueUntitledNumber();
+        document->shell.current_path.clear();
+        document->shell.source_path.clear();
+        document->shell.recovery_path =
+            std::move(identities[index].recovery_path);
+        document->shell.recovery_original_path.clear();
+        view->presentation.color_check_mode = INKPOD_COLOR_CHECK_OFF;
+        if (!state.RefreshEditorPresentation(
+                binding.session, binding.generation)) {
+            rollback();
+            release_plan();
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+    }
+    if (!state.ActivateDocumentView(staged[staged_count - 1U].view)) {
+        rollback();
+        release_plan();
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    ResetUiForNewActiveDocument(state);
+    status = FitCanvas(state, INKPOD_VIEW_FIT);
+    if (status != INKPOD_STATUS_OK) {
+        rollback();
+    }
+    release_plan();
+    UpdateMenuState(state);
+    return status;
+}
+
+bool BuildCellCreationDialogPreview(
+    void*,
+    const InkpodCellCreationOptions& options,
+    InkpodCellCreationPlanItem& preview) noexcept {
+    InkpodCellCreationOptions preview_options = options;
+    preview_options.count = 1U;
+    InkpodCellCreationPlan* plan{};
+    InkpodStatus status = inkpod_cell_creation_plan_create(&preview_options, &plan);
+    if (status != INKPOD_STATUS_OK) {
+        return false;
+    }
+    std::uint32_t written{};
+    status = inkpod_cell_creation_plan_copy(
+        plan, &preview, 1U, sizeof(preview), &written);
+    const InkpodStatus release_status = inkpod_cell_creation_plan_release(&plan);
+    return status == INKPOD_STATUS_OK
+        && release_status == INKPOD_STATUS_OK && written == 1U;
+}
+
 InkpodStatus CreateCellWithLayer(
     ApplicationHost& state,
     std::uint32_t width,
     std::uint32_t height,
     std::uint32_t dpi_milli,
     std::uint32_t initial_layer_kind) noexcept {
-    if (width == 0U || height == 0U || dpi_milli == 0U) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    GUID uuid{};
-    if (FAILED(CoCreateGuid(&uuid))) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    static_assert(sizeof(uuid) == sizeof(std::uint64_t) * 2U);
-    std::uint64_t uuid_high{};
-    std::uint64_t uuid_low{};
-    std::memcpy(&uuid_high, &uuid, sizeof(uuid_high));
-    std::memcpy(
-        &uuid_low,
-        reinterpret_cast<const std::uint8_t*>(&uuid) + sizeof(uuid_high),
-        sizeof(uuid_low));
-    std::wstring private_recovery_path;
-    if (!PrivateRecoveryPath(uuid_high, uuid_low, private_recovery_path)) {
-        return INKPOD_STATUS_IO_ERROR;
-    }
-    const InkpodCellCreateOptions options{
-        sizeof(InkpodCellCreateOptions),
-        initial_layer_kind == INKPOD_LAYER_BINARY_COLORING ? 0U : initial_layer_kind,
-        initial_layer_kind == INKPOD_LAYER_BINARY_COLORING
-            ? INKPOD_FEATURE_NONE
-            : INKPOD_CELL_CREATE_INITIAL_LAYER_KIND,
-        uuid_high,
-        uuid_low,
+    const InkpodCellCreationOptions options{
+        sizeof(InkpodCellCreationOptions),
+        INKPOD_CELL_SIZING_IMAGE_PIXELS,
+        INKPOD_FEATURE_NONE,
         width,
         height,
         dpi_milli,
-        dpi_milli};
-    if (state.engine == nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const DocumentViewId previous_view = state.routing.targets.ActiveDocumentView();
-    InkpodDocumentInfo previous_info{};
-    const bool added_session = !state.routing.targets.DocumentSession()
-        || QueryDocument(state, previous_info);
-    std::optional<ApplicationHost::DocumentBinding> added_binding;
-    if (added_session) {
-        added_binding = state.AddDocumentSession();
-        if (!added_binding.has_value()) {
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-    }
-    const auto rollback = [&state, &added_binding, previous_view]() noexcept {
-        if (added_binding.has_value()) {
-            (void)state.CloseDocumentSession(added_binding->session);
-            if (previous_view) {
-                (void)state.ActivateDocumentView(previous_view);
-            }
-        }
-    };
-    const InkpodStatus status = state.engine->Invoke(
-        [options](InkpodCore* core) {
-            InkpodDocumentInfo info = EmptyDocumentInfo();
-            return inkpod_core_new_cell(core, &options, &info);
-        },
-        false,
-        true);
-    if (status != INKPOD_STATUS_OK) {
-        rollback();
-        return status;
-    }
-    const DocumentIdentity identity = UntitledDocumentIdentity(uuid_high, uuid_low);
-    if (!state.Documents().AssignIdentity(state.Document().id, identity)) {
-        rollback();
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    state.Document().untitled_number = state.IssueUntitledNumber();
-    state.Document().shell.current_path.clear();
-    state.Document().shell.source_path.clear();
-    state.Document().shell.recovery_path = std::move(private_recovery_path);
-    state.Document().shell.recovery_original_path.clear();
-    state.ActiveView().presentation.color_check_mode = INKPOD_COLOR_CHECK_OFF;
-    ResetUiForNewActiveDocument(state);
-    if (!state.RefreshEditorPresentation(
-            state.Document().id, state.Document().generation)) {
-        rollback();
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const InkpodStatus view_status = FitCanvas(state, INKPOD_VIEW_FIT);
-    if (view_status != INKPOD_STATUS_OK) {
-        rollback();
-    }
-    UpdateMenuState(state);
-    return view_status;
+        dpi_milli,
+        0U,
+        900U,
+        500U,
+        INKPOD_FRAME_ANCHOR_CENTER,
+        initial_layer_kind,
+        INKPOD_STORAGE_RGBA8,
+        1U,
+        0U};
+    return CreateCellsFromOptions(state, options);
 }
 
 InkpodStatus CreateCell(
@@ -10522,31 +10698,36 @@ std::optional<LRESULT> RouteDocumentCommand(
                     ShowCoreError(*state, window, L"新規セル既定値");
                     return 0;
                 }
-                ViewOptionsDialogState dialog{};
-                dialog.title = L"新規セル";
-                dialog.labels = {L"幅 (px)", L"高さ (px)", L"DPI", L"レイヤー種別"};
-                dialog.values = {
-                    static_cast<std::int32_t>(defaults.width),
-                    static_cast<std::int32_t>(defaults.height),
-                    static_cast<std::int32_t>(defaults.dpi_x_milli / 1000U),
-                    INKPOD_LAYER_BINARY_COLORING};
-                dialog.value_count = 4U;
-                if (ShowViewOptions(
+                CellCreationDialogState dialog{};
+                dialog.options = InkpodCellCreationOptions{
+                    sizeof(InkpodCellCreationOptions),
+                    INKPOD_CELL_SIZING_IMAGE_PIXELS,
+                    INKPOD_FEATURE_NONE,
+                    defaults.width,
+                    defaults.height,
+                    defaults.dpi_x_milli,
+                    defaults.dpi_y_milli,
+                    50U,
+                    900U,
+                    500U,
+                    INKPOD_FRAME_ANCHOR_CENTER,
+                    INKPOD_LAYER_BINARY_COLORING,
+                    INKPOD_STORAGE_RGBA8,
+                    state->lifetime.smoke_test ? 3U : 1U,
+                    0U};
+                dialog.layer_choices = kLayerKindChoices.data();
+                dialog.layer_choice_count =
+                    static_cast<std::uint32_t>(kLayerKindChoices.size());
+                dialog.build_preview = BuildCellCreationDialogPreview;
+                if (ShowCellCreationOptions(
                         state->lifetime.instance,
                         window,
                         state->lifetime.smoke_test,
-                        dialog) != IDOK
-                    || dialog.values[0] <= 0 || dialog.values[1] <= 0
-                    || dialog.values[2] <= 0) {
+                        dialog) != IDOK) {
                     return 0;
                 }
-                const InkpodStatus status = CreateCellWithLayer(
-                    *state,
-                    static_cast<std::uint32_t>(dialog.values[0]),
-                    static_cast<std::uint32_t>(dialog.values[1]),
-                    static_cast<std::uint32_t>(dialog.values[2]) * 1000U,
-                    static_cast<std::uint32_t>(dialog.values[3]));
-                if (status != INKPOD_STATUS_OK) {
+                const InkpodStatus status = CreateCellsFromOptions(*state, dialog.options);
+                if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
                     ShowCoreError(*state, window, L"新規セルの作成");
                 }
                 UpdateMenuState(*state);

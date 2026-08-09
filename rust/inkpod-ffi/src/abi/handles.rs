@@ -17,6 +17,11 @@ pub struct InkpodSnapshot {
     pub(crate) adjustment_luts_rgb8: Box<[u8]>,
 }
 
+pub struct InkpodCellCreationPlan {
+    pub(crate) plan: CellCreationPlan,
+    pub(crate) sizing_mode: u32,
+}
+
 pub struct InkpodClipboard {
     pub(crate) payload: ClipboardPayload,
 }
