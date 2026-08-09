@@ -13,6 +13,13 @@ set(RUNTIME_SOURCE "${UI_DIR}/main_window_runtime.cpp")
 set(TEST_SOURCE "${INKPOD_SOURCE_DIR}/tests/windows_workspace_layout.cpp")
 set(RESOURCE_HEADER "${INKPOD_SOURCE_DIR}/apps/windows/app/resource.h")
 set(RESOURCE_SOURCE "${INKPOD_SOURCE_DIR}/apps/windows/app/app.rc")
+set(LOCATOR_SOURCE "${UI_DIR}/panes/locator_pane.cpp")
+set(SEQUENCE_SOURCE "${UI_DIR}/panes/sequence_pane.cpp")
+set(LIGHT_TABLE_SOURCE "${UI_DIR}/panes/light_table_pane.cpp")
+set(REFERENCE_SOURCE "${UI_DIR}/panes/subpalette_pane.cpp")
+set(BATCH_SOURCE "${UI_DIR}/dialogs/batch_dialog.cpp")
+set(PROGRESS_SOURCE "${UI_DIR}/dialogs/effects_dialogs.cpp")
+set(PROGRESS_HEADER "${UI_DIR}/dialogs/effects_dialogs.h")
 
 foreach(FILE IN ITEMS
         "${MODEL_HEADER}"
@@ -24,9 +31,43 @@ foreach(FILE IN ITEMS
         "${RUNTIME_SOURCE}"
         "${TEST_SOURCE}"
         "${RESOURCE_HEADER}"
-        "${RESOURCE_SOURCE}")
+        "${RESOURCE_SOURCE}"
+        "${LOCATOR_SOURCE}"
+        "${SEQUENCE_SOURCE}"
+        "${LIGHT_TABLE_SOURCE}"
+        "${REFERENCE_SOURCE}"
+        "${BATCH_SOURCE}"
+        "${PROGRESS_SOURCE}"
+        "${PROGRESS_HEADER}")
     if(NOT EXISTS "${FILE}")
         message(FATAL_ERROR "Missing G7 source: ${FILE}")
+    endif()
+endforeach()
+
+set(PANE_IMPLEMENTATION "")
+foreach(FILE IN ITEMS
+        "${LOCATOR_SOURCE}"
+        "${SEQUENCE_SOURCE}"
+        "${LIGHT_TABLE_SOURCE}"
+        "${REFERENCE_SOURCE}"
+        "${BATCH_SOURCE}"
+        "${PROGRESS_SOURCE}"
+        "${PROGRESS_HEADER}")
+    file(READ "${FILE}" PANE_SOURCE_TEXT)
+    string(APPEND PANE_IMPLEMENTATION "${PANE_SOURCE_TEXT}")
+endforeach()
+foreach(REQUIRED IN ITEMS
+        "LayoutLocatorPane"
+        "LayoutSequencePane"
+        "LayoutLightTablePane"
+        "LayoutSubpalettePaneDialog"
+        "LayoutBatchPane"
+        "CreateJobProgressPane"
+        "enum class JobProgressSlot"
+        "JobProgressSlot::Count")
+    string(FIND "${PANE_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR "Docked modeless pane implementation is missing: ${REQUIRED}")
     endif()
 endforeach()
 
@@ -44,6 +85,7 @@ foreach(REQUIRED IN ITEMS
         "DockResult TabPane"
         "DockResult FloatPane"
         "DockResult HidePane"
+        "DockResult SetPaneAutoHide"
         "DockResult ResetPane"
         "ComputeDockLayout(")
     string(FIND "${MODEL}" "${REQUIRED}" OFFSET)
@@ -112,6 +154,12 @@ foreach(REQUIRED IN ITEMS
         "DockPaneType::ToolOptions, state.Workspace().windows.tool_options"
         "DockPaneType::Color, state.Workspace().windows.color_pane"
         "DockPaneType::Layer, state.Workspace().windows.layer_palette"
+        "DockPaneType::Locator, state.Workspace().locator_palette"
+        "DockPaneType::Sequence, state.Workspace().sequence_palette"
+        "DockPaneType::LightTable, state.Workspace().light_table_palette"
+        "DockPaneType::Reference, state.Workspace().subpalette_palette"
+        "DockPaneType::Batch, state.Workspace().batch_palette"
+        "DockPaneType::JobProgress, state.Workspace().job_progress"
         "NotifyDockHostChanged")
     string(FIND "${RUNTIME}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
@@ -127,6 +175,8 @@ foreach(REQUIRED IN ITEMS
         "model.TabPane"
         "model.FloatPane"
         "model.HidePane"
+        "SetPaneAutoHide"
+        "DockPaneType::JobProgress"
         "model.RestorePane"
         "model.ResetPane"
         "temporarily_auto_hidden"
@@ -141,4 +191,5 @@ endforeach()
 
 message(STATUS
     "Verified pure bounded DockLayoutModel, WorkspaceWindow-owned DockHost, "
-    "primary-pane docking/floating integration, and removal of fixed geometry")
+    "primary/auxiliary/job-pane docking integration, auto-hide, and removal "
+    "of fixed geometry")

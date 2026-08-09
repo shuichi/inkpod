@@ -11,6 +11,12 @@ enum class DockPaneType : std::uint8_t {
     ToolOptions,
     Color,
     Layer,
+    Locator,
+    Sequence,
+    LightTable,
+    Reference,
+    Batch,
+    JobProgress,
     Count,
 };
 
@@ -65,6 +71,8 @@ struct PaneDescriptor {
     std::uint32_t allowed_zones{};
     PaneTargetScope scope{};
     std::uint8_t maximum_instances{1U};
+    bool default_visible{true};
+    bool persist_layout{true};
     bool can_float{};
     bool can_auto_hide{};
     int minimum_width_dip{};
@@ -156,6 +164,8 @@ public:
     [[nodiscard]] DockResult FloatPane(
         DockPaneType type, const DockFloatingPlacement& placement) noexcept;
     [[nodiscard]] DockResult HidePane(DockPaneType type) noexcept;
+    [[nodiscard]] DockResult SetPaneAutoHide(
+        DockPaneType type, bool auto_hide) noexcept;
     [[nodiscard]] DockResult RestorePane(DockPaneType type) noexcept;
     [[nodiscard]] DockResult ResetPane(DockPaneType type) noexcept;
     [[nodiscard]] DockResult SetZoneMode(

@@ -1,11 +1,13 @@
 #include "light_table_pane.h"
 
+#include <algorithm>
 #include <array>
 #include <cwchar>
 #include <utility>
 
 #include "app/resource.h"
 #include "inkpod/core_ffi.h"
+#include "pane_dialog_layout.h"
 
 namespace inkpod::windows::ui::panes {
 namespace {
@@ -14,6 +16,170 @@ void Dispatch(LightTablePaneDialogState& state, UINT command) noexcept {
     if (state.dispatch_command != nullptr) {
         state.dispatch_command(state.context, command);
     }
+}
+
+void LayoutLightTablePane(HWND dialog) noexcept {
+    RECT client{};
+    if (GetClientRect(dialog, &client) == FALSE) {
+        return;
+    }
+    const int margin = ScalePaneDip(dialog, 8);
+    const int gap = ScalePaneDip(dialog, 6);
+    const int line_height = ScalePaneDip(dialog, 18);
+    const int row_height = ScalePaneDip(dialog, 26);
+    const int pin_width = ScalePaneDip(dialog, 92);
+    const int width = static_cast<int>(client.right - client.left);
+    const int height = static_cast<int>(client.bottom - client.top);
+    const int content_width = std::max(0, width - margin * 2);
+
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_PIN,
+        std::max(margin, width - margin - pin_width),
+        margin,
+        pin_width,
+        row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_TARGET,
+        margin,
+        margin + ScalePaneDip(dialog, 4),
+        std::max(0, width - margin * 3 - pin_width),
+        line_height);
+
+    const int set_top = margin + row_height + gap;
+    const int set_label_width = ScalePaneDip(dialog, 48);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_SET_LABEL,
+        margin,
+        set_top + ScalePaneDip(dialog, 4),
+        set_label_width,
+        line_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_SETS,
+        margin + set_label_width + gap,
+        set_top,
+        std::max(0, content_width - set_label_width - gap),
+        row_height);
+
+    const int set_actions_top = set_top + row_height + gap;
+    const int small_button = ScalePaneDip(dialog, 54);
+    const int opacity_width = ScalePaneDip(dialog, 112);
+    int cursor = margin;
+    for (const int control : {
+             IDC_LIGHT_TABLE_SET_NEW,
+             IDC_LIGHT_TABLE_SET_DUPLICATE,
+             IDC_LIGHT_TABLE_SET_DELETE}) {
+        PlacePaneDialogControl(
+            dialog, control, cursor, set_actions_top, small_button, row_height);
+        cursor += small_button + gap;
+    }
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_GLOBAL_OPACITY,
+        std::max(margin, width - margin - opacity_width),
+        set_actions_top,
+        opacity_width,
+        row_height);
+
+    const int items_label_top = set_actions_top + row_height + gap;
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_ITEMS_LABEL,
+        margin,
+        items_label_top,
+        content_width,
+        line_height);
+    const int list_top = items_label_top + line_height;
+
+    const int close_width = ScalePaneDip(dialog, 76);
+    const int close_top = std::max(list_top, height - margin - row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDCANCEL,
+        std::max(margin, width - margin - close_width),
+        close_top,
+        close_width,
+        row_height);
+    const int hint_top = std::max(list_top, close_top - gap - line_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_HINT,
+        margin,
+        hint_top,
+        content_width,
+        line_height);
+    const int cell_top = std::max(list_top, hint_top - gap - row_height);
+    const int cell_label_width = ScalePaneDip(dialog, 58);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_CELL_LABEL,
+        margin,
+        cell_top + ScalePaneDip(dialog, 4),
+        cell_label_width,
+        line_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_PREVIOUS,
+        margin + cell_label_width + gap,
+        cell_top,
+        ScalePaneDip(dialog, 72),
+        row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_NEXT,
+        margin + cell_label_width + gap + ScalePaneDip(dialog, 78),
+        cell_top,
+        ScalePaneDip(dialog, 72),
+        row_height);
+
+    const int property_top = std::max(list_top, cell_top - gap - row_height);
+    const std::array<int, 3U> property_controls{
+        IDC_LIGHT_TABLE_ITEM_PROPERTIES,
+        IDC_LIGHT_TABLE_ITEM_MOVE,
+        IDC_LIGHT_TABLE_ITEM_SWAP};
+    const int property_width = std::max(
+        0, (content_width - gap * 2) / static_cast<int>(property_controls.size()));
+    cursor = margin;
+    for (const int control : property_controls) {
+        PlacePaneDialogControl(
+            dialog, control, cursor, property_top, property_width, row_height);
+        cursor += property_width + gap;
+    }
+
+    const int item_actions_top = std::max(
+        list_top, property_top - gap - row_height);
+    const std::array<int, 5U> item_controls{
+        IDC_LIGHT_TABLE_ITEM_ADD,
+        IDC_LIGHT_TABLE_ITEM_RELOAD,
+        IDC_LIGHT_TABLE_ITEM_DELETE,
+        IDC_LIGHT_TABLE_ITEM_UP,
+        IDC_LIGHT_TABLE_ITEM_DOWN};
+    const int item_width = std::max(
+        0, (content_width - gap * 4) / static_cast<int>(item_controls.size()));
+    cursor = margin;
+    for (const int control : item_controls) {
+        PlacePaneDialogControl(
+            dialog, control, cursor, item_actions_top, item_width, row_height);
+        cursor += item_width + gap;
+    }
+    const int list_height = std::max(0, item_actions_top - gap - list_top);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_ITEMS,
+        margin,
+        list_top,
+        content_width,
+        list_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_EMPTY,
+        margin + gap,
+        list_top + std::max(0, (list_height - line_height) / 2),
+        std::max(0, content_width - gap * 2),
+        line_height);
 }
 
 void SelectSet(HWND dialog, LightTablePaneDialogState& state) noexcept {
@@ -48,6 +214,9 @@ INT_PTR CALLBACK LightTablePaneProcedure(
         GetWindowLongPtrW(dialog, GWLP_USERDATA));
     switch (message) {
         case WM_INITDIALOG:
+            return TRUE;
+        case WM_SIZE:
+            LayoutLightTablePane(dialog);
             return TRUE;
         case WM_COMMAND:
             if (state == nullptr) {
@@ -113,14 +282,16 @@ INT_PTR CALLBACK LightTablePaneProcedure(
                     Dispatch(*state, IDM_SEQ_NEXT);
                     return TRUE;
                 case IDCANCEL:
-                    ShowWindow(dialog, SW_HIDE);
+                    Dispatch(*state, IDM_WINDOW_LIGHT_TABLE);
                     return TRUE;
                 default:
                     break;
             }
             break;
         case WM_CLOSE:
-            ShowWindow(dialog, SW_HIDE);
+            if (state != nullptr) {
+                Dispatch(*state, IDM_WINDOW_LIGHT_TABLE);
+            }
             return TRUE;
         case WM_NCDESTROY:
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
@@ -170,6 +341,7 @@ HWND CreateLightTablePaneDialog(
     }
     SetWindowLongPtrW(
         dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
+    LayoutLightTablePane(dialog);
     SetWindowTextW(
         GetDlgItem(dialog, IDC_LIGHT_TABLE_SETS),
         L"ライトテーブルセット");

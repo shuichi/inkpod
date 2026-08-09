@@ -47,7 +47,6 @@
 #include "ui/panes/sequence_pane.h"
 #include "ui/panes/subpalette_pane.h"
 #include "ui/panes/tool_options_pane.h"
-#include "ui/palette_window.h"
 #include "ui/tools/fill_controller.h"
 #include "ui/tools/floating_paste_controller.h"
 #include "ui/tools/selection_controller.h"
@@ -4085,7 +4084,8 @@ InkpodStatus StartEffectTask(
     EffectsController controller(
         state.lifetime,
         state.Workspace().windows,
-        state.Workspace().effects_progress,
+        state.Workspace().job_progress,
+        state.Workspace().job_progress_state,
         state.effects,
         *state.engine);
     const InkpodStatus status = controller.StartTask(
@@ -5027,8 +5027,9 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.batch.loaded_graph = state.batch.loaded_graph;
     inputs.batch.editable_item = inputs.batch.idle && !state.batch.loaded_graph
         && state.batch.selected_operation < state.batch.operations.size();
-    inputs.batch.palette_visible = state.Workspace().batch_palette != nullptr
-        && IsWindowVisible(state.Workspace().batch_palette) != FALSE;
+    inputs.batch.palette_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Batch);
     inputs.batch.output_policy = state.batch.output_policy;
     inputs.batch.failure_policy = state.batch.failure_policy;
     inputs.workspace.tool_visible =
@@ -5052,8 +5053,9 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.workspace.layer_visible =
         state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Layer);
-    inputs.workspace.locator_visible = state.Workspace().locator_palette != nullptr
-        && IsWindowVisible(state.Workspace().locator_palette) != FALSE;
+    inputs.workspace.locator_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Locator);
     const auto* locator_binding = state.routing.pane_targets.Find(
         state.routing.locator_pane);
     inputs.workspace.locator_pinned = locator_binding != nullptr
@@ -5066,8 +5068,9 @@ CommandStateInputs BuildCommandStateInputs(
             state.routing.locator_pane,
             state.routing.targets.Capture(),
             state.routing.targets).status == PaneTargetStatus::Ok;
-    inputs.workspace.sequence_visible = state.Workspace().sequence_palette != nullptr
-        && IsWindowVisible(state.Workspace().sequence_palette) != FALSE;
+    inputs.workspace.sequence_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Sequence);
     const auto* sequence_binding = state.routing.pane_targets.Find(
         state.routing.sequence_pane);
     inputs.workspace.sequence_pinned = sequence_binding != nullptr
@@ -5078,8 +5081,8 @@ CommandStateInputs BuildCommandStateInputs(
             state.routing.targets.Capture(),
             state.routing.targets).status == PaneTargetStatus::Ok;
     inputs.workspace.light_table_visible =
-        state.Workspace().light_table_palette != nullptr
-        && IsWindowVisible(state.Workspace().light_table_palette) != FALSE;
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::LightTable);
     const auto* light_table_binding = state.routing.pane_targets.Find(
         state.routing.light_table_pane);
     inputs.workspace.light_table_pinned = light_table_binding != nullptr
@@ -5090,8 +5093,8 @@ CommandStateInputs BuildCommandStateInputs(
             state.routing.targets.Capture(),
             state.routing.targets).status == PaneTargetStatus::Ok;
     inputs.workspace.subpalette_visible =
-        state.Workspace().subpalette_palette != nullptr
-        && IsWindowVisible(state.Workspace().subpalette_palette) != FALSE;
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Reference);
     const auto* subpalette_binding = state.routing.pane_targets.Find(
         state.routing.subpalette_pane);
     inputs.workspace.subpalette_pinned = subpalette_binding != nullptr
@@ -5110,14 +5113,18 @@ CommandStateInputs BuildCommandStateInputs(
             state.routing.batch_pane,
             state.routing.targets.Capture(),
             state.routing.targets).status == PaneTargetStatus::Ok;
+    inputs.workspace.job_progress_visible =
+        state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::JobProgress);
     inputs.workspace.mirrored =
         state.Workspace().windows.workspace.dock.Mirrored();
     inputs.workspace.selected_workspace_preset = static_cast<std::uint32_t>(
         state.Workspace().windows.workspace.selected_preset);
     const auto auto_hidden = [&state](WorkspaceAuxiliaryPane type) {
-        const auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
-            state.Workspace().windows.workspace, type);
-        return pane != nullptr && pane->auto_hide;
+        const DockPanePlacement* pane =
+            state.Workspace().windows.workspace.dock.Pane(
+                inkpod::windows::ui::DockPaneTypeForAuxiliary(type));
+        return pane != nullptr && pane->zone == DockZone::AutoHide;
     };
     inputs.workspace.locator_auto_hidden = auto_hidden(
         WorkspaceAuxiliaryPane::Locator);
@@ -8933,7 +8940,7 @@ bool CloseWorkspaceWindow(ApplicationHost& state, HWND window) noexcept {
     CaptureWorkspacePresentation(state);
     if (!state.lifetime.smoke_test) {
         const auto session_name = WorkspaceRegistryValueName(
-            L"WorkspaceSessionV4", closing->persistence_slot);
+            L"WorkspaceSessionV5", closing->persistence_slot);
         (void)SaveWorkspaceLayout(
             closing->windows.workspace, session_name.data());
     }
@@ -9377,7 +9384,8 @@ InkpodStatus PreviewBatch(
     BatchController controller(
         state.lifetime,
         state.Workspace().windows,
-        state.Workspace().batch_progress,
+        state.Workspace().job_progress,
+        state.Workspace().job_progress_state,
         state.Workspace().batch_palette,
         state.batch,
         *state.engine);
@@ -9428,7 +9436,8 @@ InkpodStatus StartBatch(
     BatchController controller(
         state.lifetime,
         state.Workspace().windows,
-        state.Workspace().batch_progress,
+        state.Workspace().job_progress,
+        state.Workspace().job_progress_state,
         state.Workspace().batch_palette,
         state.batch,
         *state.engine);
@@ -9530,22 +9539,6 @@ void CaptureWorkspacePresentation(ApplicationHost& state) noexcept {
         static_cast<void>(inkpod::windows::ui::CaptureWorkspaceWindowPlacement(
             state.Workspace().windows.window, layout));
     }
-    for (std::size_t index = 0U;
-         index < inkpod::windows::ui::kWorkspaceAuxiliaryPaneCount;
-         ++index) {
-        const auto type = static_cast<WorkspaceAuxiliaryPane>(index);
-        auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
-            layout, type);
-        const HWND window = AuxiliaryPaneWindow(state, type);
-        if (pane == nullptr || window == nullptr) {
-            continue;
-        }
-        static_cast<void>(inkpod::windows::ui::CaptureWorkspaceAuxiliaryPlacement(
-            window, layout, type));
-        if (!pane->auto_hide) {
-            pane->visible = IsWindowVisible(window) != FALSE;
-        }
-    }
 }
 
 void ApplyWorkspacePresentation(ApplicationHost& state) noexcept {
@@ -9558,22 +9551,6 @@ void ApplyWorkspacePresentation(ApplicationHost& state) noexcept {
             : EditorSplitOrientation::Vertical;
         static_cast<void>(state.Workspace().editors.SetOrientation(orientation));
     }
-    for (std::size_t index = 0U;
-         index < inkpod::windows::ui::kWorkspaceAuxiliaryPaneCount;
-         ++index) {
-        const auto type = static_cast<WorkspaceAuxiliaryPane>(index);
-        const auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
-            layout, type);
-        const HWND window = AuxiliaryPaneWindow(state, type);
-        if (pane == nullptr || window == nullptr) {
-            continue;
-        }
-        static_cast<void>(inkpod::windows::ui::ApplyWorkspaceAuxiliaryPlacement(
-            window, state.Workspace().windows.window, layout, type));
-        ShowWindow(
-            window,
-            pane->visible && !pane->auto_hide ? SW_SHOWNOACTIVATE : SW_HIDE);
-    }
 }
 
 void CollapseAutoHiddenPanes(ApplicationHost& state) noexcept {
@@ -9582,11 +9559,11 @@ void CollapseAutoHiddenPanes(ApplicationHost& state) noexcept {
          index < inkpod::windows::ui::kWorkspaceAuxiliaryPaneCount;
          ++index) {
         const auto type = static_cast<WorkspaceAuxiliaryPane>(index);
-        const auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
-            layout, type);
-        const HWND window = AuxiliaryPaneWindow(state, type);
-        if (pane != nullptr && pane->auto_hide && window != nullptr) {
-            ShowWindow(window, SW_HIDE);
+        const DockPaneType dock_type =
+            inkpod::windows::ui::DockPaneTypeForAuxiliary(type);
+        const DockPanePlacement* pane = layout.dock.Pane(dock_type);
+        if (pane != nullptr && pane->zone == DockZone::AutoHide) {
+            state.Workspace().windows.dock_host.HideAutoHiddenPane(dock_type);
         }
     }
 }
@@ -9594,34 +9571,74 @@ void CollapseAutoHiddenPanes(ApplicationHost& state) noexcept {
 bool ToggleAuxiliaryPaneVisibility(
     ApplicationHost& state, WorkspaceAuxiliaryPane type) noexcept {
     WorkspaceLayoutState& layout = state.Workspace().windows.workspace;
-    auto* pane = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(layout, type);
-    const HWND window = AuxiliaryPaneWindow(state, type);
-    if (pane == nullptr || window == nullptr) {
+    const auto* auxiliary = inkpod::windows::ui::FindWorkspaceAuxiliaryPane(
+        layout, type);
+    const DockPaneType dock_type =
+        inkpod::windows::ui::DockPaneTypeForAuxiliary(type);
+    const DockPanePlacement* pane = layout.dock.Pane(dock_type);
+    if (auxiliary == nullptr || pane == nullptr
+        || AuxiliaryPaneWindow(state, type) == nullptr) {
         return false;
     }
-    const bool show = IsWindowVisible(window) == FALSE;
-    ShowWindow(window, show ? SW_SHOW : SW_HIDE);
-    if (!pane->auto_hide) {
-        pane->visible = show;
+    bool show{};
+    bool layout_changed{};
+    if (pane->zone == DockZone::AutoHide) {
+        show = !state.Workspace().windows.dock_host.AutoHiddenPaneVisible(
+            dock_type);
+        if (show) {
+            show = state.Workspace().windows.dock_host.ShowAutoHiddenPane(
+                dock_type,
+                inkpod::windows::ui::DockZoneForAutoHideEdge(auxiliary->edge));
+        } else {
+            state.Workspace().windows.dock_host.HideAutoHiddenPane(dock_type);
+        }
+    } else {
+        show = !layout.dock.IsPaneVisible(dock_type);
+        const DockResult result = state.Workspace().windows.dock_host.TogglePane(
+            dock_type);
+        if (result != DockResult::Ok) {
+            return false;
+        }
+        layout_changed = true;
+        if (show) {
+            static_cast<void>(
+                state.Workspace().windows.dock_host.ActivatePane(dock_type));
+        }
     }
-    layout.selected_preset = WorkspacePreset::Custom;
+    if (layout_changed) {
+        layout.selected_preset = WorkspacePreset::Custom;
+    }
     return show;
+}
+
+void FocusPaneWindow(HWND pane, int control) noexcept {
+    if (pane == nullptr) {
+        return;
+    }
+    const HWND root = GetAncestor(pane, GA_ROOT);
+    if (root != nullptr) {
+        SetForegroundWindow(root);
+    }
+    const HWND target = control == 0 ? pane : GetDlgItem(pane, control);
+    if (target != nullptr) {
+        SetFocus(target);
+    }
+}
+
+void PreserveActiveJobProgressPane(ApplicationHost& state) noexcept {
+    if (!HasActiveJobProgress(state.Workspace().job_progress_state)) {
+        return;
+    }
+    static_cast<void>(state.Workspace().windows.dock_host.RestorePane(
+        DockPaneType::JobProgress));
+    static_cast<void>(state.Workspace().windows.dock_host.ActivatePane(
+        DockPaneType::JobProgress));
 }
 
 void ClampWorkspaceOwnedWindows(ApplicationHost& state) noexcept {
     WorkspaceLayoutState& layout = state.Workspace().windows.workspace;
     static_cast<void>(inkpod::windows::ui::ApplyWorkspaceWindowPlacement(
         state.Workspace().windows.window, layout));
-    for (std::size_t index = 0U;
-         index < inkpod::windows::ui::kWorkspaceAuxiliaryPaneCount;
-         ++index) {
-        const auto type = static_cast<WorkspaceAuxiliaryPane>(index);
-        static_cast<void>(inkpod::windows::ui::ApplyWorkspaceAuxiliaryPlacement(
-            AuxiliaryPaneWindow(state, type),
-            state.Workspace().windows.window,
-            layout,
-            type));
-    }
 }
 
 void RelayoutWorkspace(ApplicationHost& state) noexcept {
@@ -9678,17 +9695,26 @@ void NotifyDockHostChanged(void* context) noexcept {
 
 bool InitializeMainChrome(ApplicationHost& state) noexcept {
     const auto session_name = WorkspaceRegistryValueName(
+        L"WorkspaceSessionV5", state.Workspace().persistence_slot);
+    const auto legacy_session_name = WorkspaceRegistryValueName(
         L"WorkspaceSessionV4", state.Workspace().persistence_slot);
     if (!state.lifetime.smoke_test) {
         if (!LoadWorkspaceLayout(
                 state.Workspace().windows.workspace, session_name.data())
-            && state.Workspace().persistence_slot == 0U
             && (LoadWorkspaceLayout(
-                    state.Workspace().windows.workspace, L"WorkspaceSessionV4")
-                || LoadWorkspaceLayout(
-                    state.Workspace().windows.workspace, L"WorkspaceSessionV2"))) {
+                    state.Workspace().windows.workspace,
+                    legacy_session_name.data())
+                || (state.Workspace().persistence_slot == 0U
+                    && (LoadWorkspaceLayout(
+                            state.Workspace().windows.workspace,
+                            L"WorkspaceSessionV4")
+                        || LoadWorkspaceLayout(
+                            state.Workspace().windows.workspace,
+                            L"WorkspaceSessionV2"))))) {
             if (SaveWorkspaceLayout(
                     state.Workspace().windows.workspace, session_name.data())) {
+                static_cast<void>(DeleteWorkspaceLayout(
+                    legacy_session_name.data()));
                 static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSessionV4"));
                 static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSessionV2"));
             }
@@ -9722,6 +9748,15 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     UpdateBatchTarget(state);
     RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     ShowWindow(state.Workspace().batch_palette, SW_HIDE);
+    state.Workspace().job_progress_state = {};
+    state.Workspace().job_progress = inkpod::windows::ui::CreateJobProgressPane(
+        state.lifetime.instance,
+        state.Workspace().windows.window,
+        state.Workspace().job_progress_state);
+    if (state.Workspace().job_progress == nullptr) {
+        return false;
+    }
+    ShowWindow(state.Workspace().job_progress, SW_HIDE);
     state.Workspace().locator_dialog = {};
     state.Workspace().locator_dialog.context = &state.Workspace();
     state.Workspace().locator_dialog.dispatch_command =
@@ -9735,13 +9770,6 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     if (state.Workspace().locator_palette == nullptr) {
         return false;
     }
-    const auto locator_name = WorkspaceRegistryValueName(
-        L"LocatorPaletteV1", state.Workspace().persistence_slot);
-    (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
-        state.Workspace().locator_palette,
-        state.Workspace().windows.window,
-        locator_name.data(),
-        !state.lifetime.smoke_test);
     ShowWindow(state.Workspace().locator_palette, SW_HIDE);
     state.Workspace().sequence_dialog = {};
     state.Workspace().sequence_dialog.context = &state.Workspace();
@@ -9758,13 +9786,6 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     if (state.Workspace().sequence_palette == nullptr) {
         return false;
     }
-    const auto sequence_name = WorkspaceRegistryValueName(
-        L"SequencePaletteV1", state.Workspace().persistence_slot);
-    (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
-        state.Workspace().sequence_palette,
-        state.Workspace().windows.window,
-        sequence_name.data(),
-        !state.lifetime.smoke_test);
     ShowWindow(state.Workspace().sequence_palette, SW_HIDE);
     state.Workspace().light_table_dialog = {};
     state.Workspace().light_table_dialog.context = &state.Workspace();
@@ -9780,13 +9801,6 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
     if (state.Workspace().light_table_palette == nullptr) {
         return false;
     }
-    const auto light_table_name = WorkspaceRegistryValueName(
-        L"LightTablePaletteV1", state.Workspace().persistence_slot);
-    (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
-        state.Workspace().light_table_palette,
-        state.Workspace().windows.window,
-        light_table_name.data(),
-        !state.lifetime.smoke_test);
     ShowWindow(state.Workspace().light_table_palette, SW_HIDE);
     const auto subpalette_canvas =
         state.routing.targets.RegisterAuxiliaryCanvas();
@@ -9818,13 +9832,6 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         state.Workspace().subpalette_canvas_id = {};
         return false;
     }
-    const auto subpalette_name = WorkspaceRegistryValueName(
-        L"SubpalettePaletteV1", state.Workspace().persistence_slot);
-    (void)inkpod::windows::ui::RestorePaletteWindowPlacement(
-        state.Workspace().subpalette_palette,
-        state.Workspace().windows.window,
-        subpalette_name.data(),
-        !state.lifetime.smoke_test);
     ShowWindow(state.Workspace().subpalette_palette, SW_HIDE);
     state.Workspace().tools.palette_dialog = {};
     state.Workspace().tools.palette_dialog.context = &state.Workspace();
@@ -9894,7 +9901,19 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         || !state.Workspace().windows.dock_host.AttachPane(
             DockPaneType::Color, state.Workspace().windows.color_pane)
         || !state.Workspace().windows.dock_host.AttachPane(
-            DockPaneType::Layer, state.Workspace().windows.layer_palette)) {
+            DockPaneType::Layer, state.Workspace().windows.layer_palette)
+        || !state.Workspace().windows.dock_host.AttachPane(
+            DockPaneType::Locator, state.Workspace().locator_palette)
+        || !state.Workspace().windows.dock_host.AttachPane(
+            DockPaneType::Sequence, state.Workspace().sequence_palette)
+        || !state.Workspace().windows.dock_host.AttachPane(
+            DockPaneType::LightTable, state.Workspace().light_table_palette)
+        || !state.Workspace().windows.dock_host.AttachPane(
+            DockPaneType::Reference, state.Workspace().subpalette_palette)
+        || !state.Workspace().windows.dock_host.AttachPane(
+            DockPaneType::Batch, state.Workspace().batch_palette)
+        || !state.Workspace().windows.dock_host.AttachPane(
+            DockPaneType::JobProgress, state.Workspace().job_progress)) {
         return false;
     }
     ApplyWorkspacePresentation(state);
@@ -10084,7 +10103,9 @@ std::optional<LRESULT> RouteBatchCommand(
                 if (shown) {
                     UpdateBatchTarget(*state);
                     RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
-                    SetForegroundWindow(state->Workspace().batch_palette);
+                    FocusPaneWindow(
+                        state->Workspace().batch_palette,
+                        IDC_BATCH_OPERATIONS);
                 }
                 UpdateMenuState(*state);
                 return 1;
@@ -10410,7 +10431,8 @@ std::optional<LRESULT> RouteBatchCommand(
             BatchController controller(
                 state->lifetime,
                 state->Workspace().windows,
-                state->Workspace().batch_progress,
+                state->Workspace().job_progress,
+                state->Workspace().job_progress_state,
                 state->Workspace().batch_palette,
                 state->batch,
                 *state->engine);
@@ -13520,6 +13542,21 @@ std::optional<LRESULT> RouteApplicationCommand(
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
+        case IDM_WINDOW_JOB_PROGRESS: {
+            const bool show = !state->Workspace().windows.workspace.dock
+                                   .IsPaneVisible(DockPaneType::JobProgress);
+            if (state->Workspace().windows.dock_host.TogglePane(
+                    DockPaneType::JobProgress)
+                != DockResult::Ok) {
+                return 0;
+            }
+            if (show) {
+                static_cast<void>(state->Workspace().windows.dock_host.ActivatePane(
+                    DockPaneType::JobProgress));
+            }
+            UpdateMenuState(*state);
+            return 1;
+        }
         case IDM_FILE_RESTORE_PREVIOUS: {
             const bool enabled = !state->lifetime.restore_previous_documents;
             if (!SaveRestorePreviousDocumentsSetting(enabled)
@@ -13544,10 +13581,9 @@ std::optional<LRESULT> RouteApplicationCommand(
                 if (shown) {
                     RefreshLocatorPane(*state);
                     QueueLocatorSample(*state);
-                    SetForegroundWindow(state->Workspace().locator_palette);
-                    SetFocus(GetDlgItem(
+                    FocusPaneWindow(
                         state->Workspace().locator_palette,
-                        IDC_LOCATOR_PIN));
+                        IDC_LOCATOR_PIN);
                 }
                 UpdateMenuState(*state);
                 return 1;
@@ -13591,10 +13627,9 @@ std::optional<LRESULT> RouteApplicationCommand(
                     *state, WorkspaceAuxiliaryPane::Sequence);
                 if (shown) {
                     RefreshSequencePane(*state);
-                    SetForegroundWindow(state->Workspace().sequence_palette);
-                    SetFocus(GetDlgItem(
+                    FocusPaneWindow(
                         state->Workspace().sequence_palette,
-                        IDC_SEQUENCE_CELLS));
+                        IDC_SEQUENCE_CELLS);
                 }
                 UpdateMenuState(*state);
                 return 1;
@@ -13625,12 +13660,11 @@ std::optional<LRESULT> RouteApplicationCommand(
                     *state, WorkspaceAuxiliaryPane::LightTable);
                 if (shown) {
                     RefreshLightTablePane(*state);
-                    SetForegroundWindow(state->Workspace().light_table_palette);
-                    SetFocus(GetDlgItem(
+                    FocusPaneWindow(
                         state->Workspace().light_table_palette,
                         state->Workspace().panes.light_table_item_count != 0U
                             ? IDC_LIGHT_TABLE_ITEMS
-                            : IDC_LIGHT_TABLE_SETS));
+                            : IDC_LIGHT_TABLE_SETS);
                 }
                 UpdateMenuState(*state);
                 return 1;
@@ -13661,7 +13695,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                     *state, WorkspaceAuxiliaryPane::Reference);
                 if (shown) {
                     (void)RefreshSubpalettePane(*state);
-                    SetForegroundWindow(state->Workspace().subpalette_palette);
+                    FocusPaneWindow(state->Workspace().subpalette_palette, 0);
                     SetFocus(
                         state->Workspace().subpalette_dialog.canvas != nullptr
                         ? state->Workspace().subpalette_dialog.canvas
@@ -13697,6 +13731,7 @@ std::optional<LRESULT> RouteApplicationCommand(
             static_cast<void>(ApplyWorkspacePreset(
                 state->Workspace().windows.workspace,
                 WorkspacePreset::Coloring));
+            PreserveActiveJobProgressPane(*state);
             ApplyOrDeferWorkspacePresentation(*state);
             return 1;
         case IDM_WORKSPACE_PRESET_COLORING:
@@ -13731,13 +13766,14 @@ std::optional<LRESULT> RouteApplicationCommand(
             }
             layout.split_orientation = orientation;
             layout.split_ratio_milli = ratio;
+            PreserveActiveJobProgressPane(*state);
             ApplyOrDeferWorkspacePresentation(*state);
             return 1;
         }
         case IDM_WORKSPACE_SAVE: {
             CaptureWorkspacePresentation(*state);
             const auto saved_name = WorkspaceRegistryValueName(
-                L"WorkspaceSavedV4", state->Workspace().persistence_slot);
+                L"WorkspaceSavedV5", state->Workspace().persistence_slot);
             const bool saved = SaveWorkspaceLayout(
                 state->Workspace().windows.workspace, saved_name.data());
             if (!saved && !state->lifetime.smoke_test) {
@@ -13780,7 +13816,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                 return 0;
             }
             const auto saved_name = WorkspaceRegistryValueName(
-                L"WorkspaceSavedV4", state->Workspace().persistence_slot);
+                L"WorkspaceSavedV5", state->Workspace().persistence_slot);
             const bool saved = SaveWorkspaceLayout(layout, saved_name.data());
             UpdateMenuState(*state);
             return saved ? 1 : 0;
@@ -13788,17 +13824,24 @@ std::optional<LRESULT> RouteApplicationCommand(
         case IDM_WORKSPACE_RESTORE: {
             WorkspaceLayoutState restored = state->Workspace().windows.workspace;
             const auto saved_name = WorkspaceRegistryValueName(
+                L"WorkspaceSavedV5", state->Workspace().persistence_slot);
+            const auto legacy_saved_name = WorkspaceRegistryValueName(
                 L"WorkspaceSavedV4", state->Workspace().persistence_slot);
             bool loaded = LoadWorkspaceLayout(restored, saved_name.data());
-            if (!loaded && state->Workspace().persistence_slot == 0U
-                && LoadWorkspaceLayout(restored, L"WorkspaceSavedV2")) {
+            if (!loaded
+                && (LoadWorkspaceLayout(restored, legacy_saved_name.data())
+                    || (state->Workspace().persistence_slot == 0U
+                        && LoadWorkspaceLayout(restored, L"WorkspaceSavedV2")))) {
                 if (SaveWorkspaceLayout(restored, saved_name.data())) {
+                    static_cast<void>(DeleteWorkspaceLayout(
+                        legacy_saved_name.data()));
                     static_cast<void>(DeleteWorkspaceLayout(L"WorkspaceSavedV2"));
                 }
                 loaded = true;
             }
             if (loaded) {
                 state->Workspace().windows.workspace = restored;
+                PreserveActiveJobProgressPane(*state);
                 ApplyOrDeferWorkspacePresentation(*state);
             } else if (!state->lifetime.smoke_test) {
                 MessageBoxW(
@@ -13836,11 +13879,25 @@ std::optional<LRESULT> RouteApplicationCommand(
             if (pane == nullptr) {
                 return 0;
             }
-            pane->auto_hide = !pane->auto_hide;
-            pane->visible = false;
+            const DockPaneType dock_type =
+                inkpod::windows::ui::DockPaneTypeForAuxiliary(type);
+            const DockPanePlacement* placement =
+                state->Workspace().windows.workspace.dock.Pane(dock_type);
+            const bool enable = placement == nullptr
+                || placement->zone != DockZone::AutoHide;
+            if (state->Workspace().windows.dock_host.SetPaneAutoHide(
+                    dock_type, enable)
+                != DockResult::Ok) {
+                return 0;
+            }
+            pane->auto_hide = enable;
+            pane->visible = !enable;
+            if (!enable) {
+                static_cast<void>(
+                    state->Workspace().windows.dock_host.ActivatePane(dock_type));
+            }
             state->Workspace().windows.workspace.selected_preset =
                 WorkspacePreset::Custom;
-            ShowWindow(AuxiliaryPaneWindow(*state, type), SW_HIDE);
             RelayoutWorkspace(*state);
             UpdateMenuState(*state);
             return 1;
@@ -15039,10 +15096,17 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     == CommandResolveStatus::Ok;
                 const bool prompt = state->effects.preview_prompt;
                 state->effects.preview_prompt = false;
-                if (completion_workspace != nullptr
-                    && completion_workspace->effects_progress != nullptr) {
-                    DestroyWindow(completion_workspace->effects_progress);
-                    completion_workspace->effects_progress = nullptr;
+                if (completion_workspace != nullptr) {
+                    ClearJobProgress(
+                        completion_workspace->job_progress,
+                        completion_workspace->job_progress_state,
+                        JobProgressSlot::Effect);
+                    if (!HasActiveJobProgress(
+                            completion_workspace->job_progress_state)) {
+                        static_cast<void>(
+                            completion_workspace->windows.dock_host.HidePane(
+                                DockPaneType::JobProgress));
+                    }
                 }
                 inkpod_task_release(&state->effects.task);
                 if (status == INKPOD_STATUS_OK && prompt && document_current
@@ -15111,10 +15175,17 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 const std::wstring completed_target = completed_document == nullptr
                     ? L""
                     : LocatorDocumentName(*completed_document);
-                if (completion_workspace != nullptr
-                    && completion_workspace->batch_progress != nullptr) {
-                    DestroyWindow(completion_workspace->batch_progress);
-                    completion_workspace->batch_progress = nullptr;
+                if (completion_workspace != nullptr) {
+                    ClearJobProgress(
+                        completion_workspace->job_progress,
+                        completion_workspace->job_progress_state,
+                        JobProgressSlot::Batch);
+                    if (!HasActiveJobProgress(
+                            completion_workspace->job_progress_state)) {
+                        static_cast<void>(
+                            completion_workspace->windows.dock_host.HidePane(
+                                DockPaneType::JobProgress));
+                    }
                 }
                 if (target_valid && state->batch.report != nullptr) {
                     try {

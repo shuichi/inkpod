@@ -1,9 +1,11 @@
 #include "batch_dialog.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 
 #include "app/resource.h"
+#include "ui/panes/pane_dialog_layout.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -43,6 +45,170 @@ void DispatchCommand(BatchPaletteDialogState& state, UINT command) noexcept {
     }
 }
 
+void LayoutBatchPane(HWND dialog) noexcept {
+    RECT client{};
+    if (GetClientRect(dialog, &client) == FALSE) {
+        return;
+    }
+    using panes::PlacePaneDialogControl;
+    const auto scale = [dialog](int value) {
+        return panes::ScalePaneDip(dialog, value);
+    };
+    const int margin = scale(8);
+    const int gap = scale(6);
+    const int line_height = scale(18);
+    const int row_height = scale(26);
+    const int pin_width = scale(90);
+    const int width = static_cast<int>(client.right - client.left);
+    const int height = static_cast<int>(client.bottom - client.top);
+    const int content_width = std::max(0, width - margin * 2);
+
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_PIN,
+        std::max(margin, width - margin - pin_width),
+        margin,
+        pin_width,
+        row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_TARGET,
+        margin,
+        margin + scale(4),
+        std::max(0, width - margin * 3 - pin_width),
+        line_height);
+    const int job_top = margin + row_height + gap;
+    PlacePaneDialogControl(
+        dialog, IDC_BATCH_JOB, margin, job_top, content_width, line_height);
+    const int input_label_top = job_top + line_height + gap;
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_INPUT_LABEL,
+        margin,
+        input_label_top,
+        content_width,
+        line_height);
+    const int inputs_top = input_label_top + line_height;
+    const int inputs_height = scale(48);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_INPUTS,
+        margin,
+        inputs_top,
+        content_width,
+        inputs_height);
+    const int operations_label_top = inputs_top + inputs_height + gap;
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_OPERATIONS_LABEL,
+        margin,
+        operations_label_top,
+        content_width,
+        line_height);
+    const int operations_top = operations_label_top + line_height;
+
+    const int bottom_top = std::max(operations_top, height - margin - row_height);
+    const int save_width = scale(82);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_SAVE_SET,
+        margin,
+        bottom_top,
+        save_width,
+        row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_LOAD_SET,
+        margin + save_width + gap,
+        bottom_top,
+        save_width,
+        row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDCANCEL,
+        std::max(margin, width - margin - save_width),
+        bottom_top,
+        save_width,
+        row_height);
+
+    const int run_top = std::max(operations_top, bottom_top - gap - row_height);
+    const std::array<int, 5U> run_controls{
+        IDC_BATCH_PREVIEW,
+        IDC_BATCH_DRY_RUN,
+        IDC_BATCH_RUN_CURRENT,
+        IDC_BATCH_RUN_ALL,
+        IDC_BATCH_CANCEL};
+    const int run_width = std::max(
+        0, (content_width - gap * 4) / static_cast<int>(run_controls.size()));
+    int cursor = margin;
+    for (const int control : run_controls) {
+        PlacePaneDialogControl(
+            dialog, control, cursor, run_top, run_width, row_height);
+        cursor += run_width + gap;
+    }
+
+    const int output_height = scale(34);
+    const int output_top = std::max(operations_top, run_top - gap - output_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_OUTPUT,
+        margin,
+        output_top,
+        content_width,
+        output_height);
+    const int output_label_top = std::max(
+        operations_top, output_top - line_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_OUTPUT_LABEL,
+        margin,
+        output_label_top,
+        content_width,
+        line_height);
+
+    const int reorder_top = std::max(
+        operations_top, output_label_top - gap - row_height);
+    const int small_button = scale(56);
+    cursor = margin;
+    for (const int control : {
+             IDC_BATCH_UP, IDC_BATCH_DOWN, IDC_BATCH_EDIT}) {
+        PlacePaneDialogControl(
+            dialog, control, cursor, reorder_top, small_button, row_height);
+        cursor += small_button + gap;
+    }
+    const int add_top = std::max(
+        operations_top, reorder_top - gap - row_height);
+    const int action_width = scale(56);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_OPERATION_KIND,
+        margin,
+        add_top,
+        std::max(0, content_width - action_width * 2 - gap * 2),
+        row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_ADD,
+        std::max(margin, width - margin - action_width * 2 - gap),
+        add_top,
+        action_width,
+        row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_REMOVE,
+        std::max(margin, width - margin - action_width),
+        add_top,
+        action_width,
+        row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_BATCH_OPERATIONS,
+        margin,
+        operations_top,
+        content_width,
+        std::max(0, add_top - gap - operations_top));
+}
+
 INT_PTR CALLBACK BatchPaletteDialogProcedure(
     HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
     auto* state = reinterpret_cast<BatchPaletteDialogState*>(
@@ -67,8 +233,12 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
                     reinterpret_cast<LPARAM>(entry.label));
             }
             SendMessageW(combo, CB_SETCURSEL, 0, 0);
+            LayoutBatchPane(dialog);
             return TRUE;
         }
+        case WM_SIZE:
+            LayoutBatchPane(dialog);
+            return TRUE;
         case WM_COMMAND:
             if (state == nullptr) {
                 break;
@@ -135,7 +305,7 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
                     }
                     return TRUE;
                 case IDCANCEL:
-                    ShowWindow(dialog, SW_HIDE);
+                    DispatchCommand(*state, IDM_WINDOW_BATCH);
                     return TRUE;
                 default:
                     break;
@@ -148,7 +318,9 @@ INT_PTR CALLBACK BatchPaletteDialogProcedure(
             }
             break;
         case WM_CLOSE:
-            ShowWindow(dialog, SW_HIDE);
+            if (state != nullptr) {
+                DispatchCommand(*state, IDM_WINDOW_BATCH);
+            }
             return TRUE;
         case WM_NCDESTROY:
             KillTimer(dialog, kBatchRefreshTimer);

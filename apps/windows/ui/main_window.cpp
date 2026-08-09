@@ -417,10 +417,14 @@ void LayoutMainChrome(
     for (std::size_t index = 0U; index < windows.auto_hide_buttons.size(); ++index) {
         const auto* pane = FindWorkspaceAuxiliaryPane(
             windows.workspace, static_cast<WorkspaceAuxiliaryPane>(index));
+        const DockPanePlacement* placement = pane == nullptr
+            ? nullptr
+            : windows.workspace.dock.Pane(
+                  DockPaneTypeForAuxiliary(pane->type));
         PlaceChild(
             windows.auto_hide_buttons[index],
             layout.auto_hide_buttons[index],
-            pane != nullptr && pane->auto_hide);
+            placement != nullptr && placement->zone == DockZone::AutoHide);
     }
     LayoutEditorArea(windows, layout, smoke_test, dpi);
 }

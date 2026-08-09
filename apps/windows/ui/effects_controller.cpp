@@ -10,12 +10,14 @@ namespace inkpod::windows::ui {
 EffectsController::EffectsController(
     app::AppLifetimeState& lifetime,
     app::MainWindowHandles& windows,
-    HWND& progress,
+    HWND progress,
+    JobProgressPaneState& progress_state,
     app::EffectsUiState& effects,
     app::CoreHost& engine) noexcept
     : lifetime_(lifetime),
       windows_(windows),
       progress_(progress),
+      progress_state_(progress_state),
       effects_(effects),
       engine_(engine) {}
 
@@ -63,13 +65,16 @@ InkpodStatus EffectsController::StartTask(
         nullptr,
         L"処理中...",
         L"キャンセル中..."};
-    progress_ = CreateProgressDialog(
-        lifetime_.instance, windows_.window, effects_.progress_dialog);
-    if (progress_ == nullptr) {
+    if (!BindJobProgress(
+            progress_,
+            progress_state_,
+            JobProgressSlot::Effect,
+            effects_.progress_dialog)) {
         inkpod_task_release(&effects_.task);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    ShowWindow(progress_, SW_SHOW);
+    static_cast<void>(windows_.dock_host.RestorePane(DockPaneType::JobProgress));
+    static_cast<void>(windows_.dock_host.ActivatePane(DockPaneType::JobProgress));
     const HWND window = windows_.window;
     if (!engine_.Enqueue(
             context,
@@ -86,8 +91,12 @@ InkpodStatus EffectsController::StartTask(
                 PostMessageW(
                     window, completion_message, completion_status, generation);
             })) {
-        DestroyWindow(progress_);
-        progress_ = nullptr;
+        ClearJobProgress(
+            progress_, progress_state_, JobProgressSlot::Effect);
+        if (!HasActiveJobProgress(progress_state_)) {
+            static_cast<void>(windows_.dock_host.HidePane(
+                DockPaneType::JobProgress));
+        }
         inkpod_task_release(&effects_.task);
         effects_.preview_prompt = false;
         effects_.completion_context = {};

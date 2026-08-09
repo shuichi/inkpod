@@ -109,6 +109,7 @@ const wchar_t* GroupName(UINT command) noexcept {
                     || command == IDM_SUBPALETTE_PIN
                     || command == IDM_BATCH_PIN
                     || command == IDM_WINDOW_BATCH
+                    || command == IDM_WINDOW_JOB_PROGRESS
                 ? L"ウィンドウ"
                 : L"バッチ";
         case 420: return L"バッチ項目";

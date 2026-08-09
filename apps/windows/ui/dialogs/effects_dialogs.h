@@ -55,7 +55,33 @@ struct ProgressDialogState {
     const wchar_t* cancelling_text{L"キャンセル中..."};
 };
 
-HWND CreateProgressDialog(
-    HINSTANCE instance, HWND owner, ProgressDialogState& state) noexcept;
+enum class JobProgressSlot : std::uint8_t {
+    Effect,
+    Batch,
+    Count,
+};
+
+struct JobProgressEntry {
+    ProgressDialogState progress{};
+    bool active{};
+    bool cancelling{};
+};
+
+struct JobProgressPaneState {
+    std::array<JobProgressEntry, static_cast<std::size_t>(JobProgressSlot::Count)>
+        entries{};
+};
+
+HWND CreateJobProgressPane(
+    HINSTANCE instance, HWND parent, JobProgressPaneState& state) noexcept;
+[[nodiscard]] bool BindJobProgress(
+    HWND pane,
+    JobProgressPaneState& state,
+    JobProgressSlot slot,
+    const ProgressDialogState& progress) noexcept;
+void ClearJobProgress(
+    HWND pane, JobProgressPaneState& state, JobProgressSlot slot) noexcept;
+[[nodiscard]] bool HasActiveJobProgress(
+    const JobProgressPaneState& state) noexcept;
 
 }  // namespace inkpod::windows::ui

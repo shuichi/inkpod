@@ -394,6 +394,21 @@ DockResult DockHost::HidePane(DockPaneType type) noexcept {
     return result;
 }
 
+DockResult DockHost::SetPaneAutoHide(
+    DockPaneType type, bool auto_hide) noexcept {
+    if (model_ == nullptr) {
+        return DockResult::InvalidState;
+    }
+    const DockResult result = model_->SetPaneAutoHide(type, auto_hide);
+    if (result == DockResult::Ok) {
+        if (PaneHostState* pane = PaneState(type); pane != nullptr) {
+            pane->auto_hide_expanded = false;
+        }
+        NotifyChanged();
+    }
+    return result;
+}
+
 DockResult DockHost::RestorePane(DockPaneType type) noexcept {
     if (model_ == nullptr) {
         return DockResult::InvalidState;
@@ -428,6 +443,38 @@ DockResult DockHost::SetZoneMode(
     return result;
 }
 
+DockResult DockHost::ActivatePane(DockPaneType type) noexcept {
+    if (model_ == nullptr) {
+        return DockResult::InvalidState;
+    }
+    const DockPanePlacement* pane = model_->Pane(type);
+    if (pane == nullptr || !pane->present || !IsDockedZone(pane->zone)) {
+        return DockResult::InvalidState;
+    }
+    const DockZone zone = pane->zone;
+    DockResult mode_result = DockResult::NoOp;
+    if (model_->PaneCount(zone) > 1U) {
+        mode_result = model_->SetZoneMode(zone, DockStackMode::Tabs);
+        if (mode_result != DockResult::Ok && mode_result != DockResult::NoOp) {
+            return mode_result;
+        }
+    }
+    const DockZoneState* zone_state = model_->Zone(zone);
+    DockResult active_result = DockResult::NoOp;
+    if (zone_state != nullptr && zone_state->mode == DockStackMode::Tabs) {
+        active_result = model_->SetActiveTab(zone, type);
+        if (active_result != DockResult::Ok
+            && active_result != DockResult::NoOp) {
+            return active_result;
+        }
+    }
+    if (mode_result == DockResult::Ok || active_result == DockResult::Ok) {
+        NotifyChanged();
+        return DockResult::Ok;
+    }
+    return DockResult::NoOp;
+}
+
 HWND DockHost::FloatingWindow(DockPaneType type) const noexcept {
     const PaneHostState* pane = PaneState(type);
     return pane == nullptr ? nullptr : pane->floating_window;
@@ -456,6 +503,46 @@ HWND DockHost::SplitterWindow(
 
 bool DockHost::PreviewVisible() const noexcept {
     return preview_ != nullptr && IsWindowVisible(preview_) != FALSE;
+}
+
+bool DockHost::ShowAutoHiddenPane(
+    DockPaneType type, DockZone edge) noexcept {
+    PaneHostState* pane = PaneState(type);
+    const DockPanePlacement* placement = model_ == nullptr
+        ? nullptr
+        : model_->Pane(type);
+    if (pane == nullptr || placement == nullptr
+        || placement->zone != DockZone::AutoHide
+        || (edge != DockZone::Left && edge != DockZone::Right
+            && edge != DockZone::Bottom)) {
+        return false;
+    }
+    pane->auto_hide_edge = edge;
+    pane->auto_hide_expanded = true;
+    ApplyPaneLayout(*pane);
+    return pane->floating_window != nullptr
+        && IsWindowVisible(pane->floating_window) != FALSE;
+}
+
+bool DockHost::AutoHiddenPaneVisible(DockPaneType type) const noexcept {
+    const PaneHostState* pane = PaneState(type);
+    return pane != nullptr && pane->auto_hide_expanded
+        && pane->floating_window != nullptr
+        && IsWindowVisible(pane->floating_window) != FALSE;
+}
+
+void DockHost::HideAutoHiddenPane(DockPaneType type) noexcept {
+    PaneHostState* pane = PaneState(type);
+    if (pane == nullptr || !pane->auto_hide_expanded) {
+        return;
+    }
+    pane->auto_hide_expanded = false;
+    if (pane->floating_window != nullptr) {
+        ShowWindow(pane->floating_window, SW_HIDE);
+    }
+    if (pane->content != nullptr) {
+        ShowWindow(pane->content, SW_HIDE);
+    }
 }
 
 std::size_t DockHost::PaneIndex(DockPaneType type) noexcept {
@@ -516,6 +603,66 @@ void DockHost::LayoutFloatingContent(PaneHostState& pane) noexcept {
     }
 }
 
+void DockHost::LayoutAutoHiddenContent(PaneHostState& pane) noexcept {
+    const PaneDescriptor* descriptor = FindPaneDescriptor(pane.type);
+    if (pane.floating_window == nullptr || descriptor == nullptr
+        || owner_ == nullptr) {
+        return;
+    }
+    DockRect available = geometry_.editor;
+    if (!HasArea(available)) {
+        RECT client{};
+        if (GetClientRect(owner_, &client) == FALSE) {
+            return;
+        }
+        available = DockRect{
+            0,
+            0,
+            static_cast<int>(client.right - client.left),
+            static_cast<int>(client.bottom - client.top)};
+    }
+    POINT origin{available.x, available.y};
+    if (ClientToScreen(owner_, &origin) == FALSE) {
+        return;
+    }
+    const int client_width = std::max(1, available.width);
+    const int client_height = std::max(1, available.height);
+    const int preferred_width = std::min(
+        client_width, ScaleDip(descriptor->preferred_width_dip, dpi_));
+    const int preferred_height = std::min(
+        client_height, ScaleDip(descriptor->preferred_height_dip, dpi_));
+    RECT bounds{};
+    if (pane.auto_hide_edge == DockZone::Left) {
+        bounds = RECT{
+            origin.x,
+            origin.y,
+            origin.x + preferred_width,
+            origin.y + client_height};
+    } else if (pane.auto_hide_edge == DockZone::Bottom) {
+        bounds = RECT{
+            origin.x,
+            origin.y + client_height - preferred_height,
+            origin.x + client_width,
+            origin.y + client_height};
+    } else {
+        bounds = RECT{
+            origin.x + client_width - preferred_width,
+            origin.y,
+            origin.x + client_width,
+            origin.y + client_height};
+    }
+    bounds = ClampToVisibleWorkArea(bounds);
+    SetWindowPos(
+        pane.floating_window,
+        nullptr,
+        bounds.left,
+        bounds.top,
+        bounds.right - bounds.left,
+        bounds.bottom - bounds.top,
+        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_SHOWWINDOW);
+    LayoutFloatingContent(pane);
+}
+
 void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
     if (model_ == nullptr || pane.content == nullptr) {
         return;
@@ -526,6 +673,7 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
         return;
     }
     if (placement->zone == DockZone::Floating) {
+        pane.auto_hide_expanded = false;
         if (!EnsureFloatingWindow(pane)) {
             ShowWindow(pane.content, SW_HIDE);
             return;
@@ -556,6 +704,25 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
         LayoutFloatingContent(pane);
         return;
     }
+    if (placement->zone == DockZone::AutoHide) {
+        if (!pane.auto_hide_expanded) {
+            if (pane.floating_window != nullptr) {
+                ShowWindow(pane.floating_window, SW_HIDE);
+            }
+            ShowWindow(pane.content, SW_HIDE);
+            return;
+        }
+        if (!EnsureFloatingWindow(pane)) {
+            ShowWindow(pane.content, SW_HIDE);
+            return;
+        }
+        if (GetParent(pane.content) != pane.floating_window) {
+            SetParent(pane.content, pane.floating_window);
+        }
+        LayoutAutoHiddenContent(pane);
+        return;
+    }
+    pane.auto_hide_expanded = false;
     if (pane.floating_window != nullptr) {
         ShowWindow(pane.floating_window, SW_HIDE);
     }
@@ -679,6 +846,10 @@ void DockHost::ShowContextMenu(
             | (pane != nullptr && pane->zone == DockZone::Floating ? MF_CHECKED : 0U),
         kContextFloat,
         L"フローティング");
+    const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+    if (descriptor == nullptr || !descriptor->can_float) {
+        EnableMenuItem(menu, kContextFloat, MF_BYCOMMAND | MF_GRAYED);
+    }
     if (pane != nullptr && IsDockedZone(pane->zone)
         && model_->PaneCount(pane->zone) > 1U) {
         const DockZoneState* zone = model_->Zone(pane->zone);

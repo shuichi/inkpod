@@ -20,7 +20,8 @@ public:
     BatchController(
         app::AppLifetimeState& lifetime,
         app::MainWindowHandles& windows,
-        HWND& progress,
+        HWND progress,
+        JobProgressPaneState& progress_state,
         HWND& palette,
         app::BatchUiState& batch,
         app::CoreHost& engine) noexcept;
@@ -51,7 +52,8 @@ private:
 
     app::AppLifetimeState& lifetime_;
     app::MainWindowHandles& windows_;
-    HWND& progress_;
+    HWND progress_{};
+    JobProgressPaneState& progress_state_;
     HWND& palette_;
     app::BatchUiState& batch_;
     app::CoreHost& engine_;

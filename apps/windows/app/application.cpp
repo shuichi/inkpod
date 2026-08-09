@@ -23,7 +23,6 @@
 #include "session_recovery.h"
 #include "ui/main_window.h"
 #include "ui/main_window_runtime.h"
-#include "ui/palette_window.h"
 #include "ui/shortcut_controller.h"
 #include "ui/workspace_layout.h"
 
@@ -152,33 +151,12 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
             windows::ui::runtime::CaptureWorkspacePresentation(state);
             const auto session_name =
                 WorkspaceRegistryValueName(
-                    L"WorkspaceSessionV4", workspace->persistence_slot);
+                    L"WorkspaceSessionV5", workspace->persistence_slot);
             windows::ui::SaveWorkspaceLayout(
                 workspace->windows.workspace, session_name.data());
-            const auto locator_name =
-                WorkspaceRegistryValueName(
-                    L"LocatorPaletteV1", workspace->persistence_slot);
-            const auto sequence_name =
-                WorkspaceRegistryValueName(
-                    L"SequencePaletteV1", workspace->persistence_slot);
-            const auto light_table_name =
-                WorkspaceRegistryValueName(
-                    L"LightTablePaletteV1", workspace->persistence_slot);
-            const auto subpalette_name =
-                WorkspaceRegistryValueName(
-                    L"SubpalettePaletteV1", workspace->persistence_slot);
-            (void)windows::ui::SavePaletteWindowPlacement(
-                workspace->locator_palette, locator_name.data());
-            (void)windows::ui::SavePaletteWindowPlacement(
-                workspace->sequence_palette, sequence_name.data());
-            (void)windows::ui::SavePaletteWindowPlacement(
-                workspace->light_table_palette, light_table_name.data());
-            (void)windows::ui::SavePaletteWindowPlacement(
-                workspace->subpalette_palette, subpalette_name.data());
         }
-        const std::array<HWND*, 9U> owned{
-            &workspace->effects_progress,
-            &workspace->batch_progress,
+        const std::array<HWND*, 8U> owned{
+            &workspace->job_progress,
             &workspace->tools.palette,
             &workspace->windows.tool_options,
             &workspace->windows.color_pane,

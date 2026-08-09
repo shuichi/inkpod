@@ -104,7 +104,11 @@ struct WorkspaceLayoutState {
     std::array<WorkspaceAuxiliaryPaneState, kWorkspaceAuxiliaryPaneCount>
         auxiliary{{
             {WorkspaceAuxiliaryPane::Locator, UINT32_C(0x41434f4c)},
-            {WorkspaceAuxiliaryPane::Sequence, UINT32_C(0x55514553)},
+            {WorkspaceAuxiliaryPane::Sequence,
+             UINT32_C(0x55514553),
+             false,
+             false,
+             WorkspaceAutoHideEdge::Bottom},
             {WorkspaceAuxiliaryPane::LightTable, UINT32_C(0x544c474c)},
             {WorkspaceAuxiliaryPane::Reference, UINT32_C(0x45464552)},
             {WorkspaceAuxiliaryPane::Batch, UINT32_C(0x48435442)},
@@ -145,6 +149,10 @@ void ResetWorkspaceLayout(WorkspaceLayoutState& state) noexcept;
     WorkspaceLayoutState& state, WorkspaceAuxiliaryPane type) noexcept;
 [[nodiscard]] const WorkspaceAuxiliaryPaneState* FindWorkspaceAuxiliaryPane(
     const WorkspaceLayoutState& state, WorkspaceAuxiliaryPane type) noexcept;
+[[nodiscard]] DockPaneType DockPaneTypeForAuxiliary(
+    WorkspaceAuxiliaryPane type) noexcept;
+[[nodiscard]] DockZone DockZoneForAutoHideEdge(
+    WorkspaceAutoHideEdge edge) noexcept;
 
 [[nodiscard]] bool EncodeWorkspaceLayout(
     const WorkspaceLayoutState& state,

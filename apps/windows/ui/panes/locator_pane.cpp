@@ -7,6 +7,7 @@
 #include <cstddef>
 
 #include "app/resource.h"
+#include "pane_dialog_layout.h"
 
 namespace inkpod::windows::ui::panes {
 namespace {
@@ -15,6 +16,95 @@ void Dispatch(LocatorPaneDialogState& state, UINT command) noexcept {
     if (state.dispatch_command != nullptr) {
         state.dispatch_command(state.context, command);
     }
+}
+
+void LayoutLocatorPane(HWND dialog) noexcept {
+    RECT client{};
+    if (GetClientRect(dialog, &client) == FALSE) {
+        return;
+    }
+    const int margin = ScalePaneDip(dialog, 8);
+    const int gap = ScalePaneDip(dialog, 6);
+    const int header_height = ScalePaneDip(dialog, 24);
+    const int pin_width = ScalePaneDip(dialog, 88);
+    const int line_height = ScalePaneDip(dialog, 18);
+    const int option_height = ScalePaneDip(dialog, 20);
+    const int width = std::max(
+        0, static_cast<int>(client.right - client.left));
+    const int height = std::max(
+        0, static_cast<int>(client.bottom - client.top));
+
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LOCATOR_PIN,
+        std::max(margin, width - margin - pin_width),
+        margin,
+        pin_width,
+        header_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LOCATOR_TARGET,
+        margin,
+        margin + ScalePaneDip(dialog, 4),
+        std::max(0, width - margin * 3 - pin_width),
+        line_height);
+
+    const int options_top = std::max(
+        margin + header_height + gap,
+        height - margin - option_height);
+    const int color_top = std::max(
+        margin + header_height + gap,
+        options_top - gap - line_height);
+    const int selection_top = std::max(
+        margin + header_height + gap,
+        color_top - line_height);
+    const int coordinate_top = std::max(
+        margin + header_height + gap,
+        selection_top - line_height);
+    const int neighborhood_top = margin + header_height + gap;
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LOCATOR_NEIGHBORHOOD,
+        margin,
+        neighborhood_top,
+        std::max(0, width - margin * 2),
+        std::max(0, coordinate_top - gap - neighborhood_top));
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LOCATOR_COORDINATE,
+        margin,
+        coordinate_top,
+        std::max(0, width - margin * 2),
+        line_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LOCATOR_SELECTION,
+        margin,
+        selection_top,
+        std::max(0, width - margin * 2),
+        line_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LOCATOR_COLOR,
+        margin,
+        color_top,
+        std::max(0, width - margin * 2),
+        line_height);
+    const int option_width = std::max(0, (width - margin * 2 - gap) / 2);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LOCATOR_FIXED,
+        margin,
+        options_top,
+        option_width,
+        option_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LOCATOR_AUTOSCROLL,
+        margin + option_width + gap,
+        options_top,
+        std::max(0, width - margin * 2 - gap - option_width),
+        option_height);
 }
 
 void DrawNeighborhood(
@@ -132,6 +222,9 @@ INT_PTR CALLBACK LocatorPaneProcedure(
     switch (message) {
         case WM_INITDIALOG:
             return TRUE;
+        case WM_SIZE:
+            LayoutLocatorPane(dialog);
+            return TRUE;
         case WM_DRAWITEM:
             if (state != nullptr
                 && wparam == static_cast<WPARAM>(IDC_LOCATOR_NEIGHBORHOOD)) {
@@ -160,14 +253,16 @@ INT_PTR CALLBACK LocatorPaneProcedure(
                     }
                     return TRUE;
                 case IDCANCEL:
-                    ShowWindow(dialog, SW_HIDE);
+                    Dispatch(*state, IDM_WINDOW_LOCATOR);
                     return TRUE;
                 default:
                     break;
             }
             break;
         case WM_CLOSE:
-            ShowWindow(dialog, SW_HIDE);
+            if (state != nullptr) {
+                Dispatch(*state, IDM_WINDOW_LOCATOR);
+            }
             return TRUE;
         case WM_NCDESTROY:
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
@@ -196,6 +291,7 @@ HWND CreateLocatorPaneDialog(
     }
     SetWindowLongPtrW(
         dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
+    LayoutLocatorPane(dialog);
     SetWindowTextW(
         GetDlgItem(dialog, IDC_LOCATOR_NEIGHBORHOOD),
         L"ロケーター拡大表示。固定モードではクリックした画素を編集します。");

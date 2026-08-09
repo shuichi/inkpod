@@ -100,26 +100,60 @@ struct LegacyWorkspaceV3 {
     std::uint32_t version{3U};
     std::uint32_t struct_size{sizeof(LegacyWorkspaceV3)};
     std::uint32_t flags{};
-    std::uint32_t pane_count{static_cast<std::uint32_t>(kDockPaneCount)};
+    std::uint32_t pane_count{4U};
     std::uint32_t zone_count{static_cast<std::uint32_t>(kDockedZoneCount)};
     std::uint32_t layer_split_milli{550U};
     std::uint32_t reserved{};
-    std::array<LegacyDockPaneV3, kDockPaneCount> panes{};
+    std::array<LegacyDockPaneV3, 4U> panes{};
     std::array<LegacyDockZoneV3, kDockedZoneCount> zones{};
 };
 
 }  // namespace
 
 int main() {
-    if (PaneDescriptors().size() != 4U
+    const auto& descriptors = PaneDescriptors();
+    const auto& locator_descriptor = descriptors[
+        static_cast<std::size_t>(DockPaneType::Locator)];
+    const auto& job_descriptor = descriptors[
+        static_cast<std::size_t>(DockPaneType::JobProgress)];
+    if (descriptors.size() != kDockPaneCount
         || PaneDescriptors()[0].stable_type_id == 0U
         || PaneDescriptors()[0].title_resource_id == 0U
         || PaneDescriptors()[0].fallback_title == nullptr
         || PaneDescriptors()[1].scope
             != inkpod::windows::ui::PaneTargetScope::FollowActiveView
         || PaneDescriptors()[0].can_auto_hide
-        || !PaneDescriptors()[0].can_float) {
+        || !PaneDescriptors()[0].can_float
+        || locator_descriptor.default_visible
+        || !locator_descriptor.persist_layout
+        || !locator_descriptor.can_float
+        || !locator_descriptor.can_auto_hide
+        || job_descriptor.default_visible
+        || job_descriptor.persist_layout
+        || job_descriptor.can_float
+        || job_descriptor.can_auto_hide) {
         return 1;
+    }
+
+    DockLayoutModel auxiliary_model{};
+    if (auxiliary_model.IsPaneVisible(DockPaneType::Locator)
+        || auxiliary_model.SetPaneAutoHide(DockPaneType::Locator, true)
+            != DockResult::Ok
+        || auxiliary_model.Pane(DockPaneType::Locator)->zone
+            != DockZone::AutoHide
+        || auxiliary_model.SetPaneAutoHide(DockPaneType::Locator, true)
+            != DockResult::NoOp
+        || auxiliary_model.SetPaneAutoHide(DockPaneType::Locator, false)
+            != DockResult::Ok
+        || auxiliary_model.Pane(DockPaneType::Locator)->zone
+            != DockZone::Right
+        || auxiliary_model.SetPaneAutoHide(DockPaneType::JobProgress, true)
+            != DockResult::ZoneNotAllowed
+        || auxiliary_model.FloatPane(
+               DockPaneType::JobProgress,
+               DockFloatingPlacement{0, 0, 720, 112})
+            != DockResult::ZoneNotAllowed) {
+        return 43;
     }
 
     DockLayoutModel model{};
@@ -349,7 +383,10 @@ int main() {
         || FindWorkspaceAuxiliaryPane(
                preset, WorkspaceAuxiliaryPane::Reference)
                 ->visible
-            == false) {
+            == false
+        || preset.dock.Zone(DockZone::Right)->mode != DockStackMode::Tabs
+        || preset.dock.Zone(DockZone::Right)->active_tab
+            != DockPaneType::Reference) {
         return 22;
     }
     const auto reference_layout = ComputeWorkspaceLayout(
@@ -373,6 +410,11 @@ int main() {
     WorkspaceLayoutState serialized = preset;
     serialized.split_orientation = WorkspaceSplitOrientation::Horizontal;
     serialized.split_ratio_milli = 650U;
+    if (serialized.dock.RestorePane(DockPaneType::JobProgress)
+            != DockResult::Ok
+        || serialized.dock.Zone(DockZone::Bottom)->extent_dip != 112) {
+        return 44;
+    }
     if (!SetWorkspaceCustomName(serialized, L"仕上げ確認")) {
         return 25;
     }
@@ -389,8 +431,33 @@ int main() {
         || std::wstring(decoded.custom_name.data()) != L"仕上げ確認"
         || decoded.split_orientation != WorkspaceSplitOrientation::Horizontal
         || decoded.split_ratio_milli != 650U
+        || decoded.dock.Pane(DockPaneType::Locator)->zone
+            != DockZone::AutoHide
+        || !decoded.dock.IsPaneVisible(DockPaneType::Reference)
+        || decoded.dock.IsPaneVisible(DockPaneType::JobProgress)
         || !decoded.window.valid || decoded.window.show_command != SW_SHOWMAXIMIZED) {
         return 27;
+    }
+
+    auto legacy_v4_bytes = bytes;
+    const std::uint32_t current_version = 5U;
+    const std::uint32_t legacy_v4_version = 4U;
+    if (!ReplaceFirst(
+            std::span<std::byte>(legacy_v4_bytes.data(), written),
+            current_version,
+            legacy_v4_version)) {
+        return 45;
+    }
+    WorkspaceLayoutState migrated_v4{};
+    if (DecodeWorkspaceLayout(
+            migrated_v4,
+            std::span<const std::byte>(legacy_v4_bytes.data(), written))
+            != WorkspaceLayoutDecodeResult::Migrated
+        || migrated_v4.dock.Pane(DockPaneType::Locator)->zone
+            != DockZone::AutoHide
+        || !migrated_v4.dock.IsPaneVisible(DockPaneType::Reference)
+        || migrated_v4.dock.IsPaneVisible(DockPaneType::JobProgress)) {
+        return 46;
     }
     WorkspaceLayoutState rejected = decoded;
     if (DecodeWorkspaceLayout(
@@ -453,9 +520,15 @@ int main() {
     }
     for (std::size_t index = 0U; index < legacy_v3.zones.size(); ++index) {
         const auto& source = legacy_record.zones[index];
+        const DockPaneType active_tab = source.active_tab != DockPaneType::Count
+                && static_cast<std::size_t>(source.active_tab) >= 4U
+            ? (index == static_cast<std::size_t>(DockZone::Right)
+                   ? DockPaneType::Color
+                   : DockPaneType::Count)
+            : source.active_tab;
         legacy_v3.zones[index] = LegacyDockZoneV3{
             static_cast<std::uint32_t>(source.mode),
-            static_cast<std::uint32_t>(source.active_tab),
+            static_cast<std::uint32_t>(active_tab),
             source.extent_dip};
     }
     if (DecodeWorkspaceLayout(

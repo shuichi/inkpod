@@ -15,11 +15,12 @@ namespace {
 constexpr wchar_t kSettingsKey[] = L"Software\\Inkpod";
 constexpr wchar_t kWorkspaceWindowCountValue[] = L"WorkspaceWindowCountV1";
 constexpr std::uint32_t kMagic = UINT32_C(0x4c574b49);
-constexpr std::uint32_t kVersion = 4U;
+constexpr std::uint32_t kVersion = 5U;
 constexpr int kReferenceDpi = 96;
 constexpr int kTabsHeightDip = 28;
 constexpr std::size_t kMaximumPersistedDockPanes = 16U;
 constexpr std::size_t kMaximumPersistedAuxiliaryPanes = 16U;
+constexpr std::size_t kLegacyDockPaneCount = 4U;
 
 constexpr std::uint32_t kLegacyToolVisible = UINT32_C(1) << 0U;
 constexpr std::uint32_t kLegacyToolOptionsVisible = UINT32_C(1) << 1U;
@@ -69,7 +70,7 @@ struct PersistedWorkspaceLayoutV3 {
     std::uint32_t zone_count;
     std::uint32_t layer_split_milli;
     std::uint32_t reserved;
-    std::array<PersistedDockPaneV3, kDockPaneCount> panes;
+    std::array<PersistedDockPaneV3, kLegacyDockPaneCount> panes;
     std::array<PersistedDockZone, kDockedZoneCount> zones;
 };
 
@@ -142,6 +143,18 @@ std::size_t PaneIndex(DockPaneType type) noexcept {
 
 std::size_t AuxiliaryIndex(WorkspaceAuxiliaryPane type) noexcept {
     return static_cast<std::size_t>(type);
+}
+
+DockPaneType AuxiliaryDockPaneType(WorkspaceAuxiliaryPane type) noexcept {
+    switch (type) {
+        case WorkspaceAuxiliaryPane::Locator: return DockPaneType::Locator;
+        case WorkspaceAuxiliaryPane::Sequence: return DockPaneType::Sequence;
+        case WorkspaceAuxiliaryPane::LightTable: return DockPaneType::LightTable;
+        case WorkspaceAuxiliaryPane::Reference: return DockPaneType::Reference;
+        case WorkspaceAuxiliaryPane::Batch: return DockPaneType::Batch;
+        case WorkspaceAuxiliaryPane::Count: return DockPaneType::Count;
+    }
+    return DockPaneType::Count;
 }
 
 const PaneDescriptor* FindPaneDescriptorByStableId(
@@ -265,13 +278,14 @@ bool DecodeVersion3(
     const PersistedWorkspaceLayoutV3& value) noexcept {
     if (value.magic != kMagic || value.version != 3U
         || value.struct_size != sizeof(value) || value.flags > 1U
-        || value.pane_count != kDockPaneCount
+        || value.pane_count != kLegacyDockPaneCount
         || value.zone_count != kDockedZoneCount
         || value.layer_split_milli < 200U
         || value.layer_split_milli > 800U || value.reserved != 0U) {
         return false;
     }
-    DockLayoutRecord record{};
+    WorkspaceLayoutState candidate{};
+    DockLayoutRecord record = candidate.dock.ToRecord();
     record.mirrored = value.flags;
     for (std::size_t index = 0U; index < value.panes.size(); ++index) {
         const PersistedDockPaneV3& source = value.panes[index];
@@ -295,7 +309,6 @@ bool DecodeVersion3(
             static_cast<DockPaneType>(source.active_tab),
             source.extent_dip};
     }
-    WorkspaceLayoutState candidate{};
     if (!candidate.dock.LoadRecord(record)) {
         return false;
     }
@@ -342,10 +355,12 @@ void NormalizeRecordOrders(DockLayoutRecord& record) noexcept {
     }
 }
 
-bool DecodeVersion4(
+bool DecodeVersion4Or5(
     WorkspaceLayoutState& state,
-    const PersistedWorkspaceLayoutV4& value) noexcept {
-    if (value.magic != kMagic || value.version != kVersion
+    const PersistedWorkspaceLayoutV4& value,
+    bool migrate_auxiliary) noexcept {
+    if (value.magic != kMagic
+        || (value.version != 4U && value.version != kVersion)
         || value.struct_size != sizeof(value) || value.flags > 1U
         || value.pane_count > value.panes.size()
         || value.zone_count != kDockedZoneCount
@@ -465,18 +480,49 @@ bool DecodeVersion4(
         destination->edge = static_cast<WorkspaceAutoHideEdge>(source.edge);
         destination->floating = floating;
     }
+    if (migrate_auxiliary) {
+        for (const WorkspaceAuxiliaryPaneState& pane : candidate.auxiliary) {
+            const DockPaneType type = AuxiliaryDockPaneType(pane.type);
+            if (type == DockPaneType::Count) {
+                continue;
+            }
+            if (pane.auto_hide) {
+                static_cast<void>(candidate.dock.SetPaneAutoHide(type, true));
+            } else if (pane.visible) {
+                if (pane.floating.valid) {
+                    const UINT source_dpi = pane.floating.capture_dpi == 0U
+                        ? 96U
+                        : pane.floating.capture_dpi;
+                    static_cast<void>(candidate.dock.FloatPane(
+                        type,
+                        DockFloatingPlacement{
+                            MulDiv(pane.floating.x_px, 96, source_dpi),
+                            MulDiv(pane.floating.y_px, 96, source_dpi),
+                            MulDiv(pane.floating.width_px, 96, source_dpi),
+                            MulDiv(pane.floating.height_px, 96, source_dpi)}));
+                } else {
+                    static_cast<void>(candidate.dock.RestorePane(type));
+                }
+            } else {
+                static_cast<void>(candidate.dock.HidePane(type));
+            }
+        }
+    }
     state = candidate;
     return true;
 }
 
-PersistedWorkspaceLayoutV4 EncodeVersion4(
+PersistedWorkspaceLayoutV4 EncodeCurrent(
     const WorkspaceLayoutState& state) noexcept {
     PersistedWorkspaceLayoutV4 value{};
     value.magic = kMagic;
     value.version = kVersion;
     value.struct_size = sizeof(value);
     value.flags = state.dock.Mirrored() ? 1U : 0U;
-    value.pane_count = static_cast<std::uint32_t>(kDockPaneCount);
+    value.pane_count = static_cast<std::uint32_t>(std::count_if(
+        PaneDescriptors().begin(),
+        PaneDescriptors().end(),
+        [](const PaneDescriptor& descriptor) { return descriptor.persist_layout; }));
     value.zone_count = static_cast<std::uint32_t>(kDockedZoneCount);
     value.auxiliary_count = static_cast<std::uint32_t>(
         kWorkspaceAuxiliaryPaneCount);
@@ -494,10 +540,14 @@ PersistedWorkspaceLayoutV4 EncodeVersion4(
         value.custom_name.begin());
 
     const DockLayoutRecord record = state.dock.ToRecord();
+    std::size_t persisted_index{};
     for (std::size_t index = 0U; index < kDockPaneCount; ++index) {
         const DockPanePlacement& source = record.panes[index];
         const PaneDescriptor* descriptor = FindPaneDescriptor(source.type);
-        value.panes[index] = PersistedDockPaneV4{
+        if (descriptor == nullptr || !descriptor->persist_layout) {
+            continue;
+        }
+        value.panes[persisted_index++] = PersistedDockPaneV4{
             descriptor == nullptr ? 0U : descriptor->stable_type_id,
             static_cast<std::uint32_t>(source.zone),
             static_cast<std::uint32_t>(source.restore_zone),
@@ -518,10 +568,16 @@ PersistedWorkspaceLayoutV4 EncodeVersion4(
     }
     for (std::size_t index = 0U; index < state.auxiliary.size(); ++index) {
         const WorkspaceAuxiliaryPaneState& source = state.auxiliary[index];
+        const DockPanePlacement* placement = state.dock.Pane(
+            AuxiliaryDockPaneType(source.type));
         value.auxiliary[index] = PersistedAuxiliaryPaneV4{
             source.stable_type_id,
-            (source.visible ? UINT32_C(1) : 0U)
-                | (source.auto_hide ? UINT32_C(2) : 0U),
+            (placement != nullptr && placement->zone != DockZone::Hidden
+                    ? UINT32_C(1)
+                    : 0U)
+                | (placement != nullptr && placement->zone == DockZone::AutoHide
+                       ? UINT32_C(2)
+                       : 0U),
             static_cast<std::uint32_t>(source.edge),
             0U,
             EncodeScreenPlacement(source.floating)};
@@ -541,6 +597,15 @@ void SetAuxiliaryPreset(
         pane->visible = visible;
         pane->auto_hide = auto_hide;
         pane->edge = edge;
+        const DockPaneType dock_type = AuxiliaryDockPaneType(type);
+        if (auto_hide) {
+            static_cast<void>(state.dock.SetPaneAutoHide(dock_type, true));
+        } else if (visible) {
+            static_cast<void>(state.dock.SetPaneAutoHide(dock_type, false));
+            static_cast<void>(state.dock.RestorePane(dock_type));
+        } else {
+            static_cast<void>(state.dock.HidePane(dock_type));
+        }
     }
 }
 
@@ -637,9 +702,14 @@ WorkspaceLayoutRects ComputeWorkspaceLayout(
     const int button_height = ScaleWorkspaceDip(
         state.density == WorkspaceDensity::Compact ? 24 : 28, dpi);
     const int gap = std::max(1, ScaleWorkspaceDip(2, dpi));
+    const auto is_auto_hidden = [&state](WorkspaceAuxiliaryPane type) {
+        const DockPanePlacement* placement = state.dock.Pane(
+            AuxiliaryDockPaneType(type));
+        return placement != nullptr && placement->zone == DockZone::AutoHide;
+    };
     std::array<std::size_t, 3U> edge_counts{};
     for (const WorkspaceAuxiliaryPaneState& pane : state.auxiliary) {
-        if (pane.auto_hide) {
+        if (is_auto_hidden(pane.type)) {
             ++edge_counts[static_cast<std::size_t>(pane.edge)];
         }
     }
@@ -658,7 +728,7 @@ WorkspaceLayoutRects ComputeWorkspaceLayout(
     std::array<int, 3U> edge_positions{};
     for (std::size_t index = 0U; index < state.auxiliary.size(); ++index) {
         const WorkspaceAuxiliaryPaneState& pane = state.auxiliary[index];
-        if (!pane.auto_hide) {
+        if (!is_auto_hidden(pane.type)) {
             continue;
         }
         int& position = edge_positions[static_cast<std::size_t>(pane.edge)];
@@ -759,6 +829,10 @@ bool ApplyWorkspacePreset(
                 WorkspaceAuxiliaryPane::Reference,
                 true,
                 false);
+            static_cast<void>(state.dock.SetZoneMode(
+                DockZone::Right, DockStackMode::Tabs));
+            static_cast<void>(state.dock.SetActiveTab(
+                DockZone::Right, DockPaneType::Reference));
             break;
         case WorkspacePreset::Batch:
             static_cast<void>(state.dock.HidePane(DockPaneType::Tool));
@@ -827,6 +901,21 @@ const WorkspaceAuxiliaryPaneState* FindWorkspaceAuxiliaryPane(
     return index < state.auxiliary.size() ? &state.auxiliary[index] : nullptr;
 }
 
+DockPaneType DockPaneTypeForAuxiliary(
+    WorkspaceAuxiliaryPane type) noexcept {
+    return AuxiliaryDockPaneType(type);
+}
+
+DockZone DockZoneForAutoHideEdge(
+    WorkspaceAutoHideEdge edge) noexcept {
+    switch (edge) {
+        case WorkspaceAutoHideEdge::Left: return DockZone::Left;
+        case WorkspaceAutoHideEdge::Right: return DockZone::Right;
+        case WorkspaceAutoHideEdge::Bottom: return DockZone::Bottom;
+    }
+    return DockZone::Right;
+}
+
 bool EncodeWorkspaceLayout(
     const WorkspaceLayoutState& state,
     std::span<std::byte> output,
@@ -856,7 +945,7 @@ bool EncodeWorkspaceLayout(
             return false;
         }
     }
-    const PersistedWorkspaceLayoutV4 value = EncodeVersion4(state);
+    const PersistedWorkspaceLayoutV4 value = EncodeCurrent(state);
     std::memcpy(output.data(), &value, sizeof(value));
     written = sizeof(value);
     return true;
@@ -878,8 +967,15 @@ WorkspaceLayoutDecodeResult DecodeWorkspaceLayout(
         && input.size() == sizeof(PersistedWorkspaceLayoutV4)) {
         PersistedWorkspaceLayoutV4 value{};
         std::memcpy(&value, input.data(), sizeof(value));
-        decoded = DecodeVersion4(state, value);
+        decoded = DecodeVersion4Or5(state, value, false);
         result = WorkspaceLayoutDecodeResult::Current;
+    } else if (header[0] == kMagic && header[1] == 4U
+        && header[2] == sizeof(PersistedWorkspaceLayoutV4)
+        && input.size() == sizeof(PersistedWorkspaceLayoutV4)) {
+        PersistedWorkspaceLayoutV4 value{};
+        std::memcpy(&value, input.data(), sizeof(value));
+        decoded = DecodeVersion4Or5(state, value, true);
+        result = WorkspaceLayoutDecodeResult::Migrated;
     } else if (header[0] == kMagic && header[1] == 3U
         && header[2] == sizeof(PersistedWorkspaceLayoutV3)
         && input.size() == sizeof(PersistedWorkspaceLayoutV3)) {

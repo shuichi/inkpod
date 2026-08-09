@@ -78,13 +78,15 @@ InkpodFilterInput FilterInputFor(const app::FilterJob& job) noexcept {
 BatchController::BatchController(
     app::AppLifetimeState& lifetime,
     app::MainWindowHandles& windows,
-    HWND& progress,
+    HWND progress,
+    JobProgressPaneState& progress_state,
     HWND& palette,
     app::BatchUiState& batch,
     app::CoreHost& engine) noexcept
     : lifetime_(lifetime),
       windows_(windows),
       progress_(progress),
+      progress_state_(progress_state),
       palette_(palette),
       batch_(batch),
       engine_(engine) {}
@@ -326,13 +328,16 @@ InkpodStatus BatchController::Start(
         L"バッチ実行",
         L"バッチ処理中...",
         L"キャンセル中..."};
-    progress_ = CreateProgressDialog(
-        lifetime_.instance, windows_.window, batch_.progress_dialog);
-    if (progress_ == nullptr) {
+    if (!BindJobProgress(
+            progress_,
+            progress_state_,
+            JobProgressSlot::Batch,
+            batch_.progress_dialog)) {
         inkpod_batch_task_release(&batch_.task);
         return INKPOD_STATUS_INVALID_STATE;
     }
-    ShowWindow(progress_, SW_SHOW);
+    static_cast<void>(windows_.dock_host.RestorePane(DockPaneType::JobProgress));
+    static_cast<void>(windows_.dock_host.ActivatePane(DockPaneType::JobProgress));
     batch_.completion_context = context;
     const HWND window = windows_.window;
     if (!engine_.Enqueue(
@@ -356,8 +361,11 @@ InkpodStatus BatchController::Start(
                 PostMessageW(
                     window, completion_message, completion_status, generation);
             })) {
-        DestroyWindow(progress_);
-        progress_ = nullptr;
+        ClearJobProgress(progress_, progress_state_, JobProgressSlot::Batch);
+        if (!HasActiveJobProgress(progress_state_)) {
+            static_cast<void>(windows_.dock_host.HidePane(
+                DockPaneType::JobProgress));
+        }
         inkpod_batch_task_release(&batch_.task);
         batch_.completion_context = {};
         return INKPOD_STATUS_INVALID_STATE;

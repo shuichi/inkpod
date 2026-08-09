@@ -232,6 +232,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_frontend_boundaries.cmake")
 
 add_test(
+    NAME inkpod_windows_modal_dialog_positioning
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_modal_dialog_positioning.cmake")
+
+add_test(
     NAME inkpod_windows_activation_recovery_boundaries
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -444,6 +450,23 @@ if(WIN32)
         NAME inkpod_windows_workspace_layout
         COMMAND inkpod_windows_workspace_layout_tests)
 
+    add_executable(inkpod_windows_modal_dialog_position_tests
+        apps/windows/ui/dialogs/modal_dialog_position.cpp
+        apps/windows/ui/dialogs/modal_dialog_position.h
+        tests/windows_modal_dialog_position.cpp)
+    target_include_directories(inkpod_windows_modal_dialog_position_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/apps/windows")
+    target_compile_definitions(inkpod_windows_modal_dialog_position_tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(inkpod_windows_modal_dialog_position_tests PRIVATE user32)
+    if(MSVC)
+        inkpod_enable_strict_warnings(inkpod_windows_modal_dialog_position_tests)
+        target_compile_options(inkpod_windows_modal_dialog_position_tests PRIVATE /EHsc)
+    endif()
+    add_test(
+        NAME inkpod_windows_modal_dialog_position
+        COMMAND inkpod_windows_modal_dialog_position_tests)
+
     add_executable(inkpod_windows_owner_model_tests
         apps/windows/app/application_owner_graph.h
         apps/windows/app/editor_area.cpp
@@ -578,6 +601,8 @@ if(WIN32)
         apps/windows/ui/dialogs/effects_dialogs.cpp
         apps/windows/ui/dialogs/layer_palette.cpp
         apps/windows/ui/dialogs/layer_palette.h
+        apps/windows/ui/dialogs/modal_dialog_position.cpp
+        apps/windows/ui/dialogs/modal_dialog_position.h
         apps/windows/ui/dialogs/tool_palette.cpp
         apps/windows/ui/dialogs/tool_palette.h
         apps/windows/ui/panes/document_panes.cpp
@@ -585,6 +610,7 @@ if(WIN32)
         apps/windows/ui/panes/light_table_pane.h
         apps/windows/ui/panes/locator_pane.cpp
         apps/windows/ui/panes/locator_pane.h
+        apps/windows/ui/panes/pane_dialog_layout.h
         apps/windows/ui/panes/sequence_pane.cpp
         apps/windows/ui/panes/sequence_pane.h
         apps/windows/ui/panes/subpalette_pane.cpp
@@ -608,8 +634,6 @@ if(WIN32)
         apps/windows/ui/shortcut_controller.h
         apps/windows/ui/effects_controller.cpp
         apps/windows/ui/batch_controller.cpp
-        apps/windows/ui/palette_window.cpp
-        apps/windows/ui/palette_window.h
         apps/windows/ui/dock_layout.cpp
         apps/windows/ui/dock_layout.h
         apps/windows/ui/dock_host.cpp

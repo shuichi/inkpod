@@ -26,9 +26,13 @@ constexpr std::size_t ZoneIndex(DockZone zone) noexcept {
 }
 
 constexpr std::uint32_t DockedAndTransientZones(
-    std::initializer_list<DockZone> zones) noexcept {
+    std::initializer_list<DockZone> zones,
+    bool auto_hide = false) noexcept {
     std::uint32_t value = DockZoneBit(DockZone::Floating)
         | DockZoneBit(DockZone::Hidden);
+    if (auto_hide) {
+        value |= DockZoneBit(DockZone::AutoHide);
+    }
     for (const DockZone zone : zones) {
         value |= DockZoneBit(zone);
     }
@@ -42,10 +46,12 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
      L"ツールパレット",
      DockZone::Left,
      DockedAndTransientZones({DockZone::Left, DockZone::Right}),
-     PaneTargetScope::Application,
-     1U,
-     true,
-     false,
+      PaneTargetScope::Application,
+      1U,
+      true,
+      true,
+      true,
+      false,
      80,
      120,
      80,
@@ -57,10 +63,12 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
      L"ツールオプション",
      DockZone::TopContext,
      DockedAndTransientZones({DockZone::TopContext, DockZone::Bottom}),
-     PaneTargetScope::FollowActiveView,
-     1U,
-     true,
-     false,
+      PaneTargetScope::FollowActiveView,
+      1U,
+      true,
+      true,
+      true,
+      false,
      320,
      28,
      720,
@@ -73,10 +81,12 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
      DockZone::Right,
      DockedAndTransientZones(
          {DockZone::Left, DockZone::Right, DockZone::Bottom}),
-     PaneTargetScope::Application,
-     1U,
-     true,
-     false,
+      PaneTargetScope::Application,
+      1U,
+      true,
+      true,
+      true,
+      false,
      240,
      120,
      320,
@@ -89,15 +99,124 @@ constexpr std::array<PaneDescriptor, kDockPaneCount> kPaneDescriptors{{
      DockZone::Right,
      DockedAndTransientZones(
          {DockZone::Left, DockZone::Right, DockZone::Bottom}),
-     PaneTargetScope::FollowActiveView,
-     1U,
-     true,
-     false,
+      PaneTargetScope::FollowActiveView,
+      1U,
+      true,
+      true,
+      true,
+      false,
      240,
      180,
      320,
+      420,
+      80U},
+    {DockPaneType::Locator,
+     UINT32_C(0x41434f4c),
+     IDS_PANE_LOCATOR,
+     L"ロケーター",
+     DockZone::Right,
+     DockedAndTransientZones(
+         {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
+     PaneTargetScope::FollowActiveView,
+     1U,
+     false,
+     true,
+     true,
+     true,
+     220,
+     220,
+     300,
+     380,
+     45U},
+    {DockPaneType::Sequence,
+     UINT32_C(0x55514553),
+     IDS_PANE_SEQUENCE,
+     L"シーケンス",
+     DockZone::Bottom,
+     DockedAndTransientZones(
+         {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
+     PaneTargetScope::FollowActiveView,
+     1U,
+     false,
+     true,
+     true,
+     true,
+     260,
+     200,
+     360,
      420,
-     80U},
+     40U},
+    {DockPaneType::LightTable,
+     UINT32_C(0x544c474c),
+     IDS_PANE_LIGHT_TABLE,
+     L"ライトテーブル",
+     DockZone::Right,
+     DockedAndTransientZones(
+         {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
+     PaneTargetScope::FollowActiveView,
+     1U,
+     false,
+     true,
+     true,
+     true,
+     280,
+     260,
+     380,
+     500,
+     35U},
+    {DockPaneType::Reference,
+     UINT32_C(0x45464552),
+     IDS_PANE_REFERENCE,
+     L"サブパレット／参照ビュー",
+     DockZone::Right,
+     DockedAndTransientZones(
+         {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
+     PaneTargetScope::FollowActiveView,
+     1U,
+     false,
+     true,
+     true,
+     true,
+     300,
+     260,
+     440,
+     560,
+     30U},
+    {DockPaneType::Batch,
+     UINT32_C(0x48435442),
+     IDS_PANE_BATCH,
+     L"バッチ",
+     DockZone::Right,
+     DockedAndTransientZones(
+         {DockZone::Left, DockZone::Right, DockZone::Bottom}, true),
+     PaneTargetScope::FollowActiveView,
+     1U,
+     false,
+     true,
+     true,
+     true,
+     300,
+     300,
+     420,
+     560,
+     25U},
+    {DockPaneType::JobProgress,
+     UINT32_C(0x424f4a50),
+     IDS_PANE_JOB_PROGRESS,
+     L"処理進捗",
+     DockZone::Bottom,
+     DockedAndTransientZones({DockZone::Bottom}),
+     PaneTargetScope::Job,
+     1U,
+     false,
+     false,
+     false,
+     false,
+     320,
+     84,
+     720,
+     112,
+     10U},
 }};
 
 DockFloatingPlacement DefaultFloatingPlacement(DockPaneType type) noexcept {
@@ -115,10 +234,12 @@ DockPanePlacement DefaultPlacement(DockPaneType type) noexcept {
     DockPanePlacement placement{};
     placement.type = type;
     placement.present = descriptor != nullptr;
-    placement.zone = descriptor == nullptr
+    placement.zone = descriptor == nullptr || !descriptor->default_visible
         ? DockZone::Hidden
         : descriptor->default_zone;
-    placement.restore_zone = placement.zone;
+    placement.restore_zone = descriptor == nullptr
+        ? DockZone::Left
+        : descriptor->default_zone;
     placement.order = type == DockPaneType::Layer ? 1U : 0U;
     placement.split_weight = type == DockPaneType::Color
         ? 320U
@@ -500,6 +621,49 @@ DockResult DockLayoutModel::HidePane(DockPaneType type) noexcept {
     return DockResult::Ok;
 }
 
+DockResult DockLayoutModel::SetPaneAutoHide(
+    DockPaneType type, bool auto_hide) noexcept {
+    DockPanePlacement* pane = Pane(type);
+    const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+    if (pane == nullptr || descriptor == nullptr || !pane->present) {
+        return DockResult::InvalidPane;
+    }
+    if (!descriptor->can_auto_hide) {
+        return DockResult::ZoneNotAllowed;
+    }
+    if (auto_hide) {
+        if (pane->zone == DockZone::AutoHide) {
+            return DockResult::NoOp;
+        }
+        const DockZone old_zone = pane->zone;
+        if (IsDockedZone(old_zone)) {
+            pane->restore_zone = old_zone;
+        }
+        pane->zone = DockZone::AutoHide;
+        NormalizeOrders(old_zone);
+        return DockResult::Ok;
+    }
+    if (pane->zone != DockZone::AutoHide) {
+        return DockResult::NoOp;
+    }
+    DockZone target = pane->restore_zone;
+    if (!IsDockedZone(target) || !IsZoneAllowed(type, target)) {
+        target = descriptor->default_zone;
+    }
+    const bool target_was_empty = PaneCount(target) == 0U;
+    pane->zone = target;
+    pane->order = static_cast<std::uint8_t>(PaneCount(target));
+    NormalizeOrders(target);
+    if (target_was_empty) {
+        static_cast<void>(SetZoneExtentDip(
+            target,
+            target == DockZone::TopContext || target == DockZone::Bottom
+                ? descriptor->preferred_height_dip
+                : descriptor->preferred_width_dip));
+    }
+    return DockResult::Ok;
+}
+
 DockResult DockLayoutModel::RestorePane(DockPaneType type) noexcept {
     DockPanePlacement* pane = Pane(type);
     const PaneDescriptor* descriptor = FindPaneDescriptor(type);
@@ -513,9 +677,17 @@ DockResult DockLayoutModel::RestorePane(DockPaneType type) noexcept {
     if (!IsDockedZone(target) || !IsZoneAllowed(type, target)) {
         target = descriptor->default_zone;
     }
+    const bool target_was_empty = PaneCount(target) == 0U;
     pane->zone = target;
     pane->order = static_cast<std::uint8_t>(PaneCount(target));
     NormalizeOrders(target);
+    if (target_was_empty) {
+        static_cast<void>(SetZoneExtentDip(
+            target,
+            target == DockZone::TopContext || target == DockZone::Bottom
+                ? descriptor->preferred_height_dip
+                : descriptor->preferred_width_dip));
+    }
     return DockResult::Ok;
 }
 

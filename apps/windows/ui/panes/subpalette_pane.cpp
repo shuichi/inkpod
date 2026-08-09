@@ -1,9 +1,11 @@
 #include "subpalette_pane.h"
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 #include "app/resource.h"
+#include "pane_dialog_layout.h"
 #include "renderer/renderer_host.h"
 
 namespace inkpod::windows::ui::panes {
@@ -73,7 +75,7 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
                     Dispatch(*state, IDM_PALETTE_REGISTER);
                     return TRUE;
                 case IDCANCEL:
-                    ShowWindow(dialog, SW_HIDE);
+                    Dispatch(*state, IDM_WINDOW_SUBPALETTE);
                     return TRUE;
                 default:
                     break;
@@ -119,7 +121,9 @@ INT_PTR CALLBACK SubpalettePaneProcedure(
         case renderer::kCanvasActivated:
             return TRUE;
         case WM_CLOSE:
-            ShowWindow(dialog, SW_HIDE);
+            if (state != nullptr) {
+                Dispatch(*state, IDM_WINDOW_SUBPALETTE);
+            }
             return TRUE;
         case WM_NCDESTROY:
             if (state != nullptr) {
@@ -191,18 +195,100 @@ void LayoutSubpalettePaneDialog(HWND dialog) noexcept {
     if (GetClientRect(dialog, &client) == FALSE) {
         return;
     }
-    const int dpi = static_cast<int>(GetDpiForWindow(dialog));
-    const int margin = MulDiv(8, dpi, 96);
-    const int top = MulDiv(49, dpi, 96);
-    const int bottom = MulDiv(85, dpi, 96);
+    const int margin = ScalePaneDip(dialog, 8);
+    const int gap = ScalePaneDip(dialog, 6);
+    const int line_height = ScalePaneDip(dialog, 18);
+    const int row_height = ScalePaneDip(dialog, 26);
+    const int pin_width = ScalePaneDip(dialog, 92);
+    const int width = static_cast<int>(client.right - client.left);
+    const int height = static_cast<int>(client.bottom - client.top);
+    const int content_width = std::max(0, width - margin * 2);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SUBPALETTE_PIN,
+        std::max(margin, width - margin - pin_width),
+        margin,
+        pin_width,
+        row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SUBPALETTE_TARGET,
+        margin,
+        margin + ScalePaneDip(dialog, 4),
+        std::max(0, width - margin * 3 - pin_width),
+        line_height);
+    const int source_top = margin + row_height + gap;
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SUBPALETTE_SOURCE,
+        margin,
+        source_top,
+        content_width,
+        line_height);
+
+    const int hint_top = std::max(
+        source_top + line_height + gap,
+        height - margin - line_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SUBPALETTE_HINT,
+        margin,
+        hint_top,
+        content_width,
+        line_height);
+    const int checks_top = std::max(
+        source_top + line_height + gap,
+        hint_top - gap - ScalePaneDip(dialog, 22));
+    const int check_width = std::max(0, (content_width - gap) / 2);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SUBPALETTE_AUTO_PREVIOUS,
+        margin,
+        checks_top,
+        check_width,
+        ScalePaneDip(dialog, 22));
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SUBPALETTE_SCROLL_SYNC,
+        margin + check_width + gap,
+        checks_top,
+        std::max(0, content_width - check_width - gap),
+        ScalePaneDip(dialog, 22));
+    const int actions_top = std::max(
+        source_top + line_height + gap,
+        checks_top - gap - row_height);
+    const std::array<int, 6U> actions{
+        IDC_SUBPALETTE_PREVIOUS,
+        IDC_SUBPALETTE_NEXT,
+        IDC_SUBPALETTE_CURRENT,
+        IDC_SUBPALETTE_FIT,
+        IDC_SUBPALETTE_ONE_TO_ONE,
+        IDC_SUBPALETTE_REGISTER};
+    const int action_width = std::max(
+        0, (content_width - gap * 5) / static_cast<int>(actions.size()));
+    int cursor = margin;
+    for (const int control : actions) {
+        PlacePaneDialogControl(
+            dialog, control, cursor, actions_top, action_width, row_height);
+        cursor += action_width + gap;
+    }
+    const int canvas_top = source_top + line_height + gap;
+    const int canvas_height = std::max(0, actions_top - gap - canvas_top);
     SetWindowPos(
         state->canvas,
         nullptr,
         margin,
-        top,
-        std::max(1, static_cast<int>(client.right) - margin * 2),
-        std::max(1, static_cast<int>(client.bottom) - top - bottom),
+        canvas_top,
+        std::max(1, content_width),
+        std::max(1, canvas_height),
         SWP_NOACTIVATE | SWP_NOZORDER);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SUBPALETTE_EMPTY,
+        margin + gap,
+        canvas_top + std::max(0, (canvas_height - line_height) / 2),
+        std::max(0, content_width - gap * 2),
+        line_height);
 }
 
 void UpdateSubpalettePaneDialog(HWND dialog, SubpalettePaneView view) noexcept {

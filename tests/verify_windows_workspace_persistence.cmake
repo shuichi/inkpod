@@ -46,9 +46,10 @@ endforeach()
 
 file(READ "${LAYOUT_SOURCE}" LAYOUT_SOURCE_TEXT)
 foreach(REQUIRED IN ITEMS
-        "kVersion = 4U"
+        "kVersion = 5U"
         "PersistedWorkspaceLayoutV4"
         "DecodeVersion3"
+        "DecodeVersion4Or5"
         "LoadLegacyLayout"
         "FindPaneDescriptorByStableId"
         "kMaximumWorkspaceLayoutRecordBytes"
@@ -82,7 +83,9 @@ foreach(REQUIRED IN ITEMS
         "CaptureWorkspacePresentation"
         "ApplyWorkspacePresentation"
         "CollapseAutoHiddenPanes"
+        "WorkspaceSessionV5"
         "WorkspaceSessionV4"
+        "WorkspaceSavedV5"
         "WorkspaceSavedV4"
         "IDM_WORKSPACE_SAVE_AS"
         "IDM_WORKSPACE_PRESET_COLORING"
@@ -127,6 +130,8 @@ foreach(REQUIRED IN ITEMS
         "DecodeWorkspaceLayout"
         "WorkspaceLayoutDecodeResult::Migrated"
         "LegacyWorkspaceV3"
+        "legacy_v4_bytes"
+        "DockPaneType::JobProgress"
         "unknown_pane"
         "missing_monitor"
         "added_monitor"
@@ -140,6 +145,6 @@ foreach(REQUIRED IN ITEMS
 endforeach()
 
 message(STATUS
-    "Verified G9 bounded v4 persistence, v2/v3 migration, named presets, "
+    "Verified G9 bounded v5 persistence, v2/v3/v4 migration, named presets, "
     "monitor recovery, accessible auxiliary-pane auto-hide integration, "
     "and G10 bounded workspace-window count persistence")

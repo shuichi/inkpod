@@ -22,7 +22,8 @@ public:
     EffectsController(
         app::AppLifetimeState& lifetime,
         app::MainWindowHandles& windows,
-        HWND& progress,
+        HWND progress,
+        JobProgressPaneState& progress_state,
         app::EffectsUiState& effects,
         app::CoreHost& engine) noexcept;
 
@@ -39,7 +40,8 @@ public:
 private:
     app::AppLifetimeState& lifetime_;
     app::MainWindowHandles& windows_;
-    HWND& progress_;
+    HWND progress_{};
+    JobProgressPaneState& progress_state_;
     app::EffectsUiState& effects_;
     app::CoreHost& engine_;
 };

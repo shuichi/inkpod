@@ -200,6 +200,8 @@ int main() {
         || IsCommandEnabled(states, IDM_SEQUENCE_PIN)
         || !IsCommandEnabled(states, IDM_WINDOW_LIGHT_TABLE)
         || IsCommandChecked(states, IDM_WINDOW_LIGHT_TABLE)
+        || !IsCommandEnabled(states, IDM_WINDOW_JOB_PROGRESS)
+        || IsCommandChecked(states, IDM_WINDOW_JOB_PROGRESS)
         || IsCommandEnabled(states, IDM_LIGHT_TABLE_PIN)
         || !IsCommandEnabled(states, IDM_WINDOW_SUBPALETTE)
         || IsCommandChecked(states, IDM_WINDOW_SUBPALETTE)
@@ -261,6 +263,7 @@ int main() {
     inputs.workspace.color_pinned = true;
     inputs.workspace.batch_target_available = true;
     inputs.workspace.batch_pinned = true;
+    inputs.workspace.job_progress_visible = true;
     states = ComputeCommandStates(inputs);
     CommandStateInputs dirty_inputs = inputs;
     dirty_inputs.document.dirty = true;
@@ -288,6 +291,7 @@ int main() {
         || !IsCommandEnabled(states, IDM_SEQUENCE_PIN)
         || !IsCommandChecked(states, IDM_SEQUENCE_PIN)
         || !IsCommandChecked(states, IDM_WINDOW_LIGHT_TABLE)
+        || !IsCommandChecked(states, IDM_WINDOW_JOB_PROGRESS)
         || !IsCommandEnabled(states, IDM_LIGHT_TABLE_PIN)
         || !IsCommandChecked(states, IDM_LIGHT_TABLE_PIN)
         || !IsCommandChecked(states, IDM_WINDOW_SUBPALETTE)

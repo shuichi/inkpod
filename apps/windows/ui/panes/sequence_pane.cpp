@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "app/resource.h"
+#include "pane_dialog_layout.h"
 
 namespace inkpod::windows::ui::panes {
 namespace {
@@ -15,6 +16,78 @@ void Dispatch(SequencePaneDialogState& state, UINT command) noexcept {
     if (state.dispatch_command != nullptr) {
         state.dispatch_command(state.context, command);
     }
+}
+
+void LayoutSequencePane(HWND dialog) noexcept {
+    RECT client{};
+    if (GetClientRect(dialog, &client) == FALSE) {
+        return;
+    }
+    const int margin = ScalePaneDip(dialog, 8);
+    const int gap = ScalePaneDip(dialog, 6);
+    const int header_height = ScalePaneDip(dialog, 24);
+    const int line_height = ScalePaneDip(dialog, 18);
+    const int button_height = ScalePaneDip(dialog, 26);
+    const int pin_width = ScalePaneDip(dialog, 88);
+    const int nav_width = ScalePaneDip(dialog, 58);
+    const int import_width = ScalePaneDip(dialog, 112);
+    const int width = static_cast<int>(client.right - client.left);
+    const int height = static_cast<int>(client.bottom - client.top);
+
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SEQUENCE_PIN,
+        std::max(margin, width - margin - pin_width),
+        margin,
+        pin_width,
+        header_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SEQUENCE_TARGET,
+        margin,
+        margin + ScalePaneDip(dialog, 4),
+        std::max(0, width - margin * 3 - pin_width),
+        line_height);
+    const int buttons_top = std::max(
+        margin + header_height + gap,
+        height - margin - button_height);
+    const int list_top = margin + header_height + gap;
+    const int list_height = std::max(0, buttons_top - gap - list_top);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SEQUENCE_CELLS,
+        margin,
+        list_top,
+        std::max(0, width - margin * 2),
+        list_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SEQUENCE_EMPTY,
+        margin + gap,
+        list_top + std::max(0, (list_height - line_height) / 2),
+        std::max(0, width - margin * 2 - gap * 2),
+        line_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SEQUENCE_PREVIOUS,
+        margin,
+        buttons_top,
+        nav_width,
+        button_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SEQUENCE_NEXT,
+        margin + nav_width + gap,
+        buttons_top,
+        nav_width,
+        button_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_SEQUENCE_IMPORT,
+        std::max(margin, width - margin - import_width),
+        buttons_top,
+        import_width,
+        button_height);
 }
 
 void DrawThumbnail(
@@ -142,6 +215,9 @@ INT_PTR CALLBACK SequencePaneProcedure(
     switch (message) {
         case WM_INITDIALOG:
             return TRUE;
+        case WM_SIZE:
+            LayoutSequencePane(dialog);
+            return TRUE;
         case WM_MEASUREITEM:
             if (wparam == static_cast<WPARAM>(IDC_SEQUENCE_CELLS)) {
                 auto* measure = reinterpret_cast<MEASUREITEMSTRUCT*>(lparam);
@@ -189,14 +265,16 @@ INT_PTR CALLBACK SequencePaneProcedure(
                     }
                     return TRUE;
                 case IDCANCEL:
-                    ShowWindow(dialog, SW_HIDE);
+                    Dispatch(*state, IDM_WINDOW_SEQUENCE);
                     return TRUE;
                 default:
                     break;
             }
             break;
         case WM_CLOSE:
-            ShowWindow(dialog, SW_HIDE);
+            if (state != nullptr) {
+                Dispatch(*state, IDM_WINDOW_SEQUENCE);
+            }
             return TRUE;
         case WM_NCDESTROY:
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
@@ -225,6 +303,7 @@ HWND CreateSequencePaneDialog(
     }
     SetWindowLongPtrW(
         dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
+    LayoutSequencePane(dialog);
     SetWindowTextW(
         GetDlgItem(dialog, IDC_SEQUENCE_CELLS),
         L"シーケンスのサムネイル一覧");

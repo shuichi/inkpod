@@ -29,10 +29,13 @@ public:
         DockPaneType type, DockZone zone) noexcept;
     [[nodiscard]] DockResult FloatPane(DockPaneType type) noexcept;
     [[nodiscard]] DockResult HidePane(DockPaneType type) noexcept;
+    [[nodiscard]] DockResult SetPaneAutoHide(
+        DockPaneType type, bool auto_hide) noexcept;
     [[nodiscard]] DockResult RestorePane(DockPaneType type) noexcept;
     [[nodiscard]] DockResult ResetPane(DockPaneType type) noexcept;
     [[nodiscard]] DockResult SetZoneMode(
         DockZone zone, DockStackMode mode) noexcept;
+    [[nodiscard]] DockResult ActivatePane(DockPaneType type) noexcept;
 
     [[nodiscard]] HWND FloatingWindow(DockPaneType type) const noexcept;
     [[nodiscard]] HWND ContentWindow(DockPaneType type) const noexcept;
@@ -40,6 +43,10 @@ public:
     [[nodiscard]] HWND SplitterWindow(
         DockZone zone, DockSplitterKind kind) const noexcept;
     [[nodiscard]] bool PreviewVisible() const noexcept;
+    [[nodiscard]] bool ShowAutoHiddenPane(
+        DockPaneType type, DockZone edge) noexcept;
+    [[nodiscard]] bool AutoHiddenPaneVisible(DockPaneType type) const noexcept;
+    void HideAutoHiddenPane(DockPaneType type) noexcept;
 
 private:
     struct PaneHostState {
@@ -47,6 +54,8 @@ private:
         DockPaneType type{DockPaneType::Count};
         HWND content{};
         HWND floating_window{};
+        DockZone auto_hide_edge{DockZone::Right};
+        bool auto_hide_expanded{};
     };
 
     struct SplitterHostState {
@@ -91,6 +100,7 @@ private:
     [[nodiscard]] const PaneHostState* PaneState(DockPaneType type) const noexcept;
     [[nodiscard]] bool EnsureFloatingWindow(PaneHostState& pane) noexcept;
     void LayoutFloatingContent(PaneHostState& pane) noexcept;
+    void LayoutAutoHiddenContent(PaneHostState& pane) noexcept;
     void ApplyPaneLayout(PaneHostState& pane) noexcept;
     void ApplyTabLayout(DockZone zone) noexcept;
     void NotifyChanged() noexcept;

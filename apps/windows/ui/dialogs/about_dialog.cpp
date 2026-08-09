@@ -6,6 +6,7 @@
 #include <cwchar>
 
 #include "app/resource.h"
+#include "modal_dialog_position.h"
 
 namespace inkpod::windows::ui {
 namespace {
@@ -500,6 +501,7 @@ INT_PTR CALLBACK AboutDialogProcedure(
             }
             state->layout_valid = ValidateAboutDialog(
                 dialog, state->instance);
+            static_cast<void>(CenterModalDialogOnOwner(dialog));
             if (state->close_immediately) {
                 PostMessageW(dialog, WM_COMMAND, IDOK, 0);
             }

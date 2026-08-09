@@ -124,6 +124,13 @@ bool WindowHasAccessibleName(HWND window) noexcept {
     return has_name;
 }
 
+bool WindowHasVisibleStyle(HWND window) noexcept {
+    return window != nullptr
+        && (static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE))
+            & WS_VISIBLE)
+            != 0U;
+}
+
 bool AccessibleChildNameContains(
     HWND window, std::wstring_view expected) noexcept {
     if (window == nullptr || expected.empty()) {
@@ -395,9 +402,11 @@ bool ValidateFixedResourceScenario(
 int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
     const HWND pane = state.Workspace().locator_palette;
     const HMENU menu = GetMenu(state.Workspace().windows.window);
-    if (pane == nullptr || menu == nullptr || IsWindowVisible(pane) != FALSE
-        || GetWindow(pane, GW_OWNER) != state.Workspace().windows.window
-        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) != 0U
+    if (pane == nullptr || menu == nullptr
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Locator)
+        || GetParent(pane) != state.Workspace().windows.window
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) == 0U
         || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_EXSTYLE))
             & (WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0U
         || !WindowHasAccessibleName(pane)) {
@@ -408,7 +417,8 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
             WM_COMMAND,
             IDM_WINDOW_LOCATOR,
             0) != 1
-        || IsWindowVisible(pane) == FALSE
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Locator)
         || (GetMenuState(menu, IDM_WINDOW_LOCATOR, MF_BYCOMMAND) & MF_CHECKED) == 0U
         || GetDlgItem(pane, IDC_LOCATOR_TARGET) == nullptr
         || GetDlgItem(pane, IDC_LOCATOR_PIN) == nullptr
@@ -487,7 +497,8 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
             WM_COMMAND,
             IDM_WINDOW_LOCATOR,
             0) != 1
-        || IsWindowVisible(pane) != FALSE
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Locator)
         || (GetMenuState(menu, IDM_WINDOW_LOCATOR, MF_BYCOMMAND) & MF_CHECKED) != 0U) {
         return 857;
     }
@@ -497,9 +508,11 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
 int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
     const HWND pane = state.Workspace().sequence_palette;
     const HMENU menu = GetMenu(state.Workspace().windows.window);
-    if (pane == nullptr || menu == nullptr || IsWindowVisible(pane) != FALSE
-        || GetWindow(pane, GW_OWNER) != state.Workspace().windows.window
-        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) != 0U
+    if (pane == nullptr || menu == nullptr
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Sequence)
+        || GetParent(pane) != state.Workspace().windows.window
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) == 0U
         || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_EXSTYLE))
             & (WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0U
         || !WindowHasAccessibleName(pane)) {
@@ -510,7 +523,8 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
             WM_COMMAND,
             IDM_WINDOW_SEQUENCE,
             0) != 1
-        || IsWindowVisible(pane) == FALSE
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Sequence)
         || (GetMenuState(menu, IDM_WINDOW_SEQUENCE, MF_BYCOMMAND) & MF_CHECKED) == 0U
         || GetDlgItem(pane, IDC_SEQUENCE_TARGET) == nullptr
         || GetDlgItem(pane, IDC_SEQUENCE_PIN) == nullptr
@@ -567,7 +581,8 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
             WM_COMMAND,
             IDM_WINDOW_SEQUENCE,
             0) != 1
-        || IsWindowVisible(pane) != FALSE
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Sequence)
         || (GetMenuState(menu, IDM_WINDOW_SEQUENCE, MF_BYCOMMAND) & MF_CHECKED) != 0U) {
         return 873;
     }
@@ -577,9 +592,11 @@ int RunSequencePaneSmoke(ApplicationHost& state) noexcept {
 int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
     const HWND pane = state.Workspace().light_table_palette;
     const HMENU menu = GetMenu(state.Workspace().windows.window);
-    if (pane == nullptr || menu == nullptr || IsWindowVisible(pane) != FALSE
-        || GetWindow(pane, GW_OWNER) != state.Workspace().windows.window
-        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) != 0U
+    if (pane == nullptr || menu == nullptr
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::LightTable)
+        || GetParent(pane) != state.Workspace().windows.window
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) == 0U
         || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_EXSTYLE))
             & (WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0U
         || !WindowHasAccessibleName(pane)) {
@@ -590,7 +607,8 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
             WM_COMMAND,
             IDM_WINDOW_LIGHT_TABLE,
             0) != 1
-        || IsWindowVisible(pane) == FALSE
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::LightTable)
         || (GetMenuState(menu, IDM_WINDOW_LIGHT_TABLE, MF_BYCOMMAND) & MF_CHECKED) == 0U
         || GetDlgItem(pane, IDC_LIGHT_TABLE_TARGET) == nullptr
         || GetDlgItem(pane, IDC_LIGHT_TABLE_PIN) == nullptr
@@ -651,7 +669,8 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
                WM_COMMAND,
                IDM_WINDOW_LIGHT_TABLE,
                0) != 1
-        || IsWindowVisible(pane) != FALSE
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::LightTable)
         || (GetMenuState(menu, IDM_WINDOW_LIGHT_TABLE, MF_BYCOMMAND) & MF_CHECKED) != 0U) {
         return 879;
     }
@@ -663,10 +682,11 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
     const HWND canvas = state.Workspace().subpalette_dialog.canvas;
     const HMENU menu = GetMenu(state.Workspace().windows.window);
     if (pane == nullptr || canvas == nullptr || menu == nullptr
-        || IsWindowVisible(pane) != FALSE
-        || GetWindow(pane, GW_OWNER) != state.Workspace().windows.window
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Reference)
+        || GetParent(pane) != state.Workspace().windows.window
         || GetParent(canvas) != pane
-        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) != 0U
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) == 0U
         || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_EXSTYLE))
             & (WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0U
         || !WindowHasAccessibleName(pane)) {
@@ -677,7 +697,8 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
             WM_COMMAND,
             IDM_WINDOW_SUBPALETTE,
             0) != 1
-        || IsWindowVisible(pane) == FALSE
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Reference)
         || GetDlgItem(pane, IDC_SUBPALETTE_TARGET) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_PIN) == nullptr
         || GetDlgItem(pane, IDC_SUBPALETTE_PREVIOUS) == nullptr
@@ -722,8 +743,48 @@ int RunSubpalettePaneSmoke(ApplicationHost& state) noexcept {
                WM_COMMAND,
                IDM_WINDOW_SUBPALETTE,
                0) != 1
-        || IsWindowVisible(pane) != FALSE) {
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Reference)) {
         return 923;
+    }
+    return 0;
+}
+
+int RunJobProgressPaneSmoke(ApplicationHost& state) noexcept {
+    const HWND pane = state.Workspace().job_progress;
+    const HWND window = state.Workspace().windows.window;
+    const HMENU menu = GetMenu(window);
+    if (pane == nullptr || window == nullptr || menu == nullptr
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::JobProgress)
+        || GetParent(pane) != window
+        || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD)
+            == 0U
+        || GetDlgItem(pane, IDC_EFFECT_PROGRESS_TEXT) == nullptr
+        || GetDlgItem(pane, IDC_EFFECT_PROGRESS_BAR) == nullptr
+        || GetDlgItem(pane, IDC_EFFECT_PROGRESS_CANCEL) == nullptr
+        || GetDlgItem(pane, IDC_BATCH_PROGRESS_TEXT) == nullptr
+        || GetDlgItem(pane, IDC_BATCH_PROGRESS_BAR) == nullptr
+        || GetDlgItem(pane, IDC_BATCH_PROGRESS_CANCEL) == nullptr
+        || GetDlgItem(pane, IDC_JOB_PROGRESS_EMPTY) == nullptr) {
+        return 926;
+    }
+    if (SendMessageW(window, WM_COMMAND, IDM_WINDOW_JOB_PROGRESS, 0) != 1
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::JobProgress)
+        || (GetMenuState(menu, IDM_WINDOW_JOB_PROGRESS, MF_BYCOMMAND)
+            & MF_CHECKED) == 0U
+        || !WindowHasVisibleStyle(GetDlgItem(pane, IDC_JOB_PROGRESS_EMPTY))
+        || WindowHasVisibleStyle(GetDlgItem(pane, IDC_EFFECT_PROGRESS_CANCEL))
+        || WindowHasVisibleStyle(GetDlgItem(pane, IDC_BATCH_PROGRESS_CANCEL))) {
+        return 927;
+    }
+    if (SendMessageW(window, WM_COMMAND, IDM_WINDOW_JOB_PROGRESS, 0) != 1
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::JobProgress)
+        || (GetMenuState(menu, IDM_WINDOW_JOB_PROGRESS, MF_BYCOMMAND)
+            & MF_CHECKED) != 0U) {
+        return 928;
     }
     return 0;
 }
@@ -1667,7 +1728,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 945;
     }
     SendMessageW(locator_edge, BM_CLICK, 0, 0);
-    if (IsWindowVisible(state.Workspace().locator_palette) == FALSE) {
+    if (!WindowHasVisibleStyle(state.Workspace().locator_palette)) {
         return 945;
     }
     SendMessageW(
@@ -1675,7 +1736,7 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         WM_ACTIVATE,
         WA_ACTIVE,
         0);
-    if (IsWindowVisible(state.Workspace().locator_palette) != FALSE
+    if (WindowHasVisibleStyle(state.Workspace().locator_palette)
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
@@ -4653,7 +4714,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             IDM_WINDOW_LIGHT_TABLE,
             0) != 1
         || !RefreshLightTablePane(state)
-        || IsWindowVisible(state.Workspace().light_table_palette) == FALSE
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::LightTable)
         || SendMessageW(
                GetDlgItem(
                    state.Workspace().light_table_palette,
@@ -4764,7 +4826,8 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             WM_COMMAND,
             IDM_WINDOW_LIGHT_TABLE,
             0) != 1
-        || IsWindowVisible(state.Workspace().light_table_palette) != FALSE) {
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::LightTable)) {
         return 883;
     }
     DeleteFileW(swap_save.c_str());
@@ -5610,14 +5673,22 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         DeleteFileW(output_path);
     };
     cleanup();
-    if (state.engine == nullptr || state.Workspace().batch_palette == nullptr) {
+    if (state.engine == nullptr || state.Workspace().batch_palette == nullptr
+        || GetParent(state.Workspace().batch_palette)
+            != state.Workspace().windows.window
+        || (static_cast<DWORD>(GetWindowLongPtrW(
+                state.Workspace().batch_palette,
+                GWL_STYLE))
+            & WS_CHILD)
+            == 0U) {
         return 700;
     }
     HMENU menu = GetMenu(state.Workspace().windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_WINDOW_BATCH, MF_BYCOMMAND) == static_cast<UINT>(-1)
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
-        || IsWindowVisible(state.Workspace().batch_palette) == FALSE) {
+        || !state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Batch)) {
         cleanup();
         return 701;
     }
@@ -5750,7 +5821,8 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         return 712;
     }
     if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
-        || IsWindowVisible(state.Workspace().batch_palette) != FALSE) {
+        || state.Workspace().windows.workspace.dock.IsPaneVisible(
+            DockPaneType::Batch)) {
         cleanup();
         return 713;
     }
@@ -8475,13 +8547,16 @@ int RunMultiWorkspaceWindowSmoke(ApplicationHost& state) noexcept {
         cleanup_isolated_file();
         return 813;
     }
-    const BOOL source_locator_visible = IsWindowVisible(source->locator_palette);
-    const BOOL destination_locator_visible = IsWindowVisible(
-        destination->locator_palette);
+    const bool source_locator_visible =
+        source->windows.workspace.dock.IsPaneVisible(DockPaneType::Locator);
+    const bool destination_locator_visible =
+        destination->windows.workspace.dock.IsPaneVisible(DockPaneType::Locator);
     if (!DispatchEnabledCommand(
             state, destination->windows.window, IDM_WINDOW_LOCATOR)
-        || IsWindowVisible(source->locator_palette) != source_locator_visible
-        || IsWindowVisible(destination->locator_palette)
+        || source->windows.workspace.dock.IsPaneVisible(DockPaneType::Locator)
+            != source_locator_visible
+        || destination->windows.workspace.dock.IsPaneVisible(
+               DockPaneType::Locator)
             == destination_locator_visible
         || !DispatchEnabledCommand(
             state, destination->windows.window, IDM_WINDOW_LOCATOR)) {
@@ -9109,6 +9184,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunSubpalettePaneSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunJobProgressPaneSmoke(state);
     }
     if (exit_code == 0) {
         exit_code = runtime::RunDrawingPersistenceSmoke(state);
