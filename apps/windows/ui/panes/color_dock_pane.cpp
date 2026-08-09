@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <cwchar>
 #include <new>
 #include <utility>
@@ -17,11 +18,94 @@
 #include "app/resource.h"
 
 namespace inkpod::windows::ui::panes {
+
+bool GdiPaintBuffer::Prepare(
+    HDC reference,
+    int width,
+    int height) noexcept {
+    if (ReadyFor(width, height)) {
+        return true;
+    }
+    Reset();
+    if (reference == nullptr || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    BITMAPINFO bitmap_info{};
+    bitmap_info.bmiHeader.biSize = sizeof(bitmap_info.bmiHeader);
+    bitmap_info.bmiHeader.biWidth = width;
+    bitmap_info.bmiHeader.biHeight = -height;
+    bitmap_info.bmiHeader.biPlanes = 1U;
+    bitmap_info.bmiHeader.biBitCount = 32U;
+    bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+    HDC dc = CreateCompatibleDC(reference);
+    void* bits{};
+    HBITMAP bitmap = dc == nullptr
+        ? nullptr
+        : CreateDIBSection(
+              reference,
+              &bitmap_info,
+              DIB_RGB_COLORS,
+              &bits,
+              nullptr,
+              0U);
+    HGDIOBJ previous = bitmap == nullptr ? nullptr : SelectObject(dc, bitmap);
+    if (previous == nullptr || previous == HGDI_ERROR || bits == nullptr) {
+        if (dc != nullptr && previous != nullptr && previous != HGDI_ERROR) {
+            SelectObject(dc, previous);
+        }
+        if (bitmap != nullptr) {
+            DeleteObject(bitmap);
+        }
+        if (dc != nullptr) {
+            DeleteDC(dc);
+        }
+        return false;
+    }
+
+    dc_ = dc;
+    bitmap_ = bitmap;
+    previous_bitmap_ = previous;
+    bits_ = bits;
+    width_ = width;
+    height_ = height;
+    return true;
+}
+
+bool GdiPaintBuffer::ReadyFor(int width, int height) const noexcept {
+    return dc_ != nullptr && bitmap_ != nullptr && bits_ != nullptr
+        && width_ == width && height_ == height;
+}
+
+HDC GdiPaintBuffer::Dc() const noexcept {
+    return dc_;
+}
+
+void* GdiPaintBuffer::Bits() const noexcept {
+    return bits_;
+}
+
+bool GdiPaintBuffer::Present(HDC destination) const noexcept {
+    return destination != nullptr && dc_ != nullptr && width_ > 0 && height_ > 0
+        && BitBlt(
+               destination,
+               0,
+               0,
+               width_,
+               height_,
+               dc_,
+               0,
+               0,
+               SRCCOPY) != FALSE;
+}
+
 namespace {
 
 constexpr UINT_PTR kPaneSubclass = 1U;
 constexpr UINT_PTR kPickerSubclass = 2U;
 constexpr UINT_PTR kSwatchSubclass = 3U;
+constexpr UINT_PTR kColorLabelSubclass = 4U;
 constexpr double kPi = 3.14159265358979323846;
 
 enum PickerDragTarget : int {
@@ -1203,92 +1287,157 @@ void DrawPicker(
         alpha_x,
         static_cast<double>(geometry.alpha_track.top + geometry.alpha_track.bottom) * 0.5,
         marker_radius);
-    BlitDibPixels(draw.hDC, width, height, state.picker_present_pixels);
-
-    const HGDIOBJ old_font = state.font == nullptr
-        ? nullptr
-        : SelectObject(draw.hDC, state.font);
-    SetBkMode(draw.hDC, TRANSPARENT);
-    SetTextColor(draw.hDC, GetSysColor(COLOR_WINDOWTEXT));
-    TEXTMETRICW metrics{};
-    const int line_height = GetTextMetricsW(draw.hDC, &metrics) != FALSE
-        ? static_cast<int>(metrics.tmHeight + metrics.tmExternalLeading)
-        : ScaleForDpi(17, dpi);
-    const int margin = ScaleForDpi(4, dpi);
-    const int color_bottom = static_cast<int>(geometry.client.bottom)
-        - ScaleForDpi(46, dpi);
-    const int details_top = std::max(
-        margin, color_bottom - line_height * 3 - margin);
-    const int left_text_right = std::max(
-        margin + ScaleForDpi(42, dpi),
-        static_cast<int>(std::floor(geometry.center_x - geometry.outer_radius))
-            - margin);
-    std::array<wchar_t, 64U> label{};
-    const auto draw_left_row = [&](const wchar_t* text, int row) noexcept {
-        RECT bounds{
-            margin,
-            details_top + row * line_height,
-            left_text_right,
-            details_top + (row + 1) * line_height};
-        DrawTextW(
-            draw.hDC,
-            text,
-            -1,
-            &bounds,
-            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    };
-    swprintf_s(label.data(), label.size(), L"H: %u", static_cast<unsigned>(
-        std::lround(hue_degrees)) % 360U);
-    draw_left_row(label.data(), 0);
-    swprintf_s(label.data(), label.size(), L"S: %u", static_cast<unsigned>(
-        std::lround(hsv.saturation * 100.0)));
-    draw_left_row(label.data(), 1);
-    swprintf_s(label.data(), label.size(), L"V: %u", static_cast<unsigned>(
-        std::lround(hsv.value * 100.0)));
-    draw_left_row(label.data(), 2);
-
-    swprintf_s(
-        label.data(),
-        label.size(),
-        L"#%02X%02X%02X",
-        Channel8(selected_color, selected_color.red),
-        Channel8(selected_color, selected_color.green),
-        Channel8(selected_color, selected_color.blue));
-    SIZE hex_extent{};
-    GetTextExtentPoint32W(
-        draw.hDC,
-        label.data(),
-        static_cast<int>(wcslen(label.data())),
-        &hex_extent);
-    const int hex_left = std::max(
-        margin, width - margin - static_cast<int>(hex_extent.cx));
-    RECT hex_rect{
-        hex_left,
-        details_top + line_height * 2,
-        width - margin,
-        details_top + line_height * 3};
-    DrawTextW(draw.hDC, label.data(), -1, &hex_rect,
-              DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-
-    RECT opacity_label{
-        margin,
-        color_bottom + ScaleForDpi(1, dpi),
-        width - margin,
-        geometry.alpha_track.top};
-    DrawTextW(draw.hDC, L"不透明度", -1, &opacity_label,
-              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    const unsigned opacity_percent = static_cast<unsigned>(std::lround(
-        ChannelUnit(selected_color, selected_color.alpha) * 100.0));
-    swprintf_s(label.data(), label.size(), L"%u%%", opacity_percent);
-    DrawTextW(draw.hDC, label.data(), -1, &opacity_label,
-              DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    if (GetFocus() == draw.hwndItem) {
-        RECT focus = geometry.client;
-        InflateRect(&focus, -1, -1);
-        DrawFocusRect(draw.hDC, &focus);
+    const std::size_t pixel_count = static_cast<std::size_t>(width)
+        * static_cast<std::size_t>(height);
+    const bool buffered = state.picker_present_pixels.size() == pixel_count
+        && state.picker_paint_buffer.Prepare(draw.hDC, width, height);
+    HDC paint_dc = draw.hDC;
+    if (buffered) {
+        std::memcpy(
+            state.picker_paint_buffer.Bits(),
+            state.picker_present_pixels.data(),
+            pixel_count * sizeof(std::uint32_t));
+        paint_dc = state.picker_paint_buffer.Dc();
+    } else {
+        BlitDibPixels(draw.hDC, width, height, state.picker_present_pixels);
     }
-    if (old_font != nullptr) {
-        SelectObject(draw.hDC, old_font);
+
+    const auto draw_overlay = [&](HDC target) noexcept {
+        const HGDIOBJ old_font = state.font == nullptr
+            ? nullptr
+            : SelectObject(target, state.font);
+        SetBkMode(target, TRANSPARENT);
+        SetTextColor(target, GetSysColor(COLOR_WINDOWTEXT));
+        TEXTMETRICW metrics{};
+        const int line_height = GetTextMetricsW(target, &metrics) != FALSE
+            ? static_cast<int>(metrics.tmHeight + metrics.tmExternalLeading)
+            : ScaleForDpi(17, dpi);
+        const int margin = ScaleForDpi(4, dpi);
+        const int color_bottom = static_cast<int>(geometry.client.bottom)
+            - ScaleForDpi(46, dpi);
+        const int details_top = std::max(
+            margin, color_bottom - line_height * 3 - margin);
+        const int left_text_right = std::max(
+            margin + ScaleForDpi(42, dpi),
+            static_cast<int>(std::floor(
+                geometry.center_x - geometry.outer_radius)) - margin);
+        std::array<wchar_t, 64U> label{};
+        const auto draw_left_row = [&](const wchar_t* text, int row) noexcept {
+            RECT bounds{
+                margin,
+                details_top + row * line_height,
+                left_text_right,
+                details_top + (row + 1) * line_height};
+            DrawTextW(
+                target,
+                text,
+                -1,
+                &bounds,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        };
+        swprintf_s(label.data(), label.size(), L"H: %u", static_cast<unsigned>(
+            std::lround(hue_degrees)) % 360U);
+        draw_left_row(label.data(), 0);
+        swprintf_s(label.data(), label.size(), L"S: %u", static_cast<unsigned>(
+            std::lround(hsv.saturation * 100.0)));
+        draw_left_row(label.data(), 1);
+        swprintf_s(label.data(), label.size(), L"V: %u", static_cast<unsigned>(
+            std::lround(hsv.value * 100.0)));
+        draw_left_row(label.data(), 2);
+
+        swprintf_s(
+            label.data(),
+            label.size(),
+            L"#%02X%02X%02X",
+            Channel8(selected_color, selected_color.red),
+            Channel8(selected_color, selected_color.green),
+            Channel8(selected_color, selected_color.blue));
+        SIZE hex_extent{};
+        GetTextExtentPoint32W(
+            target,
+            label.data(),
+            static_cast<int>(wcslen(label.data())),
+            &hex_extent);
+        const int hex_left = std::max(
+            margin, width - margin - static_cast<int>(hex_extent.cx));
+        RECT hex_rect{
+            hex_left,
+            details_top + line_height * 2,
+            width - margin,
+            details_top + line_height * 3};
+        DrawTextW(target, label.data(), -1, &hex_rect,
+                  DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+        RECT opacity_label{
+            margin,
+            color_bottom + ScaleForDpi(1, dpi),
+            width - margin,
+            geometry.alpha_track.top};
+        DrawTextW(target, L"不透明度", -1, &opacity_label,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        const unsigned opacity_percent = static_cast<unsigned>(std::lround(
+            ChannelUnit(selected_color, selected_color.alpha) * 100.0));
+        swprintf_s(label.data(), label.size(), L"%u%%", opacity_percent);
+        DrawTextW(target, label.data(), -1, &opacity_label,
+                  DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        if (GetFocus() == draw.hwndItem) {
+            RECT focus = geometry.client;
+            InflateRect(&focus, -1, -1);
+            DrawFocusRect(target, &focus);
+        }
+        if (old_font != nullptr && old_font != HGDI_ERROR) {
+            SelectObject(target, old_font);
+        }
+    };
+    draw_overlay(paint_dc);
+    if (buffered && !state.picker_paint_buffer.Present(draw.hDC)) {
+        BlitDibPixels(draw.hDC, width, height, state.picker_present_pixels);
+        draw_overlay(draw.hDC);
+    }
+}
+
+void DrawColorLabel(
+    const DRAWITEMSTRUCT& draw,
+    ColorDockPaneState& state) noexcept {
+    RECT client{};
+    if (GetClientRect(draw.hwndItem, &client) == FALSE) {
+        return;
+    }
+    const int width = static_cast<int>(client.right - client.left);
+    const int height = static_cast<int>(client.bottom - client.top);
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    std::array<wchar_t, 64U> text{};
+    GetWindowTextW(
+        draw.hwndItem,
+        text.data(),
+        static_cast<int>(text.size()));
+    const auto paint = [&](HDC target) noexcept {
+        FillRect(target, &client, GetSysColorBrush(COLOR_3DFACE));
+        const HGDIOBJ old_font = state.font == nullptr
+            ? nullptr
+            : SelectObject(target, state.font);
+        SetBkMode(target, TRANSPARENT);
+        SetTextColor(target, GetSysColor(COLOR_WINDOWTEXT));
+        DrawTextW(
+            target,
+            text.data(),
+            -1,
+            &client,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX
+                | DT_END_ELLIPSIS);
+        if (old_font != nullptr && old_font != HGDI_ERROR) {
+            SelectObject(target, old_font);
+        }
+    };
+    if (state.color_label_paint_buffer.Prepare(draw.hDC, width, height)) {
+        paint(state.color_label_paint_buffer.Dc());
+        if (!state.color_label_paint_buffer.Present(draw.hDC)) {
+            paint(draw.hDC);
+        }
+    } else {
+        paint(draw.hDC);
     }
 }
 
@@ -1576,6 +1725,26 @@ void SelectSwatchTarget(
     InvalidateRect(GetDlgItem(pane, IDC_COLOR_PICKER), nullptr, FALSE);
 }
 
+LRESULT CALLBACK ColorLabelSubclassProcedure(
+    HWND label,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam,
+    UINT_PTR,
+    DWORD_PTR) noexcept {
+    switch (message) {
+        case WM_ERASEBKGND:
+            return TRUE;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(
+                label, ColorLabelSubclassProcedure, kColorLabelSubclass);
+            break;
+        default:
+            break;
+    }
+    return DefSubclassProc(label, message, wparam, lparam);
+}
+
 LRESULT CALLBACK SwatchSubclassProcedure(
     HWND swatch,
     UINT message,
@@ -1642,6 +1811,10 @@ LRESULT CALLBACK PickerSubclassProcedure(
     DWORD_PTR reference) noexcept {
     auto* state = reinterpret_cast<ColorDockPaneState*>(reference);
     switch (message) {
+        case WM_ERASEBKGND:
+            // DrawPicker covers the complete client area and presents the
+            // finished color surface and text in one blit.
+            return TRUE;
         case WM_GETDLGCODE:
             return DefSubclassProc(picker, message, wparam, lparam) | DLGC_WANTARROWS;
         case WM_LBUTTONDOWN:
@@ -1852,6 +2025,14 @@ LRESULT CALLBACK PaneSubclassProcedure(
             if (state == nullptr) {
                 break;
             }
+            if (wparam == IDC_COLOR_MAIN_LINE_LABEL
+                || wparam == IDC_COLOR_DRAWING_LABEL) {
+                const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+                if (draw != nullptr) {
+                    DrawColorLabel(*draw, *state);
+                }
+                return TRUE;
+            }
             if (wparam == IDC_COLOR_MAIN_LINE_SWATCH) {
                 const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
                 if (draw != nullptr) {
@@ -1889,6 +2070,10 @@ LRESULT CALLBACK PaneSubclassProcedure(
             if (state != nullptr && state->font != nullptr) {
                 DeleteObject(state->font);
                 state->font = nullptr;
+            }
+            if (state != nullptr) {
+                state->picker_paint_buffer.Reset();
+                state->color_label_paint_buffer.Reset();
             }
             SetWindowLongPtrW(pane, GWLP_USERDATA, 0);
             RemoveWindowSubclass(pane, PaneSubclassProcedure, kPaneSubclass);
@@ -2004,7 +2189,7 @@ HWND CreateColorDockPane(
                pane,
                L"STATIC",
                L"主線色",
-               SS_LEFT | SS_CENTERIMAGE | SS_ENDELLIPSIS,
+               SS_OWNERDRAW,
                IDC_COLOR_MAIN_LINE_LABEL)
             != nullptr
         && CreateControl(
@@ -2020,7 +2205,7 @@ HWND CreateColorDockPane(
                pane,
                L"STATIC",
                L"彩色用描画色",
-               SS_LEFT | SS_CENTERIMAGE | SS_ENDELLIPSIS,
+               SS_OWNERDRAW,
                IDC_COLOR_DRAWING_LABEL)
             != nullptr
         && CreateControl(
@@ -2110,7 +2295,10 @@ HWND CreateColorDockPane(
             != nullptr;
     const HWND picker = GetDlgItem(pane, IDC_COLOR_PICKER);
     const HWND swatch = GetDlgItem(pane, IDC_COLOR_MAIN_LINE_SWATCH);
+    const HWND main_line_label = GetDlgItem(pane, IDC_COLOR_MAIN_LINE_LABEL);
+    const HWND drawing_label = GetDlgItem(pane, IDC_COLOR_DRAWING_LABEL);
     if (!controls_created || picker == nullptr || swatch == nullptr
+        || main_line_label == nullptr || drawing_label == nullptr
         || SetWindowSubclass(
                picker,
                PickerSubclassProcedure,
@@ -2121,6 +2309,19 @@ HWND CreateColorDockPane(
                SwatchSubclassProcedure,
                kSwatchSubclass,
                reinterpret_cast<DWORD_PTR>(&state)) == FALSE) {
+        DestroyWindow(pane);
+        return nullptr;
+    }
+    if (SetWindowSubclass(
+            main_line_label,
+            ColorLabelSubclassProcedure,
+            kColorLabelSubclass,
+            0U) == FALSE
+        || SetWindowSubclass(
+               drawing_label,
+               ColorLabelSubclassProcedure,
+               kColorLabelSubclass,
+               0U) == FALSE) {
         DestroyWindow(pane);
         return nullptr;
     }
