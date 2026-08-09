@@ -17,6 +17,51 @@ using ColorPaneSelectionCallback = void (*)(
     void* context, std::uint32_t index, bool chart) noexcept;
 using ColorPaneGroupCallback = void (*)(void* context, int delta) noexcept;
 
+class GdiPaintBuffer final {
+public:
+    GdiPaintBuffer() noexcept = default;
+    ~GdiPaintBuffer() noexcept {
+        Reset();
+    }
+
+    GdiPaintBuffer(const GdiPaintBuffer&) = delete;
+    GdiPaintBuffer& operator=(const GdiPaintBuffer&) = delete;
+    GdiPaintBuffer(GdiPaintBuffer&&) = delete;
+    GdiPaintBuffer& operator=(GdiPaintBuffer&&) = delete;
+
+    bool Prepare(HDC reference, int width, int height) noexcept;
+    void Reset() noexcept {
+        if (dc_ != nullptr && previous_bitmap_ != nullptr
+            && previous_bitmap_ != HGDI_ERROR) {
+            SelectObject(dc_, previous_bitmap_);
+        }
+        if (bitmap_ != nullptr) {
+            DeleteObject(bitmap_);
+        }
+        if (dc_ != nullptr) {
+            DeleteDC(dc_);
+        }
+        dc_ = nullptr;
+        bitmap_ = nullptr;
+        previous_bitmap_ = nullptr;
+        bits_ = nullptr;
+        width_ = 0;
+        height_ = 0;
+    }
+    [[nodiscard]] bool ReadyFor(int width, int height) const noexcept;
+    [[nodiscard]] HDC Dc() const noexcept;
+    [[nodiscard]] void* Bits() const noexcept;
+    [[nodiscard]] bool Present(HDC destination) const noexcept;
+
+private:
+    HDC dc_{};
+    HBITMAP bitmap_{};
+    HGDIOBJ previous_bitmap_{};
+    void* bits_{};
+    int width_{};
+    int height_{};
+};
+
 struct ColorDockPaneState {
     void* context{};
     ColorPaneCommandCallback dispatch_command{};
@@ -60,6 +105,8 @@ struct ColorDockPaneState {
     bool picker_ring_cache_valid{};
     bool picker_triangle_cache_valid{};
     bool picker_frame_cache_valid{};
+    GdiPaintBuffer picker_paint_buffer;
+    GdiPaintBuffer color_label_paint_buffer;
     bool updating{};
     HFONT font{};
 };

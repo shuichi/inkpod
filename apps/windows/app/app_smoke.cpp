@@ -1158,6 +1158,10 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || combined_swatch_bounds.right - combined_swatch_bounds.left
             <= combined_swatch_bounds.bottom - combined_swatch_bounds.top
         || (GetWindowLongPtrW(drawing_swatch, GWL_STYLE) & WS_VISIBLE) != 0
+        || (GetWindowLongPtrW(main_line_label, GWL_STYLE) & SS_TYPEMASK)
+            != SS_OWNERDRAW
+        || (GetWindowLongPtrW(drawing_label, GWL_STYLE) & SS_TYPEMASK)
+            != SS_OWNERDRAW
         || state.Workspace().panes.color_pane.change_main_line_color == nullptr
         || (GetWindowLongPtrW(color_eyedropper, GWL_STYLE) & BS_TYPEMASK)
             == BS_OWNERDRAW
@@ -1352,6 +1356,27 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (UpdateWindow(color_picker) == FALSE
         || GetUpdateRect(color_picker, &color_picker_update, FALSE) != FALSE) {
         return 843;
+    }
+    HDC picker_dc = GetDC(color_picker);
+    if (picker_dc == nullptr) {
+        return 844;
+    }
+    const bool suppresses_background_erase = SendMessageW(
+        color_picker,
+        WM_ERASEBKGND,
+        reinterpret_cast<WPARAM>(picker_dc),
+        0) != FALSE;
+    const bool prepared = state.Workspace()
+        .panes.color_pane.picker_paint_buffer.Prepare(picker_dc, 16, 16);
+    ReleaseDC(color_picker, picker_dc);
+    if (!suppresses_background_erase) {
+        return 845;
+    }
+    if (!prepared) {
+        return 846;
+    }
+    if (!state.Workspace().panes.color_pane.picker_paint_buffer.ReadyFor(16, 16)) {
+        return 847;
     }
     SetWindowPos(
         state.Workspace().windows.color_pane,
