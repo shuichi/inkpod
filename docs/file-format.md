@@ -13,19 +13,14 @@ schema should be replaced whenever a more robust or efficient design is found.
 ## Current procedure-authoritative contract
 
 This section defines the implemented procedure-authoritative container at
-top-level format version 9 and replay epoch 6. The earlier v3/epoch-1, v4/epoch-2,
-v5/epoch-3, v6/epoch-4, and v7/epoch-5 reservations were superseded before any
-reader or writer existed. Version 9 supersedes the v8 M8 cutover and retains its hierarchical document commitment and the
-exact-depth, target-explicit `ApplyRasterStroke/v2` schema from the superseded
-v6 reservation, while document-state schema/domain 4 replaces the temporary
-Document-ID-as-Cell bridge with a distinct stable Cell ID and an explicit
-immutable Genesis base surface:
+top-level format version 9 and replay epoch 6. It uses a hierarchical document
+commitment, an exact-depth target-explicit `ApplyRasterStroke/v2` schema, a
+distinct stable Cell ID, and an explicit immutable Genesis base surface:
 metadata, raster, and raster-tile commitments are domain-separated so a raster
 edit hashes only changed tile payloads instead of every allocated document
 pixel. This semantic digest is independent of the renderer's canonical
-revision-max cache identity. Asset and procedure-payload digest contracts remain
-version 1.
-Version 2 and every other version are rejected before Core state replacement;
+revision-max cache identity. Asset and procedure-payload digest contracts are
+version 1. Every version other than 9 is rejected before Core state replacement;
 there is no migration or compatibility reader. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
@@ -90,13 +85,13 @@ and invalid in a procedure. Values in
 range does not define an extension mechanism. A reader accepts only IDs present
 in the exact catalog named by the header.
 
-M6 assigns a stable ID to every production document mutation. The complete
-source catalog is the `PrimitiveId` constants in `inkpod-core`; it occupies the
-family ranges above without renumbering the original assignments:
+Every production document mutation has a stable ID. The complete source catalog
+is the `PrimitiveId` constants in `inkpod-core`; it occupies the family ranges
+above without renumbering existing assignments:
 `SetMainLineColor` is `0x0003_0001/v1`, `ReplacePalette` is
 `0x0003_0002/v1`, `ApplyRasterStroke` is `0x0005_0001/v2`, and
-`ImportRasterAsset` is `0x0009_0001/v1`. All other M6 typed invocation records
-use M7 canonical schema v2: document geometry is signed Q16, normalized pressure
+`ImportRasterAsset` is `0x0009_0001/v1`. Other typed invocation records use the
+current canonical schema v2: document geometry is signed Q16, normalized pressure
 is `u16`, and angles are `u32` turns. `LightTableSwapWithActive` has stable ID
 `0x000A_0015`, but replaces the session Genesis and resets history rather than
 creating a `HistoryEntry`. Adding a primitive consumes a new ID.
@@ -122,14 +117,12 @@ revision, work-formula ID, and replay-policy byte (`1` journal-replayable, `0`
 session Genesis replacement). Query, view, transient, ingestion, export, and
 application command IDs are not `PrimitiveId` values.
 
-The four procedures below retain their fully specified pre-M6 byte schemas. M6
-also stores bounded canonical bytes for every new typed invocation and retains
-that typed value as the runtime replay authority. M7 closes the
-cross-architecture bit-exact audit and catalog-digest gate; v9 atomically
-connects the persistent decoder/encoder for all invocation variants through the
-kind-7 canonical-invocation envelope described below. M3 left the two metadata
-primitives at v1 and replaced `ApplyRasterStroke` with exact-current v2. M4 adds
-`ImportRasterAsset/v1` and the inline-or-asset representation for stroke samples:
+The four procedures below have fully specified byte schemas. V9 stores bounded
+canonical bytes for every typed invocation and retains that typed value as the
+runtime replay authority. Its decoder/encoder connects all invocation variants
+through the kind-7 canonical-invocation envelope described below. The two
+metadata primitives use v1, `ApplyRasterStroke` uses exact-current v2, and
+`ImportRasterAsset/v1` supports the inline-or-asset representation for samples:
 
 | Primitive | Canonical input-ID roles | Canonical asset roles | Canonical arguments | Inline payload | Work formula ID |
 |---|---|---|---|---|---:|
@@ -206,9 +199,8 @@ the journal semantics; begin/append preview batching cannot change them.
 The rational clipping endpoints and pressure are reduced only for overflow-safe
 comparison; reduction does not alter their value. A zero denominator, overflow,
 resource-limit excess, or inability to represent an interpolated canonical
-value rejects the whole staged primitive. This closes the pixel and work result
-for M1 without retaining the current runtime floating-point rasterizer as a
-second semantics owner.
+value rejects the whole staged primitive. The integer rules are the sole pixel
+and work-result authority; no floating-point rasterizer is a second owner.
 
 The schema-1 argument `value-kind` catalog is closed: 0 is the absent sentinel,
 1 Boolean (one byte, exactly 0 or 1), 2 U32 (four bytes), 3 Q16 document scalar
@@ -231,7 +223,7 @@ Stable object-kind codes are 1 Document, 2 Project, 3 Cut, 4 Cell, 5 Frame, 6
 Sequence, 7 Layer, 8 Plane, 9 Guide, 10 LightTableSet, 11 LightTableItem, 12
 Adjustment, 13 VectorPath, and 14 VectorFill. Zero and unlisted codes are
 invalid. `ApplyRasterStroke/v2` input role 1 is required, has object kind 8,
-and names the exact target plane; the other M1 primitives have no ID roles.
+and names the exact target plane; the other primitives in the table have no ID roles.
 
 ### Persistent identity and journal ordering
 
@@ -504,18 +496,15 @@ follows:
   Cell ID, ordered animation-frame records, and ordered sequence records. A
   frame record orders Frame ID and zero-based display ordinal `u32`. A sequence
   record orders Sequence ID, UTF-8 name, and an ordered sequence of Frame IDs;
-  each referenced frame must occur in the frame-record sequence. The M4 Core
+  each referenced frame must occur in the frame-record sequence. Core
   allocates a distinct persistent Cell ID in the document namespace and places
   it in the required Cell slot, with absent Project/Cut IDs and empty frame/
   sequence lists for the current standalone-cell model. Document, Cell, layer,
   plane, selection, and other stable object IDs therefore obey cross-kind
-  numeric-ID uniqueness without the earlier bridge exception. Introducing the
-  distinct Cell identity and immutable Genesis base changes the document-state
-  bytes; schema/domain 4 historically advanced replay epoch 5 and successor
-  version 7 together. M7 canonical numeric semantics advance the current build
-  contract to replay epoch 6 and successor version 8 without changing this
-  state-digest schema. M9 adds non-semantic checkpoint/streaming records and
-  advances only the top-level version to 9. Collections whose UI order is not semantic are ID-sorted.
+  numeric-ID uniqueness. This document-state frame is schema/domain 4. The
+  current build contract is replay epoch 6 and top-level version 9; optional
+  checkpoint/streaming records do not change the state-digest schema.
+  Collections whose UI order is not semantic are ID-sorted.
 - An adjustment frame orders kind, channel, interpolation, six signed `i32`
   parameters, and an ordered point sequence of `(input u16, output u16)`.
   Kinds 1/2/3 are BrightnessContrast, ToneCurve, and Levels; channels 0/1/2/3/4
@@ -524,7 +513,7 @@ follows:
   occupy parameters 1/2; Levels orders input shadow, input gamma thousandths,
   input highlight, output shadow, and output highlight in parameters 1..5.
 
-The M3 canonical EditorState frame has schema 1 and exactly twelve fields in
+The canonical EditorState frame has schema 1 and exactly twelve fields in
 this order: 1 schema `u32 = 1`; 2 active `ToolId u32`; 3 optional last
 color-consuming `ToolId`; 4 tool-color sequence; 5 tool-diameter sequence; 6
 fill-options frame; 7 selection-options frame; 8 vector-options frame; 9
@@ -591,7 +580,7 @@ are Opaque, Straight, and CoverageMask. Vector/sample assets omit pixel/color/
 alpha/dimension/stride fields and define their element record through their
 primitive schema. Unknown codes are invalid, not optional extensions.
 
-The M4 runtime uses this descriptor-and-payload identity in a Core-owned
+The runtime uses this descriptor-and-payload identity in a Core-owned
 content-addressed registry. Ingestion validates dimensions, canonical stride,
 element count, logical byte length, and work/resource bounds before computing
 or accepting an identity. Equal canonical descriptors and logical payloads
@@ -609,8 +598,8 @@ available for cache-free replay, and the owning Core session releases its
 registry only after transient work has drained. These runtime rules establish
 the exact graph serialized by v9 `GENS` and `ASST`.
 
-M4's historical save/reopen-equivalent verification was deliberately detached from that
-live registry: it walks the same roots, deep-copies every unique payload in
+Cache-free save/reopen-equivalent verification is detached from that live
+registry: it walks the same roots, deep-copies every unique payload in
 `AssetId` order, re-ingests it into an empty store with the expected identity,
 then rebinds Genesis and retained procedures before fresh replay. Descriptor,
 payload, identity, and duplicate-root reference counts must match, while the
@@ -844,128 +833,6 @@ requires a semantics revision, top-level format version, and replay epoch
 change. Exceeding a count, byte, object, or work limit rejects the entire staged
 open/replay without changing the live Core or existing file.
 
-## Rejected historical v2 container layout
-
-The pre-M8 v2 file separated a manifest from binary tile blobs. This section is
-historical implementation context only: the native reader now rejects v2 before
-payload decode, and none of these bytes form a compatibility path.
-
-```text
-32-byte header
-  magic "INKPOD\0\0", format version, required flags,
-  manifest byte length, blob count
-
-binary manifest
-  128-bit document UUID plus stable document/layer/main-plane/color-plane IDs
-  pixel width/height, X/Y DPI in thousandths, sRGB marker
-  100/reference/drawing/safe frame rectangles and margins
-  required color metadata: exact-depth main-line base color and a bounded
-  sequence of exact-depth RGBA8/RGBA16 palette records
-  optional document metadata: typed layer tree/properties, active
-  IDs, persistent selection plane, guides, and grid
-  optional light-table metadata: sets/items, transforms,
-  source identity/revision/DPI/reference frame, and source-plane IDs
-  optional vector metadata: stable paths/fills, cubic control points,
-  endpoint widths, colors, and fill-boundary path IDs
-  typed plane descriptors with pixel format and blob ranges
-  tile blob descriptors with coordinate, dimensions, format,
-  offset, length, and FNV-1a 64-bit checksum
-
-blob area
-  compact edge-aware tile bytes in manifest order
-```
-
-The historical cell DTO retained exactly one main-line plane and one color plane.
-DTO. The main-line descriptor accepts binary mask, grayscale 8-bit, or
-grayscale 16-bit storage. The color descriptor accepts straight-alpha sRGB
-RGBA8 or RGBA16 storage. Header flag bit 0 marks the required color-metadata
-section. Each color record carries its own 8/16-bit depth; the main-line base
-color and up to 4096 palette entries are serialized little-endian without an
-implicit 8-bit conversion. The decoder rejects a missing flag and requires every
-tile format to equal its plane descriptor.
-Raster storage is sparse; zero tiles are omitted.
-Tile revision and GPU cache data are runtime state and are not persisted.
-
-Header flag bit 1 advertises the document-metadata section. It starts with
-`"DOCM"` plus section version 1 and contains active layer/plane IDs, the stable
-selection-plane ID, bounded layer/guide counts, grid origin/spacing/
-subdivisions, and ordered layer descriptors. Each layer stores its stable ID,
-typed `LayerKind`, visible/editable flags, opacity in thousandths, bounded UTF-8
-name, and an ordered list of plane property descriptors. Plane kind, storage
-format, sparse tile blobs, and checksums remain in the common plane descriptor,
-so one stable plane ID joins the tree entry to its raster payload. Guide records
-store stable ID, horizontal/vertical axis, and signed document position.
-
-The persistent selection is a normal sparse binary-mask plane referenced by
-`selection_plane_id`; it is not inferred from a UI rectangle. View flips,
-ruler visibility, locator position, secondary-view transforms, floating paste,
-and shortcut bindings are transient/application state and are not serialized.
-
-The historical v2 `DOCM` active-ID fields did not constitute the M3 canonical
-EditorState and do not restore its tool/color/diameter/options, palette cursor,
-`EditorRevision`, digest, or editor savepoint. A normal v2 open copies the
-built-in immutable defaults into a fresh clean session EditorState and resolves
-its document target in Core. Because v2 reopen cannot reproduce a modified
-EditorState, a successful v2 normal save advances only the document savepoint;
-it does not mark editor dirty clean. Autosave, recovery, and export likewise do
-not advance the editor savepoint, and recovery initializes its EditorState
-dirty. V9 EDIT restores the complete editor session and editor savepoint.
-
-Historical production v2 also had no representation for the M4 immutable Genesis base.
-`SolidWhite` documents remain representable by the established implicit-white
-paper contract. A raster-open document whose Genesis is an asset is rejected by
-normal save and autosave/recovery before destination I/O; the existing file,
-document/revisions/dirty state, path, and savepoints remain unchanged. General
-raster export still flattens that base normally. `GENS`/`ASST` persistence and
-native reopen are provided by the current procedure-authoritative cutover.
-
-Header flag bit 2 advertises the `"LTBL"` version-1 section. It stores
-stable-ID light-table sets, the active set, global opacity, and ordered items.
-Each item stores a stable item/source-plane ID, source UUID/revision/DPI/
-reference frame, visibility, opacity, display mode/color, translation, scale,
-rotation, and bounded UTF-8 name. Source RGBA8/RGBA16 rasters remain in the
-checksummed blob area as typed `LightTable` planes and may differ in dimensions
-from the editing paper. They are read-only: fill derives a temporary boundary
-or sampled color but never writes the source. Files without light-table
-metadata open with one empty default set. The decoder rejects
-missing/unreferenced source planes, colliding
-IDs, invalid transforms/opacities/DPI, and light-table metadata without the
-typed document tree.
-
-Header flag bit 3 advertises the `"VECT"` version-1 section. Geometry
-is stored in document coordinates as signed 32-bit thousandths of a pixel,
-restricted to -2,000,000,000 through 2,000,000,000 thousandths so reopened
-geometry obeys the Core's +/-2,000,000 document-pixel bound;
-variable endpoint widths are unsigned thousandths in the range 1 through
-4,096,000. Each stable-ID path names a vector main-line or color-trace plane,
-an exact RGBA8/RGBA16 color, a closed flag, and one or more continuous cubic
-segments. Each stable-ID fill names a vector-fill plane, an exact color, and one
-or more unique closed boundary-path IDs. The section is bounded to 65,536 paths,
-262,144 total segments, 65,536 fills, and 262,144 total boundary references.
-
-A vector-coloring layer has exactly one vector-main-line plane, one or more
-color-trace planes, and exactly one vector-fill plane; optional raster planes are
-allowed. Vector plane payload descriptors are empty RGBA8 placeholders because
-geometry lives in `VECT`, not in raster blobs. The decoder requires typed document
-metadata, rejects vector planes without vector metadata, cross-layer fill boundaries,
-open/discontinuous fill boundaries, missing plane/path references, duplicate or
-cross-section stable IDs, unsupported flags/reserved values, excessive counts,
-and trailing section bytes.
-
-Header flag bit 4 advertises the `"ADJT"` version-1 section. Each record names
-one stable-ID adjustment layer and stores exactly one bounded
-brightness/contrast, RGB/R/G/B Bezier or B-spline tone curve, or levels
-operation. Curve inputs/outputs use the full normalized 0..65535 range and are
-strictly ordered from 0 through 65535; levels store input shadow/gamma/highlight
-and output shadow/highlight in the same normalized domain. Adjustment layers
-have no raster payload, so source plane bytes and checksums remain unchanged.
-
-The decoder requires a one-to-one relationship between `ADJT` records and
-zero-plane adjustment layers. It rejects missing or duplicate records,
-non-adjustment/wrong layer IDs, invalid channel/interpolation codes, excessive
-layer/curve counts, out-of-range parameters, unknown/reserved values, and
-trailing bytes.
-
 ## Palette and color-chart formats
 
 Application palettes use `.inkpalette`; named color charts use `.inkchart`.
@@ -1117,7 +984,7 @@ automatic squash.
 ## Corrupted-input regression corpus
 
 The checked-in `rust/inkpod-format/tests/corpus/corrupted` corpus covers forged
-historical native and batch-body lengths plus malformed/oversized PNG, TIFF, TGA, and BMP
+native and batch-body lengths plus malformed/oversized PNG, TIFF, TGA, and BMP
 headers. `acceptance_corrupted_file_corpus_is_bounded_and_non_destructive`
 passes each case through its public byte decoder and, where available, public
 file reader under panic containment. Each corpus entry asserts the intended

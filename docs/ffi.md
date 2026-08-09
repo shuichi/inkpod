@@ -76,7 +76,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 
 ## 決定的リプレイ契約と複合ダイジェスト
 
-M7 では、所有権を移さない読み取り専用の固定レイアウト照会を二つ追加した。
+現行 ABI は、所有権を移さない読み取り専用の固定レイアウト照会を二つ提供する。
 
 - `inkpod_core_get_replay_contract` は、呼び出し側が所有する `InkpodReplayContract` へ値を書き込む。
   リプレイエポック 6、現行のプロシージャ／コンテナバージョン 9、正規数値バージョン 1、閉じた
@@ -98,7 +98,7 @@ M7 では、所有権を移さない読み取り専用の固定レイアウト�
 製品の保存／オープン API は同じ v9 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
-M9 では、Core 所有スレッド専用の ABI v5 操作を三つ追加した。`inkpod_core_get_persistence_info` は、
+現行 ABI v5 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
 形式バージョン、最後に成功したオープン方式、正本であるジャーナルの件数、決定的なリプレイ作業量と
 未保存変更量（`dirty_bytes`）、アセット使用量、`INKPOD_PERSISTENCE_CHECKPOINT_DUE` フラグを、
 リプレイや状態変更を行わずに返す。`open_strategy` は `INKPOD_NATIVE_OPEN_NOT_OPENED`、
@@ -450,7 +450,7 @@ Windows の `CoreHost` は、発行時の `DocumentSessionId + Generation` を�
 
 ## 正規 Genesis とアセット取り込み（現行 ABI v5）
 
-M4 の Core は、Genesis の安定した文書 ID、別個の Cell ID、不変の基底面を所有する。空の文書では
+Core は、Genesis の安定した文書 ID、別個の Cell ID、不変の基底面を所有する。空の文書では
 割り当て不要の `SolidWhite`、ラスタを文書として開く場合は正規ラスタアセットが基底面となる。基底面は、
 編集可能なレイヤー／プレーン、選択マスク、借用スナップショットバッファではない。既存文書へのラスタ
 インポート、アプリ内クリップボード、ライトテーブル入力元は同じ正規レジストリを使う。

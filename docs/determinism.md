@@ -1,10 +1,9 @@
 # Cross-architecture determinism contract
 
-M7 closes the runtime replay determinism gate. The current build contract is
-procedure format 9, replay epoch 6, canonical numeric version 1, and the digest
-of the closed 76-entry primitive catalog. Production `.inkpod` is exact-current
-v9; a verified M9 checkpoint preserves this contract and never replaces the
-authoritative journal.
+The current runtime replay contract is procedure format 9, replay epoch 6,
+canonical numeric version 1, and the digest of the closed 76-entry primitive
+catalog. Production `.inkpod` is exact-current v9; an optional verified
+checkpoint preserves this contract and never replaces the authoritative journal.
 
 ## Canonical numeric authority
 
@@ -31,7 +30,7 @@ do not have frontend or effect-local alternative formulas.
 
 ## Replay and output gates
 
-The public M7 fixture executes a pressure-sensitive stroke, radial dithered
+The public determinism fixture executes a pressure-sensitive stroke, radial dithered
 gradient, Gaussian blur, Levels gamma, and airbrush. It locks the semantic digest
 at Genesis and after every one of the five procedures, verifies a fresh journal
 rebuild at every boundary, and locks the final public snapshot composite digest.

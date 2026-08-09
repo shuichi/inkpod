@@ -4,8 +4,8 @@ This document contains only the current implementation summary, active gaps,
 stable known differences, and latest representative verification. Product
 requirements are defined in [`../SPEC.md`](../SPEC.md), requirement status and
 evidence in [`compatibility.md`](compatibility.md), and ownership/data flow in
-[`architecture.md`](architecture.md). Completed plans and superseded results
-belong to Git history.
+[`architecture.md`](architecture.md). Completed plans, superseded designs, and
+past acceptance records are summarized in [`legacy.md`](legacy.md).
 
 ## Current implementation
 
@@ -66,10 +66,11 @@ The latest complete procedure-history/persistence verification is dated
 | Performance | Quick pan/dirty/replay/checkpoint medians: `0.713125/1.797375/1.020958/28.065125 ms`; full: `12.289834/8.550750/1.218625/116.759334 ms`. Release native smoke retained 512 wheel events/512 Presents and 16 strokes/544 samples/16 Presents |
 | Fuzzing | `native_v9` and `native_core_v9` fuzz binaries compile. Coverage-guided execution was not run because the host did not have the optional `cargo fuzz` subcommand installed |
 
-Exact samples, envelopes, and rebaseline rules live in
+Semantic gates, active-envelope samples, and rebaseline rules live in
 [`core-benchmark-baseline.md`](core-benchmark-baseline.md). Platform-specific
-accessibility evidence lives in
-[`windows-g13-release-checklist.md`](windows-g13-release-checklist.md).
+accessibility procedures live in
+[`windows-release-checklist.md`](windows-release-checklist.md); superseded G13
+observations are retained only in [`legacy.md`](legacy.md).
 
 ## Maintenance rule
 

@@ -225,6 +225,7 @@ flowchart LR
 
 - 開発時に常時適用する設計境界と品質基準: [開発ガイド](AGENTS.md)
 - 維持する機能、挙動契約、要件 ID: [機能・挙動仕様](SPEC.md)
+- 現行文書と歴史資料の区分: [ドキュメント一覧](docs/README.md)
 - 現在状態、未完了項目、既知差分、代表検証: [実装状況](docs/implementation-status.md)
 - 要件ごとの status、代表証拠、既知差分: [互換性一覧](docs/compatibility.md)
 

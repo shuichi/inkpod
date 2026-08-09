@@ -3,7 +3,8 @@
 This document describes the current component, ownership, thread, and state
 boundaries. Product behavior is specified in [`../SPEC.md`](../SPEC.md), and
 current gaps are summarized in [`implementation-status.md`](implementation-status.md).
-Completed migration steps and historical size measurements belong to Git history.
+Completed migration steps, superseded designs, and past measurements are
+summarized in [`legacy.md`](legacy.md).
 
 ## Dependency direction
 
@@ -60,7 +61,7 @@ Windows dependencies throughout the Rust workspace.
 
 ## Primitive, route, and journal target contract
 
-The procedure-history redesign keeps one machine-readable inventory in
+The current procedure-history architecture keeps one machine-readable inventory in
 [`primitive-route-inventory.md`](primitive-route-inventory.md). It covers every
 public `Core` method, every exported C ABI function, and every production
 Windows command. Each route has exactly one of these semantic classes:
@@ -242,10 +243,10 @@ Cache-free verification first builds a detached asset archive from every semanti
 retention root, deep-copies each logical payload, and re-ingests it into an empty
 registry with the expected `AssetId`. Fresh Genesis/journal replay uses only that
 detached registry, so passing verification cannot be an artifact of shared
-`AssetRecord`, payload, or `TileRaster` ownership. This remains an independent
-M4 retention check; production v9 persists the same rooted graph in GENS/ASST.
+`AssetRecord`, payload, or `TileRaster` ownership. Production v9 persists the
+same rooted graph in GENS/ASST.
 
-The present ABI is v4. `InkpodObjectId` separates Core, snapshot, task, color,
+The present ABI is v5. `InkpodObjectId` separates Core, snapshot, task, color,
 sample, raster, thumbnail, and export runtime objects by type and Core generation;
 IDs are monotonic within one Core and are never accepted across generation or
 after release. Variable input is synchronously copied into bounded Rust-owned
@@ -301,7 +302,7 @@ main -> Application -> MainWindow/controllers -> CoreHost -> C ABI
 `ApplicationHost` is the process-lifetime composition root. It owns global
 shortcut and clipboard state, the frontend routing/token registries, job state,
 one `CoreHost`, one `RendererHost`, a bounded multi-entry workspace registry, and a
-bounded multi-entry document registry. The G6 UI exposes those document entries
+bounded multi-entry document registry. The UI exposes those document entries
 as tabs in one or two `EditorGroup` values. Each visible group owns one tab
 control, active frontend view, focus history, Canvas slot, and Canvas identity;
 inactive tabs do not own Canvas surfaces.
@@ -390,7 +391,7 @@ by captured pane ID and reports color-picker CPU cache bytes separately.
 Close marks a session non-accepting before its ordered close item, resolves all
 previously accepted work, cancels a live stroke, and destroys the handle on the
 owner thread. Long operations still share this single lane and may delay other
-sessions. The cross-session delay test and fixed G13 scenarios retain every
+sessions. The cross-session delay and fault scenarios retain every
 accepted input without partial commit, so current measurements do not justify
 relaxing the single-writer owner-thread contract.
 
@@ -425,7 +426,7 @@ view/Canvas/generation route and byte/count values but no snapshot or GPU
 pointer. GPU tile payloads share a 512 MiB application-wide
 budget; active tiles are admitted only when the aggregate fits, while inactive
 tiles are retained for reuse and evicted in application-wide least-recently-used
-order. G6 retains one Canvas surface per visible editor group, up to two,
+order. The frontend retains one Canvas surface per visible editor group, up to two,
 rather than per open or inactive tab. Closing a group or non-final workspace
 atomically unregisters every affected snapshot sink through the same
 `CoreHost` publication lock before destroying its Canvas. The deterministic
@@ -471,7 +472,7 @@ Rust-owned object pointer is placed in `WPARAM` or `LPARAM`. Canvas stroke and
 view-gesture payloads follow the same rule: `CanvasHost` owns them in bounded
 queues until the workspace takes the matching token plus surface generation.
 Document-bound and preview queries use typed Canvas APIs rather than output
-pointers in custom messages. G6 exposes one workspace with one or two editor
+pointers in custom messages. Each workspace exposes one or two editor
 groups and one Canvas per visible group. Focus or explicit group activation
 first cancels the prior group's live stroke, then selects the captured frontend
 view, session, Canvas route, and Core-local view before refreshing pane, menu,
@@ -490,7 +491,7 @@ Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
 toolbar; every user command remains reachable through a menu leaf.
 
-G8 adds a UI-thread-owned, fixed-capacity `PaneTargetRegistry` beside the target
+The UI thread owns a fixed-capacity `PaneTargetRegistry` beside the target
 registry. It stores only `PaneInstanceId`, strong session/view/job IDs,
 generation-tagged value contexts, and the four explicit policies `Application`,
 `FollowActiveView`, `PinnedDocument`, and `Job`. A pane captures its action target
@@ -569,7 +570,7 @@ close maps to hide, preserving the pane's controller state. All HWND and Common
 Controls activity remains on the UI/Input thread; Core and renderer ownership is
 unchanged.
 
-G9 persists a bounded version 4 workspace record in HKCU. It contains only main
+The frontend persists a bounded version 4 workspace record in HKCU. It contains only main
 window placement, editor split orientation/ratio, dock zones/order/ratios,
 primary and secondary pane visibility/size/floating placement, AutoHide edge,
 density, and selected or user-named preset; document paths and document/Core
@@ -579,8 +580,8 @@ Unknown pane IDs are ignored, absent known panes retain current defaults, and an
 invalid or unsupported record restores the default without aborting startup.
 Version 2 fixed and version 3 dock records migrate once to version 4.
 
-G10 replaces the single workspace slot with a UI-thread-owned, fixed-capacity
-`WorkspaceWindowRegistry`. Each heap-stable `WorkspaceWindow` owns its top-level
+The UI thread owns a fixed-capacity `WorkspaceWindowRegistry`. Each heap-stable
+`WorkspaceWindow` owns its top-level
 and child HWNDs, menu/status presentation, `DockHost`, `EditorArea`, pane instances,
 focus history, and persistence slot. The application continues to share its
 `DocumentRegistry`, `CoreHost`, `RendererHost`, clipboard, shortcuts, and job
@@ -602,8 +603,8 @@ final workspace posts quit. Shutdown unbinds every Canvas, rejects stale
 notifications, detaches and stops Core on its owner thread, stops the renderer
 on its thread, and only then destroys remaining workspace HWND ownership.
 
-G12 adds one process-lifetime `ActivationService` owned by `ApplicationHost`.
-Before Common Controls, COM, CoreHost, RendererHost, or workspace creation, a
+One process-lifetime `ActivationService` is owned by `ApplicationHost`. Before
+Common Controls, COM, CoreHost, RendererHost, or workspace creation, a
 current-user/logon-session named mutex selects the primary. A secondary serializes
 only validated bounded UTF-8 paths, version/size, request ID, open mode, and target
 preference to a local named pipe whose ACL permits the current SID and SYSTEM and
@@ -710,8 +711,8 @@ flip are render transforms only.
 
 ### Canonical revision-max render-cache identity
 
-The render-cache source identity intentionally uses the pre-M1 revision-max
-design as its canonical performance contract. For each document tile coordinate,
+The render-cache source identity uses `revision-max` as its canonical
+performance contract. For each document tile coordinate,
 Core computes one scalar value as the maximum of all visible plane
 `tile_revision` values at that coordinate, the selection tile revision, and the
 Light Table source revision. Cache validation compares that value with the
@@ -754,22 +755,17 @@ views with different alpha modes can also reuse the shared cache incorrectly
 after the first mode switch. Transparent results have no negative cache and can
 be recomposed. These are intentional, documented constraints of choosing the
 revision-max performance baseline as canonical; they are not described as
-correctness fixes. This runtime policy is independent of the M8 native-format
-cutover and is neither serialized nor automatically changed by M8.
+correctness fixes. This runtime policy is independent of the native file format,
+is not serialized, and is not changed by a format-version update.
 
-#### Rationale and adoption record
+#### Rationale and change control
 
-Production before the procedure-history refactoring used the scalar
-revision-max formula. The initial M1 work added semantic digest and canonical
-procedure costs and substantially regressed the protected zoom/pan and
-dirty-tile workflows. Recovery did not weaken those workloads or accept the new
-cost. It restored revision-max as the renderer's sole cache-validation
-authority, separated the document-state commitment tree from rendering,
-borrowed changed source tiles without copying, and prepared each dirty-tile
-composition once. Same-host A/B measurements then placed all four protected
-Core medians below the detached pre-M1 production baseline; the exact samples
-and reproduction procedure are the provenance in
-[`core-benchmark-baseline.md`](core-benchmark-baseline.md#2026-08-05-canonical-revision-max-calibration-provenance).
+The renderer keeps cache validation separate from document-state commitment,
+borrows changed source tiles without copying, and prepares each dirty-tile
+composition once. The adoption history and original A/B results are summarized
+in [`legacy.md`](legacy.md); the current executable workloads, environment
+envelope, and exceptional audit procedure are in
+[`core-benchmark-baseline.md`](core-benchmark-baseline.md).
 
 The decision favors byte-independent, fixed-scalar validation and minimal cache
 bookkeeping over a collision-free source fingerprint. A key containing every
@@ -943,16 +939,14 @@ allocation, distributed writes, copy-on-write isolation, and a bounded dense
 filter workload. The `core_workflows` benchmark separately covers sparse and
 dirty-tile snapshots, view-only cache reuse, Undo/Redo, light-table composition,
 vector snapshot/rasterization, and in-memory Batch preview/dry-run. Both expose
-fixed quick/full inputs and semantic counters/checksums. The old pre-M1
-revision-max implementation supplies historical calibration provenance for the
-protected `pan_zoom_snapshot` and `dirty_tile_rebuild` scenarios. Routine
-wall-clock acceptance uses a matching approved environment envelope from
-`docs/core-benchmark-baseline.md`: after warm-up, compare at least five-run
+fixed quick/full inputs and semantic counters/checksums. Routine wall-clock
+acceptance for protected `pan_zoom_snapshot` and `dirty_tile_rebuild` scenarios
+uses a matching approved environment envelope from
+[`core-benchmark-baseline.md`](core-benchmark-baseline.md): after warm-up, compare at least five-run
 medians, and require a second independent five-run median before confirming an
 upper-edge regression. Reconstruct the old build only for recalibration or an
-explicit audit. Other G13 scenarios retain their warmed Windows x64 relative
-review threshold; semantic drift and resource-budget failures remain
-unconditional on every machine.
+explicit audit. Other scenarios use the documented same-machine review rule;
+semantic drift and resource-budget failures remain unconditional on every machine.
 
 The private Windows `--performance-smoke-test` is the native companion gate. It
 materializes all 256 tiles of a 1024-square raster, sends 256 alternating wheel

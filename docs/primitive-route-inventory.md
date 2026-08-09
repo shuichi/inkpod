@@ -1,9 +1,8 @@
 # Primitive route inventory
 
-This inventory began as the M0 ownership baseline for the
-procedure-authoritative history redesign. It classifies the current public Rust
+This machine-readable inventory classifies the current public Rust
 routing surface, every exported C ABI function, and every production Windows
-command. M6 routes every production document mutation through the canonical
+command. Every production document mutation routes through the canonical
 Rust primitive boundary. Each successful history-producing route owns one
 stable `PrimitiveId`, one retained canonical procedure, and one atomic
 `Commit`/`HistoryMove`/`BranchCut` journal transition. Invalid, failed,
@@ -11,8 +10,7 @@ cancelled, stale, and semantic no-op work publishes none of them. Whole-session
 Genesis replacement routes such as open, recovery, sequence activation, and
 Light Table swap stage the complete replacement and reset the journal
 atomically instead of manufacturing a history entry. The inventory is an
-ownership constraint. M7 adds the classified replay-contract and snapshot-
-digest queries; the M8 successor `.inkpod` container does not yet exist.
+ownership constraint enforced by architecture tests, not a milestone log.
 
 Each route has exactly one of the eight categories defined in
 [`architecture.md`](architecture.md). Classification follows the final semantic
