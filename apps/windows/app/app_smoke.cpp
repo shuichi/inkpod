@@ -77,9 +77,6 @@ using inkpod::app::DocumentSessionId;
 using inkpod::app::DocumentViewId;
 using inkpod::windows::ui::tools::kInteractionEffectAirbrush;
 
-constexpr wchar_t kVectorStrokePlaneRequired[] =
-    L"ベクター描画には、ベクター主線または色トレース線プレーンの選択が必要です。";
-
 bool CommandSurfacesMatchComputedState(const ApplicationHost& state) noexcept;
 
 template <typename Mutator>
@@ -1939,19 +1936,24 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     if (DispatchEnabledCommand(state, state.Workspace().windows.window, IDM_EDIT_UNDO)) {
         return 714;
     }
-    constexpr std::array<UINT, 6U> vector_draw_commands{
+    constexpr std::array<UINT, 6U> geometry_draw_commands{
         IDM_VECTOR_LINE,
         IDM_VECTOR_CURVE,
         IDM_VECTOR_RECTANGLE,
         IDM_VECTOR_ELLIPSE,
         IDM_VECTOR_POLYLINE,
-        IDM_VECTOR_ERASER};
-    for (const UINT command : vector_draw_commands) {
+        IDM_VECTOR_POLYGON};
+    for (const UINT command : geometry_draw_commands) {
         const UINT command_state = GetMenuState(menu, command, MF_BYCOMMAND);
         if (command_state == static_cast<UINT>(-1)
-            || (command_state & (MF_DISABLED | MF_GRAYED)) == 0U) {
+            || (command_state & (MF_DISABLED | MF_GRAYED)) != 0U) {
             return 701;
         }
+    }
+    const UINT eraser_state = GetMenuState(menu, IDM_VECTOR_ERASER, MF_BYCOMMAND);
+    if (eraser_state == static_cast<UINT>(-1)
+        || (eraser_state & (MF_DISABLED | MF_GRAYED)) == 0U) {
+        return 701;
     }
     if (!RefreshSequencePane(state) || state.Workspace().panes.sequence_count != 0U) {
         return 702;
@@ -1969,16 +1971,12 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             == std::wstring::npos) {
         return 703;
     }
-    if (FinishVectorCanvasGesture(state) != INKPOD_STATUS_INVALID_STATE
-        || state.engine->LastError() != kVectorStrokePlaneRequired) {
-        return 704;
-    }
     const std::uint32_t initial_tool = state.Workspace().tools.active_tool;
-    for (const UINT command : vector_draw_commands) {
-        if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0) != 0
-            || state.Workspace().tools.active_tool != initial_tool) {
-            return 705;
-        }
+    if (SendMessageW(
+            state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_ERASER, 0)
+            != 0
+        || state.Workspace().tools.active_tool != initial_tool) {
+        return 705;
     }
     const std::wstring initial_recovery_path = state.Document().shell.recovery_path;
     RecoveryMetadata initial_recovery_metadata{};
@@ -6232,7 +6230,8 @@ int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
     UpdateMenuState(state);
     for (const UINT command : {
              IDM_VECTOR_LINE, IDM_VECTOR_CURVE, IDM_VECTOR_RECTANGLE,
-             IDM_VECTOR_ELLIPSE, IDM_VECTOR_POLYLINE, IDM_VECTOR_ERASER}) {
+             IDM_VECTOR_ELLIPSE, IDM_VECTOR_POLYGON, IDM_VECTOR_POLYLINE,
+             IDM_VECTOR_ERASER}) {
         const UINT command_state = GetMenuState(GetMenu(state.Workspace().windows.window), command, MF_BYCOMMAND);
         if (command_state == static_cast<UINT>(-1)
             || (command_state & (MF_DISABLED | MF_GRAYED)) != 0U) {
@@ -6274,6 +6273,50 @@ int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
             && inkpod::renderer::SubmitCanvasStrokeEvent(
                    state.Workspace().windows.canvas, end);
     };
+    const auto curve_gesture = [&](const std::array<InkpodStrokeSample, 4U>& samples) {
+        if (SendMessageW(
+                state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_CURVE, 0) != 1) {
+            return false;
+        }
+        const inkpod::renderer::CanvasStrokeEvent begin{
+            inkpod::renderer::CanvasStrokeEventKind::Begin, samples.data(), 1U};
+        const inkpod::renderer::CanvasStrokeEvent end{
+            inkpod::renderer::CanvasStrokeEventKind::End, samples.data() + 3U, 1U};
+        const inkpod::renderer::CanvasStrokeEvent control_begin{
+            inkpod::renderer::CanvasStrokeEventKind::Begin, samples.data() + 1U, 1U};
+        const inkpod::renderer::CanvasStrokeEvent control_end{
+            inkpod::renderer::CanvasStrokeEventKind::End, samples.data() + 1U, 1U};
+        return inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, begin)
+            && inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, end)
+            && inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, control_begin)
+            && inkpod::renderer::SubmitCanvasStrokeEvent(
+                   state.Workspace().windows.canvas, control_end);
+    };
+    const auto polyline_gesture = [&](const std::array<InkpodStrokeSample, 4U>& samples) {
+        if (SendMessageW(
+                state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_POLYLINE, 0) != 1) {
+            return false;
+        }
+        const auto click = [&](const InkpodStrokeSample& sample) {
+            const inkpod::renderer::CanvasStrokeEvent begin{
+                inkpod::renderer::CanvasStrokeEventKind::Begin, &sample, 1U};
+            const inkpod::renderer::CanvasStrokeEvent end{
+                inkpod::renderer::CanvasStrokeEventKind::End, &sample, 1U};
+            return inkpod::renderer::SubmitCanvasStrokeEvent(
+                       state.Workspace().windows.canvas, begin)
+                && inkpod::renderer::SubmitCanvasStrokeEvent(
+                       state.Workspace().windows.canvas, end);
+        };
+        for (const auto& sample : samples) {
+            if (!click(sample)) {
+                return false;
+            }
+        }
+        return click(samples.back());
+    };
     const std::array<InkpodStrokeSample, 4U> line_samples{
         sample(4.0F, 8.0F), sample(5.0F, 8.0F),
         sample(6.0F, 8.0F), sample(7.0F, 8.0F)};
@@ -6287,10 +6330,11 @@ int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
         sample(10.0F, 40.0F), sample(20.0F, 45.0F),
         sample(28.0F, 38.0F), sample(36.0F, 48.0F)};
     if (!gesture(IDM_VECTOR_LINE, line_samples)
-        || !gesture(IDM_VECTOR_CURVE, curve_samples)
+        || !curve_gesture(curve_samples)
         || !gesture(IDM_VECTOR_RECTANGLE, shape_samples)
         || !gesture(IDM_VECTOR_ELLIPSE, shape_samples)
-        || !gesture(IDM_VECTOR_POLYLINE, polyline_samples)) {
+        || !gesture(IDM_VECTOR_POLYGON, shape_samples)
+        || !polyline_gesture(polyline_samples)) {
         return 507;
     }
     const std::array<UINT, 8U> selection_commands{

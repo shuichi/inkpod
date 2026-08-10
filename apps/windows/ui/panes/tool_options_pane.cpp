@@ -77,6 +77,7 @@ const wchar_t* ToolLabel(std::uint32_t tool) noexcept {
     if (tool == tools::kInteractionVectorRectangle) return L"長方形";
     if (tool == tools::kInteractionVectorEllipse) return L"楕円";
     if (tool == tools::kInteractionVectorPolyline) return L"折れ線";
+    if (tool == tools::kInteractionVectorPolygon) return L"正多角形";
     if (tool == tools::kInteractionVectorEraser) return L"ベクター消しゴム";
     if (tool == tools::kInteractionEffectGradient) return L"グラデーション";
     if (tool == tools::kInteractionEffectAirbrush) return L"エアブラシ";
@@ -88,6 +89,9 @@ const wchar_t* ToolLabel(std::uint32_t tool) noexcept {
 }
 
 UINT DetailsCommand(std::uint32_t tool) noexcept {
+    if (tools::IsVectorCanvasTool(tool) && tool != tools::kInteractionVectorEraser) {
+        return IDM_GEOMETRY_OPTIONS;
+    }
     if (tool == tools::kInteractionFill) return IDM_TOOL_FILL_OPTIONS;
     if (tool == tools::kInteractionSelection) return IDM_SELECTION_OPTIONS;
     if (tool == tools::kInteractionEffectGradient) return IDM_EFFECT_GRADIENT;
@@ -103,11 +107,12 @@ UINT DetailsCommand(std::uint32_t tool) noexcept {
 
 bool HasDiameter(std::uint32_t tool) noexcept {
     return tool == INKPOD_TOOL_PENCIL || tool == INKPOD_TOOL_BRUSH
-        || tool == INKPOD_TOOL_ERASER;
+        || tool == INKPOD_TOOL_ERASER || tools::IsVectorCanvasTool(tool);
 }
 
 bool CanEditDiameter(std::uint32_t tool) noexcept {
-    return tool == INKPOD_TOOL_BRUSH || tool == INKPOD_TOOL_ERASER;
+    return tool == INKPOD_TOOL_BRUSH || tool == INKPOD_TOOL_ERASER
+        || tools::IsVectorCanvasTool(tool);
 }
 
 void LayoutPane(HWND pane) noexcept {

@@ -91,6 +91,7 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
     entry!(DELETE_ALL_GUIDES, 2, "DeleteAllGuides", 2, 0x0004_0011),
     entry!(APPLY_RASTER_STROKE, 3, "ApplyRasterStroke", 5, 3),
     entry!(APPLY_FILL, 2, "ApplyFill", 2, 0x0005_0002),
+    entry!(APPLY_GEOMETRY, 2, "ApplyGeometry", 1, 0x0005_0003),
     entry!(APPLY_GRADIENT, 2, "ApplyGradient", 2, 0x0005_0010),
     entry!(
         APPLY_BOUNDARY_AIRBRUSH,
@@ -351,7 +352,7 @@ mod tests {
 
     #[test]
     fn catalog_is_sorted_unique_bounded_and_matches_replay_schema_lookup() {
-        assert_eq!(PRIMITIVE_CATALOG.len(), 78);
+        assert_eq!(PRIMITIVE_CATALOG.len(), 79);
         for pair in PRIMITIVE_CATALOG.windows(2) {
             assert!(pair[0].id < pair[1].id);
         }

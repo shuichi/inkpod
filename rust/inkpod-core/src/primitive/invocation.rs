@@ -1,6 +1,7 @@
 //! Typed canonical invocations for document primitives outside the original kernel slice.
 
 use super::*;
+use crate::geometry::{CanonicalGeometry, CanonicalGeometryPoint, CanonicalGeometrySegment};
 use crate::history::PixelChange;
 use crate::selection::FloatingDestination;
 use crate::stroke::DocumentStrokeSample;
@@ -12,6 +13,7 @@ use inkpod_image::{
 use std::sync::Arc;
 
 const INVOCATION_SCHEMA_VERSION: u16 = 2;
+const MAX_CANONICAL_GEOMETRY_BOUNDARY_POINTS: usize = MAX_GEOMETRY_POINTS * 32;
 type InvocationApply<'a> = Box<dyn FnOnce(&mut Core) -> Result<InvocationResult, CoreError> + 'a>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -103,6 +105,9 @@ pub(crate) enum CanonicalInvocation {
         target: EditorTarget,
         use_light_table_boundary: bool,
         use_light_table_color: bool,
+    },
+    ApplyGeometry {
+        geometry: CanonicalGeometry,
     },
     ApplyGradient {
         plane_id: u64,
@@ -631,6 +636,10 @@ fn decode_persistent_invocation(
             use_light_table_boundary: reader.boolean()?,
             use_light_table_color: reader.boolean()?,
         }
+    } else if primitive_id == PrimitiveId::APPLY_GEOMETRY {
+        CanonicalInvocation::ApplyGeometry {
+            geometry: reader.geometry()?,
+        }
     } else if primitive_id == PrimitiveId::APPLY_GRADIENT {
         CanonicalInvocation::ApplyGradient {
             plane_id: reader.u64()?,
@@ -1086,6 +1095,7 @@ impl CanonicalInvocation {
             Self::SetGrid { .. } => PrimitiveId::SET_GRID,
             Self::DeleteAllGuides => PrimitiveId::DELETE_ALL_GUIDES,
             Self::ApplyFill { .. } => PrimitiveId::APPLY_FILL,
+            Self::ApplyGeometry { .. } => PrimitiveId::APPLY_GEOMETRY,
             Self::ApplyGradient { .. } => PrimitiveId::APPLY_GRADIENT,
             Self::ApplyBoundaryAirbrush { .. } => PrimitiveId::APPLY_BOUNDARY_AIRBRUSH,
             Self::ApplyBlur { .. } => PrimitiveId::APPLY_BLUR,
@@ -1187,6 +1197,7 @@ impl CanonicalInvocation {
             | Self::EditPlaneAlpha { plane_id, .. }
             | Self::ApplyAlphaGradient { plane_id, .. }
             | Self::ApplyFilter { plane_id, .. } => vec![*plane_id],
+            Self::ApplyGeometry { geometry } => vec![geometry.plane_id],
             Self::ReplaceRasterColors { plane_id, .. }
             | Self::ScopedColorReplace { plane_id, .. }
             | Self::SeparateRasterColors { plane_id, .. }
@@ -1378,6 +1389,18 @@ impl CanonicalInvocation {
                     *use_light_table_color,
                 )
                 .map(InvocationResult::fill),
+            Self::ApplyGeometry { geometry } => {
+                core.apply_canonical_geometry(geometry).map(|commit| {
+                    let mut ids = Vec::with_capacity(2);
+                    if commit.path_id != 0 {
+                        ids.push(commit.path_id);
+                    }
+                    if commit.fill_id != 0 {
+                        ids.push(commit.fill_id);
+                    }
+                    InvocationResult::outputs(commit.dispatch, ids)
+                })
+            }
             Self::ApplyGradient { plane_id, gradient } => core
                 .apply_gradient_to_plane(*plane_id, gradient)
                 .map(InvocationResult::dispatch),
@@ -1784,6 +1807,7 @@ impl CanonicalInvocation {
                 writer.boolean(*use_light_table_boundary);
                 writer.boolean(*use_light_table_color);
             }
+            Self::ApplyGeometry { geometry } => writer.geometry(geometry)?,
             Self::ApplyGradient { plane_id, gradient } => {
                 writer.u64(*plane_id);
                 writer.gradient(gradient)?;
@@ -2241,6 +2265,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::SET_GRID.get()
         || value == PrimitiveId::DELETE_ALL_GUIDES.get()
         || value == PrimitiveId::APPLY_FILL.get()
+        || value == PrimitiveId::APPLY_GEOMETRY.get()
         || value == PrimitiveId::APPLY_GRADIENT.get()
         || value == PrimitiveId::APPLY_BOUNDARY_AIRBRUSH.get()
         || value == PrimitiveId::APPLY_BLUR.get()
@@ -3078,6 +3103,7 @@ impl<'a> CanonicalReader<'a> {
                     segments: input.segments,
                     color: input.color,
                     closed: input.closed,
+                    square_cross_section: self.boolean()?,
                 });
             }
             let fill_count = self.count(32)?;
@@ -3153,6 +3179,76 @@ impl<'a> CanonicalReader<'a> {
             result.push(self.u64()?);
         }
         Ok(result)
+    }
+
+    fn geometry(&mut self) -> Result<CanonicalGeometry, CoreError> {
+        let plane_id = self.u64()?;
+        let primitive = match self.u32()? {
+            1 => GeometryPrimitive::Line,
+            2 => GeometryPrimitive::Curve,
+            3 => GeometryPrimitive::Rectangle,
+            4 => GeometryPrimitive::Ellipse,
+            5 => GeometryPrimitive::Polygon,
+            6 => GeometryPrimitive::Polyline,
+            _ => return Err(self.invalid("canonical geometry primitive is invalid")),
+        };
+        let flags = self.u32()?;
+        if flags & !0x7 != 0 {
+            return Err(self.invalid("canonical geometry flags are invalid"));
+        }
+        let cross_section = match self.u32()? {
+            1 => GeometryCrossSection::Round,
+            2 => GeometryCrossSection::Square,
+            _ => return Err(self.invalid("canonical geometry cross-section is invalid")),
+        };
+        let outline_width_q16 = self.i64()?;
+        let outline_color = self.pixel()?;
+        let fill_color = self.pixel()?;
+        let segment_count = self.count(80)?;
+        if segment_count > MAX_GEOMETRY_POINTS * 2 {
+            return Err(self.invalid("canonical geometry has too many segments"));
+        }
+        let mut segments = Vec::with_capacity(segment_count);
+        for _ in 0..segment_count {
+            let mut point = || -> Result<CanonicalGeometryPoint, CoreError> {
+                Ok(CanonicalGeometryPoint {
+                    x_q16: self.i64()?,
+                    y_q16: self.i64()?,
+                })
+            };
+            segments.push(CanonicalGeometrySegment {
+                p0: point()?,
+                p1: point()?,
+                p2: point()?,
+                p3: point()?,
+                width_start_q16: self.i64()?,
+                width_end_q16: self.i64()?,
+            });
+        }
+        let boundary_count = self.count(16)?;
+        if boundary_count > MAX_CANONICAL_GEOMETRY_BOUNDARY_POINTS {
+            return Err(self.invalid("canonical geometry fill boundary is too large"));
+        }
+        let mut fill_boundary = Vec::with_capacity(boundary_count);
+        for _ in 0..boundary_count {
+            fill_boundary.push(CanonicalGeometryPoint {
+                x_q16: self.i64()?,
+                y_q16: self.i64()?,
+            });
+        }
+        Ok(CanonicalGeometry {
+            plane_id,
+            primitive,
+            segments,
+            fill_boundary,
+            outline_color,
+            fill_color,
+            outline_width_q16,
+            cross_section,
+            outline: flags & 0x1 != 0,
+            fill: flags & 0x2 != 0,
+            closed: flags & 0x4 != 0,
+        })
     }
 
     fn vector_path(&mut self) -> Result<VectorPathInput, CoreError> {
@@ -3928,6 +4024,7 @@ impl CanonicalWriter {
                     color: path.color,
                     closed: path.closed,
                 })?;
+                self.boolean(path.square_cross_section);
             }
             self.u32(u32::try_from(plane.vector_fills.len()).map_err(|_| {
                 CoreError::InvalidArgument("canonical clipboard has too many vector fills")
@@ -3966,6 +4063,51 @@ impl CanonicalWriter {
         self.u32(count);
         for id in ids {
             self.u64(*id);
+        }
+        Ok(())
+    }
+
+    fn geometry(&mut self, geometry: &CanonicalGeometry) -> Result<(), CoreError> {
+        self.u64(geometry.plane_id);
+        self.u32(match geometry.primitive {
+            GeometryPrimitive::Line => 1,
+            GeometryPrimitive::Curve => 2,
+            GeometryPrimitive::Rectangle => 3,
+            GeometryPrimitive::Ellipse => 4,
+            GeometryPrimitive::Polygon => 5,
+            GeometryPrimitive::Polyline => 6,
+        });
+        self.u32(
+            u32::from(geometry.outline)
+                | (u32::from(geometry.fill) << 1)
+                | (u32::from(geometry.closed) << 2),
+        );
+        self.u32(match geometry.cross_section {
+            GeometryCrossSection::Round => 1,
+            GeometryCrossSection::Square => 2,
+        });
+        self.i64(geometry.outline_width_q16);
+        self.pixel(geometry.outline_color);
+        self.pixel(geometry.fill_color);
+        self.u32(
+            u32::try_from(geometry.segments.len()).map_err(|_| {
+                CoreError::InvalidArgument("canonical geometry has too many segments")
+            })?,
+        );
+        for segment in &geometry.segments {
+            for point in [segment.p0, segment.p1, segment.p2, segment.p3] {
+                self.i64(point.x_q16);
+                self.i64(point.y_q16);
+            }
+            self.i64(segment.width_start_q16);
+            self.i64(segment.width_end_q16);
+        }
+        self.u32(u32::try_from(geometry.fill_boundary.len()).map_err(|_| {
+            CoreError::InvalidArgument("canonical geometry fill boundary is too large")
+        })?);
+        for point in &geometry.fill_boundary {
+            self.i64(point.x_q16);
+            self.i64(point.y_q16);
         }
         Ok(())
     }

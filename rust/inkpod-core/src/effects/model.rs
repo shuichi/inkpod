@@ -20,11 +20,13 @@ pub(crate) enum PreviewProcedure {
         shape: Option<SelectionShape>,
         options: DustRemoval,
     },
+    Geometry(crate::geometry::CanonicalGeometry),
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct FilterPreview {
     pub(crate) plane_id: PlaneId,
+    pub(crate) base_revision: DocumentRevision,
     pub(crate) base_document: CellDocument,
     pub(crate) preview_document: CellDocument,
     pub(crate) procedure: PreviewProcedure,

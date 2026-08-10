@@ -385,6 +385,7 @@ impl Core {
             plane_id,
             color: left.color,
             closed: false,
+            square_cross_section: left.square_cross_section,
             segments: vec![line_segment(start, end, start_width, end_width)],
         });
         let left_endpoint = VectorEndpointId {

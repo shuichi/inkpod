@@ -45,6 +45,8 @@ pub struct VectorPathInfo {
     pub color: PixelValue,
     /// Whether the path is closed.
     pub closed: bool,
+    /// Whether the geometry uses square rather than round endpoint cross-sections.
+    pub square_cross_section: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -155,6 +157,8 @@ pub struct RenderVectorSegment {
     pub color_rgba: [u8; 4],
     /// Whether the source path is closed.
     pub closed: bool,
+    /// Whether open endpoint caps use the square cross-section contract.
+    pub square_cross_section: bool,
     /// Whether the source plane is currently visible.
     pub stroke_visible: bool,
     /// Whether the stable start endpoint has an explicit topological connection.
@@ -208,6 +212,7 @@ pub(super) struct VectorPath {
     pub(super) plane_id: PlaneId,
     pub(super) color: PixelValue,
     pub(super) closed: bool,
+    pub(super) square_cross_section: bool,
     pub(super) segments: Vec<VectorSegment>,
 }
 
@@ -296,6 +301,7 @@ impl VectorState {
                     plane_id: path.plane_id.get(),
                     color: path.color,
                     closed: path.closed,
+                    square_cross_section: path.square_cross_section,
                     segments: path
                         .segments
                         .iter()
@@ -343,6 +349,7 @@ impl VectorState {
                     plane_id: PlaneId::from_raw(path.plane_id),
                     color: path.color,
                     closed: path.closed,
+                    square_cross_section: path.square_cross_section,
                     segments: path
                         .segments
                         .iter()
@@ -620,11 +627,9 @@ impl VectorState {
                 color: path.color,
                 closed: path.closed,
             };
-            self.paths.push(super::geometry::fixed_path(
-                id,
-                destination_plane_id,
-                input,
-            )?);
+            let mut copied = super::geometry::fixed_path(id, destination_plane_id, input)?;
+            copied.square_cross_section = path.square_cross_section;
+            self.paths.push(copied);
             if path_map.insert(path.id, id).is_some() {
                 return Err(CoreError::InvalidArgument(
                     "clipboard contains a duplicate vector path id",
@@ -746,6 +751,7 @@ impl VectorState {
                                 segment_count: path.segments.len() as u32,
                                 color_rgba: color,
                                 closed: path.closed,
+                                square_cross_section: path.square_cross_section,
                                 stroke_visible: plane.visible,
                                 start_connected,
                                 end_connected,
@@ -801,6 +807,7 @@ impl VectorState {
                         segment_count: path.segments.len() as u32,
                         color_rgba: color,
                         closed: path.closed,
+                        square_cross_section: path.square_cross_section,
                         stroke_visible: plane.visible,
                         start_connected,
                         end_connected,

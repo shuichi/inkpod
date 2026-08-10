@@ -38,6 +38,7 @@ mod editor;
 mod effects;
 mod error;
 mod genesis;
+mod geometry;
 mod history;
 mod identity;
 mod journal;
@@ -88,6 +89,10 @@ pub use editor::{
 pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
 pub use genesis::{BaseSurface, GenesisInfo};
+pub use geometry::{
+    GeometryCommit, GeometryCrossSection, GeometryOptions, GeometryPreviewInfo, GeometryPrimitive,
+    GeometryRequest, MAX_GEOMETRY_POINTS,
+};
 pub use history::HistoryEntryInfo;
 pub use inkpod_format::CommonRasterFormat;
 pub use inkpod_image::RasterRangeInterpretation as RangeInterpretation;

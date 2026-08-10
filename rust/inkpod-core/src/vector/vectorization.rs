@@ -246,6 +246,7 @@ fn append_vectorization_runs(
             plane_id: trace_plane,
             color: PixelValue::Rgba([0, 0, 0, 0]),
             closed: true,
+            square_cross_section: false,
             segments: vec![
                 line_segment(points[0], points[1], width, width),
                 line_segment(points[1], points[2], width, width),

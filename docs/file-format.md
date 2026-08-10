@@ -1,7 +1,7 @@
 # Native file format
 
-`.inkpod` v16 is the bounded, procedure-authoritative, little-endian native
-container. Version 16 and runtime replay epoch 13 are the only accepted native contract.
+`.inkpod` v17 is the bounded, procedure-authoritative, little-endian native
+container. Version 17 and runtime replay epoch 14 are the only accepted native contract.
 
 Until the user explicitly declares a format freeze, Inkpod accepts only the
 current version of each application-owned file format. It provides no older-
@@ -13,21 +13,22 @@ schema should be replaced whenever a more robust or efficient design is found.
 ## Current procedure-authoritative contract
 
 This section defines the implemented procedure-authoritative container at
-top-level format version 16 and runtime replay epoch 13. It uses a hierarchical document
+top-level format version 17 and runtime replay epoch 14. It uses a hierarchical document
 commitment, an exact-depth target-explicit `ApplyRasterStroke/v3` schema, a
+bounded resolved `ApplyGeometry/canonical-v2` schema,
 distinct stable Cell ID, and an explicit immutable Genesis base surface:
 metadata, raster, and raster-tile commitments are domain-separated so a raster
 edit hashes only changed tile payloads instead of every allocated document
 pixel. This semantic digest is independent of the renderer's canonical
 revision-max cache identity. Asset and procedure-payload digest contracts are
-version 1. Every version other than 16 is rejected before Core state replacement;
+version 1. Every version other than 17 is rejected before Core state replacement;
 there is no migration or compatibility reader. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
 
 The authoritative sections are `META`, `GENS`, `ASST`, `PROC`, and `EDIT`.
 `EXTM`, `CKPT`, and unknown opaque-preserve sections are optional. `CKPT` is a
-schema-1 acceleration record in v16. There is no `HIST` section: history moves and
+schema-1 acceleration record in v17. There is no `HIST` section: history moves and
 branch cuts are records in `PROC`, while cursor, active branch, savepoints, and
 ID high-watermarks are fields in `META`. A materialized document or checkpoint
 is never sufficient without Genesis, retained assets, and the procedure/control
@@ -89,7 +90,8 @@ Every production document mutation has a stable ID. The complete source catalog
 is the `PrimitiveId` constants in `inkpod-core`; it occupies the family ranges
 above without renumbering existing assignments:
 `SetMainLineColor` is `0x0003_0001/v1`, `ReplacePalette` is
-`0x0003_0002/v1`, `ApplyRasterStroke` is `0x0005_0001/v3`, and
+`0x0003_0002/v1`, `ApplyRasterStroke` is `0x0005_0001/v3`, `ApplyGeometry` is
+`0x0005_0003/v2`, and
 `ImportRasterAsset` is `0x0009_0001/v1`. Other typed invocation records use the
 current canonical schema v2: document geometry is signed Q16, normalized pressure
 is `u16`, and angles are `u32` turns. `LightTableSwapWithActive` has stable ID
@@ -117,7 +119,7 @@ revision, work-formula ID, and replay-policy byte (`1` journal-replayable, `0`
 session Genesis replacement). Query, view, transient, ingestion, export, and
 application command IDs are not `PrimitiveId` values.
 
-The four procedures below have fully specified byte schemas. V14 stores bounded
+The four procedures below have fully specified byte schemas. V17 stores bounded
 canonical bytes for every typed invocation and retains that typed value as the
 runtime replay authority. Its decoder/encoder connects all invocation variants
 through the kind-7 canonical-invocation envelope described below. The two
@@ -282,7 +284,7 @@ the common 16-byte record header defined below, then these exact payload bytes:
 - An asset-reference record is `argument ordinal u32`, zero `u32`, then the
   32-byte `AssetId`. Input/output-ID records are `role ordinal u32`, reserved
   zero `u32`, and stable ID `u64`; the typed canonical invocation is the object-
-  kind authority in v16. Each sequence is strictly increasing
+  kind authority in v17. Each sequence is strictly increasing
   by ordinal with no duplicate role. The primitive schema fixes whether each
   input/output role is required; transient object IDs are forbidden.
 - When payload length is zero, `ProcedurePayloadDigest` is 32 zero bytes and no
@@ -312,9 +314,37 @@ output; every other command emits none. Live commit, Undo/Redo, and replay use
 the same executor, and invalid, stale, incompatible, overflow, or semantic no-op
 input publishes no partial document state or stable ID.
 
+`ApplyGeometry/canonical-v2` uses `PrimitiveId 0x0005_0003`, semantics
+revision 1, and work-formula ID `0x0005_0003`. Its input-ID role 1 is the
+nonzero target Plane ID. Its canonical bytes are, in order: that Plane ID;
+primitive `u32` (1 Line, 2 Curve, 3 Rectangle, 4 Ellipse, 5 Polygon, 6
+Polyline); flags `u32` (bit 0 outline, bit 1 fill, bit 2 closed); cross-section
+`u32` (1 Round, 2 Square); positive Q16 outline width `i64`; tagged exact-depth
+outline and fill colors; segment count `u32`; each segment as four signed-Q16
+points followed by signed-Q16 start/end widths; fill-boundary count `u32`; and
+that many signed-Q16 points. Segment count is bounded to 512 and fill-boundary
+count to 8,192. Every other flag/code, a non-RGBA color, an invalid target,
+noncontinuous or unclosed vector geometry, and inconsistent fill data are
+invalid.
+
+The stored value is the Core-resolved geometry, not frontend clicks, device
+coordinates, DPI, modifier keys, or a Windows command ID. Line and Curve are
+open and reject fill; Rectangle, Ellipse, and Polygon are closed; Polyline is
+closed only when requested. Raster MainLine permits outline only, raster
+Color/Raster permits outline and closed fill, and vector MainLine/ColorTrace
+permits outline plus closed fill through its associated fill plane. Raster
+fill samples pixel centers with a deterministic half-open even/odd rule and is
+clipped by the committed selection. A degenerate resolved segment sequence is
+a semantic no-op. A vector commit emits path ID first and optional fill ID
+second; raster emits no output IDs. Preview bytes are never persisted. Live
+commit, Undo/Redo, staged reopen, and replay execute this same resolved value;
+the new replay result is the reason the exact-current contract is top-level
+v17/runtime replay epoch 14.
+
 Genesis vector metadata uses `VECT` schema 2: magic `VECT`, schema `u32 = 2`,
 path/fill/connection counts, and a zero reserved word, followed by bounded path
-and fill records and then fixed connection records. A connection orders two
+and fill records and then fixed connection records. Path flags are bit 0 closed
+and bit 1 square cross-section; every other bit is rejected. A connection orders two
 endpoint identities, each formed from a stable `VectorPathId` and endpoint code
 0 Start or 1 End. Connections and their endpoints are strictly ordered and
 unique; both paths must be open and belong to the same plane. Coordinate
@@ -396,7 +426,7 @@ tables. View revision, zoom, pan, flip, guides, grid, renderer resources, and OS
 DPI are excluded. `RenderSnapshot::canonical_composite_digest` and
 `inkpod_snapshot_get_canonical_digest` expose this result without a test-only
 state accessor. This derived snapshot digest is not serialized in `.inkpod` and
-does not change native format v16 or runtime replay epoch 13.
+does not change native format v17 or runtime replay epoch 14.
 
 A sequence field is `element-count u64`, then for every element `element-length
 u64` and exact element bytes. A schema-declared ordered sequence retains its
@@ -434,7 +464,7 @@ digest, 5 semantics revision `u32`, 6 work-formula ID `u32`, and 7 replay-policy
 argument-schema digest is BLAKE3 `derive_key` over the exact canonical ASCII
 label `<canonical-name>/canonical-v<schema-version>` using the primitive-
 argument-schema context above. This label identifies the closed typed schema;
-the v16 reader selects its decoder through the same catalog entry and accepts
+the v17 reader selects its decoder through the same catalog entry and accepts
 only a byte-exact canonical re-encoding.
 
 An argument descriptor is a schema-1 frame with fields 1 ordinal `u32`; 2
@@ -573,7 +603,7 @@ follows:
   sequence lists for the current standalone-cell model. Document, Cell, layer,
   plane, selection, and other stable object IDs therefore obey cross-kind
   numeric-ID uniqueness. This document-state frame is schema/domain 5. The
-  current build contract is runtime replay epoch 13 and top-level version 16; optional
+  current build contract is runtime replay epoch 14 and top-level version 17; optional
   checkpoint/streaming records do not change the state-digest schema.
   Collections whose UI order is not semantic are ID-sorted.
 - An adjustment frame orders kind, channel, interpolation, six signed `i32`
@@ -606,11 +636,11 @@ Eyedropper, 1003 BoxZoom, 1004 GuideMove, 1005 Selection, 1006
 FloatingTransform, 1007 LightTableMove; 1101 EffectGradient, 1102
 EffectAirbrush, 1103 EffectBlur, 1104 EffectStamp, 1105 EffectDust, 1106
 EffectAlphaGradient; and 1201..1206 VectorLine, VectorCurve, VectorRectangle,
-VectorEllipse, VectorPolyline, VectorEraser in that order. Each tool sequence
-contains exactly those 22 IDs in ascending order. A color entry frame orders
+VectorEllipse, VectorPolyline, VectorEraser, and VectorPolygon 1207 in that order.
+Each tool sequence contains exactly those 24 IDs in ascending order. A color entry frame orders
 ToolId and an optional exact color. Color is required only for Pencil, Brush,
 Fill, Selection, EffectAirbrush, VectorLine, VectorCurve, VectorRectangle,
-VectorEllipse, and VectorPolyline and absent for every other tool. A diameter
+VectorEllipse, VectorPolyline, and VectorPolygon and absent for every other tool. A diameter
 entry frame orders ToolId and signed Q16.16 `i64`; every tool has one positive
 diameter, bounded to 256 document pixels. Exact color is tag 1 plus four RGBA8
 bytes or tag 2 plus four little-endian RGBA16 channels, including alpha; no
@@ -688,7 +718,7 @@ owners. The current materialized document and checkpoints are not sufficient
 roots by themselves. Assets referenced only by an inactive branch remain
 available for cache-free replay, and the owning Core session releases its
 registry only after transient work has drained. These runtime rules establish
-the exact graph serialized by v16 `GENS` and `ASST`.
+the exact graph serialized by v17 `GENS` and `ASST`.
 
 Cache-free save/reopen-equivalent verification is detached from that live
 registry: it walks the same roots, deep-copies every unique payload in
@@ -696,7 +726,7 @@ registry: it walks the same roots, deep-copies every unique payload in
 then rebinds Genesis and retained procedures before fresh replay. Descriptor,
 payload, identity, and duplicate-root reference counts must match, while the
 source and rebuilt `AssetRecord`, payload, and raster allocations must not share
-ownership. That detached archive remains test infrastructure; v16 now provides
+ownership. That detached archive remains test infrastructure; v17 now provides
 the production encoder and staged reader.
 
 Self-referential digest fields are present as thirty-two zero bytes during
@@ -714,19 +744,19 @@ change digest output. The Core production dependency computes the
 hierarchical schema-5 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render
 caching: snapshot validation uses only the documented revision-max scalar and
-never these digests. The same pinned implementation computes the v16 section,
+never these digests. The same pinned implementation computes the v17 section,
 root, asset-chunk, journal, document, editor, and procedure-payload commitments.
 
 ### Header, directory, and record bytes
 
-The v16 header is exactly 128 bytes. Its outer container-layout epoch is 8;
+The v17 header is exactly 128 bytes. Its outer container-layout epoch is 8;
 the authoritative `META` and procedure records independently require runtime
-replay epoch 13 before staged Core publication:
+replay epoch 14 before staged Core publication:
 
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic bytes `49 4E 4B 50 4F 44 00 00` |
-| 8 | 4 | top-level format version = 14 |
+| 8 | 4 | top-level format version = 17 |
 | 12 | 4 | outer container-layout epoch = 8 |
 | 16 | 4 | header size = 128 |
 | 20 | 4 | required flags = 0 |
@@ -825,7 +855,7 @@ SolidWhite, 2 Asset followed by its 32-byte `AssetId`), then nested payload
 length `u64` and the exact current schema-1 `DocumentArchive` payload. That nested
 payload is not a standalone `.inkpod` container and is not accepted through
 the native-file entrypoint; it is the bounded Genesis document DTO owned by the
-v16 GENS schema. Its fixed manifest is 200 bytes before palette, optional
+v17 GENS schema. Its fixed manifest is 200 bytes before palette, optional
 metadata, plane descriptors, and blob descriptors: stable Document ID, distinct
 stable Cell ID, primary layer/main/color plane IDs, document UUID, raster size,
 DPI, sRGB/reserved words, then 100%, reference, drawing, safe, shooting, and
@@ -838,7 +868,7 @@ persisted `EditorRevision u64`; 3 exact canonical EditorState frame; 4 its
 `EditorStateDigest`. Revision starts at 1, is excluded from the digest, and the
 stored digest must match both the frame and `META`.
 
-The v16 writer emits this bounded canonical EDIT payload and the staged reader
+The v17 writer emits this bounded canonical EDIT payload and the staged reader
 verifies its digest, target IDs, revision, and META savepoint before replacing
 the live Core. The decoder rejects an EDIT frame larger than 4 MiB.
 
@@ -1022,7 +1052,7 @@ is atomically installed. Dry-run creates no output or temporary file. Duplicate
 is the default and is forbidden from resolving to its input path; overwrite is
 available only through the explicit output policy. A current-document source
 retains a copy of its canonical asset store while operations run. Asset-backed
-Genesis and every retained journal asset are written through the same v16
+Genesis and every retained journal asset are written through the same v17
 GENS/ASST path as an interactive save.
 
 The decoder bounds the whole file (1 GiB), including a post-read check against
@@ -1099,7 +1129,7 @@ itself retains the contract above.
 
 Explicit compaction is a separate export. Core first returns a confirmation
 token containing omitted event/procedure counts and document/editor/journal
-digests. Only the exact current token can write a new v16 file whose current
+digests. Only the exact current token can write a new v17 file whose current
 document is Genesis and whose PROC history is empty. The operation never changes
 or adopts the live path, journal, savepoints, dirty state, or IDs. There is no
 automatic squash.
@@ -1119,7 +1149,7 @@ deterministic mutation harness truncates and bit-flips valid native, batch, and
 all four common-raster seeds across every decoder. These regression tests do not
 replace coverage-guided fuzzing, but keep the accepted corruption corpus and
 allocation-bound paths executable on every normal `cargo test` run. The
-`rust/inkpod-format/fuzz` package provides `native_v16` for the current
-container, directory, CKPT removal/re-encode path and `native_core_v16` for staged Core
+`rust/inkpod-format/fuzz` package provides `native_v17` for the current
+container, directory, CKPT removal/re-encode path and `native_core_v17` for staged Core
 journal/checkpoint/full-replay, retention, and compaction-plan parsing; both call
 public production entrypoints.

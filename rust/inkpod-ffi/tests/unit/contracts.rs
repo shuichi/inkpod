@@ -2891,6 +2891,207 @@ fn ffi_contract_vector_diagnostics_are_bounded_and_reject_invalid_input() {
 }
 
 #[test]
+fn ffi_contract_geometry_preview_copies_bounded_points_and_rejects_invalid_records() {
+    let (mut core, initial) = create_core(32, 32, 29);
+    let vector_name = b"Geometry vector";
+    let create_vector = InkpodTreeEdit {
+        struct_size: size_of::<InkpodTreeEdit>() as u32,
+        operation: INKPOD_TREE_CREATE_LAYER,
+        flags: 0,
+        object_id: 0,
+        parent_id: 0,
+        destination_index: 0,
+        kind: INKPOD_LAYER_VECTOR_COLORING,
+        pixel_format: 0,
+        opacity_milli: 0,
+        name_utf8: vector_name.as_ptr(),
+        name_bytes: vector_name.len() as u64,
+    };
+    let mut result = dispatch();
+    // SAFETY: Every record and borrowed span is complete and live for its call.
+    unsafe {
+        let mut vector_layer_id = 0;
+        assert_eq!(
+            inkpod_core_tree_edit(core, &create_vector, &mut result, &mut vector_layer_id),
+            INKPOD_STATUS_OK
+        );
+        let mut node = InkpodNodeInfo {
+            struct_size: size_of::<InkpodNodeInfo>() as u32,
+            ..InkpodNodeInfo::default()
+        };
+        let mut layer_index = None;
+        for index in 0..2 {
+            if inkpod_core_node_get(core, index, u32::MAX, &mut node) == INKPOD_STATUS_OK
+                && node.id == vector_layer_id
+            {
+                layer_index = Some(index);
+            }
+        }
+        assert_eq!(
+            inkpod_core_node_get(core, layer_index.unwrap(), 0, &mut node),
+            INKPOD_STATUS_OK
+        );
+        let plane_id = node.id;
+        let base = queried_document_info(core).document_revision;
+        assert!(base > initial.document_revision);
+        let points = [
+            InkpodGeometryPoint {
+                struct_size: size_of::<InkpodGeometryPoint>() as u32,
+                reserved: 0,
+                x: 4.0,
+                y: 5.0,
+            },
+            InkpodGeometryPoint {
+                struct_size: size_of::<InkpodGeometryPoint>() as u32,
+                reserved: 0,
+                x: 20.0,
+                y: 18.0,
+            },
+        ];
+        let input = InkpodGeometryInput {
+            struct_size: size_of::<InkpodGeometryInput>() as u32,
+            primitive: INKPOD_GEOMETRY_RECTANGLE,
+            feature_flags: INKPOD_GEOMETRY_OUTLINE
+                | INKPOD_GEOMETRY_FILL
+                | INKPOD_GEOMETRY_SQUARE_CROSS_SECTION,
+            plane_id,
+            base_revision: base,
+            outline_color: color(1, 2, 3, 255),
+            fill_color: color(80, 90, 100, 255),
+            outline_width: 2.0,
+            aspect_ratio_q16: 0,
+            polygon_sides: 5,
+            rotation_turns: 0,
+            points: points.as_ptr(),
+            point_count: points.len() as u64,
+            point_stride_bytes: size_of::<InkpodGeometryPoint>() as u64,
+        };
+        let mut preview = InkpodGeometryPreviewInfo {
+            struct_size: size_of::<InkpodGeometryPreviewInfo>() as u32,
+            reserved: 0,
+            plane_id: 0,
+            base_revision: 0,
+            preview_revision: 0,
+        };
+
+        let mut stale = input;
+        stale.base_revision -= 1;
+        assert_eq!(
+            inkpod_core_geometry_preview_begin(core, &stale, &mut preview),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        let mut invalid_points = points;
+        invalid_points[0].struct_size -= 4;
+        let mut short_point = input;
+        short_point.points = invalid_points.as_ptr();
+        assert_eq!(
+            inkpod_core_geometry_preview_begin(core, &short_point, &mut preview),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        let mut invalid = input;
+        invalid.feature_flags |= 1_u64 << 63;
+        assert_eq!(
+            inkpod_core_geometry_preview_begin(core, &invalid, &mut preview),
+            INKPOD_STATUS_UNSUPPORTED
+        );
+        invalid = input;
+        invalid.point_stride_bytes -= 1;
+        assert_eq!(
+            inkpod_core_geometry_preview_begin(core, &invalid, &mut preview),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+
+        assert_eq!(
+            inkpod_core_geometry_preview_begin(core, &input, &mut preview),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(preview.base_revision, base);
+        assert!(preview.preview_revision >= 1_u64 << 63);
+        assert_eq!(queried_document_info(core).document_revision, base);
+        invalid = input;
+        invalid.primitive = INKPOD_GEOMETRY_ELLIPSE;
+        assert_eq!(
+            inkpod_core_geometry_preview_update(core, &invalid, &mut preview),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_geometry_preview_update(core, &input, &mut preview),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_geometry_preview_cancel(core), INKPOD_STATUS_OK);
+        assert_eq!(queried_document_info(core).document_revision, base);
+
+        assert_eq!(
+            inkpod_core_geometry_preview_begin(core, &input, &mut preview),
+            INKPOD_STATUS_OK
+        );
+        let mut path_id = 0;
+        let mut fill_id = 0;
+        assert_eq!(
+            inkpod_core_geometry_preview_commit(core, &mut result, &mut path_id, &mut fill_id,),
+            INKPOD_STATUS_OK
+        );
+        assert_ne!(path_id, 0);
+        assert_ne!(fill_id, 0);
+        assert_eq!(queried_document_info(core).document_revision, base + 1);
+        let snapshot_options = InkpodSnapshotOptions {
+            struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+            reserved: 0,
+            feature_flags: 0,
+        };
+        let mut snapshot = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_build_snapshot(core, &snapshot_options, &mut snapshot),
+            INKPOD_STATUS_OK
+        );
+        let mut vectors = InkpodSnapshotVectorView {
+            struct_size: size_of::<InkpodSnapshotVectorView>() as u32,
+            abi_version: 0,
+            feature_flags: 0,
+            segments: ptr::null(),
+            segment_count: 0,
+            segment_stride_bytes: 0,
+            fills: ptr::null(),
+            fill_count: 0,
+            fill_stride_bytes: 0,
+            boundary_path_ids: ptr::null(),
+            boundary_path_count: 0,
+        };
+        assert_eq!(
+            inkpod_snapshot_get_vectors(snapshot, &mut vectors),
+            INKPOD_STATUS_OK
+        );
+        let segments = std::slice::from_raw_parts(vectors.segments, vectors.segment_count as usize);
+        let path_segments = segments
+            .iter()
+            .filter(|segment| segment.path_id == path_id)
+            .collect::<Vec<_>>();
+        assert!(!path_segments.is_empty());
+        assert!(
+            path_segments.iter().all(|segment| {
+                segment.flags & INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION != 0
+            })
+        );
+        assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_geometry_preview_cancel(core),
+            INKPOD_STATUS_INVALID_STATE
+        );
+
+        let mut one_shot = input;
+        one_shot.base_revision = base + 1;
+        path_id = 99;
+        fill_id = 99;
+        assert_eq!(
+            inkpod_core_geometry_apply(core, &one_shot, &mut result, &mut path_id, &mut fill_id,),
+            INKPOD_STATUS_UNSUPPORTED
+        );
+        assert_eq!((path_id, fill_id), (0, 0));
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn ffi_contract_vector_filter_and_task_state_machines() {
     let (mut core, info) = create_core(8, 8, 5);
     let vector_name = b"Contract vector";
@@ -3168,8 +3369,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 13);
-        assert_eq!(contract.procedure_format_version, 16);
+        assert_eq!(contract.replay_epoch, 14);
+        assert_eq!(contract.procedure_format_version, 17);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);

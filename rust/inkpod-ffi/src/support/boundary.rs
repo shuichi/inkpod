@@ -46,6 +46,10 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
                 INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE
             } else {
                 0
+            } | if segment.square_cross_section {
+                INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION
+            } else {
+                0
             },
             path_id: segment.path_id,
             plane_id: segment.plane_id,

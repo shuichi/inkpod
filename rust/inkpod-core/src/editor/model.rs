@@ -126,10 +126,12 @@ pub enum EditorTool {
     VectorPolyline = 1_205,
     /// Vector eraser command.
     VectorEraser = 1_206,
+    /// Regular polygon geometry command.
+    VectorPolygon = 1_207,
 }
 
 impl EditorTool {
-    pub(crate) const ALL: [Self; 23] = [
+    pub(crate) const ALL: [Self; 24] = [
         Self::Pencil,
         Self::Brush,
         Self::Eraser,
@@ -153,6 +155,7 @@ impl EditorTool {
         Self::VectorEllipse,
         Self::VectorPolyline,
         Self::VectorEraser,
+        Self::VectorPolygon,
     ];
 
     pub(crate) const fn consumes_color(self) -> bool {
@@ -169,6 +172,7 @@ impl EditorTool {
                 | Self::VectorRectangle
                 | Self::VectorEllipse
                 | Self::VectorPolyline
+                | Self::VectorPolygon
         )
     }
 

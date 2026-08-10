@@ -86,6 +86,9 @@ static_assert(sizeof(InkpodSequenceThumbnailBuffer) == 56U);
 static_assert(sizeof(InkpodMotionCheckInput) == 16U);
 static_assert(sizeof(InkpodMotionFrame) == 40U);
 static_assert(sizeof(InkpodVectorPoint) == 8U);
+static_assert(sizeof(InkpodGeometryPoint) == 16U);
+static_assert(sizeof(InkpodGeometryInput) == 104U);
+static_assert(sizeof(InkpodGeometryPreviewInfo) == 32U);
 static_assert(sizeof(InkpodVectorCubicSegment) == 48U);
 static_assert(sizeof(InkpodVectorPathInput) == 64U);
 static_assert(sizeof(InkpodVectorFillInput) == 56U);
@@ -162,8 +165,8 @@ int InkpodRunAbiSmoke() {
     InkpodReplayContract replay_contract{};
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 13U
-        || replay_contract.procedure_format_version != 16U
+        || replay_contract.replay_epoch != 14U
+        || replay_contract.procedure_format_version != 17U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -317,7 +320,7 @@ int InkpodRunAbiSmoke() {
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 16U
+        || persistence.format_version != 17U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE

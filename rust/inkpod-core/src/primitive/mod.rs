@@ -22,7 +22,7 @@ pub(crate) use invocation::{CanonicalInvocation, InvocationResult, RuntimeInvoca
 use model::CanonicalPrimitive;
 pub(crate) use model::CanonicalStrokeArguments;
 pub(crate) use raster::{
-    RasterStrokePreview, begin_preview as begin_stroke_preview,
+    RasterStrokePreview, apply as apply_raster_stroke, begin_preview as begin_stroke_preview,
     canonicalize as canonicalize_stroke, canonicalize_exact as canonicalize_exact_stroke,
     validate_public_stroke as validate_stroke_request,
 };

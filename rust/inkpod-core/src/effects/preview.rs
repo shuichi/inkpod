@@ -50,6 +50,7 @@ impl Core {
         )?;
         self.filter_preview = Some(FilterPreview {
             plane_id,
+            base_revision,
             base_document,
             preview_document,
             procedure: PreviewProcedure::Filter(filter),
@@ -80,10 +81,17 @@ impl Core {
     ) -> Result<FilterPreviewInfo, CoreError> {
         let plane_id = PlaneId::from_raw(plane_id);
         let base_revision = self.document_revision;
-        let (active_plane_id, base_document) = self
+        let (active_plane_id, active_base_revision, base_document) = self
             .filter_preview
             .as_ref()
-            .map(|preview| (preview.plane_id, preview.base_document.clone()))
+            .filter(|preview| !matches!(&preview.procedure, PreviewProcedure::Geometry(_)))
+            .map(|preview| {
+                (
+                    preview.plane_id,
+                    preview.base_revision,
+                    preview.base_document.clone(),
+                )
+            })
             .ok_or(CoreError::InvalidState("there is no active filter preview"))?;
         if plane_id != active_plane_id {
             return Err(CoreError::InvalidArgument(
@@ -98,7 +106,7 @@ impl Core {
             RenderRevision::from_raw(preview_revision.get()),
             &mut progress,
         )?;
-        if self.document_revision != base_revision {
+        if self.document_revision != base_revision || base_revision != active_base_revision {
             return Err(CoreError::InvalidState(
                 "filter preview base revision became stale",
             ));
@@ -111,6 +119,7 @@ impl Core {
         )?;
         self.filter_preview = Some(FilterPreview {
             plane_id,
+            base_revision,
             base_document,
             preview_document,
             procedure: PreviewProcedure::Filter(filter),
@@ -124,6 +133,13 @@ impl Core {
     ///
     /// Document revision, history, dirty state, and savepoint are unchanged.
     pub fn cancel_filter_preview(&mut self) -> Result<FilterPreviewInfo, CoreError> {
+        if self
+            .filter_preview
+            .as_ref()
+            .is_some_and(|preview| matches!(&preview.procedure, PreviewProcedure::Geometry(_)))
+        {
+            return Err(CoreError::InvalidState("there is no active filter preview"));
+        }
         let preview = self
             .filter_preview
             .take()
@@ -165,6 +181,9 @@ impl Core {
                         shape: shape.clone(),
                         options: *options,
                     }
+                }
+                PreviewProcedure::Geometry(_) => {
+                    return Err(CoreError::InvalidState("there is no active filter preview"));
                 }
             };
             return self

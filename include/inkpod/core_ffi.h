@@ -161,6 +161,7 @@ typedef uint32_t InkpodEditorTool;
 #define INKPOD_EDITOR_TOOL_VECTOR_ELLIPSE UINT32_C(1204)
 #define INKPOD_EDITOR_TOOL_VECTOR_POLYLINE UINT32_C(1205)
 #define INKPOD_EDITOR_TOOL_VECTOR_ERASER UINT32_C(1206)
+#define INKPOD_EDITOR_TOOL_VECTOR_POLYGON UINT32_C(1207)
 
 #define INKPOD_EDITOR_STATE_DIRTY (UINT32_C(1) << 0)
 #define INKPOD_EDITOR_STATE_HAS_LAST_COLOR_TOOL (UINT32_C(1) << 1)
@@ -369,6 +370,25 @@ typedef uint32_t InkpodVectorSelectionMode;
 #define INKPOD_VECTOR_RASTERIZE_ANTIALIAS (UINT64_C(1) << 0)
 #define INKPOD_SNAPSHOT_VECTOR_CLOSED (UINT32_C(1) << 0)
 #define INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE (UINT32_C(1) << 1)
+#define INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION (UINT32_C(1) << 2)
+
+/** @brief Core-owned geometry primitive discriminator. */
+typedef uint32_t InkpodGeometryPrimitive;
+#define INKPOD_GEOMETRY_LINE UINT32_C(1)
+#define INKPOD_GEOMETRY_CURVE UINT32_C(2)
+#define INKPOD_GEOMETRY_RECTANGLE UINT32_C(3)
+#define INKPOD_GEOMETRY_ELLIPSE UINT32_C(4)
+#define INKPOD_GEOMETRY_POLYGON UINT32_C(5)
+#define INKPOD_GEOMETRY_POLYLINE UINT32_C(6)
+#define INKPOD_GEOMETRY_OUTLINE (UINT64_C(1) << 0)
+#define INKPOD_GEOMETRY_FILL (UINT64_C(1) << 1)
+#define INKPOD_GEOMETRY_CLOSE_PATH (UINT64_C(1) << 2)
+#define INKPOD_GEOMETRY_BEZIER_SEGMENTS (UINT64_C(1) << 3)
+#define INKPOD_GEOMETRY_CONSTRAIN_45_DEGREES (UINT64_C(1) << 4)
+#define INKPOD_GEOMETRY_FROM_CENTER (UINT64_C(1) << 5)
+#define INKPOD_GEOMETRY_TAPER_START (UINT64_C(1) << 6)
+#define INKPOD_GEOMETRY_TAPER_END (UINT64_C(1) << 7)
+#define INKPOD_GEOMETRY_SQUARE_CROSS_SECTION (UINT64_C(1) << 8)
 
 /** @brief Semantic operation in an ordered immutable snapshot render plan. */
 typedef uint32_t InkpodRenderPassKind;
@@ -1378,6 +1398,41 @@ typedef struct InkpodVectorPoint {
     float x;
     float y;
 } InkpodVectorPoint;
+
+/** @brief One size-versioned document-space point in a borrowed geometry span. */
+typedef struct InkpodGeometryPoint {
+    uint32_t struct_size;
+    uint32_t reserved;
+    float x;
+    float y;
+} InkpodGeometryPoint;
+
+/** @brief Bounded raster/vector geometry request copied by Core before return. */
+typedef struct InkpodGeometryInput {
+    uint32_t struct_size;
+    InkpodGeometryPrimitive primitive;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    uint64_t base_revision;
+    InkpodColorValue outline_color;
+    InkpodColorValue fill_color;
+    float outline_width;
+    uint32_t aspect_ratio_q16;
+    uint32_t polygon_sides;
+    uint32_t rotation_turns;
+    const InkpodGeometryPoint* points;
+    uint64_t point_count;
+    uint64_t point_stride_bytes;
+} InkpodGeometryInput;
+
+/** @brief Immutable-base state returned for a live geometry preview. */
+typedef struct InkpodGeometryPreviewInfo {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t plane_id;
+    uint64_t base_revision;
+    uint64_t preview_revision;
+} InkpodGeometryPreviewInfo;
 
 /** @brief cubic control points と両端線幅を持つ borrowed vector segment record。 */
 typedef struct InkpodVectorCubicSegment {
@@ -4123,6 +4178,37 @@ InkpodStatus inkpod_core_subpalette_build_snapshot(
     uint64_t view_id,
     const InkpodSnapshotOptions* options,
     InkpodSnapshot** out_snapshot);
+
+/**
+ * @brief Apply one bounded Core-owned geometry request as one history unit.
+ *
+ * `base_revision` must be zero. The point span is copied during the call and is
+ * never retained. Vector targets return stable IDs; raster targets return zero.
+ */
+InkpodStatus inkpod_core_geometry_apply(
+    InkpodCore* core,
+    const InkpodGeometryInput* input,
+    InkpodDispatchResult* result,
+    uint64_t* out_path_id,
+    uint64_t* out_fill_id);
+/** @brief Begin a non-persistent geometry preview at `base_revision`. */
+InkpodStatus inkpod_core_geometry_preview_begin(
+    InkpodCore* core,
+    const InkpodGeometryInput* input,
+    InkpodGeometryPreviewInfo* out_info);
+/** @brief Rebuild the active preview from the same target, primitive, and base. */
+InkpodStatus inkpod_core_geometry_preview_update(
+    InkpodCore* core,
+    const InkpodGeometryInput* input,
+    InkpodGeometryPreviewInfo* out_info);
+/** @brief Commit the active preview through the canonical geometry executor. */
+InkpodStatus inkpod_core_geometry_preview_commit(
+    InkpodCore* core,
+    InkpodDispatchResult* result,
+    uint64_t* out_path_id,
+    uint64_t* out_fill_id);
+/** @brief Cancel the active preview without changing document or history state. */
+InkpodStatus inkpod_core_geometry_preview_cancel(InkpodCore* core);
 
 /**
  * @brief cubic segment span から document-coordinate vector path を追加する。

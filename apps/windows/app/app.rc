@@ -310,7 +310,9 @@ BEGIN
             MENUITEM "長方形", IDM_VECTOR_RECTANGLE
             MENUITEM "楕円", IDM_VECTOR_ELLIPSE
             MENUITEM "折れ線", IDM_VECTOR_POLYLINE
+            MENUITEM "正多角形", IDM_VECTOR_POLYGON
             MENUITEM "ベクター消しゴム", IDM_VECTOR_ERASER
+            MENUITEM "図形オプション...", IDM_GEOMETRY_OPTIONS
         END
         POPUP "ベクター消去モード"
         BEGIN

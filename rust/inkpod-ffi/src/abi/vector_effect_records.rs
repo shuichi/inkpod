@@ -9,6 +9,44 @@ pub struct InkpodVectorPoint {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct InkpodGeometryPoint {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodGeometryInput {
+    pub struct_size: u32,
+    pub primitive: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub base_revision: u64,
+    pub outline_color: InkpodColorValue,
+    pub fill_color: InkpodColorValue,
+    pub outline_width: f32,
+    pub aspect_ratio_q16: u32,
+    pub polygon_sides: u32,
+    pub rotation_turns: u32,
+    pub points: *const InkpodGeometryPoint,
+    pub point_count: u64,
+    pub point_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodGeometryPreviewInfo {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub plane_id: u64,
+    pub base_revision: u64,
+    pub preview_revision: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct InkpodVectorCubicSegment {
     pub struct_size: u32,
     pub reserved: u32,

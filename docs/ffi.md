@@ -96,7 +96,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 コピーされる。NULL、短いレコード、パニックでは通常の ABI ステータス契約に従い、出力を部分更新しない。
 スレッド違反が成立するのは Core 所有スレッド専用のリプレイ契約照会だけであり、スナップショットの
 ダイジェスト照会は、外部同期された任意の読み取りスレッドから呼び出せる。これらは検証値を公開するだけで、
-製品の保存／オープン API は同じ v16 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
+製品の保存／オープン API は同じ v17 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
 現行 ABI v9 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
@@ -108,7 +108,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 ジャーナルの正確なダイジェストを返す。UI は履歴件数を表示して確認を得た後、そのレコードを変更せずに
 `inkpod_core_write_compacted_copy` へ渡す。書き込み時に確認トークンが古ければ `INVALID_STATE`、
 トークンのフラグまたは予約領域が 0 でなければ `UNSUPPORTED` になる。成功時は、現在状態を新しい Genesis
-とする別の v16 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
+とする別の v17 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
 `CoreHost` は三つの操作すべてを Core エンジンキュー経由で実行する。自動的な履歴圧縮は行わず、`CKPT` は
 履歴やアセット保持の正本ではない。Windows では `ファイル > 履歴を破棄してコピー...` として公開し、
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
@@ -390,6 +390,39 @@ unknown view-command flags or centerline values, invalid endpoint kinds,
 excess counts/strides, and inconsistent flag combinations are rejected before
 retention. The additive export and view commands retain ABI v9.
 
+### Geometry construction preview
+
+`inkpod_core_geometry_apply` and
+`inkpod_core_geometry_preview_begin/update/commit/cancel` expose one Core-owned
+raster/vector geometry state machine on the Core owner thread.
+`InkpodGeometryInput` carries a stable Plane ID, primitive, option flags,
+native-depth outline/fill colors, width, aspect, polygon side count, rotation in
+turns, and a caller-owned strided span of at most 256 `InkpodGeometryPoint`
+records. Core copies every point during the call and retains no input record,
+point pointer, Windows command ID, device coordinate, or DPI value. Each point
+record requires its complete `struct_size`, zero reserved field, and finite
+document coordinates.
+
+One-shot apply accepts only `base_revision = 0`. Preview begin/update require
+the exact current document revision, and update cannot change the target Plane
+or primitive captured by begin. The Core handle owns at most one preview and
+rebuilds every update from the same committed base. `InkpodGeometryPreviewInfo`
+is a caller-owned value record with no release function. Cancel changes no
+committed document/history/dirty/ID state. Commit executes the same
+`ApplyGeometry` canonical primitive once and creates one Undo unit. The
+caller-owned `out_path_id` and `out_fill_id` receive stable IDs only for the
+corresponding vector objects; raster and absent fill return zero. Failure
+zeroes both outputs.
+
+NULL, misalignment, short outer or nested records, zero/oversized counts,
+invalid stride, unknown primitive/flag, nonzero reserved fields, stale base,
+cross-target update, and point/work overflow are rejected without partial
+preview or committed publication. Preview snapshots follow the normal
+Rust-owned snapshot lifetime. Geometry-created vector segments use flag bit 2,
+`INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION`, for square caps; other unknown
+segment flag bits remain invalid. These are additive ABI v9 exports and do not
+make an older ABI version acceptable.
+
 解放後は、ハンドルから得たタイル、ピクセル、ガイド、ベクター、文字列、バイト列と、コピーしておいた
 別名ポインターを一切使わない。Rust が確保したオブジェクトを `free`、`delete`、`CoTaskMemFree` で解放しない。
 
@@ -667,10 +700,10 @@ Core はセッションを無効化するため、フロントエンドはスト
 | ストローク終了、プレビュー適用、浮動状態の確定                 | 実変更時に 1 回進む  | 未保存                            | 高々 1 単位                       |
 | 直接の文書編集                                                | 実変更時に 1 回進む  | 未保存                            | 原則 1 単位                       |
 | Undo／Redo／履歴位置の移動                                    | 結果状態へ進む       | 保存点との位置で再計算            | カーソルを移動し項目は増やさない  |
-| 現行 v16 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
+| 現行 v17 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
 | 自動保存                                                      | 不変                 | 不変                              | 不変                              |
 | 新規作成／インポート                                          | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis／履歴              |
-| v16 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
+| v17 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
 
 意味上の変更がない場合の厳密な出力やリビジョンは、各関数の Doxygen 契約に従う。フロントエンドはファイル時刻ではなく、
 Core が返す文書フラグと保存点に基づいて未保存状態を表示する。
@@ -786,7 +819,7 @@ UI スレッド:                 照会／照会／キャンセル
 
 ## 保存、自動保存、復旧
 
-通常保存では、v16 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
+通常保存では、v17 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
 セクション、チェックポイントの作成条件を満たす場合だけ任意の `CKPT` を構築する。保存後に設定予定の
 文書／EditorState 保存点を含むコンテナは、同じディレクトリの一時ファイルへ複数回に分けて書き込む。
 フラッシュ、同期、クローズを終えてから置換する。成功後だけ通常保存パスと両保存点を Core へ公開するため、
@@ -795,7 +828,7 @@ EditorState だけが
 どちらの保存点も変更しない。
 
 自動保存とエクスポートは、出力を原子的に書いても通常保存パス、文書／EditorState 保存点、未保存状態を
-変えない。通常の v16 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
+変えない。通常の v17 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
 ID 発行状態、EditorState、両保存点を、段階的に構築した Core で検証・復元してから、現在の Core 状態を
 一回だけ置換する。`InkpodCore` の `_v3` 付きオブジェクトレジストリの世代自体は、オープンで更新されない。
 

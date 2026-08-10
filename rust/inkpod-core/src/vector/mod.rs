@@ -38,6 +38,10 @@ mod vectorization;
 pub(crate) use color_replace::{
     apply_scoped_vector_color_replace, scoped_vector_color_replace_matches,
 };
+pub(crate) use geometry::{
+    ensure_vector_stroke_plane, geometry_fill_plane_for_stroke, stage_geometry_fill,
+    stage_geometry_path,
+};
 pub(crate) use model::VectorState;
 pub use model::{
     RenderVectorEndpoint, RenderVectorFill, RenderVectorSegment, VectorCubicSegment,

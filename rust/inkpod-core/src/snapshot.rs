@@ -354,7 +354,11 @@ impl RenderSnapshot {
             hasher.update(&segment.segment_index.to_le_bytes());
             hasher.update(&segment.segment_count.to_le_bytes());
             hasher.update(&segment.color_rgba);
-            hasher.update(&[u8::from(segment.closed), u8::from(segment.stroke_visible)]);
+            hasher.update(&[
+                u8::from(segment.closed),
+                u8::from(segment.square_cross_section),
+                u8::from(segment.stroke_visible),
+            ]);
             for value in [
                 segment.cubic.p0.x,
                 segment.cubic.p0.y,

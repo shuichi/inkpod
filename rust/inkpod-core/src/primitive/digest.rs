@@ -495,6 +495,7 @@ fn canonical_vector_path(path: &inkpod_format::FileVectorPath) -> Result<Vec<u8>
         present(path.plane_id.to_le_bytes()),
         present(color_bytes(path.color)?),
         present(boolean_bytes(path.closed)),
+        present(boolean_bytes(path.square_cross_section)),
         present(sequence(segments.iter().map(Vec::as_slice))?),
     ])
 }

@@ -265,6 +265,7 @@ fn vector_fixture() -> DocumentArchive {
             plane_id: 9,
             color: PixelValue::Rgba16([1, 2, 3, 65_535]),
             closed: true,
+            square_cross_section: false,
             segments: corners
                 .windows(2)
                 .map(|pair| line(pair[0], pair[1]))
@@ -318,6 +319,7 @@ fn pm_gap_018_vector_connections_round_trip_and_reject_invalid_topology() {
                 plane_id: 9,
                 color: PixelValue::Rgba([0, 0, 0, 255]),
                 closed: false,
+                square_cross_section: false,
                 segments: vec![segment(1_000, 8_000)],
             },
             FileVectorPath {
@@ -325,6 +327,7 @@ fn pm_gap_018_vector_connections_round_trip_and_reject_invalid_topology() {
                 plane_id: 9,
                 color: PixelValue::Rgba([0, 0, 0, 255]),
                 closed: false,
+                square_cross_section: false,
                 segments: vec![segment(8_000, 16_000)],
             },
         ],
@@ -423,7 +426,7 @@ fn procedure_file_fixture() -> NativeFile {
 }
 
 #[test]
-fn io_001_v16_directory_digest_and_opaque_sections_round_trip() {
+fn io_001_v17_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
@@ -453,14 +456,14 @@ fn io_001_v16_directory_digest_and_opaque_sections_round_trip() {
 }
 
 #[test]
-fn io_001_v16_accepts_checkpoint_and_rejects_v15_missing_duplicate_overlap_and_bad_digest() {
+fn io_001_v17_accepts_checkpoint_and_rejects_v16_missing_duplicate_overlap_and_bad_digest() {
     let file = procedure_file_fixture();
     let encoded = encode_procedure_file(&file).unwrap();
 
-    let mut v15 = encoded.clone();
-    v15[8..12].copy_from_slice(&15_u32.to_le_bytes());
+    let mut v16 = encoded.clone();
+    v16[8..12].copy_from_slice(&16_u32.to_le_bytes());
     assert!(matches!(
-        decode_procedure_file(&v15),
+        decode_procedure_file(&v16),
         Err(FormatError::Unsupported("format version is not supported"))
     ));
 
@@ -516,9 +519,9 @@ fn io_001_v16_accepts_checkpoint_and_rejects_v15_missing_duplicate_overlap_and_b
 }
 
 #[test]
-fn io_001_v16_streaming_cancel_keeps_existing_destination_and_removes_temp() {
+fn io_001_v17_streaming_cancel_keeps_existing_destination_and_removes_temp() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v16-cancel-test-{}-{}",
+        "inkpod-v17-cancel-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -545,9 +548,9 @@ fn io_001_v16_streaming_cancel_keeps_existing_destination_and_removes_temp() {
 }
 
 #[test]
-fn io_001_v16_atomic_save_replaces_an_existing_container() {
+fn io_001_v17_atomic_save_replaces_an_existing_container() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v16-replace-test-{}-{}",
+        "inkpod-v17-replace-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));

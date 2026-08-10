@@ -27,6 +27,7 @@ fn editor_tool(code: u32) -> Result<EditorTool, u32> {
         1_204 => EditorTool::VectorEllipse,
         1_205 => EditorTool::VectorPolyline,
         1_206 => EditorTool::VectorEraser,
+        1_207 => EditorTool::VectorPolygon,
         _ => {
             return Err(fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,

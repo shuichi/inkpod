@@ -1,7 +1,7 @@
 use super::model::*;
 use super::*;
 
-pub(super) fn fixed_path(
+pub(crate) fn fixed_path(
     id: VectorPathId,
     plane_id: PlaneId,
     input: VectorPathInput,
@@ -44,6 +44,7 @@ pub(super) fn fixed_path(
         plane_id,
         color: input.color,
         closed: input.closed,
+        square_cross_section: false,
         segments,
     })
 }
@@ -79,7 +80,7 @@ pub(super) fn fixed_width(width: f32) -> Result<u32, CoreError> {
     Ok(fixed)
 }
 
-pub(super) fn ensure_vector_stroke_plane(
+pub(crate) fn ensure_vector_stroke_plane(
     document: &CellDocument,
     plane_id: PlaneId,
     editable: bool,
@@ -111,7 +112,7 @@ pub(super) fn ensure_vector_stroke_plane(
     Ok(layer_id)
 }
 
-pub(super) fn ensure_vector_fill_plane(
+pub(crate) fn ensure_vector_fill_plane(
     document: &CellDocument,
     plane_id: PlaneId,
     editable: bool,
@@ -140,6 +141,67 @@ pub(super) fn ensure_vector_fill_plane(
     Ok(layer_id)
 }
 
+pub(crate) fn geometry_fill_plane_for_stroke(
+    document: &CellDocument,
+    stroke_plane_id: PlaneId,
+) -> Result<PlaneId, CoreError> {
+    let layer_id = ensure_vector_stroke_plane(document, stroke_plane_id, true)?;
+    let layer = document
+        .layers
+        .iter()
+        .find(|layer| layer.id == layer_id)
+        .expect("validated vector layer exists");
+    let fill = layer
+        .planes
+        .iter()
+        .find(|plane| plane.kind == PlaneType::VectorFill)
+        .ok_or(CoreError::InvalidState("vector layer has no fill plane"))?;
+    if !fill.editable {
+        return Err(CoreError::InvalidState(
+            "vector fill destination is not editable",
+        ));
+    }
+    Ok(fill.id)
+}
+
+pub(crate) fn stage_geometry_path(
+    document: &mut CellDocument,
+    path_id: VectorPathId,
+    plane_id: PlaneId,
+    input: VectorPathInput,
+    square_cross_section: bool,
+) -> Result<(), CoreError> {
+    ensure_vector_stroke_plane(document, plane_id, true)?;
+    document
+        .vector
+        .ensure_additional_limits(1, 0, input.segments.len(), 0)?;
+    let mut path = fixed_path(path_id, plane_id, input)?;
+    path.square_cross_section = square_cross_section;
+    document.vector.paths.push(path);
+    Ok(())
+}
+
+pub(crate) fn stage_geometry_fill(
+    document: &mut CellDocument,
+    fill_id: VectorFillId,
+    plane_id: PlaneId,
+    boundary_path_id: VectorPathId,
+    color: PixelValue,
+) -> Result<(), CoreError> {
+    ensure_vector_fill_plane(document, plane_id, true)?;
+    if color.rgba16().is_none() {
+        return Err(CoreError::InvalidArgument("vector fill color must be RGBA"));
+    }
+    document.vector.ensure_additional_limits(0, 1, 0, 1)?;
+    document.vector.fills.push(VectorFill {
+        id: fill_id,
+        plane_id,
+        color,
+        boundary_path_ids: vec![boundary_path_id],
+    });
+    Ok(())
+}
+
 pub(super) fn vector_layer_for_plane(
     document: &CellDocument,
     plane_id: PlaneId,
@@ -162,6 +224,7 @@ pub(super) fn path_info(path: &VectorPath) -> VectorPathInfo {
         segments: path.segments.iter().copied().map(public_segment).collect(),
         color: path.color,
         closed: path.closed,
+        square_cross_section: path.square_cross_section,
     }
 }
 
@@ -366,6 +429,7 @@ pub(super) fn subpath(path: &VectorPath, start: f64, end: f64) -> Option<VectorP
         plane_id: path.plane_id,
         color: path.color,
         closed: false,
+        square_cross_section: path.square_cross_section,
         segments,
     })
 }

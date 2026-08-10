@@ -14,11 +14,12 @@ mod document_selection;
 mod editor_state;
 mod effects;
 mod foundation;
+mod geometry;
 mod history_stroke;
 mod mixed_order;
 mod multi_target;
 #[path = "native_v9.rs"]
-mod native_v16;
+mod native_v17;
 mod primitive_kernel;
 mod procedure_journal;
 mod state_machine;

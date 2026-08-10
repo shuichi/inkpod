@@ -429,8 +429,9 @@ void ProvideToolCommandStates(
          IDM_VECTOR_RECTANGLE,
          IDM_VECTOR_ELLIPSE,
          IDM_VECTOR_POLYLINE,
-         IDM_VECTOR_ERASER},
-        input.tool.vector_stroke_plane);
+         IDM_VECTOR_POLYGON},
+        input.tool.geometry_drawable_plane);
+    SetEnabled(states, IDM_VECTOR_ERASER, input.tool.vector_stroke_plane);
     SetUnchecked(
         states,
         {IDM_VECTOR_LINE,
@@ -438,6 +439,7 @@ void ProvideToolCommandStates(
          IDM_VECTOR_RECTANGLE,
          IDM_VECTOR_ELLIPSE,
          IDM_VECTOR_POLYLINE,
+         IDM_VECTOR_POLYGON,
          IDM_VECTOR_ERASER});
     const UINT vector_command = input.tool.active_tool == tools::kInteractionVectorLine
         ? IDM_VECTOR_LINE
@@ -450,10 +452,19 @@ void ProvideToolCommandStates(
                                       : (input.tool.active_tool
                                                     == tools::kInteractionVectorPolyline
                                                 ? IDM_VECTOR_POLYLINE
-                                                : IDM_VECTOR_ERASER))));
+                                                : (input.tool.active_tool
+                                                              == tools::kInteractionVectorPolygon
+                                                      ? IDM_VECTOR_POLYGON
+                                                      : IDM_VECTOR_ERASER)))));
     if (tools::IsVectorCanvasTool(input.tool.active_tool)) {
         SetChecked(states, vector_command, true);
     }
+    SetEnabled(
+        states,
+        IDM_GEOMETRY_OPTIONS,
+        input.tool.geometry_drawable_plane
+            && tools::IsVectorCanvasTool(input.tool.active_tool)
+            && input.tool.active_tool != tools::kInteractionVectorEraser);
 
     SetUnchecked(
         states,

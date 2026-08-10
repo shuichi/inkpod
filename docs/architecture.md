@@ -205,7 +205,7 @@ asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
 maximum-close frames change canonical document-state bytes, so the document-state
 commitment is schema/domain 5. The current
-replay contract is epoch 13 and native format version 16 for canonical fixed-
+replay contract is epoch 14 and native format version 17 for canonical fixed-
 point/image-result semantics.
 The numeric audit, prohibited platform-math list, public golden fixture, and
 benchmark gate are specified in [`determinism.md`](determinism.md).

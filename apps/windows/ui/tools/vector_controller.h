@@ -15,6 +15,14 @@ class VectorController final {
 public:
     explicit VectorController(app::CoreHost& engine) noexcept;
 
+    InkpodStatus BeginGeometry(
+        const InkpodGeometryInput& input,
+        InkpodGeometryPreviewInfo& info) noexcept;
+    InkpodStatus UpdateGeometry(
+        const InkpodGeometryInput& input,
+        InkpodGeometryPreviewInfo& info) noexcept;
+    InkpodStatus CommitGeometry() noexcept;
+    InkpodStatus CancelGeometry() noexcept;
     InkpodStatus AddPath(const InkpodVectorPathInput& input) noexcept;
     InkpodStatus Erase(const InkpodVectorEraseInput& input) noexcept;
     InkpodStatus Select(

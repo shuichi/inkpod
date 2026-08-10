@@ -37,6 +37,7 @@ pub struct FileVectorPath {
     pub plane_id: u64,
     pub color: PixelValue,
     pub closed: bool,
+    pub square_cross_section: bool,
     pub segments: Vec<FileVectorSegment>,
 }
 
@@ -83,7 +84,10 @@ pub(super) fn encode_vector_metadata(
     for path in &metadata.paths {
         push_u64(&mut output, path.id);
         push_u64(&mut output, path.plane_id);
-        push_u32(&mut output, u32::from(path.closed));
+        push_u32(
+            &mut output,
+            u32::from(path.closed) | (u32::from(path.square_cross_section) << 1),
+        );
         push_u32(&mut output, path.segments.len() as u32);
         push_color_value(&mut output, path.color)?;
         for segment in &path.segments {
@@ -146,7 +150,7 @@ pub(super) fn decode_vector_metadata(bytes: &[u8]) -> Result<FileVectorMetadata,
         let id = reader.u64()?;
         let plane_id = reader.u64()?;
         let flags = reader.u32()?;
-        if flags & !1 != 0 {
+        if flags & !3 != 0 {
             return Err(FormatError::Unsupported("unknown vector path flags"));
         }
         let count = reader.u32()? as usize;
@@ -181,6 +185,7 @@ pub(super) fn decode_vector_metadata(bytes: &[u8]) -> Result<FileVectorMetadata,
             plane_id,
             color,
             closed: flags & 1 != 0,
+            square_cross_section: flags & 2 != 0,
             segments,
         });
     }

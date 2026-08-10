@@ -87,6 +87,8 @@ impl PrimitiveId {
     pub const APPLY_RASTER_STROKE: Self = Self(0x0005_0001);
     /// Primitive ID for one bounded raster fill transaction.
     pub const APPLY_FILL: Self = Self(0x0005_0002);
+    /// Primitive ID for one canonical raster or vector geometry transaction.
+    pub const APPLY_GEOMETRY: Self = Self(0x0005_0003);
     /// Primitive ID for applying a raster gradient.
     pub const APPLY_GRADIENT: Self = Self(0x0005_0010);
     /// Primitive ID for applying boundary-aware airbrush processing.
@@ -240,14 +242,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(13);
+    pub const CURRENT: Self = Self(14);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 16;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 17;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;

@@ -28,7 +28,7 @@ void ApplyCurrentColor(
 } // namespace
 
 bool IsVectorCanvasTool(std::uint32_t tool) noexcept {
-    return tool >= kInteractionVectorLine && tool <= kInteractionVectorEraser;
+    return tool >= kInteractionVectorLine && tool <= kInteractionVectorPolygon;
 }
 
 bool IsVectorStrokePlane(std::uint32_t kind) noexcept {
@@ -36,9 +36,20 @@ bool IsVectorStrokePlane(std::uint32_t kind) noexcept {
         || kind == INKPOD_TYPED_PLANE_COLOR_TRACE;
 }
 
+bool IsGeometryCanvasPlane(std::uint32_t kind) noexcept {
+    return IsVectorStrokePlane(kind) || kind == INKPOD_TYPED_PLANE_MAIN_LINE
+        || kind == INKPOD_TYPED_PLANE_COLOR || kind == INKPOD_TYPED_PLANE_RASTER;
+}
+
 void CancelVectorGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept {
     tools.vector_gesture_samples.clear();
+    tools.vector_geometry_points.clear();
+    tools.vector_geometry_base_revision = 0U;
+    tools.vector_geometry_phase = 0U;
+    tools.vector_last_click_time = 0U;
+    tools.vector_last_click_device = POINT{};
+    tools.vector_geometry_preview_active = false;
     tools.procedure.valid = false;
     if (canvas == nullptr) {
         return;
@@ -103,8 +114,11 @@ void SetActiveCommandColor(
 }
 
 void HandleActivePlaneTransition(
-    app::ToolUiState& tools, HWND canvas, bool vector_stroke_plane) noexcept {
-    if (!vector_stroke_plane && IsVectorCanvasTool(tools.active_tool)) {
+    app::ToolUiState& tools, HWND canvas, std::uint32_t plane_kind) noexcept {
+    const bool supported = tools.active_tool == kInteractionVectorEraser
+        ? IsVectorStrokePlane(plane_kind)
+        : IsGeometryCanvasPlane(plane_kind);
+    if (!supported && IsVectorCanvasTool(tools.active_tool)) {
         TransitionActiveTool(tools, canvas, INKPOD_TOOL_PENCIL);
     }
 }

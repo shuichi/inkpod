@@ -102,7 +102,7 @@ PDF は全 191 表示ページを確認した。PDF p2～p189 は原則として
 4. raster 選択の閉領域内側、線沿い内側、筆跡形状、境界、作図 option は実装と自動検証を完了し、x64 Release の表示確認を待っている。
 5. 範囲限定の色置換は実装、自動検証、x64 Release の表示確認まで完了した。連番 batch authoring の詳細は実装と自動検証を完了し、x64 Release の手動確認を待っている。
 
-`docs/compatibility.md` は `PAINT-*`、`COLOR-*`、`SEL-*`、`BATCH-*`、`VECTOR-*` 等を広い単位で追跡する。しかし個別能力へ分解すると、高度な作図オプション、color-chart preview、vector 診断表示などが未接続であり、Batch詳細は自動検証済みだが手動確認前である。本書は追跡文書の状態を否定材料ではなく出発点として使い、個別のコードとテストを優先した。
+`docs/compatibility.md` は `PAINT-*`、`COLOR-*`、`SEL-*`、`BATCH-*`、`VECTOR-*` 等を広い単位で追跡する。個別能力へ分解すると、図形作図はM09の手動確認、color-chart previewやproduction snapなどは後続マイルストーンを待つ一方、vector診断表示とBatch詳細は手動確認まで完了した。本書は追跡文書の状態を否定材料ではなく出発点として使い、個別のコードとテストを優先した。
 
 ### 2.4 結論保留領域
 
@@ -126,7 +126,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | PM-CAP-012 | 消失点 | 複数消失点、補助線角度、色、不透明度を編集する | 第7章 PDF表示 p.95（印刷 pp.188–189） | `SPEC.md:313–317` | `LayerKind::VanishingPoint` は 0 plane／content なし。通常 H/V guide のみ | Specified only | PM-GAP-010 |
 | PM-CAP-013 | 自由描画／消去 | 鉛筆、brush、raster eraser、auto-erase、筆圧、vector 三種消去を扱う | 第7章 PDF表示 pp.88,107（印刷 pp.174–175,212–213） | `PAINT-001`, `VECTOR-002` | `paint_001_brush_eraser_auto_erase_and_pressure_are_transactional`; `RunVectorWorkflowSmoke` | Implemented and verified | 物理 pen 経路の直接検証は §7 参照 |
 | PM-CAP-013A | ストローク入力 | 実ペンタブレットの pressure を stroke 太さへ反映する | 第7章 PDF表示 pp.88,107（印刷 pp.174–175,212–213） | `PAINT-001` | `WM_POINTER` の PT_PEN／pressure route はあるが物理 device E2E なし | Implemented but unverified | 実機検証は §7 |
-| PM-CAP-014 | 図形描画 | 直線、二段階曲線、矩形、楕円、N角形、polyline、fill、入り抜き、制約、snap を扱う | 第7章 PDF表示 pp.89–91（印刷 pp.176–181） | `PAINT-002`, `SPEC.md:281–287` | vector の line/curve/rect/ellipse/polyline と `RunVectorWorkflowSmoke`; raster plane では command を拒否 | Partial | N角形、二段階 curve、filled shape、各制約、raster 直接経路が不足。PM-GAP-011 |
+| PM-CAP-014 | 図形描画 | 直線、二段階曲線、矩形、楕円、N角形、polyline、fill、入り抜き、制約、snap を扱う | 第7章 PDF表示 pp.89–91（印刷 pp.176–181） | `PAINT-002`, `SPEC.md:281–287` | raster/vector 共通の typed geometry、resolved canonical procedure、preview state machine、全 primitive capability/golden、bounded ABI、Windows staged gesture/renderer smoke | Implemented but unverified | M09 ARM64手動確認待ち。guide/grid production snapだけはPM-GAP-013/M15で追跡 |
 | PM-CAP-015 | Brush 制御 | 丸／角、太さ、筆圧、補正、開始色と同色領域だけを塗る | 第7章 PDF表示 p.107（印刷 pp.212–213） | `PAINT-004`, `SPEC.md:293–298` | native-depth goldens、canonical replay、ABI v8 negatives、Windows Tool Options/Canvas smoke、x64 Release 手動確認 | Implemented and verified | PM-GAP-012 解消済み |
 | PM-CAP-016 | 線修正 | ゴミ取り、線つなぎ、raster/vector 線幅修正を局所／選択へ適用する | 第7章 PDF表示 pp.92–94（印刷 pp.182–187） | `PAINT-003`, `EFFECT-001`, `VECTOR-002` | test `full_effect_gestures_dust_and_alpha_are_atomic`, vector width/connect contracts, Windows smoke | Implemented and verified | — |
 | PM-CAP-017 | 入力 snap | guide／grid の表示設定を実際の直線等の入力点へ適用する | 第4章 PDF表示 pp.58–59（印刷 pp.114–117） | `VIEW-002`, `SPEC.md:251–252` | `Core::snap_document_point` と toggle はあるが production caller は確認できず、smoke は toggle のみ | Partial | PM-GAP-013 |
@@ -151,7 +151,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | PM-CAP-035 | 補助表示 | ruler、guide、grid、transparent view を表示・編集する | 第4章 PDF表示 pp.58–59（印刷 pp.114–117） | `VIEW-002` | guide/grid state、renderer、Windows smoke | Implemented and verified | 実入力 snap は PM-CAP-017 |
 | PM-CAP-036 | Locator | 周辺拡大と座標／色を表示し、固定 mode で編集・edge scroll する | 第4章 PDF表示 p.60（印刷 pp.118–119） | `VIEW-003` | `SelectLocatorPixel`; `RunMagnifiedRasterHitSmoke` は checksum、Undo/Redo を検証 | Implemented and verified | 編集は 1px Pencil 固定 |
 | PM-CAP-037 | Multi-view | 同じ文書／履歴を共有し viewport だけ異なる複数 view を使う | 第4章 PDF表示 p.60（印刷 pp.118–119） | `VIEW-004` | multi-view Core／FFI、split/group/window smoke | Implemented and verified | — |
-| PM-CAP-038 | Vector 診断表示 | AA on/off、中心線、中心線のみ、未接続端点を切り替える | 第4章 PDF表示 p.61（印刷 pp.120–121） | `VIEW-005`, `SPEC.md:150,256` | view-local typed flags、明示endpoint topology、snapshot／FFI、Direct2D overlay、menu／shortcut／checked state、GPU/device-loss smoke | Implemented but unverified | M08手動確認待ち |
+| PM-CAP-038 | Vector 診断表示 | AA on/off、中心線、中心線のみ、未接続端点を切り替える | 第4章 PDF表示 p.61（印刷 pp.120–121） | `VIEW-005`, `SPEC.md:150,256` | view-local typed flags、明示endpoint topology、snapshot／FFI、Direct2D overlay、menu／shortcut／checked state、GPU/device-loss smoke、x64 Release手動確認 | Implemented and verified | — |
 | PM-CAP-039 | Fullscreen | 他 pane を隠して描画領域を最大化する | 第4章 PDF表示 p.60（印刷 pp.118–119） | `SPEC.md:161` | 専用 command なし | Equivalent by another workflow | OS maximize／workspace preset で合理的に代替。Not required |
 | PM-CAP-040 | Light Table 管理 | 複数 set/item、順序、visibility、opacity、color mode、transform を保持する | 第8章 PDF表示 pp.114–120（印刷 pp.226–239） | `LT-001` | LT Core／FFI／pane smoke | Partial | 基本管理は実装、前後N枚登録と opacity step がない。PM-GAP-019 |
 | PM-CAP-041 | 参照利用 | 基準 frame 整列、移動、sample、reload、編集画像交換、前後移動を行う | 第8章 PDF表示 pp.114–120 | `LT-002` | animation contracts、FFI、Windows target-aware smoke | Implemented and verified | — |
@@ -263,7 +263,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 - **不足していた能力:** 複数 fill seed、複数 color pair、二セル比較からの pair 生成と曖昧さ preview、分離結果の mask／主線／彩色 destination、実行時再設定を production UI から扱う。
 - **PaintMan で可能な作業:** 多数のセルへ複数箇所を連続 fill し、色指定変更や色分離を preset として反復する。
 - **現状で困る状況:** 解消済み。exact native-depth二セル比較は件数／affected boundsを示し、one-to-manyを利用者が一候補または除外へ解決するまでsilent winnerを作らない。
-- **不足層／カバレッジ:** Core／canonical procedure、ABI v9、Windows Batch production route、`.inkbatch` v2、`.inkpod` v16／epoch-13、golden／smokeとx64 Release手動確認を完了した。
+- **不足層／カバレッジ:** Core／canonical procedure、ABI v9、Windows Batch production route、`.inkbatch` v2、現行 `.inkpod` v17／epoch-14、golden／smokeとx64 Release手動確認を完了した。
 - **推奨優先度（仕上げ）:** **7/22（P1）**。互換性評価は **Should**。一件ずつ graph を分けると設定ミスと preview 回数が増え、長い sequence で影響が大きい。
 - **代替手段:** 不要。
 - **関連要件:** `BATCH-001`, `BATCH-002`, `BATCH-003`, `SPEC.md:461–466`。
@@ -276,9 +276,9 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 - **不足していた能力:** AA on/off、中心線 overlay、中心線のみ、未接続端点を view-local に切り替える。
 - **PaintMan で可能な作業:** 線つなぎ前に微小な切れや中心位置を発見し、vector geometry を修正する。
 - **現状で困る状況:** 実装上の不足は解消した。stable path/start-or-end ID の明示接続だけを正本とし、座標一致／近接を接続扱いしない。
-- **不足層／カバレッジ:** Core／current-only v16・epoch-13 persistence／ABI v9 borrowed span／Windows menu・shortcut・checked state／Direct2D AA・中心線・device-pixel endpoint overlay／device-loss smokeを実装した。現在はM08の利用者手動確認待ち。
+- **不足層／カバレッジ:** Core／current-only persistence／ABI v9 borrowed span／Windows menu・shortcut・checked state／Direct2D AA・中心線・device-pixel endpoint overlay／device-loss smokeとx64 Release手動確認を完了した。`Implemented and verified`。
 - **推奨優先度（仕上げ）:** **8/22（P1）**。互換性評価は **Should**。vector 線の切れは fill 漏れや誤接続に直結する。
-- **代替手段:** 手動確認完了までは高倍率表示、選択／hit test、rasterize 後の目視を併用する。
+- **代替手段:** 不要。
 - **関連要件:** `VIEW-005`, `VECTOR-001`, `SPEC.md:150,256`。
 - **責務:** Core snapshot は view-local diagnostic records。FFI は flags。renderer は非破壊 overlay、Windows は toggle／shortcut。
 - **依存ギャップ:** PM-GAP-007 の ordered vector snapshot 基盤。
@@ -288,10 +288,10 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 
 - **不足している能力:** raster／vector での直線、二段階 curve、N角形、filled shape、click 式 polyline、入り抜き、45度／aspect／center／snap、断面形状を一貫して扱う。
 - **PaintMan で可能な作業:** 形の整った修正線や閉領域を少ない操作で作り、そのまま彩色境界として使う。
-- **現状で困る状況:** 基本 vector gestures はあるが、raster plane では拒否され、curve は sample の 1/3・2/3 を自動 control にするだけで、詳細 option がない。
-- **不足層／カバレッジ:** Core／FFI／frontend 実装不足、`Partial`。
+- **現状で困る状況:** M09で raster／vector 共通の図形作図経路は接続した。guide／grid表示を実入力へ吸着させる部分だけはM15まで未接続である。
+- **不足層／カバレッジ:** M09自動検証済み、ARM64手動確認待ち。snapはPM-GAP-013で追跡するため、`PAINT-002`全体はまだ`Verified`にしない。
 - **推奨優先度（仕上げ）:** **9/22（P1）**。互換性評価は **Should**。vector 作成→rasterize で一部代替できるが、追加操作と編集型の変化が発生する。
-- **代替手段:** 基本 vector shape、freehand、vectorize／rasterize、fill の組合せ。
+- **代替手段:** snapが必要な場合は座標表示、45度／aspect／center制約を使って配置する。
 - **関連要件:** `PAINT-002`, `VECTOR-001`, `SPEC.md:281–287`。
 - **責務:** Core は typed geometry request と preview／commit。FFI は bounded points/options。Windows frontend は段階的 gesture、option pane、target validation。
 - **依存ギャップ:** PM-GAP-013 の snap、PM-GAP-007 の mixed composition。
@@ -481,18 +481,18 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | 複数 edit target の presentation | `DOC-002`, `DOC-003` | 実装・手動確認済み | tree-ordered Core/ABI、Layer pane marker、capability menu、status、smoke、x64 Release 確認。PM-GAP-006 |
 | 論理 layer 順の raster/vector 混在合成 | `DOC-002`, `VECTOR-001` | 一部実装 | `docs/implementation-status.md:42–43` の既知差分、PM-GAP-007 |
 | Frame／Text／Annotation／VanishingPoint の内容 | `DOC-002` と §5 | kind のみ | `operations.rs:1000–1004` は空 content。PM-GAP-008～010 |
-| 二段階 curve、N角形、filled shape、line／polyline options、raster 図形 | `PAINT-002` | 一部実装 | basic vector gesture のみ。PM-GAP-011。`PAINT-* Verified` は能力粒度が粗い |
+| 二段階 curve、N角形、filled shape、line／polyline options、raster 図形 | `PAINT-002` | 実装・手動確認待ち | Core/canonical v2、ABI v9 additive exports、Windows staged gestures、v17/epoch-14、golden/smoke。snapはPM-GAP-013/M15 |
 | 通常 brush の shape／smoothing／開始色限定 | `PAINT-004` | 実装・手動確認済み | Core/image、canonical v3、ABI v8、Windows pane/Canvas、v13/epoch-10、golden/smoke、x64 Release確認。PM-GAP-012 解消済み |
 | guide／grid snap の実入力適用 | `VIEW-002` | 一部実装 | state と Core helper はあるが production caller なし。PM-GAP-013 |
 | color-chart quantization preview | `COLOR-002` | 一部実装 | generate はあるが preview update なし。PM-GAP-014 |
 | 対話的 scoped color replace | `COLOR-REPLACE-001`, `FILL-003` | 実装・手動確認済み | Core／canonical procedure、ABI v8、Windows menu／Canvas、v14／epoch-11、golden/smoke、x64 Release確認。PM-GAP-015 解消済み |
 | raster 選択の range interpretation／construction options | `SEL-004` | 実装・手動確認済み | typed range／geometry／trace、Core/ABI/Windows、v13/epoch-10、golden/smoke。PM-GAP-016 解消済み |
 | floating transform の五点基準 | `XFORM-002` | frontend 未接続 | dialog 値を transform に使わない。PM-GAP-017 |
-| vector AA／中心線／中心線のみ／端点 view overlays | `VIEW-005`, `VECTOR-001` | 実装・手動確認待ち | 明示topology、Core snapshot、ABI v9、Windows menu／shortcut／Direct2D pixel golden／device-loss smoke。PM-GAP-018 |
+| vector AA／中心線／中心線のみ／端点 view overlays | `VIEW-005`, `VECTOR-001` | 実装・手動確認済み | 明示topology、Core snapshot、ABI v9、Windows menu／shortcut／Direct2D pixel golden／device-loss smoke、x64 Release確認。PM-GAP-018解消済み |
 | LT 前後 N 枚登録／自動 opacity step | `LT-001` | 未実装 | `docs/compatibility.md:44` の既知差分、PM-GAP-019 |
 | 設定可能な出力色域 check → selection | `COLOR-002`, `SEL-002` | 未実装 | PM-GAP-020 |
 | dialog parameter 変更ごとの filter preview update | `HIST-001`, `FILTER-001` | Core/FFI のみ | Windows controller 未接続。PM-GAP-021 |
-| batch 複数 seed／pair UI、二セル pair 抽出、分離先、実行時再設定 | `BATCH-002`, `BATCH-004` | 実装・手動確認済み | Core／canonical、ABI v9、Windows row editor／二セルselector、`.inkbatch` v2、v16／epoch-13、golden／smoke、x64 Release確認。PM-GAP-022 解消済み |
+| batch 複数 seed／pair UI、二セル pair 抽出、分離先、実行時再設定 | `BATCH-002`, `BATCH-004` | 実装・手動確認済み | Core／canonical、ABI v9、Windows row editor／二セルselector、`.inkbatch` v2、現行v17／epoch-14、golden／smoke、x64 Release確認。PM-GAP-022 解消済み |
 | app private clipboard で layer/plane/vector type を保持 | `CLIP-001` | 実装済み | Rust 所有の private handle が ordered plane、RGBA8/16、origin、vector path/fill topology を保持し、Windows は標準 DIB も併記 |
 | fullscreen command | Window specification | 未実装 | OS maximize／workspace preset で代替できるため `Not required`、ギャップ非計上 |
 

@@ -175,6 +175,16 @@ struct ToolUiState {
     std::uint64_t color_replace_base_revision{};
     std::vector<InkpodStrokeSample> color_replace_gesture_samples;
     std::vector<InkpodStrokeSample> vector_gesture_samples;
+    std::vector<InkpodGeometryPoint> vector_geometry_points;
+    std::uint64_t vector_geometry_base_revision{};
+    std::uint64_t vector_geometry_flags{INKPOD_GEOMETRY_OUTLINE};
+    std::uint32_t vector_geometry_polygon_sides{5U};
+    std::uint32_t vector_geometry_aspect_ratio_q16{};
+    std::uint32_t vector_geometry_rotation_turns{};
+    std::uint32_t vector_geometry_phase{};
+    DWORD vector_last_click_time{};
+    POINT vector_last_click_device{};
+    bool vector_geometry_preview_active{};
     InkpodVectorEraseMode vector_erase_mode{INKPOD_VECTOR_ERASE_PARTIAL};
     InkpodVectorSelectionMode vector_selection_mode{INKPOD_VECTOR_SELECT_TOUCHING};
     std::vector<std::uint64_t> vector_selected_path_ids;

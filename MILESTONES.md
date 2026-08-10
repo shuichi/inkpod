@@ -537,7 +537,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M08 — PM-GAP-018: Vector線の診断表示
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: VIEW-005、VECTOR-001、ABI-002。
 
@@ -582,7 +582,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M09 — PM-GAP-011: PaintMan相当の図形作図semantics
 
-状態: 未着手
+状態: 手動確認待ち
 
 関連要件: PAINT-002、VECTOR-001、HIST-001。
 

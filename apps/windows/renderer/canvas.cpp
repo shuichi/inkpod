@@ -914,7 +914,8 @@ private:
             const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
                 segment_bytes + static_cast<std::size_t>(index * vectors.segment_stride_bytes));
             constexpr std::uint32_t known_flags = INKPOD_SNAPSHOT_VECTOR_CLOSED
-                | INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE;
+                | INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE
+                | INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION;
             const auto finite_point = [](const InkpodVectorPoint& point) noexcept {
                 return std::isfinite(point.x) && std::isfinite(point.y)
                     && std::abs(point.x) <= 2000000.0F && std::abs(point.y) <= 2000000.0F;
@@ -1270,6 +1271,23 @@ private:
             if (centers.size() < 2U) {
                 return E_INVALIDARG;
             }
+            const bool square_cross_section =
+                (path.flags & INKPOD_SNAPSHOT_VECTOR_SQUARE_CROSS_SECTION) != 0U;
+            if (!closed && square_cross_section) {
+                float start_x{};
+                float start_y{};
+                float end_x{};
+                float end_y{};
+                if (UnitDirection(centers[0], centers[1], start_x, start_y)) {
+                    centers[0].x -= start_x * widths[0] * 0.5F;
+                    centers[0].y -= start_y * widths[0] * 0.5F;
+                }
+                const std::size_t last = centers.size() - 1U;
+                if (UnitDirection(centers[last - 1U], centers[last], end_x, end_y)) {
+                    centers[last].x += end_x * widths[last] * 0.5F;
+                    centers[last].y += end_y * widths[last] * 0.5F;
+                }
+            }
             std::vector<D2D1_POINT_2F> left;
             std::vector<D2D1_POINT_2F> right;
             left.reserve(centers.size() * 2U);
@@ -1369,8 +1387,27 @@ private:
                 sink->BeginFigure(left.front(), D2D1_FIGURE_BEGIN_FILLED);
                 sink->AddLines(
                     left.data() + 1U, static_cast<UINT32>(left.size() - 1U));
-                for (auto iterator = right.rbegin(); iterator != right.rend(); ++iterator) {
+                if (!square_cross_section) {
+                    const float radius = widths.back() * 0.5F;
+                    sink->AddArc(D2D1::ArcSegment(
+                        right.back(),
+                        D2D1::SizeF(radius, radius),
+                        0.0F,
+                        D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                        D2D1_ARC_SIZE_SMALL));
+                }
+                for (auto iterator = right.rbegin() + (square_cross_section ? 0U : 1U);
+                     iterator != right.rend(); ++iterator) {
                     sink->AddLine(*iterator);
+                }
+                if (!square_cross_section) {
+                    const float radius = widths.front() * 0.5F;
+                    sink->AddArc(D2D1::ArcSegment(
+                        left.front(),
+                        D2D1::SizeF(radius, radius),
+                        0.0F,
+                        D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                        D2D1_ARC_SIZE_SMALL));
                 }
                 sink->EndFigure(D2D1_FIGURE_END_CLOSED);
             }

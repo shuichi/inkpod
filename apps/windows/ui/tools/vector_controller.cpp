@@ -11,6 +11,51 @@ namespace inkpod::windows::ui::tools {
 VectorController::VectorController(app::CoreHost& engine) noexcept
     : engine_(engine) {}
 
+InkpodStatus VectorController::BeginGeometry(
+    const InkpodGeometryInput& input,
+    InkpodGeometryPreviewInfo& info) noexcept {
+    return engine_.Invoke(
+        [&input, &info](InkpodCore* core) {
+            return inkpod_core_geometry_preview_begin(core, &input, &info);
+        },
+        true,
+        false);
+}
+
+InkpodStatus VectorController::UpdateGeometry(
+    const InkpodGeometryInput& input,
+    InkpodGeometryPreviewInfo& info) noexcept {
+    return engine_.Invoke(
+        [&input, &info](InkpodCore* core) {
+            return inkpod_core_geometry_preview_update(core, &input, &info);
+        },
+        true,
+        false);
+}
+
+InkpodStatus VectorController::CommitGeometry() noexcept {
+    return engine_.Invoke(
+        [](InkpodCore* core) {
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            std::uint64_t path_id{};
+            std::uint64_t fill_id{};
+            return inkpod_core_geometry_preview_commit(
+                core, &result, &path_id, &fill_id);
+        },
+        true,
+        true);
+}
+
+InkpodStatus VectorController::CancelGeometry() noexcept {
+    return engine_.Invoke(
+        [](InkpodCore* core) {
+            return inkpod_core_geometry_preview_cancel(core);
+        },
+        true,
+        false);
+}
+
 InkpodStatus VectorController::AddPath(
     const InkpodVectorPathInput& input) noexcept {
     return engine_.Invoke(

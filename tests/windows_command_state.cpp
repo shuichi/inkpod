@@ -418,6 +418,7 @@ int main() {
     }
 
     inputs.tool.vector_stroke_plane = true;
+    inputs.tool.geometry_drawable_plane = true;
     inputs.tool.active_tool = kInteractionVectorLine;
     inputs.tool.vector_selection_mode = INKPOD_VECTOR_SELECT_FILL_BOUNDARY;
     inputs.tool.palette_visible = true;
@@ -433,10 +434,12 @@ int main() {
     }
     inputs.tool.vector_stroke_plane = false;
     states = ComputeCommandStates(inputs);
-    if (IsCommandEnabled(states, IDM_VECTOR_LINE)
+    if (!IsCommandEnabled(states, IDM_VECTOR_LINE)
+        || IsCommandEnabled(states, IDM_VECTOR_ERASER)
         || inputs.tool.active_tool != kInteractionVectorLine) {
         return 5;
     }
+    inputs.tool.geometry_drawable_plane = false;
 
     inputs.effects.color_plane_active = true;
     inputs.tool.active_tool = kInteractionEffectGradient;

@@ -32,9 +32,11 @@ inline constexpr std::uint32_t kInteractionVectorRectangle = 1203U;
 inline constexpr std::uint32_t kInteractionVectorEllipse = 1204U;
 inline constexpr std::uint32_t kInteractionVectorPolyline = 1205U;
 inline constexpr std::uint32_t kInteractionVectorEraser = 1206U;
+inline constexpr std::uint32_t kInteractionVectorPolygon = 1207U;
 
 bool IsVectorCanvasTool(std::uint32_t tool) noexcept;
 bool IsVectorStrokePlane(std::uint32_t kind) noexcept;
+bool IsGeometryCanvasPlane(std::uint32_t kind) noexcept;
 
 // All active-tool changes go through this boundary so leaving a vector,
 // selection, or ranged-fill tool cannot retain a geometry preview owned by the
@@ -49,7 +51,7 @@ void SetActiveCommandColor(
 
 // Called only by an active-plane transition, never by command-state queries.
 void HandleActivePlaneTransition(
-    app::ToolUiState& tools, HWND canvas, bool vector_stroke_plane) noexcept;
+    app::ToolUiState& tools, HWND canvas, std::uint32_t plane_kind) noexcept;
 
 void CancelVectorGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept;

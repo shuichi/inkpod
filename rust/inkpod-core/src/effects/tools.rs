@@ -510,6 +510,7 @@ impl Core {
         )?;
         self.filter_preview = Some(FilterPreview {
             plane_id,
+            base_revision,
             base_document,
             preview_document,
             procedure: PreviewProcedure::Dust { shape, options },
