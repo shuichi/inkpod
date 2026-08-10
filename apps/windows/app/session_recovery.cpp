@@ -20,10 +20,14 @@ constexpr std::uint16_t kMetadataHeaderBytes = 100U;
 constexpr std::size_t kMaximumMetadataBytes = 512U * 1024U;
 constexpr std::uint32_t kSessionPathsMagic = UINT32_C(0x53524b49);
 constexpr std::uint16_t kSessionPathsVersion = 1U;
+constexpr std::uint32_t kSequenceSwitchPolicyMagic = UINT32_C(0x50534b49);
+constexpr std::uint16_t kSequenceSwitchPolicyVersion = 1U;
+constexpr std::size_t kSequenceSwitchPolicyBytes = 16U;
 constexpr std::size_t kMaximumSessionRecordBytes = 1024U * 1024U;
 constexpr wchar_t kSettingsKey[] = L"Software\\inkpod";
 constexpr wchar_t kRestoreSettingValue[] = L"RestorePreviousDocumentsV1";
 constexpr wchar_t kPreviousPathsValue[] = L"PreviousDocumentPathsV1";
+constexpr wchar_t kSequenceSwitchPolicyValue[] = L"SequenceCellSwitchPolicyV1";
 constexpr std::size_t kMaximumRestoredDocumentPaths = 64U;
 
 void AppendU16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
@@ -674,6 +678,143 @@ bool SaveRestorePreviousDocumentsSetting(bool enabled) noexcept {
         REG_DWORD,
         reinterpret_cast<const BYTE*>(&value),
         sizeof(value)) == ERROR_SUCCESS;
+    RegCloseKey(key);
+    return saved;
+}
+
+bool SequenceRecoveryPath(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation,
+    std::wstring& output) noexcept {
+    if ((document_uuid_high == 0U && document_uuid_low == 0U)
+        || source_generation == 0U) {
+        return false;
+    }
+    std::wstring directory;
+    if (!RecoveryRootDirectory(directory)) {
+        return false;
+    }
+    std::array<wchar_t, 128U> name{};
+    _snwprintf_s(
+        name.data(),
+        name.size(),
+        _TRUNCATE,
+        L"\\%016llx%016llx-sequence-%016llx.inkpod",
+        static_cast<unsigned long long>(document_uuid_high),
+        static_cast<unsigned long long>(document_uuid_low),
+        static_cast<unsigned long long>(source_generation));
+    try {
+        output = directory + name.data();
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool EncodeSequenceCellSwitchPolicy(
+    SequenceCellSwitchPolicy policy,
+    std::vector<std::uint8_t>& output) noexcept {
+    if (policy != SequenceCellSwitchPolicy::Prompt
+        && policy != SequenceCellSwitchPolicy::AutosaveBeforeSwitch) {
+        return false;
+    }
+    try {
+        output.clear();
+        output.reserve(kSequenceSwitchPolicyBytes);
+        AppendU32(output, kSequenceSwitchPolicyMagic);
+        AppendU16(output, kSequenceSwitchPolicyVersion);
+        AppendU16(output, 0U);
+        AppendU32(output, static_cast<std::uint32_t>(kSequenceSwitchPolicyBytes));
+        AppendU32(output, static_cast<std::uint32_t>(policy));
+        return output.size() == kSequenceSwitchPolicyBytes;
+    } catch (const std::bad_alloc&) {
+        output.clear();
+        return false;
+    }
+}
+
+bool DecodeSequenceCellSwitchPolicy(
+    const std::uint8_t* bytes,
+    std::size_t length,
+    SequenceCellSwitchPolicy& policy) noexcept {
+    if (bytes == nullptr || length != kSequenceSwitchPolicyBytes) {
+        return false;
+    }
+    std::size_t cursor{};
+    std::uint32_t magic{};
+    std::uint16_t version{};
+    std::uint16_t reserved{};
+    std::uint32_t total{};
+    std::uint32_t raw_policy{};
+    if (!ReadU32(bytes, length, cursor, magic)
+        || !ReadU16(bytes, length, cursor, version)
+        || !ReadU16(bytes, length, cursor, reserved)
+        || !ReadU32(bytes, length, cursor, total)
+        || !ReadU32(bytes, length, cursor, raw_policy)
+        || cursor != length || magic != kSequenceSwitchPolicyMagic
+        || version != kSequenceSwitchPolicyVersion || reserved != 0U
+        || total != length
+        || (raw_policy
+                != static_cast<std::uint32_t>(SequenceCellSwitchPolicy::Prompt)
+            && raw_policy != static_cast<std::uint32_t>(
+                SequenceCellSwitchPolicy::AutosaveBeforeSwitch))) {
+        return false;
+    }
+    policy = static_cast<SequenceCellSwitchPolicy>(raw_policy);
+    return true;
+}
+
+bool LoadSequenceCellSwitchPolicy(
+    SequenceCellSwitchPolicy& policy) noexcept {
+    policy = SequenceCellSwitchPolicy::Prompt;
+    HKEY key{};
+    if (!OpenSettingsKey(KEY_QUERY_VALUE, key)) {
+        return false;
+    }
+    DWORD type{};
+    DWORD byte_count{};
+    LSTATUS status = RegQueryValueExW(
+        key, kSequenceSwitchPolicyValue, nullptr, &type, nullptr, &byte_count);
+    if (status == ERROR_FILE_NOT_FOUND) {
+        RegCloseKey(key);
+        return true;
+    }
+    if (status != ERROR_SUCCESS || type != REG_BINARY
+        || byte_count != kSequenceSwitchPolicyBytes) {
+        RegCloseKey(key);
+        return false;
+    }
+    std::array<std::uint8_t, kSequenceSwitchPolicyBytes> bytes{};
+    status = RegQueryValueExW(
+        key,
+        kSequenceSwitchPolicyValue,
+        nullptr,
+        &type,
+        bytes.data(),
+        &byte_count);
+    RegCloseKey(key);
+    return status == ERROR_SUCCESS
+        && DecodeSequenceCellSwitchPolicy(bytes.data(), bytes.size(), policy);
+}
+
+bool SaveSequenceCellSwitchPolicy(
+    SequenceCellSwitchPolicy policy) noexcept {
+    std::vector<std::uint8_t> bytes;
+    if (!EncodeSequenceCellSwitchPolicy(policy, bytes)) {
+        return false;
+    }
+    HKEY key{};
+    if (!OpenSettingsKey(KEY_SET_VALUE, key)) {
+        return false;
+    }
+    const bool saved = RegSetValueExW(
+        key,
+        kSequenceSwitchPolicyValue,
+        0U,
+        REG_BINARY,
+        bytes.data(),
+        static_cast<DWORD>(bytes.size())) == ERROR_SUCCESS;
     RegCloseKey(key);
     return saved;
 }

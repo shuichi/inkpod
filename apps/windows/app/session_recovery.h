@@ -33,7 +33,17 @@ struct RecoveryCandidate final {
 
 inline constexpr std::size_t kMaximumRecoveryCandidates = 4096U;
 
+enum class SequenceCellSwitchPolicy : std::uint32_t {
+    Prompt = 1U,
+    AutosaveBeforeSwitch = 2U,
+};
+
 [[nodiscard]] bool RecoveryRootDirectory(std::wstring& output) noexcept;
+[[nodiscard]] bool SequenceRecoveryPath(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation,
+    std::wstring& output) noexcept;
 [[nodiscard]] bool RecoveryMetadataPath(
     const std::wstring& recovery_path,
     std::wstring& output) noexcept;
@@ -71,6 +81,17 @@ inline constexpr std::size_t kMaximumRecoveryCandidates = 4096U;
     bool& enabled) noexcept;
 [[nodiscard]] bool SaveRestorePreviousDocumentsSetting(
     bool enabled) noexcept;
+[[nodiscard]] bool EncodeSequenceCellSwitchPolicy(
+    SequenceCellSwitchPolicy policy,
+    std::vector<std::uint8_t>& output) noexcept;
+[[nodiscard]] bool DecodeSequenceCellSwitchPolicy(
+    const std::uint8_t* bytes,
+    std::size_t length,
+    SequenceCellSwitchPolicy& policy) noexcept;
+[[nodiscard]] bool LoadSequenceCellSwitchPolicy(
+    SequenceCellSwitchPolicy& policy) noexcept;
+[[nodiscard]] bool SaveSequenceCellSwitchPolicy(
+    SequenceCellSwitchPolicy policy) noexcept;
 [[nodiscard]] bool LoadPreviousDocumentPaths(
     std::vector<std::wstring>& paths) noexcept;
 [[nodiscard]] bool EncodePreviousDocumentPaths(

@@ -187,6 +187,166 @@ impl Core {
         if self.savepoint != Some(self.current_state) {
             return Err(CoreError::UnsavedChanges);
         }
+        self.sequence_activate_impl(target)
+    }
+
+    /// Captures the exact source, target, policy, and document revision for an
+    /// asynchronous sequence switch.
+    ///
+    /// The configured sequence must already identify the active document. The
+    /// request is side-effect free and remains usable only while its source
+    /// revision and both sequence identities remain current.
+    pub fn sequence_switch_request(
+        &self,
+        target: usize,
+        policy: SequenceSwitchPolicy,
+    ) -> Result<SequenceSwitchRequest, CoreError> {
+        self.ensure_no_active_stroke()?;
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let sequence = self
+            .sequence
+            .as_ref()
+            .ok_or(CoreError::InvalidState("no sequence is configured"))?;
+        let source_index = sequence.active_index.ok_or(CoreError::InvalidState(
+            "active document is not bound to a sequence entry",
+        ))?;
+        let source = sequence
+            .cells
+            .get(source_index)
+            .ok_or(CoreError::InvalidState("sequence active index is invalid"))?;
+        let target_source = sequence
+            .cells
+            .get(target)
+            .ok_or(CoreError::InvalidArgument(
+                "sequence target index is outside bounds",
+            ))?;
+        if source.document_uuid != document.uuid {
+            return Err(CoreError::InvalidState(
+                "active document identity does not match the sequence source",
+            ));
+        }
+        Ok(SequenceSwitchRequest {
+            policy,
+            source_document_uuid: source.document_uuid,
+            source_generation: source.source_generation,
+            source_document_revision: self.document_revision.get(),
+            source_editor_revision: self
+                .editor_session
+                .as_ref()
+                .ok_or(CoreError::NoDocument)?
+                .revision
+                .get(),
+            target_document_uuid: target_source.document_uuid,
+            target_source_generation: target_source.source_generation,
+            target_index: u32::try_from(target)
+                .map_err(|_| CoreError::InvalidArgument("sequence target index overflows"))?,
+        })
+    }
+
+    /// Commits an autosave-before-switch request after the frontend has durably
+    /// written the source recovery artifact and metadata.
+    ///
+    /// This operation does not itself perform I/O. A stale, invalid, or non-autosave
+    /// request publishes nothing. Success activates the immutable flattened target;
+    /// the source document remains dirty only in its external recovery association.
+    pub fn sequence_commit_autosaved_switch(
+        &mut self,
+        request: SequenceSwitchRequest,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.validate_autosaved_sequence_switch_request(request)?;
+        if !request.requires_switch() {
+            return self.document_info();
+        }
+        self.sequence_activate_impl(request.target_index as usize)
+    }
+
+    /// Restores an exact target cell from a validated native recovery artifact.
+    ///
+    /// The active source and configured target must still match `request`. The
+    /// artifact is fully decoded, validated, and replayed before one live-state
+    /// replacement. Success keeps no normal path/savepoint, marks the restored
+    /// document and EditorState dirty/recovered, and preserves the configured
+    /// sequence. Failure leaves all live Core state unchanged.
+    pub fn sequence_restore_autosaved_switch(
+        &mut self,
+        request: SequenceSwitchRequest,
+        path: &Path,
+    ) -> Result<DocumentInfo, CoreError> {
+        self.validate_autosaved_sequence_switch_request(request)?;
+        if !request.requires_switch() {
+            return self.document_info();
+        }
+        let file = inkpod_format::read_procedure_file(path)?;
+        let mut staged = Self::from_procedure_file(file)?;
+        let restored_uuid = staged.document.as_ref().ok_or(CoreError::NoDocument)?.uuid;
+        if restored_uuid != request.target_document_uuid {
+            return Err(CoreError::InvalidArgument(
+                "recovery artifact does not match the sequence target",
+            ));
+        }
+        staged.current_path = None;
+        staged.recovered = true;
+        staged.savepoint = None;
+        staged
+            .editor_session
+            .as_mut()
+            .ok_or(CoreError::NoDocument)?
+            .savepoint = None;
+        let mut sequence = self
+            .sequence
+            .clone()
+            .ok_or(CoreError::InvalidState("no sequence is configured"))?;
+        sequence.active_index = Some(request.target_index as usize);
+        staged.sequence = Some(sequence);
+        staged.motion_check = None;
+        staged.subpalette_index = self.subpalette_index;
+        *self = staged;
+        self.document_info()
+    }
+
+    fn validate_autosaved_sequence_switch_request(
+        &self,
+        request: SequenceSwitchRequest,
+    ) -> Result<(), CoreError> {
+        self.ensure_no_active_stroke()?;
+        if request.policy != SequenceSwitchPolicy::AutosaveBeforeSwitch {
+            return Err(CoreError::InvalidArgument(
+                "sequence switch request does not use autosave policy",
+            ));
+        }
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let sequence = self
+            .sequence
+            .as_ref()
+            .ok_or(CoreError::InvalidState("no sequence is configured"))?;
+        let source = sequence
+            .active_index
+            .and_then(|index| sequence.cells.get(index))
+            .ok_or(CoreError::InvalidState("sequence switch request is stale"))?;
+        let target = sequence
+            .cells
+            .get(request.target_index as usize)
+            .ok_or(CoreError::InvalidState("sequence switch request is stale"))?;
+        if self.document_revision.get() != request.source_document_revision
+            || self
+                .editor_session
+                .as_ref()
+                .ok_or(CoreError::NoDocument)?
+                .revision
+                .get()
+                != request.source_editor_revision
+            || document.uuid != request.source_document_uuid
+            || source.document_uuid != request.source_document_uuid
+            || source.source_generation != request.source_generation
+            || target.document_uuid != request.target_document_uuid
+            || target.source_generation != request.target_source_generation
+        {
+            return Err(CoreError::InvalidState("sequence switch request is stale"));
+        }
+        Ok(())
+    }
+
+    fn sequence_activate_impl(&mut self, target: usize) -> Result<DocumentInfo, CoreError> {
         let (source, has_active_cell) = {
             let sequence = self
                 .sequence

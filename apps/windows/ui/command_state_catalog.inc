@@ -1,5 +1,6 @@
 // One state owner for every production command in app.rc. Keep this catalog in
 // sync with the verified single-handler routing catalog.
+INKPOD_COMMAND_STATE(Application, IDM_FILE_SEQUENCE_AUTOSAVE)
 INKPOD_COMMAND_STATE(Batch, IDM_WINDOW_BATCH)
 INKPOD_COMMAND_STATE(Batch, IDM_BATCH_INPUT_FILE)
 INKPOD_COMMAND_STATE(Batch, IDM_BATCH_INPUT_FOLDER)

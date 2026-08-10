@@ -11,16 +11,20 @@ namespace {
 
 using inkpod::app::DecodePreviousDocumentPaths;
 using inkpod::app::DecodeRecoveryMetadata;
+using inkpod::app::DecodeSequenceCellSwitchPolicy;
 using inkpod::app::DiscardRecoveryArtifact;
 using inkpod::app::DocumentIdentity;
 using inkpod::app::DocumentIdentityKind;
 using inkpod::app::DocumentSessionId;
 using inkpod::app::EncodePreviousDocumentPaths;
 using inkpod::app::EncodeRecoveryMetadata;
+using inkpod::app::EncodeSequenceCellSwitchPolicy;
 using inkpod::app::EnumerateRecoveryCandidatesInDirectory;
 using inkpod::app::Generation;
 using inkpod::app::ReadRecoveryMetadata;
 using inkpod::app::RecoveryMetadata;
+using inkpod::app::SequenceCellSwitchPolicy;
+using inkpod::app::SequenceRecoveryPath;
 using inkpod::app::WriteRecoveryMetadata;
 
 bool WriteDummy(const std::wstring& path) {
@@ -117,6 +121,43 @@ int TestSessionPathCodec() {
     return 0;
 }
 
+int TestSequenceSwitchPolicyCodec() {
+    std::vector<std::uint8_t> bytes;
+    SequenceCellSwitchPolicy decoded{SequenceCellSwitchPolicy::Prompt};
+    if (!EncodeSequenceCellSwitchPolicy(
+            SequenceCellSwitchPolicy::AutosaveBeforeSwitch, bytes)
+        || bytes.size() != 16U
+        || !DecodeSequenceCellSwitchPolicy(bytes.data(), bytes.size(), decoded)
+        || decoded != SequenceCellSwitchPolicy::AutosaveBeforeSwitch) {
+        return 15;
+    }
+    std::vector<std::uint8_t> wrong_version = bytes;
+    wrong_version[4] = 2U;
+    if (DecodeSequenceCellSwitchPolicy(
+            wrong_version.data(), wrong_version.size(), decoded)) {
+        return 16;
+    }
+    bytes[12] = 3U;
+    if (DecodeSequenceCellSwitchPolicy(bytes.data(), bytes.size(), decoded)
+        || EncodeSequenceCellSwitchPolicy(
+            static_cast<SequenceCellSwitchPolicy>(3U), bytes)) {
+        return 17;
+    }
+    std::wstring first_path;
+    std::wstring second_path;
+    std::wstring repeated_path;
+    if (!SequenceRecoveryPath(1U, 2U, 3U, first_path)
+        || !SequenceRecoveryPath(1U, 2U, 4U, second_path)
+        || !SequenceRecoveryPath(1U, 2U, 3U, repeated_path)
+        || first_path.empty() || first_path == second_path
+        || first_path != repeated_path
+        || SequenceRecoveryPath(1U, 2U, 0U, repeated_path)
+        || SequenceRecoveryPath(0U, 0U, 1U, repeated_path)) {
+        return 18;
+    }
+    return 0;
+}
+
 int TestCatalog() {
     std::array<wchar_t, MAX_PATH> root{};
     if (GetTempPathW(static_cast<DWORD>(root.size()), root.data()) == 0U) {
@@ -173,5 +214,9 @@ int main() {
         return metadata;
     }
     const int session_paths = TestSessionPathCodec();
-    return session_paths == 0 ? TestCatalog() : session_paths;
+    if (session_paths != 0) {
+        return session_paths;
+    }
+    const int switch_policy = TestSequenceSwitchPolicyCodec();
+    return switch_policy == 0 ? TestCatalog() : switch_policy;
 }

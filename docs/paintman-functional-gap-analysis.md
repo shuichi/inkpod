@@ -102,7 +102,7 @@ PDF は全 191 表示ページを確認した。PDF p2～p189 は原則として
 4. raster 選択の閉領域内側、線沿い内側、筆跡形状、境界、作図 option は実装と自動検証を完了し、x64 Release の表示確認を待っている。
 5. 範囲限定の色置換は実装、自動検証、x64 Release の表示確認まで完了した。連番 batch authoring の詳細は実装と自動検証を完了し、x64 Release の手動確認を待っている。
 
-`docs/compatibility.md` は `PAINT-*`、`COLOR-*`、`SEL-*`、`BATCH-*`、`VECTOR-*` 等を広い単位で追跡する。個別能力へ分解すると、図形作図はM09の手動確認まで完了し、parameter変更へ追従するfilter previewはM10の自動検証を完了してARM64手動確認を待っている。color-chart previewやproduction snapなどは後続マイルストーンを待つ一方、vector診断表示とBatch詳細は手動確認まで完了した。本書は追跡文書の状態を否定材料ではなく出発点として使い、個別のコードとテストを優先した。
+`docs/compatibility.md` は `PAINT-*`、`COLOR-*`、`SEL-*`、`BATCH-*`、`VECTOR-*` 等を広い単位で追跡する。個別能力へ分解すると、図形作図はM09、parameter変更へ追従するfilter previewはM10の手動確認まで完了した。M11ではセル切替前のexact native autosaveと戻り時のstaged restoreを自動検証まで終え、ARM64手動確認を待っている。color-chart previewやproduction snapなどは後続マイルストーンを待つ一方、vector診断表示とBatch詳細は手動確認まで完了した。本書は追跡文書の状態を否定材料ではなく出発点として使い、個別のコードとテストを優先した。
 
 ### 2.4 結論保留領域
 
@@ -117,7 +117,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | PM-CAP-003 | セル作成 | frame/image size、DPI、レイヤー型、8/16 bit、作成枚数を指定する | 第5章「新規セル」PDF表示 pp.63–65（印刷 pp.124–129） | `SPEC.md` §7、`DOC-001` | `main_window_runtime.cpp:10513`、`inkpod_core_new_cell`; test `cell_creation_carries_the_typed_initial_layer_in_genesis` | Partial | pixel幅／高さ、DPI、初期レイヤー、一枚、RGBA8に限定。PM-GAP-003 |
 | PM-CAP-004 | 用紙／基準フレーム | 用紙、作画／安全／基準 frame、余白、DPI、異寸法整列を保持する | 第5章 PDF表示 pp.65–70（印刷 pp.128–139） | `SPEC.md` §7、`DOC-001` | `FrameMetadata`; test `acceptance_reference_frame_aligns_different_cell_sizes_and_reopens`; Windows document smoke | Implemented and verified | — |
 | PM-CAP-005 | 撮影フレーム | サイズ、角度、座標を持つ撮影 frame を文書内で編集する | 第12章 PDF表示 pp.163–164（印刷 pp.324–327） | `SPEC.md:214,236–243` は撮影 frame 型を記載 | 矩形 frame metadata と fit はあるが、`Frame` layer は content なし | Partial | 角度付き object と編集経路がない。PM-GAP-008 |
-| PM-CAP-006 | 連続作業 | thumbnail／番号／前後で切替え、dirty 時に確認または自動保存し、端点を循環できる | 第2・3・14章 PDF表示 pp.19–20,55,175–176（印刷 pp.36–39,108–109,348–351） | `SEQ-001`, `SPEC.md:174–176` | test `acceptance_sequence_gaps_natural_order_thumbnails_subpalette_and_motion`; Windows sequence smoke | Partial | 確認切替は実装。自動保存と端点 loop preference が未実装。PM-GAP-004, PM-GAP-005 |
+| PM-CAP-006 | 連続作業 | thumbnail／番号／前後で切替え、dirty 時に確認または自動保存し、端点を循環できる | 第2・3・14章 PDF表示 pp.19–20,55,175–176（印刷 pp.36–39,108–109,348–351） | `SEQ-001`, `SPEC.md:174–177` | natural-order/thumbnail contracts; exact autosave/staged-restore Core・ABI contracts; Windows setting/owner/production sequence smoke | Partial | 確認切替と自動保存は実装済みでM11 ARM64手動確認待ち。端点 loop preference は未実装。PM-GAP-004, PM-GAP-005 |
 | PM-CAP-007 | モーション確認 | FPS、範囲、loop、pause、step でセル系列を確認する | 第7章 PDF表示 pp.111–112（印刷 pp.220–223） | `SEQ-002` | animation contract、FFI、`RunProductionWorkflowSmoke` | Implemented and verified | タイムシート合成は対象外 |
 | PM-CAP-008 | 彩色構造 | 2値／階調／vector の主線、色トレース、彩色、汎用 plane を型付き分離する | 第6章 PDF表示 pp.71–84、第15章 pp.180–187 | `SPEC.md` §5、`DOC-002`, `VECTOR-001` | topology validation; test `acceptance_layer_tree_undo_redo_save_reopen_and_validation`, vector contracts | Implemented and verified | — |
 | PM-CAP-009 | レイヤー／プレーン操作 | create、duplicate、delete、reorder、visibility、editability、opacity、convert、merge を扱う | 第6章 PDF表示 pp.76–82（印刷 pp.150–163） | `DOC-002`, `DOC-003`, `SPEC.md:223–234` | grouped capability/canonical/Undo contracts; FFI spans; Layer pane marker/menu/status and smoke; x64 Release manual check | Implemented and verified | — |
@@ -157,7 +157,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | PM-CAP-041 | 参照利用 | 基準 frame 整列、移動、sample、reload、編集画像交換、前後移動を行う | 第8章 PDF表示 pp.114–120 | `LT-002` | animation contracts、FFI、Windows target-aware smoke | Implemented and verified | — |
 | PM-CAP-041A | 参照変形 | 登録した Light Table 画像を個別に回転する | 第8章 PDF表示 p.114（印刷 pp.226–227） | `LT-001` | item `rotation_milli_degrees` と Core／FFI／UI route はあるが、回転結果を直接固定する E2E は薄い | Implemented but unverified | 同頁の「画面を回転できない」は Canvas/view の別能力 |
 | PM-CAP-042 | 履歴／復帰 | Undo/Redo、複数段階移動、保存点復帰、部分復帰を行う | 第10章 PDF表示 p.141（印刷 pp.280–281） | `HIST-001` | `hist_001_history_jump_and_partial_selection_revert_are_transactional`; Windows history smoke | Implemented and verified | PDF は履歴一単位の詳細が曖昧 |
-| PM-CAP-043 | Preview／Cancel | stroke、transform、filter 等を base から preview し、OK 一件／Cancel 無変更にする | 第10章 PDF表示 pp.140,142–146（印刷 pp.278–291） | `FILTER-PREVIEW-001`, `SPEC.md:430–444` | stroke／floating／Core filter preview contracts、Windows debounced update、bounded latest-wins queue、production smoke | Implemented but unverified | M10自動検証済み、ARM64手動確認待ち。PM-GAP-021 |
+| PM-CAP-043 | Preview／Cancel | stroke、transform、filter 等を base から preview し、OK 一件／Cancel 無変更にする | 第10章 PDF表示 pp.140,142–146（印刷 pp.278–291） | `FILTER-PREVIEW-001`, `SPEC.md:430–444` | stroke／floating／Core filter preview contracts、Windows debounced update、bounded latest-wins queue、production smoke、ARM64手動確認 | Implemented and verified | M10完了。PM-GAP-021解消済み |
 | PM-CAP-044 | Filter catalog | sharpen、blur、invert、auto contrast、色調補正を selection／plane へ適用し再実行する | 第10章 PDF表示 pp.142–146（印刷 pp.282–291） | `FILTER-001`, `FILTER-002` | `filter_catalog_executes_with_bounded_parameters`; `acceptance_apply_is_exactly_one_undo_unit_and_last_filter_reuses_it`; UI smoke | Implemented and verified | interactive preview loop は PM-CAP-043 |
 | PM-CAP-045 | 特効／retouch | airbrush、gradient、boundary airbrush、local blur、stamp、dust を使う | 第10章 PDF表示 pp.147–149（印刷 pp.292–297） | `EFFECT-001`, `PAINT-003` | deterministic image/Core tests、FFI、代表 Windows smoke | Implemented and verified | 一部個別 WM_COMMAND の E2E は §7 |
 | PM-CAP-046 | Adjustment／alpha | 非破壊 adjustment を再編集し、alpha だけを編集する | 第10章 PDF表示 pp.150–152（印刷 pp.298–303） | `ADJUST-001` | adjustment order/save-reopen、alpha RGB preservation、FFI／UI smoke | Implemented and verified | — |
@@ -301,8 +301,8 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 
 - **不足している能力:** filter／色調補正の parameter を変えるたびに同じ base から再計算し、結果を見て再調整してから一回だけ commit する。
 - **PaintMan で可能な作業:** 強度や curve を完成画像で比較し、不要なら完全に Cancel する。
-- **現状で困る状況:** M10でWindows dialogのparameter変更通知から既存Core／FFI preview sessionへ接続し、同じbaseからの非累積preview、OK一件、Cancel無変更をproduction routeへ実装した。ARM64の利用者向け表示確認だけが残る。
-- **不足層／カバレッジ:** M10自動検証済み、ARM64手動確認待ちのため`Implemented but unverified`。`FILTER-PREVIEW-001`は`Experimental`として追跡する。
+- **現状で困る状況:** M10でWindows dialogのparameter変更通知から既存Core／FFI preview sessionへ接続し、同じbaseからの非累積preview、OK一件、Cancel無変更をproduction routeへ実装した。ARM64の利用者向け表示確認も完了した。
+- **不足層／カバレッジ:** Core／FFI／Windows production smokeとARM64手動確認が完了し、`FILTER-PREVIEW-001`は`Verified`。PM-GAP-021は解消済み。
 - **推奨優先度（仕上げ）:** **10/22（P1）**。互換性評価は **Should**。結果品質へ直接影響し、Cancel→再度 dialog の反復が必要になる。
 - **代替手段:** 手動確認完了までは、確定前に複数parameterを往復し、CancelとUndoで元画像へ戻ることを確認する。
 - **関連要件:** `HIST-001`, `FILTER-001`, `FILTER-002`, `FILTER-PREVIEW-001`, `SPEC.md:432–444`。
@@ -314,8 +314,8 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 
 - **不足している能力:** dirty cell から別セルへ移るとき、設定に従い通常保存とは別 status の自動保存を成功させてから切り替える。
 - **PaintMan で可能な作業:** 前後セルを連続して彩色し、毎回の確認 dialog を省きながら変更を失わない。
-- **現状で困る状況:** 現在は保存確認と Cancel はあるが、自動保存 policy がなく、長い連続作業で確認回数が増える。
-- **不足層／カバレッジ:** 実装不足、`Specified only`。`SEQ-001` の既知残件。
+- **現状で困る状況:** M11でversioned `Prompt`／`Autosave-before-switch` setting、発行時identity/revision固定、exact native recovery artifact、戻り時staged restore、非同期progressとcommand抑止をproduction routeへ接続した。ARM64の利用者向け表示と書込不可時の挙動確認だけが残る。
+- **不足層／カバレッジ:** Coreのsuccess/no-op/invalid/stale/Undo/Redo、ABI ownership/negative、Windows setting/association/production smokeを自動検証済みで`Implemented but unverified`。M11 ARM64手動確認待ち。
 - **推奨優先度（仕上げ）:** **11/22（P2）**。互換性評価は **Should**。主に効率の問題だが、確認の見落としは変更損失につながる。
 - **代替手段:** 毎回の保存確認、手動 save、一般 autosave。切替との順序は自動保証されない。
 - **関連要件:** `SEQ-001`, `SESSION-001`, `SPEC.md:175,177`。
@@ -476,7 +476,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 |---|---|---|---|
 | 新規カットとカット metadata／既定値 | `SEQ-001`, File menu specification | 実装未確認 | PM-GAP-001。Cut model／ABI／UI なし |
 | frame/image size、8/16 bit、複数枚の新規セル | `DOC-001` | 一部実装 | PM-GAP-003。現 UI は一枚、pixel幅／高さ、DPI、layer kind |
-| セル切替時自動保存 | `SEQ-001` | 未実装 | `docs/compatibility.md:46` の既知差分、PM-GAP-004 |
+| セル切替時自動保存 | `SEQ-001` | 実装・手動確認待ち | exact native recovery association、staged restore、通常savepoint/path不変、Core／ABI／Windows production smoke。PM-GAP-004 |
 | sequence 端点 loop preference | `SEQ-001` | 未実装 | 同上、PM-GAP-005 |
 | 複数 edit target の presentation | `DOC-002`, `DOC-003` | 実装・手動確認済み | tree-ordered Core/ABI、Layer pane marker、capability menu、status、smoke、x64 Release 確認。PM-GAP-006 |
 | 論理 layer 順の raster/vector 混在合成 | `DOC-002`, `VECTOR-001` | 一部実装 | `docs/implementation-status.md:42–43` の既知差分、PM-GAP-007 |
@@ -491,7 +491,7 @@ PaintMan の塗りあふれ中断が途中結果を残すか、フィルター�
 | vector AA／中心線／中心線のみ／端点 view overlays | `VIEW-005`, `VECTOR-001` | 実装・手動確認済み | 明示topology、Core snapshot、ABI v9、Windows menu／shortcut／Direct2D pixel golden／device-loss smoke、x64 Release確認。PM-GAP-018解消済み |
 | LT 前後 N 枚登録／自動 opacity step | `LT-001` | 未実装 | `docs/compatibility.md:44` の既知差分、PM-GAP-019 |
 | 設定可能な出力色域 check → selection | `COLOR-002`, `SEL-002` | 未実装 | PM-GAP-020 |
-| dialog parameter 変更ごとの filter preview update | `FILTER-PREVIEW-001`, `HIST-001`, `FILTER-001` | 実装・手動確認待ち | 同一base Core preview、ABI v9、120ms debounce、bounded latest-wins queue、issue-time target、Job Progress、Windows smoke。PM-GAP-021 |
+| dialog parameter 変更ごとの filter preview update | `FILTER-PREVIEW-001`, `HIST-001`, `FILTER-001` | 実装・手動確認済み | 同一base Core preview、ABI v9、120ms debounce、bounded latest-wins queue、issue-time target、Job Progress、Windows smoke、ARM64確認。PM-GAP-021解消済み |
 | batch 複数 seed／pair UI、二セル pair 抽出、分離先、実行時再設定 | `BATCH-002`, `BATCH-004` | 実装・手動確認済み | Core／canonical、ABI v9、Windows row editor／二セルselector、`.inkbatch` v2、現行v17／epoch-14、golden／smoke、x64 Release確認。PM-GAP-022 解消済み |
 | app private clipboard で layer/plane/vector type を保持 | `CLIP-001` | 実装済み | Rust 所有の private handle が ordered plane、RGBA8/16、origin、vector path/fill topology を保持し、Windows は標準 DIB も併記 |
 | fullscreen command | Window specification | 未実装 | OS maximize／workspace preset で代替できるため `Not required`、ギャップ非計上 |

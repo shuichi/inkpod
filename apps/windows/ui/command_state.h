@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 348U;
+inline constexpr std::size_t kProductionCommandStateCount = 349U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -65,6 +65,7 @@ struct DocumentPaneCommandStateInput {
 
 struct AnimationCommandStateInput {
     std::uint32_t motion_fps{24U};
+    bool sequence_switch_pending{};
 };
 
 struct SelectionViewCommandStateInput {
@@ -154,6 +155,7 @@ struct WorkspaceCommandStateInput {
 
 struct ApplicationCommandStateInput {
     bool restore_previous_documents{};
+    bool sequence_autosave_before_switch{};
 };
 
 struct CommandStateInputs {

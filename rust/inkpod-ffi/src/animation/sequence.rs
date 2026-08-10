@@ -722,6 +722,215 @@ pub unsafe extern "C" fn inkpod_core_sequence_activate(
     })
 }
 
+/// Captures an immutable source/target/revision token for a sequence switch.
+///
+/// # Safety
+/// Core and request output must be complete live owner-thread records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_switch_request(
+    core: *mut InkpodCore,
+    index: u32,
+    policy: u32,
+    out_request: *mut InkpodSequenceSwitchRequest,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_request.cast_const(), "InkpodSequenceSwitchRequest") }
+        {
+            return status;
+        }
+        let policy = match parse_sequence_switch_policy(policy) {
+            Ok(policy) => policy,
+            Err(status) => return status,
+        };
+        // SAFETY: Complete live records were validated above.
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *out_request };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.sequence_switch_request(index as usize, policy) {
+            Ok(request) => {
+                write_sequence_switch_request(output, request);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Commits a validated autosave-before-switch token after durable source save.
+///
+/// # Safety
+/// Core, request, and document-info output must be complete live owner-thread
+/// records. The request is borrowed only for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_commit_autosaved_switch(
+    core: *mut InkpodCore,
+    request: *const InkpodSequenceSwitchRequest,
+    out_info: *mut InkpodDocumentInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(request, "InkpodSequenceSwitchRequest") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodDocumentInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records were validated above.
+        let request = match parse_sequence_switch_request(unsafe { &*request }) {
+            Ok(request) => request,
+            Err(status) => return status,
+        };
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.sequence_commit_autosaved_switch(request) {
+            Ok(info) => {
+                write_document_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+/// Restores the requested target from one exact native recovery artifact.
+///
+/// # Safety
+/// Core/request/output must be complete live owner-thread records and the UTF-8
+/// path span must remain readable for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_restore_autosaved_switch(
+    core: *mut InkpodCore,
+    request: *const InkpodSequenceSwitchRequest,
+    path_utf8: *const u8,
+    path_bytes: u64,
+    out_info: *mut InkpodDocumentInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) = unsafe { validate_struct(request, "InkpodSequenceSwitchRequest") } {
+            return status;
+        }
+        if let Err(status) = unsafe { validate_struct(out_info.cast_const(), "InkpodDocumentInfo") }
+        {
+            return status;
+        }
+        // SAFETY: Complete live records and readable path span are required by contract.
+        let request = match parse_sequence_switch_request(unsafe { &*request }) {
+            Ok(request) => request,
+            Err(status) => return status,
+        };
+        let path = match unsafe { path_from_utf8(path_utf8, path_bytes) } {
+            Ok(path) => path,
+            Err(status) => return status,
+        };
+        let core = unsafe { &mut *core };
+        let output = unsafe { &mut *out_info };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core.core.sequence_restore_autosaved_switch(request, path) {
+            Ok(info) => {
+                write_document_info(output, info);
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+fn parse_sequence_switch_policy(policy: u32) -> Result<SequenceSwitchPolicy, u32> {
+    match policy {
+        INKPOD_SEQUENCE_SWITCH_PROMPT => Ok(SequenceSwitchPolicy::Prompt),
+        INKPOD_SEQUENCE_SWITCH_AUTOSAVE => Ok(SequenceSwitchPolicy::AutosaveBeforeSwitch),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "sequence switch policy is not defined",
+        )),
+    }
+}
+
+fn parse_sequence_switch_request(
+    input: &InkpodSequenceSwitchRequest,
+) -> Result<SequenceSwitchRequest, u32> {
+    if input.feature_flags != INKPOD_FEATURE_NONE
+        || input.flags & !INKPOD_SEQUENCE_SWITCH_REQUIRED != 0
+    {
+        return Err(fail(
+            INKPOD_STATUS_UNSUPPORTED,
+            "sequence switch request contains unsupported flags",
+        ));
+    }
+    let request = SequenceSwitchRequest {
+        policy: parse_sequence_switch_policy(input.policy)?,
+        source_document_uuid: (u128::from(input.source_document_uuid_high) << 64)
+            | u128::from(input.source_document_uuid_low),
+        source_generation: input.source_generation,
+        source_document_revision: input.source_document_revision,
+        source_editor_revision: input.source_editor_revision,
+        target_document_uuid: (u128::from(input.target_document_uuid_high) << 64)
+            | u128::from(input.target_document_uuid_low),
+        target_source_generation: input.target_source_generation,
+        target_index: input.target_index,
+    };
+    let required = if request.requires_switch() {
+        INKPOD_SEQUENCE_SWITCH_REQUIRED
+    } else {
+        0
+    };
+    if input.flags != required {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "sequence switch request flags do not match its identities",
+        ));
+    }
+    Ok(request)
+}
+
+fn write_sequence_switch_request(
+    output: &mut InkpodSequenceSwitchRequest,
+    request: SequenceSwitchRequest,
+) {
+    output.policy = match request.policy {
+        SequenceSwitchPolicy::Prompt => INKPOD_SEQUENCE_SWITCH_PROMPT,
+        SequenceSwitchPolicy::AutosaveBeforeSwitch => INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+    };
+    output.feature_flags = INKPOD_FEATURE_NONE;
+    output.source_document_uuid_high = (request.source_document_uuid >> 64) as u64;
+    output.source_document_uuid_low = request.source_document_uuid as u64;
+    output.source_generation = request.source_generation;
+    output.source_document_revision = request.source_document_revision;
+    output.source_editor_revision = request.source_editor_revision;
+    output.target_document_uuid_high = (request.target_document_uuid >> 64) as u64;
+    output.target_document_uuid_low = request.target_document_uuid as u64;
+    output.target_source_generation = request.target_source_generation;
+    output.target_index = request.target_index;
+    output.flags = if request.requires_switch() {
+        INKPOD_SEQUENCE_SWITCH_REQUIRED
+    } else {
+        0
+    };
+}
+
 /// Registers one sequence cell as the exact-depth subpalette source.
 ///
 /// # Safety

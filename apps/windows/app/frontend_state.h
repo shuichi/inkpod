@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -14,6 +15,7 @@
 #include "command_context.h"
 #include "pane_target.h"
 #include "inkpod/core_ffi.h"
+#include "session_recovery.h"
 #include "ui/command_state.h"
 #include "ui/dialogs/basic_dialogs.h"
 #include "ui/dialogs/batch_dialog.h"
@@ -91,6 +93,19 @@ struct LocatorAsyncResult {
     std::array<std::uint8_t, 9U * 9U * 4U> neighborhood{};
 };
 
+struct SequenceSwitchAsyncResult {
+    PostedNotificationToken token;
+    CommandContext context;
+    InkpodStatus status{INKPOD_STATUS_INVALID_STATE};
+    InkpodSequenceSwitchRequest request{sizeof(InkpodSequenceSwitchRequest)};
+    std::wstring source_recovery_path;
+    RecoveryMetadata source_metadata{};
+    std::wstring target_recovery_path;
+    RecoveryMetadata target_metadata{};
+    bool source_autosaved{};
+    bool target_restored{};
+};
+
 struct AdjustmentLayerUiState {
     std::uint64_t id{};
     bool visible{true};
@@ -127,6 +142,8 @@ struct AppLifetimeState {
     std::wstring smoke_raster_path;
     std::vector<std::wstring> smoke_sequence_paths;
     bool restore_previous_documents{};
+    SequenceCellSwitchPolicy sequence_switch_policy{
+        SequenceCellSwitchPolicy::Prompt};
 };
 
 struct DocumentShellState {
@@ -295,6 +312,9 @@ struct AnimationUiState {
     std::uint64_t motion_flags{INKPOD_MOTION_FLAG_LOOP};
     bool motion_active{};
     bool motion_paused{};
+    bool sequence_switch_pending{};
+    std::uint32_t smoke_sequence_switch_completed{};
+    InkpodStatus smoke_sequence_switch_status{INKPOD_STATUS_OK};
 };
 
 struct EffectsUiState {
@@ -364,6 +384,9 @@ struct FrontendRoutingState {
     std::atomic_uint64_t locator_pending_token{};
     std::mutex locator_results_mutex;
     std::array<std::optional<LocatorAsyncResult>, 64U> locator_results{};
+    std::atomic_uint64_t sequence_switch_pending_token{};
+    std::mutex sequence_switch_results_mutex;
+    std::shared_ptr<SequenceSwitchAsyncResult> sequence_switch_result;
     CommandContext command_state_context;
     PaneInstanceId tool_pane{};
     PaneInstanceId tool_options_pane{};

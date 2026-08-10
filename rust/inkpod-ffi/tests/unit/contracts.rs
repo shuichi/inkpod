@@ -2384,7 +2384,10 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
 
     let (mut sequence_core, _) = create_core(1, 1, 4);
     let clean_path = temporary_inkpod_path("sequence");
+    let source_recovery_path = temporary_inkpod_path("sequence-source-recovery");
+    let target_recovery_path = temporary_inkpod_path("sequence-target-recovery");
     save_document(sequence_core, &clean_path);
+    let clean_file_bytes = std::fs::read(&clean_path).unwrap();
     let names = [b"cell10.png".as_slice(), b"cell2.png".as_slice()];
     let mut files = [
         InkpodNamedBytesInput {
@@ -2604,6 +2607,167 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
         assert_eq!(active_editor.active_layer_id, active.layer_id);
         assert_eq!(active_editor.active_plane_id, active.main_plane_id);
 
+        let mut switch_request = InkpodSequenceSwitchRequest {
+            struct_size: size_of::<u32>() as u32,
+            ..InkpodSequenceSwitchRequest::default()
+        };
+        assert_eq!(
+            inkpod_core_sequence_switch_request(
+                sequence_core,
+                1,
+                INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                &mut switch_request,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        switch_request.struct_size = size_of::<InkpodSequenceSwitchRequest>() as u32;
+        assert_eq!(
+            inkpod_core_sequence_switch_request(sequence_core, 1, u32::MAX, &mut switch_request,),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_sequence_switch_request(
+                sequence_core,
+                1,
+                INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                &mut switch_request,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(switch_request.flags, INKPOD_SEQUENCE_SWITCH_REQUIRED);
+        assert_eq!(
+            inkpod_core_sequence_commit_autosaved_switch(sequence_core, ptr::null(), &mut active,),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut malformed_request = switch_request;
+        malformed_request.flags = 0;
+        assert_eq!(
+            inkpod_core_sequence_commit_autosaved_switch(
+                sequence_core,
+                &malformed_request,
+                &mut active,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut stale_request = switch_request;
+        stale_request.source_document_revision += 1;
+        assert_eq!(
+            inkpod_core_sequence_commit_autosaved_switch(
+                sequence_core,
+                &stale_request,
+                &mut active,
+            ),
+            INKPOD_STATUS_INVALID_STATE
+        );
+
+        let source_recovery_bytes = source_recovery_path
+            .to_string_lossy()
+            .into_owned()
+            .into_bytes();
+        assert_eq!(
+            inkpod_core_autosave(
+                sequence_core,
+                source_recovery_bytes.as_ptr(),
+                source_recovery_bytes.len() as u64,
+                &mut active,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_sequence_commit_autosaved_switch(
+                sequence_core,
+                &switch_request,
+                &mut active,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            active.document_uuid_high,
+            switch_request.target_document_uuid_high
+        );
+        assert_eq!(
+            active.document_uuid_low,
+            switch_request.target_document_uuid_low
+        );
+
+        let mut return_request = InkpodSequenceSwitchRequest {
+            struct_size: size_of::<InkpodSequenceSwitchRequest>() as u32,
+            ..InkpodSequenceSwitchRequest::default()
+        };
+        assert_eq!(
+            inkpod_core_sequence_switch_request(
+                sequence_core,
+                0,
+                INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                &mut return_request,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let target_recovery_bytes = target_recovery_path
+            .to_string_lossy()
+            .into_owned()
+            .into_bytes();
+        assert_eq!(
+            inkpod_core_autosave(
+                sequence_core,
+                target_recovery_bytes.as_ptr(),
+                target_recovery_bytes.len() as u64,
+                &mut active,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_sequence_restore_autosaved_switch(
+                sequence_core,
+                &return_request,
+                target_recovery_bytes.as_ptr(),
+                target_recovery_bytes.len() as u64,
+                &mut active,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            queried_document_info(sequence_core).document_uuid_low,
+            return_request.source_document_uuid_low
+        );
+        let missing_path = b"Z:/inkpod-missing/sequence-recovery.inkpod";
+        assert_eq!(
+            inkpod_core_sequence_restore_autosaved_switch(
+                sequence_core,
+                &return_request,
+                missing_path.as_ptr(),
+                missing_path.len() as u64,
+                &mut active,
+            ),
+            INKPOD_STATUS_IO_ERROR
+        );
+        let after_missing = queried_document_info(sequence_core);
+        assert_eq!(
+            after_missing.document_uuid_low,
+            return_request.source_document_uuid_low
+        );
+        assert_eq!(
+            inkpod_core_sequence_restore_autosaved_switch(
+                sequence_core,
+                &return_request,
+                source_recovery_bytes.as_ptr(),
+                source_recovery_bytes.len() as u64,
+                &mut active,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_ne!(active.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
+        assert_ne!(active.flags & INKPOD_DOCUMENT_FLAG_RECOVERED, 0);
+        assert_eq!(
+            active.document_uuid_high,
+            return_request.target_document_uuid_high
+        );
+        assert_eq!(
+            active.document_uuid_low,
+            return_request.target_document_uuid_low
+        );
+        assert_eq!(std::fs::read(&clean_path).unwrap(), clean_file_bytes);
+
         let mut encoded = ptr::null_mut();
         assert_eq!(
             inkpod_core_sequence_export_encoded(
@@ -2672,6 +2836,8 @@ fn ffi_contract_light_table_sequence_and_owned_buffers() {
         assert_eq!(inkpod_core_destroy(&mut sequence_core), INKPOD_STATUS_OK);
     }
     std::fs::remove_file(clean_path).unwrap();
+    std::fs::remove_file(source_recovery_path).unwrap();
+    std::fs::remove_file(target_recovery_path).unwrap();
 }
 
 fn vector_segment(start: (f32, f32), end: (f32, f32)) -> InkpodVectorCubicSegment {

@@ -632,7 +632,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M10 — PM-GAP-021: parameter変更に追従する非累積preview
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: HIST-001、FILTER-001、FILTER-002、FILTER-PREVIEW-001。
 
@@ -674,7 +674,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M11 — PM-GAP-004: セル切替時の安全な自動保存
 
-状態: 未着手
+状態: 手動確認待ち
 
 関連要件: SEQ-001、SESSION-001、IO-001。
 

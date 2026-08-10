@@ -562,6 +562,31 @@ numeric run match, then selects the opened cell in Core natural order. Dirty-cel
 cancel, stale target, decode failure, and endpoint no-op leave the current cell
 unchanged.
 
+Sequence navigation has one application-level, versioned `Prompt` or
+`Autosave-before-switch` policy. The autosave route first asks Core for an
+immutable value request containing the exact source/target UUIDs, sequence-source
+generations, and source document/editor revisions. `DocumentSession` owns a
+bounded registry keyed by source UUID plus generation; each published entry owns
+one private native recovery path, sidecar metadata, and a monotonic artifact
+generation. The UI pre-reserves registry capacity, then the CoreHost owner lane
+writes and durably replaces the source artifact before it commits the requested
+activation. A target with an existing association is decoded, validated, and
+replayed in a staged Core, then swaps the live Core only after its UUID matches.
+The flattened `SequenceCellSource` remains a thumbnail/fresh-cell source and is
+never used to reconstruct saved layer topology, history, selection, or editor
+state.
+
+Only one sequence switch token may be pending application-wide. While it is
+pending, previous/next/goto are disabled, progress is visible in the status bar,
+and another request is rejected rather than retargeted. Completion carries only
+token and frontend generation through `PostMessage`; the UI publishes the
+pre-reserved association, active cell, pathless recovery shell state, panes, and
+menu state only for the captured live session. Save, metadata, queue, or stale
+failure leaves the source cell active and never advances the normal path or
+savepoint; close or shutdown invalidates and discards that session without
+retargeting completion to another document. The HKCU policy record is versioned
+frontend state, not part of the `.inkpod` schema.
+
 The Light Table palette also uses the pane-target registry. Its set/item
 selection is valid only with the captured session/generation namespace, and
 every mutation dispatches to that exact Core handle. Canvas movement retains

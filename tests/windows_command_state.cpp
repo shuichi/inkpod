@@ -236,15 +236,28 @@ int main() {
         || IsCommandEnabled(states, IDM_TOOL_COLOR_REPLACE_RECTANGLE)
         || !IsCommandEnabled(states, IDM_FILE_RESTORE_PREVIOUS)
         || IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
+        || !IsCommandEnabled(states, IDM_FILE_SEQUENCE_AUTOSAVE)
+        || IsCommandChecked(states, IDM_FILE_SEQUENCE_AUTOSAVE)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
         return 1;
     }
 
     inputs.application.restore_previous_documents = true;
+    inputs.application.sequence_autosave_before_switch = true;
     states = ComputeCommandStates(inputs);
-    if (!IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)) {
+    if (!IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
+        || !IsCommandChecked(states, IDM_FILE_SEQUENCE_AUTOSAVE)) {
         return 21;
     }
+
+    inputs.animation.sequence_switch_pending = true;
+    states = ComputeCommandStates(inputs);
+    if (IsCommandEnabled(states, IDM_SEQ_PREVIOUS)
+        || IsCommandEnabled(states, IDM_SEQ_NEXT)
+        || IsCommandEnabled(states, IDM_SEQ_GOTO)) {
+        return 22;
+    }
+    inputs.animation.sequence_switch_pending = false;
 
     inputs.document.has_document = true;
     inputs.document.has_saved_path = true;

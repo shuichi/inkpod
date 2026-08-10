@@ -172,9 +172,10 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - `ファイル > 開く` は focused workspace の active editor group に新しい document tab を追加する。同じ file identity が既に開いている場合は既存 `DocumentSession` の view を選択し、通常操作で二つの独立 session を作らない。別 view が必要な場合は `新しいビュー` を明示的に使う。
 - file identity は Windows の volume/file ID を取得できる場合はそれを使い、取得できない場合は正規化した絶対 path を使う。表示名や tab index を identity に使わず、untitled document には frontend が UUID を発行する。
 - 開いたセルと同じ sequence/folder にある画像は file preview に自然順で表示する。thumbnail click、前/次 command、番号指定で切り替える。
-- active cell が dirty の状態で別セルへ移る場合は、設定に応じて保存確認または自動保存を行う。cancel ならセルを切り替えない。
+- active cell が dirty の状態で別セルへ移る場合は、versioned application setting で `Prompt` または `Autosave-before-switch` を選ぶ。Prompt の cancel、自動保存の失敗、発行後 stale、queue rejection では現在セルと未保存編集を保ち、durable な native recovery artifact と metadata の publication 成功後だけ対象セルへ切り替える。
+- 自動保存済みセルは sequence entry の document UUID と source generation に関連付け、戻る際は exact native state を staged Core で検証・replayしてから active Core を交換する。flattened preview source から history、layer/plane tree、selection、editor state を再構成しない。
 - `前のセル` と `次のセル` は欠番を飛ばし、設定で末尾から先頭へ循環できる。
-- 通常保存、自動保存、recovery、export は別 status とし、自動保存成功だけで通常 savepoint を進めない。
+- 通常保存、自動保存、recovery、export は別 status とし、自動保存成功だけで通常 savepoint、document path authority、dirty 表示を進めない。
 - 保存は temp file 完成後の置換とし、失敗しても元ファイルを残す。起動時は全 recovery 候補を列挙し、一件ずつ復元/破棄/保留を選べるようにして、silent に捨てない。通常の前回文書復元は layout と crash recovery から分離した既定 off の明示設定とする。
 - `名前を付けて保存` は成功時に file identity registry、title、recent files、recovery metadata を一つの transaction として更新する。保存先 identity が別の open session と競合する場合は上書きや silent merge をせず、明示的な解決を求める。
 - 外部変更または read-only は session ごとに検出し、保存前に利用者へ示す。read-only document を同じ path へ無言で書き換えず、reload は dirty/history を失うため明示確認と cancel を持つ。

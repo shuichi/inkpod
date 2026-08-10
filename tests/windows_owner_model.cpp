@@ -391,6 +391,34 @@ bool TestDocumentAndViewLifetime() {
         || document->shell.current_path != L"C:\\work\\cell.inkpod") {
         return false;
     }
+    inkpod::app::RecoveryMetadata sequence_metadata{};
+    sequence_metadata.session = document->id;
+    sequence_metadata.generation = document->generation;
+    sequence_metadata.document_uuid_high = 71U;
+    sequence_metadata.document_uuid_low = 73U;
+    if (!document->PublishSequenceAutosave(
+            71U, 73U, 5U, L"C:\\recovery\\cell.inkpod", sequence_metadata)
+        || document->FindSequenceAutosave(71U, 73U, 4U) != nullptr) {
+        return false;
+    }
+    const auto* sequence_autosave = document->FindSequenceAutosave(71U, 73U, 5U);
+    if (sequence_autosave == nullptr
+        || sequence_autosave->artifact_generation != 1U
+        || sequence_autosave->recovery_path != L"C:\\recovery\\cell.inkpod"
+        || !document->PublishSequenceAutosave(
+            71U, 73U, 5U, L"C:\\recovery\\cell-2.inkpod", sequence_metadata)) {
+        return false;
+    }
+    sequence_autosave = document->FindSequenceAutosave(71U, 73U, 5U);
+    if (sequence_autosave == nullptr
+        || sequence_autosave->artifact_generation != 2U
+        || sequence_autosave->recovery_path != L"C:\\recovery\\cell-2.inkpod") {
+        return false;
+    }
+    document->ClearSequenceAutosaves();
+    if (document->FindSequenceAutosave(71U, 73U, 5U) != nullptr) {
+        return false;
+    }
     if (registry.Replace({}, Generation{4U}, DocumentViewId{21U}, nullptr)
         || registry.Current() != document
         || registry.Current()->id != DocumentSessionId{11U}

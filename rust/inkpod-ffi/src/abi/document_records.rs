@@ -385,6 +385,24 @@ pub struct InkpodSequenceThumbnailBuffer {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodSequenceSwitchRequest {
+    pub struct_size: u32,
+    pub policy: u32,
+    pub feature_flags: u64,
+    pub source_document_uuid_high: u64,
+    pub source_document_uuid_low: u64,
+    pub source_generation: u64,
+    pub source_document_revision: u64,
+    pub source_editor_revision: u64,
+    pub target_document_uuid_high: u64,
+    pub target_document_uuid_low: u64,
+    pub target_source_generation: u64,
+    pub target_index: u32,
+    pub flags: u32,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodMotionCheckInput {
     pub struct_size: u32,

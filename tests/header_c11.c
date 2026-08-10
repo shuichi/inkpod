@@ -37,6 +37,7 @@ _Static_assert(sizeof(InkpodRasterSourceInput) == 96U, "raster source layout dri
 _Static_assert(sizeof(InkpodLightTableItemInput) == 168U, "light-table input layout drift");
 _Static_assert(sizeof(InkpodSequenceCellInput) == 120U, "sequence cell layout drift");
 _Static_assert(sizeof(InkpodSequenceInput) == 40U, "sequence input layout drift");
+_Static_assert(sizeof(InkpodSequenceSwitchRequest) == 88U, "sequence switch request layout drift");
 _Static_assert(sizeof(InkpodMotionCheckInput) == 16U, "motion input layout drift");
 _Static_assert(sizeof(InkpodMotionFrame) == 40U, "motion frame layout drift");
 _Static_assert(sizeof(InkpodLayerThumbnailBuffer) == 80U, "layer thumbnail layout drift");

@@ -71,6 +71,7 @@ using inkpod::app::ReadRecoveryMetadata;
 using inkpod::app::RecoveryCandidate;
 using inkpod::app::RecoveryMetadata;
 using inkpod::app::RecoveryMetadataPath;
+using inkpod::app::SequenceCellSwitchPolicy;
 using inkpod::app::WriteFileAtomically;
 using inkpod::app::CommandTimerKind;
 using inkpod::app::DocumentSessionId;
@@ -5656,6 +5657,146 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || active_cell_tab != L"cell3.png *") {
         return 718;
     }
+    InkpodDocumentInfo autosave_source = EmptyDocumentInfo();
+    InkpodEditorStateInfo autosave_source_editor{};
+    autosave_source_editor.struct_size = sizeof(autosave_source_editor);
+    InkpodSequenceSwitchRequest autosave_request{};
+    autosave_request.struct_size = sizeof(autosave_request);
+    if (!QueryDocument(state, autosave_source)
+        || (autosave_source.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
+        || state.engine->GetEditorState(
+               state.Document().id,
+               state.Document().generation,
+               autosave_source_editor)
+            == false
+        || state.engine->Invoke(
+               [&autosave_request](InkpodCore* core) {
+                   return inkpod_core_sequence_switch_request(
+                       core,
+                       2U,
+                       INKPOD_SEQUENCE_SWITCH_AUTOSAVE,
+                       &autosave_request);
+               },
+               false,
+               false) != INKPOD_STATUS_OK
+        || (autosave_request.flags & INKPOD_SEQUENCE_SWITCH_REQUIRED) == 0U) {
+        return 4095;
+    }
+    const SequenceCellSwitchPolicy previous_sequence_policy =
+        state.lifetime.sequence_switch_policy;
+    const auto restore_sequence_policy = [&state, previous_sequence_policy]() {
+        state.lifetime.sequence_switch_policy = previous_sequence_policy;
+        UpdateMenuState(state);
+    };
+    state.lifetime.sequence_switch_policy =
+        SequenceCellSwitchPolicy::AutosaveBeforeSwitch;
+    UpdateMenuState(state);
+    const std::uint32_t autosave_prompt_count =
+        state.lifetime.smoke_dirty_prompt_count;
+    const std::uint32_t autosave_completion_count =
+        state.Workspace().animation.smoke_sequence_switch_completed;
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_SEQ_NEXT,
+            0) != 1
+        || !state.Workspace().animation.sequence_switch_pending
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_SEQ_NEXT,
+               0) != 0
+        || state.engine->Invoke(
+               [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
+            != INKPOD_STATUS_OK) {
+        restore_sequence_policy();
+        return 4096;
+    }
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo autosave_target = EmptyDocumentInfo();
+    const auto* source_binding = state.Document().FindSequenceAutosave(
+        autosave_request.source_document_uuid_high,
+        autosave_request.source_document_uuid_low,
+        autosave_request.source_generation);
+    std::wstring source_metadata_path;
+    if (state.Workspace().animation.sequence_switch_pending
+        || state.Workspace().animation.smoke_sequence_switch_completed
+            != autosave_completion_count + 1U
+        || state.Workspace().animation.smoke_sequence_switch_status
+            != INKPOD_STATUS_OK
+        || state.lifetime.smoke_dirty_prompt_count != autosave_prompt_count
+        || !QueryDocument(state, autosave_target)
+        || autosave_target.document_uuid_high
+            != autosave_request.target_document_uuid_high
+        || autosave_target.document_uuid_low
+            != autosave_request.target_document_uuid_low
+        || state.Workspace().sequence_dialog.view.active_index != 2U
+        || source_binding == nullptr
+        || source_binding->artifact_generation != 1U
+        || GetFileAttributesW(source_binding->recovery_path.c_str())
+            == INVALID_FILE_ATTRIBUTES
+        || !RecoveryMetadataPath(
+            source_binding->recovery_path, source_metadata_path)
+        || GetFileAttributesW(source_metadata_path.c_str())
+            == INVALID_FILE_ATTRIBUTES
+        || !state.Document().shell.current_path.empty()) {
+        restore_sequence_policy();
+        return 4097;
+    }
+    const std::wstring source_recovery_path = source_binding->recovery_path;
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_SEQ_PREVIOUS,
+            0) != 1
+        || !state.Workspace().animation.sequence_switch_pending
+        || state.engine->Invoke(
+               [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
+            != INKPOD_STATUS_OK) {
+        restore_sequence_policy();
+        return 4098;
+    }
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo autosave_restored = EmptyDocumentInfo();
+    InkpodEditorStateInfo autosave_restored_editor{};
+    autosave_restored_editor.struct_size = sizeof(autosave_restored_editor);
+    if (state.Workspace().animation.sequence_switch_pending
+        || state.Workspace().animation.smoke_sequence_switch_completed
+            != autosave_completion_count + 2U
+        || state.Workspace().animation.smoke_sequence_switch_status
+            != INKPOD_STATUS_OK
+        || state.lifetime.smoke_dirty_prompt_count != autosave_prompt_count
+        || !QueryDocument(state, autosave_restored)
+        || state.engine->GetEditorState(
+               state.Document().id,
+               state.Document().generation,
+               autosave_restored_editor)
+            == false
+        || autosave_restored.document_uuid_high
+            != autosave_source.document_uuid_high
+        || autosave_restored.document_uuid_low
+            != autosave_source.document_uuid_low
+        || autosave_restored.main_plane_checksum
+            != autosave_source.main_plane_checksum
+        || autosave_restored.color_plane_checksum
+            != autosave_source.color_plane_checksum
+        || (autosave_restored.flags
+            & (INKPOD_DOCUMENT_FLAG_DIRTY | INKPOD_DOCUMENT_FLAG_RECOVERED))
+            != (INKPOD_DOCUMENT_FLAG_DIRTY | INKPOD_DOCUMENT_FLAG_RECOVERED)
+        || autosave_restored_editor.editor_revision
+            != autosave_source_editor.editor_revision
+        || std::memcmp(
+               autosave_restored_editor.editor_digest,
+               autosave_source_editor.editor_digest,
+               sizeof(autosave_restored_editor.editor_digest)) != 0
+        || (autosave_restored_editor.flags & INKPOD_EDITOR_STATE_DIRTY) == 0U
+        || state.Workspace().sequence_dialog.view.active_index != 1U
+        || state.Document().shell.current_path.empty() == false
+        || state.Document().shell.recovery_path != source_recovery_path) {
+        restore_sequence_policy();
+        return 4099;
+    }
+    restore_sequence_policy();
     const inkpod::app::DocumentSessionId sequence_session = state.Document().id;
     const inkpod::app::DocumentViewId sequence_view_id =
         state.Document().ActiveView()->id;

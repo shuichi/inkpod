@@ -83,6 +83,7 @@ static_assert(sizeof(InkpodSequenceCellInput) == 120U);
 static_assert(sizeof(InkpodSequenceInput) == 40U);
 static_assert(sizeof(InkpodNamedRasterInput) == 48U);
 static_assert(sizeof(InkpodSequenceThumbnailBuffer) == 56U);
+static_assert(sizeof(InkpodSequenceSwitchRequest) == 88U);
 static_assert(sizeof(InkpodMotionCheckInput) == 16U);
 static_assert(sizeof(InkpodMotionFrame) == 40U);
 static_assert(sizeof(InkpodVectorPoint) == 8U);

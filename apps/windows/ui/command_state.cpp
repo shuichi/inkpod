@@ -196,6 +196,10 @@ void ProvideAnimationCommandStates(
                                       : (input.motion_fps == 10U ? IDM_MOTION_FPS_10
                                                                  : IDM_MOTION_FPS_8))));
     SetChecked(states, command, true);
+    SetEnabled(
+        states,
+        {IDM_SEQ_PREVIOUS, IDM_SEQ_NEXT, IDM_SEQ_GOTO},
+        !input.sequence_switch_pending);
 }
 
 void ProvideSelectionViewCommandStates(
@@ -743,6 +747,10 @@ void ProvideApplicationCommandStates(
         states,
         IDM_FILE_RESTORE_PREVIOUS,
         input.restore_previous_documents);
+    SetChecked(
+        states,
+        IDM_FILE_SEQUENCE_AUTOSAVE,
+        input.sequence_autosave_before_switch);
 }
 
 } // namespace

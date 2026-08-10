@@ -551,6 +551,25 @@ status = inkpod_clipboard_render_rgba8(clipboard, &output);
 長さを検証してから各画像をデコードする。全件成功時だけシーケンスを一括置換し、一件でも入力不正、
 デコード失敗、割り当て失敗があれば、以前のシーケンス、現在の文書、未保存状態、Undo を保つ。
 
+セル切替前の自動保存は、同じCore所有スレッド上で次の三段階を使う。ABI versionはv9のままのadditive契約である。
+
+1. `inkpod_core_sequence_switch_request` はcaller-ownedの固定長
+   `InkpodSequenceSwitchRequest`へ、policy、source/target document UUID、sequence source
+   generation、source document/editor revision、target indexを値としてコピーする。raw pointer、path、
+   pane indexは保持しない。同じcellへの要求は`REQUIRED` flagなしのsuccessであり、範囲外index／policy、
+   NULL／短い構造体はinvalidとなる。
+2. frontendが別statusのnative recovery saveとmetadata publicationを完了した後だけ、
+   `inkpod_core_sequence_commit_autosaved_switch`へ同じrequestを戻す。Coreはsource identityと両revisionを
+   再検査し、staleなら現在文書、history、dirty、出力を変更しない。
+3. target entryにexact recovery associationがある場合は、代わりに
+   `inkpod_core_sequence_restore_autosaved_switch`へUTF-8 pathを渡す。path bytesは呼出中だけborrowedで、
+   Coreは保持しない。current-version containerのdecode、asset検証、replay、target UUID照合をstaged Coreで
+   完了してから一回で交換し、復元文書を`RECOVERED|DIRTY`かつnormal-path非採用として返す。失敗時は
+   live Coreを交換しない。
+
+これらはRust所有objectを新規に返さず、release関数も追加しない。Windows `DocumentSession`がartifact pathと
+metadataをUUID+source generationへ関連付け、CoreHost queueの完了前に別cellへ再解決しない。
+
 ## サブパレット参照スナップショットの契約
 
 読み取り専用の参照ビューアーは、対象 `DocumentSessionId + Generation` の Core 所有スレッドで

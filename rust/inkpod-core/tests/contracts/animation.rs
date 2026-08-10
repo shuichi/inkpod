@@ -707,6 +707,171 @@ fn sequence_activate_and_step_reject_document_dirty_without_discarding_it() {
 }
 
 #[test]
+fn acceptance_autosave_sequence_switch_restores_exact_dirty_native_state() {
+    let mut core = Core::new();
+    let current = core
+        .new_cell(3, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_sequence(vec![
+        source("cell1.png", current.document_uuid, 3, 2, [1, 2, 3, 255]),
+        source("cell2.png", 0x4545, 2, 3, [4, 5, 6, 255]),
+    ])
+    .unwrap();
+    let normal_path = std::env::temp_dir().join(format!(
+        "inkpod-test-sequence-normal-{}-{}.inkpod",
+        std::process::id(),
+        current.document_revision
+    ));
+    let source_recovery_path = std::env::temp_dir().join(format!(
+        "inkpod-test-sequence-source-recovery-{}-{}.inkpod",
+        std::process::id(),
+        current.document_revision
+    ));
+    let target_recovery_path = std::env::temp_dir().join(format!(
+        "inkpod-test-sequence-target-recovery-{}-{}.inkpod",
+        std::process::id(),
+        current.document_revision
+    ));
+    for path in [&normal_path, &source_recovery_path, &target_recovery_path] {
+        let _ = std::fs::remove_file(path);
+    }
+    core.save(&normal_path).unwrap();
+    let normal_bytes = std::fs::read(&normal_path).unwrap();
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 1.0,
+        y: 0.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let source_before = core.document_info().unwrap();
+    let source_digest = core.document_state_digest().unwrap();
+    let source_history = core.history_entries().to_vec();
+    let source_journal = core.journal_entries().to_vec();
+    let source_editor = core.editor_state().unwrap();
+    let source_request = core
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    assert!(source_request.requires_switch());
+    assert_eq!(source_request.source_document_uuid, current.document_uuid);
+    assert_eq!(source_request.target_document_uuid, 0x4545);
+
+    core.autosave(&source_recovery_path).unwrap();
+    assert_eq!(core.document_info().unwrap(), source_before);
+    assert_eq!(std::fs::read(&normal_path).unwrap(), normal_bytes);
+    let switched = core
+        .sequence_commit_autosaved_switch(source_request)
+        .unwrap();
+    assert_eq!(switched.document_uuid, 0x4545);
+
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 0.0,
+        y: 1.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let target_request = core
+        .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    core.autosave(&target_recovery_path).unwrap();
+    let target_before_failed_restore = core.document_info().unwrap();
+    let target_digest_before_failed_restore = core.document_state_digest().unwrap();
+    let target_history_before_failed_restore = core.history_entries().to_vec();
+    assert!(matches!(
+        core.sequence_restore_autosaved_switch(target_request, &target_recovery_path),
+        Err(CoreError::InvalidArgument(
+            "recovery artifact does not match the sequence target"
+        ))
+    ));
+    assert_eq!(core.document_info().unwrap(), target_before_failed_restore);
+    assert_eq!(
+        core.document_state_digest().unwrap(),
+        target_digest_before_failed_restore
+    );
+    assert_eq!(core.history_entries(), target_history_before_failed_restore);
+    let restored = core
+        .sequence_restore_autosaved_switch(target_request, &source_recovery_path)
+        .unwrap();
+    assert_eq!(restored.document_uuid, current.document_uuid);
+    assert!(restored.dirty);
+    assert!(restored.recovered);
+    assert_eq!(
+        restored.main_plane_checksum,
+        source_before.main_plane_checksum
+    );
+    assert_eq!(
+        restored.color_plane_checksum,
+        source_before.color_plane_checksum
+    );
+    assert_eq!(core.document_state_digest().unwrap(), source_digest);
+    assert_eq!(core.history_entries(), source_history);
+    assert_eq!(core.journal_entries(), source_journal);
+    assert_eq!(core.editor_state().unwrap().state, source_editor.state);
+    assert_eq!(core.sequence_cells().unwrap().len(), 2);
+    let restored_digest = core.document_state_digest().unwrap();
+    core.undo().unwrap();
+    assert_ne!(core.document_state_digest().unwrap(), restored_digest);
+    core.redo().unwrap();
+    assert_eq!(core.document_state_digest().unwrap(), restored_digest);
+    assert_eq!(std::fs::read(&normal_path).unwrap(), normal_bytes);
+
+    for path in [normal_path, source_recovery_path, target_recovery_path] {
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn autosave_sequence_switch_request_is_noop_or_stale_without_partial_change() {
+    let mut core = Core::new();
+    let current = core
+        .new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_sequence(vec![
+        source("cell1.png", current.document_uuid, 2, 2, [1, 2, 3, 255]),
+        source("cell2.png", 0x4646, 2, 2, [4, 5, 6, 255]),
+    ])
+    .unwrap();
+    let no_op = core
+        .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    assert!(!no_op.requires_switch());
+    let before_no_op = core.document_info().unwrap();
+    assert_eq!(
+        core.sequence_commit_autosaved_switch(no_op).unwrap(),
+        before_no_op
+    );
+    assert!(matches!(
+        core.sequence_switch_request(usize::MAX, SequenceSwitchPolicy::AutosaveBeforeSwitch),
+        Err(CoreError::InvalidArgument(_))
+    ));
+
+    let request = core
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    core.apply_stroke(&line_stroke(vec![StrokeSample {
+        x: 0.0,
+        y: 0.0,
+        pressure: 1.0,
+    }]))
+    .unwrap();
+    let document_before = core.document_info().unwrap();
+    let digest_before = core.document_state_digest().unwrap();
+    let editor_before = core.editor_state().unwrap();
+    let history_before = core.history_entries().to_vec();
+    let journal_before = core.journal_entries().to_vec();
+    let snapshot_before = core.build_snapshot();
+    assert_eq!(
+        core.sequence_commit_autosaved_switch(request),
+        Err(CoreError::InvalidState("sequence switch request is stale"))
+    );
+    assert_eq!(core.document_info().unwrap(), document_before);
+    assert_eq!(core.document_state_digest().unwrap(), digest_before);
+    assert_eq!(core.editor_state().unwrap(), editor_before);
+    assert_eq!(core.history_entries(), history_before);
+    assert_eq!(core.journal_entries(), journal_before);
+    assert_eq!(core.build_snapshot(), snapshot_before);
+}
+
+#[test]
 fn sequence_activate_and_step_accept_after_editor_state_save() {
     let mut core = Core::new();
     let current = core

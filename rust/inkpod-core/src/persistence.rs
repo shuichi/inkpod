@@ -393,7 +393,7 @@ impl Core {
         })
     }
 
-    fn from_procedure_file(file: inkpod_format::NativeFile) -> Result<Self, CoreError> {
+    pub(crate) fn from_procedure_file(file: inkpod_format::NativeFile) -> Result<Self, CoreError> {
         let contract = replay_contract();
         if file.primitive_catalog_digest != *contract.primitive_catalog_digest() {
             return Err(format_error(

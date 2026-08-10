@@ -1,5 +1,6 @@
 #include "document_session.h"
 
+#include <algorithm>
 #include <new>
 #include <utility>
 
@@ -184,6 +185,112 @@ std::size_t DocumentSession::ViewCount() const noexcept {
     return view_count_;
 }
 
+const SequenceAutosaveBinding* DocumentSession::FindSequenceAutosave(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation) const noexcept {
+    const auto found = std::find_if(
+        sequence_autosaves_.cbegin(),
+        sequence_autosaves_.cend(),
+        [document_uuid_high,
+         document_uuid_low,
+         source_generation](const SequenceAutosaveBinding& binding) {
+            return binding.document_uuid_high == document_uuid_high
+                && binding.document_uuid_low == document_uuid_low
+                && binding.source_generation == source_generation;
+        });
+    return found == sequence_autosaves_.cend() ? nullptr : &*found;
+}
+
+bool DocumentSession::PublishSequenceAutosave(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation,
+    const std::wstring& recovery_path,
+    const RecoveryMetadata& metadata) noexcept {
+    if ((document_uuid_high == 0U && document_uuid_low == 0U)
+        || source_generation == 0U || recovery_path.empty()
+        || metadata.document_uuid_high != document_uuid_high
+        || metadata.document_uuid_low != document_uuid_low) {
+        return false;
+    }
+    try {
+        SequenceAutosaveBinding binding{};
+        binding.document_uuid_high = document_uuid_high;
+        binding.document_uuid_low = document_uuid_low;
+        binding.source_generation = source_generation;
+        binding.recovery_path = recovery_path;
+        binding.metadata = metadata;
+        return ReserveSequenceAutosave(
+                   document_uuid_high, document_uuid_low, source_generation)
+            && PublishReservedSequenceAutosave(std::move(binding));
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool DocumentSession::ReserveSequenceAutosave(
+    std::uint64_t document_uuid_high,
+    std::uint64_t document_uuid_low,
+    std::uint64_t source_generation) noexcept {
+    if ((document_uuid_high == 0U && document_uuid_low == 0U)
+        || source_generation == 0U) {
+        return false;
+    }
+    if (const auto* existing = FindSequenceAutosave(
+            document_uuid_high, document_uuid_low, source_generation);
+        existing != nullptr) {
+        return existing->artifact_generation != UINT64_MAX;
+    }
+    if (sequence_autosaves_.size() >= 10'000U) {
+        return false;
+    }
+    try {
+        sequence_autosaves_.reserve(sequence_autosaves_.size() + 1U);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool DocumentSession::PublishReservedSequenceAutosave(
+    SequenceAutosaveBinding binding) noexcept {
+    if ((binding.document_uuid_high == 0U
+            && binding.document_uuid_low == 0U)
+        || binding.source_generation == 0U || binding.recovery_path.empty()
+        || binding.metadata.document_uuid_high != binding.document_uuid_high
+        || binding.metadata.document_uuid_low != binding.document_uuid_low) {
+        return false;
+    }
+    auto found = std::find_if(
+        sequence_autosaves_.begin(),
+        sequence_autosaves_.end(),
+        [&binding](const SequenceAutosaveBinding& candidate) {
+            return candidate.document_uuid_high == binding.document_uuid_high
+                && candidate.document_uuid_low == binding.document_uuid_low
+                && candidate.source_generation == binding.source_generation;
+        });
+    if (found != sequence_autosaves_.end()) {
+        if (found->artifact_generation == UINT64_MAX) {
+            return false;
+        }
+        binding.artifact_generation = found->artifact_generation + 1U;
+        *found = std::move(binding);
+        return true;
+    }
+    if (sequence_autosaves_.size() >= sequence_autosaves_.capacity()
+        || sequence_autosaves_.size() >= 10'000U) {
+        return false;
+    }
+    binding.artifact_generation = 1U;
+    sequence_autosaves_.push_back(std::move(binding));
+    return true;
+}
+
+void DocumentSession::ClearSequenceAutosaves() noexcept {
+    sequence_autosaves_.clear();
+}
+
 bool DocumentRegistry::InitializePlaceholder(Generation generation) noexcept {
     if (!generation) {
         return false;
@@ -222,6 +329,7 @@ bool DocumentRegistry::Replace(
     current->id = id;
     current->generation = generation;
     current->BindCore(core);
+    current->ClearSequenceAutosaves();
     current->ResetViews(initial_view, generation);
     return true;
 }

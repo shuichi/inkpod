@@ -551,6 +551,9 @@ typedef uint32_t InkpodSequenceDirection;
 #define INKPOD_SEQUENCE_PREVIOUS UINT32_C(1)
 #define INKPOD_SEQUENCE_NEXT UINT32_C(2)
 #define INKPOD_SEQUENCE_FLAG_LOOP (UINT32_C(1) << 0)
+#define INKPOD_SEQUENCE_SWITCH_PROMPT UINT32_C(1)
+#define INKPOD_SEQUENCE_SWITCH_AUTOSAVE UINT32_C(2)
+#define INKPOD_SEQUENCE_SWITCH_REQUIRED (UINT32_C(1) << 0)
 #define INKPOD_MOTION_FLAG_LOOP (UINT64_C(1) << 0)
 #define INKPOD_MOTION_FLAG_INCLUDE_SELECTION (UINT64_C(1) << 1)
 #define INKPOD_MOTION_FLAG_INCLUDE_LIGHT_TABLE (UINT64_C(1) << 2)
@@ -2514,6 +2517,23 @@ typedef struct InkpodSequenceThumbnailBuffer {
     uint64_t required_bytes;
 } InkpodSequenceThumbnailBuffer;
 
+/** @brief Immutable source, target, and revision token for one sequence switch. */
+typedef struct InkpodSequenceSwitchRequest {
+    uint32_t struct_size;
+    uint32_t policy;
+    uint64_t feature_flags;
+    uint64_t source_document_uuid_high;
+    uint64_t source_document_uuid_low;
+    uint64_t source_generation;
+    uint64_t source_document_revision;
+    uint64_t source_editor_revision;
+    uint64_t target_document_uuid_high;
+    uint64_t target_document_uuid_low;
+    uint64_t target_source_generation;
+    uint32_t target_index;
+    uint32_t flags;
+} InkpodSequenceSwitchRequest;
+
 /** @brief motion-check の FPS と loop/selection/light-table flags を渡す入力。 */
 typedef struct InkpodMotionCheckInput {
     uint32_t struct_size;
@@ -4053,6 +4073,40 @@ InkpodStatus inkpod_core_sequence_thumbnail_get(
 InkpodStatus inkpod_core_sequence_activate(
     InkpodCore* core,
     uint32_t index,
+    InkpodDocumentInfo* out_info);
+/**
+ * @brief Captures a side-effect-free sequence switch token at command issue time.
+ *
+ * `policy` must be PROMPT or AUTOSAVE. Success writes exact source/target UUID,
+ * generation, document/editor revisions, and REQUIRED status. The token is
+ * caller-owned and contains no borrowed pointers.
+ */
+InkpodStatus inkpod_core_sequence_switch_request(
+    InkpodCore* core,
+    uint32_t index,
+    uint32_t policy,
+    InkpodSequenceSwitchRequest* out_request);
+/**
+ * @brief Commits an AUTOSAVE switch after source recovery data is durable.
+ *
+ * Stale or mutated tokens return an error without switching or changing Core.
+ * This call performs no file I/O and borrows `request` only for the call.
+ */
+InkpodStatus inkpod_core_sequence_commit_autosaved_switch(
+    InkpodCore* core,
+    const InkpodSequenceSwitchRequest* request,
+    InkpodDocumentInfo* out_info);
+/**
+ * @brief Restores the requested target from an exact native recovery artifact.
+ *
+ * The artifact is staged and replayed before one live replacement. Success is
+ * pathless, recovered, and dirty; normal savepoint/path authority is not adopted.
+ */
+InkpodStatus inkpod_core_sequence_restore_autosaved_switch(
+    InkpodCore* core,
+    const InkpodSequenceSwitchRequest* request,
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
     InkpodDocumentInfo* out_info);
 /**
  * @brief previous/next の存在する sequence cell へ移動する。

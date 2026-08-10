@@ -170,6 +170,52 @@ pub enum SequenceDirection {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+/// User-selected dirty-cell policy captured in an immutable sequence switch request.
+pub enum SequenceSwitchPolicy {
+    /// The frontend must obtain confirmation and complete a normal save before switching.
+    Prompt = 1,
+    /// The frontend must durably write recovery data before committing the switch.
+    AutosaveBeforeSwitch = 2,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Immutable source, target, and revision token for an asynchronous sequence switch.
+///
+/// UUID and source-generation pairs belong to the configured sequence for the
+/// lifetime of that sequence. A commit succeeds only while the active source,
+/// target entry, and document revision still match this request. Creating this
+/// value and rejected commits do not change document, history, dirty, savepoint,
+/// path, or sequence state.
+pub struct SequenceSwitchRequest {
+    /// Policy selected when the command was issued.
+    pub policy: SequenceSwitchPolicy,
+    /// Persistent UUID of the source document being protected.
+    pub source_document_uuid: u128,
+    /// Immutable source-raster generation of the source sequence entry.
+    pub source_generation: u64,
+    /// Document revision that must still be active at commit time.
+    pub source_document_revision: u64,
+    /// Independent EditorState revision that must still be active at commit time.
+    pub source_editor_revision: u64,
+    /// Persistent UUID of the requested target document.
+    pub target_document_uuid: u128,
+    /// Immutable source-raster generation of the target sequence entry.
+    pub target_source_generation: u64,
+    /// Zero-based natural-order target index.
+    pub target_index: u32,
+}
+
+impl SequenceSwitchRequest {
+    /// Reports whether this request would change the active sequence entry.
+    #[must_use]
+    pub const fn requires_switch(self) -> bool {
+        self.source_document_uuid != self.target_document_uuid
+            || self.source_generation != self.target_source_generation
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Playback and composition settings for motion check.
 pub struct MotionCheckConfig {
     /// Playback rate in frames per second.

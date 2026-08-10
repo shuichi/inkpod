@@ -4,9 +4,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "document_identity.h"
 #include "frontend_state.h"
+#include "session_recovery.h"
 
 namespace inkpod::app {
 
@@ -17,6 +20,15 @@ struct DocumentView final {
     std::uint64_t core_view_id{};
     Generation generation{};
     ViewUiState presentation{};
+};
+
+struct SequenceAutosaveBinding final {
+    std::uint64_t document_uuid_high{};
+    std::uint64_t document_uuid_low{};
+    std::uint64_t source_generation{};
+    std::uint64_t artifact_generation{};
+    std::wstring recovery_path;
+    RecoveryMetadata metadata{};
 };
 
 class DocumentSession final {
@@ -55,6 +67,23 @@ public:
     [[nodiscard]] DocumentView* ViewAt(std::size_t index) noexcept;
     [[nodiscard]] const DocumentView* ViewAt(std::size_t index) const noexcept;
     [[nodiscard]] std::size_t ViewCount() const noexcept;
+    [[nodiscard]] const SequenceAutosaveBinding* FindSequenceAutosave(
+        std::uint64_t document_uuid_high,
+        std::uint64_t document_uuid_low,
+        std::uint64_t source_generation) const noexcept;
+    [[nodiscard]] bool PublishSequenceAutosave(
+        std::uint64_t document_uuid_high,
+        std::uint64_t document_uuid_low,
+        std::uint64_t source_generation,
+        const std::wstring& recovery_path,
+        const RecoveryMetadata& metadata) noexcept;
+    [[nodiscard]] bool ReserveSequenceAutosave(
+        std::uint64_t document_uuid_high,
+        std::uint64_t document_uuid_low,
+        std::uint64_t source_generation) noexcept;
+    [[nodiscard]] bool PublishReservedSequenceAutosave(
+        SequenceAutosaveBinding binding) noexcept;
+    void ClearSequenceAutosaves() noexcept;
 
 private:
     CoreHost* core_{};
@@ -62,6 +91,7 @@ private:
     std::array<bool, kMaximumViews> view_used_{};
     std::size_t view_count_{};
     DocumentViewId active_view_{};
+    std::vector<SequenceAutosaveBinding> sequence_autosaves_;
 };
 
 class DocumentRegistry final {

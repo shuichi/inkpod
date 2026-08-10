@@ -56,7 +56,8 @@ mod view;
 pub use animation::{
     LightTableDisplayMode, LightTableItemInfo, LightTableItemInput, LightTableItemProperties,
     LightTableSetInfo, LightTableSource, MotionCheckConfig, MotionFrame, RgbaRasterBytes,
-    SequenceCellInfo, SequenceCellSource, SequenceDirection, Thumbnail,
+    SequenceCellInfo, SequenceCellSource, SequenceDirection, SequenceSwitchPolicy,
+    SequenceSwitchRequest, Thumbnail,
 };
 pub use api::*;
 pub use asset::{

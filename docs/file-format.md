@@ -1114,6 +1114,18 @@ path as a normal document path. `open_recovery` loads the container into a
 dirty, recovered, pathless Core document, so a later ordinary Save must choose
 a destination and cannot silently overwrite the pre-recovery normal file.
 
+Sequence-cell autosave-before-switch uses this same exact-current v17 recovery
+container and sidecar metadata. The live frontend associates the artifact with
+the source document UUID and sequence-source generation; revisiting that entry
+opens, validates, and replays the full native artifact in a staged Core rather
+than reconstructing a document from the flattened sequence raster. The
+association and its artifact generation are `DocumentSession` state, while the
+versioned Prompt/Autosave policy is an HKCU application setting. Neither is a
+new `.inkpod` section or serialized canonical procedure. Therefore this change
+does not alter v17, runtime replay epoch 14, EDIT schema 4, or `.inkbatch` v2.
+Autosave publication alone never advances the normal document/editor savepoint,
+adopts a normal path, clears dirty state, or overwrites the prior normal file.
+
 The Windows adapter assigns a per-document recovery path under the user's local
 application data directory before a never-saved cell is exposed. A successful
 normal save removes that private recovery and switches to an adjacent companion

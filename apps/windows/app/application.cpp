@@ -548,6 +548,10 @@ int Application::Run() {
         state.lifetime.restore_previous_documents =
             LoadRestorePreviousDocumentsSetting(restore_previous)
             && restore_previous;
+        SequenceCellSwitchPolicy sequence_policy{};
+        if (LoadSequenceCellSwitchPolicy(sequence_policy)) {
+            state.lifetime.sequence_switch_policy = sequence_policy;
+        }
     }
     if (!InitializeFrontendRouting(state)) {
         host_.reset();

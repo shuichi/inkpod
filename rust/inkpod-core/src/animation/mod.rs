@@ -30,6 +30,6 @@ pub(crate) use ordering::{natural_cmp, parse_cell_number};
 pub(crate) use raster::base_raster_pixel;
 pub use sequence::{
     MotionCheckConfig, MotionFrame, SequenceCellInfo, SequenceCellSource, SequenceDirection,
-    Thumbnail,
+    SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
 };
 pub(crate) use sequence::{MotionCheckState, SequenceState};
