@@ -175,6 +175,13 @@ pub(crate) enum CanonicalInvocation {
         plane_id: u64,
         pairs: Vec<BatchColorPair>,
     },
+    ScopedColorReplace {
+        plane_id: u64,
+        mode: ScopedColorReplaceMode,
+        target: PixelValue,
+        replacement: PixelValue,
+        region: Option<SelectionShape>,
+    },
     SeparateRasterColors {
         plane_id: u64,
         options: BatchSeparation,
@@ -716,6 +723,17 @@ fn decode_persistent_invocation(
             plane_id: reader.u64()?,
             pairs: reader.batch_color_pairs()?,
         }
+    } else if primitive_id == PrimitiveId::SCOPED_COLOR_REPLACE {
+        CanonicalInvocation::ScopedColorReplace {
+            plane_id: reader.u64()?,
+            mode: scoped_color_replace_mode(reader.u32()?)?,
+            target: reader.pixel()?,
+            replacement: reader.pixel()?,
+            region: reader
+                .boolean()?
+                .then(|| reader.selection_shape())
+                .transpose()?,
+        }
     } else if primitive_id == PrimitiveId::SEPARATE_RASTER_COLORS {
         CanonicalInvocation::SeparateRasterColors {
             plane_id: reader.u64()?,
@@ -965,6 +983,19 @@ impl CanonicalInvocation {
                 shape: shape.map(canonical_selection_shape).transpose()?,
                 options,
             }),
+            Self::ScopedColorReplace {
+                plane_id,
+                mode,
+                target,
+                replacement,
+                region,
+            } => Ok(Self::ScopedColorReplace {
+                plane_id,
+                mode,
+                target,
+                replacement,
+                region: region.map(canonical_selection_shape).transpose()?,
+            }),
             Self::ApplySelection {
                 shape,
                 operation,
@@ -1072,6 +1103,7 @@ impl CanonicalInvocation {
             Self::CreateAdjustmentLayer { .. } => PrimitiveId::CREATE_ADJUSTMENT_LAYER,
             Self::UpdateAdjustmentLayer { .. } => PrimitiveId::UPDATE_ADJUSTMENT_LAYER,
             Self::ReplaceRasterColors { .. } => PrimitiveId::REPLACE_RASTER_COLORS,
+            Self::ScopedColorReplace { .. } => PrimitiveId::SCOPED_COLOR_REPLACE,
             Self::SeparateRasterColors { .. } => PrimitiveId::SEPARATE_RASTER_COLORS,
             Self::RestoreSelectedPixels { .. } => PrimitiveId::RESTORE_SELECTED_PIXELS,
             Self::ApplySelection { .. } => PrimitiveId::APPLY_SELECTION,
@@ -1156,6 +1188,7 @@ impl CanonicalInvocation {
             | Self::ApplyAlphaGradient { plane_id, .. }
             | Self::ApplyFilter { plane_id, .. } => vec![*plane_id],
             Self::ReplaceRasterColors { plane_id, .. }
+            | Self::ScopedColorReplace { plane_id, .. }
             | Self::SeparateRasterColors { plane_id, .. }
             | Self::RestoreSelectedPixels { plane_id, .. } => vec![*plane_id],
             Self::UpdateAdjustmentLayer { layer_id, .. } => vec![*layer_id],
@@ -1436,6 +1469,21 @@ impl CanonicalInvocation {
                 crate::batch::apply_color_replacement(core, *plane_id, pairs, &mut |_, _| true)
                     .map(InvocationResult::dispatch)
             }
+            Self::ScopedColorReplace {
+                plane_id,
+                mode,
+                target,
+                replacement,
+                region,
+            } => core
+                .apply_scoped_color_replace_arguments(
+                    *plane_id,
+                    *mode,
+                    *target,
+                    *replacement,
+                    region.as_ref(),
+                )
+                .map(InvocationResult::dispatch),
             Self::SeparateRasterColors { plane_id, options } => {
                 crate::batch::apply_separation(core, *plane_id, options, &mut |_, _| true)
                     .map(InvocationResult::dispatch)
@@ -1834,6 +1882,22 @@ impl CanonicalInvocation {
                 writer.u64(*plane_id);
                 writer.batch_color_pairs(pairs)?;
             }
+            Self::ScopedColorReplace {
+                plane_id,
+                mode,
+                target,
+                replacement,
+                region,
+            } => {
+                writer.u64(*plane_id);
+                writer.u32(scoped_color_replace_mode_code(*mode));
+                writer.pixel(*target);
+                writer.pixel(*replacement);
+                writer.boolean(region.is_some());
+                if let Some(region) = region {
+                    writer.selection_shape(region)?;
+                }
+            }
             Self::SeparateRasterColors { plane_id, options } => {
                 writer.u64(*plane_id);
                 writer.batch_separation(options)?;
@@ -2192,6 +2256,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::CREATE_ADJUSTMENT_LAYER.get()
         || value == PrimitiveId::UPDATE_ADJUSTMENT_LAYER.get()
         || value == PrimitiveId::REPLACE_RASTER_COLORS.get()
+        || value == PrimitiveId::SCOPED_COLOR_REPLACE.get()
         || value == PrimitiveId::SEPARATE_RASTER_COLORS.get()
         || value == PrimitiveId::RESTORE_SELECTED_PIXELS.get()
         || value == PrimitiveId::APPLY_SELECTION.get()
@@ -4074,6 +4139,29 @@ const fn range_interpretation_code(value: RangeInterpretation) -> u32 {
         RangeInterpretation::EnclosedInterior => 3,
         RangeInterpretation::Drawing => 4,
         RangeInterpretation::Boundary => 5,
+    }
+}
+
+const fn scoped_color_replace_mode_code(value: ScopedColorReplaceMode) -> u32 {
+    match value {
+        ScopedColorReplaceMode::RasterColor => 1,
+        ScopedColorReplaceMode::RasterMainLine => 2,
+        ScopedColorReplaceMode::VectorColorLine => 3,
+        ScopedColorReplaceMode::VectorMainLine => 4,
+        ScopedColorReplaceMode::VectorFill => 5,
+    }
+}
+
+fn scoped_color_replace_mode(code: u32) -> Result<ScopedColorReplaceMode, CoreError> {
+    match code {
+        1 => Ok(ScopedColorReplaceMode::RasterColor),
+        2 => Ok(ScopedColorReplaceMode::RasterMainLine),
+        3 => Ok(ScopedColorReplaceMode::VectorColorLine),
+        4 => Ok(ScopedColorReplaceMode::VectorMainLine),
+        5 => Ok(ScopedColorReplaceMode::VectorFill),
+        _ => Err(CoreError::Format(
+            "unknown scoped color replacement mode".to_owned(),
+        )),
     }
 }
 

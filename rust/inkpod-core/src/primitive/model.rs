@@ -121,6 +121,8 @@ impl PrimitiveId {
     pub const SEPARATE_RASTER_COLORS: Self = Self(0x0005_0041);
     /// Primitive ID for restoring selected raster pixels from an ingested source.
     pub const RESTORE_SELECTED_PIXELS: Self = Self(0x0005_0042);
+    /// Primitive ID for exact region-scoped raster or vector color replacement.
+    pub const SCOPED_COLOR_REPLACE: Self = Self(0x0005_0043);
     /// Primitive ID for replacing one existing raster plane from an immutable asset.
     pub const IMPORT_RASTER_ASSET: Self = Self(0x0009_0001);
     /// Primitive ID for adding one document guide.
@@ -238,14 +240,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(10);
+    pub const CURRENT: Self = Self(11);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 13;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 14;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;

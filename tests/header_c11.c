@@ -38,6 +38,8 @@ _Static_assert(sizeof(InkpodSequenceInput) == 40U, "sequence input layout drift"
 _Static_assert(sizeof(InkpodMotionCheckInput) == 16U, "motion input layout drift");
 _Static_assert(sizeof(InkpodMotionFrame) == 40U, "motion frame layout drift");
 _Static_assert(sizeof(InkpodLayerThumbnailBuffer) == 80U, "layer thumbnail layout drift");
+_Static_assert(sizeof(InkpodScopedColorReplaceInput) == 120U, "scoped replace input layout drift");
+_Static_assert(sizeof(InkpodScopedColorReplacePreview) == 48U, "scoped replace preview layout drift");
 
 int inkpod_header_c11_smoke(void) {
     InkpodSnapshotView view = {0};

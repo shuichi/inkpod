@@ -71,6 +71,8 @@ static_assert(sizeof(InkpodTreeEdit) == 64U);
 static_assert(sizeof(InkpodNodeInfo) == 72U);
 static_assert(sizeof(InkpodSelectionPoint) == 24U);
 static_assert(sizeof(InkpodSelectionInput) == 104U);
+static_assert(sizeof(InkpodScopedColorReplaceInput) == 120U);
+static_assert(sizeof(InkpodScopedColorReplacePreview) == 48U);
 static_assert(sizeof(InkpodFloatingTransform) == 48U);
 static_assert(sizeof(InkpodGridInput) == 32U);
 static_assert(sizeof(InkpodLocatorOutput) == 48U);
@@ -155,8 +157,8 @@ int InkpodRunAbiSmoke() {
     InkpodReplayContract replay_contract{};
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 10U
-        || replay_contract.procedure_format_version != 13U
+        || replay_contract.replay_epoch != 11U
+        || replay_contract.procedure_format_version != 14U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -310,7 +312,7 @@ int InkpodRunAbiSmoke() {
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 13U
+        || persistence.format_version != 14U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE
@@ -982,6 +984,31 @@ int InkpodRunAbiSmoke() {
         || inkpod_clipboard_release(&clipboard) != INKPOD_STATUS_OK
         || clipboard != nullptr) {
         return 38;
+    }
+    if (inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK) {
+        return 153;
+    }
+    InkpodScopedColorReplaceInput scoped_replace{};
+    scoped_replace.struct_size = sizeof(scoped_replace);
+    scoped_replace.mode = INKPOD_COLOR_REPLACE_RASTER_COLOR;
+    scoped_replace.feature_flags = INKPOD_COLOR_REPLACE_HAS_REGION;
+    scoped_replace.plane_id = document.color_plane_id;
+    scoped_replace.base_document_revision = document.document_revision;
+    scoped_replace.target_color = selected_color;
+    scoped_replace.replacement_color = selected_color;
+    scoped_replace.shape = INKPOD_SELECTION_RECTANGLE;
+    scoped_replace.bounds = InkpodFrameRect{20, 30, 64, 1};
+    InkpodScopedColorReplacePreview scoped_preview{};
+    scoped_preview.struct_size = sizeof(scoped_preview);
+    InkpodScopedColorReplaceInput invalid_scoped_replace = scoped_replace;
+    invalid_scoped_replace.mode = UINT32_MAX;
+    if (inkpod_core_preview_scoped_color_replace(
+            core, &invalid_scoped_replace, &scoped_preview) != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_core_preview_scoped_color_replace(
+               core, &scoped_replace, &scoped_preview) != INKPOD_STATUS_OK
+        || inkpod_core_apply_scoped_color_replace(
+               core, &scoped_replace, &dispatch) != INKPOD_STATUS_OK) {
+        return 154;
     }
 
     const std::array<std::uint8_t, 4> expected_external_pixels{17U, 34U, 51U, 255U};

@@ -49,7 +49,7 @@ procedure/control-event journal を表現できなかった。
 
 この形式は互換 reader を持たず廃止された。現行 reader は v2 を payload decode 前に拒否し、v2 の
 header flag、section、DTO、checksum は現行 bytes の一部ではない。現行の唯一の形式契約は
-[`file-format.md`](file-format.md) の v13 である。
+[`file-format.md`](file-format.md) の v14 である。
 
 ## `revision-max` 採用と性能校正
 

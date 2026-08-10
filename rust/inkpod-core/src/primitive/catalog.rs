@@ -156,6 +156,13 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         2,
         0x0005_0042
     ),
+    entry!(
+        SCOPED_COLOR_REPLACE,
+        2,
+        "ScopedColorReplace",
+        1,
+        0x0005_0043
+    ),
     entry!(APPLY_SELECTION, 2, "ApplySelection", 3, 0x0006_0001),
     entry!(INVERT_SELECTION, 2, "InvertSelection", 2, 0x0006_0002),
     entry!(CLEAR_SELECTION, 2, "ClearSelection", 2, 0x0006_0003),
@@ -344,7 +351,7 @@ mod tests {
 
     #[test]
     fn catalog_is_sorted_unique_bounded_and_matches_replay_schema_lookup() {
-        assert_eq!(PRIMITIVE_CATALOG.len(), 77);
+        assert_eq!(PRIMITIVE_CATALOG.len(), 78);
         for pair in PRIMITIVE_CATALOG.windows(2) {
             assert!(pair[0].id < pair[1].id);
         }

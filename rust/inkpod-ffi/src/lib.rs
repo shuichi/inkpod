@@ -35,6 +35,7 @@ use inkpod_core::{
     RangeInterpretation, RasterAssetInput, RectI32, RenderPassKind, RenderSnapshot, ResizeAnchor,
     ResourceUsage, RgbaRasterBytes, RotateDirection, SNAPSHOT_FEATURE_COLOR_CHECK_LEGACY_WHITE,
     SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SNAPSHOT_FEATURE_SOLID_WHITE_BASE,
+    ScopedColorReplaceMode, ScopedColorReplacePreview, ScopedColorReplaceRequest,
     SelectionConstructionOptions, SelectionLayerOperation, SelectionOperation, SelectionSample,
     SelectionShape, SequenceCellSource, SequenceDirection, ShortcutBinding,
     ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape, StartColorPredicate,

@@ -25,6 +25,7 @@ const FLATTEN_STEPS: usize = 64;
 const RASTER_STEPS: usize = 32;
 const MAX_VECTOR_RASTER_PIXELS: u64 = 16_777_216;
 
+mod color_replace;
 mod geometry;
 mod model;
 mod path_operations;
@@ -33,6 +34,9 @@ mod selection;
 mod thumbnail;
 mod vectorization;
 
+pub(crate) use color_replace::{
+    apply_scoped_vector_color_replace, scoped_vector_color_replace_matches,
+};
 pub(crate) use model::VectorState;
 pub use model::{
     RenderVectorFill, RenderVectorSegment, VectorCubicSegment, VectorEraseMode, VectorFillInfo,

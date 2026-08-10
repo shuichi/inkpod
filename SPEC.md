@@ -372,7 +372,10 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 #### 色置換・塗りのばし・組み線
 
-- 色置換 tool は指定範囲の対象色を描画色へ変更し、主線 mode では主線、彩色 mode では塗り色へ作用する。selection なしの全体処理は実行前に明示する。
+- 色置換 tool は pen、rectangle、polyline、lasso の document-space region と既存 selection の積集合だけで、対象色を描画色へ変更する。region がなく selection だけがある場合は selection、両方がない場合は文書全体を対象とし、文書全体の実行は Windows frontend が確定 request の発行前に明示確認する。region preview は button release まで文書を変更せず、Cancel または tool／view 切替で消去する。
+- raster 色置換は対象 plane の native depth で alpha を含む全格納成分が対象色と完全一致する pixel だけを置換する。表示変換、premultiply 後の値、tolerance、連結性を判定へ使わず、selection／region 外の同色 pixel は変更しない。
+- vector 色置換は `線` と `塗り` を明示 mode として分ける。`線` mode の一単位は stable `VectorPathId` を持つ一つの path とし、segment、表示 stroke、複合境界を別単位にしない。可変線幅を含む path の幾何学的 coverage が region と交差した場合は、その path 全体の色を変更する。`塗り` mode は stable `VectorFillId` を持つ一つの fill object の幾何学的内部が region と交差した場合に、その fill 全体の色を変更する。線 mode から fill を、fill mode から境界 path を暗黙に変更しない。
+- vector の接触判定は Core が document 座標の固定 geometry と width から決定し、Direct2D の antialias fringe、zoom、pan、view flip、OS DPI、layer／plane opacityへ依存させない。彩色 mode は raster／vector とも主線 plane を対象にできず、主線 mode の明示 command だけが editable な主線 pixel／path を変更できる。raster／vector とも hidden または non-editable target は実行前に拒否する。
 - 塗りのばしは既存色を drag 方向の狭い未着色領域へ広げ、効果範囲、強さ、drag で囲まれた範囲も処理する option を持つ。
 - 組み線彩色では light table の線を境界として参照し、参照画像自体を変更しない。
 - 合成動画では親セルの必要 layer/plane を typed clipboard で子セルへ座標維持 paste できる。
@@ -576,6 +579,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `FILL-001`: connected seed fill、tolerance、selection
 - `FILL-002`: 含み塗り、overflow abort、gap close、detached regions
 - `FILL-003`: closed-region fill、transparent-only、fill extension
+- `COLOR-REPLACE-001`: pen／rectangle／polyline／lassoとselectionで限定したnative-depth raster置換、およびstable path／fill単位のcoverage接触vector置換
 - `COLOR-001`: RGBA 8/16、RGB/HSV、eyedropper source
 - `COLOR-002`: palette、chart、subpalette、color check
 

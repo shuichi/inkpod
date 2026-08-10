@@ -351,6 +351,33 @@ void ProvideToolCommandStates(
          IDM_TOOL_EYEDROPPER,
          IDM_PLANE_MAIN_LINE,
          IDM_PLANE_COLOR});
+    SetEnabled(
+        states,
+        {IDM_TOOL_COLOR_REPLACE_TARGET,
+         IDM_TOOL_COLOR_REPLACE_PEN,
+         IDM_TOOL_COLOR_REPLACE_RECTANGLE,
+         IDM_TOOL_COLOR_REPLACE_POLYLINE,
+         IDM_TOOL_COLOR_REPLACE_LASSO,
+         IDM_TOOL_COLOR_REPLACE_ALL},
+        input.document.has_document);
+    SetUnchecked(
+        states,
+        {IDM_TOOL_COLOR_REPLACE_PEN,
+         IDM_TOOL_COLOR_REPLACE_RECTANGLE,
+         IDM_TOOL_COLOR_REPLACE_POLYLINE,
+         IDM_TOOL_COLOR_REPLACE_LASSO});
+    if (input.tool.active_tool == tools::kInteractionColorReplace) {
+        SetChecked(
+            states,
+            input.tool.color_replace_shape == INKPOD_SELECTION_RECTANGLE
+                ? IDM_TOOL_COLOR_REPLACE_RECTANGLE
+                : (input.tool.color_replace_shape == INKPOD_SELECTION_POLYLINE
+                          ? IDM_TOOL_COLOR_REPLACE_POLYLINE
+                          : (input.tool.color_replace_shape == INKPOD_SELECTION_LASSO
+                                    ? IDM_TOOL_COLOR_REPLACE_LASSO
+                                    : IDM_TOOL_COLOR_REPLACE_PEN)),
+            true);
+    }
     const UINT tool_command = input.tool.active_tool == INKPOD_TOOL_PENCIL
         ? IDM_TOOL_PENCIL
         : (input.tool.active_tool == INKPOD_TOOL_BRUSH
@@ -368,6 +395,7 @@ void ProvideToolCommandStates(
     const bool ordinary_tool = input.tool.active_tool != tools::kInteractionBoxZoom
         && input.tool.active_tool != tools::kInteractionGuideMove
         && input.tool.active_tool != tools::kInteractionSelection
+        && input.tool.active_tool != tools::kInteractionColorReplace
         && input.tool.active_tool != tools::kInteractionFloatingTransform
         && input.tool.active_tool != tools::kInteractionLightTableMove
         && !tools::IsVectorCanvasTool(input.tool.active_tool)

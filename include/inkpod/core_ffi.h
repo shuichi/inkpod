@@ -146,6 +146,7 @@ typedef uint32_t InkpodEditorTool;
 #define INKPOD_EDITOR_TOOL_BOX_ZOOM UINT32_C(1003)
 #define INKPOD_EDITOR_TOOL_GUIDE_MOVE UINT32_C(1004)
 #define INKPOD_EDITOR_TOOL_SELECTION UINT32_C(1005)
+#define INKPOD_EDITOR_TOOL_COLOR_REPLACE UINT32_C(1008)
 #define INKPOD_EDITOR_TOOL_FLOATING_TRANSFORM UINT32_C(1006)
 #define INKPOD_EDITOR_TOOL_LIGHT_TABLE_MOVE UINT32_C(1007)
 #define INKPOD_EDITOR_TOOL_EFFECT_GRADIENT UINT32_C(1101)
@@ -542,6 +543,16 @@ typedef uint32_t InkpodSelectionShape;
 #define INKPOD_SELECTION_POLYLINE UINT32_C(4)
 #define INKPOD_SELECTION_TRACE UINT32_C(5)
 #define INKPOD_SELECTION_WAND UINT32_C(6)
+/** @brief Explicit raster/vector topology for scoped exact color replacement. */
+typedef uint32_t InkpodScopedColorReplaceMode;
+#define INKPOD_COLOR_REPLACE_RASTER_COLOR UINT32_C(1)
+#define INKPOD_COLOR_REPLACE_RASTER_MAIN_LINE UINT32_C(2)
+#define INKPOD_COLOR_REPLACE_VECTOR_COLOR_LINE UINT32_C(3)
+#define INKPOD_COLOR_REPLACE_VECTOR_MAIN_LINE UINT32_C(4)
+#define INKPOD_COLOR_REPLACE_VECTOR_FILL UINT32_C(5)
+#define INKPOD_COLOR_REPLACE_HAS_REGION (UINT64_C(1) << 0)
+#define INKPOD_COLOR_REPLACE_FLAGS INKPOD_COLOR_REPLACE_HAS_REGION
+#define INKPOD_COLOR_REPLACE_PREVIEW_HAS_BOUNDS (UINT32_C(1) << 0)
 /** @brief geometric candidate に適用する raster 内容解釈。 */
 typedef uint32_t InkpodRangeInterpretation;
 #define INKPOD_RANGE_NORMAL UINT32_C(1)
@@ -1980,6 +1991,43 @@ typedef struct InkpodSelectionInput {
 } InkpodSelectionInput;
 
 /**
+ * @brief Borrowed, size-versioned scoped exact color replacement input.
+ *
+ * Colors retain native depth and alpha. With `INKPOD_COLOR_REPLACE_HAS_REGION`,
+ * `shape` is rectangle, trace, polyline, or lasso and the optional point span is
+ * borrowed only for the call. Without the flag every region field must be zero.
+ * Core intersects a non-empty document selection with the region; no region and
+ * no selection means the full document.
+ */
+typedef struct InkpodScopedColorReplaceInput {
+    uint32_t struct_size;
+    InkpodScopedColorReplaceMode mode;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    uint64_t base_document_revision;
+    InkpodColorValue target_color;
+    InkpodColorValue replacement_color;
+    InkpodSelectionShape shape;
+    uint32_t reserved;
+    InkpodFrameRect bounds;
+    const InkpodSelectionPoint* points;
+    uint64_t point_count;
+    uint64_t point_stride_bytes;
+    float diameter;
+    uint32_t reserved_2;
+} InkpodScopedColorReplaceInput;
+
+/** @brief Caller-owned preview summary; no Rust allocation is transferred. */
+typedef struct InkpodScopedColorReplacePreview {
+    uint32_t struct_size;
+    uint32_t feature_flags;
+    uint64_t base_document_revision;
+    uint64_t matched_pixels;
+    uint64_t matched_objects;
+    InkpodFrameRect affected_bounds;
+} InkpodScopedColorReplacePreview;
+
+/**
  * @brief blur tool の region/sample span を渡す borrowed 入力。
  * `INKPOD_EFFECT_FLAG_PRESSURE_SIZE` は pen region の直径にだけ適用できる。
  */
@@ -3071,6 +3119,27 @@ InkpodStatus inkpod_core_apply_selection_for_editor_target(
     uint64_t layer_id,
     uint64_t plane_id,
     const InkpodSelectionInput* input,
+    InkpodDispatchResult* result);
+/**
+ * @brief Evaluates scoped exact color replacement without mutating Core state.
+ * @par Contract
+ * Core owner thread; all records and advertised point spans are borrowed and
+ * must be complete, aligned, and non-overlapping. Stale revision, invalid mode,
+ * hidden/locked target, invalid span, or bounded-work overflow changes nothing.
+ */
+InkpodStatus inkpod_core_preview_scoped_color_replace(
+    InkpodCore* core,
+    const InkpodScopedColorReplaceInput* input,
+    InkpodScopedColorReplacePreview* output);
+/**
+ * @brief Commits one scoped exact replacement as one canonical Undo unit.
+ * @par Contract
+ * Ownership and validation match the preview API. Success writes `result`;
+ * semantic no-op preserves revision/history. Failure and stale input are atomic.
+ */
+InkpodStatus inkpod_core_apply_scoped_color_replace(
+    InkpodCore* core,
+    const InkpodScopedColorReplaceInput* input,
     InkpodDispatchResult* result);
 /**
  * @brief call開始時にcurrent EditorStateからcaptureしたactive planeの指定色と同じ／異なるpixelをselectionへ合成する。

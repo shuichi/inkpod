@@ -2477,6 +2477,8 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
     if (menu == nullptr
         || GetMenuState(menu, IDM_TOOL_FILL, MF_BYCOMMAND) == static_cast<UINT>(-1)
         || GetMenuState(menu, IDM_TOOL_EYEDROPPER, MF_BYCOMMAND) == static_cast<UINT>(-1)
+        || GetMenuState(menu, IDM_TOOL_COLOR_REPLACE_RECTANGLE, MF_BYCOMMAND)
+            == static_cast<UINT>(-1)
         || GetMenuState(menu, IDM_COLOR_CHECK_NATIVE, MF_BYCOMMAND)
             == static_cast<UINT>(-1)) {
         return 201;
@@ -2602,6 +2604,111 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
             != before_fill.color_plane_id) {
         return 205;
     }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_TOOL_COLOR_REPLACE_TARGET,
+            0)
+            != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_TOOL_COLOR_REPLACE_RECTANGLE,
+               0)
+            != 1) {
+        return 1070;
+    }
+    const InkpodColorValue replacement_color{
+        sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 77U, 88U, 99U, 255U};
+    state.Workspace().panes.color_pane.change_color(
+        state.Workspace().panes.color_pane.context, replacement_color);
+    const auto replacement_sample = [&bounds, zoom](double x, double y) {
+        return InkpodStrokeSample{
+            sizeof(InkpodStrokeSample),
+            0U,
+            static_cast<float>(bounds.left + x * zoom),
+            static_cast<float>(bounds.top + y * zoom),
+            1.0F,
+            0U};
+    };
+    const std::array<InkpodStrokeSample, 2U> replacement_samples{
+        replacement_sample(120.0, 120.0), replacement_sample(180.0, 180.0)};
+    const inkpod::renderer::CanvasStrokeEvent replacement_begin{
+        inkpod::renderer::CanvasStrokeEventKind::Begin,
+        replacement_samples.data(),
+        1U};
+    const inkpod::renderer::CanvasStrokeEvent replacement_end{
+        inkpod::renderer::CanvasStrokeEventKind::End,
+        replacement_samples.data() + 1U,
+        1U};
+    const inkpod::renderer::CanvasStrokeEvent replacement_append{
+        inkpod::renderer::CanvasStrokeEventKind::Append,
+        replacement_samples.data() + 1U,
+        1U};
+    const inkpod::renderer::CanvasStrokeEvent replacement_cancel{
+        inkpod::renderer::CanvasStrokeEventKind::Cancel, nullptr, 0U};
+    InkpodDocumentInfo before_replacement{};
+    InkpodDocumentInfo after_replacement{};
+    inkpod::renderer::CanvasGeometryPreview replacement_preview{};
+    replacement_preview.struct_size = sizeof(replacement_preview);
+    if (!QueryDocument(state, before_replacement)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+               state.Workspace().windows.canvas, replacement_begin)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+               state.Workspace().windows.canvas, replacement_end)
+        || !QueryDocument(state, after_replacement)
+        || after_replacement.document_revision
+            != before_replacement.document_revision + 1U
+        || after_replacement.main_plane_checksum
+            != before_replacement.main_plane_checksum
+        || after_replacement.color_plane_checksum
+            == before_replacement.color_plane_checksum) {
+        return 1071;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    InkpodDocumentInfo replacement_undone{};
+    if (!QueryDocument(state, replacement_undone)
+        || replacement_undone.color_plane_checksum
+            != before_replacement.color_plane_checksum) {
+        return 1072;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
+    InkpodDocumentInfo replacement_redone{};
+    if (!QueryDocument(state, replacement_redone)
+        || replacement_redone.color_plane_checksum
+            != after_replacement.color_plane_checksum) {
+        return 1073;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    if (!QueryDocument(state, after_fill)) {
+        return 1074;
+    }
+    const std::array<UINT, 4U> replacement_shape_commands{
+        IDM_TOOL_COLOR_REPLACE_PEN,
+        IDM_TOOL_COLOR_REPLACE_RECTANGLE,
+        IDM_TOOL_COLOR_REPLACE_POLYLINE,
+        IDM_TOOL_COLOR_REPLACE_LASSO};
+    for (const UINT command : replacement_shape_commands) {
+        if (SendMessageW(
+                state.Workspace().windows.window, WM_COMMAND, command, 0)
+                != 1
+            || !inkpod::renderer::SubmitCanvasStrokeEvent(
+                state.Workspace().windows.canvas, replacement_begin)
+            || !inkpod::renderer::SubmitCanvasStrokeEvent(
+                state.Workspace().windows.canvas, replacement_append)
+            || !inkpod::renderer::GetCanvasGeometryPreview(
+                state.Workspace().windows.canvas, replacement_preview)
+            || replacement_preview.active != 1U
+            || !inkpod::renderer::SubmitCanvasStrokeEvent(
+                state.Workspace().windows.canvas, replacement_cancel)
+            || !inkpod::renderer::GetCanvasGeometryPreview(
+                state.Workspace().windows.canvas, replacement_preview)
+            || replacement_preview.active != 0U) {
+            return 1075;
+        }
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_TOOL_FILL, 0);
     if (state.Workspace().panes.layer_palette_dialog.select_plane == nullptr) {
         return 791;
     }

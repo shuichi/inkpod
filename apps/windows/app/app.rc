@@ -289,6 +289,15 @@ BEGIN
         MENUITEM "塗りのばし", IDM_TOOL_FILL_EXTENSION
         MENUITEM "フィル設定...", IDM_TOOL_FILL_OPTIONS
         MENUITEM "スポイト(&I)", IDM_TOOL_EYEDROPPER
+        POPUP "色置換"
+        BEGIN
+            MENUITEM "対象色を現在色に設定", IDM_TOOL_COLOR_REPLACE_TARGET
+            MENUITEM "ペン範囲", IDM_TOOL_COLOR_REPLACE_PEN
+            MENUITEM "長方形範囲", IDM_TOOL_COLOR_REPLACE_RECTANGLE
+            MENUITEM "折れ線範囲", IDM_TOOL_COLOR_REPLACE_POLYLINE
+            MENUITEM "投げ縄範囲", IDM_TOOL_COLOR_REPLACE_LASSO
+            MENUITEM "選択範囲／文書全体", IDM_TOOL_COLOR_REPLACE_ALL
+        END
         POPUP "ベクター描画"
         BEGIN
             MENUITEM "直線", IDM_VECTOR_LINE

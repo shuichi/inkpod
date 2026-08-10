@@ -100,6 +100,8 @@ pub enum EditorTool {
     FloatingTransform = 1_006,
     /// Light Table mover.
     LightTableMove = 1_007,
+    /// Scoped exact color replacement command.
+    ColorReplace = 1_008,
     /// Gradient effect command.
     EffectGradient = 1_101,
     /// Airbrush effect command.
@@ -127,7 +129,7 @@ pub enum EditorTool {
 }
 
 impl EditorTool {
-    pub(crate) const ALL: [Self; 22] = [
+    pub(crate) const ALL: [Self; 23] = [
         Self::Pencil,
         Self::Brush,
         Self::Eraser,
@@ -138,6 +140,7 @@ impl EditorTool {
         Self::Selection,
         Self::FloatingTransform,
         Self::LightTableMove,
+        Self::ColorReplace,
         Self::EffectGradient,
         Self::EffectAirbrush,
         Self::EffectBlur,
@@ -159,6 +162,7 @@ impl EditorTool {
                 | Self::Brush
                 | Self::Fill
                 | Self::Selection
+                | Self::ColorReplace
                 | Self::EffectAirbrush
                 | Self::VectorLine
                 | Self::VectorCurve

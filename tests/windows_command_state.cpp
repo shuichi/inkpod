@@ -28,6 +28,7 @@ using inkpod::windows::ui::tools::kInteractionEyedropper;
 using inkpod::windows::ui::tools::kInteractionEffectGradient;
 using inkpod::windows::ui::tools::kInteractionFill;
 using inkpod::windows::ui::tools::kInteractionSelection;
+using inkpod::windows::ui::tools::kInteractionColorReplace;
 using inkpod::windows::ui::tools::kInteractionVectorLine;
 
 bool SameStates(const CommandStateSet& left, const CommandStateSet& right) noexcept {
@@ -227,6 +228,8 @@ int main() {
         || IsCommandEnabled(states, IDM_VIEW_MOVE_NEXT_WINDOW)
         || IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEXT_WINDOW)
         || IsCommandEnabled(states, IDM_FILE_RECENT_1)
+        || IsCommandEnabled(states, IDM_TOOL_COLOR_REPLACE_TARGET)
+        || IsCommandEnabled(states, IDM_TOOL_COLOR_REPLACE_RECTANGLE)
         || !IsCommandEnabled(states, IDM_FILE_RESTORE_PREVIOUS)
         || IsCommandChecked(states, IDM_FILE_RESTORE_PREVIOUS)
         || !IsCommandEnabled(states, IDM_FILE_NEW)) {
@@ -280,6 +283,8 @@ int main() {
         || !IsCommandEnabled(states, IDM_WORKSPACE_NEW_WINDOW)
         || !IsCommandEnabled(states, IDM_VIEW_MOVE_NEW_WINDOW)
         || !IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEW_WINDOW)
+        || !IsCommandEnabled(states, IDM_TOOL_COLOR_REPLACE_TARGET)
+        || !IsCommandEnabled(states, IDM_TOOL_COLOR_REPLACE_RECTANGLE)
         || !IsCommandEnabled(states, IDM_LOCATOR_PIN)
         || !IsCommandEnabled(states, IDM_LOCATOR_FIXED)
         || !IsCommandEnabled(states, IDM_LOCATOR_AUTOSCROLL)
@@ -413,6 +418,14 @@ int main() {
         return 10;
     }
 
+    inputs.tool.active_tool = kInteractionColorReplace;
+    inputs.tool.color_replace_shape = INKPOD_SELECTION_LASSO;
+    states = ComputeCommandStates(inputs);
+    if (!IsCommandChecked(states, IDM_TOOL_COLOR_REPLACE_LASSO)
+        || IsCommandChecked(states, IDM_TOOL_COLOR_REPLACE_RECTANGLE)) {
+        return 22;
+    }
+
     ToolUiState tools{};
     const InkpodColorValue black{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
@@ -449,6 +462,15 @@ int main() {
     TransitionActiveTool(tools, nullptr, kInteractionSelection);
     if (!tools.fill_gesture_samples.empty()) {
         return 15;
+    }
+
+    TransitionActiveTool(tools, nullptr, kInteractionColorReplace);
+    tools.color_replace_gesture_samples.push_back(InkpodStrokeSample{});
+    tools.color_replace_base_revision = 9U;
+    TransitionActiveTool(tools, nullptr, kInteractionSelection);
+    if (!tools.color_replace_gesture_samples.empty()
+        || tools.color_replace_base_revision != 0U) {
+        return 23;
     }
 
     tools.active_tool = kInteractionVectorLine;

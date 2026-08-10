@@ -89,6 +89,37 @@ pub struct InkpodSelectionInput {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodScopedColorReplaceInput {
+    pub struct_size: u32,
+    pub mode: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub base_document_revision: u64,
+    pub target_color: InkpodColorValue,
+    pub replacement_color: InkpodColorValue,
+    pub shape: u32,
+    pub reserved: u32,
+    pub bounds: InkpodFrameRect,
+    pub points: *const InkpodSelectionPoint,
+    pub point_count: u64,
+    pub point_stride_bytes: u64,
+    pub diameter: f32,
+    pub reserved_2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodScopedColorReplacePreview {
+    pub struct_size: u32,
+    pub feature_flags: u32,
+    pub base_document_revision: u64,
+    pub matched_pixels: u64,
+    pub matched_objects: u64,
+    pub affected_bounds: InkpodFrameRect,
+}
+
+#[repr(C)]
 pub struct InkpodFloatingTransform {
     pub struct_size: u32,
     pub reserved: u32,

@@ -623,6 +623,8 @@ if(WIN32)
         apps/windows/ui/panes/tool_options_pane.h
         apps/windows/ui/tools/view_controller.cpp
         apps/windows/ui/tools/fill_controller.cpp
+        apps/windows/ui/tools/color_replace_controller.cpp
+        apps/windows/ui/tools/color_replace_controller.h
         apps/windows/ui/tools/selection_controller.cpp
         apps/windows/ui/tools/floating_paste_controller.cpp
         apps/windows/ui/tools/tool_state.cpp

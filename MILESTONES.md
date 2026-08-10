@@ -360,7 +360,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M05 — PM-GAP-012: 彩色修正向けbrush option
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: PAINT-001、PAINT-004、HIST-001。
 
@@ -412,9 +412,18 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M06 — PM-GAP-015: 対話的で範囲限定された色置換
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: FILL-003、SEL-001、VECTOR-001。
+関連要件: COLOR-REPLACE-001、FILL-003、SEL-001、VECTOR-001。
+
+今回の契約影響:
+
+| Contract | Current | M06 impact |
+|---|---:|---|
+| native `.inkpod` top-level format | 13 | 新canonical procedureを追加するため14へ更新し、v13を拒否 |
+| runtime replay epoch | 10 | scoped raster／vector置換semanticsを追加するため11へ更新 |
+| C ABI | 8 | 既存layoutを変えずsize-versioned input recordと新exportを追加。version更新なし |
+| `.inkbatch` top-level format | 1 | 既存Batch graph／operation semanticsは不変。version更新なし |
 
 仕様決定ゲート:
 

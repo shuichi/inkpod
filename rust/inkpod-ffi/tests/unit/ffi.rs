@@ -12,6 +12,112 @@ fn config() -> InkpodCoreConfig {
 }
 
 #[test]
+fn scoped_color_replace_ffi_validates_borrowed_records_preview_stale_and_noop() {
+    let mut core = ptr::null_mut();
+    let create = InkpodCellCreateOptions {
+        struct_size: size_of::<InkpodCellCreateOptions>() as u32,
+        feature_flags: INKPOD_FEATURE_NONE,
+        document_uuid_high: 7,
+        document_uuid_low: 6,
+        width: 4,
+        height: 4,
+        dpi_x_milli: 96_000,
+        dpi_y_milli: 96_000,
+        reserved: 0,
+    };
+    let mut document = InkpodDocumentInfo {
+        struct_size: size_of::<InkpodDocumentInfo>() as u32,
+        ..InkpodDocumentInfo::default()
+    };
+    let color = |rgba: [u16; 4]| InkpodColorValue {
+        struct_size: size_of::<InkpodColorValue>() as u32,
+        depth: INKPOD_COLOR_DEPTH_8,
+        red: rgba[0],
+        green: rgba[1],
+        blue: rgba[2],
+        alpha: rgba[3],
+    };
+    // SAFETY: Every record remains aligned, live, and non-overlapping for each call.
+    unsafe {
+        assert_eq!(inkpod_core_create(&config(), &mut core), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_new_cell(core, &create, &mut document),
+            INKPOD_STATUS_OK
+        );
+        let input = InkpodScopedColorReplaceInput {
+            struct_size: size_of::<InkpodScopedColorReplaceInput>() as u32,
+            mode: INKPOD_COLOR_REPLACE_RASTER_COLOR,
+            feature_flags: INKPOD_FEATURE_NONE,
+            plane_id: document.color_plane_id,
+            base_document_revision: document.document_revision,
+            target_color: color([0, 0, 0, 0]),
+            replacement_color: color([9, 8, 7, 6]),
+            ..InkpodScopedColorReplaceInput::default()
+        };
+        let mut preview = InkpodScopedColorReplacePreview {
+            struct_size: size_of::<InkpodScopedColorReplacePreview>() as u32,
+            ..InkpodScopedColorReplacePreview::default()
+        };
+        assert_eq!(
+            inkpod_core_preview_scoped_color_replace(core, ptr::null(), &mut preview),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut short = input;
+        short.struct_size -= 1;
+        assert_eq!(
+            inkpod_core_preview_scoped_color_replace(core, &short, &mut preview),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        let mut unknown = input;
+        unknown.mode = u32::MAX;
+        assert_eq!(
+            inkpod_core_preview_scoped_color_replace(core, &unknown, &mut preview),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut unknown_flags = input;
+        unknown_flags.feature_flags = 1_u64 << 63;
+        assert_eq!(
+            inkpod_core_preview_scoped_color_replace(core, &unknown_flags, &mut preview),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut oversized = input;
+        oversized.point_count = MAX_SELECTION_POINT_COUNT + 1;
+        assert_eq!(
+            inkpod_core_preview_scoped_color_replace(core, &oversized, &mut preview),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_preview_scoped_color_replace(core, &input, &mut preview),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(preview.matched_pixels, 16);
+        assert_eq!(preview.matched_objects, 0);
+        assert_eq!(
+            preview.feature_flags,
+            INKPOD_COLOR_REPLACE_PREVIEW_HAS_BOUNDS
+        );
+        assert_eq!(preview.affected_bounds.width, 4);
+        let mut result = InkpodDispatchResult {
+            struct_size: size_of::<InkpodDispatchResult>() as u32,
+            reserved: 0,
+            revision: 0,
+            accepted_command_count: 0,
+        };
+        assert_eq!(
+            inkpod_core_apply_scoped_color_replace(core, &input, &mut result),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(result.revision, document.document_revision + 1);
+        assert_eq!(
+            inkpod_core_preview_scoped_color_replace(core, &input, &mut preview),
+            INKPOD_STATUS_INVALID_STATE,
+            "the consumed preview revision is stale"
+        );
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn complete_cell_creation_plan_is_bounded_owned_and_atomic() {
     let mut plan = ptr::null_mut();
     let options = InkpodCellCreationOptions {
@@ -223,7 +329,7 @@ fn persistence_checkpoint_and_compaction_abi_are_bounded_confirmed_and_atomic() 
             inkpod_core_get_persistence_info(core, &mut persistence),
             INKPOD_STATUS_OK
         );
-        assert_eq!(persistence.format_version, 13);
+        assert_eq!(persistence.format_version, 14);
         assert_eq!(persistence.open_strategy, INKPOD_NATIVE_OPEN_NOT_OPENED);
         assert_eq!(persistence.flags, 0);
 

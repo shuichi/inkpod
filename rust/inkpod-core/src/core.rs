@@ -375,6 +375,7 @@ pub(super) struct DocumentEdit {
     commit_revision: DocumentRevision,
     preferred_editor_target: Option<EditorTarget>,
     preferred_edit_targets: Option<Vec<EditTarget>>,
+    preserve_render_cache_by_raster_revision: bool,
 }
 
 impl DocumentEdit {
@@ -387,6 +388,7 @@ impl DocumentEdit {
             commit_revision: core.next_document_revision()?,
             preferred_editor_target: None,
             preferred_edit_targets: None,
+            preserve_render_cache_by_raster_revision: false,
         })
     }
 
@@ -403,6 +405,7 @@ impl DocumentEdit {
             commit_revision,
             preferred_editor_target: None,
             preferred_edit_targets: None,
+            preserve_render_cache_by_raster_revision: false,
         }
     }
 
@@ -424,6 +427,10 @@ impl DocumentEdit {
 
     pub(super) fn prefer_edit_targets(&mut self, targets: Vec<EditTarget>) {
         self.preferred_edit_targets = Some(targets);
+    }
+
+    pub(super) fn preserve_render_cache_by_raster_revision(&mut self) {
+        self.preserve_render_cache_by_raster_revision = true;
     }
 
     pub(super) fn commit(self, core: &mut Core) -> Result<DispatchOutcome, CoreError> {
@@ -459,7 +466,9 @@ impl DocumentEdit {
 
         core.document = Some(self.working);
         core.document_revision = self.commit_revision;
-        core.render_cache.clear();
+        if !self.preserve_render_cache_by_raster_revision {
+            core.render_cache.clear();
+        }
         core.commit_history_change(change, after_state);
         core.publish_editor_session(editor);
         Ok(DispatchOutcome {

@@ -56,6 +56,17 @@ void CancelSelectionGeometryPreview(
     SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0);
 }
 
+void CancelColorReplaceGeometryPreview(
+    app::ToolUiState& tools, HWND canvas) noexcept {
+    tools.color_replace_gesture_samples.clear();
+    tools.color_replace_base_revision = 0U;
+    tools.procedure.valid = false;
+    if (canvas == nullptr) {
+        return;
+    }
+    SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0);
+}
+
 void CancelFillGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept {
     tools.fill_gesture_samples.clear();
@@ -74,6 +85,10 @@ void TransitionActiveTool(
     if (tools.active_tool != next_tool
         && tools.active_tool == kInteractionSelection) {
         CancelSelectionGeometryPreview(tools, canvas);
+    }
+    if (tools.active_tool != next_tool
+        && tools.active_tool == kInteractionColorReplace) {
+        CancelColorReplaceGeometryPreview(tools, canvas);
     }
     if (tools.active_tool != next_tool
         && tools.active_tool == kInteractionFill) {

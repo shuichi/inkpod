@@ -168,6 +168,12 @@ struct ToolUiState {
     std::uint32_t selection_rotation_turns{};
     InkpodTraceBrushShape selection_trace_shape{INKPOD_TRACE_ROUND};
     std::vector<InkpodStrokeSample> selection_gesture_samples;
+    InkpodColorValue color_replace_target{sizeof(InkpodColorValue)};
+    InkpodSelectionShape color_replace_shape{INKPOD_SELECTION_TRACE};
+    InkpodScopedColorReplaceMode color_replace_mode{INKPOD_COLOR_REPLACE_RASTER_COLOR};
+    float color_replace_diameter{8.0F};
+    std::uint64_t color_replace_base_revision{};
+    std::vector<InkpodStrokeSample> color_replace_gesture_samples;
     std::vector<InkpodStrokeSample> vector_gesture_samples;
     InkpodVectorEraseMode vector_erase_mode{INKPOD_VECTOR_ERASE_PARTIAL};
     InkpodVectorSelectionMode vector_selection_mode{INKPOD_VECTOR_SELECT_TOUCHING};

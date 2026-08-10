@@ -49,6 +49,7 @@
 #include "ui/panes/subpalette_pane.h"
 #include "ui/panes/tool_options_pane.h"
 #include "ui/tools/fill_controller.h"
+#include "ui/tools/color_replace_controller.h"
 #include "ui/tools/floating_paste_controller.h"
 #include "ui/tools/selection_controller.h"
 #include "ui/tools/tool_state.h"
@@ -168,6 +169,7 @@ using inkpod::windows::ui::WorkspacePreset;
 using inkpod::windows::ui::WorkspaceSplitOrientation;
 using inkpod::windows::ui::tools::CancelVectorGeometryPreview;
 using inkpod::windows::ui::tools::CancelSelectionGeometryPreview;
+using inkpod::windows::ui::tools::CancelColorReplaceGeometryPreview;
 using inkpod::windows::ui::tools::CancelFillGeometryPreview;
 using inkpod::windows::ui::tools::IsVectorCanvasTool;
 using inkpod::windows::ui::tools::IsVectorStrokePlane;
@@ -184,6 +186,7 @@ using inkpod::windows::ui::tools::kInteractionEffectDust;
 using inkpod::windows::ui::tools::kInteractionEffectGradient;
 using inkpod::windows::ui::tools::kInteractionEffectStamp;
 using inkpod::windows::ui::tools::kInteractionSelection;
+using inkpod::windows::ui::tools::kInteractionColorReplace;
 using inkpod::windows::ui::tools::kInteractionVectorCurve;
 using inkpod::windows::ui::tools::kInteractionVectorEllipse;
 using inkpod::windows::ui::tools::kInteractionVectorEraser;
@@ -534,6 +537,8 @@ void ResetPaneDocumentState(PaneUiState& panes) noexcept {
 void ResetToolDocumentState(ToolUiState& tools) noexcept {
     tools.editor = {};
     tools.procedure = {};
+    tools.color_replace_base_revision = 0U;
+    tools.color_replace_gesture_samples.clear();
     tools.floating_active = false;
     tools.floating_transform = InkpodFloatingTransform{
         sizeof(InkpodFloatingTransform), 0U, 0.0, 0.0, 1.0, 1.0, 0.0};
@@ -1028,6 +1033,8 @@ std::optional<DocumentViewId> FrontendViewForCoreView(
 void ResetUiForNewActiveDocument(ApplicationHost& state) noexcept {
     CancelFillGeometryPreview(state.Workspace().tools, state.Workspace().windows.canvas);
     CancelSelectionGeometryPreview(state.Workspace().tools, state.Workspace().windows.canvas);
+    CancelColorReplaceGeometryPreview(
+        state.Workspace().tools, state.Workspace().windows.canvas);
     state.Thumbnails().RemoveDocument(
         state.Document().id, state.Document().generation);
     ResetDocumentShellTransientState(state.Document().shell);
@@ -1061,6 +1068,8 @@ bool ActivateDocumentTab(
     CancelFillGeometryPreview(
         state.Workspace().tools, state.Workspace().windows.canvas);
     CancelSelectionGeometryPreview(
+        state.Workspace().tools, state.Workspace().windows.canvas);
+    CancelColorReplaceGeometryPreview(
         state.Workspace().tools, state.Workspace().windows.canvas);
     if (!state.ActivateDocumentView(view)) {
         return false;
@@ -3974,6 +3983,10 @@ InkpodStatus SetEditorActiveTool(
         CancelSelectionGeometryPreview(
             state.Workspace().tools, state.Workspace().windows.canvas);
     }
+    if (previous != tool && previous == kInteractionColorReplace) {
+        CancelColorReplaceGeometryPreview(
+            state.Workspace().tools, state.Workspace().windows.canvas);
+    }
     if (previous != tool && previous == kInteractionFill) {
         CancelFillGeometryPreview(
             state.Workspace().tools, state.Workspace().windows.canvas);
@@ -5230,6 +5243,7 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.tool.active_tool = state.Workspace().tools.active_tool;
     inputs.tool.active_plane = state.Workspace().tools.active_plane;
     inputs.tool.fill_operation = state.Workspace().tools.fill_options.operation;
+    inputs.tool.color_replace_shape = state.Workspace().tools.color_replace_shape;
     inputs.tool.vector_erase_mode = state.Workspace().tools.vector_erase_mode;
     inputs.tool.vector_selection_mode = state.Workspace().tools.vector_selection_mode;
     inputs.tool.palette_visible =
@@ -5613,6 +5627,7 @@ void UpdateMainWindowStatus(
             case kInteractionBoxZoom: return L"範囲拡大";
             case kInteractionGuideMove: return L"ガイド移動";
             case kInteractionSelection: return L"選択";
+            case kInteractionColorReplace: return L"色置換";
             case kInteractionFill: return L"フィル";
             case kInteractionEyedropper: return L"スポイト";
             case kInteractionFloatingTransform: return L"変形";
@@ -6621,6 +6636,59 @@ void UpdateSelectionGeometryPreview(ApplicationHost& state) noexcept {
                     }
                 }
             }
+        }
+    }
+    if (preview.point_count == 0U) {
+        preview.active = 0U;
+    }
+    publish_preview();
+}
+
+void UpdateColorReplaceGeometryPreview(ApplicationHost& state) noexcept {
+    inkpod::renderer::CanvasGeometryPreview preview{};
+    preview.struct_size = sizeof(preview);
+    const auto publish_preview = [&state, &preview] {
+        inkpod::renderer::SetCanvasGeometryPreview(
+            state.Workspace().windows.canvas, preview);
+    };
+    std::vector<InkpodVectorPoint> points;
+    const auto& tools = state.Workspace().tools;
+    if (!VectorGestureDocumentPoints(
+            state, tools.color_replace_gesture_samples, points)) {
+        publish_preview();
+        return;
+    }
+    preview.active = 1U;
+    const auto append_point = [&preview](InkpodVectorPoint point) {
+        if (preview.point_count < inkpod::renderer::kCanvasGeometryPreviewPoints) {
+            preview.points[preview.point_count++] = point;
+        }
+    };
+    if (tools.color_replace_shape == INKPOD_SELECTION_RECTANGLE) {
+        if (points.size() < 2U) {
+            preview.active = 0U;
+            publish_preview();
+            return;
+        }
+        const float left = std::min(points.front().x, points.back().x);
+        const float top = std::min(points.front().y, points.back().y);
+        const float right = std::max(points.front().x, points.back().x);
+        const float bottom = std::max(points.front().y, points.back().y);
+        append_point({left, top});
+        append_point({right, top});
+        append_point({right, bottom});
+        append_point({left, bottom});
+        preview.closed = 1U;
+    } else {
+        for (const InkpodVectorPoint point : points) {
+            append_point(point);
+        }
+        preview.closed = tools.color_replace_shape == INKPOD_SELECTION_LASSO
+                || tools.color_replace_shape == INKPOD_SELECTION_POLYLINE
+            ? 1U
+            : 0U;
+        if (tools.color_replace_shape == INKPOD_SELECTION_TRACE) {
+            preview.stroke_width = tools.color_replace_diameter;
         }
     }
     if (preview.point_count == 0U) {
@@ -9008,6 +9076,147 @@ InkpodStatus ApplyFillAtDevicePoint(
     const InkpodEditorStateInfo* editor) noexcept {
     return ApplyFillAtDeviceRange(
         state, device_x, device_y, device_x, device_y, false, editor);
+}
+
+std::optional<InkpodScopedColorReplaceMode> ColorReplaceModeForPlane(
+    std::uint32_t kind) noexcept {
+    switch (kind) {
+        case INKPOD_TYPED_PLANE_MAIN_LINE:
+            return INKPOD_COLOR_REPLACE_RASTER_MAIN_LINE;
+        case INKPOD_TYPED_PLANE_COLOR:
+        case INKPOD_TYPED_PLANE_RASTER:
+            return INKPOD_COLOR_REPLACE_RASTER_COLOR;
+        case INKPOD_TYPED_PLANE_VECTOR_MAIN_LINE:
+            return INKPOD_COLOR_REPLACE_VECTOR_MAIN_LINE;
+        case INKPOD_TYPED_PLANE_COLOR_TRACE:
+            return INKPOD_COLOR_REPLACE_VECTOR_COLOR_LINE;
+        case INKPOD_TYPED_PLANE_VECTOR_FILL:
+            return INKPOD_COLOR_REPLACE_VECTOR_FILL;
+        default:
+            return std::nullopt;
+    }
+}
+
+InkpodStatus ApplyColorReplace(
+    ApplicationHost& state,
+    const InkpodEditorStateInfo* editor,
+    bool has_region,
+    const std::vector<InkpodStrokeSample>& samples) noexcept {
+    InkpodDocumentInfo info{};
+    if (state.engine == nullptr || editor == nullptr
+        || (editor->flags & INKPOD_EDITOR_STATE_HAS_TARGET) == 0U
+        || editor->active_plane_id == 0U || !QueryDocument(state, info)) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    InkpodScopedColorReplaceInput input{};
+    input.struct_size = sizeof(input);
+    input.mode = state.Workspace().tools.color_replace_mode;
+    input.plane_id = editor->active_plane_id;
+    input.base_document_revision = has_region
+        ? state.Workspace().tools.color_replace_base_revision
+        : info.document_revision;
+    input.target_color = state.Workspace().tools.color_replace_target;
+    input.target_color.struct_size = sizeof(InkpodColorValue);
+    input.replacement_color = editor->current_color;
+    input.replacement_color.struct_size = sizeof(InkpodColorValue);
+
+    std::vector<InkpodSelectionPoint> points;
+    if (has_region) {
+        inkpod::renderer::CanvasDocumentBounds bounds{};
+        if (samples.empty() || info.width == 0U || info.height == 0U
+            || !inkpod::renderer::GetCanvasDocumentBounds(
+                state.Workspace().windows.canvas, bounds)) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        const double zoom =
+            (bounds.right - bounds.left) / static_cast<double>(info.width);
+        if (!std::isfinite(zoom) || zoom <= 0.0) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        const auto document_point = [&](const InkpodStrokeSample& sample) {
+            double x = (static_cast<double>(sample.x) - bounds.left) / zoom;
+            double y = (static_cast<double>(sample.y) - bounds.top) / zoom;
+            if (state.ActiveView().presentation.flip_horizontal) {
+                x = static_cast<double>(info.width) - x;
+            }
+            if (state.ActiveView().presentation.flip_vertical) {
+                y = static_cast<double>(info.height) - y;
+            }
+            return InkpodSelectionPoint{
+                sizeof(InkpodSelectionPoint),
+                0U,
+                static_cast<float>(std::clamp(
+                    x, 0.0, static_cast<double>(info.width))),
+                static_cast<float>(std::clamp(
+                    y, 0.0, static_cast<double>(info.height))),
+                std::clamp(sample.pressure, 0.0F, 1.0F),
+                0U};
+        };
+        try {
+            if (state.Workspace().tools.color_replace_shape
+                == INKPOD_SELECTION_RECTANGLE) {
+                if (samples.size() < 2U) {
+                    return INKPOD_STATUS_INVALID_ARGUMENT;
+                }
+                points.reserve(2U);
+                points.push_back(document_point(samples.front()));
+                points.push_back(document_point(samples.back()));
+            } else {
+                points.reserve(samples.size());
+                for (const auto& sample : samples) {
+                    points.push_back(document_point(sample));
+                }
+            }
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        input.feature_flags = INKPOD_COLOR_REPLACE_HAS_REGION;
+        input.shape = state.Workspace().tools.color_replace_shape;
+        if (input.shape == INKPOD_SELECTION_RECTANGLE) {
+            const double left = std::floor(std::min(
+                static_cast<double>(points.front().x),
+                static_cast<double>(points.back().x)));
+            const double top = std::floor(std::min(
+                static_cast<double>(points.front().y),
+                static_cast<double>(points.back().y)));
+            const double right = std::ceil(std::max(
+                static_cast<double>(points.front().x),
+                static_cast<double>(points.back().x)));
+            const double bottom = std::ceil(std::max(
+                static_cast<double>(points.front().y),
+                static_cast<double>(points.back().y)));
+            if (!(right > left) || !(bottom > top)) {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
+            }
+            input.bounds = InkpodFrameRect{
+                static_cast<std::int32_t>(left),
+                static_cast<std::int32_t>(top),
+                static_cast<std::int32_t>(right - left),
+                static_cast<std::int32_t>(bottom - top)};
+            points.clear();
+        } else {
+            if ((input.shape == INKPOD_SELECTION_LASSO
+                    || input.shape == INKPOD_SELECTION_POLYLINE)
+                && points.size() < 3U) {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
+            }
+            input.point_count = points.size();
+            input.point_stride_bytes = sizeof(InkpodSelectionPoint);
+            input.diameter = input.shape == INKPOD_SELECTION_TRACE
+                ? state.Workspace().tools.color_replace_diameter
+                : 0.0F;
+        }
+    }
+    InkpodDispatchResult result{};
+    result.struct_size = sizeof(result);
+    inkpod::windows::ui::tools::ColorReplaceController controller(*state.engine);
+    const InkpodStatus status = controller.Apply(input, points, result);
+    if (status == INKPOD_STATUS_OK) {
+        (void)state.RefreshEditorPresentation(
+            state.Document().id, state.Document().generation);
+        RefreshTreePane(state);
+    }
+    return status;
 }
 
 InkpodStatus ApplySelectionGesture(
@@ -13552,6 +13761,101 @@ std::optional<LRESULT> RouteToolCommand(
             (void)SetEditorActiveTool(*state, kInteractionEyedropper);
             UpdateMenuState(*state);
             return 0;
+        case IDM_TOOL_COLOR_REPLACE_TARGET: {
+            if (!state->RefreshEditorPresentation(
+                    state->Document().id, state->Document().generation)) {
+                return 0;
+            }
+            const InkpodEditorStateInfo* editor = PresentedEditorState(*state);
+            if (editor == nullptr
+                || (editor->flags & INKPOD_EDITOR_STATE_HAS_TARGET) == 0U) {
+                return 0;
+            }
+            state->Workspace().tools.color_replace_target = editor->current_color;
+            state->Workspace().tools.color_replace_target.struct_size =
+                sizeof(InkpodColorValue);
+            return 1;
+        }
+        case IDM_TOOL_COLOR_REPLACE_PEN:
+        case IDM_TOOL_COLOR_REPLACE_RECTANGLE:
+        case IDM_TOOL_COLOR_REPLACE_POLYLINE:
+        case IDM_TOOL_COLOR_REPLACE_LASSO: {
+            TreePaneNode plane{};
+            if (!QueryTreeNode(*state, true, plane)) {
+                return 0;
+            }
+            const auto mode = ColorReplaceModeForPlane(plane.kind);
+            if (!mode.has_value()) {
+                if (state->engine != nullptr) {
+                    state->engine->SetLocalFailure(
+                        L"色置換は描画プレーンだけを対象にできます");
+                }
+                return 0;
+            }
+            const UINT command = LOWORD(wparam);
+            state->Workspace().tools.color_replace_shape =
+                command == IDM_TOOL_COLOR_REPLACE_RECTANGLE
+                ? INKPOD_SELECTION_RECTANGLE
+                : (command == IDM_TOOL_COLOR_REPLACE_POLYLINE
+                          ? INKPOD_SELECTION_POLYLINE
+                          : (command == IDM_TOOL_COLOR_REPLACE_LASSO
+                                    ? INKPOD_SELECTION_LASSO
+                                    : INKPOD_SELECTION_TRACE));
+            state->Workspace().tools.color_replace_mode = mode.value();
+            if (SetEditorActiveTool(*state, kInteractionColorReplace)
+                != INKPOD_STATUS_OK) {
+                return 0;
+            }
+            UpdateMenuState(*state);
+            return 1;
+        }
+        case IDM_TOOL_COLOR_REPLACE_ALL: {
+            if (!state->RefreshEditorPresentation(
+                    state->Document().id, state->Document().generation)) {
+                return 0;
+            }
+            const InkpodEditorStateInfo* editor = PresentedEditorState(*state);
+            TreePaneNode plane{};
+            if (editor == nullptr || !QueryTreeNode(*state, true, plane)) {
+                return 0;
+            }
+            const auto mode = ColorReplaceModeForPlane(plane.kind);
+            if (!mode.has_value()) {
+                return 0;
+            }
+            state->Workspace().tools.color_replace_mode = mode.value();
+            InkpodLocatorOutput locator{};
+            locator.struct_size = sizeof(locator);
+            const InkpodStatus locator_status = state->engine == nullptr
+                ? INKPOD_STATUS_INVALID_STATE
+                : state->engine->Invoke(
+                      [&locator](InkpodCore* core) {
+                          return inkpod_core_locator_sample(
+                              core, 0U, 0.0, 0.0, &locator);
+                      },
+                      false,
+                      false);
+            if (locator_status != INKPOD_STATUS_OK) {
+                return 0;
+            }
+            if ((locator.flags & INKPOD_LOCATOR_SELECTION_PRESENT) == 0U
+                && !state->lifetime.smoke_test
+                && MessageBoxW(
+                       window,
+                       L"選択範囲がありません。文書全体の対象色を置換しますか？",
+                       L"色置換",
+                       MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2)
+                    != IDYES) {
+                return 0;
+            }
+            const InkpodStatus status = ApplyColorReplace(
+                *state, editor, false, {});
+            if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
+                ShowCoreError(*state, window, L"色置換");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
         case IDM_VECTOR_LINE:
         case IDM_VECTOR_CURVE:
         case IDM_VECTOR_RECTANGLE:
@@ -15225,6 +15529,101 @@ std::optional<LRESULT> RouteCanvasMessage(
                         const InkpodStatus status = FinishVectorCanvasGesture(*state);
                         if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
                             ShowCoreError(*state, window, L"ベクターCanvas操作");
+                        }
+                        UpdateMenuState(*state);
+                    }
+                    return 1;
+                }
+                procedure_editor = CapturedEditorState(*state);
+                if ((procedure_editor == nullptr
+                        ? state->Workspace().tools.active_tool
+                        : procedure_editor->active_tool)
+                    == kInteractionColorReplace) {
+                    try {
+                        if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
+                            CancelColorReplaceGeometryPreview(
+                                state->Workspace().tools,
+                                state->Workspace().windows.canvas);
+                            if (!BeginEditorProcedureCapture(*state)) {
+                                return 0;
+                            }
+                            procedure_editor = CapturedEditorState(*state);
+                            InkpodDocumentInfo info{};
+                            TreePaneNode plane{};
+                            const auto mode = QueryTreeNode(*state, true, plane)
+                                ? ColorReplaceModeForPlane(plane.kind)
+                                : std::nullopt;
+                            if (procedure_editor == nullptr || !QueryDocument(*state, info)
+                                || plane.id != procedure_editor->active_plane_id
+                                || !mode.has_value()) {
+                                CancelColorReplaceGeometryPreview(
+                                    state->Workspace().tools,
+                                    state->Workspace().windows.canvas);
+                                return 0;
+                            }
+                            state->Workspace().tools.color_replace_base_revision =
+                                info.document_revision;
+                            state->Workspace().tools.color_replace_mode = mode.value();
+                            state->Workspace().tools.color_replace_diameter =
+                                std::clamp(
+                                    static_cast<float>(
+                                        static_cast<double>(
+                                            procedure_editor->current_diameter_q16)
+                                        / 65536.0),
+                                    0.001F,
+                                    4096.0F);
+                        }
+                        if (input->kind
+                                != inkpod::renderer::CanvasStrokeEventKind::Cancel
+                            && input->sample_count != 0U) {
+                            if (state->Workspace().tools
+                                    .color_replace_gesture_samples.size()
+                                > UINT64_C(1048576) - input->sample_count) {
+                                CancelColorReplaceGeometryPreview(
+                                    state->Workspace().tools,
+                                    state->Workspace().windows.canvas);
+                                return 0;
+                            }
+                            state->Workspace().tools.color_replace_gesture_samples.insert(
+                                state->Workspace().tools
+                                    .color_replace_gesture_samples.end(),
+                                input->samples,
+                                input->samples
+                                    + static_cast<std::size_t>(input->sample_count));
+                        }
+                    } catch (const std::bad_alloc&) {
+                        CancelColorReplaceGeometryPreview(
+                            state->Workspace().tools,
+                            state->Workspace().windows.canvas);
+                        return 0;
+                    }
+                    if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
+                        CancelColorReplaceGeometryPreview(
+                            state->Workspace().tools,
+                            state->Workspace().windows.canvas);
+                        return 1;
+                    }
+                    procedure_editor = CapturedEditorState(*state);
+                    if (procedure_editor == nullptr) {
+                        CancelColorReplaceGeometryPreview(
+                            state->Workspace().tools,
+                            state->Workspace().windows.canvas);
+                        return 0;
+                    }
+                    UpdateColorReplaceGeometryPreview(*state);
+                    if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
+                        const InkpodStatus status = ApplyColorReplace(
+                            *state,
+                            procedure_editor,
+                            true,
+                            state->Workspace().tools
+                                .color_replace_gesture_samples);
+                        CancelColorReplaceGeometryPreview(
+                            state->Workspace().tools,
+                            state->Workspace().windows.canvas);
+                        if (status != INKPOD_STATUS_OK
+                            && !state->lifetime.smoke_test) {
+                            ShowCoreError(*state, window, L"色置換");
                         }
                         UpdateMenuState(*state);
                     }
