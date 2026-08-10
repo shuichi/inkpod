@@ -4,7 +4,8 @@ use super::{
     Adjustment, AirbrushGesture, AirbrushStroke, BoundaryAirbrush, CellDocument, CoordinateSpace,
     Core, CoreError, DispatchOutcome, DustRemoval, EffectRegionKind, EffectSample, Filter,
     Gradient, LayerKind, LayerNode, MAX_LAYERS, PixelFormat, PixelValue, PlaneNode, PlaneType,
-    PointF32, RectI32, SelectionOperation, SelectionShape, Stamp, StampGesture, StrokeSample,
+    PointF32, RangeInterpretation, RectI32, SelectionConstructionOptions, SelectionOperation,
+    SelectionShape, Stamp, StampGesture, StrokeSample,
 };
 use crate::document::{unique_layer_name, validate_node_name};
 use crate::identity::*;

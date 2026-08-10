@@ -7,6 +7,7 @@ mod palette;
 mod pixel;
 mod raster;
 mod sampling;
+mod selection;
 mod vector;
 
 pub use edit::{
@@ -33,6 +34,7 @@ pub use sampling::{
     ColorCheckCategory, ColorCheckMode, EyedropperSource, PlaneSample, color_check_category,
     eyedropper,
 };
+pub use selection::{RasterRangeInterpretation, interpret_raster_selection};
 pub use vector::{
     VECTOR_UNITS_PER_PIXEL, VectorFixedCubic, VectorFixedPoint, VectorFlatSample,
     evaluate_vector_cubic, flatten_vector_path, split_vector_cubic, sub_vector_cubic,

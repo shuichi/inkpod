@@ -89,7 +89,7 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
     entry!(DELETE_GUIDE, 2, "DeleteGuide", 2, 0x0004_0003),
     entry!(SET_GRID, 2, "SetGrid", 2, 0x0004_0010),
     entry!(DELETE_ALL_GUIDES, 2, "DeleteAllGuides", 2, 0x0004_0011),
-    entry!(APPLY_RASTER_STROKE, 2, "ApplyRasterStroke", 4, 3),
+    entry!(APPLY_RASTER_STROKE, 3, "ApplyRasterStroke", 5, 3),
     entry!(APPLY_FILL, 2, "ApplyFill", 2, 0x0005_0002),
     entry!(APPLY_GRADIENT, 2, "ApplyGradient", 2, 0x0005_0010),
     entry!(
@@ -156,7 +156,7 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         2,
         0x0005_0042
     ),
-    entry!(APPLY_SELECTION, 2, "ApplySelection", 2, 0x0006_0001),
+    entry!(APPLY_SELECTION, 2, "ApplySelection", 3, 0x0006_0001),
     entry!(INVERT_SELECTION, 2, "InvertSelection", 2, 0x0006_0002),
     entry!(CLEAR_SELECTION, 2, "ClearSelection", 2, 0x0006_0003),
     entry!(RESIZE_SELECTION, 2, "ResizeSelection", 2, 0x0006_0004),

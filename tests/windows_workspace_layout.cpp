@@ -13,6 +13,7 @@
 namespace {
 
 using inkpod::windows::ui::ComputeWorkspaceLayout;
+using inkpod::windows::ui::ComputeDockLayout;
 using inkpod::windows::ui::DecodeWorkspaceLayout;
 using inkpod::windows::ui::DeleteWorkspaceLayout;
 using inkpod::windows::ui::DockFloatingPlacement;
@@ -63,6 +64,42 @@ bool ReplaceFirst(
         }
     }
     return false;
+}
+
+std::uint32_t GroupedPaneOrder(
+    const inkpod::windows::ui::DockPanePlacement& pane) noexcept {
+    return UINT32_C(0x80000000)
+        | (pane.active_tab ? UINT32_C(1) << 24U : 0U)
+        | (static_cast<std::uint32_t>(pane.tab_order) << 16U)
+        | (static_cast<std::uint32_t>(pane.stack) << 8U)
+        | pane.order;
+}
+
+bool DowngradeGroupedLayoutToV5(
+    std::span<std::byte> bytes,
+    const inkpod::windows::ui::DockLayoutRecord& record) noexcept {
+    std::array<std::uint32_t, kDockedZoneCount> legacy_zone_orders{};
+    for (const auto& pane : record.panes) {
+        const auto& descriptor = PaneDescriptors()[
+            static_cast<std::size_t>(pane.type)];
+        if (!descriptor.persist_layout) {
+            continue;
+        }
+        std::uint32_t legacy_order = pane.order;
+        if (static_cast<std::size_t>(pane.zone) < kDockedZoneCount) {
+            legacy_order = legacy_zone_orders[
+                static_cast<std::size_t>(pane.zone)]++;
+        }
+        if (!ReplaceFirst(
+                bytes, GroupedPaneOrder(pane), legacy_order)) {
+            return false;
+        }
+    }
+    return ReplaceFirst(bytes, UINT32_C(7), UINT32_C(5));
+}
+
+bool DowngradeGroupedLayoutToV6(std::span<std::byte> bytes) noexcept {
+    return ReplaceFirst(bytes, UINT32_C(7), UINT32_C(6));
 }
 
 struct LegacyWorkspaceV2 {
@@ -228,11 +265,79 @@ int main() {
         return 6;
     }
 
+    DockLayoutModel grouped_inspector{};
+    const std::uint32_t original_layer_weight =
+        grouped_inspector.Pane(DockPaneType::Layer)->split_weight;
+    if (grouped_inspector.RestorePane(DockPaneType::LightTable)
+            != DockResult::Ok
+        || grouped_inspector.RestorePane(DockPaneType::Reference)
+            != DockResult::Ok
+        || grouped_inspector.StackCount(DockZone::Right) != 2U
+        || grouped_inspector.StackPaneCount(
+               DockZone::Right,
+               grouped_inspector.Pane(DockPaneType::Layer)->stack)
+            != 3U
+        || grouped_inspector.Pane(DockPaneType::Layer)->stack
+            != grouped_inspector.Pane(DockPaneType::LightTable)->stack
+        || grouped_inspector.Pane(DockPaneType::Layer)->stack
+            != grouped_inspector.Pane(DockPaneType::Reference)->stack
+        || grouped_inspector.Zone(DockZone::Right)->mode
+            != DockStackMode::Mixed
+        || grouped_inspector.SetActiveTab(
+               DockZone::Right, DockPaneType::Reference)
+            != DockResult::Ok) {
+        return 47;
+    }
+    const auto grouped_geometry = ComputeDockLayout(
+        grouped_inspector, 1'200, 720, 96U);
+    const auto& grouped_color = grouped_geometry.panes[
+        static_cast<std::size_t>(DockPaneType::Color)];
+    const auto& grouped_layer = grouped_geometry.panes[
+        static_cast<std::size_t>(DockPaneType::Layer)];
+    const auto& grouped_light_table = grouped_geometry.panes[
+        static_cast<std::size_t>(DockPaneType::LightTable)];
+    const auto& grouped_reference = grouped_geometry.panes[
+        static_cast<std::size_t>(DockPaneType::Reference)];
+    if (!grouped_color.shown || grouped_layer.shown || grouped_light_table.shown
+        || !grouped_reference.shown) {
+        return 48;
+    }
+    if (grouped_color.bounds.height >= grouped_reference.bounds.height
+        || grouped_layer.bounds.x != grouped_reference.bounds.x
+        || grouped_layer.bounds.y != grouped_reference.bounds.y
+        || grouped_layer.bounds.width != grouped_reference.bounds.width
+        || grouped_layer.bounds.height != grouped_reference.bounds.height
+        || grouped_light_table.bounds.x != grouped_reference.bounds.x
+        || grouped_light_table.bounds.y != grouped_reference.bounds.y
+        || grouped_light_table.bounds.width != grouped_reference.bounds.width
+        || grouped_light_table.bounds.height != grouped_reference.bounds.height) {
+        return 51;
+    }
+    if (grouped_inspector.Pane(DockPaneType::Layer)->split_weight
+            != original_layer_weight
+        || grouped_inspector.Pane(DockPaneType::LightTable)->split_weight
+            != original_layer_weight
+        || grouped_inspector.Pane(DockPaneType::Reference)->split_weight
+            != original_layer_weight) {
+        return 52;
+    }
+    if (grouped_inspector.HidePane(DockPaneType::Reference) != DockResult::Ok
+        || !grouped_inspector.Pane(DockPaneType::Layer)->active_tab
+        || grouped_inspector.Zone(DockZone::Right)->mode
+            != DockStackMode::Mixed
+        || grouped_inspector.HidePane(DockPaneType::LightTable) != DockResult::Ok
+        || grouped_inspector.Zone(DockZone::Right)->mode
+            != DockStackMode::Split) {
+        return 53;
+    }
+
     const auto record = model.ToRecord();
     DockLayoutModel restored{};
-    if (!restored.LoadRecord(record)
-        || restored.Pane(DockPaneType::Color)->split_weight != 400U) {
+    if (!restored.LoadRecord(record)) {
         return 7;
+    }
+    if (restored.Pane(DockPaneType::Color)->split_weight != 400U) {
+        return 54;
     }
     auto corrupted = record;
     corrupted.panes[0].zone = DockZone::TopContext;
@@ -439,24 +544,178 @@ int main() {
         return 27;
     }
 
-    auto legacy_v4_bytes = bytes;
-    const std::uint32_t current_version = 5U;
-    const std::uint32_t legacy_v4_version = 4U;
-    if (!ReplaceFirst(
-            std::span<std::byte>(legacy_v4_bytes.data(), written),
-            current_version,
-            legacy_v4_version)) {
+    WorkspaceLayoutState mixed_serialized{};
+    if (mixed_serialized.dock.RestorePane(DockPaneType::LightTable)
+            != DockResult::Ok
+        || mixed_serialized.dock.RestorePane(DockPaneType::Reference)
+            != DockResult::Ok
+        || mixed_serialized.dock.SetActiveTab(
+               DockZone::Right, DockPaneType::Reference)
+            != DockResult::Ok) {
+        return 49;
+    }
+    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes> mixed_bytes{};
+    std::size_t mixed_written{};
+    WorkspaceLayoutState mixed_decoded{};
+    if (!EncodeWorkspaceLayout(mixed_serialized, mixed_bytes, mixed_written)
+        || DecodeWorkspaceLayout(
+               mixed_decoded,
+               std::span<const std::byte>(mixed_bytes.data(), mixed_written))
+            != WorkspaceLayoutDecodeResult::Current
+        || mixed_decoded.dock.Zone(DockZone::Right)->mode
+            != DockStackMode::Mixed
+        || mixed_decoded.dock.StackCount(DockZone::Right) != 2U
+        || mixed_decoded.dock.Pane(DockPaneType::Layer)->stack
+            != mixed_decoded.dock.Pane(DockPaneType::LightTable)->stack
+        || mixed_decoded.dock.Pane(DockPaneType::Layer)->stack
+            != mixed_decoded.dock.Pane(DockPaneType::Reference)->stack
+        || !mixed_decoded.dock.Pane(DockPaneType::Reference)->active_tab) {
+        return 50;
+    }
+
+    WorkspaceLayoutState legacy_reference_split{};
+    if (legacy_reference_split.dock.RestorePane(DockPaneType::Reference)
+            != DockResult::Ok) {
+        return 58;
+    }
+    auto legacy_reference_record = legacy_reference_split.dock.ToRecord();
+    auto& legacy_reference = legacy_reference_record.panes[
+        static_cast<std::size_t>(DockPaneType::Reference)];
+    legacy_reference.stack = static_cast<std::uint8_t>(DockPaneType::Reference);
+    legacy_reference.order = 2U;
+    legacy_reference.tab_order = 0U;
+    legacy_reference.split_weight = 1000U;
+    legacy_reference.active_tab = true;
+    auto& legacy_reference_zone = legacy_reference_record.zones[
+        static_cast<std::size_t>(DockZone::Right)];
+    legacy_reference_zone.mode = DockStackMode::Split;
+    legacy_reference_zone.active_tab = DockPaneType::Reference;
+    if (!legacy_reference_split.dock.LoadRecord(legacy_reference_record)) {
+        return 59;
+    }
+    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes>
+        legacy_reference_bytes{};
+    std::size_t legacy_reference_written{};
+    if (!EncodeWorkspaceLayout(
+            legacy_reference_split,
+            legacy_reference_bytes,
+            legacy_reference_written)
+        || !DowngradeGroupedLayoutToV6(std::span<std::byte>(
+            legacy_reference_bytes.data(), legacy_reference_written))) {
+        return 60;
+    }
+    WorkspaceLayoutState migrated_reference_stack{};
+    if (DecodeWorkspaceLayout(
+            migrated_reference_stack,
+            std::span<const std::byte>(
+                legacy_reference_bytes.data(), legacy_reference_written))
+            != WorkspaceLayoutDecodeResult::Migrated
+        || migrated_reference_stack.dock.StackCount(DockZone::Right) != 2U
+        || migrated_reference_stack.dock.Pane(DockPaneType::Reference)->stack
+            != migrated_reference_stack.dock.Pane(DockPaneType::Layer)->stack
+        || migrated_reference_stack.dock.Zone(DockZone::Right)->mode
+            != DockStackMode::Mixed
+        || !migrated_reference_stack.dock.Pane(
+                DockPaneType::Reference)->active_tab) {
+        return 61;
+    }
+
+    WorkspaceLayoutState legacy_explicit_reference_split{};
+    if (legacy_explicit_reference_split.dock.RestorePane(
+            DockPaneType::Reference)
+            != DockResult::Ok) {
+        return 62;
+    }
+    auto explicit_reference_record =
+        legacy_explicit_reference_split.dock.ToRecord();
+    auto& explicit_reference = explicit_reference_record.panes[
+        static_cast<std::size_t>(DockPaneType::Reference)];
+    explicit_reference.stack = 2U;
+    explicit_reference.order = 2U;
+    explicit_reference.tab_order = 0U;
+    explicit_reference.split_weight = 1000U;
+    explicit_reference.active_tab = true;
+    auto& explicit_reference_zone = explicit_reference_record.zones[
+        static_cast<std::size_t>(DockZone::Right)];
+    explicit_reference_zone.mode = DockStackMode::Split;
+    explicit_reference_zone.active_tab = DockPaneType::Reference;
+    if (!legacy_explicit_reference_split.dock.LoadRecord(
+            explicit_reference_record)) {
+        return 63;
+    }
+    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes>
+        explicit_reference_bytes{};
+    std::size_t explicit_reference_written{};
+    WorkspaceLayoutState preserved_reference_split{};
+    if (!EncodeWorkspaceLayout(
+            legacy_explicit_reference_split,
+            explicit_reference_bytes,
+            explicit_reference_written)
+        || !DowngradeGroupedLayoutToV6(std::span<std::byte>(
+            explicit_reference_bytes.data(), explicit_reference_written))
+        || DecodeWorkspaceLayout(
+               preserved_reference_split,
+               std::span<const std::byte>(
+                   explicit_reference_bytes.data(), explicit_reference_written))
+            != WorkspaceLayoutDecodeResult::Migrated
+        || preserved_reference_split.dock.StackCount(DockZone::Right) != 3U
+        || preserved_reference_split.dock.Pane(DockPaneType::Reference)->stack
+            == preserved_reference_split.dock.Pane(DockPaneType::Layer)->stack) {
+        return 64;
+    }
+
+    WorkspaceLayoutState legacy_light_table_tabs{};
+    if (legacy_light_table_tabs.dock.RestorePane(DockPaneType::LightTable)
+            != DockResult::Ok
+        || legacy_light_table_tabs.dock.SetZoneMode(
+               DockZone::Right, DockStackMode::Tabs)
+            != DockResult::Ok) {
+        return 55;
+    }
+    std::array<std::byte, kMaximumWorkspaceLayoutRecordBytes> legacy_tabs_bytes{};
+    std::size_t legacy_tabs_written{};
+    if (!EncodeWorkspaceLayout(
+            legacy_light_table_tabs, legacy_tabs_bytes, legacy_tabs_written)
+        || !DowngradeGroupedLayoutToV5(
+            std::span<std::byte>(
+                legacy_tabs_bytes.data(), legacy_tabs_written),
+            legacy_light_table_tabs.dock.ToRecord())) {
+        return 56;
+    }
+    WorkspaceLayoutState migrated_light_table_tabs{};
+    if (DecodeWorkspaceLayout(
+            migrated_light_table_tabs,
+            std::span<const std::byte>(
+                legacy_tabs_bytes.data(), legacy_tabs_written))
+            != WorkspaceLayoutDecodeResult::Migrated
+        || migrated_light_table_tabs.dock.Zone(DockZone::Right)->mode
+            != DockStackMode::Mixed
+        || migrated_light_table_tabs.dock.Pane(DockPaneType::Color)->stack
+            == migrated_light_table_tabs.dock.Pane(DockPaneType::Layer)->stack
+        || migrated_light_table_tabs.dock.Pane(DockPaneType::Layer)->stack
+            != migrated_light_table_tabs.dock.Pane(
+                   DockPaneType::LightTable)->stack
+        || !migrated_light_table_tabs.dock.Pane(DockPaneType::Color)->active_tab
+        || !migrated_light_table_tabs.dock.Pane(DockPaneType::Layer)->active_tab) {
+        return 57;
+    }
+
+    auto legacy_v5_bytes = bytes;
+    const auto serialized_record = serialized.dock.ToRecord();
+    if (!DowngradeGroupedLayoutToV5(
+            std::span<std::byte>(legacy_v5_bytes.data(), written),
+            serialized_record)) {
         return 45;
     }
-    WorkspaceLayoutState migrated_v4{};
+    WorkspaceLayoutState migrated_v5{};
     if (DecodeWorkspaceLayout(
-            migrated_v4,
-            std::span<const std::byte>(legacy_v4_bytes.data(), written))
+            migrated_v5,
+            std::span<const std::byte>(legacy_v5_bytes.data(), written))
             != WorkspaceLayoutDecodeResult::Migrated
-        || migrated_v4.dock.Pane(DockPaneType::Locator)->zone
+        || migrated_v5.dock.Pane(DockPaneType::Locator)->zone
             != DockZone::AutoHide
-        || !migrated_v4.dock.IsPaneVisible(DockPaneType::Reference)
-        || migrated_v4.dock.IsPaneVisible(DockPaneType::JobProgress)) {
+        || !migrated_v5.dock.IsPaneVisible(DockPaneType::Reference)
+        || migrated_v5.dock.IsPaneVisible(DockPaneType::JobProgress)) {
         return 46;
     }
     WorkspaceLayoutState rejected = decoded;
@@ -501,7 +760,7 @@ int main() {
         || !migrated.dock.IsPaneVisible(DockPaneType::Tool)) {
         return 32;
     }
-    const auto legacy_record = serialized.dock.ToRecord();
+    const auto& legacy_record = serialized_record;
     LegacyWorkspaceV3 legacy_v3{};
     legacy_v3.flags = legacy_record.mirrored;
     legacy_v3.layer_split_milli = serialized.layer_split_milli;

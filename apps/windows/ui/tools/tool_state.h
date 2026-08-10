@@ -35,8 +35,9 @@ inline constexpr std::uint32_t kInteractionVectorEraser = 1206U;
 bool IsVectorCanvasTool(std::uint32_t tool) noexcept;
 bool IsVectorStrokePlane(std::uint32_t kind) noexcept;
 
-// All active-tool changes go through this boundary so leaving a vector or
-// selection tool cannot retain a geometry preview owned by the prior interaction.
+// All active-tool changes go through this boundary so leaving a vector,
+// selection, or ranged-fill tool cannot retain a geometry preview owned by the
+// prior interaction.
 void TransitionActiveTool(
     app::ToolUiState& tools, HWND canvas, std::uint32_t next_tool) noexcept;
 
@@ -53,6 +54,9 @@ void CancelVectorGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept;
 
 void CancelSelectionGeometryPreview(
+    app::ToolUiState& tools, HWND canvas) noexcept;
+
+void CancelFillGeometryPreview(
     app::ToolUiState& tools, HWND canvas) noexcept;
 
 } // namespace inkpod::windows::ui::tools

@@ -694,6 +694,277 @@ fn acceptance_selection_authoring_tools() {
     assert_eq!(core.selection_bounds().unwrap(), saved_bounds);
 }
 
+fn selected_pixels(core: &mut Core, width: u32, height: u32) -> Vec<(u32, u32)> {
+    let snapshot = core.build_snapshot();
+    let Some(pass) = snapshot
+        .render_passes()
+        .last()
+        .filter(|pass| pass.kind() == RenderPassKind::RasterTiles && pass.layer_id() == 0)
+    else {
+        return Vec::new();
+    };
+    let first = usize::try_from(pass.first_item()).unwrap();
+    let count = usize::try_from(pass.item_count()).unwrap();
+    let mut result = Vec::new();
+    for tile in &snapshot.tiles()[first..first + count] {
+        for local_y in 0..tile.height() {
+            for local_x in 0..tile.width() {
+                let offset = local_y as usize * tile.stride_bytes() as usize + local_x as usize * 4;
+                if tile.pixels()[offset] != 0 && tile.pixels()[offset + 1] != 0 {
+                    let x = u32::try_from(tile.origin_x()).unwrap() + local_x;
+                    let y = u32::try_from(tile.origin_y()).unwrap() + local_y;
+                    if x < width && y < height {
+                        result.push((x, y));
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+fn raster_range_fixture_core() -> Core {
+    let mut core = Core::new();
+    core.new_cell(5, 5, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.apply_stroke(&line_stroke(vec![
+        StrokeSample {
+            x: 1.0,
+            y: 1.0,
+            pressure: 1.0,
+        },
+        StrokeSample {
+            x: 3.0,
+            y: 1.0,
+            pressure: 1.0,
+        },
+        StrokeSample {
+            x: 3.0,
+            y: 3.0,
+            pressure: 1.0,
+        },
+        StrokeSample {
+            x: 1.0,
+            y: 3.0,
+            pressure: 1.0,
+        },
+        StrokeSample {
+            x: 1.0,
+            y: 1.0,
+            pressure: 1.0,
+        },
+    ]))
+    .unwrap();
+    core
+}
+
+#[test]
+fn sel_004_raster_range_interpretations_are_atomic_replayable_and_exact() {
+    let shape = SelectionShape::Rectangle(RectI32 {
+        x: 0,
+        y: 0,
+        width: 5,
+        height: 5,
+    });
+    let options = SelectionConstructionOptions::default();
+    for (interpretation, expected) in [
+        (RangeInterpretation::Normal, 25),
+        (RangeInterpretation::Tight, 9),
+        (RangeInterpretation::EnclosedInterior, 1),
+        (RangeInterpretation::Drawing, 8),
+        (RangeInterpretation::Boundary, 8),
+    ] {
+        let mut core = raster_range_fixture_core();
+        let before = core.document_info().unwrap().document_revision;
+        core.apply_selection_with_options(&shape, SelectionOperation::New, interpretation, options)
+            .unwrap();
+        if interpretation == RangeInterpretation::EnclosedInterior {
+            assert_eq!(
+                core.selection_bounds().unwrap(),
+                Some(RectI32 {
+                    x: 2,
+                    y: 2,
+                    width: 1,
+                    height: 1,
+                })
+            );
+        }
+        assert_eq!(
+            selected_pixels(&mut core, 5, 5).len(),
+            expected,
+            "{interpretation:?}"
+        );
+        assert_eq!(core.document_info().unwrap().document_revision, before + 1);
+        core.verify_journal_replay()
+            .unwrap_or_else(|error| panic!("{interpretation:?} replay failed: {error:?}"));
+    }
+    let mut core = raster_range_fixture_core();
+    core.apply_selection_with_options(
+        &shape,
+        SelectionOperation::New,
+        RangeInterpretation::Boundary,
+        options,
+    )
+    .unwrap();
+    let before_noop = core.document_info().unwrap();
+    let history_before = core.history_entries().len();
+    core.apply_selection_with_options(
+        &shape,
+        SelectionOperation::New,
+        RangeInterpretation::Boundary,
+        options,
+    )
+    .unwrap();
+    assert_eq!(core.document_info().unwrap(), before_noop);
+    assert_eq!(core.history_entries().len(), history_before);
+    core.undo().unwrap();
+    assert!(selected_pixels(&mut core, 5, 5).is_empty());
+    core.redo().unwrap();
+    assert_eq!(selected_pixels(&mut core, 5, 5).len(), 8);
+
+    let before_invalid = core.document_state_digest().unwrap();
+    let mut invalid = options;
+    invalid.aspect_ratio_q16 = u32::MAX;
+    assert!(matches!(
+        core.apply_selection_with_options(
+            &SelectionShape::RectangleGesture {
+                anchor: PointF32 { x: 1.0, y: 1.0 },
+                current: PointF32 { x: 2.0, y: 2.0 },
+            },
+            SelectionOperation::New,
+            RangeInterpretation::Normal,
+            invalid,
+        ),
+        Err(CoreError::InvalidArgument(_))
+    ));
+    assert_eq!(core.document_state_digest().unwrap(), before_invalid);
+}
+
+#[test]
+fn sel_004_geometry_and_trace_options_share_one_mask_path() {
+    let mut core = Core::new();
+    core.new_cell(9, 9, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let geometry = SelectionConstructionOptions {
+        aspect_ratio_q16: 1 << 16,
+        from_center: true,
+        constrain_rotation_45: true,
+        rotation_turns: 0x1800_0000,
+        ..SelectionConstructionOptions::default()
+    };
+    core.apply_selection_with_options(
+        &SelectionShape::RectangleGesture {
+            anchor: PointF32 { x: 4.5, y: 4.5 },
+            current: PointF32 { x: 6.5, y: 5.5 },
+        },
+        SelectionOperation::New,
+        RangeInterpretation::Normal,
+        geometry,
+    )
+    .unwrap();
+    let rotated = selected_pixels(&mut core, 9, 9);
+    assert!(!rotated.is_empty());
+    core.verify_journal_replay().unwrap();
+
+    let sample = SelectionSample {
+        x: 4.5,
+        y: 4.5,
+        pressure: 0.5,
+    };
+    let trace = |shape, pressure_size, screen_size, view_zoom_q16| SelectionConstructionOptions {
+        trace: TraceBrushOptions {
+            shape,
+            pressure_size,
+            screen_size,
+            view_zoom_q16,
+        },
+        ..SelectionConstructionOptions::default()
+    };
+    core.apply_selection_with_options(
+        &SelectionShape::TraceBrush {
+            samples: vec![sample],
+            diameter: 2.0,
+        },
+        SelectionOperation::New,
+        RangeInterpretation::Normal,
+        trace(TraceBrushShape::Round, false, false, 1 << 16),
+    )
+    .unwrap();
+    assert_eq!(selected_pixels(&mut core, 9, 9).len(), 5);
+    core.apply_selection_with_options(
+        &SelectionShape::TraceBrush {
+            samples: vec![sample],
+            diameter: 2.0,
+        },
+        SelectionOperation::New,
+        RangeInterpretation::Normal,
+        trace(TraceBrushShape::Square, false, false, 1 << 16),
+    )
+    .unwrap();
+    assert_eq!(selected_pixels(&mut core, 9, 9).len(), 9);
+    core.apply_selection_with_options(
+        &SelectionShape::TraceBrush {
+            samples: vec![sample],
+            diameter: 4.0,
+        },
+        SelectionOperation::New,
+        RangeInterpretation::Normal,
+        trace(TraceBrushShape::Round, true, true, 2 << 16),
+    )
+    .unwrap();
+    assert_eq!(selected_pixels(&mut core, 9, 9).len(), 1);
+}
+
+#[test]
+fn sel_004_new_empty_replaces_nonempty_once_and_then_is_a_no_op() {
+    let mut core = Core::new();
+    core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let whole = SelectionShape::Rectangle(RectI32 {
+        x: 0,
+        y: 0,
+        width: 4,
+        height: 4,
+    });
+    core.apply_selection_with_options(
+        &whole,
+        SelectionOperation::New,
+        RangeInterpretation::Normal,
+        SelectionConstructionOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(selected_pixels(&mut core, 4, 4).len(), 16);
+    let before_empty = core.document_info().unwrap().document_revision;
+    core.apply_selection_with_options(
+        &whole,
+        SelectionOperation::New,
+        RangeInterpretation::Drawing,
+        SelectionConstructionOptions::default(),
+    )
+    .unwrap();
+    assert!(selected_pixels(&mut core, 4, 4).is_empty());
+    assert_eq!(
+        core.document_info().unwrap().document_revision,
+        before_empty + 1
+    );
+    let empty_info = core.document_info().unwrap();
+    let empty_history = core.history_entries().len();
+    core.apply_selection_with_options(
+        &whole,
+        SelectionOperation::New,
+        RangeInterpretation::Drawing,
+        SelectionConstructionOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(core.document_info().unwrap(), empty_info);
+    assert_eq!(core.history_entries().len(), empty_history);
+    core.undo().unwrap();
+    assert_eq!(selected_pixels(&mut core, 4, 4).len(), 16);
+    core.redo().unwrap();
+    assert!(selected_pixels(&mut core, 4, 4).is_empty());
+    core.verify_journal_replay().unwrap();
+}
+
 #[test]
 fn acceptance_coordinate_preserving_typed_paste_and_floating_transform() {
     let mut source = Core::new();
@@ -1194,6 +1465,9 @@ fn tree_order_merge_names_and_active_ids_remain_consistent() {
         plane: ActivePlane::Color,
         color: [0, 0, 255, 128],
         diameter: 1.0,
+        shape: BrushShape::Round,
+        smoothing: 0,
+        start_color: StartColorPredicate::Any,
         auto_erase: false,
         pressure_size: false,
         coordinate_space: CoordinateSpace::Document,

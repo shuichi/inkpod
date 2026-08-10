@@ -125,7 +125,12 @@ InkpodStatus ApplyMark(InkpodCore* core, float x, float y) noexcept {
         3.0F,
         &sample,
         1U,
-        sizeof(InkpodStrokeSample)};
+        sizeof(InkpodStrokeSample),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     InkpodDispatchResult result{};
     result.struct_size = sizeof(result);
     return inkpod_core_apply_stroke(core, &input, &result);
@@ -586,8 +591,8 @@ int wmain() {
     }
     InkpodReplayContract replay_contract{};
     if (host.GetReplayContract(first, generation, replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 8U
-        || replay_contract.procedure_format_version != 11U
+        || replay_contract.replay_epoch != 10U
+        || replay_contract.procedure_format_version != 13U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U) {
         host.Stop();
@@ -1036,7 +1041,7 @@ int wmain() {
         host.GetPersistenceInfo(second, generation, persistence);
     second_info = EmptyDocumentInfo();
     if (persistence_status != INKPOD_STATUS_OK
-        || persistence.format_version != 11U
+        || persistence.format_version != 13U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.feature_flags != INKPOD_FEATURE_NONE
         || !host.GetDocumentInfo(second, generation, second_info)

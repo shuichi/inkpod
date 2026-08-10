@@ -4,10 +4,10 @@ use super::CanonicalStrokeArguments;
 use crate::document::ensure_editable_plane;
 use crate::view::{device_to_document, stroke_coordinate_is_supported};
 use crate::{
-    CellDocument, CoordinateSpace, CoreError, DevicePointF64, DocumentSizeU32, MAX_BRUSH_DIAMETER,
-    MAX_STROKE_COORDINATE, MAX_STROKE_SAMPLES, MAX_STROKE_WORK, PaintTool, PixelChange,
-    PixelFormat, PixelValue, PlaneId, PlaneType, Stroke, StrokeSample, TILE_SIZE, TileCoord,
-    ViewState,
+    BrushShape, CellDocument, CoordinateSpace, CoreError, DevicePointF64, DocumentSizeU32,
+    MAX_BRUSH_DIAMETER, MAX_STROKE_COORDINATE, MAX_STROKE_SAMPLES, MAX_STROKE_WORK, PaintTool,
+    PixelChange, PixelFormat, PixelValue, PlaneId, PlaneType, StartColorPredicate, Stroke,
+    StrokeSample, TILE_SIZE, TileCoord, ViewState,
 };
 use inkpod_image::{
     canonical_q16_from_f32 as image_q16_from_f32, canonical_q16_from_f64 as image_q16_from_f64,
@@ -36,6 +36,9 @@ pub(super) struct CanonicalRasterStroke {
     pub(super) target_plane_id: PlaneId,
     pub(super) color: PixelValue,
     pub(super) diameter_q16: i64,
+    pub(super) shape: BrushShape,
+    pub(super) smoothing: u16,
+    pub(super) start_color: StartColorPredicate,
     pub(super) auto_erase: bool,
     pub(super) pressure_size: bool,
     pub(super) samples: Vec<CanonicalStrokeSample>,
@@ -50,7 +53,9 @@ pub(super) struct CanonicalRasterStroke {
 #[derive(Clone, Debug)]
 pub(crate) struct RasterStrokePreview {
     stroke: CanonicalRasterStroke,
+    normalized_samples: Vec<CanonicalStrokeSample>,
     desired: PixelValue,
+    start_value: Option<PixelValue>,
     maximum_radius: i64,
     work: u64,
 }
@@ -119,6 +124,9 @@ pub(crate) fn canonicalize_exact(
         tool_code: tool_code(stroke.tool),
         color,
         diameter_q16,
+        shape_code: shape_code(stroke.shape),
+        smoothing: stroke.smoothing,
+        start_color_code: start_color_code(stroke.start_color),
         auto_erase: stroke.auto_erase,
         pressure_size: stroke.pressure_size,
         payload: encode_payload(&samples)?,
@@ -210,12 +218,21 @@ pub(crate) fn begin_preview(
     revision: u64,
 ) -> Result<RasterStrokePreview, CoreError> {
     let stroke = stroke_from_arguments(arguments)?;
-    let (desired, maximum_radius) = validated_stroke_context(document, &stroke)?;
-    let (changes, work) = stage_canonical_raster_stroke(document, &stroke)?;
+    let (desired, maximum_radius, start_value) = validated_stroke_context(document, &stroke)?;
+    let normalized_samples = normalized_samples(&stroke)?;
+    let (changes, work) = stage_canonical_raster_stroke_with_samples(
+        document,
+        &stroke,
+        &normalized_samples,
+        desired,
+        start_value,
+    )?;
     apply_staged_changes(document, stroke.target_plane_id, &changes, revision)?;
     Ok(RasterStrokePreview {
         stroke,
+        normalized_samples,
         desired,
+        start_value,
         maximum_radius,
         work,
     })
@@ -262,6 +279,12 @@ impl RasterStrokePreview {
             .try_reserve(appended.samples.len())
             .map_err(|_| CoreError::InvalidState("stroke preview allocation failed"))?;
         self.stroke.samples.extend_from_slice(&appended.samples);
+        let old_normalized_len = self.normalized_samples.len();
+        append_normalized_samples(
+            &mut self.normalized_samples,
+            &appended.samples,
+            self.stroke.smoothing,
+        )?;
 
         let next_maximum_radius =
             appended
@@ -276,7 +299,13 @@ impl RasterStrokePreview {
             // Bresenham phase of an earlier off-canvas segment. Rebuild only on
             // one of the bounded radius transitions so preview pixels remain
             // exactly batching independent without returning to per-append O(N²).
-            let (changes, work) = stage_canonical_raster_stroke(base_document, &self.stroke)?;
+            let (changes, work) = stage_canonical_raster_stroke_with_samples(
+                base_document,
+                &self.stroke,
+                &self.normalized_samples,
+                self.desired,
+                self.start_value,
+            )?;
             let mut rebuilt = base_document.clone();
             apply_staged_changes(
                 &mut rebuilt,
@@ -300,16 +329,21 @@ impl RasterStrokePreview {
                 "stroke rasterization work overflows",
             ))?;
         stage_sample_windows(
-            document,
+            base_document,
             &self.stroke,
-            &self.stroke.samples[old_len - 1..],
+            &self.normalized_samples[old_normalized_len - 1..],
             next_maximum_radius,
             &mut staged,
             &mut next_work,
         )?;
 
-        let changes =
-            changes_from_staged(document, self.stroke.target_plane_id, self.desired, staged)?;
+        let changes = changes_from_staged(
+            base_document,
+            self.stroke.target_plane_id,
+            self.desired,
+            self.start_value,
+            staged,
+        )?;
         apply_staged_changes(document, self.stroke.target_plane_id, &changes, revision)?;
         self.maximum_radius = next_maximum_radius;
         self.work = next_work;
@@ -323,6 +357,9 @@ impl RasterStrokePreview {
             tool_code: tool_code(self.stroke.tool),
             color: self.stroke.color,
             diameter_q16: self.stroke.diameter_q16,
+            shape_code: shape_code(self.stroke.shape),
+            smoothing: self.stroke.smoothing,
+            start_color_code: start_color_code(self.stroke.start_color),
             auto_erase: self.stroke.auto_erase,
             pressure_size: self.stroke.pressure_size,
             payload: encode_payload(&self.stroke.samples)?,
@@ -349,6 +386,9 @@ fn stroke_from_arguments(
         target_plane_id: checked_plane_id(arguments.target_plane_id)?,
         color: arguments.color,
         diameter_q16: arguments.diameter_q16,
+        shape: shape_from_code(arguments.shape_code)?,
+        smoothing: arguments.smoothing,
+        start_color: start_color_from_code(arguments.start_color_code)?,
         auto_erase: arguments.auto_erase,
         pressure_size: arguments.pressure_size,
         samples: decode_payload(&arguments.payload)?,
@@ -360,6 +400,9 @@ fn same_stroke_settings(left: &CanonicalRasterStroke, right: &CanonicalRasterStr
         && left.target_plane_id == right.target_plane_id
         && left.color == right.color
         && left.diameter_q16 == right.diameter_q16
+        && left.shape == right.shape
+        && left.smoothing == right.smoothing
+        && left.start_color == right.start_color
         && left.auto_erase == right.auto_erase
         && left.pressure_size == right.pressure_size
 }
@@ -405,6 +448,34 @@ fn tool_from_code(code: u32) -> Result<PaintTool, CoreError> {
     }
 }
 
+const fn shape_code(shape: BrushShape) -> u32 {
+    shape as u32
+}
+
+fn shape_from_code(code: u32) -> Result<BrushShape, CoreError> {
+    match code {
+        1 => Ok(BrushShape::Round),
+        2 => Ok(BrushShape::Square),
+        _ => Err(CoreError::InvalidArgument(
+            "canonical stroke brush shape code is unknown",
+        )),
+    }
+}
+
+const fn start_color_code(predicate: StartColorPredicate) -> u32 {
+    predicate as u32
+}
+
+fn start_color_from_code(code: u32) -> Result<StartColorPredicate, CoreError> {
+    match code {
+        0 => Ok(StartColorPredicate::Any),
+        1 => Ok(StartColorPredicate::ExactNative),
+        _ => Err(CoreError::InvalidArgument(
+            "canonical stroke start-color predicate code is unknown",
+        )),
+    }
+}
+
 fn checked_plane_id(raw: u64) -> Result<PlaneId, CoreError> {
     if raw == 0 {
         return Err(CoreError::InvalidArgument(
@@ -433,6 +504,9 @@ fn canonical_stroke_from_public(
         target_plane_id,
         color: arguments.color,
         diameter_q16: arguments.diameter_q16,
+        shape: shape_from_code(arguments.shape_code)?,
+        smoothing: arguments.smoothing,
+        start_color: start_color_from_code(arguments.start_color_code)?,
         auto_erase: arguments.auto_erase,
         pressure_size: arguments.pressure_size,
         samples: decode_payload(&arguments.payload)?,
@@ -490,21 +564,117 @@ fn canonicalize_stroke_samples(
         .collect()
 }
 
+fn validate_brush_options(stroke: &CanonicalRasterStroke) -> Result<(), CoreError> {
+    if stroke.smoothing > 1_000 {
+        return Err(CoreError::InvalidArgument(
+            "stroke smoothing strength exceeds 1000",
+        ));
+    }
+    match stroke.tool {
+        PaintTool::Brush => Ok(()),
+        PaintTool::Pencil
+            if stroke.shape == BrushShape::Round
+                && stroke.smoothing == 0
+                && stroke.start_color == StartColorPredicate::Any =>
+        {
+            Ok(())
+        }
+        PaintTool::Eraser
+            if stroke.smoothing == 0 && stroke.start_color == StartColorPredicate::Any =>
+        {
+            Ok(())
+        }
+        _ => Err(CoreError::InvalidArgument(
+            "stroke options are unsupported for the selected tool",
+        )),
+    }
+}
+
+fn normalized_samples(
+    stroke: &CanonicalRasterStroke,
+) -> Result<Vec<CanonicalStrokeSample>, CoreError> {
+    let mut normalized = Vec::with_capacity(stroke.samples.len());
+    append_normalized_samples(&mut normalized, &stroke.samples, stroke.smoothing)?;
+    Ok(normalized)
+}
+
+fn append_normalized_samples(
+    normalized: &mut Vec<CanonicalStrokeSample>,
+    samples: &[CanonicalStrokeSample],
+    strength: u16,
+) -> Result<(), CoreError> {
+    if strength > 1_000 {
+        return Err(CoreError::InvalidArgument(
+            "stroke smoothing strength exceeds 1000",
+        ));
+    }
+    normalized
+        .try_reserve(samples.len())
+        .map_err(|_| CoreError::InvalidState("stroke smoothing allocation failed"))?;
+    for sample in samples {
+        let Some(previous) = normalized.last().copied() else {
+            normalized.push(*sample);
+            continue;
+        };
+        if strength == 0 {
+            normalized.push(*sample);
+            continue;
+        }
+        let retained = i128::from(strength);
+        let incoming = i128::from(1_001_u16 - strength);
+        let smooth = |previous: i64, current: i64| -> Result<i64, CoreError> {
+            let numerator = i128::from(previous)
+                .checked_mul(retained)
+                .and_then(|left| {
+                    i128::from(current)
+                        .checked_mul(incoming)
+                        .and_then(|right| left.checked_add(right))
+                })
+                .ok_or(CoreError::InvalidArgument(
+                    "stroke smoothing recurrence overflows",
+                ))?;
+            i64::try_from(divide_round_ties_even(numerator, 1_001)?).map_err(|_| {
+                CoreError::InvalidArgument("stroke smoothing coordinate is outside bounds")
+            })
+        };
+        normalized.push(CanonicalStrokeSample {
+            x_q16: smooth(previous.x_q16, sample.x_q16)?,
+            y_q16: smooth(previous.y_q16, sample.y_q16)?,
+            pressure: sample.pressure,
+        });
+    }
+    Ok(())
+}
+
 /// Stages the exact pixel delta without changing the supplied document.
 fn stage_canonical_raster_stroke(
     document: &CellDocument,
     stroke: &CanonicalRasterStroke,
 ) -> Result<(Vec<PixelChange>, u64), CoreError> {
-    let (desired, maximum_radius) = validated_stroke_context(document, stroke)?;
+    let (desired, _maximum_radius, start_value) = validated_stroke_context(document, stroke)?;
+    let normalized = normalized_samples(stroke)?;
+    stage_canonical_raster_stroke_with_samples(document, stroke, &normalized, desired, start_value)
+}
+
+fn stage_canonical_raster_stroke_with_samples(
+    document: &CellDocument,
+    stroke: &CanonicalRasterStroke,
+    samples: &[CanonicalStrokeSample],
+    desired: PixelValue,
+    start_value: Option<PixelValue>,
+) -> Result<(Vec<PixelChange>, u64), CoreError> {
+    let maximum_radius = samples.iter().try_fold(0_i64, |maximum, sample| {
+        dab_radius(stroke, sample.pressure).map(|radius| maximum.max(radius))
+    })?;
     let mut staged = BTreeSet::new();
-    let mut work = u64::try_from(stroke.samples.len()).map_err(|_| {
+    let mut work = u64::try_from(samples.len()).map_err(|_| {
         CoreError::InvalidArgument("canonical stroke sample count is not representable")
     })?;
     stage_segment(
         document,
         stroke,
-        stroke.samples[0],
-        stroke.samples[0],
+        samples[0],
+        samples[0],
         maximum_radius,
         &mut staged,
         &mut work,
@@ -512,19 +682,25 @@ fn stage_canonical_raster_stroke(
     stage_sample_windows(
         document,
         stroke,
-        &stroke.samples,
+        samples,
         maximum_radius,
         &mut staged,
         &mut work,
     )?;
-    let changes = changes_from_staged(document, stroke.target_plane_id, desired, staged)?;
+    let changes = changes_from_staged(
+        document,
+        stroke.target_plane_id,
+        desired,
+        start_value,
+        staged,
+    )?;
     Ok((changes, work))
 }
 
 fn validated_stroke_context(
     document: &CellDocument,
     stroke: &CanonicalRasterStroke,
-) -> Result<(PixelValue, i64), CoreError> {
+) -> Result<(PixelValue, i64, Option<PixelValue>), CoreError> {
     if stroke.samples.is_empty() || stroke.samples.len() > MAX_STROKE_SAMPLES {
         return Err(CoreError::InvalidArgument(
             "stroke sample count is outside bounds",
@@ -535,6 +711,7 @@ fn validated_stroke_context(
             "canonical stroke diameter is outside bounds",
         ));
     }
+    validate_brush_options(stroke)?;
     ensure_editable_plane(document, stroke.target_plane_id)?;
     let plane = document
         .plane_by_id(stroke.target_plane_id)
@@ -546,7 +723,20 @@ fn validated_stroke_context(
     let maximum_radius = stroke.samples.iter().try_fold(0_i64, |maximum, sample| {
         dab_radius(stroke, sample.pressure).map(|radius| maximum.max(radius))
     })?;
-    Ok((desired, maximum_radius))
+    let start_value = if stroke.start_color == StartColorPredicate::ExactNative {
+        let first = stroke.samples[0];
+        let x = q16_floor(first.x_q16);
+        let y = q16_floor(first.y_q16);
+        if x < 0 || y < 0 || x >= i64::from(document.width) || y >= i64::from(document.height) {
+            return Err(CoreError::InvalidArgument(
+                "start-color brush begins outside the document",
+            ));
+        }
+        Some(plane.raster.pixel(x as u32, y as u32)?)
+    } else {
+        None
+    };
+    Ok((desired, maximum_radius, start_value))
 }
 
 fn stage_sample_windows(
@@ -575,6 +765,7 @@ fn changes_from_staged(
     document: &CellDocument,
     target_plane_id: PlaneId,
     desired: PixelValue,
+    start_value: Option<PixelValue>,
     staged: BTreeSet<(u32, u32)>,
 ) -> Result<Vec<PixelChange>, CoreError> {
     let plane = document
@@ -583,10 +774,14 @@ fn changes_from_staged(
             "stroke target plane no longer exists",
         ))?;
     let raster = &plane.raster;
+    let selection_active = document.selection.allocated_tile_count() != 0;
     let mut changes = Vec::with_capacity(staged.len());
     for (x, y) in staged {
+        if selection_active && document.selection.pixel(x, y)? == PixelValue::Binary(0) {
+            continue;
+        }
         let before = raster.pixel(x, y)?;
-        if before != desired {
+        if before != desired && start_value.is_none_or(|value| before == value) {
             changes.push(PixelChange {
                 x,
                 y,
@@ -883,7 +1078,7 @@ fn stage_dab(
                 .ok_or(CoreError::InvalidArgument(
                     "canonical stroke dab distance overflows",
                 ))?;
-            if distance_squared > radius_squared {
+            if stroke.shape == BrushShape::Round && distance_squared > radius_squared {
                 continue;
             }
             let x = center_x
@@ -1190,6 +1385,7 @@ const fn q16_floor(value: i64) -> i64 {
 mod tests {
     use super::*;
     use crate::{ActivePlane, Core, DEFAULT_DPI_MILLI};
+    use inkpod_image::TileRaster;
 
     fn pencil(samples: Vec<StrokeSample>) -> Stroke {
         Stroke {
@@ -1197,6 +1393,9 @@ mod tests {
             plane: ActivePlane::MainLine,
             color: [0, 0, 0, 255],
             diameter: 1.0,
+            shape: BrushShape::Round,
+            smoothing: 0,
+            start_color: StartColorPredicate::Any,
             auto_erase: false,
             pressure_size: false,
             coordinate_space: CoordinateSpace::Document,
@@ -1254,6 +1453,9 @@ mod tests {
             target_plane_id: PlaneId::from_raw(1),
             color: PixelValue::Rgba([0; 4]),
             diameter_q16: 3 * Q16_ONE,
+            shape: BrushShape::Round,
+            smoothing: 0,
+            start_color: StartColorPredicate::Any,
             auto_erase: false,
             pressure_size: true,
             samples: Vec::new(),
@@ -1300,6 +1502,74 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn exact_start_color_uses_binary_and_grayscale_native_scalars() {
+        for (format, start, different) in [
+            (
+                PixelFormat::BinaryMask8,
+                PixelValue::Binary(0),
+                PixelValue::Binary(u8::MAX),
+            ),
+            (
+                PixelFormat::Grayscale8,
+                PixelValue::Grayscale8(17),
+                PixelValue::Grayscale8(18),
+            ),
+            (
+                PixelFormat::Grayscale16,
+                PixelValue::Grayscale16(0x1201),
+                PixelValue::Grayscale16(0x1200),
+            ),
+        ] {
+            let mut core = Core::new();
+            core.new_cell(8, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+                .unwrap();
+            let document = core.document.as_mut().unwrap();
+            let target_plane_id = document.plane_for_role(ActivePlane::MainLine).unwrap().id;
+            let mut raster = TileRaster::new(8, 4, format).unwrap();
+            raster.set_pixel(1, 1, start, 1).unwrap();
+            raster.set_pixel(2, 1, different, 1).unwrap();
+            raster.set_pixel(3, 1, start, 1).unwrap();
+            *document.raster_mut(ActivePlane::MainLine) = raster;
+
+            let stroke = CanonicalRasterStroke {
+                tool: PaintTool::Brush,
+                target_plane_id,
+                color: PixelValue::Rgba([1, 2, 3, u8::MAX]),
+                diameter_q16: Q16_ONE,
+                shape: BrushShape::Square,
+                smoothing: 0,
+                start_color: StartColorPredicate::ExactNative,
+                auto_erase: false,
+                pressure_size: false,
+                samples: vec![
+                    CanonicalStrokeSample {
+                        x_q16: Q16_ONE,
+                        y_q16: Q16_ONE,
+                        pressure: u16::MAX,
+                    },
+                    CanonicalStrokeSample {
+                        x_q16: 3 * Q16_ONE,
+                        y_q16: Q16_ONE,
+                        pressure: u16::MAX,
+                    },
+                ],
+            };
+            let changes = apply_canonical_raster_stroke(document, &stroke, 2).unwrap();
+            assert_eq!(
+                changes
+                    .iter()
+                    .map(|change| (change.x, change.y))
+                    .collect::<Vec<_>>(),
+                vec![(1, 1), (3, 1)]
+            );
+            assert_eq!(
+                document.raster(ActivePlane::MainLine).pixel(2, 1).unwrap(),
+                different
+            );
+        }
     }
 
     #[test]

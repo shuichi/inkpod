@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 6U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 8U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodCoreConfig) == 16U, "core config layout drift");
 _Static_assert(sizeof(InkpodSnapshotOptions) == 16U, "snapshot options layout drift");
 _Static_assert(sizeof(InkpodPersistenceInfo) == 72U, "persistence info layout drift");
@@ -16,7 +16,8 @@ _Static_assert(sizeof(InkpodCellCreationPlanItem) == 144U, "cell creation plan i
 _Static_assert(sizeof(InkpodDocumentInfo) == 224U, "document info layout drift");
 _Static_assert(sizeof(InkpodResourceUsage) == 112U, "resource usage layout drift");
 _Static_assert(sizeof(InkpodStrokeSample) == 24U, "stroke sample layout drift");
-_Static_assert(sizeof(InkpodStrokeInput) == 56U, "stroke input layout drift");
+_Static_assert(sizeof(InkpodStrokeInput) == 72U, "stroke input layout drift");
+_Static_assert(sizeof(InkpodEditorBrushOptions) == 20U, "editor brush layout drift");
 _Static_assert(sizeof(InkpodStrokeSampleSpan) == 40U, "stroke span layout drift");
 _Static_assert(sizeof(InkpodViewInput) == 48U, "view input layout drift");
 _Static_assert(sizeof(InkpodSnapshotTransform) == 48U, "snapshot transform layout drift");

@@ -104,6 +104,28 @@ bool UpdateEditorFillOptionsForSmoke(
     return state.UpdateEditorState(update) == INKPOD_STATUS_OK;
 }
 
+template <typename Mutator>
+bool UpdateEditorSelectionOptionsForSmoke(
+    ApplicationHost& state, Mutator&& mutate) noexcept {
+    if (state.engine == nullptr) {
+        return false;
+    }
+    InkpodEditorStateInfo editor{};
+    editor.struct_size = sizeof(editor);
+    if (!state.engine->GetEditorState(
+            state.Document().id, state.Document().generation, editor)) {
+        return false;
+    }
+    InkpodEditorStateUpdate update{};
+    update.struct_size = sizeof(update);
+    update.kind = INKPOD_EDITOR_UPDATE_SELECTION_OPTIONS;
+    update.expected_editor_revision = editor.editor_revision;
+    update.selection = editor.selection;
+    update.selection.struct_size = sizeof(InkpodEditorSelectionOptions);
+    std::forward<Mutator>(mutate)(update.selection);
+    return state.UpdateEditorState(update) == INKPOD_STATUS_OK;
+}
+
 bool WindowHasAccessibleName(HWND window) noexcept {
     IAccessible* accessible = nullptr;
     const HRESULT object_result = AccessibleObjectFromWindow(
@@ -625,7 +647,8 @@ int RunLightTablePaneSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(pane, IDC_LIGHT_TABLE_ITEM_MOVE) == nullptr
         || GetDlgItem(pane, IDC_LIGHT_TABLE_ITEM_SWAP) == nullptr
         || GetDlgItem(pane, IDC_LIGHT_TABLE_PREVIOUS) == nullptr
-        || GetDlgItem(pane, IDC_LIGHT_TABLE_NEXT) == nullptr) {
+        || GetDlgItem(pane, IDC_LIGHT_TABLE_NEXT) == nullptr
+        || GetDlgItem(pane, IDCANCEL) != nullptr) {
         return 875;
     }
     std::array<wchar_t, 256U> target_text{};
@@ -1058,9 +1081,29 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         GetDlgItem(state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_TARGET_MAIN_LINE);
     const HWND erase_color =
         GetDlgItem(state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_TARGET_COLOR);
+    const HWND brush_shape = GetDlgItem(
+        state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_BRUSH_SHAPE);
+    const HWND brush_smoothing = GetDlgItem(
+        state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_BRUSH_SMOOTHING);
+    const HWND brush_start_color = GetDlgItem(
+        state.Workspace().windows.tool_options, IDC_TOOL_OPTIONS_BRUSH_START_COLOR);
     if (diameter_edit == nullptr || diameter_label == nullptr
         || erase_target_label == nullptr
-        || erase_main_line == nullptr || erase_color == nullptr) {
+        || erase_main_line == nullptr || erase_color == nullptr
+        || brush_shape == nullptr || brush_smoothing == nullptr
+        || brush_start_color == nullptr) {
+        return 747;
+    }
+    std::array<wchar_t, 32U> brush_start_color_text{};
+    if (GetWindowTextW(
+            brush_start_color,
+            brush_start_color_text.data(),
+            static_cast<int>(brush_start_color_text.size()))
+            <= 0
+        || std::wcscmp(
+               brush_start_color_text.data(),
+               L"開始色の部分だけ塗る")
+            != 0) {
         return 747;
     }
     const auto diameter_text_is = [&](const wchar_t* expected) noexcept {
@@ -1112,7 +1155,10 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || !diameter_text_is(L"1.0")
         || IsWindowVisible(erase_target_label) != FALSE
         || IsWindowVisible(erase_main_line) != FALSE
-        || IsWindowVisible(erase_color) != FALSE) {
+        || IsWindowVisible(erase_color) != FALSE
+        || IsWindowVisible(brush_shape) != FALSE
+        || IsWindowVisible(brush_smoothing) != FALSE
+        || IsWindowVisible(brush_start_color) != FALSE) {
         return 750;
     }
     const HWND main_line_label =
@@ -1442,8 +1488,37 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         return 733;
     }
     if (IsWindowEnabled(diameter_edit) == FALSE
-        || !diameter_text_is(L"8.0")) {
+        || !diameter_text_is(L"8.0")
+        || IsWindowVisible(brush_shape) == FALSE
+        || IsWindowVisible(brush_smoothing) == FALSE
+        || IsWindowVisible(brush_start_color) == FALSE
+        || SendMessageW(brush_shape, CB_GETCURSEL, 0, 0) != 0
+        || SendMessageW(brush_start_color, BM_GETCHECK, 0, 0)
+            != BST_UNCHECKED) {
         return 751;
+    }
+    SendMessageW(brush_shape, CB_SETCURSEL, 1, 0);
+    SendMessageW(
+        state.Workspace().windows.tool_options,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_TOOL_OPTIONS_BRUSH_SHAPE, CBN_SELCHANGE),
+        reinterpret_cast<LPARAM>(brush_shape));
+    SetFocus(brush_smoothing);
+    SetWindowTextW(brush_smoothing, L"700");
+    SetFocus(state.Workspace().windows.canvas);
+    SendMessageW(brush_start_color, BM_CLICK, 0, 0);
+    InkpodEditorStateInfo brush_editor{};
+    brush_editor.struct_size = sizeof(brush_editor);
+    if (!state.engine->GetEditorState(
+            state.Document().id, state.Document().generation, brush_editor)
+        || brush_editor.brush.shape != INKPOD_BRUSH_SQUARE
+        || brush_editor.brush.smoothing != 700U
+        || brush_editor.brush.start_color != INKPOD_START_COLOR_EXACT_NATIVE
+        || state.Workspace().tools.brush.shape != INKPOD_BRUSH_SQUARE
+        || state.Workspace().tools.brush.smoothing != 700U
+        || state.Workspace().tools.brush.start_color
+            != INKPOD_START_COLOR_EXACT_NATIVE) {
+        return 11001;
     }
     SetFocus(diameter_edit);
     SetWindowTextW(diameter_edit, L"20.0");
@@ -1561,6 +1636,27 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
     SetFocus(state.Workspace().windows.canvas);
     if (state.Workspace().tools.diameter != 8.0F || !diameter_text_is(L"8.0")) {
         return 757;
+    }
+    SendMessageW(brush_shape, CB_SETCURSEL, 0, 0);
+    SendMessageW(
+        state.Workspace().windows.tool_options,
+        WM_COMMAND,
+        MAKEWPARAM(IDC_TOOL_OPTIONS_BRUSH_SHAPE, CBN_SELCHANGE),
+        reinterpret_cast<LPARAM>(brush_shape));
+    SetFocus(brush_smoothing);
+    SetWindowTextW(brush_smoothing, L"0");
+    SetFocus(state.Workspace().windows.canvas);
+    if (SendMessageW(brush_start_color, BM_GETCHECK, 0, 0) == BST_CHECKED) {
+        SendMessageW(brush_start_color, BM_CLICK, 0, 0);
+    }
+    InkpodEditorStateInfo restored_brush{};
+    restored_brush.struct_size = sizeof(restored_brush);
+    if (!state.engine->GetEditorState(
+            state.Document().id, state.Document().generation, restored_brush)
+        || restored_brush.brush.shape != INKPOD_BRUSH_ROUND
+        || restored_brush.brush.smoothing != 0U
+        || restored_brush.brush.start_color != INKPOD_START_COLOR_ANY) {
+        return 11002;
     }
     SendMessageW(pencil_button, BM_CLICK, 0, 0);
     const LONG initial_canvas_width =
@@ -2270,12 +2366,20 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         1.0F,
         &history_sample,
         1U,
-        sizeof(history_sample)};
+        sizeof(history_sample),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     InkpodSelectionInput history_selection{};
     history_selection.struct_size = sizeof(history_selection);
     history_selection.shape = INKPOD_SELECTION_RECTANGLE;
     history_selection.operation = INKPOD_SELECTION_NEW;
     history_selection.bounds = {10, 10, 1, 1};
+    history_selection.interpretation = INKPOD_RANGE_NORMAL;
+    history_selection.trace_shape = INKPOD_TRACE_ROUND;
+    history_selection.view_zoom_q16 = INT64_C(1) << 16;
     if (state.engine->Invoke(
             [history_stroke, history_selection](InkpodCore* core) {
                 InkpodStatus status = inkpod_core_set_active_plane(
@@ -2428,6 +2532,10 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         return 231;
     }
 
+    // The preceding persistence smoke intentionally leaves a selection active.
+    // Painting must respect it, so clear it before constructing this fill boundary.
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
+
     std::array<InkpodStrokeSample, 5> boundary_samples{{
         {sizeof(InkpodStrokeSample), 0U, 100.0F, 100.0F, 1.0F, 0U},
         {sizeof(InkpodStrokeSample), 0U, 200.0F, 100.0F, 1.0F, 0U},
@@ -2445,7 +2553,12 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         1.0F,
         boundary_samples.data(),
         boundary_samples.size(),
-        sizeof(InkpodStrokeSample)};
+        sizeof(InkpodStrokeSample),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     if (state.engine->Invoke(
             [boundary](InkpodCore* core) {
                 InkpodDispatchResult result{};
@@ -2609,16 +2722,55 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         return true;
     };
     InkpodDocumentInfo before_closed{};
-    if (!QueryDocument(state, before_closed)
-        || !canvas_drag(
-            device_x(90.0),
-            device_y(90.0),
-            device_x(210.0),
-            device_y(210.0))) {
+    if (!QueryDocument(state, before_closed)) {
         return 222;
     }
+    const int closed_left = device_x(90.0);
+    const int closed_top = device_y(90.0);
+    const int closed_right = device_x(210.0);
+    const int closed_bottom = device_y(210.0);
+    if (SendMessageW(
+            state.Workspace().windows.canvas,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(closed_left, closed_top))
+        != 1) {
+        return 222;
+    }
+    SendMessageW(
+        state.Workspace().windows.canvas,
+        WM_MOUSEMOVE,
+        MK_LBUTTON,
+        MAKELPARAM(closed_right, closed_bottom));
+    inkpod::renderer::CanvasGeometryPreview closed_fill_preview{};
+    closed_fill_preview.struct_size = sizeof(closed_fill_preview);
+    InkpodDocumentInfo during_closed_preview{};
+    const bool closed_preview_visible =
+        inkpod::renderer::GetCanvasGeometryPreview(
+            state.Workspace().windows.canvas, closed_fill_preview)
+        && QueryDocument(state, during_closed_preview)
+        && during_closed_preview.document_revision == before_closed.document_revision
+        && closed_fill_preview.active == 1U
+        && closed_fill_preview.closed == 1U
+        && closed_fill_preview.point_count == 4U
+        && closed_fill_preview.points[0].x < closed_fill_preview.points[1].x
+        && closed_fill_preview.points[1].y < closed_fill_preview.points[2].y;
+    SendMessageW(
+        state.Workspace().windows.canvas,
+        WM_LBUTTONUP,
+        0,
+        MAKELPARAM(closed_right, closed_bottom));
+    if (!closed_preview_visible) {
+        return 1064;
+    }
     InkpodDocumentInfo after_closed{};
-    if (!QueryDocument(state, after_closed)
+    closed_fill_preview = {};
+    closed_fill_preview.struct_size = sizeof(closed_fill_preview);
+    if (!inkpod::renderer::GetCanvasGeometryPreview(
+            state.Workspace().windows.canvas, closed_fill_preview)
+        || closed_fill_preview.active != 0U
+        || closed_fill_preview.point_count != 0U
+        || !QueryDocument(state, after_closed)
         || after_closed.document_revision != before_closed.document_revision + 1U
         || after_closed.main_plane_checksum != before_closed.main_plane_checksum
         || after_closed.color_plane_checksum == before_closed.color_plane_checksum) {
@@ -2654,7 +2806,12 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         1.0F,
         &extension_source,
         1U,
-        sizeof(extension_source)};
+        sizeof(extension_source),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     if (state.engine->Invoke(
             [extension_stroke](InkpodCore* core) {
                 InkpodDispatchResult result{};
@@ -2696,6 +2853,9 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
     persistent_selection.shape = INKPOD_SELECTION_ELLIPSE;
     persistent_selection.operation = INKPOD_SELECTION_NEW;
     persistent_selection.bounds = {300, 300, 8, 8};
+    persistent_selection.interpretation = INKPOD_RANGE_NORMAL;
+    persistent_selection.trace_shape = INKPOD_TRACE_ROUND;
+    persistent_selection.view_zoom_q16 = INT64_C(1) << 16;
     if (state.engine->Invoke(
             [persistent_selection](InkpodCore* core) {
                 InkpodDispatchResult result{};
@@ -2845,7 +3005,8 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         return 210;
     }
     std::array<InkpodStrokeSample, 1> edit_sample{{
-        {sizeof(InkpodStrokeSample), 0U, 300.0F, 300.0F, 1.0F, 0U},
+        // Center of the persisted 8x8 ellipse selection; its corner is clipped.
+        {sizeof(InkpodStrokeSample), 0U, 303.0F, 303.0F, 1.0F, 0U},
     }};
     const InkpodStrokeInput edit{
         sizeof(InkpodStrokeInput),
@@ -2853,11 +3014,16 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
         INKPOD_PLANE_COLOR,
         INKPOD_COORDINATE_SPACE_DOCUMENT,
         0U,
-        UINT32_C(0x010203ff),
+        UINT32_C(0x040506ff),
         1.0F,
         edit_sample.data(),
         edit_sample.size(),
-        sizeof(InkpodStrokeSample)};
+        sizeof(InkpodStrokeSample),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     if (state.engine->Invoke(
             [edit](InkpodCore* core) {
                 InkpodDispatchResult result{};
@@ -3190,6 +3356,74 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
                    false,
                    false) == INKPOD_STATUS_OK;
     };
+    if (!UpdateEditorSelectionOptionsForSmoke(
+            state,
+            [](InkpodEditorSelectionOptions& selection) {
+                selection.interpretation = INKPOD_RANGE_BOUNDARY;
+                selection.aspect_ratio_q16 = 1U << 16U;
+                selection.construction_flags = INKPOD_SELECTION_FROM_CENTER
+                    | INKPOD_SELECTION_CONSTRAIN_ROTATION_45
+                    | INKPOD_SELECTION_TRACE_PRESSURE_SIZE
+                    | INKPOD_SELECTION_TRACE_SCREEN_SIZE;
+                selection.rotation_turns = UINT32_C(0x20000000);
+                selection.trace_shape = INKPOD_TRACE_SQUARE;
+            })) {
+        return 1061;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_RECTANGLE, 0);
+    const std::array<InkpodStrokeSample, 2U> option_preview_samples{
+        selection_sample(2.0F, 2.0F), selection_sample(5.0F, 3.0F)};
+    const inkpod::renderer::CanvasStrokeEvent option_preview_begin{
+        inkpod::renderer::CanvasStrokeEventKind::Begin,
+        option_preview_samples.data(),
+        1U};
+    const inkpod::renderer::CanvasStrokeEvent option_preview_append{
+        inkpod::renderer::CanvasStrokeEventKind::Append,
+        option_preview_samples.data() + 1U,
+        1U};
+    InkpodDocumentInfo before_option_preview{};
+    InkpodDocumentInfo during_option_preview{};
+    inkpod::renderer::CanvasGeometryPreview option_preview{};
+    InkpodEditorStateInfo option_editor{};
+    option_editor.struct_size = sizeof(option_editor);
+    if (!QueryDocument(state, before_option_preview)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, option_preview_begin)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, option_preview_append)
+        || !query_selection_preview(option_preview)
+        || !QueryDocument(state, during_option_preview)
+        || during_option_preview.document_revision != before_option_preview.document_revision
+        || option_preview.active != 1U || option_preview.closed != 1U
+        || option_preview.point_count != 4U
+        || option_preview.points[0].x == option_preview.points[1].x
+        || option_preview.points[0].y == option_preview.points[1].y
+        || !state.engine->GetEditorState(
+            state.Document().id, state.Document().generation, option_editor)
+        || option_editor.selection.interpretation != INKPOD_RANGE_BOUNDARY
+        || option_editor.selection.trace_shape != INKPOD_TRACE_SQUARE
+        || option_editor.selection.construction_flags
+            != (INKPOD_SELECTION_FROM_CENTER
+                | INKPOD_SELECTION_CONSTRAIN_ROTATION_45
+                | INKPOD_SELECTION_TRACE_PRESSURE_SIZE
+                | INKPOD_SELECTION_TRACE_SCREEN_SIZE)) {
+        return 1062;
+    }
+    const inkpod::renderer::CanvasStrokeEvent option_preview_cancel{
+        inkpod::renderer::CanvasStrokeEventKind::Cancel, nullptr, 0U};
+    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, option_preview_cancel)
+        || !UpdateEditorSelectionOptionsForSmoke(
+            state,
+            [](InkpodEditorSelectionOptions& selection) {
+                selection.interpretation = INKPOD_RANGE_NORMAL;
+                selection.aspect_ratio_q16 = 0U;
+                selection.construction_flags = 0U;
+                selection.rotation_turns = 0U;
+                selection.trace_shape = INKPOD_TRACE_ROUND;
+            })) {
+        return 1063;
+    }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_RECTANGLE, 0);
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
     const std::array<InkpodStrokeSample, 2U> preview_samples{
@@ -3421,7 +3655,12 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         1.0F,
         &source_sample,
         1U,
-        sizeof(source_sample)};
+        sizeof(source_sample),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     if (state.engine->Invoke(
             [source_stroke](InkpodCore* core) {
                 InkpodDispatchResult result{};
@@ -3843,7 +4082,12 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         1.0F,
         &multi_view_sample,
         1U,
-        sizeof(multi_view_sample)};
+        sizeof(multi_view_sample),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     if (state.engine->Invoke(
             [multi_view_stroke](InkpodCore* core) {
                 InkpodDispatchResult result{};
@@ -4373,7 +4617,12 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
                 3.0F,
                 samples.data(),
                 samples.size(),
-                sizeof(InkpodStrokeSample)};
+                sizeof(InkpodStrokeSample),
+                INKPOD_BRUSH_ROUND,
+                0U,
+                0U,
+                INKPOD_START_COLOR_ANY,
+                0U};
             InkpodDispatchResult dispatch{};
             dispatch.struct_size = sizeof(dispatch);
             if (current == INKPOD_STATUS_OK) {
@@ -5713,7 +5962,12 @@ int RunImageEffectsSmoke(ApplicationHost& state) noexcept {
                 3.0F,
                 samples.data(),
                 samples.size(),
-                sizeof(InkpodStrokeSample)};
+                sizeof(InkpodStrokeSample),
+                INKPOD_BRUSH_ROUND,
+                0U,
+                0U,
+                INKPOD_START_COLOR_ANY,
+                0U};
             InkpodDispatchResult dispatch{};
             dispatch.struct_size = sizeof(dispatch);
             if (current == INKPOD_STATUS_OK) {
@@ -6105,7 +6359,12 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
         1.0F,
         &source,
         1U,
-        sizeof(source)};
+        sizeof(source),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     if (!QueryDocument(state, blank)
         || state.engine->Invoke(
                [stroke](InkpodCore* core) {
@@ -6517,7 +6776,12 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         1.0F,
         &sample,
         1U,
-        sizeof(sample)};
+        sizeof(sample),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     if (state.engine->Invoke(
             [stroke](InkpodCore* core) {
                 InkpodDispatchResult result{};
@@ -6643,15 +6907,14 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
     }
 
     const auto first_command_states = state.Workspace().command_states;
-    const InkpodSelectionInput second_selection{
-        sizeof(InkpodSelectionInput),
-        INKPOD_SELECTION_RECTANGLE,
-        INKPOD_SELECTION_NEW,
-        INKPOD_FEATURE_NONE,
-        {2, 3, 7, 5},
-        nullptr,
-        0U,
-        0U};
+    InkpodSelectionInput second_selection{};
+    second_selection.struct_size = sizeof(second_selection);
+    second_selection.shape = INKPOD_SELECTION_RECTANGLE;
+    second_selection.operation = INKPOD_SELECTION_NEW;
+    second_selection.bounds = {2, 3, 7, 5};
+    second_selection.interpretation = INKPOD_RANGE_NORMAL;
+    second_selection.trace_shape = INKPOD_TRACE_ROUND;
+    second_selection.view_zoom_q16 = INT64_C(1) << 16;
     if (!state.engine->Enqueue(
             second_async_context,
             [second_selection](InkpodCore* core) {
@@ -6740,7 +7003,12 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         1.0F,
         &first_prompt_sample,
         1U,
-        sizeof(first_prompt_sample)};
+        sizeof(first_prompt_sample),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     if (state.engine->Invoke(
             [first_prompt_stroke](InkpodCore* core) {
                 InkpodDispatchResult result{};
@@ -7175,7 +7443,12 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
                         1.0F,
                         &split_document_sample,
                         1U,
-                        sizeof(split_document_sample)};
+                        sizeof(split_document_sample),
+                        INKPOD_BRUSH_ROUND,
+                        0U,
+                        0U,
+                        INKPOD_START_COLOR_ANY,
+                        0U};
                     InkpodDispatchResult result{};
                     result.struct_size = sizeof(result);
                     InkpodStatus status = inkpod_core_set_active_plane(
@@ -7231,15 +7504,14 @@ int RunSplitEditorGroupSmoke(ApplicationHost& state) noexcept {
     InkpodDocumentInfo after_edit = EmptyDocumentInfo();
     const InkpodStrokeSample shared_sample{
         sizeof(InkpodStrokeSample), 0U, 9.0F, 9.0F, 1.0F, 0U};
-    const InkpodSelectionInput shared_selection{
-        sizeof(InkpodSelectionInput),
-        INKPOD_SELECTION_RECTANGLE,
-        INKPOD_SELECTION_NEW,
-        INKPOD_FEATURE_NONE,
-        {3, 4, 7, 5},
-        nullptr,
-        0U,
-        0U};
+    InkpodSelectionInput shared_selection{};
+    shared_selection.struct_size = sizeof(shared_selection);
+    shared_selection.shape = INKPOD_SELECTION_RECTANGLE;
+    shared_selection.operation = INKPOD_SELECTION_NEW;
+    shared_selection.bounds = {3, 4, 7, 5};
+    shared_selection.interpretation = INKPOD_RANGE_NORMAL;
+    shared_selection.trace_shape = INKPOD_TRACE_ROUND;
+    shared_selection.view_zoom_q16 = INT64_C(1) << 16;
     const auto query_selection = [&state, shared_session, shared_generation](
                                      InkpodLocatorOutput& output) noexcept {
         output = {};
@@ -8308,7 +8580,12 @@ int RunG13ResourceScenarioSmoke(ApplicationHost& state) noexcept {
                 1.0F,
                 &sample,
                 1U,
-                sizeof(sample)};
+                sizeof(sample),
+                INKPOD_BRUSH_ROUND,
+                0U,
+                0U,
+                INKPOD_START_COLOR_ANY,
+                0U};
             InkpodDispatchResult dispatch{};
             dispatch.struct_size = sizeof(dispatch);
             InkpodStatus status = inkpod_core_set_active_plane(

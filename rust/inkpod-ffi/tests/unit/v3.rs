@@ -363,6 +363,11 @@ fn v3_snapshot_thumbnail_export_and_task_ids_use_bounded_copy_and_exact_release(
         samples: &sample,
         sample_count: 1,
         sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
+        shape: INKPOD_BRUSH_ROUND,
+        smoothing: 0,
+        reserved_2: 0,
+        start_color: INKPOD_START_COLOR_ANY,
+        reserved_3: 0,
     };
     let mut stroke_result = InkpodDispatchResult {
         struct_size: size_of::<InkpodDispatchResult>() as u32,

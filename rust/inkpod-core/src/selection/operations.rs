@@ -12,7 +12,35 @@ impl Core {
         operation: SelectionOperation,
     ) -> Result<DispatchOutcome, CoreError> {
         let target = self.active_editor_target()?;
-        self.apply_selection_for_editor_target(shape, operation, target)
+        self.apply_selection_with_options_for_editor_target(
+            shape,
+            operation,
+            RangeInterpretation::Normal,
+            SelectionConstructionOptions::default(),
+            target,
+        )
+    }
+
+    /// Combines an option-normalized shape and raster interpretation with the selection.
+    ///
+    /// Preview callers and commit callers use the same construction and mask path.
+    /// A changed mask is one canonical transaction and Undo unit; no-op and every
+    /// validation/allocation failure leave revision, history, dirty state, and IDs unchanged.
+    pub fn apply_selection_with_options(
+        &mut self,
+        shape: &SelectionShape,
+        operation: SelectionOperation,
+        interpretation: RangeInterpretation,
+        options: SelectionConstructionOptions,
+    ) -> Result<DispatchOutcome, CoreError> {
+        let target = self.active_editor_target()?;
+        self.apply_selection_with_options_for_editor_target(
+            shape,
+            operation,
+            interpretation,
+            options,
+            target,
+        )
     }
 
     /// Combines a selection shape using the stable target captured at gesture begin.
@@ -26,11 +54,31 @@ impl Core {
         operation: SelectionOperation,
         target: EditorTarget,
     ) -> Result<DispatchOutcome, CoreError> {
+        self.apply_selection_with_options_for_editor_target(
+            shape,
+            operation,
+            RangeInterpretation::Normal,
+            SelectionConstructionOptions::default(),
+            target,
+        )
+    }
+
+    /// Applies selection construction to the stable target captured at gesture begin.
+    pub fn apply_selection_with_options_for_editor_target(
+        &mut self,
+        shape: &SelectionShape,
+        operation: SelectionOperation,
+        interpretation: RangeInterpretation,
+        options: SelectionConstructionOptions,
+        target: EditorTarget,
+    ) -> Result<DispatchOutcome, CoreError> {
         if !self.canonical_invocation_is_active() {
             return self
                 .execute_canonical_invocation(CanonicalInvocation::ApplySelection {
                     shape: shape.clone(),
                     operation,
+                    interpretation,
+                    options,
                     target,
                 })
                 .map(|result| result.dispatch);
@@ -40,9 +88,21 @@ impl Core {
         let mut edit = self.begin_document_edit()?;
         let revision = edit.revision();
         let (before, after) = edit.documents();
-        let candidate = selection_mask_for_shape(before, active_plane_id, shape, revision.get())?;
-        after.selection =
+        let candidate = selection_mask_for_shape(
+            before,
+            active_plane_id,
+            shape,
+            interpretation,
+            options,
+            revision.get(),
+        )?;
+        let combined =
             combine_selection_masks(&before.selection, &candidate, operation, revision.get())?;
+        if selection_masks_have_same_coverage(&before.selection, &combined)? {
+            drop(edit);
+            return Ok(self.noop_outcome());
+        }
+        after.selection = combined;
         edit.commit(self)
     }
 
@@ -154,8 +214,13 @@ impl Core {
             .ok_or(CoreError::InvalidState("active plane is missing"))?;
         let candidate =
             color_selection_mask(&source.raster, color, tolerance, different, revision.get())?;
-        after.selection =
+        let combined =
             combine_selection_masks(&before.selection, &candidate, operation, revision.get())?;
+        if selection_masks_have_same_coverage(&before.selection, &combined)? {
+            drop(edit);
+            return Ok(self.noop_outcome());
+        }
+        after.selection = combined;
         edit.commit(self)
     }
 

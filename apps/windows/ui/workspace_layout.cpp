@@ -15,7 +15,9 @@ namespace {
 constexpr wchar_t kSettingsKey[] = L"Software\\Inkpod";
 constexpr wchar_t kWorkspaceWindowCountValue[] = L"WorkspaceWindowCountV1";
 constexpr std::uint32_t kMagic = UINT32_C(0x4c574b49);
-constexpr std::uint32_t kVersion = 5U;
+constexpr std::uint32_t kVersion = 7U;
+constexpr std::uint32_t kGroupedPaneMarker = UINT32_C(0x80000000);
+constexpr std::uint32_t kGroupedPaneReservedMask = UINT32_C(0x7e000000);
 constexpr int kReferenceDpi = 96;
 constexpr int kTabsHeightDip = 28;
 constexpr std::size_t kMaximumPersistedDockPanes = 16U;
@@ -128,6 +130,30 @@ struct PersistedWorkspaceLayoutV4 {
 
 static_assert(
     sizeof(PersistedWorkspaceLayoutV4) <= kMaximumWorkspaceLayoutRecordBytes);
+
+std::uint32_t EncodeGroupedPaneOrder(
+    const DockPanePlacement& pane) noexcept {
+    return kGroupedPaneMarker
+        | (pane.active_tab ? UINT32_C(1) << 24U : 0U)
+        | (static_cast<std::uint32_t>(pane.tab_order) << 16U)
+        | (static_cast<std::uint32_t>(pane.stack) << 8U)
+        | pane.order;
+}
+
+bool DecodeGroupedPaneOrder(
+    std::uint32_t encoded,
+    DockPanePlacement& pane) noexcept {
+    if ((encoded & kGroupedPaneMarker) == 0U
+        || (encoded & kGroupedPaneReservedMask) != 0U) {
+        return false;
+    }
+    pane.order = static_cast<std::uint8_t>(encoded & UINT32_C(0xff));
+    pane.stack = static_cast<std::uint8_t>((encoded >> 8U) & UINT32_C(0xff));
+    pane.tab_order = static_cast<std::uint8_t>(
+        (encoded >> 16U) & UINT32_C(0xff));
+    pane.active_tab = ((encoded >> 24U) & UINT32_C(1)) != 0U;
+    return true;
+}
 
 RECT ToRect(const DockRect& value) noexcept {
     return RECT{
@@ -273,6 +299,8 @@ bool LoadLegacyLayout(
     return true;
 }
 
+void NormalizeRecordOrders(DockLayoutRecord& record) noexcept;
+
 bool DecodeVersion3(
     WorkspaceLayoutState& state,
     const PersistedWorkspaceLayoutV3& value) noexcept {
@@ -289,18 +317,18 @@ bool DecodeVersion3(
     record.mirrored = value.flags;
     for (std::size_t index = 0U; index < value.panes.size(); ++index) {
         const PersistedDockPaneV3& source = value.panes[index];
-        record.panes[index] = DockPanePlacement{
-            static_cast<DockPaneType>(source.type),
-            static_cast<DockZone>(source.zone),
-            static_cast<DockZone>(source.restore_zone),
-            static_cast<std::uint8_t>(source.order),
-            source.split_weight,
-            DockFloatingPlacement{
-                source.floating_x_dip,
-                source.floating_y_dip,
-                source.floating_width_dip,
-                source.floating_height_dip},
-            true};
+        DockPanePlacement& pane = record.panes[index];
+        pane.type = static_cast<DockPaneType>(source.type);
+        pane.zone = static_cast<DockZone>(source.zone);
+        pane.restore_zone = static_cast<DockZone>(source.restore_zone);
+        pane.order = static_cast<std::uint8_t>(source.order);
+        pane.split_weight = source.split_weight;
+        pane.floating = DockFloatingPlacement{
+            source.floating_x_dip,
+            source.floating_y_dip,
+            source.floating_width_dip,
+            source.floating_height_dip};
+        pane.present = true;
     }
     for (std::size_t index = 0U; index < value.zones.size(); ++index) {
         const PersistedDockZone& source = value.zones[index];
@@ -309,6 +337,7 @@ bool DecodeVersion3(
             static_cast<DockPaneType>(source.active_tab),
             source.extent_dip};
     }
+    NormalizeRecordOrders(record);
     if (!candidate.dock.LoadRecord(record)) {
         return false;
     }
@@ -337,9 +366,6 @@ void NormalizeRecordOrders(DockLayoutRecord& record) noexcept {
                 }
                 return PaneIndex(left->type) < PaneIndex(right->type);
             });
-        for (std::size_t index = 0U; index < count; ++index) {
-            panes[index]->order = static_cast<std::uint8_t>(index);
-        }
         DockZoneState& zone_state = record.zones[zone_index];
         const bool active_present = std::any_of(
             panes.begin(),
@@ -352,15 +378,36 @@ void NormalizeRecordOrders(DockLayoutRecord& record) noexcept {
                 ? DockPaneType::Count
                 : panes[0]->type;
         }
+        if (zone_state.mode == DockStackMode::Tabs && count > 1U) {
+            const std::uint32_t weight = panes[0]->split_weight;
+            for (std::size_t index = 0U; index < count; ++index) {
+                panes[index]->order = 0U;
+                panes[index]->stack = 0U;
+                panes[index]->tab_order = static_cast<std::uint8_t>(index);
+                panes[index]->split_weight = weight;
+                panes[index]->active_tab = panes[index]->type
+                    == zone_state.active_tab;
+            }
+        } else {
+            zone_state.mode = DockStackMode::Split;
+            for (std::size_t index = 0U; index < count; ++index) {
+                panes[index]->order = static_cast<std::uint8_t>(index);
+                panes[index]->stack = static_cast<std::uint8_t>(index);
+                panes[index]->tab_order = 0U;
+                panes[index]->active_tab = true;
+            }
+        }
     }
 }
 
 bool DecodeVersion4Or5(
     WorkspaceLayoutState& state,
     const PersistedWorkspaceLayoutV4& value,
-    bool migrate_auxiliary) noexcept {
+    bool migrate_auxiliary,
+    bool grouped) noexcept {
     if (value.magic != kMagic
-        || (value.version != 4U && value.version != kVersion)
+        || (grouped ? (value.version != kVersion && value.version != 6U)
+                    : (value.version != 4U && value.version != 5U))
         || value.struct_size != sizeof(value) || value.flags > 1U
         || value.pane_count > value.panes.size()
         || value.zone_count != kDockedZoneCount
@@ -397,28 +444,34 @@ bool DecodeVersion4Or5(
         }
         const std::size_t type_index = PaneIndex(descriptor->type);
         const DockZone zone = static_cast<DockZone>(source.zone);
+        DockPanePlacement pane = record.panes[type_index];
+        const bool grouped_order_valid = !grouped
+            || DecodeGroupedPaneOrder(source.order, pane);
+        const bool legacy_order_valid = grouped || source.order < kDockPaneCount;
         if (type_index >= seen_panes.size() || seen_panes[type_index]
-            || source.order >= kDockPaneCount
-            || (IsDockedZone(zone)
+            || !grouped_order_valid || !legacy_order_valid
+            || (!grouped && IsDockedZone(zone)
                 && seen_orders[static_cast<std::size_t>(zone)][source.order])) {
             return false;
         }
         seen_panes[type_index] = true;
-        if (IsDockedZone(zone)) {
+        if (!grouped && IsDockedZone(zone)) {
             seen_orders[static_cast<std::size_t>(zone)][source.order] = true;
         }
-        record.panes[type_index] = DockPanePlacement{
-            descriptor->type,
-            zone,
-            static_cast<DockZone>(source.restore_zone),
-            static_cast<std::uint8_t>(source.order),
-            source.split_weight,
-            DockFloatingPlacement{
-                source.floating_x_dip,
-                source.floating_y_dip,
-                source.floating_width_dip,
-                source.floating_height_dip},
-            true};
+        pane.type = descriptor->type;
+        pane.zone = zone;
+        pane.restore_zone = static_cast<DockZone>(source.restore_zone);
+        if (!grouped) {
+            pane.order = static_cast<std::uint8_t>(source.order);
+        }
+        pane.split_weight = source.split_weight;
+        pane.floating = DockFloatingPlacement{
+            source.floating_x_dip,
+            source.floating_y_dip,
+            source.floating_width_dip,
+            source.floating_height_dip};
+        pane.present = true;
+        record.panes[type_index] = pane;
     }
     for (std::size_t index = 0U; index < kDockedZoneCount; ++index) {
         const PersistedDockZone& source = value.zones[index];
@@ -431,8 +484,100 @@ bool DecodeVersion4Or5(
         record.zones[index] = DockZoneState{
             static_cast<DockStackMode>(source.mode), active, source.extent_dip};
     }
-    NormalizeRecordOrders(record);
+    if (!grouped) {
+        const std::size_t right_index = static_cast<std::size_t>(DockZone::Right);
+        const DockPanePlacement& legacy_color = record.panes[PaneIndex(
+            DockPaneType::Color)];
+        const DockPanePlacement& legacy_layer = record.panes[PaneIndex(
+            DockPaneType::Layer)];
+        const DockPanePlacement& legacy_light_table = record.panes[PaneIndex(
+            DockPaneType::LightTable)];
+        const std::size_t right_pane_count = static_cast<std::size_t>(
+            std::count_if(
+                record.panes.begin(),
+                record.panes.end(),
+                [](const DockPanePlacement& pane) {
+                    return pane.present && pane.zone == DockZone::Right;
+                }));
+        const DockPaneType legacy_active = record.zones[right_index].active_tab;
+        const bool migrate_legacy_light_table_tabs = value.version == 5U
+            && right_pane_count == 3U
+            && record.zones[right_index].mode == DockStackMode::Tabs
+            && legacy_color.zone == DockZone::Right
+            && legacy_layer.zone == DockZone::Right
+            && legacy_light_table.zone == DockZone::Right
+            && (legacy_active == DockPaneType::Color
+                || legacy_active == DockPaneType::Layer
+                || legacy_active == DockPaneType::LightTable);
+        const std::uint32_t legacy_color_weight = legacy_color.split_weight;
+        const std::uint32_t legacy_layer_weight = legacy_layer.split_weight;
+        NormalizeRecordOrders(record);
+        if (migrate_legacy_light_table_tabs) {
+            DockPanePlacement& color = record.panes[PaneIndex(DockPaneType::Color)];
+            DockPanePlacement& layer = record.panes[PaneIndex(DockPaneType::Layer)];
+            DockPanePlacement& light_table = record.panes[PaneIndex(
+                DockPaneType::LightTable)];
+            color.order = 0U;
+            color.stack = 0U;
+            color.tab_order = 0U;
+            color.split_weight = legacy_color_weight;
+            color.active_tab = true;
+            layer.order = 1U;
+            layer.stack = 1U;
+            layer.tab_order = 0U;
+            layer.split_weight = legacy_layer_weight;
+            layer.active_tab = legacy_active != DockPaneType::LightTable;
+            light_table.order = 1U;
+            light_table.stack = 1U;
+            light_table.tab_order = 1U;
+            light_table.split_weight = legacy_layer_weight;
+            light_table.active_tab = legacy_active == DockPaneType::LightTable;
+            record.zones[right_index].mode = DockStackMode::Mixed;
+            record.zones[right_index].active_tab = legacy_active;
+        }
+    } else {
+        for (std::size_t index = 0U; index < kDockedZoneCount; ++index) {
+            const DockZone zone = static_cast<DockZone>(index);
+            DockZoneState& zone_state = record.zones[index];
+            const bool active_present = std::any_of(
+                record.panes.begin(),
+                record.panes.end(),
+                [zone, &zone_state](const DockPanePlacement& pane) {
+                    return pane.present && pane.zone == zone
+                        && pane.type == zone_state.active_tab;
+                });
+            if (active_present) {
+                continue;
+            }
+            const auto replacement = std::find_if(
+                record.panes.begin(),
+                record.panes.end(),
+                [zone](const DockPanePlacement& pane) {
+                    return pane.present && pane.zone == zone && pane.active_tab;
+                });
+            zone_state.active_tab = replacement == record.panes.end()
+                ? DockPaneType::Count
+                : replacement->type;
+        }
+    }
+    const DockPanePlacement& reference = record.panes[PaneIndex(
+        DockPaneType::Reference)];
+    const DockPanePlacement& layer = record.panes[PaneIndex(
+        DockPaneType::Layer)];
+    const bool migrate_version6_reference_stack = grouped
+        && value.version == 6U && reference.present
+        && reference.zone == DockZone::Right
+        && reference.restore_zone == DockZone::Right
+        && reference.stack
+            == static_cast<std::uint8_t>(PaneIndex(DockPaneType::Reference))
+        && layer.present && layer.zone == DockZone::Right
+        && reference.stack != layer.stack;
     if (!candidate.dock.LoadRecord(record)) {
+        return false;
+    }
+    if (migrate_version6_reference_stack
+        && candidate.dock.TabPane(DockPaneType::Reference, DockPaneType::Layer)
+            != DockResult::Ok) {
         return false;
     }
 
@@ -551,7 +696,7 @@ PersistedWorkspaceLayoutV4 EncodeCurrent(
             descriptor == nullptr ? 0U : descriptor->stable_type_id,
             static_cast<std::uint32_t>(source.zone),
             static_cast<std::uint32_t>(source.restore_zone),
-            source.order,
+            EncodeGroupedPaneOrder(source),
             source.split_weight,
             source.floating.x_dip,
             source.floating.y_dip,
@@ -962,19 +1107,22 @@ WorkspaceLayoutDecodeResult DecodeWorkspaceLayout(
     std::memcpy(header.data(), input.data(), sizeof(header));
     bool decoded{};
     WorkspaceLayoutDecodeResult result = WorkspaceLayoutDecodeResult::Invalid;
-    if (header[0] == kMagic && header[1] == kVersion
+    if (header[0] == kMagic
+        && (header[1] == kVersion || header[1] == 6U)
         && header[2] == sizeof(PersistedWorkspaceLayoutV4)
         && input.size() == sizeof(PersistedWorkspaceLayoutV4)) {
         PersistedWorkspaceLayoutV4 value{};
         std::memcpy(&value, input.data(), sizeof(value));
-        decoded = DecodeVersion4Or5(state, value, false);
-        result = WorkspaceLayoutDecodeResult::Current;
-    } else if (header[0] == kMagic && header[1] == 4U
+        decoded = DecodeVersion4Or5(state, value, false, true);
+        result = header[1] == kVersion ? WorkspaceLayoutDecodeResult::Current
+                                      : WorkspaceLayoutDecodeResult::Migrated;
+    } else if (header[0] == kMagic
+        && (header[1] == 4U || header[1] == 5U)
         && header[2] == sizeof(PersistedWorkspaceLayoutV4)
         && input.size() == sizeof(PersistedWorkspaceLayoutV4)) {
         PersistedWorkspaceLayoutV4 value{};
         std::memcpy(&value, input.data(), sizeof(value));
-        decoded = DecodeVersion4Or5(state, value, true);
+        decoded = DecodeVersion4Or5(state, value, header[1] == 4U, false);
         result = WorkspaceLayoutDecodeResult::Migrated;
     } else if (header[0] == kMagic && header[1] == 3U
         && header[2] == sizeof(PersistedWorkspaceLayoutV3)

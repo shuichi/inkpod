@@ -347,8 +347,9 @@ enum ConcreteAction {
 }
 
 impl ConcreteAction {
-    fn expected_class(&self) -> ResultClass {
+    fn expected_class(&self) -> Option<ResultClass> {
         match self {
+            Self::SelectRect(_, _) => None,
             Self::InvalidDeleteLayer
             | Self::InvalidGuide
             | Self::InvalidView
@@ -357,12 +358,12 @@ impl ConcreteAction {
             | Self::InvalidFill
             | Self::InvalidVector
             | Self::InvalidLightSet
-            | Self::InvalidHistoryJump => ResultClass::Invalid,
-            Self::CancelFill => ResultClass::Cancel,
+            | Self::InvalidHistoryJump => Some(ResultClass::Invalid),
+            Self::CancelFill => Some(ResultClass::Cancel),
             Self::SetLayer(_, _, _, _, _, class)
             | Self::SetPlane(_, _, _, _, _, class)
             | Self::Pan(_, _, class)
-            | Self::ClearSelection(class) => *class,
+            | Self::ClearSelection(class) => Some(*class),
             Self::MoveGuide(_, _)
             | Self::SetGrid(_)
             | Self::SetGridVisible(_)
@@ -370,9 +371,9 @@ impl ConcreteAction {
             | Self::RenameLightSet(_, _)
             | Self::SetActiveLightSet(_)
             | Self::SetLightOpacity(_)
-            | Self::JumpHistory(_) => ResultClass::NoOp,
-            Self::SelectVector => ResultClass::NoOp,
-            _ => ResultClass::Success,
+            | Self::JumpHistory(_) => Some(ResultClass::NoOp),
+            Self::SelectVector => Some(ResultClass::NoOp),
+            _ => Some(ResultClass::Success),
         }
     }
 
@@ -550,9 +551,33 @@ impl ConcreteAction {
                     value: ResultValue::None,
                 },
             },
-            Self::SelectRect(bounds, operation) => ExecutionResult::dispatch(
-                core.apply_selection(&SelectionShape::Rectangle(*bounds), *operation),
-            ),
+            Self::SelectRect(bounds, operation) => {
+                let before = core.document_info().map(|info| info.document_revision);
+                match (
+                    before,
+                    core.apply_selection(&SelectionShape::Rectangle(*bounds), *operation),
+                ) {
+                    (Ok(before), Ok(_)) => ExecutionResult {
+                        class: if core
+                            .document_info()
+                            .is_ok_and(|info| info.document_revision == before)
+                        {
+                            ResultClass::NoOp
+                        } else {
+                            ResultClass::Success
+                        },
+                        value: ResultValue::None,
+                    },
+                    (_, Err(CoreError::Cancelled)) => ExecutionResult {
+                        class: ResultClass::Cancel,
+                        value: ResultValue::None,
+                    },
+                    _ => ExecutionResult {
+                        class: ResultClass::Invalid,
+                        value: ResultValue::None,
+                    },
+                }
+            }
             Self::InvertSelection => ExecutionResult::dispatch(core.invert_selection()),
             Self::ClearSelection(class) => {
                 ExecutionResult::dispatch_class(core.clear_selection(), *class)
@@ -573,6 +598,9 @@ impl ConcreteAction {
                     plane: ActivePlane::Color,
                     color: *color,
                     diameter: 1.0,
+                    shape: BrushShape::Round,
+                    smoothing: 0,
+                    start_color: StartColorPredicate::Any,
                     auto_erase: false,
                     pressure_size: false,
                     coordinate_space: CoordinateSpace::Document,
@@ -922,15 +950,15 @@ fn resolve_action(
             _ => unreachable!(),
         },
         2 => match spec.opcode % 6 {
-            0 => Ok(ConcreteAction::SelectRect(
-                RectI32 {
+            0 => {
+                let bounds = RectI32 {
                     x: i32::from(spec.a % 8),
                     y: i32::from(spec.a.wrapping_mul(3) % 8),
                     width: 4,
                     height: 4,
-                },
-                SelectionOperation::New,
-            )),
+                };
+                Ok(ConcreteAction::SelectRect(bounds, SelectionOperation::New))
+            }
             1 => Ok(ConcreteAction::InvertSelection),
             2 => Ok(ConcreteAction::ClearSelection(
                 if core.selection_bounds()?.is_some() {
@@ -941,15 +969,15 @@ fn resolve_action(
             )),
             3 => Ok(ConcreteAction::ResizeSelection(0)),
             4 => Ok(ConcreteAction::InvalidSelection),
-            _ => Ok(ConcreteAction::SelectRect(
-                RectI32 {
+            _ => {
+                let bounds = RectI32 {
                     x: 0,
                     y: 0,
                     width: 16,
                     height: 16,
-                },
-                SelectionOperation::Add,
-            )),
+                };
+                Ok(ConcreteAction::SelectRect(bounds, SelectionOperation::Add))
+            }
         },
         3 => {
             let x = u32::from(spec.a % 16);
@@ -1307,18 +1335,19 @@ fn run_sequence(seed: u64, case: usize, generated: &[ActionSpec]) -> Result<(), 
                 ),
             ));
         }
-        if left_result.class != action.expected_class() {
-            return Err(fail(
-                seed,
-                case,
-                step,
-                &actions,
-                format!(
-                    "result class mismatch for {action:?}: expected={:?} actual={:?}",
-                    action.expected_class(),
-                    left_result.class
-                ),
-            ));
+        if let Some(expected) = action.expected_class() {
+            if left_result.class != expected {
+                return Err(fail(
+                    seed,
+                    case,
+                    step,
+                    &actions,
+                    format!(
+                        "result class mismatch for {action:?}: expected={expected:?} actual={:?}",
+                        left_result.class
+                    ),
+                ));
+            }
         }
         seen.insert(left_result.class as u8);
         let after_left = CoreObservation::capture(&mut left).map_err(|error| {

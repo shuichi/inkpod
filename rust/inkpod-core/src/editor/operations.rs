@@ -269,6 +269,7 @@ impl Core {
                     .ok_or(CoreError::InvalidArgument("unknown editor tool"))?
                     .diameter_q16 = diameter_q16;
             }
+            EditorStateUpdate::SetBrushOptions(options) => state.brush = options,
             EditorStateUpdate::SetFillOptions(options) => state.fill = options,
             EditorStateUpdate::SetSelectionOptions(options) => state.selection = options,
             EditorStateUpdate::SetVectorOptions(options) => state.vector = options,

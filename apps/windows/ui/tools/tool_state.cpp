@@ -56,6 +56,16 @@ void CancelSelectionGeometryPreview(
     SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0);
 }
 
+void CancelFillGeometryPreview(
+    app::ToolUiState& tools, HWND canvas) noexcept {
+    tools.fill_gesture_samples.clear();
+    tools.procedure.valid = false;
+    if (canvas == nullptr) {
+        return;
+    }
+    SendMessageW(canvas, renderer::kCanvasClearGeometryPreview, 0, 0);
+}
+
 void TransitionActiveTool(
     app::ToolUiState& tools, HWND canvas, std::uint32_t next_tool) noexcept {
     if (tools.active_tool != next_tool && IsVectorCanvasTool(tools.active_tool)) {
@@ -64,6 +74,10 @@ void TransitionActiveTool(
     if (tools.active_tool != next_tool
         && tools.active_tool == kInteractionSelection) {
         CancelSelectionGeometryPreview(tools, canvas);
+    }
+    if (tools.active_tool != next_tool
+        && tools.active_tool == kInteractionFill) {
+        CancelFillGeometryPreview(tools, canvas);
     }
     tools.active_tool = next_tool;
 }

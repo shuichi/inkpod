@@ -238,14 +238,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(8);
+    pub const CURRENT: Self = Self(10);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 11;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 13;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;
@@ -545,6 +545,9 @@ pub(crate) struct CanonicalStrokeArguments {
     pub(crate) tool_code: u32,
     pub(crate) color: PixelValue,
     pub(crate) diameter_q16: i64,
+    pub(crate) shape_code: u32,
+    pub(crate) smoothing: u16,
+    pub(crate) start_color_code: u32,
     pub(crate) auto_erase: bool,
     pub(crate) pressure_size: bool,
     pub(crate) payload: Vec<u8>,

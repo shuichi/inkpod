@@ -54,16 +54,18 @@ pub struct InkpodLayerThumbnailBuffer {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct InkpodSelectionPoint {
     pub struct_size: u32,
     pub reserved: u32,
     pub x: f32,
     pub y: f32,
+    pub pressure: f32,
+    pub reserved2: u32,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct InkpodSelectionInput {
     pub struct_size: u32,
     pub shape: u32,
@@ -78,6 +80,12 @@ pub struct InkpodSelectionInput {
     pub gap_close: u16,
     pub seed_x: u32,
     pub seed_y: u32,
+    pub interpretation: u32,
+    pub aspect_ratio_q16: u32,
+    pub construction_flags: u64,
+    pub rotation_turns: u32,
+    pub trace_shape: u32,
+    pub view_zoom_q16: i64,
 }
 
 #[repr(C)]

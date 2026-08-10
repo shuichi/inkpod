@@ -68,6 +68,7 @@ private:
     struct TabHostState {
         DockHost* host{};
         DockZone zone{DockZone::TopContext};
+        std::uint8_t stack{};
         HWND control{};
     };
 
@@ -102,7 +103,7 @@ private:
     void LayoutFloatingContent(PaneHostState& pane) noexcept;
     void LayoutAutoHiddenContent(PaneHostState& pane) noexcept;
     void ApplyPaneLayout(PaneHostState& pane) noexcept;
-    void ApplyTabLayout(DockZone zone) noexcept;
+    void ApplyTabLayout(TabHostState& tabs) noexcept;
     void NotifyChanged() noexcept;
     void ShowContextMenu(DockPaneType type, POINT screen) noexcept;
     [[nodiscard]] DockZone PreviewZoneAt(
@@ -127,7 +128,7 @@ private:
     std::array<PaneHostState, kDockPaneCount> panes_{};
     std::array<SplitterHostState, kMaximumDockSplitters> splitter_states_{};
     std::array<HWND, kMaximumDockSplitters> splitters_{};
-    std::array<TabHostState, kDockedZoneCount> tab_states_{};
+    std::array<TabHostState, kMaximumDockTabStacks> tab_states_{};
     HWND preview_{};
     DockZone preview_zone_{DockZone::Count};
     bool initialized_{};

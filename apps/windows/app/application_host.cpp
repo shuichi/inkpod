@@ -56,6 +56,7 @@ bool ProjectEditorPresentation(
             tools.color_rgba = ColorToRgba8(editor.current_color);
         }
         tools.diameter = Q16ToFloat(editor.current_diameter_q16);
+        tools.brush = editor.brush;
 
         tools.fill_options.operation = editor.fill.operation;
         tools.fill_options.tolerance = editor.fill.tolerance;
@@ -89,6 +90,11 @@ bool ProjectEditorPresentation(
         tools.selection_tolerance = editor.selection.tolerance;
         tools.selection_gap_close = editor.selection.gap_close;
         tools.selection_diameter = Q16ToFloat(editor.selection.diameter_q16);
+        tools.selection_interpretation = editor.selection.interpretation;
+        tools.selection_aspect_ratio_q16 = editor.selection.aspect_ratio_q16;
+        tools.selection_construction_flags = editor.selection.construction_flags;
+        tools.selection_rotation_turns = editor.selection.rotation_turns;
+        tools.selection_trace_shape = editor.selection.trace_shape;
         tools.vector_erase_mode = editor.vector.erase_mode;
         tools.vector_selection_mode = editor.vector.selection_mode;
 

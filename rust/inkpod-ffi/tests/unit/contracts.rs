@@ -705,6 +705,128 @@ fn editor_state_ffi_rejects_short_unknown_stale_and_invalid_updates_atomically()
 }
 
 #[test]
+fn editor_brush_options_are_inline_owned_and_validate_noop_stale_and_negative_inputs() {
+    let (mut core, _) = create_core(16, 16, 0x4252_5553);
+    // SAFETY: Every record is complete, aligned, uniquely writable, and live for its call.
+    unsafe {
+        let mut before = editor_state_info();
+        assert_eq!(
+            inkpod_core_get_editor_state(core, &mut before),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(before.brush.shape, INKPOD_BRUSH_ROUND);
+        assert_eq!(before.brush.smoothing, 0);
+        assert_eq!(before.brush.start_color, INKPOD_START_COLOR_ANY);
+
+        let mut update =
+            editor_state_update(INKPOD_EDITOR_UPDATE_BRUSH_OPTIONS, before.editor_revision);
+        update.brush = InkpodEditorBrushOptions {
+            struct_size: size_of::<InkpodEditorBrushOptions>() as u32,
+            shape: INKPOD_BRUSH_SQUARE,
+            smoothing: 777,
+            reserved: 0,
+            start_color: INKPOD_START_COLOR_EXACT_NATIVE,
+            reserved2: 0,
+        };
+        let mut changed = editor_state_info();
+        assert_eq!(
+            inkpod_core_update_editor_state(core, &update, &mut changed),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(changed.editor_revision, before.editor_revision + 1);
+        assert_eq!(changed.brush.shape, INKPOD_BRUSH_SQUARE);
+        assert_eq!(changed.brush.smoothing, 777);
+        assert_eq!(changed.brush.start_color, INKPOD_START_COLOR_EXACT_NATIVE);
+
+        // The returned nested record is an inline caller-owned copy.
+        changed.brush.shape = u32::MAX;
+        assert_eq!(changed.brush.shape, u32::MAX);
+        let mut owned_again = editor_state_info();
+        assert_eq!(
+            inkpod_core_get_editor_state(core, &mut owned_again),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(owned_again.brush.shape, INKPOD_BRUSH_SQUARE);
+
+        update.expected_editor_revision = owned_again.editor_revision;
+        let mut no_op = editor_state_info();
+        assert_eq!(
+            inkpod_core_update_editor_state(core, &update, &mut no_op),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(no_op.editor_revision, owned_again.editor_revision);
+        assert_eq!(no_op.editor_digest, owned_again.editor_digest);
+
+        let mut stale = update;
+        stale.expected_editor_revision = 0;
+        assert_eq!(
+            inkpod_core_update_editor_state(core, &stale, &mut no_op),
+            INKPOD_STATUS_INVALID_STATE
+        );
+
+        for (invalid_brush, expected_status) in [
+            (
+                InkpodEditorBrushOptions {
+                    struct_size: size_of::<InkpodEditorBrushOptions>() as u32 - 1,
+                    ..update.brush
+                },
+                INKPOD_STATUS_INVALID_ARGUMENT,
+            ),
+            (
+                InkpodEditorBrushOptions {
+                    shape: u32::MAX,
+                    ..update.brush
+                },
+                INKPOD_STATUS_INVALID_ARGUMENT,
+            ),
+            (
+                InkpodEditorBrushOptions {
+                    smoothing: 1_001,
+                    ..update.brush
+                },
+                INKPOD_STATUS_INVALID_ARGUMENT,
+            ),
+            (
+                InkpodEditorBrushOptions {
+                    reserved: 1,
+                    ..update.brush
+                },
+                INKPOD_STATUS_INVALID_ARGUMENT,
+            ),
+            (
+                InkpodEditorBrushOptions {
+                    start_color: u32::MAX,
+                    ..update.brush
+                },
+                INKPOD_STATUS_INVALID_ARGUMENT,
+            ),
+            (
+                InkpodEditorBrushOptions {
+                    reserved2: 1,
+                    ..update.brush
+                },
+                INKPOD_STATUS_INVALID_ARGUMENT,
+            ),
+        ] {
+            let mut invalid = update;
+            invalid.brush = invalid_brush;
+            assert_eq!(
+                inkpod_core_update_editor_state(core, &invalid, &mut no_op),
+                expected_status
+            );
+        }
+        let mut after = editor_state_info();
+        assert_eq!(
+            inkpod_core_get_editor_state(core, &mut after),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(after.editor_revision, owned_again.editor_revision);
+        assert_eq!(after.editor_digest, owned_again.editor_digest);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn grouped_edit_target_ffi_owns_normalized_spans_and_rejects_stale_or_short_records() {
     let (mut core, document) = create_core(8, 8, 0x4544_5447);
     // SAFETY: Complete records and the live owner-thread Core remain valid for every call.
@@ -1026,6 +1148,10 @@ fn captured_editor_target_ffi_routes_fill_selection_and_color_without_live_retar
         gap_close: 0,
         seed_x: 0,
         seed_y: 0,
+        interpretation: INKPOD_RANGE_NORMAL,
+        trace_shape: INKPOD_TRACE_ROUND,
+        view_zoom_q16: 1 << 16,
+        ..InkpodSelectionInput::default()
     };
     let mut selection_result = dispatch();
 
@@ -1336,6 +1462,10 @@ fn rectangle_selection(core: *mut InkpodCore, bounds: InkpodFrameRect) -> Inkpod
         gap_close: 0,
         seed_x: 0,
         seed_y: 0,
+        interpretation: INKPOD_RANGE_NORMAL,
+        trace_shape: INKPOD_TRACE_ROUND,
+        view_zoom_q16: 1 << 16,
+        ..InkpodSelectionInput::default()
     };
     let mut result = dispatch();
     // SAFETY: Core and complete, non-overlapping input/output records live for the call.
@@ -1374,6 +1504,11 @@ fn clear_selected_content_journal_saves_and_reopens_through_the_abi() {
         samples: &sample,
         sample_count: 1,
         sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
+        shape: INKPOD_BRUSH_ROUND,
+        smoothing: 0,
+        reserved_2: 0,
+        start_color: INKPOD_START_COLOR_ANY,
+        reserved_3: 0,
     };
     let mut result = dispatch();
     let mut info = document_info();
@@ -2841,8 +2976,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 8);
-        assert_eq!(contract.procedure_format_version, 11);
+        assert_eq!(contract.replay_epoch, 10);
+        assert_eq!(contract.procedure_format_version, 13);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);

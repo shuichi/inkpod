@@ -138,6 +138,13 @@ struct ToolUiState {
     InkpodColorValue drawing_color{sizeof(InkpodColorValue)};
     InkpodEyedropperSource eyedropper_source{INKPOD_EYEDROPPER_COMPOSITE};
     float diameter{8.0F};
+    InkpodEditorBrushOptions brush{
+        sizeof(InkpodEditorBrushOptions),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
 
     bool floating_active{};
     InkpodFloatingTransform floating_transform{
@@ -155,6 +162,11 @@ struct ToolUiState {
     std::uint16_t selection_tolerance{};
     std::uint16_t selection_gap_close{};
     float selection_diameter{8.0F};
+    InkpodRangeInterpretation selection_interpretation{INKPOD_RANGE_NORMAL};
+    std::uint32_t selection_aspect_ratio_q16{};
+    std::uint64_t selection_construction_flags{};
+    std::uint32_t selection_rotation_turns{};
+    InkpodTraceBrushShape selection_trace_shape{INKPOD_TRACE_ROUND};
     std::vector<InkpodStrokeSample> selection_gesture_samples;
     std::vector<InkpodStrokeSample> vector_gesture_samples;
     InkpodVectorEraseMode vector_erase_mode{INKPOD_VECTOR_ERASE_PARTIAL};

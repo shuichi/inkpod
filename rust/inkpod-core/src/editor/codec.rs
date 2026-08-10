@@ -2,13 +2,13 @@
 
 use super::model::*;
 use crate::{
-    CoreError, FillOperation, InclusionMode, PixelValue, SelectionOperation, VectorEraseMode,
-    VectorSelectionMode,
+    BrushShape, CoreError, FillOperation, InclusionMode, PixelValue, RangeInterpretation,
+    SelectionOperation, StartColorPredicate, TraceBrushShape, VectorEraseMode, VectorSelectionMode,
 };
 use std::collections::BTreeMap;
 
-const FRAME_SCHEMA: u32 = 2;
-const STATE_FIELD_COUNT: usize = 12;
+const FRAME_SCHEMA: u32 = 4;
+const STATE_FIELD_COUNT: usize = 13;
 const EDIT_FIELD_COUNT: usize = 4;
 const DIGEST_CONTEXT: &str = "org.inkpod.digest.editor-state.v1";
 const MAX_DIAMETER_Q16: i64 = 256_i64 << 16;
@@ -119,8 +119,18 @@ pub(crate) fn validate_state(state: &EditorState) -> Result<(), CoreError> {
             "an active color-consuming tool must be the last color tool",
         ));
     }
+    if state.brush.smoothing > 1_000 {
+        return Err(CoreError::InvalidArgument(
+            "editor brush smoothing exceeds 1000",
+        ));
+    }
     validate_fill(&state.fill)?;
     validate_selection_diameter(state.selection.diameter_q16)?;
+    if state.selection.aspect_ratio_q16 > (4_096_u32 << 16) {
+        return Err(CoreError::InvalidArgument(
+            "editor selection aspect ratio exceeds 4096:1",
+        ));
+    }
     Ok(())
 }
 
@@ -195,6 +205,7 @@ fn encode_state_frame(state: &EditorState) -> Vec<u8> {
             .map(|tool| (tool as u32).to_le_bytes().to_vec()),
         Some(colors),
         Some(diameters),
+        Some(encode_brush(state.brush)),
         Some(encode_fill(&state.fill)),
         Some(encode_selection(&state.selection)),
         Some(encode_vector(&state.vector)),
@@ -252,7 +263,7 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
             },
         );
     }
-    let target = match (fields[8], fields[9]) {
+    let target = match (fields[9], fields[10]) {
         (Some(layer), Some(plane)) => Some(EditorTarget {
             layer_id: read_u64(layer)?,
             plane_id: read_u64(plane)?,
@@ -260,7 +271,7 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
         (None, None) => None,
         _ => return malformed("partial editor target"),
     };
-    let palette_cursor = fields[10]
+    let palette_cursor = fields[11]
         .map(|field| -> Result<PaletteCursor, CoreError> {
             let cursor = decode_frame(field, 2)?;
             Ok(PaletteCursor {
@@ -269,7 +280,7 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
             })
         })
         .transpose()?;
-    let edit_targets = decode_sequence(required(fields[11])?, MAX_EDIT_TARGETS)?
+    let edit_targets = decode_sequence(required(fields[12])?, MAX_EDIT_TARGETS)?
         .into_iter()
         .map(|record| {
             let fields = decode_frame(record, 3)?;
@@ -289,15 +300,47 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
         active_tool,
         last_color_consuming_tool,
         tool_styles,
-        fill: decode_fill(required(fields[5])?)?,
-        selection: decode_selection(required(fields[6])?)?,
-        vector: decode_vector(required(fields[7])?)?,
+        brush: decode_brush(required(fields[5])?)?,
+        fill: decode_fill(required(fields[6])?)?,
+        selection: decode_selection(required(fields[7])?)?,
+        vector: decode_vector(required(fields[8])?)?,
         target,
         edit_targets,
         palette_cursor,
     };
     validate_state(&state).map_err(|error| format_error(&error.to_string()))?;
     Ok(state)
+}
+
+fn encode_brush(brush: EditorBrushOptions) -> Vec<u8> {
+    encode_frame(&[
+        Some((brush.shape as u32).to_le_bytes().to_vec()),
+        Some(brush.smoothing.to_le_bytes().to_vec()),
+        Some((brush.start_color as u32).to_le_bytes().to_vec()),
+    ])
+}
+
+fn decode_brush(bytes: &[u8]) -> Result<EditorBrushOptions, CoreError> {
+    let fields = decode_frame(bytes, 3)?;
+    let shape = match read_u32(required(fields[0])?)? {
+        1 => BrushShape::Round,
+        2 => BrushShape::Square,
+        _ => return malformed("unknown editor brush shape"),
+    };
+    let smoothing = read_u16(required(fields[1])?)?;
+    if smoothing > 1_000 {
+        return malformed("editor brush smoothing exceeds 1000");
+    }
+    let start_color = match read_u32(required(fields[2])?)? {
+        0 => StartColorPredicate::Any,
+        1 => StartColorPredicate::ExactNative,
+        _ => return malformed("unknown editor start-color predicate"),
+    };
+    Ok(EditorBrushOptions {
+        shape,
+        smoothing,
+        start_color,
+    })
 }
 
 fn encode_tool_colors(styles: &BTreeMap<EditorTool, EditorToolStyle>) -> Vec<u8> {
@@ -413,11 +456,19 @@ fn encode_selection(selection: &EditorSelectionOptions) -> Vec<u8> {
         Some(selection.tolerance.to_le_bytes().to_vec()),
         Some(vec![selection.gap_close]),
         Some(selection.diameter_q16.to_le_bytes().to_vec()),
+        Some((selection.interpretation as u32).to_le_bytes().to_vec()),
+        Some(selection.aspect_ratio_q16.to_le_bytes().to_vec()),
+        Some(vec![u8::from(selection.from_center)]),
+        Some(vec![u8::from(selection.constrain_rotation_45)]),
+        Some(selection.rotation_turns.to_le_bytes().to_vec()),
+        Some((selection.trace_shape as u32).to_le_bytes().to_vec()),
+        Some(vec![u8::from(selection.trace_pressure_size)]),
+        Some(vec![u8::from(selection.trace_screen_size)]),
     ])
 }
 
 fn decode_selection(bytes: &[u8]) -> Result<EditorSelectionOptions, CoreError> {
-    let fields = decode_frame(bytes, 5)?;
+    let fields = decode_frame(bytes, 13)?;
     let shape = EditorSelectionShape::from_code(read_u32(required(fields[0])?)?)
         .ok_or_else(|| format_error("unknown selection shape"))?;
     Ok(EditorSelectionOptions {
@@ -426,6 +477,25 @@ fn decode_selection(bytes: &[u8]) -> Result<EditorSelectionOptions, CoreError> {
         tolerance: read_u16(required(fields[2])?)?,
         gap_close: read_u8(required(fields[3])?)?,
         diameter_q16: read_i64(required(fields[4])?)?,
+        interpretation: match read_u32(required(fields[5])?)? {
+            1 => RangeInterpretation::Normal,
+            2 => RangeInterpretation::Tight,
+            3 => RangeInterpretation::EnclosedInterior,
+            4 => RangeInterpretation::Drawing,
+            5 => RangeInterpretation::Boundary,
+            _ => return malformed("unknown raster range interpretation"),
+        },
+        aspect_ratio_q16: read_u32(required(fields[6])?)?,
+        from_center: read_bool(required(fields[7])?)?,
+        constrain_rotation_45: read_bool(required(fields[8])?)?,
+        rotation_turns: read_u32(required(fields[9])?)?,
+        trace_shape: match read_u32(required(fields[10])?)? {
+            1 => TraceBrushShape::Round,
+            2 => TraceBrushShape::Square,
+            _ => return malformed("unknown trace brush shape"),
+        },
+        trace_pressure_size: read_bool(required(fields[11])?)?,
+        trace_screen_size: read_bool(required(fields[12])?)?,
     })
 }
 
@@ -774,8 +844,8 @@ mod tests {
         assert_eq!(
             state_digest(&state).as_bytes(),
             &[
-                117, 46, 41, 31, 242, 192, 200, 213, 146, 134, 164, 234, 178, 211, 122, 243, 238,
-                156, 207, 35, 145, 78, 129, 168, 138, 231, 219, 135, 104, 179, 37, 185,
+                140, 71, 147, 9, 134, 173, 246, 94, 181, 56, 247, 217, 42, 229, 128, 14, 213, 244,
+                221, 8, 148, 74, 140, 206, 95, 100, 127, 205, 126, 23, 107, 254,
             ]
         );
     }

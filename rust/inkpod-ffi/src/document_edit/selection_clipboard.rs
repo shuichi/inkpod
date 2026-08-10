@@ -63,7 +63,10 @@ unsafe fn apply_selection_ffi(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        if input.reserved != 0 || input.point_count > MAX_SELECTION_POINT_COUNT {
+        if input.reserved != 0
+            || input.point_count > MAX_SELECTION_POINT_COUNT
+            || input.construction_flags & !INKPOD_SELECTION_CONSTRUCTION_FLAGS != 0
+        {
             return fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,
                 "selection reserved/count value is invalid",
@@ -75,10 +78,15 @@ unsafe fn apply_selection_ffi(
         };
         let needs_points = matches!(
             input.shape,
-            INKPOD_SELECTION_LASSO | INKPOD_SELECTION_POLYLINE | INKPOD_SELECTION_TRACE
+            INKPOD_SELECTION_LASSO
+                | INKPOD_SELECTION_POLYLINE
+                | INKPOD_SELECTION_TRACE
+                | INKPOD_SELECTION_RECTANGLE
+                | INKPOD_SELECTION_ELLIPSE
         );
         let mut points = Vec::new();
-        if needs_points {
+        let has_points = input.point_count != 0 || !input.points.is_null();
+        if needs_points && has_points {
             if input.points.is_null() || !is_aligned(input.points) || input.point_count == 0 {
                 return fail(
                     INKPOD_STATUS_INVALID_ARGUMENT,
@@ -140,7 +148,7 @@ unsafe fn apply_selection_ffi(
                         "selection point record exceeds its stride",
                     );
                 }
-                if point.reserved != 0 {
+                if point.reserved != 0 || point.reserved2 != 0 {
                     return fail(
                         INKPOD_STATUS_UNSUPPORTED,
                         "selection point reserved value is not zero",
@@ -158,14 +166,59 @@ unsafe fn apply_selection_ffi(
                 "point-free selection must not carry a point span",
             );
         }
+        let interpretation = match input.interpretation {
+            INKPOD_RANGE_NORMAL => RangeInterpretation::Normal,
+            INKPOD_RANGE_TIGHT => RangeInterpretation::Tight,
+            INKPOD_RANGE_ENCLOSED_INTERIOR => RangeInterpretation::EnclosedInterior,
+            INKPOD_RANGE_DRAWING => RangeInterpretation::Drawing,
+            INKPOD_RANGE_BOUNDARY => RangeInterpretation::Boundary,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "selection range interpretation is not defined",
+                );
+            }
+        };
+        let trace_shape = match input.trace_shape {
+            INKPOD_TRACE_ROUND => TraceBrushShape::Round,
+            INKPOD_TRACE_SQUARE => TraceBrushShape::Square,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "selection trace brush shape is not defined",
+                );
+            }
+        };
+        let options = SelectionConstructionOptions {
+            aspect_ratio_q16: input.aspect_ratio_q16,
+            from_center: input.construction_flags & INKPOD_SELECTION_FROM_CENTER != 0,
+            constrain_rotation_45: input.construction_flags
+                & INKPOD_SELECTION_CONSTRAIN_ROTATION_45
+                != 0,
+            rotation_turns: input.rotation_turns,
+            trace: TraceBrushOptions {
+                shape: trace_shape,
+                pressure_size: input.construction_flags & INKPOD_SELECTION_TRACE_PRESSURE_SIZE != 0,
+                screen_size: input.construction_flags & INKPOD_SELECTION_TRACE_SCREEN_SIZE != 0,
+                view_zoom_q16: input.view_zoom_q16,
+            },
+        };
         let shape = match input.shape {
-            INKPOD_SELECTION_RECTANGLE => SelectionShape::Rectangle(RectI32 {
+            INKPOD_SELECTION_RECTANGLE if points.len() == 2 => SelectionShape::RectangleGesture {
+                anchor: points[0],
+                current: points[1],
+            },
+            INKPOD_SELECTION_RECTANGLE if points.is_empty() => SelectionShape::Rectangle(RectI32 {
                 x: input.bounds.x,
                 y: input.bounds.y,
                 width: input.bounds.width,
                 height: input.bounds.height,
             }),
-            INKPOD_SELECTION_ELLIPSE => SelectionShape::Ellipse(RectI32 {
+            INKPOD_SELECTION_ELLIPSE if points.len() == 2 => SelectionShape::EllipseGesture {
+                anchor: points[0],
+                current: points[1],
+            },
+            INKPOD_SELECTION_ELLIPSE if points.is_empty() => SelectionShape::Ellipse(RectI32 {
                 x: input.bounds.x,
                 y: input.bounds.y,
                 width: input.bounds.width,
@@ -173,10 +226,29 @@ unsafe fn apply_selection_ffi(
             }),
             INKPOD_SELECTION_LASSO => SelectionShape::Lasso(points),
             INKPOD_SELECTION_POLYLINE => SelectionShape::Polyline(points),
-            INKPOD_SELECTION_TRACE => SelectionShape::Trace {
-                points,
-                diameter: input.diameter,
-            },
+            INKPOD_SELECTION_TRACE => {
+                let count = usize::try_from(input.point_count).unwrap_or(0);
+                let mut samples = Vec::with_capacity(count);
+                for index in 0..count {
+                    // SAFETY: The point span was validated and remains borrowed for this call.
+                    let point = unsafe {
+                        &*input
+                            .points
+                            .cast::<u8>()
+                            .add(index * input.point_stride_bytes as usize)
+                            .cast::<InkpodSelectionPoint>()
+                    };
+                    samples.push(SelectionSample {
+                        x: point.x,
+                        y: point.y,
+                        pressure: point.pressure,
+                    });
+                }
+                SelectionShape::TraceBrush {
+                    samples,
+                    diameter: input.diameter,
+                }
+            }
             INKPOD_SELECTION_WAND => SelectionShape::Wand {
                 x: input.seed_x,
                 y: input.seed_y,
@@ -191,6 +263,12 @@ unsafe fn apply_selection_ffi(
                     }
                 },
             },
+            INKPOD_SELECTION_RECTANGLE | INKPOD_SELECTION_ELLIPSE => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "rectangle/ellipse selection requires zero or two points",
+                );
+            }
             _ => {
                 return fail(
                     INKPOD_STATUS_INVALID_ARGUMENT,
@@ -199,10 +277,17 @@ unsafe fn apply_selection_ffi(
             }
         };
         let outcome = match target {
-            Some(target) => core
-                .core
-                .apply_selection_for_editor_target(&shape, operation, target),
-            None => core.core.apply_selection(&shape, operation),
+            Some(target) => core.core.apply_selection_with_options_for_editor_target(
+                &shape,
+                operation,
+                interpretation,
+                options,
+                target,
+            ),
+            None => {
+                core.core
+                    .apply_selection_with_options(&shape, operation, interpretation, options)
+            }
         };
         match outcome {
             Ok(outcome) => {

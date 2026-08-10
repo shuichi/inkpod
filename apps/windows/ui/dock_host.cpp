@@ -184,7 +184,9 @@ DockHost::DockHost() noexcept {
     }
     for (std::size_t index = 0U; index < tab_states_.size(); ++index) {
         tab_states_[index].host = this;
-        tab_states_[index].zone = static_cast<DockZone>(index);
+        tab_states_[index].zone = static_cast<DockZone>(index / kDockPaneCount);
+        tab_states_[index].stack = static_cast<std::uint8_t>(
+            index % kDockPaneCount);
     }
 }
 
@@ -309,8 +311,8 @@ void DockHost::ApplyLayout(
     applying_ = true;
     geometry_ = geometry;
     dpi_ = dpi == 0U ? 96U : dpi;
-    for (std::size_t index = 0U; index < tab_states_.size(); ++index) {
-        ApplyTabLayout(static_cast<DockZone>(index));
+    for (TabHostState& tabs : tab_states_) {
+        ApplyTabLayout(tabs);
     }
     for (PaneHostState& pane : panes_) {
         ApplyPaneLayout(pane);
@@ -452,27 +454,14 @@ DockResult DockHost::ActivatePane(DockPaneType type) noexcept {
         return DockResult::InvalidState;
     }
     const DockZone zone = pane->zone;
-    DockResult mode_result = DockResult::NoOp;
-    if (model_->PaneCount(zone) > 1U) {
-        mode_result = model_->SetZoneMode(zone, DockStackMode::Tabs);
-        if (mode_result != DockResult::Ok && mode_result != DockResult::NoOp) {
-            return mode_result;
-        }
+    if (model_->StackPaneCount(zone, pane->stack) < 2U) {
+        return DockResult::NoOp;
     }
-    const DockZoneState* zone_state = model_->Zone(zone);
-    DockResult active_result = DockResult::NoOp;
-    if (zone_state != nullptr && zone_state->mode == DockStackMode::Tabs) {
-        active_result = model_->SetActiveTab(zone, type);
-        if (active_result != DockResult::Ok
-            && active_result != DockResult::NoOp) {
-            return active_result;
-        }
-    }
-    if (mode_result == DockResult::Ok || active_result == DockResult::Ok) {
+    const DockResult active_result = model_->SetActiveTab(zone, type);
+    if (active_result == DockResult::Ok) {
         NotifyChanged();
-        return DockResult::Ok;
     }
-    return DockResult::NoOp;
+    return active_result;
 }
 
 HWND DockHost::FloatingWindow(DockPaneType type) const noexcept {
@@ -486,8 +475,18 @@ HWND DockHost::ContentWindow(DockPaneType type) const noexcept {
 }
 
 HWND DockHost::TabWindow(DockZone zone) const noexcept {
-    const std::size_t index = static_cast<std::size_t>(zone);
-    return index < tab_states_.size() ? tab_states_[index].control : nullptr;
+    for (const TabHostState& tabs : tab_states_) {
+        if (tabs.zone == zone && tabs.control != nullptr
+            && IsWindowVisible(tabs.control) != FALSE) {
+            return tabs.control;
+        }
+    }
+    for (const TabHostState& tabs : tab_states_) {
+        if (tabs.zone == zone) {
+            return tabs.control;
+        }
+    }
+    return nullptr;
 }
 
 HWND DockHost::SplitterWindow(
@@ -734,9 +733,8 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
         SetParent(pane.content, owner_);
     }
     DockPaneGeometry geometry = geometry_.panes[PaneIndex(pane.type)];
-    const DockZoneState* zone = model_->Zone(placement->zone);
-    if (zone != nullptr && zone->mode == DockStackMode::Tabs
-        && model_->PaneCount(placement->zone) > 1U && geometry.shown) {
+    if (model_->StackPaneCount(placement->zone, placement->stack) > 1U
+        && geometry.shown) {
         const int tab_height = std::min(
             geometry.bounds.height, ScaleDip(kTabHeightDip, dpi_));
         geometry.bounds.y += tab_height;
@@ -748,15 +746,12 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
         geometry.shown && !geometry.temporarily_auto_hidden);
 }
 
-void DockHost::ApplyTabLayout(DockZone zone) noexcept {
-    if (model_ == nullptr || !IsDockedZone(zone)) {
+void DockHost::ApplyTabLayout(TabHostState& tabs) noexcept {
+    if (model_ == nullptr || !IsDockedZone(tabs.zone)) {
         return;
     }
-    TabHostState& tabs = tab_states_[static_cast<std::size_t>(zone)];
-    const DockZoneState* state = model_->Zone(zone);
-    const bool show = state != nullptr && state->mode == DockStackMode::Tabs
-        && model_->PaneCount(zone) > 1U
-        && HasArea(geometry_.zones[static_cast<std::size_t>(zone)]);
+    const bool show = model_->StackPaneCount(tabs.zone, tabs.stack) > 1U
+        && HasArea(geometry_.zones[static_cast<std::size_t>(tabs.zone)]);
     if (!show) {
         PlaceWindow(tabs.control, {}, false);
         return;
@@ -770,8 +765,9 @@ void DockHost::ApplyTabLayout(DockZone zone) noexcept {
     for (std::size_t index = 0U; index < kDockPaneCount; ++index) {
         const auto type = static_cast<DockPaneType>(index);
         const DockPanePlacement* pane = model_->Pane(type);
-        if (pane != nullptr && pane->present && pane->zone == zone) {
-            ordered[count++] = OrderedPane{pane->order, type};
+        if (pane != nullptr && pane->present && pane->zone == tabs.zone
+            && pane->stack == tabs.stack) {
+            ordered[count++] = OrderedPane{pane->tab_order, type};
         }
     }
     std::sort(
@@ -794,12 +790,16 @@ void DockHost::ApplyTabLayout(DockZone zone) noexcept {
             LoadPaneTitle(instance_, *descriptor, title));
         item.lParam = static_cast<LPARAM>(ordered[index].type);
         TabCtrl_InsertItem(tabs.control, static_cast<int>(index), &item);
-        if (state->active_tab == ordered[index].type) {
+        const DockPanePlacement* pane = model_->Pane(ordered[index].type);
+        if (pane != nullptr && pane->active_tab) {
             selected = static_cast<int>(index);
         }
     }
     TabCtrl_SetCurSel(tabs.control, selected);
-    DockRect bounds = geometry_.zones[static_cast<std::size_t>(zone)];
+    DockRect bounds{};
+    if (count > 0U) {
+        bounds = geometry_.panes[PaneIndex(ordered[0].type)].bounds;
+    }
     bounds.height = std::min(bounds.height, ScaleDip(kTabHeightDip, dpi_));
     PlaceWindow(tabs.control, bounds, true);
 }

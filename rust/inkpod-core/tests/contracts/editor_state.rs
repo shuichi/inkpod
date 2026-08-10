@@ -427,6 +427,7 @@ fn editor_state_is_session_owned_shared_by_views_and_independent_between_documen
                 tolerance: 321,
                 gap_close: 9,
                 diameter_q16: 17 << 16,
+                ..EditorSelectionOptions::default()
             }),
         )
         .unwrap();
@@ -699,6 +700,14 @@ fn canonical_editor_frame_round_trips_and_failure_or_overflow_is_atomic() {
         .unwrap();
     let mut maximum_selection = fill_state.state.selection.clone();
     maximum_selection.diameter_q16 = 4_096_i64 << 16;
+    maximum_selection.interpretation = RangeInterpretation::Boundary;
+    maximum_selection.aspect_ratio_q16 = 16 << 16;
+    maximum_selection.from_center = true;
+    maximum_selection.constrain_rotation_45 = true;
+    maximum_selection.rotation_turns = 0x2000_0000;
+    maximum_selection.trace_shape = TraceBrushShape::Square;
+    maximum_selection.trace_pressure_size = true;
+    maximum_selection.trace_screen_size = true;
     let maximum_selection_state = source
         .update_editor_state(
             fill_state.revision,
@@ -803,6 +812,16 @@ fn editor_savepoint_and_edit_frame_round_trip_with_current_native_format() {
             EditorStateUpdate::SetActiveTool(EditorTool::Brush),
         )
         .unwrap();
+    let changed = core
+        .update_editor_state(
+            changed.revision,
+            EditorStateUpdate::SetBrushOptions(EditorBrushOptions {
+                shape: BrushShape::Square,
+                smoothing: 725,
+                start_color: StartColorPredicate::ExactNative,
+            }),
+        )
+        .unwrap();
     assert!(changed.dirty);
     assert!(core.document_info().unwrap().dirty);
 
@@ -831,6 +850,14 @@ fn editor_savepoint_and_edit_frame_round_trip_with_current_native_format() {
     assert_eq!(
         reopened.editor_state().unwrap().state.active_tool,
         EditorTool::Brush
+    );
+    assert_eq!(
+        reopened.editor_state().unwrap().state.brush,
+        EditorBrushOptions {
+            shape: BrushShape::Square,
+            smoothing: 725,
+            start_color: StartColorPredicate::ExactNative,
+        }
     );
     assert!(!reopened.document_info().unwrap().dirty);
 

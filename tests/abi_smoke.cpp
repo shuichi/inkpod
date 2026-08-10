@@ -32,7 +32,7 @@ static_assert(sizeof(InkpodCellCreateOptions) == 48U);
 static_assert(sizeof(InkpodDocumentInfo) == 224U);
 static_assert(sizeof(InkpodResourceUsage) == 112U);
 static_assert(sizeof(InkpodStrokeSample) == 24U);
-static_assert(sizeof(InkpodStrokeInput) == 56U);
+static_assert(sizeof(InkpodStrokeInput) == 72U);
 static_assert(sizeof(InkpodViewInput) == 48U);
 static_assert(sizeof(InkpodSnapshotTransform) == 48U);
 static_assert(sizeof(InkpodSnapshotGuide) == 24U);
@@ -58,18 +58,19 @@ static_assert(sizeof(InkpodColorArray) == 40U);
 static_assert(sizeof(InkpodColorBuffer) == 48U);
 static_assert(std::is_standard_layout_v<InkpodEditorStateInfo>);
 static_assert(sizeof(InkpodEditorFillOptions) == 136U);
-static_assert(sizeof(InkpodEditorSelectionOptions) == 32U);
+static_assert(sizeof(InkpodEditorSelectionOptions) == 56U);
 static_assert(sizeof(InkpodEditorVectorOptions) == 16U);
-static_assert(sizeof(InkpodEditorStateInfo) == 304U);
-static_assert(sizeof(InkpodEditorDefaults) == 336U);
-static_assert(sizeof(InkpodEditorStateUpdate) == 264U);
+static_assert(sizeof(InkpodEditorBrushOptions) == 20U);
+static_assert(sizeof(InkpodEditorStateInfo) == 352U);
+static_assert(sizeof(InkpodEditorDefaults) == 384U);
+static_assert(sizeof(InkpodEditorStateUpdate) == 312U);
 static_assert(sizeof(InkpodEditorStrokeInput) == 48U);
 static_assert(sizeof(InkpodFillInput) == 96U);
 static_assert(sizeof(InkpodFillResult) == 32U);
 static_assert(sizeof(InkpodTreeEdit) == 64U);
 static_assert(sizeof(InkpodNodeInfo) == 72U);
-static_assert(sizeof(InkpodSelectionPoint) == 16U);
-static_assert(sizeof(InkpodSelectionInput) == 72U);
+static_assert(sizeof(InkpodSelectionPoint) == 24U);
+static_assert(sizeof(InkpodSelectionInput) == 104U);
 static_assert(sizeof(InkpodFloatingTransform) == 48U);
 static_assert(sizeof(InkpodGridInput) == 32U);
 static_assert(sizeof(InkpodLocatorOutput) == 48U);
@@ -154,8 +155,8 @@ int InkpodRunAbiSmoke() {
     InkpodReplayContract replay_contract{};
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 8U
-        || replay_contract.procedure_format_version != 11U
+        || replay_contract.replay_epoch != 10U
+        || replay_contract.procedure_format_version != 13U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -309,7 +310,7 @@ int InkpodRunAbiSmoke() {
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 11U
+        || persistence.format_version != 13U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE
@@ -913,7 +914,12 @@ int InkpodRunAbiSmoke() {
         1.0F,
         stroke_samples.data(),
         stroke_samples.size(),
-        sizeof(InkpodStrokeSample)};
+        sizeof(InkpodStrokeSample),
+        INKPOD_BRUSH_ROUND,
+        0U,
+        0U,
+        INKPOD_START_COLOR_ANY,
+        0U};
     dispatch = InkpodDispatchResult{};
     dispatch.struct_size = sizeof(dispatch);
     if (inkpod_core_apply_stroke(core, &stroke, &dispatch) != INKPOD_STATUS_OK
@@ -956,20 +962,14 @@ int InkpodRunAbiSmoke() {
                &dispatch) != INKPOD_STATUS_OK) {
         return 41;
     }
-    const InkpodSelectionInput selection{
-        sizeof(InkpodSelectionInput),
-        INKPOD_SELECTION_RECTANGLE,
-        INKPOD_SELECTION_NEW,
-        0U,
-        InkpodFrameRect{20, 30, 64, 1},
-        nullptr,
-        0U,
-        0U,
-        0.0F,
-        0U,
-        0U,
-        0U,
-        0U};
+    InkpodSelectionInput selection{};
+    selection.struct_size = sizeof(selection);
+    selection.shape = INKPOD_SELECTION_RECTANGLE;
+    selection.operation = INKPOD_SELECTION_NEW;
+    selection.bounds = InkpodFrameRect{20, 30, 64, 1};
+    selection.interpretation = INKPOD_RANGE_NORMAL;
+    selection.trace_shape = INKPOD_TRACE_ROUND;
+    selection.view_zoom_q16 = INT64_C(1) << 16;
     InkpodClipboard* clipboard{};
     InkpodSelectionInput invalid_selection = selection;
     invalid_selection.point_stride_bytes = sizeof(InkpodSelectionPoint);

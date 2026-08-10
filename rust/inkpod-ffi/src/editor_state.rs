@@ -124,6 +124,91 @@ fn selection_operation(code: u32) -> Result<SelectionOperation, u32> {
     }
 }
 
+const fn range_interpretation_code(value: RangeInterpretation) -> u32 {
+    match value {
+        RangeInterpretation::Normal => INKPOD_RANGE_NORMAL,
+        RangeInterpretation::Tight => INKPOD_RANGE_TIGHT,
+        RangeInterpretation::EnclosedInterior => INKPOD_RANGE_ENCLOSED_INTERIOR,
+        RangeInterpretation::Drawing => INKPOD_RANGE_DRAWING,
+        RangeInterpretation::Boundary => INKPOD_RANGE_BOUNDARY,
+    }
+}
+
+fn range_interpretation(code: u32) -> Result<RangeInterpretation, u32> {
+    match code {
+        INKPOD_RANGE_NORMAL => Ok(RangeInterpretation::Normal),
+        INKPOD_RANGE_TIGHT => Ok(RangeInterpretation::Tight),
+        INKPOD_RANGE_ENCLOSED_INTERIOR => Ok(RangeInterpretation::EnclosedInterior),
+        INKPOD_RANGE_DRAWING => Ok(RangeInterpretation::Drawing),
+        INKPOD_RANGE_BOUNDARY => Ok(RangeInterpretation::Boundary),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "editor raster range interpretation is unknown",
+        )),
+    }
+}
+
+const fn trace_shape_code(value: TraceBrushShape) -> u32 {
+    match value {
+        TraceBrushShape::Round => INKPOD_TRACE_ROUND,
+        TraceBrushShape::Square => INKPOD_TRACE_SQUARE,
+    }
+}
+
+fn trace_shape(code: u32) -> Result<TraceBrushShape, u32> {
+    match code {
+        INKPOD_TRACE_ROUND => Ok(TraceBrushShape::Round),
+        INKPOD_TRACE_SQUARE => Ok(TraceBrushShape::Square),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "editor trace brush shape is unknown",
+        )),
+    }
+}
+
+const fn brush_shape_code(value: BrushShape) -> u32 {
+    match value {
+        BrushShape::Round => INKPOD_BRUSH_ROUND,
+        BrushShape::Square => INKPOD_BRUSH_SQUARE,
+    }
+}
+
+const fn start_color_code(value: StartColorPredicate) -> u32 {
+    match value {
+        StartColorPredicate::Any => INKPOD_START_COLOR_ANY,
+        StartColorPredicate::ExactNative => INKPOD_START_COLOR_EXACT_NATIVE,
+    }
+}
+
+fn write_brush(brush: EditorBrushOptions) -> InkpodEditorBrushOptions {
+    InkpodEditorBrushOptions {
+        struct_size: size_of::<InkpodEditorBrushOptions>() as u32,
+        shape: brush_shape_code(brush.shape),
+        smoothing: brush.smoothing,
+        reserved: 0,
+        start_color: start_color_code(brush.start_color),
+        reserved2: 0,
+    }
+}
+
+fn parse_brush(input: &InkpodEditorBrushOptions) -> Result<EditorBrushOptions, u32> {
+    if input.struct_size < size_of::<InkpodEditorBrushOptions>() as u32
+        || input.reserved != 0
+        || input.reserved2 != 0
+        || input.smoothing > 1_000
+    {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "editor brush options are malformed",
+        ));
+    }
+    Ok(EditorBrushOptions {
+        shape: parse_brush_shape(input.shape)?,
+        smoothing: input.smoothing,
+        start_color: parse_start_color_predicate(input.start_color)?,
+    })
+}
+
 const fn vector_erase_code(mode: VectorEraseMode) -> u32 {
     match mode {
         VectorEraseMode::Partial => INKPOD_VECTOR_ERASE_PARTIAL,
@@ -304,6 +389,27 @@ fn write_editor_state(
         gap_close: u16::from(state.selection.gap_close),
         reserved2: 0,
         diameter_q16: state.selection.diameter_q16,
+        interpretation: range_interpretation_code(state.selection.interpretation),
+        aspect_ratio_q16: state.selection.aspect_ratio_q16,
+        construction_flags: (if state.selection.from_center {
+            INKPOD_SELECTION_FROM_CENTER
+        } else {
+            0
+        }) | (if state.selection.constrain_rotation_45 {
+            INKPOD_SELECTION_CONSTRAIN_ROTATION_45
+        } else {
+            0
+        }) | (if state.selection.trace_pressure_size {
+            INKPOD_SELECTION_TRACE_PRESSURE_SIZE
+        } else {
+            0
+        }) | (if state.selection.trace_screen_size {
+            INKPOD_SELECTION_TRACE_SCREEN_SIZE
+        } else {
+            0
+        }),
+        rotation_turns: state.selection.rotation_turns,
+        trace_shape: trace_shape_code(state.selection.trace_shape),
     };
     output.vector = InkpodEditorVectorOptions {
         struct_size: size_of::<InkpodEditorVectorOptions>() as u32,
@@ -311,6 +417,7 @@ fn write_editor_state(
         selection_mode: vector_selection_code(state.vector.selection_mode),
         reserved: 0,
     };
+    output.brush = write_brush(state.brush);
     Ok(())
 }
 
@@ -319,6 +426,7 @@ fn parse_selection(input: &InkpodEditorSelectionOptions) -> Result<EditorSelecti
         || input.reserved != 0
         || input.reserved2 != 0
         || input.gap_close > u16::from(u8::MAX)
+        || input.construction_flags & !INKPOD_SELECTION_CONSTRUCTION_FLAGS != 0
     {
         return Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
@@ -331,6 +439,15 @@ fn parse_selection(input: &InkpodEditorSelectionOptions) -> Result<EditorSelecti
         tolerance: input.tolerance,
         gap_close: input.gap_close as u8,
         diameter_q16: input.diameter_q16,
+        interpretation: range_interpretation(input.interpretation)?,
+        aspect_ratio_q16: input.aspect_ratio_q16,
+        from_center: input.construction_flags & INKPOD_SELECTION_FROM_CENTER != 0,
+        constrain_rotation_45: input.construction_flags & INKPOD_SELECTION_CONSTRAIN_ROTATION_45
+            != 0,
+        rotation_turns: input.rotation_turns,
+        trace_shape: trace_shape(input.trace_shape)?,
+        trace_pressure_size: input.construction_flags & INKPOD_SELECTION_TRACE_PRESSURE_SIZE != 0,
+        trace_screen_size: input.construction_flags & INKPOD_SELECTION_TRACE_SCREEN_SIZE != 0,
     })
 }
 
@@ -470,6 +587,9 @@ pub unsafe extern "C" fn inkpod_core_update_editor_state(
                     tool,
                     diameter_q16: input.diameter_q16,
                 })
+            }
+            INKPOD_EDITOR_UPDATE_BRUSH_OPTIONS if input.flags == 0 => {
+                parse_brush(&input.brush).map(EditorStateUpdate::SetBrushOptions)
             }
             INKPOD_EDITOR_UPDATE_FILL_OPTIONS if input.flags == 0 => {
                 parse_fill(&input.fill).map(EditorStateUpdate::SetFillOptions)

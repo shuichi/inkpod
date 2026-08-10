@@ -210,6 +210,7 @@ void ProvideSelectionViewCommandStates(
          IDM_SELECTION_POLYLINE,
          IDM_SELECTION_TRACE,
          IDM_SELECTION_WAND,
+         IDM_SELECTION_OPTIONS,
          IDM_SELECTION_MODE_NEW,
          IDM_SELECTION_MODE_ADD,
          IDM_SELECTION_MODE_SUBTRACT,

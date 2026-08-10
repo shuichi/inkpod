@@ -89,6 +89,7 @@ const wchar_t* ToolLabel(std::uint32_t tool) noexcept {
 
 UINT DetailsCommand(std::uint32_t tool) noexcept {
     if (tool == tools::kInteractionFill) return IDM_TOOL_FILL_OPTIONS;
+    if (tool == tools::kInteractionSelection) return IDM_SELECTION_OPTIONS;
     if (tool == tools::kInteractionEffectGradient) return IDM_EFFECT_GRADIENT;
     if (tool == tools::kInteractionEffectAirbrush) return IDM_EFFECT_AIRBRUSH;
     if (tool == tools::kInteractionEffectBlur) return IDM_EFFECT_BLUR;
@@ -128,6 +129,9 @@ void LayoutPane(HWND pane) noexcept {
     const int target_button_width = ScaleForDpi(58, dpi);
     const int diameter_label_width = ScaleForDpi(54, dpi);
     const int edit_width = ScaleForDpi(72, dpi);
+    const int brush_shape_width = ScaleForDpi(78, dpi);
+    const int brush_smoothing_width = ScaleForDpi(80, dpi);
+    const int brush_start_width = ScaleForDpi(150, dpi);
     const int details_width = ScaleForDpi(78, dpi);
     int x = margin;
     const int y = std::max(
@@ -189,6 +193,35 @@ void LayoutPane(HWND pane) noexcept {
         edit_height,
         SWP_NOACTIVATE | SWP_NOZORDER);
     x += edit_width + margin;
+    if (state != nullptr && state->active_tool == INKPOD_TOOL_BRUSH) {
+        SetWindowPos(
+            GetDlgItem(pane, IDC_TOOL_OPTIONS_BRUSH_SHAPE),
+            nullptr,
+            x,
+            y,
+            brush_shape_width,
+            ScaleForDpi(120, dpi),
+            SWP_NOACTIVATE | SWP_NOZORDER);
+        x += brush_shape_width + margin;
+        SetWindowPos(
+            GetDlgItem(pane, IDC_TOOL_OPTIONS_BRUSH_SMOOTHING),
+            nullptr,
+            x,
+            edit_y,
+            brush_smoothing_width,
+            edit_height,
+            SWP_NOACTIVATE | SWP_NOZORDER);
+        x += brush_smoothing_width + margin;
+        SetWindowPos(
+            GetDlgItem(pane, IDC_TOOL_OPTIONS_BRUSH_START_COLOR),
+            nullptr,
+            x,
+            y,
+            brush_start_width,
+            row,
+            SWP_NOACTIVATE | SWP_NOZORDER);
+        x += brush_start_width + margin;
+    }
     SetWindowPos(
         GetDlgItem(pane, IDC_TOOL_OPTIONS_DETAILS),
         nullptr,
@@ -217,13 +250,21 @@ void UpdateFont(HWND pane, ToolOptionsPaneState& state) noexcept {
              IDC_TOOL_OPTIONS_DETAILS,
              IDC_TOOL_OPTIONS_TARGET_LABEL,
              IDC_TOOL_OPTIONS_TARGET_MAIN_LINE,
-             IDC_TOOL_OPTIONS_TARGET_COLOR}) {
+             IDC_TOOL_OPTIONS_TARGET_COLOR,
+             IDC_TOOL_OPTIONS_BRUSH_SHAPE,
+             IDC_TOOL_OPTIONS_BRUSH_START_COLOR}) {
         SendDlgItemMessageW(
             pane, control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), TRUE);
     }
     SendDlgItemMessageW(
         pane,
         IDC_TOOL_OPTIONS_DIAMETER,
+        WM_SETFONT,
+        reinterpret_cast<WPARAM>(edit_replacement),
+        TRUE);
+    SendDlgItemMessageW(
+        pane,
+        IDC_TOOL_OPTIONS_BRUSH_SMOOTHING,
         WM_SETFONT,
         reinterpret_cast<WPARAM>(edit_replacement),
         TRUE);
@@ -243,7 +284,7 @@ void CommitDiameter(HWND pane, ToolOptionsPaneState& state) noexcept {
     }
     if (!CanEditDiameter(state.active_tool) || state.change_diameter == nullptr) {
         UpdateToolOptionsPane(
-            pane, state.active_tool, state.active_plane, state.diameter);
+            pane, state.active_tool, state.active_plane, state.diameter, state.brush);
         return;
     }
     std::array<wchar_t, 64U> text{};
@@ -260,7 +301,32 @@ void CommitDiameter(HWND pane, ToolOptionsPaneState& state) noexcept {
         state.change_diameter(state.context, static_cast<float>(value));
     }
     UpdateToolOptionsPane(
-        pane, state.active_tool, state.active_plane, state.diameter);
+        pane, state.active_tool, state.active_plane, state.diameter, state.brush);
+}
+
+void CommitBrushSmoothing(HWND pane, ToolOptionsPaneState& state) noexcept {
+    if (state.updating || state.active_tool != INKPOD_TOOL_BRUSH
+        || state.change_brush == nullptr) {
+        UpdateToolOptionsPane(
+            pane, state.active_tool, state.active_plane, state.diameter, state.brush);
+        return;
+    }
+    std::array<wchar_t, 64U> text{};
+    GetDlgItemTextW(
+        pane,
+        IDC_TOOL_OPTIONS_BRUSH_SMOOTHING,
+        text.data(),
+        static_cast<int>(text.size()));
+    wchar_t* end{};
+    const unsigned long value = std::wcstoul(text.data(), &end, 10);
+    if (end != text.data() && *end == L'\0' && value <= 1000UL) {
+        InkpodEditorBrushOptions options = state.brush;
+        options.struct_size = sizeof(options);
+        options.smoothing = static_cast<std::uint16_t>(value);
+        state.change_brush(state.context, options);
+    }
+    UpdateToolOptionsPane(
+        pane, state.active_tool, state.active_plane, state.diameter, state.brush);
 }
 
 LRESULT CALLBACK PaneSubclassProcedure(
@@ -282,6 +348,50 @@ LRESULT CALLBACK PaneSubclassProcedure(
             if (LOWORD(wparam) == IDC_TOOL_OPTIONS_DIAMETER
                 && HIWORD(wparam) == EN_SETFOCUS) {
                 state->editing = true;
+                return 0;
+            }
+            if (LOWORD(wparam) == IDC_TOOL_OPTIONS_BRUSH_SMOOTHING
+                && HIWORD(wparam) == EN_SETFOCUS) {
+                state->editing_smoothing = true;
+                return 0;
+            }
+            if (LOWORD(wparam) == IDC_TOOL_OPTIONS_BRUSH_SMOOTHING
+                && HIWORD(wparam) == EN_KILLFOCUS) {
+                state->editing_smoothing = false;
+                CommitBrushSmoothing(pane, *state);
+                return 0;
+            }
+            if (LOWORD(wparam) == IDC_TOOL_OPTIONS_BRUSH_SHAPE
+                && HIWORD(wparam) == CBN_SELCHANGE
+                && state->active_tool == INKPOD_TOOL_BRUSH
+                && state->change_brush != nullptr) {
+                const LRESULT selected = SendDlgItemMessageW(
+                    pane, IDC_TOOL_OPTIONS_BRUSH_SHAPE, CB_GETCURSEL, 0, 0);
+                if (selected == 0 || selected == 1) {
+                    InkpodEditorBrushOptions options = state->brush;
+                    options.struct_size = sizeof(options);
+                    options.shape = selected == 0
+                        ? INKPOD_BRUSH_ROUND
+                        : INKPOD_BRUSH_SQUARE;
+                    state->change_brush(state->context, options);
+                }
+                return 0;
+            }
+            if (LOWORD(wparam) == IDC_TOOL_OPTIONS_BRUSH_START_COLOR
+                && HIWORD(wparam) == BN_CLICKED
+                && state->active_tool == INKPOD_TOOL_BRUSH
+                && state->change_brush != nullptr) {
+                InkpodEditorBrushOptions options = state->brush;
+                options.struct_size = sizeof(options);
+                options.start_color = SendDlgItemMessageW(
+                    pane,
+                    IDC_TOOL_OPTIONS_BRUSH_START_COLOR,
+                    BM_GETCHECK,
+                    0,
+                    0) == BST_CHECKED
+                    ? INKPOD_START_COLOR_EXACT_NATIVE
+                    : INKPOD_START_COLOR_ANY;
+                state->change_brush(state->context, options);
                 return 0;
             }
             if (LOWORD(wparam) == IDC_TOOL_OPTIONS_DIAMETER
@@ -432,6 +542,30 @@ HWND CreateToolOptionsPane(
                L"彩色",
                WS_TABSTOP | BS_AUTORADIOBUTTON | BS_PUSHLIKE,
                IDC_TOOL_OPTIONS_TARGET_COLOR)
+            == nullptr
+        || CreateControl(
+               instance,
+               pane,
+               WC_COMBOBOXW,
+               L"",
+               WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+               IDC_TOOL_OPTIONS_BRUSH_SHAPE)
+            == nullptr
+        || CreateControl(
+               instance,
+               pane,
+               L"EDIT",
+               L"0",
+               WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL | ES_NUMBER,
+               IDC_TOOL_OPTIONS_BRUSH_SMOOTHING)
+            == nullptr
+        || CreateControl(
+               instance,
+               pane,
+               L"BUTTON",
+               L"開始色の部分だけ塗る",
+               WS_TABSTOP | BS_AUTOCHECKBOX,
+               IDC_TOOL_OPTIONS_BRUSH_START_COLOR)
             == nullptr) {
         if (pane != nullptr) {
             DestroyWindow(pane);
@@ -445,9 +579,19 @@ HWND CreateToolOptionsPane(
         reinterpret_cast<DWORD_PTR>(&state));
     SetWindowLongPtrW(
         pane, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
+    SendDlgItemMessageW(
+        pane, IDC_TOOL_OPTIONS_BRUSH_SHAPE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Round"));
+    SendDlgItemMessageW(
+        pane, IDC_TOOL_OPTIONS_BRUSH_SHAPE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Square"));
+    SendDlgItemMessageW(
+        pane,
+        IDC_TOOL_OPTIONS_BRUSH_SMOOTHING,
+        EM_SETCUEBANNER,
+        TRUE,
+        reinterpret_cast<LPARAM>(L"Smoothing 0-1000"));
     UpdateFont(pane, state);
     UpdateToolOptionsPane(
-        pane, state.active_tool, state.active_plane, state.diameter);
+        pane, state.active_tool, state.active_plane, state.diameter, state.brush);
     return pane;
 }
 
@@ -455,7 +599,8 @@ void UpdateToolOptionsPane(
     HWND pane,
     std::uint32_t active_tool,
     InkpodPlaneKind active_plane,
-    float diameter) noexcept {
+    float diameter,
+    const InkpodEditorBrushOptions& brush) noexcept {
     auto* state = pane == nullptr
         ? nullptr
         : reinterpret_cast<ToolOptionsPaneState*>(
@@ -465,10 +610,13 @@ void UpdateToolOptionsPane(
     }
     const bool preserve_diameter_edit = state->editing
         && state->active_tool == active_tool && CanEditDiameter(active_tool);
+    const bool preserve_smoothing_edit = state->editing_smoothing
+        && state->active_tool == active_tool && active_tool == INKPOD_TOOL_BRUSH;
     state->updating = true;
     state->active_tool = active_tool;
     state->active_plane = active_plane;
     state->diameter = diameter;
+    state->brush = brush;
     SetDlgItemTextW(pane, IDC_TOOL_OPTIONS_LABEL, ToolLabel(active_tool));
     std::array<wchar_t, 32U> value{};
     const float displayed_diameter = active_tool == INKPOD_TOOL_PENCIL
@@ -496,6 +644,29 @@ void UpdateToolOptionsPane(
     EnableWindow(
         GetDlgItem(pane, IDC_TOOL_OPTIONS_DETAILS),
         DetailsCommand(active_tool) != 0U ? TRUE : FALSE);
+    const bool show_brush = active_tool == INKPOD_TOOL_BRUSH;
+    for (const int control : {
+             IDC_TOOL_OPTIONS_BRUSH_SHAPE,
+             IDC_TOOL_OPTIONS_BRUSH_SMOOTHING,
+             IDC_TOOL_OPTIONS_BRUSH_START_COLOR}) {
+        ShowWindow(GetDlgItem(pane, control), show_brush ? SW_SHOW : SW_HIDE);
+    }
+    SendDlgItemMessageW(
+        pane,
+        IDC_TOOL_OPTIONS_BRUSH_SHAPE,
+        CB_SETCURSEL,
+        brush.shape == INKPOD_BRUSH_SQUARE ? 1 : 0,
+        0);
+    if (!preserve_smoothing_edit) {
+        swprintf_s(value.data(), value.size(), L"%u", static_cast<unsigned>(brush.smoothing));
+        SetDlgItemTextW(pane, IDC_TOOL_OPTIONS_BRUSH_SMOOTHING, value.data());
+    }
+    SendDlgItemMessageW(
+        pane,
+        IDC_TOOL_OPTIONS_BRUSH_START_COLOR,
+        BM_SETCHECK,
+        brush.start_color == INKPOD_START_COLOR_EXACT_NATIVE ? BST_CHECKED : BST_UNCHECKED,
+        0);
     const bool show_erase_target = active_tool == INKPOD_TOOL_ERASER;
     for (const int control : {
              IDC_TOOL_OPTIONS_TARGET_LABEL,

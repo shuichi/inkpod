@@ -85,7 +85,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(main_line_procedure.primitive_id().get(), 0x0003_0001);
     assert_eq!(main_line_procedure.primitive_schema_version(), 1);
-    assert_eq!(main_line_procedure.replay_epoch().get(), 8);
+    assert_eq!(main_line_procedure.replay_epoch().get(), 10);
     assert_eq!(main_line_procedure.procedure_id().get(), 1);
     assert_eq!(main_line_procedure.base_state_id().get(), 1);
     assert_eq!(main_line_procedure.committed_state_id().get(), 2);
@@ -112,7 +112,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(palette_procedure.primitive_id().get(), 0x0003_0002);
     assert_eq!(palette_procedure.primitive_schema_version(), 1);
-    assert_eq!(palette_procedure.replay_epoch().get(), 8);
+    assert_eq!(palette_procedure.replay_epoch().get(), 10);
     assert_eq!(palette_procedure.procedure_id().get(), 2);
     assert_eq!(palette_procedure.base_state_id().get(), 2);
     assert_eq!(palette_procedure.committed_state_id().get(), 3);
@@ -128,6 +128,9 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         plane: ActivePlane::Color,
         color: [21, 34, 55, 233],
         diameter: 3.5,
+        shape: BrushShape::Round,
+        smoothing: 0,
+        start_color: StartColorPredicate::Any,
         auto_erase: false,
         pressure_size: true,
         coordinate_space: CoordinateSpace::Document,
@@ -156,8 +159,8 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .expect("a committed primitive must return its canonical procedure")
         .clone();
     assert_eq!(stroke_procedure.primitive_id().get(), 0x0005_0001);
-    assert_eq!(stroke_procedure.primitive_schema_version(), 2);
-    assert_eq!(stroke_procedure.replay_epoch().get(), 8);
+    assert_eq!(stroke_procedure.primitive_schema_version(), 3);
+    assert_eq!(stroke_procedure.replay_epoch().get(), 10);
     assert_eq!(stroke_procedure.procedure_id().get(), 3);
     assert_eq!(stroke_procedure.base_state_id().get(), 3);
     assert_eq!(stroke_procedure.committed_state_id().get(), 4);
@@ -173,15 +176,15 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .canonical_composite_digest()
         .unwrap()
         .as_bytes();
-    assert_eq!(contract.replay_epoch().get(), 8);
-    assert_eq!(contract.procedure_format_version(), 11);
+    assert_eq!(contract.replay_epoch().get(), 10);
+    assert_eq!(contract.procedure_format_version(), 13);
     assert_eq!(contract.canonical_numeric_version(), 1);
     assert_eq!(contract.primitive_count(), 77);
     assert_eq!(
         *contract.primitive_catalog_digest(),
         [
-            82, 25, 97, 121, 12, 210, 40, 203, 99, 227, 205, 39, 147, 205, 91, 220, 94, 152, 91,
-            161, 186, 144, 14, 60, 158, 33, 83, 170, 181, 139, 196, 14
+            56, 180, 149, 223, 100, 67, 15, 63, 146, 165, 226, 13, 144, 66, 145, 81, 134, 146, 11,
+            8, 16, 43, 145, 188, 47, 207, 234, 77, 63, 159, 123, 148
         ]
     );
     assert_eq!(
@@ -599,6 +602,9 @@ fn bounded_stroke_work_overflow_is_atomic_and_consumes_no_persistent_ids() {
         plane: ActivePlane::Color,
         color: [1, 2, 3, 255],
         diameter: 256.0,
+        shape: BrushShape::Round,
+        smoothing: 0,
+        start_color: StartColorPredicate::Any,
         auto_erase: false,
         pressure_size: false,
         coordinate_space: CoordinateSpace::Document,
@@ -762,6 +768,9 @@ fn semantic_digest_and_execution_ignore_tile_materialization_order() {
                         [40, 50, 60, 255]
                     },
                     diameter: 1.0,
+                    shape: BrushShape::Round,
+                    smoothing: 0,
+                    start_color: StartColorPredicate::Any,
                     auto_erase: false,
                     pressure_size: false,
                     coordinate_space: CoordinateSpace::Document,
@@ -787,6 +796,9 @@ fn semantic_digest_and_execution_ignore_tile_materialization_order() {
         plane: ActivePlane::Color,
         color: [70, 80, 90, 255],
         diameter: 1.0,
+        shape: BrushShape::Round,
+        smoothing: 0,
+        start_color: StartColorPredicate::Any,
         auto_erase: false,
         pressure_size: false,
         coordinate_space: CoordinateSpace::Document,
@@ -1191,6 +1203,9 @@ fn execute_color_pencil(core: &mut Core, x: f32, y: f32, color: [u8; 4]) {
             plane: ActivePlane::Color,
             color,
             diameter: 1.0,
+            shape: BrushShape::Round,
+            smoothing: 0,
+            start_color: StartColorPredicate::Any,
             auto_erase: false,
             pressure_size: false,
             coordinate_space: CoordinateSpace::Document,

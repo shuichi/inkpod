@@ -216,6 +216,67 @@ pub struct PointF32 {
     pub y: f32,
 }
 
+/// One pressure-bearing sample used by a trace-brush selection.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelectionSample {
+    /// Horizontal document coordinate.
+    pub x: f32,
+    /// Vertical document coordinate.
+    pub y: f32,
+    /// Normalized pressure in the inclusive range `0.0..=1.0`.
+    pub pressure: f32,
+}
+
+/// Closed shape used by trace-brush stamps.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(u32)]
+pub enum TraceBrushShape {
+    /// Circular stamps and round segment joins.
+    #[default]
+    Round = 1,
+    /// Axis-aligned square stamps.
+    Square = 2,
+}
+
+/// Options that determine trace-brush rasterization.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TraceBrushOptions {
+    /// Stamp shape.
+    pub shape: TraceBrushShape,
+    /// Whether sample pressure scales diameter.
+    pub pressure_size: bool,
+    /// Whether `diameter` is expressed in screen pixels.
+    pub screen_size: bool,
+    /// Document-to-screen zoom in positive signed Q16.16 units.
+    pub view_zoom_q16: i64,
+}
+
+impl Default for TraceBrushOptions {
+    fn default() -> Self {
+        Self {
+            shape: TraceBrushShape::Round,
+            pressure_size: false,
+            screen_size: false,
+            view_zoom_q16: 1_i64 << 16,
+        }
+    }
+}
+
+/// Deterministic construction options shared by selection preview and commit.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SelectionConstructionOptions {
+    /// Width/height ratio in unsigned Q16.16, or zero for a free ratio.
+    pub aspect_ratio_q16: u32,
+    /// Whether a rectangle/ellipse gesture grows around its anchor.
+    pub from_center: bool,
+    /// Whether rotation is rounded to the nearest 45 degrees.
+    pub constrain_rotation_45: bool,
+    /// Clockwise rotation as unsigned binary turns (`u32::MAX + 1` is one turn).
+    pub rotation_turns: u32,
+    /// Trace-brush construction options.
+    pub trace: TraceBrushOptions,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 /// Geometry used to build a document-space selection mask.
 pub enum SelectionShape {
@@ -223,6 +284,20 @@ pub enum SelectionShape {
     Rectangle(RectI32),
     /// Ellipse inscribed in a half-open document-pixel rectangle.
     Ellipse(RectI32),
+    /// Rectangle constructed from a document-space drag gesture.
+    RectangleGesture {
+        /// Gesture anchor captured at begin.
+        anchor: PointF32,
+        /// Latest gesture point captured at update/end.
+        current: PointF32,
+    },
+    /// Ellipse constructed from a document-space drag gesture.
+    EllipseGesture {
+        /// Gesture anchor captured at begin.
+        anchor: PointF32,
+        /// Latest gesture point captured at update/end.
+        current: PointF32,
+    },
     /// Closed polygon formed by document-space points.
     Lasso(Vec<PointF32>),
     /// Closed polygonal path formed by document-space points.
@@ -232,6 +307,13 @@ pub enum SelectionShape {
         /// Ordered path samples in document coordinates.
         points: Vec<PointF32>,
         /// Positive brush diameter in document pixels.
+        diameter: f32,
+    },
+    /// Pressure-bearing trace-brush path.
+    TraceBrush {
+        /// Ordered document-space samples.
+        samples: Vec<SelectionSample>,
+        /// Positive base diameter in document or screen pixels as selected by options.
         diameter: f32,
     },
     /// Color-similarity selection seeded at one document pixel.
@@ -567,6 +649,26 @@ pub struct StrokeSample {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+/// Raster footprint used by a pressure-scaled brush dab.
+pub enum BrushShape {
+    /// Include pixels whose centers fall within the canonical circular radius.
+    Round = 1,
+    /// Include the complete canonical square bounding the dab radius.
+    Square = 2,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+/// Predicate applied to immutable pre-stroke pixels before a brush may change them.
+pub enum StartColorPredicate {
+    /// Do not restrict painting by the value under the first sample.
+    Any = 0,
+    /// Require exact equality with the native-depth value under the first sample.
+    ExactNative = 1,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Geometry kind used to bound local effect operations.
 pub enum EffectRegionKind {
     /// A stroked trace region.
@@ -593,6 +695,12 @@ pub struct Stroke {
     pub color: [u8; 4],
     /// Positive diameter in document pixels.
     pub diameter: f32,
+    /// Canonical footprint used by brush and eraser dabs.
+    pub shape: BrushShape,
+    /// Causal fixed-point smoothing strength in the inclusive range `0..=1000`.
+    pub smoothing: u16,
+    /// Immutable native-depth start-value predicate used by the brush.
+    pub start_color: StartColorPredicate,
     /// Whether matching existing color is erased instead of painted.
     pub auto_erase: bool,
     /// Whether pressure scales the diameter.

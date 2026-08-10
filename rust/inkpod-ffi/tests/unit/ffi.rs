@@ -223,7 +223,7 @@ fn persistence_checkpoint_and_compaction_abi_are_bounded_confirmed_and_atomic() 
             inkpod_core_get_persistence_info(core, &mut persistence),
             INKPOD_STATUS_OK
         );
-        assert_eq!(persistence.format_version, 11);
+        assert_eq!(persistence.format_version, 13);
         assert_eq!(persistence.open_strategy, INKPOD_NATIVE_OPEN_NOT_OPENED);
         assert_eq!(persistence.flags, 0);
 
@@ -989,6 +989,11 @@ fn batched_stroke_snapshot_view_history_and_round_trip() {
         samples: &samples[0].sample,
         sample_count: samples.len() as u64,
         sample_stride_bytes: size_of::<ExtendedStrokeSample>() as u64,
+        shape: INKPOD_BRUSH_ROUND,
+        smoothing: 0,
+        reserved_2: 0,
+        start_color: INKPOD_START_COLOR_ANY,
+        reserved_3: 0,
     };
     let mut dispatch = InkpodDispatchResult {
         struct_size: size_of::<InkpodDispatchResult>() as u32,
@@ -996,6 +1001,50 @@ fn batched_stroke_snapshot_view_history_and_round_trip() {
         revision: 0,
         accepted_command_count: 0,
     };
+    let initial_revision = info.document_revision;
+    stroke.tool = INKPOD_TOOL_BRUSH;
+    stroke.plane = INKPOD_PLANE_COLOR;
+    for invalid in [
+        InkpodStrokeInput {
+            shape: u32::MAX,
+            ..stroke
+        },
+        InkpodStrokeInput {
+            smoothing: 1_001,
+            ..stroke
+        },
+        InkpodStrokeInput {
+            start_color: u32::MAX,
+            ..stroke
+        },
+        InkpodStrokeInput {
+            reserved_2: 1,
+            ..stroke
+        },
+        InkpodStrokeInput {
+            reserved_3: 1,
+            ..stroke
+        },
+    ] {
+        dispatch.revision = u64::MAX;
+        dispatch.accepted_command_count = u64::MAX;
+        // SAFETY: The complete record and borrowed sample span are live for the call.
+        assert_eq!(
+            unsafe { inkpod_core_apply_stroke(core, &invalid, &mut dispatch) },
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(dispatch.revision, u64::MAX);
+        assert_eq!(dispatch.accepted_command_count, u64::MAX);
+        assert_eq!(
+            unsafe { inkpod_core_get_document_info(core, &mut info) },
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(info.document_revision, initial_revision);
+    }
+    stroke.tool = INKPOD_TOOL_PENCIL;
+    stroke.plane = INKPOD_PLANE_MAIN_LINE;
+    dispatch.revision = 0;
+    dispatch.accepted_command_count = 0;
     // SAFETY: One call borrows the complete 256-record sample span.
     assert_eq!(
         unsafe { inkpod_core_apply_stroke(core, &stroke, &mut dispatch) },
@@ -1190,6 +1239,11 @@ fn live_stroke_abi_previews_then_commits_once_and_cancel_is_safe() {
         samples: &begin_sample,
         sample_count: 1,
         sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
+        shape: INKPOD_BRUSH_ROUND,
+        smoothing: 0,
+        reserved_2: 0,
+        start_color: INKPOD_START_COLOR_ANY,
+        reserved_3: 0,
     };
     // SAFETY: The first sample and Core remain live for the call.
     assert_eq!(
@@ -1818,6 +1872,11 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
             samples: &sample,
             sample_count: 1,
             sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
+            shape: INKPOD_BRUSH_ROUND,
+            smoothing: 0,
+            reserved_2: 0,
+            start_color: INKPOD_START_COLOR_ANY,
+            reserved_3: 0,
         };
         assert_eq!(
             inkpod_core_apply_stroke(core, &stroke, &mut result),
@@ -1861,6 +1920,10 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
             gap_close: 0,
             seed_x: 0,
             seed_y: 0,
+            interpretation: INKPOD_RANGE_NORMAL,
+            trace_shape: INKPOD_TRACE_ROUND,
+            view_zoom_q16: 1 << 16,
+            ..InkpodSelectionInput::default()
         };
         assert_eq!(
             inkpod_core_apply_selection(core, &selection, &mut result),
@@ -1879,6 +1942,8 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
             reserved: 0,
             x: 0.0,
             y: 0.0,
+            pressure: 1.0,
+            reserved2: 0,
         };
         let invalid_strided_point = InkpodSelectionInput {
             shape: INKPOD_SELECTION_LASSO,
@@ -1889,6 +1954,30 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
         };
         assert_eq!(
             inkpod_core_apply_selection(core, &invalid_strided_point, &mut result),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let invalid_interpretation = InkpodSelectionInput {
+            interpretation: u32::MAX,
+            ..selection
+        };
+        assert_eq!(
+            inkpod_core_apply_selection(core, &invalid_interpretation, &mut result),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let invalid_trace_shape = InkpodSelectionInput {
+            trace_shape: u32::MAX,
+            ..selection
+        };
+        assert_eq!(
+            inkpod_core_apply_selection(core, &invalid_trace_shape, &mut result),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let invalid_construction_flags = InkpodSelectionInput {
+            construction_flags: INKPOD_SELECTION_CONSTRUCTION_FLAGS + 1,
+            ..selection
+        };
+        assert_eq!(
+            inkpod_core_apply_selection(core, &invalid_construction_flags, &mut result),
             INKPOD_STATUS_INVALID_ARGUMENT
         );
         let mut clipboard = ptr::null_mut();
@@ -2622,6 +2711,11 @@ fn vector_commands_snapshot_and_nested_span_validation_are_connected() {
             samples: &sample,
             sample_count: 1,
             sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
+            shape: INKPOD_BRUSH_ROUND,
+            smoothing: 0,
+            reserved_2: 0,
+            start_color: INKPOD_START_COLOR_ANY,
+            reserved_3: 0,
         };
         assert_eq!(
             inkpod_core_apply_stroke(core, &stroke, &mut dispatch),

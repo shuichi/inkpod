@@ -252,7 +252,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M03 — PM-GAP-006: 複数レイヤー／プレーンの一体編集
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: DOC-002、DOC-003、CLIP-001。
 
@@ -312,7 +312,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M04 — PM-GAP-016: Raster選択の内容解釈と作図option
 
-状態: 未着手
+状態: 完了
 
 関連要件: SEL-001、SEL-002、SEL-003。
 
@@ -360,9 +360,9 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M05 — PM-GAP-012: 彩色修正向けbrush option
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: PAINT-001、HIST-001。
+関連要件: PAINT-001、PAINT-004、HIST-001。
 
 仕様決定ゲート:
 

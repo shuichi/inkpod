@@ -1,8 +1,9 @@
 //! Typed document-session editor state and immutable built-in defaults.
 
 use crate::{
-    CoordinateSpace, DEFAULT_DPI_MILLI, FillOperation, InclusionMode, PixelValue,
-    SelectionOperation, StrokeSample, VectorEraseMode, VectorSelectionMode,
+    BrushShape, CoordinateSpace, DEFAULT_DPI_MILLI, FillOperation, InclusionMode, PixelValue,
+    RangeInterpretation, SelectionOperation, StartColorPredicate, StrokeSample, TraceBrushShape,
+    VectorEraseMode, VectorSelectionMode,
 };
 use std::collections::BTreeMap;
 
@@ -50,6 +51,7 @@ impl EditorDefaults {
                 active_tool: EditorTool::Pencil,
                 last_color_consuming_tool: Some(EditorTool::Pencil),
                 tool_styles,
+                brush: EditorBrushOptions::default(),
                 fill: EditorFillOptions::default(),
                 selection: EditorSelectionOptions::default(),
                 vector: EditorVectorOptions::default(),
@@ -180,6 +182,27 @@ pub struct EditorToolStyle {
     pub diameter_q16: i64,
 }
 
+/// Core-owned options captured when a raster brush stroke begins.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EditorBrushOptions {
+    /// Canonical dab footprint.
+    pub shape: BrushShape,
+    /// Causal smoothing strength in the inclusive range `0..=1000`.
+    pub smoothing: u16,
+    /// Immutable native-depth start-value predicate.
+    pub start_color: StartColorPredicate,
+}
+
+impl Default for EditorBrushOptions {
+    fn default() -> Self {
+        Self {
+            shape: BrushShape::Round,
+            smoothing: 0,
+            start_color: StartColorPredicate::Any,
+        }
+    }
+}
+
 /// Core-owned fill command options copied into a procedure when that command starts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EditorFillOptions {
@@ -273,6 +296,22 @@ pub struct EditorSelectionOptions {
     pub gap_close: u8,
     /// Trace diameter in signed Q16.16 document pixels.
     pub diameter_q16: i64,
+    /// Raster-content meaning applied to the geometric candidate.
+    pub interpretation: RangeInterpretation,
+    /// Width/height ratio in unsigned Q16.16, or zero for a free ratio.
+    pub aspect_ratio_q16: u32,
+    /// Whether rectangle/ellipse construction grows around the gesture anchor.
+    pub from_center: bool,
+    /// Whether rotation is rounded to the nearest 45 degrees.
+    pub constrain_rotation_45: bool,
+    /// Clockwise rotation in unsigned binary turns.
+    pub rotation_turns: u32,
+    /// Trace brush stamp shape.
+    pub trace_shape: TraceBrushShape,
+    /// Whether trace pressure scales its diameter.
+    pub trace_pressure_size: bool,
+    /// Whether the trace diameter is held constant in screen pixels.
+    pub trace_screen_size: bool,
 }
 
 impl Default for EditorSelectionOptions {
@@ -283,6 +322,14 @@ impl Default for EditorSelectionOptions {
             tolerance: 0,
             gap_close: 0,
             diameter_q16: 8_i64 << 16,
+            interpretation: RangeInterpretation::Normal,
+            aspect_ratio_q16: 0,
+            from_center: false,
+            constrain_rotation_45: false,
+            rotation_turns: 0,
+            trace_shape: TraceBrushShape::Round,
+            trace_pressure_size: false,
+            trace_screen_size: false,
         }
     }
 }
@@ -346,6 +393,8 @@ pub struct EditorState {
     /// Most recently active tool that consumes a current color.
     pub last_color_consuming_tool: Option<EditorTool>,
     pub(crate) tool_styles: BTreeMap<EditorTool, EditorToolStyle>,
+    /// Raster brush options.
+    pub brush: EditorBrushOptions,
     /// Fill options.
     pub fill: EditorFillOptions,
     /// Selection tool options.
@@ -443,6 +492,8 @@ pub enum EditorStateUpdate {
         /// Positive Q16.16 document-pixel diameter.
         diameter_q16: i64,
     },
+    /// Replaces raster brush shape, smoothing, and start-color options.
+    SetBrushOptions(EditorBrushOptions),
     /// Replaces fill options.
     SetFillOptions(EditorFillOptions),
     /// Replaces selection options.

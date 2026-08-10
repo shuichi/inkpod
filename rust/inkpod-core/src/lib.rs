@@ -74,17 +74,18 @@ pub use cell_creation::{
 };
 pub use core::Core;
 pub use editor::{
-    EditTarget, EditorDefaults, EditorFillOptions, EditorFrameDisposition, EditorRevision,
-    EditorSavepointToken, EditorSelectionOptions, EditorSelectionShape, EditorState,
-    EditorStateDigest, EditorStateInfo, EditorStateUpdate, EditorStrokeInput, EditorTarget,
-    EditorTool, EditorToolStyle, EditorVectorOptions, InitialDocumentSpec, MAX_EDIT_TARGETS,
-    PaletteCursor,
+    EditTarget, EditorBrushOptions, EditorDefaults, EditorFillOptions, EditorFrameDisposition,
+    EditorRevision, EditorSavepointToken, EditorSelectionOptions, EditorSelectionShape,
+    EditorState, EditorStateDigest, EditorStateInfo, EditorStateUpdate, EditorStrokeInput,
+    EditorTarget, EditorTool, EditorToolStyle, EditorVectorOptions, InitialDocumentSpec,
+    MAX_EDIT_TARGETS, PaletteCursor,
 };
 pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
 pub use genesis::{BaseSurface, GenesisInfo};
 pub use history::HistoryEntryInfo;
 pub use inkpod_format::CommonRasterFormat;
+pub use inkpod_image::RasterRangeInterpretation as RangeInterpretation;
 pub use journal::{
     BranchId, HistoryMoveKind, JournalBranchCut, JournalCommit, JournalEntry, JournalEventId,
     JournalHistoryMove, JournalReplayInfo, JournalState,

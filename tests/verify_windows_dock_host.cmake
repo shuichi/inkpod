@@ -111,6 +111,33 @@ foreach(REQUIRED IN ITEMS
     endif()
 endforeach()
 
+string(FIND "${RESOURCE_TEXT}" "IDD_LIGHT_TABLE_PALETTE DIALOGEX" LIGHT_TABLE_BEGIN)
+string(FIND "${RESOURCE_TEXT}" "IDD_SUBPALETTE_PALETTE DIALOGEX" LIGHT_TABLE_END)
+if(LIGHT_TABLE_BEGIN LESS 0 OR LIGHT_TABLE_END LESS 0
+        OR LIGHT_TABLE_END LESS_EQUAL LIGHT_TABLE_BEGIN)
+    message(FATAL_ERROR "Light Table pane resource boundaries are missing")
+endif()
+math(EXPR LIGHT_TABLE_LENGTH "${LIGHT_TABLE_END} - ${LIGHT_TABLE_BEGIN}")
+string(SUBSTRING
+    "${RESOURCE_TEXT}" ${LIGHT_TABLE_BEGIN} ${LIGHT_TABLE_LENGTH} LIGHT_TABLE_RESOURCE)
+if(LIGHT_TABLE_RESOURCE MATCHES "\"閉じる\"[^\r\n]*IDCANCEL")
+    message(FATAL_ERROR
+        "Tabbed Light Table pane retains a pane-local Close button")
+endif()
+
+file(READ "${LIGHT_TABLE_SOURCE}" LIGHT_TABLE_IMPLEMENTATION)
+if(LIGHT_TABLE_IMPLEMENTATION MATCHES "const int close_width")
+    message(FATAL_ERROR
+        "Light Table layout still reserves space for a pane-local Close button")
+endif()
+foreach(REQUIRED IN ITEMS "case IDCANCEL:" "case WM_CLOSE:")
+    string(FIND "${LIGHT_TABLE_IMPLEMENTATION}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Light Table floating/keyboard close route is missing: ${REQUIRED}")
+    endif()
+endforeach()
+
 file(READ "${HOST_SOURCE}" HOST)
 foreach(REQUIRED IN ITEMS
         "WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME"

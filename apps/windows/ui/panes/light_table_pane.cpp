@@ -94,16 +94,7 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         line_height);
     const int list_top = items_label_top + line_height;
 
-    const int close_width = ScalePaneDip(dialog, 76);
-    const int close_top = std::max(list_top, height - margin - row_height);
-    PlacePaneDialogControl(
-        dialog,
-        IDCANCEL,
-        std::max(margin, width - margin - close_width),
-        close_top,
-        close_width,
-        row_height);
-    const int hint_top = std::max(list_top, close_top - gap - line_height);
+    const int hint_top = std::max(list_top, height - margin - line_height);
     PlacePaneDialogControl(
         dialog,
         IDC_LIGHT_TABLE_HINT,

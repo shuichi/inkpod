@@ -6,6 +6,7 @@ use support::*;
 mod animation;
 mod assets_genesis;
 mod batch;
+mod brush_options;
 mod cell_creation;
 mod determinism;
 mod document_selection;
@@ -16,7 +17,7 @@ mod history_stroke;
 mod mixed_order;
 mod multi_target;
 #[path = "native_v9.rs"]
-mod native_v11;
+mod native_v13;
 mod primitive_kernel;
 mod procedure_journal;
 mod state_machine;

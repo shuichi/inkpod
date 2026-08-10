@@ -229,6 +229,12 @@ pub(crate) unsafe fn parse_stroke_input(input: &InkpodStrokeInput) -> Result<Str
             "stroke input contains unsupported flags",
         ));
     }
+    if input.reserved_2 != 0 || input.reserved_3 != 0 {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "stroke input contains nonzero reserved values",
+        ));
+    }
     // SAFETY: Forwarded from this helper's caller contract.
     let samples = unsafe {
         parse_stroke_samples(input.samples, input.sample_count, input.sample_stride_bytes)
@@ -246,11 +252,36 @@ pub(crate) unsafe fn parse_stroke_input(input: &InkpodStrokeInput) -> Result<Str
             input.color_rgba as u8,
         ],
         diameter: input.diameter,
+        shape: parse_brush_shape(input.shape)?,
+        smoothing: input.smoothing,
+        start_color: parse_start_color_predicate(input.start_color)?,
         auto_erase: input.flags & INKPOD_STROKE_FLAG_AUTO_ERASE != 0,
         pressure_size: input.flags & INKPOD_STROKE_FLAG_PRESSURE_SIZE != 0,
         coordinate_space,
         samples,
     })
+}
+
+pub(crate) fn parse_brush_shape(code: u32) -> Result<BrushShape, u32> {
+    match code {
+        INKPOD_BRUSH_ROUND => Ok(BrushShape::Round),
+        INKPOD_BRUSH_SQUARE => Ok(BrushShape::Square),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "brush shape is unknown",
+        )),
+    }
+}
+
+pub(crate) fn parse_start_color_predicate(code: u32) -> Result<StartColorPredicate, u32> {
+    match code {
+        INKPOD_START_COLOR_ANY => Ok(StartColorPredicate::Any),
+        INKPOD_START_COLOR_EXACT_NATIVE => Ok(StartColorPredicate::ExactNative),
+        _ => Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "start-color predicate is unknown",
+        )),
+    }
 }
 
 pub(crate) fn parse_effect_region_kind(shape: u32) -> Result<EffectRegionKind, u32> {

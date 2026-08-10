@@ -205,6 +205,11 @@ pub struct InkpodStrokeInput {
     pub samples: *const InkpodStrokeSample,
     pub sample_count: u64,
     pub sample_stride_bytes: u64,
+    pub shape: u32,
+    pub smoothing: u16,
+    pub reserved_2: u16,
+    pub start_color: u32,
+    pub reserved_3: u32,
 }
 
 #[repr(C)]

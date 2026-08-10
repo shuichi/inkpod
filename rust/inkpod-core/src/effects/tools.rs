@@ -376,6 +376,8 @@ impl Core {
                 &before,
                 plane_id,
                 shape,
+                RangeInterpretation::Normal,
+                SelectionConstructionOptions::default(),
                 revision.get(),
             )?),
             None => None,
@@ -462,7 +464,14 @@ impl Core {
         let mut operation_mask = shape
             .as_ref()
             .map(|shape| {
-                selection_mask_for_shape(&base_document, plane_id, shape, preview_revision.get())
+                selection_mask_for_shape(
+                    &base_document,
+                    plane_id,
+                    shape,
+                    RangeInterpretation::Normal,
+                    SelectionConstructionOptions::default(),
+                    preview_revision.get(),
+                )
             })
             .transpose()?;
         if base_document.selection.allocated_tile_count() != 0 {

@@ -445,6 +445,12 @@ int main() {
         return 13;
     }
 
+    tools.fill_gesture_samples.push_back(InkpodStrokeSample{});
+    TransitionActiveTool(tools, nullptr, kInteractionSelection);
+    if (!tools.fill_gesture_samples.empty()) {
+        return 15;
+    }
+
     tools.active_tool = kInteractionVectorLine;
     tools.vector_gesture_samples.push_back(InkpodStrokeSample{});
     HandleActivePlaneTransition(tools, nullptr, false);

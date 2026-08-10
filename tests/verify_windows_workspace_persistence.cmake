@@ -46,10 +46,14 @@ endforeach()
 
 file(READ "${LAYOUT_SOURCE}" LAYOUT_SOURCE_TEXT)
 foreach(REQUIRED IN ITEMS
-        "kVersion = 5U"
+        "kVersion = 7U"
         "PersistedWorkspaceLayoutV4"
+        "EncodeGroupedPaneOrder"
+        "DecodeGroupedPaneOrder"
         "DecodeVersion3"
         "DecodeVersion4Or5"
+        "value.version != 5U"
+        "migrate_version6_reference_stack"
         "LoadLegacyLayout"
         "FindPaneDescriptorByStableId"
         "kMaximumWorkspaceLayoutRecordBytes"
@@ -130,7 +134,11 @@ foreach(REQUIRED IN ITEMS
         "DecodeWorkspaceLayout"
         "WorkspaceLayoutDecodeResult::Migrated"
         "LegacyWorkspaceV3"
-        "legacy_v4_bytes"
+        "legacy_v5_bytes"
+        "mixed_serialized"
+        "legacy_light_table_tabs"
+        "legacy_reference_split"
+        "legacy_explicit_reference_split"
         "DockPaneType::JobProgress"
         "unknown_pane"
         "missing_monitor"
@@ -145,6 +153,6 @@ foreach(REQUIRED IN ITEMS
 endforeach()
 
 message(STATUS
-    "Verified G9 bounded v5 persistence, v2/v3/v4 migration, named presets, "
+    "Verified G9 bounded v7 persistence, v2/v3/v4/v5/v6 migration, split tab stacks, named presets, "
     "monitor recovery, accessible auxiliary-pane auto-hide integration, "
     "and G10 bounded workspace-window count persistence")

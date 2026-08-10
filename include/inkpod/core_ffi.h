@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v6 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v8 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(6)
+#define INKPOD_ABI_VERSION UINT32_C(8)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -184,7 +184,18 @@ typedef uint32_t InkpodEditorUpdateKind;
 #define INKPOD_EDITOR_UPDATE_VECTOR_OPTIONS UINT32_C(6)
 #define INKPOD_EDITOR_UPDATE_ACTIVE_TARGET UINT32_C(7)
 #define INKPOD_EDITOR_UPDATE_PALETTE_CURSOR UINT32_C(8)
+#define INKPOD_EDITOR_UPDATE_BRUSH_OPTIONS UINT32_C(9)
 #define INKPOD_EDITOR_UPDATE_PALETTE_CURSOR_PRESENT (UINT64_C(1) << 0)
+
+/** @brief brush dab footprint。 */
+typedef uint32_t InkpodBrushShape;
+#define INKPOD_BRUSH_ROUND UINT32_C(1)
+#define INKPOD_BRUSH_SQUARE UINT32_C(2)
+
+/** @brief immutable pre-stroke pixel predicate。 */
+typedef uint32_t InkpodStartColorPredicate;
+#define INKPOD_START_COLOR_ANY UINT32_C(0)
+#define INKPOD_START_COLOR_EXACT_NATIVE UINT32_C(1)
 
 #define INKPOD_EDITOR_MAX_INCLUSION_COLORS UINT32_C(6)
 
@@ -531,6 +542,22 @@ typedef uint32_t InkpodSelectionShape;
 #define INKPOD_SELECTION_POLYLINE UINT32_C(4)
 #define INKPOD_SELECTION_TRACE UINT32_C(5)
 #define INKPOD_SELECTION_WAND UINT32_C(6)
+/** @brief geometric candidate に適用する raster 内容解釈。 */
+typedef uint32_t InkpodRangeInterpretation;
+#define INKPOD_RANGE_NORMAL UINT32_C(1)
+#define INKPOD_RANGE_TIGHT UINT32_C(2)
+#define INKPOD_RANGE_ENCLOSED_INTERIOR UINT32_C(3)
+#define INKPOD_RANGE_DRAWING UINT32_C(4)
+#define INKPOD_RANGE_BOUNDARY UINT32_C(5)
+/** @brief trace brush の stamp 形状。 */
+typedef uint32_t InkpodTraceBrushShape;
+#define INKPOD_TRACE_ROUND UINT32_C(1)
+#define INKPOD_TRACE_SQUARE UINT32_C(2)
+#define INKPOD_SELECTION_FROM_CENTER (UINT64_C(1) << 0)
+#define INKPOD_SELECTION_CONSTRAIN_ROTATION_45 (UINT64_C(1) << 1)
+#define INKPOD_SELECTION_TRACE_PRESSURE_SIZE (UINT64_C(1) << 2)
+#define INKPOD_SELECTION_TRACE_SCREEN_SIZE (UINT64_C(1) << 3)
+#define INKPOD_SELECTION_CONSTRUCTION_FLAGS ((UINT64_C(1) << 4) - UINT64_C(1))
 /** @brief selection mask の new/add/subtract/intersect 演算型。 */
 typedef uint32_t InkpodSelectionOperation;
 #define INKPOD_SELECTION_NEW UINT32_C(1)
@@ -825,6 +852,8 @@ typedef struct InkpodStrokeSample {
 /**
  * @brief stroke の tool/style と初期 sample span を渡す borrowed 入力。
  * `samples` は `sample_count > 0` なら非 NULL かつ各 record の `struct_size` が必要。
+ * `shape` は ROUND/SQUARE、`smoothing` は 0..1000、`start_color` は
+ * ANY/EXACT_NATIVE。reserved fields は 0 とし、Core は call 復帰後に入力を保持しない。
  */
 typedef struct InkpodStrokeInput {
     uint32_t struct_size;
@@ -837,6 +866,11 @@ typedef struct InkpodStrokeInput {
     const InkpodStrokeSample* samples;
     uint64_t sample_count;
     uint64_t sample_stride_bytes;
+    InkpodBrushShape shape;
+    uint16_t smoothing; /**< 0=off、1..1000=Core-owned fixed-point smoothing。 */
+    uint16_t reserved_2;
+    InkpodStartColorPredicate start_color;
+    uint32_t reserved_3;
 } InkpodStrokeInput;
 
 /** @brief live stroke へ追加する caller-owned sample span。呼び出し終了後は保持しない。 */
@@ -1036,7 +1070,7 @@ typedef struct InkpodEditorFillOptions {
     InkpodColorValue inclusion_colors[INKPOD_EDITOR_MAX_INCLUSION_COLORS];
 } InkpodEditorFillOptions;
 
-/** @brief selection tool の shape/operation/tolerance/径をコピーする値 record。 */
+/** @brief selection tool の shape/operation/range/geometry/trace option をコピーする値 record。 */
 typedef struct InkpodEditorSelectionOptions {
     uint32_t struct_size;
     InkpodSelectionShape shape;
@@ -1046,6 +1080,11 @@ typedef struct InkpodEditorSelectionOptions {
     uint16_t gap_close;
     uint32_t reserved2;
     int64_t diameter_q16;
+    InkpodRangeInterpretation interpretation;
+    uint32_t aspect_ratio_q16;
+    uint64_t construction_flags;
+    uint32_t rotation_turns;
+    InkpodTraceBrushShape trace_shape;
 } InkpodEditorSelectionOptions;
 
 /** @brief vector erase/select option をコピーする値 record。 */
@@ -1055,6 +1094,23 @@ typedef struct InkpodEditorVectorOptions {
     InkpodVectorSelectionMode selection_mode;
     uint32_t reserved;
 } InkpodEditorVectorOptions;
+
+/**
+ * @brief Core-owned raster brush options copied by value.
+ *
+ * `shape` is ROUND or SQUARE, `smoothing` is 0..1000, and `start_color` is ANY or
+ * EXACT_NATIVE. Reserved fields must be zero. EXACT_NATIVE includes alpha and compares
+ * the immutable pre-stroke pixel in its native channel depth without requiring connectivity.
+ * Caller storage is borrowed only for the update call and is never retained.
+ */
+typedef struct InkpodEditorBrushOptions {
+    uint32_t struct_size;
+    InkpodBrushShape shape;
+    uint16_t smoothing;
+    uint16_t reserved;
+    InkpodStartColorPredicate start_color;
+    uint32_t reserved2;
+} InkpodEditorBrushOptions;
 
 /**
  * @brief document session に属する Core-owned EditorState の caller-owned snapshot。
@@ -1080,6 +1136,7 @@ typedef struct InkpodEditorStateInfo {
     InkpodEditorFillOptions fill;
     InkpodEditorSelectionOptions selection;
     InkpodEditorVectorOptions vector;
+    InkpodEditorBrushOptions brush;
 } InkpodEditorStateInfo;
 
 /** @brief document 作成前にも取得できる immutable built-in defaults のコピー。 */
@@ -1116,13 +1173,14 @@ typedef struct InkpodEditorStateUpdate {
     InkpodEditorFillOptions fill;
     InkpodEditorSelectionOptions selection;
     InkpodEditorVectorOptions vector;
+    InkpodEditorBrushOptions brush;
 } InkpodEditorStateUpdate;
 
 /**
- * @brief Core-owned EditorStateからtool/color/diameter/targetを開始時にcaptureするstroke入力。
+ * @brief Core-owned EditorStateからtool/color/diameter/target/brush optionsを開始時にcaptureするstroke入力。
  *
  * sample spanは呼出中だけborrowedでCoreが全値をcopyする。`tool == 0` はactive tool、
- * 非0は指定toolのCore-owned styleを選ぶ。callerはcolor/diameter/targetを渡さず、
+ * 非0は指定toolのCore-owned styleを選ぶ。callerはcolor/diameter/target/brush optionsを渡さず、
  * `inkpod_core_editor_stroke_begin`が対象sessionのexact-depth値を一度だけ確定する。
  */
 typedef struct InkpodEditorStrokeInput {
@@ -1888,15 +1946,17 @@ typedef struct InkpodLayerThumbnailBuffer {
     uint64_t required_bytes;
 } InkpodLayerThumbnailBuffer;
 
-/** @brief selection path の document 座標点 record。 */
+/** @brief selection path の document 座標点と正規化 pressure record。 */
 typedef struct InkpodSelectionPoint {
     uint32_t struct_size;
     uint32_t reserved;
     float x;
     float y;
+    float pressure;
+    uint32_t reserved2;
 } InkpodSelectionPoint;
 
-/** @brief selection shape/operation、bounds、point span、wand 条件を渡す borrowed 入力。 */
+/** @brief selection shape/operation、range、geometry、trace、wand 条件を渡す borrowed 入力。 */
 typedef struct InkpodSelectionInput {
     uint32_t struct_size;
     InkpodSelectionShape shape;
@@ -1911,6 +1971,12 @@ typedef struct InkpodSelectionInput {
     uint16_t gap_close;
     uint32_t seed_x;
     uint32_t seed_y;
+    InkpodRangeInterpretation interpretation;
+    uint32_t aspect_ratio_q16;
+    uint64_t construction_flags;
+    uint32_t rotation_turns;
+    InkpodTraceBrushShape trace_shape;
+    int64_t view_zoom_q16;
 } InkpodSelectionInput;
 
 /**

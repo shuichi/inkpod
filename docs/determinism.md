@@ -1,8 +1,8 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 11, replay epoch 8,
+The current runtime replay contract is procedure format 13, replay epoch 10,
 canonical numeric version 1, and the digest of the closed 77-entry primitive
-catalog. Production `.inkpod` is exact-current v11; an optional verified
+catalog. Production `.inkpod` is exact-current v13; an optional verified
 checkpoint preserves this contract and never replaces the authoritative journal.
 
 ## Canonical numeric authority
@@ -18,6 +18,12 @@ Image-result Gaussian weights use a bounded integer Pascal kernel. Levels gamma
 uses fixed log2/exp2 iterations and a frozen Q48 table. Gradient distance,
 airbrush/stamp falloff and spacing, Light Table transforms, floating-selection
 rotation, and the ABI 45-degree constraint use integer/fixed-point algorithms.
+Brush smoothing is also fixed-point: the first Q16.16 document sample is
+unchanged and each later axis is `round_ties_even((previous * s + raw *
+(1001 - s)) / 1001)` for `s` in 0..1000. It is causal, so append batching and
+worker partitioning cannot change the normalized sample sequence. Exact
+start-color restriction compares the immutable pre-stroke native pixel,
+including alpha, and never depends on connectivity or mutable dab order.
 Production Rust source is guarded against platform `exp`, `powf`, trigonometric,
 square-root, hypot, and atan2 calls. Remaining IEEE arithmetic is limited to
 validated polynomial/vector geometry whose operation order is explicit; its
@@ -42,7 +48,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 11 and replay epoch 8. A semantic change that updates
+together with format version 13 and replay epoch 10. A semantic change that updates
 the catalog or any golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 
@@ -55,6 +61,6 @@ same query. Cache revisions and view-only state are deliberately excluded.
 
 `core_workflows` runs `canonical_replay` in both quick and full profiles with
 the same five procedures, six boundary observations, revision/history counters,
-and checksum `20de057cc9cc3ca1`. Wall-clock is diagnostic; the checksum and
+and checksum `f521d658a47051e9`. Wall-clock is diagnostic; the checksum and
 semantic counters are hard failures. The established pan/zoom, dirty-rebuild,
 native wheel, and drawing ranges are unchanged.

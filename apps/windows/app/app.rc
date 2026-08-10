@@ -230,6 +230,7 @@ BEGIN
             MENUITEM "折れ線", IDM_SELECTION_POLYLINE
             MENUITEM "トレース", IDM_SELECTION_TRACE
             MENUITEM "色の杖", IDM_SELECTION_WAND
+            MENUITEM "選択オプション...", IDM_SELECTION_OPTIONS
         END
         POPUP "作成モード"
         BEGIN
@@ -812,7 +813,6 @@ BEGIN
     PUSHBUTTON      "前のセル", IDC_LIGHT_TABLE_PREVIOUS, 66, 306, 62, 20
     PUSHBUTTON      "次のセル", IDC_LIGHT_TABLE_NEXT, 132, 306, 62, 20
     LTEXT           "項目をダブルクリックしても編集画像と交換できます。", IDC_LIGHT_TABLE_HINT, 8, 340, 294, 14, SS_NOPREFIX
-    PUSHBUTTON      "閉じる", IDCANCEL, 238, 358, 64, 20
 END
 
 IDD_SUBPALETTE_PALETTE DIALOGEX 0, 0, 330, 420

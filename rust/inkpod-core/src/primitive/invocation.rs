@@ -186,6 +186,8 @@ pub(crate) enum CanonicalInvocation {
     ApplySelection {
         shape: SelectionShape,
         operation: SelectionOperation,
+        interpretation: RangeInterpretation,
+        options: SelectionConstructionOptions,
         target: EditorTarget,
     },
     InvertSelection,
@@ -344,6 +346,14 @@ fn canonical_selection_shape(shape: SelectionShape) -> Result<SelectionShape, Co
         SelectionShape::Rectangle(_) | SelectionShape::Ellipse(_) | SelectionShape::Wand { .. } => {
             shape
         }
+        SelectionShape::RectangleGesture { anchor, current } => SelectionShape::RectangleGesture {
+            anchor: canonical_point(anchor)?,
+            current: canonical_point(current)?,
+        },
+        SelectionShape::EllipseGesture { anchor, current } => SelectionShape::EllipseGesture {
+            anchor: canonical_point(anchor)?,
+            current: canonical_point(current)?,
+        },
         SelectionShape::Lasso(points) => SelectionShape::Lasso(
             points
                 .into_iter()
@@ -363,7 +373,39 @@ fn canonical_selection_shape(shape: SelectionShape) -> Result<SelectionShape, Co
                 .collect::<Result<_, _>>()?,
             diameter: canonical_f32_q16(diameter)?,
         },
+        SelectionShape::TraceBrush { samples, diameter } => SelectionShape::TraceBrush {
+            samples: samples
+                .into_iter()
+                .map(|sample| {
+                    let pressure = canonical_unit_u16_from_f32(sample.pressure).ok_or(
+                        CoreError::InvalidArgument(
+                            "canonical selection pressure is outside the unit interval",
+                        ),
+                    )?;
+                    Ok(SelectionSample {
+                        x: canonical_f32_q16(sample.x)?,
+                        y: canonical_f32_q16(sample.y)?,
+                        pressure: f32::from(pressure) / f32::from(u16::MAX),
+                    })
+                })
+                .collect::<Result<_, CoreError>>()?,
+            diameter: canonical_f32_q16(diameter)?,
+        },
     })
+}
+
+fn canonical_selection_options(
+    options: SelectionConstructionOptions,
+) -> Result<SelectionConstructionOptions, CoreError> {
+    if options.aspect_ratio_q16 > (4_096_u32 << 16)
+        || options.trace.view_zoom_q16 <= 0
+        || options.trace.view_zoom_q16 > (64_i64 << 16)
+    {
+        return Err(CoreError::InvalidArgument(
+            "selection construction options are outside their bounds",
+        ));
+    }
+    Ok(options)
 }
 
 fn canonical_vector_width_mode(mode: VectorWidthMode) -> Result<VectorWidthMode, CoreError> {
@@ -688,6 +730,8 @@ fn decode_persistent_invocation(
         CanonicalInvocation::ApplySelection {
             shape: reader.selection_shape()?,
             operation: reader.selection_operation()?,
+            interpretation: reader.range_interpretation()?,
+            options: reader.selection_construction_options()?,
             target: reader.editor_target()?,
         }
     } else if primitive_id == PrimitiveId::INVERT_SELECTION {
@@ -924,10 +968,14 @@ impl CanonicalInvocation {
             Self::ApplySelection {
                 shape,
                 operation,
+                interpretation,
+                options,
                 target,
             } => Ok(Self::ApplySelection {
                 shape: canonical_selection_shape(shape)?,
                 operation,
+                interpretation,
+                options: canonical_selection_options(options)?,
                 target,
             }),
             Self::CommitFloating { mut floating } => {
@@ -1398,9 +1446,17 @@ impl CanonicalInvocation {
             Self::ApplySelection {
                 shape,
                 operation,
+                interpretation,
+                options,
                 target,
             } => core
-                .apply_selection_for_editor_target(shape, *operation, *target)
+                .apply_selection_with_options_for_editor_target(
+                    shape,
+                    *operation,
+                    *interpretation,
+                    *options,
+                    *target,
+                )
                 .map(InvocationResult::dispatch),
             Self::InvertSelection => core.invert_selection().map(InvocationResult::dispatch),
             Self::ClearSelection => core.clear_selection().map(InvocationResult::dispatch),
@@ -1789,10 +1845,14 @@ impl CanonicalInvocation {
             Self::ApplySelection {
                 shape,
                 operation,
+                interpretation,
+                options,
                 target,
             } => {
                 writer.selection_shape(shape)?;
                 writer.u32(selection_operation_code(*operation));
+                writer.u32(range_interpretation_code(*interpretation));
+                writer.selection_construction_options(*options);
                 writer.editor_target(*target);
             }
             Self::InvertSelection | Self::ClearSelection => {}
@@ -2813,7 +2873,70 @@ impl<'a> CanonicalReader<'a> {
                 tolerance: self.u16()?,
                 gap_close: self.u8()?,
             },
+            7 => SelectionShape::RectangleGesture {
+                anchor: self.point()?,
+                current: self.point()?,
+            },
+            8 => SelectionShape::EllipseGesture {
+                anchor: self.point()?,
+                current: self.point()?,
+            },
+            9 => {
+                let count = self.count(16)?;
+                let mut samples = Vec::with_capacity(count);
+                for _ in 0..count {
+                    samples.push(SelectionSample {
+                        x: self.q16_f32()?,
+                        y: self.q16_f32()?,
+                        pressure: f32::from(self.u16()?) / f32::from(u16::MAX),
+                    });
+                }
+                SelectionShape::TraceBrush {
+                    samples,
+                    diameter: self.q16_f32()?,
+                }
+            }
             _ => return Err(self.invalid("canonical selection shape is invalid")),
+        })
+    }
+
+    fn range_interpretation(&mut self) -> Result<RangeInterpretation, CoreError> {
+        match self.u32()? {
+            1 => Ok(RangeInterpretation::Normal),
+            2 => Ok(RangeInterpretation::Tight),
+            3 => Ok(RangeInterpretation::EnclosedInterior),
+            4 => Ok(RangeInterpretation::Drawing),
+            5 => Ok(RangeInterpretation::Boundary),
+            _ => Err(self.invalid("canonical raster range interpretation is invalid")),
+        }
+    }
+
+    fn selection_construction_options(
+        &mut self,
+    ) -> Result<SelectionConstructionOptions, CoreError> {
+        let aspect_ratio_q16 = self.u32()?;
+        let from_center = self.boolean()?;
+        let constrain_rotation_45 = self.boolean()?;
+        let rotation_turns = self.u32()?;
+        let shape = match self.u32()? {
+            1 => TraceBrushShape::Round,
+            2 => TraceBrushShape::Square,
+            _ => return Err(self.invalid("canonical trace brush shape is invalid")),
+        };
+        let pressure_size = self.boolean()?;
+        let screen_size = self.boolean()?;
+        let view_zoom_q16 = self.i64()?;
+        Ok(SelectionConstructionOptions {
+            aspect_ratio_q16,
+            from_center,
+            constrain_rotation_45,
+            rotation_turns,
+            trace: TraceBrushOptions {
+                shape,
+                pressure_size,
+                screen_size,
+                view_zoom_q16,
+            },
         })
     }
 
@@ -3586,8 +3709,48 @@ impl CanonicalWriter {
                 self.u16(*tolerance);
                 self.u8(*gap_close);
             }
+            SelectionShape::RectangleGesture { anchor, current } => {
+                self.u32(7);
+                self.point(*anchor)?;
+                self.point(*current)?;
+            }
+            SelectionShape::EllipseGesture { anchor, current } => {
+                self.u32(8);
+                self.point(*anchor)?;
+                self.point(*current)?;
+            }
+            SelectionShape::TraceBrush { samples, diameter } => {
+                self.u32(9);
+                let count = u32::try_from(samples.len()).map_err(|_| {
+                    CoreError::InvalidArgument("canonical selection sample stream is too long")
+                })?;
+                self.u32(count);
+                for sample in samples {
+                    self.q16_f32(sample.x)?;
+                    self.q16_f32(sample.y)?;
+                    let pressure = canonical_unit_u16_from_f32(sample.pressure).ok_or(
+                        CoreError::InvalidArgument("canonical selection pressure is invalid"),
+                    )?;
+                    self.u16(pressure);
+                }
+                self.q16_f32(*diameter)?;
+            }
         }
         Ok(())
+    }
+
+    fn selection_construction_options(&mut self, options: SelectionConstructionOptions) {
+        self.u32(options.aspect_ratio_q16);
+        self.boolean(options.from_center);
+        self.boolean(options.constrain_rotation_45);
+        self.u32(options.rotation_turns);
+        self.u32(match options.trace.shape {
+            TraceBrushShape::Round => 1,
+            TraceBrushShape::Square => 2,
+        });
+        self.boolean(options.trace.pressure_size);
+        self.boolean(options.trace.screen_size);
+        self.i64(options.trace.view_zoom_q16);
     }
 
     fn points(&mut self, points: &[PointF32]) -> Result<(), CoreError> {
@@ -3901,6 +4064,16 @@ const fn selection_operation_code(value: SelectionOperation) -> u32 {
         SelectionOperation::Add => 2,
         SelectionOperation::Subtract => 3,
         SelectionOperation::Intersect => 4,
+    }
+}
+
+const fn range_interpretation_code(value: RangeInterpretation) -> u32 {
+    match value {
+        RangeInterpretation::Normal => 1,
+        RangeInterpretation::Tight => 2,
+        RangeInterpretation::EnclosedInterior => 3,
+        RangeInterpretation::Drawing => 4,
+        RangeInterpretation::Boundary => 5,
     }
 }
 

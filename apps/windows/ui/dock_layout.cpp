@@ -229,8 +229,14 @@ DockFloatingPlacement DefaultFloatingPlacement(DockPaneType type) noexcept {
         descriptor == nullptr ? 320 : descriptor->preferred_height_dip};
 }
 
+constexpr bool IsDefaultLowerInspectorTab(DockPaneType type) noexcept {
+    return type == DockPaneType::Layer || type == DockPaneType::LightTable
+        || type == DockPaneType::Reference;
+}
+
 DockPanePlacement DefaultPlacement(DockPaneType type) noexcept {
     const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+    const bool lower_inspector_tab = IsDefaultLowerInspectorTab(type);
     DockPanePlacement placement{};
     placement.type = type;
     placement.present = descriptor != nullptr;
@@ -240,11 +246,26 @@ DockPanePlacement DefaultPlacement(DockPaneType type) noexcept {
     placement.restore_zone = descriptor == nullptr
         ? DockZone::Left
         : descriptor->default_zone;
-    placement.order = type == DockPaneType::Layer ? 1U : 0U;
+    placement.order = lower_inspector_tab
+        ? 1U
+        : (type == DockPaneType::Tool || type == DockPaneType::ToolOptions
+                   || type == DockPaneType::Color || type == DockPaneType::Sequence
+               ? 0U
+               : static_cast<std::uint8_t>(PaneIndex(type)));
+    placement.stack = lower_inspector_tab
+        ? 1U
+        : (type == DockPaneType::Tool || type == DockPaneType::ToolOptions
+                   || type == DockPaneType::Color || type == DockPaneType::Sequence
+               ? 0U
+               : static_cast<std::uint8_t>(PaneIndex(type)));
+    placement.tab_order = type == DockPaneType::LightTable
+        ? 1U
+        : (type == DockPaneType::Reference ? 2U : 0U);
     placement.split_weight = type == DockPaneType::Color
         ? 320U
-        : (type == DockPaneType::Layer ? 680U : 1000U);
+        : (lower_inspector_tab ? 680U : 1000U);
     placement.floating = DefaultFloatingPlacement(type);
+    placement.active_tab = descriptor != nullptr && descriptor->default_visible;
     return placement;
 }
 
@@ -337,7 +358,63 @@ std::array<const DockPanePlacement*, kDockPaneCount> OrderedPanes(
         output.begin(),
         output.begin() + static_cast<std::ptrdiff_t>(count),
         [](const DockPanePlacement* left, const DockPanePlacement* right) {
-            return left->order < right->order;
+            if (left->order != right->order) {
+                return left->order < right->order;
+            }
+            if (left->stack != right->stack) {
+                return left->stack < right->stack;
+            }
+            if (left->tab_order != right->tab_order) {
+                return left->tab_order < right->tab_order;
+            }
+            return PaneIndex(left->type) < PaneIndex(right->type);
+        });
+    return output;
+}
+
+struct OrderedDockStack {
+    std::uint8_t id{};
+    std::uint8_t order{};
+    std::uint32_t split_weight{1000U};
+    std::array<const DockPanePlacement*, kDockPaneCount> panes{};
+    std::size_t pane_count{};
+    DockPaneType active{DockPaneType::Count};
+};
+
+std::array<OrderedDockStack, kDockPaneCount> OrderedStacks(
+    const DockLayoutModel& model,
+    DockZone zone,
+    std::size_t& count) noexcept {
+    std::array<OrderedDockStack, kDockPaneCount> output{};
+    count = 0U;
+    std::size_t pane_count{};
+    const auto panes = OrderedPanes(model, zone, pane_count);
+    for (std::size_t pane_index = 0U; pane_index < pane_count; ++pane_index) {
+        const DockPanePlacement* pane = panes[pane_index];
+        std::size_t stack_index{};
+        while (stack_index < count && output[stack_index].id != pane->stack) {
+            ++stack_index;
+        }
+        if (stack_index == count) {
+            output[count].id = pane->stack;
+            output[count].order = pane->order;
+            output[count].split_weight = pane->split_weight;
+            ++count;
+        }
+        OrderedDockStack& stack = output[stack_index];
+        stack.panes[stack.pane_count++] = pane;
+        if (pane->active_tab || stack.active == DockPaneType::Count) {
+            stack.active = pane->type;
+        }
+    }
+    std::sort(
+        output.begin(),
+        output.begin() + static_cast<std::ptrdiff_t>(count),
+        [](const OrderedDockStack& left, const OrderedDockStack& right) {
+            if (left.order != right.order) {
+                return left.order < right.order;
+            }
+            return left.id < right.id;
         });
     return output;
 }
@@ -380,27 +457,8 @@ void LayoutZone(
         return;
     }
     std::size_t count{};
-    const auto panes = OrderedPanes(model, zone, count);
+    const auto stacks = OrderedStacks(model, zone, count);
     if (count == 0U) {
-        return;
-    }
-    const DockZoneState* zone_state = model.Zone(zone);
-    if (zone_state != nullptr && zone_state->mode == DockStackMode::Tabs) {
-        DockPaneType active = zone_state->active_tab;
-        const bool active_exists = std::any_of(
-            panes.begin(),
-            panes.begin() + static_cast<std::ptrdiff_t>(count),
-            [active](const DockPanePlacement* pane) {
-                return pane->type == active;
-            });
-        if (!active_exists) {
-            active = panes[0]->type;
-        }
-        for (std::size_t index = 0U; index < count; ++index) {
-            DockPaneGeometry& geometry = output.panes[PaneIndex(panes[index]->type)];
-            geometry.bounds = bounds;
-            geometry.shown = panes[index]->type == active;
-        }
         return;
     }
 
@@ -413,15 +471,23 @@ void LayoutZone(
     int minimum_total{};
     std::uint64_t weight_total{};
     for (std::size_t index = 0U; index < count; ++index) {
-        const PaneDescriptor* descriptor = FindPaneDescriptor(panes[index]->type);
-        minimums[index] = descriptor == nullptr
-            ? 1
-            : ScaleDip(
-                  horizontal ? descriptor->minimum_width_dip
-                             : descriptor->minimum_height_dip,
-                  dpi);
+        minimums[index] = 1;
+        for (std::size_t pane_index = 0U;
+             pane_index < stacks[index].pane_count;
+             ++pane_index) {
+            const PaneDescriptor* descriptor = FindPaneDescriptor(
+                stacks[index].panes[pane_index]->type);
+            if (descriptor != nullptr) {
+                minimums[index] = std::max(
+                    minimums[index],
+                    ScaleDip(
+                        horizontal ? descriptor->minimum_width_dip
+                                   : descriptor->minimum_height_dip,
+                        dpi));
+            }
+        }
         minimum_total += minimums[index];
-        weight_total += panes[index]->split_weight;
+        weight_total += stacks[index].split_weight;
     }
     int remaining = available;
     int remaining_minimum = minimum_total;
@@ -432,7 +498,7 @@ void LayoutZone(
             break;
         }
         const int raw = static_cast<int>(
-            static_cast<std::int64_t>(remaining) * panes[index]->split_weight
+            static_cast<std::int64_t>(remaining) * stacks[index].split_weight
             / static_cast<std::int64_t>(remaining_weight));
         const int minimum = available >= minimum_total ? minimums[index] : 0;
         const int remaining_after_minimum = available >= minimum_total
@@ -442,8 +508,8 @@ void LayoutZone(
         sizes[index] = std::clamp(raw, minimum, maximum);
         remaining -= sizes[index];
         remaining_minimum -= minimums[index];
-        remaining_weight = remaining_weight > panes[index]->split_weight
-            ? remaining_weight - panes[index]->split_weight
+        remaining_weight = remaining_weight > stacks[index].split_weight
+            ? remaining_weight - stacks[index].split_weight
             : 1U;
     }
 
@@ -457,9 +523,15 @@ void LayoutZone(
             pane_bounds.y = cursor;
             pane_bounds.height = sizes[index];
         }
-        DockPaneGeometry& geometry = output.panes[PaneIndex(panes[index]->type)];
-        geometry.bounds = pane_bounds;
-        geometry.shown = HasArea(pane_bounds);
+        for (std::size_t pane_index = 0U;
+             pane_index < stacks[index].pane_count;
+             ++pane_index) {
+            const DockPanePlacement* pane = stacks[index].panes[pane_index];
+            DockPaneGeometry& geometry = output.panes[PaneIndex(pane->type)];
+            geometry.bounds = pane_bounds;
+            geometry.shown = HasArea(pane_bounds)
+                && pane->type == stacks[index].active;
+        }
         cursor += sizes[index];
         if (index + 1U < count) {
             const DockRect splitter_bounds = horizontal
@@ -544,16 +616,28 @@ DockResult DockLayoutModel::MovePane(
         return DockResult::NoOp;
     }
     const DockZone old_zone = pane->zone;
+    const std::size_t destination_stack_count = StackCount(zone);
+    std::array<bool, kDockPaneCount> used_stacks{};
+    for (const DockPanePlacement& candidate : panes_) {
+        if (candidate.type != type && candidate.present && candidate.zone == zone
+            && candidate.stack < used_stacks.size()) {
+            used_stacks[candidate.stack] = true;
+        }
+    }
+    const auto available = std::find(
+        used_stacks.begin(), used_stacks.end(), false);
+    pane->stack = available == used_stacks.end()
+        ? 0U
+        : static_cast<std::uint8_t>(
+              std::distance(used_stacks.begin(), available));
     pane->zone = zone;
     pane->restore_zone = zone;
-    pane->order = static_cast<std::uint8_t>(PaneCount(zone));
+    pane->order = static_cast<std::uint8_t>(destination_stack_count);
+    pane->tab_order = 0U;
     pane->split_weight = 1000U;
+    pane->active_tab = true;
     NormalizeOrders(old_zone);
     NormalizeOrders(zone);
-    DockZoneState* state = Zone(zone);
-    if (state != nullptr && state->active_tab == DockPaneType::Count) {
-        state->active_tab = type;
-    }
     return DockResult::Ok;
 }
 
@@ -566,16 +650,32 @@ DockResult DockLayoutModel::TabPane(
         || !IsDockedZone(destination->zone)) {
         return DockResult::InvalidState;
     }
-    const DockResult moved = MovePane(type, destination->zone);
-    if (moved != DockResult::Ok && moved != DockResult::NoOp) {
-        return moved;
+    const DockZone destination_zone = destination->zone;
+    const std::uint8_t destination_stack = destination->stack;
+    if (source->zone == destination_zone && source->stack == destination_stack) {
+        return SetActiveTab(destination_zone, type);
     }
-    DockZoneState* zone = Zone(destination->zone);
-    if (zone == nullptr) {
-        return DockResult::InvalidState;
+    const DockZone old_zone = source->zone;
+    const std::size_t tab_count = StackPaneCount(
+        destination_zone, destination_stack);
+    source->zone = destination_zone;
+    source->restore_zone = destination_zone;
+    source->stack = destination_stack;
+    source->order = destination->order;
+    source->tab_order = static_cast<std::uint8_t>(tab_count);
+    source->split_weight = destination->split_weight;
+    source->active_tab = true;
+    for (DockPanePlacement& pane : panes_) {
+        if (pane.present && pane.zone == destination_zone
+            && pane.stack == destination_stack && pane.type != type) {
+            pane.active_tab = false;
+        }
     }
-    zone->mode = DockStackMode::Tabs;
-    zone->active_tab = type;
+    NormalizeOrders(old_zone);
+    NormalizeOrders(destination_zone);
+    if (DockZoneState* zone = Zone(destination_zone); zone != nullptr) {
+        zone->active_tab = type;
+    }
     return DockResult::Ok;
 }
 
@@ -651,8 +751,16 @@ DockResult DockLayoutModel::SetPaneAutoHide(
         target = descriptor->default_zone;
     }
     const bool target_was_empty = PaneCount(target) == 0U;
+    const std::size_t existing_tabs = StackPaneCount(target, pane->stack);
     pane->zone = target;
-    pane->order = static_cast<std::uint8_t>(PaneCount(target));
+    if (existing_tabs == 0U) {
+        pane->order = static_cast<std::uint8_t>(StackCount(target));
+        pane->tab_order = 0U;
+        pane->active_tab = true;
+    } else {
+        pane->tab_order = static_cast<std::uint8_t>(existing_tabs);
+        pane->active_tab = false;
+    }
     NormalizeOrders(target);
     if (target_was_empty) {
         static_cast<void>(SetZoneExtentDip(
@@ -678,8 +786,16 @@ DockResult DockLayoutModel::RestorePane(DockPaneType type) noexcept {
         target = descriptor->default_zone;
     }
     const bool target_was_empty = PaneCount(target) == 0U;
+    const std::size_t existing_tabs = StackPaneCount(target, pane->stack);
     pane->zone = target;
-    pane->order = static_cast<std::uint8_t>(PaneCount(target));
+    if (existing_tabs == 0U) {
+        pane->order = static_cast<std::uint8_t>(StackCount(target));
+        pane->tab_order = 0U;
+        pane->active_tab = true;
+    } else {
+        pane->tab_order = static_cast<std::uint8_t>(existing_tabs);
+        pane->active_tab = false;
+    }
     NormalizeOrders(target);
     if (target_was_empty) {
         static_cast<void>(SetZoneExtentDip(
@@ -700,29 +816,52 @@ DockResult DockLayoutModel::ResetPane(DockPaneType type) noexcept {
     *pane = DefaultPlacement(type);
     NormalizeOrders(old_zone);
     NormalizeOrders(pane->zone);
-    DockZoneState* zone = Zone(pane->zone);
-    if (zone != nullptr) {
-        zone->mode = DockStackMode::Split;
-        zone->active_tab = type;
-    }
     return DockResult::Ok;
 }
 
 DockResult DockLayoutModel::SetZoneMode(
     DockZone zone, DockStackMode mode) noexcept {
     DockZoneState* state = Zone(zone);
-    if (state == nullptr || PaneCount(zone) == 0U) {
+    if (state == nullptr || PaneCount(zone) == 0U
+        || mode == DockStackMode::Mixed) {
         return DockResult::InvalidState;
     }
     if (state->mode == mode) {
         return DockResult::NoOp;
     }
-    state->mode = mode;
+    std::size_t count{};
+    const auto ordered = OrderedPanes(*this, zone, count);
     if (mode == DockStackMode::Tabs) {
-        std::size_t count{};
-        const auto panes = OrderedPanes(*this, zone, count);
-        state->active_tab = count == 0U ? DockPaneType::Count : panes[0]->type;
+        const std::uint8_t stack = ordered[0]->stack;
+        const std::uint32_t weight = ordered[0]->split_weight;
+        DockPaneType active = state->active_tab;
+        const bool active_present = std::any_of(
+            ordered.begin(),
+            ordered.begin() + static_cast<std::ptrdiff_t>(count),
+            [active](const DockPanePlacement* pane) {
+                return pane->type == active;
+            });
+        if (!active_present) {
+            active = ordered[0]->type;
+        }
+        for (std::size_t index = 0U; index < count; ++index) {
+            DockPanePlacement* pane = Pane(ordered[index]->type);
+            pane->stack = stack;
+            pane->order = 0U;
+            pane->tab_order = static_cast<std::uint8_t>(index);
+            pane->split_weight = weight;
+            pane->active_tab = pane->type == active;
+        }
+    } else {
+        for (std::size_t index = 0U; index < count; ++index) {
+            DockPanePlacement* pane = Pane(ordered[index]->type);
+            pane->stack = static_cast<std::uint8_t>(index);
+            pane->order = static_cast<std::uint8_t>(index);
+            pane->tab_order = 0U;
+            pane->active_tab = true;
+        }
     }
+    NormalizeOrders(zone);
     return DockResult::Ok;
 }
 
@@ -730,12 +869,18 @@ DockResult DockLayoutModel::SetActiveTab(
     DockZone zone, DockPaneType type) noexcept {
     DockZoneState* state = Zone(zone);
     const DockPanePlacement* pane = Pane(type);
-    if (state == nullptr || state->mode != DockStackMode::Tabs
-        || pane == nullptr || !pane->present || pane->zone != zone) {
+    if (state == nullptr || pane == nullptr || !pane->present
+        || pane->zone != zone || StackPaneCount(zone, pane->stack) < 2U) {
         return DockResult::InvalidState;
     }
-    if (state->active_tab == type) {
+    if (pane->active_tab) {
         return DockResult::NoOp;
+    }
+    for (DockPanePlacement& candidate : panes_) {
+        if (candidate.present && candidate.zone == zone
+            && candidate.stack == pane->stack) {
+            candidate.active_tab = candidate.type == type;
+        }
     }
     state->active_tab = type;
     return DockResult::Ok;
@@ -764,26 +909,31 @@ DockResult DockLayoutModel::AdjustSplitBoundary(
     std::uint8_t boundary,
     int delta_milli) noexcept {
     std::size_t count{};
-    const auto panes = OrderedPanes(*this, zone, count);
+    const auto stacks = OrderedStacks(*this, zone, count);
     if (boundary + 1U >= count || delta_milli == 0) {
         return delta_milli == 0 ? DockResult::NoOp : DockResult::InvalidState;
     }
-    DockPanePlacement* first = Pane(panes[boundary]->type);
-    DockPanePlacement* second = Pane(panes[boundary + 1U]->type);
-    if (first == nullptr || second == nullptr) {
-        return DockResult::InvalidState;
-    }
-    const int combined = static_cast<int>(first->split_weight + second->split_weight);
-    const int requested = static_cast<int>(first->split_weight) + delta_milli;
+    const int combined = static_cast<int>(
+        stacks[boundary].split_weight + stacks[boundary + 1U].split_weight);
+    const int requested = static_cast<int>(stacks[boundary].split_weight)
+        + delta_milli;
     const int adjusted = std::clamp(
         requested,
         static_cast<int>(kMinimumSplitWeight),
         combined - static_cast<int>(kMinimumSplitWeight));
-    if (adjusted == static_cast<int>(first->split_weight)) {
+    if (adjusted == static_cast<int>(stacks[boundary].split_weight)) {
         return DockResult::NoOp;
     }
-    first->split_weight = static_cast<std::uint32_t>(adjusted);
-    second->split_weight = static_cast<std::uint32_t>(combined - adjusted);
+    for (DockPanePlacement& pane : panes_) {
+        if (!pane.present || pane.zone != zone) {
+            continue;
+        }
+        if (pane.stack == stacks[boundary].id) {
+            pane.split_weight = static_cast<std::uint32_t>(adjusted);
+        } else if (pane.stack == stacks[boundary + 1U].id) {
+            pane.split_weight = static_cast<std::uint32_t>(combined - adjusted);
+        }
+    }
     return DockResult::Ok;
 }
 
@@ -837,6 +987,30 @@ std::size_t DockLayoutModel::PaneCount(DockZone zone) const noexcept {
         }));
 }
 
+std::size_t DockLayoutModel::StackCount(DockZone zone) const noexcept {
+    std::array<bool, kDockPaneCount> seen{};
+    std::size_t count{};
+    for (const DockPanePlacement& pane : panes_) {
+        if (!pane.present || pane.zone != zone || pane.stack >= seen.size()
+            || seen[pane.stack]) {
+            continue;
+        }
+        seen[pane.stack] = true;
+        ++count;
+    }
+    return count;
+}
+
+std::size_t DockLayoutModel::StackPaneCount(
+    DockZone zone, std::uint8_t stack) const noexcept {
+    return static_cast<std::size_t>(std::count_if(
+        panes_.begin(),
+        panes_.end(),
+        [zone, stack](const DockPanePlacement& pane) {
+            return pane.present && pane.zone == zone && pane.stack == stack;
+        }));
+}
+
 DockLayoutRecord DockLayoutModel::ToRecord() const noexcept {
     DockLayoutRecord record{};
     record.mirrored = mirrored_ ? 1U : 0U;
@@ -846,7 +1020,7 @@ DockLayoutRecord DockLayoutModel::ToRecord() const noexcept {
 }
 
 bool DockLayoutModel::LoadRecord(const DockLayoutRecord& record) noexcept {
-    if (record.version != 1U || record.pane_count != kDockPaneCount
+    if (record.version != 2U || record.pane_count != kDockPaneCount
         || record.mirrored > 1U) {
         return false;
     }
@@ -858,7 +1032,8 @@ bool DockLayoutModel::LoadRecord(const DockLayoutRecord& record) noexcept {
             || !pane.present || !IsZoneAllowed(pane.type, pane.zone)
             || !IsDockedZone(pane.restore_zone)
             || !IsZoneAllowed(pane.type, pane.restore_zone)
-            || pane.order >= kDockPaneCount
+            || pane.order >= kDockPaneCount || pane.stack >= kDockPaneCount
+            || pane.tab_order >= kDockPaneCount
             || pane.split_weight < kMinimumSplitWeight
             || pane.split_weight > kMaximumSplitWeight
             || !ValidFloatingPlacement(pane.floating, *descriptor)) {
@@ -869,7 +1044,13 @@ bool DockLayoutModel::LoadRecord(const DockLayoutRecord& record) noexcept {
     for (std::size_t index = 0U; index < record.zones.size(); ++index) {
         const DockZone zone = static_cast<DockZone>(index);
         const DockZoneState& state = record.zones[index];
-        std::array<bool, kDockPaneCount> orders{};
+        std::array<bool, kDockPaneCount> stack_seen{};
+        std::array<bool, kDockPaneCount> stack_orders{};
+        std::array<std::uint8_t, kDockPaneCount> stack_order{};
+        std::array<std::uint32_t, kDockPaneCount> stack_weight{};
+        std::array<std::size_t, kDockPaneCount> stack_panes{};
+        std::array<std::size_t, kDockPaneCount> stack_active{};
+        std::array<std::array<bool, kDockPaneCount>, kDockPaneCount> tab_orders{};
         std::size_t pane_count{};
         bool active_tab_belongs_to_zone = state.active_tab == DockPaneType::Count;
         for (const DockPanePlacement& pane : record.panes) {
@@ -877,31 +1058,65 @@ bool DockLayoutModel::LoadRecord(const DockLayoutRecord& record) noexcept {
                 continue;
             }
             ++pane_count;
-            if (pane.order >= orders.size() || orders[pane.order]) {
+            if (!stack_seen[pane.stack]) {
+                if (stack_orders[pane.order]) {
+                    return false;
+                }
+                stack_seen[pane.stack] = true;
+                stack_orders[pane.order] = true;
+                stack_order[pane.stack] = pane.order;
+                stack_weight[pane.stack] = pane.split_weight;
+            } else if (stack_order[pane.stack] != pane.order
+                       || stack_weight[pane.stack] != pane.split_weight) {
                 return false;
             }
-            orders[pane.order] = true;
+            if (tab_orders[pane.stack][pane.tab_order]) {
+                return false;
+            }
+            tab_orders[pane.stack][pane.tab_order] = true;
+            ++stack_panes[pane.stack];
+            stack_active[pane.stack] += pane.active_tab ? 1U : 0U;
             if (pane.type == state.active_tab) {
                 active_tab_belongs_to_zone = true;
             }
         }
-        for (std::size_t order = 0U; order < pane_count; ++order) {
-            if (!orders[order]) {
+        std::size_t stack_count{};
+        bool has_tab_stack{};
+        for (std::size_t stack = 0U; stack < stack_seen.size(); ++stack) {
+            if (!stack_seen[stack]) {
+                continue;
+            }
+            ++stack_count;
+            has_tab_stack = has_tab_stack || stack_panes[stack] > 1U;
+            if (stack_active[stack] != 1U) {
+                return false;
+            }
+            for (std::size_t tab = 0U; tab < stack_panes[stack]; ++tab) {
+                if (!tab_orders[stack][tab]) {
+                    return false;
+                }
+            }
+        }
+        for (std::size_t order = 0U; order < stack_count; ++order) {
+            if (!stack_orders[order]) {
                 return false;
             }
         }
+        const DockStackMode expected_mode = stack_count == 1U && pane_count > 1U
+            ? DockStackMode::Tabs
+            : (stack_count > 1U && has_tab_stack ? DockStackMode::Mixed
+                                                 : DockStackMode::Split);
         const int maximum_extent = zone == DockZone::TopContext
                 || zone == DockZone::Bottom
             ? 480
             : 640;
-        if ((state.mode != DockStackMode::Split && state.mode != DockStackMode::Tabs)
+        if (state.mode != expected_mode
             || state.extent_dip < MinimumZoneExtent(record, zone)
             || state.extent_dip > maximum_extent
             || (state.active_tab != DockPaneType::Count
                 && PaneIndex(state.active_tab) >= kDockPaneCount)
             || !active_tab_belongs_to_zone
-            || (state.mode == DockStackMode::Tabs && pane_count > 0U
-                && state.active_tab == DockPaneType::Count)) {
+            || (pane_count > 0U && state.active_tab == DockPaneType::Count)) {
             return false;
         }
     }
@@ -918,38 +1133,94 @@ void DockLayoutModel::NormalizeOrders(DockZone zone) noexcept {
     if (!IsDockedZone(zone)) {
         return;
     }
-    std::array<DockPanePlacement*, kDockPaneCount> panes{};
-    std::size_t count{};
+    struct MutableStack {
+        std::uint8_t id{};
+        std::uint8_t order{};
+        std::array<DockPanePlacement*, kDockPaneCount> panes{};
+        std::size_t pane_count{};
+    };
+    std::array<MutableStack, kDockPaneCount> stacks{};
+    std::size_t stack_count{};
     for (DockPanePlacement& pane : panes_) {
-        if (pane.present && pane.zone == zone) {
-            panes[count++] = &pane;
+        if (!pane.present || pane.zone != zone) {
+            continue;
         }
+        std::size_t stack_index{};
+        while (stack_index < stack_count && stacks[stack_index].id != pane.stack) {
+            ++stack_index;
+        }
+        if (stack_index == stack_count) {
+            stacks[stack_count].id = pane.stack;
+            stacks[stack_count].order = pane.order;
+            ++stack_count;
+        } else {
+            stacks[stack_index].order = std::min(
+                stacks[stack_index].order, pane.order);
+        }
+        MutableStack& stack = stacks[stack_index];
+        stack.panes[stack.pane_count++] = &pane;
     }
     std::sort(
-        panes.begin(),
-        panes.begin() + static_cast<std::ptrdiff_t>(count),
-        [](const DockPanePlacement* left, const DockPanePlacement* right) {
-            if (left->order != right->order) {
-                return left->order < right->order;
+        stacks.begin(),
+        stacks.begin() + static_cast<std::ptrdiff_t>(stack_count),
+        [](const MutableStack& left, const MutableStack& right) {
+            if (left.order != right.order) {
+                return left.order < right.order;
             }
-            return PaneIndex(left->type) < PaneIndex(right->type);
+            return left.id < right.id;
         });
-    for (std::size_t index = 0U; index < count; ++index) {
-        panes[index]->order = static_cast<std::uint8_t>(index);
-    }
     DockZoneState* state = Zone(zone);
     if (state == nullptr) {
         return;
     }
-    const bool active_present = std::any_of(
-        panes.begin(),
-        panes.begin() + static_cast<std::ptrdiff_t>(count),
-        [state](const DockPanePlacement* pane) {
-            return pane->type == state->active_tab;
-        });
-    if (!active_present) {
-        state->active_tab = count == 0U ? DockPaneType::Count : panes[0]->type;
+    DockPaneType first_active = DockPaneType::Count;
+    bool any_tab_stack{};
+    bool remembered_active{};
+    for (std::size_t stack_index = 0U; stack_index < stack_count; ++stack_index) {
+        MutableStack& stack = stacks[stack_index];
+        std::sort(
+            stack.panes.begin(),
+            stack.panes.begin()
+                + static_cast<std::ptrdiff_t>(stack.pane_count),
+            [](const DockPanePlacement* left, const DockPanePlacement* right) {
+                if (left->tab_order != right->tab_order) {
+                    return left->tab_order < right->tab_order;
+                }
+                return PaneIndex(left->type) < PaneIndex(right->type);
+            });
+        DockPanePlacement* active = nullptr;
+        for (std::size_t tab_index = 0U; tab_index < stack.pane_count; ++tab_index) {
+            DockPanePlacement* pane = stack.panes[tab_index];
+            if (pane->type == state->active_tab) {
+                active = pane;
+            } else if (active == nullptr && pane->active_tab) {
+                active = pane;
+            }
+        }
+        if (active == nullptr) {
+            active = stack.panes[0];
+        }
+        const std::uint32_t weight = stack.panes[0]->split_weight;
+        for (std::size_t tab_index = 0U; tab_index < stack.pane_count; ++tab_index) {
+            DockPanePlacement* pane = stack.panes[tab_index];
+            pane->order = static_cast<std::uint8_t>(stack_index);
+            pane->tab_order = static_cast<std::uint8_t>(tab_index);
+            pane->split_weight = weight;
+            pane->active_tab = pane == active;
+        }
+        any_tab_stack = any_tab_stack || stack.pane_count > 1U;
+        if (first_active == DockPaneType::Count) {
+            first_active = active->type;
+        }
+        remembered_active = remembered_active || active->type == state->active_tab;
     }
+    if (!remembered_active) {
+        state->active_tab = first_active;
+    }
+    state->mode = stack_count == 1U && any_tab_stack
+        ? DockStackMode::Tabs
+        : (stack_count > 1U && any_tab_stack ? DockStackMode::Mixed
+                                             : DockStackMode::Split);
 }
 
 const std::array<PaneDescriptor, kDockPaneCount>& PaneDescriptors() noexcept {

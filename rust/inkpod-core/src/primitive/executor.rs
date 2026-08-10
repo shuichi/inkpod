@@ -10,7 +10,7 @@ use crate::primitive::raster::{apply as apply_raster_stroke, canonicalize as can
 use crate::*;
 
 const METADATA_PRIMITIVE_SCHEMA_VERSION: u16 = 1;
-const RASTER_STROKE_PRIMITIVE_SCHEMA_VERSION: u16 = 2;
+const RASTER_STROKE_PRIMITIVE_SCHEMA_VERSION: u16 = 3;
 const IMPORT_RASTER_ASSET_PRIMITIVE_SCHEMA_VERSION: u16 = 1;
 const MAX_INLINE_PROCEDURE_PAYLOAD_BYTES: usize = 4 * 1_024 * 1_024;
 
@@ -650,11 +650,14 @@ fn encode_stroke_arguments(arguments: &CanonicalStrokeArguments) -> Result<Vec<u
         ));
     }
     let color = color_bytes(arguments.color)?;
-    let mut bytes = Vec::with_capacity(8 + 4 + color.len() + 8 + 2);
+    let mut bytes = Vec::with_capacity(8 + 4 + color.len() + 8 + 4 + 2 + 4 + 2);
     bytes.extend_from_slice(&arguments.target_plane_id.to_le_bytes());
     bytes.extend_from_slice(&arguments.tool_code.to_le_bytes());
     bytes.extend_from_slice(&color);
     bytes.extend_from_slice(&arguments.diameter_q16.to_le_bytes());
+    bytes.extend_from_slice(&arguments.shape_code.to_le_bytes());
+    bytes.extend_from_slice(&arguments.smoothing.to_le_bytes());
+    bytes.extend_from_slice(&arguments.start_color_code.to_le_bytes());
     bytes.push(u8::from(arguments.auto_erase));
     bytes.push(u8::from(arguments.pressure_size));
     Ok(bytes)
@@ -740,7 +743,7 @@ fn decode_stroke_procedure(
     procedure: &CanonicalProcedure,
     assets: &asset::AssetStore,
 ) -> Result<CanonicalizedRequest, CoreError> {
-    if procedure.input_ids.len() != 1 || !matches!(procedure.canonical_arguments.len(), 27 | 31) {
+    if procedure.input_ids.len() != 1 || !matches!(procedure.canonical_arguments.len(), 37 | 41) {
         return Err(CoreError::InvalidArgument(
             "raster stroke procedure has invalid canonical roles or arguments",
         ));
@@ -763,7 +766,10 @@ fn decode_stroke_procedure(
         }
     };
     let diameter_start = 12 + color_length;
-    let flags_start = diameter_start + 8;
+    let shape_start = diameter_start + 8;
+    let smoothing_start = shape_start + 4;
+    let start_color_start = smoothing_start + 2;
+    let flags_start = start_color_start + 4;
     if bytes.len() != flags_start + 2
         || !matches!(bytes[flags_start], 0 | 1)
         || !matches!(bytes[flags_start + 1], 0 | 1)
@@ -774,7 +780,22 @@ fn decode_stroke_procedure(
     }
     let color = decode_color(&bytes[12..diameter_start])?;
     let diameter_q16 = i64::from_le_bytes(
-        bytes[diameter_start..flags_start]
+        bytes[diameter_start..shape_start]
+            .try_into()
+            .expect("fixed-width slice"),
+    );
+    let shape_code = u32::from_le_bytes(
+        bytes[shape_start..smoothing_start]
+            .try_into()
+            .expect("fixed-width slice"),
+    );
+    let smoothing = u16::from_le_bytes(
+        bytes[smoothing_start..start_color_start]
+            .try_into()
+            .expect("fixed-width slice"),
+    );
+    let start_color_code = u32::from_le_bytes(
+        bytes[start_color_start..flags_start]
             .try_into()
             .expect("fixed-width slice"),
     );
@@ -808,6 +829,9 @@ fn decode_stroke_procedure(
         tool_code,
         color,
         diameter_q16,
+        shape_code,
+        smoothing,
+        start_color_code,
         auto_erase: bytes[flags_start] != 0,
         pressure_size: bytes[flags_start + 1] != 0,
         payload,
@@ -895,6 +919,9 @@ mod tests {
                 plane: ActivePlane::Color,
                 color,
                 diameter: 1.0,
+                shape: BrushShape::Round,
+                smoothing: 0,
+                start_color: StartColorPredicate::Any,
                 auto_erase: false,
                 pressure_size: false,
                 coordinate_space: CoordinateSpace::Document,
@@ -1137,6 +1164,9 @@ mod tests {
                     plane: ActivePlane::Color,
                     color: [1, 2, 3, 255],
                     diameter: 1.0,
+                    shape: BrushShape::Round,
+                    smoothing: 0,
+                    start_color: StartColorPredicate::Any,
                     auto_erase: false,
                     pressure_size: false,
                     coordinate_space: CoordinateSpace::Document,
@@ -1218,6 +1248,9 @@ mod tests {
             plane: ActivePlane::Color,
             color: [9, 8, 7, 6],
             diameter: 1.0,
+            shape: BrushShape::Round,
+            smoothing: 0,
+            start_color: StartColorPredicate::Any,
             auto_erase: true,
             pressure_size: false,
             coordinate_space: CoordinateSpace::Document,
@@ -1242,9 +1275,9 @@ mod tests {
             .unwrap();
         let exact_procedure = exact_outcome.procedure().unwrap();
         let exact_bytes = exact_procedure.canonical_arguments();
-        assert_eq!(exact_procedure.primitive_schema_version(), 2);
+        assert_eq!(exact_procedure.primitive_schema_version(), 3);
         assert_eq!(exact_procedure.replay_epoch(), ReplayEpoch::CURRENT);
-        assert_eq!(exact_bytes.len(), 31);
+        assert_eq!(exact_bytes.len(), 41);
         assert_eq!(
             u64::from_le_bytes(exact_bytes[0..8].try_into().unwrap()),
             exact_target
@@ -1262,7 +1295,10 @@ mod tests {
             i64::from_le_bytes(exact_bytes[21..29].try_into().unwrap()),
             65_536
         );
-        assert_eq!(&exact_bytes[29..31], &[1, 0]);
+        assert_eq!(&exact_bytes[29..33], &1_u32.to_le_bytes());
+        assert_eq!(&exact_bytes[33..35], &0_u16.to_le_bytes());
+        assert_eq!(&exact_bytes[35..39], &0_u32.to_le_bytes());
+        assert_eq!(&exact_bytes[39..41], &[1, 0]);
 
         let mut exact_replay = initialized_core(0x18);
         exact_replay.replay_procedure(exact_procedure).unwrap();
@@ -1298,7 +1334,7 @@ mod tests {
             })
             .unwrap();
         let legacy_bytes = legacy_outcome.procedure().unwrap().canonical_arguments();
-        assert_eq!(legacy_bytes.len(), 27);
+        assert_eq!(legacy_bytes.len(), 37);
         assert_eq!(
             u64::from_le_bytes(legacy_bytes[0..8].try_into().unwrap()),
             legacy_document.color_plane_id
@@ -1309,7 +1345,10 @@ mod tests {
             i64::from_le_bytes(legacy_bytes[17..25].try_into().unwrap()),
             65_536
         );
-        assert_eq!(&legacy_bytes[25..27], &[0, 1]);
+        assert_eq!(&legacy_bytes[25..29], &1_u32.to_le_bytes());
+        assert_eq!(&legacy_bytes[29..31], &0_u16.to_le_bytes());
+        assert_eq!(&legacy_bytes[31..35], &0_u32.to_le_bytes());
+        assert_eq!(&legacy_bytes[35..37], &[0, 1]);
     }
 
     #[test]
@@ -1324,7 +1363,7 @@ mod tests {
         );
         assert_eq!(
             current_primitive_schema_version(PrimitiveId::APPLY_RASTER_STROKE),
-            Some(2)
+            Some(3)
         );
 
         let mut main_line = initialized_core(0x20);

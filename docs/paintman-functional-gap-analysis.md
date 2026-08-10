@@ -98,8 +98,8 @@ PDF は全 191 表示ページを確認した。PDF p2～p189 は原則として
 
 1. raster と vector の任意のレイヤー順合成ができず、表示、確認、出力の結果が論理レイヤー順と異なる場合がある。
 2. 新規セルは一枚の pixel 寸法／DPI／初期レイヤー指定に限られ、frame-size、8/16 bit、複数枚作成等の制作条件を開始時に揃えられない。
-3. 複数 edit target の production UI、Core／ABI、型付きコピー／編集は実装済みで、x64 Release の主線＋彩色手動確認を待っている。
-4. raster 選択の閉領域内側、線沿い内側、筆跡形状等の意味指定がなく、色修正や filter の共通 mask を手作業で補う必要がある。
+3. 複数 edit target の production UI、Core／ABI、型付きコピー／編集は実装し、x64 Release の主線＋彩色手動確認まで完了した。
+4. raster 選択の閉領域内側、線沿い内側、筆跡形状、境界、作図 option は実装と自動検証を完了し、x64 Release の表示確認を待っている。
 5. 彩色修正向け brush、範囲限定の色置換、連番 batch authoring が部分実装で、日常修正と多数セルへの反映に余分な操作と設定ミスの余地がある。
 
 `docs/compatibility.md` は `PAINT-*`、`COLOR-*`、`SEL-*`、`BATCH-*`、`VECTOR-*` 等を広い単位で `Verified` とする。しかし個別能力へ分解すると、高度な作図オプション、color-chart preview、raster 選択範囲解釈、バッチの二セル色対抽出／分離先、vector 診断表示などが未接続である。本書は追跡文書の状態を否定材料ではなく出発点として使い、個別のコードとテストを優先した。
@@ -120,14 +120,14 @@ PaintMan の塗りあふれ中断が途中結果を残すか、二セルから�
 | PM-CAP-006 | 連続作業 | thumbnail／番号／前後で切替え、dirty 時に確認または自動保存し、端点を循環できる | 第2・3・14章 PDF表示 pp.19–20,55,175–176（印刷 pp.36–39,108–109,348–351） | `SEQ-001`, `SPEC.md:174–176` | test `acceptance_sequence_gaps_natural_order_thumbnails_subpalette_and_motion`; Windows sequence smoke | Partial | 確認切替は実装。自動保存と端点 loop preference が未実装。PM-GAP-004, PM-GAP-005 |
 | PM-CAP-007 | モーション確認 | FPS、範囲、loop、pause、step でセル系列を確認する | 第7章 PDF表示 pp.111–112（印刷 pp.220–223） | `SEQ-002` | animation contract、FFI、`RunProductionWorkflowSmoke` | Implemented and verified | タイムシート合成は対象外 |
 | PM-CAP-008 | 彩色構造 | 2値／階調／vector の主線、色トレース、彩色、汎用 plane を型付き分離する | 第6章 PDF表示 pp.71–84、第15章 pp.180–187 | `SPEC.md` §5、`DOC-002`, `VECTOR-001` | topology validation; test `acceptance_layer_tree_undo_redo_save_reopen_and_validation`, vector contracts | Implemented and verified | — |
-| PM-CAP-009 | レイヤー／プレーン操作 | create、duplicate、delete、reorder、visibility、editability、opacity、convert、merge を扱う | 第6章 PDF表示 pp.76–82（印刷 pp.150–163） | `DOC-002`, `DOC-003`, `SPEC.md:223–234` | grouped capability/canonical/Undo contracts; FFI spans; Layer pane marker/menu/status and smoke | Implemented, manual pending | x64 Release の複数対象手動確認待ち。PM-GAP-006 |
+| PM-CAP-009 | レイヤー／プレーン操作 | create、duplicate、delete、reorder、visibility、editability、opacity、convert、merge を扱う | 第6章 PDF表示 pp.76–82（印刷 pp.150–163） | `DOC-002`, `DOC-003`, `SPEC.md:223–234` | grouped capability/canonical/Undo contracts; FFI spans; Layer pane marker/menu/status and smoke; x64 Release manual check | Implemented and verified | — |
 | PM-CAP-010 | 合成順 | raster／vector を含む論理 layer 順で合成する | 第6章 PDF表示 pp.76–82、第15章 pp.180–187 | `SPEC.md:221` | `docs/implementation-status.md:42–43` は vector を raster tile 後に合成すると明記 | Partial | 任意の raster/vector interleave が表示へ反映されない。PM-GAP-007 |
 | PM-CAP-011 | 指示／テキスト | 非出力の手書き指示、再編集可能 text、指示線／RGB 値を保持する | 第12章 PDF表示 pp.164–167（印刷 pp.326–333） | `SPEC.md:218–219` | `LayerKind::Text/Annotation` は作成可能だが `operations.rs:1000–1004` で空 content | Specified only | 空 layer kind は能力ではない。PM-GAP-009 |
 | PM-CAP-012 | 消失点 | 複数消失点、補助線角度、色、不透明度を編集する | 第7章 PDF表示 p.95（印刷 pp.188–189） | `SPEC.md:313–317` | `LayerKind::VanishingPoint` は 0 plane／content なし。通常 H/V guide のみ | Specified only | PM-GAP-010 |
 | PM-CAP-013 | 自由描画／消去 | 鉛筆、brush、raster eraser、auto-erase、筆圧、vector 三種消去を扱う | 第7章 PDF表示 pp.88,107（印刷 pp.174–175,212–213） | `PAINT-001`, `VECTOR-002` | `paint_001_brush_eraser_auto_erase_and_pressure_are_transactional`; `RunVectorWorkflowSmoke` | Implemented and verified | 物理 pen 経路の直接検証は §7 参照 |
 | PM-CAP-013A | ストローク入力 | 実ペンタブレットの pressure を stroke 太さへ反映する | 第7章 PDF表示 pp.88,107（印刷 pp.174–175,212–213） | `PAINT-001` | `WM_POINTER` の PT_PEN／pressure route はあるが物理 device E2E なし | Implemented but unverified | 実機検証は §7 |
 | PM-CAP-014 | 図形描画 | 直線、二段階曲線、矩形、楕円、N角形、polyline、fill、入り抜き、制約、snap を扱う | 第7章 PDF表示 pp.89–91（印刷 pp.176–181） | `PAINT-002`, `SPEC.md:281–287` | vector の line/curve/rect/ellipse/polyline と `RunVectorWorkflowSmoke`; raster plane では command を拒否 | Partial | N角形、二段階 curve、filled shape、各制約、raster 直接経路が不足。PM-GAP-011 |
-| PM-CAP-015 | Brush 制御 | 丸／角、太さ、筆圧、補正、開始色と同色領域だけを塗る | 第7章 PDF表示 p.107（印刷 pp.212–213） | `SPEC.md:289–292` | 通常 brush は diameter／pressure 中心。airbrush の hardness／spacing は別機能として実装 | Partial | brush shape、smoothing、開始色限定がない。PM-GAP-012 |
+| PM-CAP-015 | Brush 制御 | 丸／角、太さ、筆圧、補正、開始色と同色領域だけを塗る | 第7章 PDF表示 p.107（印刷 pp.212–213） | `PAINT-004`, `SPEC.md:293–298` | native-depth goldens、canonical replay、ABI v8 negatives、Windows Tool Options/Canvas smoke | Implemented, manual pending | x64 Release の二色境界、丸／角、補正量、Cancel／Undo確認待ち。PM-GAP-012 |
 | PM-CAP-016 | 線修正 | ゴミ取り、線つなぎ、raster/vector 線幅修正を局所／選択へ適用する | 第7章 PDF表示 pp.92–94（印刷 pp.182–187） | `PAINT-003`, `EFFECT-001`, `VECTOR-002` | test `full_effect_gestures_dust_and_alpha_are_atomic`, vector width/connect contracts, Windows smoke | Implemented and verified | — |
 | PM-CAP-017 | 入力 snap | guide／grid の表示設定を実際の直線等の入力点へ適用する | 第4章 PDF表示 pp.58–59（印刷 pp.114–117） | `VIEW-002`, `SPEC.md:251–252` | `Core::snap_document_point` と toggle はあるが production caller は確認できず、smoke は toggle のみ | Partial | PM-GAP-013 |
 | PM-CAP-018 | 色作成／スポイト | RGB/HSV、alpha、8/16 bit、複数 source のスポイトを使う | 第7章 PDF表示 pp.96–98,102（印刷 pp.190–195,202–203） | `COLOR-001`, `COLOR-002` | exact-depth tests、eyedropper FFI、Color pane smoke | Implemented and verified | — |
@@ -137,12 +137,12 @@ PaintMan の塗りあふれ中断が途中結果を残すか、二セルから�
 | PM-CAP-022 | 閉領域一括 | pen／rect／polyline／lasso 内の閉領域を一回で塗る | 第7章 PDF表示 p.105（印刷 pp.208–209） | `FILL-003` | `golden_only_completely_closed_regions_are_filled`; Windows closed-fill route | Implemented and verified | — |
 | PM-CAP-023 | 塗りのばし | 既存色を drag 方向の狭い隙間へ広げる | 第7章 PDF表示 p.106（印刷 pp.210–211） | `FILL-003` | image test `tolerance_detached_closed_extension_and_color_check_semantics`; Core／UI／smoke route | Implemented and verified | — |
 | PM-CAP-024 | 範囲色置換 | pen／rect／polyline／lasso の範囲で対象色を置換し、vector 線全体にも作用する | 第7章 PDF表示 p.106（印刷 pp.210–211） | `SPEC.md:366–369` | batch plane 全体の exact replace はあるが、対話的 scoped tool／API はなし | Specified only | PM-GAP-015 |
-| PM-CAP-025 | 組み線／合成セル | 別セル主線を境界に使い、親セル内容を子セルへ複製する | 第7章 PDF表示 pp.107–109（印刷 pp.212–217） | `FILL-002`, `LT-002`, `CLIP-001` | LT boundary contract; ordered main-line/color and raster/vector grouped clipboard contracts | Implemented, manual pending | 親子という専用 UI は使わず、Light Table 境界＋複数 target copy/paste で合理的同等 |
+| PM-CAP-025 | 組み線／合成セル | 別セル主線を境界に使い、親セル内容を子セルへ複製する | 第7章 PDF表示 pp.107–109（印刷 pp.212–217） | `FILL-002`, `LT-002`, `CLIP-001` | LT boundary contract; ordered main-line/color and raster/vector grouped clipboard contracts; x64 Release manual check | Implemented and verified | 親子という専用 UI は使わず、Light Table 境界＋複数 target copy/paste で合理的同等 |
 | PM-CAP-026 | 基本選択 | rect／ellipse／wand／lasso／polyline／trace と New/Add/Subtract/Intersect を使う | 第9章 PDF表示 pp.122–124（印刷 pp.242–247） | `SEL-001` | `acceptance_selection_authoring_tools`; FFI／Windows gesture smoke | Implemented and verified | — |
-| PM-CAP-027 | Raster 選択解釈 | shrink、閉領域内部、描線形状、境界、比率、中心、回転、trace brush option を使う | 第9章 PDF表示 pp.124–126（印刷 pp.246–251） | `SPEC.md:399–403`, `SEL-001` | `EditorSelectionOptions` は shape／operation／tolerance／gap／diameter まで | Partial | `docs/compatibility.md` の SEL `Verified` より狭い。PM-GAP-016 |
+| PM-CAP-027 | Raster 選択解釈 | shrink、閉領域内部、描線形状、境界、比率、中心、回転、trace brush option を使う | 第9章 PDF表示 pp.124–126（印刷 pp.246–251） | `SEL-004`, `SPEC.md:399–403` | typed image/Core interpreter; canonical selection tests; ABI v8 option negatives; Windows option/preview smoke and x64 Release manual check | Implemented and verified | — |
 | PM-CAP-028 | Vector 選択 | cut／touch／contained／line／whole／intersection／boundary／fill を区別する | 第9章 PDF表示 pp.124–127（印刷 pp.246–253） | `SEL-003` | test `vector_002_all_selection_modes_have_deterministic_ranges_and_ids`; UI route | Implemented and verified | — |
 | PM-CAP-029 | Mask 管理 | 色選択、expand／shrink、selection layer 化、再読込、描画／消去を行う | 第9章 PDF表示 pp.128–130（印刷 pp.254–259） | `SEL-002`, `SEL-003` | selection layer／color operations contract、Windows smoke | Implemented and verified | — |
-| PM-CAP-030 | 型付きコピー | 単一または複数 plane を属性と座標を保って copy する | 第9章 PDF表示 pp.131–132（印刷 pp.260–263） | `CLIP-001`, `SPEC.md:410–418` | grouped RGBA8/16 and vector-topology clipboard contracts; FFI ownership; Windows marker/copy/paste smoke | Implemented, manual pending | x64 Release の主線＋彩色手動確認待ち。PM-GAP-006 |
+| PM-CAP-030 | 型付きコピー | 単一または複数 plane を属性と座標を保って copy する | 第9章 PDF表示 pp.131–132（印刷 pp.260–263） | `CLIP-001`, `SPEC.md:410–418` | grouped RGBA8/16 and vector-topology clipboard contracts; FFI ownership; Windows marker/copy/paste smoke; x64 Release manual check | Implemented and verified | — |
 | PM-CAP-031 | Paste／floating | 互換 plane、選択 plane、新規変換先へ paste し、位置を保って preview／commit／cancel する | 第9章 PDF表示 pp.131–135（印刷 pp.260–269） | `CLIP-001`, `XFORM-002` | clipboard／floating contracts、FFI、`RunDocumentEditingSmoke` | Implemented and verified | Windows private clipboard の型保持は §5 参照 |
 | PM-CAP-031A | Paste 合成 | 階調主線同士は重なりの暗い側を採用する | 第9章 PDF表示 pp.133–134（印刷 pp.264–267） | `SPEC.md:417`, `CLIP-001` | Core は Grayscale8/16 を coverage の濃い側へ合成するが明示 test なし | Implemented but unverified | §7 の比較（暗）検証待ち |
 | PM-CAP-032 | 全体変形 | mirror、90度 rotate、image size、resolution／resample を frame／guide と整合させる | 第10章 PDF表示 pp.137–138（印刷 pp.272–275） | `XFORM-001` | destructive transform contracts、Windows dialog smoke | Implemented and verified | — |
@@ -208,10 +208,10 @@ PaintMan の塗りあふれ中断が途中結果を残すか、二セルから�
 
 ### PM-GAP-006 — 複数レイヤー／プレーンを edit target として扱う
 
-- **不足していた能力:** active selection と複数 edit target を分け、主線／彩色等の複数 plane を一つの copy／操作対象として明示する。M03 で実装し、手動確認待ち。
+- **不足していた能力:** active selection と複数 edit target を分け、主線／彩色等の複数 plane を一つの copy／操作対象として明示する。M03 で実装し、x64 Release の手動確認まで完了した。
 - **PaintMan で可能な作業:** 複数プレーンを属性付きでまとめて copy し、対応する構造へ一体として paste／編集する。
-- **現状で困る状況:** 自動検証済みの production route はあるが、x64 Release で主線＋彩色を別セルへ貼り付け、一回の Undo と active-plane-only brush を利用者が確認するまで完了扱いにしない。
-- **不足層／カバレッジ:** 実装と自動カバレッジは完了。`DOC-002/003` は手動確認待ちの `Experimental`。
+- **現状で困る状況:** 解消済み。主線＋彩色を別セルへ貼り付け、一回の Undo と active-plane-only brush を x64 Release で確認した。
+- **不足層／カバレッジ:** Core／ABI／Windows production route、自動カバレッジ、利用者の手動確認まで完了。`DOC-002/003` は `Verified`。
 - **推奨優先度（仕上げ）:** **3/22（P0）**。互換性評価は **Must**。主線と彩色の組を別々に扱うと位置、型、操作単位を失う可能性がある。
 - **代替手段:** 一 plane ずつ操作する。原子的でなく、貼付先取り違えのリスクがある。
 - **関連要件:** `DOC-002`, `DOC-003`, `CLIP-001`, `SPEC.md:227,410–418`。
@@ -221,26 +221,26 @@ PaintMan の塗りあふれ中断が途中結果を残すか、二セルから�
 
 ### PM-GAP-016 — Raster 選択の内容解釈と作図 option
 
-- **不足している能力:** 描線へ密着する shrink、閉領域内部、描線形状、境界選択、矩形／楕円の aspect／中心／回転、trace brush の形状／筆圧／screen-size を区別する。
+- **不足していた能力:** 描線へ密着する shrink、閉領域内部、描線形状、境界選択、矩形／楕円の aspect／中心／回転、trace brush の形状／筆圧／screen-size を区別する。
 - **PaintMan で可能な作業:** 線画の内側、線そのもの、境界だけ等を目的に合わせて一回で mask 化する。
-- **現状で困る状況:** 基本 shape／algebra と vector 8 mode はあるが、raster の range interpretation と construction options がない。
-- **不足層／カバレッジ:** Core／FFI／frontend 実装不足、`Partial`。
+- **現状で困る状況:** 解消済み。range ごとの mask、回転 ellipse、角 trace brush、Add/Subtract は x64 Release で確認された。
+- **不足層／カバレッジ:** image/Core、canonical procedure、ABI v8、Windows option／preview、v13／epoch-10 永続化、自動カバレッジ、利用者の手動確認まで完了。`SEL-004` は `Verified`。
 - **推奨優先度（仕上げ）:** **4/22（P1）**。互換性評価は **Should**。選択は色修正、filter、copy、transform の共通基盤であり、手作業の mask 修正量が増える。
 - **代替手段:** wand／trace／expand-shrink の組合せと mask 手編集。
-- **関連要件:** `SEL-001`, `SPEC.md:399–403`。
+- **関連要件:** `SEL-004`, `SPEC.md:399–403`。
 - **責務:** Core/image は typed range interpretation。FFI は shape options。Windows frontend は option pane と preview gesture。
 - **依存ギャップ:** PM-GAP-012, PM-GAP-015 の効率改善に使う。
 - **PDF 根拠:** 第9章、PDF表示 pp.124–126（印刷 pp.246–251）。
 
 ### PM-GAP-012 — 彩色修正向け brush option
 
-- **不足している能力:** 丸／角 shape、stroke smoothing、開始 pixel と同色の領域だけを描く mode を通常 brush に持たせる。
+- **不足していた能力:** 丸／角 shape、stroke smoothing、開始 pixel と同色の領域だけを描く mode を通常 brush に持たせる。
 - **PaintMan で可能な作業:** 境界近くの狭い塗り残しを、隣の色へはみ出さず連続 stroke で修正する。
-- **現状で困る状況:** diameter／pressure の brush はあるが、開始色限定と補正がなく、selection 作成や細かい Undo を多用する。
-- **不足層／カバレッジ:** Core／FFI／frontend 実装不足、`Partial`。airbrush effect の hardness／spacing は別能力であり代用しない。
+- **現状で困る状況:** 自動検証済みの production route はあるが、x64 Release で二色境界の狭い塗り残し、丸／角、補正量、Cancel／Undoを利用者が確認するまで完了扱いにしない。
+- **不足層／カバレッジ:** Core/image、canonical procedure v3、ABI v8、Windows Tool Options／Canvas、v13／epoch-10 永続化と自動カバレッジは完了。`PAINT-004` は手動確認待ちの `Experimental`。
 - **推奨優先度（仕上げ）:** **5/22（P1）**。互換性評価は **Should**。彩色修正の速度と誤塗り率へ直接影響する。
 - **代替手段:** selection mask、細い brush、塗りのばし。準備操作が増える。
-- **関連要件:** `PAINT-001`, `SPEC.md:289–292`。
+- **関連要件:** `PAINT-001`, `PAINT-004`, `SPEC.md:293–298`。
 - **責務:** Core/image は shape、smoothing、start-color predicate を canonical stroke に含める。FFI は option。Windows frontend は pane と preview。
 - **依存ギャップ:** PM-GAP-016 の選択詳細は代替 workflow を改善する。
 - **PDF 根拠:** 第7章「ブラシ」、PDF表示 p.107（印刷 pp.212–213）。
@@ -478,15 +478,15 @@ PaintMan の塗りあふれ中断が途中結果を残すか、二セルから�
 | frame/image size、8/16 bit、複数枚の新規セル | `DOC-001` | 一部実装 | PM-GAP-003。現 UI は一枚、pixel幅／高さ、DPI、layer kind |
 | セル切替時自動保存 | `SEQ-001` | 未実装 | `docs/compatibility.md:46` の既知差分、PM-GAP-004 |
 | sequence 端点 loop preference | `SEQ-001` | 未実装 | 同上、PM-GAP-005 |
-| 複数 edit target の presentation | `DOC-002`, `DOC-003` | 実装済み、手動確認待ち | tree-ordered Core/ABI、Layer pane marker、capability menu、status、smoke。PM-GAP-006 |
+| 複数 edit target の presentation | `DOC-002`, `DOC-003` | 実装・手動確認済み | tree-ordered Core/ABI、Layer pane marker、capability menu、status、smoke、x64 Release 確認。PM-GAP-006 |
 | 論理 layer 順の raster/vector 混在合成 | `DOC-002`, `VECTOR-001` | 一部実装 | `docs/implementation-status.md:42–43` の既知差分、PM-GAP-007 |
 | Frame／Text／Annotation／VanishingPoint の内容 | `DOC-002` と §5 | kind のみ | `operations.rs:1000–1004` は空 content。PM-GAP-008～010 |
 | 二段階 curve、N角形、filled shape、line／polyline options、raster 図形 | `PAINT-002` | 一部実装 | basic vector gesture のみ。PM-GAP-011。`PAINT-* Verified` は能力粒度が粗い |
-| 通常 brush の shape／smoothing／開始色限定 | `PAINT-001` | 一部実装 | diameter／pressure はある。PM-GAP-012 |
+| 通常 brush の shape／smoothing／開始色限定 | `PAINT-004` | 実装済み、手動確認待ち | Core/image、canonical v3、ABI v8、Windows pane/Canvas、v13/epoch-10、golden/smoke。PM-GAP-012 |
 | guide／grid snap の実入力適用 | `VIEW-002` | 一部実装 | state と Core helper はあるが production caller なし。PM-GAP-013 |
 | color-chart quantization preview | `COLOR-002` | 一部実装 | generate はあるが preview update なし。PM-GAP-014 |
 | 対話的 scoped color replace | `FILL-003` | 未実装 | batch の plane 全体 replace だけ。PM-GAP-015 |
-| raster 選択の range interpretation／construction options | `SEL-001` | 一部実装 | basic shape／algebra は実装。PM-GAP-016。SEL `Verified` は過大 |
+| raster 選択の range interpretation／construction options | `SEL-004` | 実装・手動確認済み | typed range／geometry／trace、Core/ABI/Windows、v13/epoch-10、golden/smoke。PM-GAP-016 解消済み |
 | floating transform の五点基準 | `XFORM-002` | frontend 未接続 | dialog 値を transform に使わない。PM-GAP-017 |
 | vector AA／中心線／中心線のみ／端点 view overlays | `VIEW-002`, `VECTOR-001` | 未実装 | PM-GAP-018 |
 | LT 前後 N 枚登録／自動 opacity step | `LT-001` | 未実装 | `docs/compatibility.md:44` の既知差分、PM-GAP-019 |

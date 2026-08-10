@@ -63,7 +63,12 @@ public:
             static_cast<float>(document_.width + document_.height) * 4.0F,
             &sample,
             1U,
-            sizeof(InkpodStrokeSample)};
+            sizeof(InkpodStrokeSample),
+            INKPOD_BRUSH_ROUND,
+            0U,
+            0U,
+            INKPOD_START_COLOR_ANY,
+            0U};
         InkpodDispatchResult dispatch{};
         dispatch.struct_size = sizeof(dispatch);
         if (inkpod_core_apply_stroke(core_, &stroke, &dispatch) != INKPOD_STATUS_OK) {
@@ -252,10 +257,16 @@ bool HasBounds(
     inkpod::app::Generation generation,
     double width,
     double height) noexcept {
-    inkpod::renderer::CanvasDocumentBounds bounds{};
-    return SUCCEEDED(host.GetDocumentBounds(canvas, generation, bounds))
-        && bounds.left == 0.0 && bounds.top == 0.0
-        && bounds.right == width && bounds.bottom == height;
+    for (std::uint32_t attempt = 0U; attempt < 100U; ++attempt) {
+        inkpod::renderer::CanvasDocumentBounds bounds{};
+        if (SUCCEEDED(host.GetDocumentBounds(canvas, generation, bounds))
+            && bounds.left == 0.0 && bounds.top == 0.0
+            && bounds.right == width && bounds.bottom == height) {
+            return true;
+        }
+        Sleep(1U);
+    }
+    return false;
 }
 
 int Run() {

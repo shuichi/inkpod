@@ -94,7 +94,7 @@ impl Core {
                 .get(&ViewId::from_raw(view_id))
                 .ok_or(CoreError::InvalidArgument("view ID does not exist"))?
         };
-        let (tool, color, diameter_q16, layer_id, target_plane_id) =
+        let (tool, color, diameter_q16, brush, layer_id, target_plane_id) =
             {
                 let state = &self
                     .editor_session
@@ -119,6 +119,7 @@ impl Core {
                     tool,
                     color,
                     diameter_q16,
+                    state.brush,
                     LayerId::from_raw(target.layer_id),
                     PlaneId::from_raw(target.plane_id),
                 )
@@ -149,6 +150,21 @@ impl Core {
             // request shell and never round-trip through these presentation fields.
             color: [0; 4],
             diameter: (diameter_q16 as f64 / 65_536.0) as f32,
+            shape: if tool == PaintTool::Brush {
+                brush.shape
+            } else {
+                BrushShape::Round
+            },
+            smoothing: if tool == PaintTool::Brush {
+                brush.smoothing
+            } else {
+                0
+            },
+            start_color: if tool == PaintTool::Brush {
+                brush.start_color
+            } else {
+                StartColorPredicate::Any
+            },
             auto_erase: input.auto_erase,
             pressure_size: input.pressure_size,
             coordinate_space: input.coordinate_space,

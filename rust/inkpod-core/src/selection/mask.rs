@@ -29,6 +29,24 @@ pub(crate) fn combine_selection_masks(
     Ok(output)
 }
 
+pub(crate) fn selection_masks_have_same_coverage(
+    left: &TileRaster,
+    right: &TileRaster,
+) -> Result<bool, CoreError> {
+    if left.width() != right.width() || left.height() != right.height() {
+        return Ok(false);
+    }
+    bounded_document_pixels(left.width(), left.height())?;
+    for y in 0..left.height() {
+        for x in 0..left.width() {
+            if left.pixel(x, y)? != right.pixel(x, y)? {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 pub(crate) fn invert_selection_mask(
     source: &TileRaster,
     revision: u64,

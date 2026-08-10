@@ -41,6 +41,7 @@ enum class PaneTargetScope : std::uint8_t {
 enum class DockStackMode : std::uint8_t {
     Split,
     Tabs,
+    Mixed,
 };
 
 enum class DockResult : std::uint8_t {
@@ -55,8 +56,11 @@ enum class DockResult : std::uint8_t {
 inline constexpr std::size_t kDockPaneCount =
     static_cast<std::size_t>(DockPaneType::Count);
 inline constexpr std::size_t kDockedZoneCount = 4U;
+inline constexpr std::uint8_t kInvalidDockStack = UINT8_MAX;
 inline constexpr std::size_t kMaximumDockSplitters =
     kDockedZoneCount + (kDockPaneCount - 1U) * kDockedZoneCount;
+inline constexpr std::size_t kMaximumDockTabStacks =
+    kDockedZoneCount * kDockPaneCount;
 
 constexpr std::uint32_t DockZoneBit(DockZone zone) noexcept {
     return UINT32_C(1) << static_cast<std::uint8_t>(zone);
@@ -95,10 +99,16 @@ struct DockPanePlacement {
     DockPaneType type{};
     DockZone zone{DockZone::Hidden};
     DockZone restore_zone{DockZone::Left};
+    // A dock zone is a one-direction split of stacks. Panes with the same
+    // stack value share one rectangle and appear as tabs within that rectangle.
+    // order is the split-stack order; tab_order is local to the stack.
     std::uint8_t order{};
+    std::uint8_t stack{};
+    std::uint8_t tab_order{};
     std::uint32_t split_weight{1000U};
     DockFloatingPlacement floating{};
     bool present{};
+    bool active_tab{true};
 };
 
 struct DockZoneState {
@@ -108,7 +118,7 @@ struct DockZoneState {
 };
 
 struct DockLayoutRecord {
-    std::uint32_t version{1U};
+    std::uint32_t version{2U};
     std::uint32_t pane_count{static_cast<std::uint32_t>(kDockPaneCount)};
     std::uint32_t mirrored{};
     std::array<DockPanePlacement, kDockPaneCount> panes{};
@@ -191,6 +201,9 @@ public:
     [[nodiscard]] const DockZoneState* Zone(DockZone zone) const noexcept;
     [[nodiscard]] DockZoneState* Zone(DockZone zone) noexcept;
     [[nodiscard]] std::size_t PaneCount(DockZone zone) const noexcept;
+    [[nodiscard]] std::size_t StackCount(DockZone zone) const noexcept;
+    [[nodiscard]] std::size_t StackPaneCount(
+        DockZone zone, std::uint8_t stack) const noexcept;
     [[nodiscard]] DockLayoutRecord ToRecord() const noexcept;
     [[nodiscard]] bool LoadRecord(const DockLayoutRecord& record) noexcept;
 

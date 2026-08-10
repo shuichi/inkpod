@@ -64,9 +64,9 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - 一つの `DocumentSession` は一つの `InkpodCore` handle、file identity、dirty/savepoint、Undo/Redo、autosave/recovery を所有する。同じ document の全 `DocumentView` は session を共有し、zoom、pan、flip、表示補助、表示中 frame 等の view logical state だけを分離する。文書 raster、layer、history、保存先を view ごとに複製しない。
 - tab label は active sequence cell 名、保存 file 名、`無題セル N`、`復元セル`の順で意味のある識別名を使い、dirty は `*`、同じ document の追加 view は `[ビュー N]` で示す。read-only、処理中、error も compact かつ accessible な状態として示す。tab を閉じる操作は view を閉じ、最後の view の場合だけ document close と dirty 確認へ進む。
 - `CanvasSurface` は非表示 tab ではなく可視 `EditorGroup` ごとに一つ持つ。active tab の切替時に同じ surface を別 `DocumentView` へ bind し直し、非表示 tab 数に比例して swap chain や renderer thread を増やさない。
-- dock zone は `TopContext`、`Left`、`Right`、`Bottom`、`Floating`、`Hidden`、`AutoHide` に制限する。各 zone は pane tab stack と一方向の比率分割だけを持ち、任意に再帰する dock tree を作らない。pane descriptor は stable type ID、default/allowed zone、scope、multiplicity、float/autohide 可否、最小寸法を宣言する。
+- dock zone は `TopContext`、`Left`、`Right`、`Bottom`、`Floating`、`Hidden`、`AutoHide` に制限する。各 zone は一方向に並ぶ比率分割枠を持ち、各分割枠は一つ以上の pane からなる tab stack とする。pane の表示、非表示、tab 選択は他の分割枠とその比率を変更せず、任意に再帰する dock tree を作らない。docked tab の内容領域に pane 固有の常設 close button を重複配置せず、非表示化は共通 pane command、floating 時の system close、または keyboard route から行う。pane descriptor は stable type ID、default/allowed zone、scope、multiplicity、float/autohide 可否、最小寸法を宣言する。
 - pane の target scope は `Application`、`FollowActiveView`、`PinnedDocument`、`Job` を区別する。pin 先 document が閉じた場合は別文書へ silent に向けず、追従 mode へ戻して accessible notification を出す。pane action は発行時の target ID と generation を保持する。
-- 現在相当の一 window、一 group 配置を初期 named workspace `彩色` として維持する。96 DPI の初期値は上端に全幅 40 DIP の tool options、body 左端に幅 80 DIP の一列 tool pane、中央に document tabs と Canvas、右端に幅 320 DIP の color/palette/chart および layer/plane inspector、最下段に status bar とする。既存の 32:68、55:45 比率と 4 DIP splitter を初期値に使うが、これは固定所有権ではなく復元可能な layout state である。
+- 現在相当の一 window、一 group 配置を初期 named workspace `彩色` として維持する。96 DPI の初期値は上端に全幅 40 DIP の tool options、body 左端に幅 80 DIP の一列 tool pane、中央に document tabs と Canvas、右端に幅 320 DIP の上段 color/palette/chart と下段 layer/plane・Light Table・subpalette/reference の tab stack、最下段に status bar とする。既存の 32:68、55:45 比率と 4 DIP splitter を初期値に使うが、これは固定所有権ではなく復元可能な layout state である。
 - tool pane の既定 button は 72 x 34 DIP、一列、7 pt の読み取れる一語ラベルとする。正規ラベルは `鉛筆`、`ブラシ`、`消しゴム`、`塗りつぶし`、`閉領域塗り`、`塗り延ばし`、`スポイト`、`直線`、`曲線`、`長方形`、`楕円`、`折れ線`、`線消しゴム`、`グラデーション`、`エアブラシ`、`境界ブラシ`、`ぼかし`、`スタンプ`、`ゴミ取り`、`アルファ階調` とする。意味を推測させる一文字略号へ戻さず、詳細名は tooltip で補う。
 - named workspace と per-window layout は versioned、bounded な application setting として保存し、`.inkpod` 文書へ混ぜない。monitor/DPI 構成が変わった場合は可視 work area へ clamp し、不正 record は拒否して初期配置へ戻す。temporary な narrow-window adaptation で保存済み logical layout を上書きしない。
 - built-in named workspace は `彩色`、`線整理`、`参照・チェック`、`バッチ`、`集中` を提供する。layout record は window、split、dock、pane、floating placement と選択 preset だけを保持し、開いている文書 path や Core 所有状態を含めない。未知 pane は無視し、不足する既知 pane は既定値で補う。
@@ -293,6 +293,8 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 #### ブラシ・エアブラシ
 
 - brush は丸/角、太さ、pressure、stroke smoothing、開始 pixel と同色領域だけへ描く mode を持つ。
+- 開始色限定 brush は stroke 開始時の変更前 raster を immutable base とし、開始 pixel の native-depth 値と完全一致する pixel だけを各 brush footprint 内で描く。Binary／Grayscale 8/16 bit は格納 scalar、RGBA 8/16 bit は straight alpha を含む全 RGBA 成分を比較し、tolerance、表示変換、premultiply 後の値を比較へ使わない。4 近傍の連結性は要求せず、stroke が到達した footprint 内なら非連結の同値 pixel も対象にする。stroke 中に描いた色で predicate を拡張せず、開始 pixel が用紙外なら invalid とする。
+- brush smoothing は off または 0〜1000 の整数強度 `s` とする。Core は document Q16.16 の各 x/y 座標について、最初の sample を変更せず、二点目以降を `round_ties_even((previous_normalized * s + raw * (1001 - s)) / 1001)` で因果的に正規化し、pressure は変更しない。中間積は符号付き固定幅の検査付き演算とし、同じ入力 sample 列は frontend の batch 分割、OS pointer history の通知単位、thread 数にかかわらず同じ canonical sample 列と pixel 結果を返す。
 - airbrush は太さ、硬さ、dab 間隔、fade、pressure->size、pressure->opacity、停止中も時間で濃くなる continuous spray を持つ。
 
 #### ゴミ取り
@@ -364,6 +366,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 #### 閉領域フィル
 
 - pen/rectangle/polyline/lasso で指定した範囲内に含まれる複数の閉領域を一回で塗る。
+- drag で指定する範囲は button release まで文書を変更せず Canvas 上へ preview し、Cancel または tool／view 切替で消去する。
 - `透明部分のみ` と含み塗りを組み合わせられる。
 - 細い毛先や1 pixel領域も、通常 fill の seed click を何度も要求せず処理する。
 
@@ -405,6 +408,9 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - magic wand は connected same-color、color tolerance、gap close を持つ。階調主線では基本色と coverage semantics を使う。
 - trace brush は丸/角、太さ、pressure、screen-size固定を持つ。
 - 範囲解釈は通常、描線に密着する shrink、閉じた内部、描線形状、必要に応じた境界選択を区別する。
+- raster 内容の coverage は Binary／Grayscale 8/16 bit の非ゼロ値、RGBA 8/16 bit の非ゼロ alpha とする。探索は candidate 内の 4 近傍で行い、`描線に密着` は candidate 外周へ到達する未 coverage を除いた coverage と穴、`閉領域内部` は外周へ到達しない未 coverage、`描線形状` は coverage、`境界` は未 coverage または用紙外へ 4 近傍で接する coverage とする。通常は raster 内容を読まず candidate をそのまま使う。
+- rectangle／ellipse の aspect は入力範囲を縮めず不足軸を拡張し、中心指定時は開始点を中心とする。回転値は一周を `u32` 全域で表し、45 度 constraint は最寄りの 1/8 周へ丸める。trace の screen-size 固定は gesture 開始時の view zoom で document 径へ正規化し、pressure は各 sample の径へ適用する。
+- geometry preview と commit は同じ正規化済み option と mask generator を使う。Cancel、invalid、stale、overflow は mask、revision、履歴、journal を変えない。`新規` が非空 mask を空へ置換する場合は一変更、既に同じ空 mask なら no-op とする。
 - vector selection は selection で切断、一部でも触れれば選択、完全包含のみ、線を選択、線全体、交点まで、塗りを囲む線、塗りを選択を区別する。
 - 描画色と同じ/異なる領域の全選択、追加、mask expand/shrink を提供する。
 - selection layer との相互変換、現在 mask への追加/削除、selection layer 自体を通常描画 tool で編集する操作を round-trip 可能にする。
@@ -564,6 +570,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 ### Paint and color
 
 - `PAINT-001`: pencil、brush、eraser、auto erase、pressure
+- `PAINT-004`: brush の丸／角 footprint、決定的 smoothing、immutable native-depth 開始色限定
 - `PAINT-002`: line/curve/shape/polyline と preview commit
 - `PAINT-003`: gap connect、dust removal、line width correction
 - `FILL-001`: connected seed fill、tolerance、selection
@@ -577,6 +584,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `SEL-001`: rect/ellipse/lasso/polyline/trace/wand selection
 - `SEL-002`: new/add/subtract/intersect/invert/expand/shrink/color selection
 - `SEL-003`: selection layer conversion と vector selection modes
+- `SEL-004`: raster range interpretation と rectangle／ellipse／trace construction options
 - `CLIP-001`: typed clipboard、standard clipboard、document coordinate preservation
 - `XFORM-001`: destructive mirror/rotate/size/resolution と非破壊 view transform の分離
 - `XFORM-002`: floating selection move/scale/rotate、preview/commit/cancel

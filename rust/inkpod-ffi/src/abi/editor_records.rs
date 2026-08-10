@@ -29,6 +29,11 @@ pub struct InkpodEditorSelectionOptions {
     pub gap_close: u16,
     pub reserved2: u32,
     pub diameter_q16: i64,
+    pub interpretation: u32,
+    pub aspect_ratio_q16: u32,
+    pub construction_flags: u64,
+    pub rotation_turns: u32,
+    pub trace_shape: u32,
 }
 
 #[repr(C)]
@@ -38,6 +43,17 @@ pub struct InkpodEditorVectorOptions {
     pub erase_mode: u32,
     pub selection_mode: u32,
     pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodEditorBrushOptions {
+    pub struct_size: u32,
+    pub shape: u32,
+    pub smoothing: u16,
+    pub reserved: u16,
+    pub start_color: u32,
+    pub reserved2: u32,
 }
 
 #[repr(C)]
@@ -60,6 +76,7 @@ pub struct InkpodEditorStateInfo {
     pub fill: InkpodEditorFillOptions,
     pub selection: InkpodEditorSelectionOptions,
     pub vector: InkpodEditorVectorOptions,
+    pub brush: InkpodEditorBrushOptions,
 }
 
 #[repr(C)]
@@ -93,6 +110,7 @@ pub struct InkpodEditorStateUpdate {
     pub fill: InkpodEditorFillOptions,
     pub selection: InkpodEditorSelectionOptions,
     pub vector: InkpodEditorVectorOptions,
+    pub brush: InkpodEditorBrushOptions,
 }
 
 #[repr(C)]
