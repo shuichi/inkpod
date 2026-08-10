@@ -65,9 +65,10 @@ pub use asset::{
 pub use batch::{
     BATCH_OPERATION_VERSION, BatchColorPair, BatchFailurePolicy, BatchGraph, BatchInputKind,
     BatchInputSelector, BatchItemOutcome, BatchItemResult, BatchMissingTargetPolicy,
-    BatchOperation, BatchOperationKind, BatchOutputPolicy, BatchOutputSettings, BatchPreview,
-    BatchPreviewItem, BatchRunOptions, BatchRunReport, BatchRunScope, BatchSeed, BatchSeparation,
-    BatchTargetSelector,
+    BatchOperation, BatchOperationKind, BatchOutputPolicy, BatchOutputSettings, BatchPairCandidate,
+    BatchPairExtraction, BatchPairResolution, BatchPreview, BatchPreviewItem, BatchRunOptions,
+    BatchRunReport, BatchRunScope, BatchSeed, BatchSeparation, BatchSeparationDestination,
+    BatchTargetSelector, SequenceSourceIdentity,
 };
 pub use cell_creation::{
     CellCreationOptions, CellCreationPlan, CellCreationPlanItem, CellSizing, FrameAnchor,

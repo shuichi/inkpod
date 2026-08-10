@@ -70,6 +70,9 @@ impl Core {
                         )?))
                         .ok_or(CoreError::InvalidState("batch target plane disappeared"))?;
                     for (seed_index, seed) in seeds.iter().enumerate() {
+                        if !seed.enabled {
+                            continue;
+                        }
                         let actual = plane.raster.pixel(seed.x, seed.y)?;
                         let expected = seed.expected_source.or_else(|| {
                             expected_seed_colors
@@ -112,6 +115,15 @@ impl Core {
         mut progress: impl FnMut(u64, u64) -> bool,
     ) -> Result<BatchRunReport, CoreError> {
         graph.validate()?;
+        if graph
+            .operations
+            .iter()
+            .any(|operation| operation.enabled && operation.configure_each_run)
+        {
+            return Err(CoreError::InvalidState(
+                "batch run contains unresolved per-run configuration",
+            ));
+        }
         if graph.output.preview_before_save && !options.dry_run && !options.preview_confirmed {
             return Err(CoreError::InvalidState(
                 "batch output requires preview confirmation before save",

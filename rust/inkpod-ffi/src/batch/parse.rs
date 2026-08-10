@@ -202,33 +202,13 @@ pub(super) unsafe fn parse_graph_input(
             last_cell: record.last_cell,
         });
     }
-    let operation_count = usize::try_from(input.operation_count).map_err(|_| {
-        fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "batch operation count is not representable",
+    let operations = unsafe {
+        parse_operation_records(
+            input.operations,
+            input.operation_count,
+            input.operation_stride_bytes,
         )
-    })?;
-    if operation_count == 0 || operation_count > MAX_BATCH_OPERATIONS {
-        return Err(fail(
-            INKPOD_STATUS_INVALID_ARGUMENT,
-            "batch operation count is outside bounds",
-        ));
-    }
-    let mut operations = Vec::with_capacity(operation_count);
-    for index in 0..operation_count {
-        let pointer = unsafe {
-            record_at(
-                input.operations,
-                input.operation_count,
-                input.operation_stride_bytes,
-                index,
-                MAX_BATCH_OPERATIONS,
-                "InkpodBatchOperationInput",
-            )
-        }?;
-        // SAFETY: record_at validated this complete record and every nested parser copies spans.
-        operations.push(unsafe { parse_operation(&*pointer) }?);
-    }
+    }?;
     Ok(BatchGraph {
         version: input.version,
         name: name.to_owned(),
@@ -265,6 +245,41 @@ pub(super) unsafe fn parse_graph_input(
             preview_before_save: input.output_flags & INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE != 0,
         },
     })
+}
+
+pub(super) unsafe fn parse_operation_records(
+    records: *const InkpodBatchOperationInput,
+    record_count: u64,
+    record_stride_bytes: u64,
+) -> Result<Vec<BatchOperation>, u32> {
+    let operation_count = usize::try_from(record_count).map_err(|_| {
+        fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "batch operation count is not representable",
+        )
+    })?;
+    if operation_count == 0 || operation_count > MAX_BATCH_OPERATIONS {
+        return Err(fail(
+            INKPOD_STATUS_INVALID_ARGUMENT,
+            "batch operation count is outside bounds",
+        ));
+    }
+    let mut operations = Vec::with_capacity(operation_count);
+    for index in 0..operation_count {
+        let pointer = unsafe {
+            record_at(
+                records,
+                record_count,
+                record_stride_bytes,
+                index,
+                MAX_BATCH_OPERATIONS,
+                "InkpodBatchOperationInput",
+            )
+        }?;
+        // SAFETY: record_at validated this complete record and every nested parser copies spans.
+        operations.push(unsafe { parse_operation(&*pointer) }?);
+    }
+    Ok(operations)
 }
 
 pub(super) unsafe fn parse_operation(
@@ -330,13 +345,17 @@ pub(super) unsafe fn parse_operation(
                 }?;
                 // SAFETY: record_at validated the complete record.
                 let seed = unsafe { &*pointer };
-                if seed.flags & !INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR != 0 || seed.reserved != 0 {
+                if seed.flags & !(INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR | INKPOD_BATCH_SEED_ENABLED)
+                    != 0
+                    || seed.reserved != 0
+                {
                     return Err(fail(
                         INKPOD_STATUS_UNSUPPORTED,
                         "batch fill seed contains unsupported fields",
                     ));
                 }
                 seeds.push(BatchSeed {
+                    enabled: seed.flags & INKPOD_BATCH_SEED_ENABLED != 0,
                     x: seed.x,
                     y: seed.y,
                     color: unsafe { parse_color_value(ptr::addr_of!(seed.fill_color)) }?,
@@ -371,6 +390,21 @@ pub(super) unsafe fn parse_operation(
                     return Err(fail(
                         INKPOD_STATUS_INVALID_ARGUMENT,
                         "batch separation flags are invalid",
+                    ));
+                }
+            },
+            destination: match record.parameters[1] {
+                INKPOD_BATCH_SEPARATION_REPLACE_SOURCE => BatchSeparationDestination::ReplaceSource,
+                INKPOD_BATCH_SEPARATION_SELECTION_MASK => BatchSeparationDestination::SelectionMask,
+                INKPOD_BATCH_SEPARATION_MAIN_LINE_PLANE => {
+                    BatchSeparationDestination::MainLinePlane
+                }
+                INKPOD_BATCH_SEPARATION_COLOR_PLANE => BatchSeparationDestination::ColorPlane,
+                INKPOD_BATCH_SEPARATION_NATIVE_FILE => BatchSeparationDestination::NativeFile,
+                _ => {
+                    return Err(fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "batch separation destination is invalid",
                     ));
                 }
             },

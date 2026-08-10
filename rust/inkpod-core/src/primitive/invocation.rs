@@ -2882,6 +2882,16 @@ impl<'a> CanonicalReader<'a> {
             colors,
             replacement: self.pixel()?,
             invert: self.boolean()?,
+            destination: match self.u32()? {
+                1 => BatchSeparationDestination::ReplaceSource,
+                2 => BatchSeparationDestination::SelectionMask,
+                3 => BatchSeparationDestination::MainLinePlane,
+                4 => BatchSeparationDestination::ColorPlane,
+                5 => BatchSeparationDestination::NativeFile,
+                _ => {
+                    return Err(self.invalid("canonical batch separation destination is invalid"));
+                }
+            },
         })
     }
 
@@ -3713,6 +3723,13 @@ impl CanonicalWriter {
         }
         self.pixel(options.replacement);
         self.boolean(options.invert);
+        self.u32(match options.destination {
+            BatchSeparationDestination::ReplaceSource => 1,
+            BatchSeparationDestination::SelectionMask => 2,
+            BatchSeparationDestination::MainLinePlane => 3,
+            BatchSeparationDestination::ColorPlane => 4,
+            BatchSeparationDestination::NativeFile => 5,
+        });
         Ok(())
     }
 

@@ -94,6 +94,7 @@ pub(super) fn encode_operation_kind(
         BatchOperationKind::ContinuousFill(seeds) => {
             output.u32(seeds.len() as u32);
             for seed in seeds {
+                output.u32(u32::from(seed.enabled));
                 output.u32(seed.x);
                 output.u32(seed.y);
                 output.pixel(seed.color);
@@ -111,6 +112,7 @@ pub(super) fn encode_operation_kind(
             }
             output.pixel(options.replacement);
             output.u32(u32::from(options.invert));
+            output.u32(separation_destination_code(options.destination));
             OP_SEPARATION
         }
         BatchOperationKind::Visibility { visible } => {
@@ -209,6 +211,7 @@ pub(super) fn decode_operation_kind(
             let count = input.count(MAX_BATCH_SEEDS)?;
             let mut seeds = Vec::with_capacity(count);
             for _ in 0..count {
+                let enabled = input.boolean()?;
                 let x = input.u32()?;
                 let y = input.u32()?;
                 let color = input.pixel()?;
@@ -219,6 +222,7 @@ pub(super) fn decode_operation_kind(
                 let has_expected = input.boolean()?;
                 let expected = input.pixel()?;
                 seeds.push(BatchSeed {
+                    enabled,
                     x,
                     y,
                     color,
@@ -239,6 +243,7 @@ pub(super) fn decode_operation_kind(
                 colors,
                 replacement: input.pixel()?,
                 invert: input.boolean()?,
+                destination: parse_separation_destination(input.u32()?)?,
             })
         }
         OP_VISIBILITY => BatchOperationKind::Visibility {
@@ -321,6 +326,29 @@ pub(super) fn decode_operation_kind(
     };
     input.finish()?;
     Ok(kind)
+}
+
+const fn separation_destination_code(destination: BatchSeparationDestination) -> u32 {
+    match destination {
+        BatchSeparationDestination::ReplaceSource => 1,
+        BatchSeparationDestination::SelectionMask => 2,
+        BatchSeparationDestination::MainLinePlane => 3,
+        BatchSeparationDestination::ColorPlane => 4,
+        BatchSeparationDestination::NativeFile => 5,
+    }
+}
+
+fn parse_separation_destination(code: u32) -> Result<BatchSeparationDestination, CoreError> {
+    match code {
+        1 => Ok(BatchSeparationDestination::ReplaceSource),
+        2 => Ok(BatchSeparationDestination::SelectionMask),
+        3 => Ok(BatchSeparationDestination::MainLinePlane),
+        4 => Ok(BatchSeparationDestination::ColorPlane),
+        5 => Ok(BatchSeparationDestination::NativeFile),
+        _ => Err(CoreError::InvalidArgument(
+            "batch separation destination is unknown",
+        )),
+    }
 }
 
 #[cfg(test)]

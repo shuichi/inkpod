@@ -44,7 +44,7 @@ fn graph_preview_dry_run_and_owned_report_cross_ffi() {
     };
     let operation = InkpodBatchOperationInput {
         struct_size: size_of::<InkpodBatchOperationInput>() as u32,
-        version: 1,
+        version: BATCH_OPERATION_VERSION,
         kind: INKPOD_BATCH_OPERATION_COLOR_REPLACE,
         reserved: 0,
         flags: INKPOD_BATCH_OPERATION_ENABLED,
@@ -76,7 +76,7 @@ fn graph_preview_dry_run_and_owned_report_cross_ffi() {
     };
     let graph_input = InkpodBatchGraphInput {
         struct_size: size_of::<InkpodBatchGraphInput>() as u32,
-        version: 1,
+        version: INKPOD_BATCH_GRAPH_VERSION,
         feature_flags: INKPOD_FEATURE_NONE,
         name_utf8: name.as_ptr(),
         name_bytes: name.len() as u64,
@@ -116,6 +116,61 @@ fn graph_preview_dry_run_and_owned_report_cross_ffi() {
         INKPOD_STATUS_OK
     );
     assert_eq!((info.input_count, info.operation_count), (1, 1));
+    let mut operation_info = InkpodBatchOperationInfo {
+        struct_size: size_of::<InkpodBatchOperationInfo>() as u32,
+        ..InkpodBatchOperationInfo::default()
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_operation(graph, 0, &mut operation_info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(operation_info.kind, INKPOD_BATCH_OPERATION_COLOR_REPLACE);
+    assert_eq!(operation_info.color_pair_count, 1);
+    let mut queried_pair = InkpodBatchColorPairInput {
+        struct_size: size_of::<InkpodBatchColorPairInput>() as u32,
+        enabled: 0,
+        reserved: u64::MAX,
+        old_color: color([0, 0, 0, 0]),
+        new_color: color([0, 0, 0, 0]),
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_operation_color_pair(graph, 0, 0, &mut queried_pair) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(queried_pair.enabled, 1);
+    assert_eq!(queried_pair.new_color.red, 255);
+
+    let unresolved_operation = InkpodBatchOperationInput {
+        flags: INKPOD_BATCH_OPERATION_ENABLED | INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN,
+        ..operation
+    };
+    let mut run_graph = ptr::null_mut();
+    assert_eq!(
+        unsafe {
+            inkpod_batch_graph_clone_with_operations(
+                graph,
+                &unresolved_operation,
+                1,
+                size_of::<InkpodBatchOperationInput>() as u64,
+                &mut run_graph,
+            )
+        },
+        INKPOD_STATUS_INVALID_STATE
+    );
+    assert!(run_graph.is_null());
+    assert_eq!(
+        unsafe {
+            inkpod_batch_graph_clone_with_operations(
+                graph,
+                &operation,
+                1,
+                size_of::<InkpodBatchOperationInput>() as u64,
+                &mut run_graph,
+            )
+        },
+        INKPOD_STATUS_OK
+    );
+    assert!(!run_graph.is_null());
 
     let mut core = InkpodCore {
         owner_thread: thread::current().id(),
@@ -244,10 +299,170 @@ fn graph_preview_dry_run_and_owned_report_cross_ffi() {
         INKPOD_STATUS_OK
     );
     assert_eq!(
+        unsafe { inkpod_batch_graph_release(&mut run_graph) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
         unsafe { inkpod_batch_graph_release(&mut graph) },
         INKPOD_STATUS_OK
     );
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn graph_operation_queries_restore_seed_separation_and_curve_rows() {
+    let graph = InkpodBatchGraph {
+        graph: BatchGraph {
+            version: INKPOD_BATCH_GRAPH_VERSION,
+            name: "query-rows".to_owned(),
+            inputs: vec![BatchInputSelector::current_sequence()],
+            operations: vec![
+                BatchOperation {
+                    version: BATCH_OPERATION_VERSION,
+                    enabled: true,
+                    configure_each_run: true,
+                    target: Some(BatchTargetSelector::color_plane()),
+                    kind: BatchOperationKind::ContinuousFill(vec![BatchSeed {
+                        enabled: false,
+                        x: 7,
+                        y: 9,
+                        color: PixelValue::Rgba([1, 2, 3, 255]),
+                        tolerance: 4,
+                        gap_close: 2,
+                        expected_source: Some(PixelValue::Rgba([9, 8, 7, 255])),
+                    }]),
+                },
+                BatchOperation {
+                    version: BATCH_OPERATION_VERSION,
+                    enabled: true,
+                    configure_each_run: false,
+                    target: Some(BatchTargetSelector::color_plane()),
+                    kind: BatchOperationKind::Separation(BatchSeparation {
+                        colors: vec![
+                            PixelValue::Rgba([10, 20, 30, 255]),
+                            PixelValue::Rgba([40, 50, 60, 128]),
+                        ],
+                        replacement: PixelValue::Rgba([70, 80, 90, 255]),
+                        invert: true,
+                        destination: BatchSeparationDestination::ColorPlane,
+                    }),
+                },
+                BatchOperation {
+                    version: BATCH_OPERATION_VERSION,
+                    enabled: true,
+                    configure_each_run: false,
+                    target: Some(BatchTargetSelector::color_plane()),
+                    kind: BatchOperationKind::Filter(Filter::ToneCurve {
+                        channel: Channel::Blue,
+                        interpolation: CurveInterpolation::BSpline,
+                        points: vec![
+                            CurvePoint {
+                                input: 1,
+                                output: 2,
+                            },
+                            CurvePoint {
+                                input: 3,
+                                output: 4,
+                            },
+                        ],
+                    }),
+                },
+            ],
+            output: BatchOutputSettings::default(),
+        },
+    };
+
+    let mut info = InkpodBatchOperationInfo {
+        struct_size: size_of::<InkpodBatchOperationInfo>() as u32,
+        ..InkpodBatchOperationInfo::default()
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_operation(&graph, 0, &mut info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(info.kind, INKPOD_BATCH_OPERATION_CONTINUOUS_FILL);
+    assert_eq!(info.seed_count, 1);
+    assert_ne!(info.flags & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN, 0);
+    let mut seed = InkpodBatchSeedInput {
+        struct_size: size_of::<InkpodBatchSeedInput>() as u32,
+        flags: 0,
+        x: 0,
+        y: 0,
+        tolerance: 0,
+        gap_close: 0,
+        reserved: u64::MAX,
+        fill_color: color([0, 0, 0, 0]),
+        expected_color: color([0, 0, 0, 0]),
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_operation_seed(&graph, 0, 0, &mut seed) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
+        (seed.x, seed.y, seed.tolerance, seed.gap_close),
+        (7, 9, 4, 2)
+    );
+    assert_eq!(seed.flags, INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR);
+    assert_eq!(seed.expected_color.red, 9);
+
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_operation(&graph, 1, &mut info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(info.color_count, 2);
+    assert_eq!(info.parameters[1], INKPOD_BATCH_SEPARATION_COLOR_PLANE);
+    let mut separated_color = color([0, 0, 0, 0]);
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_operation_color(&graph, 1, 1, &mut separated_color) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
+        (
+            separated_color.red,
+            separated_color.green,
+            separated_color.blue,
+            separated_color.alpha,
+        ),
+        (40, 50, 60, 128)
+    );
+
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_operation(&graph, 2, &mut info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(info.filter_kind, INKPOD_FILTER_TONE_CURVE);
+    assert_eq!(info.filter_channel, INKPOD_FILTER_CHANNEL_BLUE);
+    assert_eq!(info.filter_interpolation, INKPOD_CURVE_BSPLINE);
+    assert_eq!(info.curve_point_count, 2);
+    let mut point = InkpodCurvePoint {
+        struct_size: size_of::<InkpodCurvePoint>() as u32,
+        reserved: u32::MAX,
+        input: 0,
+        output: 0,
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_graph_get_operation_curve_point(&graph, 2, 1, &mut point) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!((point.input, point.output), (3, 4));
+
+    #[repr(C, align(8))]
+    struct ShortInfo {
+        struct_size: u32,
+    }
+    let mut short = ShortInfo {
+        struct_size: size_of::<ShortInfo>() as u32,
+    };
+    assert_eq!(
+        unsafe {
+            inkpod_batch_graph_get_operation(
+                &graph,
+                0,
+                (&raw mut short).cast::<InkpodBatchOperationInfo>(),
+            )
+        },
+        INKPOD_STATUS_INCOMPATIBLE_ABI
+    );
 }
 
 #[test]
@@ -327,7 +542,7 @@ fn ffi_rejects_short_graph_and_cancelled_task_is_idempotent() {
     };
     let filter_operation = InkpodBatchOperationInput {
         struct_size: size_of::<InkpodBatchOperationInput>() as u32,
-        version: 1,
+        version: BATCH_OPERATION_VERSION,
         kind: INKPOD_BATCH_OPERATION_FILTER,
         reserved: 0,
         flags: INKPOD_BATCH_OPERATION_ENABLED,
@@ -375,6 +590,112 @@ fn ffi_rejects_short_graph_and_cancelled_task_is_idempotent() {
     );
     assert_eq!(
         unsafe { inkpod_batch_task_release(&mut task) },
+        INKPOD_STATUS_OK
+    );
+}
+
+#[test]
+fn owned_pair_preview_reports_ambiguity_and_rejects_short_records() {
+    let source = |name: &str, uuid: u128, generation: u64, pixels: Vec<u8>| {
+        let mut cell = SequenceCellSource::from_rgba_bytes(
+            name,
+            uuid,
+            RgbaRasterBytes {
+                width: 2,
+                height: 1,
+                pixel_format: PixelFormat::StraightRgba8,
+                dpi_x_milli: None,
+                dpi_y_milli: None,
+                pixels,
+            },
+        )
+        .unwrap();
+        cell.source_generation = generation;
+        cell
+    };
+    let mut core = InkpodCore {
+        owner_thread: thread::current().id(),
+        core: Core::new(),
+        objects: crate::v3::ObjectRegistry::new().expect("test Core generation"),
+    };
+    core.core
+        .set_sequence(vec![
+            source("A001", 0x101, 3, vec![10, 20, 30, 40, 10, 20, 30, 40]),
+            source("A002", 0x202, 4, vec![1, 2, 3, 255, 4, 5, 6, 255]),
+        ])
+        .unwrap();
+    let old_identity = InkpodSequenceSourceIdentity {
+        struct_size: size_of::<InkpodSequenceSourceIdentity>() as u32,
+        reserved: 0,
+        document_uuid_high: 0,
+        document_uuid_low: 0x101,
+        source_generation: 3,
+    };
+    let new_identity = InkpodSequenceSourceIdentity {
+        struct_size: size_of::<InkpodSequenceSourceIdentity>() as u32,
+        reserved: 0,
+        document_uuid_high: 0,
+        document_uuid_low: 0x202,
+        source_generation: 4,
+    };
+    let mut preview = ptr::null_mut();
+    assert_eq!(
+        unsafe {
+            inkpod_core_batch_extract_color_pairs(
+                &mut core,
+                &old_identity,
+                &new_identity,
+                &mut preview,
+            )
+        },
+        INKPOD_STATUS_OK
+    );
+    let mut info = InkpodBatchPairPreviewInfo {
+        struct_size: size_of::<InkpodBatchPairPreviewInfo>() as u32,
+        ..Default::default()
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_pair_preview_get_info(preview, &mut info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(info.pixel_format, INKPOD_STORAGE_RGBA8);
+    assert_eq!((info.candidate_count, info.ambiguity_count), (2, 1));
+    let mut candidate = InkpodBatchPairCandidate {
+        struct_size: size_of::<InkpodBatchPairCandidate>() as u32,
+        ..Default::default()
+    };
+    assert_eq!(
+        unsafe { inkpod_batch_pair_preview_get_candidate(preview, 0, &mut candidate) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
+        candidate.flags & INKPOD_BATCH_PAIR_CANDIDATE_AMBIGUOUS,
+        INKPOD_BATCH_PAIR_CANDIDATE_AMBIGUOUS
+    );
+    assert_eq!(candidate.old_color.alpha, 40);
+
+    #[repr(C, align(8))]
+    struct ShortInfo {
+        struct_size: u32,
+    }
+    let mut short = ShortInfo {
+        struct_size: size_of::<ShortInfo>() as u32,
+    };
+    assert_eq!(
+        unsafe {
+            inkpod_batch_pair_preview_get_info(
+                preview,
+                (&raw mut short).cast::<InkpodBatchPairPreviewInfo>(),
+            )
+        },
+        INKPOD_STATUS_INCOMPATIBLE_ABI
+    );
+    assert_eq!(
+        unsafe { inkpod_batch_pair_preview_release(&mut preview) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
+        unsafe { inkpod_batch_pair_preview_release(&mut preview) },
         INKPOD_STATUS_OK
     );
 }

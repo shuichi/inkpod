@@ -146,7 +146,7 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         SEPARATE_RASTER_COLORS,
         2,
         "SeparateRasterColors",
-        2,
+        3,
         0x0005_0041
     ),
     entry!(

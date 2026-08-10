@@ -11,7 +11,7 @@ fn fixture() -> FileBatchGraph {
             last_cell: 12,
         }],
         operations: vec![FileBatchOperation {
-            version: 1,
+            version: 2,
             kind: 2,
             flags: 1,
             target: FileBatchTarget {
@@ -58,6 +58,12 @@ fn batch_graph_rejects_unknown_container_version_and_cancel_cleans_temp() {
     encoded[8..12].copy_from_slice(&(BATCH_GRAPH_VERSION + 1).to_le_bytes());
     assert!(matches!(
         decode_batch_graph(&encoded),
+        Err(FormatError::Invalid("batch graph version is unsupported"))
+    ));
+    let mut old = encode_batch_graph(&graph).unwrap();
+    old[8..12].copy_from_slice(&1_u32.to_le_bytes());
+    assert!(matches!(
+        decode_batch_graph(&old),
         Err(FormatError::Invalid("batch graph version is unsupported"))
     ));
 

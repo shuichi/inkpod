@@ -187,13 +187,16 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
         inkpod_batch_report_release(&state.batch.report);
     const InkpodStatus graph_status =
         inkpod_batch_graph_release(&state.batch.graph);
+    const InkpodStatus run_graph_status =
+        inkpod_batch_graph_release(&state.batch.run_graph);
     for (const InkpodStatus status : {
              clipboard_status,
              task_status,
              batch_task_status,
              preview_status,
              report_status,
-             graph_status}) {
+             graph_status,
+             run_graph_status}) {
         if (status != INKPOD_STATUS_OK) {
             return status;
         }

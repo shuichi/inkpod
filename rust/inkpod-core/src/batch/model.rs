@@ -106,6 +106,8 @@ pub struct BatchColorPair {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// One document-pixel seed used by continuous batch fill.
 pub struct BatchSeed {
+    /// Whether this seed participates in the operation.
+    pub enabled: bool,
     /// Seed x-coordinate in document pixels.
     pub x: u32,
     /// Seed y-coordinate in document pixels.
@@ -129,6 +131,86 @@ pub struct BatchSeparation {
     pub replacement: PixelValue,
     /// Whether matching logic is inverted.
     pub invert: bool,
+    /// Destination receiving the separated pixels.
+    pub destination: BatchSeparationDestination,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Semantic destination for one color-separation operation.
+pub enum BatchSeparationDestination {
+    /// Replaces the selected source plane.
+    ReplaceSource,
+    /// Replaces the document selection mask.
+    SelectionMask,
+    /// Replaces the main-line plane in the source layer.
+    MainLinePlane,
+    /// Replaces the color plane in the source layer.
+    ColorPlane,
+    /// Writes the separated result through the normal native batch output path.
+    NativeFile,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Stable identity of an immutable sequence raster owned by Core.
+pub struct SequenceSourceIdentity {
+    /// Persistent nonzero source document UUID.
+    pub document_uuid: u128,
+    /// Nonzero immutable source generation.
+    pub source_generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// One exact old/new pair candidate extracted from aligned sequence cells.
+pub struct BatchPairCandidate {
+    /// Exact source pixel value, including alpha.
+    pub old: PixelValue,
+    /// Exact destination pixel value, including alpha.
+    pub new: PixelValue,
+    /// Number of aligned pixels exhibiting this transition.
+    pub pixel_count: u64,
+    /// Half-open document-pixel bounds of all matching coordinates.
+    pub affected_bounds: RectI32,
+    /// Whether this old value maps to more than one destination value.
+    pub ambiguous: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Explicit resolution for one ambiguous old color group.
+pub struct BatchPairResolution {
+    /// Ambiguous source value being resolved.
+    pub old: PixelValue,
+    /// Chosen candidate, or `None` to exclude the old value.
+    pub selected_new: Option<PixelValue>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// Deterministic exact-pixel comparison of two immutable sequence cells.
+pub struct BatchPairExtraction {
+    /// Compared raster width.
+    pub width: u32,
+    /// Compared raster height.
+    pub height: u32,
+    /// Shared native pixel format.
+    pub pixel_format: PixelFormat,
+    /// Number of exactly unchanged aligned pixels.
+    pub unchanged_pixel_count: u64,
+    /// Number of old-value groups requiring an explicit decision.
+    pub ambiguity_count: u32,
+    /// Ordered exact transition candidates.
+    pub candidates: Vec<BatchPairCandidate>,
+}
+
+impl BatchPairExtraction {
+    /// Produces enabled replacement rows after every ambiguous group is resolved.
+    ///
+    /// Unambiguous groups are included automatically. Unknown, duplicate, missing,
+    /// or non-candidate resolutions return an error without changing Core state.
+    pub fn resolved_pairs(
+        &self,
+        resolutions: &[BatchPairResolution],
+    ) -> Result<Vec<BatchColorPair>, CoreError> {
+        super::pairs::resolve_pairs(self, resolutions)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -334,6 +416,22 @@ impl BatchGraph {
         }
         validate_component(&self.output.basename, false)?;
         validate_path(&self.output.folder)?;
+        if self.output.policy == BatchOutputPolicy::ExplicitOverwrite
+            && self.operations.iter().any(|operation| {
+                operation.enabled
+                    && matches!(
+                        operation.kind,
+                        BatchOperationKind::Separation(BatchSeparation {
+                            destination: BatchSeparationDestination::NativeFile,
+                            ..
+                        })
+                    )
+            })
+        {
+            return Err(CoreError::InvalidArgument(
+                "native-file separation cannot overwrite its input",
+            ));
+        }
         for operation in &self.operations {
             validate_operation(operation)?;
         }

@@ -9788,6 +9788,188 @@ InkpodColorValue BatchTransparentColor() noexcept {
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 0U};
 }
 
+bool EditBatchColorValue(
+    ApplicationHost& state,
+    const wchar_t* title,
+    InkpodColorValue& color) noexcept {
+    ViewOptionsDialogState channels{};
+    channels.title = title;
+    channels.labels = {L"depth (8/16)", L"R", L"G", L"B"};
+    channels.values = {
+        static_cast<std::int32_t>(color.depth),
+        static_cast<std::int32_t>(color.red),
+        static_cast<std::int32_t>(color.green),
+        static_cast<std::int32_t>(color.blue)};
+    channels.value_count = 4U;
+    if (ShowViewOptions(
+            state.lifetime.instance,
+            state.Workspace().windows.window,
+            state.lifetime.smoke_test,
+            channels) != IDOK
+        || (channels.values[0] != 8 && channels.values[0] != 16)) {
+        return false;
+    }
+    const std::int32_t maximum = channels.values[0] == 8 ? 255 : 65535;
+    if (channels.values[1] < 0 || channels.values[1] > maximum
+        || channels.values[2] < 0 || channels.values[2] > maximum
+        || channels.values[3] < 0 || channels.values[3] > maximum) {
+        return false;
+    }
+    ViewOptionsDialogState alpha{};
+    alpha.title = title;
+    alpha.labels = {L"alpha", nullptr, nullptr, nullptr};
+    alpha.values = {static_cast<std::int32_t>(color.alpha), 0, 0, 0};
+    alpha.value_count = 1U;
+    if (ShowViewOptions(
+            state.lifetime.instance,
+            state.Workspace().windows.window,
+            state.lifetime.smoke_test,
+            alpha) != IDOK
+        || alpha.values[0] < 0 || alpha.values[0] > maximum) {
+        return false;
+    }
+    color.struct_size = sizeof(color);
+    color.depth = static_cast<std::uint32_t>(channels.values[0]);
+    color.red = static_cast<std::uint16_t>(channels.values[1]);
+    color.green = static_cast<std::uint16_t>(channels.values[2]);
+    color.blue = static_cast<std::uint16_t>(channels.values[3]);
+    color.alpha = static_cast<std::uint16_t>(alpha.values[0]);
+    return true;
+}
+
+bool EditBatchColorRows(
+    ApplicationHost& state,
+    BatchOperationUi& operation) noexcept {
+    ViewOptionsDialogState count{};
+    count.title = L"色置換行";
+    count.labels = {L"行数 (1-4096)", nullptr, nullptr, nullptr};
+    count.values = {
+        static_cast<std::int32_t>(operation.color_pairs.size()), 0, 0, 0};
+    count.value_count = 1U;
+    if (ShowViewOptions(
+            state.lifetime.instance,
+            state.Workspace().windows.window,
+            state.lifetime.smoke_test,
+            count) != IDOK
+        || count.values[0] < 1 || count.values[0] > 4096) {
+        return false;
+    }
+    try {
+        const std::size_t previous = operation.color_pairs.size();
+        operation.color_pairs.resize(static_cast<std::size_t>(count.values[0]));
+        for (std::size_t index = previous; index < operation.color_pairs.size(); ++index) {
+            auto& pair = operation.color_pairs[index];
+            pair.struct_size = sizeof(pair);
+            pair.enabled = 1U;
+            pair.old_color = BatchTransparentColor();
+            pair.new_color = state.Workspace().tools.drawing_color;
+        }
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    for (auto& pair : operation.color_pairs) {
+        ViewOptionsDialogState enabled{};
+        enabled.title = L"色置換行";
+        enabled.labels = {L"有効 (0/1)", nullptr, nullptr, nullptr};
+        enabled.values = {static_cast<std::int32_t>(pair.enabled), 0, 0, 0};
+        enabled.value_count = 1U;
+        if (ShowViewOptions(
+                state.lifetime.instance,
+                state.Workspace().windows.window,
+                state.lifetime.smoke_test,
+                enabled) != IDOK
+            || enabled.values[0] < 0 || enabled.values[0] > 1
+            || !EditBatchColorValue(state, L"旧色", pair.old_color)
+            || !EditBatchColorValue(state, L"新色", pair.new_color)) {
+            return false;
+        }
+        pair.struct_size = sizeof(pair);
+        pair.enabled = static_cast<std::uint32_t>(enabled.values[0]);
+        pair.reserved = 0U;
+    }
+    return true;
+}
+
+bool EditBatchSeedRows(
+    ApplicationHost& state,
+    BatchOperationUi& operation) noexcept {
+    ViewOptionsDialogState count{};
+    count.title = L"連続フィル seed 行";
+    count.labels = {L"行数 (1-4096)", nullptr, nullptr, nullptr};
+    count.values = {static_cast<std::int32_t>(operation.seeds.size()), 0, 0, 0};
+    count.value_count = 1U;
+    if (ShowViewOptions(
+            state.lifetime.instance,
+            state.Workspace().windows.window,
+            state.lifetime.smoke_test,
+            count) != IDOK
+        || count.values[0] < 1 || count.values[0] > 4096) {
+        return false;
+    }
+    try {
+        const std::size_t previous = operation.seeds.size();
+        operation.seeds.resize(static_cast<std::size_t>(count.values[0]));
+        for (std::size_t index = previous; index < operation.seeds.size(); ++index) {
+            auto& seed = operation.seeds[index];
+            seed.struct_size = sizeof(seed);
+            seed.flags = INKPOD_BATCH_SEED_ENABLED;
+            seed.fill_color = state.Workspace().tools.drawing_color;
+            seed.expected_color = BatchTransparentColor();
+        }
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    for (auto& seed : operation.seeds) {
+        ViewOptionsDialogState geometry{};
+        geometry.title = L"連続フィル seed 行";
+        geometry.labels = {L"有効 (0/1)", L"X", L"Y", L"tolerance"};
+        geometry.values = {
+            (seed.flags & INKPOD_BATCH_SEED_ENABLED) != 0U ? 1 : 0,
+            static_cast<std::int32_t>(seed.x),
+            static_cast<std::int32_t>(seed.y),
+            static_cast<std::int32_t>(seed.tolerance)};
+        geometry.value_count = 4U;
+        ViewOptionsDialogState details{};
+        details.title = L"連続フィル seed 行";
+        details.labels = {L"gap close", L"期待色を検査 (0/1)", nullptr, nullptr};
+        details.values = {
+            static_cast<std::int32_t>(seed.gap_close),
+            (seed.flags & INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR) != 0U ? 1 : 0,
+            0,
+            0};
+        details.value_count = 2U;
+        if (ShowViewOptions(
+                state.lifetime.instance,
+                state.Workspace().windows.window,
+                state.lifetime.smoke_test,
+                geometry) != IDOK
+            || ShowViewOptions(
+                   state.lifetime.instance,
+                   state.Workspace().windows.window,
+                   state.lifetime.smoke_test,
+                   details) != IDOK
+            || geometry.values[0] < 0 || geometry.values[0] > 1
+            || geometry.values[1] < 0 || geometry.values[2] < 0
+            || geometry.values[3] < 0 || geometry.values[3] > UINT16_MAX
+            || details.values[0] < 0 || details.values[0] > UINT8_MAX
+            || details.values[1] < 0 || details.values[1] > 1
+            || !EditBatchColorValue(state, L"塗り色", seed.fill_color)
+            || (details.values[1] != 0
+                && !EditBatchColorValue(state, L"期待する元色", seed.expected_color))) {
+            return false;
+        }
+        seed.struct_size = sizeof(seed);
+        seed.flags = (geometry.values[0] != 0 ? INKPOD_BATCH_SEED_ENABLED : 0U)
+            | (details.values[1] != 0 ? INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR : 0U);
+        seed.x = static_cast<std::uint32_t>(geometry.values[1]);
+        seed.y = static_cast<std::uint32_t>(geometry.values[2]);
+        seed.tolerance = static_cast<std::uint32_t>(geometry.values[3]);
+        seed.gap_close = static_cast<std::uint32_t>(details.values[0]);
+        seed.reserved = 0U;
+    }
+    return true;
+}
+
 UINT FilterEditorCommandForBatchCommand(UINT command) noexcept {
     switch (command) {
         case IDM_BATCH_ADD_FILTER_SHARPEN_WEAK:
@@ -9857,7 +10039,8 @@ bool AddBatchOperation(ApplicationHost& state, UINT command) noexcept {
                 operation.kind = INKPOD_BATCH_OPERATION_CONTINUOUS_FILL;
                 InkpodBatchSeedInput seed{};
                 seed.struct_size = sizeof(seed);
-                seed.flags = INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR;
+                seed.flags = INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR
+                    | INKPOD_BATCH_SEED_ENABLED;
                 seed.fill_color = state.Workspace().tools.drawing_color;
                 seed.expected_color = BatchTransparentColor();
                 operation.seeds.push_back(seed);
@@ -9867,6 +10050,7 @@ bool AddBatchOperation(ApplicationHost& state, UINT command) noexcept {
                 operation.kind = INKPOD_BATCH_OPERATION_SEPARATION;
                 operation.colors.push_back(state.Workspace().tools.drawing_color);
                 operation.color_0 = BatchTransparentColor();
+                operation.parameters[1] = INKPOD_BATCH_SEPARATION_REPLACE_SOURCE;
                 break;
             case IDM_BATCH_ADD_VISIBILITY:
                 operation.kind = INKPOD_BATCH_OPERATION_VISIBILITY;
@@ -9981,8 +10165,9 @@ UINT FilterEditorCommandForKind(std::uint32_t kind) noexcept {
     }
 }
 
-bool EditSelectedBatchOperation(ApplicationHost& state) noexcept {
-    if (state.batch.loaded_graph
+bool EditSelectedBatchOperation(
+    ApplicationHost& state, bool prepare_loaded_run = false) noexcept {
+    if ((state.batch.loaded_graph && !prepare_loaded_run)
         || state.batch.selected_operation >= state.batch.operations.size()) {
         return false;
     }
@@ -10046,10 +10231,13 @@ bool EditSelectedBatchOperation(ApplicationHost& state) noexcept {
             return false;
         }
     } else if (operation.kind == INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
-        if (operation.color_pairs.empty()) {
+        if (!EditBatchColorRows(state, operation)) {
             return false;
         }
-        operation.color_pairs[0].new_color = state.Workspace().tools.drawing_color;
+    } else if (operation.kind == INKPOD_BATCH_OPERATION_CONTINUOUS_FILL) {
+        if (!EditBatchSeedRows(state, operation)) {
+            return false;
+        }
     } else {
         ViewOptionsDialogState dialog{};
         dialog.title = L"バッチ項目の編集";
@@ -10060,20 +10248,13 @@ bool EditSelectedBatchOperation(ApplicationHost& state) noexcept {
             static_cast<std::int32_t>(operation.parameters[2]),
             static_cast<std::int32_t>(operation.parameters[3])};
         dialog.value_count = 2U;
-        if (operation.kind == INKPOD_BATCH_OPERATION_CONTINUOUS_FILL) {
-            if (operation.seeds.empty()) {
-                return false;
-            }
-            dialog.labels = {L"seed X", L"seed Y", L"tolerance", L"gap close"};
-            dialog.values = {
-                static_cast<std::int32_t>(operation.seeds[0].x),
-                static_cast<std::int32_t>(operation.seeds[0].y),
-                static_cast<std::int32_t>(operation.seeds[0].tolerance),
-                static_cast<std::int32_t>(operation.seeds[0].gap_close)};
-            dialog.value_count = 4U;
-        } else if (operation.kind == INKPOD_BATCH_OPERATION_SEPARATION) {
-            dialog.labels = {L"反転 (0/1)", nullptr, nullptr, nullptr};
-            dialog.value_count = 1U;
+        if (operation.kind == INKPOD_BATCH_OPERATION_SEPARATION) {
+            dialog.labels = {
+                L"反転 (0/1)",
+                L"出力先 (1:元 2:選択 3:主線 4:彩色 5:別file)",
+                nullptr,
+                nullptr};
+            dialog.value_count = 2U;
         } else if (operation.kind == INKPOD_BATCH_OPERATION_VISIBILITY) {
             dialog.labels = {L"表示 (0/1)", nullptr, nullptr, nullptr};
             dialog.value_count = 1U;
@@ -10098,25 +10279,249 @@ bool EditSelectedBatchOperation(ApplicationHost& state) noexcept {
         if (ShowViewOptions(state.lifetime.instance, state.Workspace().windows.window, state.lifetime.smoke_test, dialog) != IDOK) {
             return false;
         }
-        if (operation.kind == INKPOD_BATCH_OPERATION_CONTINUOUS_FILL) {
-            if (dialog.values[0] < 0 || dialog.values[1] < 0
-                || dialog.values[2] < 0 || dialog.values[2] > UINT16_MAX
-                || dialog.values[3] < 0 || dialog.values[3] > UINT8_MAX) {
+        if (operation.kind == INKPOD_BATCH_OPERATION_SEPARATION) {
+            if (dialog.values[0] < 0 || dialog.values[0] > 1
+                || dialog.values[1] < INKPOD_BATCH_SEPARATION_REPLACE_SOURCE
+                || dialog.values[1] > INKPOD_BATCH_SEPARATION_NATIVE_FILE) {
                 return false;
             }
-            operation.seeds[0].x = static_cast<std::uint32_t>(dialog.values[0]);
-            operation.seeds[0].y = static_cast<std::uint32_t>(dialog.values[1]);
-            operation.seeds[0].tolerance = static_cast<std::uint32_t>(dialog.values[2]);
-            operation.seeds[0].gap_close = static_cast<std::uint32_t>(dialog.values[3]);
-            operation.seeds[0].fill_color = state.Workspace().tools.drawing_color;
-        } else {
-            for (std::size_t index = 0; index < dialog.value_count; ++index) {
-                operation.parameters[index] = dialog.values[index];
-            }
+        }
+        for (std::size_t index = 0; index < dialog.value_count; ++index) {
+            operation.parameters[index] = dialog.values[index];
         }
     }
     state.batch.operations[state.batch.selected_operation] = std::move(operation);
+    if (!prepare_loaded_run) {
+        ResetBatchDerivedState(state.batch);
+    }
+    RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
+    return true;
+}
+
+bool PrepareBatchRunOperations(ApplicationHost& state) noexcept {
+    if (std::none_of(
+            state.batch.operations.begin(),
+            state.batch.operations.end(),
+            [](const BatchOperationUi& operation) {
+                return (operation.flags
+                           & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN)
+                    != 0U;
+            })) {
+        state.batch.run_operations.clear();
+        return true;
+    }
+    std::vector<BatchOperationUi> original;
+    try {
+        original = state.batch.operations;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    const std::uint32_t original_selection = state.batch.selected_operation;
+    for (std::size_t index = 0U; index < state.batch.operations.size(); ++index) {
+        if ((state.batch.operations[index].flags
+                & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN)
+            == 0U) {
+            continue;
+        }
+        state.batch.selected_operation = static_cast<std::uint32_t>(index);
+        if (!EditSelectedBatchOperation(state, state.batch.loaded_graph)) {
+            state.batch.operations = std::move(original);
+            state.batch.selected_operation = original_selection;
+            state.batch.run_operations.clear();
+            if (!state.batch.loaded_graph) {
+                ResetBatchDerivedState(state.batch);
+            }
+            RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
+            return false;
+        }
+        state.batch.operations[index].flags &=
+            ~INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN;
+    }
+    state.batch.run_operations = std::move(state.batch.operations);
+    state.batch.operations = std::move(original);
+    state.batch.selected_operation = original_selection;
+    if (!state.batch.loaded_graph) {
+        ResetBatchDerivedState(state.batch);
+    }
+    RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
+    return true;
+}
+
+bool SameBatchColor(
+    const InkpodColorValue& left, const InkpodColorValue& right) noexcept {
+    return left.depth == right.depth && left.red == right.red
+        && left.green == right.green && left.blue == right.blue
+        && left.alpha == right.alpha;
+}
+
+bool ExtractBatchColorPairs(
+    ApplicationHost& state,
+    const CommandContext& issued_context) noexcept {
+    if (state.engine == nullptr || state.batch.loaded_graph
+        || state.batch.selected_operation >= state.batch.operations.size()
+        || state.batch.operations[state.batch.selected_operation].kind
+            != INKPOD_BATCH_OPERATION_COLOR_REPLACE) {
+        return false;
+    }
+    const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
+        state.routing.batch_pane, issued_context, state.routing.targets);
+    if (target.status != PaneTargetStatus::Ok
+        || !target.context.document_session.has_value()
+        || !target.context.generation.has_value()) {
+        return false;
+    }
+    ViewOptionsDialogState selector{};
+    selector.title = L"二セル色比較";
+    selector.labels = {
+        L"旧セル番号 (1以上)", L"新セル番号 (1以上)", nullptr, nullptr};
+    selector.values = {1, 2, 0, 0};
+    selector.value_count = 2U;
+    if (ShowViewOptions(
+            state.lifetime.instance,
+            state.Workspace().windows.window,
+            state.lifetime.smoke_test,
+            selector) != IDOK
+        || selector.values[0] < 1 || selector.values[1] < 1
+        || selector.values[0] == selector.values[1]) {
+        return false;
+    }
+    const std::uint32_t old_index =
+        static_cast<std::uint32_t>(selector.values[0] - 1);
+    const std::uint32_t new_index =
+        static_cast<std::uint32_t>(selector.values[1] - 1);
+    InkpodBatchPairPreview* preview{};
+    const InkpodStatus status = state.engine->Invoke(
+        target.context.document_session.value(),
+        target.context.generation.value(),
+        [old_index, new_index, &preview](InkpodCore* core) {
+            InkpodSequenceSourceIdentity old_identity{};
+            old_identity.struct_size = sizeof(old_identity);
+            InkpodSequenceSourceIdentity new_identity{};
+            new_identity.struct_size = sizeof(new_identity);
+            InkpodStatus call = inkpod_core_sequence_source_identity(
+                core, old_index, &old_identity);
+            if (call == INKPOD_STATUS_OK) {
+                call = inkpod_core_sequence_source_identity(
+                    core, new_index, &new_identity);
+            }
+            if (call == INKPOD_STATUS_OK) {
+                call = inkpod_core_batch_extract_color_pairs(
+                    core, &old_identity, &new_identity, &preview);
+            }
+            return call;
+        },
+        false,
+        false);
+    if (status != INKPOD_STATUS_OK || preview == nullptr) {
+        inkpod_batch_pair_preview_release(&preview);
+        return false;
+    }
+    InkpodBatchPairPreviewInfo info{};
+    info.struct_size = sizeof(info);
+    if (inkpod_batch_pair_preview_get_info(preview, &info) != INKPOD_STATUS_OK
+        || info.candidate_count == 0U || info.candidate_count > 4096U) {
+        inkpod_batch_pair_preview_release(&preview);
+        return false;
+    }
+    std::vector<InkpodBatchPairCandidate> candidates;
+    std::vector<InkpodBatchColorPairInput> pairs;
+    try {
+        candidates.resize(static_cast<std::size_t>(info.candidate_count));
+        pairs.reserve(static_cast<std::size_t>(info.candidate_count));
+    } catch (const std::bad_alloc&) {
+        inkpod_batch_pair_preview_release(&preview);
+        return false;
+    }
+    for (std::uint64_t index = 0U; index < info.candidate_count; ++index) {
+        auto& candidate = candidates[static_cast<std::size_t>(index)];
+        candidate.struct_size = sizeof(candidate);
+        if (inkpod_batch_pair_preview_get_candidate(
+                preview, index, &candidate) != INKPOD_STATUS_OK) {
+            inkpod_batch_pair_preview_release(&preview);
+            return false;
+        }
+    }
+    inkpod_batch_pair_preview_release(&preview);
+
+    for (std::size_t begin = 0U; begin < candidates.size();) {
+        std::size_t end = begin + 1U;
+        while (end < candidates.size()
+               && SameBatchColor(
+                   candidates[begin].old_color, candidates[end].old_color)) {
+            ++end;
+        }
+        std::optional<std::size_t> selected;
+        if ((candidates[begin].flags
+                & INKPOD_BATCH_PAIR_CANDIDATE_AMBIGUOUS)
+            == 0U) {
+            selected = begin;
+        } else if (state.lifetime.smoke_test) {
+            selected = begin;
+        } else {
+            for (std::size_t index = begin; index < end; ++index) {
+                const auto& candidate = candidates[index];
+                std::array<wchar_t, 384U> message{};
+                swprintf_s(
+                    message.data(),
+                    message.size(),
+                    L"旧色 (%u,%u,%u,%u) を新色 (%u,%u,%u,%u) に対応させますか？\n"
+                    L"pixel: %llu / bounds: (%d,%d,%d,%d)\n"
+                    L"「いいえ」で次候補、全候補を『いいえ』で旧色を除外します。",
+                    candidate.old_color.red,
+                    candidate.old_color.green,
+                    candidate.old_color.blue,
+                    candidate.old_color.alpha,
+                    candidate.new_color.red,
+                    candidate.new_color.green,
+                    candidate.new_color.blue,
+                    candidate.new_color.alpha,
+                    static_cast<unsigned long long>(candidate.pixel_count),
+                    candidate.bounds_x,
+                    candidate.bounds_y,
+                    candidate.bounds_width,
+                    candidate.bounds_height);
+                const int decision = MessageBoxW(
+                    state.Workspace().windows.window,
+                    message.data(),
+                    L"one-to-many 色対応の解決",
+                    MB_YESNOCANCEL | MB_ICONQUESTION);
+                if (decision == IDCANCEL) {
+                    return false;
+                }
+                if (decision == IDYES) {
+                    selected = index;
+                    break;
+                }
+            }
+        }
+        if (selected.has_value()) {
+            InkpodBatchColorPairInput pair{};
+            pair.struct_size = sizeof(pair);
+            pair.enabled = 1U;
+            pair.old_color = candidates[selected.value()].old_color;
+            pair.new_color = candidates[selected.value()].new_color;
+            try {
+                pairs.push_back(pair);
+            } catch (const std::bad_alloc&) {
+                return false;
+            }
+        }
+        begin = end;
+    }
+    if (pairs.empty()) {
+        return false;
+    }
+    state.batch.operations[state.batch.selected_operation].color_pairs =
+        std::move(pairs);
     ResetBatchDerivedState(state.batch);
+    try {
+        state.batch.last_result = L"二セル比較: 候補 "
+            + std::to_wstring(info.candidate_count) + L" / ambiguity "
+            + std::to_wstring(info.ambiguity_count) + L" / unchanged "
+            + std::to_wstring(info.unchanged_pixel_count);
+    } catch (const std::bad_alloc&) {
+        state.batch.last_result = L"二セル比較を反映しました";
+    }
     RefreshBatchPalette(state.batch, state.Workspace().batch_palette);
     return true;
 }
@@ -10158,6 +10563,9 @@ InkpodStatus StartBatch(
     bool dry_run) noexcept {
     if (state.engine == nullptr || state.batch.task != nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (!PrepareBatchRunOperations(state)) {
+        return INKPOD_STATUS_CANCELLED;
     }
     const PaneActionTarget pane_target =
         state.routing.pane_targets.CaptureAction(
@@ -11140,6 +11548,13 @@ std::optional<LRESULT> RouteBatchCommand(
                     ? INKPOD_BATCH_FAILURE_STOP
                     : INKPOD_BATCH_FAILURE_CONTINUE;
                 RefreshBatchPalette(state->batch, state->Workspace().batch_palette);
+                UpdateMenuState(*state);
+                return 1;
+            }
+            return 0;
+        case IDM_BATCH_EXTRACT_PAIRS:
+            if (state->batch.task == nullptr
+                && ExtractBatchColorPairs(*state, context)) {
                 UpdateMenuState(*state);
                 return 1;
             }

@@ -469,6 +469,7 @@ BEGIN
             END
             MENUITEM "選択項目を編集...", IDM_BATCH_OPERATION_EDIT
             MENUITEM "色置換 old/new を入替", IDM_BATCH_REPLACE_SWAP
+            MENUITEM "二セル比較から色置換行を抽出...", IDM_BATCH_EXTRACT_PAIRS
             MENUITEM "選択項目を削除", IDM_BATCH_OPERATION_REMOVE
             MENUITEM "上へ", IDM_BATCH_OPERATION_UP
             MENUITEM "下へ", IDM_BATCH_OPERATION_DOWN

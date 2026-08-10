@@ -25,6 +25,16 @@ impl Core {
                 "sequence contains duplicate names",
             ));
         }
+        for (index, cell) in cells.iter().enumerate() {
+            if cells[..index].iter().any(|previous| {
+                previous.document_uuid == cell.document_uuid
+                    && previous.source_generation == cell.source_generation
+            }) {
+                return Err(CoreError::InvalidArgument(
+                    "sequence contains a duplicate source identity",
+                ));
+            }
+        }
         let current_uuid = self
             .document
             .as_ref()
@@ -97,6 +107,7 @@ impl Core {
             name: cell.name.clone(),
             cell_number: cell.cell_number,
             document_uuid: cell.document_uuid,
+            source_generation: cell.source_generation,
             width: cell.raster.width(),
             height: cell.raster.height(),
             thumbnail: cell.thumbnail()?,

@@ -1,6 +1,6 @@
 use super::*;
 
-pub const INKPOD_ABI_VERSION: u32 = 8;
+pub const INKPOD_ABI_VERSION: u32 = 9;
 pub const INKPOD_DIGEST_BLAKE3_256: u32 = 1;
 
 pub const INKPOD_OBJECT_NONE: u32 = 0;

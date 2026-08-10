@@ -42,6 +42,9 @@ pub(super) fn apply_operation(
             ))?;
             core.set_active_node(layer_id, plane_id)?;
             for (index, seed) in seeds.iter().enumerate() {
+                if !seed.enabled {
+                    continue;
+                }
                 if !progress(index as u64, seeds.len() as u64) {
                     return Err(CoreError::Cancelled);
                 }
@@ -236,33 +239,116 @@ pub(crate) fn apply_separation(
     let plane_id = PlaneId::from_raw(plane_id);
     let base_revision = core.document_revision;
     let before = core.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
-    let source = before
-        .plane_by_id(plane_id)
+    let source_layer = before
+        .layers
+        .iter()
+        .find(|layer| layer.planes.iter().any(|plane| plane.id == plane_id))
         .ok_or(CoreError::InvalidArgument(
             "batch plane target does not exist",
         ))?;
-    ensure_pixel_matches_format(options.replacement, source.raster.format())?;
-    let empty = empty_pixel(source.raster.format());
+    let source = source_layer
+        .planes
+        .iter()
+        .find(|plane| plane.id == plane_id)
+        .ok_or(CoreError::InvalidState(
+            "batch separation source disappeared",
+        ))?;
+    if !source_layer.visible || !source_layer.editable || !source.visible || !source.editable {
+        return Err(CoreError::InvalidArgument(
+            "batch separation source is hidden or non-editable",
+        ));
+    }
+    for color in &options.colors {
+        ensure_pixel_matches_format(*color, source.raster.format())?;
+    }
+    let destination_plane_id = match options.destination {
+        BatchSeparationDestination::ReplaceSource | BatchSeparationDestination::NativeFile => {
+            Some(plane_id)
+        }
+        BatchSeparationDestination::SelectionMask => None,
+        BatchSeparationDestination::MainLinePlane => Some(
+            source_layer
+                .planes
+                .iter()
+                .find(|plane| plane.kind == PlaneType::MainLine)
+                .ok_or(CoreError::InvalidArgument(
+                    "batch separation main-line destination is missing",
+                ))?
+                .id,
+        ),
+        BatchSeparationDestination::ColorPlane => Some(
+            source_layer
+                .planes
+                .iter()
+                .find(|plane| plane.kind == PlaneType::Color)
+                .ok_or(CoreError::InvalidArgument(
+                    "batch separation color destination is missing",
+                ))?
+                .id,
+        ),
+    };
+    let destination_format = if let Some(destination_plane_id) = destination_plane_id {
+        let destination = source_layer
+            .planes
+            .iter()
+            .find(|plane| plane.id == destination_plane_id)
+            .ok_or(CoreError::InvalidState(
+                "batch separation destination disappeared",
+            ))?;
+        if !destination.visible || !destination.editable {
+            return Err(CoreError::InvalidArgument(
+                "batch separation destination is hidden or non-editable",
+            ));
+        }
+        if destination.raster.width() != source.raster.width()
+            || destination.raster.height() != source.raster.height()
+        {
+            return Err(CoreError::InvalidArgument(
+                "batch separation destination dimensions do not match",
+            ));
+        }
+        ensure_pixel_matches_format(options.replacement, destination.raster.format())?;
+        destination.raster.format()
+    } else {
+        PixelFormat::BinaryMask8
+    };
+    let source_raster = source.raster.clone();
+    let empty = empty_pixel(destination_format);
     let revision = core.next_document_revision()?;
     let mut after = before.clone();
-    let raster = &mut after
-        .plane_by_id_mut(plane_id)
-        .ok_or(CoreError::InvalidState("batch plane target disappeared"))?
-        .raster;
-    for y in 0..raster.height() {
-        if !progress(u64::from(y), u64::from(raster.height()).max(1)) {
+    let raster = if let Some(destination_plane_id) = destination_plane_id {
+        &mut after
+            .plane_by_id_mut(destination_plane_id)
+            .ok_or(CoreError::InvalidState(
+                "batch separation destination disappeared",
+            ))?
+            .raster
+    } else {
+        &mut after.selection
+    };
+    for y in 0..source_raster.height() {
+        if !progress(u64::from(y), u64::from(source_raster.height()).max(1)) {
             return Err(CoreError::Cancelled);
         }
-        for x in 0..raster.width() {
-            let value = raster.pixel(x, y)?;
+        for x in 0..source_raster.width() {
+            let value = source_raster.pixel(x, y)?;
             let selected = options.colors.contains(&value) ^ options.invert;
+            let selected_value = if destination_plane_id.is_none() {
+                PixelValue::Binary(u8::MAX)
+            } else {
+                options.replacement
+            };
             raster.set_pixel(
                 x,
                 y,
-                if selected { options.replacement } else { empty },
+                if selected { selected_value } else { empty },
                 revision.get(),
             )?;
         }
+    }
+    let allocated: Vec<_> = raster.allocated_coords().collect();
+    for coord in allocated {
+        raster.remove_tile_if_empty(coord);
     }
     core.commit_deferred_document_edit(before, after, base_revision, revision)
 }

@@ -23,6 +23,8 @@ pub struct SequenceCellSource {
     pub cell_number: u32,
     /// Persistent nonzero document UUID.
     pub document_uuid: u128,
+    /// Nonzero generation of the immutable raster payload owned by Core.
+    pub source_generation: u64,
     /// Horizontal resolution in thousandths of a DPI.
     pub dpi_x_milli: u32,
     /// Vertical resolution in thousandths of a DPI.
@@ -58,14 +60,26 @@ impl SequenceCellSource {
         document_uuid: u128,
         raster: &CommonRaster,
     ) -> Result<Self, CoreError> {
+        Self::from_common_raster_with_generation(name, document_uuid, 1, raster)
+    }
+
+    /// Validates and copies a common raster with an explicit immutable source generation.
+    ///
+    /// The name must contain a cell number, and both UUID and generation must be nonzero.
+    pub fn from_common_raster_with_generation(
+        name: impl Into<String>,
+        document_uuid: u128,
+        source_generation: u64,
+        raster: &CommonRaster,
+    ) -> Result<Self, CoreError> {
         let name = name.into();
         validate_node_name(&name)?;
         let cell_number = parse_cell_number(&name).ok_or(CoreError::InvalidArgument(
             "sequence name has no cell number",
         ))?;
-        if document_uuid == 0 {
+        if document_uuid == 0 || source_generation == 0 {
             return Err(CoreError::InvalidArgument(
-                "sequence document UUID must be nonzero",
+                "sequence document UUID and source generation must be nonzero",
             ));
         }
         let width = raster.info.width;
@@ -86,6 +100,7 @@ impl SequenceCellSource {
             name,
             cell_number,
             document_uuid,
+            source_generation,
             dpi_x_milli: raster.info.dpi_x_milli.unwrap_or(DEFAULT_DPI_MILLI),
             dpi_y_milli: raster.info.dpi_y_milli.unwrap_or(DEFAULT_DPI_MILLI),
             frames: FrameMetadata {
@@ -116,6 +131,8 @@ pub struct SequenceCellInfo {
     pub cell_number: u32,
     /// Persistent document UUID.
     pub document_uuid: u128,
+    /// Generation of the immutable source raster.
+    pub source_generation: u64,
     /// Source width in pixels.
     pub width: u32,
     /// Source height in pixels.

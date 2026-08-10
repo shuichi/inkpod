@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 8U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 9U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodCoreConfig) == 16U, "core config layout drift");
 _Static_assert(sizeof(InkpodSnapshotOptions) == 16U, "snapshot options layout drift");
 _Static_assert(sizeof(InkpodPersistenceInfo) == 72U, "persistence info layout drift");
@@ -40,6 +40,9 @@ _Static_assert(sizeof(InkpodMotionFrame) == 40U, "motion frame layout drift");
 _Static_assert(sizeof(InkpodLayerThumbnailBuffer) == 80U, "layer thumbnail layout drift");
 _Static_assert(sizeof(InkpodScopedColorReplaceInput) == 120U, "scoped replace input layout drift");
 _Static_assert(sizeof(InkpodScopedColorReplacePreview) == 48U, "scoped replace preview layout drift");
+_Static_assert(sizeof(InkpodSequenceSourceIdentity) == 32U, "sequence identity layout drift");
+_Static_assert(sizeof(InkpodBatchPairPreviewInfo) == 40U, "pair preview info layout drift");
+_Static_assert(sizeof(InkpodBatchPairCandidate) == 64U, "pair candidate layout drift");
 
 int inkpod_header_c11_smoke(void) {
     InkpodSnapshotView view = {0};

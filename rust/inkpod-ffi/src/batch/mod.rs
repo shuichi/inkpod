@@ -1,12 +1,15 @@
 //! C ABI adapters for batch processing.
 
 use super::*;
+#[cfg(test)]
+use inkpod_core::BATCH_OPERATION_VERSION;
 use inkpod_core::{
     BatchColorPair, BatchFailurePolicy, BatchGraph, BatchInputKind, BatchInputSelector,
     BatchItemOutcome, BatchMissingTargetPolicy, BatchOperation, BatchOperationKind,
-    BatchOutputPolicy, BatchOutputSettings, BatchRunOptions, BatchRunScope, BatchSeed,
-    BatchSeparation, BatchTargetSelector, DocumentResize, LayerKind, MirrorAxis, PixelFormat,
-    PlaneType, ResizeAnchor, RotateDirection, VectorWidthMode,
+    BatchOutputPolicy, BatchOutputSettings, BatchPairExtraction, BatchRunOptions, BatchRunScope,
+    BatchSeed, BatchSeparation, BatchSeparationDestination, BatchTargetSelector, DocumentResize,
+    LayerKind, MirrorAxis, PixelFormat, PlaneType, ResizeAnchor, RotateDirection,
+    SequenceSourceIdentity, VectorWidthMode,
 };
 use std::path::PathBuf;
 
@@ -42,6 +45,12 @@ pub const INKPOD_BATCH_OUTPUT_DESCENDING: u64 = 1 << 1;
 pub const INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE: u64 = 1 << 2;
 pub const INKPOD_BATCH_SEPARATION_INVERT: i64 = 1;
 pub const INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR: u32 = 1;
+pub const INKPOD_BATCH_SEED_ENABLED: u32 = 1 << 1;
+pub const INKPOD_BATCH_SEPARATION_REPLACE_SOURCE: i64 = 1;
+pub const INKPOD_BATCH_SEPARATION_SELECTION_MASK: i64 = 2;
+pub const INKPOD_BATCH_SEPARATION_MAIN_LINE_PLANE: i64 = 3;
+pub const INKPOD_BATCH_SEPARATION_COLOR_PLANE: i64 = 4;
+pub const INKPOD_BATCH_SEPARATION_NATIVE_FILE: i64 = 5;
 
 pub const INKPOD_BATCH_SCOPE_CURRENT: u32 = 1;
 pub const INKPOD_BATCH_SCOPE_ALL: u32 = 2;
@@ -54,6 +63,9 @@ pub const INKPOD_BATCH_ITEM_FAILED: u32 = 3;
 pub const INKPOD_BATCH_ITEM_CANCELLED: u32 = 4;
 pub const INKPOD_BATCH_ITEM_DRY_RUN: u32 = 5;
 pub const INKPOD_BATCH_PREVIEW_HAS_WARNING: u32 = 1;
+#[cfg(test)]
+pub const INKPOD_BATCH_GRAPH_VERSION: u32 = 2;
+pub const INKPOD_BATCH_PAIR_CANDIDATE_AMBIGUOUS: u32 = 1;
 
 const MAX_BATCH_INPUTS: usize = 16_384;
 const MAX_BATCH_OPERATIONS: usize = 1_024;
@@ -63,11 +75,14 @@ const MAX_BATCH_TEXT_BYTES: u64 = 32_768;
 
 mod exports;
 mod parse;
+mod query;
 mod records;
 
 #[cfg(test)]
 pub(super) use exports::*;
 use parse::*;
+#[cfg(test)]
+pub(super) use query::*;
 pub use records::*;
 
 #[cfg(test)]

@@ -121,6 +121,9 @@ static_assert(sizeof(InkpodBatchGraphInfo) == 40U);
 static_assert(sizeof(InkpodBatchPreviewItem) == 56U);
 static_assert(sizeof(InkpodBatchReportInfo) == 32U);
 static_assert(sizeof(InkpodBatchReportItem) == 56U);
+static_assert(sizeof(InkpodSequenceSourceIdentity) == 32U);
+static_assert(sizeof(InkpodBatchPairPreviewInfo) == 40U);
+static_assert(sizeof(InkpodBatchPairCandidate) == 64U);
 static_assert(sizeof(InkpodSnapshotVectorSegment) == 80U);
 static_assert(sizeof(InkpodSnapshotVectorFill) == 48U);
 static_assert(sizeof(InkpodSnapshotVectorView) == 80U);
@@ -157,8 +160,8 @@ int InkpodRunAbiSmoke() {
     InkpodReplayContract replay_contract{};
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 11U
-        || replay_contract.procedure_format_version != 14U
+        || replay_contract.replay_epoch != 12U
+        || replay_contract.procedure_format_version != 15U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -312,7 +315,7 @@ int InkpodRunAbiSmoke() {
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 14U
+        || persistence.format_version != 15U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE
@@ -503,6 +506,62 @@ int InkpodRunAbiSmoke() {
         || motion_frame.cell_number != 10U
         || inkpod_core_motion_check_stop(core) != INKPOD_STATUS_OK) {
         return 46;
+    }
+    InkpodSequenceSourceIdentity pair_old{};
+    pair_old.struct_size = sizeof(pair_old);
+    InkpodSequenceSourceIdentity pair_new{};
+    pair_new.struct_size = sizeof(pair_new);
+    InkpodBatchPairPreview* pair_preview{};
+    InkpodBatchPairPreviewInfo pair_info{};
+    pair_info.struct_size = sizeof(pair_info);
+    InkpodBatchPairCandidate pair_candidate{};
+    pair_candidate.struct_size = sizeof(pair_candidate);
+    if (inkpod_core_sequence_source_identity(core, 0U, &pair_old) != INKPOD_STATUS_OK
+        || inkpod_core_sequence_source_identity(core, 1U, &pair_new) != INKPOD_STATUS_OK
+        || inkpod_core_batch_extract_color_pairs(
+               core, &pair_old, &pair_new, &pair_preview) != INKPOD_STATUS_OK
+        || pair_preview == nullptr) {
+        return 155;
+    }
+    if (inkpod_batch_pair_preview_get_info(pair_preview, &pair_info)
+            != INKPOD_STATUS_OK
+        || pair_info.pixel_format != INKPOD_STORAGE_RGBA8
+        || pair_info.width != 1U || pair_info.height != 1U
+        || pair_info.candidate_count != 1U || pair_info.ambiguity_count != 0U
+        || pair_info.unchanged_pixel_count != 0U) {
+        return 156;
+    }
+    if (inkpod_batch_pair_preview_get_candidate(
+            pair_preview, 0U, &pair_candidate) != INKPOD_STATUS_OK) {
+        return 157;
+    }
+    if (pair_candidate.pixel_count != 1U
+        || pair_candidate.bounds_x != 0 || pair_candidate.bounds_y != 0
+        || pair_candidate.bounds_width != 1 || pair_candidate.bounds_height != 1
+        || pair_candidate.old_color.depth != INKPOD_COLOR_DEPTH_8
+        || pair_candidate.new_color.depth != INKPOD_COLOR_DEPTH_8
+        || pair_candidate.old_color.red != 4U
+        || pair_candidate.new_color.red != 1U) {
+        std::fprintf(
+            stderr,
+            "pair candidate: count=%llu bounds=%d,%d,%d,%d depth=%u/%u red=%u/%u\n",
+            static_cast<unsigned long long>(pair_candidate.pixel_count),
+            pair_candidate.bounds_x,
+            pair_candidate.bounds_y,
+            pair_candidate.bounds_width,
+            pair_candidate.bounds_height,
+            pair_candidate.old_color.depth,
+            pair_candidate.new_color.depth,
+            pair_candidate.old_color.red,
+            pair_candidate.new_color.red);
+        return 158;
+    }
+    if (inkpod_batch_pair_preview_get_candidate(
+               pair_preview, 1U, &pair_candidate) != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_batch_pair_preview_release(&pair_preview) != INKPOD_STATUS_OK
+        || pair_preview != nullptr
+        || inkpod_batch_pair_preview_release(&pair_preview) != INKPOD_STATUS_OK) {
+        return 159;
     }
     std::uint64_t reference_view_id{};
     const InkpodViewInput reference_fit{

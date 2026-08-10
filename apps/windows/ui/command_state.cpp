@@ -608,7 +608,8 @@ void ProvideBatchCommandStates(
          IDM_BATCH_OPERATION_REMOVE,
          IDM_BATCH_OPERATION_UP,
          IDM_BATCH_OPERATION_DOWN,
-         IDM_BATCH_REPLACE_SWAP},
+         IDM_BATCH_REPLACE_SWAP,
+         IDM_BATCH_EXTRACT_PAIRS},
         input.batch.editable_item);
     SetEnabled(
         states,

@@ -14,6 +14,7 @@ pub(super) fn validate_reference_frame(frame: RectI32) -> Result<(), CoreError> 
 pub(super) fn validate_sequence_cell(cell: &SequenceCellSource) -> Result<(), CoreError> {
     validate_node_name(&cell.name)?;
     if cell.document_uuid == 0
+        || cell.source_generation == 0
         || cell.dpi_x_milli == 0
         || cell.dpi_y_milli == 0
         || parse_cell_number(&cell.name) != Some(cell.cell_number)

@@ -1,6 +1,230 @@
 use super::*;
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_sequence_source_identity(
+    core: *mut InkpodCore,
+    sequence_index: u32,
+    out_identity: *mut InkpodSequenceSourceIdentity,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(INKPOD_STATUS_INVALID_ARGUMENT, "core is null or misaligned");
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_identity.cast_const(), "InkpodSequenceSourceIdentity") }
+        {
+            return status;
+        }
+        let core = unsafe { &mut *core };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let cell = match core.core.sequence_cell(sequence_index as usize) {
+            Ok(cell) => cell,
+            Err(error) => return map_core_error(error),
+        };
+        let output = unsafe { &mut *out_identity };
+        output.reserved = 0;
+        output.document_uuid_high = (cell.document_uuid >> 64) as u64;
+        output.document_uuid_low = cell.document_uuid as u64;
+        output.source_generation = cell.source_generation;
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_batch_extract_color_pairs(
+    core: *mut InkpodCore,
+    old_identity: *const InkpodSequenceSourceIdentity,
+    new_identity: *const InkpodSequenceSourceIdentity,
+    out_preview: *mut *mut InkpodBatchPairPreview,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || out_preview.is_null() || !is_aligned(out_preview)
+        {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch pair extraction pointer is null or misaligned",
+            );
+        }
+        if let Err(status) =
+            unsafe { validate_struct(old_identity, "old InkpodSequenceSourceIdentity") }
+        {
+            return status;
+        }
+        if let Err(status) =
+            unsafe { validate_struct(new_identity, "new InkpodSequenceSourceIdentity") }
+        {
+            return status;
+        }
+        if !unsafe { out_preview.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "batch pair preview output already owns a handle",
+            );
+        }
+        let parse_identity = |record: &InkpodSequenceSourceIdentity| {
+            let document_uuid = (u128::from(record.document_uuid_high) << 64)
+                | u128::from(record.document_uuid_low);
+            if record.reserved != 0 || document_uuid == 0 || record.source_generation == 0 {
+                Err(fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "sequence source identity contains invalid fields",
+                ))
+            } else {
+                Ok(SequenceSourceIdentity {
+                    document_uuid,
+                    source_generation: record.source_generation,
+                })
+            }
+        };
+        let old_identity = match parse_identity(unsafe { &*old_identity }) {
+            Ok(identity) => identity,
+            Err(status) => return status,
+        };
+        let new_identity = match parse_identity(unsafe { &*new_identity }) {
+            Ok(identity) => identity,
+            Err(status) => return status,
+        };
+        let core = unsafe { &mut *core };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        match core
+            .core
+            .extract_batch_color_pairs(old_identity, new_identity)
+        {
+            Ok(extraction) => {
+                unsafe {
+                    out_preview.write(Box::into_raw(Box::new(InkpodBatchPairPreview {
+                        extraction,
+                    })))
+                };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_pair_preview_get_info(
+    preview: *const InkpodBatchPairPreview,
+    out_info: *mut InkpodBatchPairPreviewInfo,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if preview.is_null() || !is_aligned(preview) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch pair preview is null or misaligned",
+            );
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_info.cast_const(), "InkpodBatchPairPreviewInfo") }
+        {
+            return status;
+        }
+        let extraction = &unsafe { &*preview }.extraction;
+        let output = unsafe { &mut *out_info };
+        output.pixel_format = storage_format_code(extraction.pixel_format);
+        output.width = extraction.width;
+        output.height = extraction.height;
+        output.ambiguity_count = extraction.ambiguity_count;
+        output.reserved = 0;
+        output.candidate_count = extraction.candidates.len() as u64;
+        output.unchanged_pixel_count = extraction.unchanged_pixel_count;
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_pair_preview_get_candidate(
+    preview: *const InkpodBatchPairPreview,
+    index: u64,
+    out_candidate: *mut InkpodBatchPairCandidate,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if preview.is_null() || !is_aligned(preview) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch pair preview is null or misaligned",
+            );
+        }
+        if let Err(status) =
+            unsafe { validate_struct(out_candidate.cast_const(), "InkpodBatchPairCandidate") }
+        {
+            return status;
+        }
+        let Ok(index) = usize::try_from(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch pair candidate index is not representable",
+            );
+        };
+        let Some(candidate) = unsafe { &*preview }.extraction.candidates.get(index) else {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch pair candidate index is outside bounds",
+            );
+        };
+        let output = unsafe { &mut *out_candidate };
+        output.flags = if candidate.ambiguous {
+            INKPOD_BATCH_PAIR_CANDIDATE_AMBIGUOUS
+        } else {
+            0
+        };
+        output.old_color = match color_value_record(candidate.old) {
+            Ok(color) => color,
+            Err(status) => return status,
+        };
+        output.new_color = match color_value_record(candidate.new) {
+            Ok(color) => color,
+            Err(status) => return status,
+        };
+        output.pixel_count = candidate.pixel_count;
+        output.bounds_x = candidate.affected_bounds.x;
+        output.bounds_y = candidate.affected_bounds.y;
+        output.bounds_width = candidate.affected_bounds.width;
+        output.bounds_height = candidate.affected_bounds.height;
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_batch_pair_preview_release(
+    preview: *mut *mut InkpodBatchPairPreview,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if preview.is_null() || !is_aligned(preview) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch pair preview owner pointer is null or misaligned",
+            );
+        }
+        let handle = unsafe { preview.read() };
+        if handle.is_null() {
+            return INKPOD_STATUS_OK;
+        }
+        if !is_aligned(handle) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "batch pair preview handle is misaligned",
+            );
+        }
+        unsafe { preview.write(ptr::null_mut()) };
+        drop(unsafe { Box::from_raw(handle) });
+        INKPOD_STATUS_OK
+    })
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn inkpod_batch_graph_create(
     input: *const InkpodBatchGraphInput,
     out_graph: *mut *mut InkpodBatchGraph,

@@ -5,7 +5,7 @@ use super::{
     CurveInterpolation, CurvePoint, DispatchOutcome, DocumentResize, DustMode, DustRemoval,
     FillOperation, FillRequest, Filter, HsvAdjustment, InclusionMode, LayerKind, Levels,
     MAX_CURVE_POINTS, MAX_IMAGE_EDIT_PIXELS, MirrorAxis, PixelFormat, PixelValue, PlaneType,
-    ResizeAnchor, RotateDirection, TILE_SIZE, TileCoord, VectorWidthMode,
+    RectI32, ResizeAnchor, RotateDirection, TILE_SIZE, TileCoord, VectorWidthMode,
 };
 use crate::animation::{SequenceCellSource, parse_cell_number};
 use crate::asset;
@@ -19,7 +19,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Version required in every [`BatchOperation`] payload.
-pub const BATCH_OPERATION_VERSION: u32 = 1;
+pub const BATCH_OPERATION_VERSION: u32 = 2;
 const MAX_BATCH_COLOR_PAIRS: usize = 4_096;
 const MAX_BATCH_SEEDS: usize = 4_096;
 const MAX_BATCH_COLORS: usize = 4_096;
@@ -62,6 +62,7 @@ mod codec;
 mod execute;
 mod model;
 mod operations;
+mod pairs;
 mod validation;
 
 pub(crate) use operations::{apply_color_replacement, apply_separation};
@@ -69,7 +70,8 @@ pub(crate) use operations::{apply_color_replacement, apply_separation};
 pub use model::{
     BatchColorPair, BatchFailurePolicy, BatchGraph, BatchInputKind, BatchInputSelector,
     BatchItemOutcome, BatchItemResult, BatchMissingTargetPolicy, BatchOperation,
-    BatchOperationKind, BatchOutputPolicy, BatchOutputSettings, BatchPreview, BatchPreviewItem,
-    BatchRunOptions, BatchRunReport, BatchRunScope, BatchSeed, BatchSeparation,
-    BatchTargetSelector,
+    BatchOperationKind, BatchOutputPolicy, BatchOutputSettings, BatchPairCandidate,
+    BatchPairExtraction, BatchPairResolution, BatchPreview, BatchPreviewItem, BatchRunOptions,
+    BatchRunReport, BatchRunScope, BatchSeed, BatchSeparation, BatchSeparationDestination,
+    BatchTargetSelector, SequenceSourceIdentity,
 };

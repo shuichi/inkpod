@@ -97,6 +97,39 @@ pub(super) fn validate_operation(operation: &BatchOperation) -> Result<(), CoreE
         }
         _ => {}
     }
+    if let BatchOperationKind::ColorReplace(pairs) = &operation.kind {
+        for (index, pair) in pairs.iter().enumerate().filter(|(_, pair)| pair.enabled) {
+            if pairs[..index]
+                .iter()
+                .any(|previous| previous.enabled && previous.old == pair.old)
+            {
+                return Err(CoreError::InvalidArgument(
+                    "batch color replacement contains a duplicate enabled old color",
+                ));
+            }
+        }
+    }
+    if let BatchOperationKind::ContinuousFill(seeds) = &operation.kind {
+        for (index, seed) in seeds.iter().enumerate().filter(|(_, seed)| seed.enabled) {
+            if seeds[..index]
+                .iter()
+                .any(|previous| previous.enabled && previous.x == seed.x && previous.y == seed.y)
+            {
+                return Err(CoreError::InvalidArgument(
+                    "batch continuous fill contains a duplicate enabled seed",
+                ));
+            }
+        }
+    }
+    if let BatchOperationKind::Separation(options) = &operation.kind {
+        for (index, color) in options.colors.iter().enumerate() {
+            if options.colors[..index].contains(color) {
+                return Err(CoreError::InvalidArgument(
+                    "batch separation contains a duplicate color",
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -182,7 +215,7 @@ mod tests {
         };
 
         let pair = BatchColorPair {
-            enabled: true,
+            enabled: false,
             old: PixelValue::Rgba([0; 4]),
             new: PixelValue::Rgba([1, 2, 3, 4]),
         };
@@ -199,6 +232,7 @@ mod tests {
         }
 
         let seed = BatchSeed {
+            enabled: false,
             x: 0,
             y: 0,
             color: PixelValue::Rgba([0; 4]),
@@ -223,24 +257,93 @@ mod tests {
         }
 
         for count in [1, MAX_BATCH_COLORS] {
+            let colors = (0..count)
+                .map(|index| {
+                    PixelValue::Rgba([
+                        (index >> 8) as u8,
+                        index as u8,
+                        (index >> 16) as u8,
+                        u8::MAX,
+                    ])
+                })
+                .collect();
             assert!(
                 validate_kind(BatchOperationKind::Separation(BatchSeparation {
-                    colors: vec![PixelValue::Rgba([0; 4]); count],
+                    colors,
                     replacement: PixelValue::Rgba([1, 2, 3, 4]),
                     invert: false,
+                    destination: BatchSeparationDestination::ReplaceSource,
                 }))
                 .is_ok()
             );
         }
         for count in [0, MAX_BATCH_COLORS + 1] {
+            let colors = (0..count)
+                .map(|index| {
+                    PixelValue::Rgba([
+                        (index >> 8) as u8,
+                        index as u8,
+                        (index >> 16) as u8,
+                        u8::MAX,
+                    ])
+                })
+                .collect();
             assert_invalid(
                 BatchOperationKind::Separation(BatchSeparation {
-                    colors: vec![PixelValue::Rgba([0; 4]); count],
+                    colors,
                     replacement: PixelValue::Rgba([1, 2, 3, 4]),
                     invert: false,
+                    destination: BatchSeparationDestination::ReplaceSource,
                 }),
                 "batch separation color count is outside bounds",
             );
         }
+    }
+
+    #[test]
+    fn enabled_duplicate_rows_are_rejected_without_forbidding_disabled_alternatives() {
+        let pair = |enabled| BatchColorPair {
+            enabled,
+            old: PixelValue::Rgba([1, 2, 3, 4]),
+            new: PixelValue::Rgba([4, 3, 2, 1]),
+        };
+        assert!(
+            validate_kind(BatchOperationKind::ColorReplace(vec![
+                pair(true),
+                pair(true)
+            ]))
+            .is_err()
+        );
+        assert!(
+            validate_kind(BatchOperationKind::ColorReplace(vec![
+                pair(true),
+                pair(false)
+            ]))
+            .is_ok()
+        );
+
+        let seed = |enabled| BatchSeed {
+            enabled,
+            x: 4,
+            y: 5,
+            color: PixelValue::Rgba([1, 2, 3, 4]),
+            tolerance: 0,
+            gap_close: 0,
+            expected_source: None,
+        };
+        assert!(
+            validate_kind(BatchOperationKind::ContinuousFill(vec![
+                seed(true),
+                seed(true)
+            ]))
+            .is_err()
+        );
+        assert!(
+            validate_kind(BatchOperationKind::ContinuousFill(vec![
+                seed(true),
+                seed(false)
+            ]))
+            .is_ok()
+        );
     }
 }

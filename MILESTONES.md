@@ -412,7 +412,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M06 — PM-GAP-015: 対話的で範囲限定された色置換
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: COLOR-REPLACE-001、FILL-003、SEL-001、VECTOR-001。
 
@@ -470,9 +470,9 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M07 — PM-GAP-022: 連続彩色向けBatch authoringの詳細
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: BATCH-001、BATCH-002、BATCH-003、CLIP-001。
+関連要件: BATCH-001、BATCH-002、BATCH-003、BATCH-004、CLIP-001。
 
 仕様決定ゲート:
 

@@ -473,9 +473,12 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - line width batch は加算/減算/倍率/一定幅を対象 type に応じて検証する。
 - continuous fill は色と document X/Y seed の複数行を持ち、同じ座標が全 frame で意図した領域に残るか再生 preview する。各 frame で通常 fill semantics を使う。
 - color replace は旧色/新色の複数 pair、行ごとのenable、全pair反転、native preset save/load を持つ。
-- 二枚の同位置セルから color pair を抽出する場合は、差分色の曖昧さとalphaをpreviewする。
+- 二枚の同位置セルから color pair を抽出する場合は、Core が所有する非zero document UUIDと非zero source generationの組で各immutable raster sourceを固定する。両sourceは同じ幅、高さ、native pixel formatを必要とし、異なる寸法、形式、stale／missing identityを変換、resample、現在activeな別cellへの再解決なしに拒否する。比較は同じdocument X/Yの格納値をnative depthで行い、RGBA 8/16 bitではstraight alphaを含む全成分、Binary／Grayscale 8/16 bitでは格納scalarの完全一致を使う。表示変換、premultiply後の値、toleranceを使わない。
+- 同じ格納値のpixelは置換pairへ出さず、unchanged件数としてpreviewする。RGBが同じでもalphaが異なれば差分候補とする。各`旧色 -> 新色`候補はpixel件数と、その候補が現れたhalf-open document boundsを持つ。旧色groupは最初の差分pixelのscanline順、同じ旧色内の候補はpixel件数の降順、同数なら新色のnative値順で決定的に並べる。
+- 一つの旧色が複数の新色へ対応するone-to-manyは未解決ambiguityとし、最多候補を自動採用しない。利用者がその旧色について一候補だけを選ぶか旧色group全体を除外するまで、graph作成と実行を拒否する。複数の異なる旧色が同じ新色へ対応するmany-to-oneは、それぞれがone-to-oneなら有効な複数pairとして許可する。previewは候補、件数、bounds、alphaを表示する。
 - layer visibility batch は名前だけでなく安定selector/typeを使い、存在しない対象のskip/error policyを明示する。
-- separation は指定色をmask化し、単色置換、主線planeへ送る、彩色planeへ送る、別file出力を選べる。
+- separation は指定色をmask化し、元planeの単色置換、同じlayerの主線plane、同じlayerの彩色plane、Batchのnative別file出力をtyped destinationとして選べる。mask destinationはdocument selectionを置換し、plane destinationはsourceを保持して選択pixelだけをdestination native depthの指定色、非選択pixelをその形式のempty値へ置換する。主線／彩色destinationは既存のstable planeを明示解決し、欠落、hidden、non-editable、形式不一致、主線保護違反をcommit前に拒否する。別file destinationは既存のatomic `.inkpod` Batch出力だけを使い、入力fileの明示上書きを許可せず、外部形式や副carを追加しない。
+- `実行ごとに設定`のoperationはjob enqueue前に全行のimmutable実行configを完成させる。このflagは`.inkbatch`へ保存して再読込後も維持し、読込済みgraphでも毎回stored parameterを初期値として再設定する。確定時は元のpersisted graphを変更せず、全operationを含む一時run graphを一件作り、flagが一件でも未解決のgraphはdry-runを含め実行拒否する。Cancel、invalid、未解決ambiguityではjobを作らず、実行中のgraphを変更しない。変更する場合は進行中jobをcancelして新しいconfigで別jobを作る。
 - airbrush effect batch は境界を構成する複数色と幅を設定する。
 - 一件ごとにtemp outputからatomic commitし、cancel/失敗したfileに部分出力を残さない。dry-runは一切書かない。
 
@@ -610,5 +613,6 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `BATCH-001`: persisted Input -> Operations -> Output graph
 - `BATCH-002`: line width、continuous fill、replace、visibility、separate、filter/effect
 - `BATCH-003`: dry-run、preview、progress、cancel、per-output atomicity、failure report
+- `BATCH-004`: bounded multi-row seed／pair authoring、exact native-depth二セルpair抽出とambiguity解決、typed separation destination、実行前immutable per-run configuration
 - `VECTOR-001`: path/variable width/fill/color-trace model と rendering
 - `VECTOR-002`: vector draw/erase/connect/width/select/convert

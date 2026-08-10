@@ -1607,8 +1607,28 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
             state.Workspace().tools.palette, state.Workspace().command_states)) {
         return 896;
     }
+    const auto* pair_extract_state = windows::ui::FindCommandState(
+        state.Workspace().command_states, IDM_BATCH_EXTRACT_PAIRS);
+    const UINT pair_extract_menu_state = GetMenuState(
+        GetMenu(state.Workspace().windows.window),
+        IDM_BATCH_EXTRACT_PAIRS,
+        MF_BYCOMMAND);
+    if (pair_extract_state == nullptr) {
+        return 937;
+    }
+    if (pair_extract_menu_state == static_cast<UINT>(-1)) {
+        return 938;
+    }
+    if (((pair_extract_menu_state & (MF_DISABLED | MF_GRAYED)) == 0U)
+        != pair_extract_state->enabled) {
+        return 939;
+    }
+    if (((pair_extract_menu_state & MF_CHECKED) != 0U)
+        != pair_extract_state->checked) {
+        return 940;
+    }
     if (!CommandSurfacesMatchComputedState(state)) {
-        return 745;
+        return 929;
     }
     SendMessageW(pencil_button, BM_CLICK, 0, 0);
     InkpodEditorStateInfo pencil_editor{};
@@ -6295,6 +6315,50 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
             == 0U) {
         return 700;
     }
+    InkpodDocumentInfo pair_document = EmptyDocumentInfo();
+    if (!QueryDocument(state, pair_document)) {
+        return 926;
+    }
+    constexpr std::array<std::uint8_t, 4U> pair_source_old{1U, 2U, 3U, 255U};
+    constexpr std::array<std::uint8_t, 4U> pair_source_new{4U, 5U, 6U, 255U};
+    constexpr std::array<std::uint8_t, 4U> pair_name_old{'o', 'l', 'd', '1'};
+    constexpr std::array<std::uint8_t, 4U> pair_name_new{'n', 'e', 'w', '2'};
+    const std::array<InkpodSequenceCellInput, 2U> pair_cells{
+        InkpodSequenceCellInput{
+            sizeof(InkpodSequenceCellInput),
+            0U,
+            pair_name_old.data(),
+            pair_name_old.size(),
+            InkpodRasterSourceInput{
+                sizeof(InkpodRasterSourceInput), INKPOD_STORAGE_RGBA8, 0U,
+                pair_document.document_uuid_high,
+                pair_document.document_uuid_low,
+                1U, 1U, 1U, 96000U, 96000U,
+                InkpodFrameRect{0, 0, 1, 1}, pair_source_old.data(),
+                pair_source_old.size(), 4U}},
+        InkpodSequenceCellInput{
+            sizeof(InkpodSequenceCellInput),
+            0U,
+            pair_name_new.data(),
+            pair_name_new.size(),
+            InkpodRasterSourceInput{
+                sizeof(InkpodRasterSourceInput), INKPOD_STORAGE_RGBA8, 0U,
+                pair_document.document_uuid_high ^ UINT64_C(1),
+                pair_document.document_uuid_low,
+                2U, 1U, 1U, 96000U, 96000U,
+                InkpodFrameRect{0, 0, 1, 1}, pair_source_new.data(),
+                pair_source_new.size(), 4U}}};
+    const InkpodSequenceInput pair_sequence{
+        sizeof(InkpodSequenceInput), 0U, 0U, pair_cells.data(), pair_cells.size(),
+        sizeof(InkpodSequenceCellInput)};
+    if (state.engine->Invoke(
+            [&pair_sequence](InkpodCore* core) {
+                return inkpod_core_sequence_set(core, &pair_sequence);
+            },
+            false,
+            false) != INKPOD_STATUS_OK) {
+        return 926;
+    }
     HMENU menu = GetMenu(state.Workspace().windows.window);
     if (menu == nullptr
         || GetMenuState(menu, IDM_WINDOW_BATCH, MF_BYCOMMAND) == static_cast<UINT>(-1)
@@ -6335,7 +6399,32 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_OUTPUT_SETTINGS, 0) != 1
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_ADD_COLOR_REPLACE, 0) != 1
         || state.batch.operations.size() != 1U
-        || state.batch.operations[0].color_pairs.size() != 1U) {
+        || state.batch.operations[0].color_pairs.size() != 1U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_EXTRACT_PAIRS,
+               0) != 1
+        || state.batch.operations[0].color_pairs.size() != 1U
+        || state.batch.last_result.find(L"候補 1") == std::wstring::npos) {
+        cleanup();
+        return 702;
+    }
+    try {
+        state.batch.operations[0].color_pairs.push_back(
+            state.batch.operations[0].color_pairs.front());
+    } catch (const std::bad_alloc&) {
+        cleanup();
+        return 702;
+    }
+    state.batch.operations[0].color_pairs[1].enabled = 0U;
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_BATCH_OPERATION_EDIT,
+            0) != 1
+        || state.batch.operations[0].color_pairs.size() != 2U
+        || state.batch.operations[0].color_pairs[1].enabled != 0U) {
         cleanup();
         return 702;
     }
@@ -6347,7 +6436,8 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
     }
     const auto& swapped = state.batch.operations[0].color_pairs[0];
     if (std::memcmp(&swapped.old_color, &new_before, sizeof(new_before)) != 0
-        || std::memcmp(&swapped.new_color, &old_before, sizeof(old_before)) != 0) {
+        || std::memcmp(&swapped.new_color, &old_before, sizeof(old_before)) != 0
+        || state.batch.operations[0].color_pairs[1].enabled != 0U) {
         cleanup();
         return 704;
     }
@@ -6380,6 +6470,69 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         cleanup();
         return 706;
     }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_BATCH_ADD_SEPARATION,
+            0) != 1
+        || state.batch.operations.back().kind != INKPOD_BATCH_OPERATION_SEPARATION) {
+        cleanup();
+        return 927;
+    }
+    state.batch.operations.back().parameters[1] =
+        INKPOD_BATCH_SEPARATION_SELECTION_MASK;
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_BATCH_OPERATION_EDIT,
+            0) != 1
+        || state.batch.operations.back().parameters[1]
+            != INKPOD_BATCH_SEPARATION_SELECTION_MASK
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_OPERATION_REMOVE,
+               0) != 1) {
+        cleanup();
+        return 927;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_BATCH_ADD_CONTINUOUS_FILL,
+            0) != 1
+        || state.batch.operations.back().seeds.size() != 1U) {
+        cleanup();
+        return 928;
+    }
+    try {
+        state.batch.operations.back().seeds.push_back(
+            state.batch.operations.back().seeds.front());
+    } catch (const std::bad_alloc&) {
+        cleanup();
+        return 928;
+    }
+    state.batch.operations.back().seeds[1].flags &= ~INKPOD_BATCH_SEED_ENABLED;
+    state.batch.operations.back().flags |=
+        INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN;
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_BATCH_OPERATION_EDIT,
+            0) != 1
+        || state.batch.operations.back().seeds.size() != 2U
+        || (state.batch.operations.back().seeds[1].flags
+                & INKPOD_BATCH_SEED_ENABLED)
+            != 0U
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_BATCH_OPERATION_REMOVE,
+               0) != 1
+        || state.batch.operations.size() != 1U) {
+        cleanup();
+        return 928;
+    }
     const LRESULT input_count = SendDlgItemMessageW(
         state.Workspace().batch_palette, IDC_BATCH_INPUTS, LB_GETCOUNT, 0, 0);
     const LRESULT operation_count = SendDlgItemMessageW(
@@ -6389,6 +6542,8 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         cleanup();
         return 707;
     }
+    state.batch.operations[0].flags |=
+        INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN;
     if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_SAVE_SET, 0) != 1
         || GetFileAttributesW(settings_path) == INVALID_FILE_ATTRIBUTES
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_LOAD_SET, 0) != 1
@@ -6401,7 +6556,11 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
     if (inkpod_batch_graph_get_info(state.batch.graph, &graph_info) != INKPOD_STATUS_OK
         || graph_info.version != INKPOD_BATCH_GRAPH_VERSION
         || graph_info.operation_count != 1U
-        || graph_info.output_policy != INKPOD_BATCH_OUTPUT_DUPLICATE) {
+        || graph_info.output_policy != INKPOD_BATCH_OUTPUT_DUPLICATE
+        || state.batch.operations.size() != 1U
+        || (state.batch.operations[0].flags
+                & INKPOD_BATCH_OPERATION_CONFIGURE_EACH_RUN)
+            == 0U) {
         cleanup();
         return 709;
     }
@@ -6425,12 +6584,30 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
         cleanup();
         return 711;
     }
-    if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_BATCH_RUN_CURRENT, 0) != 1
-        || GetFileAttributesW(output_path) == INVALID_FILE_ATTRIBUTES
-        || inkpod_batch_report_get_info(state.batch.report, &report_info) != INKPOD_STATUS_OK
-        || report_info.failure_count != 0U) {
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_BATCH_RUN_CURRENT,
+            0) != 1) {
+        std::fwprintf(
+            stderr,
+            L"batch production run failed: %ls\n",
+            state.engine->LastError().c_str());
         cleanup();
-        return 712;
+        return 941;
+    }
+    if (GetFileAttributesW(output_path) == INVALID_FILE_ATTRIBUTES) {
+        cleanup();
+        return 942;
+    }
+    if (inkpod_batch_report_get_info(state.batch.report, &report_info)
+        != INKPOD_STATUS_OK) {
+        cleanup();
+        return 943;
+    }
+    if (report_info.failure_count != 0U) {
+        cleanup();
+        return 944;
     }
     if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_WINDOW_BATCH, 0) != 1
         || state.Workspace().windows.workspace.dock.IsPaneVisible(
@@ -7036,7 +7213,7 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         || state.engine->WaitIdle(second_session, second_generation)
             != INKPOD_STATUS_OK) {
         cleanup();
-        return 745;
+        return 930;
     }
     PumpPendingWindowMessages();
     InkpodDocumentInfo second_after_async = EmptyDocumentInfo();
@@ -7073,7 +7250,7 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
                false) != INKPOD_STATUS_OK
         || (first_locator.flags & INKPOD_LOCATOR_SELECTION_PRESENT) != 0U) {
         cleanup();
-        return 745;
+        return 931;
     }
 
     InkpodDocumentInfo first_after = EmptyDocumentInfo();
@@ -7095,7 +7272,7 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         || SaveToPath(state, second_path) != INKPOD_STATUS_INVALID_STATE
         || state.Document().shell.current_path != first_path) {
         cleanup();
-        return 745;
+        return 932;
     }
 
     const InkpodStrokeSample first_prompt_sample{
@@ -7126,7 +7303,7 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
             true,
             true) != INKPOD_STATUS_OK) {
         cleanup();
-        return 745;
+        return 933;
     }
     std::uint32_t expected_dirty_prompts{};
     for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
@@ -7140,7 +7317,7 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
     }
     if (expected_dirty_prompts < 2U) {
         cleanup();
-        return 745;
+        return 934;
     }
     const auto* first_document = state.Documents().Find(first_session);
     const auto* second_document = state.Documents().Find(second_session);
@@ -7196,7 +7373,7 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         || state.lifetime.smoke_dirty_prompt_count != 1U
         || state.Documents().Count() != baseline_count + 1U) {
         cleanup();
-        return 745;
+        return 935;
     }
     state.lifetime.smoke_dirty_prompt_choice = IDNO;
     state.lifetime.smoke_dirty_prompt_count = 0U;
@@ -7205,7 +7382,7 @@ int RunMultiDocumentTabSmoke(ApplicationHost& state) noexcept {
         || state.Documents().Count() != baseline_count + 1U
         || !ActivateDocumentTab(state, first_view)) {
         cleanup();
-        return 745;
+        return 936;
     }
 
     const std::size_t first_view_count = state.Document().ViewCount();

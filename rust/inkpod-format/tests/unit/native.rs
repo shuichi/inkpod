@@ -344,7 +344,10 @@ fn io_001_v14_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
-    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 14);
+    assert_eq!(
+        u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
+        FORMAT_VERSION
+    );
     assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 8);
     assert_eq!(u32::from_le_bytes(bytes[16..20].try_into().unwrap()), 128);
     let mut expected = file;

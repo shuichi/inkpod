@@ -73,6 +73,126 @@ InkpodFilterInput FilterInputFor(const app::FilterJob& job) noexcept {
     return input;
 }
 
+void FillOperationInput(
+    const app::BatchOperationUi& source,
+    InkpodFilterInput& filter,
+    InkpodBatchOperationInput& destination) noexcept {
+    destination = {};
+    destination.struct_size = sizeof(destination);
+    destination.version = INKPOD_BATCH_GRAPH_VERSION;
+    destination.kind = source.kind;
+    destination.flags = source.flags;
+    destination.layer_id = source.layer_id;
+    destination.plane_id = source.plane_id;
+    destination.layer_kind = source.layer_kind;
+    destination.plane_kind = source.plane_kind;
+    destination.missing_policy = source.missing_policy;
+    std::copy(
+        source.parameters.begin(),
+        source.parameters.end(),
+        std::begin(destination.parameters));
+    destination.color_0 = source.color_0;
+    destination.color_1 = source.color_1;
+    destination.colors.struct_size = sizeof(destination.colors);
+    destination.colors.colors = source.colors.empty()
+        ? nullptr
+        : source.colors.data();
+    destination.colors.color_count = source.colors.size();
+    destination.colors.color_stride_bytes = sizeof(InkpodColorValue);
+    if (source.kind == INKPOD_BATCH_OPERATION_FILTER) {
+        filter = FilterInputFor(source.filter);
+        destination.filter = &filter;
+    }
+    destination.color_pairs = source.color_pairs.empty()
+        ? nullptr
+        : source.color_pairs.data();
+    destination.color_pair_count = source.color_pairs.size();
+    destination.color_pair_stride_bytes = sizeof(InkpodBatchColorPairInput);
+    destination.seeds = source.seeds.empty() ? nullptr : source.seeds.data();
+    destination.seed_count = source.seeds.size();
+    destination.seed_stride_bytes = sizeof(InkpodBatchSeedInput);
+}
+
+bool ReadOperation(
+    const InkpodBatchGraph* graph,
+    std::uint64_t index,
+    app::BatchOperationUi& operation) noexcept {
+    InkpodBatchOperationInfo info{};
+    info.struct_size = sizeof(info);
+    if (inkpod_batch_graph_get_operation(graph, index, &info)
+        != INKPOD_STATUS_OK
+        || info.color_count > 4'096U || info.color_pair_count > 4'096U
+        || info.seed_count > 4'096U || info.curve_point_count > 4'096U) {
+        return false;
+    }
+    try {
+        operation = {};
+        operation.kind = info.kind;
+        operation.flags = info.flags;
+        operation.layer_id = info.layer_id;
+        operation.plane_id = info.plane_id;
+        operation.layer_kind = info.layer_kind;
+        operation.plane_kind = info.plane_kind;
+        operation.missing_policy = info.missing_policy;
+        std::copy(
+            std::begin(info.parameters),
+            std::end(info.parameters),
+            operation.parameters.begin());
+        operation.color_0 = info.color_0;
+        operation.color_1 = info.color_1;
+        operation.filter.kind = info.filter_kind;
+        operation.filter.channel = info.filter_channel;
+        operation.filter.interpolation = info.filter_interpolation;
+        std::copy(
+            std::begin(info.filter_parameters),
+            std::end(info.filter_parameters),
+            operation.filter.parameters.begin());
+        operation.colors.resize(static_cast<std::size_t>(info.color_count));
+        operation.color_pairs.resize(
+            static_cast<std::size_t>(info.color_pair_count));
+        operation.seeds.resize(static_cast<std::size_t>(info.seed_count));
+        operation.filter.points.resize(
+            static_cast<std::size_t>(info.curve_point_count));
+        operation.label = L"読み込み済み操作";
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    for (std::size_t row = 0U; row < operation.colors.size(); ++row) {
+        operation.colors[row].struct_size = sizeof(InkpodColorValue);
+        if (inkpod_batch_graph_get_operation_color(
+                graph, index, row, &operation.colors[row])
+            != INKPOD_STATUS_OK) {
+            return false;
+        }
+    }
+    for (std::size_t row = 0U; row < operation.color_pairs.size(); ++row) {
+        operation.color_pairs[row].struct_size =
+            sizeof(InkpodBatchColorPairInput);
+        if (inkpod_batch_graph_get_operation_color_pair(
+                graph, index, row, &operation.color_pairs[row])
+            != INKPOD_STATUS_OK) {
+            return false;
+        }
+    }
+    for (std::size_t row = 0U; row < operation.seeds.size(); ++row) {
+        operation.seeds[row].struct_size = sizeof(InkpodBatchSeedInput);
+        if (inkpod_batch_graph_get_operation_seed(
+                graph, index, row, &operation.seeds[row])
+            != INKPOD_STATUS_OK) {
+            return false;
+        }
+    }
+    for (std::size_t row = 0U; row < operation.filter.points.size(); ++row) {
+        operation.filter.points[row].struct_size = sizeof(InkpodCurvePoint);
+        if (inkpod_batch_graph_get_operation_curve_point(
+                graph, index, row, &operation.filter.points[row])
+            != INKPOD_STATUS_OK) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 BatchController::BatchController(
@@ -92,13 +212,37 @@ BatchController::BatchController(
       engine_(engine) {}
 
 InkpodStatus BatchController::BuildGraph() noexcept {
-    if (batch_.loaded_graph && batch_.graph != nullptr) {
-        return INKPOD_STATUS_OK;
-    }
-    if (batch_.operations.empty()) {
+    const auto& source_operations = batch_.run_operations.empty()
+        ? batch_.operations
+        : batch_.run_operations;
+    if (source_operations.empty()) {
         return INKPOD_STATUS_INVALID_STATE;
     }
     try {
+        std::vector<InkpodFilterInput> filters(source_operations.size());
+        std::vector<InkpodBatchOperationInput> operations(source_operations.size());
+        for (std::size_t index = 0; index < source_operations.size(); ++index) {
+            FillOperationInput(
+                source_operations[index], filters[index], operations[index]);
+        }
+        if (batch_.loaded_graph && batch_.graph != nullptr) {
+            if (batch_.run_operations.empty()) {
+                return INKPOD_STATUS_OK;
+            }
+            InkpodBatchGraph* run_graph{};
+            const InkpodStatus status = inkpod_batch_graph_clone_with_operations(
+                batch_.graph,
+                operations.data(),
+                operations.size(),
+                sizeof(InkpodBatchOperationInput),
+                &run_graph);
+            if (status == INKPOD_STATUS_OK) {
+                inkpod_batch_graph_release(&batch_.run_graph);
+                batch_.run_graph = run_graph;
+            }
+            return status;
+        }
+        inkpod_batch_graph_release(&batch_.run_graph);
         std::vector<std::uint8_t> input_path;
         std::vector<std::uint8_t> output_folder;
         std::vector<std::uint8_t> basename;
@@ -118,48 +262,6 @@ InkpodStatus BatchController::BuildGraph() noexcept {
         batch_input.first_cell = batch_.first_cell;
         batch_input.last_cell = batch_.last_cell;
 
-        std::vector<InkpodFilterInput> filters(batch_.operations.size());
-        std::vector<InkpodBatchOperationInput> operations(batch_.operations.size());
-        for (std::size_t index = 0; index < batch_.operations.size(); ++index) {
-            const app::BatchOperationUi& source = batch_.operations[index];
-            InkpodBatchOperationInput& destination = operations[index];
-            destination.struct_size = sizeof(destination);
-            destination.version = INKPOD_BATCH_GRAPH_VERSION;
-            destination.kind = source.kind;
-            destination.flags = source.flags;
-            destination.layer_id = source.layer_id;
-            destination.plane_id = source.plane_id;
-            destination.layer_kind = source.layer_kind;
-            destination.plane_kind = source.plane_kind;
-            destination.missing_policy = source.missing_policy;
-            std::copy(
-                source.parameters.begin(),
-                source.parameters.end(),
-                std::begin(destination.parameters));
-            destination.color_0 = source.color_0;
-            destination.color_1 = source.color_1;
-            destination.colors.struct_size = sizeof(destination.colors);
-            destination.colors.colors = source.colors.empty()
-                ? nullptr
-                : source.colors.data();
-            destination.colors.color_count = source.colors.size();
-            destination.colors.color_stride_bytes = sizeof(InkpodColorValue);
-            if (source.kind == INKPOD_BATCH_OPERATION_FILTER) {
-                filters[index] = FilterInputFor(source.filter);
-                destination.filter = &filters[index];
-            }
-            destination.color_pairs = source.color_pairs.empty()
-                ? nullptr
-                : source.color_pairs.data();
-            destination.color_pair_count = source.color_pairs.size();
-            destination.color_pair_stride_bytes =
-                sizeof(InkpodBatchColorPairInput);
-            destination.seeds = source.seeds.empty()
-                ? nullptr
-                : source.seeds.data();
-            destination.seed_count = source.seeds.size();
-            destination.seed_stride_bytes = sizeof(InkpodBatchSeedInput);
-        }
         static constexpr std::array<std::uint8_t, 17U> graph_name{
             'W','i','n','d','o','w','s',' ','B','a','t','c','h',' ','S','e','t'};
         InkpodBatchGraphInput input{};
@@ -210,6 +312,7 @@ InkpodStatus BatchController::Preview(
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus graph_status = BuildGraph();
+    batch_.run_operations.clear();
     if (graph_status != INKPOD_STATUS_OK) {
         return graph_status;
     }
@@ -219,8 +322,11 @@ InkpodStatus BatchController::Preview(
         *context.document_session,
         *context.generation,
         [batch, scope](InkpodCore* core) {
+            const InkpodBatchGraph* graph = batch->run_graph != nullptr
+                ? batch->run_graph
+                : batch->graph;
             return inkpod_core_batch_preview(
-                core, batch->graph, scope, &batch->preview);
+                core, graph, scope, &batch->preview);
         },
         false,
         false);
@@ -261,6 +367,7 @@ InkpodStatus BatchController::Start(
         return INKPOD_STATUS_INVALID_STATE;
     }
     const InkpodStatus graph_status = BuildGraph();
+    batch_.run_operations.clear();
     if (graph_status != INKPOD_STATUS_OK) {
         return graph_status;
     }
@@ -299,9 +406,12 @@ InkpodStatus BatchController::Start(
             *context.document_session,
             *context.generation,
             [batch, scope, flags](InkpodCore* core) {
+                const InkpodBatchGraph* graph = batch->run_graph != nullptr
+                    ? batch->run_graph
+                    : batch->graph;
                 return inkpod_core_batch_execute(
                     core,
-                    batch->graph,
+                    graph,
                     scope,
                     flags,
                     batch->task,
@@ -343,9 +453,12 @@ InkpodStatus BatchController::Start(
     if (!engine_.Enqueue(
             context,
             [batch, scope, flags](InkpodCore* core) {
+                const InkpodBatchGraph* graph = batch->run_graph != nullptr
+                    ? batch->run_graph
+                    : batch->graph;
                 return inkpod_core_batch_execute(
                     core,
-                    batch->graph,
+                    graph,
                     scope,
                     flags,
                     batch->task,
@@ -390,23 +503,43 @@ InkpodStatus BatchController::LoadGraph(
     if (status != INKPOD_STATUS_OK) {
         return status;
     }
-    inkpod_batch_preview_release(&batch_.preview);
-    inkpod_batch_report_release(&batch_.report);
-    inkpod_batch_graph_release(&batch_.graph);
-    batch_.graph = loaded;
-    batch_.loaded_graph = true;
     InkpodBatchGraphInfo info{};
     info.struct_size = sizeof(info);
-    if (inkpod_batch_graph_get_info(loaded, &info) == INKPOD_STATUS_OK) {
-        batch_.output_policy = info.output_policy;
-        batch_.failure_policy = info.failure_policy;
-        batch_.cell_folder =
-            (info.output_flags & INKPOD_BATCH_OUTPUT_CELL_FOLDER) != 0U;
-        batch_.descending =
-            (info.output_flags & INKPOD_BATCH_OUTPUT_DESCENDING) != 0U;
-        batch_.preview_before_save =
-            (info.output_flags & INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE) != 0U;
+    if (inkpod_batch_graph_get_info(loaded, &info) != INKPOD_STATUS_OK
+        || info.operation_count == 0U || info.operation_count > 1'024U) {
+        inkpod_batch_graph_release(&loaded);
+        return INKPOD_STATUS_INVALID_ARGUMENT;
     }
+    std::vector<app::BatchOperationUi> operations;
+    try {
+        operations.resize(static_cast<std::size_t>(info.operation_count));
+    } catch (const std::bad_alloc&) {
+        inkpod_batch_graph_release(&loaded);
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    for (std::size_t index = 0U; index < operations.size(); ++index) {
+        if (!ReadOperation(loaded, index, operations[index])) {
+            inkpod_batch_graph_release(&loaded);
+            return INKPOD_STATUS_INVALID_ARGUMENT;
+        }
+    }
+    inkpod_batch_preview_release(&batch_.preview);
+    inkpod_batch_report_release(&batch_.report);
+    inkpod_batch_graph_release(&batch_.run_graph);
+    inkpod_batch_graph_release(&batch_.graph);
+    batch_.graph = loaded;
+    batch_.operations = std::move(operations);
+    batch_.run_operations.clear();
+    batch_.selected_operation = 0U;
+    batch_.loaded_graph = true;
+    batch_.output_policy = info.output_policy;
+    batch_.failure_policy = info.failure_policy;
+    batch_.cell_folder =
+        (info.output_flags & INKPOD_BATCH_OUTPUT_CELL_FOLDER) != 0U;
+    batch_.descending =
+        (info.output_flags & INKPOD_BATCH_OUTPUT_DESCENDING) != 0U;
+    batch_.preview_before_save =
+        (info.output_flags & INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE) != 0U;
     return INKPOD_STATUS_OK;
 }
 
@@ -529,6 +662,7 @@ void BatchController::ResetDerivedState(app::BatchUiState& batch) noexcept {
     inkpod_batch_preview_release(&batch.preview);
     inkpod_batch_report_release(&batch.report);
     inkpod_batch_graph_release(&batch.graph);
+    inkpod_batch_graph_release(&batch.run_graph);
     batch.loaded_graph = false;
     batch.last_result.clear();
 }

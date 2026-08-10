@@ -117,6 +117,7 @@ pub unsafe extern "C" fn inkpod_core_sequence_set(
                 Ok(cell) => cell,
                 Err(error) => return map_core_error(error),
             };
+            cell.source_generation = raster.source_revision;
             cell.frames.reference_frame = raster.reference_frame;
             cells.push(cell);
         }

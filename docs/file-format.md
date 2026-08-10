@@ -1,7 +1,7 @@
 # Native file format
 
-`.inkpod` v14 is the bounded, procedure-authoritative, little-endian native
-container. Version 14 and runtime replay epoch 11 are the only accepted native contract.
+`.inkpod` v15 is the bounded, procedure-authoritative, little-endian native
+container. Version 15 and runtime replay epoch 12 are the only accepted native contract.
 
 Until the user explicitly declares a format freeze, Inkpod accepts only the
 current version of each application-owned file format. It provides no older-
@@ -13,7 +13,7 @@ schema should be replaced whenever a more robust or efficient design is found.
 ## Current procedure-authoritative contract
 
 This section defines the implemented procedure-authoritative container at
-top-level format version 14 and runtime replay epoch 11. It uses a hierarchical document
+top-level format version 15 and runtime replay epoch 12. It uses a hierarchical document
 commitment, an exact-depth target-explicit `ApplyRasterStroke/v3` schema, a
 distinct stable Cell ID, and an explicit immutable Genesis base surface:
 metadata, raster, and raster-tile commitments are domain-separated so a raster
@@ -27,7 +27,7 @@ merged. A replay-result change also increments the replay epoch.
 
 The authoritative sections are `META`, `GENS`, `ASST`, `PROC`, and `EDIT`.
 `EXTM`, `CKPT`, and unknown opaque-preserve sections are optional. `CKPT` is a
-schema-1 acceleration record in v14. There is no `HIST` section: history moves and
+schema-1 acceleration record in v15. There is no `HIST` section: history moves and
 branch cuts are records in `PROC`, while cursor, active branch, savepoints, and
 ID high-watermarks are fields in `META`. A materialized document or checkpoint
 is never sufficient without Genesis, retained assets, and the procedure/control
@@ -282,7 +282,7 @@ the common 16-byte record header defined below, then these exact payload bytes:
 - An asset-reference record is `argument ordinal u32`, zero `u32`, then the
   32-byte `AssetId`. Input/output-ID records are `role ordinal u32`, reserved
   zero `u32`, and stable ID `u64`; the typed canonical invocation is the object-
-  kind authority in v14. Each sequence is strictly increasing
+  kind authority in v15. Each sequence is strictly increasing
   by ordinal with no duplicate role. The primitive schema fixes whether each
   input/output role is required; transient object IDs are forbidden.
 - When payload length is zero, `ProcedurePayloadDigest` is 32 zero bytes and no
@@ -386,7 +386,7 @@ tables. View revision, zoom, pan, flip, guides, grid, renderer resources, and OS
 DPI are excluded. `RenderSnapshot::canonical_composite_digest` and
 `inkpod_snapshot_get_canonical_digest` expose this result without a test-only
 state accessor. This derived snapshot digest is not serialized in `.inkpod` and
-does not change native format v14 or runtime replay epoch 11.
+does not change native format v15 or runtime replay epoch 12.
 
 A sequence field is `element-count u64`, then for every element `element-length
 u64` and exact element bytes. A schema-declared ordered sequence retains its
@@ -424,7 +424,7 @@ digest, 5 semantics revision `u32`, 6 work-formula ID `u32`, and 7 replay-policy
 argument-schema digest is BLAKE3 `derive_key` over the exact canonical ASCII
 label `<canonical-name>/canonical-v<schema-version>` using the primitive-
 argument-schema context above. This label identifies the closed typed schema;
-the v14 reader selects its decoder through the same catalog entry and accepts
+the v15 reader selects its decoder through the same catalog entry and accepts
 only a byte-exact canonical re-encoding.
 
 An argument descriptor is a schema-1 frame with fields 1 ordinal `u32`; 2
@@ -477,7 +477,19 @@ region; and, when present, one canonical selection shape restricted to trace,
 rectangle, polyline, or lasso. It stores no frontend command ID, view transform,
 device coordinate, raw pointer, or temporary object ID. A non-empty persistent
 selection is resolved at execution and intersected with the region; this is
-therefore part of runtime replay epoch 11.
+therefore part of runtime replay epoch 12.
+
+`SeparateRasterColors/v2` has primitive ID `0x0005_0041`, semantics revision 3,
+and work-formula ID `0x0005_0041`. Its canonical bytes order the nonzero source
+Plane ID, a bounded exact-native-depth color list, the exact replacement value,
+the invert boolean, and destination `u32`: 1 ReplaceSource, 2 SelectionMask,
+3 MainLinePlane, 4 ColorPlane, or 5 NativeFile. The destination changes replay
+results, so the addition is part of runtime replay epoch 12 and top-level v15.
+SelectionMask replaces the document mask with binary 0/255 coverage. Plane
+destinations preserve the source plane and replace the chosen editable sibling
+plane with replacement pixels for selected coordinates and transparent/zero
+pixels elsewhere. NativeFile uses the normal atomic `.inkpod` batch output route
+and is invalid with ExplicitOverwrite.
 
 `DocumentStateDigest` excludes document/editor revisions, history, paths, views,
 transient sessions, allocation/tile-cache state, and caches. Its schema-5 root
@@ -551,7 +563,7 @@ follows:
   sequence lists for the current standalone-cell model. Document, Cell, layer,
   plane, selection, and other stable object IDs therefore obey cross-kind
   numeric-ID uniqueness. This document-state frame is schema/domain 5. The
-  current build contract is runtime replay epoch 11 and top-level version 14; optional
+  current build contract is runtime replay epoch 12 and top-level version 15; optional
   checkpoint/streaming records do not change the state-digest schema.
   Collections whose UI order is not semantic are ID-sorted.
 - An adjustment frame orders kind, channel, interpolation, six signed `i32`
@@ -666,7 +678,7 @@ owners. The current materialized document and checkpoints are not sufficient
 roots by themselves. Assets referenced only by an inactive branch remain
 available for cache-free replay, and the owning Core session releases its
 registry only after transient work has drained. These runtime rules establish
-the exact graph serialized by v14 `GENS` and `ASST`.
+the exact graph serialized by v15 `GENS` and `ASST`.
 
 Cache-free save/reopen-equivalent verification is detached from that live
 registry: it walks the same roots, deep-copies every unique payload in
@@ -674,7 +686,7 @@ registry: it walks the same roots, deep-copies every unique payload in
 then rebinds Genesis and retained procedures before fresh replay. Descriptor,
 payload, identity, and duplicate-root reference counts must match, while the
 source and rebuilt `AssetRecord`, payload, and raster allocations must not share
-ownership. That detached archive remains test infrastructure; v14 now provides
+ownership. That detached archive remains test infrastructure; v15 now provides
 the production encoder and staged reader.
 
 Self-referential digest fields are present as thirty-two zero bytes during
@@ -692,14 +704,14 @@ change digest output. The Core production dependency computes the
 hierarchical schema-5 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render
 caching: snapshot validation uses only the documented revision-max scalar and
-never these digests. The same pinned implementation computes the v14 section,
+never these digests. The same pinned implementation computes the v15 section,
 root, asset-chunk, journal, document, editor, and procedure-payload commitments.
 
 ### Header, directory, and record bytes
 
-The v14 header is exactly 128 bytes. Its outer container-layout epoch is 8;
+The v15 header is exactly 128 bytes. Its outer container-layout epoch is 8;
 the authoritative `META` and procedure records independently require runtime
-replay epoch 11 before staged Core publication:
+replay epoch 12 before staged Core publication:
 
 | Offset | Size | Field |
 |---:|---:|---|
@@ -803,7 +815,7 @@ SolidWhite, 2 Asset followed by its 32-byte `AssetId`), then nested payload
 length `u64` and the exact current schema-1 `DocumentArchive` payload. That nested
 payload is not a standalone `.inkpod` container and is not accepted through
 the native-file entrypoint; it is the bounded Genesis document DTO owned by the
-v14 GENS schema. Its fixed manifest is 200 bytes before palette, optional
+v15 GENS schema. Its fixed manifest is 200 bytes before palette, optional
 metadata, plane descriptors, and blob descriptors: stable Document ID, distinct
 stable Cell ID, primary layer/main/color plane IDs, document UUID, raster size,
 DPI, sRGB/reserved words, then 100%, reference, drawing, safe, shooting, and
@@ -816,7 +828,7 @@ persisted `EditorRevision u64`; 3 exact canonical EditorState frame; 4 its
 `EditorStateDigest`. Revision starts at 1, is excluded from the digest, and the
 stored digest must match both the frame and `META`.
 
-The v14 writer emits this bounded canonical EDIT payload and the staged reader
+The v15 writer emits this bounded canonical EDIT payload and the staged reader
 verifies its digest, target IDs, revision, and META savepoint before replacing
 the live Core. The decoder rejects an EDIT frame larger than 4 MiB.
 
@@ -943,7 +955,7 @@ the destination. Decode and failed save do not mutate a live Core document.
 
 ## Batch settings format
 
-Batch settings use the separate `.inkbatch` extension. Version 1 is a bounded
+Batch settings use the separate `.inkbatch` extension. Version 2 is a bounded
 little-endian file with a 28-byte header: magic `INKBATCH`, graph version, body
 length, and FNV-1a 64-bit body checksum. The format-freeze policy above applies:
 only the current graph version is accepted, and any graph schema change increments
@@ -954,12 +966,36 @@ current-sequence input selectors with optional cell-number ranges; up to 1,024
 ordered operations; and one output record. Each operation has its own version,
 kind, enabled/configure-each-run flags, conjunctive stable layer/plane ID and type selector,
 missing-target policy, and a kind-specific bounded payload. Payloads preserve
-exact-depth colors, replacement pairs, continuous-fill seeds and expected
-source colors, filter/curve parameters, separation/effect settings, transforms,
+exact-depth colors, per-row enabled replacement pairs, per-row enabled
+continuous-fill seeds and expected source colors, filter/curve parameters,
+typed separation destination/effect settings, transforms,
 resize/DPI, and conversion destination. The output record stores Duplicate,
 New Save, or Explicit Overwrite policy, native format code, folder/cell-folder,
 basename/numbering direction, continue/stop failure policy, optional wait, and
 preview-before-save.
+
+Version 2 is exact-current: version 1 and every other graph version are rejected,
+without migration. A seed record stores enabled, document x/y, exact fill color,
+tolerance, gap-close, and optional exact expected source color. A replacement row
+stores enabled plus exact old/new colors. Duplicate enabled seed coordinates and
+duplicate enabled old colors are invalid; disabled rows round-trip but do not
+execute. Separation stores one destination code from the closed set above.
+`configure-each-run` is persisted as authoring intent and remains active after
+save/load. Before every enqueue, including runs from a loaded preset, the frontend
+uses stored values as defaults and creates a complete immutable run copy with all
+such flags cleared. The persisted source graph is unchanged; an unresolved graph is
+rejected even for dry-run, and neither graph contains a mutable UI pointer.
+
+Two-cell pair extraction is a Core runtime preview, not a second persisted schema.
+It resolves each input by the exact pair of nonzero document UUID and nonzero
+source generation, requires equal dimensions and native pixel format, and compares
+full straight-alpha native values at identical document coordinates. Equal pixels
+increment the unchanged count and are omitted. Each transition records count and
+half-open affected bounds. Old-color groups follow first differing scanline
+coordinate; candidates within a group sort by descending count then native new-color
+bytes. One old color mapping to multiple new colors remains ambiguous until exactly
+one candidate or exclusion is chosen; multiple old colors mapping to one new color
+is valid. Only resolved enabled pairs enter `.inkbatch`.
 
 The complete file is limited to 16 MiB, inputs to 16,384, operations to 1,024,
 each UTF-8 string to 32 KiB, and each operation payload to 1 MiB. Decode rejects
@@ -976,7 +1012,7 @@ is atomically installed. Dry-run creates no output or temporary file. Duplicate
 is the default and is forbidden from resolving to its input path; overwrite is
 available only through the explicit output policy. A current-document source
 retains a copy of its canonical asset store while operations run. Asset-backed
-Genesis and every retained journal asset are written through the same v14
+Genesis and every retained journal asset are written through the same v15
 GENS/ASST path as an interactive save.
 
 The decoder bounds the whole file (1 GiB), including a post-read check against
@@ -1053,7 +1089,7 @@ itself retains the contract above.
 
 Explicit compaction is a separate export. Core first returns a confirmation
 token containing omitted event/procedure counts and document/editor/journal
-digests. Only the exact current token can write a new v14 file whose current
+digests. Only the exact current token can write a new v15 file whose current
 document is Genesis and whose PROC history is empty. The operation never changes
 or adopts the live path, journal, savepoints, dirty state, or IDs. There is no
 automatic squash.
@@ -1073,7 +1109,7 @@ deterministic mutation harness truncates and bit-flips valid native, batch, and
 all four common-raster seeds across every decoder. These regression tests do not
 replace coverage-guided fuzzing, but keep the accepted corruption corpus and
 allocation-bound paths executable on every normal `cargo test` run. The
-`rust/inkpod-format/fuzz` package provides `native_v14` for the current
-container, directory, CKPT removal/re-encode path and `native_core_v14` for staged Core
+`rust/inkpod-format/fuzz` package provides `native_v15` for the current
+container, directory, CKPT removal/re-encode path and `native_core_v15` for staged Core
 journal/checkpoint/full-replay, retention, and compaction-plan parsing; both call
 public production entrypoints.

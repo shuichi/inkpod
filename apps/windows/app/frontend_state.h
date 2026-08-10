@@ -287,6 +287,7 @@ struct BatchUiState {
     std::uint32_t first_cell{};
     std::uint32_t last_cell{};
     std::vector<BatchOperationUi> operations;
+    std::vector<BatchOperationUi> run_operations;
     std::uint32_t selected_operation{};
     InkpodBatchOutputPolicy output_policy{INKPOD_BATCH_OUTPUT_DUPLICATE};
     InkpodBatchFailurePolicy failure_policy{INKPOD_BATCH_FAILURE_CONTINUE};
@@ -302,6 +303,7 @@ struct BatchUiState {
 
     windows::ui::BatchPaletteDialogState palette_dialog{};
     InkpodBatchGraph* graph{};
+    InkpodBatchGraph* run_graph{};
     InkpodBatchPreview* preview{};
     InkpodBatchReport* report{};
     InkpodBatchTask* task{};

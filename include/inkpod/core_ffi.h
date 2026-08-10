@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(8)
+#define INKPOD_ABI_VERSION UINT32_C(9)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -423,7 +423,7 @@ typedef uint32_t InkpodTaskState;
 #define INKPOD_TASK_CANCELLED UINT32_C(3)
 #define INKPOD_TASK_FAILED UINT32_C(4)
 
-#define INKPOD_BATCH_GRAPH_VERSION UINT32_C(1)
+#define INKPOD_BATCH_GRAPH_VERSION UINT32_C(2)
 /** @brief batch graph の入力 selector 種類。 */
 typedef uint32_t InkpodBatchInputKind;
 #define INKPOD_BATCH_INPUT_FILE UINT32_C(1)
@@ -463,6 +463,12 @@ typedef uint32_t InkpodBatchOperationKind;
 #define INKPOD_BATCH_OUTPUT_PREVIEW_BEFORE_SAVE (UINT64_C(1) << 2)
 #define INKPOD_BATCH_SEPARATION_INVERT INT64_C(1)
 #define INKPOD_BATCH_SEED_HAS_EXPECTED_COLOR UINT32_C(1)
+#define INKPOD_BATCH_SEED_ENABLED (UINT32_C(1) << 1)
+#define INKPOD_BATCH_SEPARATION_REPLACE_SOURCE INT64_C(1)
+#define INKPOD_BATCH_SEPARATION_SELECTION_MASK INT64_C(2)
+#define INKPOD_BATCH_SEPARATION_MAIN_LINE_PLANE INT64_C(3)
+#define INKPOD_BATCH_SEPARATION_COLOR_PLANE INT64_C(4)
+#define INKPOD_BATCH_SEPARATION_NATIVE_FILE INT64_C(5)
 /** @brief batch 実行対象を current/all から選ぶ型。 */
 typedef uint32_t InkpodBatchRunScope;
 #define INKPOD_BATCH_SCOPE_CURRENT UINT32_C(1)
@@ -619,6 +625,8 @@ typedef struct InkpodBatchGraph InkpodBatchGraph;
 typedef struct InkpodColorChartFile InkpodColorChartFile;
 /** @brief batch preview item を所有する immutable・Rust-owned handle。 */
 typedef struct InkpodBatchPreview InkpodBatchPreview;
+/** @brief Rust-owned immutable two-cell exact color-pair extraction result. */
+typedef struct InkpodBatchPairPreview InkpodBatchPairPreview;
 /** @brief batch report item を所有する immutable・Rust-owned handle。 */
 typedef struct InkpodBatchReport InkpodBatchReport;
 
@@ -1698,7 +1706,7 @@ typedef struct InkpodBatchColorPairInput {
     InkpodColorValue new_color;
 } InkpodBatchColorPairInput;
 
-/** @brief continuous fill の seed、許容差、期待色を持つ borrowed record。 */
+/** @brief continuous fill の行単位 enable、seed、許容差、期待色を持つ borrowed record。 */
 typedef struct InkpodBatchSeedInput {
     uint32_t struct_size;
     uint32_t flags;
@@ -1715,7 +1723,9 @@ typedef struct InkpodBatchSeedInput {
  * @brief kind ごとの parameter と nested span を持つ versioned batch operation 入力。
  *
  * visibility [0]=0/1、line width [0]=mode/[1]=value*1000、
- * separation [0]=`INKPOD_BATCH_SEPARATION_INVERT` または 0、
+ * separation [0]=`INKPOD_BATCH_SEPARATION_INVERT` または 0、[1] は
+ * `INKPOD_BATCH_SEPARATION_*` typed destination、seed flags は
+ * `INKPOD_BATCH_SEED_ENABLED` と任意の期待色検査を持つ。
  * boundary effect [0]=width/[1]=strength_milli、dust [0]=`InkpodDustMode`/[1]=maximum_pixels、
  * mirror/rotate [0]=axis/direction、resize [0..5]=width,height,dpi_x,dpi_y,resample,anchor、
  * convert [0..1]=`InkpodTypedPlaneKind`,`InkpodStoragePixelFormat`。
@@ -1787,6 +1797,37 @@ typedef struct InkpodBatchGraphInfo {
 } InkpodBatchGraphInfo;
 
 /**
+ * @brief immutable graph 内の一操作を caller-owned scalar/count record へコピーする。
+ * nested colors/pairs/seeds/curve points は対応する indexed query で取得する。
+ */
+typedef struct InkpodBatchOperationInfo {
+    uint32_t struct_size;
+    uint32_t version;
+    InkpodBatchOperationKind kind;
+    uint32_t reserved;
+    uint64_t flags;
+    uint64_t layer_id;
+    uint64_t plane_id;
+    InkpodLayerKind layer_kind;
+    InkpodTypedPlaneKind plane_kind;
+    InkpodBatchMissingPolicy missing_policy;
+    uint32_t reserved_2;
+    int64_t parameters[8];
+    InkpodColorValue color_0;
+    InkpodColorValue color_1;
+    uint32_t filter_kind;
+    uint32_t filter_channel;
+    uint32_t filter_interpolation;
+    uint32_t reserved_3;
+    int32_t filter_parameters[5];
+    uint32_t reserved_4;
+    uint64_t color_count;
+    uint64_t color_pair_count;
+    uint64_t seed_count;
+    uint64_t curve_point_count;
+} InkpodBatchOperationInfo;
+
+/**
  * @brief batch preview 1 item の borrowed UTF-8 span を返す view record。
  * 文字列は親 `InkpodBatchPreview` の release まで有効で、個別解放しない。
  */
@@ -1824,6 +1865,42 @@ typedef struct InkpodBatchReportItem {
     const uint8_t* message;
     uint64_t message_bytes;
 } InkpodBatchReportItem;
+
+/** @brief Exact Core-owned sequence raster identity used for two-cell comparison. */
+typedef struct InkpodSequenceSourceIdentity {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint64_t source_generation;
+} InkpodSequenceSourceIdentity;
+
+/** @brief Geometry, native format, and bounded counts for a pair preview. */
+typedef struct InkpodBatchPairPreviewInfo {
+    uint32_t struct_size;
+    InkpodStoragePixelFormat pixel_format;
+    uint32_t width;
+    uint32_t height;
+    uint32_t ambiguity_count;
+    uint32_t reserved;
+    uint64_t candidate_count;
+    uint64_t unchanged_pixel_count;
+} InkpodBatchPairPreviewInfo;
+
+#define INKPOD_BATCH_PAIR_CANDIDATE_AMBIGUOUS UINT32_C(1)
+
+/** @brief One exact old/new candidate; colors include straight alpha. */
+typedef struct InkpodBatchPairCandidate {
+    uint32_t struct_size;
+    uint32_t flags;
+    InkpodColorValue old_color;
+    InkpodColorValue new_color;
+    uint64_t pixel_count;
+    int32_t bounds_x;
+    int32_t bounds_y;
+    int32_t bounds_width;
+    int32_t bounds_height;
+} InkpodBatchPairCandidate;
 
 /** @brief snapshot 内の path/plane/order/color/cubic/width を持つ borrowed segment record。 */
 typedef struct InkpodSnapshotVectorSegment {
@@ -4453,6 +4530,39 @@ InkpodStatus inkpod_task_release(InkpodTask** task);
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`UNSUPPORTED`、`PANIC`。
  */
+/** Copies the exact UUID/generation identity of one natural-order sequence source. */
+InkpodStatus inkpod_core_sequence_source_identity(
+    InkpodCore* core,
+    uint32_t sequence_index,
+    InkpodSequenceSourceIdentity* out_identity);
+
+/**
+ * Compares two immutable sequence rasters at identical document coordinates.
+ * Both identities are borrowed for the call. On success `*out_preview` owns a
+ * Rust allocation and must be released with `inkpod_batch_pair_preview_release`.
+ * Stale/missing identities, equal identities, dimensions/formats that differ,
+ * non-NULL output ownership, and wrong-thread access are rejected atomically.
+ */
+InkpodStatus inkpod_core_batch_extract_color_pairs(
+    InkpodCore* core,
+    const InkpodSequenceSourceIdentity* old_identity,
+    const InkpodSequenceSourceIdentity* new_identity,
+    InkpodBatchPairPreview** out_preview);
+
+/** Copies pair-preview counts and native raster metadata into caller storage. */
+InkpodStatus inkpod_batch_pair_preview_get_info(
+    const InkpodBatchPairPreview* preview,
+    InkpodBatchPairPreviewInfo* out_info);
+
+/** Copies one exact candidate and half-open document bounds into caller storage. */
+InkpodStatus inkpod_batch_pair_preview_get_candidate(
+    const InkpodBatchPairPreview* preview,
+    uint64_t index,
+    InkpodBatchPairCandidate* out_candidate);
+
+/** Releases an owned preview and sets the caller owner pointer to NULL; NULL is a no-op. */
+InkpodStatus inkpod_batch_pair_preview_release(InkpodBatchPairPreview** preview);
+
 InkpodStatus inkpod_batch_graph_create(
     const InkpodBatchGraphInput* input,
     InkpodBatchGraph** out_graph);
@@ -4491,6 +4601,46 @@ InkpodStatus inkpod_batch_graph_save(
 InkpodStatus inkpod_batch_graph_get_info(
     const InkpodBatchGraph* graph,
     InkpodBatchGraphInfo* out_info);
+/** Copies one operation's scalar fields and nested row counts. */
+InkpodStatus inkpod_batch_graph_get_operation(
+    const InkpodBatchGraph* graph,
+    uint64_t index,
+    InkpodBatchOperationInfo* out_info);
+/** Copies one separation/boundary-airbrush color row. */
+InkpodStatus inkpod_batch_graph_get_operation_color(
+    const InkpodBatchGraph* graph,
+    uint64_t operation_index,
+    uint64_t color_index,
+    InkpodColorValue* out_color);
+/** Copies one color-replacement row. */
+InkpodStatus inkpod_batch_graph_get_operation_color_pair(
+    const InkpodBatchGraph* graph,
+    uint64_t operation_index,
+    uint64_t pair_index,
+    InkpodBatchColorPairInput* out_pair);
+/** Copies one continuous-fill seed row. */
+InkpodStatus inkpod_batch_graph_get_operation_seed(
+    const InkpodBatchGraph* graph,
+    uint64_t operation_index,
+    uint64_t seed_index,
+    InkpodBatchSeedInput* out_seed);
+/** Copies one tone-curve point. */
+InkpodStatus inkpod_batch_graph_get_operation_curve_point(
+    const InkpodBatchGraph* graph,
+    uint64_t operation_index,
+    uint64_t point_index,
+    InkpodCurvePoint* out_point);
+/**
+ * Creates an immutable run graph by replacing all source operations with a
+ * complete borrowed operation span. Count must match and every per-run flag
+ * must already be cleared. Success transfers a new Rust-owned graph handle.
+ */
+InkpodStatus inkpod_batch_graph_clone_with_operations(
+    const InkpodBatchGraph* graph,
+    const InkpodBatchOperationInput* operations,
+    uint64_t operation_count,
+    uint64_t operation_stride_bytes,
+    InkpodBatchGraph** out_graph);
 /**
  * @brief batch graph handle を解放し owner 変数を NULL にする。
  * @par 契約
