@@ -127,6 +127,8 @@ static_assert(sizeof(InkpodBatchPairCandidate) == 64U);
 static_assert(sizeof(InkpodSnapshotVectorSegment) == 80U);
 static_assert(sizeof(InkpodSnapshotVectorFill) == 48U);
 static_assert(sizeof(InkpodSnapshotVectorView) == 80U);
+static_assert(sizeof(InkpodSnapshotVectorEndpoint) == 32U);
+static_assert(sizeof(InkpodSnapshotVectorDiagnostics) == 40U);
 static_assert(sizeof(InkpodLayerThumbnailBuffer) == 80U);
 
 extern "C" int inkpod_header_c11_smoke(void);
@@ -160,8 +162,8 @@ int InkpodRunAbiSmoke() {
     InkpodReplayContract replay_contract{};
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 12U
-        || replay_contract.procedure_format_version != 15U
+        || replay_contract.replay_epoch != 13U
+        || replay_contract.procedure_format_version != 16U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -315,7 +317,7 @@ int InkpodRunAbiSmoke() {
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 15U
+        || persistence.format_version != 16U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE
@@ -878,6 +880,22 @@ int InkpodRunAbiSmoke() {
         || vector_view.fills->fill_id != vector_fill_id
         || *vector_view.boundary_path_ids != vector_path_id) {
         return 55;
+    }
+    InkpodSnapshotVectorDiagnostics short_diagnostics{};
+    short_diagnostics.struct_size = sizeof(std::uint32_t);
+    InkpodSnapshotVectorDiagnostics diagnostics{};
+    diagnostics.struct_size = sizeof(diagnostics);
+    if (inkpod_snapshot_get_vector_diagnostics(snapshot, &short_diagnostics)
+            != INKPOD_STATUS_INCOMPATIBLE_ABI
+        || inkpod_snapshot_get_vector_diagnostics(snapshot, nullptr)
+            != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
+            != INKPOD_STATUS_OK
+        || diagnostics.flags != INKPOD_VECTOR_DIAGNOSTIC_ANTIALIAS
+        || diagnostics.feature_flags != INKPOD_FEATURE_NONE
+        || diagnostics.endpoints != nullptr || diagnostics.endpoint_count != 0U
+        || diagnostics.endpoint_stride_bytes != sizeof(InkpodSnapshotVectorEndpoint)) {
+        return 111;
     }
     InkpodSnapshotRenderPlan short_render_plan{};
     short_render_plan.struct_size = sizeof(std::uint32_t);

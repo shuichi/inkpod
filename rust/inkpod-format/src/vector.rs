@@ -10,6 +10,7 @@ pub const MAX_VECTOR_PATHS: usize = 65_536;
 pub const MAX_VECTOR_SEGMENTS: usize = 262_144;
 pub const MAX_VECTOR_FILLS: usize = 65_536;
 pub const MAX_VECTOR_BOUNDARIES: usize = 262_144;
+pub const MAX_VECTOR_CONNECTIONS: usize = MAX_VECTOR_PATHS;
 const MAX_VECTOR_WIDTH_MILLI: u32 = 4_096_000;
 const MAX_VECTOR_COORDINATE_MILLI: i64 = 2_000_000_000;
 const VECTOR_METADATA_MAGIC: [u8; 4] = *b"VECT";
@@ -47,10 +48,25 @@ pub struct FileVectorFill {
     pub boundary_path_ids: Vec<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum FileVectorEndpoint {
+    Start,
+    End,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct FileVectorConnection {
+    pub first_path_id: u64,
+    pub first_endpoint: FileVectorEndpoint,
+    pub second_path_id: u64,
+    pub second_endpoint: FileVectorEndpoint,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FileVectorMetadata {
     pub paths: Vec<FileVectorPath>,
     pub fills: Vec<FileVectorFill>,
+    pub connections: Vec<FileVectorConnection>,
 }
 
 pub(super) fn encode_vector_metadata(
@@ -59,10 +75,10 @@ pub(super) fn encode_vector_metadata(
     validate_vector_metadata(metadata, None, None, None)?;
     let mut output = Vec::new();
     output.extend_from_slice(&VECTOR_METADATA_MAGIC);
-    push_u32(&mut output, 1);
+    push_u32(&mut output, 2);
     push_u32(&mut output, metadata.paths.len() as u32);
     push_u32(&mut output, metadata.fills.len() as u32);
-    push_u32(&mut output, 0);
+    push_u32(&mut output, metadata.connections.len() as u32);
     push_u32(&mut output, 0);
     for path in &metadata.paths {
         push_u64(&mut output, path.id);
@@ -89,6 +105,12 @@ pub(super) fn encode_vector_metadata(
             push_u64(&mut output, *path_id);
         }
     }
+    for connection in &metadata.connections {
+        push_u64(&mut output, connection.first_path_id);
+        push_u64(&mut output, connection.second_path_id);
+        push_u32(&mut output, endpoint_value(connection.first_endpoint));
+        push_u32(&mut output, endpoint_value(connection.second_endpoint));
+    }
     if output.len() > MAX_MANIFEST_BYTES as usize {
         return Err(FormatError::Invalid("vector metadata exceeds its bound"));
     }
@@ -97,19 +119,23 @@ pub(super) fn encode_vector_metadata(
 
 pub(super) fn decode_vector_metadata(bytes: &[u8]) -> Result<FileVectorMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != VECTOR_METADATA_MAGIC || reader.u32()? != 1 {
+    if reader.take(4)? != VECTOR_METADATA_MAGIC || reader.u32()? != 2 {
         return Err(FormatError::Unsupported(
             "vector metadata version is not supported",
         ));
     }
     let path_count = reader.u32()? as usize;
     let fill_count = reader.u32()? as usize;
-    if reader.u32()? != 0 || reader.u32()? != 0 {
+    let connection_count = reader.u32()? as usize;
+    if reader.u32()? != 0 {
         return Err(FormatError::Unsupported(
             "vector metadata reserved field is not zero",
         ));
     }
-    if path_count > MAX_VECTOR_PATHS || fill_count > MAX_VECTOR_FILLS {
+    if path_count > MAX_VECTOR_PATHS
+        || fill_count > MAX_VECTOR_FILLS
+        || connection_count > MAX_VECTOR_CONNECTIONS
+    {
         return Err(FormatError::Invalid(
             "vector object count is outside bounds",
         ));
@@ -189,10 +215,27 @@ pub(super) fn decode_vector_metadata(bytes: &[u8]) -> Result<FileVectorMetadata,
             boundary_path_ids,
         });
     }
+    let mut connections = Vec::with_capacity(connection_count);
+    for _ in 0..connection_count {
+        let first_path_id = reader.u64()?;
+        let second_path_id = reader.u64()?;
+        let first_endpoint = decode_endpoint(reader.u32()?)?;
+        let second_endpoint = decode_endpoint(reader.u32()?)?;
+        connections.push(FileVectorConnection {
+            first_path_id,
+            first_endpoint,
+            second_path_id,
+            second_endpoint,
+        });
+    }
     if reader.position != bytes.len() {
         return Err(FormatError::Invalid("vector metadata has trailing bytes"));
     }
-    let metadata = FileVectorMetadata { paths, fills };
+    let metadata = FileVectorMetadata {
+        paths,
+        fills,
+        connections,
+    };
     validate_vector_metadata(&metadata, None, None, None)?;
     Ok(metadata)
 }
@@ -203,7 +246,10 @@ pub(super) fn validate_vector_metadata(
     fill_plane_ids: Option<&BTreeSet<u64>>,
     vector_layer_for_plane: Option<&BTreeMap<u64, u64>>,
 ) -> Result<(), FormatError> {
-    if metadata.paths.len() > MAX_VECTOR_PATHS || metadata.fills.len() > MAX_VECTOR_FILLS {
+    if metadata.paths.len() > MAX_VECTOR_PATHS
+        || metadata.fills.len() > MAX_VECTOR_FILLS
+        || metadata.connections.len() > MAX_VECTOR_CONNECTIONS
+    {
         return Err(FormatError::Invalid(
             "vector object count is outside bounds",
         ));
@@ -291,5 +337,50 @@ pub(super) fn validate_vector_metadata(
             }
         }
     }
+    let paths_by_id = metadata
+        .paths
+        .iter()
+        .map(|path| (path.id, path))
+        .collect::<BTreeMap<_, _>>();
+    let mut connected_endpoints = BTreeSet::new();
+    let mut previous = None;
+    for connection in &metadata.connections {
+        let first = (connection.first_path_id, connection.first_endpoint);
+        let second = (connection.second_path_id, connection.second_endpoint);
+        let Some(first_path) = paths_by_id.get(&connection.first_path_id) else {
+            return Err(FormatError::Invalid("vector connection path is missing"));
+        };
+        let Some(second_path) = paths_by_id.get(&connection.second_path_id) else {
+            return Err(FormatError::Invalid("vector connection path is missing"));
+        };
+        if first >= second
+            || first_path.closed
+            || second_path.closed
+            || first_path.plane_id != second_path.plane_id
+            || !connected_endpoints.insert(first)
+            || !connected_endpoints.insert(second)
+            || previous.is_some_and(|value| value >= *connection)
+        {
+            return Err(FormatError::Invalid("vector connection is invalid"));
+        }
+        previous = Some(*connection);
+    }
     Ok(())
+}
+
+fn endpoint_value(endpoint: FileVectorEndpoint) -> u32 {
+    match endpoint {
+        FileVectorEndpoint::Start => 0,
+        FileVectorEndpoint::End => 1,
+    }
+}
+
+fn decode_endpoint(value: u32) -> Result<FileVectorEndpoint, FormatError> {
+    match value {
+        0 => Ok(FileVectorEndpoint::Start),
+        1 => Ok(FileVectorEndpoint::End),
+        _ => Err(FormatError::Unsupported(
+            "vector connection endpoint is not supported",
+        )),
+    }
 }

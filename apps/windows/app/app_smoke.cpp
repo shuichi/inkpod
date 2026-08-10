@@ -5958,6 +5958,272 @@ int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
         return 507;
     }
 
+    std::uint64_t diagnostic_path_id{};
+    const InkpodStatus diagnostic_path_status = state.engine->Invoke(
+        [vector_trace_plane_id, &diagnostic_path_id](InkpodCore* core) {
+            const InkpodVectorCubicSegment segment{
+                sizeof(InkpodVectorCubicSegment),
+                0U,
+                InkpodVectorPoint{12.0F, 24.0F},
+                InkpodVectorPoint{20.0F, 26.6667F},
+                InkpodVectorPoint{28.0F, 29.3333F},
+                InkpodVectorPoint{36.0F, 32.0F},
+                3.0F,
+                3.0F};
+            const InkpodVectorPathInput path{
+                sizeof(InkpodVectorPathInput),
+                0U,
+                0U,
+                vector_trace_plane_id,
+                InkpodColorValue{
+                    sizeof(InkpodColorValue),
+                    INKPOD_COLOR_DEPTH_8,
+                    20U,
+                    40U,
+                    220U,
+                    255U},
+                &segment,
+                1U,
+                sizeof(InkpodVectorCubicSegment)};
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            return inkpod_core_vector_add_path(
+                core, &path, &result, &diagnostic_path_id);
+        },
+        true,
+        true);
+    InkpodDocumentInfo diagnostics_before = EmptyDocumentInfo();
+    InkpodHistoryInfo diagnostics_history_before{};
+    diagnostics_history_before.struct_size = sizeof(diagnostics_history_before);
+    if (diagnostic_path_status != INKPOD_STATUS_OK || diagnostic_path_id == 0U
+        || !QueryDocument(state, diagnostics_before)
+        || state.engine->Invoke(
+               [&diagnostics_history_before](InkpodCore* core) {
+                   return inkpod_core_history_info(core, &diagnostics_history_before);
+               },
+               false,
+               false) != INKPOD_STATUS_OK) {
+        return 530;
+    }
+    const inkpod::app::EditorGroup* diagnostic_group =
+        state.Workspace().editors.Active();
+    inkpod::renderer::CanvasDocumentBounds diagnostic_bounds{};
+    if (diagnostic_group == nullptr || state.renderer == nullptr
+        || !state.renderer->WaitQueueIdleForSmokeTest()
+        || SendMessageW(
+               diagnostic_group->canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+            diagnostic_group->canvas, diagnostic_bounds)) {
+        return 535;
+    }
+    const double diagnostic_zoom = (diagnostic_bounds.right - diagnostic_bounds.left)
+        / static_cast<double>(diagnostics_before.width);
+    const auto device_coordinate = [diagnostic_zoom](double origin, double document) {
+        return static_cast<UINT>(std::max(
+            0L, std::lround(origin + document * diagnostic_zoom)));
+    };
+    const UINT antialias_x = device_coordinate(diagnostic_bounds.left, 23.526F);
+    const UINT antialias_y = device_coordinate(diagnostic_bounds.top, 29.423F);
+    const auto read_antialias_samples = [diagnostic_group, &state, antialias_x, antialias_y](
+                                           std::array<inkpod::renderer::CanvasPixelRgba8, 3U>&
+                                               samples) {
+        for (std::size_t index = 0U; index < samples.size(); ++index) {
+            const int offset = static_cast<int>(index) - 1;
+            if (FAILED(state.renderer->ReadPixelForSmokeTest(
+                    diagnostic_group->canvas_id,
+                    diagnostic_group->generation,
+                    antialias_x,
+                    static_cast<UINT>(static_cast<int>(antialias_y) + offset),
+                    samples[index]))) {
+                return false;
+            }
+        }
+        return true;
+    };
+    std::array<inkpod::renderer::CanvasPixelRgba8, 3U> antialias_on{};
+    if (!read_antialias_samples(antialias_on)) {
+        return 536;
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_ANTIALIAS, 0);
+    std::array<inkpod::renderer::CanvasPixelRgba8, 3U> antialias_off{};
+    if (!state.renderer->WaitQueueIdleForSmokeTest()
+        || SendMessageW(
+               diagnostic_group->canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1
+        || !read_antialias_samples(antialias_off)) {
+        return 536;
+    }
+    const bool antialias_pixels_identical = std::equal(
+        antialias_on.begin(),
+        antialias_on.end(),
+        antialias_off.begin(),
+        [](const auto& left, const auto& right) {
+            return left.red == right.red && left.green == right.green
+                && left.blue == right.blue && left.alpha == right.alpha;
+        });
+    if (antialias_pixels_identical) {
+        return 536;
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_CENTERLINE, 0);
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_CENTERLINE_ONLY, 0);
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_ENDPOINTS, 0);
+    UpdateMenuState(state);
+    const auto checked = [&state](UINT command) {
+        const UINT menu_state = GetMenuState(
+            GetMenu(state.Workspace().windows.window), command, MF_BYCOMMAND);
+        return menu_state != static_cast<UINT>(-1)
+            && (menu_state & MF_CHECKED) != 0U;
+    };
+    if (state.ActiveView().presentation.vector_antialias
+        || state.ActiveView().presentation.vector_centerline_mode
+            != INKPOD_VECTOR_CENTERLINE_ONLY
+        || !state.ActiveView().presentation.vector_endpoints_visible
+        || checked(IDM_VIEW_VECTOR_ANTIALIAS)
+        || !checked(IDM_VIEW_VECTOR_CENTERLINE)
+        || !checked(IDM_VIEW_VECTOR_CENTERLINE_ONLY)
+        || !checked(IDM_VIEW_VECTOR_ENDPOINTS)) {
+        return 531;
+    }
+
+    InkpodDocumentInfo diagnostics_after = EmptyDocumentInfo();
+    InkpodHistoryInfo diagnostics_history_after{};
+    diagnostics_history_after.struct_size = sizeof(diagnostics_history_after);
+    bool diagnostics_snapshot_valid{};
+    const std::uint64_t diagnostic_view_id =
+        state.ActiveView().presentation.active_view_id;
+    const InkpodStatus diagnostics_status = state.engine->Invoke(
+        [diagnostic_view_id,
+         diagnostic_path_id,
+         &diagnostics_history_after,
+         &diagnostics_snapshot_valid](InkpodCore* core) {
+            InkpodStatus status = inkpod_core_history_info(
+                core, &diagnostics_history_after);
+            const InkpodSnapshotOptions options{
+                sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
+            InkpodSnapshot* snapshot{};
+            if (status == INKPOD_STATUS_OK) {
+                status = diagnostic_view_id == 0U
+                    ? inkpod_core_build_snapshot(core, &options, &snapshot)
+                    : inkpod_core_build_snapshot_for_view(
+                          core, diagnostic_view_id, &options, &snapshot);
+            }
+            InkpodSnapshotVectorDiagnostics diagnostics{};
+            diagnostics.struct_size = sizeof(diagnostics);
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_snapshot_get_vector_diagnostics(
+                    snapshot, &diagnostics);
+            }
+            if (status == INKPOD_STATUS_OK) {
+                diagnostics_snapshot_valid = diagnostics.flags
+                        == (INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE
+                            | INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY
+                            | INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE)
+                    && diagnostics.endpoint_count == 2U
+                    && diagnostics.endpoints != nullptr
+                    && diagnostics.endpoints[0].path_id == diagnostic_path_id
+                    && diagnostics.endpoints[0].endpoint
+                        == INKPOD_VECTOR_ENDPOINT_START
+                    && diagnostics.endpoints[1].path_id == diagnostic_path_id
+                    && diagnostics.endpoints[1].endpoint
+                        == INKPOD_VECTOR_ENDPOINT_END;
+            }
+            const InkpodStatus release_status = inkpod_snapshot_release(&snapshot);
+            return status == INKPOD_STATUS_OK ? release_status : status;
+        },
+        false,
+        false);
+    if (diagnostics_status != INKPOD_STATUS_OK || !diagnostics_snapshot_valid
+        || !QueryDocument(state, diagnostics_after)
+        || diagnostics_after.document_revision != diagnostics_before.document_revision
+        || diagnostics_after.flags != diagnostics_before.flags
+        || diagnostics_after.main_plane_checksum != diagnostics_before.main_plane_checksum
+        || diagnostics_after.color_plane_checksum != diagnostics_before.color_plane_checksum
+        || diagnostics_after.view_revision <= diagnostics_before.view_revision
+        || diagnostics_history_after.cursor != diagnostics_history_before.cursor
+        || diagnostics_history_after.item_count != diagnostics_history_before.item_count) {
+        return 532;
+    }
+
+    if (!state.renderer->WaitQueueIdleForSmokeTest()
+        || SendMessageW(
+               diagnostic_group->canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+            diagnostic_group->canvas, diagnostic_bounds)) {
+        return 535;
+    }
+    const auto diagnostic_color_present = [diagnostic_group, &state](
+                                              UINT center_x,
+                                              UINT center_y,
+                                              bool endpoint) {
+        constexpr std::array<int, 5U> offsets{0, -1, 1, -2, 2};
+        for (const int y : offsets) {
+            for (const int x : offsets) {
+                if ((x < 0 && center_x < static_cast<UINT>(-x))
+                    || (y < 0 && center_y < static_cast<UINT>(-y))) {
+                    continue;
+                }
+                inkpod::renderer::CanvasPixelRgba8 pixel{};
+                if (FAILED(state.renderer->ReadPixelForSmokeTest(
+                        diagnostic_group->canvas_id,
+                        diagnostic_group->generation,
+                        static_cast<UINT>(static_cast<int>(center_x) + x),
+                        static_cast<UINT>(static_cast<int>(center_y) + y),
+                        pixel))) {
+                    return false;
+                }
+                if (pixel.red >= 180U && pixel.green <= 120U
+                    && (endpoint ? pixel.blue <= 100U : pixel.blue >= 80U)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    if (!diagnostic_color_present(
+            device_coordinate(diagnostic_bounds.left, 32.0),
+            device_coordinate(diagnostic_bounds.top, 8.0),
+            false)) {
+        return 537;
+    }
+    if (!diagnostic_color_present(
+            device_coordinate(diagnostic_bounds.left, 12.0),
+            device_coordinate(diagnostic_bounds.top, 24.0),
+            true)) {
+        return 538;
+    }
+    if (SendMessageW(
+               diagnostic_group->canvas,
+               inkpod::renderer::kCanvasSimulateDeviceLoss,
+               0,
+               0) != 1
+        || SendMessageW(
+               diagnostic_group->canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1) {
+        return 539;
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_CENTERLINE_ONLY, 0);
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_CENTERLINE, 0);
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_ENDPOINTS, 0);
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_VECTOR_ANTIALIAS, 0);
+
     state.Workspace().panes.active_tree_layer_id = vector_layer_id;
     state.Workspace().panes.active_tree_plane_id = vector_trace_plane_id;
     if (!RefreshTreePane(state)) {
@@ -10118,6 +10384,38 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
             || state.Document().ActiveView()->id != context.document_view.value()
         ? 731
         : 0;
+    if (exit_code == 0) {
+        const InkpodShortcutSequence* original = FindShortcutSequence(
+            state.shortcuts.bindings, IDM_VIEW_VECTOR_ENDPOINTS);
+        if (original == nullptr) {
+            exit_code = 732;
+        } else {
+            const InkpodShortcutSequence saved = *original;
+            InkpodShortcutSequence replacement{};
+            replacement.struct_size = sizeof(replacement);
+            replacement.command_id = IDM_VIEW_VECTOR_ENDPOINTS;
+            replacement.stroke_count = 1U;
+            replacement.strokes[0] = {
+                static_cast<std::uint32_t>('9'),
+                INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_ALT};
+            UINT resolved{};
+            const InkpodStatus rebind = RebindShortcut(
+                *state.engine, state.shortcuts, replacement, false);
+            const bool shortcut_resolved = rebind == INKPOD_STATUS_OK
+                && runtime::ResolveConfiguredShortcut(
+                    state,
+                    static_cast<std::uint32_t>('9'),
+                    INKPOD_SHORTCUT_MODIFIER_CONTROL | INKPOD_SHORTCUT_MODIFIER_ALT,
+                    resolved)
+                && resolved == IDM_VIEW_VECTOR_ENDPOINTS;
+            const InkpodStatus restore = rebind == INKPOD_STATUS_OK
+                ? RebindShortcut(*state.engine, state.shortcuts, saved, false)
+                : rebind;
+            if (!shortcut_resolved || restore != INKPOD_STATUS_OK) {
+                exit_code = 733;
+            }
+        }
+    }
     if (exit_code == 0) {
         exit_code = runtime::RunCommandContextSmoke(state);
     }

@@ -2699,6 +2699,198 @@ fn vector_segment(start: (f32, f32), end: (f32, f32)) -> InkpodVectorCubicSegmen
 }
 
 #[test]
+fn ffi_contract_vector_diagnostics_are_bounded_and_reject_invalid_input() {
+    let (mut core, _) = create_core(32, 32, 23);
+    let vector_name = b"Diagnostic vector";
+    let create_vector = InkpodTreeEdit {
+        struct_size: size_of::<InkpodTreeEdit>() as u32,
+        operation: INKPOD_TREE_CREATE_LAYER,
+        flags: 0,
+        object_id: 0,
+        parent_id: 0,
+        destination_index: 0,
+        kind: INKPOD_LAYER_VECTOR_COLORING,
+        pixel_format: 0,
+        opacity_milli: 0,
+        name_utf8: vector_name.as_ptr(),
+        name_bytes: vector_name.len() as u64,
+    };
+    let mut result = dispatch();
+
+    // SAFETY: Every input record and borrowed span remains valid for its call, and
+    // every Rust-owned handle is released exactly once through its matching API.
+    unsafe {
+        let mut vector_layer_id = 0;
+        assert_eq!(
+            inkpod_core_tree_edit(core, &create_vector, &mut result, &mut vector_layer_id),
+            INKPOD_STATUS_OK
+        );
+        let mut vector_layer_index = None;
+        let mut node = InkpodNodeInfo {
+            struct_size: size_of::<InkpodNodeInfo>() as u32,
+            ..InkpodNodeInfo::default()
+        };
+        for index in 0..2 {
+            if inkpod_core_node_get(core, index, u32::MAX, &mut node) == INKPOD_STATUS_OK
+                && node.id == vector_layer_id
+            {
+                vector_layer_index = Some(index);
+                break;
+            }
+        }
+        let vector_layer_index = vector_layer_index.expect("vector layer must be queryable");
+        assert_eq!(
+            inkpod_core_node_get(core, vector_layer_index, 0, &mut node),
+            INKPOD_STATUS_OK
+        );
+
+        let segment = vector_segment((4.0, 8.0), (20.0, 8.0));
+        let path = InkpodVectorPathInput {
+            struct_size: size_of::<InkpodVectorPathInput>() as u32,
+            reserved: 0,
+            flags: 0,
+            plane_id: node.id,
+            color: color(0, 0, 0, 255),
+            segments: &segment,
+            segment_count: 1,
+            segment_stride_bytes: size_of::<InkpodVectorCubicSegment>() as u64,
+        };
+        let mut path_id = 0;
+        assert_eq!(
+            inkpod_core_vector_add_path(core, &path, &mut result, &mut path_id),
+            INKPOD_STATUS_OK
+        );
+
+        let mut before = document_info();
+        assert_eq!(
+            inkpod_core_get_document_info(core, &mut before),
+            INKPOD_STATUS_OK
+        );
+        let history_before = queried_history_info(core);
+        let apply = |kind, value1, flags| InkpodViewInput {
+            struct_size: size_of::<InkpodViewInput>() as u32,
+            kind,
+            flags,
+            value1,
+            value2: 0.0,
+            value3: 0.0,
+            value4: 0.0,
+        };
+        let mut view_info = document_info();
+        assert_eq!(
+            inkpod_core_apply_view(
+                core,
+                &apply(INKPOD_VIEW_SET_VECTOR_ANTIALIAS, 0.0, 0),
+                &mut view_info,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_apply_view(
+                core,
+                &apply(
+                    INKPOD_VIEW_SET_VECTOR_CENTERLINE_MODE,
+                    f64::from(INKPOD_VECTOR_CENTERLINE_ONLY),
+                    0,
+                ),
+                &mut view_info,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_apply_view(
+                core,
+                &apply(INKPOD_VIEW_SET_VECTOR_ENDPOINTS_VISIBLE, 1.0, 0),
+                &mut view_info,
+            ),
+            INKPOD_STATUS_OK
+        );
+
+        let invalid_revision = view_info.view_revision;
+        assert_eq!(
+            inkpod_core_apply_view(
+                core,
+                &apply(INKPOD_VIEW_SET_VECTOR_CENTERLINE_MODE, 99.0, 0),
+                &mut view_info,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_apply_view(
+                core,
+                &apply(INKPOD_VIEW_SET_VECTOR_ENDPOINTS_VISIBLE, 1.0, 1),
+                &mut view_info,
+            ),
+            INKPOD_STATUS_UNSUPPORTED
+        );
+        let mut after = document_info();
+        assert_eq!(
+            inkpod_core_get_document_info(core, &mut after),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(after.document_revision, before.document_revision);
+        assert_eq!(after.view_revision, invalid_revision);
+        assert_eq!(after.flags, before.flags);
+        let history_after = queried_history_info(core);
+        assert_eq!(history_after.cursor, history_before.cursor);
+        assert_eq!(history_after.item_count, history_before.item_count);
+
+        let options = InkpodSnapshotOptions {
+            struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+            reserved: 0,
+            feature_flags: INKPOD_FEATURE_NONE,
+        };
+        let mut snapshot = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_build_snapshot(core, &options, &mut snapshot),
+            INKPOD_STATUS_OK
+        );
+        let mut short = InkpodSnapshotVectorDiagnostics {
+            struct_size: (size_of::<InkpodSnapshotVectorDiagnostics>() - 1) as u32,
+            ..InkpodSnapshotVectorDiagnostics::default()
+        };
+        assert_eq!(
+            inkpod_snapshot_get_vector_diagnostics(snapshot, &mut short),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(
+            inkpod_snapshot_get_vector_diagnostics(snapshot, ptr::null_mut()),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut diagnostics = InkpodSnapshotVectorDiagnostics {
+            struct_size: size_of::<InkpodSnapshotVectorDiagnostics>() as u32,
+            ..InkpodSnapshotVectorDiagnostics::default()
+        };
+        assert_eq!(
+            inkpod_snapshot_get_vector_diagnostics(snapshot, &mut diagnostics),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            diagnostics.flags,
+            INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE
+                | INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY
+                | INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE
+        );
+        assert_eq!(diagnostics.feature_flags, INKPOD_FEATURE_NONE);
+        assert_eq!(diagnostics.endpoint_count, 2);
+        assert_eq!(
+            diagnostics.endpoint_stride_bytes,
+            size_of::<InkpodSnapshotVectorEndpoint>() as u64
+        );
+        let endpoints =
+            std::slice::from_raw_parts(diagnostics.endpoints, diagnostics.endpoint_count as usize);
+        assert_eq!(endpoints[0].path_id, path_id);
+        assert_eq!(endpoints[0].plane_id, node.id);
+        assert_eq!(endpoints[0].endpoint, INKPOD_VECTOR_ENDPOINT_START);
+        assert_eq!(endpoints[1].endpoint, INKPOD_VECTOR_ENDPOINT_END);
+
+        assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn ffi_contract_vector_filter_and_task_state_machines() {
     let (mut core, info) = create_core(8, 8, 5);
     let vector_name = b"Contract vector";
@@ -2976,8 +3168,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 12);
-        assert_eq!(contract.procedure_format_version, 15);
+        assert_eq!(contract.replay_epoch, 13);
+        assert_eq!(contract.procedure_format_version, 16);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);

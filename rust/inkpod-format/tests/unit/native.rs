@@ -276,6 +276,7 @@ fn vector_fixture() -> DocumentArchive {
             color: PixelValue::Rgba([20, 40, 60, 200]),
             boundary_path_ids: vec![11],
         }],
+        connections: Vec::new(),
     });
     document
 }
@@ -288,8 +289,90 @@ fn io_001_manifest_and_blobs_round_trip() {
 }
 
 #[test]
+fn pm_gap_018_vector_connections_round_trip_and_reject_invalid_topology() {
+    let mut document = vector_fixture();
+    let segment = |x0, x1| FileVectorSegment {
+        p0: FileVectorPoint {
+            x_milli: x0,
+            y_milli: 2_000,
+        },
+        p1: FileVectorPoint {
+            x_milli: (x0 * 2 + x1) / 3,
+            y_milli: 2_000,
+        },
+        p2: FileVectorPoint {
+            x_milli: (x0 + x1 * 2) / 3,
+            y_milli: 2_000,
+        },
+        p3: FileVectorPoint {
+            x_milli: x1,
+            y_milli: 2_000,
+        },
+        width_start_milli: 1_000,
+        width_end_milli: 1_000,
+    };
+    document.vector_metadata = Some(FileVectorMetadata {
+        paths: vec![
+            FileVectorPath {
+                id: 21,
+                plane_id: 9,
+                color: PixelValue::Rgba([0, 0, 0, 255]),
+                closed: false,
+                segments: vec![segment(1_000, 8_000)],
+            },
+            FileVectorPath {
+                id: 22,
+                plane_id: 9,
+                color: PixelValue::Rgba([0, 0, 0, 255]),
+                closed: false,
+                segments: vec![segment(8_000, 16_000)],
+            },
+        ],
+        fills: Vec::new(),
+        connections: vec![FileVectorConnection {
+            first_path_id: 21,
+            first_endpoint: FileVectorEndpoint::End,
+            second_path_id: 22,
+            second_endpoint: FileVectorEndpoint::Start,
+        }],
+    });
+    let bytes = encode(&document).unwrap();
+    assert_eq!(decode(&bytes).unwrap(), document);
+
+    let mut legacy_vector = bytes;
+    let vector_offset = legacy_vector
+        .windows(4)
+        .position(|window| window == b"VECT")
+        .expect("vector metadata section");
+    legacy_vector[vector_offset + 4..vector_offset + 8].copy_from_slice(&1_u32.to_le_bytes());
+    assert!(matches!(
+        decode(&legacy_vector),
+        Err(FormatError::Unsupported(
+            "vector metadata version is not supported"
+        ))
+    ));
+
+    let mut invalid = document;
+    invalid
+        .vector_metadata
+        .as_mut()
+        .unwrap()
+        .connections
+        .push(FileVectorConnection {
+            first_path_id: 21,
+            first_endpoint: FileVectorEndpoint::End,
+            second_path_id: 22,
+            second_endpoint: FileVectorEndpoint::End,
+        });
+    assert!(matches!(
+        encode(&invalid),
+        Err(FormatError::Invalid("vector connection is invalid"))
+    ));
+}
+
+#[test]
 fn non_current_container_versions_are_rejected_before_format_freeze() {
-    for version in [2_u32, 3_u32] {
+    for version in [2_u32, 3_u32, 15_u32, 17_u32] {
         let mut encoded = encode(&base_fixture()).unwrap();
         encoded[8..12].copy_from_slice(&version.to_le_bytes());
         assert!(matches!(
@@ -340,7 +423,7 @@ fn procedure_file_fixture() -> NativeFile {
 }
 
 #[test]
-fn io_001_v14_directory_digest_and_opaque_sections_round_trip() {
+fn io_001_v16_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
@@ -370,14 +453,14 @@ fn io_001_v14_directory_digest_and_opaque_sections_round_trip() {
 }
 
 #[test]
-fn io_001_v14_accepts_checkpoint_and_rejects_v13_missing_duplicate_overlap_and_bad_digest() {
+fn io_001_v16_accepts_checkpoint_and_rejects_v15_missing_duplicate_overlap_and_bad_digest() {
     let file = procedure_file_fixture();
     let encoded = encode_procedure_file(&file).unwrap();
 
-    let mut v13 = encoded.clone();
-    v13[8..12].copy_from_slice(&13_u32.to_le_bytes());
+    let mut v15 = encoded.clone();
+    v15[8..12].copy_from_slice(&15_u32.to_le_bytes());
     assert!(matches!(
-        decode_procedure_file(&v13),
+        decode_procedure_file(&v15),
         Err(FormatError::Unsupported("format version is not supported"))
     ));
 
@@ -433,9 +516,9 @@ fn io_001_v14_accepts_checkpoint_and_rejects_v13_missing_duplicate_overlap_and_b
 }
 
 #[test]
-fn io_001_v14_streaming_cancel_keeps_existing_destination_and_removes_temp() {
+fn io_001_v16_streaming_cancel_keeps_existing_destination_and_removes_temp() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v14-cancel-test-{}-{}",
+        "inkpod-v16-cancel-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -462,9 +545,9 @@ fn io_001_v14_streaming_cancel_keeps_existing_destination_and_removes_temp() {
 }
 
 #[test]
-fn io_001_v14_atomic_save_replaces_an_existing_container() {
+fn io_001_v16_atomic_save_replaces_an_existing_container() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v14-replace-test-{}-{}",
+        "inkpod-v16-replace-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));

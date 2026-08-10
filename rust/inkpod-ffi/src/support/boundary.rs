@@ -66,6 +66,20 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         .iter()
         .flat_map(|fill| fill.boundary_path_ids.iter().copied())
         .collect();
+    let vector_endpoints = snapshot
+        .vector_endpoints()
+        .iter()
+        .map(|endpoint| InkpodSnapshotVectorEndpoint {
+            struct_size: size_of::<InkpodSnapshotVectorEndpoint>() as u32,
+            endpoint: match endpoint.endpoint {
+                VectorEndpoint::Start => INKPOD_VECTOR_ENDPOINT_START,
+                VectorEndpoint::End => INKPOD_VECTOR_ENDPOINT_END,
+            },
+            path_id: endpoint.path_id,
+            plane_id: endpoint.plane_id,
+            point: vector_point(endpoint.point),
+        })
+        .collect();
     let mut first_boundary_path = 0_u64;
     let vector_fills = snapshot
         .vector_fills()
@@ -118,6 +132,7 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         vector_segments,
         vector_fills,
         vector_boundary_path_ids,
+        vector_endpoints,
         render_passes,
         adjustment_luts_rgb8,
     })

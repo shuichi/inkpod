@@ -274,6 +274,7 @@ impl Core {
             }
         }
         after.vector.paths = paths;
+        after.vector.remove_connections_for_paths(&changed_ids);
         after.vector.fills.retain(|fill| {
             !fill
                 .boundary_path_ids
@@ -316,15 +317,32 @@ impl Core {
             .iter()
             .filter(|path| path.plane_id == plane_id && !path.closed)
             .collect();
+        let connected_endpoints = before.vector.connected_endpoint_ids();
         let mut best: Option<(f64, VectorPathId, bool, VectorPathId, bool)> = None;
         for (left_index, left) in paths.iter().enumerate() {
             for right in &paths[left_index + 1..] {
                 for left_end in [false, true] {
-                    if !endpoint_is_unconnected(&paths, left.id, endpoint(left, left_end)) {
+                    let left_endpoint = VectorEndpointId {
+                        path_id: left.id,
+                        endpoint: if left_end {
+                            VectorEndpoint::End
+                        } else {
+                            VectorEndpoint::Start
+                        },
+                    };
+                    if connected_endpoints.contains(&left_endpoint) {
                         continue;
                     }
                     for right_end in [false, true] {
-                        if !endpoint_is_unconnected(&paths, right.id, endpoint(right, right_end)) {
+                        let right_endpoint = VectorEndpointId {
+                            path_id: right.id,
+                            endpoint: if right_end {
+                                VectorEndpoint::End
+                            } else {
+                                VectorEndpoint::Start
+                            },
+                        };
+                        if connected_endpoints.contains(&right_endpoint) {
                             continue;
                         }
                         let a = endpoint(left, left_end);
@@ -369,6 +387,37 @@ impl Core {
             closed: false,
             segments: vec![line_segment(start, end, start_width, end_width)],
         });
+        let left_endpoint = VectorEndpointId {
+            path_id: left_id,
+            endpoint: if left_end {
+                VectorEndpoint::End
+            } else {
+                VectorEndpoint::Start
+            },
+        };
+        let right_endpoint = VectorEndpointId {
+            path_id: right_id,
+            endpoint: if right_end {
+                VectorEndpoint::End
+            } else {
+                VectorEndpoint::Start
+            },
+        };
+        after.vector.connect_endpoints(
+            left_endpoint,
+            VectorEndpointId {
+                path_id: connector_id,
+                endpoint: VectorEndpoint::Start,
+            },
+        )?;
+        after.vector.connect_endpoints(
+            VectorEndpointId {
+                path_id: connector_id,
+                endpoint: VectorEndpoint::End,
+            },
+            right_endpoint,
+        )?;
+        after.vector.ensure_limits()?;
         let outcome = edit.commit(self)?;
         self.next_id = next_id;
         Ok((outcome, Some(connector_id.get())))

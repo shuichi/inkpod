@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 342U;
+inline constexpr std::size_t kProductionCommandStateCount = 346U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -79,6 +79,9 @@ struct SelectionViewCommandStateInput {
     bool snap_guides{};
     bool snap_grid{};
     bool transparent_visible{true};
+    bool vector_antialias{true};
+    InkpodVectorCenterlineMode vector_centerline_mode{INKPOD_VECTOR_CENTERLINE_HIDDEN};
+    bool vector_endpoints_visible{};
     bool selection_layer_available{};
     std::size_t document_count{};
     std::size_t view_count{};

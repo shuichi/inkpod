@@ -74,6 +74,30 @@ pub(crate) fn parse_view_command(core: &Core, input: &InkpodViewInput) -> Result
         INKPOD_VIEW_SET_GRID_SNAP_ENABLED => ViewCommand::SetGridSnapEnabled(input.value1 != 0.0),
         INKPOD_VIEW_SET_TRANSPARENT_VISIBLE => ViewCommand::SetTransparentView(input.value1 != 0.0),
         INKPOD_VIEW_SET_ALPHA_VISIBLE => ViewCommand::SetAlphaView(input.value1 != 0.0),
+        INKPOD_VIEW_SET_VECTOR_ANTIALIAS => ViewCommand::SetVectorAntialias(input.value1 != 0.0),
+        INKPOD_VIEW_SET_VECTOR_CENTERLINE_MODE => {
+            let mode = match input.value1 {
+                value if value == f64::from(INKPOD_VECTOR_CENTERLINE_HIDDEN) => {
+                    VectorCenterlineMode::Hidden
+                }
+                value if value == f64::from(INKPOD_VECTOR_CENTERLINE_OVERLAY) => {
+                    VectorCenterlineMode::Overlay
+                }
+                value if value == f64::from(INKPOD_VECTOR_CENTERLINE_ONLY) => {
+                    VectorCenterlineMode::Only
+                }
+                _ => {
+                    return Err(fail(
+                        INKPOD_STATUS_INVALID_ARGUMENT,
+                        "vector centerline mode is not defined",
+                    ));
+                }
+            };
+            ViewCommand::SetVectorCenterlineMode(mode)
+        }
+        INKPOD_VIEW_SET_VECTOR_ENDPOINTS_VISIBLE => {
+            ViewCommand::SetVectorEndpointsVisible(input.value1 != 0.0)
+        }
         _ => {
             return Err(fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,

@@ -1,9 +1,12 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 15, replay epoch 12,
+The current runtime replay contract is procedure format 16, replay epoch 13,
 canonical numeric version 1, and the digest of the closed 77-entry primitive
-catalog. Production `.inkpod` is exact-current v15; an optional verified
+catalog. Production `.inkpod` is exact-current v16; an optional verified
 checkpoint preserves this contract and never replaces the authoritative journal.
+Epoch 13 and format 16 add explicit stable vector endpoint connections to
+Genesis and replayed `VectorConnect` results; coordinate proximity is never an
+implicit topology input.
 
 ## Canonical numeric authority
 
@@ -48,7 +51,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 15 and replay epoch 12. A semantic change that updates
+together with format version 16 and replay epoch 13. A semantic change that updates
 the catalog or any golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 

@@ -55,8 +55,9 @@ use std::fs;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
 pub use vector::{
-    FileVectorFill, FileVectorMetadata, FileVectorPath, FileVectorPoint, FileVectorSegment,
-    MAX_VECTOR_BOUNDARIES, MAX_VECTOR_FILLS, MAX_VECTOR_PATHS, MAX_VECTOR_SEGMENTS,
+    FileVectorConnection, FileVectorEndpoint, FileVectorFill, FileVectorMetadata, FileVectorPath,
+    FileVectorPoint, FileVectorSegment, MAX_VECTOR_BOUNDARIES, MAX_VECTOR_CONNECTIONS,
+    MAX_VECTOR_FILLS, MAX_VECTOR_PATHS, MAX_VECTOR_SEGMENTS,
 };
 
 #[cfg(test)]

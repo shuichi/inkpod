@@ -562,6 +562,9 @@ void ResetViewDocumentState(ViewUiState& view) noexcept {
     view.snap_guides = false;
     view.snap_grid = false;
     view.transparent_visible = true;
+    view.vector_antialias = true;
+    view.vector_centerline_mode = INKPOD_VECTOR_CENTERLINE_HIDDEN;
+    view.vector_endpoints_visible = false;
     ++view.locator_generation;
     view.locator_valid = false;
     view.locator = {};
@@ -5218,6 +5221,13 @@ CommandStateInputs BuildCommandStateInputs(
         && active_view->presentation.snap_grid;
     inputs.selection_view.transparent_visible = active_view != nullptr
         && active_view->presentation.transparent_visible;
+    inputs.selection_view.vector_antialias = active_view == nullptr
+        || active_view->presentation.vector_antialias;
+    inputs.selection_view.vector_centerline_mode = active_view == nullptr
+        ? INKPOD_VECTOR_CENTERLINE_HIDDEN
+        : active_view->presentation.vector_centerline_mode;
+    inputs.selection_view.vector_endpoints_visible = active_view != nullptr
+        && active_view->presentation.vector_endpoints_visible;
     inputs.selection_view.selection_layer_available =
         document != nullptr && document->shell.selection_layer_id != 0U;
     inputs.selection_view.document_count = state.Documents().Count();
@@ -13917,6 +13927,49 @@ std::optional<LRESULT> RouteSelectionViewCommand(
                 ShowCoreError(*state, window, L"表示補助の切替");
             } else {
                 *current = visible;
+            }
+            UpdateMenuState(*state);
+            return 0;
+        }
+        case IDM_VIEW_VECTOR_ANTIALIAS:
+        case IDM_VIEW_VECTOR_CENTERLINE:
+        case IDM_VIEW_VECTOR_CENTERLINE_ONLY:
+        case IDM_VIEW_VECTOR_ENDPOINTS: {
+            const UINT command = LOWORD(wparam);
+            auto& presentation = state->ActiveView().presentation;
+            InkpodViewCommandKind kind{};
+            double value{};
+            if (command == IDM_VIEW_VECTOR_ANTIALIAS) {
+                kind = INKPOD_VIEW_SET_VECTOR_ANTIALIAS;
+                value = presentation.vector_antialias ? 0.0 : 1.0;
+            } else if (command == IDM_VIEW_VECTOR_ENDPOINTS) {
+                kind = INKPOD_VIEW_SET_VECTOR_ENDPOINTS_VISIBLE;
+                value = presentation.vector_endpoints_visible ? 0.0 : 1.0;
+            } else {
+                kind = INKPOD_VIEW_SET_VECTOR_CENTERLINE_MODE;
+                if (command == IDM_VIEW_VECTOR_CENTERLINE) {
+                    value = presentation.vector_centerline_mode
+                            == INKPOD_VECTOR_CENTERLINE_HIDDEN
+                        ? INKPOD_VECTOR_CENTERLINE_OVERLAY
+                        : INKPOD_VECTOR_CENTERLINE_HIDDEN;
+                } else {
+                    value = presentation.vector_centerline_mode
+                            == INKPOD_VECTOR_CENTERLINE_ONLY
+                        ? INKPOD_VECTOR_CENTERLINE_OVERLAY
+                        : INKPOD_VECTOR_CENTERLINE_ONLY;
+                }
+            }
+            const InkpodStatus status = ApplyView(
+                *state, context, kind, value, 0.0);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"ベクター診断表示の切替");
+            } else if (command == IDM_VIEW_VECTOR_ANTIALIAS) {
+                presentation.vector_antialias = value != 0.0;
+            } else if (command == IDM_VIEW_VECTOR_ENDPOINTS) {
+                presentation.vector_endpoints_visible = value != 0.0;
+            } else {
+                presentation.vector_centerline_mode =
+                    static_cast<InkpodVectorCenterlineMode>(value);
             }
             UpdateMenuState(*state);
             return 0;

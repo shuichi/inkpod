@@ -406,21 +406,6 @@ pub(super) fn endpoint_width(path: &VectorPath, end: bool) -> u32 {
     }
 }
 
-pub(super) fn endpoint_is_unconnected(
-    paths: &[&VectorPath],
-    path_id: VectorPathId,
-    point: FixedPoint,
-) -> bool {
-    paths.iter().all(|other| {
-        other.id == path_id
-            || [endpoint(other, false), endpoint(other, true)]
-                .into_iter()
-                .all(|other_point| {
-                    squared_distance(fixed_xy(point), fixed_xy(other_point)) > 1.0e-12
-                })
-    })
-}
-
 pub(super) fn line_segment(
     start: FixedPoint,
     end: FixedPoint,

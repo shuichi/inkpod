@@ -13,6 +13,7 @@ pub struct InkpodSnapshot {
     pub(crate) vector_segments: Box<[InkpodSnapshotVectorSegment]>,
     pub(crate) vector_fills: Box<[InkpodSnapshotVectorFill]>,
     pub(crate) vector_boundary_path_ids: Box<[u64]>,
+    pub(crate) vector_endpoints: Box<[InkpodSnapshotVectorEndpoint]>,
     pub(crate) render_passes: Box<[InkpodSnapshotRenderPass]>,
     pub(crate) adjustment_luts_rgb8: Box<[u8]>,
 }

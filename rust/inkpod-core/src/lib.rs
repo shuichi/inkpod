@@ -105,9 +105,9 @@ pub use snapshot::{
     RenderTile,
 };
 pub use vector::{
-    RenderVectorFill, RenderVectorSegment, VectorCubicSegment, VectorEraseMode, VectorFillInfo,
-    VectorPathInfo, VectorPathInput, VectorRaster, VectorSelectionMode, VectorSelectionRange,
-    VectorSelectionResult, VectorWidthMode,
+    RenderVectorEndpoint, RenderVectorFill, RenderVectorSegment, VectorCubicSegment,
+    VectorEndpoint, VectorEraseMode, VectorFillInfo, VectorPathInfo, VectorPathInput, VectorRaster,
+    VectorSelectionMode, VectorSelectionRange, VectorSelectionResult, VectorWidthMode,
 };
 
 pub(crate) use coordinate::*;

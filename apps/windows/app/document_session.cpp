@@ -18,6 +18,9 @@ void ResetPresentation(ViewUiState& view) noexcept {
     view.snap_guides = false;
     view.snap_grid = false;
     view.transparent_visible = true;
+    view.vector_antialias = true;
+    view.vector_centerline_mode = INKPOD_VECTOR_CENTERLINE_HIDDEN;
+    view.vector_endpoints_visible = false;
     view.pointer_device_x = 0;
     view.pointer_device_y = 0;
     ++view.locator_generation;

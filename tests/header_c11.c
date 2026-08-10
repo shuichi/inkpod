@@ -23,6 +23,8 @@ _Static_assert(sizeof(InkpodViewInput) == 48U, "view input layout drift");
 _Static_assert(sizeof(InkpodSnapshotTransform) == 48U, "snapshot transform layout drift");
 _Static_assert(sizeof(InkpodSnapshotGuide) == 24U, "snapshot guide layout drift");
 _Static_assert(sizeof(InkpodSnapshotOverlay) == 56U, "snapshot overlay layout drift");
+_Static_assert(sizeof(InkpodSnapshotVectorEndpoint) == 32U, "vector endpoint layout drift");
+_Static_assert(sizeof(InkpodSnapshotVectorDiagnostics) == 40U, "vector diagnostics layout drift");
 _Static_assert(sizeof(InkpodObjectId) == 32U, "object id layout drift");
 _Static_assert(sizeof(InkpodPrimitiveRequestV3) == 120U, "primitive request layout drift");
 _Static_assert(sizeof(InkpodPrimitiveResultV3) == 48U, "primitive result layout drift");

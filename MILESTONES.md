@@ -470,7 +470,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M07 — PM-GAP-022: 連続彩色向けBatch authoringの詳細
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: BATCH-001、BATCH-002、BATCH-003、BATCH-004、CLIP-001。
 
@@ -537,9 +537,9 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M08 — PM-GAP-018: Vector線の診断表示
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: VIEW-002、VECTOR-001、ABI-002。
+関連要件: VIEW-005、VECTOR-001、ABI-002。
 
 成果:
 

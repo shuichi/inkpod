@@ -39,6 +39,7 @@ constexpr std::uint64_t kMaximumSnapshotGuides = 4096U;
 constexpr std::uint64_t kMaximumVectorSegments = 262144U;
 constexpr std::uint64_t kMaximumVectorFills = 65536U;
 constexpr std::uint64_t kMaximumVectorBoundaries = 262144U;
+constexpr std::uint64_t kMaximumVectorEndpoints = 131072U;
 constexpr std::uint64_t kMaximumRenderPasses = 1048576U;
 constexpr std::uint64_t kMaximumAdjustmentLuts = 4096U;
 constexpr std::uint64_t kMaximumOverlayLines = 8192U;
@@ -80,16 +81,21 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     overlay.struct_size = sizeof(overlay);
     InkpodSnapshotVectorView vectors{};
     vectors.struct_size = sizeof(vectors);
+    InkpodSnapshotVectorDiagnostics diagnostics{};
+    diagnostics.struct_size = sizeof(diagnostics);
     InkpodSnapshotRenderPlan plan{};
     plan.struct_size = sizeof(plan);
     if (inkpod_snapshot_get_view(snapshot, &view) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_overlay(snapshot, &overlay) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_vectors(snapshot, &vectors) != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
+            != INKPOD_STATUS_OK
         || inkpod_snapshot_get_render_plan(snapshot, &plan) != INKPOD_STATUS_OK) {
         return 0U;
     }
     std::uint64_t bytes = sizeof(InkpodSnapshotView) + sizeof(InkpodSnapshotTransform)
         + sizeof(InkpodSnapshotOverlay) + sizeof(InkpodSnapshotVectorView)
+        + sizeof(InkpodSnapshotVectorDiagnostics)
         + sizeof(InkpodSnapshotRenderPlan);
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         view.tile_count, view.tile_stride_bytes));
@@ -114,6 +120,8 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
         vectors.fill_count, vectors.fill_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         vectors.boundary_path_count, sizeof(std::uint64_t)));
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        diagnostics.endpoint_count, diagnostics.endpoint_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         plan.pass_count, plan.pass_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
@@ -401,6 +409,12 @@ public:
                 d2d_context_->EndDraw();
                 return result;
             }
+            result = DrawVectorDiagnostics();
+            if (FAILED(result)) {
+                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+                d2d_context_->EndDraw();
+                return result;
+            }
             result = DrawOverlays();
             if (FAILED(result)) {
                 d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -459,6 +473,8 @@ public:
         overlay.struct_size = sizeof(overlay);
         InkpodSnapshotVectorView vectors{};
         vectors.struct_size = sizeof(vectors);
+        InkpodSnapshotVectorDiagnostics diagnostics{};
+        diagnostics.struct_size = sizeof(diagnostics);
         InkpodSnapshotRenderPlan render_plan{};
         render_plan.struct_size = sizeof(render_plan);
         const InkpodStatus view_status = inkpod_snapshot_get_view(snapshot, &view);
@@ -471,13 +487,18 @@ public:
         const InkpodStatus vector_status = overlay_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_vectors(snapshot, &vectors)
             : overlay_status;
-        const InkpodStatus render_plan_status = vector_status == INKPOD_STATUS_OK
-            ? inkpod_snapshot_get_render_plan(snapshot, &render_plan)
+        const InkpodStatus diagnostics_status = vector_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
             : vector_status;
+        const InkpodStatus render_plan_status = diagnostics_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_render_plan(snapshot, &render_plan)
+            : diagnostics_status;
         if (view_status != INKPOD_STATUS_OK || transform_status != INKPOD_STATUS_OK
             || overlay_status != INKPOD_STATUS_OK || vector_status != INKPOD_STATUS_OK
+            || diagnostics_status != INKPOD_STATUS_OK
             || render_plan_status != INKPOD_STATUS_OK
             || !ValidateOverlay(overlay) || !ValidateVectors(vectors)
+            || !ValidateVectorDiagnostics(diagnostics)
             || !ValidateRenderPlan(render_plan, view, vectors)) {
             inkpod_snapshot_release(&snapshot);
             return E_INVALIDARG;
@@ -490,6 +511,7 @@ public:
         transform_ = transform;
         overlay_ = overlay;
         vectors_ = vectors;
+        vector_diagnostics_ = diagnostics;
         render_plan_ = render_plan;
         retained_snapshot_bytes_ = EstimateSnapshotPayloadBytes(snapshot);
         return RebuildTileCache();
@@ -951,6 +973,64 @@ private:
         return true;
     }
 
+    static bool ValidateVectorDiagnostics(
+        const InkpodSnapshotVectorDiagnostics& diagnostics) noexcept {
+        constexpr std::uint32_t known_flags = INKPOD_VECTOR_DIAGNOSTIC_ANTIALIAS
+            | INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE
+            | INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY
+            | INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE;
+        if (diagnostics.feature_flags != INKPOD_FEATURE_NONE
+            || (diagnostics.flags & ~known_flags) != 0U
+            || ((diagnostics.flags & INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY) != 0U
+                && (diagnostics.flags & INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE) == 0U)
+            || diagnostics.endpoint_count > kMaximumVectorEndpoints
+            || diagnostics.endpoint_stride_bytes < sizeof(InkpodSnapshotVectorEndpoint)
+            || diagnostics.endpoint_stride_bytes
+                    % alignof(InkpodSnapshotVectorEndpoint)
+                != 0U
+            || (diagnostics.endpoint_count != 0U && diagnostics.endpoints == nullptr)
+            || (diagnostics.endpoint_count != 0U
+                && (diagnostics.flags & INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE) == 0U)
+            || (diagnostics.endpoints != nullptr
+                && reinterpret_cast<std::uintptr_t>(diagnostics.endpoints)
+                        % alignof(InkpodSnapshotVectorEndpoint)
+                    != 0U)
+            || diagnostics.endpoint_stride_bytes
+                > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+            || (diagnostics.endpoint_count > 1U
+                && diagnostics.endpoint_stride_bytes
+                    > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+                        / (diagnostics.endpoint_count - 1U))) {
+            return false;
+        }
+        const auto* bytes = reinterpret_cast<const std::byte*>(diagnostics.endpoints);
+        std::uint64_t previous_path_id{};
+        std::uint32_t previous_endpoint{};
+        for (std::uint64_t index = 0U; index < diagnostics.endpoint_count; ++index) {
+            const auto* endpoint = reinterpret_cast<const InkpodSnapshotVectorEndpoint*>(
+                bytes + static_cast<std::size_t>(
+                    index * diagnostics.endpoint_stride_bytes));
+            if (endpoint->struct_size < sizeof(InkpodSnapshotVectorEndpoint)
+                || endpoint->struct_size > diagnostics.endpoint_stride_bytes
+                || (endpoint->endpoint != INKPOD_VECTOR_ENDPOINT_START
+                    && endpoint->endpoint != INKPOD_VECTOR_ENDPOINT_END)
+                || endpoint->path_id == 0U || endpoint->plane_id == 0U
+                || !std::isfinite(endpoint->point.x)
+                || !std::isfinite(endpoint->point.y)
+                || std::abs(endpoint->point.x) > 2000000.0F
+                || std::abs(endpoint->point.y) > 2000000.0F
+                || (index != 0U
+                    && (endpoint->path_id < previous_path_id
+                        || (endpoint->path_id == previous_path_id
+                            && endpoint->endpoint <= previous_endpoint)))) {
+                return false;
+            }
+            previous_path_id = endpoint->path_id;
+            previous_endpoint = endpoint->endpoint;
+        }
+        return true;
+    }
+
     static bool ValidateRenderPlan(
         const InkpodSnapshotRenderPlan& plan,
         const InkpodSnapshotView& view,
@@ -1145,7 +1225,13 @@ private:
             return result;
         }
         brush->SetColor(VectorColor(fill.color_rgba));
+        const D2D1_ANTIALIAS_MODE previous_antialias = d2d_context_->GetAntialiasMode();
+        d2d_context_->SetAntialiasMode(
+            (vector_diagnostics_.flags & INKPOD_VECTOR_DIAGNOSTIC_ANTIALIAS) != 0U
+                ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE
+                : D2D1_ANTIALIAS_MODE_ALIASED);
         d2d_context_->FillGeometry(geometry.Get(), brush);
+        d2d_context_->SetAntialiasMode(previous_antialias);
         return S_OK;
     }
 
@@ -1307,8 +1393,46 @@ private:
             return result;
         }
         brush->SetColor(VectorColor(path.first->color_rgba));
+        const D2D1_ANTIALIAS_MODE previous_antialias = d2d_context_->GetAntialiasMode();
+        d2d_context_->SetAntialiasMode(
+            (vector_diagnostics_.flags & INKPOD_VECTOR_DIAGNOSTIC_ANTIALIAS) != 0U
+                ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE
+                : D2D1_ANTIALIAS_MODE_ALIASED);
         d2d_context_->FillGeometry(geometry.Get(), brush);
+        d2d_context_->SetAntialiasMode(previous_antialias);
         return S_OK;
+    }
+
+    HRESULT CreateCenterlineGeometry(
+        const VectorPathSpan& path,
+        ComPtr<ID2D1PathGeometry>& geometry) noexcept {
+        geometry.Reset();
+        HRESULT result = shared_.D2dFactory()->CreatePathGeometry(&geometry);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<ID2D1GeometrySink> sink;
+        result = geometry->Open(&sink);
+        if (FAILED(result)) {
+            return result;
+        }
+        sink->BeginFigure(
+            D2D1::Point2F(path.first->p0.x, path.first->p0.y),
+            D2D1_FIGURE_BEGIN_HOLLOW);
+        for (std::uint32_t index = 0U; index < path.count; ++index) {
+            const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                reinterpret_cast<const std::byte*>(path.first)
+                + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
+            sink->AddBezier(D2D1::BezierSegment(
+                D2D1::Point2F(segment->p1.x, segment->p1.y),
+                D2D1::Point2F(segment->p2.x, segment->p2.y),
+                D2D1::Point2F(segment->p3.x, segment->p3.y)));
+        }
+        sink->EndFigure(
+            (path.flags & INKPOD_SNAPSHOT_VECTOR_CLOSED) != 0U
+                ? D2D1_FIGURE_END_CLOSED
+                : D2D1_FIGURE_END_OPEN);
+        return sink->Close();
     }
 
     HRESULT BuildVectorPathMap(
@@ -1404,6 +1528,11 @@ private:
                 return S_OK;
             }
             case INKPOD_RENDER_PASS_VECTOR_STROKES: {
+                if ((vector_diagnostics_.flags
+                        & INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY)
+                    != 0U) {
+                    return S_OK;
+                }
                 const auto* segment_bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
                 std::uint64_t index = pass.first_item;
                 const std::uint64_t end = pass.first_item + pass.item_count;
@@ -1690,6 +1819,72 @@ private:
         } catch (const std::bad_alloc&) {
             return E_OUTOFMEMORY;
         }
+    }
+
+    HRESULT DrawVectorDiagnostics() noexcept {
+        if ((vector_diagnostics_.flags
+                & (INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE
+                    | INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE))
+            == 0U) {
+            return S_OK;
+        }
+        ComPtr<ID2D1SolidColorBrush> brush;
+        HRESULT result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(0.95F, 0.15F, 0.55F, 0.95F), &brush);
+        if (FAILED(result)) {
+            return result;
+        }
+        const D2D1_ANTIALIAS_MODE previous_antialias = d2d_context_->GetAntialiasMode();
+        d2d_context_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        if ((vector_diagnostics_.flags
+                & INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE)
+            != 0U) {
+            const float width = static_cast<float>(1.0 / transform_.zoom);
+            const auto* bytes = reinterpret_cast<const std::byte*>(vectors_.segments);
+            for (std::uint64_t index = 0U; index < vectors_.segment_count;) {
+                const auto* segment = reinterpret_cast<const InkpodSnapshotVectorSegment*>(
+                    bytes + static_cast<std::size_t>(index * vectors_.segment_stride_bytes));
+                const VectorPathSpan path{
+                    segment->path_id,
+                    segment->z_order,
+                    segment->flags,
+                    segment,
+                    segment->segment_count};
+                if ((path.flags & INKPOD_SNAPSHOT_VECTOR_STROKE_VISIBLE) == 0U) {
+                    index += path.count;
+                    continue;
+                }
+                ComPtr<ID2D1PathGeometry> geometry;
+                result = CreateCenterlineGeometry(path, geometry);
+                if (FAILED(result)) {
+                    d2d_context_->SetAntialiasMode(previous_antialias);
+                    return result;
+                }
+                d2d_context_->DrawGeometry(geometry.Get(), brush.Get(), width);
+                index += path.count;
+            }
+        }
+        if ((vector_diagnostics_.flags & INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE)
+            != 0U) {
+            brush->SetColor(D2D1::ColorF(0.95F, 0.2F, 0.15F, 1.0F));
+            const float radius = static_cast<float>(4.0 / transform_.zoom);
+            const auto* bytes = reinterpret_cast<const std::byte*>(
+                vector_diagnostics_.endpoints);
+            for (std::uint64_t index = 0U; index < vector_diagnostics_.endpoint_count;
+                 ++index) {
+                const auto* endpoint = reinterpret_cast<const InkpodSnapshotVectorEndpoint*>(
+                    bytes + static_cast<std::size_t>(
+                        index * vector_diagnostics_.endpoint_stride_bytes));
+                d2d_context_->FillEllipse(
+                    D2D1::Ellipse(
+                        D2D1::Point2F(endpoint->point.x, endpoint->point.y),
+                        radius,
+                        radius),
+                    brush.Get());
+            }
+        }
+        d2d_context_->SetAntialiasMode(previous_antialias);
+        return S_OK;
     }
 
     HRESULT DrawOverlays() noexcept {
@@ -2208,6 +2403,7 @@ private:
     InkpodSnapshotTransform transform_{};
     InkpodSnapshotOverlay overlay_{};
     InkpodSnapshotVectorView vectors_{};
+    InkpodSnapshotVectorDiagnostics vector_diagnostics_{};
     InkpodSnapshotRenderPlan render_plan_{};
     CanvasFloatingPreview floating_preview_{};
     CanvasGeometryPreview geometry_preview_{};

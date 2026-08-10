@@ -157,6 +157,10 @@ pub struct RenderVectorSegment {
     pub closed: bool,
     /// Whether the source plane is currently visible.
     pub stroke_visible: bool,
+    /// Whether the stable start endpoint has an explicit topological connection.
+    pub start_connected: bool,
+    /// Whether the stable end endpoint has an explicit topological connection.
+    pub end_connected: bool,
     /// Document-coordinate cubic geometry and widths.
     pub cubic: VectorCubicSegment,
 }
@@ -176,6 +180,28 @@ pub struct RenderVectorFill {
     pub boundary_path_ids: Vec<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+/// Stable endpoint identity within one vector path.
+pub enum VectorEndpoint {
+    /// The first point of an open path.
+    Start,
+    /// The final point of an open path.
+    End,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+/// One topologically unconnected endpoint in a render snapshot.
+pub struct RenderVectorEndpoint {
+    /// Stable source path ID.
+    pub path_id: u64,
+    /// Stable source plane ID.
+    pub plane_id: u64,
+    /// Stable start/end identity within the path.
+    pub endpoint: VectorEndpoint,
+    /// Endpoint position in document pixels.
+    pub point: PointF32,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct VectorPath {
     pub(super) id: VectorPathId,
@@ -193,10 +219,42 @@ pub(super) struct VectorFill {
     pub(super) boundary_path_ids: Vec<VectorPathId>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) struct VectorEndpointId {
+    pub(super) path_id: VectorPathId,
+    pub(super) endpoint: VectorEndpoint,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) struct VectorConnection {
+    pub(super) first: VectorEndpointId,
+    pub(super) second: VectorEndpointId,
+}
+
+impl VectorConnection {
+    pub(super) fn new(left: VectorEndpointId, right: VectorEndpointId) -> Self {
+        let (first, second) = if left < right {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        Self { first, second }
+    }
+
+    fn contains(self, endpoint: VectorEndpointId) -> bool {
+        self.first == endpoint || self.second == endpoint
+    }
+
+    fn references_any(self, paths: &BTreeSet<VectorPathId>) -> bool {
+        paths.contains(&self.first.path_id) || paths.contains(&self.second.path_id)
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct VectorState {
     pub(super) paths: Vec<VectorPath>,
     pub(super) fills: Vec<VectorFill>,
+    pub(super) connections: Vec<VectorConnection>,
 }
 
 impl VectorState {
@@ -262,6 +320,16 @@ impl VectorState {
                     boundary_path_ids: fill.boundary_path_ids.iter().map(|id| id.get()).collect(),
                 })
                 .collect(),
+            connections: self
+                .connections
+                .iter()
+                .map(|connection| FileVectorConnection {
+                    first_path_id: connection.first.path_id.get(),
+                    first_endpoint: file_endpoint(connection.first.endpoint),
+                    second_path_id: connection.second.path_id.get(),
+                    second_endpoint: file_endpoint(connection.second.endpoint),
+                })
+                .collect(),
         })
     }
 
@@ -302,6 +370,20 @@ impl VectorState {
                         .copied()
                         .map(VectorPathId::from_raw)
                         .collect(),
+                })
+                .collect(),
+            connections: metadata
+                .connections
+                .iter()
+                .map(|connection| VectorConnection {
+                    first: VectorEndpointId {
+                        path_id: VectorPathId::from_raw(connection.first_path_id),
+                        endpoint: core_endpoint(connection.first_endpoint),
+                    },
+                    second: VectorEndpointId {
+                        path_id: VectorPathId::from_raw(connection.second_path_id),
+                        endpoint: core_endpoint(connection.second_endpoint),
+                    },
                 })
                 .collect(),
         })
@@ -361,7 +443,48 @@ impl VectorState {
     }
 
     pub(crate) fn ensure_limits(&self) -> Result<(), CoreError> {
-        self.ensure_additional_limits(0, 0, 0, 0)
+        self.ensure_additional_limits(0, 0, 0, 0)?;
+        if self.connections.len() > MAX_VECTOR_CONNECTIONS {
+            return Err(CoreError::InvalidState("vector connection limit reached"));
+        }
+        Ok(())
+    }
+
+    pub(super) fn endpoint_is_connected(&self, endpoint: VectorEndpointId) -> bool {
+        self.connections
+            .iter()
+            .any(|connection| connection.contains(endpoint))
+    }
+
+    pub(super) fn connected_endpoint_ids(&self) -> BTreeSet<VectorEndpointId> {
+        self.connections
+            .iter()
+            .flat_map(|connection| [connection.first, connection.second])
+            .collect()
+    }
+
+    pub(super) fn connect_endpoints(
+        &mut self,
+        left: VectorEndpointId,
+        right: VectorEndpointId,
+    ) -> Result<(), CoreError> {
+        if left == right
+            || self.endpoint_is_connected(left)
+            || self.endpoint_is_connected(right)
+            || self.connections.len() >= MAX_VECTOR_CONNECTIONS
+        {
+            return Err(CoreError::InvalidState(
+                "vector endpoints cannot be connected",
+            ));
+        }
+        self.connections.push(VectorConnection::new(left, right));
+        self.connections.sort_unstable();
+        Ok(())
+    }
+
+    pub(super) fn remove_connections_for_paths(&mut self, paths: &BTreeSet<VectorPathId>) {
+        self.connections
+            .retain(|connection| !connection.references_any(paths));
     }
 
     pub(super) fn raster_vectorize_run_capacity(&self) -> Result<usize, CoreError> {
@@ -387,6 +510,7 @@ impl VectorState {
             .map(|path| path.id)
             .collect();
         self.paths.retain(|path| path.plane_id != plane_id);
+        self.remove_connections_for_paths(&removed);
         self.fills.retain(|fill| {
             fill.plane_id != plane_id
                 && !fill
@@ -423,6 +547,26 @@ impl VectorState {
             path_map.insert(source_id, path.id);
             self.paths.push(path);
         }
+        let source_connections = self.connections.clone();
+        for connection in source_connections {
+            let (Some(first_path_id), Some(second_path_id)) = (
+                path_map.get(&connection.first.path_id),
+                path_map.get(&connection.second.path_id),
+            ) else {
+                continue;
+            };
+            self.connections.push(VectorConnection::new(
+                VectorEndpointId {
+                    path_id: *first_path_id,
+                    endpoint: connection.first.endpoint,
+                },
+                VectorEndpointId {
+                    path_id: *second_path_id,
+                    endpoint: connection.second.endpoint,
+                },
+            ));
+        }
+        self.connections.sort_unstable();
         let source_fills: Vec<_> = self
             .fills
             .iter()
@@ -553,6 +697,7 @@ impl VectorState {
     ) -> (Vec<RenderVectorSegment>, Vec<RenderVectorFill>) {
         let mut segments = Vec::new();
         let mut fills = Vec::new();
+        let connected_endpoints = self.connected_endpoint_ids();
         for (z_order, layer) in document.layers.iter().rev().enumerate() {
             if !layer.visible || layer.kind != LayerKind::VectorColoring {
                 continue;
@@ -584,6 +729,14 @@ impl VectorState {
                     for path in self.paths.iter().filter(|path| path.plane_id == plane.id) {
                         let color =
                             display_color(path.color, layer.opacity_milli, plane.opacity_milli);
+                        let start_connected = connected_endpoints.contains(&VectorEndpointId {
+                            path_id: path.id,
+                            endpoint: VectorEndpoint::Start,
+                        });
+                        let end_connected = connected_endpoints.contains(&VectorEndpointId {
+                            path_id: path.id,
+                            endpoint: VectorEndpoint::End,
+                        });
                         for (index, segment) in path.segments.iter().enumerate() {
                             segments.push(RenderVectorSegment {
                                 path_id: path.id.get(),
@@ -594,6 +747,8 @@ impl VectorState {
                                 color_rgba: color,
                                 closed: path.closed,
                                 stroke_visible: plane.visible,
+                                start_connected,
+                                end_connected,
                                 cubic: public_segment(*segment),
                             });
                         }
@@ -611,6 +766,7 @@ impl VectorState {
     ) -> (Vec<RenderVectorSegment>, Vec<RenderVectorFill>) {
         let mut segments = Vec::new();
         let mut fills = Vec::new();
+        let connected_endpoints = self.connected_endpoint_ids();
         if plane.kind == PlaneType::VectorFill && plane.visible {
             for fill in self.fills.iter().filter(|fill| fill.plane_id == plane.id) {
                 fills.push(RenderVectorFill {
@@ -628,6 +784,14 @@ impl VectorState {
         ) {
             for path in self.paths.iter().filter(|path| path.plane_id == plane.id) {
                 let color = display_color(path.color, 1_000, plane.opacity_milli);
+                let start_connected = connected_endpoints.contains(&VectorEndpointId {
+                    path_id: path.id,
+                    endpoint: VectorEndpoint::Start,
+                });
+                let end_connected = connected_endpoints.contains(&VectorEndpointId {
+                    path_id: path.id,
+                    endpoint: VectorEndpoint::End,
+                });
                 for (index, segment) in path.segments.iter().enumerate() {
                     segments.push(RenderVectorSegment {
                         path_id: path.id.get(),
@@ -638,12 +802,28 @@ impl VectorState {
                         color_rgba: color,
                         closed: path.closed,
                         stroke_visible: plane.visible,
+                        start_connected,
+                        end_connected,
                         cubic: public_segment(*segment),
                     });
                 }
             }
         }
         (segments, fills)
+    }
+}
+
+fn file_endpoint(endpoint: VectorEndpoint) -> FileVectorEndpoint {
+    match endpoint {
+        VectorEndpoint::Start => FileVectorEndpoint::Start,
+        VectorEndpoint::End => FileVectorEndpoint::End,
+    }
+}
+
+fn core_endpoint(endpoint: FileVectorEndpoint) -> VectorEndpoint {
+    match endpoint {
+        FileVectorEndpoint::Start => VectorEndpoint::Start,
+        FileVectorEndpoint::End => VectorEndpoint::End,
     }
 }
 

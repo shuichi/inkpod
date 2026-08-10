@@ -232,6 +232,23 @@ typedef uint32_t InkpodViewCommandKind;
 #define INKPOD_VIEW_SET_ALPHA_VISIBLE UINT32_C(14)
 #define INKPOD_VIEW_SET_GUIDE_SNAP_ENABLED UINT32_C(15)
 #define INKPOD_VIEW_SET_GRID_SNAP_ENABLED UINT32_C(16)
+#define INKPOD_VIEW_SET_VECTOR_ANTIALIAS UINT32_C(17)
+#define INKPOD_VIEW_SET_VECTOR_CENTERLINE_MODE UINT32_C(18)
+#define INKPOD_VIEW_SET_VECTOR_ENDPOINTS_VISIBLE UINT32_C(19)
+
+typedef uint32_t InkpodVectorCenterlineMode;
+#define INKPOD_VECTOR_CENTERLINE_HIDDEN UINT32_C(0)
+#define INKPOD_VECTOR_CENTERLINE_OVERLAY UINT32_C(1)
+#define INKPOD_VECTOR_CENTERLINE_ONLY UINT32_C(2)
+
+#define INKPOD_VECTOR_DIAGNOSTIC_ANTIALIAS (UINT32_C(1) << 0)
+#define INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE (UINT32_C(1) << 1)
+#define INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY (UINT32_C(1) << 2)
+#define INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE (UINT32_C(1) << 3)
+
+typedef uint32_t InkpodVectorEndpointKind;
+#define INKPOD_VECTOR_ENDPOINT_START UINT32_C(1)
+#define INKPOD_VECTOR_ENDPOINT_END UINT32_C(2)
 
 #define INKPOD_SNAPSHOT_TRANSFORM_FLIP_HORIZONTAL (UINT32_C(1) << 0)
 #define INKPOD_SNAPSHOT_TRANSFORM_FLIP_VERTICAL (UINT32_C(1) << 1)
@@ -1949,6 +1966,31 @@ typedef struct InkpodSnapshotVectorView {
     const uint64_t* boundary_path_ids;
     uint64_t boundary_path_count;
 } InkpodSnapshotVectorView;
+
+/** @brief Explicitly disconnected vector endpoint in stable path/plane identity order. */
+typedef struct InkpodSnapshotVectorEndpoint {
+    uint32_t struct_size;
+    InkpodVectorEndpointKind endpoint;
+    uint64_t path_id;
+    uint64_t plane_id;
+    InkpodVectorPoint point;
+} InkpodSnapshotVectorEndpoint;
+
+/**
+ * @brief View-local vector diagnostic flags and snapshot-owned endpoint span.
+ *
+ * Endpoint marker size is a renderer concern in device pixels. The Core emits
+ * only exact topological disconnections and never infers a connection from
+ * coordinate proximity.
+ */
+typedef struct InkpodSnapshotVectorDiagnostics {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t feature_flags;
+    const InkpodSnapshotVectorEndpoint* endpoints;
+    uint64_t endpoint_count;
+    uint64_t endpoint_stride_bytes;
+} InkpodSnapshotVectorDiagnostics;
 
 /** @brief One bottom-to-top operation in a snapshot-owned render plan. */
 typedef struct InkpodSnapshotRenderPass {
@@ -4862,6 +4904,18 @@ InkpodStatus inkpod_snapshot_get_overlay(
 InkpodStatus inkpod_snapshot_get_vectors(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotVectorView* out_vectors);
+
+/**
+ * @brief snapshot の view-local vector 診断設定と未接続端点 span を取得する。
+ * @par 契約
+ * 任意スレッド。`snapshot`/完全サイズの `out_diagnostics` は非 NULL、release と同期。
+ * 成功時 endpoint span は snapshot-owned borrowed で release まで有効。文書、履歴、dirty は変更しない。
+ * @par 主なステータス
+ * `OK`、`INVALID_ARGUMENT`、`INCOMPATIBLE_ABI`、`PANIC`。
+ */
+InkpodStatus inkpod_snapshot_get_vector_diagnostics(
+    const InkpodSnapshot* snapshot,
+    InkpodSnapshotVectorDiagnostics* out_diagnostics);
 
 /**
  * @brief Copies the bottom-to-top render plan for a live immutable snapshot.

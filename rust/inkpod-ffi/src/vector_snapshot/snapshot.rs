@@ -214,6 +214,67 @@ pub unsafe extern "C" fn inkpod_snapshot_get_vectors(
     })
 }
 
+/// Copies immutable vector diagnostic flags and disconnected endpoint records.
+/// The endpoint span borrows storage owned by `snapshot` and remains valid only
+/// until that snapshot is released.
+///
+/// # Safety
+/// Snapshot/output must be complete, aligned, live, externally synchronized,
+/// writable/non-overlapping objects.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_snapshot_get_vector_diagnostics(
+    snapshot: *const InkpodSnapshot,
+    out_diagnostics: *mut InkpodSnapshotVectorDiagnostics,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if snapshot.is_null() || !is_aligned(snapshot) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "snapshot is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe {
+            validate_struct(
+                out_diagnostics.cast_const(),
+                "InkpodSnapshotVectorDiagnostics",
+            )
+        } {
+            return status;
+        }
+        // SAFETY: Live snapshot and writable output are required by contract.
+        let snapshot = unsafe { &*snapshot };
+        let output = unsafe { &mut *out_diagnostics };
+        let view = snapshot.snapshot.view();
+        output.flags = (if view.vector_antialias() {
+            INKPOD_VECTOR_DIAGNOSTIC_ANTIALIAS
+        } else {
+            0
+        }) | (if view.vector_centerline_mode() != VectorCenterlineMode::Hidden {
+            INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_VISIBLE
+        } else {
+            0
+        }) | (if view.vector_centerline_mode() == VectorCenterlineMode::Only {
+            INKPOD_VECTOR_DIAGNOSTIC_CENTERLINE_ONLY
+        } else {
+            0
+        }) | if view.vector_endpoints_visible() {
+            INKPOD_VECTOR_DIAGNOSTIC_ENDPOINTS_VISIBLE
+        } else {
+            0
+        };
+        output.feature_flags = INKPOD_FEATURE_NONE;
+        output.endpoints = if snapshot.vector_endpoints.is_empty() {
+            ptr::null()
+        } else {
+            snapshot.vector_endpoints.as_ptr()
+        };
+        output.endpoint_count = snapshot.vector_endpoints.len() as u64;
+        output.endpoint_stride_bytes = size_of::<InkpodSnapshotVectorEndpoint>() as u64;
+        INKPOD_STATUS_OK
+    })
+}
+
 /// Copies the immutable ordered render plan. All returned spans borrow storage
 /// owned by `snapshot` and remain valid only until that snapshot is released.
 ///

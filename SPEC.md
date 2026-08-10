@@ -257,7 +257,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - 透明表示は設定色または checkerboard で示し、pixel 値を変更しない。
 - color locator は cursor 周辺を別倍率で表示し、X/Y、selection 幅 H、高さ V、対角長 L、RGBA を表示する。固定 mode では locator 上で編集でき、edge 付近は自動 scroll を選べる。
 - multi-view は一つの document state と history を共有し、viewport transform だけを別に持つ。
-- vector overlay は antialias on/off、中心線、中心線のみ、未接続端点を切り替えられる。
+- vector overlay は view ごとに antialias on/off、中心線、中心線のみ、未接続端点を切り替えられる。中心線のみは通常 stroke を隠すが vector fill は保持する。未接続判定は stable path/start-or-end ID の明示接続だけを正本とし、座標一致や近接距離から推測しない。中心線幅と端点 marker は zoom に依存しない device-pixel 寸法とし、各 toggle は view revision だけを進めて document/history/journal/dirty/savepoint を変えない。
 
 ### 9. 描画・線修正ツール
 
@@ -571,6 +571,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `VIEW-002`: ruler、guide/grid、snap、transparent view
 - `VIEW-003`: color locator の座標/RGBA/selection sampling と magnified neighborhood 表示・編集
 - `VIEW-004`: 複数文書 tab、同一文書 view、二分割 group、group/window 間の移動と複製
+- `VIEW-005`: view-local vector antialias、中心線 overlay／中心線のみ、明示 topology に基づく未接続端点診断
 - `HIST-001`: transaction、Undo/Redo、savepoint、revert、preview cancel
 
 ### Paint and color

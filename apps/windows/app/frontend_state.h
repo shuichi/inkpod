@@ -196,6 +196,9 @@ struct ViewUiState {
     bool snap_guides{};
     bool snap_grid{};
     bool transparent_visible{true};
+    bool vector_antialias{true};
+    InkpodVectorCenterlineMode vector_centerline_mode{INKPOD_VECTOR_CENTERLINE_HIDDEN};
+    bool vector_endpoints_visible{};
     std::int32_t pointer_device_x{};
     std::int32_t pointer_device_y{};
     std::uint64_t locator_generation{};

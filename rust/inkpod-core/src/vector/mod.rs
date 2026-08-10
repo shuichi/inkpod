@@ -7,8 +7,9 @@ use super::{
 use crate::document::{unique_layer_name, validate_node_name};
 use crate::identity::*;
 use inkpod_format::{
-    FileVectorFill, FileVectorMetadata, FileVectorPath, FileVectorPoint, FileVectorSegment,
-    MAX_VECTOR_BOUNDARIES, MAX_VECTOR_FILLS, MAX_VECTOR_PATHS, MAX_VECTOR_SEGMENTS,
+    FileVectorConnection, FileVectorEndpoint, FileVectorFill, FileVectorMetadata, FileVectorPath,
+    FileVectorPoint, FileVectorSegment, MAX_VECTOR_BOUNDARIES, MAX_VECTOR_CONNECTIONS,
+    MAX_VECTOR_FILLS, MAX_VECTOR_PATHS, MAX_VECTOR_SEGMENTS,
 };
 use inkpod_image::{
     VECTOR_UNITS_PER_PIXEL as UNITS_PER_PIXEL, VectorFixedCubic as VectorSegment,
@@ -39,8 +40,8 @@ pub(crate) use color_replace::{
 };
 pub(crate) use model::VectorState;
 pub use model::{
-    RenderVectorFill, RenderVectorSegment, VectorCubicSegment, VectorEraseMode, VectorFillInfo,
-    VectorPathInfo, VectorPathInput, VectorRaster, VectorSelectionMode, VectorSelectionRange,
-    VectorSelectionResult, VectorWidthMode,
+    RenderVectorEndpoint, RenderVectorFill, RenderVectorSegment, VectorCubicSegment,
+    VectorEndpoint, VectorEraseMode, VectorFillInfo, VectorPathInfo, VectorPathInput, VectorRaster,
+    VectorSelectionMode, VectorSelectionRange, VectorSelectionResult, VectorWidthMode,
 };
 pub(crate) use rasterization::rasterize_vector_layer_content;

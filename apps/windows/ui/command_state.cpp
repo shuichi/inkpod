@@ -234,6 +234,10 @@ void ProvideSelectionViewCommandStates(
          IDM_VIEW_SNAP_GUIDES,
          IDM_VIEW_SNAP_GRID,
          IDM_VIEW_TRANSPARENT,
+         IDM_VIEW_VECTOR_ANTIALIAS,
+         IDM_VIEW_VECTOR_CENTERLINE,
+         IDM_VIEW_VECTOR_CENTERLINE_ONLY,
+         IDM_VIEW_VECTOR_ENDPOINTS,
          IDM_VIEW_GUIDE_VERTICAL,
          IDM_VIEW_GUIDE_HORIZONTAL,
          IDM_VIEW_GUIDE_MOVE,
@@ -296,6 +300,19 @@ void ProvideSelectionViewCommandStates(
     SetChecked(states, IDM_VIEW_SNAP_GUIDES, input.selection_view.snap_guides);
     SetChecked(states, IDM_VIEW_SNAP_GRID, input.selection_view.snap_grid);
     SetChecked(states, IDM_VIEW_TRANSPARENT, input.selection_view.transparent_visible);
+    SetChecked(states, IDM_VIEW_VECTOR_ANTIALIAS, input.selection_view.vector_antialias);
+    SetChecked(
+        states,
+        IDM_VIEW_VECTOR_CENTERLINE,
+        input.selection_view.vector_centerline_mode != INKPOD_VECTOR_CENTERLINE_HIDDEN);
+    SetChecked(
+        states,
+        IDM_VIEW_VECTOR_CENTERLINE_ONLY,
+        input.selection_view.vector_centerline_mode == INKPOD_VECTOR_CENTERLINE_ONLY);
+    SetChecked(
+        states,
+        IDM_VIEW_VECTOR_ENDPOINTS,
+        input.selection_view.vector_endpoints_visible);
     SetChecked(
         states,
         IDM_VIEW_BOX_ZOOM,

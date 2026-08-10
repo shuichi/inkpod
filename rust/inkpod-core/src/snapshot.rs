@@ -271,6 +271,46 @@ impl RenderSnapshot {
         &self.vector_fills
     }
 
+    /// Returns topologically unconnected vector endpoints requested by this view.
+    #[must_use]
+    pub fn vector_endpoints(&self) -> Vec<RenderVectorEndpoint> {
+        if !self.view.vector_endpoints_visible() {
+            return Vec::new();
+        }
+        let mut endpoints = Vec::new();
+        let mut index = 0_usize;
+        while let Some(first) = self.vector_segments.get(index) {
+            let count = first.segment_count as usize;
+            let Some(last) = count
+                .checked_sub(1)
+                .and_then(|offset| self.vector_segments.get(index + offset))
+            else {
+                break;
+            };
+            if first.stroke_visible && !first.closed {
+                if !first.start_connected {
+                    endpoints.push(RenderVectorEndpoint {
+                        path_id: first.path_id,
+                        plane_id: first.plane_id,
+                        endpoint: VectorEndpoint::Start,
+                        point: first.cubic.p0,
+                    });
+                }
+                if !last.end_connected {
+                    endpoints.push(RenderVectorEndpoint {
+                        path_id: last.path_id,
+                        plane_id: last.plane_id,
+                        endpoint: VectorEndpoint::End,
+                        point: last.cubic.p3,
+                    });
+                }
+            }
+            index += count;
+        }
+        endpoints.sort_by_key(|endpoint| (endpoint.path_id, endpoint.endpoint));
+        endpoints
+    }
+
     /// Borrows the immutable bottom-to-top render plan.
     #[must_use]
     pub fn render_passes(&self) -> &[RenderPass] {

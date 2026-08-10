@@ -408,3 +408,24 @@ pub struct InkpodSnapshotVectorView {
     pub boundary_path_ids: *const u64,
     pub boundary_path_count: u64,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodSnapshotVectorEndpoint {
+    pub struct_size: u32,
+    pub endpoint: u32,
+    pub path_id: u64,
+    pub plane_id: u64,
+    pub point: InkpodVectorPoint,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodSnapshotVectorDiagnostics {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub feature_flags: u64,
+    pub endpoints: *const InkpodSnapshotVectorEndpoint,
+    pub endpoint_count: u64,
+    pub endpoint_stride_bytes: u64,
+}

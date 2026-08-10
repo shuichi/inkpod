@@ -182,6 +182,10 @@ int main() {
         || IsCommandEnabled(states, IDM_FILE_SAVE)
         || IsCommandEnabled(states, IDM_VIEW_FIT)
         || IsCommandEnabled(states, IDM_VIEW_ONE_TO_ONE)
+        || IsCommandEnabled(states, IDM_VIEW_VECTOR_ANTIALIAS)
+        || IsCommandEnabled(states, IDM_VIEW_VECTOR_CENTERLINE)
+        || IsCommandEnabled(states, IDM_VIEW_VECTOR_CENTERLINE_ONLY)
+        || IsCommandEnabled(states, IDM_VIEW_VECTOR_ENDPOINTS)
         || IsCommandEnabled(states, IDM_SELECTION_ALL)
         || IsCommandEnabled(states, IDM_FILTER_INVERT)
         || IsCommandEnabled(states, IDM_BATCH_ADD_COLOR_REPLACE)
@@ -317,6 +321,30 @@ int main() {
         || IsCommandEnabled(states, IDM_VIEW_DUPLICATE_NEXT_WINDOW)) {
         return 2;
     }
+
+    if (!IsCommandEnabled(states, IDM_VIEW_VECTOR_ANTIALIAS)
+        || !IsCommandEnabled(states, IDM_VIEW_VECTOR_CENTERLINE)
+        || !IsCommandEnabled(states, IDM_VIEW_VECTOR_CENTERLINE_ONLY)
+        || !IsCommandEnabled(states, IDM_VIEW_VECTOR_ENDPOINTS)
+        || !IsCommandChecked(states, IDM_VIEW_VECTOR_ANTIALIAS)
+        || IsCommandChecked(states, IDM_VIEW_VECTOR_CENTERLINE)
+        || IsCommandChecked(states, IDM_VIEW_VECTOR_CENTERLINE_ONLY)
+        || IsCommandChecked(states, IDM_VIEW_VECTOR_ENDPOINTS)) {
+        return 53;
+    }
+    inputs.selection_view.vector_antialias = false;
+    inputs.selection_view.vector_centerline_mode = INKPOD_VECTOR_CENTERLINE_ONLY;
+    inputs.selection_view.vector_endpoints_visible = true;
+    states = ComputeCommandStates(inputs);
+    if (IsCommandChecked(states, IDM_VIEW_VECTOR_ANTIALIAS)
+        || !IsCommandChecked(states, IDM_VIEW_VECTOR_CENTERLINE)
+        || !IsCommandChecked(states, IDM_VIEW_VECTOR_CENTERLINE_ONLY)
+        || !IsCommandChecked(states, IDM_VIEW_VECTOR_ENDPOINTS)) {
+        return 54;
+    }
+    inputs.selection_view.vector_antialias = true;
+    inputs.selection_view.vector_centerline_mode = INKPOD_VECTOR_CENTERLINE_HIDDEN;
+    inputs.selection_view.vector_endpoints_visible = false;
 
     inputs.document.recent_document_count = 2U;
     states = ComputeCommandStates(inputs);
