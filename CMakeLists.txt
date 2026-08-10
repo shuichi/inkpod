@@ -250,6 +250,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_command_context.cmake")
 
 add_test(
+    NAME inkpod_windows_filter_preview_boundaries
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_filter_preview.cmake")
+
+add_test(
     NAME inkpod_windows_tab_drag_boundaries
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"

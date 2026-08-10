@@ -444,6 +444,15 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - pointer down から up までの stroke、shape 確定、fill、filter apply、layer operation、paste commit をそれぞれ一 command とする。
 - dialog preview は base state から毎回再計算し、parameter slider を動かすたびに結果へ累積適用しない。
 - `実行`/`OK` は一回の commit、`キャンセル` は base state へ完全復元する。
+- filter／色調補正 dialog は有効な parameter、channel、補間、curve point の変更を
+  120ms以内の短いdebounce後にCore previewへ送り、同じ発行時document session、view、
+  stable Plane ID、generation、base revisionを最後まで保持する。一つの実行中taskと
+  一つのpending parameter setだけを持ち、新しい変更はpendingを置換して実行中taskへ
+  cooperative cancelを要求する。古いcompletionを別targetへ適用しない。
+- filter previewの失敗／cancelled updateは直前に成功したpreviewを保持するが、最新の
+  parameterがinvalid／failureのまま`OK`された場合は古いpreviewを確定しない。tab／target
+  delete、document close、stale generationでは安全にCancelする。dialogと共有Job Progressは
+  計算中parameter、progress、failureを表示し、UI threadはCore workやPresentを待たない。
 - `復帰` は最後の通常保存を staged Core で再構成して置換する。`部分復帰` は保存済み journal state から対象を再構成し、成功時だけ一件の新しい Undo 可能な canonical procedure として commit する。
 
 ### 18. フィルタ、特効、レタッチ、調整レイヤー
@@ -609,6 +618,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 - `FILTER-001`: sharpen/blur/Gaussian/invert/auto contrast
 - `FILTER-002`: brightness/contrast、curve、levels、HSV、color balance
+- `FILTER-PREVIEW-001`: filter／色調補正dialogの非累積live preview、bounded latest-wins更新、発行時target固定、OK一commit／Cancel完全復元
 - `EFFECT-001`: gradient、airbrush、airbrush boundary effect、blur tool、stamp
 - `ADJUST-001`: non-destructive adjustment layer と alpha edit
 - `BATCH-001`: persisted Input -> Operations -> Output graph

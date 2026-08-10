@@ -390,6 +390,36 @@ unknown view-command flags or centerline values, invalid endpoint kinds,
 excess counts/strides, and inconsistent flag combinations are rejected before
 retention. The additive export and view commands retain ABI v9.
 
+### Filter preview session
+
+`inkpod_core_filter_preview_begin[_task]`,
+`inkpod_core_filter_preview_update[_task]`,
+`inkpod_core_filter_preview_apply`, and `inkpod_core_filter_preview_cancel`
+operate on the Core owner thread and reuse the existing ABI v9 records. The
+`InkpodFilterInput` and any curve-point span are borrowed only for the call;
+`InkpodFilterPreviewInfo` and `InkpodDispatchResult` are caller-owned value
+records and require no release. `InkpodTask*` remains caller-owned: the caller
+may request cooperative cancellation, must keep it alive until the Core call
+returns, and releases it with `inkpod_task_release` after completion.
+
+Begin captures the stable Plane ID, committed base document, and base revision.
+Every update recomputes from that same base; it never treats the previously
+published preview as input. A failed or cancelled update retains the last
+successfully published preview, and no begin/update changes committed document
+revision, history, journal, dirty state, savepoint, or persistent IDs. Apply
+commits the latest successful parameters through the canonical filter primitive
+as at most one Undo unit. Cancel discards the session and restores the base.
+Cross-plane update, missing/locked target, malformed or short records, invalid
+parameters, stale base, cancellation, overflow, and task failure publish no
+partial committed state.
+
+The Windows adapter keeps at most one running task and one pending immutable
+parameter set. A new dialog generation cooperatively cancels the running
+begin/update and replaces only the pending value. Completion is resolved against
+the issue-time session/view/generation; it never falls back to the newly active
+document. The adapter releases every task after its completion message whether
+the result is current, cancelled, stale, or failed.
+
 ### Geometry construction preview
 
 `inkpod_core_geometry_apply` and

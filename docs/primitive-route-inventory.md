@@ -74,6 +74,13 @@ route|windows|os-application-adapter|windows-adapter|IDM_APP_EXIT IDM_BATCH_ADD_
 
 ## Current composition notes
 
+- Parameterized `IDM_FILTER_*` commands keep their terminal document-primitive
+  classification, but their Windows adapter now opens one Core-owned transient
+  preview session. Dialog `EN_CHANGE`/selection notifications feed a bounded
+  latest-value queue into `inkpod_core_filter_preview_begin_task` or
+  `inkpod_core_filter_preview_update_task`; OK alone reaches
+  `inkpod_core_filter_preview_apply`, while Cancel/close/stale target reaches
+  `inkpod_core_filter_preview_cancel`.
 - The ABI-v2 `NoOp` dispatch ingress and its Core implementation are removed.
   Real edits use the typed canonical primitive and operation-specific APIs.
 - Encoded raster, clipboard, Light Table, sequence, palette, color-chart, Batch,

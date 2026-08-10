@@ -582,7 +582,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M09 — PM-GAP-011: PaintMan相当の図形作図semantics
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: PAINT-002、VECTOR-001、HIST-001。
 
@@ -632,9 +632,9 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M10 — PM-GAP-021: parameter変更に追従する非累積preview
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: HIST-001、FILTER-001、FILTER-002。
+関連要件: HIST-001、FILTER-001、FILTER-002、FILTER-PREVIEW-001。
 
 成果:
 

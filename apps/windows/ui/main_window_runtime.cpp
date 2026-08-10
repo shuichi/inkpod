@@ -77,6 +77,8 @@ using inkpod::windows::ui::ShowAboutDialog;
 using inkpod::windows::ui::ShowCellCreationOptions;
 using inkpod::windows::ui::ShowHistoryDialog;
 using inkpod::windows::ui::ShowEffectEditor;
+using inkpod::windows::ui::SetEffectEditorPreviewStatus;
+using inkpod::windows::ui::ProgressDialogInfo;
 using inkpod::windows::ui::ShowShortcutEditor;
 using inkpod::windows::ui::ShowTextInput;
 using inkpod::windows::ui::ShowViewOptions;
@@ -4378,13 +4380,12 @@ std::uint32_t FilterKindForCommand(UINT command) noexcept {
     }
 }
 
-bool ConfigureFilterEditor(
-    ApplicationHost& state, UINT command, FilterJob& job) noexcept {
+bool PrepareFilterEditor(
+    UINT command, FilterJob& job, EffectEditorState& editor) noexcept {
     job.kind = FilterKindForCommand(command);
     if (job.kind == 0U) {
         return false;
     }
-    EffectEditorState editor{};
     editor.title = L"フィルタ（選択範囲があればその内側だけに適用）";
     editor.parameter_labels = {
         L"P0 / radius", L"P1 / amount", L"P2", L"P3", L"P4"};
@@ -4410,15 +4411,43 @@ bool ConfigureFilterEditor(
     } else if (job.kind == INKPOD_FILTER_UNSHARP_MASK) {
         editor.parameters = {2, 1000, 0, 0, 0};
     }
+    return true;
+}
+
+bool FilterJobFromEditor(
+    std::uint32_t kind,
+    std::uint64_t plane_id,
+    const EffectEditorState& editor,
+    FilterJob& job) noexcept {
+    FilterJob candidate{};
+    candidate.kind = kind;
+    candidate.plane_id = plane_id;
+    candidate.channel = editor.channel;
+    candidate.interpolation = editor.mode;
+    candidate.parameters = editor.parameters;
+    candidate.preview = true;
+    if (kind == INKPOD_FILTER_TONE_CURVE
+        && !ParseCurvePoints(editor.points, candidate.points)) {
+        return false;
+    }
+    try {
+        job = std::move(candidate);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return true;
+}
+
+bool ConfigureFilterEditor(
+    ApplicationHost& state, UINT command, FilterJob& job) noexcept {
+    EffectEditorState editor{};
+    if (!PrepareFilterEditor(command, job, editor)) {
+        return false;
+    }
     if (ShowEffectEditor(state.lifetime.instance, state.Workspace().windows.window, state.lifetime.smoke_test, editor) != IDOK) {
         return false;
     }
-    job.channel = editor.channel;
-    job.interpolation = editor.mode;
-    job.parameters = editor.parameters;
-    job.preview = editor.option1;
-    if (job.kind == INKPOD_FILTER_TONE_CURVE
-        && !ParseCurvePoints(editor.points, job.points)) {
+    if (!FilterJobFromEditor(job.kind, job.plane_id, editor, job)) {
         if (!state.lifetime.smoke_test) {
             MessageBoxW(
                 state.Workspace().windows.window,
@@ -4431,30 +4460,352 @@ bool ConfigureFilterEditor(
     return true;
 }
 
-InkpodStatus QueueFilter(
-    ApplicationHost& state,
-    const CommandContext& context,
-    FilterJob job) noexcept {
-    return StartEffectTask(
+void ResetInteractiveFilterPreview(EffectsUiState& effects) noexcept {
+    auto& preview = effects.filter_preview;
+    preview.context = {};
+    preview.kind = 0U;
+    preview.plane_id = 0U;
+    preview.pending.reset();
+    preview.desired_generation = 0U;
+    preview.pending_generation = 0U;
+    preview.running_generation = 0U;
+    preview.work = inkpod::app::FilterPreviewWork::None;
+    preview.session_active = false;
+    preview.dialog_active = false;
+    preview.accept_requested = false;
+    preview.cancel_requested = false;
+    preview.dialog = nullptr;
+}
+
+void RecordSmokeFilterPreview(
+    EffectsUiState& effects, const InkpodFilterPreviewInfo& info) noexcept {
+    auto& preview = effects.filter_preview;
+    ++preview.completed_updates;
+    if (preview.smoke_checksum_count < preview.smoke_checksums.size()) {
+        preview.smoke_checksums[preview.smoke_checksum_count++] = info.preview_checksum;
+    }
+}
+
+InkpodStatus QueueInteractiveFilterPreview(ApplicationHost& state) noexcept;
+InkpodStatus FinishInteractiveFilterPreview(
+    ApplicationHost& state, bool accept) noexcept;
+
+InkpodStatus QueueInteractiveFilterFinalize(
+    ApplicationHost& state, bool apply) noexcept {
+    auto& preview = state.effects.filter_preview;
+    if (!preview.session_active) {
+        ResetInteractiveFilterPreview(state.effects);
+        return apply ? INKPOD_STATUS_INVALID_STATE : INKPOD_STATUS_OK;
+    }
+    if (state.engine == nullptr || state.effects.task != nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (state.lifetime.smoke_test) {
+        const InkpodStatus status = state.engine->Invoke(
+            [apply](InkpodCore* core) {
+                if (apply) {
+                    InkpodDispatchResult result{};
+                    result.struct_size = sizeof(result);
+                    return inkpod_core_filter_preview_apply(core, &result);
+                }
+                InkpodFilterPreviewInfo info{};
+                info.struct_size = sizeof(info);
+                return inkpod_core_filter_preview_cancel(core, &info);
+            },
+            true,
+            true);
+        if (status == INKPOD_STATUS_OK) {
+            ResetInteractiveFilterPreview(state.effects);
+        }
+        return status;
+    }
+    preview.work = apply
+        ? inkpod::app::FilterPreviewWork::Apply
+        : inkpod::app::FilterPreviewWork::Cancel;
+    const InkpodStatus status = StartEffectTask(
         state,
-        context,
-        job.preview,
-        [job = std::move(job)](InkpodCore* core, InkpodTask* task) {
-            const InkpodFilterInput input = FilterInputFor(job);
-            InkpodFilterPreviewInfo preview{};
-            preview.struct_size = sizeof(preview);
-            InkpodStatus status = inkpod_core_filter_preview_begin_task(
-                core, &input, task, &preview);
-            if (status == INKPOD_STATUS_OK && !job.preview) {
+        preview.context,
+        false,
+        [apply](InkpodCore* core, InkpodTask*) {
+            if (apply) {
                 InkpodDispatchResult result{};
                 result.struct_size = sizeof(result);
-                status = inkpod_core_filter_preview_apply(core, &result);
-                if (status != INKPOD_STATUS_OK) {
-                    inkpod_core_filter_preview_cancel(core, &preview);
-                }
+                return inkpod_core_filter_preview_apply(core, &result);
             }
-            return status;
+            InkpodFilterPreviewInfo info{};
+            info.struct_size = sizeof(info);
+            return inkpod_core_filter_preview_cancel(core, &info);
         });
+    if (status != INKPOD_STATUS_OK) {
+        preview.work = inkpod::app::FilterPreviewWork::None;
+    }
+    return status;
+}
+
+InkpodStatus QueueInteractiveFilterPreview(ApplicationHost& state) noexcept {
+    auto& preview = state.effects.filter_preview;
+    if (!preview.pending.has_value() || state.effects.task != nullptr
+        || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    FilterJob job{};
+    try {
+        job = preview.pending.value();
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const std::uint64_t generation = preview.pending_generation;
+    const bool update = preview.session_active;
+    if (state.lifetime.smoke_test) {
+        InkpodFilterPreviewInfo info{};
+        info.struct_size = sizeof(info);
+        const InkpodStatus status = state.engine->Invoke(
+            [&job, update, &info](InkpodCore* core) {
+                const InkpodFilterInput input = FilterInputFor(job);
+                return update
+                    ? inkpod_core_filter_preview_update(core, &input, &info)
+                    : inkpod_core_filter_preview_begin(core, &input, &info);
+            },
+            true,
+            true);
+        if (status == INKPOD_STATUS_OK) {
+            preview.pending.reset();
+            preview.pending_generation = 0U;
+            preview.session_active = true;
+            preview.running_generation = generation;
+            RecordSmokeFilterPreview(state.effects, info);
+        }
+        return status;
+    }
+    preview.work = update
+        ? inkpod::app::FilterPreviewWork::Update
+        : inkpod::app::FilterPreviewWork::Begin;
+    preview.running_generation = generation;
+    const InkpodStatus status = StartEffectTask(
+        state,
+        preview.context,
+        false,
+        [job = std::move(job), update](InkpodCore* core, InkpodTask* task) {
+            const InkpodFilterInput input = FilterInputFor(job);
+            InkpodFilterPreviewInfo info{};
+            info.struct_size = sizeof(info);
+            return update
+                ? inkpod_core_filter_preview_update_task(core, &input, task, &info)
+                : inkpod_core_filter_preview_begin_task(core, &input, task, &info);
+        });
+    if (status == INKPOD_STATUS_OK) {
+        preview.pending.reset();
+        preview.pending_generation = 0U;
+    } else {
+        preview.work = inkpod::app::FilterPreviewWork::None;
+        preview.running_generation = 0U;
+    }
+    return status;
+}
+
+bool RequestInteractiveFilterPreview(
+    ApplicationHost& state, FilterJob job) noexcept {
+    auto& preview = state.effects.filter_preview;
+    if (!preview.dialog_active || preview.cancel_requested
+        || preview.desired_generation == UINT64_MAX) {
+        return false;
+    }
+    try {
+        preview.pending = std::move(job);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    preview.pending_generation = ++preview.desired_generation;
+    if (state.effects.task != nullptr) {
+        if (preview.work == inkpod::app::FilterPreviewWork::Begin
+            || preview.work == inkpod::app::FilterPreviewWork::Update) {
+            inkpod_task_cancel(state.effects.task);
+            return true;
+        }
+        return false;
+    }
+    return QueueInteractiveFilterPreview(state) == INKPOD_STATUS_OK;
+}
+
+bool FilterEditorPreviewChanged(
+    void* context, const EffectEditorState& editor) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    if (state == nullptr) {
+        return false;
+    }
+    auto& preview = state->effects.filter_preview;
+    preview.dialog = editor.dialog;
+    FilterJob job{};
+    if (!FilterJobFromEditor(
+            preview.kind,
+            preview.plane_id,
+            editor,
+            job)) {
+        return false;
+    }
+    return RequestInteractiveFilterPreview(*state, std::move(job));
+}
+
+bool FilterEditorPreviewProgress(
+    void* context, ProgressDialogInfo& output) noexcept {
+    auto* state = static_cast<ApplicationHost*>(context);
+    return state != nullptr
+        && EffectsController::QueryProgress(&state->effects, output);
+}
+
+InkpodStatus FinishInteractiveFilterPreview(
+    ApplicationHost& state, bool accept) noexcept {
+    auto& preview = state.effects.filter_preview;
+    preview.dialog_active = false;
+    preview.dialog = nullptr;
+    preview.accept_requested = accept;
+    preview.cancel_requested = !accept;
+    if (!accept) {
+        preview.pending.reset();
+        preview.pending_generation = 0U;
+        if (state.effects.task != nullptr) {
+            inkpod_task_cancel(state.effects.task);
+            return INKPOD_STATUS_OK;
+        }
+        return preview.session_active
+            ? QueueInteractiveFilterFinalize(state, false)
+            : (ResetInteractiveFilterPreview(state.effects), INKPOD_STATUS_OK);
+    }
+    if (state.effects.task != nullptr) {
+        return INKPOD_STATUS_OK;
+    }
+    if (preview.pending.has_value()) {
+        return QueueInteractiveFilterPreview(state);
+    }
+    return QueueInteractiveFilterFinalize(state, true);
+}
+
+InkpodStatus RunInteractiveFilterEditor(
+    ApplicationHost& state,
+    const CommandContext& context,
+    UINT command,
+    std::uint64_t plane_id) noexcept {
+    if (state.engine == nullptr || state.effects.task != nullptr || plane_id == 0U
+        || state.effects.filter_preview.work
+            != inkpod::app::FilterPreviewWork::None
+        || state.effects.filter_preview.session_active) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    FilterJob defaults{};
+    EffectEditorState editor{};
+    if (!PrepareFilterEditor(command, defaults, editor)) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    const bool smoke_cancel = state.effects.filter_preview.smoke_cancel_next;
+    ResetInteractiveFilterPreview(state.effects);
+    auto& preview = state.effects.filter_preview;
+    preview.context = context;
+    preview.kind = defaults.kind;
+    preview.plane_id = plane_id;
+    preview.dialog_active = true;
+    preview.smoke_cancel_next = false;
+
+    editor.option1_label = L"ライブプレビュー";
+    editor.option1 = true;
+    editor.option1_enabled = false;
+    editor.preview_context = &state;
+    editor.preview_change = FilterEditorPreviewChanged;
+    editor.preview_progress = FilterEditorPreviewProgress;
+    editor.smoke_cancel = smoke_cancel;
+    const INT_PTR result = ShowEffectEditor(
+        state.lifetime.instance,
+        state.Workspace().windows.window,
+        state.lifetime.smoke_test,
+        editor);
+    preview.dialog = nullptr;
+    return FinishInteractiveFilterPreview(state, result == IDOK);
+}
+
+void CompleteInteractiveFilterWork(
+    ApplicationHost& state,
+    InkpodStatus status,
+    bool document_current) noexcept {
+    auto& preview = state.effects.filter_preview;
+    const inkpod::app::FilterPreviewWork work = preview.work;
+    preview.work = inkpod::app::FilterPreviewWork::None;
+    preview.running_generation = 0U;
+
+    if (!document_current) {
+        if (preview.dialog != nullptr && IsWindow(preview.dialog) != FALSE) {
+            PostMessageW(preview.dialog, WM_COMMAND, IDCANCEL, 0);
+        }
+        ResetInteractiveFilterPreview(state.effects);
+        return;
+    }
+    if (work == inkpod::app::FilterPreviewWork::Apply) {
+        if (status == INKPOD_STATUS_OK) {
+            ResetInteractiveFilterPreview(state.effects);
+            return;
+        }
+        preview.accept_requested = false;
+        preview.cancel_requested = true;
+        if (preview.session_active) {
+            static_cast<void>(QueueInteractiveFilterFinalize(state, false));
+        } else {
+            ResetInteractiveFilterPreview(state.effects);
+        }
+        ShowCoreError(state, state.Workspace().windows.window, L"画像処理プレビューの確定");
+        return;
+    }
+    if (work == inkpod::app::FilterPreviewWork::Cancel) {
+        if (status != INKPOD_STATUS_OK
+            && status != INKPOD_STATUS_INVALID_STATE) {
+            ShowCoreError(state, state.Workspace().windows.window, L"画像処理プレビューの取消");
+        }
+        ResetInteractiveFilterPreview(state.effects);
+        return;
+    }
+    if (work != inkpod::app::FilterPreviewWork::Begin
+        && work != inkpod::app::FilterPreviewWork::Update) {
+        return;
+    }
+
+    if (status == INKPOD_STATUS_OK) {
+        preview.session_active = true;
+        ++preview.completed_updates;
+        SetEffectEditorPreviewStatus(
+            preview.dialog,
+            preview.pending.has_value()
+                ? L"より新しいパラメーターを待機中..."
+                : L"Canvasのプレビューを更新しました。");
+    } else if (status != INKPOD_STATUS_CANCELLED) {
+        SetEffectEditorPreviewStatus(
+            preview.dialog,
+            L"このパラメーターではプレビューを更新できませんでした。");
+    }
+
+    if (preview.cancel_requested) {
+        preview.pending.reset();
+        preview.pending_generation = 0U;
+        if (preview.session_active) {
+            static_cast<void>(QueueInteractiveFilterFinalize(state, false));
+        } else {
+            ResetInteractiveFilterPreview(state.effects);
+        }
+        return;
+    }
+    if (preview.pending.has_value()) {
+        const InkpodStatus queued = QueueInteractiveFilterPreview(state);
+        if (queued != INKPOD_STATUS_OK) {
+            SetEffectEditorPreviewStatus(
+                preview.dialog, L"次のプレビュー要求を開始できませんでした。");
+        }
+        return;
+    }
+    if (preview.accept_requested) {
+        if (status == INKPOD_STATUS_OK) {
+            static_cast<void>(QueueInteractiveFilterFinalize(state, true));
+        } else if (preview.session_active) {
+            static_cast<void>(QueueInteractiveFilterFinalize(state, false));
+        } else {
+            ResetInteractiveFilterPreview(state.effects);
+        }
+    }
 }
 
 bool ConfigureAdjustmentEditor(
@@ -12415,17 +12766,14 @@ std::optional<LRESULT> RouteEffectsCommand(
         case IDM_FILTER_UNSHARP: {
             const UINT command = LOWORD(wparam);
             const InkpodEditorStateInfo* editor = PresentedEditorState(*state);
-            FilterJob job{};
             if (state->Workspace().tools.active_plane != INKPOD_PLANE_COLOR
                 || editor == nullptr
                 || (editor->flags & INKPOD_EDITOR_STATE_HAS_TARGET) == 0U
-                || editor->active_plane_id == 0U
-                || !ConfigureFilterEditor(*state, command, job)) {
+                || editor->active_plane_id == 0U) {
                 return 0;
             }
-            job.plane_id = editor->active_plane_id;
-            const InkpodStatus status = QueueFilter(
-                *state, context, std::move(job));
+            const InkpodStatus status = RunInteractiveFilterEditor(
+                *state, context, command, editor->active_plane_id);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"フィルタ");
             }
@@ -16942,6 +17290,9 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     == CommandResolveStatus::Ok;
                 const bool prompt = state->effects.preview_prompt;
                 state->effects.preview_prompt = false;
+                const bool interactive_filter =
+                    state->effects.filter_preview.work
+                    != inkpod::app::FilterPreviewWork::None;
                 if (completion_workspace != nullptr) {
                     ClearJobProgress(
                         completion_workspace->job_progress,
@@ -16955,6 +17306,18 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     }
                 }
                 inkpod_task_release(&state->effects.task);
+                if (state->effects.job_id.has_value()) {
+                    (void)state->routing.targets.EndJob(
+                        state->effects.job_id.value());
+                }
+                state->effects.job_id.reset();
+                state->effects.completion_context = {};
+                if (interactive_filter) {
+                    CompleteInteractiveFilterWork(
+                        *state, status, document_current);
+                    UpdateMenuState(*state);
+                    return 0;
+                }
                 if (status == INKPOD_STATUS_OK && prompt && document_current
                     && state->engine != nullptr) {
                     const int choice = target_current
@@ -16983,12 +17346,6 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                         ShowCoreError(*state, window, L"画像処理プレビューの確定");
                     }
                 }
-                if (state->effects.job_id.has_value()) {
-                    (void)state->routing.targets.EndJob(
-                        state->effects.job_id.value());
-                }
-                state->effects.job_id.reset();
-                state->effects.completion_context = {};
                 UpdateMenuState(*state);
             }
             return 0;

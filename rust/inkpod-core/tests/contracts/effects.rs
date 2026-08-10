@@ -85,6 +85,114 @@ fn acceptance_apply_is_exactly_one_undo_unit_and_last_filter_reuses_it() {
 }
 
 #[test]
+fn filter_preview_001_parameter_updates_recompute_from_the_original_base() {
+    let (mut updated, plane_id) = seeded_core();
+    let original = updated.document_info().unwrap();
+    let history = updated.history_entries().len();
+    let first = Filter::BrightnessContrast {
+        brightness_milli: 250,
+        contrast_milli: 0,
+    };
+    let final_filter = Filter::BrightnessContrast {
+        brightness_milli: -150,
+        contrast_milli: 400,
+    };
+
+    let first_preview = updated
+        .begin_filter_preview(plane_id, first.clone())
+        .unwrap();
+    let final_preview = updated
+        .update_filter_preview(plane_id, final_filter.clone())
+        .unwrap();
+    assert_ne!(
+        first_preview.preview_checksum,
+        final_preview.preview_checksum
+    );
+    assert_eq!(updated.document_info().unwrap(), original);
+    assert_eq!(updated.history_entries().len(), history);
+    let published_preview = updated.build_snapshot().canonical_composite_digest();
+    assert!(matches!(
+        updated.update_filter_preview(
+            plane_id,
+            Filter::BrightnessContrast {
+                brightness_milli: i32::MIN,
+                contrast_milli: 0,
+            },
+        ),
+        Err(CoreError::Raster(_))
+    ));
+    assert_eq!(
+        updated.build_snapshot().canonical_composite_digest(),
+        published_preview
+    );
+    assert_eq!(updated.document_info().unwrap(), original);
+    assert_eq!(updated.history_entries().len(), history);
+
+    let (mut direct, direct_plane_id) = seeded_core();
+    let direct_preview = direct
+        .begin_filter_preview(direct_plane_id, final_filter.clone())
+        .unwrap();
+    assert_eq!(
+        final_preview.preview_checksum,
+        direct_preview.preview_checksum
+    );
+
+    let (mut cumulative, cumulative_plane_id) = seeded_core();
+    cumulative
+        .begin_filter_preview(cumulative_plane_id, first)
+        .unwrap();
+    cumulative.apply_filter_preview().unwrap();
+    let cumulative_preview = cumulative
+        .begin_filter_preview(cumulative_plane_id, final_filter)
+        .unwrap();
+    assert_ne!(
+        final_preview.preview_checksum,
+        cumulative_preview.preview_checksum
+    );
+
+    let cancelled = updated.cancel_filter_preview().unwrap();
+    assert_eq!(cancelled.preview_checksum, original.color_plane_checksum);
+    assert_eq!(updated.document_info().unwrap(), original);
+    assert_eq!(updated.history_entries().len(), history);
+
+    updated
+        .begin_filter_preview(
+            plane_id,
+            Filter::BrightnessContrast {
+                brightness_milli: 250,
+                contrast_milli: 0,
+            },
+        )
+        .unwrap();
+    updated
+        .update_filter_preview(
+            plane_id,
+            Filter::BrightnessContrast {
+                brightness_milli: -150,
+                contrast_milli: 400,
+            },
+        )
+        .unwrap();
+    updated.apply_filter_preview().unwrap();
+    let committed = updated.document_info().unwrap();
+    assert_eq!(
+        committed.color_plane_checksum,
+        final_preview.preview_checksum
+    );
+    assert_eq!(updated.history_entries().len(), history + 1);
+    updated.undo().unwrap();
+    assert_eq!(
+        updated.document_info().unwrap().color_plane_checksum,
+        original.color_plane_checksum
+    );
+    updated.redo().unwrap();
+    assert_eq!(
+        updated.document_info().unwrap().color_plane_checksum,
+        final_preview.preview_checksum
+    );
+}
+
+#[test]
 fn acceptance_adjustment_order_changes_composite_without_changing_source_plane() {
     let (mut core, _) = seeded_core();
     let unadjusted = core.build_snapshot().tiles()[0].pixels()[..4].to_vec();

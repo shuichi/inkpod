@@ -9,6 +9,17 @@
 
 namespace inkpod::windows::ui {
 
+struct ProgressDialogInfo {
+    std::uint64_t completed_work{};
+    std::uint64_t total_work{};
+};
+
+struct EffectEditorState;
+using EffectEditorChangeCallback = bool (*)(
+    void* context, const EffectEditorState& state) noexcept;
+using EffectEditorProgressCallback = bool (*)(
+    void* context, ProgressDialogInfo& output) noexcept;
+
 struct EffectEditorState {
     const wchar_t* title{L"画像編集"};
     std::array<const wchar_t*, 5U> parameter_labels{L"P0", L"P1", L"P2", L"P3", L"P4"};
@@ -29,6 +40,13 @@ struct EffectEditorState {
     bool option1_enabled{true};
     bool option2_enabled{true};
     bool close_immediately{};
+    void* preview_context{};
+    EffectEditorChangeCallback preview_change{};
+    EffectEditorProgressCallback preview_progress{};
+    const wchar_t* preview_idle_text{L"パラメーターを変更するとCanvasを更新します。"};
+    HWND dialog{};
+    std::uint32_t smoke_change_step{};
+    bool smoke_cancel{};
 };
 
 INT_PTR ShowEffectEditor(
@@ -36,11 +54,7 @@ INT_PTR ShowEffectEditor(
     HWND owner,
     bool close_immediately,
     EffectEditorState& state) noexcept;
-
-struct ProgressDialogInfo {
-    std::uint64_t completed_work{};
-    std::uint64_t total_work{};
-};
+void SetEffectEditorPreviewStatus(HWND dialog, const wchar_t* text) noexcept;
 
 using ProgressQueryCallback = bool (*)(
     void* context, ProgressDialogInfo& output) noexcept;

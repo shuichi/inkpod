@@ -17,6 +17,9 @@ namespace inkpod::windows::ui {
 namespace {
 
 constexpr UINT_PTR kProgressTimer = 1U;
+constexpr UINT_PTR kEffectPreviewDebounceTimer = 2U;
+constexpr UINT_PTR kEffectPreviewProgressTimer = 3U;
+constexpr UINT kEffectEditorSmokeChange = WM_APP + 91U;
 
 bool ReadSignedDialogValue(
     HWND dialog, int control, std::int32_t& output) noexcept {
@@ -69,6 +72,92 @@ std::uint32_t SelectedEffectCombo(
     const LRESULT value = SendDlgItemMessageW(
         dialog, control, CB_GETITEMDATA, static_cast<WPARAM>(selected), 0);
     return value == CB_ERR ? fallback : static_cast<std::uint32_t>(value);
+}
+
+bool ReadEffectEditorState(
+    HWND dialog, EffectEditorState& state, bool show_error) noexcept {
+    constexpr std::array<int, 5U> edits{
+        IDC_EFFECT_PARAMETER0,
+        IDC_EFFECT_PARAMETER1,
+        IDC_EFFECT_PARAMETER2,
+        IDC_EFFECT_PARAMETER3,
+        IDC_EFFECT_PARAMETER4};
+    auto parameters = state.parameters;
+    for (std::size_t index = 0; index < edits.size(); ++index) {
+        if (!ReadSignedDialogValue(dialog, edits[index], parameters[index])) {
+            if (show_error && !state.close_immediately) {
+                MessageBoxW(
+                    dialog,
+                    L"数値パラメーターを10進整数で入力してください。",
+                    L"inkpod",
+                    MB_OK | MB_ICONWARNING);
+            }
+            return false;
+        }
+    }
+    std::array<wchar_t, 1024U> points{};
+    GetDlgItemTextW(
+        dialog,
+        IDC_EFFECT_POINTS,
+        points.data(),
+        static_cast<int>(points.size()));
+    try {
+        state.points.assign(points.data());
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    state.parameters = parameters;
+    state.channel = SelectedEffectCombo(
+        dialog, IDC_EFFECT_CHANNEL, state.channel);
+    state.mode = SelectedEffectCombo(dialog, IDC_EFFECT_MODE, state.mode);
+    state.option1 =
+        IsDlgButtonChecked(dialog, IDC_EFFECT_OPTION1) == BST_CHECKED;
+    state.option2 =
+        IsDlgButtonChecked(dialog, IDC_EFFECT_OPTION2) == BST_CHECKED;
+    return true;
+}
+
+void SetEffectPreviewStatus(HWND dialog, const wchar_t* text) noexcept {
+    if (dialog != nullptr && IsWindow(dialog) != FALSE) {
+        SetDlgItemTextW(dialog, IDC_EFFECT_PREVIEW_STATUS, text == nullptr ? L"" : text);
+    }
+}
+
+bool SubmitEffectPreviewChange(
+    HWND dialog, EffectEditorState& state, bool show_error) noexcept {
+    if (!ReadEffectEditorState(dialog, state, show_error)) {
+        SetEffectPreviewStatus(dialog, L"入力中のパラメーターはまだ有効ではありません。");
+        return false;
+    }
+    if (state.preview_change == nullptr) {
+        return true;
+    }
+    if (!state.preview_change(state.preview_context, state)) {
+        SetEffectPreviewStatus(dialog, L"プレビュー要求を開始できませんでした。");
+        return false;
+    }
+    SetEffectPreviewStatus(dialog, L"最新のパラメーターからプレビューを計算中...");
+    return true;
+}
+
+bool IsEffectEditorChangeNotification(WPARAM wparam) noexcept {
+    switch (LOWORD(wparam)) {
+        case IDC_EFFECT_PARAMETER0:
+        case IDC_EFFECT_PARAMETER1:
+        case IDC_EFFECT_PARAMETER2:
+        case IDC_EFFECT_PARAMETER3:
+        case IDC_EFFECT_PARAMETER4:
+        case IDC_EFFECT_POINTS:
+            return HIWORD(wparam) == EN_CHANGE;
+        case IDC_EFFECT_CHANNEL:
+        case IDC_EFFECT_MODE:
+            return HIWORD(wparam) == CBN_SELCHANGE;
+        case IDC_EFFECT_OPTION1:
+        case IDC_EFFECT_OPTION2:
+            return HIWORD(wparam) == BN_CLICKED;
+        default:
+            return false;
+    }
 }
 
 INT_PTR CALLBACK EffectEditorDialogProcedure(
@@ -129,8 +218,16 @@ INT_PTR CALLBACK EffectEditorDialogProcedure(
             EnableWindow(
                 GetDlgItem(dialog, IDC_EFFECT_OPTION2),
                 state->option2_enabled ? TRUE : FALSE);
+            state->dialog = dialog;
+            SetEffectPreviewStatus(dialog, state->preview_idle_text);
             static_cast<void>(CenterModalDialogOnOwner(dialog));
-            if (state->close_immediately) {
+            if (state->preview_change != nullptr) {
+                static_cast<void>(SubmitEffectPreviewChange(dialog, *state, false));
+                SetTimer(dialog, kEffectPreviewProgressTimer, 100U, nullptr);
+            }
+            if (state->close_immediately && state->preview_change != nullptr) {
+                PostMessageW(dialog, kEffectEditorSmokeChange, 0, 0);
+            } else if (state->close_immediately) {
                 PostMessageW(dialog, WM_COMMAND, IDOK, 0);
             }
             return TRUE;
@@ -140,53 +237,88 @@ INT_PTR CALLBACK EffectEditorDialogProcedure(
                 break;
             }
             if (LOWORD(wparam) == IDOK) {
-                constexpr std::array<int, 5U> edits{
-                    IDC_EFFECT_PARAMETER0,
-                    IDC_EFFECT_PARAMETER1,
-                    IDC_EFFECT_PARAMETER2,
-                    IDC_EFFECT_PARAMETER3,
-                    IDC_EFFECT_PARAMETER4};
-                for (std::size_t index = 0; index < edits.size(); ++index) {
-                    if (!ReadSignedDialogValue(
-                            dialog, edits[index], state->parameters[index])) {
-                        if (!state->close_immediately) {
-                            MessageBoxW(
-                                dialog,
-                                L"数値パラメーターを10進整数で入力してください。",
-                                L"inkpod",
-                                MB_OK | MB_ICONWARNING);
-                        }
+                KillTimer(dialog, kEffectPreviewDebounceTimer);
+                KillTimer(dialog, kEffectPreviewProgressTimer);
+                if (state->preview_change != nullptr) {
+                    if (!SubmitEffectPreviewChange(dialog, *state, true)) {
+                        SetTimer(dialog, kEffectPreviewProgressTimer, 100U, nullptr);
                         return TRUE;
                     }
-                }
-                state->channel = SelectedEffectCombo(
-                    dialog, IDC_EFFECT_CHANNEL, state->channel);
-                state->mode = SelectedEffectCombo(
-                    dialog, IDC_EFFECT_MODE, state->mode);
-                std::array<wchar_t, 1024U> points{};
-                GetDlgItemTextW(
-                    dialog,
-                    IDC_EFFECT_POINTS,
-                    points.data(),
-                    static_cast<int>(points.size()));
-                try {
-                    state->points.assign(points.data());
-                } catch (const std::bad_alloc&) {
+                } else if (!ReadEffectEditorState(dialog, *state, true)) {
                     return TRUE;
                 }
-                state->option1 =
-                    IsDlgButtonChecked(dialog, IDC_EFFECT_OPTION1) == BST_CHECKED;
-                state->option2 =
-                    IsDlgButtonChecked(dialog, IDC_EFFECT_OPTION2) == BST_CHECKED;
+                state->dialog = nullptr;
                 EndDialog(dialog, IDOK);
                 return TRUE;
             }
             if (LOWORD(wparam) == IDCANCEL) {
+                KillTimer(dialog, kEffectPreviewDebounceTimer);
+                KillTimer(dialog, kEffectPreviewProgressTimer);
+                state->dialog = nullptr;
                 EndDialog(dialog, IDCANCEL);
                 return TRUE;
             }
+            if (state->preview_change != nullptr
+                && IsEffectEditorChangeNotification(wparam)) {
+                KillTimer(dialog, kEffectPreviewDebounceTimer);
+                SetTimer(dialog, kEffectPreviewDebounceTimer, 120U, nullptr);
+                return TRUE;
+            }
             break;
+        case WM_TIMER:
+            if (state == nullptr) {
+                break;
+            }
+            if (wparam == kEffectPreviewDebounceTimer) {
+                KillTimer(dialog, kEffectPreviewDebounceTimer);
+                static_cast<void>(SubmitEffectPreviewChange(dialog, *state, false));
+                return TRUE;
+            }
+            if (wparam == kEffectPreviewProgressTimer
+                && state->preview_progress != nullptr) {
+                ProgressDialogInfo info{};
+                if (state->preview_progress(state->preview_context, info)) {
+                    std::array<wchar_t, 96U> status{};
+                    _snwprintf_s(
+                        status.data(),
+                        status.size(),
+                        _TRUNCATE,
+                        L"プレビュー計算中... %llu / %llu",
+                        static_cast<unsigned long long>(info.completed_work),
+                        static_cast<unsigned long long>(info.total_work));
+                    SetEffectPreviewStatus(dialog, status.data());
+                }
+                return TRUE;
+            }
+            break;
+        case kEffectEditorSmokeChange:
+            if (state == nullptr || state->preview_change == nullptr) {
+                break;
+            }
+            if (state->smoke_change_step < 3U) {
+                constexpr std::array<std::int32_t, 3U> values{100, 250, -150};
+                const std::int32_t value = values[state->smoke_change_step++];
+                std::array<wchar_t, 32U> text{};
+                _snwprintf_s(
+                    text.data(), text.size(), _TRUNCATE, L"%d", value);
+                SetDlgItemTextW(dialog, IDC_EFFECT_PARAMETER0, text.data());
+                KillTimer(dialog, kEffectPreviewDebounceTimer);
+                static_cast<void>(SubmitEffectPreviewChange(dialog, *state, false));
+                PostMessageW(dialog, kEffectEditorSmokeChange, 0, 0);
+                return TRUE;
+            }
+            PostMessageW(
+                dialog,
+                WM_COMMAND,
+                state->smoke_cancel ? IDCANCEL : IDOK,
+                0);
+            return TRUE;
         case WM_CLOSE:
+            if (state != nullptr) {
+                KillTimer(dialog, kEffectPreviewDebounceTimer);
+                KillTimer(dialog, kEffectPreviewProgressTimer);
+                state->dialog = nullptr;
+            }
             EndDialog(dialog, IDCANCEL);
             return TRUE;
         default:
@@ -396,6 +528,10 @@ INT_PTR ShowEffectEditor(
     } catch (const std::bad_alloc&) {
         return IDCANCEL;
     }
+}
+
+void SetEffectEditorPreviewStatus(HWND dialog, const wchar_t* text) noexcept {
+    SetEffectPreviewStatus(dialog, text);
 }
 
 HWND CreateJobProgressPane(

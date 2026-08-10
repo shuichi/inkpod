@@ -51,6 +51,36 @@ struct FilterJob {
     bool preview{};
 };
 
+enum class FilterPreviewWork : std::uint8_t {
+    None,
+    Begin,
+    Update,
+    Apply,
+    Cancel,
+};
+
+struct InteractiveFilterPreviewUiState {
+    CommandContext context;
+    std::uint32_t kind{};
+    std::uint64_t plane_id{};
+    std::optional<FilterJob> pending;
+    std::uint64_t desired_generation{};
+    std::uint64_t pending_generation{};
+    std::uint64_t running_generation{};
+    FilterPreviewWork work{FilterPreviewWork::None};
+    bool session_active{};
+    bool dialog_active{};
+    bool accept_requested{};
+    bool cancel_requested{};
+    HWND dialog{};
+
+    // Fixed-size smoke observations avoid adding an unbounded diagnostic queue.
+    std::uint64_t completed_updates{};
+    std::array<std::uint64_t, 8U> smoke_checksums{};
+    std::size_t smoke_checksum_count{};
+    bool smoke_cancel_next{};
+};
+
 struct LocatorAsyncResult {
     PostedNotificationToken token;
     CommandContext context;
@@ -286,6 +316,7 @@ struct EffectsUiState {
     std::optional<CommandContext> gesture_context;
     std::optional<JobSessionId> job_id;
     CommandContext completion_context;
+    InteractiveFilterPreviewUiState filter_preview;
 };
 
 struct BatchUiState {

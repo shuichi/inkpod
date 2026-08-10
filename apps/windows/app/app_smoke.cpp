@@ -6533,21 +6533,73 @@ int RunImageEffectsSmoke(ApplicationHost& state) noexcept {
         || after_menu.color_plane_checksum == before_menu.color_plane_checksum) {
         return 603;
     }
+    InkpodDocumentInfo before_live_preview = EmptyDocumentInfo();
+    InkpodDocumentInfo after_live_preview = EmptyDocumentInfo();
+    const std::size_t preview_checksum_start =
+        state.effects.filter_preview.smoke_checksum_count;
+    const std::uint64_t preview_updates_start =
+        state.effects.filter_preview.completed_updates;
+    if (!QueryDocument(state, before_live_preview)) {
+        return 604;
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_FILTER_BRIGHTNESS, 0);
+    if (!QueryDocument(state, after_live_preview)
+        || after_live_preview.color_plane_checksum
+            == before_live_preview.color_plane_checksum
+        || state.effects.filter_preview.completed_updates
+            < preview_updates_start + 4U
+        || state.effects.filter_preview.smoke_checksum_count
+            < preview_checksum_start + 4U) {
+        return 605;
+    }
+    const auto& preview_checksums = state.effects.filter_preview.smoke_checksums;
+    if (preview_checksums[preview_checksum_start]
+            == preview_checksums[preview_checksum_start + 1U]
+        || preview_checksums[preview_checksum_start + 1U]
+            == preview_checksums[preview_checksum_start + 2U]
+        || preview_checksums[preview_checksum_start + 2U]
+            == preview_checksums[preview_checksum_start + 3U]) {
+        return 606;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    InkpodDocumentInfo after_live_undo = EmptyDocumentInfo();
+    if (!QueryDocument(state, after_live_undo)
+        || after_live_undo.color_plane_checksum
+            != before_live_preview.color_plane_checksum) {
+        return 607;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
+    InkpodDocumentInfo before_live_cancel = EmptyDocumentInfo();
+    InkpodDocumentInfo after_live_cancel = EmptyDocumentInfo();
+    if (!QueryDocument(state, before_live_cancel)) {
+        return 608;
+    }
+    state.effects.filter_preview.smoke_cancel_next = true;
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_FILTER_BRIGHTNESS, 0);
+    if (!QueryDocument(state, after_live_cancel)
+        || after_live_cancel.color_plane_checksum
+            != before_live_cancel.color_plane_checksum
+        || state.effects.filter_preview.session_active
+        || state.effects.task != nullptr) {
+        return 609;
+    }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_CREATE, 0);
     if (state.effects.adjustments.size() != 2U
         || state.effects.adjustments[0].id == state.effects.adjustments[1].id) {
-        return 605;
+        return 610;
     }
     const std::uint64_t newest_adjustment = state.effects.adjustment_id;
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_PREVIOUS, 0);
     if (state.effects.adjustment_id == newest_adjustment) {
-        return 606;
+        return 611;
     }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_EDIT, 0);
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_TOGGLE, 0);
     if (state.effects.adjustment_visible) {
-        return 607;
+        return 612;
     }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_ADJUSTMENT_MOVE_TOP, 0);
     InkpodDocumentInfo before_spray = EmptyDocumentInfo();
@@ -6556,11 +6608,11 @@ int RunImageEffectsSmoke(ApplicationHost& state) noexcept {
     if (!QueryDocument(state, before_spray)
         || !inkpod::renderer::GetCanvasDocumentBounds(
                state.Workspace().windows.canvas, spray_bounds)) {
-        return 608;
+        return 613;
     }
     if (SetEditorActiveTool(state, kInteractionEffectAirbrush)
         != INKPOD_STATUS_OK) {
-        return 609;
+        return 614;
     }
     state.effects.options.parameters = {4000, 1000, 1000, 750, 0};
     state.effects.options.option = true;
