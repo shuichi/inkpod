@@ -123,6 +123,8 @@ public:
         Generation generation,
         DocumentViewId initial_view) noexcept;
     void DetachCoreSessions() noexcept;
+    [[nodiscard]] bool DestroyCutSession(WorkspaceWindow& workspace) noexcept;
+    [[nodiscard]] bool DestroyAllCutSessions() noexcept;
 
     AppLifetimeState lifetime{};
     EffectsUiState effects{};

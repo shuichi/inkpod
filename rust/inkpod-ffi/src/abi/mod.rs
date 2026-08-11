@@ -2,6 +2,7 @@ use super::*;
 
 mod constants;
 mod core_records;
+mod cut_records;
 mod document_records;
 mod editor_records;
 mod handles;
@@ -14,6 +15,7 @@ pub(crate) use constants::{
     MAX_SELECTION_POINT_COUNT, MAX_STROKE_SAMPLE_COUNT,
 };
 pub use core_records::*;
+pub use cut_records::*;
 pub use document_records::*;
 pub use editor_records::*;
 pub use handles::*;

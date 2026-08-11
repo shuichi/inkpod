@@ -1,6 +1,6 @@
 use super::*;
 
-pub const INKPOD_ABI_VERSION: u32 = 10;
+pub const INKPOD_ABI_VERSION: u32 = 11;
 pub const INKPOD_DIGEST_BLAKE3_256: u32 = 1;
 
 pub const INKPOD_OBJECT_NONE: u32 = 0;
@@ -136,6 +136,10 @@ pub const INKPOD_DOCUMENT_FLAG_DIRTY: u32 = 1 << 0;
 pub const INKPOD_DOCUMENT_FLAG_CAN_UNDO: u32 = 1 << 1;
 pub const INKPOD_DOCUMENT_FLAG_CAN_REDO: u32 = 1 << 2;
 pub const INKPOD_DOCUMENT_FLAG_RECOVERED: u32 = 1 << 3;
+pub const INKPOD_CUT_FLAG_DIRTY: u32 = 1 << 0;
+pub const INKPOD_CUT_FLAG_CAN_UNDO: u32 = 1 << 1;
+pub const INKPOD_CUT_FLAG_CAN_REDO: u32 = 1 << 2;
+pub const INKPOD_CUT_FLAG_RECOVERED: u32 = 1 << 3;
 pub const INKPOD_HISTORY_ITEM_APPLIED: u32 = 1 << 0;
 pub const INKPOD_VIEW_PAN_BY: u32 = 1;
 pub const INKPOD_VIEW_ZOOM_AT: u32 = 2;

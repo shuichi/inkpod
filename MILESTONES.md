@@ -925,7 +925,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M16 — PM-GAP-017: 五点基準によるfloating transform
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: XFORM-002、XFORM-003、HIST-001。
 
@@ -973,24 +973,22 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M17 — PM-GAP-001: Cutを意味上の制作単位として保持
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: SEQ-001、DOC-001、SESSION-001。専用要件IDを新設する。
+関連要件: CUT-001、DOC-001、SESSION-001。
 
 仕様決定ゲート:
 
-- Cutと個別CellDocumentの保存所有関係が現行SPECでは一意でない。実装前に、
-  一つのcut-root .inkpodへcellを内包する方式と、cut descriptor .inkpodから
-  同一directoryの個別cell .inkpodを相対参照する方式について、atomicity、
-  大容量cell、単独cell編集、移動／rename、recoveryの影響を示して利用者の
-  決定を得る。
-- 新しい拡張子、absolute path、canonical procedure内の外部path、silentな
-  file移動を導入しない。選択したtopologyをSPEC.mdとdocs/file-format.mdへ
-  先に記載する。
-- Cutが独立Core handleか複数CellDocumentのcoordinatorか、Cut自身のdirty、
-  history、savepoint、Undo owner、Core engine thread、multi-cell publish、
-  recoveryを同時に決め、現行DocumentSession owner graphへの影響を
-  docs/architecture.mdへ記載する。
+- 決定済み。利用者指定の個別セル参照方式を採用する。Cut descriptor `.inkpod` は
+  同一directoryの個別Cell `.inkpod` を一成分の相対file名、CellId、document UUIDで
+  参照し、Cell本体を内包しない。新しい拡張子、absolute path、canonical procedure内の
+  外部path、silentなfile移動は導入しない。
+- Cutは独立したRust-owned handleとしてmetadata、defaults、membership、dirty、history、
+  savepoint、recoveryを所有し、WorkspaceWindow配下のCutSessionがCore engine thread上で
+  create／query／edit／destroyする。DocumentSessionは各Cell Coreの所有を継続する。
+- Cut descriptorのatomic replaceと個別Cellのsave／defaults copyは別境界であり、複数fileを
+  一つの偽transactionとして扱わない。既存CellはCut defaults変更で書き換えず、作成後も
+  独立して編集、履歴移動、保存、recoveryできる。
 
 成果:
 

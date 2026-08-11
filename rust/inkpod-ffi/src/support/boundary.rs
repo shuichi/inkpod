@@ -338,6 +338,7 @@ pub(crate) fn write_document_info(output: &mut InkpodDocumentInfo, info: Documen
     output.reserved = 0;
     output.main_plane_checksum = info.main_plane_checksum;
     output.color_plane_checksum = info.color_plane_checksum;
+    output.cell_id = info.cell_id;
 }
 
 pub(crate) fn write_resource_usage(output: &mut InkpodResourceUsage, usage: ResourceUsage) {

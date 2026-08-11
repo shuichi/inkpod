@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(10)
+#define INKPOD_ABI_VERSION UINT32_C(11)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -664,6 +664,7 @@ typedef uint32_t InkpodOutputColorGuardProfile;
 
 /** @brief 作成スレッドに固定された Rust-owned Core opaque handle。 */
 typedef struct InkpodCore InkpodCore;
+typedef struct InkpodCut InkpodCut;
 /** @brief Rust-owned immutable validated blank-cell creation plan. */
 typedef struct InkpodCellCreationPlan InkpodCellCreationPlan;
 /** @brief Core から独立して生存できる immutable・Rust-owned snapshot handle。 */
@@ -857,7 +858,133 @@ typedef struct InkpodDocumentInfo {
     uint32_t reserved;
     uint64_t main_plane_checksum;
     uint64_t color_plane_checksum;
+    /** Stable Cell identity stored in the native Cell document. */
+    uint64_t cell_id;
 } InkpodDocumentInfo;
+
+/** Borrowed UTF-8 input bytes; an empty span may use a null pointer. */
+typedef struct InkpodUtf8Span {
+    const uint8_t* bytes;
+    uint64_t byte_count;
+} InkpodUtf8Span;
+
+/** Caller-owned UTF-8 output storage. byte_count receives the required size. */
+typedef struct InkpodUtf8Buffer {
+    uint8_t* bytes;
+    uint64_t capacity;
+    uint64_t byte_count;
+} InkpodUtf8Buffer;
+
+typedef struct InkpodCutMetadataInput {
+    uint32_t struct_size;
+    uint32_t duration_frames;
+    InkpodUtf8Span work_title;
+    InkpodUtf8Span episode;
+    InkpodUtf8Span scene;
+    InkpodUtf8Span cut_name;
+    InkpodUtf8Span instruction;
+} InkpodCutMetadataInput;
+
+typedef struct InkpodCutMetadataBuffer {
+    uint32_t struct_size;
+    uint32_t duration_frames;
+    InkpodUtf8Buffer work_title;
+    InkpodUtf8Buffer episode;
+    InkpodUtf8Buffer scene;
+    InkpodUtf8Buffer cut_name;
+    InkpodUtf8Buffer instruction;
+} InkpodCutMetadataBuffer;
+
+typedef struct InkpodCutDefaultsInput {
+    uint32_t struct_size;
+    uint32_t sizing_mode;
+    uint64_t feature_flags;
+    uint32_t width;
+    uint32_t height;
+    uint32_t dpi_x_milli;
+    uint32_t dpi_y_milli;
+    uint32_t margin_milli;
+    uint32_t safe_frame_ratio_milli;
+    uint32_t maximum_close_ratio_milli;
+    uint32_t anchor;
+    InkpodLayerKind initial_layer_kind;
+    uint32_t pixel_format;
+    uint32_t reserved;
+} InkpodCutDefaultsInput;
+
+typedef struct InkpodCutMemberInput {
+    uint32_t struct_size;
+    uint32_t display_number;
+    uint64_t cell_id;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    InkpodUtf8Span relative_path;
+} InkpodCutMemberInput;
+
+typedef struct InkpodCutCreateRequest {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t cut_uuid_high;
+    uint64_t cut_uuid_low;
+    const InkpodCutMetadataInput* metadata;
+    const InkpodCutDefaultsInput* defaults;
+    const InkpodCutMemberInput* members;
+    uint64_t member_count;
+    uint64_t member_stride_bytes;
+} InkpodCutCreateRequest;
+
+typedef struct InkpodCutUpdateRequest {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t base_revision;
+    const InkpodCutMetadataInput* metadata;
+    const InkpodCutDefaultsInput* defaults;
+} InkpodCutUpdateRequest;
+
+#define INKPOD_CUT_FLAG_DIRTY (UINT32_C(1) << 0)
+#define INKPOD_CUT_FLAG_CAN_UNDO (UINT32_C(1) << 1)
+#define INKPOD_CUT_FLAG_CAN_REDO (UINT32_C(1) << 2)
+#define INKPOD_CUT_FLAG_RECOVERED (UINT32_C(1) << 3)
+
+typedef struct InkpodCutInfo {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t cut_id;
+    uint64_t cut_uuid_high;
+    uint64_t cut_uuid_low;
+    uint64_t revision;
+    uint64_t state_id;
+    uint32_t member_count;
+    uint32_t reserved;
+    uint64_t work_title_bytes;
+    uint64_t episode_bytes;
+    uint64_t scene_bytes;
+    uint64_t cut_name_bytes;
+    uint64_t instruction_bytes;
+    uint32_t duration_frames;
+    uint32_t sizing_mode;
+    uint32_t width;
+    uint32_t height;
+    uint32_t dpi_x_milli;
+    uint32_t dpi_y_milli;
+    uint32_t margin_milli;
+    uint32_t safe_frame_ratio_milli;
+    uint32_t maximum_close_ratio_milli;
+    uint32_t anchor;
+    InkpodLayerKind initial_layer_kind;
+    uint32_t pixel_format;
+} InkpodCutInfo;
+
+typedef struct InkpodCutMemberInfo {
+    uint32_t struct_size;
+    uint32_t display_number;
+    uint64_t cell_id;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    InkpodUtf8Buffer relative_path;
+} InkpodCutMemberInfo;
 
 /**
  * @brief Core owner-thread session の deterministic な論理 resource 使用量。
@@ -5539,6 +5666,90 @@ InkpodStatus inkpod_core_task_cancel_v3(InkpodCore* core, const InkpodObjectId* 
 InkpodStatus inkpod_core_object_release_v3(
     InkpodCore* core,
     const InkpodObjectId* id);
+
+/**
+ * @brief Creates an independent Cut metadata/default/history owner.
+ * @par Ownership and thread
+ * Success stores one Rust-owned handle in `*out_cut`; failure stores NULL.
+ * Create/use/destroy are confined to the creating thread. Borrowed UTF-8 and
+ * strided member inputs are copied before return. Cell files and Cell Core
+ * handles remain independently owned.
+ */
+InkpodStatus inkpod_cut_create(
+    const InkpodCutCreateRequest* request,
+    InkpodCut** out_cut);
+
+/** Opens an exact-current Cut descriptor and validates every referenced Cell. */
+InkpodStatus inkpod_cut_open(
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    InkpodCut** out_cut);
+
+/** Opens Cut recovery data as dirty without adopting a normal savepoint. */
+InkpodStatus inkpod_cut_open_recovery(
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    InkpodCut** out_cut);
+
+/** Destroys a Cut on its owner thread and nulls owner storage; NULL is a no-op. */
+InkpodStatus inkpod_cut_destroy(InkpodCut** cut);
+
+/** Queries Cut identity, revision, history flags, defaults, and text lengths. */
+InkpodStatus inkpod_cut_info(
+    const InkpodCut* cut,
+    InkpodCutInfo* out_info);
+
+/**
+ * Copies metadata into caller buffers. BUFFER_TOO_SMALL writes every required
+ * byte count and copies no partial text. Bytes are UTF-8 and not NUL-terminated.
+ */
+InkpodStatus inkpod_cut_metadata_copy(
+    const InkpodCut* cut,
+    InkpodCutMetadataBuffer* output);
+
+/** Queries one ordered Cell reference; path output uses two-stage buffer rules. */
+InkpodStatus inkpod_cut_member_get(
+    const InkpodCut* cut,
+    uint32_t index,
+    InkpodCutMemberInfo* output);
+
+/**
+ * Commits one revision-bound metadata/default update. Success reports one
+ * accepted command; a semantic no-op reports zero. Existing Cells are unchanged.
+ */
+InkpodStatus inkpod_cut_update(
+    InkpodCut* cut,
+    const InkpodCutUpdateRequest* request,
+    InkpodDispatchResult* result);
+
+/** Reports a cancelled properties edit as a stable no-op. */
+InkpodStatus inkpod_cut_cancel_update(
+    InkpodCut* cut,
+    InkpodDispatchResult* result);
+
+/** Moves one step backward in Cut-owned history. */
+InkpodStatus inkpod_cut_undo(
+    InkpodCut* cut,
+    InkpodDispatchResult* result);
+
+/** Moves one step forward in Cut-owned history. */
+InkpodStatus inkpod_cut_redo(
+    InkpodCut* cut,
+    InkpodDispatchResult* result);
+
+/** Atomically saves a descriptor after validating same-directory Cell members. */
+InkpodStatus inkpod_cut_save(
+    InkpodCut* cut,
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    InkpodCutInfo* out_info);
+
+/** Writes recovery data without advancing the normal Cut savepoint. */
+InkpodStatus inkpod_cut_autosave(
+    InkpodCut* cut,
+    const uint8_t* path_utf8,
+    uint64_t path_bytes,
+    InkpodCutInfo* out_info);
 
 /**
  * @brief current thread の直近 FFI diagnostic に必要な UTF-8 buffer size を得る。

@@ -29,7 +29,7 @@ static_assert(std::is_standard_layout_v<InkpodSnapshotRenderPlan>);
 static_assert(sizeof(InkpodSnapshotRenderPass) == 48U);
 static_assert(sizeof(InkpodSnapshotRenderPlan) == 64U);
 static_assert(sizeof(InkpodCellCreateOptions) == 48U);
-static_assert(sizeof(InkpodDocumentInfo) == 224U);
+static_assert(sizeof(InkpodDocumentInfo) == 232U);
 static_assert(sizeof(InkpodResourceUsage) == 112U);
 static_assert(sizeof(InkpodStrokeSample) == 24U);
 static_assert(sizeof(InkpodStrokeInput) == 72U);
@@ -172,8 +172,8 @@ int InkpodRunAbiSmoke() {
     InkpodReplayContract replay_contract{};
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 18U
-        || replay_contract.procedure_format_version != 21U
+        || replay_contract.replay_epoch != 19U
+        || replay_contract.procedure_format_version != 22U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -327,7 +327,7 @@ int InkpodRunAbiSmoke() {
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 21U
+        || persistence.format_version != 22U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE

@@ -65,7 +65,7 @@ scenario assertions are:
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 18 / native v21 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 19 / native v22 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -109,6 +109,11 @@ and canonical contract identity but does not alter any benchmark workload,
 harness, counter mapping, envelope, or `revision-max` expression. The recorded
 `canonical_replay` checksum is updated only after quick/full profiles reproduce
 the same new contract checksum.
+
+The v22/epoch-19 individual-Cell Cut descriptor adds a separate bounded persistence
+and history domain. It advances the closed current contract without changing the
+ten benchmark workloads, their semantic counters/checksums, the harness, any
+approved envelope, payload-access route, or the `revision-max` expression.
 
 ## Approved output-color-guard envelope
 

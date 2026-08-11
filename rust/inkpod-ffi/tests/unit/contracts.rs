@@ -4141,8 +4141,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 18);
-        assert_eq!(contract.procedure_format_version, 21);
+        assert_eq!(contract.replay_epoch, 19);
+        assert_eq!(contract.procedure_format_version, 22);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);
@@ -4562,6 +4562,7 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
     let ffi_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/ffi.rs"));
     let v3_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/v3.rs"));
     let batch_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/batch.rs"));
+    let cut_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/cut.rs"));
     let cpp_tests = read(&repository.join("tests/abi_smoke.cpp"));
 
     let header_names = names_followed_by_parenthesis(&header);
@@ -4577,6 +4578,7 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
     let mut referenced = names_followed_by_parenthesis(&ffi_tests);
     referenced.extend(names_followed_by_parenthesis(&v3_tests));
     referenced.extend(names_followed_by_parenthesis(&batch_tests));
+    referenced.extend(names_followed_by_parenthesis(&cut_tests));
     referenced.extend(names_followed_by_parenthesis(&contract_tests));
     referenced.extend(names_followed_by_parenthesis(&cpp_tests));
     let missing = header_names

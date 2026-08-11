@@ -34,6 +34,7 @@ mod color_chart;
 mod color_replace;
 mod coordinate;
 mod core;
+mod cut;
 mod document;
 mod editor;
 mod effects;
@@ -54,7 +55,6 @@ mod stroke;
 mod transform;
 mod vector;
 mod view;
-
 pub use animation::{
     LightTableBulkDirection, LightTableBulkRegistrationAction, LightTableBulkRegistrationEntry,
     LightTableBulkRegistrationPreview, LightTableBulkRegistrationRequest,
@@ -82,7 +82,11 @@ pub use cell_creation::{
 };
 pub use color_chart::*;
 pub use color_replace::*;
+pub(crate) use coordinate::*;
 pub use core::Core;
+pub use cut::*;
+use document::{CellDocument, DocumentIds, LayerNode, PaperSpec, PlaneNode};
+use editor::EditorSessionState;
 pub use editor::{
     ColorChartCursor, EditTarget, EditorBrushOptions, EditorDefaults, EditorFillOptions,
     EditorFrameDisposition, EditorRevision, EditorSavepointToken, EditorSelectionOptions,
@@ -98,35 +102,31 @@ pub use geometry::{
     GeometryPreviewInfo, GeometryPrimitive, GeometryRequest, GeometrySnapMode, MAX_GEOMETRY_POINTS,
 };
 pub use history::HistoryEntryInfo;
+use history::{HistoryChange, HistoryEntry, PixelChange, StagedHistoryEntry};
+pub(crate) use identity::*;
 pub use inkpod_format::CommonRasterFormat;
 pub use inkpod_image::RasterRangeInterpretation as RangeInterpretation;
 pub use journal::{
     BranchId, HistoryMoveKind, JournalBranchCut, JournalCommit, JournalEntry, JournalEventId,
     JournalHistoryMove, JournalReplayInfo, JournalState,
 };
+use persistence::{file_plane_to_raster, raster_to_file_plane};
 pub use primitive::{
     CANONICAL_NUMERIC_VERSION, CanonicalProcedure, DocumentStateDigest, PROCEDURE_FORMAT_VERSION,
     PrimitiveId, PrimitiveOutcome, PrimitiveRequest, ProcedureId, ReplayContract, ReplayEpoch,
     StateId, replay_contract,
 };
+use selection::FloatingSelection;
 pub use snapshot::{
     CanonicalCompositeDigest, RenderAdjustmentLut, RenderPass, RenderPassKind, RenderSnapshot,
     RenderTile,
 };
+use stroke::StrokeSession;
 pub use vector::{
     RenderVectorEndpoint, RenderVectorFill, RenderVectorSegment, VectorCubicSegment,
     VectorEndpoint, VectorEraseMode, VectorFillInfo, VectorPathInfo, VectorPathInput, VectorRaster,
     VectorSelectionMode, VectorSelectionRange, VectorSelectionResult, VectorWidthMode,
 };
-
-pub(crate) use coordinate::*;
-use document::{CellDocument, DocumentIds, LayerNode, PaperSpec, PlaneNode};
-use editor::EditorSessionState;
-use history::{HistoryChange, HistoryEntry, PixelChange, StagedHistoryEntry};
-pub(crate) use identity::*;
-use persistence::{file_plane_to_raster, raster_to_file_plane};
-use selection::FloatingSelection;
-use stroke::StrokeSession;
 use view::default_shortcuts;
 
 use inkpod_format::NativeSection;

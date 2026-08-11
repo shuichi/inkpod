@@ -4,6 +4,7 @@ mod adjustment;
 mod application_data;
 mod batch;
 mod common_formats;
+mod cut;
 mod light_table;
 mod native;
 mod procedure;
@@ -24,6 +25,11 @@ pub use batch::{
 pub use common_formats::{
     CommonRaster, CommonRasterFormat, CommonRasterInfo, MAX_COMMON_RASTER_BYTES,
     decode_common_raster, encode_common_raster,
+};
+pub use cut::{
+    CUT_DESCRIPTOR_REPLAY_EPOCH, FileCutDefaults, FileCutDescriptor, FileCutHistoryEntry,
+    FileCutMember, FileCutMetadata, decode_cut_descriptor, encode_cut_descriptor,
+    read_cut_descriptor, save_cut_descriptor_atomic, save_cut_recovery_atomic,
 };
 use inkpod_image::PixelValue;
 #[cfg(test)]

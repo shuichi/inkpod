@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "editor_area.h"
 #include "frontend_state.h"
@@ -30,12 +32,23 @@ struct WorkspacePaneIds final {
     PaneInstanceId subpalette{};
 };
 
+// Workspace-scoped Cut authority. The Rust handle is created, used, and
+// destroyed synchronously on the CoreHost owner thread. Paths and names are
+// presentation caches only; the Cut handle remains authoritative.
+struct CutSession final {
+    InkpodCut* handle{};
+    std::wstring current_path;
+    std::wstring cut_name;
+    std::vector<std::wstring> member_paths;
+};
+
 struct WorkspaceWindow final {
     ApplicationHost* application{};
     WorkspaceWindowId id{};
     Generation generation{};
     std::uint32_t persistence_slot{};
     WorkspacePaneIds pane_ids{};
+    CutSession cut{};
     MainWindowHandles windows{};
     EditorArea editors{};
     ToolUiState tools{};

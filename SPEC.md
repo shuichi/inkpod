@@ -53,6 +53,16 @@ inkpod は次の構成を維持する。
 - `ライトテーブル`: 編集セルの背後へ参照セルを半透明で重ねる read-only 機能。編集画像と明示的に入れ替えた場合だけ編集対象が変わる。
 - `合理的互換性`: 操作の意味、データ分離、座標、結果を再現すること。旧画面の配置、配色、アイコン、文言、制限を不必要に模写することではない。
 
+#### 1.1 カットと個別セルの所有・保存
+
+- カットは stable `CutId`、永続 UUID、作品名、話、scene、cut 名、尺、指示、Cell 作成既定値、ordered membership を持つ。Cell membership は各 Cell の stable `CellId`、document UUID、正の表示番号、参照 file 名を組にし、名前や配列添字を identity にしない。
+- 保存 topology は個別セル参照方式とする。Cut descriptor と各 CellDocument は同じ `.inkpod` 拡張子を使うが、別 magic で識別する。descriptor は同じ directory にある個別 Cell `.inkpod` を一 path segment の相対 file 名だけで参照し、absolute path、`..`、subdirectory、symlink による directory 外参照、descriptor 自身への参照を許可しない。directory 一式を同じ構造のまま移動することはできるが、Cell file だけの rename／移動は参照切れとして open を拒否し、silent に探索・修復しない。
+- `WorkspaceWindow` 配下の一つの `CutSession` が一つの Cut handle、Cut 自身の revision、history、dirty、通常 savepoint、recovery association を所有する。各 `DocumentSession` は引き続き一つの独立 Cell Core、file identity、history、dirty、savepoint、recovery を所有し、Cut transaction と Cell transaction を一つに偽装しない。
+- 新規 Cut は既存の Cell creation plan へ Cut defaults を明示 copy して各 Cell を独立作成・保存し、その成功済み identity だけを descriptor membership に入れる。defaults の後続変更は既存 Cell を silent に変更せず、その後に明示作成する Cell の初期値にだけ使う。
+- Cut Properties の metadata／defaults 変更は base revision を固定した一つの Cut procedure、一 revision、一 history item とする。no-op、invalid、Cancel、stale、overflow、failure は Cut state、history、ID、dirty、savepoint、descriptor を進めない。Cut Undo／Redo は Cut 専用 command だけが動かし、active Cell の Undo／Redo と混ぜない。
+- 通常 Cut save は全 member file の存在、同一 directory、stable Cell identity を staged 検証してから descriptor 一 file を同一 directory の temporary file 経由で atomic replace し、成功後だけ Cut savepoint を進める。Cell file の保存は別の明示境界であり、複数 file の見かけ上の atomic commit を約束しない。Cut autosave は通常 savepoint／path authority を進めず、recovery open は dirty とする。
+- Cut open は exact-current top-level version、replay epoch、checksum、bounds、UTF-8、ID／path 重複、history chainを検証し、さらに全 member Cell を current Cell reader で staged openして `CellId` と document UUID の一致を確認してから live Cut を置換する。missing、renamed、duplicate、identity mismatch、path traversal、非current version、corruption は現在の Cut／Cell session を変更せず拒否する。
+
 ### 2. Windows GUI の全体構成
 
 Windows GUI は標準的な Windows 11 desktop application とし、古典的 MDI
@@ -88,7 +98,7 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 #### ファイル
 
 - `新規 > セル`: 用紙、pixel 寸法、DPI、100 frame、frame 配置、layer 種類、色深度、作成枚数を指定してセルを作る。
-- `新規 > カット`: 作品/scene/cut 名、セル folder、既定用紙、layer 数、尺を設定する。
+- `新規 > カット`: 作品/話/scene/cut 名、既定用紙、初期 layer、色深度、尺、作成枚数を設定し、descriptor と同じ directory に個別 Cell `.inkpod` を作る。
 - `開く`: `.inkpod` または対応 raster/sequence を開く。
 - `最近使ったファイル`: 存在確認し、消失 path は履歴から整理できる。
 - `保存`: 同一 path へ atomic save。変更がない場合は no-op。
@@ -635,6 +645,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `LT-001`: light table set、per-item transform/color/opacity、global opacity
 - `LT-002`: reference-frame alignment、boundary/color sampling、edit image swap
 - `LT-003`: 自然順の前／後／両方向Nセルを線形opacity stepと時系列z-orderでpreviewし、同一source UUIDの既存itemを保持したまま一つのUndo単位で一括登録する
+- `CUT-001`: stable CutId、metadata、Cell作成既定値、ordered Cell membershipを、同一directoryの個別Cell `.inkpod`へのbounded相対参照として保持し、独立history／savepoint／recovery、default明示copy、staged identity検証、Cut Properties／Undo／Redo／save／reopenを提供する
 - `SEQ-001`: cut/cell sequence、前後セル、欠番、thumbnail preview
 - `SEQ-002`: motion check、FPS、loop、step、selection/light table option
 - `SHORT-001`: 全 menu command への single/multi-stroke shortcut、text-focus guard、prefix-free resolve、conflict replacement、永続化、reset

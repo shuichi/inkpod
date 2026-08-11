@@ -83,6 +83,22 @@ INT_PTR ShowCellCreationOptions(
     bool close_immediately,
     CellCreationDialogState& state) noexcept;
 
+struct CutPropertiesDialogState {
+    std::wstring work_title;
+    std::wstring episode;
+    std::wstring scene;
+    std::wstring cut_name;
+    std::wstring instruction;
+    std::uint32_t duration_frames{24U};
+    bool close_immediately{};
+};
+
+INT_PTR ShowCutProperties(
+    HINSTANCE instance,
+    HWND owner,
+    bool close_immediately,
+    CutPropertiesDialogState& state) noexcept;
+
 struct TextInputDialogState {
     const wchar_t* title{};
     const wchar_t* label{};

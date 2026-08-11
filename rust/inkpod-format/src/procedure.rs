@@ -1,4 +1,4 @@
-//! Current-only procedure-authoritative `.inkpod` v21 container codec.
+//! Current-only procedure-authoritative `.inkpod` v22 container codec.
 //!
 //! This module owns byte layout, directory validation, digest verification,
 //! resource limits, and atomic file replacement. Section payload meaning stays
@@ -20,8 +20,8 @@ const EDIT: [u8; 4] = *b"EDIT";
 const CKPT: [u8; 4] = *b"CKPT";
 const EXTM: [u8; 4] = *b"EXTM";
 /// Exact current native file version. Earlier and later versions are rejected.
-pub const FORMAT_VERSION: u32 = 21;
-const REPLAY_EPOCH: u32 = 8;
+pub const FORMAT_VERSION: u32 = 22;
+const REPLAY_EPOCH: u32 = 9;
 const HEADER_BYTES: usize = 128;
 const DIRECTORY_ENTRY_BYTES: usize = 128;
 const RECORD_HEADER_BYTES: usize = 16;

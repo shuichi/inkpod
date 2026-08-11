@@ -204,8 +204,10 @@ selection mask. `BaseSurface::Asset` instead names one immutable canonical raste
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
 maximum-close frames change canonical document-state bytes, so the document-state
-commitment is schema 6/domain 5. The current replay contract is epoch 18 and native
-format version 21. It adds the canonical floating-transform v3 procedure with
+commitment is schema 6/domain 5. The current replay contract is epoch 19 and native
+format version 22. It adds the independent current-only Cut descriptor and Cut
+metadata/default history while retaining Cell-document primitive semantics. Epoch
+18/version 21 added the canonical floating-transform v3 procedure with
 half-open five-point absolute-anchor semantics. Epoch 17/version 20 added the
 canonical output-color guard selection procedure
 over the committed visible straight-alpha composite. The document-owned Color
@@ -373,6 +375,32 @@ unpublished preparations, closes any published prefix, and restores the prior
 active view before the command returns; recent files are never touched. Untitled
 display numbers remain frontend presentation values and are not Cell IDs or
 future sequence numbers.
+
+Cut ownership is deliberately separate from that Cell graph. Each
+`WorkspaceWindow` has at most one `CutSession`; it owns one opaque `InkpodCut*`,
+the descriptor path, and presentation-only cached Cut name/member file names.
+The handle is created, queried, edited, saved, opened, recovered, and destroyed
+only through `CoreHost::Invoke` on the Core engine thread. It has its own
+revision, canonical metadata/defaults history, dirty state, and savepoint.
+`DocumentSession` continues to own each member Cell Core and file/recovery shell,
+so a Cut edit cannot enter Cell history and a Cell edit cannot enter Cut history.
+Workspace close and CoreHost shutdown destroy every Cut handle before the Core
+engine thread stops; no process-global active Cut pointer exists.
+
+The selected persistence topology is an individually referenced descriptor.
+The Cut `.inkpod` stores ordered `(CellId, document UUID, display number,
+relative file name)` records; every member is an independently saved Cell
+`.inkpod` in the descriptor directory. New Cut first uses the existing bounded
+Cell creation plan, publishes and saves each independent Cell, then creates and
+atomically saves the descriptor from those returned identities. This is an
+explicit multi-step boundary, not a fabricated cross-file transaction. Cut
+defaults are copied into the creation request only at that boundary; changing
+defaults later never mutates an existing Cell. Open/recovery decodes into a
+staged Cut, canonicalizes the descriptor directory and every member, opens each
+Cell with the current Cell reader, and compares both stable identities before
+publishing the Cut handle. Missing, renamed, duplicate, self, traversal, or
+directory-escaping members reject the staged Cut without retargeting any live
+session.
 
 `CoreHost` queries the selected session/generation on the Core owner thread and
 copies an `InkpodEditorStateInfo` presentation record into the matching

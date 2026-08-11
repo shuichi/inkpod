@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 10U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 11U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodCoreConfig) == 16U, "core config layout drift");
 _Static_assert(sizeof(InkpodSnapshotOptions) == 16U, "snapshot options layout drift");
 _Static_assert(sizeof(InkpodPersistenceInfo) == 72U, "persistence info layout drift");
@@ -13,7 +13,17 @@ _Static_assert(sizeof(InkpodSnapshotRenderPlan) == 64U, "render plan layout drif
 _Static_assert(sizeof(InkpodCellCreateOptions) == 48U, "cell options layout drift");
 _Static_assert(sizeof(InkpodCellCreationOptions) == 64U, "cell creation options layout drift");
 _Static_assert(sizeof(InkpodCellCreationPlanItem) == 144U, "cell creation plan item layout drift");
-_Static_assert(sizeof(InkpodDocumentInfo) == 224U, "document info layout drift");
+_Static_assert(sizeof(InkpodDocumentInfo) == 232U, "document info layout drift");
+_Static_assert(sizeof(InkpodUtf8Span) == 16U, "UTF-8 span layout drift");
+_Static_assert(sizeof(InkpodUtf8Buffer) == 24U, "UTF-8 buffer layout drift");
+_Static_assert(sizeof(InkpodCutMetadataInput) == 88U, "Cut metadata input layout drift");
+_Static_assert(sizeof(InkpodCutMetadataBuffer) == 128U, "Cut metadata buffer layout drift");
+_Static_assert(sizeof(InkpodCutDefaultsInput) == 64U, "Cut defaults layout drift");
+_Static_assert(sizeof(InkpodCutMemberInput) == 48U, "Cut member input layout drift");
+_Static_assert(sizeof(InkpodCutCreateRequest) == 72U, "Cut create request layout drift");
+_Static_assert(sizeof(InkpodCutUpdateRequest) == 40U, "Cut update request layout drift");
+_Static_assert(sizeof(InkpodCutInfo) == 144U, "Cut info layout drift");
+_Static_assert(sizeof(InkpodCutMemberInfo) == 56U, "Cut member info layout drift");
 _Static_assert(sizeof(InkpodResourceUsage) == 112U, "resource usage layout drift");
 _Static_assert(sizeof(InkpodStrokeSample) == 24U, "stroke sample layout drift");
 _Static_assert(sizeof(InkpodStrokeInput) == 72U, "stroke input layout drift");

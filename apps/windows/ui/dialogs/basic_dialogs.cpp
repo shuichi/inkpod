@@ -1139,6 +1139,99 @@ INT_PTR ShowViewOptions(
     return result;
 }
 
+bool ReadCutText(HWND dialog, int control, std::wstring& output) noexcept {
+    const int length = GetWindowTextLengthW(GetDlgItem(dialog, control));
+    if (length < 0 || length > 4096) {
+        return false;
+    }
+    try {
+        std::wstring value(static_cast<std::size_t>(length) + 1U, L'\0');
+        const int written = GetDlgItemTextW(
+            dialog, control, value.data(), static_cast<int>(value.size()));
+        if (written != length) {
+            return false;
+        }
+        value.resize(static_cast<std::size_t>(written));
+        output = std::move(value);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+INT_PTR CALLBACK CutPropertiesDialogProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<CutPropertiesDialogState*>(
+        GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    switch (message) {
+        case WM_INITDIALOG:
+            state = reinterpret_cast<CutPropertiesDialogState*>(lparam);
+            if (state == nullptr) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            SetDlgItemTextW(dialog, IDC_CUT_WORK_TITLE, state->work_title.c_str());
+            SetDlgItemTextW(dialog, IDC_CUT_EPISODE, state->episode.c_str());
+            SetDlgItemTextW(dialog, IDC_CUT_SCENE, state->scene.c_str());
+            SetDlgItemTextW(dialog, IDC_CUT_NAME, state->cut_name.c_str());
+            SetDlgItemTextW(dialog, IDC_CUT_INSTRUCTION, state->instruction.c_str());
+            SetDlgItemInt(dialog, IDC_CUT_DURATION, state->duration_frames, FALSE);
+            static_cast<void>(CenterModalDialogOnOwner(dialog));
+            if (state->close_immediately) {
+                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
+            }
+            return TRUE;
+        case WM_COMMAND:
+            if (state == nullptr) {
+                break;
+            }
+            if (LOWORD(wparam) == IDOK) {
+                BOOL valid{};
+                const UINT duration = GetDlgItemInt(
+                    dialog, IDC_CUT_DURATION, &valid, FALSE);
+                std::wstring work_title;
+                std::wstring episode;
+                std::wstring scene;
+                std::wstring cut_name;
+                std::wstring instruction;
+                if (valid == FALSE || duration == 0U
+                    || !ReadCutText(dialog, IDC_CUT_WORK_TITLE, work_title)
+                    || !ReadCutText(dialog, IDC_CUT_EPISODE, episode)
+                    || !ReadCutText(dialog, IDC_CUT_SCENE, scene)
+                    || !ReadCutText(dialog, IDC_CUT_NAME, cut_name)
+                    || cut_name.empty()
+                    || !ReadCutText(dialog, IDC_CUT_INSTRUCTION, instruction)) {
+                    MessageBoxW(
+                        dialog,
+                        L"カット名と1以上の尺を入力してください。",
+                        L"カットのプロパティ",
+                        MB_OK | MB_ICONWARNING);
+                    return TRUE;
+                }
+                state->work_title = std::move(work_title);
+                state->episode = std::move(episode);
+                state->scene = std::move(scene);
+                state->cut_name = std::move(cut_name);
+                state->instruction = std::move(instruction);
+                state->duration_frames = duration;
+                EndDialog(dialog, IDOK);
+                return TRUE;
+            }
+            if (LOWORD(wparam) == IDCANCEL) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            break;
+        case WM_CLOSE:
+            EndDialog(dialog, IDCANCEL);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
 INT_PTR ShowCellCreationOptions(
     HINSTANCE instance,
     HWND owner,
@@ -1156,6 +1249,29 @@ INT_PTR ShowCellCreationOptions(
         state = candidate;
     }
     return result;
+}
+
+INT_PTR ShowCutProperties(
+    HINSTANCE instance,
+    HWND owner,
+    bool close_immediately,
+    CutPropertiesDialogState& state) noexcept {
+    try {
+        CutPropertiesDialogState candidate = state;
+        candidate.close_immediately = close_immediately;
+        const INT_PTR result = DialogBoxParamW(
+            instance,
+            MAKEINTRESOURCEW(IDD_CUT_PROPERTIES),
+            owner,
+            CutPropertiesDialogProcedure,
+            reinterpret_cast<LPARAM>(&candidate));
+        if (result == IDOK) {
+            state = std::move(candidate);
+        }
+        return result;
+    } catch (const std::bad_alloc&) {
+        return IDCANCEL;
+    }
 }
 
 INT_PTR ShowTextInput(

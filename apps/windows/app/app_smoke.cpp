@@ -250,7 +250,8 @@ InkpodStatus CreateCell(ApplicationHost& state, std::uint32_t width, std::uint32
 InkpodStatus CreateCellsFromOptions(
     ApplicationHost& state,
     const InkpodCellCreationOptions& options,
-    std::optional<std::uint32_t> smoke_failure_index) noexcept;
+    std::optional<std::uint32_t> smoke_failure_index,
+    std::vector<ApplicationHost::DocumentBinding>* created = nullptr) noexcept;
 bool DispatchEnabledCommand(
     ApplicationHost& state,
     HWND window,
@@ -10964,6 +10965,242 @@ int RunCellCreationSmoke(ApplicationHost& state) noexcept {
         : 928;
 }
 
+int RunCutWorkflowSmoke(ApplicationHost& state) noexcept {
+    constexpr std::array<const wchar_t*, 3U> kFiles{
+        L"inkpod-cut-smoke.inkpod",
+        L"inkpod-cut-smoke-0001.inkpod",
+        L"inkpod-cut-smoke-0002.inkpod"};
+    for (const wchar_t* path : kFiles) {
+        DeleteFileW(path);
+    }
+
+    const std::size_t baseline_count = state.Documents().Count();
+    const std::size_t engine_baseline = state.engine == nullptr
+        ? 0U
+        : state.engine->SessionCount();
+    const DocumentViewId previous_view = state.routing.targets.ActiveDocumentView();
+    std::array<DocumentSessionId, inkpod::app::DocumentRegistry::kMaximumSessions>
+        baseline{};
+    for (std::size_t index = 0U; index < baseline_count; ++index) {
+        const auto* document = state.Documents().SessionAt(index);
+        if (document == nullptr) {
+            return 1030;
+        }
+        baseline[index] = document->id;
+    }
+    std::vector<DocumentSessionId> created;
+    const auto cleanup = [&]() noexcept {
+        bool clean = state.DestroyCutSession(state.Workspace());
+        for (std::size_t index = created.size(); index != 0U; --index) {
+            clean = state.CloseDocumentSession(created[index - 1U]) && clean;
+        }
+        if (previous_view) {
+            clean = state.ActivateDocumentView(previous_view) && clean;
+        }
+        for (const wchar_t* path : kFiles) {
+            DeleteFileW(path);
+        }
+        return clean;
+    };
+    const auto finish = [&](int code) noexcept {
+        return cleanup() ? code : 1049;
+    };
+    const auto query_info = [&](InkpodCutInfo& info) noexcept {
+        info = {};
+        info.struct_size = sizeof(info);
+        InkpodCut* cut = state.Workspace().cut.handle;
+        return cut != nullptr && state.engine != nullptr
+            && state.engine->Invoke(
+                   [cut, &info](InkpodCore*) {
+                       return inkpod_cut_info(cut, &info);
+                   },
+                   false,
+                   false) == INKPOD_STATUS_OK;
+    };
+
+    const bool had_cut = state.Workspace().cut.handle != nullptr;
+    const LRESULT create_result = state.engine == nullptr || had_cut
+        ? 0
+        : SendMessageW(
+              state.Workspace().windows.window,
+              WM_COMMAND,
+              IDM_FILE_NEW_CUT,
+              0);
+    if (state.engine == nullptr || had_cut || create_result != 1
+        || state.Workspace().cut.handle == nullptr) {
+        const std::wstring detail = state.engine == nullptr
+            ? std::wstring{}
+            : state.engine->LastError();
+        std::fwprintf(
+            stderr,
+            L"Cut create mismatch: result=%lld handle=%p detail=%ls\n",
+            static_cast<long long>(create_result),
+            static_cast<void*>(state.Workspace().cut.handle),
+            detail.c_str());
+        return finish(1031);
+    }
+    for (std::size_t index = 0U; index < state.Documents().Count(); ++index) {
+        const auto* document = state.Documents().SessionAt(index);
+        if (document == nullptr) {
+            return finish(1032);
+        }
+        const bool existed = std::find(
+            baseline.cbegin(), baseline.cbegin() + baseline_count, document->id)
+            != baseline.cbegin() + baseline_count;
+        if (!existed) {
+            created.push_back(document->id);
+        }
+    }
+    InkpodCutInfo created_cut{};
+    if (created.size() != 2U || !query_info(created_cut)
+        || created_cut.cut_id == 0U || created_cut.member_count != 2U
+        || created_cut.revision != 0U
+        || (created_cut.flags
+            & (INKPOD_CUT_FLAG_DIRTY | INKPOD_CUT_FLAG_CAN_UNDO
+               | INKPOD_CUT_FLAG_CAN_REDO)) != 0U
+        || state.Workspace().cut.current_path != kFiles[0]
+        || state.Workspace().cut.cut_name != L"SmokeCut"
+        || state.Workspace().cut.member_paths.size() != 2U) {
+        return finish(1033);
+    }
+
+    std::array<InkpodDocumentInfo, 2U> cell_infos{};
+    std::array<DocumentSessionId, 2U> cell_sessions{};
+    for (std::size_t index = 0U; index < cell_infos.size(); ++index) {
+        std::array<std::uint8_t, 64U> path{};
+        InkpodCutMemberInfo member{};
+        member.struct_size = sizeof(member);
+        member.relative_path = InkpodUtf8Buffer{path.data(), path.size(), 0U};
+        InkpodCut* cut = state.Workspace().cut.handle;
+        const InkpodStatus member_status = state.engine->Invoke(
+            [cut, index, &member](InkpodCore*) {
+                return inkpod_cut_member_get(
+                    cut, static_cast<std::uint32_t>(index), &member);
+            },
+            false,
+            false);
+        const char* expected = index == 0U
+            ? "inkpod-cut-smoke-0001.inkpod"
+            : "inkpod-cut-smoke-0002.inkpod";
+        const std::size_t expected_bytes = std::strlen(expected);
+        inkpod::app::DocumentSession* document{};
+        for (const DocumentSessionId id : created) {
+            auto* candidate = state.Documents().Find(id);
+            if (candidate != nullptr
+                && candidate->shell.current_path == kFiles[index + 1U]) {
+                document = candidate;
+                break;
+            }
+        }
+        if (member_status != INKPOD_STATUS_OK
+            || member.display_number != index + 1U || member.cell_id == 0U
+            || member.relative_path.byte_count != expected_bytes
+            || std::memcmp(path.data(), expected, expected_bytes) != 0
+            || document == nullptr
+            || !state.engine->GetDocumentInfo(
+                document->id, document->generation, cell_infos[index])
+            || cell_infos[index].cell_id != member.cell_id
+            || cell_infos[index].document_uuid_high != member.document_uuid_high
+            || cell_infos[index].document_uuid_low != member.document_uuid_low
+            || cell_infos[index].width != created_cut.width
+            || cell_infos[index].height != created_cut.height
+            || cell_infos[index].dpi_x_milli != created_cut.dpi_x_milli
+            || cell_infos[index].dpi_y_milli != created_cut.dpi_y_milli) {
+            return finish(1034);
+        }
+        cell_sessions[index] = document->id;
+    }
+    if (!RefreshSequencePane(state)
+        || SendMessageW(
+               GetDlgItem(
+                   state.Workspace().sequence_palette, IDC_SEQUENCE_CELLS),
+               LB_GETCOUNT,
+               0,
+               0) != 2) {
+        return finish(1035);
+    }
+
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CUT_PROPERTIES,
+            0) != 1) {
+        return finish(1036);
+    }
+    InkpodCutInfo updated{};
+    if (!query_info(updated) || updated.revision != created_cut.revision + 1U
+        || updated.duration_frames != created_cut.duration_frames + 1U
+        || (updated.flags
+            & (INKPOD_CUT_FLAG_DIRTY | INKPOD_CUT_FLAG_CAN_UNDO))
+            != (INKPOD_CUT_FLAG_DIRTY | INKPOD_CUT_FLAG_CAN_UNDO)
+        || state.Workspace().cut.cut_name != L"SmokeCut-updated") {
+        return finish(1037);
+    }
+    for (std::size_t index = 0U; index < cell_infos.size(); ++index) {
+        auto* document = state.Documents().Find(cell_sessions[index]);
+        InkpodDocumentInfo unchanged{};
+        if (document == nullptr
+            || !state.engine->GetDocumentInfo(
+                document->id, document->generation, unchanged)
+            || unchanged.cell_id != cell_infos[index].cell_id
+            || unchanged.document_revision != cell_infos[index].document_revision
+            || unchanged.width != cell_infos[index].width
+            || unchanged.height != cell_infos[index].height
+            || unchanged.dpi_x_milli != cell_infos[index].dpi_x_milli
+            || unchanged.dpi_y_milli != cell_infos[index].dpi_y_milli) {
+            return finish(1038);
+        }
+    }
+
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CUT_UNDO,
+            0) != 1) {
+        return finish(1039);
+    }
+    InkpodCutInfo undone{};
+    if (!query_info(undone) || undone.duration_frames != created_cut.duration_frames
+        || (undone.flags & INKPOD_CUT_FLAG_CAN_REDO) == 0U
+        || state.Workspace().cut.cut_name != L"SmokeCut") {
+        return finish(1040);
+    }
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CUT_REDO,
+            0) != 1) {
+        return finish(1041);
+    }
+    InkpodCutInfo redone{};
+    if (!query_info(redone) || redone.duration_frames != updated.duration_frames
+        || state.Workspace().cut.cut_name != L"SmokeCut-updated"
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_CUT_SAVE,
+               0) != 1) {
+        return finish(1042);
+    }
+    InkpodCutInfo saved{};
+    if (!query_info(saved) || (saved.flags & INKPOD_CUT_FLAG_DIRTY) != 0U
+        || !state.DestroyCutSession(state.Workspace())
+        || OpenDocumentFromPath(state, kFiles[0]) != INKPOD_STATUS_OK) {
+        return finish(1043);
+    }
+    InkpodCutInfo reopened{};
+    if (!query_info(reopened) || reopened.member_count != 2U
+        || reopened.duration_frames != updated.duration_frames
+        || reopened.cut_id != created_cut.cut_id
+        || state.Workspace().cut.cut_name != L"SmokeCut-updated"
+        || state.Workspace().cut.member_paths.size() != 2U) {
+        return finish(1044);
+    }
+    const bool counts_ok = state.Documents().Count() == baseline_count + 2U
+        && state.engine->SessionCount() == engine_baseline + 2U;
+    return finish(counts_ok ? 0 : 1045);
+}
+
 int RunRevisionMaxPerformanceSmoke(ApplicationHost& state) noexcept {
     constexpr std::uint32_t kDocumentExtent = 1024U;
     constexpr int kTileRows = 16;
@@ -11372,6 +11609,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunCellCreationSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunCutWorkflowSmoke(state);
     }
     if (exit_code != 0) {
         std::fprintf(stderr, "inkpod application smoke failed: %d\n", exit_code);

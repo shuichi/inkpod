@@ -126,6 +126,7 @@ pub struct InkpodDocumentInfo {
     pub reserved: u32,
     pub main_plane_checksum: u64,
     pub color_plane_checksum: u64,
+    pub cell_id: u64,
 }
 
 #[repr(C)]

@@ -45,6 +45,10 @@ route|rust|document-primitive|rust-core|Core::apply_edit_target_command
 route|rust|query-snapshot|rust-core|Core::edit_target_capabilities
 route|rust|document-primitive|rust-core|Core::apply_color_chart_preview Core::replace_color_chart
 route|rust|query-snapshot|rust-core|Core::color_chart Core::preview_color_chart_generation Core::preview_color_chart_generation_with_cancel
+route|rust|document-primitive|rust-core|CutCore::update
+route|rust|history-control-event|rust-core|CutCore::redo CutCore::undo
+route|rust|asset-data-plane|rust-core|CutCore::autosave CutCore::open CutCore::open_recovery CutCore::save
+route|rust|asset-data-plane|rust-format|inkpod_format::read_cut_descriptor inkpod_format::save_cut_descriptor_atomic inkpod_format::save_cut_recovery_atomic
 
 ## C ABI surface
 
@@ -64,6 +68,12 @@ route|ffi|editor-state-command|rust-core|inkpod_core_set_edit_targets
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_get_edit_target_capabilities inkpod_core_get_edit_targets
 route|ffi|document-primitive|rust-core|inkpod_core_color_chart_preview_apply inkpod_core_color_chart_set
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_color_chart_preview_get inkpod_color_chart_preview_release inkpod_core_color_chart_get inkpod_core_color_chart_info inkpod_core_color_chart_preview_create inkpod_core_color_chart_preview_create_task
+route|ffi|document-primitive|rust-core|inkpod_cut_update
+route|ffi|history-control-event|rust-core|inkpod_cut_redo inkpod_cut_undo
+route|ffi|transient-preview-stroke|rust-ffi-adapter|inkpod_cut_cancel_update
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_cut_info inkpod_cut_member_get inkpod_cut_metadata_copy
+route|ffi|asset-data-plane|rust-ffi-adapter|inkpod_cut_autosave inkpod_cut_open inkpod_cut_open_recovery inkpod_cut_save
+route|ffi|os-application-adapter|rust-ffi-adapter|inkpod_cut_create inkpod_cut_destroy
 
 ## Windows production command surface
 
@@ -75,6 +85,10 @@ route|windows|transient-preview-stroke|windows-adapter|IDM_EDIT_FLOATING_CANCEL 
 route|windows|query-snapshot|windows-adapter|IDM_BATCH_DRY_RUN IDM_BATCH_EXTRACT_PAIRS IDM_BATCH_PREVIEW
 route|windows|asset-data-plane|windows-adapter|IDM_CHART_COPY IDM_CHART_SAVE IDM_EDIT_COPY IDM_FILE_EXPORT_RASTER IDM_FILE_REVERT IDM_PALETTE_SAVE IDM_SEQ_EXPORT IDM_SEQ_IMPORT
 route|windows|os-application-adapter|windows-adapter|IDM_APP_EXIT IDM_BATCH_ADD_BOUNDARY_AIRBRUSH IDM_BATCH_ADD_COLOR_REPLACE IDM_BATCH_ADD_CONTINUOUS_FILL IDM_BATCH_ADD_CONVERT IDM_BATCH_ADD_DUST IDM_BATCH_ADD_FILTER_AUTO_CONTRAST IDM_BATCH_ADD_FILTER_BLUR_STRONG IDM_BATCH_ADD_FILTER_BLUR_WEAK IDM_BATCH_ADD_FILTER_BRIGHTNESS IDM_BATCH_ADD_FILTER_COLOR_BALANCE IDM_BATCH_ADD_FILTER_GAUSSIAN IDM_BATCH_ADD_FILTER_HSV IDM_BATCH_ADD_FILTER_INVERT IDM_BATCH_ADD_FILTER_LEVELS IDM_BATCH_ADD_FILTER_SHARPEN_STRONG IDM_BATCH_ADD_FILTER_SHARPEN_WEAK IDM_BATCH_ADD_FILTER_TONE_CURVE IDM_BATCH_ADD_FILTER_UNSHARP IDM_BATCH_ADD_LINE_WIDTH IDM_BATCH_ADD_MIRROR IDM_BATCH_ADD_RESIZE IDM_BATCH_ADD_ROTATE IDM_BATCH_ADD_SEPARATION IDM_BATCH_ADD_VISIBILITY IDM_BATCH_CANCEL IDM_BATCH_FAILURE_CONTINUE IDM_BATCH_FAILURE_STOP IDM_BATCH_INPUT_CURRENT IDM_BATCH_INPUT_FILE IDM_BATCH_INPUT_FOLDER IDM_BATCH_INPUT_RANGE IDM_BATCH_LOAD_SET IDM_BATCH_OPERATION_DOWN IDM_BATCH_OPERATION_EDIT IDM_BATCH_OPERATION_REMOVE IDM_BATCH_OPERATION_UP IDM_BATCH_OUTPUT_DUPLICATE IDM_BATCH_OUTPUT_NEW IDM_BATCH_OUTPUT_OVERWRITE IDM_BATCH_OUTPUT_SETTINGS IDM_BATCH_PIN IDM_BATCH_REPLACE_SWAP IDM_BATCH_RUN_ALL IDM_BATCH_RUN_CURRENT IDM_BATCH_SAVE_SET IDM_COLOR_PIN IDM_DOCUMENT_CLOSE IDM_EDITOR_GROUP_CLOSE IDM_EDITOR_GROUP_NEXT IDM_EDITOR_MOVE_OTHER_GROUP IDM_EDITOR_NEW_VIEW_OTHER_GROUP IDM_EDITOR_SPLIT_DOWN IDM_EDITOR_SPLIT_RIGHT IDM_FILE_AUTOSAVE_NOW IDM_FILE_COMPACT_COPY IDM_FILE_OPEN IDM_FILE_OPEN_RECOVERY IDM_FILE_RECENT_1 IDM_FILE_RECENT_2 IDM_FILE_RECENT_3 IDM_FILE_RECENT_4 IDM_FILE_RECENT_5 IDM_FILE_RECENT_6 IDM_FILE_RECENT_7 IDM_FILE_RECENT_8 IDM_FILE_RESTORE_PREVIOUS IDM_FILE_SAVE IDM_FILE_SAVE_AS IDM_FILE_SEQUENCE_AUTOSAVE IDM_HELP_ABOUT IDM_HELP_FILE_FORMAT IDM_HELP_MANUAL IDM_HELP_WEB_PAGE IDM_LIGHT_TABLE_PIN IDM_LOCATOR_AUTOSCROLL IDM_LOCATOR_FIXED IDM_LOCATOR_PIN IDM_SEQUENCE_PIN IDM_SHORTCUT_EDIT IDM_SHORTCUT_RESET IDM_SUBPALETTE_PIN IDM_TAB_MOVE_LEFT IDM_TAB_MOVE_RIGHT IDM_TAB_NEXT IDM_TAB_PREVIOUS IDM_VIEW_CLOSE IDM_VIEW_DUPLICATE_NEW_WINDOW IDM_VIEW_DUPLICATE_NEXT_WINDOW IDM_VIEW_MOVE_NEW_WINDOW IDM_VIEW_MOVE_NEXT_WINDOW IDM_VIEW_NEW IDM_WINDOW_BATCH IDM_WINDOW_COLOR_PANE IDM_WINDOW_JOB_PROGRESS IDM_WINDOW_LAYER_PALETTE IDM_WINDOW_LIGHT_TABLE IDM_WINDOW_LOCATOR IDM_WINDOW_SEQUENCE IDM_WINDOW_SUBPALETTE IDM_WINDOW_TOOL_OPTIONS IDM_WINDOW_TOOL_PALETTE IDM_WORKSPACE_AUTOHIDE_BATCH IDM_WORKSPACE_AUTOHIDE_LIGHT_TABLE IDM_WORKSPACE_AUTOHIDE_LOCATOR IDM_WORKSPACE_AUTOHIDE_REFERENCE IDM_WORKSPACE_AUTOHIDE_SEQUENCE IDM_WORKSPACE_MIRROR IDM_WORKSPACE_NEW_WINDOW IDM_WORKSPACE_PRESET_BATCH IDM_WORKSPACE_PRESET_COLORING IDM_WORKSPACE_PRESET_FOCUS IDM_WORKSPACE_PRESET_LINE_CLEANUP IDM_WORKSPACE_PRESET_REFERENCE IDM_WORKSPACE_RESET IDM_WORKSPACE_RESTORE IDM_WORKSPACE_SAVE IDM_WORKSPACE_SAVE_AS
+route|windows|document-primitive|rust-core|IDM_CUT_PROPERTIES
+route|windows|history-control-event|rust-core|IDM_CUT_REDO IDM_CUT_UNDO
+route|windows|asset-data-plane|windows-adapter|IDM_CUT_SAVE
+route|windows|os-application-adapter|windows-adapter|IDM_FILE_NEW_CUT
 
 route|rust|document-primitive|rust-core|Core::select_output_color_guard Core::select_output_color_guard_with_cancel
 route|ffi|document-primitive|rust-core|inkpod_core_select_output_color_guard
@@ -104,10 +118,10 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   it exactly once; there is no queued arbitrary-callable work variant.
 - Palette and color-chart codecs are owned by `inkpod-format`; Windows supplies
   paths and presentation names but does not encode their native bytes.
-- Production `.inkpod` is exact-current v21. Its authoritative journal retains
+- Production `.inkpod` is exact-current v22. Its authoritative journal retains
   Genesis/assets/procedures/EditorState; optional CKPT is verified acceleration
   only, and explicit compaction writes a separate new-Genesis file.
-- Floating paste dialog, Canvas handles, renderer preview, ABI v10 record, Core
+- Floating paste dialog, Canvas handles, renderer preview, ABI v11 record, Core
   commit, Undo/Redo, and replay all use one half-open five-point absolute-anchor
   contract. Preview retries remain transient and Windows does not own a second
   document transform implementation.
@@ -116,7 +130,7 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   Core-owned values into the existing `ApplyRasterStroke` canonical route;
   neither the pane nor renderer owns an alternative paint implementation.
 
-The source-derived inventory currently contains 252 Rust routes, 249 C ABI
-exports, and 350 Windows commands. Its architecture test requires every symbol
+The source-derived inventory currently contains 268 Rust routes, 268 C ABI
+exports, and 359 Windows commands. Its architecture test requires every symbol
 to have exactly one class and owner; unclassified and direct C++ document
 mutation counts are both zero.

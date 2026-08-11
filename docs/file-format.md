@@ -1,7 +1,7 @@
 # Native file format
 
-`.inkpod` v21 is the bounded, procedure-authoritative, little-endian native
-container. Version 21 and runtime replay epoch 18 are the only accepted native contract.
+`.inkpod` v22 is the bounded, procedure-authoritative, little-endian native
+container. Version 22 and runtime replay epoch 19 are the only accepted native contract.
 
 Until the user explicitly declares a format freeze, Inkpod accepts only the
 current version of each application-owned file format. It provides no older-
@@ -10,10 +10,71 @@ schema change before code freeze must increment the format's top-level version;
 changing only a section or record version is not a substitute. The current
 schema should be replaced whenever a more robust or efficient design is found.
 
+## Current Cut descriptor contract
+
+A Cut is a separate current-only `.inkpod` descriptor identified by magic
+`49 4E 4B 43 55 54 00 00` (`INKCUT\0\0`). It is not the native Cell container
+described below. It owns production metadata, defaults for future Cell creation,
+ordered membership, and its own metadata/defaults history. Each member points to one
+independently saved native Cell `.inkpod` in the descriptor's directory. Cell pixels,
+layers, EditorState, document history, savepoint, and dirty state remain owned only by
+that Cell file.
+
+The Cut header is exactly 64 bytes:
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 8 | magic `INKCUT\0\0` |
+| 8 | 4 | top-level file-format version = 22 |
+| 12 | 4 | Cut replay epoch = 19 |
+| 16 | 8 | total descriptor length |
+| 24 | 8 | payload length |
+| 32 | 32 | BLAKE3-256 derive-key digest of the payload, context `org.inkpod.cut-descriptor.v1` |
+
+The little-endian payload starts with schema `u32 = 1` and Cut replay epoch
+`u32 = 19`, followed in order by nonzero Cut ID, 16-byte Cut UUID, current and
+savepoint State IDs, next State and Procedure IDs, history cursor, member/active-
+history/inactive-history counts, Genesis metadata/defaults, current metadata/defaults,
+member records, active history, and inactive history. Savepoint zero means absent.
+Metadata is five length-prefixed UTF-8 byte strings (work title, episode, scene,
+Cut name, instruction) followed by positive duration frames. Defaults store sizing
+mode and two dimensions, X/Y DPI in thousandths, margin, safe/maximum-close ratios,
+frame anchor, initial layer kind, and exact pixel format as fixed `u32` values.
+
+Each member is `CellId u64`, 16-byte document UUID, positive display number, and a
+length-prefixed UTF-8 relative filename. Core accepts exactly one `.inkpod` filename
+component of at most 255 bytes; absolute paths, separators, drive prefixes,
+traversal, self-reference, case-insensitive duplicate paths, duplicate persistent
+identity pairs, and more than 64 members are invalid. A persistent member identity
+is the exact `(CellId, document UUID)` pair: numeric Cell IDs may repeat across
+independent Cell-document namespaces, but the complete pair may not repeat. Staged
+open/save canonicalizes the descriptor
+directory and every member, rejects symlink escape or a missing member, then opens
+the member as an exact-current native Cell and compares both persistent identities.
+No external path is stored in Cut history.
+
+One history record contains nonzero Procedure, base-State, and committed-State IDs,
+then before/after metadata and defaults. Active plus inactive history is bounded to
+4096 records, each text field to 4096 UTF-8 bytes, and the complete descriptor to
+16 MiB. Counts, cursor, ID high-watermarks, canonical history chaining, current
+state, trailing bytes, UTF-8, enum values, lengths, and digest are validated before
+publication. Version 22, Cut replay epoch 19, and payload schema 1 are the only
+accepted values; there is no older-version reader or migration.
+
+Normal Cut save writes and flushes a same-directory temporary descriptor before
+replacement and advances only the Cut savepoint after replacement succeeds.
+Autosave/recovery uses the same format without adopting normal path authority or
+savepoint. Cell files are never embedded or rewritten by Cut save. Changing Cut
+defaults affects only later Cell creation; copying those defaults into a new Cell is
+the explicit boundary between the two owners. Creation of several independent Cell
+files and publication of the final Cut descriptor is intentionally not represented as
+one false cross-file transaction: already completed Cell saves remain valid files if a
+later descriptor operation fails, while no partial Cut state is published.
+
 ## Current procedure-authoritative contract
 
 This section defines the implemented procedure-authoritative container at
-top-level format version 21 and runtime replay epoch 18. It uses a hierarchical document
+top-level format version 22 and runtime replay epoch 19. It uses a hierarchical document
 commitment, an exact-depth target-explicit `ApplyRasterStroke/v3` schema, a
 bounded resolved `ApplyGeometry/canonical-v2` schema,
 distinct stable Cell ID, and an explicit immutable Genesis base surface:
@@ -21,14 +82,14 @@ metadata, raster, and raster-tile commitments are domain-separated so a raster
 edit hashes only changed tile payloads instead of every allocated document
 pixel. This semantic digest is independent of the renderer's canonical
 revision-max cache identity. Asset and procedure-payload digest contracts are
-version 1. Every version other than 21 is rejected before Core state replacement;
+version 1. Every version other than 22 is rejected before Core state replacement;
 there is no migration or compatibility reader. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
 
 The authoritative sections are `META`, `GENS`, `ASST`, `PROC`, and `EDIT`.
 `EXTM`, `CKPT`, and unknown opaque-preserve sections are optional. `CKPT` is a
-schema-1 acceleration record in v21. There is no `HIST` section: history moves and
+schema-1 acceleration record in v22. There is no `HIST` section: history moves and
 branch cuts are records in `PROC`, while cursor, active branch, savepoints, and
 ID high-watermarks are fields in `META`. A materialized document or checkpoint
 is never sufficient without Genesis, retained assets, and the procedure/control
@@ -298,7 +359,7 @@ the common 16-byte record header defined below, then these exact payload bytes:
 - An asset-reference record is `argument ordinal u32`, zero `u32`, then the
   32-byte `AssetId`. Input/output-ID records are `role ordinal u32`, reserved
   zero `u32`, and stable ID `u64`; the typed canonical invocation is the object-
-  kind authority in v21. Each sequence is strictly increasing
+  kind authority in v22. Each sequence is strictly increasing
   by ordinal with no duplicate role. The primitive schema fixes whether each
   input/output role is required; transient object IDs are forbidden.
 - When payload length is zero, `ProcedurePayloadDigest` is 32 zero bytes and no
@@ -487,7 +548,7 @@ tables. View revision, zoom, pan, flip, guides, grid, renderer resources, and OS
 DPI are excluded. `RenderSnapshot::canonical_composite_digest` and
 `inkpod_snapshot_get_canonical_digest` expose this result without a test-only
 state accessor. This derived snapshot digest is not serialized in `.inkpod` and
-does not change native format v21 or runtime replay epoch 18.
+does not change native format v22 or runtime replay epoch 19.
 
 A sequence field is `element-count u64`, then for every element `element-length
 u64` and exact element bytes. A schema-declared ordered sequence retains its
@@ -525,7 +586,7 @@ digest, 5 semantics revision `u32`, 6 work-formula ID `u32`, and 7 replay-policy
 argument-schema digest is BLAKE3 `derive_key` over the exact canonical ASCII
 label `<canonical-name>/canonical-v<schema-version>` using the primitive-
 argument-schema context above. This label identifies the closed typed schema;
-the v21 reader selects its decoder through the same catalog entry and accepts
+the v22 reader selects its decoder through the same catalog entry and accepts
 only a byte-exact canonical re-encoding.
 
 An argument descriptor is a schema-1 frame with fields 1 ordinal `u32`; 2
@@ -664,7 +725,7 @@ follows:
   sequence lists for the current standalone-cell model. Document, Cell, layer,
   plane, selection, and other stable object IDs therefore obey cross-kind
   numeric-ID uniqueness. This document-state frame is schema 6/domain 5. The
-  current build contract is runtime replay epoch 18 and top-level version 21; optional
+  current build contract is runtime replay epoch 19 and top-level version 22; optional
   checkpoint/streaming records do not change the state-digest schema.
   Collections whose UI order is not semantic are ID-sorted.
 - An adjustment frame orders kind, channel, interpolation, six signed `i32`
@@ -780,7 +841,7 @@ owners. The current materialized document and checkpoints are not sufficient
 roots by themselves. Assets referenced only by an inactive branch remain
 available for cache-free replay, and the owning Core session releases its
 registry only after transient work has drained. These runtime rules establish
-the exact graph serialized by v21 `GENS` and `ASST`.
+the exact graph serialized by v22 `GENS` and `ASST`.
 
 Cache-free save/reopen-equivalent verification is detached from that live
 registry: it walks the same roots, deep-copies every unique payload in
@@ -788,7 +849,7 @@ registry: it walks the same roots, deep-copies every unique payload in
 then rebinds Genesis and retained procedures before fresh replay. Descriptor,
 payload, identity, and duplicate-root reference counts must match, while the
 source and rebuilt `AssetRecord`, payload, and raster allocations must not share
-ownership. That detached archive remains test infrastructure; v21 provides
+ownership. That detached archive remains test infrastructure; v22 provides
 the production encoder and staged reader.
 
 Self-referential digest fields are present as thirty-two zero bytes during
@@ -806,20 +867,20 @@ change digest output. The Core production dependency computes the
 hierarchical schema-6 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render
 caching: snapshot validation uses only the documented revision-max scalar and
-never these digests. The same pinned implementation computes the v21 section,
+never these digests. The same pinned implementation computes the v22 section,
 root, asset-chunk, journal, document, editor, and procedure-payload commitments.
 
 ### Header, directory, and record bytes
 
-The v21 header is exactly 128 bytes. Its outer container-layout epoch is 8;
+The v22 header is exactly 128 bytes. Its outer container-layout epoch is 9;
 the authoritative `META` and procedure records independently require runtime
-replay epoch 18 before staged Core publication:
+replay epoch 19 before staged Core publication:
 
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic bytes `49 4E 4B 50 4F 44 00 00` |
-| 8 | 4 | top-level format version = 21 |
-| 12 | 4 | outer container-layout epoch = 8 |
+| 8 | 4 | top-level format version = 22 |
+| 12 | 4 | outer container-layout epoch = 9 |
 | 16 | 4 | header size = 128 |
 | 20 | 4 | required flags = 0 |
 | 24 | 8 | total file length |
@@ -917,7 +978,7 @@ SolidWhite, 2 Asset followed by its 32-byte `AssetId`), then nested payload
 length `u64` and the exact current schema-2 `DocumentArchive` payload. That nested
 payload is not a standalone `.inkpod` container and is not accepted through
 the native-file entrypoint; it is the bounded Genesis document DTO owned by the
-v21 GENS schema. Its fixed manifest is 200 bytes before palette, Color chart
+v22 GENS schema. Its fixed manifest is 200 bytes before palette, Color chart
 entries/lock, optional metadata, plane descriptors, and blob descriptors:
 stable Document ID, distinct
 stable Cell ID, primary layer/main/color plane IDs, document UUID, raster size,
@@ -937,7 +998,7 @@ multi-edit-target sequence moves to ordinal 14. The cursor is absent for an
 empty chart and is validated/reconciled against document entries during staged
 open.
 
-The v21 writer emits this bounded canonical EDIT payload and the staged reader
+The v22 writer emits this bounded canonical EDIT payload and the staged reader
 verifies its digest, target IDs, revision, and META savepoint before replacing
 the live Core. The decoder rejects an EDIT frame larger than 4 MiB.
 
@@ -1122,7 +1183,7 @@ is atomically installed. Dry-run creates no output or temporary file. Duplicate
 is the default and is forbidden from resolving to its input path; overwrite is
 available only through the explicit output policy. A current-document source
 retains a copy of its canonical asset store while operations run. Asset-backed
-Genesis and every retained journal asset are written through the same v21
+Genesis and every retained journal asset are written through the same v22
 GENS/ASST path as an interactive save.
 
 The decoder bounds the whole file (1 GiB), including a post-read check against
@@ -1184,7 +1245,7 @@ path as a normal document path. `open_recovery` loads the container into a
 dirty, recovered, pathless Core document, so a later ordinary Save must choose
 a destination and cannot silently overwrite the pre-recovery normal file.
 
-Sequence-cell autosave-before-switch uses this same exact-current v21 recovery
+Sequence-cell autosave-before-switch uses this same exact-current v22 recovery
 container and sidecar metadata. The live frontend associates the artifact with
 the source document UUID and sequence-source generation; revisiting that entry
 opens, validates, and replays the full native artifact in a staged Core rather
@@ -1201,7 +1262,9 @@ M14 advances the current contract to v20/runtime replay epoch 17 for the
 canonical output-color guard selection procedure without changing EDIT or
 document-state schemas; M16 advances it to v21/runtime replay epoch 18 for
 `CommitFloating/canonical-v3` five-point absolute-anchor semantics, again without
-changing EDIT or document-state schemas.
+changing EDIT or document-state schemas; M17 advances the exact-current top-level
+contract to v22/runtime replay epoch 19 and outer container-layout epoch 9 while
+adding the separate Cut descriptor schema and persistent Cell identity exposure.
 Autosave publication alone never advances the normal document/editor savepoint,
 adopts a normal path, clears dirty state, or overwrites the prior normal file.
 
@@ -1220,7 +1283,7 @@ itself retains the contract above.
 
 Explicit compaction is a separate export. Core first returns a confirmation
 token containing omitted event/procedure counts and document/editor/journal
-digests. Only the exact current token can write a new v21 file whose current
+digests. Only the exact current token can write a new v22 file whose current
 document is Genesis and whose PROC history is empty. The operation never changes
 or adopts the live path, journal, savepoints, dirty state, or IDs. There is no
 automatic squash.
@@ -1240,7 +1303,7 @@ deterministic mutation harness truncates and bit-flips valid native, batch, and
 all four common-raster seeds across every decoder. These regression tests do not
 replace coverage-guided fuzzing, but keep the accepted corruption corpus and
 allocation-bound paths executable on every normal `cargo test` run. The
-`rust/inkpod-format/fuzz` package provides `native_v21` for the current
-container, directory, CKPT removal/re-encode path and `native_core_v21` for staged Core
-journal/checkpoint/full-replay, retention, and compaction-plan parsing; both call
-public production entrypoints.
+`rust/inkpod-format/fuzz` package provides `native_v22` for the current
+container, directory, CKPT removal/re-encode path, `native_core_v22` for staged Core
+journal/checkpoint/full-replay, retention, and compaction-plan parsing, and `cut_v22`
+for the bounded Cut descriptor codec; all call public production entrypoints.

@@ -18,6 +18,11 @@ pub struct InkpodSnapshot {
     pub(crate) adjustment_luts_rgb8: Box<[u8]>,
 }
 
+pub struct InkpodCut {
+    pub(crate) owner_thread: ThreadId,
+    pub(crate) cut: CutCore,
+}
+
 pub struct InkpodCellCreationPlan {
     pub(crate) plan: CellCreationPlan,
     pub(crate) sizing_mode: u32,

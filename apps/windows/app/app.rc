@@ -85,7 +85,11 @@ IDR_MAIN_MENU MENU
 BEGIN
     POPUP "ファイル(&F)"
     BEGIN
-        MENUITEM "新規セル(&N)\tCtrl+N", IDM_FILE_NEW
+        POPUP "新規(&N)"
+        BEGIN
+            MENUITEM "セル(&C)\tCtrl+N", IDM_FILE_NEW
+            MENUITEM "カット(&T)...", IDM_FILE_NEW_CUT
+        END
         MENUITEM "開く(&O)...\tCtrl+O", IDM_FILE_OPEN
         POPUP "最近使ったファイル"
         BEGIN
@@ -100,6 +104,10 @@ BEGIN
         END
         MENUITEM "保存(&S)\tCtrl+S", IDM_FILE_SAVE
         MENUITEM "名前を付けて保存(&A)...", IDM_FILE_SAVE_AS
+        MENUITEM "カットを保存", IDM_CUT_SAVE
+        MENUITEM "カットのプロパティ...", IDM_CUT_PROPERTIES
+        MENUITEM "カットを元に戻す", IDM_CUT_UNDO
+        MENUITEM "カットをやり直す", IDM_CUT_REDO
         MENUITEM "履歴を破棄してコピー...", IDM_FILE_COMPACT_COPY
         MENUITEM "復帰(&R)", IDM_FILE_REVERT
         MENUITEM "レイヤーを部分的に復帰", IDM_FILE_REVERT_PARTIAL
@@ -683,6 +691,29 @@ BEGIN
     EDITTEXT        IDC_TEXT_INPUT_VALUE, 70, 11, 150, 14, ES_AUTOHSCROLL
     DEFPUSHBUTTON   "OK", IDOK, 104, 49, 54, 16
     PUSHBUTTON      "キャンセル", IDCANCEL, 166, 49, 54, 16
+END
+
+IDD_CUT_PROPERTIES DIALOGEX 0, 0, 350, 224
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_CONTROLPARENT
+CAPTION "カットのプロパティ"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT           "作品名", -1, 12, 15, 56, 12
+    EDITTEXT        IDC_CUT_WORK_TITLE, 74, 12, 264, 14, ES_AUTOHSCROLL
+    LTEXT           "話数", -1, 12, 41, 56, 12
+    EDITTEXT        IDC_CUT_EPISODE, 74, 38, 96, 14, ES_AUTOHSCROLL
+    LTEXT           "シーン", -1, 180, 41, 56, 12
+    EDITTEXT        IDC_CUT_SCENE, 242, 38, 96, 14, ES_AUTOHSCROLL
+    LTEXT           "カット名", -1, 12, 67, 56, 12
+    EDITTEXT        IDC_CUT_NAME, 74, 64, 96, 14, ES_AUTOHSCROLL
+    LTEXT           "尺 (frame)", -1, 180, 67, 56, 12
+    EDITTEXT        IDC_CUT_DURATION, 242, 64, 96, 14, ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "指示", -1, 12, 93, 56, 12
+    EDITTEXT        IDC_CUT_INSTRUCTION, 74, 90, 264, 76, ES_AUTOVSCROLL | ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL
+    LTEXT           "セルは同じフォルダーの個別 .inkpod を参照します。", -1, 12, 174, 326, 20, SS_NOPREFIX
+    DEFPUSHBUTTON   "OK", IDOK, 202, 198, 64, 18
+    PUSHBUTTON      "キャンセル", IDCANCEL, 274, 198, 64, 18
 END
 
 IDD_EFFECT_EDITOR DIALOGEX 0, 0, 314, 252
