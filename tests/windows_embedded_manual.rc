@@ -1,4 +1,4 @@
 #include "../apps/windows/app/resource.h"
 
-IDR_MANUAL_HTML RCDATA "../manual.html"
-IDR_FILE_FORMAT_HTML RCDATA "../file_format.html"
+IDR_MANUAL_HTML RCDATA "../html/manual.html"
+IDR_FILE_FORMAT_HTML RCDATA "../html/file_format.html"

@@ -303,13 +303,13 @@ endif()
 
 if(WIN32)
     set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY
-        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/manual.html")
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/manual.html")
     set_property(SOURCE apps/windows/app/app.rc APPEND PROPERTY
-        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/file_format.html")
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/file_format.html")
     set_property(SOURCE tests/windows_embedded_manual.rc APPEND PROPERTY
-        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/manual.html")
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/manual.html")
     set_property(SOURCE tests/windows_embedded_manual.rc APPEND PROPERTY
-        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/file_format.html")
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/html/file_format.html")
 
     add_executable(inkpod_windows_activation_tests
         apps/windows/app/activation.cpp

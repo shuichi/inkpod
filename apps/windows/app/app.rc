@@ -7,8 +7,8 @@
 
 1 RT_MANIFEST "app.manifest"
 IDI_APP_ICON ICON "../package/Assets/app.ico"
-IDR_MANUAL_HTML RCDATA "../../../manual.html"
-IDR_FILE_FORMAT_HTML RCDATA "../../../file_format.html"
+IDR_MANUAL_HTML RCDATA "../../../html/manual.html"
+IDR_FILE_FORMAT_HTML RCDATA "../../../html/file_format.html"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION INKPOD_VERSION_RESOURCE
