@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const BENCHMARK_UUID: u128 = 0x494e_4b50_4f44_2d4d_322d_4245_4e43_4801;
-const EXPECTED_QUICK_CHECKSUMS: [u64; 9] = [
+const EXPECTED_QUICK_CHECKSUMS: [u64; 10] = [
     0x517e_d7ae_78bf_0487,
     0x9e13_576d_ef6f_539b,
     0x517e_d7ae_78bf_0487,
@@ -16,8 +16,9 @@ const EXPECTED_QUICK_CHECKSUMS: [u64; 9] = [
     0xf31d_31fe_1bb0_0fd7,
     0xf521_d658_a470_51e9,
     0x8847_f844_0d29_0c18,
+    0xed20_8415_c758_2547,
 ];
-const EXPECTED_FULL_CHECKSUMS: [u64; 9] = [
+const EXPECTED_FULL_CHECKSUMS: [u64; 10] = [
     0x4390_40e0_244d_5773,
     0xa33f_7534_fcdd_61e7,
     0x4390_40e0_244d_5773,
@@ -27,6 +28,7 @@ const EXPECTED_FULL_CHECKSUMS: [u64; 9] = [
     0x6732_b8b0_a656_5d03,
     0xf521_d658_a470_51e9,
     0x8847_f844_0d29_0c18,
+    0x47ab_bcde_da07_36eb,
 ];
 
 #[derive(Clone, Copy)]
@@ -43,6 +45,7 @@ struct Profile {
     batch_cells: u32,
     batch_side: u32,
     checkpoint_samples: u32,
+    output_color_guard_side: u32,
 }
 
 impl Profile {
@@ -61,6 +64,7 @@ impl Profile {
                 batch_cells: 4,
                 batch_side: 16,
                 checkpoint_samples: 175_000,
+                output_color_guard_side: 1_024,
             }
         } else {
             Self {
@@ -76,6 +80,7 @@ impl Profile {
                 batch_cells: 16,
                 batch_side: 32,
                 checkpoint_samples: 1_000_000,
+                output_color_guard_side: 2_048,
             }
         }
     }
@@ -128,6 +133,7 @@ fn main() {
         batch_preview(profile),
         canonical_replay(profile),
         checkpoint_open(profile),
+        output_color_guard(profile),
     ];
 
     for result in &results {
@@ -140,6 +146,116 @@ fn main() {
         EXPECTED_FULL_CHECKSUMS
     };
     assert_eq!(actual, expected, "benchmark semantic checksums changed");
+}
+
+fn output_color_guard(profile: Profile) -> ScenarioResult {
+    let side = profile.output_color_guard_side;
+    let pixel_count = u64::from(side) * u64::from(side);
+    let transparent_count = pixel_count / 16;
+    let selected_count = pixel_count / 2;
+    let mut pixels = Vec::with_capacity(pixel_count as usize * 8);
+    for index in 0..pixel_count {
+        let pixel = match index & 15 {
+            0 => [u16::MAX, 0, 0, 0],
+            1..=7 => [128 * 257, 128 * 257, 128 * 257, u16::MAX],
+            _ => [u16::MAX, 0, 0, u16::MAX],
+        };
+        for channel in pixel {
+            pixels.extend_from_slice(&channel.to_le_bytes());
+        }
+    }
+    let mut core = Core::new();
+    core.new_cell_from_raster_asset(
+        RasterAssetInput {
+            width: side,
+            height: side,
+            pixel_format: PixelFormat::StraightRgba16,
+            color_space: Some(AssetColorSpace::Srgb),
+            alpha_semantics: AssetAlphaSemantics::Straight,
+            canonical_stride: u64::from(side) * 8,
+            pixels,
+            expected_id: None,
+        },
+        DEFAULT_DPI_MILLI,
+        DEFAULT_DPI_MILLI,
+        BENCHMARK_UUID + 5,
+    )
+    .expect("bounded output-color guard fixture must be valid");
+    let before = core.resource_usage();
+    assert_eq!(before.document_tile_count, 0);
+    let base_revision = core
+        .document_info()
+        .expect("guard fixture must have a document")
+        .document_revision;
+
+    let started = Instant::now();
+    let result = core
+        .select_output_color_guard(
+            OutputColorGuardProfile::Bt709ConservativeYCbCr,
+            SelectionOperation::New,
+            base_revision,
+        )
+        .expect("bounded output-color guard must succeed");
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        result.summary.scanned_pixel_count,
+        pixel_count - transparent_count
+    );
+    assert_eq!(result.summary.selected_pixel_count, selected_count);
+    assert_eq!(result.summary.transparent_pixel_count, transparent_count);
+    assert_eq!(result.dispatch.accepted_commands(), 1);
+    assert_eq!(result.dispatch.revision(), base_revision + 1);
+    assert_eq!(core.history_entries().len(), 1);
+    assert_eq!(
+        core.selection_bounds()
+            .expect("selection bounds must be readable"),
+        Some(RectI32 {
+            x: 8,
+            y: 0,
+            width: side as i32 - 8,
+            height: side as i32,
+        })
+    );
+    assert_eq!(
+        core.journal_entries().iter().find_map(|entry| match entry {
+            JournalEntry::Commit(commit) => Some(commit.procedure().primitive_id()),
+            JournalEntry::HistoryMove(_) | JournalEntry::BranchCut(_) => None,
+        }),
+        Some(PrimitiveId::SELECT_OUTPUT_COLOR_GUARD)
+    );
+    let usage = core.resource_usage();
+    let selection_tiles = u64::from(side.div_ceil(TILE_SIZE).pow(2));
+    assert_eq!(usage.document_tile_count, selection_tiles);
+    assert_eq!(usage.document_tile_bytes, pixel_count);
+    assert_eq!(usage.cpu_staging_bytes, 0);
+    let digest = core
+        .document_state_digest()
+        .expect("guard result digest must be available");
+    let mut hash = Fnv1a64::new();
+    hash.write(digest.as_bytes());
+    hash.write(&result.summary.scanned_pixel_count.to_le_bytes());
+    hash.write(&result.summary.selected_pixel_count.to_le_bytes());
+    hash.write(&result.summary.transparent_pixel_count.to_le_bytes());
+    hash.write(&usage.document_tile_count.to_le_bytes());
+    hash.write(&usage.document_tile_bytes.to_le_bytes());
+    hash.write(&PrimitiveId::SELECT_OUTPUT_COLOR_GUARD.get().to_le_bytes());
+    let checksum = hash.finish();
+    black_box(&core);
+
+    ScenarioResult {
+        scenario: "output_color_guard",
+        elapsed,
+        iterations: u64::from(side),
+        input_items: pixel_count,
+        output_items: selected_count,
+        reused_items: transparent_count,
+        document_revision: result.dispatch.revision(),
+        history_entries: core.history_entries().len() as u64,
+        successes: result.dispatch.accepted_commands(),
+        failures: 0,
+        checksum,
+    }
 }
 
 fn checkpoint_open(profile: Profile) -> ScenarioResult {

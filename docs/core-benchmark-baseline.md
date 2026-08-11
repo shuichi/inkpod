@@ -19,7 +19,7 @@ cargo bench --package inkpod-core --bench core_workflows -- --quick
 cargo bench --package inkpod-core --bench core_workflows
 ```
 
-Both commands use the release benchmark profile and the same nine scenarios.
+Both commands use the release benchmark profile and the same ten scenarios.
 Quick is the bounded CI profile; full increases inputs for local before/after
 comparison. The checkpoint fixture is written outside its timed open interval
 and removed afterward. Batch uses in-memory sequence cells and asserts that its
@@ -37,6 +37,13 @@ absent output directory remains absent.
 | Batch sequence | 4 cells at 16 square | 16 cells at 32 square |
 | canonical replay fixture | 64 square, 5 canonical edits | same |
 | checkpoint policy fixture | 256 procedures, 175,000 stroke samples | 256 procedures, 1,000,000 stroke samples |
+| output-color guard fixture | 1,024-square straight RGBA16, 1,048,576 pixels | 2,048-square straight RGBA16, 4,194,304 pixels |
+
+The output-color guard fixture repeats a fixed 16-pixel row-aligned pattern:
+one transparent unsafe RGB pixel, seven opaque safe neutral pixels, and eight
+opaque unsafe red pixels. Fixture construction is outside the timed interval.
+The interval includes the exact visible-composite scan, sparse selection build,
+and one canonical commit.
 
 ## Output and semantic gates
 
@@ -60,6 +67,7 @@ scenario assertions are:
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
 | `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 17 / native v20 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
+| `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
 The checksum is local FNV-1a over fixed-width public semantic data and excludes
 wall-clock time, addresses, cache allocation order, and Batch output paths.
@@ -75,6 +83,7 @@ wall-clock time, addresses, cache allocation order, and Batch output paths.
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
 | `canonical_replay` | `f521d658a47051e9` | `f521d658a47051e9` |
 | `checkpoint_open` | `8847f8440d290c18` | `8847f8440d290c18` |
+| `output_color_guard` | `ed208415c7582547` | `47abbcdeda0736eb` |
 
 The v19/schema-6 Color-chart commitment changed only the `checkpoint_open`
 document-digest checksum from `eca2df7e74020108` to `8847f8440d290c18`.
@@ -84,14 +93,49 @@ revision 3, one success, zero failures, and exact checkpoint Undo/Redo. The
 workload, harness logic, timed interval, envelope, and `revision-max` formula
 are unchanged.
 
-The v20/epoch-17 output-color guard adds one closed canonical primitive but
-does not alter any of the nine benchmark workloads or their pixel/cache paths.
-Quick and full runs retained every checksum and semantic counter, including
-`canonical_replay` `f521d658a47051e9` and `checkpoint_open`
-`8847f8440d290c18`; the workload, harness, envelope, and `revision-max` formula
-remain unchanged. The new guard scan has no approved wall-clock envelope, so
-these runs establish semantic non-regression rather than a timing approval for
-that new path.
+The v20/epoch-17 output-color guard adds one closed canonical primitive. Its
+dedicated tenth scenario changes the benchmark workload and harness, but does
+not change the original nine scenarios, their checksums, pixel/cache paths, the
+existing envelopes, or the `revision-max` formula. The new scenario's counter
+mapping is deliberately explicit: `iterations` is row count, `input_items` is
+total pixels, `output_items` is selected pixels, and `reused_items` is
+transparent pixels skipped by the scan. Quick therefore fixes
+1,048,576/524,288/65,536 pixels and 256 selection tiles; full fixes
+4,194,304/2,097,152/262,144 pixels and 1,024 selection tiles. Both profiles
+commit exactly once at revision 2/history 1 with zero failures.
+
+## Approved output-color-guard envelope
+
+The active guard range ID is
+`windows-x64-ryzen-9-9950x3d-release-2026-08-11-output-color-guard-v1`. It
+applies only to Windows build 26200.8973 on the MSI MS-7E26 host with an AMD
+Ryzen 9 9950X3D and 127.6 GiB memory, x86_64-pc-windows-msvc, Rust/Cargo 1.97.1,
+LLVM 22.1.6, MSVC 19.51.36252.0, Release benchmark profile, and the Windows
+Balanced power scheme. A materially different host, target, toolchain, or power
+mode needs its own approved range.
+
+| Protected score | Accepted range | Reference median | Interpretation |
+|---|---:|---:|---|
+| quick `output_color_guard`, 1,024 square | 55–92 ms total | 72.876 ms | exact RGBA16 scan + sparse selection + canonical commit |
+| full `output_color_guard`, 2,048 square | 255–425 ms total | 339.903 ms | scaled exact RGBA16 scan + sparse selection + canonical commit |
+
+An unmeasured warm-up process was discarded for each profile before the
+accepted sample batch. Checksum-discovery and output-extraction diagnostic runs
+were also excluded. The accepted samples below are independent measured Release
+processes in run order; every process retained the checksum and all
+semantic/allocation counters above.
+
+| Protected score | Complete accepted samples (ns) | Median |
+|---|---|---:|
+| quick `output_color_guard` | 73,712,100; 72,903,800; 72,875,900; 72,474,200; 72,660,400; 72,554,800; 73,089,600; 72,963,800; 72,812,200 | 72,875,900 |
+| full `output_color_guard` | 350,192,400; 363,748,200; 339,902,800; 330,812,600; 328,050,600 | 339,902,800 |
+
+The accepted bounds are the reference median's rounded 75–125% band. The lower
+edge diagnoses accidentally skipped work while semantic hard gates remain
+authoritative; the upper edge detects a material regression and retains the
+independent-five-run confirmation rule. This new workload and envelope were
+created under the user's explicit 2026-08-11 approval; they do not recalibrate
+or widen any existing range.
 
 ## Approved routine envelope
 
