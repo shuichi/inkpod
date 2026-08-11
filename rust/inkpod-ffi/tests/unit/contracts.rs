@@ -3404,6 +3404,265 @@ fn ffi_contract_vector_diagnostics_are_bounded_and_reject_invalid_input() {
 }
 
 #[test]
+fn snap_001_ffi_geometry_point_resolution_is_bounded_view_targeted_and_non_mutating() {
+    let (mut core, initial) = create_core(32, 24, 29);
+    // SAFETY: The Core handle and every record/span/output remain complete,
+    // aligned, live, and non-overlapping for each call.
+    unsafe {
+        (*core)
+            .core
+            .set_grid(GridConfig {
+                origin_x: 0,
+                origin_y: 0,
+                spacing_x: 8,
+                spacing_y: 8,
+                subdivisions: 2,
+            })
+            .unwrap();
+        (*core).core.add_guide(GuideAxis::Vertical, 5).unwrap();
+        (*core)
+            .core
+            .apply_view(ViewCommand::SetSnapEnabled(true))
+            .unwrap();
+        (*core)
+            .core
+            .apply_view(ViewCommand::OneToOne {
+                viewport_width: 32.0,
+                viewport_height: 24.0,
+            })
+            .unwrap();
+        (*core)
+            .core
+            .apply_view(ViewCommand::PanBy {
+                device_dx: 3.0,
+                device_dy: -2.0,
+            })
+            .unwrap();
+        let view_revision = (*core).core.view_state().revision();
+        let samples = [
+            InkpodStrokeSample {
+                struct_size: size_of::<InkpodStrokeSample>() as u32,
+                flags: 0,
+                x: 8.2,
+                y: 5.8,
+                pressure: 1.0,
+                reserved: 0,
+            },
+            InkpodStrokeSample {
+                struct_size: size_of::<InkpodStrokeSample>() as u32,
+                flags: 0,
+                x: 34.999,
+                y: 21.999,
+                pressure: 1.0,
+                reserved: 0,
+            },
+        ];
+        let input = InkpodGeometryPointResolveInput {
+            struct_size: size_of::<InkpodGeometryPointResolveInput>() as u32,
+            coordinate_space: INKPOD_COORDINATE_SPACE_DEVICE,
+            feature_flags: INKPOD_GEOMETRY_RESOLVE_USE_VIEW_SNAP,
+            view_id: 0,
+            expected_view_revision: view_revision,
+            samples: samples.as_ptr(),
+            sample_count: samples.len() as u64,
+            sample_stride_bytes: size_of::<InkpodStrokeSample>() as u64,
+        };
+        let mut result = InkpodGeometryPointResolveResult {
+            struct_size: size_of::<InkpodGeometryPointResolveResult>() as u32,
+            reserved: 0,
+            view_revision: 0,
+            point_count: 0,
+        };
+        let mut points = [InkpodGeometryPoint {
+            struct_size: size_of::<InkpodGeometryPoint>() as u32,
+            reserved: 0,
+            x: -1.0,
+            y: -1.0,
+        }; 2];
+        let before = queried_document_info(core);
+        let history_before = queried_history_info(core);
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &input,
+                &mut result,
+                points.as_mut_ptr(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(result.view_revision, view_revision);
+        assert_eq!(result.point_count, 2);
+        assert_eq!((points[0].x, points[0].y), (5.0, 8.0));
+        assert_eq!((points[1].x, points[1].y), (32.0, 24.0));
+        let after = queried_document_info(core);
+        let history_after = queried_history_info(core);
+        assert_eq!(after.document_revision, before.document_revision);
+        assert_eq!(after.flags, before.flags);
+        assert_eq!(history_after.cursor, history_before.cursor);
+        assert_eq!(history_after.item_count, history_before.item_count);
+
+        let mut bypass = input;
+        bypass.feature_flags = INKPOD_GEOMETRY_RESOLVE_BYPASS_SNAP;
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &bypass,
+                &mut result,
+                points.as_mut_ptr(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert!((points[0].x - 5.2).abs() < 0.000_1);
+        assert!((points[0].y - 7.8).abs() < 0.000_1);
+
+        let mut short = input;
+        short.struct_size -= 1;
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &short,
+                &mut result,
+                points.as_mut_ptr(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        let mut unknown = input;
+        unknown.feature_flags = 1_u64 << 63;
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &unknown,
+                &mut result,
+                points.as_mut_ptr(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_UNSUPPORTED
+        );
+        let mut invalid_space = input;
+        invalid_space.coordinate_space = u32::MAX;
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &invalid_space,
+                &mut result,
+                points.as_mut_ptr(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut overflow = input;
+        overflow.sample_count = inkpod_core::MAX_GEOMETRY_POINTS as u64 + 1;
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &overflow,
+                &mut result,
+                points.as_mut_ptr(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut invalid_samples = samples;
+        invalid_samples[0].x = f32::NAN;
+        let mut invalid_value = input;
+        invalid_value.samples = invalid_samples.as_ptr();
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &invalid_value,
+                &mut result,
+                points.as_mut_ptr(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let mut stale = input;
+        stale.expected_view_revision -= 1;
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &stale,
+                &mut result,
+                points.as_mut_ptr(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        points[0].x = -1.0;
+        points[1].x = -1.0;
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(core, &input, &mut result, points.as_mut_ptr(), 1,),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        assert_eq!(result.point_count, 2);
+        assert_eq!((points[0].x, points[1].x), (-1.0, -1.0));
+        let mut short_output = points;
+        short_output[0].struct_size -= 1;
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &input,
+                &mut result,
+                short_output.as_mut_ptr(),
+                short_output.len() as u64,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &input,
+                &mut result,
+                ptr::null_mut(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                ptr::null_mut(),
+                &input,
+                &mut result,
+                points.as_mut_ptr(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+
+        let secondary = (*core).core.create_view().unwrap();
+        let secondary_revision = (*core)
+            .core
+            .apply_view_for(
+                secondary,
+                ViewCommand::Flip {
+                    axis: MirrorAxis::Horizontal,
+                },
+            )
+            .unwrap()
+            .revision();
+        let mut secondary_input = input;
+        secondary_input.view_id = secondary;
+        secondary_input.expected_view_revision = secondary_revision;
+        (*core).core.close_view(secondary).unwrap();
+        assert_eq!(
+            inkpod_core_geometry_points_resolve(
+                core,
+                &secondary_input,
+                &mut result,
+                points.as_mut_ptr(),
+                points.len() as u64,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert!(queried_document_info(core).document_revision > initial.document_revision);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn ffi_contract_geometry_preview_copies_bounded_points_and_rejects_invalid_records() {
     let (mut core, initial) = create_core(32, 32, 29);
     let vector_name = b"Geometry vector";

@@ -15,6 +15,13 @@ class VectorController final {
 public:
     explicit VectorController(app::CoreHost& engine) noexcept;
 
+    InkpodStatus ResolveGeometryPoints(
+        std::uint64_t view_id,
+        std::uint64_t expected_view_revision,
+        bool bypass_snap,
+        const std::vector<InkpodStrokeSample>& samples,
+        std::vector<InkpodGeometryPoint>& points,
+        std::uint64_t& resolved_view_revision) noexcept;
     InkpodStatus BeginGeometry(
         const InkpodGeometryInput& input,
         InkpodGeometryPreviewInfo& info) noexcept;

@@ -517,6 +517,15 @@ history、journal、dirty、savepoint を変更しない。
 十分な大きさの呼び出し側所有バッファを設定して再度呼ぶ。バッファは呼び出し中だけ借用され、Core は
 保持しない。必要量照会とコピーのどちらも、文書、ビュー、リビジョン、未保存状態、Undo を変更しない。
 
+`inkpod_core_geometry_points_resolve` は Core 所有スレッド専用の読み取り照会である。Windows は
+`InkpodGeometryPointResolveInput` に bounded な `InkpodStrokeSample` span、発行時の `view_id`、
+非zero の `expected_view_revision`、必要なら `INKPOD_GEOMETRY_RESOLVE_BYPASS_SNAP` を渡す。
+入力 span は呼び出し中だけ借用され、Core はコピー後に保持しない。view ID 0 は primary view、
+それ以外は live secondary view であり、stale revision や閉じた view を active view へ fallback しない。
+出力 `InkpodGeometryPoint` span は呼び出し側所有で、各要素に `struct_size` を設定する。容量不足では
+`InkpodGeometryPointResolveResult.point_count` だけを返し、point span を部分書き込みしない。成功しても
+document/view revision、history、journal、dirty、savepoint は不変である。
+
 可変長出力は、まず NULL／容量 0 で必要量を問い合わせ、呼び出し側が確保した後に再度呼ぶ。API ごとに
 必要量を返すフィールド名が異なるため、各構造体の Doxygen 契約を確認する。
 

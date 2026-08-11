@@ -389,6 +389,8 @@ typedef uint32_t InkpodGeometryPrimitive;
 #define INKPOD_GEOMETRY_TAPER_START (UINT64_C(1) << 6)
 #define INKPOD_GEOMETRY_TAPER_END (UINT64_C(1) << 7)
 #define INKPOD_GEOMETRY_SQUARE_CROSS_SECTION (UINT64_C(1) << 8)
+#define INKPOD_GEOMETRY_RESOLVE_USE_VIEW_SNAP UINT64_C(0)
+#define INKPOD_GEOMETRY_RESOLVE_BYPASS_SNAP (UINT64_C(1) << 0)
 
 /** @brief Semantic operation in an ordered immutable snapshot render plan. */
 typedef uint32_t InkpodRenderPassKind;
@@ -1452,6 +1454,26 @@ typedef struct InkpodGeometryPoint {
     float x;
     float y;
 } InkpodGeometryPoint;
+
+/** @brief View-targeted pointer span used for read-only geometry point resolution. */
+typedef struct InkpodGeometryPointResolveInput {
+    uint32_t struct_size;
+    InkpodCoordinateSpace coordinate_space;
+    uint64_t feature_flags;
+    uint64_t view_id;
+    uint64_t expected_view_revision;
+    const InkpodStrokeSample* samples;
+    uint64_t sample_count;
+    uint64_t sample_stride_bytes;
+} InkpodGeometryPointResolveInput;
+
+/** @brief Required point count and immutable view revision used for resolution. */
+typedef struct InkpodGeometryPointResolveResult {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t view_revision;
+    uint64_t point_count;
+} InkpodGeometryPointResolveResult;
 
 /** @brief Bounded raster/vector geometry request copied by Core before return. */
 typedef struct InkpodGeometryInput {
@@ -4465,6 +4487,23 @@ InkpodStatus inkpod_core_subpalette_build_snapshot(
     uint64_t view_id,
     const InkpodSnapshotOptions* options,
     InkpodSnapshot** out_snapshot);
+
+/**
+ * @brief Resolve one bounded device/document pointer span into document points.
+ *
+ * View ID zero selects the primary view. A nonzero expected view revision
+ * rejects stale input. Enabled guide/grid snap is applied unless the bypass bit
+ * is set. Inputs are copied and never retained; output storage remains owned by
+ * the caller. `BUFFER_TOO_SMALL` reports the required `point_count` without
+ * partially writing the point span. This read-only query changes no revisions,
+ * history, dirty state, savepoint, or journal state.
+ */
+InkpodStatus inkpod_core_geometry_points_resolve(
+    InkpodCore* core,
+    const InkpodGeometryPointResolveInput* input,
+    InkpodGeometryPointResolveResult* result,
+    InkpodGeometryPoint* points,
+    uint64_t point_capacity);
 
 /**
  * @brief Apply one bounded Core-owned geometry request as one history unit.

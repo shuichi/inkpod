@@ -6802,6 +6802,162 @@ int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
         }
         return click(samples.back());
     };
+    const InkpodStatus snap_setup = state.engine->Invoke(
+        [](InkpodCore* core) {
+            InkpodDispatchResult result{};
+            result.struct_size = sizeof(result);
+            InkpodStatus status = inkpod_core_guide_delete_all(core, &result);
+            const InkpodGridInput grid{
+                sizeof(InkpodGridInput), 0U, 0, 0, 8U, 8U, 2U, 0U};
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_core_grid_set(core, &grid, &result);
+            }
+            std::uint64_t guide_id{};
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_core_guide_add(
+                    core, INKPOD_GUIDE_VERTICAL, 5, &result, &guide_id);
+            }
+            return status;
+        },
+        true,
+        true);
+    const auto set_snap_enabled = [&state](UINT command, bool& current, bool enabled) {
+        if (current != enabled) {
+            SendMessageW(state.Workspace().windows.window, WM_COMMAND, command, 0);
+        }
+        UpdateMenuState(state);
+        const UINT menu_state = GetMenuState(
+            GetMenu(state.Workspace().windows.window), command, MF_BYCOMMAND);
+        return current == enabled && menu_state != static_cast<UINT>(-1)
+            && ((menu_state & MF_CHECKED) != 0U) == enabled;
+    };
+    if (snap_setup != INKPOD_STATUS_OK
+        || !set_snap_enabled(
+            IDM_VIEW_SNAP_GUIDES,
+            state.ActiveView().presentation.snap_guides,
+            true)
+        || !set_snap_enabled(
+            IDM_VIEW_SNAP_GRID,
+            state.ActiveView().presentation.snap_grid,
+            true)) {
+        return 540;
+    }
+    struct GeometryProbe final {
+        InkpodSnapshotVectorSegment last{};
+        InkpodCanonicalDigest digest{sizeof(InkpodCanonicalDigest)};
+        std::uint64_t segment_count{};
+        bool valid{};
+    };
+    const auto probe_geometry = [&state](GeometryProbe& probe) {
+        return state.engine->Invoke(
+            [&probe](InkpodCore* core) {
+                const InkpodSnapshotOptions options{
+                    sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
+                InkpodSnapshot* snapshot{};
+                InkpodStatus status = inkpod_core_build_snapshot(core, &options, &snapshot);
+                InkpodSnapshotVectorView vectors{};
+                vectors.struct_size = sizeof(vectors);
+                if (status == INKPOD_STATUS_OK) {
+                    status = inkpod_snapshot_get_vectors(snapshot, &vectors);
+                }
+                if (status == INKPOD_STATUS_OK) {
+                    status = inkpod_snapshot_get_canonical_digest(snapshot, &probe.digest);
+                }
+                if (status == INKPOD_STATUS_OK) {
+                    probe.segment_count = vectors.segment_count;
+                    probe.valid = vectors.segment_count != 0U && vectors.segments != nullptr;
+                    if (probe.valid) {
+                        probe.last = vectors.segments[vectors.segment_count - 1U];
+                    }
+                }
+                const InkpodStatus released = inkpod_snapshot_release(&snapshot);
+                return status == INKPOD_STATUS_OK ? released : status;
+            },
+            false,
+            false);
+    };
+    const auto same_digest = [](const GeometryProbe& left, const GeometryProbe& right) {
+        return left.digest.algorithm == right.digest.algorithm
+            && std::memcmp(
+                left.digest.bytes, right.digest.bytes, sizeof(left.digest.bytes)) == 0;
+    };
+    const std::array<InkpodStrokeSample, 4U> snap_line_samples{
+        sample(5.2F, 7.8F), sample(8.0F, 10.0F),
+        sample(14.0F, 14.0F), sample(18.1F, 17.9F)};
+    GeometryProbe snap_before{};
+    GeometryProbe snap_after{};
+    if (probe_geometry(snap_before) != INKPOD_STATUS_OK
+        || !gesture(IDM_VECTOR_LINE, snap_line_samples)
+        || probe_geometry(snap_after) != INKPOD_STATUS_OK
+        || !snap_after.valid
+        || snap_after.segment_count != snap_before.segment_count + 1U
+        || snap_after.last.p0.x != 5.0F || snap_after.last.p0.y != 8.0F
+        || snap_after.last.p3.x != 20.0F || snap_after.last.p3.y != 16.0F
+        || same_digest(snap_before, snap_after)) {
+        return 541;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    GeometryProbe snap_undone{};
+    if (probe_geometry(snap_undone) != INKPOD_STATUS_OK
+        || snap_undone.segment_count != snap_before.segment_count
+        || !same_digest(snap_undone, snap_before)) {
+        return 542;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
+    GeometryProbe snap_redone{};
+    if (probe_geometry(snap_redone) != INKPOD_STATUS_OK
+        || snap_redone.segment_count != snap_after.segment_count
+        || !same_digest(snap_redone, snap_after)
+        || snap_redone.last.p0.x != 5.0F || snap_redone.last.p0.y != 8.0F
+        || snap_redone.last.p3.x != 20.0F || snap_redone.last.p3.y != 16.0F) {
+        return 543;
+    }
+    if (!set_snap_enabled(
+            IDM_VIEW_SNAP_GUIDES,
+            state.ActiveView().presentation.snap_guides,
+            false)
+        || !set_snap_enabled(
+            IDM_VIEW_SNAP_GRID,
+            state.ActiveView().presentation.snap_grid,
+            false)
+        || !gesture(IDM_VECTOR_LINE, snap_line_samples)) {
+        return 544;
+    }
+    GeometryProbe raw_probe{};
+    if (probe_geometry(raw_probe) != INKPOD_STATUS_OK || !raw_probe.valid
+        || std::abs(raw_probe.last.p0.x - 5.2F) > 0.001F
+        || std::abs(raw_probe.last.p0.y - 7.8F) > 0.001F
+        || std::abs(raw_probe.last.p3.x - 18.1F) > 0.001F
+        || std::abs(raw_probe.last.p3.y - 17.9F) > 0.001F) {
+        return 545;
+    }
+    if (!set_snap_enabled(
+            IDM_VIEW_SNAP_GUIDES,
+            state.ActiveView().presentation.snap_guides,
+            true)
+        || !set_snap_enabled(
+            IDM_VIEW_SNAP_GRID,
+            state.ActiveView().presentation.snap_grid,
+            true)) {
+        return 546;
+    }
+    std::array<BYTE, 256U> snap_keyboard{};
+    GetKeyboardState(snap_keyboard.data());
+    const BYTE previous_control = snap_keyboard[VK_CONTROL];
+    snap_keyboard[VK_CONTROL] = static_cast<BYTE>(0x80U);
+    SetKeyboardState(snap_keyboard.data());
+    const bool bypass_gesture = gesture(IDM_VECTOR_LINE, snap_line_samples);
+    snap_keyboard[VK_CONTROL] = previous_control;
+    SetKeyboardState(snap_keyboard.data());
+    GeometryProbe bypass_probe{};
+    if (!bypass_gesture || probe_geometry(bypass_probe) != INKPOD_STATUS_OK
+        || !bypass_probe.valid
+        || std::abs(bypass_probe.last.p0.x - 5.2F) > 0.001F
+        || std::abs(bypass_probe.last.p0.y - 7.8F) > 0.001F
+        || std::abs(bypass_probe.last.p3.x - 18.1F) > 0.001F
+        || std::abs(bypass_probe.last.p3.y - 17.9F) > 0.001F) {
+        return 547;
+    }
     const std::array<InkpodStrokeSample, 4U> line_samples{
         sample(4.0F, 8.0F), sample(5.0F, 8.0F),
         sample(6.0F, 8.0F), sample(7.0F, 8.0F)};
@@ -6855,6 +7011,7 @@ int RunVectorWorkflowSmoke(ApplicationHost& state) noexcept {
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VECTOR_VECTORIZE, 0) != 1) {
         return 510;
     }
+    PumpPendingWindowMessages();
     return 0;
 }
 

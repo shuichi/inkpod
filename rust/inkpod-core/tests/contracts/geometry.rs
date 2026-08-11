@@ -67,6 +67,337 @@ fn raster_core() -> (Core, u64) {
     (core, plane)
 }
 
+fn geometry_sample(x: f32, y: f32) -> StrokeSample {
+    StrokeSample {
+        x,
+        y,
+        pressure: 1.0,
+    }
+}
+
+fn device_sample(
+    view: ViewState,
+    document_width: u32,
+    document_height: u32,
+    x: f64,
+    y: f64,
+) -> StrokeSample {
+    let logical_x = if view.flip_horizontal() {
+        f64::from(document_width) - x
+    } else {
+        x
+    };
+    let logical_y = if view.flip_vertical() {
+        f64::from(document_height) - y
+    } else {
+        y
+    };
+    geometry_sample(
+        logical_x.mul_add(view.zoom(), view.pan_x()) as f32,
+        logical_y.mul_add(view.zoom(), view.pan_y()) as f32,
+    )
+}
+
+#[test]
+fn snap_001_geometry_input_contract_covers_precedence_ties_bypass_and_bounds() {
+    let mut core = Core::new();
+    core.new_cell(32, 24, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_grid(GridConfig {
+        origin_x: 0,
+        origin_y: 0,
+        spacing_x: 8,
+        spacing_y: 8,
+        subdivisions: 2,
+    })
+    .unwrap();
+    core.add_guide(GuideAxis::Vertical, 5).unwrap();
+    core.add_guide(GuideAxis::Horizontal, 13).unwrap();
+    let before_document = core.document_info().unwrap();
+    let before_history = core.history_entries().len();
+    let before_journal = core.journal_state();
+
+    let raw = core
+        .resolve_geometry_points_for_view(
+            0,
+            0,
+            CoordinateSpace::Document,
+            &[geometry_sample(5.2, 7.8)],
+            GeometrySnapMode::UseViewState,
+        )
+        .unwrap();
+    assert_eq!(raw.points, vec![point(5.2, 7.8)]);
+
+    core.apply_view(ViewCommand::SetGridSnapEnabled(true))
+        .unwrap();
+    let grid = core
+        .resolve_geometry_points_for_view(
+            0,
+            0,
+            CoordinateSpace::Document,
+            &[geometry_sample(5.2, 7.8), geometry_sample(2.0, 2.0)],
+            GeometrySnapMode::UseViewState,
+        )
+        .unwrap();
+    assert_eq!(grid.points, vec![point(4.0, 8.0), point(4.0, 4.0)]);
+
+    core.apply_view(ViewCommand::SetGuideSnapEnabled(true))
+        .unwrap();
+    let both = core
+        .resolve_geometry_points_for_view(
+            0,
+            0,
+            CoordinateSpace::Document,
+            &[
+                geometry_sample(5.2, 9.0),
+                geometry_sample(9.0, 9.0),
+                geometry_sample(9.001, 9.0),
+            ],
+            GeometrySnapMode::UseViewState,
+        )
+        .unwrap();
+    assert_eq!(
+        both.points,
+        vec![point(5.0, 13.0), point(5.0, 13.0), point(8.0, 13.0)]
+    );
+    let bypass = core
+        .resolve_geometry_points_for_view(
+            0,
+            both.view_revision,
+            CoordinateSpace::Document,
+            &[geometry_sample(5.2, 7.8), geometry_sample(-4.0, 40.0)],
+            GeometrySnapMode::Bypass,
+        )
+        .unwrap();
+    assert_eq!(bypass.points, vec![point(5.2, 7.8), point(0.0, 24.0)]);
+    let far_edge = core
+        .resolve_geometry_points_for_view(
+            0,
+            both.view_revision,
+            CoordinateSpace::Document,
+            &[geometry_sample(31.999, 23.999)],
+            GeometrySnapMode::UseViewState,
+        )
+        .unwrap();
+    assert_eq!(far_edge.points, vec![point(32.0, 24.0)]);
+
+    let mut guide_tie = Core::new();
+    guide_tie
+        .new_cell(16, 16, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    guide_tie.add_guide(GuideAxis::Vertical, 4).unwrap();
+    guide_tie.add_guide(GuideAxis::Vertical, 6).unwrap();
+    guide_tie
+        .apply_view(ViewCommand::SetGuideSnapEnabled(true))
+        .unwrap();
+    assert_eq!(
+        guide_tie
+            .resolve_geometry_points_for_view(
+                0,
+                0,
+                CoordinateSpace::Document,
+                &[geometry_sample(5.0, 8.0)],
+                GeometrySnapMode::UseViewState,
+            )
+            .unwrap()
+            .points,
+        vec![point(6.0, 8.0)]
+    );
+
+    let after_document = core.document_info().unwrap();
+    assert_eq!(
+        after_document.document_revision,
+        before_document.document_revision
+    );
+    assert_eq!(after_document.dirty, before_document.dirty);
+    assert_eq!(core.history_entries().len(), before_history);
+    assert_eq!(core.journal_state(), before_journal);
+}
+
+#[test]
+fn paint_002_geometry_input_is_view_targeted_dpi_independent_and_stale_safe() {
+    let configured = |dpi| {
+        let mut core = Core::new();
+        core.new_cell(32, 24, dpi, dpi).unwrap();
+        core.set_grid(GridConfig {
+            origin_x: 0,
+            origin_y: 0,
+            spacing_x: 8,
+            spacing_y: 8,
+            subdivisions: 2,
+        })
+        .unwrap();
+        core.add_guide(GuideAxis::Vertical, 5).unwrap();
+        core.apply_view(ViewCommand::SetSnapEnabled(true)).unwrap();
+        core.apply_view(ViewCommand::OneToOne {
+            viewport_width: 32.0,
+            viewport_height: 24.0,
+        })
+        .unwrap();
+        core.apply_view(ViewCommand::PanBy {
+            device_dx: 3.0,
+            device_dy: -2.0,
+        })
+        .unwrap();
+        core
+    };
+    let mut standard = configured(96_000);
+    let high_dpi = configured(300_000);
+    let standard_view = standard.view_state();
+    let high_dpi_view = high_dpi.view_state();
+    let standard_sample = device_sample(standard_view, 32, 24, 5.2, 7.8);
+    let high_dpi_sample = device_sample(high_dpi_view, 32, 24, 5.2, 7.8);
+    let resolved = standard
+        .resolve_geometry_points_for_view(
+            0,
+            0,
+            CoordinateSpace::Device,
+            &[standard_sample],
+            GeometrySnapMode::UseViewState,
+        )
+        .unwrap();
+    let high_dpi_resolved = high_dpi
+        .resolve_geometry_points_for_view(
+            0,
+            0,
+            CoordinateSpace::Device,
+            &[high_dpi_sample],
+            GeometrySnapMode::UseViewState,
+        )
+        .unwrap();
+    assert_eq!(resolved.points, vec![point(5.0, 8.0)]);
+    assert_eq!(high_dpi_resolved.points, resolved.points);
+
+    standard
+        .apply_view(ViewCommand::PanBy {
+            device_dx: 1.0,
+            device_dy: 0.0,
+        })
+        .unwrap();
+    assert!(matches!(
+        standard.resolve_geometry_points_for_view(
+            0,
+            resolved.view_revision,
+            CoordinateSpace::Device,
+            &[standard_sample],
+            GeometrySnapMode::UseViewState,
+        ),
+        Err(CoreError::InvalidState(_))
+    ));
+
+    let secondary = standard.create_view().unwrap();
+    standard
+        .apply_view_for(
+            secondary,
+            ViewCommand::Flip {
+                axis: MirrorAxis::Horizontal,
+            },
+        )
+        .unwrap();
+    standard
+        .apply_view_for(
+            secondary,
+            ViewCommand::Flip {
+                axis: MirrorAxis::Vertical,
+            },
+        )
+        .unwrap();
+    standard
+        .apply_view_for(
+            secondary,
+            ViewCommand::ZoomAt {
+                factor: f64::MAX,
+                device_x: 0.0,
+                device_y: 0.0,
+            },
+        )
+        .unwrap();
+    let secondary_view = standard
+        .apply_view_for(
+            secondary,
+            ViewCommand::PanBy {
+                device_dx: 1_000_000.0,
+                device_dy: -500_000.0,
+            },
+        )
+        .unwrap();
+    let secondary_result = standard
+        .resolve_geometry_points_for_view(
+            secondary,
+            secondary_view.revision(),
+            CoordinateSpace::Device,
+            &[device_sample(secondary_view, 32, 24, 5.2, 7.8)],
+            GeometrySnapMode::UseViewState,
+        )
+        .unwrap();
+    assert_eq!(secondary_result.points, vec![point(5.0, 8.0)]);
+    standard.close_view(secondary).unwrap();
+    assert!(matches!(
+        standard.resolve_geometry_points_for_view(
+            secondary,
+            secondary_result.view_revision,
+            CoordinateSpace::Device,
+            &[geometry_sample(0.0, 0.0)],
+            GeometrySnapMode::UseViewState,
+        ),
+        Err(CoreError::InvalidArgument(_))
+    ));
+
+    let (mut raster, plane_id) = raster_core();
+    raster
+        .set_grid(GridConfig {
+            origin_x: 0,
+            origin_y: 0,
+            spacing_x: 8,
+            spacing_y: 8,
+            subdivisions: 2,
+        })
+        .unwrap();
+    raster
+        .apply_view(ViewCommand::SetGridSnapEnabled(true))
+        .unwrap();
+    let geometry_points = raster
+        .resolve_geometry_points_for_view(
+            0,
+            0,
+            CoordinateSpace::Document,
+            &[geometry_sample(3.8, 4.2), geometry_sample(19.7, 12.1)],
+            GeometrySnapMode::UseViewState,
+        )
+        .unwrap()
+        .points;
+    let before = raster.document_info().unwrap();
+    raster
+        .apply_geometry(&request(
+            plane_id,
+            GeometryPrimitive::Line,
+            geometry_points,
+            options(true, false),
+        ))
+        .unwrap();
+    let committed = raster
+        .build_snapshot()
+        .canonical_composite_digest()
+        .unwrap();
+    assert_eq!(
+        raster.document_info().unwrap().document_revision,
+        before.document_revision + 1
+    );
+    raster.undo().unwrap();
+    assert_eq!(
+        raster.document_info().unwrap().document_revision,
+        before.document_revision + 2
+    );
+    raster.redo().unwrap();
+    assert_eq!(
+        raster
+            .build_snapshot()
+            .canonical_composite_digest()
+            .unwrap(),
+        committed
+    );
+}
+
 fn primitive_fixture(primitive: GeometryPrimitive) -> (Vec<PointF32>, bool, usize) {
     match primitive {
         GeometryPrimitive::Line => (vec![point(4.0, 5.0), point(20.0, 11.0)], false, 1),

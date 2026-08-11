@@ -1,3 +1,4 @@
+use super::{device_to_document, stroke_coordinate_is_supported};
 use crate::primitive::CanonicalInvocation;
 use crate::*;
 
@@ -161,6 +162,90 @@ impl Core {
             .map_err(|_| CoreError::InvalidArgument("snap point is not finite"))?;
         let snapped = snap_document_point(document, self.view, point);
         Ok((snapped.x, snapped.y))
+    }
+
+    /// Resolves bounded pointer samples through one immutable view into geometry points.
+    ///
+    /// View ID zero selects the primary view; other IDs select a live secondary
+    /// view. A nonzero expected revision rejects stale input. Device coordinates
+    /// are transformed before optional guide/grid snapping, then every result is
+    /// clamped to the inclusive far paper edge. This query does not change
+    /// document, view, history, dirty, savepoint, or journal state.
+    pub fn resolve_geometry_points_for_view(
+        &self,
+        view_id: u64,
+        expected_view_revision: u64,
+        coordinate_space: CoordinateSpace,
+        samples: &[StrokeSample],
+        snap_mode: GeometrySnapMode,
+    ) -> Result<GeometryPointResolution, CoreError> {
+        if samples.is_empty() || samples.len() > MAX_GEOMETRY_POINTS {
+            return Err(CoreError::InvalidArgument(
+                "geometry point count is outside bounds",
+            ));
+        }
+        if samples.iter().any(|sample| {
+            !sample.x.is_finite()
+                || !sample.y.is_finite()
+                || sample.x.abs() > MAX_STROKE_COORDINATE
+                || sample.y.abs() > MAX_STROKE_COORDINATE
+                || !sample.pressure.is_finite()
+                || !(0.0..=1.0).contains(&sample.pressure)
+        }) {
+            return Err(CoreError::InvalidArgument(
+                "geometry sample contains invalid values",
+            ));
+        }
+
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let view = if view_id == 0 {
+            self.view
+        } else {
+            *self
+                .secondary_views
+                .get(&ViewId::from_raw(view_id))
+                .ok_or(CoreError::InvalidArgument("view ID does not exist"))?
+        };
+        if expected_view_revision != 0 && expected_view_revision != view.revision.get() {
+            return Err(CoreError::InvalidState("view revision is stale"));
+        }
+
+        let document_size = DocumentSizeU32::new(document.width, document.height);
+        let mut points = Vec::with_capacity(samples.len());
+        for sample in samples {
+            let point = match coordinate_space {
+                CoordinateSpace::Document => {
+                    DocumentPointF64::new(f64::from(sample.x), f64::from(sample.y))?
+                }
+                CoordinateSpace::Device => device_to_document(
+                    view,
+                    document_size,
+                    DevicePointF64::new(f64::from(sample.x), f64::from(sample.y))?,
+                ),
+            };
+            if !stroke_coordinate_is_supported(point.x) || !stroke_coordinate_is_supported(point.y)
+            {
+                return Err(CoreError::InvalidArgument(
+                    "geometry coordinate is outside bounds",
+                ));
+            }
+            let bounded = DocumentPointF64 {
+                x: point.x.clamp(0.0, f64::from(document.width)),
+                y: point.y.clamp(0.0, f64::from(document.height)),
+            };
+            let resolved = match snap_mode {
+                GeometrySnapMode::UseViewState => snap_document_point(document, view, bounded),
+                GeometrySnapMode::Bypass => bounded,
+            };
+            points.push(PointF32 {
+                x: resolved.x.clamp(0.0, f64::from(document.width)) as f32,
+                y: resolved.y.clamp(0.0, f64::from(document.height)) as f32,
+            });
+        }
+        Ok(GeometryPointResolution {
+            view_revision: view.revision.get(),
+            points,
+        })
     }
 }
 

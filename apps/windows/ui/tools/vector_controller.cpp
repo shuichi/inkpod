@@ -5,11 +5,69 @@
 #include <new>
 
 #include "app/core_host.h"
+#include "renderer/renderer_host.h"
 
 namespace inkpod::windows::ui::tools {
 
 VectorController::VectorController(app::CoreHost& engine) noexcept
     : engine_(engine) {}
+
+InkpodStatus VectorController::ResolveGeometryPoints(
+    std::uint64_t view_id,
+    std::uint64_t expected_view_revision,
+    bool bypass_snap,
+    const std::vector<InkpodStrokeSample>& samples,
+    std::vector<InkpodGeometryPoint>& points,
+    std::uint64_t& resolved_view_revision) noexcept {
+    if (samples.empty()) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        const std::size_t limit = renderer::kCanvasGeometryPreviewPoints;
+        const std::size_t stride = std::max<std::size_t>(
+            1U, (samples.size() + limit - 1U) / limit);
+        std::vector<InkpodStrokeSample> bounded;
+        bounded.reserve(std::min(samples.size() + 1U, limit));
+        for (std::size_t index = 0U; index < samples.size(); index += stride) {
+            bounded.push_back(samples[index]);
+        }
+        if (bounded.back().x != samples.back().x || bounded.back().y != samples.back().y) {
+            if (bounded.size() == limit) {
+                bounded.back() = samples.back();
+            } else {
+                bounded.push_back(samples.back());
+            }
+        }
+        std::vector<InkpodGeometryPoint> resolved(
+            bounded.size(), InkpodGeometryPoint{sizeof(InkpodGeometryPoint), 0U, 0.0F, 0.0F});
+        InkpodGeometryPointResolveInput input{
+            sizeof(InkpodGeometryPointResolveInput),
+            INKPOD_COORDINATE_SPACE_DEVICE,
+            bypass_snap ? INKPOD_GEOMETRY_RESOLVE_BYPASS_SNAP
+                        : INKPOD_GEOMETRY_RESOLVE_USE_VIEW_SNAP,
+            view_id,
+            expected_view_revision,
+            bounded.data(),
+            bounded.size(),
+            sizeof(InkpodStrokeSample)};
+        InkpodGeometryPointResolveResult result{};
+        result.struct_size = sizeof(result);
+        const InkpodStatus status = engine_.Invoke(
+            [&input, &result, &resolved](InkpodCore* core) {
+                return inkpod_core_geometry_points_resolve(
+                    core, &input, &result, resolved.data(), resolved.size());
+            },
+            true,
+            false);
+        if (status == INKPOD_STATUS_OK) {
+            points.swap(resolved);
+            resolved_view_revision = result.view_revision;
+        }
+        return status;
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+}
 
 InkpodStatus VectorController::BeginGeometry(
     const InkpodGeometryInput& input,

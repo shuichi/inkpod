@@ -9,6 +9,122 @@ const GEOMETRY_FLAGS: u64 = INKPOD_GEOMETRY_OUTLINE
     | INKPOD_GEOMETRY_TAPER_START
     | INKPOD_GEOMETRY_TAPER_END
     | INKPOD_GEOMETRY_SQUARE_CROSS_SECTION;
+const GEOMETRY_RESOLVE_FLAGS: u64 = INKPOD_GEOMETRY_RESOLVE_BYPASS_SNAP;
+
+/// Resolves bounded pointer samples to document-space geometry points.
+///
+/// # Safety
+/// Every pointer must name a complete, aligned, live, non-overlapping record or
+/// span on the Core owner thread. Input samples are copied and never retained.
+/// Output points must be initialized with complete size-versioned records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_geometry_points_resolve(
+    core: *mut InkpodCore,
+    input: *const InkpodGeometryPointResolveInput,
+    result: *mut InkpodGeometryPointResolveResult,
+    points: *mut InkpodGeometryPoint,
+    point_capacity: u64,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "geometry point resolution core is null or misaligned",
+            );
+        }
+        if let Err(status) = unsafe { validate_struct(input, "InkpodGeometryPointResolveInput") } {
+            return status;
+        }
+        if let Err(status) =
+            unsafe { validate_struct(result.cast_const(), "InkpodGeometryPointResolveResult") }
+        {
+            return status;
+        }
+        // SAFETY: Complete records were validated above.
+        let input = unsafe { &*input };
+        let result = unsafe { &mut *result };
+        result.reserved = 0;
+        result.view_revision = 0;
+        result.point_count = 0;
+        if input.feature_flags & !GEOMETRY_RESOLVE_FLAGS != 0 {
+            return fail(
+                INKPOD_STATUS_UNSUPPORTED,
+                "geometry point resolution contains unsupported flags",
+            );
+        }
+        if input.sample_count == 0 || input.sample_count > inkpod_core::MAX_GEOMETRY_POINTS as u64 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "geometry point resolution sample count is outside bounds",
+            );
+        }
+        let coordinate_space = match parse_coordinate_space(input.coordinate_space) {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        // SAFETY: The exported contract requires the advertised strided span.
+        let samples = match unsafe {
+            parse_stroke_samples(input.samples, input.sample_count, input.sample_stride_bytes)
+        } {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        // SAFETY: The complete live Core was validated above.
+        let core = unsafe { &mut *core };
+        let status = validate_core_thread(core);
+        if status != INKPOD_STATUS_OK {
+            return status;
+        }
+        let snap_mode = if input.feature_flags & INKPOD_GEOMETRY_RESOLVE_BYPASS_SNAP != 0 {
+            GeometrySnapMode::Bypass
+        } else {
+            GeometrySnapMode::UseViewState
+        };
+        let resolved = match core.core.resolve_geometry_points_for_view(
+            input.view_id,
+            input.expected_view_revision,
+            coordinate_space,
+            &samples,
+            snap_mode,
+        ) {
+            Ok(value) => value,
+            Err(error) => return map_core_error(error),
+        };
+        result.view_revision = resolved.view_revision;
+        result.point_count = resolved.points.len() as u64;
+        if point_capacity < result.point_count {
+            return fail(
+                INKPOD_STATUS_BUFFER_TOO_SMALL,
+                "geometry point output capacity is too small",
+            );
+        }
+        if points.is_null() || !is_aligned(points) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "geometry point output span is null or misaligned",
+            );
+        }
+        for index in 0..resolved.points.len() {
+            // SAFETY: Capacity and the caller-provided live output span cover
+            // every resolved point; each record prefix is validated before writes.
+            let output = unsafe { points.add(index) };
+            if let Err(status) =
+                unsafe { validate_struct(output.cast_const(), "InkpodGeometryPoint") }
+            {
+                return status;
+            }
+        }
+        for (index, point) in resolved.points.iter().enumerate() {
+            // SAFETY: The full output span was validated without writes above.
+            let output = unsafe { &mut *points.add(index) };
+            output.reserved = 0;
+            output.x = point.x;
+            output.y = point.y;
+        }
+        INKPOD_STATUS_OK
+    })
+}
 
 /// Applies one bounded raster or vector geometry request as one canonical edit.
 ///

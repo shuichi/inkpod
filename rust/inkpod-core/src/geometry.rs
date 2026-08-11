@@ -50,6 +50,24 @@ const CORDIC_ATAN_TURNS: [i64; 30] = [
     0x0000_0001,
 ];
 
+/// Controls whether geometry input observes the selected view's snap toggles.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GeometrySnapMode {
+    /// Apply enabled guide and grid snapping after coordinate conversion.
+    UseViewState,
+    /// Temporarily bypass snapping while retaining coordinate conversion and bounds.
+    Bypass,
+}
+
+/// Read-only resolution of bounded pointer samples into document-space geometry points.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeometryPointResolution {
+    /// View revision used for coordinate conversion and snap-state evaluation.
+    pub view_revision: u64,
+    /// Ordered document-space points, clamped to the inclusive paper edges.
+    pub points: Vec<PointF32>,
+}
+
 /// Closed set of geometry primitives exposed to every frontend.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GeometryPrimitive {

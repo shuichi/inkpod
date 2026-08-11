@@ -257,6 +257,9 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - 左右/上下 view flip は表示 transform だけを変更する。セル menu の mirror は実データを変更する。
 - ruler から guide を drag して作成し、Canvas 外へ drag して削除する。move tool で位置変更する。
 - grid は間隔、分割、原点を持ち、zoom が低い場合は表示線だけ間引く。snap 計算は表示間引きの影響を受けない。
+- line、curve、rectangle、ellipse、polygon、polyline の Canvas 入力は、pointer-down 時に固定した view ID と view revision で device pixel から document 座標へ一度だけ変換し、同じ view の snap checked state を適用する。stale または閉じた view は active view へ置き換えず拒否する。OS DPI はこの変換へ重ねて適用しない。
+- snap master が off の場合は bounded raw document point を使う。grid は原点と分割後の間隔ごとに各軸を最近点へ丸め、ちょうど半分は 0 から遠ざかる側を選ぶ。guide は元の各軸が guide から 4 document pixel 以内の場合に grid より優先し、複数候補は position、stable ID の昇順で最後の guide を選ぶ。解決前後は用紙の左上から右下の far edge までへ clamp する。
+- `Ctrl` を pointer-down 時に押している間は図形入力の guide／grid snap だけを一時解除する。`Shift` の45度／縦横比制約、`Alt` の既存操作は変更しない。snap 解決は文書、view revision、history、journal、dirty、savepoint を変更せず、確定した geometry だけが既存の一つの Undo 単位になる。
 - 透明表示は設定色または checkerboard で示し、pixel 値を変更しない。
 - color locator は cursor 周辺を別倍率で表示し、X/Y、selection 幅 H、高さ V、対角長 L、RGBA を表示する。active raster stroke 中は、確定前の最新 preview と最新の処理済み pointer 座標へ bounded/coalesced に非同期追従し、query 自体は document revision、history、journal、dirty、savepoint を変更しない。End 後は確定結果、Cancel 後は元の文書へ再同期する。固定 mode では locator 上で編集でき、edge 付近は自動 scroll を選べる。
 - multi-view は一つの document state と history を共有し、viewport transform だけを別に持つ。
@@ -592,6 +595,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `RENDER-001`: raster/vector 混在時の layer/plane 木順序、visibility、opacity、alpha、adjustment を共有する Canvas/thumbnail/flatten 合成
 - `VIEW-001`: zoom、box zoom、fit、1:1、pan、horizontal/vertical flip
 - `VIEW-002`: ruler、guide/grid、snap、transparent view
+- `SNAP-001`: view-targeted device/document座標変換、guide/grid優先順位、Ctrl一時解除を共有するproduction図形入力snap
 - `VIEW-003`: color locator の座標/RGBA/selection sampling と magnified neighborhood 表示・編集
 - `VIEW-004`: 複数文書 tab、同一文書 view、二分割 group、group/window 間の移動と複製
 - `VIEW-005`: view-local vector antialias、中心線 overlay／中心線のみ、明示 topology に基づく未接続端点診断

@@ -4025,6 +4025,7 @@ bool BeginEditorProcedureCapture(ApplicationHost& state) noexcept {
     }
     state.Workspace().tools.procedure.session = document.id;
     state.Workspace().tools.procedure.generation = document.generation;
+    state.Workspace().tools.procedure.core_view_id = state.ActiveView().core_view_id;
     state.Workspace().tools.procedure.state = *editor;
     state.Workspace().tools.procedure.valid = true;
     return true;
@@ -7427,26 +7428,23 @@ bool ShowGeometryToolOptions(ApplicationHost& state) noexcept {
     return true;
 }
 
-bool GeometryPointsFromGesture(
+InkpodStatus GeometryPointsFromGesture(
     ApplicationHost& state,
     const std::vector<InkpodStrokeSample>& samples,
     std::vector<InkpodGeometryPoint>& points) noexcept {
-    std::vector<InkpodVectorPoint> converted;
-    if (!VectorGestureDocumentPoints(state, samples, converted)) {
-        return false;
+    const auto& capture = state.Workspace().tools.procedure;
+    if (!capture.valid || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
     }
-    try {
-        points.clear();
-        points.reserve(converted.size());
-        for (const auto& point : converted) {
-            points.push_back(InkpodGeometryPoint{
-                sizeof(InkpodGeometryPoint), 0U, point.x, point.y});
-        }
-        return !points.empty();
-    } catch (const std::bad_alloc&) {
-        points.clear();
-        return false;
-    }
+    auto& tools = state.Workspace().tools;
+    VectorController controller(*state.engine);
+    return controller.ResolveGeometryPoints(
+        capture.core_view_id,
+        tools.vector_geometry_view_revision,
+        tools.vector_geometry_snap_bypass,
+        samples,
+        points,
+        tools.vector_geometry_view_revision);
 }
 
 bool BuildGeometryInput(
@@ -7603,7 +7601,9 @@ InkpodStatus HandleVectorCanvasEvent(
                 return INKPOD_STATUS_INVALID_STATE;
             }
             tools.vector_geometry_base_revision = document.document_revision;
+            tools.vector_geometry_view_revision = 0U;
         }
+        tools.vector_geometry_snap_bypass = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         tools.vector_gesture_samples.clear();
         editor = CapturedEditorState(state);
     }
@@ -7633,8 +7633,11 @@ InkpodStatus HandleVectorCanvasEvent(
     }
 
     std::vector<InkpodGeometryPoint> gesture;
-    if (!GeometryPointsFromGesture(state, tools.vector_gesture_samples, gesture)) {
-        return INKPOD_STATUS_OK;
+    const InkpodStatus resolve_status =
+        GeometryPointsFromGesture(state, tools.vector_gesture_samples, gesture);
+    if (resolve_status != INKPOD_STATUS_OK) {
+        CancelCoreVectorGeometryPreview(state);
+        return resolve_status;
     }
     std::vector<InkpodGeometryPoint> preview_points;
     try {

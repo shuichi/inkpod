@@ -821,7 +821,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M14 — PM-GAP-020: 現代的な出力色域／放送安全域QA
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: COLOR-001、COLOR-002、COLOR-OUTPUT-QA-001、SEL-002。
 
@@ -873,9 +873,18 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M15 — PM-GAP-013: guide／grid snapのproduction入力接続
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: VIEW-002、PAINT-002。
+関連要件: SNAP-001、VIEW-002、PAINT-002。
+
+今回の契約影響:
+
+| Contract | Current | M15 impact |
+|---|---:|---|
+| native `.inkpod` top-level format | 20 | 永続schema／canonical procedureは不変。version更新なし |
+| runtime replay epoch | 17 | 解決済みgeometry procedure semanticsは不変。epoch更新なし |
+| C ABI | 9 | 既存layoutを変えずsize-versionedな入力点解釈exportを追加。version更新なし |
+| `.inkbatch` top-level format | 2 | Batch graph／operation semanticsは不変。version更新なし |
 
 成果:
 

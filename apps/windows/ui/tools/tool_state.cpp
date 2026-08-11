@@ -46,10 +46,12 @@ void CancelVectorGeometryPreview(
     tools.vector_gesture_samples.clear();
     tools.vector_geometry_points.clear();
     tools.vector_geometry_base_revision = 0U;
+    tools.vector_geometry_view_revision = 0U;
     tools.vector_geometry_phase = 0U;
     tools.vector_last_click_time = 0U;
     tools.vector_last_click_device = POINT{};
     tools.vector_geometry_preview_active = false;
+    tools.vector_geometry_snap_bypass = false;
     tools.procedure.valid = false;
     if (canvas == nullptr) {
         return;

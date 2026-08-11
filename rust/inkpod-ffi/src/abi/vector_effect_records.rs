@@ -18,6 +18,28 @@ pub struct InkpodGeometryPoint {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct InkpodGeometryPointResolveInput {
+    pub struct_size: u32,
+    pub coordinate_space: u32,
+    pub feature_flags: u64,
+    pub view_id: u64,
+    pub expected_view_revision: u64,
+    pub samples: *const InkpodStrokeSample,
+    pub sample_count: u64,
+    pub sample_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodGeometryPointResolveResult {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub view_revision: u64,
+    pub point_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct InkpodGeometryInput {
     pub struct_size: u32,
     pub primitive: u32,

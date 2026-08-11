@@ -171,6 +171,7 @@ struct EditorPresentationBinding final {
 struct EditorProcedureCapture final {
     DocumentSessionId session{};
     Generation generation{};
+    std::uint64_t core_view_id{};
     InkpodEditorStateInfo state{sizeof(InkpodEditorStateInfo)};
     bool valid{};
 };
@@ -224,6 +225,7 @@ struct ToolUiState {
     std::vector<InkpodStrokeSample> vector_gesture_samples;
     std::vector<InkpodGeometryPoint> vector_geometry_points;
     std::uint64_t vector_geometry_base_revision{};
+    std::uint64_t vector_geometry_view_revision{};
     std::uint64_t vector_geometry_flags{INKPOD_GEOMETRY_OUTLINE};
     std::uint32_t vector_geometry_polygon_sides{5U};
     std::uint32_t vector_geometry_aspect_ratio_q16{};
@@ -232,6 +234,7 @@ struct ToolUiState {
     DWORD vector_last_click_time{};
     POINT vector_last_click_device{};
     bool vector_geometry_preview_active{};
+    bool vector_geometry_snap_bypass{};
     InkpodVectorEraseMode vector_erase_mode{INKPOD_VECTOR_ERASE_PARTIAL};
     InkpodVectorSelectionMode vector_selection_mode{INKPOD_VECTOR_SELECT_TOUCHING};
     std::vector<std::uint64_t> vector_selected_path_ids;

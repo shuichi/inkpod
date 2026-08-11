@@ -786,6 +786,15 @@ use document points after their single `CoordinateSpace` conversion. Snapshot
 raster origins/sizes are likewise typed internally, while raster, vector, and
 overlay output coordinates remain document-space public records.
 
+Geometry gestures use the same boundary explicitly: Windows downsamples a
+bounded device-pixel span and passes the procedure-captured Core view ID,
+expected view revision, and temporary Ctrl-bypass bit to
+`Core::resolve_geometry_points_for_view`. Core alone converts, clamps, and
+applies grid/guide precedence. A stale or closed view fails the gesture instead
+of being rebound to the currently active view. The resolved document points
+feed the existing geometry preview/canonical executor, so snapping itself is a
+read-only query and does not add a second procedure or history unit.
+
 View flips are snapshot transform flags around the document extent and do not
 change document pixels or history. Destructive mirror transforms raster,
 selection, frame, and guide state in one Core transaction. Raster hit

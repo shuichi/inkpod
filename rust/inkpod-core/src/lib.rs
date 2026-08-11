@@ -94,8 +94,8 @@ pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
 pub use genesis::{BaseSurface, GenesisInfo};
 pub use geometry::{
-    GeometryCommit, GeometryCrossSection, GeometryOptions, GeometryPreviewInfo, GeometryPrimitive,
-    GeometryRequest, MAX_GEOMETRY_POINTS,
+    GeometryCommit, GeometryCrossSection, GeometryOptions, GeometryPointResolution,
+    GeometryPreviewInfo, GeometryPrimitive, GeometryRequest, GeometrySnapMode, MAX_GEOMETRY_POINTS,
 };
 pub use history::HistoryEntryInfo;
 pub use inkpod_format::CommonRasterFormat;
