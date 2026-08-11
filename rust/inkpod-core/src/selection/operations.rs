@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::SelectionBoundsCache;
 use crate::primitive::CanonicalInvocation;
 
 impl Core {
@@ -229,7 +230,40 @@ impl Core {
     /// Returns `None` for an empty selection without mutating Core state.
     pub fn selection_bounds(&self) -> Result<Option<RectI32>, CoreError> {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
-        mask_bounds(&document.selection)
+        self.selection_bounds_in_document(document)
+    }
+
+    pub(crate) fn selection_bounds_in_document(
+        &self,
+        document: &CellDocument,
+    ) -> Result<Option<RectI32>, CoreError> {
+        let key_matches = self
+            .selection_bounds_cache
+            .borrow()
+            .as_ref()
+            .is_some_and(|cache| {
+                cache.document_uuid == document.uuid
+                    && cache.document_id == document.id
+                    && cache.selection_plane_id == document.selection_plane_id
+                    && cache.document_revision == self.document_revision
+            });
+        if key_matches {
+            return Ok(self
+                .selection_bounds_cache
+                .borrow()
+                .as_ref()
+                .and_then(|cache| cache.bounds));
+        }
+        let bounds = mask_bounds(&document.selection)?;
+        self.selection_bounds_cache
+            .replace(Some(SelectionBoundsCache {
+                document_uuid: document.uuid,
+                document_id: document.id,
+                selection_plane_id: document.selection_plane_id,
+                document_revision: self.document_revision,
+                bounds,
+            }));
+        Ok(bounds)
     }
 
     /// Copies the current selection mask into a new selection layer.

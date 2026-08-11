@@ -694,6 +694,60 @@ fn acceptance_selection_authoring_tools() {
     assert_eq!(core.selection_bounds().unwrap(), saved_bounds);
 }
 
+#[test]
+fn locator_selection_bounds_cache_tracks_selection_history() {
+    let mut core = Core::new();
+    core.new_cell(4096, 4096, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    assert_eq!(
+        core.locator_sample(None, 32.0, 32.0)
+            .unwrap()
+            .selection_bounds,
+        None
+    );
+
+    let expected = RectI32 {
+        x: 17,
+        y: 23,
+        width: 301,
+        height: 205,
+    };
+    core.apply_selection(
+        &SelectionShape::Rectangle(expected),
+        SelectionOperation::New,
+    )
+    .unwrap();
+    assert_eq!(
+        core.locator_sample(None, 32.0, 32.0)
+            .unwrap()
+            .selection_bounds,
+        Some(expected)
+    );
+    assert_eq!(core.selection_bounds().unwrap(), Some(expected));
+
+    core.clear_selection().unwrap();
+    assert_eq!(
+        core.locator_sample(None, 32.0, 32.0)
+            .unwrap()
+            .selection_bounds,
+        None
+    );
+    core.undo().unwrap();
+    assert_eq!(
+        core.locator_sample(None, 32.0, 32.0)
+            .unwrap()
+            .selection_bounds,
+        Some(expected)
+    );
+    core.redo().unwrap();
+    assert_eq!(
+        core.locator_sample(None, 32.0, 32.0)
+            .unwrap()
+            .selection_bounds,
+        None
+    );
+}
+
 fn selected_pixels(core: &mut Core, width: u32, height: u32) -> Vec<(u32, u32)> {
     let snapshot = core.build_snapshot();
     let Some(pass) = snapshot

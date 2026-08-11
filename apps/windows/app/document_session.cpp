@@ -25,6 +25,7 @@ void ResetPresentation(ViewUiState& view) noexcept {
     view.pointer_device_x = 0;
     view.pointer_device_y = 0;
     ++view.locator_generation;
+    view.locator_presented_generation = view.locator_generation;
     view.locator_valid = false;
     view.locator = {};
     view.locator_neighborhood_width = 0U;

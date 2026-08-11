@@ -259,6 +259,7 @@ struct ViewUiState {
     std::int32_t pointer_device_x{};
     std::int32_t pointer_device_y{};
     std::uint64_t locator_generation{};
+    std::uint64_t locator_presented_generation{};
     bool locator_valid{};
     InkpodLocatorOutput locator{};
     std::uint32_t locator_neighborhood_width{};
@@ -422,6 +423,7 @@ struct FrontendRoutingState {
     CommandTimerRegistry timers;
     FrontendTokenSource tokens;
     std::atomic_uint64_t locator_pending_token{};
+    bool locator_latest_requested{};
     std::mutex locator_results_mutex;
     std::array<std::optional<LocatorAsyncResult>, 64U> locator_results{};
     std::atomic_uint64_t sequence_switch_pending_token{};

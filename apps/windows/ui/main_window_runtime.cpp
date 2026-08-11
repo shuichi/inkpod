@@ -584,6 +584,7 @@ void ResetViewDocumentState(ViewUiState& view) noexcept {
     view.vector_centerline_mode = INKPOD_VECTOR_CENTERLINE_HIDDEN;
     view.vector_endpoints_visible = false;
     ++view.locator_generation;
+    view.locator_presented_generation = view.locator_generation;
     view.locator_valid = false;
     view.locator = {};
     view.locator_neighborhood_width = 0U;
@@ -2489,11 +2490,15 @@ void QueueLocatorSample(ApplicationHost& state) noexcept {
         ? document->FindView(pane_target.context.document_view.value())
         : nullptr;
     if (state.engine == nullptr || pane_target.status != PaneTargetStatus::Ok
-        || view == nullptr
-        || state.routing.locator_pending_token.load(
-               std::memory_order_acquire) != 0U) {
+        || view == nullptr) {
         return;
     }
+    if (state.routing.locator_pending_token.load(
+            std::memory_order_acquire) != 0U) {
+        state.routing.locator_latest_requested = true;
+        return;
+    }
+    state.routing.locator_latest_requested = false;
     std::shared_ptr<LocatorAsyncResult> result;
     try {
         result = std::make_shared<LocatorAsyncResult>();
@@ -18093,6 +18098,10 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                     ? document->FindView(result->context.document_view.value())
                     : nullptr;
                 if (view == nullptr) {
+                    if (was_pending && state->routing.locator_latest_requested) {
+                        state->routing.locator_latest_requested = false;
+                        QueueLocatorSample(*state);
+                    }
                     return 0;
                 }
                 const PaneActionTarget current =
@@ -18101,14 +18110,18 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                         state->routing.targets.Capture(),
                         state->routing.targets);
                 const bool target_current = current.status == PaneTargetStatus::Ok
-                    && current.context.document_session
-                        == result->context.document_session
-                    && current.context.document_view == result->context.document_view;
-                if (was_pending && target_current
+                    && current.context == result->context;
+                const bool presentable = was_pending && target_current
                     && result->status == INKPOD_STATUS_OK
-                    && result->sample_generation == view->presentation.locator_generation) {
+                    && result->sample_generation
+                        >= view->presentation.locator_presented_generation
+                    && result->sample_generation
+                        <= view->presentation.locator_generation;
+                if (presentable) {
                     view->presentation.locator = result->output;
                     view->presentation.locator_valid = true;
+                    view->presentation.locator_presented_generation =
+                        result->sample_generation;
                     view->presentation.locator_neighborhood_width =
                         result->neighborhood_output.width;
                     view->presentation.locator_neighborhood_height =
@@ -18122,9 +18135,14 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                         UpdateLocatorStatus(*state);
                     }
                     RefreshLocatorPane(*state);
-                } else if (was_pending && (!target_current
-                    || result->sample_generation
-                        != view->presentation.locator_generation)) {
+                }
+                const bool needs_latest = was_pending
+                    && (state->routing.locator_latest_requested
+                        || !target_current
+                        || result->sample_generation
+                            < view->presentation.locator_generation);
+                if (needs_latest) {
+                    state->routing.locator_latest_requested = false;
                     QueueLocatorSample(*state);
                 }
             }

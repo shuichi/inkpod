@@ -77,6 +77,7 @@ impl Core {
             genesis: None,
             journal: Vec::new(),
             canonical_state_cache: std::cell::RefCell::new(None),
+            selection_bounds_cache: std::cell::RefCell::new(None),
             active_branch: BranchId::ROOT,
             next_journal_event: JournalEventId::first(),
             next_branch: BranchId::first_unallocated(),
@@ -333,6 +334,7 @@ pub struct Core {
     pub(super) journal: Vec<JournalEntry>,
     pub(super) canonical_state_cache:
         std::cell::RefCell<Option<primitive::CanonicalDocumentStateCache>>,
+    pub(super) selection_bounds_cache: std::cell::RefCell<Option<SelectionBoundsCache>>,
     pub(super) active_branch: BranchId,
     pub(super) next_journal_event: JournalEventId,
     pub(super) next_branch: BranchId,
@@ -360,6 +362,15 @@ pub struct Core {
     pub(super) native_opaque_sections: Vec<NativeSection>,
     pub(super) last_open_strategy: NativeOpenStrategy,
     pub(super) canonical_invocation_active: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct SelectionBoundsCache {
+    pub(super) document_uuid: u128,
+    pub(super) document_id: DocumentId,
+    pub(super) selection_plane_id: PlaneId,
+    pub(super) document_revision: DocumentRevision,
+    pub(super) bounds: Option<RectI32>,
 }
 
 /// One synchronous document edit staged independently from the live Core state.

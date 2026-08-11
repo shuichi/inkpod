@@ -1,5 +1,4 @@
 use super::coordinates::*;
-use crate::selection::mask_bounds;
 use crate::*;
 
 impl Core {
@@ -165,19 +164,7 @@ impl Core {
         device_y: f64,
     ) -> Result<LocatorSample, CoreError> {
         let document = self.locator_document()?;
-        let view = match view_id.map(ViewId::from_raw) {
-            Some(id) => *self
-                .secondary_views
-                .get(&id)
-                .ok_or(CoreError::InvalidArgument("view ID does not exist"))?,
-            None => self.view,
-        };
-        let device_point = DevicePointF64::new(device_x, device_y)?;
-        let point = device_to_document(
-            view,
-            DocumentSizeU32::new(document.width, document.height),
-            device_point,
-        );
+        let point = self.locator_document_point(document, view_id, device_x, device_y)?;
         let document_x = point.x.floor() as i32;
         let document_y = point.y.floor() as i32;
         let color = if document_x >= 0
@@ -198,7 +185,7 @@ impl Core {
         Ok(LocatorSample {
             document_x,
             document_y,
-            selection_bounds: mask_bounds(&document.selection)?,
+            selection_bounds: self.selection_bounds_in_document(document)?,
             color,
         })
     }
@@ -221,23 +208,21 @@ impl Core {
             return Err(CoreError::InvalidArgument("locator radius exceeds maximum"));
         }
         let document = self.locator_document()?;
-        let center = self.locator_sample(view_id, device_x, device_y)?;
+        let point = self.locator_document_point(document, view_id, device_x, device_y)?;
+        let center_x = point.x.floor() as i32;
+        let center_y = point.y.floor() as i32;
         let radius_i32 = i32::try_from(radius)
             .map_err(|_| CoreError::InvalidArgument("locator radius is invalid"))?;
-        let origin_x =
-            center
-                .document_x
-                .checked_sub(radius_i32)
-                .ok_or(CoreError::InvalidArgument(
-                    "locator x-coordinate is out of range",
-                ))?;
-        let origin_y =
-            center
-                .document_y
-                .checked_sub(radius_i32)
-                .ok_or(CoreError::InvalidArgument(
-                    "locator y-coordinate is out of range",
-                ))?;
+        let origin_x = center_x
+            .checked_sub(radius_i32)
+            .ok_or(CoreError::InvalidArgument(
+                "locator x-coordinate is out of range",
+            ))?;
+        let origin_y = center_y
+            .checked_sub(radius_i32)
+            .ok_or(CoreError::InvalidArgument(
+                "locator y-coordinate is out of range",
+            ))?;
         let side = radius
             .checked_mul(2)
             .and_then(|value| value.checked_add(1))
@@ -300,5 +285,27 @@ impl Core {
             })
             .or(self.document.as_ref())
             .ok_or(CoreError::NoDocument)
+    }
+
+    fn locator_document_point(
+        &self,
+        document: &CellDocument,
+        view_id: Option<u64>,
+        device_x: f64,
+        device_y: f64,
+    ) -> Result<DocumentPointF64, CoreError> {
+        let view = match view_id.map(ViewId::from_raw) {
+            Some(id) => *self
+                .secondary_views
+                .get(&id)
+                .ok_or(CoreError::InvalidArgument("view ID does not exist"))?,
+            None => self.view,
+        };
+        let device_point = DevicePointF64::new(device_x, device_y)?;
+        Ok(device_to_document(
+            view,
+            DocumentSizeU32::new(document.width, document.height),
+            device_point,
+        ))
     }
 }

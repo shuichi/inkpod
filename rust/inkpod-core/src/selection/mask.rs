@@ -113,33 +113,94 @@ pub(crate) fn morphology_selection(
     Ok(current)
 }
 
-pub(crate) fn mask_bounds(mask: &TileRaster) -> Result<Option<RectI32>, CoreError> {
+fn mask_bounds_with_scanned_tiles(mask: &TileRaster) -> Result<(Option<RectI32>, u64), CoreError> {
     bounded_document_pixels(mask.width(), mask.height())?;
     let mut min_x = mask.width();
     let mut min_y = mask.height();
     let mut max_x = 0;
     let mut max_y = 0;
     let mut any = false;
-    for y in 0..mask.height() {
-        for x in 0..mask.width() {
-            if matches!(mask.pixel(x, y)?, PixelValue::Binary(255)) {
+    let mut scanned_tiles = 0_u64;
+    for coord in mask.allocated_coords() {
+        let tile = mask.tile_view(coord).ok_or(CoreError::InvalidState(
+            "allocated selection tile is invalid",
+        ))?;
+        scanned_tiles = scanned_tiles
+            .checked_add(1)
+            .ok_or(CoreError::InvalidState("selection tile count overflow"))?;
+        let origin_x = coord
+            .x
+            .checked_mul(TILE_SIZE)
+            .ok_or(CoreError::InvalidState("selection tile x-origin overflow"))?;
+        let origin_y = coord
+            .y
+            .checked_mul(TILE_SIZE)
+            .ok_or(CoreError::InvalidState("selection tile y-origin overflow"))?;
+        let stride = usize::try_from(tile.row_stride_bytes())
+            .map_err(|_| CoreError::InvalidState("selection tile stride is invalid"))?;
+        let width = usize::try_from(tile.width())
+            .map_err(|_| CoreError::InvalidState("selection tile width is invalid"))?;
+        for local_y in 0..tile.height() {
+            let row_start = usize::try_from(local_y)
+                .ok()
+                .and_then(|row| row.checked_mul(stride))
+                .ok_or(CoreError::InvalidState(
+                    "selection tile row offset overflow",
+                ))?;
+            let row_end = row_start.checked_add(width).ok_or(CoreError::InvalidState(
+                "selection tile row length overflow",
+            ))?;
+            let row = tile
+                .bytes()
+                .get(row_start..row_end)
+                .ok_or(CoreError::InvalidState("selection tile row is truncated"))?;
+            let Some(first) = row.iter().position(|value| *value == 255) else {
+                continue;
+            };
+            let last =
+                row.iter()
+                    .rposition(|value| *value == 255)
+                    .ok_or(CoreError::InvalidState(
+                        "selected row is missing its final selected pixel",
+                    ))?;
+            let x = origin_x
+                .checked_add(u32::try_from(first).map_err(|_| {
+                    CoreError::InvalidState("selection tile x-coordinate is invalid")
+                })?)
+                .ok_or(CoreError::InvalidState("selection x-coordinate overflow"))?;
+            let last_x = origin_x
+                .checked_add(u32::try_from(last).map_err(|_| {
+                    CoreError::InvalidState("selection tile x-coordinate is invalid")
+                })?)
+                .ok_or(CoreError::InvalidState("selection x-coordinate overflow"))?;
+            let y = origin_y
+                .checked_add(local_y)
+                .ok_or(CoreError::InvalidState("selection y-coordinate overflow"))?;
+            if x < mask.width() && last_x < mask.width() && y < mask.height() {
                 any = true;
                 min_x = min_x.min(x);
                 min_y = min_y.min(y);
-                max_x = max_x.max(x);
+                max_x = max_x.max(last_x);
                 max_y = max_y.max(y);
             }
         }
     }
     if !any {
-        return Ok(None);
+        return Ok((None, scanned_tiles));
     }
-    Ok(Some(RectI32 {
-        x: min_x as i32,
-        y: min_y as i32,
-        width: (max_x - min_x + 1) as i32,
-        height: (max_y - min_y + 1) as i32,
-    }))
+    Ok((
+        Some(RectI32 {
+            x: min_x as i32,
+            y: min_y as i32,
+            width: (max_x - min_x + 1) as i32,
+            height: (max_y - min_y + 1) as i32,
+        }),
+        scanned_tiles,
+    ))
+}
+
+pub(crate) fn mask_bounds(mask: &TileRaster) -> Result<Option<RectI32>, CoreError> {
+    mask_bounds_with_scanned_tiles(mask).map(|(bounds, _)| bounds)
 }
 
 pub(crate) fn color_selection_mask(
@@ -260,5 +321,31 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn mask_bounds_reads_only_allocated_tiles() {
+        let empty = TileRaster::new(4096, 4096, PixelFormat::BinaryMask8).unwrap();
+        assert_eq!(mask_bounds_with_scanned_tiles(&empty).unwrap(), (None, 0));
+
+        let mut sparse = empty;
+        sparse
+            .set_pixel(17, 23, PixelValue::Binary(255), 1)
+            .unwrap();
+        sparse
+            .set_pixel(4095, 4094, PixelValue::Binary(255), 1)
+            .unwrap();
+        assert_eq!(
+            mask_bounds_with_scanned_tiles(&sparse).unwrap(),
+            (
+                Some(RectI32 {
+                    x: 17,
+                    y: 23,
+                    width: 4079,
+                    height: 4072,
+                }),
+                2,
+            )
+        );
     }
 }

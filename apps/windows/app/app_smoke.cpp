@@ -7466,6 +7466,29 @@ int RunBatchWorkflowSmoke(ApplicationHost& state) noexcept {
     return 0;
 }
 
+bool WaitForLocatorPresentation(
+    ApplicationHost& state,
+    std::uint64_t minimum_generation,
+    std::chrono::milliseconds timeout) noexcept {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    do {
+        PumpPendingWindowMessages();
+        if (state.ActiveView().presentation.locator_presented_generation
+            >= minimum_generation) {
+            return true;
+        }
+        (void)MsgWaitForMultipleObjectsEx(
+            0U,
+            nullptr,
+            10U,
+            QS_ALLINPUT,
+            MWMO_INPUTAVAILABLE);
+    } while (std::chrono::steady_clock::now() < deadline);
+    PumpPendingWindowMessages();
+    return state.ActiveView().presentation.locator_presented_generation
+        >= minimum_generation;
+}
+
 int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr
         || CreateCell(state, 8U, 8U, 96'000U) != INKPOD_STATUS_OK) {
@@ -7583,23 +7606,32 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
             state.Workspace().windows.canvas,
             WM_LBUTTONDOWN,
             MK_LBUTTON,
-            MAKELPARAM(device_x, device_y)) != 1
-        || SendMessageW(
-               state.Workspace().windows.canvas,
-               WM_MOUSEMOVE,
-               MK_LBUTTON,
-               MAKELPARAM(drag_device_x, device_y)) != 1) {
+            MAKELPARAM(device_x, device_y)) != 1) {
         return 725;
     }
-    PumpPendingWindowMessages();
-    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+    for (std::uint32_t index = 0U; index < 32U; ++index) {
+        const int move_x = (index % 2U) == 0U ? drag_device_x : device_x;
+        if (SendMessageW(
+                state.Workspace().windows.canvas,
+                WM_MOUSEMOVE,
+                MK_LBUTTON,
+                MAKELPARAM(move_x, device_y)) != 1) {
+            return 725;
+        }
+    }
+    if (SendMessageW(
+            state.Workspace().windows.canvas,
+            WM_MOUSEMOVE,
+            MK_LBUTTON,
+            MAKELPARAM(drag_device_x, device_y)) != 1) {
         return 725;
     }
-    PumpPendingWindowMessages();
-    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+    const std::uint64_t latest_locator_generation =
+        state.ActiveView().presentation.locator_generation;
+    if (!WaitForLocatorPresentation(
+            state, latest_locator_generation, std::chrono::seconds(5))) {
         return 725;
     }
-    PumpPendingWindowMessages();
 
     InkpodDocumentInfo during_preview = EmptyDocumentInfo();
     if (!QueryDocument(state, during_preview)
@@ -7607,6 +7639,8 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
         || during_preview.main_plane_checksum != seeded.main_plane_checksum
         || state.ActiveView().presentation.locator_generation
             <= locator_generation_before_stroke
+        || state.ActiveView().presentation.locator_presented_generation
+            != latest_locator_generation
         || !state.ActiveView().presentation.locator_valid
         || state.ActiveView().presentation.locator.document_x != 4
         || state.ActiveView().presentation.locator.document_y != 3
