@@ -44,6 +44,17 @@ fn queried_document_info(core: *mut InkpodCore) -> InkpodDocumentInfo {
     info
 }
 
+fn document_observation(info: &InkpodDocumentInfo) -> (u64, u64, u64, u64, u64, u64) {
+    (
+        info.document_revision,
+        u64::from(info.flags),
+        info.document_id,
+        info.layer_id,
+        info.main_plane_checksum,
+        info.color_plane_checksum,
+    )
+}
+
 fn queried_history_info(core: *mut InkpodCore) -> InkpodHistoryInfo {
     let mut history = InkpodHistoryInfo {
         struct_size: size_of::<InkpodHistoryInfo>() as u32,
@@ -3535,8 +3546,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 14);
-        assert_eq!(contract.procedure_format_version, 17);
+        assert_eq!(contract.replay_epoch, 15);
+        assert_eq!(contract.procedure_format_version, 18);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);
@@ -3620,6 +3631,325 @@ fn rust_sources(directory: &Path) -> Vec<String> {
         }
     }
     sources
+}
+
+#[test]
+fn light_table_bulk_ffi_previews_commits_and_rejects_short_unknown_stale_inputs() {
+    let (mut core, initial) = create_core(1, 1, 0x8123);
+    let names = [
+        b"cell1.png".as_slice(),
+        b"cell2.png".as_slice(),
+        b"cell3.png".as_slice(),
+        b"cell4.png".as_slice(),
+        b"cell5.png".as_slice(),
+    ];
+    let pixels = [
+        [1_u8, 0, 0, 255],
+        [2_u8, 0, 0, 255],
+        [3_u8, 0, 0, 255],
+        [4_u8, 0, 0, 255],
+        [5_u8, 0, 0, 255],
+    ];
+    let uuids = [
+        (0_u64, 0x8101_u64),
+        (0, 0x8102),
+        (initial.document_uuid_high, initial.document_uuid_low),
+        (0, 0x8104),
+        (0, 0x8105),
+    ];
+    let sources = std::array::from_fn::<_, 5, _>(|index| InkpodRasterSourceInput {
+        struct_size: size_of::<InkpodRasterSourceInput>() as u32,
+        pixel_format: INKPOD_STORAGE_RGBA8,
+        flags: 0,
+        document_uuid_high: uuids[index].0,
+        document_uuid_low: uuids[index].1,
+        source_revision: (index + 1) as u64,
+        width: 1,
+        height: 1,
+        dpi_x_milli: 96_000,
+        dpi_y_milli: 96_000,
+        reference_frame: InkpodFrameRect {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        },
+        pixels: pixels[index].as_ptr(),
+        pixel_bytes: 4,
+        row_stride_bytes: 4,
+    });
+    let cells = std::array::from_fn::<_, 5, _>(|index| InkpodSequenceCellInput {
+        struct_size: size_of::<InkpodSequenceCellInput>() as u32,
+        reserved: 0,
+        name_utf8: names[index].as_ptr(),
+        name_bytes: names[index].len() as u64,
+        source: sources[index],
+    });
+    let sequence = InkpodSequenceInput {
+        struct_size: size_of::<InkpodSequenceInput>() as u32,
+        reserved: 0,
+        feature_flags: 0,
+        cells: cells.as_ptr(),
+        cell_count: cells.len() as u64,
+        cell_stride_bytes: size_of::<InkpodSequenceCellInput>() as u64,
+    };
+
+    // SAFETY: Every caller-owned record and nested span stays live and aligned.
+    unsafe {
+        assert_eq!(inkpod_core_sequence_set(core, &sequence), INKPOD_STATUS_OK);
+        let mut set = InkpodLightTableSetInfo {
+            struct_size: size_of::<InkpodLightTableSetInfo>() as u32,
+            ..InkpodLightTableSetInfo::default()
+        };
+        assert_eq!(
+            inkpod_core_light_table_set_get(core, 0, &mut set),
+            INKPOD_STATUS_OK
+        );
+
+        let mut request = InkpodLightTableBulkRequest {
+            struct_size: size_of::<u32>() as u32,
+            ..InkpodLightTableBulkRequest::default()
+        };
+        assert_eq!(
+            inkpod_core_light_table_bulk_request(
+                core,
+                set.id,
+                INKPOD_LIGHT_TABLE_BULK_BOTH,
+                2,
+                800,
+                200,
+                &mut request,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        request.struct_size = size_of::<InkpodLightTableBulkRequest>() as u32;
+        assert_eq!(
+            inkpod_core_light_table_bulk_request(core, set.id, u32::MAX, 2, 800, 200, &mut request,),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_core_light_table_bulk_request(
+                core,
+                set.id,
+                INKPOD_LIGHT_TABLE_BULK_BOTH,
+                2,
+                800,
+                200,
+                &mut request,
+            ),
+            INKPOD_STATUS_OK
+        );
+
+        let mut preview = InkpodLightTableBulkPreviewInfo {
+            struct_size: size_of::<InkpodLightTableBulkPreviewInfo>() as u32,
+            ..InkpodLightTableBulkPreviewInfo::default()
+        };
+        assert_eq!(
+            inkpod_core_light_table_bulk_preview(
+                core,
+                &request,
+                ptr::null_mut(),
+                0,
+                0,
+                &mut preview,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            (preview.entry_count, preview.add_count, preview.skip_count),
+            (4, 4, 0)
+        );
+
+        let mut entries = std::array::from_fn::<_, 4, _>(|_| InkpodLightTableBulkPreviewEntry {
+            struct_size: size_of::<InkpodLightTableBulkPreviewEntry>() as u32,
+            ..InkpodLightTableBulkPreviewEntry::default()
+        });
+        assert_eq!(
+            inkpod_core_light_table_bulk_preview(
+                core,
+                &request,
+                entries.as_mut_ptr(),
+                3,
+                size_of::<InkpodLightTableBulkPreviewEntry>() as u64,
+                &mut preview,
+            ),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        entries[2].struct_size -= 1;
+        assert_eq!(
+            inkpod_core_light_table_bulk_preview(
+                core,
+                &request,
+                entries.as_mut_ptr(),
+                entries.len() as u64,
+                size_of::<InkpodLightTableBulkPreviewEntry>() as u64,
+                &mut preview,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        entries[2].struct_size = size_of::<InkpodLightTableBulkPreviewEntry>() as u32;
+        assert_eq!(
+            inkpod_core_light_table_bulk_preview(
+                core,
+                &request,
+                entries.as_mut_ptr(),
+                entries.len() as u64,
+                size_of::<InkpodLightTableBulkPreviewEntry>() as u64,
+                &mut preview,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| (
+                    entry.cell_number,
+                    entry.distance,
+                    entry.opacity_milli,
+                    entry.action
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (5, 2, 600, INKPOD_LIGHT_TABLE_BULK_ADD),
+                (4, 1, 800, INKPOD_LIGHT_TABLE_BULK_ADD),
+                (2, 1, 800, INKPOD_LIGHT_TABLE_BULK_ADD),
+                (1, 2, 600, INKPOD_LIGHT_TABLE_BULK_ADD),
+            ]
+        );
+
+        let before_apply = queried_document_info(core);
+        let mut result = dispatch();
+        let mut summary = InkpodLightTableBulkSummary {
+            struct_size: size_of::<InkpodLightTableBulkSummary>() as u32,
+            ..InkpodLightTableBulkSummary::default()
+        };
+        let mut short_ids = [0_u64; 3];
+        assert_eq!(
+            inkpod_core_light_table_bulk_register(
+                core,
+                &request,
+                &mut result,
+                &mut summary,
+                short_ids.as_mut_ptr(),
+                short_ids.len() as u64,
+            ),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        assert_eq!(
+            document_observation(&queried_document_info(core)),
+            document_observation(&before_apply)
+        );
+        let mut ids = [0_u64; 4];
+        assert_eq!(
+            inkpod_core_light_table_bulk_register(
+                core,
+                &request,
+                &mut result,
+                &mut summary,
+                ids.as_mut_ptr(),
+                ids.len() as u64,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(result.revision, before_apply.document_revision + 1);
+        assert_eq!(
+            (summary.add_count, summary.skip_count, summary.item_id_count),
+            (4, 0, 4)
+        );
+        assert!(ids.iter().all(|id| *id != 0));
+
+        for (index, expected) in [(0, 0x8105_u64), (1, 0x8104), (2, 0x8102), (3, 0x8101)] {
+            let mut item = InkpodLightTableItemInfo {
+                struct_size: size_of::<InkpodLightTableItemInfo>() as u32,
+                display_color: color(0, 0, 0, 0),
+                ..InkpodLightTableItemInfo::default()
+            };
+            assert_eq!(
+                inkpod_core_light_table_item_get(core, index, &mut item),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(item.source_document_uuid_low, expected);
+        }
+
+        let mut duplicate_request = InkpodLightTableBulkRequest {
+            struct_size: size_of::<InkpodLightTableBulkRequest>() as u32,
+            ..InkpodLightTableBulkRequest::default()
+        };
+        assert_eq!(
+            inkpod_core_light_table_bulk_request(
+                core,
+                set.id,
+                INKPOD_LIGHT_TABLE_BULK_BOTH,
+                2,
+                800,
+                200,
+                &mut duplicate_request,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_light_table_bulk_preview(
+                core,
+                &duplicate_request,
+                entries.as_mut_ptr(),
+                entries.len() as u64,
+                size_of::<InkpodLightTableBulkPreviewEntry>() as u64,
+                &mut preview,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!((preview.add_count, preview.skip_count), (0, 4));
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.action == INKPOD_LIGHT_TABLE_BULK_SKIP_EXISTING)
+        );
+        let before_noop = queried_document_info(core);
+        assert_eq!(
+            inkpod_core_light_table_bulk_register(
+                core,
+                &duplicate_request,
+                &mut result,
+                &mut summary,
+                ptr::null_mut(),
+                0,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            document_observation(&queried_document_info(core)),
+            document_observation(&before_noop)
+        );
+        assert_eq!(
+            (summary.add_count, summary.skip_count, summary.item_id_count),
+            (0, 4, 0)
+        );
+
+        let stale_request = duplicate_request;
+        assert_eq!(
+            inkpod_core_light_table_set_global_opacity(core, 999, &mut result),
+            INKPOD_STATUS_OK
+        );
+        let before_stale = queried_document_info(core);
+        summary.add_count = u32::MAX;
+        assert_eq!(
+            inkpod_core_light_table_bulk_register(
+                core,
+                &stale_request,
+                &mut result,
+                &mut summary,
+                ptr::null_mut(),
+                0,
+            ),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(
+            document_observation(&queried_document_info(core)),
+            document_observation(&before_stale)
+        );
+        assert_eq!(summary.add_count, u32::MAX);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
 }
 
 #[test]

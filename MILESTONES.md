@@ -674,7 +674,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M11 — PM-GAP-004: セル切替時の安全な自動保存
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: SEQ-001、SESSION-001、IO-001。
 
@@ -725,16 +725,15 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M12 — PM-GAP-019: 前後NセルのLight Table一括登録
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: LT-001、SEQ-001。
+関連要件: LT-001、LT-003、SEQ-001。
 
 仕様決定ゲート:
 
-- distance別opacityの式、前／後itemのz-order、既存同一sourceをskip／update／
-  追加のどれにするかはSPEC.mdで未決定である。異なるtransformを持つ同一source
-  itemを壊さない選択肢とUI結果を提示し、利用者の決定後にSPECとgoldenを
-  固定する。
+- 決定済み。distance別opacityは線形clamp、z-orderは後の自然順cellほど上、
+  同一source document UUIDは既存itemを保持してskipする。明示的なsource更新だけが
+  既存itemを変更する契約をSPEC.mdとgoldenへ固定した。
 
 成果:
 

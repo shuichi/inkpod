@@ -126,7 +126,27 @@ void LayoutLightTablePane(HWND dialog) noexcept {
         ScalePaneDip(dialog, 72),
         row_height);
 
-    const int property_top = std::max(list_top, cell_top - gap - row_height);
+    const int bulk_top = std::max(list_top, cell_top - gap - row_height);
+    PlacePaneDialogControl(
+        dialog,
+        IDC_LIGHT_TABLE_BULK_LABEL,
+        margin,
+        bulk_top + ScalePaneDip(dialog, 4),
+        cell_label_width,
+        line_height);
+    const int bulk_button_width = std::max(
+        0, (content_width - cell_label_width - gap * 3) / 3);
+    cursor = margin + cell_label_width + gap;
+    for (const int control : {
+             IDC_LIGHT_TABLE_BULK_PREVIOUS,
+             IDC_LIGHT_TABLE_BULK_NEXT,
+             IDC_LIGHT_TABLE_BULK_BOTH}) {
+        PlacePaneDialogControl(
+            dialog, control, cursor, bulk_top, bulk_button_width, row_height);
+        cursor += bulk_button_width + gap;
+    }
+
+    const int property_top = std::max(list_top, bulk_top - gap - row_height);
     const std::array<int, 3U> property_controls{
         IDC_LIGHT_TABLE_ITEM_PROPERTIES,
         IDC_LIGHT_TABLE_ITEM_MOVE,
@@ -265,6 +285,15 @@ INT_PTR CALLBACK LightTablePaneProcedure(
                     return TRUE;
                 case IDC_LIGHT_TABLE_ITEM_SWAP:
                     Dispatch(*state, IDM_LT_ITEM_SWAP);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_BULK_PREVIOUS:
+                    Dispatch(*state, IDM_LT_BULK_PREVIOUS);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_BULK_NEXT:
+                    Dispatch(*state, IDM_LT_BULK_NEXT);
+                    return TRUE;
+                case IDC_LIGHT_TABLE_BULK_BOTH:
+                    Dispatch(*state, IDM_LT_BULK_BOTH);
                     return TRUE;
                 case IDC_LIGHT_TABLE_PREVIOUS:
                     Dispatch(*state, IDM_SEQ_PREVIOUS);

@@ -1189,6 +1189,431 @@ fn subpalette_reference_snapshot_has_independent_view_and_never_edits_document()
 }
 
 #[test]
+fn light_table_bulk_registration_previews_skips_and_commits_one_natural_order_edit() {
+    let mut core = Core::new();
+    core.new_cell(2, 2, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let current_uuid = core.document_info().unwrap().document_uuid;
+    let cells = vec![
+        source("cell1.png", 0x7101, 2, 2, [1, 0, 0, 255]),
+        source("cell2.png", 0x7102, 2, 2, [2, 0, 0, 255]),
+        source("cell3.png", 0x7103, 2, 2, [3, 0, 0, 255]),
+        source("cell4.png", current_uuid, 2, 2, [4, 0, 0, 255]),
+        source("cell5.png", 0x7105, 2, 2, [5, 0, 0, 255]),
+        source("cell6.png", 0x7106, 2, 2, [6, 0, 0, 255]),
+        source("cell7.png", 0x7107, 2, 2, [7, 0, 0, 255]),
+    ];
+    core.set_sequence(cells).unwrap();
+
+    let target_set_id = core.light_table_sets().unwrap()[0].id;
+    let existing_source = LightTableSource::from_common_raster(
+        0x7102,
+        99,
+        RectI32 {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        },
+        &rgba8(
+            2,
+            2,
+            vec![20, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        ),
+    )
+    .unwrap();
+    let mut existing_input = LightTableItemInput::new("preserved cell2", existing_source);
+    existing_input.opacity_milli = 321;
+    existing_input.translate_x_milli = 1_250;
+    let (_, existing_id) = core.light_table_add_item(existing_input).unwrap();
+
+    let request = core
+        .light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Both,
+            3,
+            800,
+            200,
+        )
+        .unwrap();
+    let before_preview = core.document_info().unwrap();
+    let preview = core
+        .preview_light_table_bulk_registration(&request)
+        .unwrap();
+    assert_eq!(core.document_info().unwrap(), before_preview);
+    assert_eq!(preview.add_count, 5);
+    assert_eq!(preview.skip_count, 1);
+    assert_eq!(
+        preview
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.cell_number,
+                    entry.distance,
+                    entry.opacity_milli,
+                    entry.action,
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            (7, 3, 400, LightTableBulkRegistrationAction::Add),
+            (6, 2, 600, LightTableBulkRegistrationAction::Add),
+            (5, 1, 800, LightTableBulkRegistrationAction::Add),
+            (3, 1, 800, LightTableBulkRegistrationAction::Add),
+            (2, 2, 600, LightTableBulkRegistrationAction::SkipExisting),
+            (1, 3, 400, LightTableBulkRegistrationAction::Add),
+        ]
+    );
+
+    let revision_before = before_preview.document_revision;
+    let history_before = core.history_entries().len();
+    let journal_before = core.journal_entries().len();
+    let (outcome, summary) = core.light_table_bulk_register(request).unwrap();
+    assert_eq!(outcome.revision(), revision_before + 1);
+    assert_eq!(summary.added_item_ids.len(), 5);
+    assert_eq!(summary.add_count, 5);
+    assert_eq!(summary.skip_count, 1);
+    assert_eq!(core.history_entries().len(), history_before + 1);
+    assert_eq!(core.journal_entries().len(), journal_before + 1);
+    let JournalEntry::Commit(commit) = core.journal_entries().last().unwrap() else {
+        panic!("bulk registration must append one canonical commit");
+    };
+    assert_eq!(
+        commit.procedure().primitive_id(),
+        PrimitiveId::LIGHT_TABLE_BULK_REGISTER
+    );
+    assert_eq!(
+        core.light_table_items()
+            .unwrap()
+            .iter()
+            .map(|item| (item.source_document_uuid, item.opacity_milli))
+            .collect::<Vec<_>>(),
+        vec![
+            (0x7107, 400),
+            (0x7106, 600),
+            (0x7105, 800),
+            (0x7103, 800),
+            (0x7101, 400),
+            (0x7102, 321),
+        ]
+    );
+    let preserved = core
+        .light_table_items()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == existing_id)
+        .unwrap();
+    assert_eq!(preserved.source_revision, 99);
+    assert_eq!(preserved.translate_x_milli, 1_250);
+    for added in &core.light_table_items().unwrap()[..5] {
+        assert!(added.visible);
+        assert_eq!(added.display_mode, LightTableDisplayMode::Color);
+        assert_eq!(added.translate_x_milli, 0);
+        assert_eq!(added.translate_y_milli, 0);
+        assert_eq!(added.scale_x_milli, 1_000);
+        assert_eq!(added.scale_y_milli, 1_000);
+        assert_eq!(added.rotation_milli_degrees, 0);
+    }
+
+    core.undo().unwrap();
+    assert_eq!(
+        core.light_table_items().unwrap()[0].source_document_uuid,
+        0x7102
+    );
+    assert_eq!(core.light_table_items().unwrap().len(), 1);
+    core.redo().unwrap();
+    assert_eq!(core.light_table_items().unwrap().len(), 6);
+    core.verify_journal_replay().unwrap();
+
+    let path = std::env::temp_dir().join(format!(
+        "inkpod-test-light-table-bulk-{}-{}.inkpod",
+        std::process::id(),
+        core.document_info().unwrap().document_revision
+    ));
+    let _ = std::fs::remove_file(&path);
+    core.save(&path).unwrap();
+    let mut reopened = Core::new();
+    reopened.open(&path).unwrap();
+    assert_eq!(
+        reopened
+            .light_table_items()
+            .unwrap()
+            .iter()
+            .map(|item| (item.source_document_uuid, item.opacity_milli))
+            .collect::<Vec<_>>(),
+        vec![
+            (0x7107, 400),
+            (0x7106, 600),
+            (0x7105, 800),
+            (0x7103, 800),
+            (0x7101, 400),
+            (0x7102, 321),
+        ]
+    );
+    reopened.verify_journal_replay().unwrap();
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn light_table_bulk_registration_noop_invalid_cancel_and_stale_are_atomic() {
+    let mut core = Core::new();
+    core.new_cell(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let current_uuid = core.document_info().unwrap().document_uuid;
+    core.set_sequence(vec![
+        source("cell1.png", 0x7201, 1, 1, [1, 0, 0, 255]),
+        source("cell2.png", current_uuid, 1, 1, [2, 0, 0, 255]),
+        source("cell3.png", 0x7203, 1, 1, [3, 0, 0, 255]),
+    ])
+    .unwrap();
+    let target_set_id = core.light_table_sets().unwrap()[0].id;
+
+    assert!(matches!(
+        core.light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Both,
+            1,
+            1_001,
+            0,
+        ),
+        Err(CoreError::InvalidArgument(_))
+    ));
+    assert!(matches!(
+        core.light_table_bulk_registration_request(
+            u64::MAX,
+            LightTableBulkDirection::Both,
+            1,
+            1_000,
+            0,
+        ),
+        Err(CoreError::InvalidArgument(_))
+    ));
+
+    let zero = core
+        .light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Both,
+            0,
+            1_000,
+            100,
+        )
+        .unwrap();
+    assert!(
+        core.preview_light_table_bulk_registration(&zero)
+            .unwrap()
+            .entries
+            .is_empty()
+    );
+    let before_zero = core.document_info().unwrap();
+    let (zero_outcome, zero_summary) = core.light_table_bulk_register(zero).unwrap();
+    assert_eq!(zero_outcome.revision(), before_zero.document_revision);
+    assert_eq!(zero_summary.add_count, 0);
+    assert_eq!(core.document_info().unwrap(), before_zero);
+
+    let cancelled = core
+        .light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Both,
+            1,
+            900,
+            100,
+        )
+        .unwrap();
+    let before_cancel = core.document_info().unwrap();
+    core.preview_light_table_bulk_registration(&cancelled)
+        .unwrap();
+    assert_eq!(core.document_info().unwrap(), before_cancel);
+
+    let stale = cancelled;
+    core.light_table_set_global_opacity(999).unwrap();
+    let before_stale = core.document_info().unwrap();
+    let items_before_stale = core.light_table_items().unwrap();
+    assert!(matches!(
+        core.light_table_bulk_register(stale),
+        Err(CoreError::InvalidState(_))
+    ));
+    assert_eq!(core.document_info().unwrap(), before_stale);
+    assert_eq!(core.light_table_items().unwrap(), items_before_stale);
+
+    let initial = core
+        .light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Both,
+            1,
+            900,
+            100,
+        )
+        .unwrap();
+    core.light_table_bulk_register(initial).unwrap();
+    let duplicate = core
+        .light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Both,
+            1,
+            900,
+            100,
+        )
+        .unwrap();
+    let preview = core
+        .preview_light_table_bulk_registration(&duplicate)
+        .unwrap();
+    assert_eq!(preview.add_count, 0);
+    assert_eq!(preview.skip_count, 2);
+    let before_duplicate = core.document_info().unwrap();
+    let history_before = core.history_entries().len();
+    let journal_before = core.journal_entries().len();
+    let (outcome, summary) = core.light_table_bulk_register(duplicate).unwrap();
+    assert_eq!(outcome.revision(), before_duplicate.document_revision);
+    assert_eq!(summary.add_count, 0);
+    assert_eq!(summary.skip_count, 2);
+    assert_eq!(core.document_info().unwrap(), before_duplicate);
+    assert_eq!(core.history_entries().len(), history_before);
+    assert_eq!(core.journal_entries().len(), journal_before);
+}
+
+#[test]
+fn light_table_bulk_registration_directions_edges_gaps_upper_bound_and_sequence_stale() {
+    let mut core = Core::new();
+    core.new_cell(1, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let current_uuid = core.document_info().unwrap().document_uuid;
+    let target_set_id = core.light_table_sets().unwrap()[0].id;
+
+    core.set_sequence(vec![source(
+        "cell5.png",
+        current_uuid,
+        1,
+        1,
+        [5, 0, 0, 255],
+    )])
+    .unwrap();
+    for direction in [
+        LightTableBulkDirection::Previous,
+        LightTableBulkDirection::Next,
+        LightTableBulkDirection::Both,
+    ] {
+        let request = core
+            .light_table_bulk_registration_request(target_set_id, direction, 10_000, 0, 1_000)
+            .unwrap();
+        let preview = core
+            .preview_light_table_bulk_registration(&request)
+            .unwrap();
+        assert!(preview.entries.is_empty());
+        let before = core.document_info().unwrap();
+        assert_eq!(
+            core.light_table_bulk_register(request)
+                .unwrap()
+                .0
+                .revision(),
+            before.document_revision
+        );
+        assert_eq!(core.document_info().unwrap(), before);
+    }
+    assert!(matches!(
+        core.light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Both,
+            10_001,
+            1_000,
+            0,
+        ),
+        Err(CoreError::InvalidArgument(_))
+    ));
+
+    let cells = vec![
+        source("cell1.png", 0x7301, 1, 1, [1, 0, 0, 255]),
+        source("cell3.png", current_uuid, 1, 1, [3, 0, 0, 255]),
+        source("cell10.png", 0x7310, 1, 1, [10, 0, 0, 255]),
+    ];
+    core.set_sequence(cells.clone()).unwrap();
+    let previous = core
+        .light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Previous,
+            1,
+            1_000,
+            1_000,
+        )
+        .unwrap();
+    assert_eq!(
+        core.preview_light_table_bulk_registration(&previous)
+            .unwrap()
+            .entries
+            .iter()
+            .map(|entry| (entry.cell_number, entry.opacity_milli))
+            .collect::<Vec<_>>(),
+        vec![(1, 1_000)]
+    );
+    let next = core
+        .light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Next,
+            1,
+            1_000,
+            1_000,
+        )
+        .unwrap();
+    assert_eq!(
+        core.preview_light_table_bulk_registration(&next)
+            .unwrap()
+            .entries
+            .iter()
+            .map(|entry| (entry.cell_number, entry.opacity_milli))
+            .collect::<Vec<_>>(),
+        vec![(10, 1_000)]
+    );
+    let both = core
+        .light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Both,
+            10_000,
+            0,
+            1_000,
+        )
+        .unwrap();
+    assert_eq!(
+        core.preview_light_table_bulk_registration(&both)
+            .unwrap()
+            .entries
+            .iter()
+            .map(|entry| (entry.cell_number, entry.distance, entry.opacity_milli))
+            .collect::<Vec<_>>(),
+        vec![(10, 1, 0), (1, 1, 0)]
+    );
+
+    let stale = next;
+    let before_stale = core.document_info().unwrap();
+    core.set_sequence(cells).unwrap();
+    assert!(matches!(
+        core.preview_light_table_bulk_registration(&stale),
+        Err(CoreError::InvalidState(_))
+    ));
+    assert_eq!(core.document_info().unwrap(), before_stale);
+
+    core.set_sequence(vec![
+        source("cell3.png", current_uuid, 1, 1, [3, 0, 0, 255]),
+        source("cell10.png", 0x7310, 1, 1, [10, 0, 0, 255]),
+    ])
+    .unwrap();
+    let endpoint = core
+        .light_table_bulk_registration_request(
+            target_set_id,
+            LightTableBulkDirection::Previous,
+            10_000,
+            1_000,
+            0,
+        )
+        .unwrap();
+    assert!(
+        core.preview_light_table_bulk_registration(&endpoint)
+            .unwrap()
+            .entries
+            .is_empty()
+    );
+}
+
+#[test]
 fn rejects_a_mutated_common_raster_before_indexing_its_pixels() {
     let mut malformed = rgba8(1, 1, vec![1, 2, 3, 4]);
     malformed.pixels.clear();

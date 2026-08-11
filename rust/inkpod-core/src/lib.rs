@@ -54,10 +54,12 @@ mod vector;
 mod view;
 
 pub use animation::{
-    LightTableDisplayMode, LightTableItemInfo, LightTableItemInput, LightTableItemProperties,
-    LightTableSetInfo, LightTableSource, MotionCheckConfig, MotionFrame, RgbaRasterBytes,
-    SequenceCellInfo, SequenceCellSource, SequenceDirection, SequenceSwitchPolicy,
-    SequenceSwitchRequest, Thumbnail,
+    LightTableBulkDirection, LightTableBulkRegistrationAction, LightTableBulkRegistrationEntry,
+    LightTableBulkRegistrationPreview, LightTableBulkRegistrationRequest,
+    LightTableBulkRegistrationSummary, LightTableDisplayMode, LightTableItemInfo,
+    LightTableItemInput, LightTableItemProperties, LightTableSetInfo, LightTableSource,
+    MotionCheckConfig, MotionFrame, RgbaRasterBytes, SequenceCellInfo, SequenceCellSource,
+    SequenceDirection, SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
 };
 pub use api::*;
 pub use asset::{

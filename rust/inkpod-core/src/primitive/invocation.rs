@@ -315,6 +315,10 @@ pub(crate) enum CanonicalInvocation {
         item_id: u64,
         destination_index: u64,
     },
+    LightTableBulkRegister {
+        target_set_id: u64,
+        inputs: Vec<LightTableItemInput>,
+    },
 }
 
 fn canonical_f32_q16(value: f32) -> Result<f32, CoreError> {
@@ -905,6 +909,24 @@ fn decode_persistent_invocation(
             item_id: reader.u64()?,
             destination_index: reader.u64()?,
         }
+    } else if primitive_id == PrimitiveId::LIGHT_TABLE_BULK_REGISTER {
+        let target_set_id = reader.u64()?;
+        let count = usize::try_from(reader.u32()?).map_err(|_| {
+            CoreError::Format("light-table bulk item count is not representable".to_owned())
+        })?;
+        if count == 0 || count > crate::animation::MAX_LIGHT_TABLE_ITEMS {
+            return Err(CoreError::Format(
+                "canonical light-table bulk item count is outside bounds".to_owned(),
+            ));
+        }
+        let mut inputs = Vec::with_capacity(count);
+        for _ in 0..count {
+            inputs.push(reader.light_table_item(assets)?);
+        }
+        CanonicalInvocation::LightTableBulkRegister {
+            target_set_id,
+            inputs,
+        }
     } else {
         return Err(reader.invalid("persisted primitive invocation is unsupported"));
     };
@@ -1152,6 +1174,7 @@ impl CanonicalInvocation {
             Self::LightTableUpdateItem { .. } => PrimitiveId::LIGHT_TABLE_UPDATE_ITEM,
             Self::LightTableRemoveItem { .. } => PrimitiveId::LIGHT_TABLE_REMOVE_ITEM,
             Self::LightTableReorderItem { .. } => PrimitiveId::LIGHT_TABLE_REORDER_ITEM,
+            Self::LightTableBulkRegister { .. } => PrimitiveId::LIGHT_TABLE_BULK_REGISTER,
         }
     }
 
@@ -1228,7 +1251,11 @@ impl CanonicalInvocation {
             | Self::LightTableDeleteSet { set_id }
             | Self::LightTableRenameSet { set_id, .. }
             | Self::LightTableReorderSet { set_id, .. }
-            | Self::LightTableSetActive { set_id } => vec![*set_id],
+            | Self::LightTableSetActive { set_id }
+            | Self::LightTableBulkRegister {
+                target_set_id: set_id,
+                ..
+            } => vec![*set_id],
             Self::LightTableUpdateItemProperties { item_id, .. }
             | Self::LightTableUpdateItem { item_id, .. }
             | Self::LightTableRemoveItem { item_id }
@@ -1257,6 +1284,15 @@ impl CanonicalInvocation {
         match self {
             Self::LightTableAddItem { input } | Self::LightTableUpdateItem { input, .. } => {
                 vec![input.source.asset_id()]
+            }
+            Self::LightTableBulkRegister { inputs, .. } => {
+                let mut ids = inputs
+                    .iter()
+                    .map(|input| input.source.asset_id())
+                    .collect::<Vec<_>>();
+                ids.sort_unstable();
+                ids.dedup();
+                ids
             }
             _ => Vec::new(),
         }
@@ -1681,6 +1717,12 @@ impl CanonicalInvocation {
                     })?,
                 )
                 .map(InvocationResult::dispatch),
+            Self::LightTableBulkRegister {
+                target_set_id,
+                inputs,
+            } => core
+                .light_table_bulk_register_resolved(*target_set_id, inputs.clone())
+                .map(|(dispatch, ids)| InvocationResult::outputs(dispatch, ids)),
         }
     }
 
@@ -2069,6 +2111,18 @@ impl CanonicalInvocation {
                 writer.u64(*item_id);
                 writer.u64(*destination_index);
             }
+            Self::LightTableBulkRegister {
+                target_set_id,
+                inputs,
+            } => {
+                writer.u64(*target_set_id);
+                writer.u32(u32::try_from(inputs.len()).map_err(|_| {
+                    CoreError::InvalidArgument("light-table bulk item count is not representable")
+                })?);
+                for input in inputs {
+                    writer.light_table_item(input)?;
+                }
+            }
         }
         Ok(writer.finish())
     }
@@ -2316,6 +2370,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::LIGHT_TABLE_UPDATE_ITEM.get()
         || value == PrimitiveId::LIGHT_TABLE_REMOVE_ITEM.get()
         || value == PrimitiveId::LIGHT_TABLE_REORDER_ITEM.get()
+        || value == PrimitiveId::LIGHT_TABLE_BULK_REGISTER.get()
     {
         Some(INVOCATION_SCHEMA_VERSION)
     } else {

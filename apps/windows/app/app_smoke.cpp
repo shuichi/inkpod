@@ -5600,6 +5600,70 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().sequence_dialog.view.active_index != 0U) {
         return 880;
     }
+    if (!RefreshLightTablePane(state)) {
+        return 4101;
+    }
+    const std::uint64_t bulk_cancel_revision = selected_one.document_revision;
+    state.lifetime.smoke_dirty_prompt_choice = IDCANCEL;
+    const LRESULT cancelled_bulk = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_LT_BULK_BOTH,
+        0);
+    state.lifetime.smoke_dirty_prompt_choice = IDOK;
+    InkpodDocumentInfo after_cancelled_bulk = EmptyDocumentInfo();
+    if (cancelled_bulk != 0
+        || !QueryDocument(state, after_cancelled_bulk)
+        || after_cancelled_bulk.document_revision != bulk_cancel_revision
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_LT_BULK_BOTH,
+               0) != 1) {
+        state.lifetime.smoke_dirty_prompt_choice = IDNO;
+        return 4102;
+    }
+    state.lifetime.smoke_dirty_prompt_choice = IDNO;
+    InkpodDocumentInfo after_bulk = EmptyDocumentInfo();
+    InkpodLightTableItemInfo bulk_item{};
+    if (!QueryDocument(state, after_bulk)
+        || after_bulk.document_revision != bulk_cancel_revision + 1U
+        || !QueryLightTableItem(state, 0U, bulk_item)
+        || bulk_item.opacity_milli != 800U
+        || state.Workspace().panes.light_table_item_count != 1U) {
+        return 4103;
+    }
+    state.lifetime.smoke_dirty_prompt_choice = IDOK;
+    const LRESULT duplicate_bulk = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_LT_BULK_BOTH,
+        0);
+    state.lifetime.smoke_dirty_prompt_choice = IDNO;
+    InkpodDocumentInfo after_duplicate_bulk = EmptyDocumentInfo();
+    if (duplicate_bulk != 1 || !QueryDocument(state, after_duplicate_bulk)) {
+        return 4104;
+    }
+    if (after_duplicate_bulk.document_revision != after_bulk.document_revision) {
+        return 4105;
+    }
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_EDIT_UNDO,
+        0);
+    if (QueryLightTableItem(state, 0U, bulk_item)) {
+        return 4107;
+    }
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_EDIT_REDO,
+        0);
+    if (!QueryLightTableItem(state, 0U, bulk_item)
+        || bulk_item.opacity_milli != 800U) {
+        return 4109;
+    }
     if (SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,

@@ -399,6 +399,10 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - move tool で単一 item を移動し、modifier で全 item をまとめて移動する。数値 X/Y、基準 frame に対する五点 anchor、position reset を持つ。
 - source が変更された場合は `更新` で reload し、失敗時は以前の有効 snapshot を保持する。
 - 前/次セル、一覧、番号移動、前後N枚登録、全表示/全非表示、主線のみ/彩色のみ、表示 layer 選択を提供する。
+- 前後N枚登録は現在セルを除き、自然順の前、後、または両方向から各方向最大N枚を対象にする。距離を現在セルから数えた1始まりの `d`、入力した不透明度を `base`、距離stepを `step` とすると、item opacityは `max(0, base - step * (d - 1))` milliとする。`base` と `step` は0以上1000以下で、検査付き整数演算だけを使う。N=0または対象がない場合はno-opとし、端点、欠番、不足枚数では存在するセルだけを登録する。
+- 一括登録するitemは自然順で若いセルを下、後のセルを上に積み、既存itemの相対順を変えずに一括登録blockをsetの最上位へ置く。Light Tableのitem index 0は最上位であるため、一括登録block内は自然順の降順で格納する。
+- 対象set内に同じsource document UUIDのitemが一つ以上存在する場合は、source generation/revisionにかかわらずそのセルをskipし、既存itemのstable ID、source、transform、opacity、color mode、visibility、名前、順序を変更しない。source更新は明示的な`更新`操作だけが行う。全対象がcurrent cell、範囲外、または既存sourceとしてskipされた場合はno-opとする。
+- 前後N枚登録のpreviewは、発行時のsequence identity、active cell、対象set ID、document revisionに固定し、追加／skip件数、最終の上から下の順序、各source UUID／generation、距離、opacityを表示する。previewは文書を変更せず、Applyは全追加を一つのcanonical procedure、一revision、一history entryとして確定する。Cancel、invalid、stale、overflow、allocation/source failureではitem、ID、history、journal、dirty、snapshotを一つも進めない。
 - `編集画像と入れ替え` または item double click は、現在編集 image と選択 item を入れ替える。dirty 保存確認を通し、参照側の transform/opacity 情報を壊さない。
 - light table 全体で重なりを透けさせる option と、前後画像登録時の自動 opacity step を持てる。
 
@@ -611,6 +615,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 
 - `LT-001`: light table set、per-item transform/color/opacity、global opacity
 - `LT-002`: reference-frame alignment、boundary/color sampling、edit image swap
+- `LT-003`: 自然順の前／後／両方向Nセルを線形opacity stepと時系列z-orderでpreviewし、同一source UUIDの既存itemを保持したまま一つのUndo単位で一括登録する
 - `SEQ-001`: cut/cell sequence、前後セル、欠番、thumbnail preview
 - `SEQ-002`: motion check、FPS、loop、step、selection/light table option
 - `SHORT-001`: 全 menu command への single/multi-stroke shortcut、text-focus guard、prefix-free resolve、conflict replacement、永続化、reset

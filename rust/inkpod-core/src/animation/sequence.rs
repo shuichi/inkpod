@@ -145,6 +145,7 @@ pub struct SequenceCellInfo {
 pub(crate) struct SequenceState {
     pub(crate) cells: Vec<SequenceCellSource>,
     pub(super) active_index: Option<usize>,
+    pub(super) revision: u64,
 }
 
 impl SequenceState {

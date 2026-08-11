@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v8 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v9 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -545,6 +545,14 @@ typedef uint32_t InkpodLightTableDisplayMode;
 #define INKPOD_LIGHT_TABLE_REMOVE_ITEM UINT32_C(7)
 #define INKPOD_LIGHT_TABLE_REORDER_ITEM UINT32_C(8)
 #define INKPOD_LIGHT_TABLE_UPDATE_ITEM UINT32_C(9)
+typedef uint32_t InkpodLightTableBulkDirection;
+#define INKPOD_LIGHT_TABLE_BULK_PREVIOUS UINT32_C(1)
+#define INKPOD_LIGHT_TABLE_BULK_NEXT UINT32_C(2)
+#define INKPOD_LIGHT_TABLE_BULK_BOTH UINT32_C(3)
+typedef uint32_t InkpodLightTableBulkAction;
+#define INKPOD_LIGHT_TABLE_BULK_ADD UINT32_C(1)
+#define INKPOD_LIGHT_TABLE_BULK_SKIP_EXISTING UINT32_C(2)
+#define INKPOD_LIGHT_TABLE_BULK_HAS_EXISTING_REVISION (UINT64_C(1) << 0)
 
 /** @brief sequence/motion-check の移動方向型。 */
 typedef uint32_t InkpodSequenceDirection;
@@ -2443,6 +2451,58 @@ typedef struct InkpodLightTableItemInfo {
     uint64_t name_bytes;
 } InkpodLightTableItemInfo;
 
+/** @brief Caller-owned immutable issue-time token for Light Table bulk registration. */
+typedef struct InkpodLightTableBulkRequest {
+    uint32_t struct_size;
+    InkpodLightTableBulkDirection direction;
+    uint64_t target_set_id;
+    uint32_t neighbor_count;
+    uint32_t base_opacity_milli;
+    uint32_t distance_step_milli;
+    uint32_t reserved;
+    uint64_t base_document_revision;
+    uint64_t sequence_revision;
+    uint64_t active_document_uuid_high;
+    uint64_t active_document_uuid_low;
+    uint64_t active_source_generation;
+    uint64_t feature_flags;
+} InkpodLightTableBulkRequest;
+
+/** @brief Caller-owned scalar counts returned by the side-effect-free preview. */
+typedef struct InkpodLightTableBulkPreviewInfo {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t target_set_id;
+    uint64_t entry_count;
+    uint32_t add_count;
+    uint32_t skip_count;
+} InkpodLightTableBulkPreviewInfo;
+
+/** @brief One caller-owned top-to-bottom natural-sequence preview entry. */
+typedef struct InkpodLightTableBulkPreviewEntry {
+    uint32_t struct_size;
+    InkpodLightTableBulkAction action;
+    uint32_t sequence_index;
+    uint32_t cell_number;
+    uint32_t distance;
+    uint32_t opacity_milli;
+    uint64_t document_uuid_high;
+    uint64_t document_uuid_low;
+    uint64_t source_generation;
+    uint64_t existing_source_revision;
+    uint64_t flags;
+} InkpodLightTableBulkPreviewEntry;
+
+/** @brief Caller-owned counts for one bulk commit and its item-ID output span. */
+typedef struct InkpodLightTableBulkSummary {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t target_set_id;
+    uint32_t add_count;
+    uint32_t skip_count;
+    uint64_t item_id_count;
+} InkpodLightTableBulkSummary;
+
 /** @brief sequence cell の UTF-8 名と copied raster source を渡す borrowed record。 */
 typedef struct InkpodSequenceCellInput {
     uint32_t struct_size;
@@ -3871,6 +3931,51 @@ InkpodStatus inkpod_core_light_table_item_get(
     InkpodCore* core,
     uint32_t index,
     InkpodLightTableItemInfo* output);
+/**
+ * @brief Captures an immutable stale-detecting bulk-registration token.
+ *
+ * The caller owns `output`; it contains no pointers. `neighbor_count == 0` is
+ * valid. Opacity values are 0..1000. This owner-thread query does not mutate
+ * document, sequence, history, revisions, IDs, dirty state, or savepoints.
+ */
+InkpodStatus inkpod_core_light_table_bulk_request(
+    InkpodCore* core,
+    uint64_t target_set_id,
+    InkpodLightTableBulkDirection direction,
+    uint32_t neighbor_count,
+    uint32_t base_opacity_milli,
+    uint32_t distance_step_milli,
+    InkpodLightTableBulkRequest* output);
+/**
+ * @brief Copies the exact duplicate, opacity, and top-to-bottom z-order preview.
+ *
+ * Use `entries == NULL`, capacity 0, and stride 0 for the size query. Otherwise
+ * every caller-owned entry must set `struct_size` and stride must cover it.
+ * Existing UUID matches are reported as skips with their preserved revision.
+ * Preview and failure are side-effect free; stale tokens return INVALID_STATE.
+ */
+InkpodStatus inkpod_core_light_table_bulk_preview(
+    InkpodCore* core,
+    const InkpodLightTableBulkRequest* request,
+    InkpodLightTableBulkPreviewEntry* entries,
+    uint64_t entry_capacity,
+    uint64_t entry_stride_bytes,
+    InkpodLightTableBulkPreviewInfo* output);
+/**
+ * @brief Adds all nonduplicate preview entries as one canonical Undo unit.
+ *
+ * `item_id_capacity` must cover the preview add count before commit. For an
+ * all-skipped/no-target no-op, pass NULL/0. New IDs are copied in final
+ * top-to-bottom order. All caller storage remains caller-owned. Invalid, stale,
+ * overflow, allocation, and other failures publish no partial state or IDs.
+ */
+InkpodStatus inkpod_core_light_table_bulk_register(
+    InkpodCore* core,
+    const InkpodLightTableBulkRequest* request,
+    InkpodDispatchResult* result,
+    InkpodLightTableBulkSummary* summary,
+    uint64_t* out_item_ids,
+    uint64_t item_id_capacity);
 /**
  * @brief encoded common raster を decode して light-table item に追加する。
  * @par 契約

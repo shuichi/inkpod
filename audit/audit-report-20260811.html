@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Inkpod Rust Core / Win32 設計レビュー — 2026-08-11</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --surface: #ffffff;
+      --surface-alt: #eef3f7;
+      --ink: #17212b;
+      --muted: #5d6b78;
+      --line: #d8e0e7;
+      --accent: #0b6380;
+      --accent-2: #0f766e;
+      --good: #17633a;
+      --good-bg: #e8f6ed;
+      --warn: #84520a;
+      --warn-bg: #fff4d6;
+      --bad: #9f2d2d;
+      --bad-bg: #fdeaea;
+      --info: #285d91;
+      --info-bg: #eaf2fb;
+      --shadow: 0 10px 30px rgba(25, 42, 56, .08);
+      --radius: 14px;
+      --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      --sans: "Yu Gothic UI", "Meiryo", "Noto Sans JP", system-ui, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #10161c;
+        --surface: #182129;
+        --surface-alt: #202c35;
+        --ink: #edf3f7;
+        --muted: #aebbc5;
+        --line: #34434e;
+        --accent: #68c4df;
+        --accent-2: #68d1c5;
+        --good: #8bd7a8;
+        --good-bg: #173326;
+        --warn: #f2c36d;
+        --warn-bg: #3c2d13;
+        --bad: #ff9f9f;
+        --bad-bg: #3e2022;
+        --info: #9bc7f2;
+        --info-bg: #1c3044;
+        --shadow: 0 12px 34px rgba(0, 0, 0, .24);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.75;
+    }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    code, kbd {
+      font-family: var(--mono);
+      font-size: .91em;
+      overflow-wrap: anywhere;
+    }
+    code {
+      padding: .08em .32em;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--surface-alt);
+    }
+    pre {
+      margin: 1rem 0;
+      padding: 1rem 1.1rem;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-alt);
+      font: .88rem/1.65 var(--mono);
+    }
+    pre code { padding: 0; border: 0; background: transparent; }
+    h1, h2, h3, h4 { line-height: 1.35; letter-spacing: .01em; }
+    h1 { margin: .35rem 0 .75rem; font-size: clamp(1.9rem, 5vw, 3rem); }
+    h2 {
+      margin: 0 0 1.15rem;
+      padding-bottom: .5rem;
+      border-bottom: 2px solid var(--line);
+      font-size: clamp(1.45rem, 3vw, 2rem);
+    }
+    h3 { margin: 1.5rem 0 .65rem; font-size: 1.2rem; }
+    p { margin: .7rem 0; }
+    ul, ol { padding-left: 1.4rem; }
+    li + li { margin-top: .3rem; }
+    .page { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+    header.hero {
+      padding: 3.4rem 0 2.2rem;
+      color: #f6fbfd;
+      background:
+        radial-gradient(circle at 92% 10%, rgba(104, 209, 197, .32), transparent 32%),
+        linear-gradient(135deg, #12384a, #0b6380 57%, #0f766e);
+    }
+    .eyebrow {
+      display: inline-block;
+      padding: .23rem .66rem;
+      border: 1px solid rgba(255,255,255,.44);
+      border-radius: 999px;
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .hero .lead { max-width: 920px; margin: 0; font-size: 1.08rem; color: #dbeef3; }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: .75rem;
+      margin-top: 1.55rem;
+    }
+    .meta-item {
+      padding: .7rem .85rem;
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 10px;
+      background: rgba(6, 30, 40, .22);
+    }
+    .meta-item small { display: block; color: #c6e0e7; }
+    .meta-item strong { display: block; margin-top: .1rem; }
+    nav.toc {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      backdrop-filter: blur(10px);
+    }
+    .toc .page { display: flex; gap: 1rem; padding: .65rem 0; overflow-x: auto; }
+    .toc a { flex: none; color: var(--muted); font-size: .87rem; font-weight: 700; text-decoration: none; }
+    .toc a:hover { color: var(--accent); }
+    main { padding: 1.8rem 0 4rem; }
+    section {
+      margin: 0 0 1.4rem;
+      padding: clamp(1.1rem, 3vw, 2rem);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .verdict {
+      margin: 0 0 1.3rem;
+      padding: 1rem 1.15rem;
+      border-left: 5px solid var(--warn);
+      border-radius: 9px;
+      background: var(--warn-bg);
+    }
+    .verdict strong { color: var(--warn); }
+    .callout {
+      margin: 1rem 0;
+      padding: .9rem 1rem;
+      border: 1px solid var(--line);
+      border-left-width: 5px;
+      border-radius: 9px;
+      background: var(--surface-alt);
+    }
+    .callout.good { border-left-color: var(--good); background: var(--good-bg); }
+    .callout.warn { border-left-color: var(--warn); background: var(--warn-bg); }
+    .callout.bad { border-left-color: var(--bad); background: var(--bad-bg); }
+    .callout.info { border-left-color: var(--info); background: var(--info-bg); }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+    .card {
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-alt);
+    }
+    .card h3 { margin-top: 0; }
+    .table-wrap { overflow-x: auto; margin: .8rem 0 1.2rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .93rem; }
+    th, td { padding: .68rem .72rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--surface-alt); font-weight: 750; }
+    tbody tr:nth-child(even) { background: color-mix(in srgb, var(--surface-alt) 45%, transparent); }
+    .badge {
+      display: inline-block;
+      padding: .16rem .5rem;
+      border-radius: 999px;
+      font-size: .75rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .ok { color: var(--good); background: var(--good-bg); }
+    .partial { color: var(--warn); background: var(--warn-bg); }
+    .risk { color: var(--bad); background: var(--bad-bg); }
+    .note { color: var(--info); background: var(--info-bg); }
+    .metric {
+      display: flex;
+      align-items: baseline;
+      gap: .5rem;
+      margin-bottom: .35rem;
+    }
+    .metric strong { font-size: 1.75rem; line-height: 1; color: var(--accent); }
+    .metric span { color: var(--muted); font-size: .88rem; }
+    .architecture {
+      display: grid;
+      grid-template-columns: 1fr 52px 1.15fr 52px 1.25fr 52px 1fr;
+      align-items: stretch;
+      gap: .35rem;
+      margin: 1rem 0;
+    }
+    .arch-box {
+      padding: .9rem;
+      border: 2px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-alt);
+    }
+    .arch-box strong { display: block; margin-bottom: .35rem; color: var(--accent); }
+    .arch-box ul { margin: .25rem 0; padding-left: 1.2rem; font-size: .88rem; }
+    .arch-arrow { display: grid; place-items: center; color: var(--muted); font-size: 1.5rem; font-weight: 800; }
+    .lane {
+      margin: .45rem 0;
+      padding: .45rem .55rem;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+      font-size: .84rem;
+    }
+    .lane.good { border-color: var(--good); }
+    .lane.bad { border-color: var(--bad); }
+    .finding {
+      margin: 1rem 0;
+      padding: 1rem 1.1rem;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+    }
+    .finding-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+    .finding-head h3 { margin: 0; flex: 1; }
+    .priority { min-width: 2.5rem; text-align: center; }
+    .evidence { color: var(--muted); font-size: .88rem; }
+    .small { color: var(--muted); font-size: .86rem; }
+    details { margin: .8rem 0; border: 1px solid var(--line); border-radius: 8px; }
+    summary { cursor: pointer; padding: .7rem .9rem; font-weight: 700; background: var(--surface-alt); }
+    details > div { padding: .3rem .9rem .9rem; }
+    footer { padding: 1.5rem 0 2.5rem; color: var(--muted); text-align: center; font-size: .85rem; }
+    @media (max-width: 900px) {
+      .meta-grid, .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .architecture { grid-template-columns: 1fr; }
+      .arch-arrow { transform: rotate(90deg); min-height: 32px; }
+    }
+    @media (max-width: 620px) {
+      .page { width: min(100% - 20px, 1180px); }
+      .meta-grid, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      header.hero { padding-top: 2rem; }
+      section { border-radius: 10px; }
+      th, td { padding: .55rem; }
+    }
+    @media print {
+      :root { --bg: #fff; --surface: #fff; --surface-alt: #f4f6f8; --ink: #111; --muted: #444; --line: #bbb; }
+      body { font-size: 10pt; }
+      header.hero { padding: 1.2rem 0; color: #111; background: #fff; border-bottom: 2px solid #222; }
+      .hero .lead, .meta-item small { color: #333; }
+      .meta-item { border-color: #999; background: #fff; }
+      nav.toc { display: none; }
+      section { break-inside: avoid; box-shadow: none; margin-bottom: .6rem; }
+      .finding { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="page">
+      <span class="eyebrow">Architecture review</span>
+      <h1>Inkpod Rust Core / Win32<br>境界・プリミティブ・データ構造レビュー</h1>
+      <p class="lead">「Rust Core がすべての基本動作を所有し、Win32 は値／Rust-owned IDでプリミティブを呼ぶシェルである」「Genesis・Asset・操作ログから同じ画像を再現し、Undo/Redoもそのログに含める」という設計原則に対して、現行コードを静的レビューした結果です。</p>
+      <div class="meta-grid">
+        <div class="meta-item"><small>レビュー日</small><strong>2026-08-11 JST</strong></div>
+        <div class="meta-item"><small>対象ブランチ / HEAD</small><strong>main / 20230b1</strong></div>
+        <div class="meta-item"><small>Primitive catalog</small><strong>79件（再生可能 78件）</strong></div>
+        <div class="meta-item"><small>Replay contract</small><strong>epoch 14 / format 17</strong></div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="目次">
+    <div class="page">
+      <a href="#summary">総括</a>
+      <a href="#architecture">現行構造</a>
+      <a href="#roles">役割分担</a>
+      <a href="#boundary">C ABI境界</a>
+      <a href="#primitives">プリミティブ</a>
+      <a href="#data">データ構造</a>
+      <a href="#findings">主要所見</a>
+      <a href="#recommendations">推奨移行</a>
+      <a href="#verification">検証</a>
+    </div>
+  </nav>
+
+  <main class="page">
+    <section id="summary">
+      <h2>1. 総括</h2>
+      <div class="verdict">
+        <strong>結論:</strong> 文書の意味、画像編集、履歴、永続化、決定的再生の権威は、現状すでにRust Core側にあり、設計の核は成立しています。ただし、Win32から見た「単一のシステムコール表」は未完成です。値／IDだけのABI-v3プリミティブは79件中4件に限られ、大半は汎用C++クロージャと個別C ABIを通ります。また、Light Table swapはログを破棄する明示的例外です。したがって、<em>Rust内部のcanonical journalは再生可能</em>ですが、<em>C++→Rust呼び出し列そのものは閉じた再生ログではありません</em>。
+      </div>
+
+      <div class="grid-3">
+        <div class="card"><div class="metric"><strong>78/79</strong><span>catalog primitive</span></div><p>canonical procedureとして再生可能。残る1件はsession-onlyのLight Table swapです。</p></div>
+        <div class="card"><div class="metric"><strong>4/79</strong><span>pointer-free public primitive opcode</span></div><p>ABI-v3の共通値／ID経路が公開しているprimitive数です。</p></div>
+        <div class="card"><div class="metric"><strong>3</strong><span>journal event kinds</span></div><p><code>Commit</code>、<code>HistoryMove</code>、<code>BranchCut</code>に語彙が閉じています。</p></div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>評価軸</th><th>判定</th><th>要約</th></tr></thead>
+          <tbody>
+            <tr><td>画像編集・文書規則のRust所有</td><td><span class="badge ok">適合</span></td><td>C++側にraster編集、layer/plane規則、選択演算、Undo/Redo、native codecの別実装は見つかりません。</td></tr>
+            <tr><td>Win32のOS shell化</td><td><span class="badge ok">概ね適合</span></td><td>HWND、COM、dialog、clipboard、thread、DPI、Direct2D/D3DはWin32側です。</td></tr>
+            <tr><td>プリミティブの値／Rust-owned ID境界</td><td><span class="badge partial">部分適合</span></td><td>v3は適合しますが4 opcodeのみ。legacy mutationはC++ memoryのborrowed pointer/spanを同期コピーします。</td></tr>
+            <tr><td>canonical procedureと決定的replay</td><td><span class="badge ok">強く適合</span></td><td>Genesis、immutable Asset、procedure、pre/post digestからfresh Coreを再構築します。</td></tr>
+            <tr><td>Undo/Redoを含む非破壊履歴</td><td><span class="badge ok">文書内は適合</span></td><td>Undo/Redo/JumpはHistoryMoveとして記録され、Undo後の旧tailもbranchとして残ります。</td></tr>
+            <tr><td>すべての操作を含む完全なsession replay</td><td><span class="badge risk">未適合</span></td><td>New/Open/Recovery等のGenesis置換とLight Table swapは、文書journalの外側です。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout info">
+        <strong>「完全に非破壊」の正確な意味:</strong> 現状は、文書編集について「Genesis + immutable assets + canonical procedures + history eventsを正本とし、materialized documentやinverse deltaを派生cacheにする」という意味で非破壊です。RAM上の作業documentは更新され、session Genesisの明示置換もあります。純粋関数型の「メモリを一切上書きしない」設計や、アプリ操作全体のevent sourcingではありません。
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>2. 現行アーキテクチャの実像</h2>
+      <div class="architecture" role="img" aria-label="Win32からRust Core、rendererへ至る現行経路">
+        <div class="arch-box">
+          <strong>Win32 UI / Input</strong>
+          <ul><li>command / dialog</li><li>pointer history</li><li>OS I/O</li><li>presentation cache</li></ul>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box">
+          <strong>CoreHost queue</strong>
+          <div class="lane good"><b>PrimitiveWork</b><br>pointer-free requestを値copy</div>
+          <div class="lane bad"><b>AdapterWork</b><br>token → side tableの<code>std::function</code></div>
+          <div class="lane"><b>StrokeWork / ControlWork</b><br>入力session・lifecycle</div>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box">
+          <strong>Versioned C ABI</strong>
+          <div class="lane good"><b>ABI-v3</b><br>value + generation ObjectId</div>
+          <div class="lane bad"><b>Legacy feature API</b><br>borrowed record/spanをcall中にcopy</div>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box">
+          <strong>Rust Core</strong>
+          <ul><li>PrimitiveRequest（4種）</li><li>CanonicalInvocation（広いcatalog）</li><li>transaction / journal / assets</li><li>immutable snapshot</li></ul>
+        </div>
+      </div>
+      <p>Coreはowner engine threadでsingle-writerです。Coreが生成したimmutable snapshotだけがRenderer threadへ所有権移譲され、Direct2D/D3D11/DXGI resourceとPresentはRenderer側に留まります。これは意図した三分割に合っています。</p>
+      <div class="callout warn">
+        <strong>境界の重要な二重性:</strong> queued recordの<code>AdapterWork</code>自体はpointer-freeですが、<code>input_token</code>がC++ side tableの<code>AdapterInput</code>を参照し、そこに任意の<code>CoreOperation = std::function&lt;InkpodStatus(InkpodCore*)&gt;</code>が入ります。よってqueue recordを記録してもmutationの意味は復元できません。<code>PrimitiveWork</code>だけが、現状の「記録可能なsystem-call record」に相当します。
+      </div>
+      <p class="evidence">根拠: <code>apps/windows/app/core_host.cpp:85-122, 515-652, 1151-1215</code>、<code>apps/windows/app/core_host.h:77-154</code>、<code>rust/inkpod-ffi/src/v3/mod.rs:371-515, 815-869</code></p>
+    </section>
+
+    <section id="roles">
+      <h2>3. Rust CoreとWin32の役割レビュー</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>責務</th><th>現在の所有者</th><th>コード上の確認</th><th>評価</th></tr></thead>
+          <tbody>
+            <tr><td>文書、layer/plane、palette、selection、guide/grid、Light Table、vector、adjustment</td><td>Rust Core</td><td><code>CellDocument</code>が集約し、typed IDでtreeを構成。</td><td><span class="badge ok">適合</span></td></tr>
+            <tr><td>stroke/fill/filter/effect/transform/vector処理</td><td>Rust Core / inkpod-image</td><td>Win32 commandはC ABI呼出しへ変換。C++に同等algorithmなし。</td><td><span class="badge ok">適合</span></td></tr>
+            <tr><td>transaction、revision、stable ID、history、journal、replay</td><td>Rust Core</td><td>commit時に文書・ID・revision・history・journalを一括公開。</td><td><span class="badge ok">適合</span></td></tr>
+            <tr><td>.inkpod encode/decode、asset検証、staged open</td><td>Rust Core + inkpod-format</td><td>Windowsはpath/dialogを扱い、形式と再生はRust。</td><td><span class="badge ok">適合</span></td></tr>
+            <tr><td>HWND、message、COM、clipboard、file dialog、DPI、accessibility</td><td>C++ / Win32</td><td>Rust domain crateのWindows API参照ゼロをarchitecture testが検査。</td><td><span class="badge ok">適合</span></td></tr>
+            <tr><td>GPU resource、tile upload、cache、Present</td><td>C++ Renderer</td><td>Rust-owned snapshotをconsumeし、文書状態へ逆書込みしない。</td><td><span class="badge ok">適合</span></td></tr>
+            <tr><td>調整レイヤー編集用のparameters/name/visible一覧</td><td>Rustに正本、C++にも非revision-bound copy</td><td><code>EffectsUiState::adjustments</code>を編集・選択の入力に使用。</td><td><span class="badge risk">境界逸脱</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>確認できたC++側の例外: 調整レイヤーcache</h3>
+      <p><code>EffectsUiState</code>は<code>AdjustmentLayerUiState { id, visible, FilterJob, name }</code>のvectorを持ちます。Create時だけpushし、Update時はC++ copyを更新します。一方、document resetではclearされ、Undo/RedoはCoreだけを移動してこのvectorを再同期しません。編集dialog、visibility変更、previous/next選択はこのvectorを参照します。Rustには<code>Core::adjustment</code> queryがありますが、対応C ABI queryは見つかりませんでした。</p>
+      <div class="callout bad">
+        これは画像処理algorithmのC++重複ではありませんが、<strong>domain parameterを持つpresentation cacheがCore revisionに束縛されず、mutationの入力にも使われる</strong>状態です。例として調整レイヤーのUpdateをUndoしてもdialogの初期値が戻らない、CreateをUndoしてもC++ listに存在し続ける、保存済みdocumentを開くと既存調整レイヤーを編集対象として再構築できない、という不整合がコード上起こり得ます。
+      </div>
+      <p class="evidence">根拠: <code>apps/windows/app/frontend_state.h:109-113, 320-324</code>、<code>apps/windows/ui/main_window_runtime.cpp:1032-1039, 4294-4301, 4848-4863, 4886-4996, 12730-12748</code>、<code>rust/inkpod-core/src/effects/preview.rs:358-370</code></p>
+    </section>
+
+    <section id="boundary">
+      <h2>4. C++ / Rustメモリ境界</h2>
+      <p>現在の境界は、メモリ安全・寿命管理としては堅牢です。しかし、依頼で示された「primitive control planeはcall-by-valueまたはRust-owned ID/pointerのみ」という厳格な規則には、まだ全面適合していません。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>経路</th><th>現在の契約</th><th>安全性</th><th>厳格なprimitive原則</th></tr></thead>
+          <tbody>
+            <tr><td>ABI-v3 primitive</td><td>固定幅<code>InkpodPrimitiveRequestV3</code>を値copy。可変payloadはgeneration付き<code>InkpodObjectId</code>。</td><td><span class="badge ok">良好</span></td><td><span class="badge ok">適合</span></td></tr>
+            <tr><td>ABI-v3 bulk ingest</td><td>caller spanを検証し、復帰前にRust registryへdeep-copy。</td><td><span class="badge ok">良好</span></td><td><span class="badge ok">data-planeとして適合</span></td></tr>
+            <tr><td>legacy mutation API</td><td>C record、UTF-8、vector/span pointerをcall中だけborrowし、Rust owned値へ同期copy。</td><td><span class="badge ok">契約上安全</span></td><td><span class="badge risk">非適合</span></td></tr>
+            <tr><td>render snapshot</td><td>Rust-owned opaque pointer。Rendererが全経路でexactly-once release。</td><td><span class="badge ok">良好</span></td><td><span class="badge ok">許容されたRust pointer</span></td></tr>
+            <tr><td>CoreHost Adapter lane</td><td>tokenの先にC++ callableを保存し、engine threadで任意C ABI callを実行。</td><td><span class="badge ok">lifetime管理あり</span></td><td><span class="badge risk">記録不能</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>適合しているv3 object registry</h3>
+      <ul>
+        <li><code>InkpodObjectId</code>は<code>generation + object_type + value</code>で、wrong Core、stale、wrong typeを拒否します。</li>
+        <li>Rust側<code>ObjectRegistry</code>は単調増加ID、<code>BTreeMap</code>、4096 object、合計768 MiB等の上限を持ちます。</li>
+        <li>colors、stroke samples、rasterを先にRust-owned objectへ取り込み、primitive requestはIDのみを参照できます。</li>
+        <li>snapshot、thumbnail、export bytes、taskも同じgeneration-scoped modelで扱えます。</li>
+      </ul>
+      <p class="evidence">根拠: <code>include/inkpod/core_ffi.h:966-1010, 5111-5259</code>、<code>rust/inkpod-ffi/src/abi/v3_records.rs:3-133</code>、<code>rust/inkpod-ffi/src/v3/mod.rs:60-206, 254-368</code></p>
+
+      <h3>安全だが、目標境界ではないlegacy span</h3>
+      <p>例えばstrokeはC++のsample spanをRust側で<code>Vec&lt;StrokeSample&gt;</code>へ変換してからCoreへ渡します。call復帰後にpointerを保持せず、FFI panicもstatusへ封じ込めるため、現在の実装をmemory unsafeとは評価しません。ただし、そのcall recordだけを保存して後で再実行することはできないため、primitive syscallのcontrol planeとしては不適合です。</p>
+      <p class="evidence">根拠: <code>rust/inkpod-ffi/src/support/domain.rs:203-260</code>、<code>rust/inkpod-ffi/src/paint_history/paint.rs:479-518</code>、<code>rust/inkpod-ffi/src/support/boundary.rs:203-253</code></p>
+
+      <h3>snapshot ownership</h3>
+      <p>現行Rendererはlegacyの<code>InkpodSnapshot*</code>を使いますが、これはRustが所有するimmutable objectへのopaque pointerであり、依頼の許容範囲です。<code>SnapshotEnvelope</code>はsuccess、stale rejection、queue replacement/failure、surface close、shutdownの全経路で所有権をconsumeします。将来はmove-only RAII wrapperにするとmanual release事故をさらに減らせますが、設計逸脱ではありません。</p>
+      <p class="evidence">根拠: <code>apps/windows/renderer/renderer_host.h:65-74</code>、<code>apps/windows/app/core_host.cpp:956-1018</code>、<code>apps/windows/renderer/canvas.cpp:464-517, 2977-3027</code></p>
+    </section>
+
+    <section id="primitives">
+      <h2>5. Rust Coreプリミティブ機能</h2>
+      <p>closed catalogはstable <code>PrimitiveId</code>順の79件です。各entryはschema version、canonical name、argument-schema digest、semantics revision、work formula、replayable flagを持ち、catalog全体のdigestがreplay contractに入ります。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>機能群</th><th>件数</th><th>代表例</th></tr></thead>
+          <tbody>
+            <tr><td>紙・frame metadata</td><td>1</td><td>UpdatePaperFrames</td></tr>
+            <tr><td>layer / plane / edit targets</td><td>16</td><td>Create/Duplicate/Delete/Reorder/Convert/Merge、properties、DeleteHiddenLayers</td></tr>
+            <tr><td>main line / palette</td><td>2</td><td>SetMainLineColor、ReplacePalette</td></tr>
+            <tr><td>guide / grid</td><td>5</td><td>Add/Move/DeleteGuide、SetGrid、DeleteAllGuides</td></tr>
+            <tr><td>paint / effect / filter / adjustment / color replacement</td><td>21</td><td>Stroke、Fill、Geometry、Gradient、Airbrush、Blur、Stamp、Filter、Adjustment</td></tr>
+            <tr><td>selection / floating</td><td>9</td><td>Apply/Invert/Clear/Resize、SelectionTo/FromLayer、CommitFloating</td></tr>
+            <tr><td>document transform</td><td>3</td><td>Mirror、Rotate、Resize</td></tr>
+            <tr><td>vector</td><td>8</td><td>path/fill/erase/connect/width、rasterize/vectorize</td></tr>
+            <tr><td>raster import</td><td>1</td><td>ImportRasterAsset</td></tr>
+            <tr><td>Light Table</td><td>13</td><td>set/item CRUD、opacity、active、SwapWithActive</td></tr>
+            <tr><th>合計</th><th>79</th><th>78 replayable + 1 session-only</th></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="evidence">根拠: <code>rust/inkpod-core/src/primitive/catalog.rs:45-310, 312-386</code></p>
+
+      <h3>CanonicalProcedureの永続record</h3>
+      <pre><code>CanonicalProcedure {
+  procedure_id, primitive_id, primitive_schema_version, replay_epoch,
+  base_state_id, committed_state_id,
+  input_ids[], output_ids[], asset_ids[],
+  canonical_arguments, canonical_payload, payload_digest,
+  pre_state_digest, post_state_digest
+}</code></pre>
+      <p>永続fieldは固定幅値、stable ID、Rust-owned immutable <code>AssetId</code>、canonical bytes、digestです。caller pointer、外部path、frontend command ID、一時object IDを持ちません。decode後はtyped invocationを再構築し、再encodeが元のcanonical bytesと一致することも確認します。</p>
+      <p class="evidence">根拠: <code>rust/inkpod-core/src/primitive/model.rs:389-407</code>、<code>rust/inkpod-core/src/primitive/invocation.rs:464-492</code>、<code>SPEC.md:498-507</code></p>
+
+      <h3>実装は「意味上は一つ、物理的には二つ」のexecutor</h3>
+      <div class="grid-2">
+        <div class="card">
+          <h3>PrimitiveRequest path</h3>
+          <p>公開requestはSetMainLineColor、ReplacePalette、ApplyRasterStroke、ImportRasterAssetの4 variants。<code>PrimitiveTransaction</code>がworking <code>CellDocument</code>とID cursorを持ち、一回のpublishでdocument、revision、history、journal、assets、cache、counterを更新します。</p>
+          <p class="evidence"><code>primitive/model.rs:328-386</code><br><code>primitive/executor.rs:38-174, 343-492</code></p>
+        </div>
+        <div class="card">
+          <h3>CanonicalInvocation path</h3>
+          <p>広いfeature catalogはcrate-private typed invocationへ正規化し、Core全体をstaged cloneして既存feature methodを実行。exactly one revision/historyを確認後、procedureを作りstaged Coreをpublishします。</p>
+          <p class="evidence"><code>primitive/invocation.rs:19-318, 956-1684, 2077-2236</code></p>
+        </div>
+      </div>
+      <p>live実行とreplayは各primitive内では同じtyped invocation経路を共有し、どちらもcanonical journalへ到達します。そのため決定性の意味は成立しています。しかしtransaction/publish codeが二つあるため、「唯一のexecutor」という構造上の契約には未到達で、atomicity、ID予約、no-op、cache invalidationの将来driftと、Core全体cloneのコストが残ります。</p>
+
+      <h3>Undo / Redo / branch</h3>
+      <ul>
+        <li><code>JournalEntry</code>は<code>Commit</code>、<code>HistoryMove</code>、<code>BranchCut</code>だけです。</li>
+        <li>Undo、Redo、Jumpはdocumentを派生deltaで移動し、HistoryMove eventを追加します。</li>
+        <li>Undo後の新規commitはBranchCutを記録しますが、非activeな旧redo tailを消しません。</li>
+        <li>inverse/forward cacheを解放しても、Genesis + assets + journalから再構築できます。</li>
+        <li>no-op、invalid、cancel、staleはrevision、ID、history、journalを進めません。</li>
+      </ul>
+      <p class="evidence">根拠: <code>rust/inkpod-core/src/journal.rs:63-255, 440-604, 617-883</code>、<code>rust/inkpod-core/src/history.rs:7-184, 321-359</code></p>
+
+      <h3>再生保証の境界</h3>
+      <div class="callout good"><strong>保証されるもの:</strong> 同じreplay epoch、Genesis、immutable assets、journal event列から、同じCore document state digestとcanonical composite digestを得ること。現行goldenはfixed-point/int mathと複数effectを含めて検証しています。</div>
+      <div class="callout warn"><strong>保証されないもの:</strong> Win32 UI state、window配置、GPU cache、thread timing、外部path、OS codec状態を含むアプリsession全体。またNew/Open/Recovery/Sequence activation等のGenesis置換前の履歴は、置換後documentのjournalには残りません。</div>
+
+      <h3>明示的例外: LightTableSwapWithActive</h3>
+      <p><code>LightTableSwapWithActive</code>はstable primitive IDを持つ一方、catalog上<code>replayable: false</code>です。実装はincoming/outgoing imageをflattenし、新しい<code>CellDocument</code>を公開後に<code>reset_history(true)</code>を呼び、StateId、ProcedureId、journal、Genesisを再初期化します。これは今回提示された「すべてのprimitiveがログに入り、完全に非破壊」という定義と直接衝突します。</p>
+      <p><strong>設計上は二択です。</strong> (A) incoming/outgoing sourceをimmutable AssetIdで参照するreplayable procedureにして旧状態をbranchとして残す、または (B) primitive catalogから外し、Open/Replaceと同じdocument lifecycle / Genesis replacementとして明示的に分類するべきです。</p>
+      <p class="evidence">根拠: <code>rust/inkpod-core/src/primitive/catalog.rs:302-309</code>、<code>rust/inkpod-core/src/animation/light_table_operations.rs:682-769</code>、<code>rust/inkpod-core/src/core.rs:575-587</code>、<code>docs/file-format.md:97-99</code></p>
+    </section>
+
+    <section id="data">
+      <h2>6. Rust Coreのデータ構造</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>構造</th><th>現在の設計</th><th>評価</th></tr></thead>
+          <tbody>
+            <tr><td><code>Core</code></td><td>assets、document、別々のdocument/view revision、history cursor、State/Procedure/Event/Branch authority、Genesis/journal、preview/stroke、render cache、secondary views、sequence/editor stateを所有。</td><td><span class="badge ok">権威が集約</span></td></tr>
+            <tr><td><code>CellDocument</code></td><td>UUID、DocumentId/CellId、base surface、寸法/DPI/frame、main-line/palette、layer/plane tree、selection、guide/grid、Light Table、vector、adjustments。</td><td><span class="badge ok">Rust domain model</span></td></tr>
+            <tr><td><code>LayerNode / PlaneNode</code></td><td>stable ID、kind、name、visible/editable、opacity。Planeはtyped <code>PixelFormat</code>の<code>TileRaster</code>を所有。</td><td><span class="badge ok">型付き</span></td></tr>
+            <tr><td><code>TileRaster</code></td><td><code>BTreeMap&lt;TileCoord, Arc&lt;Tile&gt;&gt;</code>。疎allocate、決定的iteration、<code>Arc::make_mut</code> COW。</td><td><span class="badge ok">Undo/snapshot向き</span></td></tr>
+            <tr><td><code>AssetStore</code></td><td>canonical payload由来のBLAKE3-256 <code>AssetId</code>、immutable Arc payload、dedup、descriptor/ID再検証。</td><td><span class="badge ok">replay向き</span></td></tr>
+            <tr><td><code>CanonicalProcedure</code></td><td>stable IDs、AssetIds、canonical arguments/payload、pre/post digest。</td><td><span class="badge ok">永続操作record</span></td></tr>
+            <tr><td>History cache</td><td>Pixels delta、Palette、MainLineColor、またはbefore/after <code>CellDocument</code>。procedureとbranch IDも保持。</td><td><span class="badge ok">派生cache</span></td></tr>
+            <tr><td><code>RenderSnapshot</code></td><td>owned immutable tiles/vector/pass/LUT/view。tile bytesは<code>Arc</code>共有。</td><td><span class="badge partial">dirty metadata不足</span></td></tr>
+            <tr><td>Native file</td><td><code>META/GENS/ASST/PROC/EDIT</code>が権威。<code>CKPT</code>は任意cache。保存前にjournal replayを検証。</td><td><span class="badge ok">event-source準拠</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="evidence">代表根拠: <code>rust/inkpod-core/src/core.rs:318-479</code>、<code>rust/inkpod-core/src/document/model.rs:3-74</code>、<code>rust/inkpod-image/src/raster.rs:108-115, 211-264</code>、<code>rust/inkpod-core/src/asset.rs:247-405</code>、<code>rust/inkpod-core/src/snapshot.rs:24-205, 466-655</code></p>
+
+      <h3>stable identityの到達点</h3>
+      <p><code>DocumentId</code>、<code>CellId</code>、<code>LayerId</code>、<code>PlaneId</code>、<code>GuideId</code>、Light Table、Vector、View、および意味別revisionはnewtype化されています。一方、<code>ProjectId</code>、<code>CutId</code>、<code>FrameId</code>、<code>SequenceId</code>はまだありません。現行canonical hierarchyはstandalone Cell modelで、sequenceはdocument UUID + source generation + <code>Vec</code> indexを使います。</p>
+      <div class="callout warn">現行SPECのstandalone cell / sequence navigationには整合しますが、長期設計で要求されるproject/cut/frame/sequenceの永続ID namespaceには未到達です。導入時はprimitive schema、digest、ID high-watermark、replay epoch、top-level format versionを一緒に更新する必要があります。</div>
+      <p class="evidence">根拠: <code>rust/inkpod-core/src/identity.rs:35-65</code>、<code>rust/inkpod-core/src/primitive/digest.rs:292-300</code>、<code>rust/inkpod-core/src/animation/sequence.rs:17-35, 125-148</code>、<code>docs/file-format.md:596-605</code></p>
+
+      <h3>hardening上のデータ構造課題</h3>
+      <ul>
+        <li><strong>Stable ID上限:</strong> 永続ID上限は<code>0x7fff_ffff_ffff_ffff</code>ですが、<code>StableIdCursor::take_raw</code>は<code>saturating_add</code>して無条件に値を返します。上限直前でchecked reservationし、失敗時にdocument/journal/IDを全く進めない契約とtestが必要です。</li>
+        <li><strong>Snapshot delta:</strong> <code>RenderSnapshot</code>はrevision付きtileを持ちますが、明示的なdirty rect、removed tile、invalidation spanを持ちません。Rendererはsnapshot比較から推論します。Core snapshot contractに合わせるならbounded delta metadataが必要です。</li>
+        <li><strong>Core clone:</strong> <code>CanonicalInvocation</code> pathはCore全体をcloneしてpublishします。tile/assetsはArc/COWですが、長いhistory/journalとmetadata vectorのclone costは増えます。</li>
+        <li><strong>非有限zoom:</strong> <code>ZoomFactor::clamped</code>はNaNを拒否する一方、±Infinityを上下限へclampします。非有限値拒否という不変条件へ揃える余地があります。</li>
+      </ul>
+      <p class="evidence">根拠: <code>rust/inkpod-core/src/lib.rs:182</code>、<code>rust/inkpod-core/src/identity.rs:104-165</code>、<code>rust/inkpod-core/src/snapshot.rs:186-205</code>、<code>rust/inkpod-core/src/primitive/invocation.rs:2114-2235</code>、<code>rust/inkpod-core/src/coordinate.rs:179-184</code></p>
+    </section>
+
+    <section id="findings">
+      <h2>7. 主要所見と優先度</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>優先度</th><th>所見</th><th>影響</th></tr></thead>
+          <tbody>
+            <tr><td>F-01</td><td><span class="badge risk priority">P1</span></td><td>Win32 mutation境界が4-opcode v3と任意closure/legacy APIに分裂</td><td>C++→Rust呼出列を保存しても再生不能。境界の監査・schema evolutionが閉じない。</td></tr>
+            <tr><td>F-02</td><td><span class="badge risk priority">P1</span></td><td>調整レイヤーC++ cacheがCore revisionから再構築されない</td><td>Open、Undo/Redo、Jump後の編集値・存在・可視性がstaleになり得る。</td></tr>
+            <tr><td>F-03</td><td><span class="badge risk priority">P1</span></td><td>LightTableSwapWithActiveがprimitiveなのに非replay・Genesis reset</td><td>「全primitiveが非破壊ログに入る」という原則の明示的反例。</td></tr>
+            <tr><td>F-04</td><td><span class="badge partial priority">P2</span></td><td>Rust内部のcanonical publish実装が2系統</td><td>atomicity、ID、no-op、cache invalidationの意味driftとclone cost。</td></tr>
+            <tr><td>F-05</td><td><span class="badge partial priority">P2</span></td><td>StableIdCursorが永続上限でchecked failureしない</td><td>極限値でID契約外値、またはatomic failure契約の破綻。</td></tr>
+            <tr><td>F-06</td><td><span class="badge partial priority">P2</span></td><td>Project/Cut/Frame/Sequenceのstable IDが未実装</td><td>standalone Cellから永続制作階層へ拡張するとindex/UUID依存が残る。</td></tr>
+            <tr><td>F-07</td><td><span class="badge partial priority">P2</span></td><td>全78 replayable IDのcatalog-driven conformance testがない</td><td>catalog/route inventoryは網羅性を検査するが、全primitiveの成功・no-op・replayを意味検証しない。</td></tr>
+            <tr><td>F-08</td><td><span class="badge note priority">P3</span></td><td>snapshotに明示dirty/removed情報がない</td><td>frontend cache invalidationがsnapshot比較へ依存。</td></tr>
+            <tr><td>F-09</td><td><span class="badge note priority">P3</span></td><td>契約文書・headerコメントにversion drift</td><td><code>docs/ffi.md</code>はepoch 12/format 15、実装は14/17。headerにもABI v8/v9記述差分。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout info">
+        <strong>重要:</strong> F-01は現在のlegacy APIが直ちにmemory unsafeという指摘ではありません。境界で検証し、Rust-owned値へ同期copyし、panicを封じ込める実装は確認できました。問題は、primitive control planeが値／IDの閉じたrecordになっておらず、C++側の呼出列自体を監査・永続化・再生できないことです。
+      </div>
+    </section>
+
+    <section id="recommendations">
+      <h2>8. 推奨する目標構造と移行順序</h2>
+
+      <h3>Phase 0 — replay境界を用語として固定</h3>
+      <ol>
+        <li><strong>Document primitive</strong>は必ずcanonical procedureとなり、成功commitだけがjournalへ入る。</li>
+        <li><strong>History move</strong>はUndo/Redo/Jumpで、同じjournalに入る。</li>
+        <li><strong>Session / Genesis replacement</strong>はprimitiveではない、と明示する。全session replayが必要なら別の上位journalを導入する。</li>
+        <li>Light Table swapをdocument primitiveとして残すか、session replacementへ再分類するかを先に決める。</li>
+      </ol>
+
+      <h3>Phase 1 — C++の権威cacheを解消</h3>
+      <ol>
+        <li>stable LayerIdでadjustment metadata/parametersを取得するbounded Rust queryまたはpresentation snapshotをC ABIへ追加。</li>
+        <li>Open、Undo/Redo/Jump、document replacement、revision change後にCoreからUI projectionを再構築。</li>
+        <li><code>EffectsUiState::adjustments</code>は削除するか、session/generation/document revision/digestに束縛された純粋cacheにする。</li>
+      </ol>
+
+      <h3>Phase 2 — 全mutationを一つのvalue/ID syscall表へ</h3>
+      <pre><code>PrimitiveCallVn {
+  struct_size, abi_version,
+  primitive_id, primitive_schema_version,
+  replay_epoch, base_document_revision,
+  target_ids[], fixed_arguments,
+  rust_object_ids[], asset_ids[]
+}
+
+PrimitiveResultVn {
+  result_class, committed_revision,
+  procedure_id, committed_state_id,
+  primitive_id, schema_version
+}</code></pre>
+      <ol>
+        <li>catalogをschema、Rust enum、C opcode、decode、route inventoryの単一正本にする。</li>
+        <li>可変長colors/samples/points/raster/textは、mutation前にbounded ingestし、Rust-owned generation IDまたはpersistent AssetIdへ変換。</li>
+        <li>Win32 controllerからmutation-capableな汎用<code>CoreOperation</code>を段階的に除去。query、OS I/O、lifecycleだけを別typed laneに残す。</li>
+        <li>CoreHost completionで<code>procedure_id</code>、<code>state_id</code>、opcode/schema、queue sequenceを受け取り、Rust journalと相関可能にする。pathやpixel payloadはlogしない。</li>
+      </ol>
+
+      <h3>Phase 3 — Rust executorを一つに収束</h3>
+      <ol>
+        <li>全replayable primitiveをclosed typed command envelopeへ昇格。</li>
+        <li>一つのtransaction publisherでbase revision、working state、ID reservation、no-op、post digest、history、journal、cache invalidationを扱う。</li>
+        <li>feature methodはtransaction上の純粋なapply kernelとし、Core全体clone-and-replaceをやめる。</li>
+        <li>Stable IDは必要個数をcommit前にchecked reserveし、overflow時はall-or-nothing failure。</li>
+      </ol>
+
+      <h3>Phase 4 — 証明可能な受入条件</h3>
+      <ul>
+        <li>全78 replayable primitiveに、成功、no-op/invalid、fresh replay、save/openのconformance vectorを1つ以上持つ。</li>
+        <li>全Win32 document mutation commandが、実行時に「0または1件のcanonical procedure」へ対応することをinstrumentationで検証。</li>
+        <li>同じGenesis/assets/journalから、state digestとcanonical composite digestが一致。</li>
+        <li>C ABI mutation recordにpointer、path、callback、frontend command IDがないことをheader/Rust layout両方で生成検査。</li>
+        <li>UI projection cacheはsession/generation/revision一致を必須とし、stale targetを別documentへ再解決しない。</li>
+        <li>Project/Cut/Frame/Sequenceを導入する時点でstable ID namespaceとfile/replay versionを同時更新。</li>
+      </ul>
+    </section>
+
+    <section id="verification">
+      <h2>9. 根拠と検証結果</h2>
+      <p>本レビューではソース、契約文書、既存testを読み、次の対象検証を実行しました。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>実行内容</th><th>結果</th><th>確認範囲</th></tr></thead>
+          <tbody>
+            <tr><td><code>cargo test -p inkpod-core --test architecture --test route_inventory</code></td><td><span class="badge ok">7 passed</span></td><td>Rust domainのWindows API非依存、module構造、public Core/FFI/Windows command分類の網羅。</td></tr>
+            <tr><td><code>cargo test -p inkpod-core --test contracts fixed_math_procedure_boundaries_and_composite_are_cross_arch_golden</code></td><td><span class="badge ok">1 passed</span></td><td>代表procedure境界とcanonical compositeのcross-architecture golden。</td></tr>
+            <tr><td><code>cmake -P tests/verify_windows_core_host.cmake</code></td><td><span class="badge ok">passed</span></td><td>session-key CoreHost、typed primitive queue、notification、shutdown境界。</td></tr>
+            <tr><td><code>cmake -P tests/verify_windows_command_routes.cmake</code></td><td><span class="badge ok">349 IDs</span></td><td>production command IDが一つのroute ownerを持つこと。</td></tr>
+            <tr><td><code>cmake -P tests/verify_windows_frontend_boundaries.cmake</code></td><td><span class="badge ok">passed</span></td><td>startup/application/smoke/MainWindowの静的境界。</td></tr>
+            <tr><td>standalone HTML構造検査</td><td><span class="badge ok">passed</span></td><td>UTF-8、inline style、外部link/scriptなし、9 sectionと目次anchor、終端tagを確認。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout warn">
+        <strong>検査の限界:</strong> route inventoryはpublic symbolと分類表の一致を検査しますが、分類が意味的に正しいことや、実際のC++ call graphが必ず一つのcanonical procedureを生成することまでは証明しません。CoreHost CMake検査もqueued record内のpointer/functionを禁じますが、side tableの<code>AdapterInput::operation</code>までは禁じません。この差がF-01の根拠です。
+      </div>
+
+      <h3>代表的なレビュー対象</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>領域</th><th>主なファイル</th></tr></thead>
+          <tbody>
+            <tr><td>仕様・契約</td><td><code>AGENTS.md</code>、<code>SPEC.md:442-507, 524-541, 585</code>、<code>docs/architecture.md</code>、<code>docs/determinism.md</code>、<code>docs/primitive-route-inventory.md</code></td></tr>
+            <tr><td>Primitive / transaction</td><td><code>rust/inkpod-core/src/primitive/{model,catalog,executor,invocation}.rs</code>、<code>rust/inkpod-core/src/core.rs</code></td></tr>
+            <tr><td>Journal / persistence</td><td><code>rust/inkpod-core/src/{journal,history,persistence,asset}.rs</code>、<code>rust/inkpod-format/src/procedure.rs</code></td></tr>
+            <tr><td>Domain / raster / snapshot</td><td><code>rust/inkpod-core/src/document/model.rs</code>、<code>rust/inkpod-image/src/{raster,pixel}.rs</code>、<code>rust/inkpod-core/src/snapshot.rs</code></td></tr>
+            <tr><td>C ABI</td><td><code>include/inkpod/core_ffi.h</code>、<code>rust/inkpod-ffi/src/{v3,support,abi}.rs</code>配下</td></tr>
+            <tr><td>Win32 / Renderer</td><td><code>apps/windows/app/{core_host,frontend_state}.h/.cpp</code>、<code>apps/windows/ui/main_window_runtime.cpp</code>、<code>apps/windows/renderer/{renderer_host.h,canvas.cpp}</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>レビュー時点の注意</h3>
+      <ul>
+        <li>作業ツリーには本レビュー開始前から<code>MILESTONES.md</code>、<code>docs/compatibility.md</code>、<code>docs/implementation-status.md</code>、<code>docs/paintman-functional-gap-analysis.md</code>の変更がありました。本レビューの判断から除外し、変更していません。</li>
+        <li>full workspace test、clippy、bench、Windows build/ctest一式は、報告書作成だけのscopeでは実行していません。</li>
+        <li>standalone HTMLの構造検査は通過しました。アプリ内browserはlocal <code>file:</code> URLの安全制限により実描画できなかったため、visual rendering checkは未実施です。</li>
+        <li><code>docs/ffi.md:83</code>はreplay epoch 12 / procedure format 15と記述していますが、コード・determinism文書・testの現行値はepoch 14 / format 17です。</li>
+        <li><code>rust/inkpod-format/src/procedure.rs:1</code>のmoduleコメントはv16のままですが、実装定数はv17です。<code>include/inkpod/core_ffi.h</code>にもABI v8/v9のコメント差分があります。</li>
+      </ul>
+
+      <div class="callout good">
+        <strong>最終評価:</strong> Inkpodの「文書編集エンジン」はすでにRust Core中心で、canonical procedure、asset、journal、branch、fresh replayによる非破壊モデルは実装上の強みです。次に必要なのは機能をC++からRustへ移すことではなく、<strong>すでにRustにある機能への入口を、全件共通の値／Rust-owned ID primitive tableへ収束させること</strong>です。同時にLight Table swapの位置付けと、調整レイヤーUI cacheの権威性を解消すれば、提示された設計原則と実装の差は大きく縮まります。
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="page">Inkpod design review · generated for the source tree at <code>20230b1</code> · 2026-08-11 JST</div>
+  </footer>
+</body>
+</html>

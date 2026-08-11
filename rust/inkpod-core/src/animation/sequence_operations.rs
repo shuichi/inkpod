@@ -43,9 +43,15 @@ impl Core {
         let active_index = cells
             .iter()
             .position(|cell| cell.document_uuid == current_uuid);
+        let revision = self
+            .sequence
+            .as_ref()
+            .map_or(Some(1), |sequence| sequence.revision.checked_add(1))
+            .ok_or(CoreError::InvalidState("sequence revision overflows"))?;
         self.sequence = Some(SequenceState {
             cells,
             active_index,
+            revision,
         });
         self.motion_check = None;
         self.subpalette_index = None;

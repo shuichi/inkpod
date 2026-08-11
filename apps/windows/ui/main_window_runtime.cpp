@@ -8517,6 +8517,207 @@ InkpodStatus EditLightTableItemProperties(
     return ApplyLightTableEdit(state, context, edit, {}, ignored);
 }
 
+InkpodStatus RegisterSequenceNeighborsInLightTable(
+    ApplicationHost& state,
+    const CommandContext& context,
+    InkpodLightTableBulkDirection direction) noexcept {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()
+        || state.Workspace().panes.active_light_table_set_id == 0U) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    ViewOptionsDialogState dialog{};
+    dialog.title = L"ライトテーブル一括登録";
+    dialog.labels = {
+        L"隣接セル数 N (0-10000)",
+        L"距離1の不透明度 (0-100%)",
+        L"距離ごとの減衰 (0-100%)",
+        nullptr};
+    dialog.values = state.lifetime.smoke_test
+        ? std::array<std::int32_t, 4U>{1, 80, 20, 0}
+        : std::array<std::int32_t, 4U>{2, 80, 20, 0};
+    dialog.value_count = 3U;
+    if (ShowViewOptions(
+            state.lifetime.instance,
+            state.Workspace().windows.window,
+            state.lifetime.smoke_test,
+            dialog) != IDOK) {
+        return INKPOD_STATUS_CANCELLED;
+    }
+    if (dialog.values[0] < 0 || dialog.values[0] > 10'000
+        || dialog.values[1] < 0 || dialog.values[1] > 100
+        || dialog.values[2] < 0 || dialog.values[2] > 100) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+
+    InkpodLightTableBulkRequest request{};
+    request.struct_size = sizeof(request);
+    InkpodLightTableBulkPreviewInfo preview{};
+    preview.struct_size = sizeof(preview);
+    const std::uint64_t target_set_id =
+        state.Workspace().panes.active_light_table_set_id;
+    InkpodStatus status = state.engine->Invoke(
+        context.document_session.value(),
+        context.generation.value(),
+        [target_set_id,
+         direction,
+         count = static_cast<std::uint32_t>(dialog.values[0]),
+         opacity = static_cast<std::uint32_t>(dialog.values[1]) * 10U,
+         step = static_cast<std::uint32_t>(dialog.values[2]) * 10U,
+         &request,
+         &preview](InkpodCore* core) {
+            InkpodStatus capture = inkpod_core_light_table_bulk_request(
+                core,
+                target_set_id,
+                direction,
+                count,
+                opacity,
+                step,
+                &request);
+            if (capture != INKPOD_STATUS_OK) {
+                return capture;
+            }
+            return inkpod_core_light_table_bulk_preview(
+                core, &request, nullptr, 0U, 0U, &preview);
+        },
+        false,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+
+    std::vector<InkpodLightTableBulkPreviewEntry> entries;
+    try {
+        entries.resize(static_cast<std::size_t>(preview.entry_count));
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    for (auto& entry : entries) {
+        entry.struct_size = sizeof(entry);
+    }
+    if (!entries.empty()) {
+        status = state.engine->Invoke(
+            context.document_session.value(),
+            context.generation.value(),
+            [&request, &preview, &entries](InkpodCore* core) {
+                return inkpod_core_light_table_bulk_preview(
+                    core,
+                    &request,
+                    entries.data(),
+                    entries.size(),
+                    sizeof(InkpodLightTableBulkPreviewEntry),
+                    &preview);
+            },
+            false,
+            false);
+        if (status != INKPOD_STATUS_OK) {
+            return status;
+        }
+    }
+
+    std::wstring message;
+    try {
+        std::array<wchar_t, 256U> line{};
+        _snwprintf_s(
+            line.data(),
+            line.size(),
+            _TRUNCATE,
+            L"候補 %llu件 / 追加 %u件 / 既存を保持 %u件\n"
+            L"上から下へ、後のセルほど前面です。\n\n",
+            static_cast<unsigned long long>(preview.entry_count),
+            preview.add_count,
+            preview.skip_count);
+        message = line.data();
+        constexpr std::size_t kVisiblePreviewEntries = 32U;
+        const std::size_t visible = std::min(entries.size(), kVisiblePreviewEntries);
+        for (std::size_t index = 0U; index < visible; ++index) {
+            const auto& entry = entries[index];
+            if (entry.action == INKPOD_LIGHT_TABLE_BULK_SKIP_EXISTING) {
+                _snwprintf_s(
+                    line.data(),
+                    line.size(),
+                    _TRUNCATE,
+                    L"%zu. セル%u  距離%u  %u.%u%%  既存を保持 "
+                    L"(候補rev %llu / 既存rev %llu)\n",
+                    index + 1U,
+                    entry.cell_number,
+                    entry.distance,
+                    entry.opacity_milli / 10U,
+                    entry.opacity_milli % 10U,
+                    static_cast<unsigned long long>(entry.source_generation),
+                    static_cast<unsigned long long>(entry.existing_source_revision));
+            } else {
+                _snwprintf_s(
+                    line.data(),
+                    line.size(),
+                    _TRUNCATE,
+                    L"%zu. セル%u  距離%u  %u.%u%%  追加\n",
+                    index + 1U,
+                    entry.cell_number,
+                    entry.distance,
+                    entry.opacity_milli / 10U,
+                    entry.opacity_milli % 10U);
+            }
+            message += line.data();
+        }
+        if (visible < entries.size()) {
+            _snwprintf_s(
+                line.data(),
+                line.size(),
+                _TRUNCATE,
+                L"...ほか %zu件（順序と件数はこのプレビューのまま適用）\n",
+                entries.size() - visible);
+            message += line.data();
+        }
+        message += L"\nこの内容を1回のUndo単位で登録しますか？";
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+
+    const int choice = state.lifetime.smoke_test
+        ? state.lifetime.smoke_dirty_prompt_choice
+        : MessageBoxW(
+              state.Workspace().light_table_palette != nullptr
+                  ? state.Workspace().light_table_palette
+                  : state.Workspace().windows.window,
+              message.c_str(),
+              L"ライトテーブル一括登録プレビュー",
+              MB_OKCANCEL | MB_ICONQUESTION);
+    if (choice != IDOK) {
+        return INKPOD_STATUS_CANCELLED;
+    }
+
+    std::vector<std::uint64_t> item_ids;
+    try {
+        item_ids.resize(preview.add_count);
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    InkpodDispatchResult result{};
+    result.struct_size = sizeof(result);
+    InkpodLightTableBulkSummary summary{};
+    summary.struct_size = sizeof(summary);
+    status = state.engine->Invoke(
+        context.document_session.value(),
+        context.generation.value(),
+        [&request, &result, &summary, &item_ids](InkpodCore* core) {
+            return inkpod_core_light_table_bulk_register(
+                core,
+                &request,
+                &result,
+                &summary,
+                item_ids.empty() ? nullptr : item_ids.data(),
+                item_ids.size());
+        },
+        true,
+        true);
+    if (status == INKPOD_STATUS_OK && !item_ids.empty()) {
+        state.Workspace().panes.active_light_table_item_id = item_ids.front();
+        state.Workspace().panes.active_light_table_item_index = 0U;
+    }
+    return status;
+}
+
 InkpodStatus MoveLightTableFromCanvas(
     ApplicationHost& state, const CommandContext& context) noexcept {
     if (state.Workspace().panes.light_table_move_samples.size() < 2U) {
@@ -12434,7 +12635,7 @@ std::optional<LRESULT> RouteDocumentCommand(
     }
     const UINT animation_command = LOWORD(wparam);
     if (animation_command >= IDM_LT_SET_NEW
-        && animation_command <= IDM_LT_ITEM_MOVE
+        && animation_command <= IDM_LT_BULK_BOTH
         && !PrepareLightTableSelection(*state, context)) {
         return 0;
     }
@@ -13681,6 +13882,24 @@ std::optional<LRESULT> RouteAnimationCommand(
                 LOWORD(wparam) == IDM_LT_ITEM_RELOAD);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"ライトテーブル画像");
+            }
+            RefreshLightTablePane(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_LT_BULK_PREVIOUS:
+        case IDM_LT_BULK_NEXT:
+        case IDM_LT_BULK_BOTH: {
+            const InkpodLightTableBulkDirection direction =
+                LOWORD(wparam) == IDM_LT_BULK_PREVIOUS
+                ? INKPOD_LIGHT_TABLE_BULK_PREVIOUS
+                : (LOWORD(wparam) == IDM_LT_BULK_NEXT
+                       ? INKPOD_LIGHT_TABLE_BULK_NEXT
+                       : INKPOD_LIGHT_TABLE_BULK_BOTH);
+            const InkpodStatus status = RegisterSequenceNeighborsInLightTable(
+                *state, context, direction);
+            if (status != INKPOD_STATUS_OK
+                && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"ライトテーブル一括登録");
             }
             RefreshLightTablePane(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;

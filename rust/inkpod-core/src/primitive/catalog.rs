@@ -307,6 +307,13 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         0x000a_0015,
         session
     ),
+    entry!(
+        LIGHT_TABLE_BULK_REGISTER,
+        2,
+        "LightTableBulkRegister",
+        1,
+        0x000a_0016
+    ),
 ];
 
 static REPLAY_CONTRACT: LazyLock<ReplayContract> = LazyLock::new(|| {
@@ -352,7 +359,7 @@ mod tests {
 
     #[test]
     fn catalog_is_sorted_unique_bounded_and_matches_replay_schema_lookup() {
-        assert_eq!(PRIMITIVE_CATALOG.len(), 79);
+        assert_eq!(PRIMITIVE_CATALOG.len(), 80);
         for pair in PRIMITIVE_CATALOG.windows(2) {
             assert!(pair[0].id < pair[1].id);
         }

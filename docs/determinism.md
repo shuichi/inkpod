@@ -1,12 +1,16 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 17, replay epoch 14,
-canonical numeric version 1, and the digest of the closed 79-entry primitive
-catalog. Production `.inkpod` is exact-current v17; an optional verified
+The current runtime replay contract is procedure format 18, replay epoch 15,
+canonical numeric version 1, and the digest of the closed 80-entry primitive
+catalog. Production `.inkpod` is exact-current v18; an optional verified
 checkpoint preserves this contract and never replaces the authoritative journal.
-Epoch 14 and format 17 add resolved geometry procedure schema 2 and persistent
-vector square cross-sections. Stable vector endpoint connections remain explicit;
-coordinate proximity is never an implicit topology input.
+Epoch 15 and format 18 add `LightTableBulkRegister/canonical-v2`: its resolved,
+ordered immutable source assets and item properties are the replay input, while
+sequence discovery and duplicate preview remain live control-plane queries.
+Epoch 14/format 17 introduced resolved geometry procedure schema 2 and persistent
+vector square cross-sections; those semantics remain unchanged. Stable vector
+endpoint connections remain explicit; coordinate proximity is never an implicit
+topology input.
 
 ## Canonical numeric authority
 
@@ -51,7 +55,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 17 and replay epoch 14. A semantic change that updates
+together with format version 18 and replay epoch 15. A semantic change that updates
 the catalog or any golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 

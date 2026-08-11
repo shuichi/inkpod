@@ -203,6 +203,8 @@ impl PrimitiveId {
     pub const LIGHT_TABLE_REORDER_ITEM: Self = Self(0x000a_0014);
     /// Primitive ID for swapping Light Table content with the active plane.
     pub const LIGHT_TABLE_SWAP_WITH_ACTIVE: Self = Self(0x000a_0015);
+    /// Primitive ID for inserting one resolved natural-sequence Light Table block.
+    pub const LIGHT_TABLE_BULK_REGISTER: Self = Self(0x000a_0016);
 }
 
 impl ProcedureId {
@@ -242,14 +244,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(14);
+    pub const CURRENT: Self = Self(15);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 17;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 18;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;

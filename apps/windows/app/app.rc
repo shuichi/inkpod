@@ -409,6 +409,12 @@ BEGIN
             MENUITEM "色をサンプル...", IDM_LT_ITEM_SAMPLE
             MENUITEM "編集画像と入れ替え", IDM_LT_ITEM_SWAP
         END
+        POPUP "連番セルを一括登録"
+        BEGIN
+            MENUITEM "前Nセル...", IDM_LT_BULK_PREVIOUS
+            MENUITEM "後Nセル...", IDM_LT_BULK_NEXT
+            MENUITEM "前後Nセル...", IDM_LT_BULK_BOTH
+        END
         POPUP "連番・サブパレット"
         BEGIN
             MENUITEM "連番を読み込み...", IDM_SEQ_IMPORT
@@ -828,10 +834,14 @@ BEGIN
     PUSHBUTTON      "表示・変形", IDC_LIGHT_TABLE_ITEM_PROPERTIES, 8, 274, 72, 20
     PUSHBUTTON      "Canvasで移動", IDC_LIGHT_TABLE_ITEM_MOVE, 84, 274, 82, 20
     PUSHBUTTON      "編集画像と交換", IDC_LIGHT_TABLE_ITEM_SWAP, 170, 274, 88, 20
-    LTEXT           "セル移動", IDC_LIGHT_TABLE_CELL_LABEL, 8, 310, 54, 12
-    PUSHBUTTON      "前のセル", IDC_LIGHT_TABLE_PREVIOUS, 66, 306, 62, 20
-    PUSHBUTTON      "次のセル", IDC_LIGHT_TABLE_NEXT, 132, 306, 62, 20
-    LTEXT           "項目をダブルクリックしても編集画像と交換できます。", IDC_LIGHT_TABLE_HINT, 8, 340, 294, 14, SS_NOPREFIX
+    LTEXT           "一括登録", IDC_LIGHT_TABLE_BULK_LABEL, 8, 306, 54, 12
+    PUSHBUTTON      "前N...", IDC_LIGHT_TABLE_BULK_PREVIOUS, 66, 302, 58, 20
+    PUSHBUTTON      "後N...", IDC_LIGHT_TABLE_BULK_NEXT, 128, 302, 58, 20
+    PUSHBUTTON      "前後N...", IDC_LIGHT_TABLE_BULK_BOTH, 190, 302, 64, 20
+    LTEXT           "セル移動", IDC_LIGHT_TABLE_CELL_LABEL, 8, 334, 54, 12
+    PUSHBUTTON      "前のセル", IDC_LIGHT_TABLE_PREVIOUS, 66, 330, 62, 20
+    PUSHBUTTON      "次のセル", IDC_LIGHT_TABLE_NEXT, 132, 330, 62, 20
+    LTEXT           "項目をダブルクリックしても編集画像と交換できます。", IDC_LIGHT_TABLE_HINT, 8, 364, 294, 14, SS_NOPREFIX
 END
 
 IDD_SUBPALETTE_PALETTE DIALOGEX 0, 0, 330, 420

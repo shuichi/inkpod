@@ -305,6 +305,62 @@ pub struct InkpodLightTableItemInfo {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct InkpodLightTableBulkRequest {
+    pub struct_size: u32,
+    pub direction: u32,
+    pub target_set_id: u64,
+    pub neighbor_count: u32,
+    pub base_opacity_milli: u32,
+    pub distance_step_milli: u32,
+    pub reserved: u32,
+    pub base_document_revision: u64,
+    pub sequence_revision: u64,
+    pub active_document_uuid_high: u64,
+    pub active_document_uuid_low: u64,
+    pub active_source_generation: u64,
+    pub feature_flags: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct InkpodLightTableBulkPreviewInfo {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub target_set_id: u64,
+    pub entry_count: u64,
+    pub add_count: u32,
+    pub skip_count: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct InkpodLightTableBulkPreviewEntry {
+    pub struct_size: u32,
+    pub action: u32,
+    pub sequence_index: u32,
+    pub cell_number: u32,
+    pub distance: u32,
+    pub opacity_milli: u32,
+    pub document_uuid_high: u64,
+    pub document_uuid_low: u64,
+    pub source_generation: u64,
+    pub existing_source_revision: u64,
+    pub flags: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct InkpodLightTableBulkSummary {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub target_set_id: u64,
+    pub add_count: u32,
+    pub skip_count: u32,
+    pub item_id_count: u64,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodSequenceCellInput {
     pub struct_size: u32,
