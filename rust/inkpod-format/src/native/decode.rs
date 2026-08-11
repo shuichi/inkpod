@@ -393,7 +393,7 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
 
 fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 1 {
+    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 2 {
         return Err(FormatError::Unsupported(
             "document metadata version is not supported",
         ));
@@ -415,9 +415,19 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
         spacing_y: reader.u32()?,
         subdivisions: reader.u32()?,
     };
-    if reader.u32()? != 0 {
+    let color_chart_length = reader.u32()? as usize;
+    let color_chart_locked = match reader.u32()? {
+        0 => false,
+        1 => true,
+        _ => {
+            return Err(FormatError::Unsupported(
+                "document Color chart lock field is invalid",
+            ));
+        }
+    };
+    if color_chart_length > MAX_MANIFEST_BYTES as usize {
         return Err(FormatError::Unsupported(
-            "document grid reserved field is not zero",
+            "document Color chart length is unsupported",
         ));
     }
     let mut layers = Vec::with_capacity(layer_count);
@@ -479,6 +489,7 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
             position: reader.i32()?,
         });
     }
+    let color_chart = crate::decode_color_chart(reader.take(color_chart_length)?)?;
     if reader.position != bytes.len() {
         return Err(FormatError::Invalid("document metadata has trailing bytes"));
     }
@@ -489,6 +500,8 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
         layers,
         guides,
         grid,
+        color_chart,
+        color_chart_locked,
     };
     validate_document_metadata(&metadata, None)?;
     Ok(metadata)

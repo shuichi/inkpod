@@ -671,6 +671,8 @@ typedef InkpodTask InkpodBatchTask;
 typedef struct InkpodBatchGraph InkpodBatchGraph;
 /** @brief Rust-owned immutable `.inkchart` current-version decode result. */
 typedef struct InkpodColorChartFile InkpodColorChartFile;
+/** @brief Rust-owned immutable generated Color chart comparison preview. */
+typedef struct InkpodColorChartPreview InkpodColorChartPreview;
 /** @brief batch preview item を所有する immutable・Rust-owned handle。 */
 typedef struct InkpodBatchPreview InkpodBatchPreview;
 /** @brief Rust-owned immutable two-cell exact color-pair extraction result. */
@@ -1122,6 +1124,35 @@ typedef struct InkpodColorChartEntry {
     const uint8_t* name_utf8;
     uint64_t name_bytes;
 } InkpodColorChartEntry;
+
+#define INKPOD_COLOR_CHART_LOCKED (UINT32_C(1) << 0)
+#define INKPOD_COLOR_CHART_HAS_SELECTION (UINT32_C(1) << 1)
+#define INKPOD_COLOR_CHART_PREVIEW_EXCEEDS_MAXIMUM (UINT32_C(1) << 0)
+
+/** @brief Document-owned Color chart count, lock, and persisted cursor. */
+typedef struct InkpodColorChartInfo {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t feature_flags;
+    uint64_t entry_count;
+    uint64_t selected_index;
+    uint32_t page;
+    uint32_t reserved;
+} InkpodColorChartInfo;
+
+/** @brief Immutable generation comparison summary returned with one preview owner. */
+typedef struct InkpodColorChartPreviewSummary {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t feature_flags;
+    uint64_t base_document_revision;
+    uint64_t entry_count;
+    uint64_t source_unique_color_count;
+    uint32_t retained_color_count;
+    uint32_t added_color_count;
+    uint32_t removed_color_count;
+    uint32_t reserved;
+} InkpodColorChartPreviewSummary;
 
 /** @brief fill tool の Core-owned option を exact-depth 色と共にコピーする値 record。 */
 typedef struct InkpodEditorFillOptions {
@@ -2972,6 +3003,57 @@ InkpodStatus inkpod_core_palette_generate(
     uint32_t maximum_colors,
     uint32_t quantization_bits,
     InkpodDispatchResult* result);
+/** @brief Query the independent document Color chart and persisted presentation cursor. */
+InkpodStatus inkpod_core_color_chart_info(
+    InkpodCore* core,
+    InkpodColorChartInfo* info);
+/** @brief Copy one current chart entry; NULL/0 name storage performs a size query. */
+InkpodStatus inkpod_core_color_chart_get(
+    InkpodCore* core,
+    uint64_t index,
+    InkpodColorValue* out_color,
+    uint8_t* name_utf8,
+    uint64_t name_capacity,
+    uint64_t* out_name_bytes);
+/** @brief Replace document chart entries and lock as one canonical Undo unit. */
+InkpodStatus inkpod_core_color_chart_set(
+    InkpodCore* core,
+    const InkpodColorChartEntry* entries,
+    uint64_t entry_count,
+    uint64_t entry_stride_bytes,
+    uint32_t locked,
+    InkpodDispatchResult* result);
+/** @brief Generate a revision-bound immutable comparison without changing Core state. */
+InkpodStatus inkpod_core_color_chart_preview_create(
+    InkpodCore* core,
+    uint32_t maximum_colors,
+    uint32_t quantization_bits,
+    InkpodColorChartPreviewSummary* summary,
+    InkpodColorChartPreview** out_preview);
+/** @brief Cancellable worker variant; progress is visible through `InkpodTask`. */
+InkpodStatus inkpod_core_color_chart_preview_create_task(
+    InkpodCore* core,
+    uint32_t maximum_colors,
+    uint32_t quantization_bits,
+    InkpodTask* task,
+    InkpodColorChartPreviewSummary* summary,
+    InkpodColorChartPreview** out_preview);
+/** @brief Copy one immutable preview entry and frequency with two-stage name output. */
+InkpodStatus inkpod_color_chart_preview_get(
+    const InkpodColorChartPreview* preview,
+    uint64_t index,
+    InkpodColorValue* out_color,
+    uint8_t* name_utf8,
+    uint64_t name_capacity,
+    uint64_t* out_name_bytes,
+    uint64_t* out_frequency);
+/** @brief Apply a current non-overflowing preview as one canonical Undo unit. */
+InkpodStatus inkpod_core_color_chart_preview_apply(
+    InkpodCore* core,
+    const InkpodColorChartPreview* preview,
+    InkpodDispatchResult* result);
+/** @brief Release one preview exactly once and NULL its owner slot. */
+InkpodStatus inkpod_color_chart_preview_release(InkpodColorChartPreview** preview);
 /** @brief exact-current `.inkpalette` schema 1 を同一directoryのtemporary file経由で保存する。 */
 InkpodStatus inkpod_palette_file_save(
     const uint8_t* path_utf8,

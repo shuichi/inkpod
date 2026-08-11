@@ -331,6 +331,9 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - 高頻度の10色は `1`から`0`へ割り当て、`Tab`で次の10色 group へ切り替える。shortcut editor で変更可能にする。
 - color chart は色と名前を表形式で管理し、複数 page、検索、次候補、lock、cut/copy/paste、save/load を持つ。旧版の5文字制限は native 形式へ課さない。
 - `セルからカラーチャートを作成` は一意色を抽出するが、gradient/antialias 画像で色数が過大になるため、最大数、quantization、preview を用意する。
+- chart生成previewは発行時のdocument revisionと同じbase compositeから毎回再抽出し、直前候補へ再量子化しない。previewは候補色、頻度、色数超過、元chartとの差分summaryをboundedに返し、chart、history、journal、dirtyを変更しない。Apply tokenがstaleなら別revisionや別chartへ適用しない。
+- 生成結果のApplyはdocument paletteではなくdocument所有のColor chart全体を一transactionで置換する。native depthとstraight alphaを含む完全一致色が既存chartにある場合は最初の同色entryの名前を保持し、新規色だけ1始まりの最終順序に基づく`Color N`を既定名とする。消えた色の名前は残さない。chart lock中はpreviewを許可するがApplyを拒否し、lock状態自体を変更しない。
+- chartの現在pageと選択位置はEditorStateでありdocument historyへ含めない。Apply後も選択色が完全一致で残ればそのentryへ追従し、残らない場合だけ先頭entry／page 0へ移す。空chartでは選択なし／page 0とする。Color chart entries、名前、lockとEditorState cursorは通常save/reopenで復元する。
 - subpalette は彩色済み参照セルを独立 viewport で表示し、zoom/pan、前後セル、番号移動、現在セル登録、自動的に一つ前のセルを表示、Canvasとのscroll連動、取得色のpalette登録を持つ。
 - light table から色を拾う場合は、item transform と基準 frame alignment を通した同一 document 座標を使う。
 
@@ -600,6 +603,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `COLOR-REPLACE-001`: pen／rectangle／polyline／lassoとselectionで限定したnative-depth raster置換、およびstable path／fill単位のcoverage接触vector置換
 - `COLOR-001`: RGBA 8/16、RGB/HSV、eyedropper source
 - `COLOR-002`: palette、chart、subpalette、color check
+- `COLOR-CHART-PREVIEW-001`: 同一base compositeからの非累積Color chart生成preview、頻度／差分summary、revision-bound Apply、exact-color名前継承、lock拒否、cursor継承、Cancel無変更、一回Undo／Redoとsave/reopen
 
 ### Selection and editing
 

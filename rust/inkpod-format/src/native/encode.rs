@@ -257,9 +257,10 @@ pub fn encode_document_archive(document: &DocumentArchive) -> Result<Vec<u8>, Fo
 
 fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, FormatError> {
     validate_document_metadata(metadata, None)?;
+    let color_chart = crate::encode_color_chart(&metadata.color_chart)?;
     let mut output = Vec::new();
     output.extend_from_slice(&DOCUMENT_METADATA_MAGIC);
-    push_u32(&mut output, 1);
+    push_u32(&mut output, 2);
     push_u64(&mut output, metadata.active_layer_id);
     push_u64(&mut output, metadata.active_plane_id);
     push_u64(&mut output, metadata.selection_plane_id);
@@ -270,7 +271,8 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
     push_u32(&mut output, metadata.grid.spacing_x);
     push_u32(&mut output, metadata.grid.spacing_y);
     push_u32(&mut output, metadata.grid.subdivisions);
-    push_u32(&mut output, 0);
+    push_u32(&mut output, color_chart.len() as u32);
+    push_u32(&mut output, u32::from(metadata.color_chart_locked));
     for layer in &metadata.layers {
         push_u64(&mut output, layer.id);
         push_u32(&mut output, layer.kind.code());
@@ -306,6 +308,7 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
         );
         push_i32(&mut output, guide.position);
     }
+    output.extend_from_slice(&color_chart);
     if output.len() > MAX_MANIFEST_BYTES as usize {
         return Err(FormatError::Invalid("document metadata exceeds its bound"));
     }

@@ -8,6 +8,7 @@ mod assets_genesis;
 mod batch;
 mod brush_options;
 mod cell_creation;
+mod color_chart_preview;
 mod color_replace;
 mod determinism;
 mod document_selection;
@@ -19,7 +20,7 @@ mod history_stroke;
 mod mixed_order;
 mod multi_target;
 #[path = "native_v9.rs"]
-mod native_v17;
+mod native_v19;
 mod primitive_kernel;
 mod procedure_journal;
 mod state_machine;

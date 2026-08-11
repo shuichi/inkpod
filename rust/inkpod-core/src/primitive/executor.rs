@@ -17,6 +17,7 @@ const MAX_INLINE_PROCEDURE_PAYLOAD_BYTES: usize = 4 * 1_024 * 1_024;
 pub(super) const fn current_primitive_schema_version(primitive_id: PrimitiveId) -> Option<u16> {
     if primitive_id.get() == PrimitiveId::SET_MAIN_LINE_COLOR.get()
         || primitive_id.get() == PrimitiveId::REPLACE_PALETTE.get()
+        || primitive_id.get() == PrimitiveId::REPLACE_COLOR_CHART.get()
     {
         Some(METADATA_PRIMITIVE_SCHEMA_VERSION)
     } else if primitive_id.get() == PrimitiveId::APPLY_RASTER_STROKE.get() {
@@ -67,6 +68,7 @@ impl CanonicalizedRequest {
             CanonicalPrimitive::ApplyRasterStroke(arguments) => &arguments.payload,
             CanonicalPrimitive::SetMainLineColor(_)
             | CanonicalPrimitive::ReplacePalette(_)
+            | CanonicalPrimitive::ReplaceColorChart { .. }
             | CanonicalPrimitive::ImportRasterAsset { .. } => &[],
         }
     }
@@ -251,6 +253,19 @@ impl Core {
                 Ok(CanonicalizedRequest {
                     primitive: CanonicalPrimitive::ReplacePalette(colors),
                     primitive_id: PrimitiveId::REPLACE_PALETTE,
+                    input_ids: Vec::new(),
+                    asset_ids: Vec::new(),
+                    arguments,
+                    staged_assets: None,
+                })
+            }
+            PrimitiveRequest::ReplaceColorChart {
+                entries, locked, ..
+            } => {
+                let arguments = encode_color_chart(&entries, locked)?;
+                Ok(CanonicalizedRequest {
+                    primitive: CanonicalPrimitive::ReplaceColorChart { entries, locked },
+                    primitive_id: PrimitiveId::REPLACE_COLOR_CHART,
                     input_ids: Vec::new(),
                     asset_ids: Vec::new(),
                     arguments,
@@ -457,6 +472,7 @@ impl Core {
             .map_err(|_| CoreError::InvalidState("history allocation failed"))?;
         let staged_assets =
             self.prepare_asset_store_for_commit(staged_assets, &transaction.working, &procedure)?;
+        let editor = self.stage_reconciled_editor_target(&transaction.working, None, None)?;
 
         self.history.truncate(self.history_cursor);
         let history_entry = HistoryEntry {
@@ -484,6 +500,7 @@ impl Core {
         self.next_state = following_state;
         self.next_procedure = following_procedure;
         *self.canonical_state_cache.get_mut() = Some(post_state_cache);
+        self.publish_editor_session(editor);
         let dispatch = DispatchOutcome {
             revision: revision.get(),
             accepted_commands: 1,
@@ -527,6 +544,21 @@ fn apply_primitive(
                 history: HistoryChange::Palette {
                     before: old,
                     after: palette,
+                },
+                cache_policy: CachePolicy::Preserve,
+            }))
+        }
+        CanonicalPrimitive::ReplaceColorChart { entries, locked } => {
+            let chart = ColorChart::validated(entries.clone(), *locked)?;
+            if working.color_chart == chart {
+                return Ok(None);
+            }
+            let old = working.color_chart.clone();
+            working.color_chart = chart.clone();
+            Ok(Some(AppliedPrimitive {
+                history: HistoryChange::ColorChart {
+                    before: old,
+                    after: chart,
                 },
                 cache_policy: CachePolicy::Preserve,
             }))
@@ -643,6 +675,106 @@ fn decode_palette(bytes: &[u8]) -> Result<Vec<PixelValue>, CoreError> {
     Ok(colors)
 }
 
+fn encode_color_chart(entries: &[ColorChartEntry], locked: bool) -> Result<Vec<u8>, CoreError> {
+    crate::color_chart::validate_entries(entries)?;
+    let mut bytes = Vec::new();
+    bytes.push(u8::from(locked));
+    bytes.extend_from_slice(
+        &u32::try_from(entries.len())
+            .map_err(|_| CoreError::InvalidArgument("Color chart count overflows"))?
+            .to_le_bytes(),
+    );
+    for entry in entries {
+        let color = color_bytes(entry.color)?;
+        bytes.extend_from_slice(&(color.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&color);
+        bytes.extend_from_slice(
+            &u32::try_from(entry.name.len())
+                .map_err(|_| CoreError::InvalidArgument("Color chart name overflows"))?
+                .to_le_bytes(),
+        );
+        bytes.extend_from_slice(entry.name.as_bytes());
+    }
+    Ok(bytes)
+}
+
+fn decode_color_chart(bytes: &[u8]) -> Result<(Vec<ColorChartEntry>, bool), CoreError> {
+    let (&locked, rest) = bytes.split_first().ok_or(CoreError::InvalidArgument(
+        "canonical Color chart is truncated",
+    ))?;
+    let locked = match locked {
+        0 => false,
+        1 => true,
+        _ => {
+            return Err(CoreError::InvalidArgument(
+                "canonical Color chart lock is invalid",
+            ));
+        }
+    };
+    let count_bytes = rest.get(..4).ok_or(CoreError::InvalidArgument(
+        "canonical Color chart count is truncated",
+    ))?;
+    let count = u32::from_le_bytes(count_bytes.try_into().expect("fixed-width slice")) as usize;
+    if count > MAX_APPLICATION_COLORS {
+        return Err(CoreError::InvalidArgument(
+            "canonical Color chart count exceeds the supported maximum",
+        ));
+    }
+    let mut cursor = 4_usize;
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let color_length = read_chart_u32(rest, &mut cursor, "Color chart color length")? as usize;
+        let color_end = cursor
+            .checked_add(color_length)
+            .ok_or(CoreError::InvalidArgument(
+                "canonical Color chart color length overflows",
+            ))?;
+        let color = decode_color(rest.get(cursor..color_end).ok_or(
+            CoreError::InvalidArgument("canonical Color chart color is truncated"),
+        )?)?;
+        cursor = color_end;
+        let name_length = read_chart_u32(rest, &mut cursor, "Color chart name length")? as usize;
+        let name_end = cursor
+            .checked_add(name_length)
+            .ok_or(CoreError::InvalidArgument(
+                "canonical Color chart name length overflows",
+            ))?;
+        let name = std::str::from_utf8(rest.get(cursor..name_end).ok_or(
+            CoreError::InvalidArgument("canonical Color chart name is truncated"),
+        )?)
+        .map_err(|_| CoreError::InvalidArgument("canonical Color chart name is not UTF-8"))?
+        .to_owned();
+        cursor = name_end;
+        entries.push(ColorChartEntry { color, name });
+    }
+    if cursor != rest.len() {
+        return Err(CoreError::InvalidArgument(
+            "canonical Color chart has trailing bytes",
+        ));
+    }
+    encode_color_chart(&entries, locked)?;
+    Ok((entries, locked))
+}
+
+fn read_chart_u32(
+    bytes: &[u8],
+    cursor: &mut usize,
+    message: &'static str,
+) -> Result<u32, CoreError> {
+    let end = cursor
+        .checked_add(4)
+        .ok_or(CoreError::InvalidArgument(message))?;
+    let value = u32::from_le_bytes(
+        bytes
+            .get(*cursor..end)
+            .ok_or(CoreError::InvalidArgument(message))?
+            .try_into()
+            .expect("fixed-width slice"),
+    );
+    *cursor = end;
+    Ok(value)
+}
+
 fn encode_stroke_arguments(arguments: &CanonicalStrokeArguments) -> Result<Vec<u8>, CoreError> {
     if arguments.target_plane_id == 0 {
         return Err(CoreError::InvalidArgument(
@@ -704,6 +836,25 @@ fn decode_procedure(
             let colors = decode_palette(&procedure.canonical_arguments)?;
             Ok(CanonicalizedRequest {
                 primitive: CanonicalPrimitive::ReplacePalette(colors),
+                primitive_id: procedure.primitive_id,
+                input_ids: Vec::new(),
+                asset_ids: Vec::new(),
+                arguments: procedure.canonical_arguments.clone(),
+                staged_assets: None,
+            })
+        }
+        PrimitiveId::REPLACE_COLOR_CHART => {
+            if !procedure.input_ids.is_empty()
+                || !procedure.asset_ids.is_empty()
+                || !procedure.canonical_payload.is_empty()
+            {
+                return Err(CoreError::InvalidArgument(
+                    "Color chart procedure has unexpected roles or payload",
+                ));
+            }
+            let (entries, locked) = decode_color_chart(&procedure.canonical_arguments)?;
+            Ok(CanonicalizedRequest {
+                primitive: CanonicalPrimitive::ReplaceColorChart { entries, locked },
                 primitive_id: procedure.primitive_id,
                 input_ids: Vec::new(),
                 asset_ids: Vec::new(),

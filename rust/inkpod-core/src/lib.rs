@@ -30,6 +30,7 @@ mod asset;
 mod asset_operations;
 mod batch;
 mod cell_creation;
+mod color_chart;
 mod color_replace;
 mod coordinate;
 mod core;
@@ -78,16 +79,15 @@ pub use cell_creation::{
     CellCreationOptions, CellCreationPlan, CellCreationPlanItem, CellSizing, FrameAnchor,
     MAX_CELL_CREATION_COUNT, MAX_CELL_CREATION_DPI_MILLI, plan_cell_creation,
 };
-pub use color_replace::{
-    ScopedColorReplaceMode, ScopedColorReplacePreview, ScopedColorReplaceRequest,
-};
+pub use color_chart::*;
+pub use color_replace::*;
 pub use core::Core;
 pub use editor::{
-    EditTarget, EditorBrushOptions, EditorDefaults, EditorFillOptions, EditorFrameDisposition,
-    EditorRevision, EditorSavepointToken, EditorSelectionOptions, EditorSelectionShape,
-    EditorState, EditorStateDigest, EditorStateInfo, EditorStateUpdate, EditorStrokeInput,
-    EditorTarget, EditorTool, EditorToolStyle, EditorVectorOptions, InitialDocumentSpec,
-    MAX_EDIT_TARGETS, PaletteCursor,
+    ColorChartCursor, EditTarget, EditorBrushOptions, EditorDefaults, EditorFillOptions,
+    EditorFrameDisposition, EditorRevision, EditorSavepointToken, EditorSelectionOptions,
+    EditorSelectionShape, EditorState, EditorStateDigest, EditorStateInfo, EditorStateUpdate,
+    EditorStrokeInput, EditorTarget, EditorTool, EditorToolStyle, EditorVectorOptions,
+    InitialDocumentSpec, MAX_EDIT_TARGETS, PaletteCursor,
 };
 pub use effects::FilterPreviewInfo;
 pub use error::CoreError;

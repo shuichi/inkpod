@@ -16,6 +16,15 @@ fn history_change_bytes(change: &HistoryChange) -> u64 {
         HistoryChange::Palette { before, after } => ((before.colors().len() + after.colors().len())
             as u64)
             .saturating_mul(std::mem::size_of::<PixelValue>() as u64),
+        HistoryChange::ColorChart { before, after } => before
+            .entries()
+            .iter()
+            .chain(after.entries())
+            .fold(0_u64, |bytes, entry| {
+                bytes
+                    .saturating_add(std::mem::size_of::<ColorChartEntry>() as u64)
+                    .saturating_add(entry.name.len() as u64)
+            }),
         HistoryChange::MainLineColor { .. } => (2 * std::mem::size_of::<PixelValue>()) as u64,
         HistoryChange::Document { before, after } => history_document_raster_bytes(before)
             .saturating_add(history_document_raster_bytes(after)),

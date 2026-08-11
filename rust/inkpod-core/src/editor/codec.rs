@@ -7,8 +7,8 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
-const FRAME_SCHEMA: u32 = 4;
-const STATE_FIELD_COUNT: usize = 13;
+const FRAME_SCHEMA: u32 = 5;
+const STATE_FIELD_COUNT: usize = 14;
 const EDIT_FIELD_COUNT: usize = 4;
 const DIGEST_CONTEXT: &str = "org.inkpod.digest.editor-state.v1";
 const MAX_DIAMETER_Q16: i64 = 256_i64 << 16;
@@ -217,6 +217,12 @@ fn encode_state_frame(state: &EditorState) -> Vec<u8> {
                 Some(cursor.index.to_le_bytes().to_vec()),
             ])
         }),
+        state.color_chart_cursor.map(|cursor| {
+            encode_frame(&[
+                Some(cursor.page.to_le_bytes().to_vec()),
+                Some(cursor.index.to_le_bytes().to_vec()),
+            ])
+        }),
         Some(encode_sequence(state.edit_targets.iter().map(
             |target| match target {
                 EditTarget::Layer(layer_id) => encode_frame(&[
@@ -280,7 +286,16 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
             })
         })
         .transpose()?;
-    let edit_targets = decode_sequence(required(fields[12])?, MAX_EDIT_TARGETS)?
+    let color_chart_cursor = fields[12]
+        .map(|field| -> Result<ColorChartCursor, CoreError> {
+            let cursor = decode_frame(field, 2)?;
+            Ok(ColorChartCursor {
+                page: read_u32(required(cursor[0])?)?,
+                index: read_u32(required(cursor[1])?)?,
+            })
+        })
+        .transpose()?;
+    let edit_targets = decode_sequence(required(fields[13])?, MAX_EDIT_TARGETS)?
         .into_iter()
         .map(|record| {
             let fields = decode_frame(record, 3)?;
@@ -307,6 +322,7 @@ fn decode_state_frame(bytes: &[u8]) -> Result<EditorState, CoreError> {
         target,
         edit_targets,
         palette_cursor,
+        color_chart_cursor,
     };
     validate_state(&state).map_err(|error| format_error(&error.to_string()))?;
     Ok(state)
@@ -844,8 +860,8 @@ mod tests {
         assert_eq!(
             state_digest(&state).as_bytes(),
             &[
-                150, 145, 82, 179, 123, 229, 253, 188, 58, 59, 187, 69, 222, 99, 45, 195, 215, 118,
-                15, 13, 200, 109, 88, 113, 103, 170, 106, 24, 177, 76, 127, 206,
+                59, 34, 247, 192, 203, 17, 130, 33, 62, 237, 228, 245, 93, 38, 46, 95, 121, 112,
+                60, 202, 188, 127, 36, 120, 60, 6, 112, 97, 53, 114, 166, 151,
             ]
         );
     }

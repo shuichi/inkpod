@@ -328,6 +328,10 @@ pub(super) enum HistoryChange {
         before: Palette,
         after: Palette,
     },
+    ColorChart {
+        before: ColorChart,
+        after: ColorChart,
+    },
     MainLineColor {
         before: PixelValue,
         after: PixelValue,
@@ -343,6 +347,7 @@ impl HistoryChange {
         match self {
             Self::Pixels { .. } => "Raster edit",
             Self::Palette { .. } => "Palette edit",
+            Self::ColorChart { .. } => "Color chart edit",
             Self::MainLineColor { .. } => "Main-line color",
             Self::Document { .. } => "Document edit",
         }
@@ -403,6 +408,13 @@ pub(super) fn apply_history_change(
         }
         HistoryChange::Palette { before, after } => {
             document.palette = if use_after {
+                after.clone()
+            } else {
+                before.clone()
+            };
+        }
+        HistoryChange::ColorChart { before, after } => {
+            document.color_chart = if use_after {
                 after.clone()
             } else {
                 before.clone()

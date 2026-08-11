@@ -204,10 +204,10 @@ selection mask. `BaseSurface::Asset` instead names one immutable canonical raste
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
 maximum-close frames change canonical document-state bytes, so the document-state
-commitment is schema/domain 5. The current replay contract is epoch 15 and native
-format version 18. It adds a resolved, ordered Light Table bulk-registration
-primitive while preserving the existing canonical fixed-point/image-result
-semantics.
+commitment is schema 6/domain 5. The current replay contract is epoch 16 and native
+format version 19. It adds a document-owned Color chart, canonical whole-chart
+replacement, and EditorState cursor while preserving the existing canonical
+fixed-point/image-result semantics.
 The numeric audit, prohibited platform-math list, public golden fixture, and
 benchmark gate are specified in [`determinism.md`](determinism.md).
 
@@ -328,12 +328,13 @@ preference and are never made authoritative by a workspace. Each Core entry
 bound to a `DocumentSession` then owns exactly one mutable `EditorState`.
 Multiple views of that session share it, while different document sessions
 remain isolated even when their views appear in the same workspace. Palette
-content, main-line color, and the selection mask remain document primitives;
-only the palette cursor, active layer/plane target, ordered multi-edit-target
+content, Color chart entries/name/lock, main-line color, and the selection mask
+remain document primitives; only the palette cursor, Color chart page/selection,
+active layer/plane target, ordered multi-edit-target
 set, and selection/tool/brush options belong to `EditorState`. The active target owns
 keyboard focus and paint destination; the bounded target set independently owns
 grouped copy/tree-command intent. Core normalizes that set to document-tree
-order, reconciles it after topology changes, and persists it in EDIT schema 4.
+order, reconciles it after topology changes, and persists it in EDIT schema 5.
 Changing the marker set advances only EditorRevision/editor dirty. A grouped
 document command captures the set into one canonical invocation and publishes
 one transaction, document revision, history entry, and journal commit.

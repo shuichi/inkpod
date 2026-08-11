@@ -10,6 +10,7 @@ compile_error!("inkpod-ffi requires the statically linked MSVC CRT");
 
 mod application_data;
 mod batch;
+mod color_chart;
 
 #[cfg(test)]
 #[path = "../tests/unit/contracts.rs"]
@@ -19,18 +20,18 @@ use inkpod_core::{
     ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, ApplicationColor,
     AssetAlphaSemantics, AssetColorSpace, BoundaryAirbrush, BrushShape, CellCreationOptions,
     CellCreationPlan, CellSizing, Channel, ClipboardPayload, ClipboardPixel, ClipboardPlane,
-    ColorBalance, ColorCheckMode, CommonRasterFormat, CoordinateSpace, Core, CoreError,
-    CurveInterpolation, CurvePoint, DocumentInfo, DocumentResize, DustMode, DustRemoval,
-    EditTarget, EditTargetCommand, EditorBrushOptions, EditorDefaults, EditorFillOptions,
-    EditorSelectionOptions, EditorSelectionShape, EditorState, EditorStateInfo, EditorStateUpdate,
-    EditorStrokeInput, EditorTarget, EditorTool, EditorVectorOptions, EffectRegionKind,
-    EyedropperSource, FileColorChart, FileColorChartEntry, FilePalette, FillOperation, FillRequest,
-    Filter, FloatingTransform, FrameAnchor, FrameMetadata, GeometryCommit, GeometryCrossSection,
-    GeometryOptions, GeometryPreviewInfo, GeometryPrimitive, GeometryRequest, Gradient,
-    GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis, HsvAdjustment, InclusionMode,
-    LayerKind, Levels, LightTableBulkDirection, LightTableBulkRegistrationAction,
-    LightTableBulkRegistrationRequest, LightTableDisplayMode, LightTableItemInput,
-    LightTableItemProperties, LightTableSource, MAX_CELL_CREATION_COUNT,
+    ColorBalance, ColorChartEntry, ColorChartPreview, ColorCheckMode, CommonRasterFormat,
+    CoordinateSpace, Core, CoreError, CurveInterpolation, CurvePoint, DocumentInfo, DocumentResize,
+    DustMode, DustRemoval, EditTarget, EditTargetCommand, EditorBrushOptions, EditorDefaults,
+    EditorFillOptions, EditorSelectionOptions, EditorSelectionShape, EditorState, EditorStateInfo,
+    EditorStateUpdate, EditorStrokeInput, EditorTarget, EditorTool, EditorVectorOptions,
+    EffectRegionKind, EyedropperSource, FileColorChart, FileColorChartEntry, FilePalette,
+    FillOperation, FillRequest, Filter, FloatingTransform, FrameAnchor, FrameMetadata,
+    GeometryCommit, GeometryCrossSection, GeometryOptions, GeometryPreviewInfo, GeometryPrimitive,
+    GeometryRequest, Gradient, GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis,
+    HsvAdjustment, InclusionMode, LayerKind, Levels, LightTableBulkDirection,
+    LightTableBulkRegistrationAction, LightTableBulkRegistrationRequest, LightTableDisplayMode,
+    LightTableItemInput, LightTableItemProperties, LightTableSource, MAX_CELL_CREATION_COUNT,
     MAX_COLOR_CHART_NAME_BYTES, MAX_COMMON_RASTER_BYTES, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS,
     MAX_RASTER_DIMENSION, MAX_SHORTCUT_STROKES, MAX_SHORTCUTS, Margins, MirrorAxis,
     MotionCheckConfig, MotionFrame, PaintTool, PaletteCursor, PixelFormat, PixelValue, PlaneType,
@@ -75,6 +76,7 @@ pub(crate) use abi::{
 };
 pub use animation::*;
 pub use application_data::*;
+pub use color_chart::*;
 pub use determinism::*;
 pub use document_edit::*;
 pub use editor_state::*;

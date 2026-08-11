@@ -8,6 +8,7 @@ pub(super) fn validate_document_metadata(
     metadata: &FileDocumentMetadata,
     file_planes: Option<&[FilePlane]>,
 ) -> Result<(), FormatError> {
+    crate::encode_color_chart(&metadata.color_chart)?;
     if metadata.layers.is_empty()
         || metadata.layers.len() > MAX_LAYERS
         || metadata.guides.len() > MAX_GUIDES

@@ -1449,7 +1449,8 @@ void DrawColorListItem(
         return;
     }
     const std::size_t index = static_cast<std::size_t>(draw.itemData);
-    if (index >= state.colors.size()) {
+    const auto& colors = chart ? state.chart_colors : state.palette_colors;
+    if (index >= colors.size()) {
         return;
     }
     const bool selected = (draw.itemState & ODS_SELECTED) != 0U;
@@ -1462,7 +1463,7 @@ void DrawColorListItem(
     chip.top += 3;
     chip.right = chip.left + std::max(12L, draw.rcItem.bottom - draw.rcItem.top - 6L);
     chip.bottom -= 3;
-    const HBRUSH color_brush = CreateSolidBrush(ColorRef(state.colors[index]));
+    const HBRUSH color_brush = CreateSolidBrush(ColorRef(colors[index]));
     if (color_brush != nullptr) {
         FillRect(draw.hDC, &chip, color_brush);
         DeleteObject(color_brush);
@@ -1484,9 +1485,9 @@ void DrawColorListItem(
             text.size(),
             L"%u  #%02X%02X%02X",
             static_cast<unsigned>(index + 1U),
-            Channel8(state.colors[index], state.colors[index].red),
-            Channel8(state.colors[index], state.colors[index].green),
-            Channel8(state.colors[index], state.colors[index].blue));
+            Channel8(colors[index], colors[index].red),
+            Channel8(colors[index], colors[index].green),
+            Channel8(colors[index], colors[index].blue));
     }
     DrawTextW(
         draw.hDC,
@@ -2114,7 +2115,8 @@ void PopulateLists(HWND pane, ColorDockPaneState& state) noexcept {
     SendMessageW(palette, LB_RESETCONTENT, 0, 0);
     SendMessageW(chart, LB_RESETCONTENT, 0, 0);
     const std::size_t palette_begin = static_cast<std::size_t>(state.palette_group) * 10U;
-    const std::size_t palette_end = std::min(state.colors.size(), palette_begin + 10U);
+    const std::size_t palette_end = std::min(
+        state.palette_colors.size(), palette_begin + 10U);
     for (std::size_t index = palette_begin; index < palette_end; ++index) {
         const LRESULT item = SendMessageW(
             palette, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L""));
@@ -2123,7 +2125,8 @@ void PopulateLists(HWND pane, ColorDockPaneState& state) noexcept {
         }
     }
     const std::size_t chart_begin = static_cast<std::size_t>(state.chart_page) * 20U;
-    const std::size_t chart_end = std::min(state.colors.size(), chart_begin + 20U);
+    const std::size_t chart_end = std::min(
+        state.chart_colors.size(), chart_begin + 20U);
     for (std::size_t index = chart_begin; index < chart_end; ++index) {
         const LRESULT item = SendMessageW(
             chart, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L""));
@@ -2360,7 +2363,8 @@ void UpdateColorDockPane(
     HWND pane,
     const InkpodColorValue& main_line_color,
     const InkpodColorValue& drawing_color,
-    const std::vector<InkpodColorValue>& colors,
+    const std::vector<InkpodColorValue>& palette_colors,
+    const std::vector<InkpodColorValue>& chart_colors,
     const std::vector<std::wstring>& names,
     std::uint32_t palette_group,
     std::uint32_t chart_page,
@@ -2370,7 +2374,8 @@ void UpdateColorDockPane(
         return;
     }
     try {
-        state->colors = colors;
+        state->palette_colors = palette_colors;
+        state->chart_colors = chart_colors;
         state->names = names;
     } catch (const std::bad_alloc&) {
         return;

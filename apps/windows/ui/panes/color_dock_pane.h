@@ -73,7 +73,8 @@ struct ColorDockPaneState {
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
     InkpodColorValue drawing_color{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
-    std::vector<InkpodColorValue> colors;
+    std::vector<InkpodColorValue> palette_colors;
+    std::vector<InkpodColorValue> chart_colors;
     std::vector<std::wstring> names;
     std::uint32_t palette_group{};
     std::uint32_t chart_page{};
@@ -120,7 +121,8 @@ void UpdateColorDockPane(
     HWND pane,
     const InkpodColorValue& main_line_color,
     const InkpodColorValue& drawing_color,
-    const std::vector<InkpodColorValue>& colors,
+    const std::vector<InkpodColorValue>& palette_colors,
+    const std::vector<InkpodColorValue>& chart_colors,
     const std::vector<std::wstring>& names,
     std::uint32_t palette_group,
     std::uint32_t chart_page,

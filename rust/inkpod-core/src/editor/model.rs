@@ -58,6 +58,7 @@ impl EditorDefaults {
                 target: None,
                 edit_targets: Vec::new(),
                 palette_cursor: None,
+                color_chart_cursor: None,
             },
         }
     }
@@ -393,6 +394,15 @@ pub struct PaletteCursor {
     pub index: u32,
 }
 
+/// Cursor into Color chart presentation; chart content remains document-owned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ColorChartCursor {
+    /// Zero-based page containing the selected entry.
+    pub page: u32,
+    /// Zero-based absolute entry index.
+    pub index: u32,
+}
+
 /// Typed Core-owned editor state shared by every view of one document session.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EditorState {
@@ -415,6 +425,8 @@ pub struct EditorState {
     pub edit_targets: Vec<EditTarget>,
     /// Palette presentation cursor.
     pub palette_cursor: Option<PaletteCursor>,
+    /// Color chart presentation cursor.
+    pub color_chart_cursor: Option<ColorChartCursor>,
 }
 
 impl EditorState {
@@ -514,6 +526,8 @@ pub enum EditorStateUpdate {
     SetEditTargets(Vec<EditTarget>),
     /// Replaces or clears the palette cursor.
     SetPaletteCursor(Option<PaletteCursor>),
+    /// Replaces or clears the Color chart cursor.
+    SetColorChartCursor(Option<ColorChartCursor>),
 }
 
 /// Whether a restored canonical EDIT frame establishes an editor savepoint.

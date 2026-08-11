@@ -273,16 +273,42 @@ struct ViewUiState {
     std::optional<DragToken> active_drag;
 };
 
+struct ColorChartGenerationJob {
+    ColorChartGenerationJob() noexcept {
+        summary.struct_size = sizeof(summary);
+    }
+
+    ~ColorChartGenerationJob() {
+        (void)inkpod_color_chart_preview_release(&preview);
+        (void)inkpod_task_release(&task);
+    }
+
+    ColorChartGenerationJob(const ColorChartGenerationJob&) = delete;
+    ColorChartGenerationJob& operator=(const ColorChartGenerationJob&) = delete;
+
+    InkpodTask* task{};
+    InkpodColorChartPreview* preview{};
+    InkpodColorChartPreviewSummary summary{};
+    CommandContext context;
+    std::atomic_uint32_t status{INKPOD_STATUS_INVALID_STATE};
+    std::uint64_t token{};
+    std::uint32_t maximum_colors{};
+    std::uint32_t quantization_bits{};
+};
+
 struct PaneUiState {
     InkpodColorValue main_line_color{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
     std::vector<InkpodColorValue> palette_colors;
     std::uint32_t palette_group{};
     std::uint32_t selected_palette_index{};
+    std::vector<InkpodColorValue> color_chart_colors;
     std::vector<std::wstring> color_chart_names;
     std::uint32_t color_chart_page{};
     std::uint32_t selected_color_chart_index{};
     bool color_chart_locked{};
+    std::uint64_t color_chart_generation_token{};
+    std::shared_ptr<ColorChartGenerationJob> color_chart_generation;
     std::uint64_t active_tree_layer_id{};
     std::uint64_t active_tree_plane_id{};
     std::uint32_t active_tree_layer_index{};

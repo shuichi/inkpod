@@ -2026,6 +2026,246 @@ fn ffi_contract_document_history_selection_clipboard_and_raster_round_trip() {
 }
 
 #[test]
+fn ffi_color_chart_preview_owns_copies_applies_and_rejects_double_release() {
+    let (mut core, _) = create_core(2, 1, 1);
+    let red_name = b"Red";
+    let red = InkpodColorChartEntry {
+        struct_size: size_of::<InkpodColorChartEntry>() as u32,
+        reserved: 0,
+        feature_flags: INKPOD_FEATURE_NONE,
+        color: color(255, 0, 0, 255),
+        name_utf8: red_name.as_ptr(),
+        name_bytes: red_name.len() as u64,
+    };
+    let mut result = dispatch();
+    // SAFETY: All records and borrowed name bytes remain live for each call.
+    unsafe {
+        assert_eq!(
+            inkpod_core_color_chart_set(
+                core,
+                &red,
+                1,
+                size_of::<InkpodColorChartEntry>() as u64,
+                0,
+                &mut result,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    let before_preview = queried_document_info(core);
+    let history_before = queried_history_info(core);
+    let mut cancelled_task = ptr::null_mut();
+    let mut cancelled_preview = ptr::null_mut();
+    let mut cancelled_summary = InkpodColorChartPreviewSummary {
+        struct_size: size_of::<InkpodColorChartPreviewSummary>() as u32,
+        ..InkpodColorChartPreviewSummary::default()
+    };
+    // SAFETY: The task owner starts null, remains live through the worker call,
+    // and is released only after the call has stopped borrowing it.
+    unsafe {
+        assert_eq!(inkpod_task_create(&mut cancelled_task), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_task_cancel(cancelled_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_color_chart_preview_create_task(
+                core,
+                8,
+                0,
+                cancelled_task,
+                &mut cancelled_summary,
+                &mut cancelled_preview,
+            ),
+            INKPOD_STATUS_CANCELLED
+        );
+        assert!(cancelled_preview.is_null());
+        assert_eq!(inkpod_task_release(&mut cancelled_task), INKPOD_STATUS_OK);
+    }
+    assert_eq!(
+        document_observation(&queried_document_info(core)),
+        document_observation(&before_preview)
+    );
+    assert_eq!(queried_history_info(core).cursor, history_before.cursor);
+
+    let mut preview = ptr::null_mut();
+    let mut summary = InkpodColorChartPreviewSummary {
+        struct_size: size_of::<InkpodColorChartPreviewSummary>() as u32,
+        ..InkpodColorChartPreviewSummary::default()
+    };
+    // SAFETY: Owner starts null; summary is complete and writable.
+    unsafe {
+        assert_eq!(
+            inkpod_core_color_chart_preview_create(core, 8, 0, &mut summary, &mut preview),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert!(!preview.is_null());
+    assert_eq!(
+        summary.base_document_revision,
+        before_preview.document_revision
+    );
+    assert_eq!(summary.entry_count, 1);
+    assert_eq!(summary.retained_color_count, 0);
+    assert_eq!(summary.added_color_count, 1);
+    assert_eq!(
+        document_observation(&queried_document_info(core)),
+        document_observation(&before_preview)
+    );
+    let history_after_preview = queried_history_info(core);
+    assert_eq!(history_after_preview.cursor, history_before.cursor);
+    assert_eq!(history_after_preview.item_count, history_before.item_count);
+
+    let mut copied = InkpodColorValue {
+        struct_size: size_of::<InkpodColorValue>() as u32,
+        ..InkpodColorValue::default()
+    };
+    let mut name_bytes = 0_u64;
+    let mut frequency = 0_u64;
+    // SAFETY: Preview is live and output records are writable.
+    unsafe {
+        assert_eq!(
+            inkpod_color_chart_preview_get(
+                preview,
+                0,
+                &mut copied,
+                ptr::null_mut(),
+                0,
+                &mut name_bytes,
+                &mut frequency,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_eq!(
+        (copied.red, copied.green, copied.blue, copied.alpha),
+        (255, 255, 255, 255)
+    );
+    assert_eq!(frequency, 2);
+    let mut short = vec![0_u8; name_bytes.saturating_sub(1) as usize];
+    // SAFETY: Deliberately undersized writable buffer exercises the negative contract.
+    unsafe {
+        assert_eq!(
+            inkpod_color_chart_preview_get(
+                preview,
+                0,
+                &mut copied,
+                short.as_mut_ptr(),
+                short.len() as u64,
+                &mut name_bytes,
+                &mut frequency,
+            ),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+    }
+    let mut name = vec![0_u8; name_bytes as usize];
+    let (mut other_core, _) = create_core(2, 1, 2);
+    let mut other_result = dispatch();
+    // SAFETY: The second Core has a distinct document UUID but the same
+    // revision, proving that the preview token is not revision-only.
+    unsafe {
+        assert_eq!(
+            inkpod_core_color_chart_set(
+                other_core,
+                &red,
+                1,
+                size_of::<InkpodColorChartEntry>() as u64,
+                0,
+                &mut other_result,
+            ),
+            INKPOD_STATUS_OK
+        );
+        let other_before = queried_document_info(other_core);
+        assert_eq!(
+            inkpod_core_color_chart_preview_apply(other_core, preview, &mut other_result),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(
+            document_observation(&queried_document_info(other_core)),
+            document_observation(&other_before)
+        );
+        assert_eq!(inkpod_core_destroy(&mut other_core), INKPOD_STATUS_OK);
+    }
+    // SAFETY: Exact-capacity name output and live preview satisfy the contract.
+    unsafe {
+        assert_eq!(
+            inkpod_color_chart_preview_get(
+                preview,
+                0,
+                &mut copied,
+                name.as_mut_ptr(),
+                name.len() as u64,
+                &mut name_bytes,
+                &mut frequency,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_color_chart_preview_apply(core, preview, &mut result),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_eq!(std::str::from_utf8(&name).unwrap(), "Color 1");
+    assert_eq!(
+        queried_history_info(core).item_count,
+        history_before.item_count + 1
+    );
+
+    let mut info = InkpodColorChartInfo {
+        struct_size: size_of::<InkpodColorChartInfo>() as u32,
+        ..InkpodColorChartInfo::default()
+    };
+    let mut committed_color = InkpodColorValue {
+        struct_size: size_of::<InkpodColorValue>() as u32,
+        ..InkpodColorValue::default()
+    };
+    let mut committed_name_bytes = 0_u64;
+    // SAFETY: Chart query outputs are complete and writable; null storage with
+    // zero capacity is the documented name-size query.
+    unsafe {
+        assert_eq!(
+            inkpod_core_color_chart_info(core, &mut info),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(info.entry_count, 1);
+        assert_eq!(
+            inkpod_core_color_chart_get(
+                core,
+                0,
+                &mut committed_color,
+                ptr::null_mut(),
+                0,
+                &mut committed_name_bytes,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    let mut committed_name = vec![0_u8; committed_name_bytes as usize];
+    // SAFETY: Exact-capacity name storage and unique release owners satisfy the contract.
+    unsafe {
+        assert_eq!(
+            inkpod_core_color_chart_get(
+                core,
+                0,
+                &mut committed_color,
+                committed_name.as_mut_ptr(),
+                committed_name.len() as u64,
+                &mut committed_name_bytes,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(std::str::from_utf8(&committed_name).unwrap(), "Color 1");
+        assert_eq!(
+            inkpod_color_chart_preview_release(&mut preview),
+            INKPOD_STATUS_OK
+        );
+        assert!(preview.is_null());
+        assert_eq!(
+            inkpod_color_chart_preview_release(&mut preview),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
 fn ffi_contract_light_table_sequence_and_owned_buffers() {
     let (mut source_core, _) = create_core(3, 2, 2);
     let png = export_png_with_composite(source_core, 1);
@@ -3546,8 +3786,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 15);
-        assert_eq!(contract.procedure_format_version, 18);
+        assert_eq!(contract.replay_epoch, 16);
+        assert_eq!(contract.procedure_format_version, 19);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);

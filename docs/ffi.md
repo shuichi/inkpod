@@ -80,7 +80,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 現行 ABI は、所有権を移さない読み取り専用の固定レイアウト照会を二つ提供する。
 
 - `inkpod_core_get_replay_contract` は、呼び出し側が所有する `InkpodReplayContract` へ値を書き込む。
-  リプレイエポック 15、現行のプロシージャ／コンテナバージョン 18、正規数値バージョン 1、閉じた
+  リプレイエポック 16、現行のプロシージャ／コンテナバージョン 19、正規数値バージョン 1、閉じた
   プリミティブカタログの件数、BLAKE3-256 カタログダイジェストを返す。Core 所有スレッド専用であり、
   文書、リビジョン、履歴、未保存状態、レジストリ、スナップショットを変更しない。
 - `inkpod_snapshot_get_canonical_digest` は、不変スナップショットの `InkpodCanonicalDigest` を、
@@ -96,7 +96,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 コピーされる。NULL、短いレコード、パニックでは通常の ABI ステータス契約に従い、出力を部分更新しない。
 スレッド違反が成立するのは Core 所有スレッド専用のリプレイ契約照会だけであり、スナップショットの
 ダイジェスト照会は、外部同期された任意の読み取りスレッドから呼び出せる。これらは検証値を公開するだけで、
-製品の保存／オープン API は同じ v18 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
+製品の保存／オープン API は同じ v19 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
 現行 ABI v9 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
@@ -108,7 +108,7 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 ジャーナルの正確なダイジェストを返す。UI は履歴件数を表示して確認を得た後、そのレコードを変更せずに
 `inkpod_core_write_compacted_copy` へ渡す。書き込み時に確認トークンが古ければ `INVALID_STATE`、
 トークンのフラグまたは予約領域が 0 でなければ `UNSUPPORTED` になる。成功時は、現在状態を新しい Genesis
-とする別の v18 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
+とする別の v19 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
 `CoreHost` は三つの操作すべてを Core エンジンキュー経由で実行する。自動的な履歴圧縮は行わず、`CKPT` は
 履歴やアセット保持の正本ではない。Windows では `ファイル > 履歴を破棄してコピー...` として公開し、
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
@@ -775,10 +775,10 @@ Core はセッションを無効化するため、フロントエンドはスト
 | ストローク終了、プレビュー適用、浮動状態の確定                 | 実変更時に 1 回進む  | 未保存                            | 高々 1 単位                       |
 | 直接の文書編集                                                | 実変更時に 1 回進む  | 未保存                            | 原則 1 単位                       |
 | Undo／Redo／履歴位置の移動                                    | 結果状態へ進む       | 保存点との位置で再計算            | カーソルを移動し項目は増やさない  |
-| 現行 v18 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
+| 現行 v19 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
 | 自動保存                                                      | 不変                 | 不変                              | 不変                              |
 | 新規作成／インポート                                          | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis／履歴              |
-| v18 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
+| v19 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
 
 意味上の変更がない場合の厳密な出力やリビジョンは、各関数の Doxygen 契約に従う。フロントエンドはファイル時刻ではなく、
 Core が返す文書フラグと保存点に基づいて未保存状態を表示する。
@@ -889,12 +889,27 @@ UI スレッド:                 照会／照会／キャンセル
 破棄して `INKPOD_STATUS_CANCELLED` を返す。ファイル出力を伴う処理は、完成した一時ファイルだけを
 置換対象とし、キャンセルや失敗で部分出力を確定しない。
 
+Color chart 生成では `inkpod_core_color_chart_preview_create_task` が、呼出し中だけ
+borrow する生存中の `InkpodTask` を使って source row 単位の進捗と cooperative cancel
+を公開する。成功時の `InkpodColorChartPreview*` は Rust 所有の immutable object であり、
+候補色、名前、頻度、差分 summary と、発行元 document UUID／revision を内部に所有する。
+Core や caller buffer への借用は保持しない。`inkpod_color_chart_preview_get` は名前を
+NULL/0 で size query した後、caller buffer へ exact byte length をコピーする。
+`inkpod_core_color_chart_preview_apply` は同じ document identity、current revision、非overflow、
+chart unlocked のときだけ Core owner thread 上で一回の canonical transaction を commit する。
+別 document、stale revision、lock、overflow、invalid record、cancel／failure は chart、history、
+journal、dirty、ID を変更しない。所有者は Apply／Cancel／stale／failure のいずれでも、worker が
+task と preview を借用し終えた後に `inkpod_color_chart_preview_release` を exactly once 呼び、
+owner slot を NULL にする。NULL owner、短い record、短い name buffer、二重 release は negative
+status となる。Windows adapter は発行時 `CommandContext` と世代付き request token を固定し、
+旧 task を cancel して最新 token の completion だけを比較 dialog に渡す。
+
 バッチ実行だけは、キャンセル／失敗時にもレポートの所有権を返すことがある。戻りステータスを確認した後も、
 `out_report != NULL` なら内容を読み、必ず解放する。
 
 ## 保存、自動保存、復旧
 
-通常保存では、v18 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
+通常保存では、v19 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
 セクション、チェックポイントの作成条件を満たす場合だけ任意の `CKPT` を構築する。保存後に設定予定の
 文書／EditorState 保存点を含むコンテナは、同じディレクトリの一時ファイルへ複数回に分けて書き込む。
 フラッシュ、同期、クローズを終えてから置換する。成功後だけ通常保存パスと両保存点を Core へ公開するため、
@@ -903,7 +918,7 @@ EditorState だけが
 どちらの保存点も変更しない。
 
 自動保存とエクスポートは、出力を原子的に書いても通常保存パス、文書／EditorState 保存点、未保存状態を
-変えない。通常の v18 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
+変えない。通常の v19 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
 ID 発行状態、EditorState、両保存点を、段階的に構築した Core で検証・復元してから、現在の Core 状態を
 一回だけ置換する。`InkpodCore` の `_v3` 付きオブジェクトレジストリの世代自体は、オープンで更新されない。
 

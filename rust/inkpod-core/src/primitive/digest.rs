@@ -5,12 +5,12 @@ use crate::*;
 use blake3::hazmat::HasherExt;
 use std::sync::LazyLock;
 
-const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v4";
-const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v1";
+const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v5";
+const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v2";
 const DOCUMENT_RASTER_CONTEXT: &str = "org.inkpod.digest.document-raster.v1";
 const DOCUMENT_TILE_CONTEXT: &str = "org.inkpod.digest.document-raster-tile.v1";
 const PROCEDURE_PAYLOAD_CONTEXT: &str = "org.inkpod.digest.procedure-payload.v1";
-const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 5;
+const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 6;
 const DOCUMENT_TILE_SCHEMA_VERSION: u32 = 1;
 const PROCEDURE_PAYLOAD_SCHEMA_VERSION: u32 = 1;
 
@@ -154,7 +154,9 @@ pub(crate) fn advance_canonical_document_state_cache(
             }
             cached.digest = canonical_raster_digest(cached)?;
         }
-        HistoryChange::Palette { .. } | HistoryChange::MainLineColor { .. } => {
+        HistoryChange::Palette { .. }
+        | HistoryChange::ColorChart { .. }
+        | HistoryChange::MainLineColor { .. } => {
             tree.metadata_digest = canonical_document_metadata_digest(document, &tree)?;
         }
         HistoryChange::Document { .. } => {
@@ -266,6 +268,21 @@ fn canonical_document_metadata_bytes(
             .iter()
             .map(Vec::as_slice),
     )?;
+    let color_chart_entries = document
+        .color_chart
+        .entries()
+        .iter()
+        .map(|entry| {
+            frame(&[
+                present(color_bytes(entry.color)?),
+                present(entry.name.as_bytes().to_vec()),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let color_chart = frame(&[
+        present(boolean_bytes(document.color_chart.locked())),
+        present(sequence(color_chart_entries.iter().map(Vec::as_slice))?),
+    ])?;
     let guide_frames = document
         .guides
         .iter()
@@ -307,6 +324,7 @@ fn canonical_document_metadata_bytes(
         present(layer_tree),
         present(selection),
         present(palette),
+        present(color_chart),
         present(color_bytes(document.main_line_color)?),
         present(guides),
         present(grid),
@@ -1284,7 +1302,7 @@ mod tests {
         let metadata = canonical_document_metadata_bytes(&document, &tree).unwrap();
         let fields = parsed_fields(&metadata);
 
-        assert_eq!(fields.len(), 14);
+        assert_eq!(fields.len(), 15);
         assert_eq!(fields[0].unwrap(), &document.uuid.to_be_bytes());
         assert_eq!(fields[1].unwrap(), &document.id.get().to_le_bytes());
         assert_eq!(
@@ -1305,10 +1323,10 @@ mod tests {
         assert_eq!(
             digest.as_bytes(),
             &[
-                60, 25, 205, 63, 158, 25, 62, 121, 221, 163, 181, 4, 211, 183, 107, 215, 200, 40,
-                245, 87, 152, 165, 111, 110, 249, 36, 81, 107, 79, 229, 185, 221,
+                107, 68, 85, 113, 226, 200, 178, 223, 232, 172, 81, 145, 242, 150, 89, 74, 166,
+                208, 214, 120, 140, 73, 94, 240, 177, 73, 88, 66, 58, 179, 204, 72,
             ],
-            "schema-5 digest changes require an explicit golden update"
+            "schema-6 digest changes require an explicit golden update"
         );
     }
 
@@ -1374,7 +1392,7 @@ mod tests {
         let (tree, _) = canonical_document_state_tree(document).unwrap();
         let metadata = canonical_document_metadata_bytes(document, &tree).unwrap();
         let document_fields = parsed_fields(&metadata);
-        let light_table_fields = parsed_fields(document_fields[11].unwrap());
+        let light_table_fields = parsed_fields(document_fields[12].unwrap());
         let sets = parsed_sequence(light_table_fields[1].unwrap());
         let set_fields = parsed_fields(sets[0]);
         let items = parsed_sequence(set_fields[3].unwrap());

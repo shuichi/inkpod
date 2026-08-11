@@ -63,6 +63,7 @@ pub(crate) struct CellDocument {
     pub(crate) frames: FrameMetadata,
     pub(crate) main_line_color: PixelValue,
     pub(crate) palette: Palette,
+    pub(crate) color_chart: ColorChart,
     pub(crate) layers: Vec<LayerNode>,
     pub(crate) selection_plane_id: PlaneId,
     pub(crate) selection: TileRaster,
@@ -173,6 +174,7 @@ impl CellDocument {
             frames,
             main_line_color: PixelValue::Rgba([0, 0, 0, 255]),
             palette: Palette::default(),
+            color_chart: ColorChart::default(),
             layers: vec![LayerNode {
                 id: ids.layer,
                 kind: LayerKind::BinaryColoring,
@@ -269,6 +271,18 @@ impl CellDocument {
                     spacing_y: self.grid.spacing_y,
                     subdivisions: self.grid.subdivisions,
                 },
+                color_chart: FileColorChart {
+                    entries: self
+                        .color_chart
+                        .entries()
+                        .iter()
+                        .map(|entry| FileColorChartEntry {
+                            color: application_color(entry.color),
+                            name: entry.name.clone(),
+                        })
+                        .collect(),
+                },
+                color_chart_locked: self.color_chart.locked(),
             }),
             light_table_metadata: Some(self.light_table.to_file()),
             vector_metadata: self.vector.to_file(
@@ -307,6 +321,25 @@ impl CellDocument {
         for color in &file.palette {
             palette.push(*color)?;
         }
+        let color_chart = file
+            .document_metadata
+            .as_ref()
+            .map(|metadata| {
+                ColorChart::validated(
+                    metadata
+                        .color_chart
+                        .entries
+                        .iter()
+                        .map(|entry| ColorChartEntry {
+                            color: pixel_value(entry.color),
+                            name: entry.name.clone(),
+                        })
+                        .collect(),
+                    metadata.color_chart_locked,
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
         let (layers, selection_plane_id, selection, guides, grid) =
             if let Some(metadata) = &file.document_metadata {
                 let mut layers = Vec::with_capacity(metadata.layers.len());
@@ -465,6 +498,7 @@ impl CellDocument {
             frames: file.frames,
             main_line_color: file.main_line_color,
             palette,
+            color_chart,
             layers,
             selection_plane_id,
             selection,
@@ -623,5 +657,36 @@ impl CellDocument {
             ])
             .max()
             .unwrap_or(0)
+    }
+}
+
+fn application_color(color: PixelValue) -> ApplicationColor {
+    match color {
+        PixelValue::Rgba(channels) => ApplicationColor {
+            depth: 8,
+            red: u16::from(channels[0]),
+            green: u16::from(channels[1]),
+            blue: u16::from(channels[2]),
+            alpha: u16::from(channels[3]),
+        },
+        PixelValue::Rgba16(channels) => ApplicationColor {
+            depth: 16,
+            red: channels[0],
+            green: channels[1],
+            blue: channels[2],
+            alpha: channels[3],
+        },
+        PixelValue::Binary(_) | PixelValue::Grayscale8(_) | PixelValue::Grayscale16(_) => {
+            unreachable!("validated Color chart entries are RGBA")
+        }
+    }
+}
+
+fn pixel_value(color: ApplicationColor) -> PixelValue {
+    let channels = [color.red, color.green, color.blue, color.alpha];
+    if color.depth == 8 {
+        PixelValue::Rgba(channels.map(|channel| channel as u8))
+    } else {
+        PixelValue::Rgba16(channels)
     }
 }

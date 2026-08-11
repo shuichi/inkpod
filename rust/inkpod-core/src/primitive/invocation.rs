@@ -475,6 +475,7 @@ impl RuntimeInvocation {
             primitive_id,
             PrimitiveId::SET_MAIN_LINE_COLOR
                 | PrimitiveId::REPLACE_PALETTE
+                | PrimitiveId::REPLACE_COLOR_CHART
                 | PrimitiveId::APPLY_RASTER_STROKE
                 | PrimitiveId::IMPORT_RASTER_ASSET
         ) {

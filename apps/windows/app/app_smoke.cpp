@@ -5251,7 +5251,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         || state.Workspace().tools.drawing_color.depth != INKPOD_COLOR_DEPTH_16) {
         return 430;
     }
-    const std::array<UINT, 10U> color_commands{
+    const std::array<UINT, 9U> color_commands{
         IDM_COLOR_SOURCE_TOPMOST,
         IDM_COLOR_SOURCE_SELECTED,
         IDM_COLOR_SOURCE_COMPOSITE,
@@ -5260,12 +5260,95 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         IDM_PALETTE_SAVE,
         IDM_PALETTE_CLEAR,
         IDM_PALETTE_LOAD,
-        IDM_PALETTE_NEXT_GROUP,
-        IDM_CHART_GENERATE};
+        IDM_PALETTE_NEXT_GROUP};
     for (std::size_t index = 0U; index < color_commands.size(); ++index) {
         if (SendMessageW(state.Workspace().windows.window, WM_COMMAND, color_commands[index], 0) != 1) {
             return 434 + static_cast<int>(index);
         }
+    }
+    const auto palette_before_generation =
+        state.Workspace().panes.palette_colors;
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CHART_GENERATE,
+            0) != 1
+        || state.Workspace().panes.color_chart_generation == nullptr) {
+        return 443;
+    }
+    const auto superseded_generation =
+        state.Workspace().panes.color_chart_generation;
+    const std::uint64_t superseded_token = superseded_generation->token;
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CHART_GENERATE,
+            0) != 1
+        || state.Workspace().panes.color_chart_generation == nullptr
+        || state.Workspace().panes.color_chart_generation == superseded_generation
+        || state.Workspace().panes.color_chart_generation->token <= superseded_token
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 443;
+    }
+    PumpPendingWindowMessages();
+    const auto same_color = [](
+                                const InkpodColorValue& left,
+                                const InkpodColorValue& right) noexcept {
+        return left.depth == right.depth && left.red == right.red
+            && left.green == right.green && left.blue == right.blue
+            && left.alpha == right.alpha;
+    };
+    if (state.Workspace().panes.color_chart_generation != nullptr
+        || palette_before_generation.size()
+            != state.Workspace().panes.palette_colors.size()
+        || !std::equal(
+            palette_before_generation.begin(),
+            palette_before_generation.end(),
+            state.Workspace().panes.palette_colors.begin(),
+            same_color)) {
+        return 444;
+    }
+    const DocumentViewId close_race_return_view = state.ActiveView().id;
+    const std::size_t close_race_document_count = state.Documents().Count();
+    InkpodDocumentInfo close_race_before{};
+    if (!QueryDocument(state, close_race_before)
+        || CreateDefaultCell(state) != INKPOD_STATUS_OK) {
+        return 446;
+    }
+    const DocumentSessionId closing_generation_session = state.Document().id;
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CHART_GENERATE,
+            0) != 1
+        || state.Workspace().panes.color_chart_generation == nullptr
+        || !state.CloseDocumentSession(closing_generation_session)
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 446;
+    }
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo close_race_after{};
+    if (state.Workspace().panes.color_chart_generation != nullptr
+        || state.Documents().Count() != close_race_document_count
+        || !ActivateDocumentTab(state, close_race_return_view)
+        || !QueryDocument(state, close_race_after)
+        || close_race_after.document_revision
+            != close_race_before.document_revision
+        || close_race_after.main_plane_checksum
+            != close_race_before.main_plane_checksum
+        || close_race_after.color_plane_checksum
+            != close_race_before.color_plane_checksum
+        || close_race_after.flags != close_race_before.flags) {
+        return 447;
+    }
+    panes::ColorPanesController color_controller(*state.engine);
+    if (color_controller.ReplaceColorChart(
+            state.Document().id,
+            state.Document().generation,
+            {state.Workspace().tools.drawing_color},
+            {L"Smoke"},
+            false) != INKPOD_STATUS_OK) {
+        return 445;
     }
     RefreshColorPanes(state);
     state.Workspace().panes.selected_color_chart_index = 0U;

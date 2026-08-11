@@ -1,6 +1,6 @@
 //! Stable public types for canonical primitive execution and replay.
 
-use crate::{AssetId, DispatchOutcome, PixelValue, RasterAssetInput, Stroke};
+use crate::{AssetId, ColorChartEntry, DispatchOutcome, PixelValue, RasterAssetInput, Stroke};
 use std::sync::Arc;
 
 macro_rules! public_id {
@@ -83,6 +83,8 @@ impl PrimitiveId {
     pub const SET_MAIN_LINE_COLOR: Self = Self(0x0003_0001);
     /// Primitive ID for ordered palette replacement.
     pub const REPLACE_PALETTE: Self = Self(0x0003_0002);
+    /// Primitive ID for ordered named Color chart and lock replacement.
+    pub const REPLACE_COLOR_CHART: Self = Self(0x0003_0003);
     /// Primitive ID for one bounded raster stroke transaction.
     pub const APPLY_RASTER_STROKE: Self = Self(0x0005_0001);
     /// Primitive ID for one bounded raster fill transaction.
@@ -244,14 +246,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(15);
+    pub const CURRENT: Self = Self(16);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 18;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 19;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;
@@ -303,10 +305,10 @@ impl ReplayContract {
     }
 }
 
-/// A BLAKE3-256 digest of canonical semantic document-state schema-5 bytes.
+/// A BLAKE3-256 digest of canonical semantic document-state schema-6 bytes.
 ///
 /// The compact root and semantic metadata frames use schema version 4 in the
-/// `org.inkpod.digest.document-state.v4` derive-key domain. Raster payloads
+/// `org.inkpod.digest.document-state.v5` derive-key domain. Raster payloads
 /// enter that root through separately domain-separated, content-addressed tile
 /// and raster commitments, so the digest is independent of edit order and
 /// allocation history without requiring unchanged tile bytes to be rehashed
@@ -348,6 +350,15 @@ pub enum PrimitiveRequest {
         /// Owned exact-depth RGBA8/RGBA16 palette entries.
         colors: Vec<PixelValue>,
     },
+    /// Replaces the independent named Color chart and its edit lock.
+    ReplaceColorChart {
+        /// Document revision observed by the request producer.
+        expected_revision: u64,
+        /// Owned exact-depth, named Color chart entries.
+        entries: Vec<ColorChartEntry>,
+        /// Whether subsequent document-changing chart commands are rejected.
+        locked: bool,
+    },
     /// Applies one bounded raster stroke to an exact stable plane ID.
     ApplyRasterStroke {
         /// Document revision observed by the request producer.
@@ -376,6 +387,9 @@ impl PrimitiveRequest {
                 expected_revision, ..
             }
             | Self::ReplacePalette {
+                expected_revision, ..
+            }
+            | Self::ReplaceColorChart {
                 expected_revision, ..
             }
             | Self::ApplyRasterStroke {
@@ -538,6 +552,10 @@ impl PrimitiveOutcome {
 pub(super) enum CanonicalPrimitive {
     SetMainLineColor(PixelValue),
     ReplacePalette(Vec<PixelValue>),
+    ReplaceColorChart {
+        entries: Vec<ColorChartEntry>,
+        locked: bool,
+    },
     ApplyRasterStroke(CanonicalStrokeArguments),
     ImportRasterAsset {
         target_plane_id: u64,

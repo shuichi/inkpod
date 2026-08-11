@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "app/identity.h"
@@ -25,6 +26,12 @@ public:
         app::PaneUiState& panes) noexcept;
     InkpodStatus ReplacePalette(
         const std::vector<InkpodColorValue>& colors) noexcept;
+    InkpodStatus ReplaceColorChart(
+        app::DocumentSessionId session,
+        app::Generation generation,
+        const std::vector<InkpodColorValue>& colors,
+        const std::vector<std::wstring>& names,
+        bool locked) noexcept;
     InkpodStatus ReplacePalette(
         app::DocumentSessionId session,
         app::Generation generation,
@@ -42,10 +49,23 @@ private:
         app::DocumentSessionId session,
         app::Generation generation,
         InkpodColorValue& color) noexcept;
+    InkpodStatus LoadColorChart(
+        std::vector<InkpodColorValue>& colors,
+        std::vector<std::wstring>& names,
+        InkpodColorChartInfo& info) noexcept;
+    InkpodStatus LoadColorChart(
+        app::DocumentSessionId session,
+        app::Generation generation,
+        std::vector<InkpodColorValue>& colors,
+        std::vector<std::wstring>& names,
+        InkpodColorChartInfo& info) noexcept;
     static InkpodStatus ApplyLoadedModel(
         app::PaneUiState& panes,
         const InkpodColorValue& main_line_color,
-        const std::vector<InkpodColorValue>& colors) noexcept;
+        const std::vector<InkpodColorValue>& colors,
+        const std::vector<InkpodColorValue>& chart_colors,
+        const std::vector<std::wstring>& chart_names,
+        const InkpodColorChartInfo& chart_info) noexcept;
 
     app::CoreHost& engine_;
 };

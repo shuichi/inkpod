@@ -5,7 +5,10 @@ use super::codec::{
     validate_state,
 };
 use super::model::*;
-use crate::{CellDocument, Core, CoreError, LayerId, PlaneId};
+use crate::{
+    COLOR_CHART_PAGE_SIZE, CellDocument, ColorChart, ColorChartCursor, Core, CoreError, LayerId,
+    PlaneId,
+};
 
 impl Core {
     /// Returns an owned copy of immutable Rust built-in editor defaults.
@@ -209,7 +212,21 @@ impl Core {
         };
         let source_targets = preferred_edit_targets.unwrap_or(&session.state.edit_targets);
         let edit_targets = Self::normalize_edit_targets_in(document, source_targets, false)?;
-        if session.state.target == resolved && session.state.edit_targets == edit_targets {
+        let color_chart_cursor = self
+            .document
+            .as_ref()
+            .filter(|current| current.color_chart != document.color_chart)
+            .map_or(session.state.color_chart_cursor, |current| {
+                reconcile_color_chart_cursor(
+                    &current.color_chart,
+                    &document.color_chart,
+                    session.state.color_chart_cursor,
+                )
+            });
+        if session.state.target == resolved
+            && session.state.edit_targets == edit_targets
+            && session.state.color_chart_cursor == color_chart_cursor
+        {
             return Ok(None);
         }
         let revision = session
@@ -219,6 +236,7 @@ impl Core {
         let mut state = session.state.clone();
         state.target = resolved;
         state.edit_targets = edit_targets;
+        state.color_chart_cursor = color_chart_cursor;
         validate_state(&state)?;
         let digest = state_digest(&state);
         let savepoint = session.savepoint;
@@ -281,6 +299,23 @@ impl Core {
                 state.edit_targets = self.normalize_edit_targets(&targets)?;
             }
             EditorStateUpdate::SetPaletteCursor(cursor) => state.palette_cursor = cursor,
+            EditorStateUpdate::SetColorChartCursor(cursor) => {
+                if let Some(cursor) = cursor {
+                    let chart = &self
+                        .document
+                        .as_ref()
+                        .ok_or(CoreError::NoDocument)?
+                        .color_chart;
+                    if cursor.index as usize >= chart.entries().len()
+                        || cursor.page != cursor.index / COLOR_CHART_PAGE_SIZE
+                    {
+                        return Err(CoreError::InvalidArgument(
+                            "Color chart cursor is outside the current chart",
+                        ));
+                    }
+                }
+                state.color_chart_cursor = cursor;
+            }
         }
         Ok(())
     }
@@ -392,4 +427,25 @@ impl Core {
             state: session.state.clone(),
         }
     }
+}
+
+fn reconcile_color_chart_cursor(
+    before: &ColorChart,
+    after: &ColorChart,
+    cursor: Option<ColorChartCursor>,
+) -> Option<ColorChartCursor> {
+    let selected = cursor.and_then(|cursor| before.entries().get(cursor.index as usize));
+    let index = selected
+        .and_then(|selected| {
+            after
+                .entries()
+                .iter()
+                .position(|entry| entry.color == selected.color)
+        })
+        .or_else(|| (!after.entries().is_empty()).then_some(0))?;
+    let index = index as u32;
+    Some(ColorChartCursor {
+        page: index / COLOR_CHART_PAGE_SIZE,
+        index,
+    })
 }

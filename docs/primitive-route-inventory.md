@@ -43,6 +43,8 @@ route|rust|os-application-adapter|rust-core|BatchOperation::swap_color_replaceme
 route|rust|os-application-adapter|rust-format|inkpod_format::discard_recovery inkpod_format::recovery_is_newer
 route|rust|document-primitive|rust-core|Core::apply_edit_target_command
 route|rust|query-snapshot|rust-core|Core::edit_target_capabilities
+route|rust|document-primitive|rust-core|Core::apply_color_chart_preview Core::replace_color_chart
+route|rust|query-snapshot|rust-core|Core::color_chart Core::preview_color_chart_generation Core::preview_color_chart_generation_with_cancel
 
 ## C ABI surface
 
@@ -60,6 +62,8 @@ route|ffi|os-application-adapter|rust-ffi-adapter|inkpod_abi_version inkpod_batc
 route|ffi|document-primitive|rust-core|inkpod_core_apply_edit_target_command
 route|ffi|editor-state-command|rust-core|inkpod_core_set_edit_targets
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_get_edit_target_capabilities inkpod_core_get_edit_targets
+route|ffi|document-primitive|rust-core|inkpod_core_color_chart_preview_apply inkpod_core_color_chart_set
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_color_chart_preview_get inkpod_color_chart_preview_release inkpod_core_color_chart_get inkpod_core_color_chart_info inkpod_core_color_chart_preview_create inkpod_core_color_chart_preview_create_task
 
 ## Windows production command surface
 
@@ -96,7 +100,7 @@ route|windows|os-application-adapter|windows-adapter|IDM_APP_EXIT IDM_BATCH_ADD_
   it exactly once; there is no queued arbitrary-callable work variant.
 - Palette and color-chart codecs are owned by `inkpod-format`; Windows supplies
   paths and presentation names but does not encode their native bytes.
-- Production `.inkpod` is exact-current v18. Its authoritative journal retains
+- Production `.inkpod` is exact-current v19. Its authoritative journal retains
   Genesis/assets/procedures/EditorState; optional CKPT is verified acceleration
   only, and explicit compaction writes a separate new-Genesis file.
 - The Windows brush shape, smoothing, and start-color controls issue one typed
@@ -104,7 +108,7 @@ route|windows|os-application-adapter|windows-adapter|IDM_APP_EXIT IDM_BATCH_ADD_
   Core-owned values into the existing `ApplyRasterStroke` canonical route;
   neither the pane nor renderer owns an alternative paint implementation.
 
-The source-derived inventory currently contains 245 Rust routes, 240 C ABI
+The source-derived inventory currently contains 250 Rust routes, 248 C ABI
 exports, and 349 Windows commands. Its architecture test requires every symbol
 to have exactly one class and owner; unclassified and direct C++ document
 mutation counts are both zero.

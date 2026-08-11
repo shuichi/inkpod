@@ -326,6 +326,33 @@ pub struct InkpodColorChartEntry {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodColorChartInfo {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub feature_flags: u64,
+    pub entry_count: u64,
+    pub selected_index: u64,
+    pub page: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodColorChartPreviewSummary {
+    pub struct_size: u32,
+    pub flags: u32,
+    pub feature_flags: u64,
+    pub base_document_revision: u64,
+    pub entry_count: u64,
+    pub source_unique_color_count: u64,
+    pub retained_color_count: u32,
+    pub added_color_count: u32,
+    pub removed_color_count: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodFillInput {
     pub struct_size: u32,

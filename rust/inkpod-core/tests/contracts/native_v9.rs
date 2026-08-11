@@ -124,11 +124,11 @@ fn io_001_save_reopen_restores_full_journal_editor_and_all_next_id_authorities()
 }
 
 #[test]
-fn io_001_v18_and_corrupt_open_are_current_only_and_atomic_for_the_live_core() {
-    let path = native_path("v17-rejected");
+fn io_001_v19_and_corrupt_open_are_current_only_and_atomic_for_the_live_core() {
+    let path = native_path("v18-rejected");
     let mut legacy = vec![0_u8; 128];
     legacy[0..8].copy_from_slice(b"INKPOD\0\0");
-    legacy[8..12].copy_from_slice(&17_u32.to_le_bytes());
+    legacy[8..12].copy_from_slice(&18_u32.to_le_bytes());
     fs::write(&path, legacy).unwrap();
 
     let mut core = Core::new();

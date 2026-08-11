@@ -1,4 +1,4 @@
-use crate::{FileAdjustmentMetadata, FileLightTableMetadata, FileVectorMetadata};
+use crate::{FileAdjustmentMetadata, FileColorChart, FileLightTableMetadata, FileVectorMetadata};
 use inkpod_image::{FNV_OFFSET, PixelFormat, PixelValue, TileCoord, fnv_bytes};
 use std::fmt;
 #[cfg(test)]
@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicU64;
 pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 /// Current development format. Increment for every serialized schema change
 /// until the user declares a format freeze; older versions are not migrated.
-pub const DOCUMENT_ARCHIVE_VERSION: u32 = 1;
+pub const DOCUMENT_ARCHIVE_VERSION: u32 = 2;
 pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
 pub(super) const HEADER_BYTES: usize = 32;
 pub(super) const FIXED_MANIFEST_BYTES: usize = 200;
@@ -167,6 +167,10 @@ pub struct FileDocumentMetadata {
     pub layers: Vec<FileLayer>,
     pub guides: Vec<FileGuide>,
     pub grid: FileGrid,
+    /// Independent named Color chart stored with the document.
+    pub color_chart: FileColorChart,
+    /// Whether document-changing Color chart commands are locked.
+    pub color_chart_locked: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

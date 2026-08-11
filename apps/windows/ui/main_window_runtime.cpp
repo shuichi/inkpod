@@ -89,6 +89,7 @@ using inkpod::app::SequenceCellSwitchPolicy;
 using inkpod::app::SequenceSwitchAsyncResult;
 using inkpod::app::ApplicationHost;
 using inkpod::app::BatchOperationUi;
+using inkpod::app::ColorChartGenerationJob;
 using inkpod::app::BatchUiState;
 using inkpod::app::DocumentShellState;
 using inkpod::app::DocumentShellController;
@@ -216,6 +217,7 @@ constexpr std::array<UINT, inkpod::app::RecentDocumentList::kCapacity>
         IDM_FILE_RECENT_8};
 constexpr UINT kEffectTaskCompleted = WM_APP + 0x170U;
 constexpr UINT kBatchTaskCompleted = WM_APP + 0x171U;
+constexpr UINT kColorChartGenerationCompleted = WM_APP + 0x174U;
 constexpr UINT kShortcutSequenceTimerMilliseconds = 100U;
 constexpr UINT kStatusProgressTimerMilliseconds = 100U;
 constexpr UINT kContinuousSprayIntervalMilliseconds = 50U;
@@ -705,7 +707,13 @@ void ChangeDockMainLineColor(
 void SelectDockColor(
     void* context, std::uint32_t index, bool chart) noexcept {
     auto* state = ActivateWorkspaceContext(context);
-    if (state == nullptr || index >= state->Workspace().panes.palette_colors.size()) {
+    if (state == nullptr) {
+        return;
+    }
+    const auto& colors = chart
+        ? state->Workspace().panes.color_chart_colors
+        : state->Workspace().panes.palette_colors;
+    if (index >= colors.size()) {
         return;
     }
     std::uint32_t group = state->Workspace().panes.palette_group;
@@ -719,7 +727,7 @@ void SelectDockColor(
             return;
         }
     }
-    SetDrawingColor(*state, state->Workspace().panes.palette_colors[index]);
+    SetDrawingColor(*state, colors[index]);
     UpdateMenuState(*state);
 }
 
@@ -2889,6 +2897,7 @@ void RefreshDockPaneViews(ApplicationHost& state) noexcept {
         state.Workspace().panes.main_line_color,
         state.Workspace().tools.drawing_color,
         state.Workspace().panes.palette_colors,
+        state.Workspace().panes.color_chart_colors,
         state.Workspace().panes.color_chart_names,
         state.Workspace().panes.palette_group,
         state.Workspace().panes.color_chart_page,
@@ -4419,6 +4428,147 @@ bool PrepareFilterEditor(
         editor.parameters = {2, 1000, 0, 0, 0};
     }
     return true;
+}
+
+InkpodStatus ReplaceColorChart(
+    ApplicationHost& state,
+    const CommandContext& context,
+    const std::vector<InkpodColorValue>& colors,
+    const std::vector<std::wstring>& names,
+    bool locked) noexcept {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    ColorPanesController controller(*state.engine);
+    return controller.ReplaceColorChart(
+        context.document_session.value(),
+        context.generation.value(),
+        colors,
+        names,
+        locked);
+}
+
+bool QueryColorChartGenerationProgress(
+    void* context, ProgressDialogInfo& output) noexcept {
+    auto* job = static_cast<ColorChartGenerationJob*>(context);
+    if (job == nullptr || job->task == nullptr) {
+        return false;
+    }
+    InkpodTaskInfo info{};
+    info.struct_size = sizeof(info);
+    if (inkpod_task_query(job->task, &info) != INKPOD_STATUS_OK) {
+        return false;
+    }
+    output.completed_work = info.completed_work;
+    output.total_work = info.total_work;
+    return true;
+}
+
+void CancelColorChartGenerationProgress(void* context) noexcept {
+    auto* job = static_cast<ColorChartGenerationJob*>(context);
+    if (job != nullptr && job->task != nullptr) {
+        (void)inkpod_task_cancel(job->task);
+    }
+}
+
+InkpodStatus StartColorChartGeneration(
+    ApplicationHost& state,
+    const CommandContext& context,
+    std::uint32_t maximum_colors,
+    std::uint32_t quantization_bits) noexcept {
+    if (state.engine == nullptr || !context.document_session.has_value()
+        || !context.generation.has_value()) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    auto& workspace = state.Workspace();
+    auto& panes = workspace.panes;
+    if (panes.color_chart_generation != nullptr) {
+        CancelColorChartGenerationProgress(
+            panes.color_chart_generation.get());
+        ClearJobProgress(
+            workspace.job_progress,
+            workspace.job_progress_state,
+            JobProgressSlot::ColorChart);
+    }
+    if (panes.color_chart_generation_token == UINT64_MAX) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+
+    std::shared_ptr<ColorChartGenerationJob> job;
+    try {
+        job = std::make_shared<ColorChartGenerationJob>();
+    } catch (const std::bad_alloc&) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    InkpodStatus status = inkpod_task_create(&job->task);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    job->context = context;
+    job->token = ++panes.color_chart_generation_token;
+    job->maximum_colors = maximum_colors;
+    job->quantization_bits = quantization_bits;
+    panes.color_chart_generation = job;
+    const ProgressDialogState progress{
+        job.get(),
+        QueryColorChartGenerationProgress,
+        CancelColorChartGenerationProgress,
+        L"Color chart 生成",
+        L"セル色を抽出中...",
+        L"キャンセル中..."};
+    if (!BindJobProgress(
+            workspace.job_progress,
+            workspace.job_progress_state,
+            JobProgressSlot::ColorChart,
+            progress)) {
+        panes.color_chart_generation.reset();
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    static_cast<void>(
+        workspace.windows.dock_host.RestorePane(DockPaneType::JobProgress));
+    static_cast<void>(
+        workspace.windows.dock_host.ActivatePane(DockPaneType::JobProgress));
+
+    const HWND owner = workspace.windows.window;
+    if (!state.engine->Enqueue(
+            context,
+            [job](InkpodCore* core) {
+                return inkpod_core_color_chart_preview_create_task(
+                    core,
+                    job->maximum_colors,
+                    job->quantization_bits,
+                    job->task,
+                    &job->summary,
+                    &job->preview);
+            },
+            false,
+            false,
+            true,
+            [job, owner](InkpodStatus completion_status) {
+                job->status.store(
+                    completion_status, std::memory_order_release);
+                const LPARAM generation = job->context.generation.has_value()
+                    ? static_cast<LPARAM>(job->context.generation->Value())
+                    : 0;
+                (void)PostMessageW(
+                    owner,
+                    kColorChartGenerationCompleted,
+                    static_cast<WPARAM>(job->token),
+                    generation);
+            })) {
+        ClearJobProgress(
+            workspace.job_progress,
+            workspace.job_progress_state,
+            JobProgressSlot::ColorChart);
+        panes.color_chart_generation.reset();
+        if (!HasActiveJobProgress(workspace.job_progress_state)) {
+            static_cast<void>(
+                workspace.windows.dock_host.HidePane(DockPaneType::JobProgress));
+        }
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    return INKPOD_STATUS_OK;
 }
 
 bool FilterJobFromEditor(
@@ -15666,16 +15816,13 @@ std::optional<LRESULT> RouteColorCommand(
         case IDM_PALETTE_DELETE:
         case IDM_PALETTE_CLEAR: {
             std::vector<InkpodColorValue> colors;
-            std::vector<std::wstring> names;
             try {
                 colors = state->Workspace().panes.palette_colors;
-                names = state->Workspace().panes.color_chart_names;
                 if (LOWORD(wparam) == IDM_PALETTE_REGISTER) {
                     if (colors.size() >= 4096U) {
                         return 0;
                     }
                     colors.push_back(state->Workspace().tools.drawing_color);
-                    names.push_back(L"Color " + std::to_wstring(colors.size()));
                     state->Workspace().panes.selected_palette_index =
                         static_cast<std::uint32_t>(colors.size() - 1U);
                     state->Workspace().panes.palette_group =
@@ -15686,12 +15833,9 @@ std::optional<LRESULT> RouteColorCommand(
                         return 0;
                     }
                     colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
-                    names.erase(names.begin() + static_cast<std::ptrdiff_t>(index));
                 } else {
                     colors.clear();
-                    names.clear();
                     state->Workspace().panes.selected_palette_index = 0U;
-                    state->Workspace().panes.selected_color_chart_index = 0U;
                 }
             } catch (const std::bad_alloc&) {
                 return 0;
@@ -15699,8 +15843,6 @@ std::optional<LRESULT> RouteColorCommand(
             const InkpodStatus status = ReplacePalette(*state, context, colors);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"カラーパレット編集");
-            } else {
-                state->Workspace().panes.color_chart_names = std::move(names);
             }
             RefreshColorPanes(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -15737,38 +15879,28 @@ std::optional<LRESULT> RouteColorCommand(
         case IDM_CHART_GENERATE: {
             ViewOptionsDialogState dialog{};
             dialog.title = L"セルからカラーチャートを作成";
-            dialog.labels = {L"最大色数", L"量子化で捨てる下位bit (0-7)", L"preview確認 (1)", nullptr};
-            dialog.values = {256, 2, 1, 0};
-            dialog.value_count = 3U;
+            dialog.labels = {L"最大色数", L"量子化で捨てる下位bit (0-7)", nullptr, nullptr};
+            dialog.values = {256, 2, 0, 0};
+            dialog.value_count = 2U;
             if (state->lifetime.smoke_test) {
-                dialog.values = {16, 4, 1, 0};
+                dialog.values = {16, 4, 0, 0};
             }
             if (ShowViewOptions(
-                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK
-                || dialog.values[0] <= 0 || dialog.values[1] < 0
-                || dialog.values[1] > 7 || dialog.values[2] == 0) {
+                    state->lifetime.instance,
+                    window,
+                    state->lifetime.smoke_test,
+                    dialog) != IDOK
+                || dialog.values[0] <= 0 || dialog.values[0] > 4096
+                || dialog.values[1] < 0 || dialog.values[1] > 7) {
                 return 0;
             }
-            const InkpodStatus status = state->engine->Invoke(
-                [&dialog](InkpodCore* core) {
-                    InkpodDispatchResult result{};
-                    result.struct_size = sizeof(result);
-                    return inkpod_core_palette_generate(
-                        core,
-                        static_cast<std::uint32_t>(dialog.values[0]),
-                        static_cast<std::uint32_t>(dialog.values[1]),
-                        &result);
-                },
-                true,
-                true);
+            const InkpodStatus status = StartColorChartGeneration(
+                *state,
+                context,
+                static_cast<std::uint32_t>(dialog.values[0]),
+                static_cast<std::uint32_t>(dialog.values[1]));
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"カラーチャート生成");
-            }
-            if (status == INKPOD_STATUS_OK) {
-                state->Workspace().panes.color_chart_names.clear();
-                state->Workspace().panes.color_chart_page = 0U;
-                state->Workspace().panes.selected_color_chart_index = 0U;
-                RefreshColorPanes(*state);
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
@@ -15785,7 +15917,7 @@ std::optional<LRESULT> RouteColorCommand(
             const unsigned long number = std::wcstoul(dialog.value.c_str(), &end, 10);
             std::size_t index = SIZE_MAX;
             if (end != dialog.value.c_str() && *end == L'\0' && number != 0U
-                && number <= state->Workspace().panes.palette_colors.size()) {
+                && number <= state->Workspace().panes.color_chart_colors.size()) {
                 index = number - 1U;
             } else {
                 std::wstring needle = dialog.value;
@@ -15813,28 +15945,39 @@ std::optional<LRESULT> RouteColorCommand(
             return 1;
         }
         case IDM_CHART_NEXT: {
-            if (state->Workspace().panes.palette_colors.empty()) {
+            if (state->Workspace().panes.color_chart_colors.empty()) {
                 return 0;
             }
             std::size_t index = static_cast<std::size_t>(
                 state->Workspace().panes.selected_color_chart_index) + 1U;
-            index %= state->Workspace().panes.palette_colors.size();
+            index %= state->Workspace().panes.color_chart_colors.size();
             state->Workspace().panes.color_chart_page = static_cast<std::uint32_t>(index / 20U);
             state->Workspace().panes.selected_color_chart_index = static_cast<std::uint32_t>(index);
             RefreshColorPanes(*state);
             return 1;
         }
-        case IDM_CHART_LOCK:
-            state->Workspace().panes.color_chart_locked = !state->Workspace().panes.color_chart_locked;
+        case IDM_CHART_LOCK: {
+            const InkpodStatus status = ReplaceColorChart(
+                *state,
+                context,
+                state->Workspace().panes.color_chart_colors,
+                state->Workspace().panes.color_chart_names,
+                !state->Workspace().panes.color_chart_locked);
+            if (status == INKPOD_STATUS_OK) {
+                RefreshColorPanes(*state);
+            } else {
+                ShowCoreError(*state, window, L"カラーチャートのロック");
+            }
             UpdateMenuState(*state);
-            return 1;
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
         case IDM_CHART_NEXT_PAGE:
             ++state->Workspace().panes.color_chart_page;
             RefreshColorPanes(*state);
-            if (!state->Workspace().panes.palette_colors.empty()) {
+            if (!state->Workspace().panes.color_chart_colors.empty()) {
                 state->Workspace().panes.selected_color_chart_index = std::min<std::uint32_t>(
                     state->Workspace().panes.color_chart_page * 20U,
-                    static_cast<std::uint32_t>(state->Workspace().panes.palette_colors.size() - 1U));
+                    static_cast<std::uint32_t>(state->Workspace().panes.color_chart_colors.size() - 1U));
             }
             return 1;
         case IDM_CHART_RENAME: {
@@ -15854,13 +15997,23 @@ std::optional<LRESULT> RouteColorCommand(
                 || dialog.value.empty() || dialog.value.size() > 256U) {
                 return 0;
             }
+            std::vector<std::wstring> names;
             try {
-                state->Workspace().panes.color_chart_names[index] = dialog.value;
+                names = state->Workspace().panes.color_chart_names;
+                names[index] = dialog.value;
             } catch (const std::bad_alloc&) {
                 return 0;
             }
-            RefreshColorPanes(*state);
-            return 1;
+            const InkpodStatus status = ReplaceColorChart(
+                *state,
+                context,
+                state->Workspace().panes.color_chart_colors,
+                names,
+                false);
+            if (status == INKPOD_STATUS_OK) {
+                RefreshColorPanes(*state);
+            }
+            return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_CHART_SAVE:
         case IDM_CHART_LOAD: {
@@ -15871,7 +16024,7 @@ std::optional<LRESULT> RouteColorCommand(
             }
             if (save) {
                 return SaveColorChartFile(
-                           path, state->Workspace().panes.palette_colors, state->Workspace().panes.color_chart_names)
+                           path, state->Workspace().panes.color_chart_colors, state->Workspace().panes.color_chart_names)
                     ? 1
                     : 0;
             }
@@ -15880,9 +16033,12 @@ std::optional<LRESULT> RouteColorCommand(
             if (!LoadColorChartFile(path, colors, names)) {
                 return 0;
             }
-            const InkpodStatus status = ReplacePalette(*state, context, colors);
+            if (state->Workspace().panes.color_chart_locked) {
+                return 0;
+            }
+            const InkpodStatus status = ReplaceColorChart(
+                *state, context, colors, names, false);
             if (status == INKPOD_STATUS_OK) {
-                state->Workspace().panes.color_chart_names.swap(names);
                 state->Workspace().panes.color_chart_page = 0U;
                 state->Workspace().panes.selected_color_chart_index = 0U;
                 RefreshColorPanes(*state);
@@ -15891,10 +16047,10 @@ std::optional<LRESULT> RouteColorCommand(
         }
         case IDM_CHART_COPY: {
             const std::size_t index = state->Workspace().panes.selected_color_chart_index;
-            if (index >= state->Workspace().panes.palette_colors.size()) {
+            if (index >= state->Workspace().panes.color_chart_colors.size()) {
                 return 0;
             }
-            const auto& selected_color = state->Workspace().panes.palette_colors[index];
+            const auto& selected_color = state->Workspace().panes.color_chart_colors[index];
             std::array<wchar_t, 384U> text{};
             _snwprintf_s(
                 text.data(), text.size(), _TRUNCATE,
@@ -15939,22 +16095,22 @@ std::optional<LRESULT> RouteColorCommand(
                 return 0;
             }
             const std::size_t index = state->Workspace().panes.selected_color_chart_index;
-            if (index >= state->Workspace().panes.palette_colors.size()) {
+            if (index >= state->Workspace().panes.color_chart_colors.size()) {
                 return 0;
             }
             std::vector<InkpodColorValue> colors;
             std::vector<std::wstring> names;
             try {
-                colors = state->Workspace().panes.palette_colors;
+                colors = state->Workspace().panes.color_chart_colors;
                 names = state->Workspace().panes.color_chart_names;
                 colors.erase(colors.begin() + static_cast<std::ptrdiff_t>(index));
                 names.erase(names.begin() + static_cast<std::ptrdiff_t>(index));
             } catch (const std::bad_alloc&) {
                 return 0;
             }
-            const InkpodStatus status = ReplacePalette(*state, context, colors);
+            const InkpodStatus status = ReplaceColorChart(
+                *state, context, colors, names, false);
             if (status == INKPOD_STATUS_OK) {
-                state->Workspace().panes.color_chart_names.swap(names);
                 RefreshColorPanes(*state);
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -16008,7 +16164,7 @@ std::optional<LRESULT> RouteColorCommand(
             std::vector<InkpodColorValue> colors;
             std::vector<std::wstring> names;
             try {
-                colors = state->Workspace().panes.palette_colors;
+                colors = state->Workspace().panes.color_chart_colors;
                 names = state->Workspace().panes.color_chart_names;
                 if (colors.size() >= 4096U) {
                     return 0;
@@ -16018,14 +16174,14 @@ std::optional<LRESULT> RouteColorCommand(
             } catch (const std::bad_alloc&) {
                 return 0;
             }
-            const InkpodStatus status = ReplacePalette(*state, context, colors);
+            const InkpodStatus status = ReplaceColorChart(
+                *state, context, colors, names, false);
             if (status == INKPOD_STATUS_OK) {
-                state->Workspace().panes.color_chart_names.swap(names);
                 SetDrawingColor(*state, color);
                 state->Workspace().panes.color_chart_page = static_cast<std::uint32_t>(
-                    (state->Workspace().panes.palette_colors.size() - 1U) / 20U);
+                    (colors.size() - 1U) / 20U);
                 state->Workspace().panes.selected_color_chart_index = static_cast<std::uint32_t>(
-                    state->Workspace().panes.palette_colors.size() - 1U);
+                    colors.size() - 1U);
                 RefreshColorPanes(*state);
             }
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -17804,6 +17960,138 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                         != view->presentation.locator_generation)) {
                     QueueLocatorSample(*state);
                 }
+            }
+            return 0;
+        }
+        case kColorChartGenerationCompleted: {
+            if (state == nullptr) {
+                return 0;
+            }
+            WorkspaceWindow* completion_workspace{};
+            std::shared_ptr<ColorChartGenerationJob> job;
+            for (std::size_t index = 0U;
+                 index < state->Workspaces().Count(); ++index) {
+                WorkspaceWindow* candidate = state->Workspaces().At(index);
+                if (candidate == nullptr) {
+                    continue;
+                }
+                const auto pending = candidate->panes.color_chart_generation;
+                if (pending != nullptr
+                    && pending->token == static_cast<std::uint64_t>(wparam)
+                    && pending->context.generation.has_value()
+                    && pending->context.generation->Value()
+                        == static_cast<std::uint64_t>(lparam)) {
+                    completion_workspace = candidate;
+                    job = pending;
+                    break;
+                }
+            }
+            if (completion_workspace == nullptr || job == nullptr) {
+                return 0;
+            }
+            ClearJobProgress(
+                completion_workspace->job_progress,
+                completion_workspace->job_progress_state,
+                JobProgressSlot::ColorChart);
+            if (!HasActiveJobProgress(
+                    completion_workspace->job_progress_state)) {
+                static_cast<void>(
+                    completion_workspace->windows.dock_host.HidePane(
+                        DockPaneType::JobProgress));
+            }
+            completion_workspace->panes.color_chart_generation.reset();
+
+            const InkpodStatus status = static_cast<InkpodStatus>(
+                job->status.load(std::memory_order_acquire));
+            const bool target_valid = targets_open_document(job->context);
+            if (status == INKPOD_STATUS_CANCELLED || !target_valid) {
+                return 0;
+            }
+            if (status != INKPOD_STATUS_OK || job->preview == nullptr) {
+                if (!state->lifetime.smoke_test) {
+                    MessageBoxW(
+                        completion_workspace->windows.window,
+                        L"Color chart の生成に失敗しました。文書状態と設定を確認してください。",
+                        L"Color chart 生成",
+                        MB_OK | MB_ICONERROR);
+                }
+                return 0;
+            }
+
+            const auto& summary = job->summary;
+            std::wstring comparison =
+                L"候補: " + std::to_wstring(summary.entry_count)
+                + L" / 元の固有色: "
+                + std::to_wstring(summary.source_unique_color_count)
+                + L"\n維持: " + std::to_wstring(summary.retained_color_count)
+                + L"  追加: " + std::to_wstring(summary.added_color_count)
+                + L"  削除: " + std::to_wstring(summary.removed_color_count);
+            const std::uint64_t representatives = std::min<std::uint64_t>(
+                5U, summary.entry_count);
+            for (std::uint64_t index = 0; index < representatives; ++index) {
+                InkpodColorValue color{};
+                color.struct_size = sizeof(color);
+                std::uint64_t name_bytes{};
+                std::uint64_t frequency{};
+                if (inkpod_color_chart_preview_get(
+                        job->preview,
+                        index,
+                        &color,
+                        nullptr,
+                        0U,
+                        &name_bytes,
+                        &frequency) == INKPOD_STATUS_OK) {
+                    comparison += L"\n#" + std::to_wstring(index + 1U)
+                        + L"  count=" + std::to_wstring(frequency);
+                }
+            }
+            const bool overflow =
+                (summary.flags & INKPOD_COLOR_CHART_PREVIEW_EXCEEDS_MAXIMUM)
+                != 0U;
+            const int decision = state->lifetime.smoke_test
+                ? (overflow ? IDCANCEL : IDYES)
+                : MessageBoxW(
+                      completion_workspace->windows.window,
+                      (comparison
+                       + (overflow
+                              ? L"\n\n上限を超えています。設定を変更してください。"
+                              : L"\n\nこの結果を適用しますか？\n「いいえ」で設定を変更できます。"))
+                          .c_str(),
+                      L"Color chart 生成結果の比較",
+                      overflow ? MB_RETRYCANCEL | MB_ICONWARNING
+                               : MB_YESNOCANCEL | MB_ICONQUESTION);
+            if (!overflow && decision == IDYES) {
+                InkpodDispatchResult result{};
+                result.struct_size = sizeof(result);
+                const InkpodStatus apply_status = state->engine->Invoke(
+                    job->context.document_session.value(),
+                    job->context.generation.value(),
+                    [job, &result](InkpodCore* core) {
+                        return inkpod_core_color_chart_preview_apply(
+                            core, job->preview, &result);
+                    },
+                    true,
+                    true);
+                if (apply_status != INKPOD_STATUS_OK) {
+                    ShowCoreError(
+                        *state,
+                        completion_workspace->windows.window,
+                        L"カラーチャート生成結果の適用");
+                    return 0;
+                }
+                (void)state->ActivateWorkspaceWindow(
+                    completion_workspace->id, false);
+                RefreshColorPanes(*state);
+                UpdateMenuState(*state);
+                return 0;
+            }
+            if ((!overflow && decision == IDNO)
+                || (overflow && decision == IDRETRY)) {
+                (void)PostMessageW(
+                    completion_workspace->windows.window,
+                    WM_COMMAND,
+                    IDM_CHART_GENERATE,
+                    0);
             }
             return 0;
         }

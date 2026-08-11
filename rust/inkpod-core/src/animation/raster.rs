@@ -26,7 +26,7 @@ pub(super) fn validate_sequence_cell(cell: &SequenceCellSource) -> Result<(), Co
     validate_frame_metadata(cell.raster.width(), cell.raster.height(), cell.frames)
 }
 
-pub(super) fn flatten_document(
+pub(crate) fn flatten_document(
     document: &CellDocument,
     assets: &asset::AssetStore,
     revision: u64,

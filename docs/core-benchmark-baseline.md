@@ -58,7 +58,7 @@ scenario assertions are:
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 13 / native v16 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 16 / native v19 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 
 The checksum is local FNV-1a over fixed-width public semantic data and excludes
@@ -74,7 +74,15 @@ wall-clock time, addresses, cache allocation order, and Batch output paths.
 | `vector_snapshot` | `2813c527f27311c8` | `b975f3cfdb7824fd` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
 | `canonical_replay` | `f521d658a47051e9` | `f521d658a47051e9` |
-| `checkpoint_open` | `eca2df7e74020108` | `eca2df7e74020108` |
+| `checkpoint_open` | `8847f8440d290c18` | `8847f8440d290c18` |
+
+The v19/schema-6 Color-chart commitment changed only the `checkpoint_open`
+document-digest checksum from `eca2df7e74020108` to `8847f8440d290c18`.
+Unchanged quick and full workloads independently produced the new value while
+retaining procedure count 256, output/history 256, asset reuse 1, document
+revision 3, one success, zero failures, and exact checkpoint Undo/Redo. The
+workload, harness logic, timed interval, envelope, and `revision-max` formula
+are unchanged.
 
 ## Approved routine envelope
 

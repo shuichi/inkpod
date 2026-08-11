@@ -72,6 +72,7 @@ struct ProgressDialogState {
 enum class JobProgressSlot : std::uint8_t {
     Effect,
     Batch,
+    ColorChart,
     Count,
 };
 

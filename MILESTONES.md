@@ -725,7 +725,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M12 — PM-GAP-019: 前後NセルのLight Table一括登録
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: LT-001、LT-003、SEQ-001。
 
@@ -773,9 +773,16 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M13 — PM-GAP-014: Color chart生成結果の比較preview
 
-状態: 未着手
+状態: 手動確認待ち
 
 関連要件: COLOR-002、HIST-001。
+
+仕様決定ゲート:
+
+- 決定済み。生成結果でchart全体の色順を置換し、native depthを含む完全一致色の
+  既存名を保持、新規色だけ決定的な既定名にする。lock中はpreviewだけを許可して
+  Applyを拒否し、現在の選択色が残ればそのpage／選択を保持、消えた場合だけ
+  先頭へ移す。独立要件ID、受入条件、永続化契約をSPEC.mdへ固定する。
 
 成果:
 
