@@ -48,4 +48,6 @@ pub use model::{
     VectorEndpoint, VectorEraseMode, VectorFillInfo, VectorPathInfo, VectorPathInput, VectorRaster,
     VectorSelectionMode, VectorSelectionRange, VectorSelectionResult, VectorWidthMode,
 };
-pub(crate) use rasterization::rasterize_vector_layer_content;
+pub(crate) use rasterization::{
+    rasterize_vector_layer_content, rasterize_vector_layer_content_rgba16,
+};

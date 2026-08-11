@@ -296,6 +296,16 @@ struct ColorChartGenerationJob {
     std::uint32_t quantization_bits{};
 };
 
+struct OutputColorGuardJob {
+    OutputColorGuardJob() noexcept {
+        request.struct_size = sizeof(request);
+        result.struct_size = sizeof(result);
+    }
+
+    InkpodOutputColorGuardRequest request{};
+    InkpodOutputColorGuardResult result{};
+};
+
 struct PaneUiState {
     InkpodColorValue main_line_color{
         sizeof(InkpodColorValue), INKPOD_COLOR_DEPTH_8, 0U, 0U, 0U, 255U};
@@ -363,6 +373,10 @@ struct EffectsUiState {
     std::optional<JobSessionId> job_id;
     CommandContext completion_context;
     InteractiveFilterPreviewUiState filter_preview;
+    InkpodOutputColorGuardProfile output_color_guard_profile{
+        INKPOD_OUTPUT_COLOR_GUARD_BT709_CONSERVATIVE_YCBCR};
+    std::shared_ptr<OutputColorGuardJob> output_color_guard;
+    std::wstring last_output_color_guard_summary;
 };
 
 struct BatchUiState {

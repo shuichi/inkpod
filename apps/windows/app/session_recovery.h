@@ -38,6 +38,10 @@ enum class SequenceCellSwitchPolicy : std::uint32_t {
     AutosaveBeforeSwitch = 2U,
 };
 
+enum class OutputColorGuardProfileSetting : std::uint32_t {
+    Bt709ConservativeYcbcr = 1U,
+};
+
 [[nodiscard]] bool RecoveryRootDirectory(std::wstring& output) noexcept;
 [[nodiscard]] bool SequenceRecoveryPath(
     std::uint64_t document_uuid_high,
@@ -92,6 +96,17 @@ enum class SequenceCellSwitchPolicy : std::uint32_t {
     SequenceCellSwitchPolicy& policy) noexcept;
 [[nodiscard]] bool SaveSequenceCellSwitchPolicy(
     SequenceCellSwitchPolicy policy) noexcept;
+[[nodiscard]] bool EncodeOutputColorGuardProfileSetting(
+    OutputColorGuardProfileSetting profile,
+    std::vector<std::uint8_t>& output) noexcept;
+[[nodiscard]] bool DecodeOutputColorGuardProfileSetting(
+    const std::uint8_t* bytes,
+    std::size_t length,
+    OutputColorGuardProfileSetting& profile) noexcept;
+[[nodiscard]] bool LoadOutputColorGuardProfileSetting(
+    OutputColorGuardProfileSetting& profile) noexcept;
+[[nodiscard]] bool SaveOutputColorGuardProfileSetting(
+    OutputColorGuardProfileSetting profile) noexcept;
 [[nodiscard]] bool LoadPreviousDocumentPaths(
     std::vector<std::wstring>& paths) noexcept;
 [[nodiscard]] bool EncodePreviousDocumentPaths(

@@ -90,6 +90,30 @@ pub struct InkpodSelectionInput {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
+pub struct InkpodOutputColorGuardRequest {
+    pub struct_size: u32,
+    pub profile: u32,
+    pub operation: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub base_document_revision: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodOutputColorGuardResult {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub revision: u64,
+    pub accepted_command_count: u64,
+    pub scanned_pixel_count: u64,
+    pub selected_pixel_count: u64,
+    pub transparent_pixel_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
 pub struct InkpodScopedColorReplaceInput {
     pub struct_size: u32,
     pub mode: u32,

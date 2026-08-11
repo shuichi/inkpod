@@ -164,6 +164,164 @@ pub(crate) fn flatten_document(
     Ok(raster)
 }
 
+/// Visits the committed visible document composite as native-depth straight RGBA16.
+///
+/// The solid paper background, light-table content, selection, guides, grids, and
+/// other view overlays are deliberately absent. The visitor is called in stable
+/// row-major order and may return an error to stop before any caller commit.
+pub(crate) fn visit_visible_document_composite_rgba16(
+    document: &CellDocument,
+    assets: &asset::AssetStore,
+    mut visit: impl FnMut(u32, u32, [u16; 4]) -> Result<(), CoreError>,
+) -> Result<(), CoreError> {
+    bounded_document_pixels(document.width, document.height)?;
+    let base_asset = match document.base_surface {
+        BaseSurface::SolidWhite => None,
+        BaseSurface::Asset(id) => {
+            let record = assets
+                .get(id)
+                .ok_or(CoreError::InvalidState("Genesis base asset is missing"))?;
+            let source = record.raster().ok_or(CoreError::InvalidState(
+                "Genesis base asset is not a raster",
+            ))?;
+            if source.width() != document.width || source.height() != document.height {
+                return Err(CoreError::InvalidState(
+                    "Genesis base asset dimensions do not match the paper",
+                ));
+            }
+            Some(record)
+        }
+    };
+    let mut vector_rasters = Vec::new();
+    vector_rasters
+        .try_reserve(document.layers.len())
+        .map_err(|_| CoreError::InvalidState("visible composite allocation failed"))?;
+    for layer in &document.layers {
+        vector_rasters.push(
+            (layer.kind == LayerKind::VectorColoring)
+                .then(|| {
+                    crate::vector::rasterize_vector_layer_content_rgba16(
+                        document,
+                        layer,
+                        document.width,
+                        document.height,
+                        true,
+                    )
+                })
+                .transpose()?,
+        );
+    }
+
+    for y in 0..document.height {
+        for x in 0..document.width {
+            let mut composite = match &base_asset {
+                None => [0_u16; 4],
+                Some(record) => base_raster_pixel_rgba16(
+                    record.raster().ok_or(CoreError::InvalidState(
+                        "Genesis base asset stopped being a raster",
+                    ))?,
+                    x,
+                    y,
+                )?,
+            };
+            for (layer, vector_raster) in document
+                .layers
+                .iter()
+                .zip(&vector_rasters)
+                .rev()
+                .filter(|(layer, _)| layer.visible)
+            {
+                if layer.kind == LayerKind::Adjustment {
+                    let adjustment =
+                        document
+                            .adjustments
+                            .get(&layer.id)
+                            .ok_or(CoreError::InvalidState(
+                                "adjustment layer metadata is missing",
+                            ))?;
+                    let adjusted =
+                        inkpod_image::apply_adjustment(PixelValue::Rgba16(composite), adjustment)?
+                            .rgba16()
+                            .ok_or(CoreError::InvalidState(
+                                "adjustment output is not displayable",
+                            ))?;
+                    composite = std::array::from_fn(|channel| {
+                        ((u64::from(composite[channel]) * u64::from(1_000 - layer.opacity_milli)
+                            + u64::from(adjusted[channel]) * u64::from(layer.opacity_milli)
+                            + 500)
+                            / 1_000) as u16
+                    });
+                    continue;
+                }
+                if let Some(vector_raster) = vector_raster {
+                    let offset = y as usize * document.width as usize + x as usize;
+                    let pixel = *vector_raster
+                        .get(offset)
+                        .ok_or(CoreError::InvalidState("vector raster is truncated"))?;
+                    composite = blend_rgba16_over(composite, pixel);
+                    continue;
+                }
+                let mut layer_pixel = [0_u16; 4];
+                for plane in layer.planes.iter().rev().filter(|plane| plane.visible) {
+                    let value = plane.raster.pixel(x, y)?;
+                    let mut rgba = match plane.kind {
+                        PlaneType::MainLine => {
+                            let coverage = match value {
+                                PixelValue::Binary(value) | PixelValue::Grayscale8(value) => {
+                                    u16::from(value) * 257
+                                }
+                                PixelValue::Grayscale16(value) => value,
+                                _ => {
+                                    return Err(CoreError::InvalidState(
+                                        "main-line source is invalid",
+                                    ));
+                                }
+                            };
+                            let mut line = document
+                                .main_line_color
+                                .rgba16()
+                                .ok_or(CoreError::InvalidState("main-line color is not RGBA"))?;
+                            line[3] = ((u64::from(line[3]) * u64::from(coverage) + 32_767) / 65_535)
+                                as u16;
+                            line
+                        }
+                        PlaneType::Color | PlaneType::Raster => value.rgba16().ok_or(
+                            CoreError::InvalidState("visible composite source is not RGBA"),
+                        )?,
+                        PlaneType::Selection
+                        | PlaneType::VectorMainLine
+                        | PlaneType::ColorTrace
+                        | PlaneType::VectorFill => continue,
+                    };
+                    rgba[3] = ((u64::from(rgba[3]) * u64::from(plane.opacity_milli) + 500) / 1_000)
+                        as u16;
+                    layer_pixel = blend_rgba16_over(layer_pixel, rgba);
+                }
+                layer_pixel[3] = ((u64::from(layer_pixel[3]) * u64::from(layer.opacity_milli)
+                    + 500)
+                    / 1_000) as u16;
+                composite = blend_rgba16_over(composite, layer_pixel);
+            }
+            visit(x, y, composite)?;
+        }
+    }
+    Ok(())
+}
+
+fn base_raster_pixel_rgba16(raster: &TileRaster, x: u32, y: u32) -> Result<[u16; 4], CoreError> {
+    match raster.pixel(x, y)? {
+        PixelValue::Binary(coverage) => Ok([0, 0, 0, u16::from(coverage) * 257]),
+        PixelValue::Grayscale8(value) => {
+            let value = u16::from(value) * 257;
+            Ok([value, value, value, u16::MAX])
+        }
+        PixelValue::Grayscale16(value) => Ok([value, value, value, u16::MAX]),
+        value @ (PixelValue::Rgba(_) | PixelValue::Rgba16(_)) => value.rgba16().ok_or(
+            CoreError::InvalidState("Genesis base raster is not displayable"),
+        ),
+    }
+}
+
 pub(crate) fn base_raster_pixel(raster: &TileRaster, x: u32, y: u32) -> Result<[u8; 4], CoreError> {
     match raster.pixel(x, y)? {
         PixelValue::Binary(coverage) => Ok([0, 0, 0, coverage]),

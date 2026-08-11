@@ -43,6 +43,7 @@ mod geometry;
 mod history;
 mod identity;
 mod journal;
+mod output_color_guard;
 mod paint;
 mod persistence;
 mod primitive;

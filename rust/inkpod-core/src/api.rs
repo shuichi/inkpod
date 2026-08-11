@@ -207,6 +207,40 @@ pub enum SelectionOperation {
     Intersect,
 }
 
+/// Closed output-color guard profile understood by this Core version.
+///
+/// This is an inkpod quality-assurance aid, not a declaration of formal
+/// broadcast-standard conformance and not an automatic color correction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum OutputColorGuardProfile {
+    /// Conservative BT.709 Y-prime/Cb/Cr nominal-code guard defined by `SPEC.md`.
+    Bt709ConservativeYCbCr = 1,
+}
+
+/// Deterministic counters from one output-color guard scan.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct OutputColorGuardSummary {
+    /// Number of nontransparent composite pixels inspected.
+    pub scanned_pixel_count: u64,
+    /// Number of inspected pixels outside at least one inclusive guard bound.
+    pub selected_pixel_count: u64,
+    /// Number of fully transparent composite pixels skipped.
+    pub transparent_pixel_count: u64,
+}
+
+/// Result of combining an output-color guard mask with the document selection.
+///
+/// `summary` describes the newly scanned candidate before the requested boolean
+/// selection operation. `dispatch` reports whether the final mask changed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OutputColorGuardResult {
+    /// Document dispatch and revision outcome.
+    pub dispatch: DispatchOutcome,
+    /// Candidate scan counters.
+    pub summary: OutputColorGuardSummary,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 /// A two-dimensional point with coordinates expressed by the enclosing API.
 pub struct PointF32 {

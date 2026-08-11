@@ -71,6 +71,8 @@ static_assert(sizeof(InkpodTreeEdit) == 64U);
 static_assert(sizeof(InkpodNodeInfo) == 72U);
 static_assert(sizeof(InkpodSelectionPoint) == 24U);
 static_assert(sizeof(InkpodSelectionInput) == 104U);
+static_assert(sizeof(InkpodOutputColorGuardRequest) == 32U);
+static_assert(sizeof(InkpodOutputColorGuardResult) == 56U);
 static_assert(sizeof(InkpodScopedColorReplaceInput) == 120U);
 static_assert(sizeof(InkpodScopedColorReplacePreview) == 48U);
 static_assert(sizeof(InkpodFloatingTransform) == 48U);
@@ -166,8 +168,8 @@ int InkpodRunAbiSmoke() {
     InkpodReplayContract replay_contract{};
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 16U
-        || replay_contract.procedure_format_version != 19U
+        || replay_contract.replay_epoch != 17U
+        || replay_contract.procedure_format_version != 20U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -321,7 +323,7 @@ int InkpodRunAbiSmoke() {
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 19U
+        || persistence.format_version != 20U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE
@@ -1044,6 +1046,34 @@ int InkpodRunAbiSmoke() {
                INKPOD_SELECTION_NEW,
                &dispatch) != INKPOD_STATUS_OK) {
         return 41;
+    }
+    if (inkpod_core_get_document_info(core, &document) != INKPOD_STATUS_OK) {
+        return 160;
+    }
+    InkpodOutputColorGuardRequest output_guard{};
+    output_guard.struct_size = sizeof(output_guard);
+    output_guard.profile = INKPOD_OUTPUT_COLOR_GUARD_BT709_CONSERVATIVE_YCBCR;
+    output_guard.operation = INKPOD_SELECTION_NEW;
+    output_guard.base_document_revision = document.document_revision;
+    InkpodOutputColorGuardResult output_guard_result{};
+    output_guard_result.struct_size = sizeof(output_guard_result);
+    InkpodTask* output_guard_task{};
+    InkpodOutputColorGuardRequest invalid_output_guard = output_guard;
+    invalid_output_guard.profile = UINT32_MAX;
+    if (inkpod_task_create(&output_guard_task) != INKPOD_STATUS_OK
+        || inkpod_core_select_output_color_guard(
+               core,
+               &invalid_output_guard,
+               output_guard_task,
+               &output_guard_result) != INKPOD_STATUS_INVALID_ARGUMENT
+        || inkpod_core_select_output_color_guard(
+               core,
+               &output_guard,
+               output_guard_task,
+               &output_guard_result) != INKPOD_STATUS_OK
+        || output_guard_result.selected_pixel_count > output_guard_result.scanned_pixel_count
+        || inkpod_task_release(&output_guard_task) != INKPOD_STATUS_OK) {
+        return 161;
     }
     InkpodSelectionInput selection{};
     selection.struct_size = sizeof(selection);

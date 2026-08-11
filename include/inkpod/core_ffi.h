@@ -629,6 +629,10 @@ typedef uint32_t InkpodSelectionOperation;
 #define INKPOD_SELECTION_ADD UINT32_C(2)
 #define INKPOD_SELECTION_SUBTRACT UINT32_C(3)
 #define INKPOD_SELECTION_INTERSECT UINT32_C(4)
+/** @brief Closed inkpod output-color guard profile identifier. */
+typedef uint32_t InkpodOutputColorGuardProfile;
+/** @brief Conservative BT.709 Y-prime/Cb/Cr QA guard; not a compliance claim. */
+#define INKPOD_OUTPUT_COLOR_GUARD_BT709_CONSERVATIVE_YCBCR UINT32_C(1)
 #define INKPOD_SELECTION_ADJUST_INVERT UINT32_C(1)
 #define INKPOD_SELECTION_ADJUST_EXPAND UINT32_C(2)
 #define INKPOD_SELECTION_ADJUST_SHRINK UINT32_C(3)
@@ -2206,6 +2210,28 @@ typedef struct InkpodSelectionInput {
     int64_t view_zoom_q16;
 } InkpodSelectionInput;
 
+/** @brief Borrowed output-color guard request fixed at command issue time. */
+typedef struct InkpodOutputColorGuardRequest {
+    uint32_t struct_size;
+    InkpodOutputColorGuardProfile profile;
+    InkpodSelectionOperation operation;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t base_document_revision;
+} InkpodOutputColorGuardRequest;
+
+/** @brief Caller-owned output-color guard dispatch and deterministic scan counters. */
+typedef struct InkpodOutputColorGuardResult {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t revision;
+    uint64_t accepted_command_count;
+    uint64_t scanned_pixel_count;
+    uint64_t selected_pixel_count;
+    uint64_t transparent_pixel_count;
+} InkpodOutputColorGuardResult;
+
 /**
  * @brief Borrowed, size-versioned scoped exact color replacement input.
  *
@@ -3507,6 +3533,24 @@ InkpodStatus inkpod_core_select_color_for_editor_target(
     uint32_t different,
     InkpodSelectionOperation operation,
     InkpodDispatchResult* result);
+/**
+ * @brief Selects visible committed composite pixels outside a closed QA guard.
+ *
+ * The solid paper background, light table, guides, grid, selection overlay, and
+ * previews are excluded. Alpha-zero pixels are skipped; other pixels use straight
+ * RGBA. A changed selection is one canonical Undo unit. No-op, cancel, stale base,
+ * invalid input, and failure are atomic. This API does not alter source colors and
+ * does not claim formal broadcast-standard conformance.
+ *
+ * `core`, `request`, `task`, and `result` are caller-owned and borrowed only for
+ * the call. The task must be READY and may be cancelled concurrently. Core must be
+ * called on its owner thread. No Rust allocation crosses the ABI boundary.
+ */
+InkpodStatus inkpod_core_select_output_color_guard(
+    InkpodCore* core,
+    const InkpodOutputColorGuardRequest* request,
+    InkpodTask* task,
+    InkpodOutputColorGuardResult* result);
 /**
  * @brief selection mask を invert/expand/shrink する。
  * @par 契約

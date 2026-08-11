@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::document::{bounded_document_pixels, validate_node_name};
-use crate::snapshot::{blend_rgba_over, rgba8_for_display};
+use crate::snapshot::{blend_rgba_over, blend_rgba16_over, rgba8_for_display};
 pub use inkpod_format::LightTableDisplayMode;
 use inkpod_format::{decode_common_raster, encode_common_raster};
 use std::cmp::Ordering;
@@ -35,7 +35,7 @@ pub use light_table_bulk::{
 pub(crate) use ordering::{natural_cmp, parse_cell_number};
 #[cfg(test)]
 pub(crate) use raster::base_raster_pixel;
-pub(crate) use raster::flatten_document;
+pub(crate) use raster::{flatten_document, visit_visible_document_composite_rgba16};
 pub use sequence::{
     MotionCheckConfig, MotionFrame, SequenceCellInfo, SequenceCellSource, SequenceDirection,
     SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,

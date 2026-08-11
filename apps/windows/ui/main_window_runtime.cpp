@@ -90,6 +90,7 @@ using inkpod::app::SequenceSwitchAsyncResult;
 using inkpod::app::ApplicationHost;
 using inkpod::app::BatchOperationUi;
 using inkpod::app::ColorChartGenerationJob;
+using inkpod::app::OutputColorGuardJob;
 using inkpod::app::BatchUiState;
 using inkpod::app::DocumentShellState;
 using inkpod::app::DocumentShellController;
@@ -155,6 +156,8 @@ using inkpod::app::DiscardRecoveryArtifact;
 using inkpod::app::ClearPreviousDocumentPaths;
 using inkpod::app::SaveRestorePreviousDocumentsSetting;
 using inkpod::app::SaveSequenceCellSwitchPolicy;
+using inkpod::app::SaveOutputColorGuardProfileSetting;
+using inkpod::app::OutputColorGuardProfileSetting;
 using inkpod::app::SequenceRecoveryPath;
 using inkpod::app::ResolveDocumentFileIdentity;
 using inkpod::app::UntitledDocumentIdentity;
@@ -4324,6 +4327,20 @@ bool FormatCurvePoints(
         }
         return true;
     } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool FormatOutputColorGuardSummary(
+    const InkpodOutputColorGuardResult& result, std::wstring& text) noexcept {
+    try {
+        text = L"出力色安全ガード: 選択 "
+            + std::to_wstring(result.selected_pixel_count)
+            + L" / 検査 " + std::to_wstring(result.scanned_pixel_count)
+            + L" / 透明除外 " + std::to_wstring(result.transparent_pixel_count);
+        return true;
+    } catch (const std::bad_alloc&) {
+        text.clear();
         return false;
     }
 }
@@ -14818,6 +14835,94 @@ std::optional<LRESULT> RouteSelectionViewCommand(
             UpdateMenuState(*state);
             return 0;
         }
+        case IDM_SELECTION_OUTPUT_COLOR_GUARD: {
+            static constexpr std::array<ViewOptionsDialogState::Choice, 1U> kProfiles{{
+                {L"BT.709 保守ガード（規格適合判定ではありません）",
+                 INKPOD_OUTPUT_COLOR_GUARD_BT709_CONSERVATIVE_YCBCR}}};
+            static constexpr std::array<ViewOptionsDialogState::Choice, 4U> kOperations{{
+                {L"新規", INKPOD_SELECTION_NEW},
+                {L"追加", INKPOD_SELECTION_ADD},
+                {L"削除", INKPOD_SELECTION_SUBTRACT},
+                {L"交差", INKPOD_SELECTION_INTERSECT}}};
+            ViewOptionsDialogState dialog{};
+            dialog.title = L"出力色安全ガード";
+            dialog.labels = {L"プロファイル", L"選択演算", nullptr, nullptr};
+            dialog.values = {
+                static_cast<std::int32_t>(state->effects.output_color_guard_profile),
+                static_cast<std::int32_t>(state->Workspace().tools.selection_operation),
+                0,
+                0};
+            dialog.choices = {kProfiles.data(), kOperations.data(), nullptr, nullptr};
+            dialog.choice_counts = {
+                static_cast<std::uint32_t>(kProfiles.size()),
+                static_cast<std::uint32_t>(kOperations.size()),
+                0U,
+                0U};
+            dialog.value_count = 2U;
+            if (ShowViewOptions(
+                    state->lifetime.instance,
+                    window,
+                    state->lifetime.smoke_test,
+                    dialog)
+                != IDOK) {
+                return 0;
+            }
+            const auto profile_setting =
+                static_cast<OutputColorGuardProfileSetting>(dialog.values[0]);
+            if (!state->lifetime.smoke_test
+                && !SaveOutputColorGuardProfileSetting(profile_setting)) {
+                MessageBoxW(
+                    window,
+                    L"出力色安全ガードの既定プロファイルを保存できませんでした。",
+                    L"inkpod",
+                    MB_OK | MB_ICONERROR);
+                return 0;
+            }
+            InkpodDocumentInfo document{};
+            if (!QueryDocument(*state, document)) {
+                ShowCoreError(*state, window, L"出力色安全ガード");
+                return 0;
+            }
+            std::shared_ptr<OutputColorGuardJob> job;
+            try {
+                job = std::make_shared<OutputColorGuardJob>();
+            } catch (const std::bad_alloc&) {
+                ShowCoreError(*state, window, L"出力色安全ガード");
+                return 0;
+            }
+            state->effects.output_color_guard_profile =
+                static_cast<InkpodOutputColorGuardProfile>(dialog.values[0]);
+            job->request.profile = state->effects.output_color_guard_profile;
+            job->request.operation =
+                static_cast<InkpodSelectionOperation>(dialog.values[1]);
+            job->request.base_document_revision = document.document_revision;
+            state->effects.output_color_guard = job;
+            const InkpodStatus status = StartEffectTask(
+                *state,
+                context,
+                false,
+                [job](InkpodCore* core, InkpodTask* task) {
+                    return inkpod_core_select_output_color_guard(
+                        core, &job->request, task, &job->result);
+                });
+            if (status != INKPOD_STATUS_OK) {
+                state->effects.output_color_guard.reset();
+                ShowCoreError(*state, window, L"出力色安全ガード");
+            } else if (state->lifetime.smoke_test) {
+                (void)FormatOutputColorGuardSummary(
+                    job->result, state->effects.last_output_color_guard_summary);
+                state->effects.output_color_guard.reset();
+            }
+            UpdateMenuState(*state);
+            if (status == INKPOD_STATUS_OK && state->lifetime.smoke_test
+                && !state->effects.last_output_color_guard_summary.empty()) {
+                PresentStatusBarPart(
+                    state->Workspace().windows.status_bar,
+                    5U,
+                    state->effects.last_output_color_guard_summary.c_str());
+            }
+            return 0;
+        }
         case IDM_SELECTION_TO_LAYER: {
             static constexpr std::array<std::uint8_t, 13U> name{
                 0xe9, 0x81, 0xb8, 0xe6, 0x8a, 0x9e, 0xe7, 0xaf, 0x84,
@@ -18129,6 +18234,8 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 const bool interactive_filter =
                     state->effects.filter_preview.work
                     != inkpod::app::FilterPreviewWork::None;
+                const auto output_color_guard = state->effects.output_color_guard;
+                state->effects.output_color_guard.reset();
                 if (completion_workspace != nullptr) {
                     ClearJobProgress(
                         completion_workspace->job_progress,
@@ -18148,6 +18255,31 @@ std::optional<LRESULT> RouteCoreNotificationMessage(
                 }
                 state->effects.job_id.reset();
                 state->effects.completion_context = {};
+                if (output_color_guard != nullptr) {
+                    if (status == INKPOD_STATUS_OK && document_current) {
+                        (void)FormatOutputColorGuardSummary(
+                            output_color_guard->result,
+                            state->effects.last_output_color_guard_summary);
+                    } else {
+                        state->effects.last_output_color_guard_summary.clear();
+                        if (status != INKPOD_STATUS_CANCELLED
+                            && completion_workspace != nullptr) {
+                            ShowCoreError(
+                                *state,
+                                completion_workspace->windows.window,
+                                L"出力色安全ガード");
+                        }
+                    }
+                    UpdateMenuState(*state);
+                    if (!state->effects.last_output_color_guard_summary.empty()
+                        && completion_workspace != nullptr) {
+                        PresentStatusBarPart(
+                            completion_workspace->windows.status_bar,
+                            5U,
+                            state->effects.last_output_color_guard_summary.c_str());
+                    }
+                    return 0;
+                }
                 if (interactive_filter) {
                     CompleteInteractiveFilterWork(
                         *state, status, document_current);

@@ -23,11 +23,15 @@ constexpr std::uint16_t kSessionPathsVersion = 1U;
 constexpr std::uint32_t kSequenceSwitchPolicyMagic = UINT32_C(0x50534b49);
 constexpr std::uint16_t kSequenceSwitchPolicyVersion = 1U;
 constexpr std::size_t kSequenceSwitchPolicyBytes = 16U;
+constexpr std::uint32_t kOutputColorGuardProfileMagic = UINT32_C(0x47434b49);
+constexpr std::uint16_t kOutputColorGuardProfileVersion = 1U;
+constexpr std::size_t kOutputColorGuardProfileBytes = 16U;
 constexpr std::size_t kMaximumSessionRecordBytes = 1024U * 1024U;
 constexpr wchar_t kSettingsKey[] = L"Software\\inkpod";
 constexpr wchar_t kRestoreSettingValue[] = L"RestorePreviousDocumentsV1";
 constexpr wchar_t kPreviousPathsValue[] = L"PreviousDocumentPathsV1";
 constexpr wchar_t kSequenceSwitchPolicyValue[] = L"SequenceCellSwitchPolicyV1";
+constexpr wchar_t kOutputColorGuardProfileValue[] = L"OutputColorGuardProfileV1";
 constexpr std::size_t kMaximumRestoredDocumentPaths = 64U;
 
 void AppendU16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
@@ -811,6 +815,110 @@ bool SaveSequenceCellSwitchPolicy(
     const bool saved = RegSetValueExW(
         key,
         kSequenceSwitchPolicyValue,
+        0U,
+        REG_BINARY,
+        bytes.data(),
+        static_cast<DWORD>(bytes.size())) == ERROR_SUCCESS;
+    RegCloseKey(key);
+    return saved;
+}
+
+bool EncodeOutputColorGuardProfileSetting(
+    OutputColorGuardProfileSetting profile,
+    std::vector<std::uint8_t>& output) noexcept {
+    if (profile != OutputColorGuardProfileSetting::Bt709ConservativeYcbcr) {
+        return false;
+    }
+    try {
+        output.clear();
+        output.reserve(kOutputColorGuardProfileBytes);
+        AppendU32(output, kOutputColorGuardProfileMagic);
+        AppendU16(output, kOutputColorGuardProfileVersion);
+        AppendU16(output, 0U);
+        AppendU32(output, static_cast<std::uint32_t>(kOutputColorGuardProfileBytes));
+        AppendU32(output, static_cast<std::uint32_t>(profile));
+        return output.size() == kOutputColorGuardProfileBytes;
+    } catch (const std::bad_alloc&) {
+        output.clear();
+        return false;
+    }
+}
+
+bool DecodeOutputColorGuardProfileSetting(
+    const std::uint8_t* bytes,
+    std::size_t length,
+    OutputColorGuardProfileSetting& profile) noexcept {
+    if (bytes == nullptr || length != kOutputColorGuardProfileBytes) {
+        return false;
+    }
+    std::size_t cursor{};
+    std::uint32_t magic{};
+    std::uint16_t version{};
+    std::uint16_t reserved{};
+    std::uint32_t total{};
+    std::uint32_t raw_profile{};
+    if (!ReadU32(bytes, length, cursor, magic)
+        || !ReadU16(bytes, length, cursor, version)
+        || !ReadU16(bytes, length, cursor, reserved)
+        || !ReadU32(bytes, length, cursor, total)
+        || !ReadU32(bytes, length, cursor, raw_profile)
+        || cursor != length || magic != kOutputColorGuardProfileMagic
+        || version != kOutputColorGuardProfileVersion || reserved != 0U
+        || total != length
+        || raw_profile != static_cast<std::uint32_t>(
+            OutputColorGuardProfileSetting::Bt709ConservativeYcbcr)) {
+        return false;
+    }
+    profile = static_cast<OutputColorGuardProfileSetting>(raw_profile);
+    return true;
+}
+
+bool LoadOutputColorGuardProfileSetting(
+    OutputColorGuardProfileSetting& profile) noexcept {
+    profile = OutputColorGuardProfileSetting::Bt709ConservativeYcbcr;
+    HKEY key{};
+    if (!OpenSettingsKey(KEY_QUERY_VALUE, key)) {
+        return false;
+    }
+    DWORD type{};
+    DWORD byte_count{};
+    LSTATUS status = RegQueryValueExW(
+        key, kOutputColorGuardProfileValue, nullptr, &type, nullptr, &byte_count);
+    if (status == ERROR_FILE_NOT_FOUND) {
+        RegCloseKey(key);
+        return true;
+    }
+    if (status != ERROR_SUCCESS || type != REG_BINARY
+        || byte_count != kOutputColorGuardProfileBytes) {
+        RegCloseKey(key);
+        return false;
+    }
+    std::array<std::uint8_t, kOutputColorGuardProfileBytes> bytes{};
+    status = RegQueryValueExW(
+        key,
+        kOutputColorGuardProfileValue,
+        nullptr,
+        &type,
+        bytes.data(),
+        &byte_count);
+    RegCloseKey(key);
+    return status == ERROR_SUCCESS
+        && DecodeOutputColorGuardProfileSetting(bytes.data(), bytes.size(), profile);
+}
+
+bool SaveOutputColorGuardProfileSetting(
+    OutputColorGuardProfileSetting profile) noexcept {
+    std::vector<std::uint8_t> bytes;
+    if (!EncodeOutputColorGuardProfileSetting(profile, bytes)) {
+        return false;
+    }
+    HKEY key{};
+    if (!OpenSettingsKey(KEY_SET_VALUE, key)) {
+        return false;
+    }
+    const bool saved = RegSetValueExW(
+        key,
+        kOutputColorGuardProfileValue,
         0U,
         REG_BINARY,
         bytes.data(),

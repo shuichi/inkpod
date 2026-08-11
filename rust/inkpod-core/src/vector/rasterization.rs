@@ -180,6 +180,24 @@ struct SampledPlane<'a> {
     paths: Vec<SampledPath>,
 }
 
+struct SampledFill16 {
+    color: [u16; 4],
+    bounds: (f64, f64, f64, f64),
+    boundaries: Vec<Vec<FlatSample>>,
+}
+
+struct SampledPath16 {
+    color: [u16; 4],
+    bounds: (f64, f64, f64, f64),
+    samples: Vec<FlatSample>,
+}
+
+struct SampledPlane16<'a> {
+    raster: Option<&'a PlaneNode>,
+    fills: Vec<SampledFill16>,
+    paths: Vec<SampledPath16>,
+}
+
 pub(crate) fn rasterize_vector_layer_content(
     document: &CellDocument,
     layer: &LayerNode,
@@ -325,4 +343,175 @@ pub(crate) fn rasterize_vector_layer_content(
         stride_bytes,
         pixels,
     })
+}
+
+pub(crate) fn rasterize_vector_layer_content_rgba16(
+    document: &CellDocument,
+    layer: &LayerNode,
+    width: u32,
+    height: u32,
+    antialias: bool,
+) -> Result<Vec<[u16; 4]>, CoreError> {
+    if width == 0 || height == 0 {
+        return Err(CoreError::InvalidArgument(
+            "vector raster dimensions are invalid",
+        ));
+    }
+    let pixel_count = u64::from(width) * u64::from(height);
+    if pixel_count > MAX_VECTOR_RASTER_PIXELS {
+        return Err(CoreError::InvalidArgument(
+            "vector raster exceeds its pixel bound",
+        ));
+    }
+
+    let mut sampled_planes = Vec::new();
+    sampled_planes
+        .try_reserve(layer.planes.len())
+        .map_err(|_| CoreError::InvalidState("vector raster allocation failed"))?;
+    for plane in layer.planes.iter().rev().filter(|plane| plane.visible) {
+        let fills = document
+            .vector
+            .fills
+            .iter()
+            .filter(|fill| fill.plane_id == plane.id)
+            .filter_map(|fill| {
+                let boundaries = fill
+                    .boundary_path_ids
+                    .iter()
+                    .filter_map(|path_id| {
+                        document
+                            .vector
+                            .paths
+                            .iter()
+                            .find(|path| path.id == *path_id)
+                            .map(|path| flatten_path(path, RASTER_STEPS))
+                    })
+                    .collect::<Vec<_>>();
+                let bounds = sampled_bounds(boundaries.iter().flatten().copied(), 0.0)?;
+                Some(SampledFill16 {
+                    color: display_color16(fill.color, 1_000, plane.opacity_milli),
+                    bounds,
+                    boundaries,
+                })
+            })
+            .collect();
+        let paths = document
+            .vector
+            .paths
+            .iter()
+            .filter(|path| path.plane_id == plane.id)
+            .filter_map(|path| {
+                let samples = flatten_path(path, RASTER_STEPS);
+                let padding = samples
+                    .iter()
+                    .map(|sample| sample.width * 0.5)
+                    .fold(0.0_f64, f64::max);
+                sampled_bounds(samples.iter().copied(), padding).map(|bounds| SampledPath16 {
+                    color: display_color16(path.color, 1_000, plane.opacity_milli),
+                    bounds,
+                    samples,
+                })
+            })
+            .collect();
+        sampled_planes.push(SampledPlane16 {
+            raster: (plane.kind == PlaneType::Raster).then_some(plane),
+            fills,
+            paths,
+        });
+    }
+
+    let offsets: &[(f64, f64)] = if antialias {
+        &[
+            (0.125, 0.125),
+            (0.375, 0.125),
+            (0.625, 0.125),
+            (0.875, 0.125),
+            (0.125, 0.375),
+            (0.375, 0.375),
+            (0.625, 0.375),
+            (0.875, 0.375),
+            (0.125, 0.625),
+            (0.375, 0.625),
+            (0.625, 0.625),
+            (0.875, 0.625),
+            (0.125, 0.875),
+            (0.375, 0.875),
+            (0.625, 0.875),
+            (0.875, 0.875),
+        ]
+    } else {
+        &[(0.5, 0.5)]
+    };
+    let pixel_count = usize::try_from(pixel_count)
+        .map_err(|_| CoreError::InvalidState("vector raster allocation overflows"))?;
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(pixel_count)
+        .map_err(|_| CoreError::InvalidState("vector raster allocation failed"))?;
+    pixels.resize(pixel_count, [0_u16; 4]);
+    for y in 0..height {
+        for x in 0..width {
+            let mut accumulated_premultiplied = [0_u64; 3];
+            let mut accumulated_alpha = 0_u64;
+            for offset in offsets {
+                let sample = (
+                    (f64::from(x) + offset.0) * f64::from(document.width) / f64::from(width),
+                    (f64::from(y) + offset.1) * f64::from(document.height) / f64::from(height),
+                );
+                let mut value = [0_u16; 4];
+                for plane in &sampled_planes {
+                    if let Some(raster) = plane.raster {
+                        let source_x = (sample.0.floor() as u32).min(document.width - 1);
+                        let source_y = (sample.1.floor() as u32).min(document.height - 1);
+                        let mut rgba = raster
+                            .raster
+                            .pixel(source_x, source_y)?
+                            .rgba16()
+                            .unwrap_or([0; 4]);
+                        rgba[3] = ((u64::from(rgba[3]) * u64::from(raster.opacity_milli) + 500)
+                            / 1_000) as u16;
+                        value = inkpod_image::source_over_rgba16(value, rgba);
+                    }
+                    for fill in &plane.fills {
+                        if point_in_rect(sample, fill.bounds)
+                            && point_in_sampled_fill(&fill.boundaries, sample)
+                        {
+                            value = inkpod_image::source_over_rgba16(value, fill.color);
+                        }
+                    }
+                    for path in &plane.paths {
+                        if point_in_rect(sample, path.bounds)
+                            && point_on_sampled_stroke(&path.samples, sample)
+                        {
+                            value = inkpod_image::source_over_rgba16(value, path.color);
+                        }
+                    }
+                }
+                value[3] =
+                    ((u64::from(value[3]) * u64::from(layer.opacity_milli) + 500) / 1_000) as u16;
+                accumulated_alpha += u64::from(value[3]);
+                for channel in 0..3 {
+                    accumulated_premultiplied[channel] +=
+                        u64::from(value[channel]) * u64::from(value[3]);
+                }
+            }
+            let pixel = &mut pixels[y as usize * width as usize + x as usize];
+            for channel in 0..3 {
+                pixel[channel] = ((accumulated_premultiplied[channel] + accumulated_alpha / 2)
+                    .checked_div(accumulated_alpha)
+                    .unwrap_or(0)) as u16;
+            }
+            pixel[3] =
+                ((accumulated_alpha + offsets.len() as u64 / 2) / offsets.len() as u64) as u16;
+        }
+    }
+    Ok(pixels)
+}
+
+fn display_color16(color: PixelValue, layer_opacity: u32, plane_opacity: u32) -> [u16; 4] {
+    let mut value = color.rgba16().unwrap_or([0; 4]);
+    value[3] = ((u64::from(value[3]) * u64::from(layer_opacity) * u64::from(plane_opacity)
+        + 500_000)
+        / 1_000_000) as u16;
+    value
 }

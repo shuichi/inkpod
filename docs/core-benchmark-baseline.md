@@ -58,7 +58,7 @@ scenario assertions are:
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 16 / native v19 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 17 / native v20 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 
 The checksum is local FNV-1a over fixed-width public semantic data and excludes
@@ -83,6 +83,15 @@ retaining procedure count 256, output/history 256, asset reuse 1, document
 revision 3, one success, zero failures, and exact checkpoint Undo/Redo. The
 workload, harness logic, timed interval, envelope, and `revision-max` formula
 are unchanged.
+
+The v20/epoch-17 output-color guard adds one closed canonical primitive but
+does not alter any of the nine benchmark workloads or their pixel/cache paths.
+Quick and full runs retained every checksum and semantic counter, including
+`canonical_replay` `f521d658a47051e9` and `checkpoint_open`
+`8847f8440d290c18`; the workload, harness, envelope, and `revision-max` formula
+remain unchanged. The new guard scan has no approved wall-clock envelope, so
+these runs establish semantic non-regression rather than a timing approval for
+that new path.
 
 ## Approved routine envelope
 

@@ -387,7 +387,11 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 ### 12. 彩色チェックとモーションチェック
 
 - `彩色チェック表示` は legacy white-transparency mode で完全な白 RGB(255,255,255) を未彩色/透明候補として残し、それ以外を黒等の高 contrast で表示する。native alpha mode では透明 alpha も別 category で示す。
-- 放送色域 check は選択した規格と変換式を設定に持ち、規格外 pixel だけを selection mask にする。
+- `出力色安全ガード`は正式な放送規格適合判定ではなく、BT.709のY′CbCr係数とnominal code相当の閾値を使うinkpod独自の保守的QAとする。closed profileの初期値は`BT.709 conservative Y′CbCr guard`だけとし、旧NTSC固定式、EBU R103適合表示、自動legalizeを行わない。
+- sourceは確定済みのvisible layer compositeとGenesis assetであり、solid-white paper、Light Table、guide、grid、selection overlay、color-check overlay、previewを含めない。raster／vector／adjustment、visibility、opacity、layer／plane順を通常のdocument compositeと共有する。8 bit channelは`value * 257`で16 bitへ正確に昇格し、RGBA16 straight alphaで合成する。alphaが0のpixelは検査せず、alphaが正のpixelはpremultiplied表示値ではなく合成後のstraight RGBを検査する。
+- 16 bit compositeの`R,G,B`を0以上65535以下とし、`Y_num = 2126*R + 7152*G + 722*B`、`Y′ = round_half_up(Y_num / 10000)`とする。`Cb = round_half_up((65535*18556 + 2*(10000*B - Y_num)) / (2*18556))`、`Cr = round_half_up((65535*15748 + 2*(10000*R - Y_num)) / (2*15748))`とし、検査付き整数演算だけを使う。Y′の安全域は8 bit code相当`16..=235`、Cb／Crは`16..=240`、16 bitでは各境界を257倍した値とする。境界値は安全で、一成分でも範囲外ならそのpixelを規格外候補にする。spatial filterと画像全体1% thresholdは適用せず、pixel単位の候補選択と件数／検査数／透明skip数を返す。
+- ガード結果は元pixelを変更せず、`新規`、`追加`、`削除`、`交差`で既存selectionへ一transaction、一canonical procedure、一Undo単位として合成する。`新規`が非空selectionを空maskへ置換する場合は変更、既に同じ空maskの場合だけno-opとする。他operationの同一結果もno-opとし、Cancel、invalid profile、stale base revision、overflow、allocation／composition failureではselection、revision、history、journal、dirty、IDを進めない。
+- 大画像scanはrow単位のprogressとcooperative cancellationを持ち、発行時document UUID／base revision／profile／selection operationへ固定する。profile semanticsはcanonical procedureへ保存するが、profileのUI既定値はapplication settingでありdocumentへ永続化しない。
 - motion check は同じ sequence の指定範囲を、倍率、背景色、余白色、開始時 pause、selection のみ、light table を含める設定で再生する。
 - FPS shortcut は少なくとも 30/25/24/12/10/8、前後 frame、先頭/末尾、space pause/resume、Esc 終了を提供する。
 - 簡易連続表示は追加設定なしで sequence を loop 表示し、Esc で終了する。
@@ -604,6 +608,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `COLOR-001`: RGBA 8/16、RGB/HSV、eyedropper source
 - `COLOR-002`: palette、chart、subpalette、color check
 - `COLOR-CHART-PREVIEW-001`: 同一base compositeからの非累積Color chart生成preview、頻度／差分summary、revision-bound Apply、exact-color名前継承、lock拒否、cursor継承、Cancel無変更、一回Undo／Redoとsave/reopen
+- `COLOR-OUTPUT-QA-001`: BT.709係数とnominal code相当閾値を使う非適合表示の保守的Y′CbCr guard、visible straight-alpha composite、透明skip、fixed half-up、selection algebra、progress／Cancel／stale、Undo／Redo、replay、save/reopen
 
 ### Selection and editing
 

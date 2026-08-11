@@ -3,6 +3,7 @@
 mod canonical;
 mod edit;
 mod fill;
+mod output_color_guard;
 mod palette;
 mod pixel;
 mod raster;
@@ -24,6 +25,10 @@ pub use fill::{
     MAX_INCLUSION_COLORS, PixelEdit, closed_region_fill, closed_region_fill_with_cancel,
     extend_fill, extend_fill_with_cancel, seed_fill, seed_fill_with_cancel,
 };
+pub use output_color_guard::{
+    Bt709Ycbcr16, OutputColorGuardCategory, bt709_conservative_guard_category,
+    bt709_conservative_ycbcr16,
+};
 pub use palette::{MAX_PALETTE_COLORS, Palette};
 pub use pixel::{PixelFormat, PixelValue};
 pub use raster::{
@@ -43,6 +48,9 @@ pub use vector::{
     vector_squared_distance, vector_stroke_contains,
 };
 
+#[cfg(test)]
+#[path = "../tests/unit/output_color_guard.rs"]
+mod output_color_guard_tests;
 #[cfg(test)]
 #[path = "../tests/unit/raster_fill.rs"]
 mod tests;

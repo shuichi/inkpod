@@ -149,6 +149,8 @@ impl PrimitiveId {
     pub const RESIZE_SELECTION: Self = Self(0x0006_0004);
     /// Primitive ID for selecting pixels by exact-depth color.
     pub const SELECT_COLOR: Self = Self(0x0006_0005);
+    /// Primitive ID for selecting visible composite pixels outside an output-color guard.
+    pub const SELECT_OUTPUT_COLOR_GUARD: Self = Self(0x0006_0006);
     /// Primitive ID for converting the selection mask into a layer.
     pub const SELECTION_TO_LAYER: Self = Self(0x0006_0010);
     /// Primitive ID for combining a selection layer into the active mask.
@@ -246,14 +248,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(16);
+    pub const CURRENT: Self = Self(17);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 19;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 20;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;

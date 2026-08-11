@@ -430,7 +430,7 @@ fn procedure_file_fixture() -> NativeFile {
 }
 
 #[test]
-fn io_001_v19_directory_digest_and_opaque_sections_round_trip() {
+fn io_001_v20_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
@@ -460,14 +460,14 @@ fn io_001_v19_directory_digest_and_opaque_sections_round_trip() {
 }
 
 #[test]
-fn io_001_v19_accepts_checkpoint_and_rejects_v18_missing_duplicate_overlap_and_bad_digest() {
+fn io_001_v20_accepts_checkpoint_and_rejects_v19_missing_duplicate_overlap_and_bad_digest() {
     let file = procedure_file_fixture();
     let encoded = encode_procedure_file(&file).unwrap();
 
-    let mut v18 = encoded.clone();
-    v18[8..12].copy_from_slice(&18_u32.to_le_bytes());
+    let mut v19 = encoded.clone();
+    v19[8..12].copy_from_slice(&19_u32.to_le_bytes());
     assert!(matches!(
-        decode_procedure_file(&v18),
+        decode_procedure_file(&v19),
         Err(FormatError::Unsupported("format version is not supported"))
     ));
 
@@ -523,9 +523,9 @@ fn io_001_v19_accepts_checkpoint_and_rejects_v18_missing_duplicate_overlap_and_b
 }
 
 #[test]
-fn io_001_v19_streaming_cancel_keeps_existing_destination_and_removes_temp() {
+fn io_001_v20_streaming_cancel_keeps_existing_destination_and_removes_temp() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v19-cancel-test-{}-{}",
+        "inkpod-v20-cancel-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -552,9 +552,9 @@ fn io_001_v19_streaming_cancel_keeps_existing_destination_and_removes_temp() {
 }
 
 #[test]
-fn io_001_v19_atomic_save_replaces_an_existing_container() {
+fn io_001_v20_atomic_save_replaces_an_existing_container() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v19-replace-test-{}-{}",
+        "inkpod-v20-replace-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));

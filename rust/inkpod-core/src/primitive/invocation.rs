@@ -214,6 +214,11 @@ pub(crate) enum CanonicalInvocation {
         operation: SelectionOperation,
         target: EditorTarget,
     },
+    SelectOutputColorGuard {
+        profile: OutputColorGuardProfile,
+        operation: SelectionOperation,
+        base_revision: u64,
+    },
     SelectionToLayer {
         name: String,
     },
@@ -782,6 +787,12 @@ fn decode_persistent_invocation(
             operation: reader.selection_operation()?,
             target: reader.editor_target()?,
         }
+    } else if primitive_id == PrimitiveId::SELECT_OUTPUT_COLOR_GUARD {
+        CanonicalInvocation::SelectOutputColorGuard {
+            profile: reader.output_color_guard_profile()?,
+            operation: reader.selection_operation()?,
+            base_revision: reader.u64()?,
+        }
     } else if primitive_id == PrimitiveId::SELECTION_TO_LAYER {
         CanonicalInvocation::SelectionToLayer {
             name: reader.string()?,
@@ -1144,6 +1155,7 @@ impl CanonicalInvocation {
             Self::ClearSelection => PrimitiveId::CLEAR_SELECTION,
             Self::ResizeSelection { .. } => PrimitiveId::RESIZE_SELECTION,
             Self::SelectColor { .. } => PrimitiveId::SELECT_COLOR,
+            Self::SelectOutputColorGuard { .. } => PrimitiveId::SELECT_OUTPUT_COLOR_GUARD,
             Self::SelectionToLayer { .. } => PrimitiveId::SELECTION_TO_LAYER,
             Self::SelectionFromLayer { .. } => PrimitiveId::SELECTION_FROM_LAYER,
             Self::ClearSelectedContent { .. } => PrimitiveId::CLEAR_SELECTED_CONTENT,
@@ -1270,6 +1282,7 @@ impl CanonicalInvocation {
             | Self::InvertSelection
             | Self::ClearSelection
             | Self::ResizeSelection { .. }
+            | Self::SelectOutputColorGuard { .. }
             | Self::SelectionToLayer { .. }
             | Self::MirrorDocument { .. }
             | Self::RotateDocument { .. }
@@ -1580,6 +1593,13 @@ impl CanonicalInvocation {
             } => core
                 .select_color_for_editor_target(*color, *tolerance, *different, *operation, *target)
                 .map(InvocationResult::dispatch),
+            Self::SelectOutputColorGuard {
+                profile,
+                operation,
+                base_revision,
+            } => core
+                .select_output_color_guard(*profile, *operation, *base_revision)
+                .map(|result| InvocationResult::dispatch(result.dispatch)),
             Self::SelectionToLayer { name } => core
                 .selection_to_layer(name)
                 .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
@@ -2001,6 +2021,15 @@ impl CanonicalInvocation {
                 writer.u32(selection_operation_code(*operation));
                 writer.editor_target(*target);
             }
+            Self::SelectOutputColorGuard {
+                profile,
+                operation,
+                base_revision,
+            } => {
+                writer.u32(output_color_guard_profile_code(*profile));
+                writer.u32(selection_operation_code(*operation));
+                writer.u64(*base_revision);
+            }
             Self::SelectionToLayer { name } => writer.string(name)?,
             Self::SelectionFromLayer {
                 layer_id,
@@ -2344,6 +2373,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::CLEAR_SELECTION.get()
         || value == PrimitiveId::RESIZE_SELECTION.get()
         || value == PrimitiveId::SELECT_COLOR.get()
+        || value == PrimitiveId::SELECT_OUTPUT_COLOR_GUARD.get()
         || value == PrimitiveId::SELECTION_TO_LAYER.get()
         || value == PrimitiveId::SELECTION_FROM_LAYER.get()
         || value == PrimitiveId::CLEAR_SELECTED_CONTENT.get()
@@ -2581,6 +2611,13 @@ impl<'a> CanonicalReader<'a> {
             3 => Ok(SelectionOperation::Subtract),
             4 => Ok(SelectionOperation::Intersect),
             _ => Err(self.invalid("canonical selection operation is invalid")),
+        }
+    }
+
+    fn output_color_guard_profile(&mut self) -> Result<OutputColorGuardProfile, CoreError> {
+        match self.u32()? {
+            1 => Ok(OutputColorGuardProfile::Bt709ConservativeYCbCr),
+            _ => Err(self.invalid("canonical output-color guard profile is invalid")),
         }
     }
 
@@ -4344,6 +4381,12 @@ const fn selection_operation_code(value: SelectionOperation) -> u32 {
         SelectionOperation::Add => 2,
         SelectionOperation::Subtract => 3,
         SelectionOperation::Intersect => 4,
+    }
+}
+
+const fn output_color_guard_profile_code(value: OutputColorGuardProfile) -> u32 {
+    match value {
+        OutputColorGuardProfile::Bt709ConservativeYCbCr => 1,
     }
 }
 

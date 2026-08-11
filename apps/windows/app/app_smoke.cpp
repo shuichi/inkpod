@@ -3235,6 +3235,7 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
              IDM_SELECTION_COLOR,
              IDM_SELECTION_COLOR_DIFFERENT,
              IDM_SELECTION_COLOR_ADD,
+             IDM_SELECTION_OUTPUT_COLOR_GUARD,
              IDM_SELECTION_TO_LAYER,
              IDM_SELECTION_FROM_LAYER,
              IDM_SELECTION_LAYER_ADD,
@@ -3290,6 +3291,22 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     InkpodDocumentInfo initial{};
     if (!QueryDocument(state, initial)) {
         return 304;
+    }
+    state.effects.last_output_color_guard_summary.clear();
+    SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_SELECTION_OUTPUT_COLOR_GUARD,
+        0);
+    InkpodDocumentInfo after_output_guard{};
+    if (!QueryDocument(state, after_output_guard)
+        || after_output_guard.document_revision != initial.document_revision
+        || state.effects.output_color_guard != nullptr
+        || state.effects.output_color_guard_profile
+            != INKPOD_OUTPUT_COLOR_GUARD_BT709_CONSERVATIVE_YCBCR
+        || state.effects.last_output_color_guard_summary.find(L"選択 0")
+            == std::wstring::npos) {
+        return 341;
     }
     SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_LAYER_DUPLICATE, 0);
     const std::uint64_t duplicate_id = state.Document().shell.smoke_layer_id;

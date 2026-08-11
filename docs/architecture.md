@@ -204,10 +204,11 @@ selection mask. `BaseSurface::Asset` instead names one immutable canonical raste
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
 maximum-close frames change canonical document-state bytes, so the document-state
-commitment is schema 6/domain 5. The current replay contract is epoch 16 and native
-format version 19. It adds a document-owned Color chart, canonical whole-chart
-replacement, and EditorState cursor while preserving the existing canonical
-fixed-point/image-result semantics.
+commitment is schema 6/domain 5. The current replay contract is epoch 17 and native
+format version 20. It adds the canonical output-color guard selection procedure
+over the committed visible straight-alpha composite. The document-owned Color
+chart, canonical whole-chart replacement, and EditorState cursor introduced in
+epoch 16/version 19 retain their existing semantics.
 The numeric audit, prohibited platform-math list, public golden fixture, and
 benchmark gate are specified in [`determinism.md`](determinism.md).
 

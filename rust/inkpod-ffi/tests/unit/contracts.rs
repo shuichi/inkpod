@@ -72,6 +72,102 @@ fn queried_history_info(core: *mut InkpodCore) -> InkpodHistoryInfo {
     history
 }
 
+#[test]
+fn output_color_guard_abi_validates_profile_task_stale_and_owned_result_records() {
+    let (mut core, initial) = create_core(2, 2, 0x6f01);
+    unsafe {
+        let mut request = InkpodOutputColorGuardRequest {
+            struct_size: size_of::<InkpodOutputColorGuardRequest>() as u32,
+            profile: INKPOD_OUTPUT_COLOR_GUARD_BT709_CONSERVATIVE_YCBCR,
+            operation: INKPOD_SELECTION_NEW,
+            reserved: 0,
+            feature_flags: INKPOD_FEATURE_NONE,
+            base_document_revision: initial.document_revision,
+        };
+        let mut result = InkpodOutputColorGuardResult {
+            struct_size: size_of::<InkpodOutputColorGuardResult>() as u32,
+            ..InkpodOutputColorGuardResult::default()
+        };
+
+        let mut task = ptr::null_mut();
+        assert_eq!(inkpod_task_create(&mut task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_select_output_color_guard(core, &request, task, &mut result),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(result.revision, initial.document_revision);
+        assert_eq!(result.accepted_command_count, 1);
+        assert_eq!(result.scanned_pixel_count, 0);
+        assert_eq!(result.selected_pixel_count, 0);
+        assert_eq!(result.transparent_pixel_count, 4);
+        assert_eq!(inkpod_task_release(&mut task), INKPOD_STATUS_OK);
+
+        request.profile = u32::MAX;
+        let mut invalid_task = ptr::null_mut();
+        assert_eq!(inkpod_task_create(&mut invalid_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_select_output_color_guard(core, &request, invalid_task, &mut result),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(inkpod_task_release(&mut invalid_task), INKPOD_STATUS_OK);
+        request.profile = INKPOD_OUTPUT_COLOR_GUARD_BT709_CONSERVATIVE_YCBCR;
+
+        let original_size = request.struct_size;
+        request.struct_size -= 1;
+        let mut short_task = ptr::null_mut();
+        assert_eq!(inkpod_task_create(&mut short_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_select_output_color_guard(core, &request, short_task, &mut result),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(inkpod_task_release(&mut short_task), INKPOD_STATUS_OK);
+        request.struct_size = original_size;
+
+        let mut cancelled_task = ptr::null_mut();
+        assert_eq!(inkpod_task_create(&mut cancelled_task), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_task_cancel(cancelled_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_select_output_color_guard(core, &request, cancelled_task, &mut result),
+            INKPOD_STATUS_CANCELLED
+        );
+        assert_eq!(inkpod_task_release(&mut cancelled_task), INKPOD_STATUS_OK);
+
+        let selection = InkpodSelectionInput {
+            struct_size: size_of::<InkpodSelectionInput>() as u32,
+            shape: INKPOD_SELECTION_RECTANGLE,
+            operation: INKPOD_SELECTION_NEW,
+            bounds: InkpodFrameRect {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            interpretation: INKPOD_RANGE_NORMAL,
+            trace_shape: INKPOD_TRACE_ROUND,
+            view_zoom_q16: 1 << 16,
+            ..InkpodSelectionInput::default()
+        };
+        let mut dispatch_result = dispatch();
+        assert_eq!(
+            inkpod_core_apply_selection(core, &selection, &mut dispatch_result),
+            INKPOD_STATUS_OK
+        );
+        let before_stale = queried_document_info(core);
+        let mut stale_task = ptr::null_mut();
+        assert_eq!(inkpod_task_create(&mut stale_task), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_select_output_color_guard(core, &request, stale_task, &mut result),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(
+            queried_document_info(core).document_revision,
+            before_stale.document_revision
+        );
+        assert_eq!(inkpod_task_release(&mut stale_task), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
 fn editor_state_info() -> InkpodEditorStateInfo {
     InkpodEditorStateInfo {
         struct_size: size_of::<InkpodEditorStateInfo>() as u32,
@@ -3786,8 +3882,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 16);
-        assert_eq!(contract.procedure_format_version, 19);
+        assert_eq!(contract.replay_epoch, 17);
+        assert_eq!(contract.procedure_format_version, 20);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);

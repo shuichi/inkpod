@@ -552,6 +552,11 @@ int Application::Run() {
         if (LoadSequenceCellSwitchPolicy(sequence_policy)) {
             state.lifetime.sequence_switch_policy = sequence_policy;
         }
+        OutputColorGuardProfileSetting output_color_guard_profile{};
+        if (LoadOutputColorGuardProfileSetting(output_color_guard_profile)) {
+            state.effects.output_color_guard_profile =
+                static_cast<InkpodOutputColorGuardProfile>(output_color_guard_profile);
+        }
     }
     if (!InitializeFrontendRouting(state)) {
         host_.reset();

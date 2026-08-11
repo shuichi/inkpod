@@ -12,6 +12,7 @@ namespace {
 using inkpod::app::DecodePreviousDocumentPaths;
 using inkpod::app::DecodeRecoveryMetadata;
 using inkpod::app::DecodeSequenceCellSwitchPolicy;
+using inkpod::app::DecodeOutputColorGuardProfileSetting;
 using inkpod::app::DiscardRecoveryArtifact;
 using inkpod::app::DocumentIdentity;
 using inkpod::app::DocumentIdentityKind;
@@ -19,11 +20,13 @@ using inkpod::app::DocumentSessionId;
 using inkpod::app::EncodePreviousDocumentPaths;
 using inkpod::app::EncodeRecoveryMetadata;
 using inkpod::app::EncodeSequenceCellSwitchPolicy;
+using inkpod::app::EncodeOutputColorGuardProfileSetting;
 using inkpod::app::EnumerateRecoveryCandidatesInDirectory;
 using inkpod::app::Generation;
 using inkpod::app::ReadRecoveryMetadata;
 using inkpod::app::RecoveryMetadata;
 using inkpod::app::SequenceCellSwitchPolicy;
+using inkpod::app::OutputColorGuardProfileSetting;
 using inkpod::app::SequenceRecoveryPath;
 using inkpod::app::WriteRecoveryMetadata;
 
@@ -158,6 +161,32 @@ int TestSequenceSwitchPolicyCodec() {
     return 0;
 }
 
+int TestOutputColorGuardProfileCodec() {
+    std::vector<std::uint8_t> bytes;
+    OutputColorGuardProfileSetting decoded{
+        OutputColorGuardProfileSetting::Bt709ConservativeYcbcr};
+    if (!EncodeOutputColorGuardProfileSetting(
+            OutputColorGuardProfileSetting::Bt709ConservativeYcbcr, bytes)
+        || bytes.size() != 16U
+        || !DecodeOutputColorGuardProfileSetting(bytes.data(), bytes.size(), decoded)
+        || decoded != OutputColorGuardProfileSetting::Bt709ConservativeYcbcr) {
+        return 19;
+    }
+    std::vector<std::uint8_t> wrong_version = bytes;
+    wrong_version[4] = 2U;
+    if (DecodeOutputColorGuardProfileSetting(
+            wrong_version.data(), wrong_version.size(), decoded)) {
+        return 28;
+    }
+    bytes[12] = 2U;
+    if (DecodeOutputColorGuardProfileSetting(bytes.data(), bytes.size(), decoded)
+        || EncodeOutputColorGuardProfileSetting(
+            static_cast<OutputColorGuardProfileSetting>(2U), bytes)) {
+        return 29;
+    }
+    return 0;
+}
+
 int TestCatalog() {
     std::array<wchar_t, MAX_PATH> root{};
     if (GetTempPathW(static_cast<DWORD>(root.size()), root.data()) == 0U) {
@@ -218,5 +247,11 @@ int main() {
         return session_paths;
     }
     const int switch_policy = TestSequenceSwitchPolicyCodec();
-    return switch_policy == 0 ? TestCatalog() : switch_policy;
+    if (switch_policy != 0) {
+        return switch_policy;
+    }
+    const int output_color_guard_profile = TestOutputColorGuardProfileCodec();
+    return output_color_guard_profile == 0
+        ? TestCatalog()
+        : output_color_guard_profile;
 }

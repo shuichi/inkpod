@@ -170,6 +170,13 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
     entry!(CLEAR_SELECTION, 2, "ClearSelection", 2, 0x0006_0003),
     entry!(RESIZE_SELECTION, 2, "ResizeSelection", 2, 0x0006_0004),
     entry!(SELECT_COLOR, 2, "SelectColor", 2, 0x0006_0005),
+    entry!(
+        SELECT_OUTPUT_COLOR_GUARD,
+        2,
+        "SelectOutputColorGuard",
+        1,
+        0x0006_0006
+    ),
     entry!(SELECTION_TO_LAYER, 2, "SelectionToLayer", 2, 0x0006_0010),
     entry!(
         SELECTION_FROM_LAYER,
@@ -360,7 +367,7 @@ mod tests {
 
     #[test]
     fn catalog_is_sorted_unique_bounded_and_matches_replay_schema_lookup() {
-        assert_eq!(PRIMITIVE_CATALOG.len(), 81);
+        assert_eq!(PRIMITIVE_CATALOG.len(), 82);
         for pair in PRIMITIVE_CATALOG.windows(2) {
             assert!(pair[0].id < pair[1].id);
         }

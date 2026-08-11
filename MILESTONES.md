@@ -773,7 +773,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M13 — PM-GAP-014: Color chart生成結果の比較preview
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: COLOR-002、HIST-001。
 
@@ -821,16 +821,16 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M14 — PM-GAP-020: 現代的な出力色域／放送安全域QA
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: COLOR-001、COLOR-002、SEL-002。
+関連要件: COLOR-001、COLOR-002、COLOR-OUTPUT-QA-001、SEL-002。
 
 仕様決定ゲート:
 
-- SPEC.mdに対応profile、RGB／Y′CbCr等の変換式、transfer、range、
-  matrix係数、fixed rounding、境界を含む／含まない規則、alpha扱いが
-  明記されていなければ、実装前に候補と用途を利用者へ提示して決定を待つ。
-  2008年固定の旧NTSC式を既定で再現しない。
+- 決定済み。正式な放送規格適合判定ではなく、BT.709のY′CbCr係数と
+  nominal code相当の閾値を使うinkpod独自の保守的な出力色安全ガードとする。
+  committed visible composite、straight alpha、透明pixel、fixed half-up、inclusive
+  boundary、対象外overlay、selection演算の正確な契約をSPEC.mdへ固定した。
 
 成果:
 
