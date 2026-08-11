@@ -1297,6 +1297,8 @@ fn batched_stroke_snapshot_view_history_and_round_trip() {
 
 #[test]
 fn live_stroke_abi_previews_then_commits_once_and_cancel_is_safe() {
+    const LOCATOR_COLOR_PRESENT: u32 = 1 << 1;
+
     let mut core = ptr::null_mut();
     // SAFETY: Config and output storage are complete and non-overlapping.
     assert_eq!(
@@ -1414,6 +1416,66 @@ fn live_stroke_abi_previews_then_commits_once_and_cancel_is_safe() {
     assert!(view.revision >= 1_u64 << 63 && view.tile_count == 1);
     assert_eq!(
         unsafe { inkpod_snapshot_release(&mut snapshot) },
+        INKPOD_STATUS_OK
+    );
+
+    let mut locator = InkpodLocatorOutput {
+        struct_size: size_of::<InkpodLocatorOutput>() as u32,
+        ..InkpodLocatorOutput::default()
+    };
+    assert_eq!(
+        unsafe { inkpod_core_locator_sample(core, 0, 20.0, 4.0, &mut locator) },
+        INKPOD_STATUS_OK
+    );
+    assert_ne!(locator.flags & LOCATOR_COLOR_PRESENT, 0);
+    assert_eq!(
+        (
+            locator.color.red,
+            locator.color.green,
+            locator.color.blue,
+            locator.color.alpha
+        ),
+        (0, 0, 0, 255)
+    );
+    let mut locator_pixel = [0_u8; 4];
+    let mut neighborhood = InkpodLocatorNeighborhoodBuffer {
+        struct_size: size_of::<InkpodLocatorNeighborhoodBuffer>() as u32,
+        radius: 0,
+        pixels_rgba8: locator_pixel.as_mut_ptr(),
+        pixel_capacity: locator_pixel.len() as u64,
+        ..InkpodLocatorNeighborhoodBuffer::default()
+    };
+    assert_eq!(
+        unsafe { inkpod_core_locator_neighborhood(core, 0, 20.0, 4.0, &mut neighborhood) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(locator_pixel, [0, 0, 0, 255]);
+
+    assert_eq!(unsafe { inkpod_core_stroke_cancel(core) }, INKPOD_STATUS_OK);
+    assert_eq!(
+        unsafe { inkpod_core_locator_sample(core, 0, 20.0, 4.0, &mut locator) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(locator.flags & LOCATOR_COLOR_PRESENT, 0);
+    assert_eq!(
+        unsafe { inkpod_core_locator_neighborhood(core, 0, 20.0, 4.0, &mut neighborhood) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(locator_pixel, [0; 4]);
+    assert_eq!(
+        unsafe { inkpod_core_get_document_info(core, &mut info) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(info.document_revision, initial_revision);
+    assert_eq!(info.main_plane_checksum, initial_checksum);
+    assert_eq!(info.flags & INKPOD_DOCUMENT_FLAG_DIRTY, 0);
+
+    assert_eq!(
+        unsafe { inkpod_core_stroke_begin(core, &begin) },
+        INKPOD_STATUS_OK
+    );
+    assert_eq!(
+        unsafe { inkpod_core_stroke_append(core, &span) },
         INKPOD_STATUS_OK
     );
 

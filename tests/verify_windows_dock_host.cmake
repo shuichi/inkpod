@@ -18,6 +18,7 @@ set(SEQUENCE_SOURCE "${UI_DIR}/panes/sequence_pane.cpp")
 set(LIGHT_TABLE_SOURCE "${UI_DIR}/panes/light_table_pane.cpp")
 set(REFERENCE_SOURCE "${UI_DIR}/panes/subpalette_pane.cpp")
 set(BATCH_SOURCE "${UI_DIR}/dialogs/batch_dialog.cpp")
+set(LAYER_PALETTE_SOURCE "${UI_DIR}/dialogs/layer_palette.cpp")
 set(PROGRESS_SOURCE "${UI_DIR}/dialogs/effects_dialogs.cpp")
 set(PROGRESS_HEADER "${UI_DIR}/dialogs/effects_dialogs.h")
 
@@ -37,6 +38,7 @@ foreach(FILE IN ITEMS
         "${LIGHT_TABLE_SOURCE}"
         "${REFERENCE_SOURCE}"
         "${BATCH_SOURCE}"
+        "${LAYER_PALETTE_SOURCE}"
         "${PROGRESS_SOURCE}"
         "${PROGRESS_HEADER}")
     if(NOT EXISTS "${FILE}")
@@ -76,6 +78,7 @@ foreach(REQUIRED IN ITEMS
         "class DockLayoutModel final"
         "struct PaneDescriptor"
         "title_resource_id"
+        "show_header_when_singleton"
         "TopContext,"
         "Floating,"
         "Hidden,"
@@ -103,7 +106,10 @@ foreach(REQUIRED IN ITEMS
         "IDS_DOCK_PANE_TOOL"
         "IDS_DOCK_PANE_TOOL_OPTIONS"
         "IDS_DOCK_PANE_COLOR"
-        "IDS_DOCK_PANE_LAYER")
+        "IDS_DOCK_PANE_LAYER"
+        "IDS_LAYER_ACTION_TARGET_LAYER"
+        "IDS_LAYER_ACTION_TARGET_PLANE"
+        "IDS_LAYER_PLANE_SPLITTER")
     string(FIND "${RESOURCE_IDS}" "${REQUIRED}" HEADER_OFFSET)
     string(FIND "${RESOURCE_TEXT}" "${REQUIRED}" SOURCE_OFFSET)
     if(HEADER_OFFSET LESS 0 OR SOURCE_OFFSET LESS 0)
@@ -148,7 +154,13 @@ foreach(REQUIRED IN ITEMS
         "WM_CANCELMODE"
         "WM_GETMINMAXINFO"
         "WM_THEMECHANGED"
+        "WM_SYSCOLORCHANGE"
         "WM_SETTINGCHANGE"
+        "ShouldShowStackHeader"
+        "HeaderWindow"
+        "PaintSplitter"
+        "TrackMouseEvent"
+        "COLOR_3DSHADOW"
         "LoadPaneTitle"
         "ShowDockPreview"
         "PreviewZoneAt"
@@ -163,6 +175,25 @@ if(HOST MATCHES "WS_EX_TOPMOST" OR HOST MATCHES "WS_EX_PALETTEWINDOW"
         OR HOST MATCHES "WS_EX_NOACTIVATE,[ \t\r\n]*kFloatingPaneClass")
     message(FATAL_ERROR "Floating primary pane uses a forbidden top-level style")
 endif()
+
+file(READ "${LAYER_PALETTE_SOURCE}" LAYER_PALETTE)
+foreach(REQUIRED IN ITEMS
+        "IDC_LAYER_ACTION_TARGET"
+        "UpdateActionTargetPresentation"
+        "split_dragging"
+        "state->split_milli = state->split_drag_initial"
+        "WM_CAPTURECHANGED"
+        "WM_CANCELMODE"
+        "WM_PAINT"
+        "WM_MOUSELEAVE"
+        "WM_GETDLGCODE"
+        "IDS_LAYER_PLANE_SPLITTER")
+    string(FIND "${LAYER_PALETTE}" "${REQUIRED}" OFFSET)
+    if(OFFSET LESS 0)
+        message(FATAL_ERROR
+            "Layer/Plane pane presentation is missing: ${REQUIRED}")
+    endif()
+endforeach()
 
 file(READ "${MAIN_HEADER}" MAIN_HEADER_TEXT)
 if(NOT MAIN_HEADER_TEXT MATCHES "DockHost dock_host")
@@ -187,6 +218,8 @@ foreach(REQUIRED IN ITEMS
         "DockPaneType::Reference, state.Workspace().subpalette_palette"
         "DockPaneType::Batch, state.Workspace().batch_palette"
         "DockPaneType::JobProgress, state.Workspace().job_progress"
+        "WM_SYSCOLORCHANGE"
+        "RDW_ALLCHILDREN"
         "NotifyDockHostChanged")
     string(FIND "${RUNTIME}" "${REQUIRED}" OFFSET)
     if(OFFSET LESS 0)
@@ -204,6 +237,7 @@ foreach(REQUIRED IN ITEMS
         "model.HidePane"
         "SetPaneAutoHide"
         "DockPaneType::JobProgress"
+        "show_header_when_singleton"
         "model.RestorePane"
         "model.ResetPane"
         "temporarily_auto_hidden"

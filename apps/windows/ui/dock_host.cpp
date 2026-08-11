@@ -172,6 +172,48 @@ bool SetAccessibleName(HWND window, const wchar_t* name) noexcept {
     return SUCCEEDED(set_result);
 }
 
+bool SplitterHasHorizontalLine(
+    const DockSplitterGeometry& geometry) noexcept {
+    return geometry.kind == DockSplitterKind::ZoneExtent
+        ? geometry.zone == DockZone::TopContext
+            || geometry.zone == DockZone::Bottom
+        : geometry.zone == DockZone::Left
+            || geometry.zone == DockZone::Right;
+}
+
+void PaintSplitter(
+    HWND window,
+    const DockSplitterGeometry& geometry,
+    bool highlighted) noexcept {
+    PAINTSTRUCT paint{};
+    HDC context = BeginPaint(window, &paint);
+    if (context == nullptr) {
+        return;
+    }
+    RECT client{};
+    if (GetClientRect(window, &client) != FALSE) {
+        FillRect(context, &client, GetSysColorBrush(COLOR_BTNFACE));
+        RECT rule = client;
+        if (SplitterHasHorizontalLine(geometry)) {
+            const LONG center = client.top + (client.bottom - client.top) / 2;
+            rule.top = center;
+            rule.bottom = std::min(client.bottom, center + 1);
+        } else {
+            const LONG center = client.left + (client.right - client.left) / 2;
+            rule.left = center;
+            rule.right = std::min(client.right, center + 1);
+        }
+        FillRect(
+            context,
+            &rule,
+            GetSysColorBrush(highlighted ? COLOR_HIGHLIGHT : COLOR_3DSHADOW));
+        if (GetFocus() == window) {
+            DrawFocusRect(context, &client);
+        }
+    }
+    EndPaint(window, &paint);
+}
+
 }  // namespace
 
 DockHost::DockHost() noexcept {
@@ -329,7 +371,9 @@ void DockHost::ApplyLayout(
             }
             state.geometry = next;
             PlaceWindow(splitters_[index], geometry_.splitters[index].bounds, true);
+            InvalidateRect(splitters_[index], nullptr, FALSE);
         } else {
+            splitter_states_[index].hovered = false;
             PlaceWindow(splitters_[index], {}, false);
         }
     }
@@ -483,6 +527,22 @@ HWND DockHost::TabWindow(DockZone zone) const noexcept {
     }
     for (const TabHostState& tabs : tab_states_) {
         if (tabs.zone == zone) {
+            return tabs.control;
+        }
+    }
+    return nullptr;
+}
+
+HWND DockHost::HeaderWindow(DockPaneType type) const noexcept {
+    if (model_ == nullptr) {
+        return nullptr;
+    }
+    const DockPanePlacement* pane = model_->Pane(type);
+    if (pane == nullptr || !pane->present || !IsDockedZone(pane->zone)) {
+        return nullptr;
+    }
+    for (const TabHostState& tabs : tab_states_) {
+        if (tabs.zone == pane->zone && tabs.stack == pane->stack) {
             return tabs.control;
         }
     }
@@ -662,6 +722,32 @@ void DockHost::LayoutAutoHiddenContent(PaneHostState& pane) noexcept {
     LayoutFloatingContent(pane);
 }
 
+bool DockHost::ShouldShowStackHeader(
+    DockZone zone, std::uint8_t stack) const noexcept {
+    if (model_ == nullptr || !IsDockedZone(zone)) {
+        return false;
+    }
+    const std::size_t count = model_->StackPaneCount(zone, stack);
+    if (count > 1U) {
+        return true;
+    }
+    if (count != 1U) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < kDockPaneCount; ++index) {
+        const auto type = static_cast<DockPaneType>(index);
+        const DockPanePlacement* pane = model_->Pane(type);
+        if (pane == nullptr || !pane->present || pane->zone != zone
+            || pane->stack != stack) {
+            continue;
+        }
+        const PaneDescriptor* descriptor = FindPaneDescriptor(type);
+        return descriptor != nullptr
+            && descriptor->show_header_when_singleton;
+    }
+    return false;
+}
+
 void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
     if (model_ == nullptr || pane.content == nullptr) {
         return;
@@ -733,7 +819,7 @@ void DockHost::ApplyPaneLayout(PaneHostState& pane) noexcept {
         SetParent(pane.content, owner_);
     }
     DockPaneGeometry geometry = geometry_.panes[PaneIndex(pane.type)];
-    if (model_->StackPaneCount(placement->zone, placement->stack) > 1U
+    if (ShouldShowStackHeader(placement->zone, placement->stack)
         && geometry.shown) {
         const int tab_height = std::min(
             geometry.bounds.height, ScaleDip(kTabHeightDip, dpi_));
@@ -750,7 +836,7 @@ void DockHost::ApplyTabLayout(TabHostState& tabs) noexcept {
     if (model_ == nullptr || !IsDockedZone(tabs.zone)) {
         return;
     }
-    const bool show = model_->StackPaneCount(tabs.zone, tabs.stack) > 1U
+    const bool show = ShouldShowStackHeader(tabs.zone, tabs.stack)
         && HasArea(geometry_.zones[static_cast<std::size_t>(tabs.zone)]);
     if (!show) {
         PlaceWindow(tabs.control, {}, false);
@@ -1168,8 +1254,13 @@ LRESULT CALLBACK DockHost::FloatingWindowProcedure(
             }
             return 0;
         case WM_THEMECHANGED:
+        case WM_SYSCOLORCHANGE:
         case WM_SETTINGCHANGE:
-            InvalidateRect(window, nullptr, TRUE);
+            RedrawWindow(
+                window,
+                nullptr,
+                nullptr,
+                RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
             break;
         case WM_NCDESTROY:
             if (pane != nullptr) {
@@ -1224,8 +1315,17 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
             GetCursorPos(&splitter->last_screen);
             SetCapture(window);
             SetFocus(window);
+            InvalidateRect(window, nullptr, FALSE);
             return 0;
         case WM_MOUSEMOVE:
+            if (!splitter->hovered) {
+                TRACKMOUSEEVENT tracking{};
+                tracking.cbSize = sizeof(tracking);
+                tracking.dwFlags = TME_LEAVE;
+                tracking.hwndTrack = window;
+                splitter->hovered = TrackMouseEvent(&tracking) != FALSE;
+                InvalidateRect(window, nullptr, FALSE);
+            }
             if (GetCapture() == window) {
                 POINT current{};
                 GetCursorPos(&current);
@@ -1237,11 +1337,42 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
                 return 0;
             }
             break;
+        case WM_MOUSELEAVE:
+            splitter->hovered = false;
+            InvalidateRect(window, nullptr, FALSE);
+            return 0;
         case WM_LBUTTONUP:
             if (GetCapture() == window) {
                 ReleaseCapture();
             }
+            InvalidateRect(window, nullptr, FALSE);
             return 0;
+        case WM_CAPTURECHANGED:
+        case WM_SETFOCUS:
+        case WM_KILLFOCUS:
+        case WM_THEMECHANGED:
+        case WM_SYSCOLORCHANGE:
+        case WM_SETTINGCHANGE:
+            InvalidateRect(window, nullptr, FALSE);
+            break;
+        case WM_CANCELMODE:
+            if (GetCapture() == window) {
+                ReleaseCapture();
+            }
+            InvalidateRect(window, nullptr, FALSE);
+            return 0;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT:
+            PaintSplitter(
+                window,
+                splitter->geometry,
+                splitter->hovered || GetCapture() == window
+                    || GetFocus() == window);
+            return 0;
+        case WM_GETDLGCODE:
+            return DefSubclassProc(window, message, wparam, lparam)
+                | DLGC_WANTARROWS;
         case WM_KEYDOWN: {
             const int direction = wparam == VK_LEFT || wparam == VK_UP
                 ? -1
@@ -1271,11 +1402,7 @@ LRESULT CALLBACK DockHost::SplitterSubclassProcedure(
         }
         case WM_SETCURSOR: {
             const bool horizontal_line =
-                splitter->geometry.kind == DockSplitterKind::ZoneExtent
-                ? splitter->geometry.zone == DockZone::TopContext
-                    || splitter->geometry.zone == DockZone::Bottom
-                : splitter->geometry.zone == DockZone::Left
-                    || splitter->geometry.zone == DockZone::Right;
+                SplitterHasHorizontalLine(splitter->geometry);
             SetCursor(LoadCursorW(nullptr, horizontal_line ? IDC_SIZENS : IDC_SIZEWE));
             return TRUE;
         }

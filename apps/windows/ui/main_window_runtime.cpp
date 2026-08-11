@@ -2588,6 +2588,51 @@ void QueueLocatorSample(ApplicationHost& state) noexcept {
     }
 }
 
+std::optional<std::int32_t> LocatorDeviceCoordinate(float value) noexcept {
+    if (!std::isfinite(value)) {
+        return std::nullopt;
+    }
+    const double bounded = std::clamp(
+        static_cast<double>(value),
+        static_cast<double>(INT32_MIN),
+        static_cast<double>(INT32_MAX));
+    return static_cast<std::int32_t>(std::round(bounded));
+}
+
+void TrackAcceptedStrokePointer(
+    ApplicationHost& state,
+    const inkpod::app::EditorGroup& source_group,
+    inkpod::app::DocumentView& view,
+    const inkpod::renderer::CanvasStrokeEvent& input) noexcept {
+    const bool interaction_ended =
+        input.kind == inkpod::renderer::CanvasStrokeEventKind::End
+        || input.kind == inkpod::renderer::CanvasStrokeEventKind::Cancel;
+    bool pointer_updated{};
+    if (input.samples != nullptr && input.sample_count != 0U) {
+        const InkpodStrokeSample& latest = input.samples[
+            static_cast<std::size_t>(input.sample_count - 1U)];
+        const auto x = LocatorDeviceCoordinate(latest.x);
+        const auto y = LocatorDeviceCoordinate(latest.y);
+        if (x.has_value() && y.has_value()) {
+            view.presentation.pointer_device_x = x.value();
+            view.presentation.pointer_device_y = y.value();
+            pointer_updated = true;
+        }
+    }
+    if (!pointer_updated && !interaction_ended) {
+        return;
+    }
+
+    // EnqueueStroke has already accepted the matching Begin/Append/End/Cancel
+    // work. Advancing the generation here therefore keeps every locator query
+    // behind the preview transition it samples. End/Cancel also invalidate an
+    // older in-flight result even when they carry no final pointer sample.
+    ++view.presentation.locator_generation;
+    if (&source_group == state.Workspace().editors.Active()) {
+        QueueLocatorSample(state);
+    }
+}
+
 std::wstring LocatorDocumentName(const DocumentSession& document) {
     const std::wstring& path = !document.shell.current_path.empty()
         ? document.shell.current_path
@@ -16919,6 +16964,19 @@ std::optional<LRESULT> RouteWindowLifecycleMessage(
                 ClampWorkspaceOwnedWindows(*state);
                 RelayoutWorkspace(*state);
             }
+            RedrawWindow(
+                window,
+                nullptr,
+                nullptr,
+                RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+            break;
+        case WM_THEMECHANGED:
+        case WM_SYSCOLORCHANGE:
+            RedrawWindow(
+                window,
+                nullptr,
+                nullptr,
+                RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
             break;
         case WM_DPICHANGED: {
             const auto* bounds = reinterpret_cast<const RECT*>(lparam);
@@ -17703,6 +17761,10 @@ std::optional<LRESULT> RouteCanvasMessage(
                     return 0;
                 }
                 const bool queued = state->engine->EnqueueStroke(std::move(event));
+                if (queued) {
+                    TrackAcceptedStrokePointer(
+                        *state, *source_group, *stroke_view, *input);
+                }
                 if (!queued
                     || input->kind == inkpod::renderer::CanvasStrokeEventKind::End
                     || input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {

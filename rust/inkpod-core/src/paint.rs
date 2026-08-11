@@ -345,17 +345,28 @@ impl Core {
         })
     }
 
-    /// Samples a color at one in-bounds document pixel from the requested source.
+    /// Samples a color at one in-bounds committed-document pixel from the requested source.
     ///
-    /// Sampling is read-only and does not affect revisions, history, or dirty state.
+    /// Active previews are deliberately excluded. Sampling is read-only and does not
+    /// affect revisions, history, or dirty state.
     pub fn eyedropper(
         &self,
         source: EyedropperSource,
         x: u32,
         y: u32,
     ) -> Result<PixelValue, CoreError> {
-        let (active_layer_id, active_plane_id) = self.active_editor_target_ids()?;
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        self.eyedropper_in_document(document, source, x, y)
+    }
+
+    pub(crate) fn eyedropper_in_document(
+        &self,
+        document: &CellDocument,
+        source: EyedropperSource,
+        x: u32,
+        y: u32,
+    ) -> Result<PixelValue, CoreError> {
+        let (active_layer_id, active_plane_id) = self.active_editor_target_ids()?;
         if source == EyedropperSource::LightTableTopmost {
             return document
                 .light_table

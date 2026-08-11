@@ -146,6 +146,33 @@ bool WindowHasAccessibleName(HWND window) noexcept {
     return has_name;
 }
 
+bool AccessibleWindowNameContains(
+    HWND window, std::wstring_view expected) noexcept {
+    if (window == nullptr || expected.empty()) {
+        return false;
+    }
+    IAccessible* accessible = nullptr;
+    const HRESULT object_result = AccessibleObjectFromWindow(
+        window,
+        static_cast<DWORD>(OBJID_CLIENT),
+        IID_IAccessible,
+        reinterpret_cast<void**>(&accessible));
+    if (FAILED(object_result) || accessible == nullptr) {
+        return false;
+    }
+    VARIANT self{};
+    self.vt = VT_I4;
+    self.lVal = CHILDID_SELF;
+    BSTR name = nullptr;
+    const HRESULT name_result = accessible->get_accName(self, &name);
+    const bool contains = SUCCEEDED(name_result) && name != nullptr
+        && std::wstring_view(name, SysStringLen(name)).find(expected)
+            != std::wstring_view::npos;
+    SysFreeString(name);
+    accessible->Release();
+    return contains;
+}
+
 bool WindowHasVisibleStyle(HWND window) noexcept {
     return window != nullptr
         && (static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE))
@@ -427,16 +454,44 @@ bool ValidateFixedResourceScenario(
 
 int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
     const HWND pane = state.Workspace().locator_palette;
-    const HMENU menu = GetMenu(state.Workspace().windows.window);
-    if (pane == nullptr || menu == nullptr
+    const HWND workspace_window = state.Workspace().windows.window;
+    const HMENU menu = GetMenu(workspace_window);
+    if (pane == nullptr || workspace_window == nullptr || menu == nullptr
         || state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Locator)
-        || GetParent(pane) != state.Workspace().windows.window
+        || GetParent(pane) != workspace_window
         || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_STYLE)) & WS_CHILD) == 0U
         || (static_cast<DWORD>(GetWindowLongPtrW(pane, GWL_EXSTYLE))
             & (WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0U
         || !WindowHasAccessibleName(pane)) {
         return 850;
+    }
+    const UINT dpi = GetDpiForWindow(workspace_window);
+    const HMONITOR monitor = MonitorFromWindow(
+        workspace_window, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO monitor_info{sizeof(monitor_info)};
+    if (monitor == nullptr || GetMonitorInfoW(monitor, &monitor_info) == FALSE) {
+        return 1001;
+    }
+    const int work_width = std::max(
+        1,
+        static_cast<int>(
+            monitor_info.rcWork.right - monitor_info.rcWork.left));
+    const int work_height = std::max(
+        1,
+        static_cast<int>(
+            monitor_info.rcWork.bottom - monitor_info.rcWork.top));
+    if (SetWindowPos(
+            workspace_window,
+            nullptr,
+            monitor_info.rcWork.left,
+            monitor_info.rcWork.top,
+            std::min(
+                work_width, MulDiv(1'400, static_cast<int>(dpi), 96)),
+            std::min(
+                work_height, MulDiv(900, static_cast<int>(dpi), 96)),
+            SWP_NOACTIVATE | SWP_NOZORDER) == FALSE) {
+        return 1001;
     }
     if (SendMessageW(
             state.Workspace().windows.window,
@@ -452,6 +507,44 @@ int RunLocatorPaneSmoke(ApplicationHost& state) noexcept {
         || GetDlgItem(pane, IDC_LOCATOR_FIXED) == nullptr
         || GetDlgItem(pane, IDC_LOCATOR_AUTOSCROLL) == nullptr) {
         return 851;
+    }
+    const HWND locator_header =
+        state.Workspace().windows.dock_host.HeaderWindow(DockPaneType::Locator);
+    std::array<wchar_t, 64U> locator_title{};
+    TCITEMW locator_tab{};
+    locator_tab.mask = TCIF_TEXT;
+    locator_tab.pszText = locator_title.data();
+    locator_tab.cchTextMax = static_cast<int>(locator_title.size());
+    RECT locator_header_bounds{};
+    RECT locator_content_bounds{};
+    if (!WindowHasVisibleStyle(pane)) {
+        return 1002;
+    }
+    if (locator_header == nullptr) {
+        return 987;
+    }
+    if (!WindowHasVisibleStyle(locator_header)) {
+        return 988;
+    }
+    if (TabCtrl_GetItemCount(locator_header) != 1) {
+        return 989;
+    }
+    if (TabCtrl_GetItem(locator_header, 0, &locator_tab) == FALSE) {
+        return 990;
+    }
+    if (std::wcscmp(locator_title.data(), L"ロケーター") != 0) {
+        return 991;
+    }
+    if (!AccessibleChildNameContains(locator_header, L"ロケーター")) {
+        return 992;
+    }
+    if (GetWindowRect(locator_header, &locator_header_bounds) == FALSE
+        || GetWindowRect(pane, &locator_content_bounds) == FALSE) {
+        return 993;
+    }
+    if (locator_header_bounds.bottom > locator_content_bounds.top
+        || locator_header_bounds.bottom <= locator_header_bounds.top) {
+        return 994;
     }
     std::array<wchar_t, 256U> target_text{};
     if (GetDlgItemTextW(
@@ -1341,11 +1434,98 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || std::wcsstr(main_line_text.data(), L"#000000FF") == nullptr) {
         return 764;
     }
-    if (GetDlgItem(state.Workspace().panes.layer_palette, IDC_LAYER_LIST) == nullptr
-        || GetDlgItem(state.Workspace().panes.layer_palette, IDC_PLANE_LIST) == nullptr
-        || GetDlgItem(state.Workspace().panes.layer_palette, IDC_LAYER_PLANE_SPLITTER)
-            == nullptr) {
+    const HWND layer_list =
+        GetDlgItem(state.Workspace().panes.layer_palette, IDC_LAYER_LIST);
+    const HWND plane_list =
+        GetDlgItem(state.Workspace().panes.layer_palette, IDC_PLANE_LIST);
+    const HWND layer_splitter = GetDlgItem(
+        state.Workspace().panes.layer_palette, IDC_LAYER_PLANE_SPLITTER);
+    const HWND action_target = GetDlgItem(
+        state.Workspace().panes.layer_palette, IDC_LAYER_ACTION_TARGET);
+    const HWND new_action =
+        GetDlgItem(state.Workspace().panes.layer_palette, IDM_LAYER_NEW);
+    std::array<wchar_t, 64U> action_target_text{};
+    if (layer_list == nullptr || plane_list == nullptr
+        || !IsCaptionlessAccessibleSplitter(layer_splitter)
+        || action_target == nullptr || new_action == nullptr
+        || GetWindowTextW(
+               action_target,
+               action_target_text.data(),
+               static_cast<int>(action_target_text.size())) <= 0
+        || std::wcsstr(action_target_text.data(), L"レイヤー") == nullptr
+        || !AccessibleWindowNameContains(new_action, L"レイヤー")) {
         return 749;
+    }
+    SetFocus(plane_list);
+    action_target_text.fill(L'\0');
+    if (GetWindowTextW(
+            action_target,
+            action_target_text.data(),
+            static_cast<int>(action_target_text.size())) <= 0
+        || std::wcsstr(action_target_text.data(), L"プレーン") == nullptr
+        || !AccessibleWindowNameContains(new_action, L"プレーン")) {
+        return 985;
+    }
+    SetFocus(layer_list);
+    const std::uint32_t layer_split_before =
+        state.Workspace().panes.layer_palette_dialog.split_milli;
+    SetFocus(layer_splitter);
+    SendMessageW(layer_splitter, WM_KEYDOWN, VK_DOWN, 0);
+    if (state.Workspace().panes.layer_palette_dialog.split_milli
+        <= layer_split_before) {
+        return 986;
+    }
+    SendMessageW(layer_splitter, WM_KEYDOWN, VK_UP, 0);
+    SetFocus(layer_list);
+    RECT layer_palette_client{};
+    if (GetClientRect(
+            state.Workspace().panes.layer_palette,
+            &layer_palette_client) == FALSE) {
+        return 1003;
+    }
+    const int split_drag_pixels = std::max(
+        1,
+        static_cast<int>(
+            layer_palette_client.bottom - layer_palette_client.top) / 20);
+    const LPARAM split_drag_start = MAKELPARAM(1, 1);
+    const LPARAM split_drag_end = MAKELPARAM(1, 1 + split_drag_pixels);
+    const std::uint32_t split_before_cancel =
+        state.Workspace().panes.layer_palette_dialog.split_milli;
+    const std::uint32_t persisted_before_cancel =
+        state.Workspace().windows.workspace.layer_split_milli;
+    SendMessageW(
+        layer_splitter, WM_LBUTTONDOWN, MK_LBUTTON, split_drag_start);
+    SendMessageW(layer_splitter, WM_MOUSEMOVE, MK_LBUTTON, split_drag_end);
+    if (!state.Workspace().panes.layer_palette_dialog.split_dragging
+        || state.Workspace().panes.layer_palette_dialog.split_milli
+            == split_before_cancel
+        || state.Workspace().windows.workspace.layer_split_milli
+            != persisted_before_cancel) {
+        return 1004;
+    }
+    SendMessageW(layer_splitter, WM_CANCELMODE, 0, 0);
+    if (state.Workspace().panes.layer_palette_dialog.split_dragging
+        || state.Workspace().panes.layer_palette_dialog.split_milli
+            != split_before_cancel
+        || state.Workspace().windows.workspace.layer_split_milli
+            != persisted_before_cancel
+        || GetCapture() == layer_splitter) {
+        return 1005;
+    }
+    SendMessageW(
+        layer_splitter, WM_LBUTTONDOWN, MK_LBUTTON, split_drag_start);
+    SendMessageW(layer_splitter, WM_MOUSEMOVE, MK_LBUTTON, split_drag_end);
+    SetCapture(state.Workspace().windows.window);
+    const std::uint32_t split_after_capture_loss =
+        state.Workspace().panes.layer_palette_dialog.split_milli;
+    const bool capture_loss_committed =
+        !state.Workspace().panes.layer_palette_dialog.split_dragging
+        && split_after_capture_loss != split_before_cancel
+        && state.Workspace().windows.workspace.layer_split_milli
+            == split_after_capture_loss;
+    ReleaseCapture();
+    if (!capture_loss_committed) {
+        return 1006;
     }
     SetWindowPos(
         state.Workspace().windows.window,
@@ -7298,8 +7478,10 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
 
     InkpodDocumentInfo blank = EmptyDocumentInfo();
     InkpodDocumentInfo seeded = EmptyDocumentInfo();
-    const InkpodStrokeSample source{
-        sizeof(InkpodStrokeSample), 0U, 3.0F, 3.0F, 1.0F, 0U};
+    const std::array<InkpodStrokeSample, 2U> source{{
+        {sizeof(InkpodStrokeSample), 0U, 3.0F, 3.0F, 1.0F, 0U},
+        {sizeof(InkpodStrokeSample), 0U, 4.0F, 3.0F, 1.0F, 0U},
+    }};
     const InkpodStrokeInput stroke{
         sizeof(InkpodStrokeInput),
         INKPOD_TOOL_PENCIL,
@@ -7308,9 +7490,9 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
         INKPOD_FEATURE_NONE,
         UINT32_C(0x000000ff),
         1.0F,
-        &source,
-        1U,
-        sizeof(source),
+        source.data(),
+        source.size(),
+        sizeof(InkpodStrokeSample),
         INKPOD_BRUSH_ROUND,
         0U,
         0U,
@@ -7374,6 +7556,8 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
         return 724;
     }
     const int device_x = static_cast<int>(std::lround(bounds.left + 3.75 * zoom));
+    const int drag_device_x =
+        static_cast<int>(std::lround(bounds.left + 4.75 * zoom));
     const int device_y = static_cast<int>(std::lround(bounds.top + 3.75 * zoom));
     if (SendMessageW(
             state.Workspace().windows.window,
@@ -7384,10 +7568,79 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
         return 858;
     }
     PumpPendingWindowMessages();
+    constexpr std::size_t kLocatorCenterAlpha = ((4U * 9U + 4U) * 4U) + 3U;
     if (!state.ActiveView().presentation.locator_valid
         || state.ActiveView().presentation.locator_neighborhood_width != 9U
-        || state.ActiveView().presentation.locator_neighborhood_height != 9U) {
+        || state.ActiveView().presentation.locator_neighborhood_height != 9U
+        || state.ActiveView().presentation
+                .locator_neighborhood[kLocatorCenterAlpha]
+            != UINT8_MAX) {
         return 859;
+    }
+    const std::uint64_t locator_generation_before_stroke =
+        state.ActiveView().presentation.locator_generation;
+    if (SendMessageW(
+            state.Workspace().windows.canvas,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(device_x, device_y)) != 1
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               WM_MOUSEMOVE,
+               MK_LBUTTON,
+               MAKELPARAM(drag_device_x, device_y)) != 1) {
+        return 725;
+    }
+    PumpPendingWindowMessages();
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 725;
+    }
+    PumpPendingWindowMessages();
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 725;
+    }
+    PumpPendingWindowMessages();
+
+    InkpodDocumentInfo during_preview = EmptyDocumentInfo();
+    if (!QueryDocument(state, during_preview)
+        || during_preview.document_revision != seeded.document_revision
+        || during_preview.main_plane_checksum != seeded.main_plane_checksum
+        || state.ActiveView().presentation.locator_generation
+            <= locator_generation_before_stroke
+        || !state.ActiveView().presentation.locator_valid
+        || state.ActiveView().presentation.locator.document_x != 4
+        || state.ActiveView().presentation.locator.document_y != 3
+        || state.ActiveView().presentation
+                .locator_neighborhood[kLocatorCenterAlpha]
+            != 0U) {
+        return 867;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.canvas,
+            WM_LBUTTONUP,
+            0,
+            MAKELPARAM(drag_device_x, device_y)) != 1) {
+        return 725;
+    }
+    PumpPendingWindowMessages();
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 725;
+    }
+    PumpPendingWindowMessages();
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 725;
+    }
+    PumpPendingWindowMessages();
+
+    InkpodDocumentInfo erased = EmptyDocumentInfo();
+    if (!QueryDocument(state, erased)
+        || erased.document_revision != seeded.document_revision + 1U
+        || erased.main_plane_checksum != blank.main_plane_checksum
+        || !state.ActiveView().presentation.locator_valid
+        || state.ActiveView().presentation
+                .locator_neighborhood[kLocatorCenterAlpha]
+            != 0U) {
+        return 726;
     }
     if (SendMessageW(
             state.Workspace().windows.canvas,
@@ -7396,18 +7649,56 @@ int RunMagnifiedRasterHitSmoke(ApplicationHost& state) noexcept {
             MAKELPARAM(device_x, device_y)) != 1
         || SendMessageW(
                state.Workspace().windows.canvas,
-               WM_LBUTTONUP,
-               0,
-               MAKELPARAM(device_x, device_y)) != 1
-        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
-        return 725;
+               WM_MOUSEMOVE,
+               MK_LBUTTON,
+               MAKELPARAM(drag_device_x, device_y)) != 1) {
+        return 868;
     }
-
-    InkpodDocumentInfo erased = EmptyDocumentInfo();
-    if (!QueryDocument(state, erased)
-        || erased.document_revision != seeded.document_revision + 1U
-        || erased.main_plane_checksum != blank.main_plane_checksum) {
-        return 726;
+    PumpPendingWindowMessages();
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 868;
+    }
+    PumpPendingWindowMessages();
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 868;
+    }
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo cancel_preview = EmptyDocumentInfo();
+    if (!QueryDocument(state, cancel_preview)
+        || cancel_preview.document_revision != erased.document_revision
+        || cancel_preview.main_plane_checksum != erased.main_plane_checksum
+        || !state.ActiveView().presentation.locator_valid
+        || state.ActiveView().presentation
+                .locator_neighborhood[kLocatorCenterAlpha]
+            != UINT8_MAX) {
+        return 869;
+    }
+    const std::uint64_t locator_generation_before_cancel =
+        state.ActiveView().presentation.locator_generation;
+    if (GetCapture() != state.Workspace().windows.canvas
+        || ReleaseCapture() == FALSE) {
+        return 870;
+    }
+    PumpPendingWindowMessages();
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 870;
+    }
+    PumpPendingWindowMessages();
+    if (state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 870;
+    }
+    PumpPendingWindowMessages();
+    InkpodDocumentInfo cancelled = EmptyDocumentInfo();
+    if (!QueryDocument(state, cancelled)
+        || cancelled.document_revision != erased.document_revision
+        || cancelled.main_plane_checksum != erased.main_plane_checksum
+        || state.ActiveView().presentation.locator_generation
+            <= locator_generation_before_cancel
+        || !state.ActiveView().presentation.locator_valid
+        || state.ActiveView().presentation
+                .locator_neighborhood[kLocatorCenterAlpha]
+            != 0U) {
+        return 871;
     }
     if (SendMessageW(
             state.Workspace().windows.window,

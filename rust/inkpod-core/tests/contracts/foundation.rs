@@ -499,6 +499,130 @@ fn view_003_locator_neighborhood_is_bounded_clipped_and_read_only() {
 }
 
 #[test]
+fn view_003_locator_tracks_stroke_preview_cancel_and_single_commit() {
+    let mut core = Core::new();
+    core.new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let base = core.document_info().unwrap();
+    let base_history = core.history_entries();
+    let stroke = line_stroke(vec![StrokeSample {
+        x: 1.0,
+        y: 2.0,
+        pressure: 1.0,
+    }]);
+
+    assert_eq!(core.locator_sample(None, 3.0, 2.0).unwrap().color, None);
+    core.begin_stroke(&stroke).unwrap();
+    assert_eq!(
+        core.locator_sample(None, 1.0, 2.0).unwrap().color,
+        Some(PixelValue::Rgba([0, 0, 0, 255]))
+    );
+    assert!(matches!(
+        core.eyedropper(EyedropperSource::Composite, 1, 2),
+        Err(CoreError::InvalidState(_))
+    ));
+    core.append_stroke(&[StrokeSample {
+        x: 3.0,
+        y: 2.0,
+        pressure: 1.0,
+    }])
+    .unwrap();
+    assert_eq!(
+        core.locator_sample(None, 3.0, 2.0).unwrap().color,
+        Some(PixelValue::Rgba([0, 0, 0, 255]))
+    );
+    let preview_neighborhood = core.locator_neighborhood(None, 3.0, 2.0, 1).unwrap();
+    assert_eq!(&preview_neighborhood.pixels_rgba8[16..20], &[0, 0, 0, 255]);
+    assert_eq!(
+        core.plane_pixel(ActivePlane::MainLine, 3, 2).unwrap(),
+        PixelValue::Binary(0),
+        "the live document must stay committed while the locator reads the preview"
+    );
+    assert_eq!(core.document_info().unwrap(), base);
+    assert_eq!(core.history_entries(), base_history);
+
+    core.cancel_stroke();
+    assert_eq!(core.locator_sample(None, 3.0, 2.0).unwrap().color, None);
+    let cancelled_neighborhood = core.locator_neighborhood(None, 3.0, 2.0, 1).unwrap();
+    assert_eq!(&cancelled_neighborhood.pixels_rgba8[16..20], &[0; 4]);
+    assert_eq!(core.document_info().unwrap(), base);
+    assert_eq!(core.history_entries(), base_history);
+
+    core.begin_stroke(&stroke).unwrap();
+    core.append_stroke(&[StrokeSample {
+        x: 3.0,
+        y: 2.0,
+        pressure: 1.0,
+    }])
+    .unwrap();
+    let committed = core.end_stroke().unwrap();
+    assert_eq!(committed.revision(), base.document_revision + 1);
+    assert_eq!(core.history_entries().len(), base_history.len() + 1);
+    let after = core.document_info().unwrap();
+    assert_eq!(after.document_revision, base.document_revision + 1);
+    assert!(after.dirty);
+    assert!(after.can_undo);
+    assert_eq!(
+        core.locator_sample(None, 3.0, 2.0).unwrap().color,
+        Some(PixelValue::Rgba([0, 0, 0, 255]))
+    );
+}
+
+#[test]
+fn view_003_locator_uses_filter_preview_before_committed_document() {
+    let mut core = Core::new();
+    let created = core
+        .new_cell(8, 8, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    core.set_active_plane(ActivePlane::Color).unwrap();
+    core.apply_stroke(&color_stroke(
+        PaintTool::Pencil,
+        1.0,
+        StrokeSample {
+            x: 4.0,
+            y: 5.0,
+            pressure: 1.0,
+        },
+    ))
+    .unwrap();
+    let committed = core.document_info().unwrap();
+    let history = core.history_entries();
+    assert_eq!(
+        core.locator_sample(None, 4.0, 5.0).unwrap().color,
+        Some(PixelValue::Rgba([12, 34, 56, 255]))
+    );
+
+    core.begin_filter_preview(
+        created.color_plane_id,
+        Filter::Invert {
+            channel: Channel::Rgb,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        core.locator_sample(None, 4.0, 5.0).unwrap().color,
+        Some(PixelValue::Rgba([243, 221, 199, 255]))
+    );
+    assert_eq!(
+        core.eyedropper(EyedropperSource::Composite, 4, 5).unwrap(),
+        PixelValue::Rgba([12, 34, 56, 255]),
+        "the public eyedropper keeps its committed-document contract"
+    );
+    let neighborhood = core.locator_neighborhood(None, 4.0, 5.0, 0).unwrap();
+    assert_eq!(neighborhood.pixels_rgba8, [243, 221, 199, 255]);
+    assert_eq!(core.document_info().unwrap(), committed);
+    assert_eq!(core.history_entries(), history);
+
+    core.cancel_filter_preview().unwrap();
+    assert_eq!(
+        core.locator_sample(None, 4.0, 5.0).unwrap().color,
+        Some(PixelValue::Rgba([12, 34, 56, 255]))
+    );
+    assert_eq!(core.document_info().unwrap(), committed);
+    assert_eq!(core.history_entries(), history);
+}
+
+#[test]
 fn abi_002_snapshot_composites_visible_main_line_over_color() {
     let mut core = Core::new();
     core.new_cell(64, 64, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)

@@ -151,6 +151,10 @@ int main() {
     const auto& descriptors = PaneDescriptors();
     const auto& locator_descriptor = descriptors[
         static_cast<std::size_t>(DockPaneType::Locator)];
+    const auto& color_descriptor = descriptors[
+        static_cast<std::size_t>(DockPaneType::Color)];
+    const auto& layer_descriptor = descriptors[
+        static_cast<std::size_t>(DockPaneType::Layer)];
     const auto& job_descriptor = descriptors[
         static_cast<std::size_t>(DockPaneType::JobProgress)];
     if (descriptors.size() != kDockPaneCount
@@ -161,14 +165,20 @@ int main() {
             != inkpod::windows::ui::PaneTargetScope::FollowActiveView
         || PaneDescriptors()[0].can_auto_hide
         || !PaneDescriptors()[0].can_float
+        || PaneDescriptors()[0].show_header_when_singleton
+        || PaneDescriptors()[1].show_header_when_singleton
+        || !color_descriptor.show_header_when_singleton
+        || !layer_descriptor.show_header_when_singleton
         || locator_descriptor.default_visible
         || !locator_descriptor.persist_layout
         || !locator_descriptor.can_float
         || !locator_descriptor.can_auto_hide
+        || !locator_descriptor.show_header_when_singleton
         || job_descriptor.default_visible
         || job_descriptor.persist_layout
         || job_descriptor.can_float
-        || job_descriptor.can_auto_hide) {
+        || job_descriptor.can_auto_hide
+        || !job_descriptor.show_header_when_singleton) {
         return 1;
     }
 

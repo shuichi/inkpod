@@ -623,27 +623,35 @@ progress/result only there, closes the job, and restores the prior follow/pin
 policy. Closed/stale targets and queue failure cannot redirect a result.
 
 The canonical workspace is represented by an HWND-free, fixed-capacity
-`DockLayoutModel`. Four primary `PaneDescriptor` records give tool, tool options,
-color, and layer stable type IDs and localized resource titles, default and
-allowed zones, target scope, multiplicity, float/auto-hide capability, and
-minimum/preferred sizes. The model permits only `TopContext`, `Left`, `Right`,
+`DockLayoutModel`. Its `PaneDescriptor` records give every surface a stable type
+ID and localized resource title, default and allowed zones, target scope,
+multiplicity, float/auto-hide capability, minimum/preferred sizes, and whether
+an inspector header remains visible for a singleton stack. The compact Tool and
+Tool Options surfaces opt out of singleton headers. The model permits only
+`TopContext`, `Left`, `Right`,
 and `Bottom` stacks around the central `EditorArea`, plus floating and hidden
 placements. A stack is either tabbed or split in one direction; recursive/free
 dock trees cannot be represented. At the 96-DPI reset baseline, active-tool
 options occupy the top 40 DIP, the 80-DIP tool strip is left, and the 320-DIP
 color/layer stack is right at 32:68. The layer pane retains its internal 55:45
-layer/plane split. Tool buttons remain 72 x 34 DIP with meaningful single-word
-Japanese labels, forward the menu command IDs, and consume the same cached
-command state.
+layer/plane split. Its shared action row has a resource-backed label naming the
+currently active Layer or Plane target, and each button exposes the same target
+in its accessible name. Tool buttons remain 72 x 34 DIP with meaningful
+single-word Japanese labels, forward the menu command IDs, and consume the same
+cached command state.
 
 `WorkspaceWindow` owns one UI-thread `DockHost`, which applies the pure geometry
 to the existing primary pane child windows. Docked content is parented to the
 main frame; floating content is reparented into an ordinary main-window-owned
 top-level frame and returns to the same child HWND when docked. Drag preview is
-limited to descriptor-allowed zones. Standard tab controls, mouse/keyboard
-splitters, pane context menus, and the Window menu provide tab/split, dock,
-float, hide, restore, and reset without retargeting a document command. Floating
-close maps to hide, preserving the pane's controller state. All HWND and Common
+limited to descriptor-allowed zones. Resource-titled standard tab controls stay
+visible for singleton inspector stacks so the content and action scope remain
+identifiable. Mouse/keyboard splitters retain a 4-DIP hit target and paint a
+centered system-color rule, highlighted on hover, capture, or keyboard focus;
+the internal Layer/Plane splitter follows the same presentation and accessibility
+rules. Pane context menus and the Window menu provide tab/split, dock, float,
+hide, restore, and reset without retargeting a document command. Floating close
+maps to hide, preserving the pane's controller state. All HWND and Common
 Controls activity remains on the UI/Input thread; Core and renderer ownership is
 unchanged.
 
@@ -717,8 +725,14 @@ The six-part status bar reports tool/plane, zoom/view flags, coordinates,
 RGBA/selection, paper/DPI, and task/shortcut/dirty state. Document tabs use the
 sequence-cell name, saved filename, recovery/untitled fallback, dirty marker,
 and logical view number. Locator sampling is asynchronous and discards stale
-generations. Secondary palette presentation that is not yet exposed is tracked
-in `implementation-status.md`, while its Core/C ABI models remain owned here.
+generations. Each accepted raster-stroke packet advances the pointer generation
+after that stroke work enters the Core queue; pending requests are coalesced,
+while End and Cancel always invalidate and resample the final state. Core reads
+the same display-document priority as snapshots (active stroke preview, then
+filter preview, then committed document), without publishing a document or
+history change. Secondary palette presentation that is not yet exposed is
+tracked in `implementation-status.md`, while its Core/C ABI models remain owned
+here.
 
 ## Thread and snapshot model
 

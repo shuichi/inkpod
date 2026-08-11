@@ -3821,7 +3821,8 @@ InkpodStatus inkpod_core_grid_set(
  * @brief device point を view transform で document 座標へ変換し selection/color を読む。
  * @par 契約
  * Core owner thread。`core`/完全サイズの `out_locator` は非 NULL、device 値は finite、`view_id == 0` は primary。
- * 成功時だけ caller-owned 出力を初期化。query のため revision、dirty、Undo、排他状態は不変。
+ * active stroke preview、filter preview、committed document の順で表示用 document を読む。
+ * 成功時だけ caller-owned 出力を初期化。query のため revision、history、journal、dirty、savepoint、排他状態は不変。
  * @par 主なステータス
  * `OK`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`WRONG_THREAD`、`PANIC`。
  */
@@ -3835,8 +3836,9 @@ InkpodStatus inkpod_core_locator_sample(
  * @brief device 点を中心とする bounded composite-color neighborhood を一括取得する。
  * @par 契約
  * Core owner thread。`radius` は 0..16。capacity 0/NULL は size query。範囲外 pixel は
- * transparent RGBA8。成功時 metadata/bytes、`BUFFER_TOO_SMALL` 時も required bytes と
- * dimensions を返す。query のため document/view revision、dirty、Undo は不変。
+ * transparent RGBA8。active stroke preview、filter preview、committed document の順で表示用 document を読む。
+ * 成功時 metadata/bytes、`BUFFER_TOO_SMALL` 時も required bytes と dimensions を返す。
+ * query のため document/view revision、history、journal、dirty、savepoint、Undo は不変。
  * @par 主なステータス
  * `OK`、`BUFFER_TOO_SMALL`、`INVALID_ARGUMENT`、`NO_DOCUMENT`、`UNSUPPORTED`、`WRONG_THREAD`、`PANIC`。
  */

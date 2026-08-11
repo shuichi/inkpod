@@ -79,6 +79,10 @@ struct PaneDescriptor {
     bool persist_layout{true};
     bool can_float{};
     bool can_auto_hide{};
+    // Inspector-style panes retain a resource-backed tab/header even when
+    // they are the only pane in their dock stack. Compact tool surfaces opt
+    // out so the 40-DIP TopContext strip is not consumed by a header.
+    bool show_header_when_singleton{};
     int minimum_width_dip{};
     int minimum_height_dip{};
     int preferred_width_dip{};

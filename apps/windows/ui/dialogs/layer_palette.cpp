@@ -1,6 +1,7 @@
 #include "layer_palette.h"
 
 #include <commctrl.h>
+#include <oleacc.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -61,6 +62,126 @@ LayerPaletteDialogState* ListState(HWND list) noexcept {
 
 bool IsPlaneList(HWND list) noexcept {
     return GetDlgCtrlID(list) == IDC_PLANE_LIST;
+}
+
+bool SetAccessibleName(HWND window, const wchar_t* name) noexcept {
+    IAccPropServices* properties = nullptr;
+    const HRESULT create_result = CoCreateInstance(
+        CLSID_AccPropServices,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&properties));
+    if (FAILED(create_result) || properties == nullptr) {
+        return false;
+    }
+    const HRESULT set_result = properties->SetHwndPropStr(
+        window,
+        static_cast<DWORD>(OBJID_CLIENT),
+        static_cast<DWORD>(CHILDID_SELF),
+        PROPID_ACC_NAME,
+        name);
+    properties->Release();
+    return SUCCEEDED(set_result);
+}
+
+template <std::size_t Size>
+const wchar_t* LoadUiString(
+    HWND dialog,
+    UINT resource,
+    const wchar_t* fallback,
+    wchar_t (&buffer)[Size]) noexcept {
+    const HINSTANCE instance = dialog == nullptr
+        ? nullptr
+        : reinterpret_cast<HINSTANCE>(
+              GetWindowLongPtrW(dialog, GWLP_HINSTANCE));
+    if (instance != nullptr
+        && LoadStringW(instance, resource, buffer, static_cast<int>(Size)) > 0) {
+        return buffer;
+    }
+    return fallback;
+}
+
+void ApplyActionCommandState(
+    HWND dialog,
+    const LayerPaletteDialogState& state,
+    const CommandStateSet& command_states) noexcept {
+    for (std::size_t index = 0U; index < kLayerActionCommands.size(); ++index) {
+        const UINT command = state.plane_active
+            ? kPlaneActionCommands[index]
+            : kLayerActionCommands[index];
+        const CommandState* command_state = FindCommandState(command_states, command);
+        const HWND button = GetDlgItem(dialog, kLayerActionCommands[index]);
+        if (command_state != nullptr && button != nullptr) {
+            EnableWindow(button, command_state->enabled ? TRUE : FALSE);
+        }
+    }
+}
+
+void UpdateActionTargetPresentation(
+    HWND dialog, LayerPaletteDialogState& state) noexcept {
+    wchar_t target_buffer[64]{};
+    const wchar_t* target = state.plane_active
+        ? LoadUiString(
+              dialog,
+              IDS_LAYER_ACTION_TARGET_PLANE,
+              L"操作対象: プレーン",
+              target_buffer)
+        : LoadUiString(
+              dialog,
+              IDS_LAYER_ACTION_TARGET_LAYER,
+              L"操作対象: レイヤー",
+              target_buffer);
+    SetDlgItemTextW(dialog, IDC_LAYER_ACTION_TARGET, target);
+    for (const UINT control : kLayerActionCommands) {
+        const HWND button = GetDlgItem(dialog, static_cast<int>(control));
+        if (button == nullptr) {
+            continue;
+        }
+        wchar_t caption[48]{};
+        GetWindowTextW(button, caption, static_cast<int>(std::size(caption)));
+        wchar_t accessible[128]{};
+        _snwprintf_s(
+            accessible,
+            std::size(accessible),
+            _TRUNCATE,
+            L"%ls: %ls",
+            target,
+            caption);
+        static_cast<void>(SetAccessibleName(button, accessible));
+    }
+    if (state.has_command_states) {
+        ApplyActionCommandState(dialog, state, state.command_states);
+    }
+}
+
+void SetActionTarget(
+    HWND dialog, LayerPaletteDialogState& state, bool plane) noexcept {
+    state.plane_active = plane;
+    UpdateActionTargetPresentation(dialog, state);
+}
+
+void PaintLayerPlaneSplitter(HWND splitter, bool highlighted) noexcept {
+    PAINTSTRUCT paint{};
+    HDC context = BeginPaint(splitter, &paint);
+    if (context == nullptr) {
+        return;
+    }
+    RECT client{};
+    if (GetClientRect(splitter, &client) != FALSE) {
+        FillRect(context, &client, GetSysColorBrush(COLOR_BTNFACE));
+        RECT rule = client;
+        const LONG center = client.top + (client.bottom - client.top) / 2;
+        rule.top = center;
+        rule.bottom = std::min(client.bottom, center + 1);
+        FillRect(
+            context,
+            &rule,
+            GetSysColorBrush(highlighted ? COLOR_HIGHLIGHT : COLOR_3DSHADOW));
+        if (GetFocus() == splitter) {
+            DrawFocusRect(context, &client);
+        }
+    }
+    EndPaint(splitter, &paint);
 }
 
 const wchar_t* LayerKindLabel(std::uint32_t kind) noexcept {
@@ -142,13 +263,19 @@ void LayoutControls(HWND dialog) noexcept {
     const int gap = ScaleForDpi(kButtonGap, dpi);
     const int label_height = ScaleForDpi(18, dpi);
     const int split_height = ScaleForDpi(4, dpi);
+    const int action_target_height = ScaleForDpi(18, dpi);
     const int button_height = ScaleForDpi(kButtonHeight, dpi);
     const int width = std::max(
         0, static_cast<int>(client.right) - margin * 2);
-    const int content_height = std::max(
-        0, static_cast<int>(client.bottom) - margin * 3 - button_height);
+    const int button_y = std::max(
+        margin,
+        static_cast<int>(client.bottom) - margin - button_height);
+    const int action_target_y = std::max(
+        margin,
+        button_y - gap - action_target_height);
+    const int list_bottom = std::max(margin, action_target_y - gap);
     const int available_lists = std::max(
-        0, content_height - label_height * 2 - split_height);
+        0, list_bottom - margin - label_height * 2 - split_height);
     int layer_height = static_cast<int>(
         static_cast<std::int64_t>(available_lists)
         * std::clamp<std::uint32_t>(state->split_milli, 200U, 800U) / 1000);
@@ -196,7 +323,7 @@ void LayoutControls(HWND dialog) noexcept {
         SWP_NOACTIVATE | SWP_NOZORDER);
     y += label_height;
     const int plane_height = std::max(
-        0, margin + content_height - y);
+        0, list_bottom - y);
     SetWindowPos(
         GetDlgItem(dialog, IDC_PLANE_LIST),
         nullptr,
@@ -218,11 +345,19 @@ void LayoutControls(HWND dialog) noexcept {
         0,
         ScaleForDpi(kPlaneTileHeight, dpi));
 
+    SetWindowPos(
+        GetDlgItem(dialog, IDC_LAYER_ACTION_TARGET),
+        nullptr,
+        margin,
+        action_target_y,
+        width,
+        action_target_height,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+
     const int button_width = std::max(
         1,
         (width - gap * (static_cast<int>(kLayerActionCommands.size()) - 1))
             / static_cast<int>(kLayerActionCommands.size()));
-    const int button_y = client.bottom - margin - button_height;
     for (std::size_t index = 0; index < kLayerActionCommands.size(); ++index) {
         SetWindowPos(
             GetDlgItem(dialog, static_cast<int>(kLayerActionCommands[index])),
@@ -259,7 +394,11 @@ bool UpdatePaletteFont(HWND dialog, LayerPaletteDialogState& state) noexcept {
             dialog, control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), FALSE);
     }
     for (const int control : {
-             IDC_LAYER_SECTION, IDC_PLANE_SECTION, IDC_LAYER_LIST, IDC_PLANE_LIST}) {
+             IDC_LAYER_SECTION,
+             IDC_PLANE_SECTION,
+             IDC_LAYER_ACTION_TARGET,
+             IDC_LAYER_LIST,
+             IDC_PLANE_LIST}) {
         SendDlgItemMessageW(
             dialog, control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), FALSE);
     }
@@ -279,7 +418,7 @@ void SelectItem(
     if (index < 0 || static_cast<std::size_t>(index) >= items.size()) {
         return;
     }
-    state.plane_active = plane;
+    SetActionTarget(GetParent(list), state, plane);
     SendMessageW(list, LB_SETCURSEL, static_cast<WPARAM>(index), 0);
     const std::uint64_t id = items[static_cast<std::size_t>(index)].id;
     std::uint64_t& selected = plane
@@ -570,6 +709,11 @@ LRESULT CALLBACK ListSubclassProcedure(
             InvalidateRect(list, nullptr, FALSE);
             break;
         }
+        case WM_SETFOCUS:
+            if (state != nullptr) {
+                SetActionTarget(GetParent(list), *state, plane);
+            }
+            break;
         case WM_KEYDOWN:
             if (state != nullptr && wparam == VK_SPACE
                 && state->toggle_target != nullptr) {
@@ -652,16 +796,33 @@ LRESULT CALLBACK SplitSubclassProcedure(
     switch (message) {
         case WM_LBUTTONDOWN:
             if (state != nullptr) {
-                GetCursorPos(&state->split_drag_start);
+                state->split_drag_start = POINT{
+                    GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+                if (ClientToScreen(splitter, &state->split_drag_start) == FALSE) {
+                    GetCursorPos(&state->split_drag_start);
+                }
                 state->split_drag_initial = state->split_milli;
                 SetCapture(splitter);
+                state->split_dragging = GetCapture() == splitter;
+                SetFocus(splitter);
+                InvalidateRect(splitter, nullptr, FALSE);
             }
             return 0;
         case WM_MOUSEMOVE:
+            if (state != nullptr && !state->split_hovered) {
+                TRACKMOUSEEVENT tracking{};
+                tracking.cbSize = sizeof(tracking);
+                tracking.dwFlags = TME_LEAVE;
+                tracking.hwndTrack = splitter;
+                state->split_hovered = TrackMouseEvent(&tracking) != FALSE;
+                InvalidateRect(splitter, nullptr, FALSE);
+            }
             if (state != nullptr && GetCapture() == splitter && dialog != nullptr) {
-                POINT current{};
+                POINT current{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
                 RECT client{};
-                GetCursorPos(&current);
+                if (ClientToScreen(splitter, &current) == FALSE) {
+                    GetCursorPos(&current);
+                }
                 GetClientRect(dialog, &client);
                 const int height = std::max(
                     1, static_cast<int>(client.bottom - client.top));
@@ -676,14 +837,90 @@ LRESULT CALLBACK SplitSubclassProcedure(
                 return 0;
             }
             break;
+        case WM_MOUSELEAVE:
+            if (state != nullptr) {
+                state->split_hovered = false;
+                InvalidateRect(splitter, nullptr, FALSE);
+            }
+            return 0;
         case WM_LBUTTONUP:
-            if (state != nullptr && GetCapture() == splitter) {
-                ReleaseCapture();
+            if (state != nullptr && state->split_dragging) {
+                if (GetCapture() == splitter) {
+                    ReleaseCapture();
+                }
+                // ReleaseCapture normally commits through WM_CAPTURECHANGED.
+                // Keep this fallback for a capture implementation that does not
+                // synchronously deliver that notification.
+                if (state->split_dragging) {
+                    state->split_dragging = false;
+                    if (state->change_split != nullptr) {
+                        state->change_split(state->context, state->split_milli);
+                    }
+                }
+            }
+            InvalidateRect(splitter, nullptr, FALSE);
+            return 0;
+        case WM_CAPTURECHANGED:
+            if (state != nullptr && state->split_dragging) {
+                state->split_dragging = false;
                 if (state->change_split != nullptr) {
                     state->change_split(state->context, state->split_milli);
                 }
             }
+            InvalidateRect(splitter, nullptr, FALSE);
+            break;
+        case WM_SETFOCUS:
+        case WM_KILLFOCUS:
+        case WM_THEMECHANGED:
+        case WM_SYSCOLORCHANGE:
+        case WM_SETTINGCHANGE:
+            InvalidateRect(splitter, nullptr, FALSE);
+            break;
+        case WM_CANCELMODE:
+            if (state != nullptr && state->split_dragging) {
+                state->split_dragging = false;
+                if (state->split_milli != state->split_drag_initial) {
+                    state->split_milli = state->split_drag_initial;
+                    if (dialog != nullptr) {
+                        LayoutControls(dialog);
+                    }
+                }
+            }
+            if (GetCapture() == splitter) {
+                ReleaseCapture();
+            }
+            InvalidateRect(splitter, nullptr, FALSE);
             return 0;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT:
+            PaintLayerPlaneSplitter(
+                splitter,
+                state != nullptr
+                    && (state->split_hovered || GetCapture() == splitter
+                        || GetFocus() == splitter));
+            return 0;
+        case WM_GETDLGCODE:
+            return DefSubclassProc(splitter, message, wparam, lparam)
+                | DLGC_WANTARROWS;
+        case WM_KEYDOWN:
+            if (state != nullptr && dialog != nullptr
+                && (wparam == VK_UP || wparam == VK_DOWN)) {
+                const int direction = wparam == VK_UP ? -1 : 1;
+                const auto adjusted = static_cast<std::uint32_t>(std::clamp(
+                    static_cast<int>(state->split_milli) + direction * 20,
+                    200,
+                    800));
+                if (adjusted != state->split_milli) {
+                    state->split_milli = adjusted;
+                    LayoutControls(dialog);
+                    if (state->change_split != nullptr) {
+                        state->change_split(state->context, state->split_milli);
+                    }
+                }
+                return 0;
+            }
+            break;
         case WM_SETCURSOR:
             SetCursor(LoadCursorW(nullptr, IDC_SIZENS));
             return TRUE;
@@ -732,7 +969,7 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
                 0,
                 L"STATIC",
                 nullptr,
-                WS_CHILD | WS_VISIBLE | SS_NOTIFY,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | SS_NOTIFY,
                 0,
                 0,
                 0,
@@ -757,6 +994,15 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
                 || !UpdatePaletteFont(dialog, *state)) {
                 return FALSE;
             }
+            wchar_t splitter_name[96]{};
+            static_cast<void>(SetAccessibleName(
+                splitter,
+                LoadUiString(
+                    dialog,
+                    IDS_LAYER_PLANE_SPLITTER,
+                    L"レイヤーとプレーンの高さを変更",
+                    splitter_name)));
+            UpdateActionTargetPresentation(dialog, *state);
             LayoutControls(dialog);
             return TRUE;
         }
@@ -806,8 +1052,11 @@ INT_PTR CALLBACK LayerPaletteDialogProcedure(
             if (state != nullptr) {
                 UpdatePaletteFont(dialog, *state);
                 LayoutControls(dialog);
+                UpdateActionTargetPresentation(dialog, *state);
                 InvalidateRect(GetDlgItem(dialog, IDC_LAYER_LIST), nullptr, TRUE);
                 InvalidateRect(GetDlgItem(dialog, IDC_PLANE_LIST), nullptr, TRUE);
+                InvalidateRect(
+                    GetDlgItem(dialog, IDC_LAYER_PLANE_SPLITTER), nullptr, FALSE);
             }
             return TRUE;
         case WM_NCDESTROY:
@@ -944,16 +1193,9 @@ void UpdateLayerPaletteCommandState(
     if (palette == nullptr) {
         return;
     }
-    for (std::size_t index = 0; index < kLayerActionCommands.size(); ++index) {
-        const UINT command = palette->plane_active
-            ? kPlaneActionCommands[index]
-            : kLayerActionCommands[index];
-        const CommandState* state = FindCommandState(states, command);
-        const HWND button = GetDlgItem(dialog, kLayerActionCommands[index]);
-        if (state != nullptr && button != nullptr) {
-            EnableWindow(button, state->enabled ? TRUE : FALSE);
-        }
-    }
+    palette->command_states = states;
+    palette->has_command_states = true;
+    ApplyActionCommandState(dialog, *palette, states);
 }
 
 bool LayerPaletteMatchesCommandState(

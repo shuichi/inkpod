@@ -65,6 +65,7 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 - tab label は active sequence cell 名、保存 file 名、`無題セル N`、`復元セル`の順で意味のある識別名を使い、dirty は `*`、同じ document の追加 view は `[ビュー N]` で示す。read-only、処理中、error も compact かつ accessible な状態として示す。tab を閉じる操作は view を閉じ、最後の view の場合だけ document close と dirty 確認へ進む。
 - `CanvasSurface` は非表示 tab ではなく可視 `EditorGroup` ごとに一つ持つ。active tab の切替時に同じ surface を別 `DocumentView` へ bind し直し、非表示 tab 数に比例して swap chain や renderer thread を増やさない。
 - dock zone は `TopContext`、`Left`、`Right`、`Bottom`、`Floating`、`Hidden`、`AutoHide` に制限する。各 zone は一方向に並ぶ比率分割枠を持ち、各分割枠は一つ以上の pane からなる tab stack とする。pane の表示、非表示、tab 選択は他の分割枠とその比率を変更せず、任意に再帰する dock tree を作らない。docked tab の内容領域に pane 固有の常設 close button を重複配置せず、非表示化は共通 pane command、floating 時の system close、または keyboard route から行う。pane descriptor は stable type ID、default/allowed zone、scope、multiplicity、float/autohide 可否、最小寸法を宣言する。
+- Color、Layer/Plane、Locator 等の inspector pane は、一つだけの split stack でも descriptor の localized title を dock header に表示する。Tool と Tool Options の専用 strip はこの単独 header の対象外とする。splitter は 4 DIP の操作領域を維持し、通常、hover、pointer capture、keyboard focus、high contrast の各状態で system color により境界と操作可能性を識別できるようにする。
 - pane の target scope は `Application`、`FollowActiveView`、`PinnedDocument`、`Job` を区別する。pin 先 document が閉じた場合は別文書へ silent に向けず、追従 mode へ戻して accessible notification を出す。pane action は発行時の target ID と generation を保持する。
 - 現在相当の一 window、一 group 配置を初期 named workspace `彩色` として維持する。96 DPI の初期値は上端に全幅 40 DIP の tool options、body 左端に幅 80 DIP の一列 tool pane、中央に document tabs と Canvas、右端に幅 320 DIP の上段 color/palette/chart と下段 layer/plane・Light Table・subpalette/reference の tab stack、最下段に status bar とする。既存の 32:68、55:45 比率と 4 DIP splitter を初期値に使うが、これは固定所有権ではなく復元可能な layout state である。
 - tool pane の既定 button は 72 x 34 DIP、一列、7 pt の読み取れる一語ラベルとする。正規ラベルは `鉛筆`、`ブラシ`、`消しゴム`、`塗りつぶし`、`閉領域塗り`、`塗り延ばし`、`スポイト`、`直線`、`曲線`、`長方形`、`楕円`、`折れ線`、`線消しゴム`、`グラデーション`、`エアブラシ`、`境界ブラシ`、`ぼかし`、`スタンプ`、`ゴミ取り`、`アルファ階調` とする。意味を推測させる一文字略号へ戻さず、詳細名は tooltip で補う。
@@ -225,6 +226,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 ### 6. レイヤー・プレーンパレット
 
 - 上段に layer、下段に active layer の plane を表示する split pane とする。
+- layer/plane 間の splitter は pointer と keyboard の双方で高さを変更でき、可視かつ accessible にする。共通の下部操作 button には、現在の操作対象が layer と plane のどちらかを視覚表示と accessible name の双方で明示する。
 - 各行に visibility、editable/target、name、種類に応じた color/thumbnail を表示する。
 - active selection と複数 edit target を区別する。描画 command は active plane と明示 target 規則を検証する。
 - drag and drop で同階層の順序を変える。
@@ -256,7 +258,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - ruler から guide を drag して作成し、Canvas 外へ drag して削除する。move tool で位置変更する。
 - grid は間隔、分割、原点を持ち、zoom が低い場合は表示線だけ間引く。snap 計算は表示間引きの影響を受けない。
 - 透明表示は設定色または checkerboard で示し、pixel 値を変更しない。
-- color locator は cursor 周辺を別倍率で表示し、X/Y、selection 幅 H、高さ V、対角長 L、RGBA を表示する。固定 mode では locator 上で編集でき、edge 付近は自動 scroll を選べる。
+- color locator は cursor 周辺を別倍率で表示し、X/Y、selection 幅 H、高さ V、対角長 L、RGBA を表示する。active raster stroke 中は、確定前の最新 preview と最新の処理済み pointer 座標へ bounded/coalesced に非同期追従し、query 自体は document revision、history、journal、dirty、savepoint を変更しない。End 後は確定結果、Cancel 後は元の文書へ再同期する。固定 mode では locator 上で編集でき、edge 付近は自動 scroll を選べる。
 - multi-view は一つの document state と history を共有し、viewport transform だけを別に持つ。
 - vector overlay は view ごとに antialias on/off、中心線、中心線のみ、未接続端点を切り替えられる。中心線のみは通常 stroke を隠すが vector fill は保持する。未接続判定は stable path/start-or-end ID の明示接続だけを正本とし、座標一致や近接距離から推測しない。中心線幅と端点 marker は zoom に依存しない device-pixel 寸法とし、各 toggle は view revision だけを進めて document/history/journal/dirty/savepoint を変えない。
 

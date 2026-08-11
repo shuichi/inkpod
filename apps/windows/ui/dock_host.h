@@ -39,6 +39,7 @@ public:
 
     [[nodiscard]] HWND FloatingWindow(DockPaneType type) const noexcept;
     [[nodiscard]] HWND ContentWindow(DockPaneType type) const noexcept;
+    [[nodiscard]] HWND HeaderWindow(DockPaneType type) const noexcept;
     [[nodiscard]] HWND TabWindow(DockZone zone) const noexcept;
     [[nodiscard]] HWND SplitterWindow(
         DockZone zone, DockSplitterKind kind) const noexcept;
@@ -63,6 +64,7 @@ private:
         DockSplitterGeometry geometry{};
         POINT last_screen{};
         bool accessible_name_set{};
+        bool hovered{};
     };
 
     struct TabHostState {
@@ -102,6 +104,8 @@ private:
     [[nodiscard]] bool EnsureFloatingWindow(PaneHostState& pane) noexcept;
     void LayoutFloatingContent(PaneHostState& pane) noexcept;
     void LayoutAutoHiddenContent(PaneHostState& pane) noexcept;
+    [[nodiscard]] bool ShouldShowStackHeader(
+        DockZone zone, std::uint8_t stack) const noexcept;
     void ApplyPaneLayout(PaneHostState& pane) noexcept;
     void ApplyTabLayout(TabHostState& tabs) noexcept;
     void NotifyChanged() noexcept;

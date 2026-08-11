@@ -505,6 +505,11 @@ Rust のパニックは ABI 境界で捕捉され `INKPOD_STATUS_PANIC` にな�
 
 ## 必要量照会と呼び出し側所有バッファ
 
+`inkpod_core_locator_sample` と `inkpod_core_locator_neighborhood` は snapshot と同じく、active stroke
+preview、filter preview、committed document の順で表示用 document を選ぶ。公開スポイトの committed
+document 専用契約は変えない。いずれも読み取り照会であり、preview を参照しても document/view revision、
+history、journal、dirty、savepoint を変更しない。
+
 `inkpod_core_locator_neighborhood` は、モードレスなロケーターの拡大表示に必要な複数ピクセルを、
 所有スレッド上の一回の ABI 呼び出しで返す。`radius` は 0..16 で、出力は常に
 `(radius * 2 + 1)` の正方形に密配置した非乗算アルファの RGBA8 となり、文書外は透明になる。

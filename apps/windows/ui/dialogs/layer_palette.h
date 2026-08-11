@@ -59,7 +59,11 @@ struct LayerPaletteDialogState {
     POINT split_drag_start{};
     std::uint32_t split_drag_initial{550U};
     std::uint32_t split_milli{550U};
+    CommandStateSet command_states{};
     bool plane_active{};
+    bool split_dragging{};
+    bool split_hovered{};
+    bool has_command_states{};
     bool updating{};
     HFONT font{};
 };

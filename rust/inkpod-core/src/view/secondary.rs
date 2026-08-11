@@ -156,14 +156,15 @@ impl Core {
     /// Resolves a device-pixel point through the primary or selected secondary view.
     ///
     /// The returned document cell uses floor semantics and half-open document bounds.
-    /// Sampling is read-only.
+    /// Active stroke and filter previews are sampled in the same priority as rendering.
+    /// Sampling is read-only and does not affect revisions, history, or dirty state.
     pub fn locator_sample(
         &self,
         view_id: Option<u64>,
         device_x: f64,
         device_y: f64,
     ) -> Result<LocatorSample, CoreError> {
-        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let document = self.locator_document()?;
         let view = match view_id.map(ViewId::from_raw) {
             Some(id) => *self
                 .secondary_views
@@ -184,7 +185,8 @@ impl Core {
             && document_x < document.width as i32
             && document_y < document.height as i32
         {
-            self.eyedropper(
+            self.eyedropper_in_document(
+                document,
                 EyedropperSource::Composite,
                 document_x as u32,
                 document_y as u32,
@@ -204,8 +206,9 @@ impl Core {
     /// Samples a bounded composite-color neighborhood around one device point.
     ///
     /// The output always has `(radius * 2 + 1)` pixels on each side. Pixels
-    /// outside the half-open document bounds are transparent. Sampling is
-    /// read-only and does not allocate more than a 33 by 33 RGBA8 buffer.
+    /// outside the half-open document bounds are transparent. Active stroke and
+    /// filter previews are sampled in the same priority as rendering. Sampling
+    /// is read-only and does not allocate more than a 33 by 33 RGBA8 buffer.
     pub fn locator_neighborhood(
         &self,
         view_id: Option<u64>,
@@ -217,7 +220,7 @@ impl Core {
         if radius > MAX_RADIUS {
             return Err(CoreError::InvalidArgument("locator radius exceeds maximum"));
         }
-        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let document = self.locator_document()?;
         let center = self.locator_sample(view_id, device_x, device_y)?;
         let radius_i32 = i32::try_from(radius)
             .map_err(|_| CoreError::InvalidArgument("locator radius is invalid"))?;
@@ -253,7 +256,12 @@ impl Core {
                     continue;
                 }
                 let color = self
-                    .eyedropper(EyedropperSource::Composite, x as u32, y as u32)
+                    .eyedropper_in_document(
+                        document,
+                        EyedropperSource::Composite,
+                        x as u32,
+                        y as u32,
+                    )
                     .unwrap_or(PixelValue::Rgba([0; 4]));
                 let rgba = match color {
                     PixelValue::Binary(value) | PixelValue::Grayscale8(value) => {
@@ -279,5 +287,18 @@ impl Core {
             height: side,
             pixels_rgba8,
         })
+    }
+
+    fn locator_document(&self) -> Result<&CellDocument, CoreError> {
+        self.active_stroke
+            .as_ref()
+            .map(|session| &session.preview_document)
+            .or_else(|| {
+                self.filter_preview
+                    .as_ref()
+                    .map(|session| &session.preview_document)
+            })
+            .or(self.document.as_ref())
+            .ok_or(CoreError::NoDocument)
     }
 }
