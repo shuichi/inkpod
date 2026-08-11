@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>inkpod — アニメーション彩色のための非破壊ペイントエンジン</title>
+<meta name="description" content="inkpod は、GPU アクセラレーションとベクターストロークに対応した、アニメーション彩色向けの非破壊ペイントエンジン。Windows 11 ネイティブ。">
+<link rel="icon" id="favicon" href="">
+<script>
+/* テーマのフラッシュ防止: CSS 適用前に保存済みテーマを反映 */
+(function(){
+  try{
+    var t = localStorage.getItem('inkpod-theme');
+    if(!t) t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){}
+})();
+</script>
+<style>
+/* ============================================================
+   inkpod product page — single-file, no external assets
+   ============================================================ */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+
+:root{
+  --rainbow:linear-gradient(100deg,#FF5FD5 0%,#4F6BFF 24%,#23C0FF 44%,#22E0A6 62%,#FFD23D 80%,#FF5B3D 100%);
+  --radius:18px;
+  --font:"Segoe UI Variable Display","Segoe UI",-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI","Noto Sans JP",Meiryo,sans-serif;
+  --mono:"Cascadia Code","Consolas","SF Mono",ui-monospace,monospace;
+}
+html[data-theme="dark"]{
+  --bg:#0B0813; --bg-2:#120E1E; --bg-3:#181329;
+  --text:#EDEAF6; --muted:#A79FBE; --faint:#6F6787;
+  --surface:rgba(255,255,255,.035); --surface-2:rgba(255,255,255,.065);
+  --border:rgba(255,255,255,.09); --border-strong:rgba(255,255,255,.17);
+  --accent:#A78BFA; --accent-strong:#8B5CF6; --accent-soft:rgba(139,92,246,.16);
+  --check:rgba(255,255,255,.05);
+  --nav-bg:rgba(11,8,19,.72);
+  --shadow:0 30px 70px -30px rgba(0,0,0,.65);
+  --glow:.55;
+  color-scheme:dark;
+}
+html[data-theme="light"]{
+  --bg:#FAF9FD; --bg-2:#FFFFFF; --bg-3:#F3F0FA;
+  --text:#231C33; --muted:#5D5573; --faint:#918AA6;
+  --surface:#FFFFFF; --surface-2:#F6F4FB;
+  --border:rgba(35,28,60,.10); --border-strong:rgba(35,28,60,.22);
+  --accent:#7C3AED; --accent-strong:#6D28D9; --accent-soft:rgba(124,58,237,.10);
+  --check:rgba(35,28,60,.07);
+  --nav-bg:rgba(250,249,253,.82);
+  --shadow:0 30px 70px -36px rgba(70,45,140,.28);
+  --glow:.30;
+  color-scheme:light;
+}
+
+html{scroll-behavior:smooth;scroll-padding-top:84px}
+body{
+  font-family:var(--font);
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.7;
+  overflow-x:hidden;
+  transition:background-color .35s ease,color .35s ease;
+}
+body::before{ /* ブランドの虹色トップバー */
+  content:"";position:fixed;top:0;left:0;right:0;height:3px;
+  background:var(--rainbow);z-index:200;pointer-events:none;
+}
+::selection{background:rgba(139,92,246,.45);color:#fff}
+a{color:inherit;text-decoration:none}
+img,svg{display:block;max-width:100%}
+h1,h2,h3{font-feature-settings:"palt";letter-spacing:-.015em;line-height:1.25}
+
+/* ---------- aurora background ---------- */
+.aurora{position:fixed;inset:0;z-index:-2;overflow:hidden;pointer-events:none}
+.aurora i{position:absolute;border-radius:50%;filter:blur(110px);opacity:calc(var(--glow) * .8)}
+.aurora .a1{width:640px;height:640px;left:-160px;top:-180px;background:#6842A6;animation:drift1 26s ease-in-out infinite alternate}
+.aurora .a2{width:520px;height:520px;right:-140px;top:60px;background:#23C0FF;opacity:calc(var(--glow)*.45);animation:drift2 32s ease-in-out infinite alternate}
+.aurora .a3{width:560px;height:560px;left:32%;top:52%;background:#FF5FD5;opacity:calc(var(--glow)*.30);animation:drift3 38s ease-in-out infinite alternate}
+@keyframes drift1{to{transform:translate(90px,60px) scale(1.12)}}
+@keyframes drift2{to{transform:translate(-70px,110px) scale(1.08)}}
+@keyframes drift3{to{transform:translate(60px,-90px) scale(.94)}}
+
+.wrap{max-width:1140px;margin:0 auto;padding:0 24px}
+
+/* ---------- nav ---------- */
+.nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  background:var(--nav-bg);
+  border-bottom:1px solid transparent;
+  transition:border-color .3s ease,background-color .35s ease;
+}
+.nav.scrolled{border-bottom-color:var(--border)}
+.nav-inner{display:flex;align-items:center;gap:28px;height:64px;max-width:1140px;margin:0 auto;padding:0 24px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.15rem;letter-spacing:-.01em}
+.brand .app-icon{width:30px;height:30px;flex:none}
+.nav-links{display:flex;gap:6px;margin-left:auto}
+.nav-links a{
+  font-size:.9rem;color:var(--muted);padding:7px 13px;border-radius:9px;
+  transition:color .2s,background-color .2s;
+}
+.nav-links a:hover{color:var(--text);background:var(--surface-2)}
+.nav-ctrl{display:flex;align-items:center;gap:10px}
+.lang-toggle{
+  display:flex;border:1px solid var(--border-strong);border-radius:10px;overflow:hidden;
+}
+.lang-toggle button{
+  font-family:inherit;font-size:.78rem;font-weight:700;letter-spacing:.04em;
+  padding:6px 11px;border:0;background:transparent;color:var(--muted);cursor:pointer;
+  transition:background-color .2s,color .2s;
+}
+.lang-toggle button.active{background:var(--accent-strong);color:#fff}
+.icon-btn{
+  width:36px;height:36px;display:grid;place-items:center;border-radius:10px;
+  border:1px solid var(--border-strong);background:transparent;color:var(--muted);
+  cursor:pointer;transition:color .2s,background-color .2s;
+}
+.icon-btn:hover{color:var(--text);background:var(--surface-2)}
+.icon-btn svg{width:17px;height:17px}
+html[data-theme="dark"] .only-light{display:none}
+html[data-theme="light"] .only-dark{display:none}
+
+/* ---------- hero ---------- */
+.hero{padding:150px 0 40px;text-align:center;position:relative}
+.hero .app-icon{width:112px;height:112px;margin:0 auto 30px;filter:drop-shadow(0 18px 36px rgba(80,45,150,.45))}
+.badge{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:.8rem;font-weight:600;color:var(--muted);
+  border:1px solid var(--border-strong);border-radius:999px;padding:6px 16px;margin-bottom:26px;
+  background:var(--surface);
+}
+.badge::before{content:"";width:7px;height:7px;border-radius:50%;background:#22E0A6;box-shadow:0 0 10px #22E0A6}
+.hero h1{font-size:clamp(2.3rem,6vw,4.1rem);font-weight:800;margin-bottom:22px}
+.ink-text{
+  background:var(--rainbow);background-size:220% 100%;
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  animation:inkflow 9s linear infinite alternate;
+}
+@keyframes inkflow{to{background-position:100% 0}}
+.hero .sub{max-width:680px;margin:0 auto 34px;color:var(--muted);font-size:1.1rem}
+.cta-row{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.btn{
+  display:inline-flex;align-items:center;gap:9px;
+  font-family:inherit;font-size:.98rem;font-weight:700;
+  padding:13px 26px;border-radius:13px;cursor:pointer;border:1px solid transparent;
+  transition:transform .18s ease,box-shadow .18s ease,background-color .2s,border-color .2s,filter .2s;
+}
+.btn svg{width:17px;height:17px}
+.btn.primary{
+  background:linear-gradient(135deg,#9570D9,#6D28D9);color:#fff;
+  box-shadow:0 10px 30px -10px rgba(139,92,246,.65);
+}
+.btn.primary:hover{transform:translateY(-2px);filter:brightness(1.08);box-shadow:0 16px 36px -10px rgba(139,92,246,.75)}
+.btn.ghost{border-color:var(--border-strong);color:var(--text)}
+.btn.ghost:hover{background:var(--surface-2);transform:translateY(-2px)}
+.hero .note{font-size:.83rem;color:var(--faint)}
+
+/* hero app window */
+.hero-visual{position:relative;max-width:960px;margin:58px auto 0}
+.hero-visual::before{
+  content:"";position:absolute;inset:-6% -10%;z-index:-1;filter:blur(56px);opacity:var(--glow);
+  background:
+    radial-gradient(55% 55% at 24% 18%,rgba(255,95,213,.55),transparent 62%),
+    radial-gradient(50% 50% at 78% 26%,rgba(35,192,255,.5),transparent 62%),
+    radial-gradient(55% 55% at 52% 88%,rgba(34,224,166,.4),transparent 62%);
+}
+.app-window{
+  border-radius:16px;border:1px solid var(--border-strong);
+  background:var(--bg-2);box-shadow:var(--shadow);overflow:hidden;
+  transition:background-color .35s ease;
+}
+.app-titlebar{
+  display:flex;align-items:center;gap:10px;padding:11px 16px;
+  border-bottom:1px solid var(--border);background:var(--surface);
+  font-size:.85rem;color:var(--muted);
+}
+.app-titlebar .app-icon{width:18px;height:18px;flex:none}
+.caption-btns{margin-left:auto;display:flex;gap:16px;color:var(--faint)}
+.caption-btns svg{width:12px;height:12px}
+
+/* ---------- screenshot placeholder ---------- */
+.shot{
+  position:relative;aspect-ratio:16/9;
+  display:grid;place-items:center;
+  background:
+    conic-gradient(var(--check) 25%,transparent 0 50%,var(--check) 0 75%,transparent 0) 0 0/26px 26px,
+    var(--bg-3);
+  transition:background-color .35s ease;
+}
+.shot.rounded{border-radius:var(--radius);border:1px solid var(--border);overflow:hidden}
+.shot-inner{
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+  color:var(--faint);font-size:.88rem;font-weight:600;letter-spacing:.02em;
+  border:2px dashed var(--border-strong);border-radius:14px;
+  padding:34px 48px;background:color-mix(in srgb,var(--bg) 55%,transparent);
+}
+.shot-inner .app-icon{width:44px;height:44px;opacity:.55}
+
+/* ---------- stats strip ---------- */
+.stats{padding:72px 0 8px}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.stat{
+  text-align:center;padding:26px 12px;border-radius:var(--radius);
+  border:1px solid var(--border);background:var(--surface);
+}
+.stat b{
+  display:block;font-size:1.5rem;font-weight:800;letter-spacing:-.02em;margin-bottom:6px;
+  background:var(--rainbow);background-size:300% 100%;
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.stat:nth-child(2) b{background-position:35% 0}
+.stat:nth-child(3) b{background-position:65% 0}
+.stat:nth-child(4) b{background-position:100% 0}
+.stat span{font-size:.82rem;color:var(--muted)}
+
+/* ---------- sections ---------- */
+section{padding:104px 0}
+.sec-head{text-align:center;max-width:640px;margin:0 auto 60px}
+.eyebrow{
+  display:inline-block;font-size:.78rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase;
+  background:var(--rainbow);-webkit-background-clip:text;background-clip:text;color:transparent;
+  margin-bottom:14px;
+}
+.sec-head h2{font-size:clamp(1.7rem,3.6vw,2.5rem);font-weight:800;margin-bottom:14px}
+.sec-head p{color:var(--muted)}
+
+/* feature cards */
+.big-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:20px}
+.card{
+  border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--surface);padding:30px 28px;
+  transition:transform .25s ease,border-color .25s ease,background-color .35s ease,box-shadow .25s ease;
+}
+.card:hover{transform:translateY(-5px);border-color:var(--border-strong);box-shadow:var(--shadow)}
+.card .ico{
+  width:46px;height:46px;border-radius:13px;display:grid;place-items:center;margin-bottom:18px;
+  background:var(--accent-soft);color:var(--accent);
+}
+.card .ico svg{width:22px;height:22px}
+.card .ico.c-pink{background:rgba(255,95,213,.14);color:#FF5FD5}
+.card .ico.c-cyan{background:rgba(35,192,255,.14);color:#23C0FF}
+.card .ico.c-green{background:rgba(34,224,166,.14);color:#22E0A6}
+.card .ico.c-amber{background:rgba(255,210,61,.16);color:#E8B31E}
+.card .ico.c-red{background:rgba(255,91,61,.14);color:#FF5B3D}
+.card .ico.c-blue{background:rgba(79,107,255,.15);color:#7A8DFF}
+.card h3{font-size:1.16rem;font-weight:800;margin-bottom:10px}
+.card p{font-size:.92rem;color:var(--muted)}
+.big-grid .card h3{font-size:1.3rem}
+.small-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
+.small-grid .card{padding:26px 24px}
+.small-grid .card h3{font-size:1.02rem}
+.small-grid .card p{font-size:.87rem}
+
+/* ---------- concept (layers & planes) ---------- */
+.concept-grid{display:grid;grid-template-columns:1fr 1.05fr;gap:56px;align-items:center}
+.concept-copy .eyebrow{margin-bottom:12px}
+.concept-copy h2{font-size:clamp(1.7rem,3.4vw,2.4rem);font-weight:800;margin-bottom:18px}
+.concept-copy>p{color:var(--muted);margin-bottom:28px}
+.callout{
+  position:relative;border-radius:var(--radius);padding:24px 26px 24px 30px;
+  background:var(--surface);border:1px solid var(--border);overflow:hidden;
+}
+.callout::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--rainbow)}
+.callout h3{display:flex;align-items:center;gap:10px;font-size:1.05rem;font-weight:800;margin-bottom:8px}
+.callout h3 svg{width:19px;height:19px;color:var(--accent);flex:none}
+.callout p{font-size:.9rem;color:var(--muted)}
+
+/* palette-style diagram */
+.doc-diagram{
+  border-radius:20px;border:1px solid var(--border-strong);
+  background:var(--bg-2);box-shadow:var(--shadow);padding:22px;
+  transition:background-color .35s ease;
+}
+.doc-cell-title{
+  display:flex;align-items:center;gap:9px;
+  font-size:.82rem;font-weight:700;letter-spacing:.03em;color:var(--muted);
+  padding:4px 6px 14px;
+}
+.doc-cell-title svg{width:16px;height:16px;color:var(--accent)}
+.doc-layer{
+  border:1px solid var(--border);border-radius:13px;background:var(--surface);
+  margin-bottom:10px;overflow:hidden;
+}
+.doc-layer:last-child{margin-bottom:0}
+.doc-layer-head{
+  display:flex;align-items:center;gap:11px;padding:12px 15px;
+  font-size:.92rem;font-weight:700;
+}
+.doc-layer-head svg{width:16px;height:16px;color:var(--faint);flex:none}
+.doc-layer.dim .doc-layer-head{color:var(--muted);font-weight:600}
+.doc-layer.active{border-color:var(--accent-strong);background:var(--accent-soft)}
+.doc-layer.active .doc-layer-head svg{color:var(--accent)}
+.doc-planes{padding:2px 12px 12px 34px;display:flex;flex-direction:column;gap:8px}
+.doc-plane{
+  display:flex;align-items:center;gap:11px;
+  border:1px solid var(--border);border-radius:11px;background:var(--bg-2);
+  padding:9px 13px;font-size:.87rem;font-weight:600;
+  transition:background-color .35s ease;
+}
+.doc-plane .grow{flex:1}
+.doc-plane svg{width:14px;height:14px;color:var(--faint);flex:none}
+.swatch{width:22px;height:22px;border-radius:7px;border:1px solid var(--border-strong);flex:none;overflow:hidden}
+.swatch.line{background:#fff}
+.swatch.line svg{width:100%;height:100%;color:#1b1524}
+.swatch.paint{background:var(--rainbow)}
+.swatch.raster{background:conic-gradient(rgba(128,120,150,.35) 25%,transparent 0 50%,rgba(128,120,150,.35) 0 75%,transparent 0) 0 0/11px 11px,var(--surface-2)}
+.tag{font-size:.68rem;font-weight:800;letter-spacing:.05em;padding:3px 10px;border-radius:999px;flex:none}
+.tag.lock{background:var(--accent-soft);color:var(--accent)}
+.tag.edit{background:rgba(34,224,166,.18);color:#17B384}
+html[data-theme="dark"] .tag.edit{color:#2AE8AE}
+
+/* ---------- workflow ---------- */
+.wf-row{display:grid;grid-template-columns:1fr 1.15fr;gap:56px;align-items:center;margin-bottom:84px}
+.wf-row:last-child{margin-bottom:0}
+.wf-row.flip .wf-copy{order:2}
+.wf-num{
+  display:inline-grid;place-items:center;width:40px;height:40px;border-radius:12px;
+  font-size:.9rem;font-weight:800;color:#fff;margin-bottom:18px;
+  background:linear-gradient(135deg,#9570D9,#6D28D9);
+}
+.wf-row:nth-child(2) .wf-num{background:linear-gradient(135deg,#23C0FF,#4F6BFF)}
+.wf-row:nth-child(3) .wf-num{background:linear-gradient(135deg,#22E0A6,#0FA97A)}
+.wf-copy h3{font-size:1.45rem;font-weight:800;margin-bottom:12px}
+.wf-copy p{color:var(--muted);font-size:.96rem}
+.wf-shot .shot-inner{padding:24px 34px}
+.wf-shot .shot-inner .app-icon{width:34px;height:34px}
+
+/* ---------- tech ---------- */
+.tech-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+.tech-grid .card{display:flex;gap:20px;align-items:flex-start;padding:28px}
+.tech-grid .card .ico{margin-bottom:0;flex:none}
+.tech-chip{
+  display:inline-block;font-family:var(--mono);font-size:.72rem;font-weight:600;
+  color:var(--faint);border:1px solid var(--border);border-radius:7px;
+  padding:2px 9px;margin-top:12px;
+}
+
+/* formats */
+.formats{
+  margin-top:56px;text-align:center;
+  border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--surface);padding:30px 24px;
+}
+.formats .fl{font-size:.8rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:16px}
+.fmt-row{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.fmt{
+  font-family:var(--mono);font-size:.88rem;font-weight:600;
+  border:1px solid var(--border-strong);border-radius:11px;padding:8px 18px;color:var(--muted);
+}
+.fmt.native{
+  position:relative;color:var(--text);border-color:transparent;
+  background:
+    linear-gradient(var(--bg-2),var(--bg-2)) padding-box,
+    var(--rainbow) border-box;
+  border:1px solid transparent;
+}
+.formats .fn{font-size:.82rem;color:var(--faint)}
+
+/* ---------- download ---------- */
+#download .sec-head{margin-bottom:44px}
+.dl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,340px));gap:20px;justify-content:center;margin-bottom:30px}
+.dl-card{
+  border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);
+  padding:30px 28px;text-align:center;
+  transition:transform .25s ease,border-color .25s ease,box-shadow .25s ease;
+}
+.dl-card:hover{transform:translateY(-5px);border-color:var(--border-strong);box-shadow:var(--shadow)}
+.arch{
+  display:inline-block;font-size:.72rem;font-weight:800;letter-spacing:.1em;
+  color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:4px 14px;margin-bottom:14px;
+}
+.dl-card h3{font-size:1.25rem;font-weight:800;margin-bottom:4px}
+.dl-card .kind{font-size:.83rem;color:var(--muted);margin-bottom:14px}
+.dl-card .file{font-family:var(--mono);font-size:.74rem;color:var(--faint);margin-bottom:20px;word-break:break-all}
+.dl-card .btn{width:100%;justify-content:center}
+.dl-notes{text-align:center;font-size:.84rem;color:var(--faint)}
+.dl-notes p{margin-bottom:6px}
+.dl-notes a{color:var(--accent);font-weight:600}
+.dl-notes a:hover{text-decoration:underline}
+
+/* ---------- footer ---------- */
+footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
+.foot-inner{display:flex;align-items:flex-start;justify-content:space-between;gap:32px;flex-wrap:wrap}
+.foot-brand{display:flex;align-items:center;gap:12px;font-weight:800;font-size:1.05rem}
+.foot-brand .app-icon{width:34px;height:34px}
+.foot-tag{font-size:.83rem;color:var(--faint);margin-top:6px;font-weight:400}
+.foot-links{display:flex;gap:22px;flex-wrap:wrap}
+.foot-links a{font-size:.87rem;color:var(--muted);transition:color .2s}
+.foot-links a:hover{color:var(--text)}
+.foot-copy{width:100%;font-size:.78rem;color:var(--faint);margin-top:26px}
+
+/* ---------- reveal ---------- */
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
+.reveal.in{opacity:1;transform:none}
+
+/* ---------- responsive ---------- */
+@media (max-width:960px){
+  .big-grid{grid-template-columns:1fr}
+  .small-grid{grid-template-columns:repeat(2,1fr)}
+  .concept-grid{grid-template-columns:1fr;gap:44px}
+  .wf-row,.wf-row.flip{grid-template-columns:1fr;gap:26px}
+  .wf-row.flip .wf-copy{order:0}
+  .tech-grid{grid-template-columns:1fr}
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .dl-grid{grid-template-columns:1fr;max-width:420px;margin-left:auto;margin-right:auto}
+}
+@media (max-width:820px){
+  .nav-links{display:none}
+  section{padding:76px 0}
+  .hero{padding-top:126px}
+}
+@media (max-width:520px){
+  .small-grid{grid-template-columns:1fr}
+  .shot-inner{padding:22px 26px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+  .reveal{opacity:1;transform:none}
+  html{scroll-behavior:auto}
+}
+</style>
+</head>
+<body>
+
+<!-- ================= inkpod アプリアイコン (SVG symbol / 1回定義して使い回す) ================= -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="ip-baseGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9570D9"/><stop offset="0.35" stop-color="#8158C7"/><stop offset="0.70" stop-color="#6842A6"/><stop offset="1" stop-color="#513183"/></linearGradient>
+    <radialGradient id="ip-specular" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.34"/><stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.07"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+    <linearGradient id="ip-rimGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.78"/><stop offset="0.40" stop-color="#FFFFFF" stop-opacity="0.12"/><stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.20"/></linearGradient>
+    <clipPath id="ip-iconClip"><path d="M 584 0 c 114.8108 0 172.2161 0 216.0681 22.3437 a 205.0000 205.0000 0 0 1 89.5883 89.5883 c 22.3437 43.8519 22.3437 101.2573 22.3437 216.0681 L 912 584 c 0 114.8108 0 172.2161 -22.3437 216.0681 a 205.0000 205.0000 0 0 1 -89.5883 89.5883 c -43.8519 22.3437 -101.2573 22.3437 -216.0681 22.3437 L 328 912 c -114.8108 0 -172.2161 0 -216.0681 -22.3437 a 205.0000 205.0000 0 0 1 -89.5883 -89.5883 c -22.3437 -43.8519 -22.3437 -101.2573 -22.3437 -216.0681 L 0 328 c 0 -114.8108 0 -172.2161 22.3437 -216.0681 a 205.0000 205.0000 0 0 1 89.5883 -89.5883 c 43.8519 -22.3437 101.2573 -22.3437 216.0681 -22.3437 Z"/></clipPath>
+    <linearGradient id="ip-inkRainbow" x1="0.08" y1="0.05" x2="0.92" y2="1"><stop offset="0" stop-color="#FF5FD5"/><stop offset="0.20" stop-color="#4F6BFF"/><stop offset="0.40" stop-color="#23C0FF"/><stop offset="0.58" stop-color="#22E0A6"/><stop offset="0.78" stop-color="#FFD23D"/><stop offset="1" stop-color="#FF5B3D"/></linearGradient>
+    <linearGradient id="ip-inkDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#140F22" stop-opacity="0.32"/></linearGradient>
+    <linearGradient id="ip-glassBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4E1F0" stop-opacity="0.96"/><stop offset="0.5" stop-color="#D1CCE2" stop-opacity="0.94"/><stop offset="1" stop-color="#B5AECB" stop-opacity="0.92"/></linearGradient>
+    <linearGradient id="ip-bottleRim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/><stop offset="0.35" stop-color="#FFFFFF" stop-opacity="0.25"/><stop offset="0.7" stop-color="#837C96" stop-opacity="0.25"/><stop offset="1" stop-color="#3D3550" stop-opacity="0.45"/></linearGradient>
+    <linearGradient id="ip-capGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#443C55"/><stop offset="0.5" stop-color="#2C2539"/><stop offset="1" stop-color="#1B1524"/></linearGradient>
+    <clipPath id="ip-bottleClip"><path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z"/></clipPath>
+    <filter id="ip-bottleShadow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="13"/></filter>
+
+    <symbol id="inkpod-icon" viewBox="0 0 1024 1024">
+      <g transform="translate(56,56)">
+        <path d="M 584 0 c 114.8108 0 172.2161 0 216.0681 22.3437 a 205.0000 205.0000 0 0 1 89.5883 89.5883 c 22.3437 43.8519 22.3437 101.2573 22.3437 216.0681 L 912 584 c 0 114.8108 0 172.2161 -22.3437 216.0681 a 205.0000 205.0000 0 0 1 -89.5883 89.5883 c -43.8519 22.3437 -101.2573 22.3437 -216.0681 22.3437 L 328 912 c -114.8108 0 -172.2161 0 -216.0681 -22.3437 a 205.0000 205.0000 0 0 1 -89.5883 -89.5883 c -22.3437 -43.8519 -22.3437 -101.2573 -22.3437 -216.0681 L 0 328 c 0 -114.8108 0 -172.2161 22.3437 -216.0681 a 205.0000 205.0000 0 0 1 89.5883 -89.5883 c 43.8519 -22.3437 101.2573 -22.3437 216.0681 -22.3437 Z" fill="url(#ip-baseGradient)"/>
+        <g clip-path="url(#ip-iconClip)"><ellipse cx="456" cy="146" rx="365" ry="219" fill="url(#ip-specular)"/></g>
+        <path d="M 584 0 c 114.8108 0 172.2161 0 216.0681 22.3437 a 205.0000 205.0000 0 0 1 89.5883 89.5883 c 22.3437 43.8519 22.3437 101.2573 22.3437 216.0681 L 912 584 c 0 114.8108 0 172.2161 -22.3437 216.0681 a 205.0000 205.0000 0 0 1 -89.5883 89.5883 c -43.8519 22.3437 -101.2573 22.3437 -216.0681 22.3437 L 328 912 c -114.8108 0 -172.2161 0 -216.0681 -22.3437 a 205.0000 205.0000 0 0 1 -89.5883 -89.5883 c -22.3437 -43.8519 -22.3437 -101.2573 -22.3437 -216.0681 L 0 328 c 0 -114.8108 0 -172.2161 22.3437 -216.0681 a 205.0000 205.0000 0 0 1 89.5883 -89.5883 c 43.8519 -22.3437 101.2573 -22.3437 216.0681 -22.3437 Z" fill="none" stroke="url(#ip-rimGradient)" stroke-width="3"/>
+        <g clip-path="url(#ip-iconClip)"><g transform="translate(456,510) scale(1.6) translate(-456,-510)"><path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="#1F0F3C" opacity="0.34" filter="url(#ip-bottleShadow)" transform="translate(6,18)"/></g></g>
+        <g transform="translate(456,510) scale(1.6) translate(-456,-510)">
+          <path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="url(#ip-glassBody)"/>
+          <g clip-path="url(#ip-bottleClip)">
+            <rect x="280" y="494" width="352" height="256" fill="url(#ip-inkRainbow)"/>
+            <rect x="280" y="620" width="352" height="120" fill="url(#ip-inkDepth)"/>
+            <ellipse cx="456" cy="494" rx="151" ry="16" fill="#FFFFFF" opacity="0.30"/>
+            <ellipse cx="456" cy="500" rx="151" ry="12" fill="#101018" opacity="0.12"/>
+            <rect x="300" y="300" width="312" height="200" fill="#FFFFFF" opacity="0.12"/>
+            <rect x="342" y="470" width="16" height="205" rx="8" fill="#FFFFFF" opacity="0.50"/>
+            <rect x="368" y="500" width="7" height="150" rx="3.5" fill="#FFFFFF" opacity="0.32"/>
+            <circle cx="512" cy="560" r="9" fill="#FFFFFF" opacity="0.30"/>
+            <ellipse cx="372" cy="430" rx="34" ry="20" fill="#FFFFFF" opacity="0.35" transform="rotate(-32 372 430)"/>
+          </g>
+          <path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="none" stroke="url(#ip-bottleRim)" stroke-width="2.4"/>
+          <path d="M 402 380 A 14 14 0 0 1 416 366 L 496 366 A 14 14 0 0 1 510 380 L 510 452 C 560 452 612 470 612 502 L 612 674 A 46 46 0 0 1 566 720 L 346 720 A 46 46 0 0 1 300 674 L 300 502 C 300 470 352 452 402 452 L 402 380 Z" fill="none" stroke="#7A7290" stroke-opacity="0.35" stroke-width="1.1"/>
+          <rect x="380" y="300" width="152" height="74" rx="22" fill="url(#ip-capGrad)"/>
+          <rect x="396" y="311" width="120" height="12" rx="6" fill="#6A6280" opacity="0.55"/>
+          <rect x="380" y="364" width="152" height="10" rx="5" fill="#130E1C" opacity="0.5"/>
+        </g>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="aurora" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
+
+<!-- ================= nav ================= -->
+<nav class="nav" id="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top">
+      <svg class="app-icon" aria-hidden="true"><use href="#inkpod-icon"/></svg>
+      inkpod
+    </a>
+    <div class="nav-links">
+      <a href="#features" data-i18n="nav.features">機能</a>
+      <a href="#concept" data-i18n="nav.concept">レイヤーとプレーン</a>
+      <a href="#workflow" data-i18n="nav.workflow">ワークフロー</a>
+      <a href="#tech" data-i18n="nav.tech">テクノロジー</a>
+      <a href="#download" data-i18n="nav.download">ダウンロード</a>
+    </div>
+    <div class="nav-ctrl">
+      <div class="lang-toggle" role="group" aria-label="Language / 言語">
+        <button type="button" data-lang="ja" class="active">JA</button>
+        <button type="button" data-lang="en">EN</button>
+      </div>
+      <button type="button" class="icon-btn" id="theme-btn" aria-label="Toggle theme">
+        <svg class="only-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="only-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <a class="icon-btn" href="https://github.com/shuichi/inkpod" target="_blank" rel="noopener" aria-label="GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .3a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.74.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .3Z"/></svg>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<main id="top">
+
+  <!-- ================= hero ================= -->
+  <header class="hero">
+    <div class="wrap">
+      <svg class="app-icon" role="img" aria-label="inkpod"><use href="#inkpod-icon"/></svg>
+      <div class="badge" data-i18n="hero.badge">Windows 11 ネイティブ · x64 / ARM64</div>
+      <h1 data-i18n="hero.title">線を守り、<span class="ink-text">色を解き放つ</span>。</h1>
+      <p class="sub" data-i18n="hero.sub">inkpod は、アニメーション彩色のための非破壊ペイントエンジン。GPU アクセラレーションとベクターストロークに対応した Rust Core を、Windows 11 ネイティブアプリとして。</p>
+      <div class="cta-row">
+        <a class="btn primary" href="#download">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span data-i18n="hero.cta1">ダウンロード</span>
+        </a>
+        <a class="btn ghost" href="#features"><span data-i18n="hero.cta2">機能を見る</span></a>
+      </div>
+      <p class="note" data-i18n="hero.note">ポータブル ZIP · インストール不要 · 追加ランタイム不要</p>
+
+      <div class="hero-visual reveal">
+        <div class="app-window">
+          <div class="app-titlebar">
+            <svg class="app-icon" aria-hidden="true"><use href="#inkpod-icon"/></svg>
+            <span data-i18n="hero.win.title">inkpod — 無題セル 1*</span>
+            <span class="caption-btns" aria-hidden="true">
+              <svg viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.4" fill="none"><line x1="3" y1="8.5" x2="13" y2="8.5"/></svg>
+              <svg viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.4" fill="none"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg>
+              <svg viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.4" fill="none"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>
+            </span>
+          </div>
+          <div class="shot">
+            <div class="shot-inner">
+              <svg class="app-icon" aria-hidden="true"><use href="#inkpod-icon"/></svg>
+              <span data-i18n="ph.screenshot">スクリーンショット（準備中）</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= stats ================= -->
+  <div class="stats">
+    <div class="wrap">
+      <div class="stats-grid">
+        <div class="stat reveal"><b data-i18n="stats.1.v">8 / 16 bit</b><span data-i18n="stats.1.k">2値・グレースケール・RGBA</span></div>
+        <div class="stat reveal" data-d="80"><b data-i18n="stats.2.v">ラスター + ベクター</b><span data-i18n="stats.2.k">ハイブリッド彩色レイヤー</span></div>
+        <div class="stat reveal" data-d="160"><b data-i18n="stats.3.v">3 スレッド</b><span data-i18n="stats.3.k">UI / エンジン / 描画を分離</span></div>
+        <div class="stat reveal" data-d="240"><b data-i18n="stats.4.v">bit-exact</b><span data-i18n="stats.4.k">決定的リプレイ（x64 / ARM64）</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= features ================= -->
+  <section id="features">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <span class="eyebrow" data-i18n="features.eyebrow">機能</span>
+        <h2 data-i18n="features.title">彩色のために、すべてを設計。</h2>
+        <p data-i18n="features.sub">セル彩色の現場で必要なものを、現代的なエンジンの上に。</p>
+      </div>
+
+      <div class="big-grid">
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <h3 data-i18n="bigf.1.t">主線保護</h3>
+          <p data-i18n="bigf.1.d">塗りつぶしもブラシも、主線プレーンには決して触れません。線画をフィル境界として表示したまま、色は彩色プレーンだけに置かれます。</p>
+        </div>
+        <div class="card reveal" data-d="90">
+          <div class="ico c-cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div>
+          <h3 data-i18n="bigf.2.t">レイヤー &amp; プレーン</h3>
+          <p data-i18n="bigf.2.d">2値・階調・ベクターの彩色データを、主線・彩色・色トレース・塗りのプレーンに分離して保持。レイヤーは合成の単位、プレーンは編集の単位です。</p>
+        </div>
+        <div class="card reveal" data-d="180">
+          <div class="ico c-pink"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></div>
+          <h3 data-i18n="bigf.3.t">賢いフィル</h3>
+          <p data-i18n="bigf.3.d">隙間閉じ、含み塗り、閉領域フィル、塗りあふれ検出。小さな線切れや色トレースがあっても、高速かつ安全に塗れます。</p>
+        </div>
+      </div>
+
+      <div class="small-grid">
+        <div class="card reveal">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
+          <h3 data-i18n="grid.1.t">描画ツール</h3>
+          <p data-i18n="grid.1.d">鉛筆、ブラシ、エアブラシ、直線・曲線・図形・折れ線。筆圧、決定的な手ブレ補正、自動消去に対応。</p>
+        </div>
+        <div class="card reveal" data-d="60">
+          <div class="ico c-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="4 3"/></svg></div>
+          <h3 data-i18n="grid.2.t">選択範囲</h3>
+          <p data-i18n="grid.2.d">矩形・楕円・投げ縄・折れ線・トレース・色指定。追加・削除・交差、拡張・縮小も自在に。</p>
+        </div>
+        <div class="card reveal" data-d="120">
+          <div class="ico c-amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="13" height="13" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v11"/></svg></div>
+          <h3 data-i18n="grid.3.t">ライトテーブル</h3>
+          <p data-i18n="grid.3.d">前後のセルを基準フレームで整列し、半透明で重ねて参照。距離に応じた不透明度ステップにも対応。</p>
+        </div>
+        <div class="card reveal" data-d="180">
+          <div class="ico c-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg></div>
+          <h3 data-i18n="grid.4.t">連番 &amp; モーションチェック</h3>
+          <p data-i18n="grid.4.d">連番セルを前後に切り替え、30 / 24 / 12 fps などでループ再生。動きを塗りながら確認できます。</p>
+        </div>
+        <div class="card reveal">
+          <div class="ico c-cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="9" cy="6" r="2" fill="var(--bg-2)"/><circle cx="15" cy="12" r="2" fill="var(--bg-2)"/><circle cx="7" cy="18" r="2" fill="var(--bg-2)"/></svg></div>
+          <h3 data-i18n="grid.5.t">フィルター &amp; 調整レイヤー</h3>
+          <p data-i18n="grid.5.d">色調カーブ、レベル補正、色相・彩度、カラーバランス。調整レイヤーで非破壊に適用。</p>
+        </div>
+        <div class="card reveal" data-d="60">
+          <div class="ico c-red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></div>
+          <h3 data-i18n="grid.6.t">バッチ処理</h3>
+          <p data-i18n="grid.6.d">色置換、連続フィル、線幅修正などを多量の連番セルへ一括適用。dry-run と原子的な出力で安全に。</p>
+        </div>
+        <div class="card reveal" data-d="120">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></div>
+          <h3 data-i18n="grid.7.t">履歴 &amp; 復元</h3>
+          <p data-i18n="grid.7.d">元に戻す／やり直し、複数段階ジャンプ、自動保存とクラッシュ復元。分岐した履歴も失われません。</p>
+        </div>
+        <div class="card reveal" data-d="180">
+          <div class="ico c-pink"><svg viewBox="0 0 24 24" fill="none" stroke="none"><rect x="3" y="3" width="8" height="8" rx="2" fill="#FF5FD5"/><rect x="13" y="3" width="8" height="8" rx="2" fill="#23C0FF"/><rect x="3" y="13" width="8" height="8" rx="2" fill="#22E0A6"/><rect x="13" y="13" width="8" height="8" rx="2" fill="#FFD23D"/></svg></div>
+          <h3 data-i18n="grid.8.t">カラーチャート</h3>
+          <p data-i18n="grid.8.d">色と名前を表で管理し、ページ・検索・ロックに対応。セルから一意色を抽出して自動生成も。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= concept: layers & planes ================= -->
+  <section id="concept">
+    <div class="wrap">
+      <div class="concept-grid">
+        <div class="concept-copy reveal">
+          <span class="eyebrow" data-i18n="concept.eyebrow">コンセプト</span>
+          <h2 data-i18n="concept.title">レイヤーの中に、プレーンがある。</h2>
+          <p data-i18n="concept.lead">inkpod の文書は「セル → レイヤー → プレーン」の階層で構成されます。レイヤーはセル画を重ねる合成の単位。プレーンは主線・彩色・色トレース・塗りを分離して保持する、最小の編集単位です。</p>
+          <div class="callout">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span data-i18n="concept.callout.t">主線保護は、構造で保証。</span>
+            </h3>
+            <p data-i18n="concept.callout.d">2値彩色レイヤーでは、主線プレーンをフィル境界として表示しながら、塗りつぶしとブラシは彩色プレーンだけに書き込みます。線画を壊す事故は、運用ではなく構造で防ぎます。</p>
+          </div>
+        </div>
+
+        <div class="doc-diagram reveal" data-d="120">
+          <div class="doc-cell-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+            <span data-i18n="concept.cell">セル（1 枚の文書）</span>
+          </div>
+          <div class="doc-layer active">
+            <div class="doc-layer-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span data-i18n="concept.layer1">2値彩色レイヤー</span>
+            </div>
+            <div class="doc-planes">
+              <div class="doc-plane">
+                <span class="swatch line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 18c3-8 6-11 8-11s2 5 4 5 3-3 4-6"/></svg></span>
+                <span class="grow" data-i18n="concept.plane1">主線プレーン</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <span class="tag lock" data-i18n="concept.tag.protected">保護</span>
+              </div>
+              <div class="doc-plane">
+                <span class="swatch paint"></span>
+                <span class="grow" data-i18n="concept.plane2">彩色プレーン</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                <span class="tag edit" data-i18n="concept.tag.editing">編集中</span>
+              </div>
+              <div class="doc-plane">
+                <span class="swatch raster"></span>
+                <span class="grow" data-i18n="concept.plane3">ラスタープレーン</span>
+              </div>
+            </div>
+          </div>
+          <div class="doc-layer dim">
+            <div class="doc-layer-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span data-i18n="concept.layer2">ベクター彩色レイヤー</span>
+            </div>
+          </div>
+          <div class="doc-layer dim">
+            <div class="doc-layer-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span data-i18n="concept.layer3">ラスター汎用レイヤー</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= workflow ================= -->
+  <section id="workflow">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <span class="eyebrow" data-i18n="workflow.eyebrow">ワークフロー</span>
+        <h2 data-i18n="workflow.title">アニメーターの手順に、そのまま。</h2>
+        <p data-i18n="workflow.sub">ライトテーブルからモーションチェックまで、一続きに。</p>
+      </div>
+
+      <div class="wf-row reveal">
+        <div class="wf-copy">
+          <div class="wf-num">01</div>
+          <h3 data-i18n="wf.1.t">ライトテーブルで前後を見ながら</h3>
+          <p data-i18n="wf.1.d">参照セルを基準フレームで整列して半透明表示。参照線を境界にしたフィルや、参照色のスポイトにも対応します。</p>
+        </div>
+        <div class="wf-shot">
+          <div class="shot rounded">
+            <div class="shot-inner">
+              <svg class="app-icon" aria-hidden="true"><use href="#inkpod-icon"/></svg>
+              <span data-i18n="ph.screenshot">スクリーンショット（準備中）</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="wf-row flip reveal">
+        <div class="wf-copy">
+          <div class="wf-num">02</div>
+          <h3 data-i18n="wf.2.t">隙間があっても、あふれない</h3>
+          <p data-i18n="wf.2.d">指定幅以下の線切れは仮想的に閉じてフィル。領域が外へ漏れれば塗りあふれを検出し、途中結果を残さず中断します。</p>
+        </div>
+        <div class="wf-shot">
+          <div class="shot rounded">
+            <div class="shot-inner">
+              <svg class="app-icon" aria-hidden="true"><use href="#inkpod-icon"/></svg>
+              <span data-i18n="ph.screenshot">スクリーンショット（準備中）</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="wf-row reveal">
+        <div class="wf-copy">
+          <div class="wf-num">03</div>
+          <h3 data-i18n="wf.3.t">塗ったら、すぐ動かす</h3>
+          <p data-i18n="wf.3.d">モーションチェックで連番をループ再生。FPS 切替、コマ送り、ライトテーブル込みの再生にも対応します。</p>
+        </div>
+        <div class="wf-shot">
+          <div class="shot rounded">
+            <div class="shot-inner">
+              <svg class="app-icon" aria-hidden="true"><use href="#inkpod-icon"/></svg>
+              <span data-i18n="ph.screenshot">スクリーンショット（準備中）</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= tech ================= -->
+  <section id="tech">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <span class="eyebrow" data-i18n="tech.eyebrow">テクノロジー</span>
+        <h2 data-i18n="tech.title">中身は、現代的。</h2>
+        <p data-i18n="tech.sub">長期保守を前提に、エンジンとアプリを分離した設計。</p>
+      </div>
+      <div class="tech-grid">
+        <div class="card reveal">
+          <div class="ico c-red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg></div>
+          <div>
+            <h3 data-i18n="tech.1.t">Rust Core</h3>
+            <p data-i18n="tech.1.d">文書モデル、画像処理、履歴、保存形式は OS 非依存の Rust。同じ入力からは x64 でも ARM64 でも bit-exact に同じ結果を返します。</p>
+            <span class="tech-chip">inkpod-core · extern "C" ABI</span>
+          </div>
+        </div>
+        <div class="card reveal" data-d="80">
+          <div class="ico c-cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+          <div>
+            <h3 data-i18n="tech.2.t">Windows 11 ネイティブ</h3>
+            <p data-i18n="tech.2.d">Win32 + Direct3D 11 + Direct2D。UI・エンジン・描画は独立スレッドで動作し、ストロークはペンを離す前からプレビューされます。</p>
+            <span class="tech-chip">Win32 · D3D11 · Direct2D · DirectWrite</span>
+          </div>
+        </div>
+        <div class="card reveal" data-d="160">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
+          <div>
+            <h3 data-i18n="tech.3.t">ジャーナル型フォーマット</h3>
+            <p data-i18n="tech.3.d">.inkpod は画像のコピーではなく「原点 + アセット + 手続きの履歴」を保存。原子的な保存と復元に対応し、履歴も分岐も失われません。</p>
+            <span class="tech-chip">.inkpod v10 · atomic save · recovery</span>
+          </div>
+        </div>
+        <div class="card reveal" data-d="240">
+          <div class="ico c-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg></div>
+          <div>
+            <h3 data-i18n="tech.4.t">スパースタイル &amp; キャッシュ</h3>
+            <p data-i18n="tech.4.d">大画像はタイル単位で遅延割当・copy-on-write。変更されたタイルだけを再合成し、パン／ズームはキャッシュを再利用します。</p>
+            <span class="tech-chip">sparse tiles · COW · revision-max cache</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="formats reveal">
+        <div class="fl" data-i18n="formats.label">対応フォーマット</div>
+        <div class="fmt-row">
+          <span class="fmt native">.inkpod v10</span>
+          <span class="fmt">PNG</span>
+          <span class="fmt">TIFF</span>
+          <span class="fmt">TGA</span>
+          <span class="fmt">BMP</span>
+        </div>
+        <div class="fn" data-i18n="formats.note">8/16 bit、アルファチャンネル、DPI メタデータに対応</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= download ================= -->
+  <section id="download">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <span class="eyebrow" data-i18n="dl.eyebrow">ダウンロード</span>
+        <h2 data-i18n="dl.title">今すぐ、塗りはじめよう。</h2>
+        <p data-i18n="dl.sub">ZIP を展開して inkpod.exe を起動するだけ。インストーラーも、追加ランタイムも不要です。</p>
+      </div>
+      <div class="dl-grid">
+        <div class="dl-card reveal">
+          <span class="arch">x64</span>
+          <h3 data-i18n="dl.x64.t">Windows x64</h3>
+          <div class="kind" data-i18n="dl.kind">ポータブル ZIP</div>
+          <div class="file">Inkpod-0.1.0-windows-x64.zip</div>
+          <a class="btn primary" href="#" aria-disabled="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span data-i18n="dl.btn">ダウンロード</span>
+          </a>
+        </div>
+        <div class="dl-card reveal" data-d="100">
+          <span class="arch">ARM64</span>
+          <h3 data-i18n="dl.arm.t">Windows ARM64</h3>
+          <div class="kind" data-i18n="dl.kind">ポータブル ZIP</div>
+          <div class="file">Inkpod-0.1.0-windows-arm.zip</div>
+          <a class="btn primary" href="#" aria-disabled="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span data-i18n="dl.btn">ダウンロード</span>
+          </a>
+        </div>
+      </div>
+      <div class="dl-notes reveal">
+        <p data-i18n="dl.req">動作環境: Windows 11 · Direct3D 11 対応 GPU</p>
+        <p data-i18n="dl.msix">MSIX パッケージと過去のリリースは <a href="https://github.com/shuichi/inkpod/releases" target="_blank" rel="noopener">GitHub Releases</a> から。</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ================= footer ================= -->
+<footer>
+  <div class="wrap">
+    <div class="foot-inner">
+      <div>
+        <div class="foot-brand">
+          <svg class="app-icon" aria-hidden="true"><use href="#inkpod-icon"/></svg>
+          inkpod
+        </div>
+        <div class="foot-tag" data-i18n="footer.tag">アニメーション彩色のための非破壊ペイントエンジン</div>
+      </div>
+      <div class="foot-links">
+        <a href="https://github.com/shuichi/inkpod" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/shuichi/inkpod/blob/main/SPEC.md" target="_blank" rel="noopener" data-i18n="footer.spec">機能仕様</a>
+        <a href="https://github.com/shuichi/inkpod/blob/main/docs/implementation-status.md" target="_blank" rel="noopener" data-i18n="footer.status">実装状況</a>
+      </div>
+      <div class="foot-copy" data-i18n="footer.rights">© 2026 inkpod project</div>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ============================================================
+   i18n
+   ============================================================ */
+const I18N = {
+  ja: {
+    "meta.title": "inkpod — アニメーション彩色のための非破壊ペイントエンジン",
+    "meta.desc": "inkpod は、GPU アクセラレーションとベクターストロークに対応した、アニメーション彩色向けの非破壊ペイントエンジン。Windows 11 ネイティブ。",
+    "nav.features": "機能",
+    "nav.concept": "レイヤーとプレーン",
+    "nav.workflow": "ワークフロー",
+    "nav.tech": "テクノロジー",
+    "nav.download": "ダウンロード",
+    "hero.badge": "Windows 11 ネイティブ · x64 / ARM64",
+    "hero.title": "線を守り、<span class=\"ink-text\">色を解き放つ</span>。",
+    "hero.sub": "inkpod は、アニメーション彩色のための非破壊ペイントエンジン。GPU アクセラレーションとベクターストロークに対応した Rust Core を、Windows 11 ネイティブアプリとして。",
+    "hero.cta1": "ダウンロード",
+    "hero.cta2": "機能を見る",
+    "hero.note": "ポータブル ZIP · インストール不要 · 追加ランタイム不要",
+    "hero.win.title": "inkpod — 無題セル 1*",
+    "ph.screenshot": "スクリーンショット（準備中）",
+    "stats.1.v": "8 / 16 bit",
+    "stats.1.k": "2値・グレースケール・RGBA",
+    "stats.2.v": "ラスター + ベクター",
+    "stats.2.k": "ハイブリッド彩色レイヤー",
+    "stats.3.v": "3 スレッド",
+    "stats.3.k": "UI / エンジン / 描画を分離",
+    "stats.4.v": "bit-exact",
+    "stats.4.k": "決定的リプレイ（x64 / ARM64）",
+    "features.eyebrow": "機能",
+    "features.title": "彩色のために、すべてを設計。",
+    "features.sub": "セル彩色の現場で必要なものを、現代的なエンジンの上に。",
+    "bigf.1.t": "主線保護",
+    "bigf.1.d": "塗りつぶしもブラシも、主線プレーンには決して触れません。線画をフィル境界として表示したまま、色は彩色プレーンだけに置かれます。",
+    "bigf.2.t": "レイヤー &amp; プレーン",
+    "bigf.2.d": "2値・階調・ベクターの彩色データを、主線・彩色・色トレース・塗りのプレーンに分離して保持。レイヤーは合成の単位、プレーンは編集の単位です。",
+    "bigf.3.t": "賢いフィル",
+    "bigf.3.d": "隙間閉じ、含み塗り、閉領域フィル、塗りあふれ検出。小さな線切れや色トレースがあっても、高速かつ安全に塗れます。",
+    "grid.1.t": "描画ツール",
+    "grid.1.d": "鉛筆、ブラシ、エアブラシ、直線・曲線・図形・折れ線。筆圧、決定的な手ブレ補正、自動消去に対応。",
+    "grid.2.t": "選択範囲",
+    "grid.2.d": "矩形・楕円・投げ縄・折れ線・トレース・色指定。追加・削除・交差、拡張・縮小も自在に。",
+    "grid.3.t": "ライトテーブル",
+    "grid.3.d": "前後のセルを基準フレームで整列し、半透明で重ねて参照。距離に応じた不透明度ステップにも対応。",
+    "grid.4.t": "連番 &amp; モーションチェック",
+    "grid.4.d": "連番セルを前後に切り替え、30 / 24 / 12 fps などでループ再生。動きを塗りながら確認できます。",
+    "grid.5.t": "フィルター &amp; 調整レイヤー",
+    "grid.5.d": "色調カーブ、レベル補正、色相・彩度、カラーバランス。調整レイヤーで非破壊に適用。",
+    "grid.6.t": "バッチ処理",
+    "grid.6.d": "色置換、連続フィル、線幅修正などを多量の連番セルへ一括適用。dry-run と原子的な出力で安全に。",
+    "grid.7.t": "履歴 &amp; 復元",
+    "grid.7.d": "元に戻す／やり直し、複数段階ジャンプ、自動保存とクラッシュ復元。分岐した履歴も失われません。",
+    "grid.8.t": "カラーチャート",
+    "grid.8.d": "色と名前を表で管理し、ページ・検索・ロックに対応。セルから一意色を抽出して自動生成も。",
+    "concept.eyebrow": "コンセプト",
+    "concept.title": "レイヤーの中に、プレーンがある。",
+    "concept.lead": "inkpod の文書は「セル → レイヤー → プレーン」の階層で構成されます。レイヤーはセル画を重ねる合成の単位。プレーンは主線・彩色・色トレース・塗りを分離して保持する、最小の編集単位です。",
+    "concept.cell": "セル（1 枚の文書）",
+    "concept.layer1": "2値彩色レイヤー",
+    "concept.layer2": "ベクター彩色レイヤー",
+    "concept.layer3": "ラスター汎用レイヤー",
+    "concept.plane1": "主線プレーン",
+    "concept.plane2": "彩色プレーン",
+    "concept.plane3": "ラスタープレーン",
+    "concept.tag.protected": "保護",
+    "concept.tag.editing": "編集中",
+    "concept.callout.t": "主線保護は、構造で保証。",
+    "concept.callout.d": "2値彩色レイヤーでは、主線プレーンをフィル境界として表示しながら、塗りつぶしとブラシは彩色プレーンだけに書き込みます。線画を壊す事故は、運用ではなく構造で防ぎます。",
+    "workflow.eyebrow": "ワークフロー",
+    "workflow.title": "アニメーターの手順に、そのまま。",
+    "workflow.sub": "ライトテーブルからモーションチェックまで、一続きに。",
+    "wf.1.t": "ライトテーブルで前後を見ながら",
+    "wf.1.d": "参照セルを基準フレームで整列して半透明表示。参照線を境界にしたフィルや、参照色のスポイトにも対応します。",
+    "wf.2.t": "隙間があっても、あふれない",
+    "wf.2.d": "指定幅以下の線切れは仮想的に閉じてフィル。領域が外へ漏れれば塗りあふれを検出し、途中結果を残さず中断します。",
+    "wf.3.t": "塗ったら、すぐ動かす",
+    "wf.3.d": "モーションチェックで連番をループ再生。FPS 切替、コマ送り、ライトテーブル込みの再生にも対応します。",
+    "tech.eyebrow": "テクノロジー",
+    "tech.title": "中身は、現代的。",
+    "tech.sub": "長期保守を前提に、エンジンとアプリを分離した設計。",
+    "tech.1.t": "Rust Core",
+    "tech.1.d": "文書モデル、画像処理、履歴、保存形式は OS 非依存の Rust。同じ入力からは x64 でも ARM64 でも bit-exact に同じ結果を返します。",
+    "tech.2.t": "Windows 11 ネイティブ",
+    "tech.2.d": "Win32 + Direct3D 11 + Direct2D。UI・エンジン・描画は独立スレッドで動作し、ストロークはペンを離す前からプレビューされます。",
+    "tech.3.t": "ジャーナル型フォーマット",
+    "tech.3.d": ".inkpod は画像のコピーではなく「原点 + アセット + 手続きの履歴」を保存。原子的な保存と復元に対応し、履歴も分岐も失われません。",
+    "tech.4.t": "スパースタイル &amp; キャッシュ",
+    "tech.4.d": "大画像はタイル単位で遅延割当・copy-on-write。変更されたタイルだけを再合成し、パン／ズームはキャッシュを再利用します。",
+    "formats.label": "対応フォーマット",
+    "formats.note": "8/16 bit、アルファチャンネル、DPI メタデータに対応",
+    "dl.eyebrow": "ダウンロード",
+    "dl.title": "今すぐ、塗りはじめよう。",
+    "dl.sub": "ZIP を展開して inkpod.exe を起動するだけ。インストーラーも、追加ランタイムも不要です。",
+    "dl.x64.t": "Windows x64",
+    "dl.arm.t": "Windows ARM64",
+    "dl.kind": "ポータブル ZIP",
+    "dl.btn": "ダウンロード",
+    "dl.req": "動作環境: Windows 11 · Direct3D 11 対応 GPU",
+    "dl.msix": "MSIX パッケージと過去のリリースは <a href=\"https://github.com/shuichi/inkpod/releases\" target=\"_blank\" rel=\"noopener\">GitHub Releases</a> から。",
+    "footer.tag": "アニメーション彩色のための非破壊ペイントエンジン",
+    "footer.spec": "機能仕様",
+    "footer.status": "実装状況",
+    "footer.rights": "© 2026 inkpod project"
+  },
+  en: {
+    "meta.title": "inkpod — A non-destructive paint engine for animation coloring",
+    "meta.desc": "inkpod is a GPU-accelerated, non-destructive paint engine for animation coloring with vector strokes. Native on Windows 11.",
+    "nav.features": "Features",
+    "nav.concept": "Layers &amp; Planes",
+    "nav.workflow": "Workflow",
+    "nav.tech": "Technology",
+    "nav.download": "Download",
+    "hero.badge": "Native on Windows 11 · x64 / ARM64",
+    "hero.title": "Protect the line.<br><span class=\"ink-text\">Unleash the color.</span>",
+    "hero.sub": "inkpod is a non-destructive paint engine built for animation coloring — a GPU-accelerated, vector-capable Rust core, shipped as a native Windows 11 app.",
+    "hero.cta1": "Download",
+    "hero.cta2": "Explore features",
+    "hero.note": "Portable ZIP · no installer · no extra runtimes",
+    "hero.win.title": "inkpod — Untitled Cell 1*",
+    "ph.screenshot": "Screenshot coming soon",
+    "stats.1.v": "8 / 16 bit",
+    "stats.1.k": "Binary, grayscale &amp; RGBA",
+    "stats.2.v": "Raster + Vector",
+    "stats.2.k": "Hybrid coloring layers",
+    "stats.3.v": "3 threads",
+    "stats.3.k": "UI / engine / renderer",
+    "stats.4.v": "bit-exact",
+    "stats.4.k": "Deterministic replay (x64 / ARM64)",
+    "features.eyebrow": "Features",
+    "features.title": "Everything, designed for coloring.",
+    "features.sub": "The tools a coloring desk actually needs — on top of a modern engine.",
+    "bigf.1.t": "Line protection",
+    "bigf.1.d": "Fills and brushes never touch the line-art plane. The drawing stays visible as a fill boundary while color lands only on the paint plane.",
+    "bigf.2.t": "Layers &amp; planes",
+    "bigf.2.d": "Binary, grayscale and vector coloring data, split into line, paint, color-trace and fill planes. Layers composite; planes are what you edit.",
+    "bigf.3.t": "Smart fills",
+    "bigf.3.d": "Gap closing, inclusion fill, closed-region fill and overflow detection. Paint fast and safely — even over broken lines and color traces.",
+    "grid.1.t": "Drawing tools",
+    "grid.1.d": "Pencil, brush, airbrush, lines, curves, shapes and polylines. Pressure, deterministic smoothing and auto-erase included.",
+    "grid.2.t": "Selections",
+    "grid.2.d": "Rectangle, ellipse, lasso, polyline, trace brush and by-color. Add, subtract, intersect, expand and shrink freely.",
+    "grid.3.t": "Light table",
+    "grid.3.d": "Align neighboring cells on the registration frame and overlay them translucently — with distance-based opacity steps.",
+    "grid.4.t": "Sequences &amp; motion check",
+    "grid.4.d": "Flip through numbered cells and loop-play at 30 / 24 / 12 fps to check motion while you paint.",
+    "grid.5.t": "Filters &amp; adjustment layers",
+    "grid.5.d": "Tone curves, levels, hue/saturation and color balance — applied non-destructively as adjustment layers.",
+    "grid.6.t": "Batch processing",
+    "grid.6.d": "Apply color replacement, continuous fill, line-width fixes and more across whole sequences — with dry-runs and atomic output.",
+    "grid.7.t": "History &amp; recovery",
+    "grid.7.d": "Undo/redo, multi-step jumps, autosave and crash recovery. Even divergent history branches are preserved.",
+    "grid.8.t": "Color charts",
+    "grid.8.d": "Manage colors and names in searchable, lockable pages — or auto-generate a chart from a painted cell.",
+    "concept.eyebrow": "Concept",
+    "concept.title": "Planes live inside layers.",
+    "concept.lead": "An inkpod document is structured as cell → layer → plane. Layers are the units you composite; planes are the smallest units you edit — line art, paint, color trace and fill are kept apart.",
+    "concept.cell": "Cell (one document)",
+    "concept.layer1": "Binary coloring layer",
+    "concept.layer2": "Vector coloring layer",
+    "concept.layer3": "General raster layer",
+    "concept.plane1": "Line-art plane",
+    "concept.plane2": "Paint plane",
+    "concept.plane3": "Raster plane",
+    "concept.tag.protected": "PROTECTED",
+    "concept.tag.editing": "EDITING",
+    "concept.callout.t": "Line protection, guaranteed by structure.",
+    "concept.callout.d": "In a binary coloring layer, the line-art plane is displayed as a fill boundary while fills and brushes write only to the paint plane. Breaking the drawing isn't a mistake you can make — the structure forbids it.",
+    "workflow.eyebrow": "Workflow",
+    "workflow.title": "Made for how animators actually work.",
+    "workflow.sub": "From light table to motion check, in one flow.",
+    "wf.1.t": "Reference neighbors on the light table",
+    "wf.1.d": "Overlay reference cells aligned on the registration frame. Fill against reference lines, or pick colors straight from them.",
+    "wf.2.t": "Gaps don't leak",
+    "wf.2.d": "Line breaks under a chosen width are virtually closed before filling. If a region would leak, overflow detection aborts cleanly — no half-painted pixels.",
+    "wf.3.t": "Paint, then play",
+    "wf.3.d": "Loop-play the sequence with motion check: switchable FPS, frame stepping, and playback with the light table included.",
+    "tech.eyebrow": "Technology",
+    "tech.title": "Modern on the inside.",
+    "tech.sub": "An engine and an app, deliberately separated for the long haul.",
+    "tech.1.t": "Rust Core",
+    "tech.1.d": "Document model, imaging, history and persistence are OS-independent Rust. The same input yields bit-exact results on x64 and ARM64.",
+    "tech.2.t": "Native Windows 11",
+    "tech.2.d": "Win32 + Direct3D 11 + Direct2D. UI, engine and renderer run on separate threads — strokes preview before the pen lifts.",
+    "tech.3.t": "Journal-based format",
+    "tech.3.d": ".inkpod stores genesis + assets + a procedure journal, not a flat image. Saves are atomic, recovery is built in, and history — branches included — survives.",
+    "tech.4.t": "Sparse tiles &amp; caching",
+    "tech.4.d": "Large images use lazily-allocated, copy-on-write tiles. Only changed tiles recompose; pan and zoom reuse the cache.",
+    "formats.label": "Supported formats",
+    "formats.note": "8/16 bit, alpha channel and DPI metadata",
+    "dl.eyebrow": "Download",
+    "dl.title": "Start painting today.",
+    "dl.sub": "Unzip and run inkpod.exe. No installer, no extra runtimes.",
+    "dl.x64.t": "Windows x64",
+    "dl.arm.t": "Windows ARM64",
+    "dl.kind": "Portable ZIP",
+    "dl.btn": "Download",
+    "dl.req": "Requires Windows 11 · a Direct3D 11 capable GPU",
+    "dl.msix": "MSIX packages and past releases are on <a href=\"https://github.com/shuichi/inkpod/releases\" target=\"_blank\" rel=\"noopener\">GitHub Releases</a>.",
+    "footer.tag": "A non-destructive paint engine for animation coloring",
+    "footer.spec": "Specification",
+    "footer.status": "Implementation status",
+    "footer.rights": "© 2026 inkpod project"
+  }
+};
+
+function applyLang(lang){
+  const dict = I18N[lang] || I18N.ja;
+  document.documentElement.lang = lang;
+  try{ localStorage.setItem('inkpod-lang', lang); }catch(e){}
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const k = el.getAttribute('data-i18n');
+    if(dict[k] !== undefined) el.innerHTML = dict[k];
+  });
+  document.title = dict['meta.title'];
+  const md = document.querySelector('meta[name="description"]');
+  if(md) md.setAttribute('content', dict['meta.desc']);
+  document.querySelectorAll('.lang-toggle button').forEach(b => {
+    b.classList.toggle('active', b.dataset.lang === lang);
+  });
+}
+
+/* ============================================================
+   theme
+   ============================================================ */
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  try{ localStorage.setItem('inkpod-theme', t); }catch(e){}
+}
+document.getElementById('theme-btn').addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme');
+  applyTheme(cur === 'dark' ? 'light' : 'dark');
+});
+document.querySelectorAll('.lang-toggle button').forEach(b => {
+  b.addEventListener('click', () => applyLang(b.dataset.lang));
+});
+
+/* 初期言語: 保存値 > ブラウザ言語 */
+(function(){
+  let lang = null;
+  try{ lang = localStorage.getItem('inkpod-lang'); }catch(e){}
+  if(!lang) lang = (navigator.language || 'ja').toLowerCase().startsWith('ja') ? 'ja' : 'en';
+  applyLang(lang);
+})();
+
+/* ============================================================
+   favicon (簡略版アイコンを data URI で生成)
+   ============================================================ */
+(function(){
+  const fav = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='b' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#9570D9'/><stop offset='1' stop-color='#513183'/></linearGradient><linearGradient id='r' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#FF5FD5'/><stop offset='.35' stop-color='#23C0FF'/><stop offset='.65' stop-color='#22E0A6'/><stop offset='1' stop-color='#FFD23D'/></linearGradient></defs><rect width='64' height='64' rx='15' fill='url(#b)'/><path d='M26 15h12a2 2 0 0 1 2 2v7c6 1 10 4 10 8v16a6 6 0 0 1-6 6H20a6 6 0 0 1-6-6V32c0-4 4-7 10-8v-7a2 2 0 0 1 2-2Z' fill='#E7E3F2'/><path d='M14 34h36v14a6 6 0 0 1-6 6H20a6 6 0 0 1-6-6Z' fill='url(#r)'/><rect x='23' y='12' width='18' height='9' rx='3.5' fill='#2C2539'/></svg>";
+  document.getElementById('favicon').href = 'data:image/svg+xml,' + encodeURIComponent(fav);
+})();
+
+/* ============================================================
+   scroll reveal + nav border
+   ============================================================ */
+(function(){
+  const els = document.querySelectorAll('.reveal');
+  els.forEach(el => {
+    const d = el.getAttribute('data-d');
+    if(d) el.style.transitionDelay = d + 'ms';
+  });
+  if('IntersectionObserver' in window){
+    const io = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.12 });
+    els.forEach(el => io.observe(el));
+  }else{
+    els.forEach(el => el.classList.add('in'));
+  }
+  const nav = document.getElementById('nav');
+  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 10);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+</script>
+</body>
+</html>
