@@ -51,6 +51,13 @@ int main() {
         return 4;
     }
 
+    const wchar_t* portable[]{L"inkpod.exe", L"--portable-smoke-test"};
+    if (Parse(portable, 2, options) != LaunchParseStatus::Ok
+        || options.mode != LaunchMode::PortableSmoke
+        || !options.document_paths.empty()) {
+        return 16;
+    }
+
     const wchar_t* performance[]{
         L"inkpod.exe", L"--performance-smoke-test"};
     if (Parse(performance, 2, options) != LaunchParseStatus::Ok
@@ -109,6 +116,13 @@ int main() {
     if (Parse(conflicting_performance, 3, options)
         != LaunchParseStatus::InvalidArguments) {
         return 15;
+    }
+
+    const wchar_t* conflicting_portable[]{
+        L"inkpod.exe", L"--portable-smoke-test", L"--abi-smoke-test"};
+    if (Parse(conflicting_portable, 3, options)
+        != LaunchParseStatus::InvalidArguments) {
+        return 17;
     }
 
     const wchar_t* new_window[]{

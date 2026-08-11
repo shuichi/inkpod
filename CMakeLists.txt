@@ -664,6 +664,7 @@ if(WIN32)
         apps/windows/ui/workspace_layout.cpp
         apps/windows/ui/workspace_layout.h
         tests/abi_smoke.cpp
+        tests/portable_smoke.cpp
         $<TARGET_OBJECTS:inkpod_header_c11>)
     target_include_directories(inkpod PRIVATE
         "${CMAKE_SOURCE_DIR}/apps/windows"
@@ -815,7 +816,7 @@ if(WIN32)
 
     set(INKPOD_PORTABLE_TEST_ARGUMENTS)
     if(INKPOD_WINDOWS_ARCHITECTURE STREQUAL "x64")
-        set(INKPOD_PORTABLE_TEST_ARGUMENTS -RunAbiSmoke)
+        set(INKPOD_PORTABLE_TEST_ARGUMENTS -RunPortableSmoke)
     endif()
     add_test(
         NAME inkpod_windows_portable_zip_payload_smoke

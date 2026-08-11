@@ -10,6 +10,7 @@ enum class LaunchMode {
     ApplicationSmoke,
     PerformanceSmoke,
     AbiSmoke,
+    PortableSmoke,
 };
 
 enum class LaunchParseStatus {

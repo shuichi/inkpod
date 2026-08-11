@@ -107,8 +107,11 @@ Packaging depends on the same PE check, so a dynamic-CRT executable cannot
 produce an MSIX or portable ZIP.
 `inkpod_windows_portable_zip_payload_smoke` verifies the exact ZIP name, entry
 count/casing/root placement, source hashes, PE architecture, embedded version,
-and an extracted x64 `--abi-smoke-test`. Hosted CI runs these checks for Debug
-and Release.
+and an extracted x64 `--portable-smoke-test`. The lightweight portable smoke
+proves that the packaged executable loads outside the build tree and can query
+the Rust ABI version and create/destroy a Core. The full `--abi-smoke-test`
+remains a separate CTest and is not repeated by the ZIP check. Hosted CI runs
+these checks for Debug and Release.
 
 `scripts/publish-windows-release.ps1` validates both Release executables and ZIPs,
 creates a three-part `v<version>` tag, and uploads the x64 and ARM assets rather

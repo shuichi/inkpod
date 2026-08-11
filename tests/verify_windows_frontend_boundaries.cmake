@@ -120,6 +120,7 @@ foreach(required_launch_token IN ITEMS
         "--smoke-test"
         "--performance-smoke-test"
         "--abi-smoke-test"
+        "--portable-smoke-test"
         "--new-window")
     string(FIND "${launch_text}" "${required_launch_token}" token_offset)
     if(token_offset LESS 0)
@@ -291,7 +292,8 @@ foreach(forbidden_runtime_token IN ITEMS
         "RunDrawingPersistenceSmoke"
         "RunBatchWorkflowSmoke"
         "--smoke-test"
-        "--abi-smoke-test")
+        "--abi-smoke-test"
+        "--portable-smoke-test")
     string(FIND "${runtime_text}" "${forbidden_runtime_token}" token_offset)
     if(NOT token_offset LESS 0)
         message(FATAL_ERROR

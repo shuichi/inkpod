@@ -6,6 +6,7 @@
 #include "launch_options.h"
 
 int InkpodRunAbiSmoke();
+int InkpodRunPortableSmoke();
 
 int APIENTRY wWinMain(
     HINSTANCE instance,
@@ -27,6 +28,9 @@ int APIENTRY wWinMain(
     }
     if (options.mode == inkpod::app::LaunchMode::AbiSmoke) {
         return InkpodRunAbiSmoke();
+    }
+    if (options.mode == inkpod::app::LaunchMode::PortableSmoke) {
+        return InkpodRunPortableSmoke();
     }
     const bool performance_smoke =
         options.mode == inkpod::app::LaunchMode::PerformanceSmoke;

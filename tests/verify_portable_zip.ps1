@@ -22,7 +22,7 @@ param(
     [ValidateSet('x64', 'arm64')]
     [string] $ExpectedArchitecture,
 
-    [switch] $RunAbiSmoke
+    [switch] $RunPortableSmoke
 )
 
 Set-StrictMode -Version Latest
@@ -211,16 +211,16 @@ try {
         throw "Portable executable version '$productVersion' does not match '$ExpectedVersion.<build>'."
     }
 
-    if ($RunAbiSmoke) {
+    if ($RunPortableSmoke) {
         if ($ExpectedArchitecture -ne 'x64') {
-            throw 'The portable ABI smoke is enabled only for the native x64 test target.'
+            throw 'The portable startup smoke is enabled only for the native x64 test target.'
         }
         $process = $null
         $exitCode = $null
         try {
             $process = Start-Process `
                 -FilePath $extractedExecutable `
-                -ArgumentList '--abi-smoke-test' `
+                -ArgumentList '--portable-smoke-test' `
                 -Wait `
                 -PassThru `
                 -WindowStyle Hidden
@@ -232,7 +232,7 @@ try {
             }
         }
         if ($exitCode -ne 0) {
-            throw "Portable inkpod ABI smoke failed with exit code $exitCode."
+            throw "Portable inkpod startup smoke failed with exit code $exitCode."
         }
     }
 }

@@ -50,6 +50,15 @@ LaunchParseStatus ParseLaunchArguments(
                 has_mode = true;
                 continue;
             }
+            if (!options_ended
+                && IsOption(argument, L"--portable-smoke-test")) {
+                if (has_mode) {
+                    return LaunchParseStatus::InvalidArguments;
+                }
+                parsed.mode = LaunchMode::PortableSmoke;
+                has_mode = true;
+                continue;
+            }
             if (!options_ended && IsOption(argument, L"--smoke-test")) {
                 if (has_mode) {
                     return LaunchParseStatus::InvalidArguments;
