@@ -13,6 +13,15 @@ use inkpod_image::{
 use std::sync::Arc;
 
 const INVOCATION_SCHEMA_VERSION: u16 = 2;
+const COMMIT_FLOATING_INVOCATION_SCHEMA_VERSION: u16 = 3;
+
+const fn invocation_schema_version(primitive_id: PrimitiveId) -> u16 {
+    if primitive_id.get() == PrimitiveId::COMMIT_FLOATING.get() {
+        COMMIT_FLOATING_INVOCATION_SCHEMA_VERSION
+    } else {
+        INVOCATION_SCHEMA_VERSION
+    }
+}
 const MAX_CANONICAL_GEOMETRY_BOUNDARY_POINTS: usize = MAX_GEOMETRY_POINTS * 32;
 type InvocationApply<'a> = Box<dyn FnOnce(&mut Core) -> Result<InvocationResult, CoreError> + 'a>;
 
@@ -486,7 +495,7 @@ impl RuntimeInvocation {
         ) {
             return Ok(None);
         }
-        if schema_version != INVOCATION_SCHEMA_VERSION {
+        if schema_version != invocation_schema_version(primitive_id) {
             return Err(CoreError::Format(
                 "persisted primitive invocation schema is unsupported".to_owned(),
             ));
@@ -1053,8 +1062,8 @@ impl CanonicalInvocation {
                 target,
             }),
             Self::CommitFloating { mut floating } => {
-                floating.transform.translate_x = canonical_f64_q16(floating.transform.translate_x)?;
-                floating.transform.translate_y = canonical_f64_q16(floating.transform.translate_y)?;
+                floating.transform.target_x = canonical_f64_q16(floating.transform.target_x)?;
+                floating.transform.target_y = canonical_f64_q16(floating.transform.target_y)?;
                 floating.transform.scale_x = canonical_f64_q16(floating.transform.scale_x)?;
                 floating.transform.scale_y = canonical_f64_q16(floating.transform.scale_y)?;
                 let turns = canonical_turns_from_degrees_f64(floating.transform.rotation_degrees)
@@ -2251,7 +2260,7 @@ impl Core {
         let procedure = Arc::new(CanonicalProcedure {
             procedure_id,
             primitive_id,
-            primitive_schema_version: INVOCATION_SCHEMA_VERSION,
+            primitive_schema_version: invocation_schema_version(primitive_id),
             replay_epoch: ReplayEpoch::CURRENT,
             base_state_id: self.current_state,
             committed_state_id: self.next_state,
@@ -2403,7 +2412,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::LIGHT_TABLE_REORDER_ITEM.get()
         || value == PrimitiveId::LIGHT_TABLE_BULK_REGISTER.get()
     {
-        Some(INVOCATION_SCHEMA_VERSION)
+        Some(invocation_schema_version(primitive_id))
     } else {
         None
     }
@@ -3219,8 +3228,16 @@ impl<'a> CanonicalReader<'a> {
                 vector_fills,
             });
         }
-        let translate_x = self.q16_f64()?;
-        let translate_y = self.q16_f64()?;
+        let anchor = match self.u32()? {
+            1 => FloatingTransformAnchor::TopLeft,
+            2 => FloatingTransformAnchor::TopRight,
+            3 => FloatingTransformAnchor::Center,
+            4 => FloatingTransformAnchor::BottomLeft,
+            5 => FloatingTransformAnchor::BottomRight,
+            _ => return Err(self.invalid("canonical floating anchor is invalid")),
+        };
+        let target_x = self.q16_f64()?;
+        let target_y = self.q16_f64()?;
         let scale_x = self.q16_f64()?;
         let scale_y = self.q16_f64()?;
         let rotation_degrees = f64::from(self.u32()?) * 360.0 / 4_294_967_296.0;
@@ -3232,8 +3249,9 @@ impl<'a> CanonicalReader<'a> {
             },
             destination,
             transform: FloatingTransform {
-                translate_x,
-                translate_y,
+                anchor,
+                target_x,
+                target_y,
                 scale_x,
                 scale_y,
                 rotation_degrees,
@@ -4129,8 +4147,9 @@ impl CanonicalWriter {
                 self.ids(&fill.boundary_path_ids)?;
             }
         }
-        self.q16_f64(floating.transform.translate_x)?;
-        self.q16_f64(floating.transform.translate_y)?;
+        self.u32(floating_transform_anchor_code(floating.transform.anchor));
+        self.q16_f64(floating.transform.target_x)?;
+        self.q16_f64(floating.transform.target_y)?;
         self.q16_f64(floating.transform.scale_x)?;
         self.q16_f64(floating.transform.scale_y)?;
         self.u32(
@@ -4468,6 +4487,16 @@ const fn resize_anchor_code(value: ResizeAnchor) -> u32 {
         ResizeAnchor::Center => 3,
         ResizeAnchor::BottomLeft => 4,
         ResizeAnchor::BottomRight => 5,
+    }
+}
+
+const fn floating_transform_anchor_code(value: FloatingTransformAnchor) -> u32 {
+    match value {
+        FloatingTransformAnchor::TopLeft => 1,
+        FloatingTransformAnchor::TopRight => 2,
+        FloatingTransformAnchor::Center => 3,
+        FloatingTransformAnchor::BottomLeft => 4,
+        FloatingTransformAnchor::BottomRight => 5,
     }
 }
 

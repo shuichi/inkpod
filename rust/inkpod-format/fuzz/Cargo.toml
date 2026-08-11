@@ -15,15 +15,15 @@ inkpod-format = { path = ".." }
 inkpod-core = { path = "../../inkpod-core" }
 
 [[bin]]
-name = "native_v20"
-path = "fuzz_targets/native_v20.rs"
+name = "native_v21"
+path = "fuzz_targets/native_v21.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "native_core_v20"
-path = "fuzz_targets/native_core_v20.rs"
+name = "native_core_v21"
+path = "fuzz_targets/native_core_v21.rs"
 test = false
 doc = false
 bench = false

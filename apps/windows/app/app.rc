@@ -78,6 +78,7 @@ BEGIN
     IDS_LAYER_PLANE_SPLITTER "レイヤーとプレーンの高さを変更"
     IDS_HELP_MANUAL_OPEN_FAILED "inkpod ヘルプを表示できませんでした。保存先へのアクセスと既定ブラウザーの設定を確認してください。"
     IDS_HELP_FILE_FORMAT_OPEN_FAILED "Inkpodファイルフォーマットを表示できませんでした。保存先へのアクセスと既定ブラウザーの設定を確認してください。"
+    IDS_HELP_WEB_PAGE_OPEN_FAILED "Inkpodウェブページを表示できませんでした。既定ブラウザーの設定を確認してください。"
 END
 
 IDR_MAIN_MENU MENU
@@ -602,6 +603,7 @@ BEGIN
     BEGIN
         MENUITEM "inkpod ヘルプ(&H)\tF1", IDM_HELP_MANUAL
         MENUITEM "Inkpodファイルフォーマット(&F)", IDM_HELP_FILE_FORMAT
+        MENUITEM "Inkpodウェブページ(&W)", IDM_HELP_WEB_PAGE
         MENUITEM SEPARATOR
         MENUITEM "Inkpodについて(&A)...", IDM_HELP_ABOUT
     END

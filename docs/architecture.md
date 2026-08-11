@@ -37,7 +37,7 @@ native-format model.
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, vector geometry, and deterministic raster/filter/effect operations |
 | `inkpod-format` | Bounded procedure-authoritative `.inkpod` v16 DTO/container and `.inkbatch` v2 models, streaming encode/decode/validation, atomic file I/O, and PNG/TIFF/TGA/BMP codecs                              |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, clipboard, previews, animation, vector/effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v9 fixed records and generation-tagged runtime IDs, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports                 |
+| `inkpod-ffi`    | ABI v10 fixed records and generation-tagged runtime IDs, persistence/compaction diagnostics, validation/conversion, panic containment, ownership functions, and feature-specific exports                |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Core stores vector geometry in
@@ -204,8 +204,10 @@ selection mask. `BaseSurface::Asset` instead names one immutable canonical raste
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
 maximum-close frames change canonical document-state bytes, so the document-state
-commitment is schema 6/domain 5. The current replay contract is epoch 17 and native
-format version 20. It adds the canonical output-color guard selection procedure
+commitment is schema 6/domain 5. The current replay contract is epoch 18 and native
+format version 21. It adds the canonical floating-transform v3 procedure with
+half-open five-point absolute-anchor semantics. Epoch 17/version 20 added the
+canonical output-color guard selection procedure
 over the committed visible straight-alpha composite. The document-owned Color
 chart, canonical whole-chart replacement, and EditorState cursor introduced in
 epoch 16/version 19 retain their existing semantics.

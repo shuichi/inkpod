@@ -196,12 +196,12 @@ struct ToolUiState {
 
     bool floating_active{};
     InkpodFloatingTransform floating_transform{
-        sizeof(InkpodFloatingTransform), 0U, 0.0, 0.0, 1.0, 1.0, 0.0};
+        sizeof(InkpodFloatingTransform), INKPOD_TRANSFORM_ANCHOR_CENTER, 0.0, 0.0, 1.0, 1.0, 0.0};
     InkpodFrameRect floating_bounds{};
     std::vector<InkpodStrokeSample> floating_gesture_samples;
     std::uint32_t floating_drag_mode{};
     InkpodFloatingTransform floating_drag_start{
-        sizeof(InkpodFloatingTransform), 0U, 0.0, 0.0, 1.0, 1.0, 0.0};
+        sizeof(InkpodFloatingTransform), INKPOD_TRANSFORM_ANCHOR_CENTER, 0.0, 0.0, 1.0, 1.0, 0.0};
 
     windows::ui::FillToolOptions fill_options{};
     std::vector<InkpodStrokeSample> fill_gesture_samples;

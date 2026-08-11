@@ -1059,12 +1059,19 @@ int RunDrawingPersistenceSmoke(ApplicationHost& state) noexcept {
         || GetMenuState(menu, IDM_HELP_MANUAL, MF_BYCOMMAND) == static_cast<UINT>(-1)
         || GetMenuState(menu, IDM_HELP_FILE_FORMAT, MF_BYCOMMAND)
             == static_cast<UINT>(-1)
+        || GetMenuState(menu, IDM_HELP_WEB_PAGE, MF_BYCOMMAND) == static_cast<UINT>(-1)
         || GetMenuState(menu, IDM_HELP_ABOUT, MF_BYCOMMAND) == static_cast<UINT>(-1)
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_HELP_MANUAL, 0) != 1
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
                IDM_HELP_FILE_FORMAT,
+               0)
+            != 1
+        || SendMessageW(
+               state.Workspace().windows.window,
+               WM_COMMAND,
+               IDM_HELP_WEB_PAGE,
                0)
             != 1
         || SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_HELP_ABOUT, 0) != 1) {
@@ -4191,6 +4198,10 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
                WM_COMMAND,
                IDM_EDIT_FLOATING_TRANSFORM,
                0) != 1
+        || state.Workspace().tools.floating_transform.anchor
+            != INKPOD_TRANSFORM_ANCHOR_BOTTOM_RIGHT
+        || state.Workspace().tools.floating_transform.target_x != 2.0
+        || state.Workspace().tools.floating_transform.target_y != 1.0
         || SendMessageW(
                state.Workspace().windows.window,
                WM_COMMAND,
@@ -4230,9 +4241,9 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     }
     const InkpodFloatingTransform floating{
         sizeof(InkpodFloatingTransform),
-        0U,
-        -4.0,
-        -4.0,
+        INKPOD_TRANSFORM_ANCHOR_CENTER,
+        2.5,
+        2.5,
         1.0,
         1.0,
         0.0};

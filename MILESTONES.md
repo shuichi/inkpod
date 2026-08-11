@@ -873,7 +873,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M15 — PM-GAP-013: guide／grid snapのproduction入力接続
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: SNAP-001、VIEW-002、PAINT-002。
 
@@ -925,9 +925,9 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M16 — PM-GAP-017: 五点基準によるfloating transform
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: XFORM-002、HIST-001。
+関連要件: XFORM-002、XFORM-003、HIST-001。
 
 仕様決定ゲート:
 

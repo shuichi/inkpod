@@ -192,7 +192,7 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         2,
         0x0006_0020
     ),
-    entry!(COMMIT_FLOATING, 2, "CommitFloating", 2, 0x0006_0021),
+    entry!(COMMIT_FLOATING, 3, "CommitFloating", 3, 0x0006_0021),
     entry!(MIRROR_DOCUMENT, 2, "MirrorDocument", 2, 0x0007_0001),
     entry!(ROTATE_DOCUMENT, 2, "RotateDocument", 2, 0x0007_0002),
     entry!(RESIZE_DOCUMENT, 2, "ResizeDocument", 2, 0x0007_0003),

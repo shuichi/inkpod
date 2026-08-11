@@ -1063,8 +1063,8 @@ fn acceptance_coordinate_preserving_typed_paste_and_floating_transform() {
     ));
     destination
         .set_floating_transform(FloatingTransform {
-            translate_x: -4.0,
-            translate_y: -4.0,
+            target_x: 2.5,
+            target_y: 2.5,
             ..FloatingTransform::default()
         })
         .unwrap();
@@ -1114,7 +1114,8 @@ fn acceptance_coordinate_preserving_typed_paste_and_floating_transform() {
     destination.begin_paste(&transform_payload).unwrap();
     destination
         .set_floating_transform(FloatingTransform {
-            translate_x: 1.0,
+            target_x: 2.0,
+            target_y: 0.5,
             scale_x: 2.0,
             ..FloatingTransform::default()
         })
@@ -1135,6 +1136,8 @@ fn acceptance_coordinate_preserving_typed_paste_and_floating_transform() {
     destination.begin_paste(&transform_payload).unwrap();
     destination
         .set_floating_transform(FloatingTransform {
+            target_x: 1.0,
+            target_y: 0.5,
             rotation_degrees: 180.0,
             ..FloatingTransform::default()
         })

@@ -453,6 +453,9 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - image size は canvas width/height と元画像 anchor を変更する。resolution は物理寸法、DPI、pixel 数と再 sample algorithm を変更する。
 - 全文書の左右/上下 mirror、90度回転はすべての画像 plane、vector、selection、frame、guide の座標整合を保つ。
 - 部分 transform は selection content を floating state にし、X/Y移動、幅/高さscale、aspect lock、五点基準、任意角回転を dialog と handle drag の双方で操作する。
+- floating transform の元領域は document 座標の half-open 矩形 `[x, x + width) × [y, y + height)` とする。五点基準は左上 `(x, y)`、右上 `(x + width, y)`、中央 `(x + width/2, y + height/2)`、左下 `(x, y + height)`、右下 `(x + width, y + height)` であり、中央の半pixelは Q16.16 で正確に保持する。
+- floating transform dialog の X/Y は移動量ではなく、選択した五点基準を配置する絶対 document 座標である。変換は元の同じ floating content に対し、選択anchorをpivotとしてlocal X/Y scale、時計回りrotation、anchorをX/Yへ配置する順で一回だけ評価する。preview update、anchor変更、retry、dialog、Canvas handleは前回preview結果へ累積適用せず、この同じ変換を使う。
+- raster は変換後のhalf-open edge boundsをQ16.16で求め、外接destination pixel範囲を下端floor／上端ceilで決める。各destination pixel中心を逆写像し、source half-open cellをfloorで一意に選ぶ。用紙外はclipし、far edge、負座標、half-pixel、非一様scale、任意角回転でもOS DPI、renderer、thread数に依存しない。vector pointとCanvas preview／handleも同じanchorと変換順序を使う。
 - selection 内に描画内容がなければ明確な no-content error とし、履歴を増やさない。
 
 ### 17. 履歴、復帰、preview
@@ -625,6 +628,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `CLIP-001`: typed clipboard、standard clipboard、document coordinate preservation
 - `XFORM-001`: destructive mirror/rotate/size/resolution と非破壊 view transform の分離
 - `XFORM-002`: floating selection move/scale/rotate、preview/commit/cancel
+- `XFORM-003`: half-open boundsの五点anchorをpivotとするscale→時計回りrotate→絶対document X/Y配置、非累積preview、dialog／Canvas handle／raster／vectorの同一結果
 
 ### Animation workflow
 

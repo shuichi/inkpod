@@ -1536,8 +1536,8 @@ fn cancel_sessions_and_cancellable_fill_restore_the_common_observation() {
     };
     core.begin_paste(&payload).unwrap();
     core.set_floating_transform(FloatingTransform {
-        translate_x: 2.0,
-        translate_y: 2.0,
+        target_x: 2.5,
+        target_y: 2.5,
         ..FloatingTransform::default()
     })
     .unwrap();

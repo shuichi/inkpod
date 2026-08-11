@@ -2,6 +2,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -559,7 +560,7 @@ void ResetToolDocumentState(ToolUiState& tools) noexcept {
     tools.color_replace_gesture_samples.clear();
     tools.floating_active = false;
     tools.floating_transform = InkpodFloatingTransform{
-        sizeof(InkpodFloatingTransform), 0U, 0.0, 0.0, 1.0, 1.0, 0.0};
+        sizeof(InkpodFloatingTransform), INKPOD_TRANSFORM_ANCHOR_CENTER, 0.0, 0.0, 1.0, 1.0, 0.0};
     tools.floating_bounds = {};
     tools.floating_gesture_samples.clear();
     tools.floating_drag_mode = 0U;
@@ -3477,7 +3478,13 @@ InkpodStatus ActivateFloatingPastePreview(
         static_cast<std::int32_t>(view.width),
         static_cast<std::int32_t>(view.height)};
     state.Workspace().tools.floating_transform = InkpodFloatingTransform{
-        sizeof(InkpodFloatingTransform), 0U, 0.0, 0.0, 1.0, 1.0, 0.0};
+        sizeof(InkpodFloatingTransform),
+        INKPOD_TRANSFORM_ANCHOR_CENTER,
+        static_cast<double>(view.origin_x) + static_cast<double>(view.width) / 2.0,
+        static_cast<double>(view.origin_y) + static_cast<double>(view.height) / 2.0,
+        1.0,
+        1.0,
+        0.0};
     const InkpodStatus tool_status =
         SetEditorActiveTool(state, kInteractionFloatingTransform);
     if (tool_status != INKPOD_STATUS_OK) {
@@ -3568,10 +3575,10 @@ InkpodStatus ShowFloatingTransformDialog(ApplicationHost& state) noexcept {
     }
     ViewOptionsDialogState geometry{};
     geometry.title = L"フローティング選択の変形";
-    geometry.labels = {L"X移動 (px)", L"Y移動 (px)", L"幅 (%)", L"高さ (%)"};
+    geometry.labels = {L"基準X (px)", L"基準Y (px)", L"幅 (%)", L"高さ (%)"};
     geometry.values = {
-        static_cast<std::int32_t>(std::lround(state.Workspace().tools.floating_transform.translate_x)),
-        static_cast<std::int32_t>(std::lround(state.Workspace().tools.floating_transform.translate_y)),
+        static_cast<std::int32_t>(std::lround(state.Workspace().tools.floating_transform.target_x)),
+        static_cast<std::int32_t>(std::lround(state.Workspace().tools.floating_transform.target_y)),
         static_cast<std::int32_t>(std::lround(state.Workspace().tools.floating_transform.scale_x * 100.0)),
         static_cast<std::int32_t>(std::lround(state.Workspace().tools.floating_transform.scale_y * 100.0))};
     geometry.value_count = 4U;
@@ -3589,22 +3596,27 @@ InkpodStatus ShowFloatingTransformDialog(ApplicationHost& state) noexcept {
     rotation.values = {
         static_cast<std::int32_t>(std::lround(state.Workspace().tools.floating_transform.rotation_degrees)),
         0,
-        INKPOD_RESIZE_ANCHOR_CENTER,
+        static_cast<std::int32_t>(state.Workspace().tools.floating_transform.anchor),
         0};
     rotation.value_count = 3U;
     if (state.lifetime.smoke_test) {
         rotation.values[0] = 15;
+        rotation.values[2] = INKPOD_TRANSFORM_ANCHOR_BOTTOM_RIGHT;
     }
     if (ShowViewOptions(
             state.lifetime.instance, state.Workspace().windows.window, state.lifetime.smoke_test, rotation) != IDOK) {
         return INKPOD_STATUS_CANCELLED;
+    }
+    if (rotation.values[2] < static_cast<std::int32_t>(INKPOD_TRANSFORM_ANCHOR_TOP_LEFT)
+        || rotation.values[2] > static_cast<std::int32_t>(INKPOD_TRANSFORM_ANCHOR_BOTTOM_RIGHT)) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
     }
     if (rotation.values[1] != 0) {
         geometry.values[3] = geometry.values[2];
     }
     const InkpodFloatingTransform transform{
         sizeof(InkpodFloatingTransform),
-        0U,
+        static_cast<std::uint32_t>(rotation.values[2]),
         static_cast<double>(geometry.values[0]),
         static_cast<double>(geometry.values[1]),
         static_cast<double>(geometry.values[2]) / 100.0,
@@ -3650,32 +3662,46 @@ InkpodStatus UpdateFloatingHandleDrag(
         }
         return std::pair{canvas.left + x * zoom, canvas.top + y * zoom};
     };
-    const double center_x = static_cast<double>(state.Workspace().tools.floating_bounds.x)
-        + static_cast<double>(state.Workspace().tools.floating_bounds.width - 1) / 2.0
-        + state.Workspace().tools.floating_transform.translate_x;
-    const double center_y = static_cast<double>(state.Workspace().tools.floating_bounds.y)
-        + static_cast<double>(state.Workspace().tools.floating_bounds.height - 1) / 2.0
-        + state.Workspace().tools.floating_transform.translate_y;
+    const InkpodFloatingTransform& base_transform = begin
+        ? state.Workspace().tools.floating_transform
+        : state.Workspace().tools.floating_drag_start;
+    const double pivot_x = base_transform.target_x;
+    const double pivot_y = base_transform.target_y;
+    const double left = static_cast<double>(state.Workspace().tools.floating_bounds.x);
+    const double top = static_cast<double>(state.Workspace().tools.floating_bounds.y);
+    const double right = left + static_cast<double>(state.Workspace().tools.floating_bounds.width);
+    const double bottom = top + static_cast<double>(state.Workspace().tools.floating_bounds.height);
+    const auto source_anchor = [&]() {
+        const double anchor_x = base_transform.anchor == INKPOD_TRANSFORM_ANCHOR_TOP_RIGHT
+                || base_transform.anchor == INKPOD_TRANSFORM_ANCHOR_BOTTOM_RIGHT
+            ? right
+            : base_transform.anchor == INKPOD_TRANSFORM_ANCHOR_CENTER ? (left + right) / 2.0 : left;
+        const double anchor_y = base_transform.anchor == INKPOD_TRANSFORM_ANCHOR_BOTTOM_LEFT
+                || base_transform.anchor == INKPOD_TRANSFORM_ANCHOR_BOTTOM_RIGHT
+            ? bottom
+            : base_transform.anchor == INKPOD_TRANSFORM_ANCHOR_CENTER ? (top + bottom) / 2.0 : top;
+        return std::pair{anchor_x, anchor_y};
+    }();
+    const double radians = base_transform.rotation_degrees
+        * 3.14159265358979323846 / 180.0;
+    const double sine = std::sin(radians);
+    const double cosine = std::cos(radians);
+    const auto transform_point = [&](double x, double y) {
+        const double local_x = (x - source_anchor.first) * base_transform.scale_x;
+        const double local_y = (y - source_anchor.second) * base_transform.scale_y;
+        return std::pair{
+            pivot_x + local_x * cosine - local_y * sine,
+            pivot_y + local_x * sine + local_y * cosine};
+    };
     if (begin) {
         state.Workspace().tools.floating_drag_start = state.Workspace().tools.floating_transform;
         state.Workspace().tools.floating_drag_mode = 1U;
-        const double radians = state.Workspace().tools.floating_transform.rotation_degrees
-            * 3.14159265358979323846 / 180.0;
-        const double sine = std::sin(radians);
-        const double cosine = std::cos(radians);
-        const double half_width = static_cast<double>(state.Workspace().tools.floating_bounds.width - 1)
-            * state.Workspace().tools.floating_transform.scale_x / 2.0;
-        const double half_height = static_cast<double>(state.Workspace().tools.floating_bounds.height - 1)
-            * state.Workspace().tools.floating_transform.scale_y / 2.0;
-        const std::array<std::pair<double, double>, 4U> local{
-            std::pair{-half_width, -half_height},
-            std::pair{half_width, -half_height},
-            std::pair{half_width, half_height},
-            std::pair{-half_width, half_height}};
-        for (const auto& point : local) {
-            const auto device = to_device(
-                center_x + point.first * cosine - point.second * sine,
-                center_y + point.first * sine + point.second * cosine);
+        const std::array<std::pair<double, double>, 4U> source_corners{
+            std::pair{left, top}, std::pair{right, top},
+            std::pair{right, bottom}, std::pair{left, bottom}};
+        for (const auto& point : source_corners) {
+            const auto transformed = transform_point(point.first, point.second);
+            const auto device = to_device(transformed.first, transformed.second);
             if (std::hypot(
                     device.first - static_cast<double>(start.x),
                     device.second - static_cast<double>(start.y)) <= 14.0) {
@@ -3683,9 +3709,13 @@ InkpodStatus UpdateFloatingHandleDrag(
                 break;
             }
         }
+        const auto transformed_top_left = transform_point(left, top);
+        const auto transformed_top_right = transform_point(right, top);
         const auto rotation_handle = to_device(
-            center_x + half_height * sine,
-            center_y - half_height * cosine - 20.0 / zoom);
+            (transformed_top_left.first + transformed_top_right.first) / 2.0
+                + sine * 20.0 / zoom,
+            (transformed_top_left.second + transformed_top_right.second) / 2.0
+                - cosine * 20.0 / zoom);
         if (std::hypot(
                 rotation_handle.first - static_cast<double>(start.x),
                 rotation_handle.second - static_cast<double>(start.y)) <= 16.0) {
@@ -3697,10 +3727,14 @@ InkpodStatus UpdateFloatingHandleDrag(
     const auto current_document = to_document(current);
     InkpodFloatingTransform transform = state.Workspace().tools.floating_drag_start;
     if (state.Workspace().tools.floating_drag_mode == 2U) {
-        const double start_dx = start_document.first - center_x;
-        const double start_dy = start_document.second - center_y;
-        const double current_dx = current_document.first - center_x;
-        const double current_dy = current_document.second - center_y;
+        const double start_relative_x = start_document.first - pivot_x;
+        const double start_relative_y = start_document.second - pivot_y;
+        const double current_relative_x = current_document.first - pivot_x;
+        const double current_relative_y = current_document.second - pivot_y;
+        const double start_dx = start_relative_x * cosine + start_relative_y * sine;
+        const double start_dy = -start_relative_x * sine + start_relative_y * cosine;
+        const double current_dx = current_relative_x * cosine + current_relative_y * sine;
+        const double current_dy = -current_relative_x * sine + current_relative_y * cosine;
         if (std::abs(start_dx) > 0.01) {
             transform.scale_x *= std::max(0.01, std::abs(current_dx / start_dx));
         }
@@ -3709,14 +3743,14 @@ InkpodStatus UpdateFloatingHandleDrag(
         }
     } else if (state.Workspace().tools.floating_drag_mode == 3U) {
         const double start_angle = std::atan2(
-            start_document.second - center_y, start_document.first - center_x);
+            start_document.second - pivot_y, start_document.first - pivot_x);
         const double current_angle = std::atan2(
-            current_document.second - center_y, current_document.first - center_x);
+            current_document.second - pivot_y, current_document.first - pivot_x);
         transform.rotation_degrees +=
             (current_angle - start_angle) * 180.0 / 3.14159265358979323846;
     } else {
-        transform.translate_x += current_document.first - start_document.first;
-        transform.translate_y += current_document.second - start_document.second;
+        transform.target_x += current_document.first - start_document.first;
+        transform.target_y += current_document.second - start_document.second;
     }
     return SetFloatingTransform(state, transform);
 }
@@ -16864,6 +16898,19 @@ std::optional<LRESULT> RouteApplicationCommand(
                       state->lifetime.instance, window, document);
             if (status != EmbeddedHelpStatus::Ok) {
                 ShowEmbeddedHelpError(*state, window, error_message);
+                return 0;
+            }
+            return 1;
+        }
+        case IDM_HELP_WEB_PAGE: {
+            if (state->lifetime.smoke_test) {
+                return 1;
+            }
+            constexpr wchar_t kInkpodWebPage[] = L"https://shuichi.github.io/inkpod/";
+            const HINSTANCE launched = ShellExecuteW(
+                window, L"open", kInkpodWebPage, nullptr, nullptr, SW_SHOWNORMAL);
+            if (reinterpret_cast<INT_PTR>(launched) <= 32) {
+                ShowEmbeddedHelpError(*state, window, IDS_HELP_WEB_PAGE_OPEN_FAILED);
                 return 0;
             }
             return 1;

@@ -573,7 +573,7 @@ impl Core {
         self.floating = Some(FloatingSelection {
             payload: payload.clone(),
             destination: FloatingDestination::ExistingPlanes(destinations),
-            transform: FloatingTransform::default(),
+            transform: floating_identity_transform(payload.bounds)?,
             asset_ids,
         });
         self.assets = staged_assets;
@@ -615,10 +615,11 @@ impl Core {
             pixel.value = convert_plane_pixel(pixel.value, destination.raster.format())?;
         }
         let (staged_assets, asset_ids) = stage_clipboard_assets(self, &converted)?;
+        let transform = floating_identity_transform(converted.bounds)?;
         self.floating = Some(FloatingSelection {
             payload: converted,
             destination: FloatingDestination::ExistingPlanes(vec![destination.id]),
-            transform: FloatingTransform::default(),
+            transform,
             asset_ids,
         });
         self.assets = staged_assets;
@@ -667,6 +668,7 @@ impl Core {
             pixel.value = convert_plane_pixel(pixel.value, format)?;
         }
         let (staged_assets, asset_ids) = stage_clipboard_assets(self, &converted)?;
+        let transform = floating_identity_transform(converted.bounds)?;
         self.floating = Some(FloatingSelection {
             payload: converted,
             destination: FloatingDestination::NewPlane {
@@ -676,7 +678,7 @@ impl Core {
                 name: name.to_owned(),
                 opacity_milli,
             },
-            transform: FloatingTransform::default(),
+            transform,
             asset_ids,
         });
         self.assets = staged_assets;
@@ -848,23 +850,13 @@ impl Core {
             ceil_div_i128, div_round_ties_even_i128, floor_div_i128, rotate_q16,
         };
         let one = CANONICAL_DOCUMENT_ONE;
-        let center_x = i64::from(floating.payload.bounds.x)
-            .checked_mul(one)
-            .and_then(|value| {
-                value.checked_add(i64::from(floating.payload.bounds.width - 1) * one / 2)
-            })
-            .ok_or(CoreError::InvalidArgument("floating center overflowed"))?;
-        let center_y = i64::from(floating.payload.bounds.y)
-            .checked_mul(one)
-            .and_then(|value| {
-                value.checked_add(i64::from(floating.payload.bounds.height - 1) * one / 2)
-            })
-            .ok_or(CoreError::InvalidArgument("floating center overflowed"))?;
-        let translate_x = canonical_q16_from_f64(floating.transform.translate_x).ok_or(
-            CoreError::InvalidArgument("floating translation is outside canonical Q16"),
+        let (source_anchor_x, source_anchor_y) =
+            floating_anchor_q16(floating.payload.bounds, floating.transform.anchor)?;
+        let target_x = canonical_q16_from_f64(floating.transform.target_x).ok_or(
+            CoreError::InvalidArgument("floating target X is outside canonical Q16"),
         )?;
-        let translate_y = canonical_q16_from_f64(floating.transform.translate_y).ok_or(
-            CoreError::InvalidArgument("floating translation is outside canonical Q16"),
+        let target_y = canonical_q16_from_f64(floating.transform.target_y).ok_or(
+            CoreError::InvalidArgument("floating target Y is outside canonical Q16"),
         )?;
         let scale_x = canonical_q16_from_f64(floating.transform.scale_x)
             .filter(|value| *value > 0)
@@ -881,13 +873,13 @@ impl Core {
         )?;
         let transform_point = |x: i64, y: i64| -> Result<(i64, i64), CoreError> {
             let local_x = div_round_ties_even_i128(
-                i128::from(x - center_x) * i128::from(scale_x),
+                i128::from(x - source_anchor_x) * i128::from(scale_x),
                 i128::from(one),
             )
             .and_then(|value| value.try_into().ok())
             .ok_or(CoreError::InvalidArgument("floating scale overflowed"))?;
             let local_y = div_round_ties_even_i128(
-                i128::from(y - center_y) * i128::from(scale_y),
+                i128::from(y - source_anchor_y) * i128::from(scale_y),
                 i128::from(one),
             )
             .and_then(|value| value.try_into().ok())
@@ -895,21 +887,30 @@ impl Core {
             let (rotated_x, rotated_y) = rotate_q16(local_x, local_y, turns)
                 .ok_or(CoreError::InvalidArgument("floating rotation overflowed"))?;
             Ok((
-                center_x
+                target_x
                     .checked_add(rotated_x)
-                    .and_then(|value| value.checked_add(translate_x))
                     .ok_or(CoreError::InvalidArgument("floating transform overflowed"))?,
-                center_y
+                target_y
                     .checked_add(rotated_y)
-                    .and_then(|value| value.checked_add(translate_y))
                     .ok_or(CoreError::InvalidArgument("floating transform overflowed"))?,
             ))
         };
-        let left = i64::from(floating.payload.bounds.x) * one;
-        let top = i64::from(floating.payload.bounds.y) * one;
-        let right = i64::from(floating.payload.bounds.x + floating.payload.bounds.width - 1) * one;
-        let bottom =
-            i64::from(floating.payload.bounds.y + floating.payload.bounds.height - 1) * one;
+        let left = i64::from(floating.payload.bounds.x)
+            .checked_mul(one)
+            .ok_or(CoreError::InvalidArgument("floating left edge overflowed"))?;
+        let top = i64::from(floating.payload.bounds.y)
+            .checked_mul(one)
+            .ok_or(CoreError::InvalidArgument("floating top edge overflowed"))?;
+        let right = i64::from(floating.payload.bounds.x)
+            .checked_add(i64::from(floating.payload.bounds.width))
+            .and_then(|value| value.checked_mul(one))
+            .ok_or(CoreError::InvalidArgument("floating right edge overflowed"))?;
+        let bottom = i64::from(floating.payload.bounds.y)
+            .checked_add(i64::from(floating.payload.bounds.height))
+            .and_then(|value| value.checked_mul(one))
+            .ok_or(CoreError::InvalidArgument(
+                "floating bottom edge overflowed",
+            ))?;
         let corners = [
             transform_point(left, top)?,
             transform_point(right, top)?,
@@ -923,23 +924,23 @@ impl Core {
         let min_x = floor_div_i128(i128::from(min_x_q16), i128::from(one))
             .unwrap()
             .max(0) as i64;
-        let max_x = ceil_div_i128(i128::from(max_x_q16), i128::from(one))
+        let max_x_exclusive = ceil_div_i128(i128::from(max_x_q16), i128::from(one))
             .unwrap()
-            .min(i128::from(document.width.saturating_sub(1))) as i64;
+            .min(i128::from(document.width)) as i64;
         let min_y = floor_div_i128(i128::from(min_y_q16), i128::from(one))
             .unwrap()
             .max(0) as i64;
-        let max_y = ceil_div_i128(i128::from(max_y_q16), i128::from(one))
+        let max_y_exclusive = ceil_div_i128(i128::from(max_y_q16), i128::from(one))
             .unwrap()
-            .min(i128::from(document.height.saturating_sub(1))) as i64;
+            .min(i128::from(document.height)) as i64;
         let mut contains_content = false;
         for source in source_planes {
             let mut staged = BTreeMap::new();
-            if min_x <= max_x && min_y <= max_y {
-                let work = u64::try_from(max_x - min_x + 1)
+            if min_x < max_x_exclusive && min_y < max_y_exclusive {
+                let work = u64::try_from(max_x_exclusive - min_x)
                     .ok()
                     .and_then(|width| {
-                        u64::try_from(max_y - min_y + 1)
+                        u64::try_from(max_y_exclusive - min_y)
                             .ok()
                             .and_then(|height| width.checked_mul(height))
                     })
@@ -954,15 +955,27 @@ impl Core {
                     .iter()
                     .map(|pixel| ((pixel.x, pixel.y), pixel.value))
                     .collect();
-                for y in min_y..=max_y {
-                    for x in min_x..=max_x {
-                        let translated_x = x * one - center_x - translate_x;
-                        let translated_y = y * one - center_y - translate_y;
+                for y in min_y..max_y_exclusive {
+                    for x in min_x..max_x_exclusive {
+                        let destination_x = x
+                            .checked_mul(one)
+                            .and_then(|value| value.checked_add(one / 2))
+                            .ok_or(CoreError::InvalidArgument(
+                                "floating destination X overflowed",
+                            ))?;
+                        let destination_y = y
+                            .checked_mul(one)
+                            .and_then(|value| value.checked_add(one / 2))
+                            .ok_or(CoreError::InvalidArgument(
+                                "floating destination Y overflowed",
+                            ))?;
+                        let translated_x = destination_x - target_x;
+                        let translated_y = destination_y - target_y;
                         let (unrotated_x, unrotated_y) =
                             rotate_q16(translated_x, translated_y, turns.wrapping_neg()).ok_or(
                                 CoreError::InvalidArgument("floating inverse rotation overflowed"),
                             )?;
-                        let source_x = i128::from(center_x)
+                        let source_x = i128::from(source_anchor_x)
                             + div_round_ties_even_i128(
                                 i128::from(unrotated_x) * i128::from(one),
                                 i128::from(scale_x),
@@ -970,7 +983,7 @@ impl Core {
                             .ok_or(CoreError::InvalidArgument(
                                 "floating inverse scale overflowed",
                             ))?;
-                        let source_y = i128::from(center_y)
+                        let source_y = i128::from(source_anchor_y)
                             + div_round_ties_even_i128(
                                 i128::from(unrotated_y) * i128::from(one),
                                 i128::from(scale_y),
@@ -978,13 +991,20 @@ impl Core {
                             .ok_or(CoreError::InvalidArgument(
                                 "floating inverse scale overflowed",
                             ))?;
+                        if source_x < i128::from(left)
+                            || source_x >= i128::from(right)
+                            || source_y < i128::from(top)
+                            || source_y >= i128::from(bottom)
+                        {
+                            continue;
+                        }
                         let source_coord = (
-                            div_round_ties_even_i128(source_x, i128::from(one))
+                            floor_div_i128(source_x, i128::from(one))
                                 .and_then(|value| i32::try_from(value).ok())
                                 .ok_or(CoreError::InvalidArgument(
                                     "floating source X overflowed",
                                 ))?,
-                            div_round_ties_even_i128(source_y, i128::from(one))
+                            floor_div_i128(source_y, i128::from(one))
                                 .and_then(|value| i32::try_from(value).ok())
                                 .ok_or(CoreError::InvalidArgument(
                                     "floating source Y overflowed",

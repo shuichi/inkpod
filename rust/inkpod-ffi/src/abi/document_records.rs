@@ -146,9 +146,9 @@ pub struct InkpodScopedColorReplacePreview {
 #[repr(C)]
 pub struct InkpodFloatingTransform {
     pub struct_size: u32,
-    pub reserved: u32,
-    pub translate_x: f64,
-    pub translate_y: f64,
+    pub anchor: u32,
+    pub target_x: f64,
+    pub target_y: f64,
     pub scale_x: f64,
     pub scale_y: f64,
     pub rotation_degrees: f64,

@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v9 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は ABI v10 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(9)
+#define INKPOD_ABI_VERSION UINT32_C(10)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -653,6 +653,11 @@ typedef uint32_t InkpodOutputColorGuardProfile;
 #define INKPOD_RESIZE_ANCHOR_CENTER UINT32_C(3)
 #define INKPOD_RESIZE_ANCHOR_BOTTOM_LEFT UINT32_C(4)
 #define INKPOD_RESIZE_ANCHOR_BOTTOM_RIGHT UINT32_C(5)
+#define INKPOD_TRANSFORM_ANCHOR_TOP_LEFT UINT32_C(1)
+#define INKPOD_TRANSFORM_ANCHOR_TOP_RIGHT UINT32_C(2)
+#define INKPOD_TRANSFORM_ANCHOR_CENTER UINT32_C(3)
+#define INKPOD_TRANSFORM_ANCHOR_BOTTOM_LEFT UINT32_C(4)
+#define INKPOD_TRANSFORM_ANCHOR_BOTTOM_RIGHT UINT32_C(5)
 #define INKPOD_DOCUMENT_RESIZE_RESAMPLE (UINT64_C(1) << 0)
 #define INKPOD_PASTE_COMPATIBLE UINT32_C(1)
 #define INKPOD_PASTE_ACTIVE_CONVERTED UINT32_C(2)
@@ -2327,12 +2332,16 @@ typedef struct InkpodDustInput {
     uint64_t sample_stride_bytes;
 } InkpodDustInput;
 
-/** @brief floating paste の平行移動、拡縮、回転 preview 値を渡す borrowed 入力。 */
+/**
+ * @brief floating paste の五点基準、絶対位置、拡縮、回転 preview 値を渡す borrowed 入力。
+ * source bounds は半開区間で、anchor はその edge/corner/center。local X/Y scale、時計回り
+ * rotation の順に適用し、選択 anchor を document 座標 target_x/target_y へ配置する。
+ */
 typedef struct InkpodFloatingTransform {
     uint32_t struct_size;
-    uint32_t reserved;
-    double translate_x;
-    double translate_y;
+    uint32_t anchor;
+    double target_x;
+    double target_y;
     double scale_x;
     double scale_y;
     double rotation_degrees;
@@ -3704,13 +3713,14 @@ InkpodStatus inkpod_clipboard_create_rgba8(
     const InkpodClipboardRgbaInput* input,
     InkpodClipboard** out_clipboard);
 /**
- * @brief active floating paste の translate/scale/rotate preview を置換する。
+ * @brief active floating paste の anchor/absolute-position/scale/rotate preview を置換する。
  * @par 契約
- * Core owner thread。`core`/`input` は非 NULL・非重複、input は完全サイズ borrowed、finite 値が必要。
+ * Core owner thread。`core`/`input` は非 NULL・非重複、input は完全サイズ borrowed、finite 値と
+ * 既知 anchor が必要。input は呼び出し中だけ借用し、Rust は pointer を保持しない。
  * 成功時 transient preview のみ更新し committed revision/dirty/Undo は不変。floating 不在または stroke/preview 中は `INVALID_STATE`。
  * 失敗時元 preview を保つ。
  * @par 主なステータス
- * `OK`、`INVALID_ARGUMENT`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
+ * `OK`、`INVALID_ARGUMENT`、`INCOMPATIBLE_ABI`、`INVALID_STATE`、`WRONG_THREAD`、`PANIC`。
  */
 InkpodStatus inkpod_core_floating_transform(
     InkpodCore* core,

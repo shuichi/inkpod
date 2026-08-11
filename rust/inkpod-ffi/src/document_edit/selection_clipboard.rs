@@ -930,15 +930,23 @@ pub unsafe extern "C" fn inkpod_core_floating_transform(
         if thread_status != INKPOD_STATUS_OK {
             return thread_status;
         }
-        if input.reserved != 0 {
-            return fail(
-                INKPOD_STATUS_UNSUPPORTED,
-                "floating transform reserved value is not zero",
-            );
-        }
+        let anchor = match input.anchor {
+            INKPOD_TRANSFORM_ANCHOR_TOP_LEFT => FloatingTransformAnchor::TopLeft,
+            INKPOD_TRANSFORM_ANCHOR_TOP_RIGHT => FloatingTransformAnchor::TopRight,
+            INKPOD_TRANSFORM_ANCHOR_CENTER => FloatingTransformAnchor::Center,
+            INKPOD_TRANSFORM_ANCHOR_BOTTOM_LEFT => FloatingTransformAnchor::BottomLeft,
+            INKPOD_TRANSFORM_ANCHOR_BOTTOM_RIGHT => FloatingTransformAnchor::BottomRight,
+            _ => {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "floating transform anchor is invalid",
+                );
+            }
+        };
         match core.core.set_floating_transform(FloatingTransform {
-            translate_x: input.translate_x,
-            translate_y: input.translate_y,
+            anchor,
+            target_x: input.target_x,
+            target_y: input.target_y,
             scale_x: input.scale_x,
             scale_y: input.scale_y,
             rotation_degrees: input.rotation_degrees,

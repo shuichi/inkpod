@@ -1,10 +1,13 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 20, replay epoch 17,
+The current runtime replay contract is procedure format 21, replay epoch 18,
 canonical numeric version 1, and the digest of the closed 82-entry primitive
-catalog. Production `.inkpod` is exact-current v20; an optional verified
+catalog. Production `.inkpod` is exact-current v21; an optional verified
 checkpoint preserves this contract and never replaces the authoritative journal.
-Epoch 17 and format 20 add `SelectOutputColorGuard/canonical-v1`. Its closed
+Epoch 18 and format 21 add `CommitFloating/canonical-v3`: half-open five-point
+anchors, canonical absolute target X/Y, local scale, clockwise rotation, and
+pixel-centre inverse raster mapping share one replay formula. Epoch 17 and format
+20 added `SelectOutputColorGuard/canonical-v1`. Its closed
 BT.709 conservative Y'CbCr QA profile scans the committed visible straight-
 alpha composite at exact RGBA16 depth, skips alpha zero, and uses fixed rational
 half-up conversion before selection algebra. Epoch 16 and format 19 added
@@ -61,7 +64,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 20 and replay epoch 17. A semantic change that updates
+together with format version 21 and replay epoch 18. A semantic change that updates
 the catalog or any golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 

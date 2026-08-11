@@ -329,7 +329,7 @@ fn persistence_checkpoint_and_compaction_abi_are_bounded_confirmed_and_atomic() 
             inkpod_core_get_persistence_info(core, &mut persistence),
             INKPOD_STATUS_OK
         );
-        assert_eq!(persistence.format_version, 20);
+        assert_eq!(persistence.format_version, 21);
         assert_eq!(persistence.open_strategy, INKPOD_NATIVE_OPEN_NOT_OPENED);
         assert_eq!(persistence.flags, 0);
 
@@ -2168,13 +2168,29 @@ fn typed_tree_selection_clipboard_view_and_multiview_abi_are_connected() {
         assert!(clipboard.is_null());
         let transform = InkpodFloatingTransform {
             struct_size: size_of::<InkpodFloatingTransform>() as u32,
-            reserved: 0,
-            translate_x: -4.0,
-            translate_y: -4.0,
+            anchor: INKPOD_TRANSFORM_ANCHOR_CENTER,
+            target_x: 2.5,
+            target_y: 2.5,
             scale_x: 1.0,
             scale_y: 1.0,
             rotation_degrees: 0.0,
         };
+        let unknown_anchor = InkpodFloatingTransform {
+            anchor: u32::MAX,
+            ..transform
+        };
+        assert_eq!(
+            inkpod_core_floating_transform(core, &unknown_anchor),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        let short_transform = InkpodFloatingTransform {
+            struct_size: (size_of::<InkpodFloatingTransform>() - 1) as u32,
+            ..transform
+        };
+        assert_eq!(
+            inkpod_core_floating_transform(core, &short_transform),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
         assert_eq!(
             inkpod_core_floating_transform(core, &transform),
             INKPOD_STATUS_OK

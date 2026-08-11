@@ -65,7 +65,7 @@ scenario assertions are:
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 17 / native v20 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 18 / native v21 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -103,6 +103,12 @@ transparent pixels skipped by the scan. Quick therefore fixes
 1,048,576/524,288/65,536 pixels and 256 selection tiles; full fixes
 4,194,304/2,097,152/262,144 pixels and 1,024 selection tiles. Both profiles
 commit exactly once at revision 2/history 1 with zero failures.
+
+The v21/epoch-18 floating-transform change updates the closed primitive catalog
+and canonical contract identity but does not alter any benchmark workload,
+harness, counter mapping, envelope, or `revision-max` expression. The recorded
+`canonical_replay` checksum is updated only after quick/full profiles reproduce
+the same new contract checksum.
 
 ## Approved output-color-guard envelope
 

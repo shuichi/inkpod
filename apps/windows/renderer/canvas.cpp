@@ -530,10 +530,13 @@ public:
         if (preview.struct_size < sizeof(CanvasFloatingPreview)
             || preview.transform.struct_size < sizeof(InkpodFloatingTransform)
             || preview.bounds.width < 0 || preview.bounds.height < 0
-            || !std::isfinite(preview.transform.translate_x)
-            || !std::isfinite(preview.transform.translate_y)
+            || preview.transform.anchor < INKPOD_TRANSFORM_ANCHOR_TOP_LEFT
+            || preview.transform.anchor > INKPOD_TRANSFORM_ANCHOR_BOTTOM_RIGHT
+            || !std::isfinite(preview.transform.target_x)
+            || !std::isfinite(preview.transform.target_y)
             || !std::isfinite(preview.transform.scale_x)
             || !std::isfinite(preview.transform.scale_y)
+            || preview.transform.scale_x <= 0.0 || preview.transform.scale_y <= 0.0
             || !std::isfinite(preview.transform.rotation_degrees)) {
             return E_INVALIDARG;
         }
@@ -2009,26 +2012,28 @@ private:
         }
         const auto& bounds = floating_preview_.bounds;
         const auto& transform = floating_preview_.transform;
-        const double center_x = static_cast<double>(bounds.x)
-            + static_cast<double>(bounds.width - 1) / 2.0;
-        const double center_y = static_cast<double>(bounds.y)
-            + static_cast<double>(bounds.height - 1) / 2.0;
+        const double left = static_cast<double>(bounds.x);
+        const double top = static_cast<double>(bounds.y);
+        const double right = left + static_cast<double>(bounds.width);
+        const double bottom = top + static_cast<double>(bounds.height);
+        const double anchor_x = transform.anchor == INKPOD_TRANSFORM_ANCHOR_TOP_RIGHT
+                || transform.anchor == INKPOD_TRANSFORM_ANCHOR_BOTTOM_RIGHT
+            ? right
+            : transform.anchor == INKPOD_TRANSFORM_ANCHOR_CENTER ? (left + right) / 2.0 : left;
+        const double anchor_y = transform.anchor == INKPOD_TRANSFORM_ANCHOR_BOTTOM_LEFT
+                || transform.anchor == INKPOD_TRANSFORM_ANCHOR_BOTTOM_RIGHT
+            ? bottom
+            : transform.anchor == INKPOD_TRANSFORM_ANCHOR_CENTER ? (top + bottom) / 2.0 : top;
         const double radians = transform.rotation_degrees * 3.14159265358979323846 / 180.0;
         const double sine = std::sin(radians);
         const double cosine = std::cos(radians);
         const auto point = [&](double x, double y) {
-            const double local_x = (x - center_x) * transform.scale_x;
-            const double local_y = (y - center_y) * transform.scale_y;
+            const double local_x = (x - anchor_x) * transform.scale_x;
+            const double local_y = (y - anchor_y) * transform.scale_y;
             return D2D1::Point2F(
-                static_cast<float>(center_x + local_x * cosine - local_y * sine
-                    + transform.translate_x),
-                static_cast<float>(center_y + local_x * sine + local_y * cosine
-                    + transform.translate_y));
+                static_cast<float>(transform.target_x + local_x * cosine - local_y * sine),
+                static_cast<float>(transform.target_y + local_x * sine + local_y * cosine));
         };
-        const double left = static_cast<double>(bounds.x);
-        const double top = static_cast<double>(bounds.y);
-        const double right = static_cast<double>(bounds.x + bounds.width - 1);
-        const double bottom = static_cast<double>(bounds.y + bounds.height - 1);
         const std::array<D2D1_POINT_2F, 4U> corners{
             point(left, top), point(right, top), point(right, bottom), point(left, bottom)};
         const float stroke_width = static_cast<float>(std::max(1.0, 1.5 / transform_.zoom));

@@ -462,13 +462,35 @@ impl Default for GridConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// One of the five half-open-bounds pivots for a floating transform.
+pub enum FloatingTransformAnchor {
+    /// Upper-left edge point `(x, y)`.
+    TopLeft,
+    /// Upper-right edge point `(x + width, y)`.
+    TopRight,
+    /// Exact centre edge point `(x + width / 2, y + height / 2)`.
+    Center,
+    /// Lower-left edge point `(x, y + height)`.
+    BottomLeft,
+    /// Lower-right edge point `(x + width, y + height)`.
+    BottomRight,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 /// Affine transform applied to a staged floating selection.
+///
+/// The selected half-open-bounds anchor is the scale/rotation pivot. Local X/Y
+/// scale is followed by clockwise rotation, then the anchor is placed at
+/// `target_x`/`target_y`. Updating this preview does not mutate document state,
+/// history, dirty state, or persistent IDs.
 pub struct FloatingTransform {
-    /// Horizontal translation in document pixels.
-    pub translate_x: f64,
-    /// Vertical translation in document pixels.
-    pub translate_y: f64,
+    /// Pivot and absolute-position reference within the source half-open bounds.
+    pub anchor: FloatingTransformAnchor,
+    /// Absolute horizontal document coordinate of `anchor` after transformation.
+    pub target_x: f64,
+    /// Absolute vertical document coordinate of `anchor` after transformation.
+    pub target_y: f64,
     /// Horizontal scale factor.
     pub scale_x: f64,
     /// Vertical scale factor.
@@ -480,8 +502,9 @@ pub struct FloatingTransform {
 impl Default for FloatingTransform {
     fn default() -> Self {
         Self {
-            translate_x: 0.0,
-            translate_y: 0.0,
+            anchor: FloatingTransformAnchor::Center,
+            target_x: 0.0,
+            target_y: 0.0,
             scale_x: 1.0,
             scale_y: 1.0,
             rotation_degrees: 0.0,

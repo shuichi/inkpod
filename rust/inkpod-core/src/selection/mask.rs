@@ -243,17 +243,17 @@ pub(crate) fn pixel_within_tolerance(left: PixelValue, right: PixelValue, tolera
 }
 
 pub(crate) fn validate_floating_transform(transform: FloatingTransform) -> Result<(), CoreError> {
-    if !transform.translate_x.is_finite()
-        || !transform.translate_y.is_finite()
+    if !transform.target_x.is_finite()
+        || !transform.target_y.is_finite()
         || !transform.scale_x.is_finite()
         || !transform.scale_y.is_finite()
         || !transform.rotation_degrees.is_finite()
-        || transform.scale_x.abs() < 0.000_001
-        || transform.scale_y.abs() < 0.000_001
-        || transform.scale_x.abs() > 1_024.0
-        || transform.scale_y.abs() > 1_024.0
-        || transform.translate_x.abs() > f64::from(MAX_STROKE_COORDINATE)
-        || transform.translate_y.abs() > f64::from(MAX_STROKE_COORDINATE)
+        || transform.scale_x < 0.000_001
+        || transform.scale_y < 0.000_001
+        || transform.scale_x > 1_024.0
+        || transform.scale_y > 1_024.0
+        || transform.target_x.abs() > f64::from(MAX_STROKE_COORDINATE)
+        || transform.target_y.abs() > f64::from(MAX_STROKE_COORDINATE)
         || transform.rotation_degrees.abs() > 36_000.0
     {
         Err(CoreError::InvalidArgument(
@@ -262,6 +262,61 @@ pub(crate) fn validate_floating_transform(transform: FloatingTransform) -> Resul
     } else {
         Ok(())
     }
+}
+
+pub(crate) fn floating_anchor_q16(
+    bounds: RectI32,
+    anchor: FloatingTransformAnchor,
+) -> Result<(i64, i64), CoreError> {
+    use inkpod_image::CANONICAL_DOCUMENT_ONE;
+
+    if bounds.width <= 0 || bounds.height <= 0 {
+        return Err(CoreError::InvalidArgument(
+            "floating bounds must be positive",
+        ));
+    }
+    let one = i128::from(CANONICAL_DOCUMENT_ONE);
+    let left = i128::from(bounds.x) * one;
+    let top = i128::from(bounds.y) * one;
+    let right = left
+        .checked_add(i128::from(bounds.width) * one)
+        .ok_or(CoreError::InvalidArgument("floating right edge overflowed"))?;
+    let bottom =
+        top.checked_add(i128::from(bounds.height) * one)
+            .ok_or(CoreError::InvalidArgument(
+                "floating bottom edge overflowed",
+            ))?;
+    let x = match anchor {
+        FloatingTransformAnchor::TopLeft | FloatingTransformAnchor::BottomLeft => left,
+        FloatingTransformAnchor::TopRight | FloatingTransformAnchor::BottomRight => right,
+        FloatingTransformAnchor::Center => (left + right) / 2,
+    };
+    let y = match anchor {
+        FloatingTransformAnchor::TopLeft | FloatingTransformAnchor::TopRight => top,
+        FloatingTransformAnchor::BottomLeft | FloatingTransformAnchor::BottomRight => bottom,
+        FloatingTransformAnchor::Center => (top + bottom) / 2,
+    };
+    Ok((
+        x.try_into()
+            .map_err(|_| CoreError::InvalidArgument("floating anchor X overflowed"))?,
+        y.try_into()
+            .map_err(|_| CoreError::InvalidArgument("floating anchor Y overflowed"))?,
+    ))
+}
+
+pub(crate) fn floating_identity_transform(bounds: RectI32) -> Result<FloatingTransform, CoreError> {
+    use inkpod_image::CANONICAL_DOCUMENT_ONE;
+
+    let anchor = FloatingTransformAnchor::Center;
+    let (target_x, target_y) = floating_anchor_q16(bounds, anchor)?;
+    Ok(FloatingTransform {
+        anchor,
+        target_x: target_x as f64 / CANONICAL_DOCUMENT_ONE as f64,
+        target_y: target_y as f64 / CANONICAL_DOCUMENT_ONE as f64,
+        scale_x: 1.0,
+        scale_y: 1.0,
+        rotation_degrees: 0.0,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq)]
