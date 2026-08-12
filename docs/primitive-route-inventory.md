@@ -52,6 +52,10 @@ route|rust|asset-data-plane|rust-format|inkpod_format::read_cut_descriptor inkpo
 route|rust|document-primitive|rust-core|Core::edit_annotations Core::end_annotation_stroke
 route|rust|transient-preview-stroke|rust-core|Core::append_annotation_stroke Core::begin_annotation_stroke Core::cancel_annotation_stroke
 route|rust|query-snapshot|rust-core|Core::annotation_objects
+route|rust|document-primitive|rust-core|Core::apply_shooting_frame_preview Core::edit_shooting_frame
+route|rust|transient-preview-stroke|rust-core|Core::begin_shooting_frame_preview Core::cancel_shooting_frame_preview Core::update_shooting_frame_preview
+route|rust|query-snapshot|rust-core|Core::shooting_frame
+route|rust|asset-data-plane|rust-core|Core::export_instruction_common_raster
 
 ## C ABI surface
 
@@ -80,6 +84,10 @@ route|ffi|os-application-adapter|rust-ffi-adapter|inkpod_cut_create inkpod_cut_d
 route|ffi|document-primitive|rust-core|inkpod_core_annotation_edit inkpod_core_annotation_stroke_end
 route|ffi|transient-preview-stroke|rust-ffi-adapter|inkpod_core_annotation_stroke_append inkpod_core_annotation_stroke_begin inkpod_core_annotation_stroke_cancel
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_snapshot_annotation_copy_font_family inkpod_snapshot_annotation_copy_text inkpod_snapshot_get_annotations
+route|ffi|document-primitive|rust-core|inkpod_core_shooting_frame_edit inkpod_core_shooting_frame_preview_apply
+route|ffi|transient-preview-stroke|rust-ffi-adapter|inkpod_core_shooting_frame_preview_begin inkpod_core_shooting_frame_preview_cancel inkpod_core_shooting_frame_preview_update
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_core_shooting_frame_get inkpod_snapshot_get_shooting_frames
+route|ffi|asset-data-plane|rust-ffi-adapter|inkpod_core_export_instruction_common_raster
 
 ## Windows production command surface
 
@@ -98,6 +106,9 @@ route|windows|os-application-adapter|windows-adapter|IDM_FILE_NEW_CUT
 route|windows|document-primitive|rust-core|IDM_ANNOTATION_ADD_TEXT IDM_ANNOTATION_DELETE IDM_ANNOTATION_EDIT_TEXT IDM_ANNOTATION_MOVE_LEFT IDM_ANNOTATION_MOVE_RIGHT
 route|windows|transient-preview-stroke|windows-adapter|IDM_ANNOTATION_DRAW_INSTRUCTION
 route|windows|view-only-command|windows-adapter|IDM_ANNOTATION_SELECT_NEXT IDM_ANNOTATION_SELECT_PREVIOUS
+route|windows|document-primitive|rust-core|IDM_CELL_SHOOTING_FRAME_DELETE IDM_CELL_SHOOTING_FRAME_PROPERTIES
+route|windows|editor-state-command|rust-core|IDM_CELL_SHOOTING_FRAME_EDIT_HANDLES
+route|windows|asset-data-plane|windows-adapter|IDM_FILE_EXPORT_INSTRUCTION_RASTER
 
 route|rust|document-primitive|rust-core|Core::select_output_color_guard Core::select_output_color_guard_with_cancel
 route|ffi|document-primitive|rust-core|inkpod_core_select_output_color_guard
@@ -127,7 +138,7 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   it exactly once; there is no queued arbitrary-callable work variant.
 - Palette and color-chart codecs are owned by `inkpod-format`; Windows supplies
   paths and presentation names but does not encode their native bytes.
-- Production `.inkpod` is exact-current v24. Its authoritative journal retains
+- Production `.inkpod` is exact-current v25. Its authoritative journal retains
   Genesis/assets/procedures/EditorState; optional CKPT is verified acceleration
   only, and explicit compaction writes a separate new-Genesis file.
 - Floating paste dialog, Canvas handles, renderer preview, ABI v12 record, Core
@@ -138,8 +149,14 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   `EditorState` update through `CoreHost`. Stroke begin then captures those
   Core-owned values into the existing `ApplyRasterStroke` canonical route;
   neither the pane nor renderer owns an alternative paint implementation.
+- The optional angled shooting frame is a stable-ID document object separate
+  from axis-aligned paper-fit metadata. Properties and Canvas-handle edits use
+  one canonical primitive and one transient preview state machine. Immutable
+  snapshot geometry feeds the renderer, while only the explicit instruction
+  raster export includes the fixed red outline; normal export and thumbnails
+  remain unchanged.
 
-The source-derived inventory currently contains 276 Rust routes, 279 C ABI
-exports, and 372 Windows commands. Its architecture test requires every symbol
+The source-derived inventory currently contains 283 Rust routes, 287 C ABI
+exports, and 376 Windows commands. Its architecture test requires every symbol
 to have exactly one class and owner; unclassified and direct C++ document
 mutation counts are both zero.

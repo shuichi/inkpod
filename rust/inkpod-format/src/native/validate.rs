@@ -120,6 +120,22 @@ pub(super) fn validate_document_metadata(
             ));
         }
     }
+    if let Some(frame) = metadata.shooting_frame {
+        const LIMIT: u64 = 67_108_864_000;
+        if frame.id == 0
+            || !ids.insert(frame.id)
+            || frame.center_x_milli.unsigned_abs() > LIMIT
+            || frame.center_y_milli.unsigned_abs() > LIMIT
+            || frame.width_milli == 0
+            || frame.height_milli == 0
+            || frame.width_milli > LIMIT
+            || frame.height_milli > LIMIT
+        {
+            return Err(FormatError::Invalid(
+                "shooting-frame properties are invalid",
+            ));
+        }
+    }
     if metadata.selection_plane_id == 0
         || !ids.insert(metadata.selection_plane_id)
         || !active_layer_found

@@ -149,6 +149,7 @@ fn document_tree_fixture() -> DocumentArchive {
         },
         color_chart_locked: false,
         annotations: Vec::new(),
+        shooting_frame: None,
     });
     document
 }
@@ -414,7 +415,7 @@ fn pm_gap_018_vector_connections_round_trip_and_reject_invalid_topology() {
 
 #[test]
 fn non_current_container_versions_are_rejected_before_format_freeze() {
-    for version in [1_u32, 2_u32, 4_u32, 17_u32] {
+    for version in [1_u32, 2_u32, 3_u32, 24_u32] {
         let mut encoded = encode(&base_fixture()).unwrap();
         encoded[8..12].copy_from_slice(&version.to_le_bytes());
         assert!(matches!(
@@ -465,7 +466,7 @@ fn procedure_file_fixture() -> NativeFile {
 }
 
 #[test]
-fn io_001_v23_directory_digest_and_opaque_sections_round_trip() {
+fn io_001_v25_directory_digest_and_opaque_sections_round_trip() {
     let file = procedure_file_fixture();
     let bytes = encode_procedure_file(&file).unwrap();
     assert_eq!(&bytes[0..8], b"INKPOD\0\0");
@@ -495,7 +496,7 @@ fn io_001_v23_directory_digest_and_opaque_sections_round_trip() {
 }
 
 #[test]
-fn io_001_v23_accepts_checkpoint_and_rejects_v22_missing_duplicate_overlap_and_bad_digest() {
+fn io_001_v25_accepts_checkpoint_and_rejects_noncurrent_missing_duplicate_overlap_and_bad_digest() {
     let file = procedure_file_fixture();
     let encoded = encode_procedure_file(&file).unwrap();
 
@@ -558,9 +559,9 @@ fn io_001_v23_accepts_checkpoint_and_rejects_v22_missing_duplicate_overlap_and_b
 }
 
 #[test]
-fn io_001_v23_streaming_cancel_keeps_existing_destination_and_removes_temp() {
+fn io_001_v25_streaming_cancel_keeps_existing_destination_and_removes_temp() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v23-cancel-test-{}-{}",
+        "inkpod-v25-cancel-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -587,9 +588,9 @@ fn io_001_v23_streaming_cancel_keeps_existing_destination_and_removes_temp() {
 }
 
 #[test]
-fn io_001_v23_atomic_save_replaces_an_existing_container() {
+fn io_001_v25_atomic_save_replaces_an_existing_container() {
     let directory = std::env::temp_dir().join(format!(
-        "inkpod-v23-replace-test-{}-{}",
+        "inkpod-v25-replace-test-{}-{}",
         std::process::id(),
         TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
@@ -660,6 +661,55 @@ fn annotation_metadata_round_trips_and_rejects_malformed_text_and_geometry() {
         encode(&oversized),
         Err(FormatError::Invalid(
             "annotation object properties are invalid"
+        ))
+    ));
+}
+
+#[test]
+fn shooting_frame_metadata_round_trips_and_rejects_invalid_geometry_and_ids() {
+    let mut document = document_tree_fixture();
+    document.document_metadata.as_mut().unwrap().shooting_frame = Some(FileShootingFrame {
+        id: 7,
+        center_x_milli: -4_000,
+        center_y_milli: 68_000,
+        width_milli: 40_000,
+        height_milli: 24_000,
+        rotation_turns: 0x1800_0000,
+        anchor: FileShootingFrameAnchor::BottomRight,
+        visible: true,
+        include_in_instruction_export: true,
+    });
+    assert_eq!(decode(&encode(&document).unwrap()).unwrap(), document);
+
+    let mut zero_size = document.clone();
+    zero_size
+        .document_metadata
+        .as_mut()
+        .unwrap()
+        .shooting_frame
+        .as_mut()
+        .unwrap()
+        .width_milli = 0;
+    assert!(matches!(
+        encode(&zero_size),
+        Err(FormatError::Invalid(
+            "shooting-frame properties are invalid"
+        ))
+    ));
+
+    let mut duplicate_id = document;
+    duplicate_id
+        .document_metadata
+        .as_mut()
+        .unwrap()
+        .shooting_frame
+        .as_mut()
+        .unwrap()
+        .id = 6;
+    assert!(matches!(
+        encode(&duplicate_id),
+        Err(FormatError::Invalid(
+            "shooting-frame properties are invalid"
         ))
     ));
 }

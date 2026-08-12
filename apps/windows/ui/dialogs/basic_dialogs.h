@@ -83,6 +83,17 @@ INT_PTR ShowCellCreationOptions(
     bool close_immediately,
     CellCreationDialogState& state) noexcept;
 
+struct ShootingFrameDialogState {
+    InkpodShootingFrameInput value{sizeof(InkpodShootingFrameInput)};
+    bool close_immediately{};
+    bool centered_on_owner{};
+};
+
+INT_PTR ShowShootingFrameOptions(
+    HINSTANCE instance,
+    HWND owner,
+    ShootingFrameDialogState& state) noexcept;
+
 struct CutPropertiesDialogState {
     std::wstring work_title;
     std::wstring episode;

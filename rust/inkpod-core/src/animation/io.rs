@@ -88,6 +88,7 @@ impl Core {
         let revision = self.next_document_revision()?;
         self.cancel_stroke();
         self.annotation_stroke = None;
+        self.shooting_frame_preview = None;
         self.filter_preview = None;
         self.last_filter = None;
         self.next_id = next_id;
@@ -120,6 +121,30 @@ impl Core {
         let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
         let flattened =
             flatten_document(document, &self.assets, self.document_revision.get().max(1))?;
+        let raster = tile_to_common(
+            &flattened,
+            Some(document.dpi_x_milli),
+            Some(document.dpi_y_milli),
+        )?;
+        Ok(encode_common_raster(format, &raster, composite_white)?)
+    }
+
+    /// Flattens the document with instruction annotations and the optional
+    /// angled shooting-frame overlay, then encodes a common raster.
+    ///
+    /// This explicit query does not change ordinary export authority, paper-fit
+    /// bounds, thumbnails, revisions, history, dirty state, or savepoints.
+    pub fn export_instruction_common_raster(
+        &self,
+        format: CommonRasterFormat,
+        composite_white: bool,
+    ) -> Result<Vec<u8>, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let flattened = flatten_document_with_instructions(
+            document,
+            &self.assets,
+            self.document_revision.get().max(1),
+        )?;
         let raster = tile_to_common(
             &flattened,
             Some(document.dpi_x_milli),

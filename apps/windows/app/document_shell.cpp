@@ -242,6 +242,45 @@ InkpodStatus DocumentShellController::ExportCommonRaster(
         : INKPOD_STATUS_IO_ERROR;
 }
 
+InkpodStatus DocumentShellController::ExportInstructionCommonRaster(
+    const std::wstring& path, bool composite_white) noexcept {
+    const InkpodCommonRasterFormat format = CommonRasterFormatFromPath(path);
+    if (format == 0U) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    std::vector<std::uint8_t> bytes;
+    const InkpodStatus status = engine_.Invoke(
+        session_,
+        generation_,
+        [format, composite_white, &bytes](InkpodCore* core) {
+            InkpodByteBuffer* buffer{};
+            InkpodStatus current = inkpod_core_export_instruction_common_raster(
+                core, format, composite_white ? 1U : 0U, &buffer);
+            const std::uint8_t* data{};
+            std::uint64_t length{};
+            if (current == INKPOD_STATUS_OK) {
+                current = inkpod_byte_buffer_view(buffer, &data, &length);
+            }
+            if (current == INKPOD_STATUS_OK) {
+                try {
+                    bytes.assign(data, data + static_cast<std::size_t>(length));
+                } catch (const std::bad_alloc&) {
+                    current = INKPOD_STATUS_INVALID_STATE;
+                }
+            }
+            const InkpodStatus release_status = inkpod_byte_buffer_release(&buffer);
+            return current == INKPOD_STATUS_OK ? release_status : current;
+        },
+        false,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    return WriteFileAtomically(path, bytes)
+        ? INKPOD_STATUS_OK
+        : INKPOD_STATUS_IO_ERROR;
+}
+
 bool DocumentShellController::QueueAutosave(
     const CommandContext& context,
     const std::wstring& path,

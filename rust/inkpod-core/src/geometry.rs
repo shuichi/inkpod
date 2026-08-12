@@ -1011,7 +1011,7 @@ fn rotate_vector(
     })
 }
 
-fn sin_cos_turns(turns: u32) -> (i64, i64) {
+pub(crate) fn sin_cos_turns(turns: u32) -> (i64, i64) {
     let quadrant = turns >> 30;
     let mut z = i64::from(turns & 0x3fff_ffff);
     let mut x = CORDIC_GAIN_Q30;

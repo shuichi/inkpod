@@ -13,10 +13,8 @@
 //! document pixels unless an item explicitly says that it uses device pixels.
 //!
 //! # Example
-//!
 //! ```
 //! use inkpod_core::{Core, DEFAULT_DPI_MILLI};
-//!
 //! let mut core = Core::new();
 //! let document = core.new_cell(64, 48, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)?;
 //! assert_eq!((document.width, document.height), (64, 48));
@@ -50,6 +48,7 @@ mod persistence;
 mod primitive;
 mod resource;
 mod selection;
+mod shooting_frame;
 mod snapshot;
 mod stroke;
 mod transform;
@@ -111,8 +110,8 @@ use inkpod_format::NativeSection;
 use inkpod_format::{
     CommonRaster, DocumentArchive, FileAdjustmentLayer, FileAdjustmentMetadata, FileAnnotationKind,
     FileAnnotationObject, FileAnnotationOutput, FileAnnotationPoint, FileDocumentMetadata,
-    FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties, FileTile, FormatError,
-    PlaneKind as FilePlaneKind,
+    FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties, FileShootingFrame,
+    FileShootingFrameAnchor, FileTile, FormatError, PlaneKind as FilePlaneKind,
 };
 pub use inkpod_image::RasterRangeInterpretation as RangeInterpretation;
 use inkpod_image::{
@@ -131,6 +130,7 @@ pub use primitive::{
     StateId, replay_contract,
 };
 use selection::FloatingSelection;
+pub use shooting_frame::*;
 pub use snapshot::{
     CanonicalCompositeDigest, RenderAdjustmentLut, RenderPass, RenderPassKind, RenderSnapshot,
     RenderTile,

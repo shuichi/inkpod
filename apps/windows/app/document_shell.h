@@ -29,6 +29,8 @@ public:
     InkpodStatus ImportCommonRaster(const std::wstring& path) noexcept;
     InkpodStatus ExportCommonRaster(
         const std::wstring& path, bool composite_white) noexcept;
+    InkpodStatus ExportInstructionCommonRaster(
+        const std::wstring& path, bool composite_white) noexcept;
     bool QueueAutosave(
         const CommandContext& context,
         const std::wstring& path,

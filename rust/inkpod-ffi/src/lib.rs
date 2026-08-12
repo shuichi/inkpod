@@ -51,11 +51,13 @@ use inkpod_core::{
     SelectionConstructionOptions, SelectionLayerOperation, SelectionOperation, SelectionSample,
     SelectionShape, SequenceCellSource, SequenceDirection, SequenceEditOperation,
     SequenceEditRequest, SequenceMemberId, SequenceSwitchPolicy, SequenceSwitchRequest,
-    ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp, StampGesture, StampShape,
-    StartColorPredicate, Stroke, StrokeSample, TileRaster, TraceBrushOptions, TraceBrushShape,
-    VectorCenterlineMode, VectorCubicSegment, VectorEndpoint, VectorEraseMode, VectorPathInput,
-    VectorSelectionMode, VectorWidthMode, ViewCommand, plan_cell_creation, read_color_chart,
-    read_palette, save_color_chart_atomic, save_palette_atomic,
+    ShootingFrameAnchor, ShootingFrameEdit, ShootingFrameInfo, ShootingFrameInput,
+    ShootingFramePreviewTarget, ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp,
+    StampGesture, StampShape, StartColorPredicate, Stroke, StrokeSample, TileRaster,
+    TraceBrushOptions, TraceBrushShape, VectorCenterlineMode, VectorCubicSegment, VectorEndpoint,
+    VectorEraseMode, VectorPathInput, VectorSelectionMode, VectorWidthMode, ViewCommand,
+    plan_cell_creation, read_color_chart, read_palette, save_color_chart_atomic,
+    save_palette_atomic,
 };
 use std::cell::RefCell;
 use std::mem::{align_of, size_of};
@@ -75,6 +77,7 @@ mod editor_state;
 mod effects;
 mod lifecycle_document;
 mod paint_history;
+mod shooting_frame;
 mod support;
 mod v3;
 mod vector_snapshot;
@@ -96,6 +99,7 @@ pub use effects::*;
 pub use lifecycle_document::*;
 pub(crate) use paint_history::parse_view_command;
 pub use paint_history::*;
+pub use shooting_frame::*;
 pub(crate) use support::*;
 pub use v3::*;
 pub use vector_snapshot::*;

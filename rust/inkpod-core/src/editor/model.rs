@@ -103,6 +103,8 @@ pub enum EditorTool {
     LightTableMove = 1_007,
     /// Scoped exact color replacement command.
     ColorReplace = 1_008,
+    /// Angled shooting-frame handle editor.
+    ShootingFrame = 1_009,
     /// Gradient effect command.
     EffectGradient = 1_101,
     /// Airbrush effect command.
@@ -132,7 +134,7 @@ pub enum EditorTool {
 }
 
 impl EditorTool {
-    pub(crate) const ALL: [Self; 24] = [
+    pub(crate) const ALL: [Self; 25] = [
         Self::Pencil,
         Self::Brush,
         Self::Eraser,
@@ -144,6 +146,7 @@ impl EditorTool {
         Self::FloatingTransform,
         Self::LightTableMove,
         Self::ColorReplace,
+        Self::ShootingFrame,
         Self::EffectGradient,
         Self::EffectAirbrush,
         Self::EffectBlur,

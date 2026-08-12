@@ -81,6 +81,8 @@ impl PrimitiveId {
     pub const EDIT_TARGETS: Self = Self(0x0002_0030);
     /// Primitive ID for one atomic bounded Text/Annotation object edit.
     pub const EDIT_ANNOTATIONS: Self = Self(0x0002_0040);
+    /// Primitive ID for one typed angled shooting-frame object edit.
+    pub const EDIT_SHOOTING_FRAME: Self = Self(0x0002_0050);
     /// Primitive ID for main-line display color replacement.
     pub const SET_MAIN_LINE_COLOR: Self = Self(0x0003_0001);
     /// Primitive ID for ordered palette replacement.
@@ -250,14 +252,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(21);
+    pub const CURRENT: Self = Self(22);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 24;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 25;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;

@@ -26,6 +26,7 @@ mod native_v23;
 mod output_color_guard;
 mod primitive_kernel;
 mod procedure_journal;
+mod shooting_frame;
 mod state_machine;
 mod vector;
 mod vector_diagnostics;

@@ -591,8 +591,8 @@ int wmain() {
     }
     InkpodReplayContract replay_contract{};
     if (host.GetReplayContract(first, generation, replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 21U
-        || replay_contract.procedure_format_version != 24U
+        || replay_contract.replay_epoch != 22U
+        || replay_contract.procedure_format_version != 25U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U) {
         host.Stop();
@@ -1041,7 +1041,7 @@ int wmain() {
         host.GetPersistenceInfo(second, generation, persistence);
     second_info = EmptyDocumentInfo();
     if (persistence_status != INKPOD_STATUS_OK
-        || persistence.format_version != 24U
+        || persistence.format_version != 25U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.feature_flags != INKPOD_FEATURE_NONE
         || !host.GetDocumentInfo(second, generation, second_info)

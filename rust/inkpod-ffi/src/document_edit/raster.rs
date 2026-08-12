@@ -125,6 +125,63 @@ pub unsafe extern "C" fn inkpod_core_export_common_raster(
     })
 }
 
+/// Encodes explicit instruction output, including instruction annotations and
+/// the angled shooting-frame overlay, into a Rust-owned common-raster buffer.
+///
+/// # Safety
+/// Ownership and pointer rules match [`inkpod_core_export_common_raster`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_core_export_instruction_common_raster(
+    core: *mut InkpodCore,
+    format: u32,
+    composite_white: u32,
+    out_buffer: *mut *mut InkpodByteBuffer,
+) -> u32 {
+    ffi_boundary(|| {
+        clear_last_error();
+        if core.is_null() || !is_aligned(core) || out_buffer.is_null() || !is_aligned(out_buffer) {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "instruction-raster export pointer is null or misaligned",
+            );
+        }
+        if !unsafe { out_buffer.read() }.is_null() {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "instruction-raster output already owns a live buffer",
+            );
+        }
+        if composite_white > 1 {
+            return fail(
+                INKPOD_STATUS_INVALID_ARGUMENT,
+                "instruction-raster white-composite flag must be zero or one",
+            );
+        }
+        let format = match parse_common_raster_format(format) {
+            Ok(format) => format,
+            Err(status) => return status,
+        };
+        let core = unsafe { &mut *core };
+        let thread_status = validate_core_thread(core);
+        if thread_status != INKPOD_STATUS_OK {
+            return thread_status;
+        }
+        match core
+            .core
+            .export_instruction_common_raster(format, composite_white != 0)
+        {
+            Ok(bytes) => {
+                let handle = Box::new(InkpodByteBuffer {
+                    bytes: bytes.into_boxed_slice(),
+                });
+                unsafe { out_buffer.write(Box::into_raw(handle)) };
+                INKPOD_STATUS_OK
+            }
+            Err(error) => map_core_error(error),
+        }
+    })
+}
+
 /// Copies one bounded straight-alpha RGBA8 thumbnail of the visible document.
 ///
 /// # Safety

@@ -187,6 +187,47 @@ pub(crate) fn flatten_document(
     Ok(raster)
 }
 
+pub(crate) fn flatten_document_with_instructions(
+    document: &CellDocument,
+    assets: &asset::AssetStore,
+    revision: u64,
+) -> Result<TileRaster, CoreError> {
+    let mut raster = flatten_document(document, assets, revision)?;
+    let annotation_rasters = document
+        .layers
+        .iter()
+        .filter(|layer| layer.visible)
+        .filter(|layer| matches!(layer.kind, LayerKind::Text | LayerKind::Annotation))
+        .map(|layer| {
+            crate::annotation::rasterize_instruction_annotation_layer(
+                document,
+                layer.id,
+                document.width,
+                document.height,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let shooting_frame = crate::shooting_frame::instruction_overlay(document)?;
+    for y in 0..document.height {
+        for x in 0..document.width {
+            let index = y as usize * document.width as usize + x as usize;
+            let PixelValue::Rgba(mut composite) = raster.pixel(x, y)? else {
+                return Err(CoreError::InvalidState(
+                    "instruction export base is not RGBA8",
+                ));
+            };
+            for overlay in annotation_rasters.iter().rev() {
+                composite = blend_rgba_over(composite, overlay[index]);
+            }
+            if let Some(overlay) = &shooting_frame {
+                composite = blend_rgba_over(composite, overlay[index]);
+            }
+            raster.set_pixel(x, y, PixelValue::Rgba(composite), revision)?;
+        }
+    }
+    Ok(raster)
+}
+
 /// Visits the committed visible document composite as native-depth straight RGBA16.
 ///
 /// The solid paper background, light-table content, selection, guides, grids, and

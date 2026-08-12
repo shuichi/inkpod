@@ -241,6 +241,11 @@ struct ToolUiState {
     InkpodVectorEraseMode vector_erase_mode{INKPOD_VECTOR_ERASE_PARTIAL};
     InkpodVectorSelectionMode vector_selection_mode{INKPOD_VECTOR_SELECT_TOUCHING};
     std::vector<std::uint64_t> vector_selected_path_ids;
+    InkpodShootingFrameInput shooting_frame_drag_value{
+        sizeof(InkpodShootingFrameInput)};
+    std::vector<InkpodStrokeSample> shooting_frame_gesture_samples;
+    std::uint32_t shooting_frame_drag_handle{};
+    bool shooting_frame_preview_active{};
 
     HWND palette{};
     windows::ui::ToolPaletteDialogState palette_dialog{};

@@ -205,6 +205,7 @@ pub struct RenderSnapshot {
     render_passes: Vec<RenderPass>,
     adjustment_luts: Vec<RenderAdjustmentLut>,
     annotations: Vec<AnnotationObjectInfo>,
+    shooting_frames: Vec<ShootingFrameInfo>,
 }
 
 impl RenderSnapshot {
@@ -330,6 +331,12 @@ impl RenderSnapshot {
     #[must_use]
     pub fn annotations(&self) -> &[AnnotationObjectInfo] {
         &self.annotations
+    }
+
+    /// Borrows the optional visible angled shooting-frame instruction overlay.
+    #[must_use]
+    pub fn shooting_frames(&self) -> &[ShootingFrameInfo] {
+        &self.shooting_frames
     }
 
     /// Computes the canonical document-result digest for this immutable snapshot.
@@ -541,6 +548,11 @@ impl Core {
             .as_ref()
             .map(|session| &session.preview_document)
             .or_else(|| {
+                self.shooting_frame_preview
+                    .as_ref()
+                    .map(|session| &session.preview_document)
+            })
+            .or_else(|| {
                 self.filter_preview
                     .as_ref()
                     .map(|session| &session.preview_document)
@@ -562,12 +574,18 @@ impl Core {
                 render_passes: Vec::new(),
                 adjustment_luts: Vec::new(),
                 annotations: Vec::new(),
+                shooting_frames: Vec::new(),
             };
         };
         let snapshot_revision = self
             .active_stroke
             .as_ref()
             .map(|session| RenderRevision::from_raw(session.preview_revision.get()))
+            .or_else(|| {
+                self.shooting_frame_preview
+                    .as_ref()
+                    .map(|session| RenderRevision::from_raw(session.preview_revision.get()))
+            })
             .or_else(|| {
                 self.filter_preview
                     .as_ref()
@@ -643,6 +661,11 @@ impl Core {
                 render_passes,
                 adjustment_luts,
                 annotations,
+                shooting_frames: document
+                    .shooting_frame
+                    .filter(|frame| frame.input.visible)
+                    .map(|frame| vec![frame.info()])
+                    .unwrap_or_default(),
             };
         }
         let mut coords: Vec<_> = document
@@ -750,6 +773,11 @@ impl Core {
                 .as_ref()
                 .map(|stroke| vec![stroke.preview()])
                 .unwrap_or_default(),
+            shooting_frames: document
+                .shooting_frame
+                .filter(|frame| frame.input.visible)
+                .map(|frame| vec![frame.info()])
+                .unwrap_or_default(),
         }
     }
 
@@ -805,6 +833,7 @@ impl Core {
             }],
             adjustment_luts: Vec::new(),
             annotations: Vec::new(),
+            shooting_frames: Vec::new(),
         })
     }
 }
@@ -2128,7 +2157,7 @@ mod tests {
             blake3::hash(validation_call_graph.as_bytes())
                 .to_hex()
                 .to_string(),
-            "9198c662737309b07954e00a6f990ddae058dbe7e33a88ffa7ddfcd523c690eb",
+            "f6798fddf9f349d00c0538e12493564f10b4e4f48720a0b61d381897cc7b373d",
             "primary snapshot validation call graph changed; audit payload/hash access before updating this lock"
         );
     }

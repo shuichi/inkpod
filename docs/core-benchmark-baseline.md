@@ -65,7 +65,7 @@ scenario assertions are:
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 21 / native v24 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 22 / native v25 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -82,8 +82,8 @@ wall-clock time, addresses, cache allocation order, and Batch output paths.
 | `vector_snapshot` | `2813c527f27311c8` | `b975f3cfdb7824fd` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
 | `canonical_replay` | `264b98028ac92ac6` | `264b98028ac92ac6` |
-| `checkpoint_open` | `b63e39424fbad396` | `b63e39424fbad396` |
-| `output_color_guard` | `8b2bd6bfbf8eada8` | `53bbe70c027a2864` |
+| `checkpoint_open` | `c66817dca5345832` | `c66817dca5345832` |
+| `output_color_guard` | `650300bdff9044cb` | `290f6150f7718c2d` |
 
 The v19/schema-6 Color-chart commitment changed only the `checkpoint_open`
 document-digest checksum from `eca2df7e74020108` to `8847f8440d290c18`.
@@ -130,6 +130,16 @@ Unchanged quick and full workloads independently reproduced the new
 quick/full scanned, selected, transparent, revision, history, success, and failure
 counters recorded above. No workload, harness logic, approved envelope,
 payload-access route, or `revision-max` expression changed.
+
+The v25/epoch-22 shooting-frame primitive adds the optional angled-frame field
+to the canonical document commitment without changing any benchmark workload,
+harness logic, approved envelope, payload-access route, or `revision-max`
+expression. Quick and full retain every scenario counter and the unchanged
+`canonical_replay` checksum. The intentionally advanced document schema changes
+`checkpoint_open` to `c66817dca5345832` in both profiles and changes the
+output-color-guard result digest to `650300bdff9044cb` quick and
+`290f6150f7718c2d` full; scanned/selected/transparent counts, revision 2,
+history 1, success 1, and failure 0 are unchanged.
 
 ## Approved output-color-guard envelope
 

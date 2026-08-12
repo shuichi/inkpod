@@ -707,6 +707,33 @@ pub(crate) fn rasterize_annotation_layer(
     height: u32,
     include_instruction: bool,
 ) -> Result<Vec<[u8; 4]>, CoreError> {
+    rasterize_annotation_layer_filtered(
+        document,
+        layer_id,
+        width,
+        height,
+        include_instruction,
+        false,
+    )
+}
+
+pub(crate) fn rasterize_instruction_annotation_layer(
+    document: &CellDocument,
+    layer_id: LayerId,
+    width: u32,
+    height: u32,
+) -> Result<Vec<[u8; 4]>, CoreError> {
+    rasterize_annotation_layer_filtered(document, layer_id, width, height, true, true)
+}
+
+fn rasterize_annotation_layer_filtered(
+    document: &CellDocument,
+    layer_id: LayerId,
+    width: u32,
+    height: u32,
+    include_instruction: bool,
+    instruction_only: bool,
+) -> Result<Vec<[u8; 4]>, CoreError> {
     let layer = document
         .layers
         .iter()
@@ -720,6 +747,7 @@ pub(crate) fn rasterize_annotation_layer(
     for object in document.annotations.iter().filter(|object| {
         object.input.layer_id == layer_id.get()
             && (include_instruction || object.input.output == AnnotationOutput::Normal)
+            && (!instruction_only || object.input.output == AnnotationOutput::Instruction)
     }) {
         let color = annotation_rgba8(object.input.color)?;
         match object.input.kind {

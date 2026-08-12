@@ -51,6 +51,10 @@ numeric_token!(
     AnnotationObjectId,
     "An annotation object stable ID. Zero is invalid."
 );
+numeric_token!(
+    ShootingFrameId,
+    "An angled shooting-frame stable ID. Zero is invalid."
+);
 numeric_token!(ViewId, "A secondary-view stable ID. Zero is invalid.");
 numeric_token!(
     DocumentRevision,
@@ -169,6 +173,10 @@ impl StableIdCursor {
 
     pub(crate) fn take_annotation(&mut self) -> AnnotationObjectId {
         AnnotationObjectId::from_raw(self.take_raw())
+    }
+
+    pub(crate) fn take_shooting_frame(&mut self) -> ShootingFrameId {
+        ShootingFrameId::from_raw(self.take_raw())
     }
 }
 

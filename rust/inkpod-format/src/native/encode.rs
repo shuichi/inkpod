@@ -260,14 +260,14 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
     let color_chart = crate::encode_color_chart(&metadata.color_chart)?;
     let mut output = Vec::new();
     output.extend_from_slice(&DOCUMENT_METADATA_MAGIC);
-    push_u32(&mut output, 3);
+    push_u32(&mut output, 4);
     push_u64(&mut output, metadata.active_layer_id);
     push_u64(&mut output, metadata.active_plane_id);
     push_u64(&mut output, metadata.selection_plane_id);
     push_u32(&mut output, metadata.layers.len() as u32);
     push_u32(&mut output, metadata.guides.len() as u32);
     push_u32(&mut output, metadata.annotations.len() as u32);
-    push_u32(&mut output, 0);
+    push_u32(&mut output, u32::from(metadata.shooting_frame.is_some()));
     push_i32(&mut output, metadata.grid.origin_x);
     push_i32(&mut output, metadata.grid.origin_y);
     push_u32(&mut output, metadata.grid.spacing_x);
@@ -309,6 +309,29 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
             },
         );
         push_i32(&mut output, guide.position);
+    }
+    if let Some(frame) = metadata.shooting_frame {
+        push_u64(&mut output, frame.id);
+        push_i64(&mut output, frame.center_x_milli);
+        push_i64(&mut output, frame.center_y_milli);
+        push_u64(&mut output, frame.width_milli);
+        push_u64(&mut output, frame.height_milli);
+        push_u32(&mut output, frame.rotation_turns);
+        push_u32(
+            &mut output,
+            match frame.anchor {
+                FileShootingFrameAnchor::TopLeft => 1,
+                FileShootingFrameAnchor::TopRight => 2,
+                FileShootingFrameAnchor::Center => 3,
+                FileShootingFrameAnchor::BottomLeft => 4,
+                FileShootingFrameAnchor::BottomRight => 5,
+            },
+        );
+        push_u32(
+            &mut output,
+            u32::from(frame.visible) | (u32::from(frame.include_in_instruction_export) << 1),
+        );
+        push_u32(&mut output, 0);
     }
     for object in &metadata.annotations {
         push_u64(&mut output, object.id);
@@ -370,6 +393,10 @@ pub(crate) fn push_u32(output: &mut Vec<u8>, value: u32) {
 }
 
 pub(crate) fn push_i32(output: &mut Vec<u8>, value: i32) {
+    output.extend_from_slice(&value.to_le_bytes());
+}
+
+pub(crate) fn push_i64(output: &mut Vec<u8>, value: i64) {
     output.extend_from_slice(&value.to_le_bytes());
 }
 

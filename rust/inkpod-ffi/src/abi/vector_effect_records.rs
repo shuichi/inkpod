@@ -509,6 +509,17 @@ pub struct InkpodSnapshotAnnotationView {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
+pub struct InkpodSnapshotShootingFrameView {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub feature_flags: u64,
+    pub frames: *const InkpodShootingFrameInfo,
+    pub frame_count: u64,
+    pub frame_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
 pub struct InkpodSnapshotVectorEndpoint {
     pub struct_size: u32,
     pub endpoint: u32,

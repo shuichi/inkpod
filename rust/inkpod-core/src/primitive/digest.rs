@@ -5,12 +5,12 @@ use crate::*;
 use blake3::hazmat::HasherExt;
 use std::sync::LazyLock;
 
-const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v6";
-const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v3";
+const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v7";
+const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v4";
 const DOCUMENT_RASTER_CONTEXT: &str = "org.inkpod.digest.document-raster.v1";
 const DOCUMENT_TILE_CONTEXT: &str = "org.inkpod.digest.document-raster-tile.v1";
 const PROCEDURE_PAYLOAD_CONTEXT: &str = "org.inkpod.digest.procedure-payload.v1";
-const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 7;
+const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 8;
 const DOCUMENT_TILE_SCHEMA_VERSION: u32 = 1;
 const PROCEDURE_PAYLOAD_SCHEMA_VERSION: u32 = 1;
 
@@ -315,6 +315,32 @@ fn canonical_document_metadata_bytes(
         present(empty_sequence.clone()),
         present(empty_sequence.clone()),
     ])?;
+    let shooting_frame = document
+        .shooting_frame
+        .map(|object| {
+            let input = object.input;
+            frame(&[
+                present(object.id.get().to_le_bytes()),
+                present(input.center_x_milli.to_le_bytes()),
+                present(input.center_y_milli.to_le_bytes()),
+                present(input.width_milli.to_le_bytes()),
+                present(input.height_milli.to_le_bytes()),
+                present(input.rotation_turns.to_le_bytes()),
+                present(
+                    (match input.anchor {
+                        ShootingFrameAnchor::TopLeft => 1_u32,
+                        ShootingFrameAnchor::TopRight => 2,
+                        ShootingFrameAnchor::Center => 3,
+                        ShootingFrameAnchor::BottomLeft => 4,
+                        ShootingFrameAnchor::BottomRight => 5,
+                    })
+                    .to_le_bytes(),
+                ),
+                present(boolean_bytes(input.visible)),
+                present(boolean_bytes(input.include_in_instruction_export)),
+            ])
+        })
+        .transpose()?;
     frame(&[
         present(document.uuid.to_be_bytes()),
         present(document.id.get().to_le_bytes()),
@@ -330,6 +356,7 @@ fn canonical_document_metadata_bytes(
         present(grid),
         present(light_table),
         present(hierarchy),
+        shooting_frame,
         present(empty_sequence),
     ])
 }
@@ -1354,7 +1381,7 @@ mod tests {
         let metadata = canonical_document_metadata_bytes(&document, &tree).unwrap();
         let fields = parsed_fields(&metadata);
 
-        assert_eq!(fields.len(), 15);
+        assert_eq!(fields.len(), 16);
         assert_eq!(fields[0].unwrap(), &document.uuid.to_be_bytes());
         assert_eq!(fields[1].unwrap(), &document.id.get().to_le_bytes());
         assert_eq!(
@@ -1375,10 +1402,10 @@ mod tests {
         assert_eq!(
             digest.as_bytes(),
             &[
-                114, 108, 149, 91, 144, 81, 152, 35, 170, 238, 121, 155, 88, 226, 180, 60, 190, 37,
-                164, 252, 130, 195, 29, 189, 108, 40, 129, 43, 25, 198, 30, 79,
+                5, 14, 84, 50, 13, 20, 252, 100, 61, 187, 240, 187, 25, 158, 124, 81, 169, 36, 20,
+                248, 158, 20, 182, 205, 207, 188, 35, 192, 172, 75, 122, 9,
             ],
-            "schema-7 digest changes require an explicit golden update"
+            "schema-8 digest changes require an explicit golden update"
         );
     }
 

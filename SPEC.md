@@ -243,6 +243,14 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - immutable render snapshot は text、logical bounds、font hint／size／style、geometry、color、output policy だけを渡す。Windows Canvas の font 解決、glyph／text-format cache、DirectWrite resource は renderer thread が所有する。空の hint は `Segoe UI`、存在しない family は `Segoe UI` へ fallback し、Canvas 上部へ `Font fallback: Segoe UI` warning を表示する。OS font、fallback、glyph metrics は canonical procedure、document digest、replay の入力にしない。
 - 保存された logical bounds と code-point order が意味上の layout authority である。通常 flat export と thumbnail の描画 owner は OS 非依存の Rust Core とし、font file を参照せず、font size から得た固定 advance の portable deterministic glyph-cell raster を用いる。したがって system-font の glyph outline は完成画像の canonical layout ではなく Canvas preview であり、別 platform の font metrics を暗黙に確定結果として採用しない。通常 variant は Canvas、thumbnail、flat export に含め、指示 variant は Canvas と layer thumbnail に含めるが通常の完成画像 flat export から必ず除外する。
 
+#### 角度付き撮影 frame の確定 contract
+
+- 文書は、通常の用紙・作画・安全・撮影範囲を持つ既存の axis-aligned `FrameMetadata` とは別に、角度付き撮影 frame object を 0 個または 1 個保持する。object は文書 namespace 内で再利用しない stable `ShootingFrameId`、milli-pixel document 座標の center、正の width/height、`u32::MAX + 1` を1回転とする時計回り binary turns、左上／右上／中央／左下／右下の操作 anchor、Canvas 表示 flag、指示 export 含有 flag を持つ。rotation はすべての `u32` を正規化済みの一回転範囲として受理し、座標と corner 計算は checked fixed-point で行う。frame は Canvas 外にまたがってよい。
+- center と size/rotation が geometry authority であり、anchor は数値入力と handle 変形の固定点を選ぶための永続する意図である。五点は回転後の四 corner と center に対応し、Core の共通 geometry だけが corner、hit test、handle transform を決める。OS DPI、device pixel、renderer 固有の演算は canonical state と replay に含めない。
+- create、complete-replacement update、delete は typed canonical executor と共通 transaction 境界を使う。preview は base document/revision と作業用 document を保持するlong-lived sessionとし、OK は一回の Undo 単位、Cancel は base への完全復元とする。no-op、invalid、Cancel、stale、overflow、failure は document/revision/history/journal/dirty/savepoint/ID high-watermark を進めない。
+- 角度付きobjectは Canvas と利用者が明示的に選ぶ「指示入りラスター書き出し」にだけ含める。通常の完成画像 raster export、layer/document thumbnail、paper fit、crop bounds からは必ず除外する。通常 export と「撮影フレームを考慮して用紙サイズ変更」の唯一の authority は既存 `FrameMetadata::shooting_frame` であり、両者を暗黙に相互変換しない。指示 export では include flag が on の場合だけ、straight-alpha sRGB RGBA8 `#FF4040FF` の 1 document-pixel outline として決定的に合成する。
+- document mirror/quarter-turn rotate は center、rotation、anchor を厳密に変換する。resample なしの canvas resize は選択 anchor の offset だけを center に加える。resample は等方 scale、またはobjectの辺が document 軸に平行な四分の一回転のときだけ同じ oriented rectangle へ厳密に写す。それ以外の非等方 resample は直交矩形で表現できないため、raster や metadata を部分変更せず文書 transform 全体を `InvalidArgument` で拒否する。
+
 ### 6. レイヤー・プレーンパレット
 
 - 上段に layer、下段に active layer の plane を表示する split pane とする。
@@ -617,6 +625,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `DOC-003`: create/duplicate/delete/reorder/show/edit/opacity/convert/merge
 - `RENDER-001`: raster/vector 混在時の layer/plane 木順序、visibility、opacity、alpha、adjustment を共有する Canvas/thumbnail/flatten 合成
 - `ANNOTATION-001`: stable ID、bounded UTF-8／geometry、通常／指示 output policy を持つ再編集可能 Text／Stroke／Leader／Value annotation と、その canonical edit／stroke、Canvas／thumbnail／flat export、save／reopen contract
+- `SHOOTING-FRAME-001`: stable ID、center／size／binary-turn rotation／五点 anchor／表示・指示 export policy を持つ独立した角度付き撮影 frame object、preview/transaction、document transform、Canvas／指示 export／save／reopen contract
 - `VIEW-001`: zoom、box zoom、fit、1:1、pan、horizontal/vertical flip
 - `VIEW-002`: ruler、guide/grid、snap、transparent view
 - `SNAP-001`: view-targeted device/document座標変換、guide/grid優先順位、Ctrl一時解除を共有するproduction図形入力snap

@@ -88,6 +88,8 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     vectors.struct_size = sizeof(vectors);
     InkpodSnapshotAnnotationView annotations{};
     annotations.struct_size = sizeof(annotations);
+    InkpodSnapshotShootingFrameView shooting_frames{};
+    shooting_frames.struct_size = sizeof(shooting_frames);
     InkpodSnapshotVectorDiagnostics diagnostics{};
     diagnostics.struct_size = sizeof(diagnostics);
     InkpodSnapshotRenderPlan plan{};
@@ -96,6 +98,7 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
         || inkpod_snapshot_get_overlay(snapshot, &overlay) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_vectors(snapshot, &vectors) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_annotations(snapshot, &annotations) != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_shooting_frames(snapshot, &shooting_frames) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
             != INKPOD_STATUS_OK
         || inkpod_snapshot_get_render_plan(snapshot, &plan) != INKPOD_STATUS_OK) {
@@ -104,6 +107,7 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     std::uint64_t bytes = sizeof(InkpodSnapshotView) + sizeof(InkpodSnapshotTransform)
         + sizeof(InkpodSnapshotOverlay) + sizeof(InkpodSnapshotVectorView)
         + sizeof(InkpodSnapshotAnnotationView)
+        + sizeof(InkpodSnapshotShootingFrameView)
         + sizeof(InkpodSnapshotVectorDiagnostics)
         + sizeof(InkpodSnapshotRenderPlan);
     bytes = SaturatingAdd(bytes, SaturatingProduct(
@@ -123,6 +127,8 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     }
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         overlay.guide_count, overlay.guide_stride_bytes));
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        shooting_frames.frame_count, shooting_frames.frame_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         vectors.segment_count, vectors.segment_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
@@ -449,6 +455,12 @@ public:
                 d2d_context_->EndDraw();
                 return result;
             }
+            result = DrawShootingFrame();
+            if (FAILED(result)) {
+                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+                d2d_context_->EndDraw();
+                return result;
+            }
             result = DrawFloatingPreview();
             if (FAILED(result)) {
                 d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -514,6 +526,8 @@ public:
         vectors.struct_size = sizeof(vectors);
         InkpodSnapshotAnnotationView annotations{};
         annotations.struct_size = sizeof(annotations);
+        InkpodSnapshotShootingFrameView shooting_frames{};
+        shooting_frames.struct_size = sizeof(shooting_frames);
         InkpodSnapshotVectorDiagnostics diagnostics{};
         diagnostics.struct_size = sizeof(diagnostics);
         InkpodSnapshotRenderPlan render_plan{};
@@ -531,18 +545,23 @@ public:
         const InkpodStatus annotation_status = vector_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_annotations(snapshot, &annotations)
             : vector_status;
-        const InkpodStatus diagnostics_status = annotation_status == INKPOD_STATUS_OK
-            ? inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
+        const InkpodStatus shooting_frame_status = annotation_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_shooting_frames(snapshot, &shooting_frames)
             : annotation_status;
+        const InkpodStatus diagnostics_status = shooting_frame_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
+            : shooting_frame_status;
         const InkpodStatus render_plan_status = diagnostics_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_render_plan(snapshot, &render_plan)
             : diagnostics_status;
         if (view_status != INKPOD_STATUS_OK || transform_status != INKPOD_STATUS_OK
             || overlay_status != INKPOD_STATUS_OK || vector_status != INKPOD_STATUS_OK
             || diagnostics_status != INKPOD_STATUS_OK || annotation_status != INKPOD_STATUS_OK
+            || shooting_frame_status != INKPOD_STATUS_OK
             || render_plan_status != INKPOD_STATUS_OK
             || !ValidateOverlay(overlay) || !ValidateVectors(vectors)
             || !ValidateAnnotations(annotations)
+            || !ValidateShootingFrames(shooting_frames)
             || !ValidateVectorDiagnostics(diagnostics)
             || !ValidateRenderPlan(render_plan, view, vectors, annotations)) {
             inkpod_snapshot_release(&snapshot);
@@ -557,6 +576,7 @@ public:
         overlay_ = overlay;
         vectors_ = vectors;
         annotations_ = annotations;
+        shooting_frames_ = shooting_frames;
         vector_diagnostics_ = diagnostics;
         render_plan_ = render_plan;
         retained_snapshot_bytes_ = EstimateSnapshotPayloadBytes(snapshot);
@@ -1136,6 +1156,29 @@ private:
             }
         }
         return true;
+    }
+
+    static bool ValidateShootingFrames(
+        const InkpodSnapshotShootingFrameView& view) noexcept {
+        if (view.abi_version != INKPOD_ABI_VERSION || view.feature_flags != 0U
+            || view.frame_count > 1U
+            || view.frame_stride_bytes < sizeof(InkpodShootingFrameInfo)
+            || view.frame_stride_bytes % alignof(InkpodShootingFrameInfo) != 0U
+            || (view.frame_count != 0U && view.frames == nullptr)) {
+            return false;
+        }
+        if (view.frame_count == 0U) {
+            return true;
+        }
+        const auto& frame = *view.frames;
+        return frame.struct_size >= sizeof(InkpodShootingFrameInfo)
+            && frame.struct_size <= view.frame_stride_bytes
+            && frame.feature_flags == 0U && frame.frame_id <= INT64_MAX
+            && frame.width_milli != 0U && frame.height_milli != 0U
+            && frame.visible <= 1U && frame.include_in_instruction_export <= 1U
+            && frame.reserved == 0U
+            && frame.anchor >= INKPOD_SHOOTING_FRAME_ANCHOR_TOP_LEFT
+            && frame.anchor <= INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_RIGHT;
     }
 
     static bool ValidateRenderPlan(
@@ -1826,6 +1869,68 @@ private:
             if (FAILED(result)) {
                 return result;
             }
+        }
+        return S_OK;
+    }
+
+    HRESULT DrawShootingFrame() noexcept {
+        if (shooting_frames_.frame_count == 0U || shooting_frames_.frames == nullptr) {
+            return S_OK;
+        }
+        const InkpodShootingFrameInfo& frame = *shooting_frames_.frames;
+        if (frame.visible == 0U) {
+            return S_OK;
+        }
+        ComPtr<ID2D1SolidColorBrush> shadow;
+        ComPtr<ID2D1SolidColorBrush> foreground;
+        HRESULT result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(0.05F, 0.05F, 0.05F, 0.75F), &shadow);
+        if (SUCCEEDED(result)) {
+            result = d2d_context_->CreateSolidColorBrush(
+                D2D1::ColorF(1.0F, 64.0F / 255.0F, 64.0F / 255.0F, 1.0F), &foreground);
+        }
+        if (FAILED(result)) {
+            return result;
+        }
+        std::array<D2D1_POINT_2F, 4U> points{};
+        for (std::size_t index = 0U; index < points.size(); ++index) {
+            points[index] = D2D1::Point2F(
+                static_cast<float>(frame.corners[index].x_milli) / 1000.0F,
+                static_cast<float>(frame.corners[index].y_milli) / 1000.0F);
+        }
+        const float width = static_cast<float>(std::max(1.0, 1.5 / transform_.zoom));
+        const float shadow_width = width * 2.5F;
+        for (std::size_t index = 0U; index < points.size(); ++index) {
+            const D2D1_POINT_2F next = points[(index + 1U) % points.size()];
+            d2d_context_->DrawLine(points[index], next, shadow.Get(), shadow_width);
+            d2d_context_->DrawLine(points[index], next, foreground.Get(), width);
+        }
+        const float radius = static_cast<float>(std::max(2.0, 3.0 / transform_.zoom));
+        for (const D2D1_POINT_2F point : points) {
+            d2d_context_->FillEllipse(D2D1::Ellipse(point, radius, radius), shadow.Get());
+            d2d_context_->DrawEllipse(D2D1::Ellipse(point, radius, radius), foreground.Get(), width);
+        }
+        const D2D1_POINT_2F center = D2D1::Point2F(
+            static_cast<float>(frame.center_x_milli) / 1000.0F,
+            static_cast<float>(frame.center_y_milli) / 1000.0F);
+        d2d_context_->DrawEllipse(D2D1::Ellipse(center, radius, radius), foreground.Get(), width);
+        const float edge_x = points[1].x - points[0].x;
+        const float edge_y = points[1].y - points[0].y;
+        const float edge_length = std::hypot(edge_x, edge_y);
+        if (edge_length > 0.0F) {
+            const D2D1_POINT_2F edge_center = D2D1::Point2F(
+                (points[0].x + points[1].x) * 0.5F,
+                (points[0].y + points[1].y) * 0.5F);
+            const float handle_distance = static_cast<float>(24.0 / transform_.zoom);
+            const D2D1_POINT_2F rotation_handle = D2D1::Point2F(
+                edge_center.x + edge_y / edge_length * handle_distance,
+                edge_center.y - edge_x / edge_length * handle_distance);
+            d2d_context_->DrawLine(
+                edge_center, rotation_handle, foreground.Get(), width);
+            d2d_context_->FillEllipse(
+                D2D1::Ellipse(rotation_handle, radius, radius), shadow.Get());
+            d2d_context_->DrawEllipse(
+                D2D1::Ellipse(rotation_handle, radius, radius), foreground.Get(), width);
         }
         return S_OK;
     }
@@ -2863,6 +2968,7 @@ private:
     InkpodSnapshotOverlay overlay_{};
     InkpodSnapshotVectorView vectors_{};
     InkpodSnapshotAnnotationView annotations_{};
+    InkpodSnapshotShootingFrameView shooting_frames_{};
     InkpodSnapshotVectorDiagnostics vector_diagnostics_{};
     InkpodSnapshotRenderPlan render_plan_{};
     std::unordered_map<std::wstring, ComPtr<IDWriteTextFormat>> text_format_cache_;

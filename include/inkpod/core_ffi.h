@@ -425,6 +425,20 @@ typedef uint32_t InkpodAnnotationEditKind;
 #define INKPOD_ANNOTATION_STYLE_ITALIC (UINT32_C(1) << 1)
 #define INKPOD_ANNOTATION_STYLE_UNDERLINE (UINT32_C(1) << 2)
 
+/** @brief Persistent manipulation anchor for an angled shooting frame. */
+typedef uint32_t InkpodShootingFrameAnchor;
+#define INKPOD_SHOOTING_FRAME_ANCHOR_TOP_LEFT UINT32_C(1)
+#define INKPOD_SHOOTING_FRAME_ANCHOR_TOP_RIGHT UINT32_C(2)
+#define INKPOD_SHOOTING_FRAME_ANCHOR_CENTER UINT32_C(3)
+#define INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_LEFT UINT32_C(4)
+#define INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_RIGHT UINT32_C(5)
+
+/** @brief One canonical create/update/delete operation. */
+typedef uint32_t InkpodShootingFrameEditKind;
+#define INKPOD_SHOOTING_FRAME_EDIT_CREATE UINT32_C(1)
+#define INKPOD_SHOOTING_FRAME_EDIT_UPDATE UINT32_C(2)
+#define INKPOD_SHOOTING_FRAME_EDIT_DELETE UINT32_C(3)
+
 /** @brief filter catalog の処理識別子型。 */
 typedef uint32_t InkpodFilterKind;
 #define INKPOD_FILTER_SHARPEN_WEAK UINT32_C(1)
@@ -1256,6 +1270,49 @@ typedef struct InkpodAnnotationStrokeInput {
     uint32_t reserved;
     InkpodAnnotationPoint start;
 } InkpodAnnotationStrokeInput;
+
+/**
+ * @brief Borrowed numeric shooting-frame value for edit or preview.
+ *
+ * Coordinates and sizes are document pixels and rotation is clockwise degrees.
+ * All five doubles must be finite. Core converts them once to deterministic
+ * milli-pixels/binary turns and retains no pointer after the call.
+ */
+typedef struct InkpodShootingFrameInput {
+    uint32_t struct_size;
+    InkpodShootingFrameAnchor anchor;
+    uint64_t feature_flags;
+    double center_x;
+    double center_y;
+    double width;
+    double height;
+    double rotation_degrees;
+    uint32_t visible;
+    uint32_t include_in_instruction_export;
+} InkpodShootingFrameInput;
+
+/** @brief One exact document milli-pixel shooting-frame point. */
+typedef struct InkpodShootingFramePoint {
+    int64_t x_milli;
+    int64_t y_milli;
+} InkpodShootingFramePoint;
+
+/** @brief Immutable exact Core value, including clockwise ordered corners. */
+typedef struct InkpodShootingFrameInfo {
+    uint32_t struct_size;
+    InkpodShootingFrameAnchor anchor;
+    uint64_t feature_flags;
+    uint64_t frame_id;
+    int64_t center_x_milli;
+    int64_t center_y_milli;
+    uint64_t width_milli;
+    uint64_t height_milli;
+    uint32_t rotation_turns;
+    uint32_t visible;
+    uint32_t include_in_instruction_export;
+    uint32_t reserved;
+    InkpodShootingFramePoint corners[4];
+} InkpodShootingFrameInfo;
 
 /**
  * @brief 一つの Core generation に属する Rust-owned object の value identity。
@@ -2408,6 +2465,20 @@ typedef struct InkpodSnapshotAnnotationView {
     uint64_t point_count;
     uint64_t point_stride_bytes;
 } InkpodSnapshotAnnotationView;
+
+/**
+ * @brief Snapshot-owned optional angled shooting-frame span.
+ *
+ * The pointer is borrowed until snapshot release. Count is zero or one.
+ */
+typedef struct InkpodSnapshotShootingFrameView {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint64_t feature_flags;
+    const InkpodShootingFrameInfo* frames;
+    uint64_t frame_count;
+    uint64_t frame_stride_bytes;
+} InkpodSnapshotShootingFrameView;
 
 /** @brief Explicitly disconnected vector endpoint in stable path/plane identity order. */
 typedef struct InkpodSnapshotVectorEndpoint {
@@ -4347,6 +4418,12 @@ InkpodStatus inkpod_core_export_common_raster(
     InkpodCommonRasterFormat format,
     uint32_t composite_white,
     InkpodByteBuffer** out_buffer);
+/** @brief 明示的な指示annotation／角度付き撮影frameを含むraster bytesを返す。 */
+InkpodStatus inkpod_core_export_instruction_common_raster(
+    InkpodCore* core,
+    InkpodCommonRasterFormat format,
+    uint32_t composite_white,
+    InkpodByteBuffer** out_buffer);
 /**
  * @brief visible document の bounded straight-alpha RGBA8 thumbnail を caller buffer へコピーする。
  * @par 契約
@@ -4869,6 +4946,39 @@ InkpodStatus inkpod_core_annotation_edit(
     uint64_t edit_count,
     uint64_t edit_stride_bytes,
     InkpodAnnotationEditResult* result);
+
+/** @brief Persistent angled shooting-frame query; `out_present` is zero or one. */
+InkpodStatus inkpod_core_shooting_frame_get(
+    InkpodCore* core,
+    uint32_t* out_present,
+    InkpodShootingFrameInfo* out_frame);
+/** @brief Create/update/delete the sole angled shooting frame as one transaction. */
+InkpodStatus inkpod_core_shooting_frame_edit(
+    InkpodCore* core,
+    uint64_t expected_revision,
+    InkpodShootingFrameEditKind kind,
+    uint64_t frame_id,
+    const InkpodShootingFrameInput* input,
+    uint64_t* out_revision,
+    uint64_t* out_frame_id);
+/** @brief Begin a create/update preview; no ID or history is consumed. */
+InkpodStatus inkpod_core_shooting_frame_preview_begin(
+    InkpodCore* core,
+    uint64_t expected_revision,
+    InkpodShootingFrameEditKind kind,
+    uint64_t frame_id,
+    const InkpodShootingFrameInput* input);
+/** @brief Replace the active preview working value. */
+InkpodStatus inkpod_core_shooting_frame_preview_update(
+    InkpodCore* core,
+    const InkpodShootingFrameInput* input);
+/** @brief Cancel the active preview without document mutation. */
+InkpodStatus inkpod_core_shooting_frame_preview_cancel(InkpodCore* core);
+/** @brief Commit the active preview as one canonical history item. */
+InkpodStatus inkpod_core_shooting_frame_preview_apply(
+    InkpodCore* core,
+    uint64_t* out_revision,
+    uint64_t* out_frame_id);
 
 /** @brief Begin an instruction/normal stroke without changing document history. */
 InkpodStatus inkpod_core_annotation_stroke_begin(
@@ -5708,6 +5818,11 @@ InkpodStatus inkpod_snapshot_get_vectors(
 InkpodStatus inkpod_snapshot_get_annotations(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotAnnotationView* out_annotations);
+
+/** @brief Borrow the snapshot-owned optional angled shooting-frame span. */
+InkpodStatus inkpod_snapshot_get_shooting_frames(
+    const InkpodSnapshot* snapshot,
+    InkpodSnapshotShootingFrameView* out_frames);
 
 /** @brief Two-stage copy of one annotation font-family hint, without a terminator. */
 InkpodStatus inkpod_snapshot_annotation_copy_font_family(

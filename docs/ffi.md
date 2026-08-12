@@ -61,7 +61,9 @@ Core を作らず互換性エラーとして扱う。
 
 ABI v12 は `_v3` の値／ID 専用プリミティブ制御 API と永続化 API を保持し、
 sequence source identity、Rust-owned二セルpair preview、その bounded candidate照会、
-読込済みBatch graphのoperation照会とimmutable run-copy作成を保持し、annotation edit／stroke／snapshot API を追加した。
+読込済みBatch graphのoperation照会とimmutable run-copy作成、annotation
+edit／stroke／snapshot APIを保持し、角度付き撮影frameのedit／preview／snapshotと
+明示的な指示raster export APIを追加した。
 ABI v2 で公開名から実装時のマイルストーン番号を除いたタスク API は、現行 v12 でも引き続き
 `InkpodTask` / `InkpodTaskInfo` / `INKPOD_TASK_*` / `inkpod_task_*`、共有ラスタ入力は
 `InkpodRasterSourceInput` を使用する。v1 のマイルストーン名は公開別名として残していない。
@@ -106,12 +108,41 @@ count、stride、offset/count、enum、style、bounds を検証してから保�
 未知 enum、長さ／count／stride overflow、stale revision、wrong thread は通常の
 negative contract で拒否される。
 
+## 角度付き撮影 frame（現行 ABI v12）
+
+`inkpod_core_shooting_frame_get` はCore所有スレッドのread-only queryで、
+完全サイズのcaller-owned `InkpodShootingFrameInfo`（136 bytes）と0/1 presenceを
+返す。`InkpodShootingFrameInput`（64 bytes）はsigned milli-pixel center、正の
+`u64` width/height、時計回りbinary turns、五点anchor、visible／instruction-export
+flagを持つ。`inkpod_core_shooting_frame_edit` はcreate/update/deleteを一つの
+canonical transactionとして実行し、stale、unknown enum/flag、短いrecord、zero
+size、ID mismatch、overflow、no-opでは文書、履歴、revision、dirty、stable-ID
+high-watermarkを部分更新しない。入力recordはcall中だけ借用し、Rustは保持しない。
+
+Canvas操作は `inkpod_core_shooting_frame_preview_begin`、`_update`、`_apply`、
+`_cancel` を使う。begin/updateはpreviewだけを差し替え、IDやhistoryを消費しない。
+applyだけが実変更を一つのUndo単位にし、Cancel、capture loss、失敗は基底状態を
+完全に保持する。previewは一つのCoreに高々一件で、競合するmutation、history
+移動、save/openとは同時実行しない。
+
+`inkpod_snapshot_get_shooting_frames` の `InkpodShootingFramePoint` spanは
+snapshot-owned immutable borrowで、snapshot releaseまで有効である。record countは
+0または1、point countはcenter、4 corners、rotation handleを含む6で、rendererは
+count、stride、offset、enum、finite conversionを検証する。同じsnapshotの照会と
+releaseは外部同期する。
+
+`inkpod_core_export_instruction_common_raster` は通常exportとは別の明示的なdata-plane
+queryで、Instruction annotationとinclude flag付き撮影frameを合成したRust-owned
+`InkpodByteBuffer`を返す。成功handleは`inkpod_byte_buffer_release`で一回だけ解放し、
+失敗時はownerをNULLのままにする。通常export、thumbnail、axis-aligned paper fitは
+このobjectを含まず、ABI callerが両frame authorityを暗黙変換しない。
+
 ## 決定的リプレイ契約と複合ダイジェスト
 
 現行 ABI は、所有権を移さない読み取り専用の固定レイアウト照会を二つ提供する。
 
 - `inkpod_core_get_replay_contract` は、呼び出し側が所有する `InkpodReplayContract` へ値を書き込む。
-  リプレイエポック 21、現行のプロシージャ／コンテナバージョン 24、正規数値バージョン 1、閉じた
+  リプレイエポック 22、現行のプロシージャ／コンテナバージョン 25、正規数値バージョン 1、閉じた
   プリミティブカタログの件数、BLAKE3-256 カタログダイジェストを返す。Core 所有スレッド専用であり、
   文書、リビジョン、履歴、未保存状態、レジストリ、スナップショットを変更しない。
 - `inkpod_snapshot_get_canonical_digest` は、不変スナップショットの `InkpodCanonicalDigest` を、
@@ -127,7 +158,7 @@ negative contract で拒否される。
 コピーされる。NULL、短いレコード、パニックでは通常の ABI ステータス契約に従い、出力を部分更新しない。
 スレッド違反が成立するのは Core 所有スレッド専用のリプレイ契約照会だけであり、スナップショットの
 ダイジェスト照会は、外部同期された任意の読み取りスレッドから呼び出せる。これらは検証値を公開するだけで、
-製品の保存／オープン API は同じ v24 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
+製品の保存／オープン API は同じ v25 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
 現行 ABI v12 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
@@ -139,7 +170,7 @@ negative contract で拒否される。
 ジャーナルの正確なダイジェストを返す。UI は履歴件数を表示して確認を得た後、そのレコードを変更せずに
 `inkpod_core_write_compacted_copy` へ渡す。書き込み時に確認トークンが古ければ `INVALID_STATE`、
 トークンのフラグまたは予約領域が 0 でなければ `UNSUPPORTED` になる。成功時は、現在状態を新しい Genesis
-とする別の v24 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
+とする別の v25 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
 `CoreHost` は三つの操作すべてを Core エンジンキュー経由で実行する。自動的な履歴圧縮は行わず、`CKPT` は
 履歴やアセット保持の正本ではない。Windows では `ファイル > 履歴を破棄してコピー...` として公開し、
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
@@ -213,7 +244,7 @@ membership、revision、ID、history、dirty、savepoint、Cell file を部分�
 document history へ暗黙に混ぜない。
 
 通常保存と autosave は Cut 記述子と同じディレクトリの各 member `.inkpod` を staged validation し、
-相対ファイル名、Cell ID、document UUID が一致するときだけ current v24 / Cut replay epoch 21 の
+相対ファイル名、Cell ID、document UUID が一致するときだけ current v25 / Cut replay epoch 22 の
 記述子を原子的に置換する。通常保存だけが Cut savepoint を進め、autosave と recovery open は通常の
 path authority/savepoint を採用しない。非current version、欠落、重複、自己参照、directory escape、
 symlink escape、identity mismatch は拒否する。
@@ -873,6 +904,7 @@ Core が持つ一時編集状態は、確定済み文書と分離される。
 | 実行中ストローク        | 開始／追加では不変                                  | ストロークプレビューを観測できる | 終了時に実変更を高々 1 Undo 単位で確定。キャンセルは完全復元 |
 | フィルター／ごみ取りプレビュー | 開始／更新では不変                           | 一時プレビューリビジョンを観測できる | 適用時に 1 Undo 単位で確定。キャンセルは元の基底を保持 |
 | 浮動貼り付け            | 開始／変換では不変                                  | 浮動プレビューを観測できる       | 確定は高々 1 Undo 単位。キャンセルは基底を保持       |
+| 撮影frame preview       | 開始／更新では不変                                  | snapshot-owned handle geometryを観測 | 適用時に高々1 Undo単位。Cancelは基底とID cursorを保持 |
 
 一つの Core に各状態は高々一つであり、実行中ストロークとフィルター／ごみ取りプレビューは同時に存在できない。
 競合する文書編集、履歴移動、保存、オープン、レイヤー／プレーン操作、別プレビューの開始は
@@ -896,10 +928,10 @@ Core はセッションを無効化するため、フロントエンドはスト
 | ストローク終了、プレビュー適用、浮動状態の確定                 | 実変更時に 1 回進む  | 未保存                            | 高々 1 単位                       |
 | 直接の文書編集                                                | 実変更時に 1 回進む  | 未保存                            | 原則 1 単位                       |
 | Undo／Redo／履歴位置の移動                                    | 結果状態へ進む       | 保存点との位置で再計算            | カーソルを移動し項目は増やさない  |
-| 現行 v24 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
+| 現行 v25 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
 | 自動保存                                                      | 不変                 | 不変                              | 不変                              |
 | 新規作成／インポート                                          | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis／履歴              |
-| v24 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
+| v25 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
 
 意味上の変更がない場合の厳密な出力やリビジョンは、各関数の Doxygen 契約に従う。フロントエンドはファイル時刻ではなく、
 Core が返す文書フラグと保存点に基づいて未保存状態を表示する。
@@ -1048,7 +1080,7 @@ document、EditorState、canonical procedure、`.inkpod` section のいずれに
 
 ## 保存、自動保存、復旧
 
-通常保存では、v24 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
+通常保存では、v25 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
 セクション、チェックポイントの作成条件を満たす場合だけ任意の `CKPT` を構築する。保存後に設定予定の
 文書／EditorState 保存点を含むコンテナは、同じディレクトリの一時ファイルへ複数回に分けて書き込む。
 フラッシュ、同期、クローズを終えてから置換する。成功後だけ通常保存パスと両保存点を Core へ公開するため、
@@ -1057,7 +1089,7 @@ EditorState だけが
 どちらの保存点も変更しない。
 
 自動保存とエクスポートは、出力を原子的に書いても通常保存パス、文書／EditorState 保存点、未保存状態を
-変えない。通常の v24 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
+変えない。通常の v25 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
 ID 発行状態、EditorState、両保存点を、段階的に構築した Core で検証・復元してから、現在の Core 状態を
 一回だけ置換する。`InkpodCore` の `_v3` 付きオブジェクトレジストリの世代自体は、オープンで更新されない。
 

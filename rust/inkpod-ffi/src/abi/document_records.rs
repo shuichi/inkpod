@@ -70,6 +70,46 @@ pub struct InkpodAnnotationStrokeInput {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodShootingFrameInput {
+    pub struct_size: u32,
+    pub anchor: u32,
+    pub feature_flags: u64,
+    pub center_x: f64,
+    pub center_y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub rotation_degrees: f64,
+    pub visible: u32,
+    pub include_in_instruction_export: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodShootingFramePoint {
+    pub x_milli: i64,
+    pub y_milli: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodShootingFrameInfo {
+    pub struct_size: u32,
+    pub anchor: u32,
+    pub feature_flags: u64,
+    pub frame_id: u64,
+    pub center_x_milli: i64,
+    pub center_y_milli: i64,
+    pub width_milli: u64,
+    pub height_milli: u64,
+    pub rotation_turns: u32,
+    pub visible: u32,
+    pub include_in_instruction_export: u32,
+    pub reserved: u32,
+    pub corners: [InkpodShootingFramePoint; 4],
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodTreeEdit {
     pub struct_size: u32,

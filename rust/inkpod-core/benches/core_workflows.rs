@@ -15,8 +15,8 @@ const EXPECTED_QUICK_CHECKSUMS: [u64; 10] = [
     0x2813_c527_f273_11c8,
     0xf31d_31fe_1bb0_0fd7,
     0x264b_9802_8ac9_2ac6,
-    0xb63e_3942_4fba_d396,
-    0x8b2b_d6bf_bf8e_ada8,
+    0xc668_17dc_a534_5832,
+    0x6503_00bd_ff90_44cb,
 ];
 const EXPECTED_FULL_CHECKSUMS: [u64; 10] = [
     0x4390_40e0_244d_5773,
@@ -27,8 +27,8 @@ const EXPECTED_FULL_CHECKSUMS: [u64; 10] = [
     0xb975_f3cf_db78_24fd,
     0x6732_b8b0_a656_5d03,
     0x264b_9802_8ac9_2ac6,
-    0xb63e_3942_4fba_d396,
-    0x53bb_e70c_027a_2864,
+    0xc668_17dc_a534_5832,
+    0x290f_6150_f771_8c2d,
 ];
 
 #[derive(Clone, Copy)]

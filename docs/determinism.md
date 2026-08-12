@@ -1,10 +1,14 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 24, replay epoch 21,
-canonical numeric version 1, and the digest of the closed 83-entry primitive
-catalog. Production `.inkpod` is exact-current v24; an optional verified
+The current runtime replay contract is procedure format 25, replay epoch 22,
+canonical numeric version 1, and the digest of the closed 84-entry primitive
+catalog. Production `.inkpod` is exact-current v25; an optional verified
 checkpoint preserves this contract and never replaces the authoritative journal.
-Epoch 21 and format 24 add `EditAnnotations/canonical-v2`: bounded stable-ID
+Epoch 22 and format 25 add `EditShootingFrame/canonical-v2`: one optional
+stable-ID angled frame uses signed milli-pixel center, positive size, `u32`
+binary turns, a closed five-anchor code, and exact display/instruction-export
+flags. Deterministic fixed-point CORDIC derives corners and hit targets; no OS
+trigonometry enters replay. Epoch 21 and format 24 added `EditAnnotations/canonical-v2`: bounded stable-ID
 Text/Stroke/Leader/Value objects, atomic multi-object edits, and committed
 instruction strokes share one deterministic replay contract. Epoch 20 and format
 23 added ordered atomic Cut membership editing, the separated
@@ -71,7 +75,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 24 and replay epoch 21. A semantic change that updates
+together with format version 25 and replay epoch 22. A semantic change that updates
 the catalog or any golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 

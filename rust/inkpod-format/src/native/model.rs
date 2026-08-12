@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicU64;
 pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 /// Current development format. Increment for every serialized schema change
 /// until the user declares a format freeze; older versions are not migrated.
-pub const DOCUMENT_ARCHIVE_VERSION: u32 = 3;
+pub const DOCUMENT_ARCHIVE_VERSION: u32 = 4;
 pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
 pub(super) const HEADER_BYTES: usize = 32;
 pub(super) const FIXED_MANIFEST_BYTES: usize = 200;
@@ -176,6 +176,30 @@ pub struct FileDocumentMetadata {
     pub color_chart_locked: bool,
     /// Ordered editable Text/Annotation objects keyed by stable ID.
     pub annotations: Vec<FileAnnotationObject>,
+    /// Optional independent angled shooting-frame instruction overlay.
+    pub shooting_frame: Option<FileShootingFrame>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileShootingFrameAnchor {
+    TopLeft,
+    TopRight,
+    Center,
+    BottomLeft,
+    BottomRight,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileShootingFrame {
+    pub id: u64,
+    pub center_x_milli: i64,
+    pub center_y_milli: i64,
+    pub width_milli: u64,
+    pub height_milli: u64,
+    pub rotation_turns: u32,
+    pub anchor: FileShootingFrameAnchor,
+    pub visible: bool,
+    pub include_in_instruction_export: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

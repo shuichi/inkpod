@@ -76,6 +76,7 @@ using inkpod::windows::ui::EffectEditorState;
 using inkpod::windows::ui::ShortcutDialogState;
 using inkpod::windows::ui::TextInputDialogState;
 using inkpod::windows::ui::ViewOptionsDialogState;
+using inkpod::windows::ui::ShootingFrameDialogState;
 using inkpod::windows::ui::ShowAboutDialog;
 using inkpod::windows::ui::ShowCellCreationOptions;
 using inkpod::windows::ui::ShowCutProperties;
@@ -86,6 +87,7 @@ using inkpod::windows::ui::ProgressDialogInfo;
 using inkpod::windows::ui::ShowShortcutEditor;
 using inkpod::windows::ui::ShowTextInput;
 using inkpod::windows::ui::ShowViewOptions;
+using inkpod::windows::ui::ShowShootingFrameOptions;
 using inkpod::app::AnimationUiState;
 using inkpod::app::SequenceAutosaveBinding;
 using inkpod::app::SequenceCellSwitchPolicy;
@@ -205,6 +207,7 @@ using inkpod::windows::ui::tools::kInteractionEffectGradient;
 using inkpod::windows::ui::tools::kInteractionEffectStamp;
 using inkpod::windows::ui::tools::kInteractionSelection;
 using inkpod::windows::ui::tools::kInteractionColorReplace;
+using inkpod::windows::ui::tools::kInteractionShootingFrame;
 using inkpod::windows::ui::tools::kInteractionVectorCurve;
 using inkpod::windows::ui::tools::kInteractionVectorEllipse;
 using inkpod::windows::ui::tools::kInteractionVectorEraser;
@@ -404,6 +407,12 @@ const wchar_t* ValidatePlaneCreationOptions(
 bool QuerySnapshotTransform(
     ApplicationHost& state, InkpodSnapshotTransform& transform) noexcept;
 bool QueryDocument(ApplicationHost& state, InkpodDocumentInfo& info) noexcept;
+bool QueryShootingFrame(
+    ApplicationHost& state,
+    bool& present,
+    InkpodShootingFrameInfo& frame) noexcept;
+InkpodShootingFrameInput ShootingFrameInputFromInfo(
+    const InkpodShootingFrameInfo& frame) noexcept;
 bool BuildCellCreationDialogPreview(
     void* context,
     const InkpodCellCreationOptions& options,
@@ -3972,6 +3981,198 @@ InkpodStatus UpdateFloatingHandleDrag(
     return SetFloatingTransform(state, transform);
 }
 
+InkpodStatus HandleShootingFrameCanvasEvent(
+    ApplicationHost& state,
+    const inkpod::renderer::CanvasStrokeEvent& event) noexcept {
+    auto& tools = state.Workspace().tools;
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (event.kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
+        tools.shooting_frame_gesture_samples.clear();
+        tools.shooting_frame_drag_handle = 0U;
+        if (!tools.shooting_frame_preview_active) {
+            return INKPOD_STATUS_OK;
+        }
+        tools.shooting_frame_preview_active = false;
+        return state.engine->Invoke(
+            [](InkpodCore* core) {
+                return inkpod_core_shooting_frame_preview_cancel(core);
+            },
+            true,
+            false);
+    }
+    if (event.sample_count == 0U || event.samples == nullptr) {
+        return INKPOD_STATUS_INVALID_ARGUMENT;
+    }
+    InkpodDocumentInfo document{};
+    InkpodShootingFrameInfo frame{};
+    inkpod::renderer::CanvasDocumentBounds canvas{};
+    bool present{};
+    if (!QueryDocument(state, document)
+        || !QueryShootingFrame(state, present, frame)
+        || !present
+        || !inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, canvas)
+        || document.width == 0U || document.height == 0U) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const double zoom = (canvas.right - canvas.left)
+        / static_cast<double>(document.width);
+    if (!std::isfinite(zoom) || zoom <= 0.0) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    const auto to_document = [&](const InkpodStrokeSample& sample) {
+        double x = (static_cast<double>(sample.x) - canvas.left) / zoom;
+        double y = (static_cast<double>(sample.y) - canvas.top) / zoom;
+        if (state.ActiveView().presentation.flip_horizontal) {
+            x = static_cast<double>(document.width) - x;
+        }
+        if (state.ActiveView().presentation.flip_vertical) {
+            y = static_cast<double>(document.height) - y;
+        }
+        return std::pair{x, y};
+    };
+    const auto to_device = [&](double x, double y) {
+        if (state.ActiveView().presentation.flip_horizontal) {
+            x = static_cast<double>(document.width) - x;
+        }
+        if (state.ActiveView().presentation.flip_vertical) {
+            y = static_cast<double>(document.height) - y;
+        }
+        return std::pair{canvas.left + x * zoom, canvas.top + y * zoom};
+    };
+    const InkpodStrokeSample current =
+        event.samples[static_cast<std::size_t>(event.sample_count - 1U)];
+    if (event.kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
+        tools.shooting_frame_gesture_samples.clear();
+        tools.shooting_frame_drag_handle = 0U;
+        tools.shooting_frame_preview_active = false;
+        try {
+            tools.shooting_frame_gesture_samples.push_back(current);
+        } catch (const std::bad_alloc&) {
+            return INKPOD_STATUS_INVALID_STATE;
+        }
+        tools.shooting_frame_drag_value = ShootingFrameInputFromInfo(frame);
+        const auto center = to_device(
+            tools.shooting_frame_drag_value.center_x,
+            tools.shooting_frame_drag_value.center_y);
+        if (std::hypot(
+                center.first - static_cast<double>(current.x),
+                center.second - static_cast<double>(current.y)) <= 14.0) {
+            tools.shooting_frame_drag_handle = 1U;
+        }
+        std::array<std::pair<double, double>, 4U> corners{};
+        for (std::size_t index = 0U; index < corners.size(); ++index) {
+            corners[index] = to_device(
+                static_cast<double>(frame.corners[index].x_milli) / 1000.0,
+                static_cast<double>(frame.corners[index].y_milli) / 1000.0);
+            if (std::hypot(
+                    corners[index].first - static_cast<double>(current.x),
+                    corners[index].second - static_cast<double>(current.y)) <= 14.0) {
+                tools.shooting_frame_drag_handle = 2U;
+            }
+        }
+        const double edge_x = corners[1].first - corners[0].first;
+        const double edge_y = corners[1].second - corners[0].second;
+        const double edge_length = std::hypot(edge_x, edge_y);
+        if (edge_length > 0.0) {
+            const std::pair rotation_handle{
+                (corners[0].first + corners[1].first) / 2.0
+                    + edge_y / edge_length * 24.0,
+                (corners[0].second + corners[1].second) / 2.0
+                    - edge_x / edge_length * 24.0};
+            if (std::hypot(
+                    rotation_handle.first - static_cast<double>(current.x),
+                    rotation_handle.second - static_cast<double>(current.y)) <= 16.0) {
+                tools.shooting_frame_drag_handle = 3U;
+            }
+        }
+        if (tools.shooting_frame_drag_handle == 0U) {
+            tools.shooting_frame_gesture_samples.clear();
+            return INKPOD_STATUS_OK;
+        }
+        const InkpodStatus status = state.engine->Invoke(
+            [base_revision = document.document_revision,
+             frame_id = frame.frame_id,
+             input = tools.shooting_frame_drag_value](InkpodCore* core) {
+                return inkpod_core_shooting_frame_preview_begin(
+                    core,
+                    base_revision,
+                    INKPOD_SHOOTING_FRAME_EDIT_UPDATE,
+                    frame_id,
+                    &input);
+            },
+            true,
+            false);
+        tools.shooting_frame_preview_active = status == INKPOD_STATUS_OK;
+        return status;
+    }
+    if (!tools.shooting_frame_preview_active
+        || tools.shooting_frame_gesture_samples.empty()) {
+        return INKPOD_STATUS_OK;
+    }
+    const auto start_document = to_document(
+        tools.shooting_frame_gesture_samples.front());
+    const auto current_document = to_document(current);
+    InkpodShootingFrameInput value = tools.shooting_frame_drag_value;
+    if (tools.shooting_frame_drag_handle == 1U) {
+        value.center_x += current_document.first - start_document.first;
+        value.center_y += current_document.second - start_document.second;
+    } else if (tools.shooting_frame_drag_handle == 2U) {
+        const double radians = value.rotation_degrees
+            * 3.14159265358979323846 / 180.0;
+        const double sine = std::sin(radians);
+        const double cosine = std::cos(radians);
+        const double dx = current_document.first - value.center_x;
+        const double dy = current_document.second - value.center_y;
+        value.width = std::max(0.001, std::abs(dx * cosine + dy * sine) * 2.0);
+        value.height = std::max(0.001, std::abs(-dx * sine + dy * cosine) * 2.0);
+    } else if (tools.shooting_frame_drag_handle == 3U) {
+        const double start_angle = std::atan2(
+            start_document.second - value.center_y,
+            start_document.first - value.center_x);
+        const double current_angle = std::atan2(
+            current_document.second - value.center_y,
+            current_document.first - value.center_x);
+        value.rotation_degrees += (current_angle - start_angle)
+            * 180.0 / 3.14159265358979323846;
+    }
+    InkpodStatus status = state.engine->Invoke(
+        [value](InkpodCore* core) {
+            return inkpod_core_shooting_frame_preview_update(core, &value);
+        },
+        true,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        tools.shooting_frame_preview_active = false;
+        tools.shooting_frame_drag_handle = 0U;
+        tools.shooting_frame_gesture_samples.clear();
+        (void)state.engine->Invoke(
+            [](InkpodCore* core) {
+                return inkpod_core_shooting_frame_preview_cancel(core);
+            },
+            true,
+            false);
+        return status;
+    }
+    if (event.kind == inkpod::renderer::CanvasStrokeEventKind::End) {
+        status = state.engine->Invoke(
+            [](InkpodCore* core) {
+                std::uint64_t revision{};
+                std::uint64_t frame_id{};
+                return inkpod_core_shooting_frame_preview_apply(
+                    core, &revision, &frame_id);
+            },
+            true,
+            true);
+        tools.shooting_frame_preview_active = false;
+        tools.shooting_frame_drag_handle = 0U;
+        tools.shooting_frame_gesture_samples.clear();
+    }
+    return status;
+}
+
 InkpodStatus EndFloatingPaste(ApplicationHost& state, bool commit) noexcept {
     if (!state.Workspace().tools.floating_active || state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -4323,6 +4524,20 @@ InkpodStatus SetEditorActiveTool(
     if (previous != tool && previous == kInteractionFill) {
         CancelFillGeometryPreview(
             state.Workspace().tools, state.Workspace().windows.canvas);
+    }
+    if (previous != tool && previous == kInteractionShootingFrame) {
+        auto& tools = state.Workspace().tools;
+        if (tools.shooting_frame_preview_active && state.engine != nullptr) {
+            (void)state.engine->Invoke(
+                [](InkpodCore* core) {
+                    return inkpod_core_shooting_frame_preview_cancel(core);
+                },
+                true,
+                false);
+        }
+        tools.shooting_frame_preview_active = false;
+        tools.shooting_frame_drag_handle = 0U;
+        tools.shooting_frame_gesture_samples.clear();
     }
     update.tool = tool;
     return state.UpdateEditorState(update);
@@ -6005,6 +6220,13 @@ CommandStateInputs BuildCommandStateInputs(
         && !document->shell.current_path.empty();
     inputs.document.dirty =
         has_document && (info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U;
+    InkpodShootingFrameInfo shooting_frame{};
+    bool shooting_frame_present{};
+    inputs.document.shooting_frame_present = has_document
+        && QueryShootingFrame(state, shooting_frame_present, shooting_frame)
+        && shooting_frame_present;
+    inputs.document.shooting_frame_handle_edit =
+        state.Workspace().tools.active_tool == kInteractionShootingFrame;
     inputs.document.recent_document_count = state.RecentDocumentCount();
     inputs.application.restore_previous_documents =
         state.lifetime.restore_previous_documents;
@@ -6489,6 +6711,7 @@ void UpdateMainWindowStatus(
             case kInteractionEyedropper: return L"スポイト";
             case kInteractionFloatingTransform: return L"変形";
             case kInteractionLightTableMove: return L"ライトテーブル移動";
+            case kInteractionShootingFrame: return L"撮影フレーム";
             case kInteractionVectorLine: return L"直線";
             case kInteractionVectorCurve: return L"曲線";
             case kInteractionVectorRectangle: return L"長方形";
@@ -8597,6 +8820,31 @@ bool BuildCutSessionCache(
     return true;
 }
 
+bool QueryShootingFrame(
+    ApplicationHost& state,
+    bool& present,
+    InkpodShootingFrameInfo& frame) noexcept {
+    present = false;
+    frame = {};
+    frame.struct_size = sizeof(frame);
+    const DocumentSessionId session = state.routing.targets.DocumentSession();
+    DocumentSession* document = state.Documents().Find(session);
+    std::uint32_t raw_present{};
+    if (state.engine == nullptr || document == nullptr) {
+        return false;
+    }
+    const InkpodStatus status = state.engine->Invoke(
+        document->id,
+        document->generation,
+        [&raw_present, &frame](InkpodCore* core) {
+            return inkpod_core_shooting_frame_get(core, &raw_present, &frame);
+        },
+        false,
+        false);
+    present = status == INKPOD_STATUS_OK && raw_present != 0U;
+    return status == INKPOD_STATUS_OK;
+}
+
 bool RefreshCutSessionCache(
     ApplicationHost& state, const CutSnapshot* existing = nullptr) noexcept {
     CutSnapshot queried{};
@@ -9767,6 +10015,19 @@ InkpodStatus ExportCommonRasterToPath(
         state.Document().id,
         state.Document().generation);
     return shell.ExportCommonRaster(path, composite_white);
+}
+
+InkpodStatus ExportInstructionCommonRasterToPath(
+    ApplicationHost& state, const std::wstring& path, bool composite_white) noexcept {
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    DocumentShellController shell(
+        state.Document().shell,
+        *state.engine,
+        state.Document().id,
+        state.Document().generation);
+    return shell.ExportInstructionCommonRaster(path, composite_white);
 }
 
 InkpodStatus ApplyLightTableEdit(
@@ -14352,7 +14613,10 @@ std::optional<LRESULT> RouteDocumentCommand(
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
         }
-        case IDM_FILE_EXPORT_RASTER: {
+        case IDM_FILE_EXPORT_RASTER:
+        case IDM_FILE_EXPORT_INSTRUCTION_RASTER: {
+            const bool instruction = LOWORD(wparam)
+                == IDM_FILE_EXPORT_INSTRUCTION_RASTER;
             std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
             if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, true, path)) {
                 return 0;
@@ -14365,8 +14629,11 @@ std::optional<LRESULT> RouteDocumentCommand(
                     state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
                 return 0;
             }
-            const InkpodStatus status = ExportCommonRasterToPath(
-                *state, path, dialog.values[0] != 0);
+            const InkpodStatus status = instruction
+                ? ExportInstructionCommonRasterToPath(
+                      *state, path, dialog.values[0] != 0)
+                : ExportCommonRasterToPath(
+                      *state, path, dialog.values[0] != 0);
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"一般画像の書き出し");
             }
@@ -14908,6 +15175,142 @@ InkpodStatus ApplyAnnotationEdit(
         true);
 }
 
+InkpodShootingFrameInput ShootingFrameInputFromInfo(
+    const InkpodShootingFrameInfo& frame) noexcept {
+    constexpr double kTurnsToDegrees = 360.0 / 4294967296.0;
+    return InkpodShootingFrameInput{
+        sizeof(InkpodShootingFrameInput),
+        frame.anchor,
+        0U,
+        static_cast<double>(frame.center_x_milli) / 1000.0,
+        static_cast<double>(frame.center_y_milli) / 1000.0,
+        static_cast<double>(frame.width_milli) / 1000.0,
+        static_cast<double>(frame.height_milli) / 1000.0,
+        static_cast<double>(frame.rotation_turns) * kTurnsToDegrees,
+        frame.visible,
+        frame.include_in_instruction_export};
+}
+
+InkpodStatus EditShootingFrameFromDialog(ApplicationHost& state) noexcept {
+    InkpodDocumentInfo document{};
+    InkpodShootingFrameInfo frame{};
+    bool present{};
+    if (!QueryDocument(state, document)
+        || !QueryShootingFrame(state, present, frame)
+        || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    ShootingFrameDialogState dialog{};
+    dialog.value = present
+        ? ShootingFrameInputFromInfo(frame)
+        : InkpodShootingFrameInput{
+              sizeof(InkpodShootingFrameInput),
+              INKPOD_SHOOTING_FRAME_ANCHOR_CENTER,
+              0U,
+              static_cast<double>(document.width) / 2.0,
+              static_cast<double>(document.height) / 2.0,
+              std::max(1.0, static_cast<double>(document.width) * 0.8),
+              std::max(1.0, static_cast<double>(document.height) * 0.8),
+              0.0,
+              1U,
+              1U};
+    if (state.lifetime.smoke_test) {
+        dialog.value.rotation_degrees = 15.0;
+    }
+    dialog.close_immediately = state.lifetime.smoke_test;
+    const InkpodShootingFrameEditKind kind = present
+        ? INKPOD_SHOOTING_FRAME_EDIT_UPDATE
+        : INKPOD_SHOOTING_FRAME_EDIT_CREATE;
+    const std::uint64_t frame_id = present ? frame.frame_id : 0U;
+    InkpodStatus status = state.engine->Invoke(
+        [base_revision = document.document_revision,
+         kind,
+         frame_id,
+         input = dialog.value](InkpodCore* core) {
+            return inkpod_core_shooting_frame_preview_begin(
+                core, base_revision, kind, frame_id, &input);
+        },
+        true,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        return status;
+    }
+    if (ShowShootingFrameOptions(
+            state.lifetime.instance, state.Workspace().windows.window, dialog)
+        != IDOK) {
+        (void)state.engine->Invoke(
+            [](InkpodCore* core) {
+                return inkpod_core_shooting_frame_preview_cancel(core);
+            },
+            true,
+            false);
+        return INKPOD_STATUS_CANCELLED;
+    }
+    status = state.engine->Invoke(
+        [input = dialog.value](InkpodCore* core) {
+            return inkpod_core_shooting_frame_preview_update(core, &input);
+        },
+        true,
+        false);
+    if (status != INKPOD_STATUS_OK) {
+        (void)state.engine->Invoke(
+            [](InkpodCore* core) {
+                return inkpod_core_shooting_frame_preview_cancel(core);
+            },
+            true,
+            false);
+        return status;
+    }
+    status = state.engine->Invoke(
+        [](InkpodCore* core) {
+            std::uint64_t revision{};
+            std::uint64_t created_id{};
+            return inkpod_core_shooting_frame_preview_apply(
+                core, &revision, &created_id);
+        },
+        true,
+        true);
+    if (status == INKPOD_STATUS_OK) {
+        status = SetEditorActiveTool(state, kInteractionShootingFrame);
+    }
+    return status;
+}
+
+InkpodStatus DeleteShootingFrame(ApplicationHost& state) noexcept {
+    InkpodDocumentInfo document{};
+    InkpodShootingFrameInfo frame{};
+    bool present{};
+    if (!QueryDocument(state, document)
+        || !QueryShootingFrame(state, present, frame)
+        || state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    if (!present) {
+        return INKPOD_STATUS_OK;
+    }
+    const InkpodStatus status = state.engine->Invoke(
+        [expected_revision = document.document_revision, frame_id = frame.frame_id](
+            InkpodCore* core) {
+            std::uint64_t revision{};
+            std::uint64_t ignored_id{};
+            return inkpod_core_shooting_frame_edit(
+                core,
+                expected_revision,
+                INKPOD_SHOOTING_FRAME_EDIT_DELETE,
+                frame_id,
+                nullptr,
+                &revision,
+                &ignored_id);
+        },
+        true,
+        true);
+    if (status == INKPOD_STATUS_OK
+        && state.Workspace().tools.active_tool == kInteractionShootingFrame) {
+        return SetEditorActiveTool(state, INKPOD_TOOL_PENCIL);
+    }
+    return status;
+}
+
 void PresentAnnotationSelection(ApplicationHost& state) noexcept {
     if (state.Workspace().windows.canvas != nullptr) {
         (void)inkpod::renderer::SetCanvasAnnotationSelection(
@@ -15084,6 +15487,40 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             }
             if (status != INKPOD_STATUS_OK) {
                 ShowCoreError(*state, window, L"テキスト注釈の追加");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CELL_SHOOTING_FRAME_PROPERTIES: {
+            const InkpodStatus status = EditShootingFrameFromDialog(*state);
+            if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED) {
+                ShowCoreError(*state, window, L"撮影フレーム設定");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CELL_SHOOTING_FRAME_EDIT_HANDLES: {
+            InkpodShootingFrameInfo frame{};
+            bool present{};
+            const InkpodStatus status = !QueryShootingFrame(*state, present, frame)
+                    || !present
+                ? INKPOD_STATUS_INVALID_STATE
+                : SetEditorActiveTool(
+                      *state,
+                      state->Workspace().tools.active_tool
+                              == kInteractionShootingFrame
+                          ? INKPOD_TOOL_PENCIL
+                          : kInteractionShootingFrame);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"撮影フレームのハンドル編集");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_CELL_SHOOTING_FRAME_DELETE: {
+            const InkpodStatus status = DeleteShootingFrame(*state);
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"撮影フレーム削除");
             }
             UpdateMenuState(*state);
             return status == INKPOD_STATUS_OK ? 1 : 0;
@@ -19102,6 +19539,20 @@ std::optional<LRESULT> RouteCanvasMessage(
                             && QueueAnnotationCanvasEvent(
                                 *state, *source_group, *annotation_view, *input)
                         ? 1 : 0;
+                }
+                if (state->Workspace().tools.active_tool
+                    == kInteractionShootingFrame) {
+                    const InkpodStatus status = HandleShootingFrameCanvasEvent(
+                        *state, *input);
+                    if (status != INKPOD_STATUS_OK && !state->lifetime.smoke_test) {
+                        ShowCoreError(*state, window, L"撮影フレームのハンドル編集");
+                    }
+                    if (input->kind == inkpod::renderer::CanvasStrokeEventKind::End
+                        || input->kind
+                            == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
+                        UpdateMenuState(*state);
+                    }
+                    return status == INKPOD_STATUS_OK ? 1 : 0;
                 }
                 if (state->ActiveView().presentation.guide_drag_active) {
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {

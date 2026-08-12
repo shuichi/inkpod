@@ -182,6 +182,11 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
             }
         })
         .collect();
+    let shooting_frames = snapshot
+        .shooting_frames()
+        .iter()
+        .filter_map(|frame| shooting_frame_info_record(*frame).ok())
+        .collect();
     Box::new(InkpodSnapshot {
         snapshot,
         tiles,
@@ -195,6 +200,7 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         annotations,
         annotation_utf8: annotation_utf8.into_boxed_slice(),
         annotation_points: annotation_points.into_boxed_slice(),
+        shooting_frames,
     })
 }
 

@@ -37,6 +37,13 @@ static_assert(sizeof(InkpodViewInput) == 48U);
 static_assert(sizeof(InkpodSnapshotTransform) == 48U);
 static_assert(sizeof(InkpodSnapshotGuide) == 24U);
 static_assert(sizeof(InkpodSnapshotOverlay) == 56U);
+static_assert(std::is_standard_layout_v<InkpodShootingFrameInput>);
+static_assert(std::is_standard_layout_v<InkpodShootingFrameInfo>);
+static_assert(std::is_standard_layout_v<InkpodSnapshotShootingFrameView>);
+static_assert(sizeof(InkpodShootingFrameInput) == 64U);
+static_assert(sizeof(InkpodShootingFramePoint) == 16U);
+static_assert(sizeof(InkpodShootingFrameInfo) == 136U);
+static_assert(sizeof(InkpodSnapshotShootingFrameView) == 40U);
 static_assert(sizeof(InkpodColorValue) == 16U);
 static_assert(std::is_standard_layout_v<InkpodObjectId>);
 static_assert(std::is_standard_layout_v<InkpodPrimitiveRequestV3>);
@@ -172,8 +179,8 @@ int InkpodRunAbiSmoke() {
     InkpodReplayContract replay_contract{};
     replay_contract.struct_size = sizeof(replay_contract);
     if (inkpod_core_get_replay_contract(core, &replay_contract) != INKPOD_STATUS_OK
-        || replay_contract.replay_epoch != 21U
-        || replay_contract.procedure_format_version != 24U
+        || replay_contract.replay_epoch != 22U
+        || replay_contract.procedure_format_version != 25U
         || replay_contract.canonical_numeric_version != 1U
         || replay_contract.primitive_count == 0U
         || replay_contract.feature_flags != INKPOD_FEATURE_NONE) {
@@ -327,7 +334,7 @@ int InkpodRunAbiSmoke() {
     InkpodCompactionPlan compaction{};
     compaction.struct_size = sizeof(compaction);
     if (inkpod_core_get_persistence_info(core, &persistence) != INKPOD_STATUS_OK
-        || persistence.format_version != 24U
+        || persistence.format_version != 25U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.flags != 0U
         || persistence.feature_flags != INKPOD_FEATURE_NONE

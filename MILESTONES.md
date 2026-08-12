@@ -1089,7 +1089,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M19 — PM-GAP-009: 再編集可能なtext／instruction annotation
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: DOC-002、ANNOTATION-001、IO-001。
 
@@ -1136,19 +1136,21 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M20 — PM-GAP-008: 角度と位置を持つ撮影frame
 
-状態: 未着手
+状態: 手動確認待ち
 
 関連要件: DOC-001、DOC-002。撮影frame object用の独立要件IDを新設する。
 
 仕様決定ゲート:
 
-- 角度付き撮影frameのcenter／corner／anchor表現、finished export boundsへの
-  作用、通常Canvasと指示exportへの含有規則がSPEC.mdで未決定なら、
-  独立overlayとして保持する案とcrop／export targetとして使う案の影響を示し、
-  利用者の決定後に受入条件を固定する。
-- 既存axis-aligned FrameMetadataのshooting frameと新objectのどちらを正本と
-  するか、併存／変換、paper fit、document transform、export時の優先規則も
-  同じ決定へ含める。
+- 2026-08-12に利用者が推奨案 A＋N1 を選択した。角度付き撮影frameは
+  独立した一つの指示overlay objectとし、既存axis-aligned
+  `FrameMetadata::shooting_frame`はpaper fitと通常exportの正本のままとする。
+  新objectはCanvasと明示的な指示exportだけに含め、通常raster exportと
+  thumbnailからは除外する。
+- 角度付き撮影frameを非等方document resampleする際は、直交する辺を
+  持つ同じoriented rectangleで結果を厳密に表現できなければ、文書全体の
+  transformを原子的に拒否する。等方scaleと軸平行の四分の一回転は
+  厳密に保存する。その他の確定contractは `SPEC.md` に従う。
 
 成果:
 

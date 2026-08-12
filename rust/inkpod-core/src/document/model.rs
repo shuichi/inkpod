@@ -73,6 +73,7 @@ pub(crate) struct CellDocument {
     pub(crate) vector: vector::VectorState,
     pub(crate) adjustments: BTreeMap<LayerId, Adjustment>,
     pub(crate) annotations: Vec<AnnotationObject>,
+    pub(crate) shooting_frame: Option<ShootingFrameObject>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -193,6 +194,7 @@ impl CellDocument {
             vector: vector::VectorState::default(),
             adjustments: BTreeMap::new(),
             annotations: Vec::new(),
+            shooting_frame: None,
         })
     }
 
@@ -319,6 +321,23 @@ impl CellDocument {
                         stroke_width_milli: object.input.stroke_width_milli,
                     })
                     .collect(),
+                shooting_frame: self.shooting_frame.map(|frame| FileShootingFrame {
+                    id: frame.id.get(),
+                    center_x_milli: frame.input.center_x_milli,
+                    center_y_milli: frame.input.center_y_milli,
+                    width_milli: frame.input.width_milli,
+                    height_milli: frame.input.height_milli,
+                    rotation_turns: frame.input.rotation_turns,
+                    anchor: match frame.input.anchor {
+                        ShootingFrameAnchor::TopLeft => FileShootingFrameAnchor::TopLeft,
+                        ShootingFrameAnchor::TopRight => FileShootingFrameAnchor::TopRight,
+                        ShootingFrameAnchor::Center => FileShootingFrameAnchor::Center,
+                        ShootingFrameAnchor::BottomLeft => FileShootingFrameAnchor::BottomLeft,
+                        ShootingFrameAnchor::BottomRight => FileShootingFrameAnchor::BottomRight,
+                    },
+                    visible: frame.input.visible,
+                    include_in_instruction_export: frame.input.include_in_instruction_export,
+                }),
             }),
             light_table_metadata: Some(self.light_table.to_file()),
             vector_metadata: self.vector.to_file(
@@ -562,6 +581,27 @@ impl CellDocument {
                     .collect()
             })
             .unwrap_or_default();
+        let shooting_frame = file.document_metadata.as_ref().and_then(|metadata| {
+            metadata.shooting_frame.map(|frame| ShootingFrameObject {
+                id: ShootingFrameId::from_raw(frame.id),
+                input: ShootingFrameInput {
+                    center_x_milli: frame.center_x_milli,
+                    center_y_milli: frame.center_y_milli,
+                    width_milli: frame.width_milli,
+                    height_milli: frame.height_milli,
+                    rotation_turns: frame.rotation_turns,
+                    anchor: match frame.anchor {
+                        FileShootingFrameAnchor::TopLeft => ShootingFrameAnchor::TopLeft,
+                        FileShootingFrameAnchor::TopRight => ShootingFrameAnchor::TopRight,
+                        FileShootingFrameAnchor::Center => ShootingFrameAnchor::Center,
+                        FileShootingFrameAnchor::BottomLeft => ShootingFrameAnchor::BottomLeft,
+                        FileShootingFrameAnchor::BottomRight => ShootingFrameAnchor::BottomRight,
+                    },
+                    visible: frame.visible,
+                    include_in_instruction_export: frame.include_in_instruction_export,
+                },
+            })
+        });
         let document = Self {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: DocumentId::from_raw(file.document_id),
@@ -585,9 +625,13 @@ impl CellDocument {
             vector,
             adjustments,
             annotations,
+            shooting_frame,
         };
         for object in &document.annotations {
             crate::annotation::validate_annotation_input(&document, &object.input)?;
+        }
+        if let Some(frame) = document.shooting_frame {
+            crate::shooting_frame::validate_shooting_frame_input(frame.input)?;
         }
         Ok(document)
     }
@@ -733,6 +777,7 @@ impl CellDocument {
             .chain([self.light_table.maximum_id()])
             .chain([self.vector.maximum_id()])
             .chain(self.annotations.iter().map(|object| object.id.get()))
+            .chain(self.shooting_frame.iter().map(|object| object.id.get()))
             .chain([
                 self.id.get(),
                 self.cell_id.get(),

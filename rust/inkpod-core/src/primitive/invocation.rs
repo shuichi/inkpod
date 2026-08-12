@@ -97,6 +97,9 @@ pub(crate) enum CanonicalInvocation {
     EditAnnotations {
         edits: Vec<AnnotationEdit>,
     },
+    EditShootingFrame {
+        edit: ShootingFrameEdit,
+    },
     AddGuide {
         axis: GuideAxis,
         position: i32,
@@ -635,6 +638,10 @@ fn decode_persistent_invocation(
         CanonicalInvocation::EditAnnotations {
             edits: reader.annotation_edits()?,
         }
+    } else if primitive_id == PrimitiveId::EDIT_SHOOTING_FRAME {
+        CanonicalInvocation::EditShootingFrame {
+            edit: reader.shooting_frame_edit()?,
+        }
     } else if primitive_id == PrimitiveId::ADD_GUIDE {
         CanonicalInvocation::AddGuide {
             axis: reader.guide_axis()?,
@@ -1140,6 +1147,7 @@ impl CanonicalInvocation {
             Self::DeleteHiddenLayers => PrimitiveId::DELETE_HIDDEN_LAYERS,
             Self::EditTargets { .. } => PrimitiveId::EDIT_TARGETS,
             Self::EditAnnotations { .. } => PrimitiveId::EDIT_ANNOTATIONS,
+            Self::EditShootingFrame { .. } => PrimitiveId::EDIT_SHOOTING_FRAME,
             Self::AddGuide { .. } => PrimitiveId::ADD_GUIDE,
             Self::MoveGuide { .. } => PrimitiveId::MOVE_GUIDE,
             Self::DeleteGuide { .. } => PrimitiveId::DELETE_GUIDE,
@@ -1234,6 +1242,11 @@ impl CanonicalInvocation {
                     | AnnotationEdit::Delete { object_id } => vec![*object_id],
                 })
                 .collect(),
+            Self::EditShootingFrame { edit } => match edit {
+                ShootingFrameEdit::Create(_) => Vec::new(),
+                ShootingFrameEdit::Update { frame_id, .. }
+                | ShootingFrameEdit::Delete { frame_id } => vec![*frame_id],
+            },
             Self::CreatePlane { layer_id, .. } => vec![*layer_id],
             Self::DuplicatePlane { plane_id }
             | Self::DeletePlane { plane_id }
@@ -1452,6 +1465,17 @@ impl CanonicalInvocation {
                     outcome.created_object_ids().to_vec(),
                 )
             }),
+            Self::EditShootingFrame { edit } => {
+                core.apply_shooting_frame_edit(*edit).map(|outcome| {
+                    InvocationResult::outputs(
+                        DispatchOutcome {
+                            revision: outcome.revision(),
+                            accepted_commands: 1,
+                        },
+                        outcome.frame_id().into_iter().collect(),
+                    )
+                })
+            }
             Self::AddGuide { axis, position } => core
                 .add_guide(*axis, *position)
                 .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
@@ -1816,6 +1840,7 @@ impl CanonicalInvocation {
                 write_edit_target_command(&mut writer, *command);
             }
             Self::EditAnnotations { edits } => writer.annotation_edits(edits)?,
+            Self::EditShootingFrame { edit } => writer.shooting_frame_edit(*edit),
             Self::ReorderLayer {
                 layer_id,
                 destination_index,
@@ -2382,6 +2407,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::DELETE_HIDDEN_LAYERS.get()
         || value == PrimitiveId::EDIT_TARGETS.get()
         || value == PrimitiveId::EDIT_ANNOTATIONS.get()
+        || value == PrimitiveId::EDIT_SHOOTING_FRAME.get()
         || value == PrimitiveId::ADD_GUIDE.get()
         || value == PrimitiveId::MOVE_GUIDE.get()
         || value == PrimitiveId::DELETE_GUIDE.get()
@@ -2632,6 +2658,46 @@ impl<'a> CanonicalReader<'a> {
             16 => Ok(PixelValue::Rgba16(channels)),
             _ => Err(self.invalid("canonical annotation color depth is invalid")),
         }
+    }
+
+    fn shooting_frame_edit(&mut self) -> Result<ShootingFrameEdit, CoreError> {
+        Ok(match self.u32()? {
+            1 => ShootingFrameEdit::Create(self.shooting_frame_input()?),
+            2 => ShootingFrameEdit::Update {
+                frame_id: self.u64()?,
+                input: self.shooting_frame_input()?,
+            },
+            3 => ShootingFrameEdit::Delete {
+                frame_id: self.u64()?,
+            },
+            _ => return Err(self.invalid("canonical shooting-frame edit kind is unknown")),
+        })
+    }
+
+    fn shooting_frame_input(&mut self) -> Result<ShootingFrameInput, CoreError> {
+        let center_x_milli = self.i64()?;
+        let center_y_milli = self.i64()?;
+        let width_milli = self.u64()?;
+        let height_milli = self.u64()?;
+        let rotation_turns = self.u32()?;
+        let anchor = match self.u32()? {
+            1 => ShootingFrameAnchor::TopLeft,
+            2 => ShootingFrameAnchor::TopRight,
+            3 => ShootingFrameAnchor::Center,
+            4 => ShootingFrameAnchor::BottomLeft,
+            5 => ShootingFrameAnchor::BottomRight,
+            _ => return Err(self.invalid("canonical shooting-frame anchor is unknown")),
+        };
+        Ok(ShootingFrameInput {
+            center_x_milli,
+            center_y_milli,
+            width_milli,
+            height_milli,
+            rotation_turns,
+            anchor,
+            visible: self.boolean()?,
+            include_in_instruction_export: self.boolean()?,
+        })
     }
 
     fn q16_f32(&mut self) -> Result<f32, CoreError> {
@@ -3759,6 +3825,41 @@ impl CanonicalWriter {
             }
         }
         Ok(())
+    }
+
+    fn shooting_frame_edit(&mut self, edit: ShootingFrameEdit) {
+        match edit {
+            ShootingFrameEdit::Create(input) => {
+                self.u32(1);
+                self.shooting_frame_input(input);
+            }
+            ShootingFrameEdit::Update { frame_id, input } => {
+                self.u32(2);
+                self.u64(frame_id);
+                self.shooting_frame_input(input);
+            }
+            ShootingFrameEdit::Delete { frame_id } => {
+                self.u32(3);
+                self.u64(frame_id);
+            }
+        }
+    }
+
+    fn shooting_frame_input(&mut self, input: ShootingFrameInput) {
+        self.i64(input.center_x_milli);
+        self.i64(input.center_y_milli);
+        self.u64(input.width_milli);
+        self.u64(input.height_milli);
+        self.u32(input.rotation_turns);
+        self.u32(match input.anchor {
+            ShootingFrameAnchor::TopLeft => 1,
+            ShootingFrameAnchor::TopRight => 2,
+            ShootingFrameAnchor::Center => 3,
+            ShootingFrameAnchor::BottomLeft => 4,
+            ShootingFrameAnchor::BottomRight => 5,
+        });
+        self.boolean(input.visible);
+        self.boolean(input.include_in_instruction_export);
     }
 
     fn rect(&mut self, rect: RectI32) {

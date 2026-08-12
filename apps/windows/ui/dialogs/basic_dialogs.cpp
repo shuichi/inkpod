@@ -6,6 +6,7 @@
 #include <array>
 #include <cerrno>
 #include <climits>
+#include <cmath>
 #include <cwchar>
 #include <cwctype>
 #include <new>
@@ -407,6 +408,163 @@ INT_PTR CALLBACK ViewOptionsDialogProcedure(
                     }
                     return TRUE;
                 }
+                EndDialog(dialog, IDOK);
+                return TRUE;
+            }
+            if (LOWORD(wparam) == IDCANCEL) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            break;
+        case WM_CLOSE:
+            EndDialog(dialog, IDCANCEL);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
+constexpr std::array<std::pair<const wchar_t*, InkpodShootingFrameAnchor>, 5U>
+    kShootingFrameAnchors{{
+        {L"左上", INKPOD_SHOOTING_FRAME_ANCHOR_TOP_LEFT},
+        {L"右上", INKPOD_SHOOTING_FRAME_ANCHOR_TOP_RIGHT},
+        {L"中央", INKPOD_SHOOTING_FRAME_ANCHOR_CENTER},
+        {L"左下", INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_LEFT},
+        {L"右下", INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_RIGHT},
+    }};
+
+bool ReadFiniteDouble(HWND dialog, int control, double& output) noexcept {
+    std::array<wchar_t, 96U> text{};
+    if (GetDlgItemTextW(dialog, control, text.data(), static_cast<int>(text.size())) <= 0) {
+        return false;
+    }
+    wchar_t* end{};
+    errno = 0;
+    const double value = std::wcstod(text.data(), &end);
+    while (end != nullptr && std::iswspace(*end) != 0) {
+        ++end;
+    }
+    if (errno == ERANGE || end == text.data() || end == nullptr || *end != L'\0'
+        || !std::isfinite(value)) {
+        return false;
+    }
+    output = value;
+    return true;
+}
+
+INT_PTR CALLBACK ShootingFrameDialogProcedure(
+    HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<ShootingFrameDialogState*>(
+        GetWindowLongPtrW(dialog, GWLP_USERDATA));
+    constexpr std::array<int, 5U> controls{
+        IDC_SHOOTING_FRAME_CENTER_X,
+        IDC_SHOOTING_FRAME_CENTER_Y,
+        IDC_SHOOTING_FRAME_WIDTH,
+        IDC_SHOOTING_FRAME_HEIGHT,
+        IDC_SHOOTING_FRAME_ROTATION};
+    switch (message) {
+        case WM_INITDIALOG: {
+            state = reinterpret_cast<ShootingFrameDialogState*>(lparam);
+            if (state == nullptr || state->value.struct_size < sizeof(state->value)) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+            const std::array<double, 5U> values{
+                state->value.center_x,
+                state->value.center_y,
+                state->value.width,
+                state->value.height,
+                state->value.rotation_degrees};
+            for (std::size_t index = 0U; index < controls.size(); ++index) {
+                std::array<wchar_t, 64U> text{};
+                _snwprintf_s(
+                    text.data(), text.size(), _TRUNCATE, L"%.3f", values[index]);
+                SetDlgItemTextW(dialog, controls[index], text.data());
+            }
+            int selected = CB_ERR;
+            for (const auto& [label, anchor] : kShootingFrameAnchors) {
+                const LRESULT index = SendDlgItemMessageW(
+                    dialog,
+                    IDC_SHOOTING_FRAME_ANCHOR,
+                    CB_ADDSTRING,
+                    0,
+                    reinterpret_cast<LPARAM>(label));
+                if (index == CB_ERR || index == CB_ERRSPACE) {
+                    EndDialog(dialog, IDCANCEL);
+                    return TRUE;
+                }
+                SendDlgItemMessageW(
+                    dialog,
+                    IDC_SHOOTING_FRAME_ANCHOR,
+                    CB_SETITEMDATA,
+                    static_cast<WPARAM>(index),
+                    static_cast<LPARAM>(anchor));
+                if (anchor == state->value.anchor) {
+                    selected = static_cast<int>(index);
+                }
+            }
+            if (selected == CB_ERR) {
+                EndDialog(dialog, IDCANCEL);
+                return TRUE;
+            }
+            SendDlgItemMessageW(
+                dialog, IDC_SHOOTING_FRAME_ANCHOR, CB_SETCURSEL, selected, 0);
+            CheckDlgButton(
+                dialog,
+                IDC_SHOOTING_FRAME_VISIBLE,
+                state->value.visible != 0U ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(
+                dialog,
+                IDC_SHOOTING_FRAME_INSTRUCTION_EXPORT,
+                state->value.include_in_instruction_export != 0U
+                    ? BST_CHECKED
+                    : BST_UNCHECKED);
+            state->centered_on_owner = CenterModalDialogOnOwner(dialog);
+            if (state->close_immediately) {
+                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
+            }
+            return TRUE;
+        }
+        case WM_COMMAND:
+            if (state == nullptr) {
+                break;
+            }
+            if (LOWORD(wparam) == IDOK) {
+                InkpodShootingFrameInput candidate = state->value;
+                if (!ReadFiniteDouble(dialog, controls[0], candidate.center_x)
+                    || !ReadFiniteDouble(dialog, controls[1], candidate.center_y)
+                    || !ReadFiniteDouble(dialog, controls[2], candidate.width)
+                    || !ReadFiniteDouble(dialog, controls[3], candidate.height)
+                    || !ReadFiniteDouble(dialog, controls[4], candidate.rotation_degrees)
+                    || candidate.width <= 0.0 || candidate.height <= 0.0) {
+                    if (!state->close_immediately) {
+                        MessageBoxW(
+                            dialog,
+                            L"有限の数値を入力し、幅と高さを正にしてください。",
+                            L"撮影フレーム設定",
+                            MB_OK | MB_ICONWARNING);
+                    }
+                    return TRUE;
+                }
+                const LRESULT selection = SendDlgItemMessageW(
+                    dialog, IDC_SHOOTING_FRAME_ANCHOR, CB_GETCURSEL, 0, 0);
+                if (selection == CB_ERR) {
+                    return TRUE;
+                }
+                candidate.anchor = static_cast<InkpodShootingFrameAnchor>(
+                    SendDlgItemMessageW(
+                        dialog,
+                        IDC_SHOOTING_FRAME_ANCHOR,
+                        CB_GETITEMDATA,
+                        static_cast<WPARAM>(selection),
+                        0));
+                candidate.visible = IsDlgButtonChecked(
+                    dialog, IDC_SHOOTING_FRAME_VISIBLE) == BST_CHECKED;
+                candidate.include_in_instruction_export = IsDlgButtonChecked(
+                    dialog, IDC_SHOOTING_FRAME_INSTRUCTION_EXPORT) == BST_CHECKED;
+                state->value = candidate;
                 EndDialog(dialog, IDOK);
                 return TRUE;
             }
@@ -1244,6 +1402,23 @@ INT_PTR ShowCellCreationOptions(
         MAKEINTRESOURCEW(IDD_CELL_CREATION),
         owner,
         CellCreationDialogProcedure,
+        reinterpret_cast<LPARAM>(&candidate));
+    if (result == IDOK) {
+        state = candidate;
+    }
+    return result;
+}
+
+INT_PTR ShowShootingFrameOptions(
+    HINSTANCE instance,
+    HWND owner,
+    ShootingFrameDialogState& state) noexcept {
+    ShootingFrameDialogState candidate = state;
+    const INT_PTR result = DialogBoxParamW(
+        instance,
+        MAKEINTRESOURCEW(IDD_SHOOTING_FRAME),
+        owner,
+        ShootingFrameDialogProcedure,
         reinterpret_cast<LPARAM>(&candidate));
     if (result == IDOK) {
         state = candidate;

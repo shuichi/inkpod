@@ -30,6 +30,9 @@ impl Core {
         after.selection = mirror_raster(&after.selection, axis, revision.get())?;
         let document_size = DocumentSizeU32::new(after.width, after.height);
         mirror_frame_metadata(&mut after.frames, document_size, axis)?;
+        if let Some(frame) = &mut after.shooting_frame {
+            crate::shooting_frame::mirror_shooting_frame(frame, document_size, axis)?;
+        }
         for guide in &mut after.guides {
             match (axis, guide.axis) {
                 (MirrorAxis::Horizontal, GuideAxis::Vertical) => {
@@ -96,6 +99,9 @@ impl Core {
         after.selection = rotate_raster(&after.selection, direction, revision.get())?;
         let before_size = DocumentSizeU32::new(before.width, before.height);
         rotate_frame_metadata(&mut after.frames, before_size, direction)?;
+        if let Some(frame) = &mut after.shooting_frame {
+            crate::shooting_frame::rotate_shooting_frame(frame, before_size, direction)?;
+        }
         rotate_guides(&mut after.guides, before_size, direction)?;
         let old_grid = after.grid;
         after.grid.origin_x = match direction {
@@ -177,12 +183,22 @@ impl Core {
         {
             return Ok(self.noop_outcome());
         }
-        let mut edit = self.begin_document_edit()?;
-        let revision = edit.revision();
-        let (before, after) = edit.documents();
-        let before_size = DocumentSizeU32::new(before.width, before.height);
+        let before_size = DocumentSizeU32::new(document.width, document.height);
         let after_size = DocumentSizeU32::new(resize.width, resize.height);
         if resize.resample {
+            crate::shooting_frame::validate_resample_shooting_frame(
+                document.shooting_frame,
+                before_size,
+                after_size,
+            )?;
+        }
+        let mut edit = self.begin_document_edit()?;
+        let revision = edit.revision();
+        let (_, after) = edit.documents();
+        if resize.resample {
+            if let Some(frame) = &mut after.shooting_frame {
+                crate::shooting_frame::resample_shooting_frame(frame, before_size, after_size)?;
+            }
             for plane in after
                 .layers
                 .iter_mut()
@@ -228,6 +244,9 @@ impl Core {
             )?;
         } else {
             let offset = resize_anchor_offset(before_size, after_size, resize.anchor)?;
+            if let Some(frame) = &mut after.shooting_frame {
+                crate::shooting_frame::translate_shooting_frame(frame, offset)?;
+            }
             for plane in after
                 .layers
                 .iter_mut()

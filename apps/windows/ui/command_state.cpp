@@ -75,8 +75,21 @@ void ProvideDocumentCommandStates(
         {IDM_FILE_SAVE,
          IDM_FILE_SAVE_AS,
          IDM_FILE_COMPACT_COPY,
-         IDM_FILE_AUTOSAVE_NOW},
+         IDM_FILE_AUTOSAVE_NOW,
+         IDM_FILE_EXPORT_RASTER,
+         IDM_FILE_EXPORT_INSTRUCTION_RASTER,
+         IDM_CELL_SHOOTING_FRAME_PROPERTIES},
         input.has_document);
+    SetEnabled(
+        states,
+        {IDM_CELL_SHOOTING_FRAME_EDIT_HANDLES,
+         IDM_CELL_SHOOTING_FRAME_DELETE},
+        input.has_document && input.shooting_frame_present);
+    SetChecked(
+        states,
+        IDM_CELL_SHOOTING_FRAME_EDIT_HANDLES,
+        input.has_document && input.shooting_frame_present
+            && input.shooting_frame_handle_edit);
     SetEnabled(
         states,
         {IDM_FILE_REVERT, IDM_FILE_REVERT_PARTIAL},
@@ -437,6 +450,7 @@ void ProvideToolCommandStates(
         && input.tool.active_tool != tools::kInteractionColorReplace
         && input.tool.active_tool != tools::kInteractionFloatingTransform
         && input.tool.active_tool != tools::kInteractionLightTableMove
+        && input.tool.active_tool != tools::kInteractionShootingFrame
         && !tools::IsVectorCanvasTool(input.tool.active_tool)
         && !(input.tool.active_tool >= tools::kInteractionEffectGradient
             && input.tool.active_tool <= tools::kInteractionEffectAlphaGradient);

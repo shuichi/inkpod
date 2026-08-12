@@ -8,6 +8,172 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
+#[test]
+fn shooting_frame_abi_validates_numeric_input_and_borrows_snapshot_records() {
+    let (mut core, initial) = create_core(32, 24, 0x5f20);
+    unsafe {
+        let mut input = InkpodShootingFrameInput {
+            struct_size: size_of::<InkpodShootingFrameInput>() as u32,
+            anchor: INKPOD_SHOOTING_FRAME_ANCHOR_CENTER,
+            feature_flags: INKPOD_FEATURE_NONE,
+            center_x: 10.0,
+            center_y: 8.0,
+            width: 30.0,
+            height: 18.0,
+            rotation_degrees: 33.75,
+            visible: 1,
+            include_in_instruction_export: 1,
+        };
+        let mut revision = 0;
+        let mut frame_id = 0;
+        assert_eq!(
+            inkpod_core_shooting_frame_edit(
+                core,
+                initial.document_revision,
+                INKPOD_SHOOTING_FRAME_EDIT_CREATE,
+                0,
+                &input,
+                &mut revision,
+                &mut frame_id,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_ne!(frame_id, 0);
+
+        let mut present = 0;
+        let mut frame = InkpodShootingFrameInfo {
+            struct_size: size_of::<InkpodShootingFrameInfo>() as u32,
+            ..InkpodShootingFrameInfo::default()
+        };
+        assert_eq!(
+            inkpod_core_shooting_frame_get(core, &mut present, &mut frame),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(present, 1);
+        assert_eq!(frame.frame_id, frame_id);
+        assert_eq!(frame.center_x_milli, 10_000);
+        assert_eq!(frame.corners.len(), 4);
+
+        let stable = queried_document_info(core);
+        input.rotation_degrees = f64::NAN;
+        assert_eq!(
+            inkpod_core_shooting_frame_edit(
+                core,
+                stable.document_revision,
+                INKPOD_SHOOTING_FRAME_EDIT_UPDATE,
+                frame_id,
+                &input,
+                &mut revision,
+                &mut frame_id,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        input.rotation_degrees = 0.0;
+        input.anchor = u32::MAX;
+        assert_eq!(
+            inkpod_core_shooting_frame_edit(
+                core,
+                stable.document_revision,
+                INKPOD_SHOOTING_FRAME_EDIT_UPDATE,
+                frame_id,
+                &input,
+                &mut revision,
+                &mut frame_id,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            document_observation(&queried_document_info(core)),
+            document_observation(&stable)
+        );
+        input.anchor = INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_RIGHT;
+
+        assert_eq!(
+            inkpod_core_shooting_frame_preview_begin(
+                core,
+                stable.document_revision,
+                INKPOD_SHOOTING_FRAME_EDIT_UPDATE,
+                frame_id,
+                &input,
+            ),
+            INKPOD_STATUS_OK
+        );
+        input.center_x = 12.0;
+        assert_eq!(
+            inkpod_core_shooting_frame_preview_update(core, &input),
+            INKPOD_STATUS_OK
+        );
+        let options = InkpodSnapshotOptions {
+            struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+            reserved: 0,
+            feature_flags: INKPOD_FEATURE_NONE,
+        };
+        let mut snapshot = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_build_snapshot(core, &options, &mut snapshot),
+            INKPOD_STATUS_OK
+        );
+        let mut view = InkpodSnapshotShootingFrameView {
+            struct_size: size_of::<InkpodSnapshotShootingFrameView>() as u32,
+            ..InkpodSnapshotShootingFrameView::default()
+        };
+        assert_eq!(
+            inkpod_snapshot_get_shooting_frames(snapshot, &mut view),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(view.frame_count, 1);
+        assert!(!view.frames.is_null());
+        assert_eq!(
+            view.frame_stride_bytes,
+            size_of::<InkpodShootingFrameInfo>() as u64
+        );
+        assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_shooting_frame_preview_apply(core, &mut revision, &mut frame_id),
+            INKPOD_STATUS_OK
+        );
+        assert!(revision > stable.document_revision);
+
+        let mut instruction_buffer = ptr::null_mut();
+        assert_eq!(
+            inkpod_core_export_instruction_common_raster(
+                core,
+                INKPOD_COMMON_RASTER_PNG,
+                0,
+                &mut instruction_buffer,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert!(!instruction_buffer.is_null());
+        assert_eq!(
+            inkpod_byte_buffer_release(&mut instruction_buffer),
+            INKPOD_STATUS_OK
+        );
+
+        let committed = queried_document_info(core);
+        input.center_x = 14.0;
+        assert_eq!(
+            inkpod_core_shooting_frame_preview_begin(
+                core,
+                committed.document_revision,
+                INKPOD_SHOOTING_FRAME_EDIT_UPDATE,
+                frame_id,
+                &input,
+            ),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_shooting_frame_preview_cancel(core),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            document_observation(&queried_document_info(core)),
+            document_observation(&committed)
+        );
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
 fn config() -> InkpodCoreConfig {
     InkpodCoreConfig {
         struct_size: size_of::<InkpodCoreConfig>() as u32,
@@ -4440,8 +4606,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 21);
-        assert_eq!(contract.procedure_format_version, 24);
+        assert_eq!(contract.replay_epoch, 22);
+        assert_eq!(contract.procedure_format_version, 25);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);

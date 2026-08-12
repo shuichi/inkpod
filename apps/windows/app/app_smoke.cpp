@@ -5022,6 +5022,148 @@ int RunAnnotationWorkflowSmoke(ApplicationHost& state) noexcept {
     return state.Document().shell.annotation_draw_active ? 1262 : 0;
 }
 
+int RunShootingFrameWorkflowSmoke(ApplicationHost& state) noexcept {
+    InkpodDocumentInfo before{};
+    if (!QueryDocument(state, before)) {
+        return 1260;
+    }
+    const auto query_frame = [&state](
+                                 bool& present,
+                                 InkpodShootingFrameInfo& frame) noexcept {
+        frame = {};
+        frame.struct_size = sizeof(frame);
+        std::uint32_t raw_present{};
+        if (state.engine == nullptr) {
+            return false;
+        }
+        const InkpodStatus status = state.engine->Invoke(
+            [&raw_present, &frame](InkpodCore* core) {
+                return inkpod_core_shooting_frame_get(
+                    core, &raw_present, &frame);
+            },
+            false,
+            false);
+        present = status == INKPOD_STATUS_OK && raw_present != 0U;
+        return status == INKPOD_STATUS_OK;
+    };
+    if (SendMessageW(
+            state.Workspace().windows.window,
+            WM_COMMAND,
+            IDM_CELL_SHOOTING_FRAME_PROPERTIES,
+            0) != 1) {
+        return 1261;
+    }
+    InkpodDocumentInfo created_info{};
+    InkpodShootingFrameInfo created{};
+    bool present{};
+    if (!QueryDocument(state, created_info)
+        || !query_frame(present, created)
+        || !present || created.frame_id == 0U
+        || created.rotation_turns == 0U
+        || created_info.document_revision != before.document_revision + 1U) {
+        return 1262;
+    }
+    constexpr wchar_t kInstructionExportPath[] =
+        L"inkpod-shooting-frame-instruction-smoke.png";
+    std::wstring previous_smoke_raster_path;
+    try {
+        previous_smoke_raster_path = state.lifetime.smoke_raster_path;
+        state.lifetime.smoke_raster_path = kInstructionExportPath;
+    } catch (const std::bad_alloc&) {
+        return 1263;
+    }
+    DeleteFileW(kInstructionExportPath);
+    const LRESULT instruction_export = SendMessageW(
+        state.Workspace().windows.window,
+        WM_COMMAND,
+        IDM_FILE_EXPORT_INSTRUCTION_RASTER,
+        0);
+    const bool instruction_export_exists =
+        GetFileAttributesW(kInstructionExportPath) != INVALID_FILE_ATTRIBUTES;
+    DeleteFileW(kInstructionExportPath);
+    state.lifetime.smoke_raster_path.swap(previous_smoke_raster_path);
+    if (instruction_export != 1 || !instruction_export_exists) {
+        return 1263;
+    }
+    inkpod::renderer::CanvasDocumentBounds bounds{};
+    HWND canvas = state.Workspace().windows.canvas;
+    if (canvas == nullptr
+        || !inkpod::renderer::GetCanvasDocumentBounds(canvas, bounds)
+        || before.width == 0U) {
+        return 1264;
+    }
+    const double zoom = (bounds.right - bounds.left)
+        / static_cast<double>(before.width);
+    const auto to_device = [&](double x, double y) noexcept {
+        if (state.ActiveView().presentation.flip_horizontal) {
+            x = static_cast<double>(before.width) - x;
+        }
+        if (state.ActiveView().presentation.flip_vertical) {
+            y = static_cast<double>(before.height) - y;
+        }
+        return POINT{
+            static_cast<LONG>(std::llround(bounds.left + x * zoom)),
+            static_cast<LONG>(std::llround(bounds.top + y * zoom))};
+    };
+    const POINT start = to_device(
+        static_cast<double>(created.center_x_milli) / 1000.0,
+        static_cast<double>(created.center_y_milli) / 1000.0);
+    const POINT moved{start.x + 18, start.y + 12};
+    if (SendMessageW(canvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(start.x, start.y)) != 1
+        || SendMessageW(canvas, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(moved.x, moved.y)) != 1
+        || SendMessageW(canvas, WM_LBUTTONUP, 0, MAKELPARAM(moved.x, moved.y)) != 1) {
+        return 1265;
+    }
+    InkpodDocumentInfo moved_info{};
+    InkpodShootingFrameInfo moved_frame{};
+    if (!QueryDocument(state, moved_info)
+        || !query_frame(present, moved_frame)
+        || !present
+        || moved_info.document_revision != created_info.document_revision + 1U
+        || (moved_frame.center_x_milli == created.center_x_milli
+            && moved_frame.center_y_milli == created.center_y_milli)) {
+        return 1266;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+    InkpodShootingFrameInfo undone{};
+    if (!query_frame(present, undone) || !present
+        || undone.center_x_milli != created.center_x_milli
+        || undone.center_y_milli != created.center_y_milli) {
+        return 1267;
+    }
+    SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
+    InkpodShootingFrameInfo redone{};
+    InkpodDocumentInfo before_cancel{};
+    if (!QueryDocument(state, before_cancel)
+        || !query_frame(present, redone) || !present
+        || redone.center_x_milli != moved_frame.center_x_milli
+        || redone.center_y_milli != moved_frame.center_y_milli) {
+        return 1268;
+    }
+    const POINT cancel_start = to_device(
+        static_cast<double>(redone.center_x_milli) / 1000.0,
+        static_cast<double>(redone.center_y_milli) / 1000.0);
+    if (SendMessageW(
+            canvas,
+            WM_LBUTTONDOWN,
+            MK_LBUTTON,
+            MAKELPARAM(cancel_start.x, cancel_start.y)) != 1) {
+        return 1269;
+    }
+    SendMessageW(canvas, WM_CAPTURECHANGED, 0, 0);
+    InkpodDocumentInfo after_cancel{};
+    InkpodShootingFrameInfo cancelled{};
+    if (!QueryDocument(state, after_cancel)
+        || !query_frame(present, cancelled) || !present
+        || after_cancel.document_revision != before_cancel.document_revision
+        || cancelled.center_x_milli != redone.center_x_milli
+        || cancelled.center_y_milli != redone.center_y_milli
+        || SendMessageW(canvas, inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
+        return 1270;
+    }
+    return 0;
+}
+
 int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr
         || CreateCell(state, 32U, 24U, 120000U) != INKPOD_STATUS_OK) {
@@ -12015,6 +12157,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunAnnotationWorkflowSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunShootingFrameWorkflowSmoke(state);
     }
     if (exit_code == 0) {
         exit_code = runtime::RunProductionWorkflowSmoke(state);

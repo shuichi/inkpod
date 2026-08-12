@@ -393,7 +393,7 @@ pub fn decode_document_archive(bytes: &[u8]) -> Result<DocumentArchive, FormatEr
 
 fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, FormatError> {
     let mut reader = Reader::new(bytes);
-    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 3 {
+    if reader.take(4)? != DOCUMENT_METADATA_MAGIC || reader.u32()? != 4 {
         return Err(FormatError::Unsupported(
             "document metadata version is not supported",
         ));
@@ -404,11 +404,15 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
     let layer_count = reader.u32()? as usize;
     let guide_count = reader.u32()? as usize;
     let annotation_count = reader.u32()? as usize;
-    if reader.u32()? != 0 {
-        return Err(FormatError::Unsupported(
-            "document annotation reserved field is not zero",
-        ));
-    }
+    let shooting_frame_present = match reader.u32()? {
+        0 => false,
+        1 => true,
+        _ => {
+            return Err(FormatError::Unsupported(
+                "document shooting-frame presence field is invalid",
+            ));
+        }
+    };
     if layer_count == 0
         || layer_count > MAX_LAYERS
         || guide_count > MAX_GUIDES
@@ -499,6 +503,41 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
             position: reader.i32()?,
         });
     }
+    let shooting_frame = if shooting_frame_present {
+        let id = reader.u64()?;
+        let center_x_milli = reader.i64()?;
+        let center_y_milli = reader.i64()?;
+        let width_milli = reader.u64()?;
+        let height_milli = reader.u64()?;
+        let rotation_turns = reader.u32()?;
+        let anchor = match reader.u32()? {
+            1 => FileShootingFrameAnchor::TopLeft,
+            2 => FileShootingFrameAnchor::TopRight,
+            3 => FileShootingFrameAnchor::Center,
+            4 => FileShootingFrameAnchor::BottomLeft,
+            5 => FileShootingFrameAnchor::BottomRight,
+            _ => return Err(FormatError::Unsupported("unknown shooting-frame anchor")),
+        };
+        let flags = reader.u32()?;
+        if flags & !3 != 0 || reader.u32()? != 0 {
+            return Err(FormatError::Unsupported(
+                "shooting-frame flags or reserved field is invalid",
+            ));
+        }
+        Some(FileShootingFrame {
+            id,
+            center_x_milli,
+            center_y_milli,
+            width_milli,
+            height_milli,
+            rotation_turns,
+            anchor,
+            visible: flags_bit(flags, 0),
+            include_in_instruction_export: flags_bit(flags, 1),
+        })
+    } else {
+        None
+    };
     let mut annotations = Vec::with_capacity(annotation_count);
     for _ in 0..annotation_count {
         let id = reader.u64()?;
@@ -574,6 +613,7 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
         color_chart,
         color_chart_locked,
         annotations,
+        shooting_frame,
     };
     validate_document_metadata(&metadata, None)?;
     Ok(metadata)
@@ -656,6 +696,14 @@ impl<'a> Reader<'a> {
             .try_into()
             .map_err(|_| FormatError::Invalid("i32 is truncated"))?;
         Ok(i32::from_le_bytes(bytes))
+    }
+
+    pub(crate) fn i64(&mut self) -> Result<i64, FormatError> {
+        let bytes: [u8; 8] = self
+            .take(8)?
+            .try_into()
+            .map_err(|_| FormatError::Invalid("i64 is truncated"))?;
+        Ok(i64::from_le_bytes(bytes))
     }
 
     pub(crate) fn u64(&mut self) -> Result<u64, FormatError> {
