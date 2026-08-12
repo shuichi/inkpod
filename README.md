@@ -148,15 +148,15 @@ ctest --preset windows-arm-release
 ポータブル ZIP も生成します。Release 成果物は次の場所に作られます。
 
 ```text
-build/windows-x64-release/package/Inkpod-0.1.0-windows-x64.zip
-build/windows-arm-release/package/Inkpod-0.1.0-windows-arm.zip
+build/windows-x64-release/package/Inkpod-0.2.1-windows-x64.zip
+build/windows-arm-release/package/Inkpod-0.2.1-windows-arm.zip
 ```
 
 ZIP 名は三つ組の application version、EXE と MSIX は build number を加えた
 四つ組 version を使用します。ZIP 直下には次の4ファイルだけを収録します。
 
 ```text
-Inkpod-0.1.0-windows-x64.zip
+Inkpod-0.2.1-windows-x64.zip
 ├─ inkpod.exe
 ├─ README.txt
 ├─ LICENSE.txt
