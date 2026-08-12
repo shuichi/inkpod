@@ -1,6 +1,75 @@
 use super::*;
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodAnnotationPoint {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub x_milli: i32,
+    pub y_milli: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodAnnotationObjectInput {
+    pub struct_size: u32,
+    pub kind: u32,
+    pub feature_flags: u64,
+    pub layer_id: u64,
+    pub output: u32,
+    pub style_flags: u32,
+    pub bounds: InkpodFrameRect,
+    pub font_family_utf8: *const u8,
+    pub font_family_bytes: u64,
+    pub font_size_milli: u32,
+    pub stroke_width_milli: u32,
+    pub color: InkpodColorValue,
+    pub text_utf8: *const u8,
+    pub text_bytes: u64,
+    pub points: *const InkpodAnnotationPoint,
+    pub point_count: u64,
+    pub point_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodAnnotationEdit {
+    pub struct_size: u32,
+    pub kind: u32,
+    pub feature_flags: u64,
+    pub object_id: u64,
+    pub input: *const InkpodAnnotationObjectInput,
+    pub delta_x: i32,
+    pub delta_y: i32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InkpodAnnotationEditResult {
+    pub struct_size: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub revision: u64,
+    pub created_ids: *mut u64,
+    pub created_capacity: u64,
+    pub created_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InkpodAnnotationStrokeInput {
+    pub struct_size: u32,
+    pub output: u32,
+    pub feature_flags: u64,
+    pub base_document_revision: u64,
+    pub layer_id: u64,
+    pub color: InkpodColorValue,
+    pub stroke_width_milli: u32,
+    pub reserved: u32,
+    pub start: InkpodAnnotationPoint,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodTreeEdit {
     pub struct_size: u32,

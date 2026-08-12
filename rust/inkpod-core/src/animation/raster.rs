@@ -68,6 +68,23 @@ pub(crate) fn flatten_document(
                 .transpose()
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let annotation_rasters = document
+        .layers
+        .iter()
+        .map(|layer| {
+            matches!(layer.kind, LayerKind::Text | LayerKind::Annotation)
+                .then(|| {
+                    crate::annotation::rasterize_annotation_layer(
+                        document,
+                        layer.id,
+                        document.width,
+                        document.height,
+                        false,
+                    )
+                })
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     for y in 0..document.height {
         for x in 0..document.width {
             let mut composite = match &base_asset {
@@ -80,12 +97,13 @@ pub(crate) fn flatten_document(
                     y,
                 )?,
             };
-            for (layer, vector_raster) in document
+            for ((layer, vector_raster), annotation_raster) in document
                 .layers
                 .iter()
                 .zip(&vector_rasters)
+                .zip(&annotation_rasters)
                 .rev()
-                .filter(|(layer, _)| layer.visible)
+                .filter(|((layer, _), _)| layer.visible)
             {
                 if layer.kind == LayerKind::Adjustment {
                     let adjustment =
@@ -118,6 +136,11 @@ pub(crate) fn flatten_document(
                             .try_into()
                             .map_err(|_| CoreError::InvalidState("vector raster is truncated"))?,
                     );
+                    continue;
+                }
+                if let Some(annotation_raster) = annotation_raster {
+                    let offset = y as usize * document.width as usize + x as usize;
+                    composite = blend_rgba_over(composite, annotation_raster[offset]);
                     continue;
                 }
                 let mut layer_pixel = [0_u8; 4];

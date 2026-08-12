@@ -44,6 +44,11 @@ impl Core {
         let pixels = if layer.kind == LayerKind::VectorColoring {
             self.rasterize_vector_layer_dimensions(layer_id, width, height, stride_bytes, true)?
                 .pixels
+        } else if matches!(layer.kind, LayerKind::Text | LayerKind::Annotation) {
+            crate::annotation::rasterize_annotation_layer(document, layer_id, width, height, true)?
+                .into_iter()
+                .flatten()
+                .collect()
         } else {
             let mut pixels = vec![0_u8; byte_count];
             for output_y in 0..height {

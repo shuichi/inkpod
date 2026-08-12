@@ -65,7 +65,7 @@ scenario assertions are:
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `vector_snapshot` | ordered pass, segment/fill counts, zero legacy raster snapshot tiles, and rasterized pixels match |
 | `batch_preview` | one invalid graph is rejected, valid inputs dry-run successfully, and no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 20 / native v23 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 21 / native v24 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -81,9 +81,9 @@ wall-clock time, addresses, cache allocation order, and Batch output paths.
 | `light_table_composite` | `255ab9bad114dfdd` | `77f63d83e130185f` |
 | `vector_snapshot` | `2813c527f27311c8` | `b975f3cfdb7824fd` |
 | `batch_preview` | `f31d31fe1bb00fd7` | `6732b8b0a6565d03` |
-| `canonical_replay` | `f521d658a47051e9` | `f521d658a47051e9` |
-| `checkpoint_open` | `8847f8440d290c18` | `8847f8440d290c18` |
-| `output_color_guard` | `ed208415c7582547` | `47abbcdeda0736eb` |
+| `canonical_replay` | `264b98028ac92ac6` | `264b98028ac92ac6` |
+| `checkpoint_open` | `b63e39424fbad396` | `b63e39424fbad396` |
+| `output_color_guard` | `8b2bd6bfbf8eada8` | `53bbe70c027a2864` |
 
 The v19/schema-6 Color-chart commitment changed only the `checkpoint_open`
 document-digest checksum from `eca2df7e74020108` to `8847f8440d290c18`.
@@ -120,6 +120,16 @@ assets from ordered membership and extends Cut history outside the document/rend
 hot path. It changes no benchmark workload, semantic counter/checksum, harness,
 approved envelope, payload-access route, or `revision-max` expression. The required
 quick run must therefore retain all ten recorded checksums and reuse/rebuild gates.
+
+The v24/epoch-21 annotation primitive adds persisted annotation objects to the
+canonical document frame and normal-output annotations to flattened snapshot output.
+Unchanged quick and full workloads independently reproduced the new
+`canonical_replay` checksum `264b98028ac92ac6` and `checkpoint_open` checksum
+`b63e39424fbad396`. The output-color-guard result digest changed to
+`8b2bd6bfbf8eada8` (quick) and `53bbe70c027a2864` (full), while retaining the exact
+quick/full scanned, selected, transparent, revision, history, success, and failure
+counters recorded above. No workload, harness logic, approved envelope,
+payload-access route, or `revision-max` expression changed.
 
 ## Approved output-color-guard envelope
 

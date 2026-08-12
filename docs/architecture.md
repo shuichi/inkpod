@@ -204,8 +204,10 @@ selection mask. `BaseSurface::Asset` instead names one immutable canonical raste
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
 maximum-close frames change canonical document-state bytes, so the document-state
-commitment is schema 6/domain 5. The current replay contract is epoch 20 and native
-format version 23. Cut payload schema 2 separates immutable member assets from
+commitment is schema 7/domain 6. The current replay contract is epoch 21 and native
+format version 24. Text/Annotation layers own bounded stable-ID annotation
+objects, and `EditAnnotations/canonical-v2` commits create/update/move/delete or
+one completed stroke through the shared executor. Cut payload schema 2 separates immutable member assets from
 ordered membership and records membership before/after states in Cut history, while
 retaining Cell-document primitive semantics. Sequence edits stage bounded ordered
 insert/remove/move/renumber operations and publish one Cut revision only after final
@@ -259,7 +261,7 @@ detached registry, so passing verification cannot be an artifact of shared
 `AssetRecord`, payload, or `TileRaster` ownership. Production v16 persists the
 same rooted graph in GENS/ASST.
 
-The present ABI is v9. `InkpodObjectId` separates Core, snapshot, task, color,
+The present ABI is v12. `InkpodObjectId` separates Core, snapshot, task, color,
 sample, raster, thumbnail, and export runtime objects by type and Core generation;
 IDs are monotonic within one Core and are never accepted across generation or
 after release. Variable input is synchronously copied into bounded Rust-owned
@@ -847,7 +849,9 @@ nearest-neighbor rendering, including magnified lower/right clicks, final edges,
 and flipped views.
 
 Immutable snapshots own raster tiles, overlays, flattened cubic segments with
-explicit endpoint-connection bits, vector fills, and packed boundary path IDs.
+explicit endpoint-connection bits, vector fills, packed boundary path IDs, and
+bounded annotation records backed by snapshot-owned UTF-8 and milli-pixel point
+pools.
 The Rust snapshot adapter derives the target view's bounded disconnected
 endpoint records once, and the FFI snapshot handle owns that borrowed span.
 Borrowed spans remain valid only for the FFI snapshot lifetime. Endpoint
@@ -862,7 +866,7 @@ zoom, pan, and flip are render transforms only.
 
 Snapshots also own a bottom-to-top render plan. Layer/plane index 0 is the
 palette top, so Core walks each tree in reverse and emits closed layer groups,
-raster-tile spans, vector-fill spans, vector-stroke spans, and adjustment LUT
+raster-tile spans, vector-fill spans, vector-stroke spans, annotation spans, and adjustment LUT
 references in one semantic order. Layer opacity is applied once by the group;
 plane opacity is already resolved into its raster or vector records. The C ABI
 publishes only borrowed bounded spans, and the renderer rejects malformed group
@@ -870,8 +874,12 @@ structure, kinds, or item ranges before retaining the snapshot. Direct2D draws
 the plan sequentially. An adjustment boundary closes the current command list,
 applies the Core-resolved RGB lookup tables through TableTransfer, and continues
 in a new command list, preserving editable vector geometry and document-scale
-quality. Device-loss recovery rebuilds the same plan from the retained snapshot.
-Thumbnail and flat export use the same bottom-to-top Core semantics. Raster-only
+quality. DirectWrite font resolution and text-format caching stay on the renderer
+thread; a missing annotation family falls back to Segoe UI with a visible Canvas
+warning. Device-loss recovery rebuilds the same plan from the retained snapshot.
+Thumbnail and flat export use the same bottom-to-top Core semantics and the
+Core-owned deterministic portable annotation rasterizer; instruction-output
+objects are filtered only from ordinary flat export. Raster-only
 documents retain the existing precomposed tile path and its revision-max cache.
 
 ### Canonical revision-max render-cache identity

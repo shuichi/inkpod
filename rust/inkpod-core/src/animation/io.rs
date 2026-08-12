@@ -87,6 +87,7 @@ impl Core {
         assets = self.prepare_asset_store_for_session_reset(assets, &document)?;
         let revision = self.next_document_revision()?;
         self.cancel_stroke();
+        self.annotation_stroke = None;
         self.filter_preview = None;
         self.last_filter = None;
         self.next_id = next_id;

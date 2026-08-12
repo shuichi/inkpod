@@ -3,7 +3,7 @@
 use super::*;
 use inkpod_image::{canonical_q16_from_f32, source_over_rgba8, source_over_rgba16};
 
-const COMPOSITE_DIGEST_CONTEXT: &str = "org.inkpod.digest.canonical-composite.v2";
+const COMPOSITE_DIGEST_CONTEXT: &str = "org.inkpod.digest.canonical-composite.v3";
 
 /// Architecture-independent digest of one snapshot's document result.
 ///
@@ -115,6 +115,8 @@ pub enum RenderPassKind {
     VectorStrokes,
     /// Applies one Core-resolved RGB lookup table to the accumulated result.
     Adjustment,
+    /// Draws a contiguous span of immutable Text/Annotation objects.
+    Annotations,
     /// Ends the current logical layer group.
     LayerEnd,
 }
@@ -202,6 +204,7 @@ pub struct RenderSnapshot {
     vector_fills: Vec<RenderVectorFill>,
     render_passes: Vec<RenderPass>,
     adjustment_luts: Vec<RenderAdjustmentLut>,
+    annotations: Vec<AnnotationObjectInfo>,
 }
 
 impl RenderSnapshot {
@@ -323,6 +326,12 @@ impl RenderSnapshot {
         &self.adjustment_luts
     }
 
+    /// Borrows immutable Text/Annotation objects in render-pass span order.
+    #[must_use]
+    pub fn annotations(&self) -> &[AnnotationObjectInfo] {
+        &self.annotations
+    }
+
     /// Computes the canonical document-result digest for this immutable snapshot.
     ///
     /// This operation is deterministic across supported architectures and does
@@ -331,7 +340,7 @@ impl RenderSnapshot {
     /// outside the canonical signed-Q16 range.
     pub fn canonical_composite_digest(&self) -> Result<CanonicalCompositeDigest, CoreError> {
         let mut hasher = blake3::Hasher::new_derive_key(COMPOSITE_DIGEST_CONTEXT);
-        hasher.update(&2_u32.to_le_bytes());
+        hasher.update(&3_u32.to_le_bytes());
         hasher.update(&self.feature_flags.to_le_bytes());
         hasher.update(&self.document_size.width.to_le_bytes());
         hasher.update(&self.document_size.height.to_le_bytes());
@@ -396,7 +405,8 @@ impl RenderSnapshot {
                 RenderPassKind::VectorFills => 3,
                 RenderPassKind::VectorStrokes => 4,
                 RenderPassKind::Adjustment => 5,
-                RenderPassKind::LayerEnd => 6,
+                RenderPassKind::Annotations => 6,
+                RenderPassKind::LayerEnd => 7,
             };
             hasher.update(&kind.to_le_bytes());
             hasher.update(&pass.layer_id.to_le_bytes());
@@ -410,6 +420,60 @@ impl RenderSnapshot {
             for channel in &lut.channels {
                 hasher.update(channel);
             }
+        }
+        hasher.update(&(self.annotations.len() as u64).to_le_bytes());
+        for object in &self.annotations {
+            hasher.update(&object.id.to_le_bytes());
+            hasher.update(&object.layer_id.to_le_bytes());
+            hasher.update(
+                &(match object.kind {
+                    AnnotationKind::Text => 1_u32,
+                    AnnotationKind::Stroke => 2,
+                    AnnotationKind::Leader => 3,
+                    AnnotationKind::Value => 4,
+                })
+                .to_le_bytes(),
+            );
+            hasher.update(
+                &(match object.output {
+                    AnnotationOutput::Normal => 1_u32,
+                    AnnotationOutput::Instruction => 2,
+                })
+                .to_le_bytes(),
+            );
+            for value in [
+                object.bounds.x,
+                object.bounds.y,
+                object.bounds.width,
+                object.bounds.height,
+            ] {
+                hasher.update(&value.to_le_bytes());
+            }
+            hasher.update(&(object.font_family_hint.len() as u64).to_le_bytes());
+            hasher.update(object.font_family_hint.as_bytes());
+            hasher.update(&object.font_size_milli.to_le_bytes());
+            hasher.update(&object.style_flags.to_le_bytes());
+            match object.color {
+                PixelValue::Rgba(channels) => {
+                    hasher.update(&8_u32.to_le_bytes());
+                    hasher.update(&channels);
+                }
+                PixelValue::Rgba16(channels) => {
+                    hasher.update(&16_u32.to_le_bytes());
+                    for channel in channels {
+                        hasher.update(&channel.to_le_bytes());
+                    }
+                }
+                _ => unreachable!("validated annotation color is RGBA"),
+            }
+            hasher.update(&(object.text.len() as u64).to_le_bytes());
+            hasher.update(object.text.as_bytes());
+            hasher.update(&(object.points.len() as u64).to_le_bytes());
+            for point in &object.points {
+                hasher.update(&point.x_milli.to_le_bytes());
+                hasher.update(&point.y_milli.to_le_bytes());
+            }
+            hasher.update(&object.stroke_width_milli.to_le_bytes());
         }
         Ok(CanonicalCompositeDigest(*hasher.finalize().as_bytes()))
     }
@@ -497,6 +561,7 @@ impl Core {
                 vector_fills: Vec::new(),
                 render_passes: Vec::new(),
                 adjustment_luts: Vec::new(),
+                annotations: Vec::new(),
             };
         };
         let snapshot_revision = self
@@ -524,19 +589,46 @@ impl Core {
             BaseSurface::Asset(id) => self.assets.get(id),
         };
         let base_raster = base_asset.as_ref().and_then(|asset| asset.raster());
-        let has_visible_vector_layer = document
-            .layers
-            .iter()
-            .any(|layer| layer.visible && layer.kind == LayerKind::VectorColoring);
-        if has_visible_vector_layer && !self.view.alpha_view && self.color_check.is_none() {
+        let has_visible_ordered_layer = self.annotation_stroke.is_some()
+            || document.layers.iter().any(|layer| {
+                layer.visible
+                    && (layer.kind == LayerKind::VectorColoring
+                        || document
+                            .annotations
+                            .iter()
+                            .any(|object| object.input.layer_id == layer.id.get()))
+            });
+        if has_visible_ordered_layer && !self.view.alpha_view && self.color_check.is_none() {
             let document_size = DocumentSizeU32::new(document.width, document.height);
-            let (tiles, vector_segments, vector_fills, render_passes, adjustment_luts) =
-                build_ordered_content(
-                    document,
-                    base_raster.map(Arc::as_ref),
-                    &mut cache,
-                    &mut self.next_render_tile_revision,
-                );
+            let (
+                tiles,
+                vector_segments,
+                vector_fills,
+                mut render_passes,
+                adjustment_luts,
+                mut annotations,
+            ) = build_ordered_content(
+                document,
+                base_raster.map(Arc::as_ref),
+                &mut cache,
+                &mut self.next_render_tile_revision,
+            );
+            if let Some(preview) = self
+                .annotation_stroke
+                .as_ref()
+                .map(|stroke| stroke.preview())
+            {
+                let first = annotations.len() as u64;
+                annotations.push(preview);
+                render_passes.push(RenderPass {
+                    kind: RenderPassKind::Annotations,
+                    layer_id: annotations[first as usize].layer_id,
+                    plane_id: 0,
+                    opacity_milli: 1_000,
+                    first_item: first,
+                    item_count: 1,
+                });
+            }
             self.render_cache = cache;
             return RenderSnapshot {
                 revision: snapshot_revision,
@@ -550,6 +642,7 @@ impl Core {
                 vector_fills,
                 render_passes,
                 adjustment_luts,
+                annotations,
             };
         }
         let mut coords: Vec<_> = document
@@ -652,6 +745,11 @@ impl Core {
             vector_fills,
             render_passes,
             adjustment_luts: Vec::new(),
+            annotations: self
+                .annotation_stroke
+                .as_ref()
+                .map(|stroke| vec![stroke.preview()])
+                .unwrap_or_default(),
         }
     }
 
@@ -706,6 +804,7 @@ impl Core {
                 item_count: tile_count,
             }],
             adjustment_luts: Vec::new(),
+            annotations: Vec::new(),
         })
     }
 }
@@ -736,6 +835,7 @@ type OrderedContent = (
     Vec<RenderVectorFill>,
     Vec<RenderPass>,
     Vec<RenderAdjustmentLut>,
+    Vec<AnnotationObjectInfo>,
 );
 
 fn build_ordered_content(
@@ -751,6 +851,7 @@ fn build_ordered_content(
     let mut vector_fills = Vec::new();
     let mut passes = Vec::new();
     let mut adjustment_luts = Vec::new();
+    let mut annotations = Vec::new();
     let mut active_cache_keys = BTreeSet::new();
     let mut raster_pass_index = 0_u32;
 
@@ -931,6 +1032,25 @@ fn build_ordered_content(
                 }
             }
         }
+        let first = annotations.len() as u64;
+        annotations.extend(
+            document
+                .annotations
+                .iter()
+                .filter(|object| object.input.layer_id == layer.id.get())
+                .map(AnnotationObject::info),
+        );
+        let count = annotations.len() as u64 - first;
+        if count != 0 {
+            passes.push(RenderPass {
+                kind: RenderPassKind::Annotations,
+                layer_id: layer.id.get(),
+                plane_id: 0,
+                opacity_milli: 1_000,
+                first_item: first,
+                item_count: count,
+            });
+        }
         passes.push(RenderPass {
             kind: RenderPassKind::LayerEnd,
             layer_id: layer.id.get(),
@@ -989,6 +1109,7 @@ fn build_ordered_content(
         vector_fills,
         passes,
         adjustment_luts,
+        annotations,
     )
 }
 
@@ -2007,7 +2128,7 @@ mod tests {
             blake3::hash(validation_call_graph.as_bytes())
                 .to_hex()
                 .to_string(),
-            "3364584309179852b34636383362655338ba2877a74ce830671f927207b4d6f6",
+            "9198c662737309b07954e00a6f990ddae058dbe7e33a88ffa7ddfcd523c690eb",
             "primary snapshot validation call graph changed; audit payload/hash access before updating this lock"
         );
     }

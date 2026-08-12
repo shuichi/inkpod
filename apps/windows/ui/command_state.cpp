@@ -173,6 +173,23 @@ void ProvideDocumentPaneCommandStates(
         states,
         IDM_LAYER_DELETE,
         input.document.has_document && input.document_pane.removable_layer_available);
+    SetEnabled(
+        states,
+        {IDM_ANNOTATION_ADD_TEXT, IDM_ANNOTATION_DRAW_INSTRUCTION},
+        input.document.has_document);
+    SetEnabled(
+        states,
+        {IDM_ANNOTATION_EDIT_TEXT, IDM_ANNOTATION_SELECT_PREVIOUS,
+         IDM_ANNOTATION_SELECT_NEXT},
+        input.document.has_document && input.document_pane.annotation_available);
+    SetEnabled(
+        states,
+        {IDM_ANNOTATION_MOVE_LEFT, IDM_ANNOTATION_MOVE_RIGHT, IDM_ANNOTATION_DELETE},
+        input.document.has_document && input.document_pane.annotation_selected);
+    SetChecked(
+        states,
+        IDM_ANNOTATION_DRAW_INSTRUCTION,
+        input.document_pane.annotation_draw_active);
 }
 
 void ProvideAnimationCommandStates(

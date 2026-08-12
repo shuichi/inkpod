@@ -16,6 +16,9 @@ pub struct InkpodSnapshot {
     pub(crate) vector_endpoints: Box<[InkpodSnapshotVectorEndpoint]>,
     pub(crate) render_passes: Box<[InkpodSnapshotRenderPass]>,
     pub(crate) adjustment_luts_rgb8: Box<[u8]>,
+    pub(crate) annotations: Box<[InkpodSnapshotAnnotation]>,
+    pub(crate) annotation_utf8: Box<[u8]>,
+    pub(crate) annotation_points: Box<[InkpodAnnotationPoint]>,
 }
 
 pub struct InkpodCut {

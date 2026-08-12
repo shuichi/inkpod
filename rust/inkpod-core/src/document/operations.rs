@@ -186,6 +186,24 @@ impl Core {
         if let Some(adjustment) = before.adjustments.get(&layer_id).cloned() {
             after.adjustments.insert(duplicate_id, adjustment);
         }
+        let annotation_count = before
+            .annotations
+            .iter()
+            .filter(|object| object.input.layer_id == layer_id.get())
+            .count();
+        if after.annotations.len().saturating_add(annotation_count) > MAX_ANNOTATION_OBJECTS {
+            return Err(CoreError::InvalidState("annotation object limit reached"));
+        }
+        for object in before
+            .annotations
+            .iter()
+            .filter(|object| object.input.layer_id == layer_id.get())
+        {
+            let mut object = object.clone();
+            object.id = next_id.take_annotation();
+            object.input.layer_id = duplicate_id.get();
+            after.annotations.push(object);
+        }
         after.vector.ensure_limits()?;
         after.layers.insert(index + 1, duplicate);
         if let Some(id) = active_plane_id {
@@ -236,6 +254,9 @@ impl Core {
         }
         after.vector.remove_layer(before, layer_id);
         after.adjustments.remove(&layer_id);
+        after
+            .annotations
+            .retain(|object| object.input.layer_id != layer_id.get());
         after.layers.remove(index);
         if active_target.is_some_and(|target| target.layer_id == layer_id.get()) {
             let replacement = after
@@ -302,6 +323,11 @@ impl Core {
             after.vector.remove_layer(before, *layer_id);
             after.adjustments.remove(layer_id);
         }
+        after.annotations.retain(|object| {
+            !hidden_ids
+                .iter()
+                .any(|layer_id| layer_id.get() == object.input.layer_id)
+        });
         after.layers.retain(|layer| layer.visible);
         if active_removed {
             let replacement = after

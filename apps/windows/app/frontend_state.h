@@ -153,6 +153,9 @@ struct DocumentShellState {
     std::wstring recovery_original_path;
     std::uint64_t smoke_layer_id{};
     std::uint64_t selection_layer_id{};
+    std::uint64_t annotation_layer_id{};
+    std::uint64_t active_annotation_id{};
+    bool annotation_draw_active{};
 };
 
 // A workspace only retains a copied presentation of the Core-owned editor

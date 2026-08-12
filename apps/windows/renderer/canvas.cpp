@@ -3,6 +3,7 @@
 #include <d2d1_1.h>
 #include <d2d1effects.h>
 #include <d3d11.h>
+#include <dwrite.h>
 #include <dxgi1_3.h>
 #include <windowsx.h>
 #include <wrl/client.h>
@@ -21,6 +22,7 @@
 #include <mutex>
 #include <new>
 #include <optional>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -42,6 +44,9 @@ constexpr std::uint64_t kMaximumVectorBoundaries = 262144U;
 constexpr std::uint64_t kMaximumVectorEndpoints = 131072U;
 constexpr std::uint64_t kMaximumRenderPasses = 1048576U;
 constexpr std::uint64_t kMaximumAdjustmentLuts = 4096U;
+constexpr std::uint64_t kMaximumAnnotations = 16384U;
+constexpr std::uint64_t kMaximumAnnotationPoints = 16384U * 65536U;
+constexpr std::uint64_t kMaximumAnnotationUtf8Bytes = UINT64_C(1) << 30;
 constexpr std::uint64_t kMaximumOverlayLines = 8192U;
 constexpr std::size_t kMaximumPointerHistory = 256U;
 constexpr std::size_t kMaximumPendingCanvasInput = 64U;
@@ -81,6 +86,8 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     overlay.struct_size = sizeof(overlay);
     InkpodSnapshotVectorView vectors{};
     vectors.struct_size = sizeof(vectors);
+    InkpodSnapshotAnnotationView annotations{};
+    annotations.struct_size = sizeof(annotations);
     InkpodSnapshotVectorDiagnostics diagnostics{};
     diagnostics.struct_size = sizeof(diagnostics);
     InkpodSnapshotRenderPlan plan{};
@@ -88,6 +95,7 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     if (inkpod_snapshot_get_view(snapshot, &view) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_overlay(snapshot, &overlay) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_vectors(snapshot, &vectors) != INKPOD_STATUS_OK
+        || inkpod_snapshot_get_annotations(snapshot, &annotations) != INKPOD_STATUS_OK
         || inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
             != INKPOD_STATUS_OK
         || inkpod_snapshot_get_render_plan(snapshot, &plan) != INKPOD_STATUS_OK) {
@@ -95,6 +103,7 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
     }
     std::uint64_t bytes = sizeof(InkpodSnapshotView) + sizeof(InkpodSnapshotTransform)
         + sizeof(InkpodSnapshotOverlay) + sizeof(InkpodSnapshotVectorView)
+        + sizeof(InkpodSnapshotAnnotationView)
         + sizeof(InkpodSnapshotVectorDiagnostics)
         + sizeof(InkpodSnapshotRenderPlan);
     bytes = SaturatingAdd(bytes, SaturatingProduct(
@@ -120,6 +129,11 @@ std::uint64_t EstimateSnapshotPayloadBytes(InkpodSnapshot* snapshot) noexcept {
         vectors.fill_count, vectors.fill_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         vectors.boundary_path_count, sizeof(std::uint64_t)));
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        annotations.object_count, annotations.object_stride_bytes));
+    bytes = SaturatingAdd(bytes, annotations.utf8_byte_count);
+    bytes = SaturatingAdd(bytes, SaturatingProduct(
+        annotations.point_count, annotations.point_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
         diagnostics.endpoint_count, diagnostics.endpoint_stride_bytes));
     bytes = SaturatingAdd(bytes, SaturatingProduct(
@@ -207,6 +221,13 @@ public:
         if (FAILED(result)) {
             return result;
         }
+        result = DWriteCreateFactory(
+            DWRITE_FACTORY_TYPE_SHARED,
+            __uuidof(IDWriteFactory),
+            reinterpret_cast<IUnknown**>(dwrite_factory_.GetAddressOf()));
+        if (FAILED(result)) {
+            return result;
+        }
         result = d2d_factory_->CreateDevice(dxgi_device_.Get(), &d2d_device_);
         if (SUCCEEDED(result)) {
             ++generation_;
@@ -216,6 +237,7 @@ public:
 
     void Discard() noexcept {
         d2d_device_.Reset();
+        dwrite_factory_.Reset();
         d2d_factory_.Reset();
         dxgi_factory_.Reset();
         dxgi_device_.Reset();
@@ -243,6 +265,10 @@ public:
         return d2d_factory_.Get();
     }
 
+    [[nodiscard]] IDWriteFactory* DwriteFactory() const noexcept {
+        return dwrite_factory_.Get();
+    }
+
     [[nodiscard]] std::uint64_t Generation() const noexcept {
         return generation_;
     }
@@ -254,6 +280,7 @@ private:
     ComPtr<IDXGIFactory2> dxgi_factory_;
     ComPtr<ID2D1Factory1> d2d_factory_;
     ComPtr<ID2D1Device> d2d_device_;
+    ComPtr<IDWriteFactory> dwrite_factory_;
     std::uint64_t generation_{};
 };
 
@@ -327,6 +354,7 @@ public:
             }
         }
 
+        font_fallback_used_ = false;
         ComPtr<ID2D1Image> adjusted_content;
         if (HasAdjustmentPass()) {
             const HRESULT adjusted_result = BuildAdjustedContent(adjusted_content);
@@ -433,8 +461,19 @@ public:
                 d2d_context_->EndDraw();
                 return result;
             }
+            result = DrawAnnotationSelection();
+            if (FAILED(result)) {
+                d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+                d2d_context_->EndDraw();
+                return result;
+            }
             d2d_context_->SetTransform(D2D1::Matrix3x2F::Identity());
             result = DrawRulers();
+            if (FAILED(result)) {
+                d2d_context_->EndDraw();
+                return result;
+            }
+            result = DrawFontFallbackWarning();
             if (FAILED(result)) {
                 d2d_context_->EndDraw();
                 return result;
@@ -473,6 +512,8 @@ public:
         overlay.struct_size = sizeof(overlay);
         InkpodSnapshotVectorView vectors{};
         vectors.struct_size = sizeof(vectors);
+        InkpodSnapshotAnnotationView annotations{};
+        annotations.struct_size = sizeof(annotations);
         InkpodSnapshotVectorDiagnostics diagnostics{};
         diagnostics.struct_size = sizeof(diagnostics);
         InkpodSnapshotRenderPlan render_plan{};
@@ -487,19 +528,23 @@ public:
         const InkpodStatus vector_status = overlay_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_vectors(snapshot, &vectors)
             : overlay_status;
-        const InkpodStatus diagnostics_status = vector_status == INKPOD_STATUS_OK
-            ? inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
+        const InkpodStatus annotation_status = vector_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_annotations(snapshot, &annotations)
             : vector_status;
+        const InkpodStatus diagnostics_status = annotation_status == INKPOD_STATUS_OK
+            ? inkpod_snapshot_get_vector_diagnostics(snapshot, &diagnostics)
+            : annotation_status;
         const InkpodStatus render_plan_status = diagnostics_status == INKPOD_STATUS_OK
             ? inkpod_snapshot_get_render_plan(snapshot, &render_plan)
             : diagnostics_status;
         if (view_status != INKPOD_STATUS_OK || transform_status != INKPOD_STATUS_OK
             || overlay_status != INKPOD_STATUS_OK || vector_status != INKPOD_STATUS_OK
-            || diagnostics_status != INKPOD_STATUS_OK
+            || diagnostics_status != INKPOD_STATUS_OK || annotation_status != INKPOD_STATUS_OK
             || render_plan_status != INKPOD_STATUS_OK
             || !ValidateOverlay(overlay) || !ValidateVectors(vectors)
+            || !ValidateAnnotations(annotations)
             || !ValidateVectorDiagnostics(diagnostics)
-            || !ValidateRenderPlan(render_plan, view, vectors)) {
+            || !ValidateRenderPlan(render_plan, view, vectors, annotations)) {
             inkpod_snapshot_release(&snapshot);
             return E_INVALIDARG;
         }
@@ -511,6 +556,7 @@ public:
         transform_ = transform;
         overlay_ = overlay;
         vectors_ = vectors;
+        annotations_ = annotations;
         vector_diagnostics_ = diagnostics;
         render_plan_ = render_plan;
         retained_snapshot_bytes_ = EstimateSnapshotPayloadBytes(snapshot);
@@ -562,6 +608,11 @@ public:
         return S_OK;
     }
 
+    HRESULT SetAnnotationSelection(std::uint64_t object_id) noexcept {
+        annotation_selection_id_ = object_id;
+        return S_OK;
+    }
+
     HRESULT GetGeometryPreviewForSmokeTest(
         CanvasGeometryPreview& preview) const noexcept {
         preview = geometry_preview_;
@@ -590,6 +641,8 @@ public:
         transform_ = {};
         overlay_ = {};
         vectors_ = {};
+        annotations_ = {};
+        vector_diagnostics_ = {};
         render_plan_ = {};
         tile_cache_.clear();
         retained_snapshot_bytes_ = 0U;
@@ -1035,10 +1088,61 @@ private:
         return true;
     }
 
+    static bool ValidateAnnotations(const InkpodSnapshotAnnotationView& view) noexcept {
+        constexpr std::uint32_t known_styles = INKPOD_ANNOTATION_STYLE_BOLD
+            | INKPOD_ANNOTATION_STYLE_ITALIC | INKPOD_ANNOTATION_STYLE_UNDERLINE;
+        if (view.abi_version != INKPOD_ABI_VERSION || view.feature_flags != 0U
+            || view.object_count > kMaximumAnnotations
+            || view.point_count > kMaximumAnnotationPoints
+            || view.utf8_byte_count > kMaximumAnnotationUtf8Bytes
+            || view.object_stride_bytes < sizeof(InkpodSnapshotAnnotation)
+            || view.object_stride_bytes % alignof(InkpodSnapshotAnnotation) != 0U
+            || view.point_stride_bytes < sizeof(InkpodAnnotationPoint)
+            || view.point_stride_bytes % alignof(InkpodAnnotationPoint) != 0U
+            || (view.object_count != 0U && view.objects == nullptr)
+            || (view.point_count != 0U && view.points == nullptr)
+            || (view.utf8_byte_count != 0U && view.utf8_bytes == nullptr)
+            || view.object_stride_bytes > static_cast<std::uint64_t>(SIZE_MAX)
+            || view.point_stride_bytes > static_cast<std::uint64_t>(SIZE_MAX)
+            || (view.object_count > 1U && view.object_stride_bytes
+                > static_cast<std::uint64_t>(SIZE_MAX) / (view.object_count - 1U))
+            || (view.point_count > 1U && view.point_stride_bytes
+                > static_cast<std::uint64_t>(SIZE_MAX) / (view.point_count - 1U))) {
+            return false;
+        }
+        const auto range_is_valid = [](std::uint64_t first, std::uint64_t count,
+                                        std::uint64_t total) noexcept {
+            return first <= total && count <= total - first;
+        };
+        const auto* object_bytes = reinterpret_cast<const std::byte*>(view.objects);
+        for (std::uint64_t index = 0U; index < view.object_count; ++index) {
+            const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
+                object_bytes + static_cast<std::size_t>(index * view.object_stride_bytes));
+            if (object->struct_size < sizeof(InkpodSnapshotAnnotation)
+                || object->struct_size > view.object_stride_bytes || object->feature_flags != 0U
+                || object->object_id == 0U || object->layer_id == 0U
+                || object->bounds.width <= 0 || object->bounds.height <= 0
+                || (object->style_flags & ~known_styles) != 0U
+                || (object->kind < INKPOD_ANNOTATION_TEXT
+                    || object->kind > INKPOD_ANNOTATION_VALUE)
+                || (object->output != INKPOD_ANNOTATION_OUTPUT_NORMAL
+                    && object->output != INKPOD_ANNOTATION_OUTPUT_INSTRUCTION)
+                || !range_is_valid(
+                    object->font_utf8_offset, object->font_utf8_bytes, view.utf8_byte_count)
+                || !range_is_valid(
+                    object->text_utf8_offset, object->text_utf8_bytes, view.utf8_byte_count)
+                || !range_is_valid(object->first_point, object->point_count, view.point_count)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     static bool ValidateRenderPlan(
         const InkpodSnapshotRenderPlan& plan,
         const InkpodSnapshotView& view,
-        const InkpodSnapshotVectorView& vectors) noexcept {
+        const InkpodSnapshotVectorView& vectors,
+        const InkpodSnapshotAnnotationView& annotations) noexcept {
         constexpr std::uint64_t adjustment_lut_bytes = 3U * 256U;
         if (plan.abi_version != INKPOD_ABI_VERSION || plan.feature_flags != 0U
             || plan.pass_count > kMaximumRenderPasses
@@ -1113,6 +1217,15 @@ private:
                         || pass->opacity_milli != 1000U
                         || !range_is_valid(
                             pass->first_item, pass->item_count, vectors.segment_count)) {
+                        return false;
+                    }
+                    break;
+                case INKPOD_RENDER_PASS_ANNOTATIONS:
+                    if (active_layer == 0U || pass->layer_id != active_layer
+                        || pass->plane_id != 0U || pass->item_count == 0U
+                        || pass->opacity_milli != 1000U
+                        || !range_is_valid(
+                            pass->first_item, pass->item_count, annotations.object_count)) {
                         return false;
                     }
                     break;
@@ -1501,6 +1614,308 @@ private:
         }
     }
 
+    static HRESULT Utf8ToWide(
+        const std::uint8_t* bytes,
+        std::uint64_t byte_count,
+        std::wstring& output) noexcept {
+        output.clear();
+        if (byte_count == 0U) {
+            return S_OK;
+        }
+        if (bytes == nullptr || byte_count > static_cast<std::uint64_t>(INT_MAX)) {
+            return E_INVALIDARG;
+        }
+        const int count = MultiByteToWideChar(
+            CP_UTF8, MB_ERR_INVALID_CHARS, reinterpret_cast<const char*>(bytes),
+            static_cast<int>(byte_count), nullptr, 0);
+        if (count <= 0) {
+            return E_INVALIDARG;
+        }
+        try {
+            output.resize(static_cast<std::size_t>(count));
+        } catch (const std::bad_alloc&) {
+            return E_OUTOFMEMORY;
+        }
+        if (MultiByteToWideChar(
+                CP_UTF8, MB_ERR_INVALID_CHARS, reinterpret_cast<const char*>(bytes),
+                static_cast<int>(byte_count), output.data(), count) != count) {
+            output.clear();
+            return E_INVALIDARG;
+        }
+        return S_OK;
+    }
+
+    static D2D1_COLOR_F AnnotationColor(const InkpodColorValue& value) noexcept {
+        const float maximum = value.depth == INKPOD_COLOR_DEPTH_16 ? 65535.0F : 255.0F;
+        return D2D1::ColorF(
+            static_cast<float>(value.red) / maximum,
+            static_cast<float>(value.green) / maximum,
+            static_cast<float>(value.blue) / maximum,
+            static_cast<float>(value.alpha) / maximum);
+    }
+
+    HRESULT ResolveAnnotationFont(
+        const InkpodSnapshotAnnotation& object,
+        std::wstring& family) noexcept {
+        HRESULT result = Utf8ToWide(
+            annotations_.utf8_bytes + static_cast<std::size_t>(object.font_utf8_offset),
+            object.font_utf8_bytes,
+            family);
+        if (FAILED(result)) {
+            return result;
+        }
+        if (family.empty()) {
+            family.assign(L"Segoe UI");
+            return S_OK;
+        }
+        ComPtr<IDWriteFontCollection> fonts;
+        result = shared_.DwriteFactory()->GetSystemFontCollection(&fonts, FALSE);
+        if (FAILED(result)) {
+            return result;
+        }
+        UINT32 family_index{};
+        BOOL exists{};
+        result = fonts->FindFamilyName(family.c_str(), &family_index, &exists);
+        if (FAILED(result)) {
+            return result;
+        }
+        if (exists == FALSE) {
+            family.assign(L"Segoe UI");
+            font_fallback_used_ = true;
+        }
+        return S_OK;
+    }
+
+    HRESULT AnnotationTextFormat(
+        const InkpodSnapshotAnnotation& object,
+        IDWriteTextFormat** output) noexcept {
+        if (output == nullptr || shared_.DwriteFactory() == nullptr) {
+            return E_INVALIDARG;
+        }
+        *output = nullptr;
+        std::wstring family;
+        HRESULT result = ResolveAnnotationFont(object, family);
+        if (FAILED(result)) {
+            return result;
+        }
+        std::wstring key;
+        try {
+            key = family + L"\x1f" + std::to_wstring(object.font_size_milli) + L"\x1f"
+                + std::to_wstring(object.style_flags);
+        } catch (const std::bad_alloc&) {
+            return E_OUTOFMEMORY;
+        }
+        const auto cached = text_format_cache_.find(key);
+        if (cached != text_format_cache_.end()) {
+            *output = cached->second.Get();
+            (*output)->AddRef();
+            return S_OK;
+        }
+        ComPtr<IDWriteTextFormat> format;
+        result = shared_.DwriteFactory()->CreateTextFormat(
+            family.c_str(),
+            nullptr,
+            (object.style_flags & INKPOD_ANNOTATION_STYLE_BOLD) != 0U
+                ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+            (object.style_flags & INKPOD_ANNOTATION_STYLE_ITALIC) != 0U
+                ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,
+            static_cast<float>(object.font_size_milli) / 1000.0F,
+            L"",
+            &format);
+        if (FAILED(result)) {
+            return result;
+        }
+        try {
+            if (text_format_cache_.size() >= 64U) {
+                text_format_cache_.clear();
+            }
+            const auto [entry, inserted] = text_format_cache_.emplace(key, format);
+            (void)inserted;
+            *output = entry->second.Get();
+            (*output)->AddRef();
+            return S_OK;
+        } catch (const std::bad_alloc&) {
+            return E_OUTOFMEMORY;
+        }
+    }
+
+    HRESULT DrawAnnotationText(
+        const InkpodSnapshotAnnotation& object,
+        ID2D1SolidColorBrush* brush) noexcept {
+        std::wstring text;
+        HRESULT result = Utf8ToWide(
+            annotations_.utf8_bytes + static_cast<std::size_t>(object.text_utf8_offset),
+            object.text_utf8_bytes,
+            text);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<IDWriteTextFormat> format;
+        result = AnnotationTextFormat(object, &format);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<IDWriteTextLayout> layout;
+        result = shared_.DwriteFactory()->CreateTextLayout(
+            text.data(), static_cast<UINT32>(text.size()), format.Get(),
+            static_cast<float>(object.bounds.width),
+            static_cast<float>(object.bounds.height),
+            &layout);
+        if (FAILED(result)) {
+            return result;
+        }
+        if ((object.style_flags & INKPOD_ANNOTATION_STYLE_UNDERLINE) != 0U) {
+            const DWRITE_TEXT_RANGE range{0U, static_cast<UINT32>(text.size())};
+            result = layout->SetUnderline(TRUE, range);
+            if (FAILED(result)) {
+                return result;
+            }
+        }
+        d2d_context_->DrawTextLayout(
+            D2D1::Point2F(
+                static_cast<float>(object.bounds.x), static_cast<float>(object.bounds.y)),
+            layout.Get(), brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        return S_OK;
+    }
+
+    HRESULT DrawAnnotationGeometry(
+        const InkpodSnapshotAnnotation& object,
+        ID2D1SolidColorBrush* brush) noexcept {
+        if (object.point_count < 2U) {
+            return E_INVALIDARG;
+        }
+        const auto* point_bytes = reinterpret_cast<const std::byte*>(annotations_.points);
+        const float width = static_cast<float>(object.stroke_width_milli) / 1000.0F;
+        const auto point_at = [&](std::uint64_t offset) noexcept {
+            const auto* point = reinterpret_cast<const InkpodAnnotationPoint*>(
+                point_bytes + static_cast<std::size_t>(
+                    (object.first_point + offset) * annotations_.point_stride_bytes));
+            return D2D1::Point2F(
+                static_cast<float>(point->x_milli) / 1000.0F,
+                static_cast<float>(point->y_milli) / 1000.0F);
+        };
+        D2D1_POINT_2F previous = point_at(0U);
+        for (std::uint64_t index = 1U; index < object.point_count; ++index) {
+            const D2D1_POINT_2F current = point_at(index);
+            d2d_context_->DrawLine(previous, current, brush, width);
+            previous = current;
+        }
+        return S_OK;
+    }
+
+    HRESULT DrawAnnotationPass(
+        const InkpodSnapshotRenderPass& pass,
+        ID2D1SolidColorBrush* brush) noexcept {
+        const auto* object_bytes = reinterpret_cast<const std::byte*>(annotations_.objects);
+        for (std::uint64_t offset = 0U; offset < pass.item_count; ++offset) {
+            const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
+                object_bytes + static_cast<std::size_t>(
+                    (pass.first_item + offset) * annotations_.object_stride_bytes));
+            brush->SetColor(AnnotationColor(object->color));
+            HRESULT result = S_OK;
+            if (object->kind == INKPOD_ANNOTATION_TEXT
+                || object->kind == INKPOD_ANNOTATION_VALUE) {
+                result = DrawAnnotationText(*object, brush);
+            }
+            if (SUCCEEDED(result) && (object->kind == INKPOD_ANNOTATION_STROKE
+                    || object->kind == INKPOD_ANNOTATION_LEADER
+                    || object->kind == INKPOD_ANNOTATION_VALUE)) {
+                result = DrawAnnotationGeometry(*object, brush);
+            }
+            if (FAILED(result)) {
+                return result;
+            }
+        }
+        return S_OK;
+    }
+
+    HRESULT DrawAnnotationSelection() noexcept {
+        if (annotation_selection_id_ == 0U || annotations_.objects == nullptr) {
+            return S_OK;
+        }
+        const auto* object_bytes = reinterpret_cast<const std::byte*>(annotations_.objects);
+        const InkpodSnapshotAnnotation* selected{};
+        for (std::uint64_t index = 0U; index < annotations_.object_count; ++index) {
+            const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
+                object_bytes + static_cast<std::size_t>(
+                    index * annotations_.object_stride_bytes));
+            if (object->object_id == annotation_selection_id_) {
+                selected = object;
+                break;
+            }
+        }
+        if (selected == nullptr) {
+            return S_OK;
+        }
+        ComPtr<ID2D1SolidColorBrush> shadow;
+        ComPtr<ID2D1SolidColorBrush> foreground;
+        HRESULT result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(0.02F, 0.05F, 0.08F, 0.75F), &shadow);
+        if (SUCCEEDED(result)) {
+            result = d2d_context_->CreateSolidColorBrush(
+                D2D1::ColorF(0.1F, 0.85F, 1.0F, 1.0F), &foreground);
+        }
+        if (FAILED(result)) {
+            return result;
+        }
+        const float stroke_width = static_cast<float>(std::max(1.0, 1.5 / transform_.zoom));
+        const float shadow_width = stroke_width * 2.5F;
+        const float handle_radius = static_cast<float>(std::max(2.0, 3.0 / transform_.zoom));
+        const auto bounds = D2D1::RectF(
+            static_cast<float>(selected->bounds.x),
+            static_cast<float>(selected->bounds.y),
+            static_cast<float>(selected->bounds.x + selected->bounds.width),
+            static_cast<float>(selected->bounds.y + selected->bounds.height));
+        d2d_context_->DrawRectangle(bounds, shadow.Get(), shadow_width);
+        d2d_context_->DrawRectangle(bounds, foreground.Get(), stroke_width);
+        const std::array<D2D1_POINT_2F, 4U> corners{
+            D2D1::Point2F(bounds.left, bounds.top),
+            D2D1::Point2F(bounds.right, bounds.top),
+            D2D1::Point2F(bounds.right, bounds.bottom),
+            D2D1::Point2F(bounds.left, bounds.bottom)};
+        for (const auto corner : corners) {
+            d2d_context_->FillEllipse(
+                D2D1::Ellipse(corner, handle_radius * 1.5F, handle_radius * 1.5F),
+                shadow.Get());
+            d2d_context_->FillEllipse(
+                D2D1::Ellipse(corner, handle_radius, handle_radius), foreground.Get());
+        }
+        return S_OK;
+    }
+
+    HRESULT DrawFontFallbackWarning() noexcept {
+        if (!font_fallback_used_) {
+            return S_OK;
+        }
+        ComPtr<ID2D1SolidColorBrush> background;
+        HRESULT result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(1.0F, 0.78F, 0.12F, 0.96F), &background);
+        if (FAILED(result)) {
+            return result;
+        }
+        ComPtr<ID2D1SolidColorBrush> foreground;
+        result = d2d_context_->CreateSolidColorBrush(
+            D2D1::ColorF(0.08F, 0.08F, 0.08F, 1.0F), &foreground);
+        if (FAILED(result)) {
+            return result;
+        }
+        constexpr D2D1_RECT_F bounds{8.0F, 8.0F, 260.0F, 34.0F};
+        d2d_context_->FillRectangle(bounds, background.Get());
+        ComPtr<IDWriteTextFormat> format;
+        result = shared_.DwriteFactory()->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0F, L"", &format);
+        if (FAILED(result)) {
+            return result;
+        }
+        constexpr wchar_t message[] = L"Font fallback: Segoe UI";
+        d2d_context_->DrawTextW(
+            message, static_cast<UINT32>(std::size(message) - 1U), format.Get(), bounds,
+            foreground.Get(), D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+        return S_OK;
+    }
+
     HRESULT DrawRenderPass(
         const InkpodSnapshotRenderPass& pass,
         const std::unordered_map<std::uint64_t, VectorPathSpan>& paths,
@@ -1600,6 +2015,8 @@ private:
                 }
                 return S_OK;
             }
+            case INKPOD_RENDER_PASS_ANNOTATIONS:
+                return DrawAnnotationPass(pass, brush);
             case INKPOD_RENDER_PASS_ADJUSTMENT:
                 return E_UNEXPECTED;
             default:
@@ -2445,10 +2862,14 @@ private:
     InkpodSnapshotTransform transform_{};
     InkpodSnapshotOverlay overlay_{};
     InkpodSnapshotVectorView vectors_{};
+    InkpodSnapshotAnnotationView annotations_{};
     InkpodSnapshotVectorDiagnostics vector_diagnostics_{};
     InkpodSnapshotRenderPlan render_plan_{};
+    std::unordered_map<std::wstring, ComPtr<IDWriteTextFormat>> text_format_cache_;
+    bool font_fallback_used_{};
     CanvasFloatingPreview floating_preview_{};
     CanvasGeometryPreview geometry_preview_{};
+    std::uint64_t annotation_selection_id_{};
     std::unordered_map<std::uint64_t, CachedTile> tile_cache_;
     ComPtr<IDXGISwapChain1> swap_chain_;
     ComPtr<ID2D1DeviceContext> d2d_context_;
@@ -2477,6 +2898,7 @@ enum class HostControlKind {
     GetGeometryPreview,
     SetFloatingPreview,
     SetGeometryPreview,
+    SetAnnotationSelection,
 };
 
 struct HostControl {
@@ -2496,6 +2918,7 @@ struct HostControl {
     CanvasGeometryPreview* out_geometry_preview{};
     CanvasFloatingPreview floating_preview{};
     CanvasGeometryPreview geometry_preview{};
+    std::uint64_t annotation_object_id{};
     std::shared_ptr<std::promise<HRESULT>> completion;
 };
 
@@ -3168,6 +3591,11 @@ private:
                 break;
             case HostControlKind::SetGeometryPreview:
                 result = surface.surface->SetGeometryPreview(control.geometry_preview);
+                render = surface.visible;
+                break;
+            case HostControlKind::SetAnnotationSelection:
+                result = surface.surface->SetAnnotationSelection(
+                    control.annotation_object_id);
                 render = surface.visible;
                 break;
             case HostControlKind::Register:
@@ -4224,6 +4652,21 @@ HRESULT RendererHost::SetGeometryPreview(
     return impl_->state.Invoke(std::move(control));
 }
 
+HRESULT RendererHost::SetAnnotationSelection(
+    app::CanvasId canvas,
+    app::Generation surface_generation,
+    std::uint64_t object_id) noexcept {
+    if (impl_ == nullptr) {
+        return E_UNEXPECTED;
+    }
+    HostControl control{};
+    control.kind = HostControlKind::SetAnnotationSelection;
+    control.canvas = canvas;
+    control.surface_generation = surface_generation;
+    control.annotation_object_id = object_id;
+    return impl_->state.Invoke(std::move(control));
+}
+
 DWORD RendererHost::ThreadId() const noexcept {
     return impl_ == nullptr ? 0U : impl_->state.ThreadId();
 }
@@ -4407,6 +4850,14 @@ bool SetCanvasGeometryPreview(
     return host != nullptr
         && SUCCEEDED(host->Renderer().SetGeometryPreview(
             host->Canvas(), host->SurfaceGeneration(), preview));
+}
+
+bool SetCanvasAnnotationSelection(HWND canvas, std::uint64_t object_id) noexcept {
+    auto* host = reinterpret_cast<CanvasHost*>(
+        GetWindowLongPtrW(canvas, GWLP_USERDATA));
+    return host != nullptr
+        && SUCCEEDED(host->Renderer().SetAnnotationSelection(
+            host->Canvas(), host->SurfaceGeneration(), object_id));
 }
 
 }  // namespace inkpod::renderer

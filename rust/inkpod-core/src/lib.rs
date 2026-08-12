@@ -23,8 +23,8 @@
 //! assert!(!document.dirty);
 //! # Ok::<(), inkpod_core::CoreError>(())
 //! ```
-
 mod animation;
+mod annotation;
 mod api;
 mod asset;
 mod asset_operations;
@@ -63,6 +63,8 @@ pub use animation::{
     MotionCheckConfig, MotionFrame, RgbaRasterBytes, SequenceCellInfo, SequenceCellSource,
     SequenceDirection, SequenceSwitchPolicy, SequenceSwitchRequest, Thumbnail,
 };
+use annotation::AnnotationObject;
+pub use annotation::*;
 pub use api::*;
 pub use asset::{
     AssetAlphaSemantics, AssetColorSpace, AssetDescriptor, AssetId, AssetInfo, AssetKind,
@@ -105,7 +107,19 @@ pub use history::HistoryEntryInfo;
 use history::{HistoryChange, HistoryEntry, PixelChange, StagedHistoryEntry};
 pub(crate) use identity::*;
 pub use inkpod_format::CommonRasterFormat;
+use inkpod_format::NativeSection;
+use inkpod_format::{
+    CommonRaster, DocumentArchive, FileAdjustmentLayer, FileAdjustmentMetadata, FileAnnotationKind,
+    FileAnnotationObject, FileAnnotationOutput, FileAnnotationPoint, FileDocumentMetadata,
+    FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties, FileTile, FormatError,
+    PlaneKind as FilePlaneKind,
+};
 pub use inkpod_image::RasterRangeInterpretation as RangeInterpretation;
+use inkpod_image::{
+    ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,
+    TILE_SIZE, TileCoord, TileData, TileView, VectorFixedPoint, closed_region_fill_with_cancel,
+    color_check_category, extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
+};
 pub use journal::{
     BranchId, HistoryMoveKind, JournalBranchCut, JournalCommit, JournalEntry, JournalEventId,
     JournalHistoryMove, JournalReplayInfo, JournalState,
@@ -121,6 +135,10 @@ pub use snapshot::{
     CanonicalCompositeDigest, RenderAdjustmentLut, RenderPass, RenderPassKind, RenderSnapshot,
     RenderTile,
 };
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use stroke::StrokeSession;
 pub use vector::{
     RenderVectorEndpoint, RenderVectorFill, RenderVectorSegment, VectorCubicSegment,
@@ -128,23 +146,6 @@ pub use vector::{
     VectorSelectionMode, VectorSelectionRange, VectorSelectionResult, VectorWidthMode,
 };
 use view::default_shortcuts;
-
-use inkpod_format::NativeSection;
-use inkpod_format::{
-    CommonRaster, DocumentArchive, FileAdjustmentLayer, FileAdjustmentMetadata,
-    FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane, FilePlaneProperties, FileTile,
-    FormatError, PlaneKind as FilePlaneKind,
-};
-use inkpod_image::{
-    ColorCheckCategory, FillError, FillOptions, MAX_FILL_PIXELS, Palette, PlaneSample, RasterError,
-    TILE_SIZE, TileCoord, TileData, TileView, VectorFixedPoint, closed_region_fill_with_cancel,
-    color_check_category, extend_fill_with_cancel, eyedropper, seed_fill_with_cancel,
-};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fmt;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
 /// Feature bits supported by this version of the Rust Core API.
 pub const CORE_FEATURES: u64 = 1;
 /// Snapshot feature bit indicating legacy-white color-check rendering.
@@ -185,7 +186,6 @@ const MAX_STROKE_WORK: u64 = 16_777_216;
 const MAX_PERSISTENT_NUMERIC_ID: u64 = 0x7fff_ffff_ffff_ffff;
 const MIN_ZOOM: f64 = 0.01;
 const MAX_ZOOM: f64 = 64.0;
-
 pub use inkpod_format::{
     ApplicationColor, FileColorChart, FileColorChartEntry, FilePalette, FrameMetadata, GuideAxis,
     LayerKind, MAX_APPLICATION_COLORS, MAX_COLOR_CHART_NAME_BYTES, MAX_COMMON_RASTER_BYTES,

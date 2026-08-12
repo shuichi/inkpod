@@ -39,7 +39,8 @@ pub use light_table::{
     FileLightTableItem, FileLightTableMetadata, FileLightTableSet, LightTableDisplayMode,
 };
 pub use native::{
-    DocumentArchive, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
+    DocumentArchive, FileAnnotationKind, FileAnnotationObject, FileAnnotationOutput,
+    FileAnnotationPoint, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
     FilePlaneProperties, FileTile, FormatError, FrameMetadata, GuideAxis, LayerKind, Margins,
     PlaneKind, RectI32, checksum, discard_recovery, recovery_is_newer,
 };

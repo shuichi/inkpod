@@ -72,6 +72,7 @@ pub(crate) struct CellDocument {
     pub(crate) light_table: animation::LightTableState,
     pub(crate) vector: vector::VectorState,
     pub(crate) adjustments: BTreeMap<LayerId, Adjustment>,
+    pub(crate) annotations: Vec<AnnotationObject>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -191,6 +192,7 @@ impl CellDocument {
             light_table: animation::LightTableState::new(ids.light_table_set),
             vector: vector::VectorState::default(),
             adjustments: BTreeMap::new(),
+            annotations: Vec::new(),
         })
     }
 
@@ -283,6 +285,40 @@ impl CellDocument {
                         .collect(),
                 },
                 color_chart_locked: self.color_chart.locked(),
+                annotations: self
+                    .annotations
+                    .iter()
+                    .map(|object| FileAnnotationObject {
+                        id: object.id.get(),
+                        layer_id: object.input.layer_id,
+                        kind: match object.input.kind {
+                            AnnotationKind::Text => FileAnnotationKind::Text,
+                            AnnotationKind::Stroke => FileAnnotationKind::Stroke,
+                            AnnotationKind::Leader => FileAnnotationKind::Leader,
+                            AnnotationKind::Value => FileAnnotationKind::Value,
+                        },
+                        output: match object.input.output {
+                            AnnotationOutput::Normal => FileAnnotationOutput::Normal,
+                            AnnotationOutput::Instruction => FileAnnotationOutput::Instruction,
+                        },
+                        bounds: object.input.bounds,
+                        font_family_hint: object.input.font_family_hint.clone(),
+                        font_size_milli: object.input.font_size_milli,
+                        style_flags: object.input.style_flags,
+                        color: object.input.color,
+                        text: object.input.text.clone(),
+                        points: object
+                            .input
+                            .points
+                            .iter()
+                            .map(|point| FileAnnotationPoint {
+                                x_milli: point.x_milli,
+                                y_milli: point.y_milli,
+                            })
+                            .collect(),
+                        stroke_width_milli: object.input.stroke_width_milli,
+                    })
+                    .collect(),
             }),
             light_table_metadata: Some(self.light_table.to_file()),
             vector_metadata: self.vector.to_file(
@@ -485,7 +521,48 @@ impl CellDocument {
                     .collect()
             })
             .unwrap_or_default();
-        Ok(Self {
+        let annotations = file
+            .document_metadata
+            .as_ref()
+            .map(|metadata| {
+                metadata
+                    .annotations
+                    .iter()
+                    .map(|object| AnnotationObject {
+                        id: AnnotationObjectId::from_raw(object.id),
+                        input: AnnotationObjectInput {
+                            layer_id: object.layer_id,
+                            kind: match object.kind {
+                                FileAnnotationKind::Text => AnnotationKind::Text,
+                                FileAnnotationKind::Stroke => AnnotationKind::Stroke,
+                                FileAnnotationKind::Leader => AnnotationKind::Leader,
+                                FileAnnotationKind::Value => AnnotationKind::Value,
+                            },
+                            output: match object.output {
+                                FileAnnotationOutput::Normal => AnnotationOutput::Normal,
+                                FileAnnotationOutput::Instruction => AnnotationOutput::Instruction,
+                            },
+                            bounds: object.bounds,
+                            font_family_hint: object.font_family_hint.clone(),
+                            font_size_milli: object.font_size_milli,
+                            style_flags: object.style_flags,
+                            color: object.color,
+                            text: object.text.clone(),
+                            points: object
+                                .points
+                                .iter()
+                                .map(|point| AnnotationPoint {
+                                    x_milli: point.x_milli,
+                                    y_milli: point.y_milli,
+                                })
+                                .collect(),
+                            stroke_width_milli: object.stroke_width_milli,
+                        },
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let document = Self {
             uuid: u128::from_le_bytes(file.document_uuid),
             id: DocumentId::from_raw(file.document_id),
             cell_id: CellId::from_raw(file.cell_id),
@@ -507,7 +584,12 @@ impl CellDocument {
             light_table,
             vector,
             adjustments,
-        })
+            annotations,
+        };
+        for object in &document.annotations {
+            crate::annotation::validate_annotation_input(&document, &object.input)?;
+        }
+        Ok(document)
     }
 
     pub(crate) fn primary_layer(&self) -> &LayerNode {
@@ -650,6 +732,7 @@ impl CellDocument {
             .chain(self.guides.iter().map(|guide| guide.id))
             .chain([self.light_table.maximum_id()])
             .chain([self.vector.maximum_id()])
+            .chain(self.annotations.iter().map(|object| object.id.get()))
             .chain([
                 self.id.get(),
                 self.cell_id.get(),

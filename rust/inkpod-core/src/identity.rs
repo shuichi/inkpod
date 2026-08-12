@@ -47,6 +47,10 @@ numeric_token!(
 );
 numeric_token!(VectorPathId, "A vector path stable ID. Zero is invalid.");
 numeric_token!(VectorFillId, "A vector fill stable ID. Zero is invalid.");
+numeric_token!(
+    AnnotationObjectId,
+    "An annotation object stable ID. Zero is invalid."
+);
 numeric_token!(ViewId, "A secondary-view stable ID. Zero is invalid.");
 numeric_token!(
     DocumentRevision,
@@ -161,6 +165,10 @@ impl StableIdCursor {
 
     pub(crate) fn take_vector_fill(&mut self) -> VectorFillId {
         VectorFillId::from_raw(self.take_raw())
+    }
+
+    pub(crate) fn take_annotation(&mut self) -> AnnotationObjectId {
+        AnnotationObjectId::from_raw(self.take_raw())
     }
 }
 

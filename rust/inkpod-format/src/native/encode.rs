@@ -260,12 +260,14 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
     let color_chart = crate::encode_color_chart(&metadata.color_chart)?;
     let mut output = Vec::new();
     output.extend_from_slice(&DOCUMENT_METADATA_MAGIC);
-    push_u32(&mut output, 2);
+    push_u32(&mut output, 3);
     push_u64(&mut output, metadata.active_layer_id);
     push_u64(&mut output, metadata.active_plane_id);
     push_u64(&mut output, metadata.selection_plane_id);
     push_u32(&mut output, metadata.layers.len() as u32);
     push_u32(&mut output, metadata.guides.len() as u32);
+    push_u32(&mut output, metadata.annotations.len() as u32);
+    push_u32(&mut output, 0);
     push_i32(&mut output, metadata.grid.origin_x);
     push_i32(&mut output, metadata.grid.origin_y);
     push_u32(&mut output, metadata.grid.spacing_x);
@@ -307,6 +309,43 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
             },
         );
         push_i32(&mut output, guide.position);
+    }
+    for object in &metadata.annotations {
+        push_u64(&mut output, object.id);
+        push_u64(&mut output, object.layer_id);
+        push_u32(
+            &mut output,
+            match object.kind {
+                FileAnnotationKind::Text => 1,
+                FileAnnotationKind::Stroke => 2,
+                FileAnnotationKind::Leader => 3,
+                FileAnnotationKind::Value => 4,
+            },
+        );
+        push_u32(
+            &mut output,
+            match object.output {
+                FileAnnotationOutput::Normal => 1,
+                FileAnnotationOutput::Instruction => 2,
+            },
+        );
+        push_i32(&mut output, object.bounds.x);
+        push_i32(&mut output, object.bounds.y);
+        push_i32(&mut output, object.bounds.width);
+        push_i32(&mut output, object.bounds.height);
+        push_u32(&mut output, object.font_family_hint.len() as u32);
+        push_u32(&mut output, object.text.len() as u32);
+        push_u32(&mut output, object.points.len() as u32);
+        push_u32(&mut output, object.font_size_milli);
+        push_u32(&mut output, object.style_flags);
+        push_u32(&mut output, object.stroke_width_milli);
+        push_color_value(&mut output, object.color)?;
+        output.extend_from_slice(object.font_family_hint.as_bytes());
+        output.extend_from_slice(object.text.as_bytes());
+        for point in &object.points {
+            push_i32(&mut output, point.x_milli);
+            push_i32(&mut output, point.y_milli);
+        }
     }
     output.extend_from_slice(&color_chart);
     if output.len() > MAX_MANIFEST_BYTES as usize {

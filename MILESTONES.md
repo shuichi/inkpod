@@ -1038,7 +1038,7 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M18 — PM-GAP-002: セル系列の構造編集
 
-状態: 手動確認待ち
+状態: 完了
 
 関連要件: SEQ-001、SESSION-001。構造編集用の独立要件IDを新設する。
 
@@ -1089,9 +1089,9 @@ docs/core-benchmark-baseline.mdのworkload、harness、envelope、revision-max�
 
 ### M19 — PM-GAP-009: 再編集可能なtext／instruction annotation
 
-状態: 未着手
+状態: 手動確認待ち
 
-関連要件: DOC-002、IO-001。
+関連要件: DOC-002、ANNOTATION-001、IO-001。
 
 成果:
 

@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(11)
+#define INKPOD_ABI_VERSION UINT32_C(12)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
 /** @brief すべての fallible API が返す固定幅ステータス型。 */
@@ -399,7 +399,31 @@ typedef uint32_t InkpodRenderPassKind;
 #define INKPOD_RENDER_PASS_VECTOR_FILLS UINT32_C(3)
 #define INKPOD_RENDER_PASS_VECTOR_STROKES UINT32_C(4)
 #define INKPOD_RENDER_PASS_ADJUSTMENT UINT32_C(5)
-#define INKPOD_RENDER_PASS_LAYER_END UINT32_C(6)
+#define INKPOD_RENDER_PASS_ANNOTATIONS UINT32_C(6)
+#define INKPOD_RENDER_PASS_LAYER_END UINT32_C(7)
+
+/** @brief Editable text/instruction object kind. */
+typedef uint32_t InkpodAnnotationKind;
+#define INKPOD_ANNOTATION_TEXT UINT32_C(1)
+#define INKPOD_ANNOTATION_STROKE UINT32_C(2)
+#define INKPOD_ANNOTATION_LEADER UINT32_C(3)
+#define INKPOD_ANNOTATION_VALUE UINT32_C(4)
+
+/** @brief Whether an annotation participates in finished-image export. */
+typedef uint32_t InkpodAnnotationOutput;
+#define INKPOD_ANNOTATION_OUTPUT_NORMAL UINT32_C(1)
+#define INKPOD_ANNOTATION_OUTPUT_INSTRUCTION UINT32_C(2)
+
+/** @brief Atomic annotation object edit. */
+typedef uint32_t InkpodAnnotationEditKind;
+#define INKPOD_ANNOTATION_EDIT_CREATE UINT32_C(1)
+#define INKPOD_ANNOTATION_EDIT_UPDATE UINT32_C(2)
+#define INKPOD_ANNOTATION_EDIT_MOVE UINT32_C(3)
+#define INKPOD_ANNOTATION_EDIT_DELETE UINT32_C(4)
+
+#define INKPOD_ANNOTATION_STYLE_BOLD (UINT32_C(1) << 0)
+#define INKPOD_ANNOTATION_STYLE_ITALIC (UINT32_C(1) << 1)
+#define INKPOD_ANNOTATION_STYLE_UNDERLINE (UINT32_C(1) << 2)
 
 /** @brief filter catalog の処理識別子型。 */
 typedef uint32_t InkpodFilterKind;
@@ -1157,6 +1181,81 @@ typedef struct InkpodColorValue {
     uint16_t blue;
     uint16_t alpha;
 } InkpodColorValue;
+
+/** @brief One fixed-point document-space annotation point (1/1000 pixel). */
+typedef struct InkpodAnnotationPoint {
+    uint32_t struct_size;
+    uint32_t reserved;
+    int32_t x_milli;
+    int32_t y_milli;
+} InkpodAnnotationPoint;
+
+/**
+ * @brief Borrowed input for a Text or Annotation layer object.
+ *
+ * All nested pointers are borrowed only for the duration of the call. Empty
+ * UTF-8 and point spans use NULL with a zero length/stride. Text and font bytes
+ * must be valid UTF-8 and all spans are subject to implementation bounds.
+ */
+typedef struct InkpodAnnotationObjectInput {
+    uint32_t struct_size;
+    InkpodAnnotationKind kind;
+    uint64_t feature_flags;
+    uint64_t layer_id;
+    InkpodAnnotationOutput output;
+    uint32_t style_flags;
+    InkpodFrameRect bounds;
+    const uint8_t* font_family_utf8;
+    uint64_t font_family_bytes;
+    uint32_t font_size_milli;
+    uint32_t stroke_width_milli;
+    InkpodColorValue color;
+    const uint8_t* text_utf8;
+    uint64_t text_bytes;
+    const InkpodAnnotationPoint* points;
+    uint64_t point_count;
+    uint64_t point_stride_bytes;
+} InkpodAnnotationObjectInput;
+
+/** @brief One create/update/move/delete entry in an atomic annotation edit. */
+typedef struct InkpodAnnotationEdit {
+    uint32_t struct_size;
+    InkpodAnnotationEditKind kind;
+    uint64_t feature_flags;
+    uint64_t object_id;
+    const InkpodAnnotationObjectInput* input;
+    int32_t delta_x;
+    int32_t delta_y;
+} InkpodAnnotationEdit;
+
+/**
+ * @brief Caller-owned result and optional stable-ID output span.
+ *
+ * `created_ids` is never retained. A too-small span returns
+ * `INKPOD_STATUS_BUFFER_TOO_SMALL`, reports `created_count`, and commits nothing.
+ */
+typedef struct InkpodAnnotationEditResult {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t revision;
+    uint64_t* created_ids;
+    uint64_t created_capacity;
+    uint64_t created_count;
+} InkpodAnnotationEditResult;
+
+/** @brief Input that begins one long-lived handwritten annotation stroke. */
+typedef struct InkpodAnnotationStrokeInput {
+    uint32_t struct_size;
+    InkpodAnnotationOutput output;
+    uint64_t feature_flags;
+    uint64_t base_document_revision;
+    uint64_t layer_id;
+    InkpodColorValue color;
+    uint32_t stroke_width_milli;
+    uint32_t reserved;
+    InkpodAnnotationPoint start;
+} InkpodAnnotationStrokeInput;
 
 /**
  * @brief 一つの Core generation に属する Rust-owned object の value identity。
@@ -2268,6 +2367,47 @@ typedef struct InkpodSnapshotVectorView {
     const uint64_t* boundary_path_ids;
     uint64_t boundary_path_count;
 } InkpodSnapshotVectorView;
+
+/** @brief Immutable annotation record indexing snapshot-owned UTF-8/point pools. */
+typedef struct InkpodSnapshotAnnotation {
+    uint32_t struct_size;
+    InkpodAnnotationKind kind;
+    uint64_t feature_flags;
+    uint64_t object_id;
+    uint64_t layer_id;
+    InkpodAnnotationOutput output;
+    uint32_t style_flags;
+    InkpodFrameRect bounds;
+    uint32_t font_size_milli;
+    uint32_t stroke_width_milli;
+    InkpodColorValue color;
+    uint64_t font_utf8_offset;
+    uint64_t font_utf8_bytes;
+    uint64_t text_utf8_offset;
+    uint64_t text_utf8_bytes;
+    uint64_t first_point;
+    uint64_t point_count;
+} InkpodSnapshotAnnotation;
+
+/**
+ * @brief Snapshot-owned annotation records and immutable backing pools.
+ *
+ * Every borrowed pointer remains valid until the snapshot is released. Object
+ * offsets/counts index the UTF-8 byte and fixed-point point pools in this view.
+ */
+typedef struct InkpodSnapshotAnnotationView {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint64_t feature_flags;
+    const InkpodSnapshotAnnotation* objects;
+    uint64_t object_count;
+    uint64_t object_stride_bytes;
+    const uint8_t* utf8_bytes;
+    uint64_t utf8_byte_count;
+    const InkpodAnnotationPoint* points;
+    uint64_t point_count;
+    uint64_t point_stride_bytes;
+} InkpodSnapshotAnnotationView;
 
 /** @brief Explicitly disconnected vector endpoint in stable path/plane identity order. */
 typedef struct InkpodSnapshotVectorEndpoint {
@@ -4716,6 +4856,38 @@ InkpodStatus inkpod_core_geometry_points_resolve(
     uint64_t point_capacity);
 
 /**
+ * @brief Apply one bounded annotation edit span as one canonical transaction.
+ *
+ * The Core owner thread must call this function. All nested spans are copied and
+ * never retained. `expected_revision` rejects stale input before IDs are consumed.
+ * Success, including an all-no-op edit list, reports the resulting revision.
+ */
+InkpodStatus inkpod_core_annotation_edit(
+    InkpodCore* core,
+    uint64_t expected_revision,
+    const InkpodAnnotationEdit* edits,
+    uint64_t edit_count,
+    uint64_t edit_stride_bytes,
+    InkpodAnnotationEditResult* result);
+
+/** @brief Begin an instruction/normal stroke without changing document history. */
+InkpodStatus inkpod_core_annotation_stroke_begin(
+    InkpodCore* core,
+    const InkpodAnnotationStrokeInput* input);
+/** @brief Append a bounded borrowed fixed-point point span to the active stroke. */
+InkpodStatus inkpod_core_annotation_stroke_append(
+    InkpodCore* core,
+    const InkpodAnnotationPoint* points,
+    uint64_t point_count,
+    uint64_t point_stride_bytes);
+/** @brief Commit the active stroke as one canonical edit and one Undo unit. */
+InkpodStatus inkpod_core_annotation_stroke_end(
+    InkpodCore* core,
+    InkpodAnnotationEditResult* result);
+/** @brief Cancel the active annotation stroke without consuming an ID or revision. */
+InkpodStatus inkpod_core_annotation_stroke_cancel(InkpodCore* core);
+
+/**
  * @brief Apply one bounded Core-owned geometry request as one history unit.
  *
  * `base_revision` must be zero. The point span is copied during the call and is
@@ -5526,6 +5698,32 @@ InkpodStatus inkpod_snapshot_get_overlay(
 InkpodStatus inkpod_snapshot_get_vectors(
     const InkpodSnapshot* snapshot,
     InkpodSnapshotVectorView* out_vectors);
+
+/**
+ * @brief Borrow immutable editable annotation records from a live snapshot.
+ *
+ * Returned spans are owned by the snapshot and expire at release. The function
+ * may be called by a renderer read thread and changes no Core or snapshot state.
+ */
+InkpodStatus inkpod_snapshot_get_annotations(
+    const InkpodSnapshot* snapshot,
+    InkpodSnapshotAnnotationView* out_annotations);
+
+/** @brief Two-stage copy of one annotation font-family hint, without a terminator. */
+InkpodStatus inkpod_snapshot_annotation_copy_font_family(
+    const InkpodSnapshot* snapshot,
+    uint64_t object_index,
+    uint8_t* buffer,
+    uint64_t capacity,
+    uint64_t* out_required);
+
+/** @brief Two-stage copy of one annotation text value, without a terminator. */
+InkpodStatus inkpod_snapshot_annotation_copy_text(
+    const InkpodSnapshot* snapshot,
+    uint64_t object_index,
+    uint8_t* buffer,
+    uint64_t capacity,
+    uint64_t* out_required);
 
 /**
  * @brief snapshot の view-local vector 診断設定と未接続端点 span を取得する。

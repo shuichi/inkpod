@@ -82,6 +82,7 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         0x0002_0023
     ),
     entry!(EDIT_TARGETS, 2, "EditTargets", 1, 0x0002_0030),
+    entry!(EDIT_ANNOTATIONS, 2, "EditAnnotations", 1, 0x0002_0040),
     entry!(SET_MAIN_LINE_COLOR, 1, "SetMainLineColor", 3, 1),
     entry!(REPLACE_PALETTE, 1, "ReplacePalette", 3, 2),
     entry!(REPLACE_COLOR_CHART, 1, "ReplaceColorChart", 1, 5),
@@ -367,7 +368,7 @@ mod tests {
 
     #[test]
     fn catalog_is_sorted_unique_bounded_and_matches_replay_schema_lookup() {
-        assert_eq!(PRIMITIVE_CATALOG.len(), 82);
+        assert_eq!(PRIMITIVE_CATALOG.len(), 83);
         for pair in PRIMITIVE_CATALOG.windows(2) {
             assert!(pair[0].id < pair[1].id);
         }

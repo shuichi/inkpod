@@ -549,6 +549,7 @@ if(WIN32)
         inkpod_ffi_static
         d2d1
         d3d11
+        dwrite
         dxguid
         dxgi
         user32)
@@ -678,6 +679,7 @@ if(WIN32)
         comctl32
         d2d1
         d3d11
+        dwrite
         dxguid
         dxgi
         ole32

@@ -114,6 +114,7 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
                 RenderPassKind::VectorFills => INKPOD_RENDER_PASS_VECTOR_FILLS,
                 RenderPassKind::VectorStrokes => INKPOD_RENDER_PASS_VECTOR_STROKES,
                 RenderPassKind::Adjustment => INKPOD_RENDER_PASS_ADJUSTMENT,
+                RenderPassKind::Annotations => INKPOD_RENDER_PASS_ANNOTATIONS,
                 RenderPassKind::LayerEnd => INKPOD_RENDER_PASS_LAYER_END,
             },
             layer_id: pass.layer_id(),
@@ -129,6 +130,58 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         .iter()
         .flat_map(|lut| lut.channels().iter().flatten().copied())
         .collect();
+    let mut annotation_utf8 = Vec::new();
+    let mut annotation_points = Vec::new();
+    let annotations = snapshot
+        .annotations()
+        .iter()
+        .map(|object| {
+            let font_utf8_offset = annotation_utf8.len() as u64;
+            annotation_utf8.extend_from_slice(object.font_family_hint.as_bytes());
+            let text_utf8_offset = annotation_utf8.len() as u64;
+            annotation_utf8.extend_from_slice(object.text.as_bytes());
+            let first_point = annotation_points.len() as u64;
+            annotation_points.extend(object.points.iter().map(|point| InkpodAnnotationPoint {
+                struct_size: size_of::<InkpodAnnotationPoint>() as u32,
+                reserved: 0,
+                x_milli: point.x_milli,
+                y_milli: point.y_milli,
+            }));
+            InkpodSnapshotAnnotation {
+                struct_size: size_of::<InkpodSnapshotAnnotation>() as u32,
+                kind: match object.kind {
+                    AnnotationKind::Text => INKPOD_ANNOTATION_TEXT,
+                    AnnotationKind::Stroke => INKPOD_ANNOTATION_STROKE,
+                    AnnotationKind::Leader => INKPOD_ANNOTATION_LEADER,
+                    AnnotationKind::Value => INKPOD_ANNOTATION_VALUE,
+                },
+                feature_flags: INKPOD_FEATURE_NONE,
+                object_id: object.id,
+                layer_id: object.layer_id,
+                output: match object.output {
+                    AnnotationOutput::Normal => INKPOD_ANNOTATION_OUTPUT_NORMAL,
+                    AnnotationOutput::Instruction => INKPOD_ANNOTATION_OUTPUT_INSTRUCTION,
+                },
+                style_flags: object.style_flags,
+                bounds: InkpodFrameRect {
+                    x: object.bounds.x,
+                    y: object.bounds.y,
+                    width: object.bounds.width,
+                    height: object.bounds.height,
+                },
+                font_size_milli: object.font_size_milli,
+                stroke_width_milli: object.stroke_width_milli,
+                color: color_value_record(object.color)
+                    .expect("validated snapshot annotation color must be RGBA"),
+                font_utf8_offset,
+                font_utf8_bytes: object.font_family_hint.len() as u64,
+                text_utf8_offset,
+                text_utf8_bytes: object.text.len() as u64,
+                first_point,
+                point_count: object.points.len() as u64,
+            }
+        })
+        .collect();
     Box::new(InkpodSnapshot {
         snapshot,
         tiles,
@@ -139,6 +192,9 @@ pub(crate) fn snapshot_handle(snapshot: RenderSnapshot) -> Box<InkpodSnapshot> {
         vector_endpoints,
         render_passes,
         adjustment_luts_rgb8,
+        annotations,
+        annotation_utf8: annotation_utf8.into_boxed_slice(),
+        annotation_points: annotation_points.into_boxed_slice(),
     })
 }
 

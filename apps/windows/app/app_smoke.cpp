@@ -4798,6 +4798,230 @@ int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
         : 333;
 }
 
+int RunAnnotationWorkflowSmoke(ApplicationHost& state) noexcept {
+    if (state.engine == nullptr || state.Workspace().windows.canvas == nullptr) {
+        return 1250;
+    }
+    if (CreateCell(state, 128U, 96U, 96000U) != INKPOD_STATUS_OK) {
+        return 1251;
+    }
+    if (!state.RefreshEditorPresentation(state.Document().id, state.Document().generation)) {
+        return 1252;
+    }
+    if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
+        return 1264;
+    }
+    const HMENU menu = GetMenu(state.Workspace().windows.window);
+    for (const UINT command : {
+             IDM_ANNOTATION_ADD_TEXT, IDM_ANNOTATION_EDIT_TEXT,
+             IDM_ANNOTATION_DRAW_INSTRUCTION, IDM_ANNOTATION_SELECT_PREVIOUS,
+             IDM_ANNOTATION_SELECT_NEXT, IDM_ANNOTATION_MOVE_LEFT,
+             IDM_ANNOTATION_MOVE_RIGHT, IDM_ANNOTATION_DELETE}) {
+        wchar_t accessible_name[96]{};
+        if (menu == nullptr || GetMenuState(menu, command, MF_BYCOMMAND) == static_cast<UINT>(-1)
+            || GetMenuStringW(
+                   menu, command, accessible_name,
+                   static_cast<int>(std::size(accessible_name)), MF_BYCOMMAND) == 0) {
+            return 1253;
+        }
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_ANNOTATION_ADD_TEXT, 0);
+    InkpodDocumentInfo after_text = EmptyDocumentInfo();
+    if (!QueryDocument(state, after_text)
+        || state.Document().shell.annotation_layer_id == 0U
+        || state.Document().shell.active_annotation_id == 0U) {
+        return 1254;
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_ANNOTATION_EDIT_TEXT, 0);
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_ANNOTATION_MOVE_RIGHT, 0);
+    InkpodDocumentInfo after_move = EmptyDocumentInfo();
+    if (!QueryDocument(state, after_move)
+        || after_move.document_revision != after_text.document_revision + 1U) {
+        return 1255;
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_ANNOTATION_DRAW_INSTRUCTION, 0);
+    if (!state.Document().shell.annotation_draw_active) {
+        return 1256;
+    }
+    inkpod::renderer::CanvasDocumentBounds bounds{};
+    if (!inkpod::renderer::GetCanvasDocumentBounds(
+            state.Workspace().windows.canvas, bounds)) {
+        return 1257;
+    }
+    const std::array<InkpodStrokeSample, 3U> samples{
+        InkpodStrokeSample{sizeof(InkpodStrokeSample), 0U,
+            static_cast<float>(bounds.left + 20.0),
+            static_cast<float>(bounds.top + 20.0), 1.0F, 0U},
+        InkpodStrokeSample{sizeof(InkpodStrokeSample), 0U,
+            static_cast<float>(bounds.left + 45.0),
+            static_cast<float>(bounds.top + 32.0), 0.8F, 0U},
+        InkpodStrokeSample{sizeof(InkpodStrokeSample), 0U,
+            static_cast<float>(bounds.left + 70.0),
+            static_cast<float>(bounds.top + 25.0), 1.0F, 0U}};
+    const inkpod::renderer::CanvasStrokeEvent begin{
+        inkpod::renderer::CanvasStrokeEventKind::Begin, samples.data(), 1U};
+    const inkpod::renderer::CanvasStrokeEvent append{
+        inkpod::renderer::CanvasStrokeEventKind::Append, samples.data() + 1U, 2U};
+    const inkpod::renderer::CanvasStrokeEvent end{
+        inkpod::renderer::CanvasStrokeEventKind::End, nullptr, 0U};
+    if (!inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, begin)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, append)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, end)
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK) {
+        return 1258;
+    }
+    bool annotation_snapshot_ok{};
+    const InkpodStatus snapshot_status = state.engine->Invoke(
+        [&annotation_snapshot_ok](InkpodCore* core) {
+            InkpodSnapshotOptions snapshot_options{};
+            snapshot_options.struct_size = sizeof(snapshot_options);
+            InkpodSnapshot* snapshot{};
+            InkpodStatus status = inkpod_core_build_snapshot(
+                core, &snapshot_options, &snapshot);
+            InkpodSnapshotAnnotationView view{};
+            view.struct_size = sizeof(view);
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_snapshot_get_annotations(snapshot, &view);
+            }
+            bool has_text{};
+            bool has_instruction_stroke{};
+            if (status == INKPOD_STATUS_OK) {
+                const auto* bytes = reinterpret_cast<const std::byte*>(view.objects);
+                for (std::uint64_t index = 0U; index < view.object_count; ++index) {
+                    const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
+                        bytes + static_cast<std::size_t>(index * view.object_stride_bytes));
+                    has_text = has_text || object->kind == INKPOD_ANNOTATION_TEXT;
+                    has_instruction_stroke = has_instruction_stroke
+                        || (object->kind == INKPOD_ANNOTATION_STROKE
+                            && object->output == INKPOD_ANNOTATION_OUTPUT_INSTRUCTION);
+                }
+            }
+            annotation_snapshot_ok = status == INKPOD_STATUS_OK
+                && has_text && has_instruction_stroke;
+            const InkpodStatus release = snapshot == nullptr
+                ? INKPOD_STATUS_OK : inkpod_snapshot_release(&snapshot);
+            return status == INKPOD_STATUS_OK ? release : status;
+        },
+        false,
+        false);
+    if (snapshot_status != INKPOD_STATUS_OK || !annotation_snapshot_ok) {
+        return 1259;
+    }
+    const std::uint64_t selected_annotation_id =
+        state.Document().shell.active_annotation_id;
+    const InkpodStatus fallback_status = state.engine->Invoke(
+        [selected_annotation_id](InkpodCore* core) {
+            InkpodSnapshotOptions snapshot_options{};
+            snapshot_options.struct_size = sizeof(snapshot_options);
+            InkpodSnapshot* snapshot{};
+            InkpodStatus status = inkpod_core_build_snapshot(
+                core, &snapshot_options, &snapshot);
+            InkpodSnapshotAnnotationView view{};
+            view.struct_size = sizeof(view);
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_snapshot_get_annotations(snapshot, &view);
+            }
+            const InkpodSnapshotAnnotation* found{};
+            if (status == INKPOD_STATUS_OK) {
+                const auto* bytes = reinterpret_cast<const std::byte*>(view.objects);
+                for (std::uint64_t index = 0U; index < view.object_count; ++index) {
+                    const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
+                        bytes + static_cast<std::size_t>(index * view.object_stride_bytes));
+                    if (object->object_id == selected_annotation_id) {
+                        found = object;
+                        break;
+                    }
+                }
+                if (found == nullptr) {
+                    status = INKPOD_STATUS_INVALID_STATE;
+                }
+            }
+            InkpodDocumentInfo info = EmptyDocumentInfo();
+            if (status == INKPOD_STATUS_OK) {
+                status = inkpod_core_get_document_info(core, &info);
+            }
+            constexpr char missing_font[] = "__inkpod_missing_font__";
+            InkpodAnnotationObjectInput input{};
+            InkpodAnnotationEdit edit{};
+            InkpodAnnotationEditResult result{};
+            if (status == INKPOD_STATUS_OK) {
+                input.struct_size = sizeof(input);
+                input.kind = found->kind;
+                input.layer_id = found->layer_id;
+                input.output = found->output;
+                input.style_flags = found->style_flags;
+                input.bounds = found->bounds;
+                input.font_family_utf8 = reinterpret_cast<const std::uint8_t*>(missing_font);
+                input.font_family_bytes = std::size(missing_font) - 1U;
+                input.font_size_milli = found->font_size_milli;
+                input.stroke_width_milli = found->stroke_width_milli;
+                input.color = found->color;
+                input.text_utf8 = view.utf8_bytes
+                    + static_cast<std::size_t>(found->text_utf8_offset);
+                input.text_bytes = found->text_utf8_bytes;
+                input.points = nullptr;
+                input.point_count = 0U;
+                input.point_stride_bytes = 0U;
+                edit.struct_size = sizeof(edit);
+                edit.kind = INKPOD_ANNOTATION_EDIT_UPDATE;
+                edit.object_id = found->object_id;
+                edit.input = &input;
+                result.struct_size = sizeof(result);
+                status = inkpod_core_annotation_edit(
+                    core, info.document_revision, &edit, 1U, sizeof(edit), &result);
+            }
+            const InkpodStatus release = snapshot == nullptr
+                ? INKPOD_STATUS_OK : inkpod_snapshot_release(&snapshot);
+            return status == INKPOD_STATUS_OK ? release : status;
+        },
+        true,
+        true);
+    if (fallback_status != INKPOD_STATUS_OK
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1) {
+        return 1263;
+    }
+    InkpodDocumentInfo before_cancel = EmptyDocumentInfo();
+    InkpodDocumentInfo after_cancel = EmptyDocumentInfo();
+    const inkpod::renderer::CanvasStrokeEvent cancel{
+        inkpod::renderer::CanvasStrokeEventKind::Cancel, nullptr, 0U};
+    if (!QueryDocument(state, before_cancel)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, begin)
+        || !inkpod::renderer::SubmitCanvasStrokeEvent(
+            state.Workspace().windows.canvas, cancel)
+        || state.engine->WaitIdle() != INKPOD_STATUS_OK
+        || !QueryDocument(state, after_cancel)
+        || after_cancel.document_revision != before_cancel.document_revision) {
+        return 1260;
+    }
+    if (SendMessageW(
+            state.Workspace().windows.canvas,
+            inkpod::renderer::kCanvasSimulateDeviceLoss,
+            0,
+            0) != 1
+        || SendMessageW(
+               state.Workspace().windows.canvas,
+               inkpod::renderer::kCanvasRenderOnce,
+               0,
+               0) != 1) {
+        return 1261;
+    }
+    SendMessageW(
+        state.Workspace().windows.window, WM_COMMAND, IDM_ANNOTATION_DRAW_INSTRUCTION, 0);
+    return state.Document().shell.annotation_draw_active ? 1262 : 0;
+}
+
 int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr
         || CreateCell(state, 32U, 24U, 120000U) != INKPOD_STATUS_OK) {
@@ -11788,6 +12012,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunDocumentEditingSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunAnnotationWorkflowSmoke(state);
     }
     if (exit_code == 0) {
         exit_code = runtime::RunProductionWorkflowSmoke(state);

@@ -14,7 +14,8 @@ pub(crate) use io::{read, save_atomic, save_atomic_with_cancel};
 #[cfg(test)]
 pub(crate) use model::TEMP_SEQUENCE;
 pub use model::{
-    DocumentArchive, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
+    DocumentArchive, FileAnnotationKind, FileAnnotationObject, FileAnnotationOutput,
+    FileAnnotationPoint, FileDocumentMetadata, FileGrid, FileGuide, FileLayer, FilePlane,
     FilePlaneProperties, FileTile, FormatError, FrameMetadata, GuideAxis, LayerKind, Margins,
     PlaneKind, RectI32, checksum,
 };

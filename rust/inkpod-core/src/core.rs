@@ -86,6 +86,7 @@ impl Core {
             current_path: None,
             recovered: false,
             active_stroke: None,
+            annotation_stroke: None,
             filter_preview: None,
             last_filter: None,
             render_cache: BTreeMap::new(),
@@ -287,6 +288,7 @@ impl Core {
         let revision = self.next_document_revision()?;
 
         self.cancel_stroke();
+        self.annotation_stroke = None;
         self.filter_preview = None;
         self.last_filter = None;
         self.render_cache.clear();
@@ -343,6 +345,7 @@ pub struct Core {
     pub(super) current_path: Option<PathBuf>,
     pub(super) recovered: bool,
     pub(super) active_stroke: Option<StrokeSession>,
+    pub(super) annotation_stroke: Option<annotation::AnnotationStrokeSession>,
     pub(super) filter_preview: Option<effects::FilterPreview>,
     pub(super) last_filter: Option<Filter>,
     pub(super) render_cache: BTreeMap<(u64, TileCoord), RenderTile>,
@@ -553,7 +556,10 @@ impl Core {
     }
 
     pub(super) fn ensure_no_active_stroke(&self) -> Result<(), CoreError> {
-        if self.active_stroke.is_some() || self.filter_preview.is_some() {
+        if self.active_stroke.is_some()
+            || self.annotation_stroke.is_some()
+            || self.filter_preview.is_some()
+        {
             Err(CoreError::InvalidState(
                 "operation is not allowed during an active preview transaction",
             ))
@@ -563,7 +569,7 @@ impl Core {
     }
 
     pub(super) fn ensure_no_active_raster_stroke(&self) -> Result<(), CoreError> {
-        if self.active_stroke.is_some() {
+        if self.active_stroke.is_some() || self.annotation_stroke.is_some() {
             Err(CoreError::InvalidState(
                 "operation is not allowed during an active stroke transaction",
             ))

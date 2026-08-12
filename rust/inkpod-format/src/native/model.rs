@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicU64;
 pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 /// Current development format. Increment for every serialized schema change
 /// until the user declares a format freeze; older versions are not migrated.
-pub const DOCUMENT_ARCHIVE_VERSION: u32 = 2;
+pub const DOCUMENT_ARCHIVE_VERSION: u32 = 3;
 pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
 pub(super) const HEADER_BYTES: usize = 32;
 pub(super) const FIXED_MANIFEST_BYTES: usize = 200;
@@ -26,6 +26,9 @@ pub(super) const MAX_BLOBS: usize = 262_144;
 pub(super) const MAX_LAYERS: usize = 4_096;
 pub(super) const MAX_GUIDES: usize = 4_096;
 pub(crate) const MAX_NODE_NAME_BYTES: usize = 1_024;
+pub(crate) const MAX_ANNOTATION_OBJECTS: usize = 16_384;
+pub(crate) const MAX_ANNOTATION_TEXT_BYTES: usize = 65_536;
+pub(crate) const MAX_ANNOTATION_POINTS: usize = 65_536;
 #[cfg(test)]
 pub(crate) static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -171,6 +174,44 @@ pub struct FileDocumentMetadata {
     pub color_chart: FileColorChart,
     /// Whether document-changing Color chart commands are locked.
     pub color_chart_locked: bool,
+    /// Ordered editable Text/Annotation objects keyed by stable ID.
+    pub annotations: Vec<FileAnnotationObject>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileAnnotationKind {
+    Text,
+    Stroke,
+    Leader,
+    Value,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileAnnotationOutput {
+    Normal,
+    Instruction,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileAnnotationPoint {
+    pub x_milli: i32,
+    pub y_milli: i32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileAnnotationObject {
+    pub id: u64,
+    pub layer_id: u64,
+    pub kind: FileAnnotationKind,
+    pub output: FileAnnotationOutput,
+    pub bounds: RectI32,
+    pub font_family_hint: String,
+    pub font_size_milli: u32,
+    pub style_flags: u32,
+    pub color: PixelValue,
+    pub text: String,
+    pub points: Vec<FileAnnotationPoint>,
+    pub stroke_width_milli: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

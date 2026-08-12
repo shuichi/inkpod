@@ -471,6 +471,44 @@ pub struct InkpodSnapshotVectorView {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
+pub struct InkpodSnapshotAnnotation {
+    pub struct_size: u32,
+    pub kind: u32,
+    pub feature_flags: u64,
+    pub object_id: u64,
+    pub layer_id: u64,
+    pub output: u32,
+    pub style_flags: u32,
+    pub bounds: InkpodFrameRect,
+    pub font_size_milli: u32,
+    pub stroke_width_milli: u32,
+    pub color: InkpodColorValue,
+    pub font_utf8_offset: u64,
+    pub font_utf8_bytes: u64,
+    pub text_utf8_offset: u64,
+    pub text_utf8_bytes: u64,
+    pub first_point: u64,
+    pub point_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodSnapshotAnnotationView {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub feature_flags: u64,
+    pub objects: *const InkpodSnapshotAnnotation,
+    pub object_count: u64,
+    pub object_stride_bytes: u64,
+    pub utf8_bytes: *const u8,
+    pub utf8_byte_count: u64,
+    pub points: *const InkpodAnnotationPoint,
+    pub point_count: u64,
+    pub point_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
 pub struct InkpodSnapshotVectorEndpoint {
     pub struct_size: u32,
     pub endpoint: u32,

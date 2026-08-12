@@ -94,6 +94,9 @@ pub(crate) enum CanonicalInvocation {
         targets: Vec<EditTarget>,
         command: EditTargetCommand,
     },
+    EditAnnotations {
+        edits: Vec<AnnotationEdit>,
+    },
     AddGuide {
         axis: GuideAxis,
         position: i32,
@@ -628,6 +631,10 @@ fn decode_persistent_invocation(
             targets,
             command: read_edit_target_command(&mut reader)?,
         }
+    } else if primitive_id == PrimitiveId::EDIT_ANNOTATIONS {
+        CanonicalInvocation::EditAnnotations {
+            edits: reader.annotation_edits()?,
+        }
     } else if primitive_id == PrimitiveId::ADD_GUIDE {
         CanonicalInvocation::AddGuide {
             axis: reader.guide_axis()?,
@@ -1132,6 +1139,7 @@ impl CanonicalInvocation {
             Self::MergeLayer { .. } => PrimitiveId::MERGE_LAYER,
             Self::DeleteHiddenLayers => PrimitiveId::DELETE_HIDDEN_LAYERS,
             Self::EditTargets { .. } => PrimitiveId::EDIT_TARGETS,
+            Self::EditAnnotations { .. } => PrimitiveId::EDIT_ANNOTATIONS,
             Self::AddGuide { .. } => PrimitiveId::ADD_GUIDE,
             Self::MoveGuide { .. } => PrimitiveId::MOVE_GUIDE,
             Self::DeleteGuide { .. } => PrimitiveId::DELETE_GUIDE,
@@ -1213,6 +1221,17 @@ impl CanonicalInvocation {
                 .flat_map(|target| match target {
                     EditTarget::Layer(layer_id) => vec![*layer_id],
                     EditTarget::Plane(target) => vec![target.layer_id, target.plane_id],
+                })
+                .collect(),
+            Self::EditAnnotations { edits } => edits
+                .iter()
+                .flat_map(|edit| match edit {
+                    AnnotationEdit::Create(input) => vec![input.layer_id],
+                    AnnotationEdit::Update { object_id, input } => {
+                        vec![*object_id, input.layer_id]
+                    }
+                    AnnotationEdit::Move { object_id, .. }
+                    | AnnotationEdit::Delete { object_id } => vec![*object_id],
                 })
                 .collect(),
             Self::CreatePlane { layer_id, .. } => vec![*layer_id],
@@ -1424,6 +1443,15 @@ impl CanonicalInvocation {
                             .collect(),
                     )
                 }),
+            Self::EditAnnotations { edits } => core.apply_annotation_edits(edits).map(|outcome| {
+                InvocationResult::outputs(
+                    DispatchOutcome {
+                        revision: outcome.revision(),
+                        accepted_commands: 1,
+                    },
+                    outcome.created_object_ids().to_vec(),
+                )
+            }),
             Self::AddGuide { axis, position } => core
                 .add_guide(*axis, *position)
                 .map(|(dispatch, id)| InvocationResult::output(dispatch, id)),
@@ -1787,6 +1815,7 @@ impl CanonicalInvocation {
                 }
                 write_edit_target_command(&mut writer, *command);
             }
+            Self::EditAnnotations { edits } => writer.annotation_edits(edits)?,
             Self::ReorderLayer {
                 layer_id,
                 destination_index,
@@ -2352,6 +2381,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::MERGE_LAYER.get()
         || value == PrimitiveId::DELETE_HIDDEN_LAYERS.get()
         || value == PrimitiveId::EDIT_TARGETS.get()
+        || value == PrimitiveId::EDIT_ANNOTATIONS.get()
         || value == PrimitiveId::ADD_GUIDE.get()
         || value == PrimitiveId::MOVE_GUIDE.get()
         || value == PrimitiveId::DELETE_GUIDE.get()
@@ -2514,6 +2544,94 @@ impl<'a> CanonicalReader<'a> {
         std::str::from_utf8(bytes)
             .map(str::to_owned)
             .map_err(|_| self.invalid("canonical string is not valid UTF-8"))
+    }
+
+    fn annotation_edits(&mut self) -> Result<Vec<AnnotationEdit>, CoreError> {
+        let count = self.count(1)?;
+        if count == 0 || count > MAX_ANNOTATION_BATCH_EDITS {
+            return Err(self.invalid("canonical annotation edit count is outside bounds"));
+        }
+        let mut edits = Vec::with_capacity(count);
+        for _ in 0..count {
+            edits.push(match self.u32()? {
+                1 => AnnotationEdit::Create(self.annotation_input()?),
+                2 => AnnotationEdit::Update {
+                    object_id: self.u64()?,
+                    input: self.annotation_input()?,
+                },
+                3 => AnnotationEdit::Move {
+                    object_id: self.u64()?,
+                    delta_x: self.i32()?,
+                    delta_y: self.i32()?,
+                },
+                4 => AnnotationEdit::Delete {
+                    object_id: self.u64()?,
+                },
+                _ => return Err(self.invalid("canonical annotation edit kind is unknown")),
+            });
+        }
+        Ok(edits)
+    }
+
+    fn annotation_input(&mut self) -> Result<AnnotationObjectInput, CoreError> {
+        let layer_id = self.u64()?;
+        let kind = match self.u32()? {
+            1 => AnnotationKind::Text,
+            2 => AnnotationKind::Stroke,
+            3 => AnnotationKind::Leader,
+            4 => AnnotationKind::Value,
+            _ => return Err(self.invalid("canonical annotation object kind is unknown")),
+        };
+        let output = match self.u32()? {
+            1 => AnnotationOutput::Normal,
+            2 => AnnotationOutput::Instruction,
+            _ => return Err(self.invalid("canonical annotation output kind is unknown")),
+        };
+        let bounds = self.rect()?;
+        let font_family_hint = self.string()?;
+        let font_size_milli = self.u32()?;
+        let style_flags = self.u32()?;
+        let color = self.annotation_color()?;
+        let text = self.string()?;
+        let point_count = self.count(8)?;
+        if point_count > MAX_ANNOTATION_POINTS {
+            return Err(self.invalid("canonical annotation point count exceeds its bound"));
+        }
+        let mut points = Vec::with_capacity(point_count);
+        for _ in 0..point_count {
+            points.push(AnnotationPoint {
+                x_milli: self.i32()?,
+                y_milli: self.i32()?,
+            });
+        }
+        Ok(AnnotationObjectInput {
+            layer_id,
+            kind,
+            output,
+            bounds,
+            font_family_hint,
+            font_size_milli,
+            style_flags,
+            color,
+            text,
+            points,
+            stroke_width_milli: self.u32()?,
+        })
+    }
+
+    fn annotation_color(&mut self) -> Result<PixelValue, CoreError> {
+        let depth = self.u32()?;
+        let channels = [self.u16()?, self.u16()?, self.u16()?, self.u16()?];
+        match depth {
+            8 if channels
+                .iter()
+                .all(|channel| *channel <= u16::from(u8::MAX)) =>
+            {
+                Ok(PixelValue::Rgba(channels.map(|channel| channel as u8)))
+            }
+            16 => Ok(PixelValue::Rgba16(channels)),
+            _ => Err(self.invalid("canonical annotation color depth is invalid")),
+        }
     }
 
     fn q16_f32(&mut self) -> Result<f32, CoreError> {
@@ -3554,6 +3672,92 @@ impl CanonicalWriter {
             .map_err(|_| CoreError::InvalidArgument("canonical string is too long"))?;
         self.u32(length);
         self.bytes.extend_from_slice(value.as_bytes());
+        Ok(())
+    }
+
+    fn annotation_edits(&mut self, edits: &[AnnotationEdit]) -> Result<(), CoreError> {
+        self.u32(u32::try_from(edits.len()).map_err(|_| {
+            CoreError::InvalidArgument("annotation edit count is not representable")
+        })?);
+        for edit in edits {
+            match edit {
+                AnnotationEdit::Create(input) => {
+                    self.u32(1);
+                    self.annotation_input(input)?;
+                }
+                AnnotationEdit::Update { object_id, input } => {
+                    self.u32(2);
+                    self.u64(*object_id);
+                    self.annotation_input(input)?;
+                }
+                AnnotationEdit::Move {
+                    object_id,
+                    delta_x,
+                    delta_y,
+                } => {
+                    self.u32(3);
+                    self.u64(*object_id);
+                    self.i32(*delta_x);
+                    self.i32(*delta_y);
+                }
+                AnnotationEdit::Delete { object_id } => {
+                    self.u32(4);
+                    self.u64(*object_id);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn annotation_input(&mut self, input: &AnnotationObjectInput) -> Result<(), CoreError> {
+        self.u64(input.layer_id);
+        self.u32(match input.kind {
+            AnnotationKind::Text => 1,
+            AnnotationKind::Stroke => 2,
+            AnnotationKind::Leader => 3,
+            AnnotationKind::Value => 4,
+        });
+        self.u32(match input.output {
+            AnnotationOutput::Normal => 1,
+            AnnotationOutput::Instruction => 2,
+        });
+        self.rect(input.bounds);
+        self.string(&input.font_family_hint)?;
+        self.u32(input.font_size_milli);
+        self.u32(input.style_flags);
+        self.annotation_color(input.color)?;
+        self.string(&input.text)?;
+        self.u32(u32::try_from(input.points.len()).map_err(|_| {
+            CoreError::InvalidArgument("annotation point count is not representable")
+        })?);
+        for point in &input.points {
+            self.i32(point.x_milli);
+            self.i32(point.y_milli);
+        }
+        self.u32(input.stroke_width_milli);
+        Ok(())
+    }
+
+    fn annotation_color(&mut self, color: PixelValue) -> Result<(), CoreError> {
+        match color {
+            PixelValue::Rgba(channels) => {
+                self.u32(8);
+                for channel in channels {
+                    self.u16(u16::from(channel));
+                }
+            }
+            PixelValue::Rgba16(channels) => {
+                self.u32(16);
+                for channel in channels {
+                    self.u16(channel);
+                }
+            }
+            _ => {
+                return Err(CoreError::InvalidArgument(
+                    "annotation color must be straight RGBA",
+                ));
+            }
+        }
         Ok(())
     }
 

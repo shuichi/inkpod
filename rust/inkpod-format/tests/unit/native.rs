@@ -148,6 +148,41 @@ fn document_tree_fixture() -> DocumentArchive {
             entries: Vec::new(),
         },
         color_chart_locked: false,
+        annotations: Vec::new(),
+    });
+    document
+}
+
+fn annotation_fixture() -> DocumentArchive {
+    let mut document = document_tree_fixture();
+    let metadata = document.document_metadata.as_mut().unwrap();
+    metadata.layers.push(FileLayer {
+        id: 7,
+        kind: LayerKind::Text,
+        name: "Text".to_owned(),
+        visible: true,
+        editable: true,
+        opacity_milli: 1_000,
+        planes: Vec::new(),
+    });
+    metadata.annotations.push(FileAnnotationObject {
+        id: 8,
+        layer_id: 7,
+        kind: FileAnnotationKind::Text,
+        output: FileAnnotationOutput::Normal,
+        bounds: RectI32 {
+            x: 2,
+            y: 3,
+            width: 40,
+            height: 20,
+        },
+        font_family_hint: "Segoe UI".to_owned(),
+        font_size_milli: 18_000,
+        style_flags: 1,
+        color: PixelValue::Rgba16([1_000, 2_000, 3_000, 65_535]),
+        text: "日本語 e\u{301}".to_owned(),
+        points: Vec::new(),
+        stroke_width_milli: 0,
     });
     document
 }
@@ -379,7 +414,7 @@ fn pm_gap_018_vector_connections_round_trip_and_reject_invalid_topology() {
 
 #[test]
 fn non_current_container_versions_are_rejected_before_format_freeze() {
-    for version in [1_u32, 3_u32, 15_u32, 17_u32] {
+    for version in [1_u32, 2_u32, 4_u32, 17_u32] {
         let mut encoded = encode(&base_fixture()).unwrap();
         encoded[8..12].copy_from_slice(&version.to_le_bytes());
         assert!(matches!(
@@ -588,6 +623,45 @@ fn color_metadata_round_trips() {
     let decoded = decode(&encode(&document).unwrap()).unwrap();
     assert_eq!(decoded.main_line_color, document.main_line_color);
     assert_eq!(decoded.palette, document.palette);
+}
+
+#[test]
+fn annotation_metadata_round_trips_and_rejects_malformed_text_and_geometry() {
+    let document = annotation_fixture();
+    let encoded = encode(&document).unwrap();
+    assert_eq!(decode(&encoded).unwrap(), document);
+
+    let needle = "日本語".as_bytes();
+    let mut invalid_utf8 = encoded;
+    let offset = invalid_utf8
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .unwrap();
+    invalid_utf8[offset] = 0xff;
+    assert!(matches!(
+        decode(&invalid_utf8),
+        Err(FormatError::Invalid(_))
+    ));
+
+    let mut outside = annotation_fixture();
+    outside.document_metadata.as_mut().unwrap().annotations[0]
+        .bounds
+        .width = 64;
+    assert!(matches!(
+        encode(&outside),
+        Err(FormatError::Invalid(
+            "annotation geometry is outside the document"
+        ))
+    ));
+
+    let mut oversized = annotation_fixture();
+    oversized.document_metadata.as_mut().unwrap().annotations[0].text = "x".repeat(65_537);
+    assert!(matches!(
+        encode(&oversized),
+        Err(FormatError::Invalid(
+            "annotation object properties are invalid"
+        ))
+    ));
 }
 
 #[test]

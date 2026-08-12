@@ -31,7 +31,7 @@ struct CommandState {
     bool checked{};
 };
 
-inline constexpr std::size_t kProductionCommandStateCount = 364U;
+inline constexpr std::size_t kProductionCommandStateCount = 372U;
 using CommandStateSet = std::array<CommandState, kProductionCommandStateCount>;
 
 struct DocumentCommandStateInput {
@@ -61,6 +61,9 @@ struct EffectsCommandStateInput {
 struct DocumentPaneCommandStateInput {
     bool removable_layer_available{};
     bool layer_palette_visible{};
+    bool annotation_available{};
+    bool annotation_selected{};
+    bool annotation_draw_active{};
 };
 
 struct AnimationCommandStateInput {

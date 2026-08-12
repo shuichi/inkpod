@@ -5,12 +5,12 @@ use crate::*;
 use blake3::hazmat::HasherExt;
 use std::sync::LazyLock;
 
-const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v5";
-const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v2";
+const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v6";
+const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v3";
 const DOCUMENT_RASTER_CONTEXT: &str = "org.inkpod.digest.document-raster.v1";
 const DOCUMENT_TILE_CONTEXT: &str = "org.inkpod.digest.document-raster-tile.v1";
 const PROCEDURE_PAYLOAD_CONTEXT: &str = "org.inkpod.digest.procedure-payload.v1";
-const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 6;
+const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 7;
 const DOCUMENT_TILE_SCHEMA_VERSION: u32 = 1;
 const PROCEDURE_PAYLOAD_SCHEMA_VERSION: u32 = 1;
 
@@ -428,6 +428,12 @@ fn canonical_layer(
         .get(&layer.id)
         .map(canonical_adjustment)
         .transpose()?;
+    let annotations = document
+        .annotations
+        .iter()
+        .filter(|object| object.input.layer_id == layer.id.get())
+        .map(canonical_annotation)
+        .collect::<Result<Vec<_>, _>>()?;
     frame(&[
         present(layer.id.get().to_le_bytes()),
         present(layer_kind_code(layer.kind).to_le_bytes()),
@@ -437,6 +443,52 @@ fn canonical_layer(
         present(normalized_opacity(layer.opacity_milli)?.to_le_bytes()),
         present(sequence(planes.iter().map(Vec::as_slice))?),
         adjustment,
+        present(sequence(annotations.iter().map(Vec::as_slice))?),
+    ])
+}
+
+fn canonical_annotation(object: &AnnotationObject) -> Result<Vec<u8>, CoreError> {
+    let input = &object.input;
+    let points = input
+        .points
+        .iter()
+        .map(|point| {
+            frame(&[
+                present(point.x_milli.to_le_bytes()),
+                present(point.y_milli.to_le_bytes()),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    frame(&[
+        present(object.id.get().to_le_bytes()),
+        present(input.layer_id.to_le_bytes()),
+        present(
+            (match input.kind {
+                AnnotationKind::Text => 1_u32,
+                AnnotationKind::Stroke => 2,
+                AnnotationKind::Leader => 3,
+                AnnotationKind::Value => 4,
+            })
+            .to_le_bytes(),
+        ),
+        present(
+            (match input.output {
+                AnnotationOutput::Normal => 1_u32,
+                AnnotationOutput::Instruction => 2,
+            })
+            .to_le_bytes(),
+        ),
+        present(input.bounds.x.to_le_bytes()),
+        present(input.bounds.y.to_le_bytes()),
+        present(input.bounds.width.to_le_bytes()),
+        present(input.bounds.height.to_le_bytes()),
+        present(input.font_family_hint.as_bytes().to_vec()),
+        present(input.font_size_milli.to_le_bytes()),
+        present(input.style_flags.to_le_bytes()),
+        present(color_bytes(input.color)?),
+        present(input.text.as_bytes().to_vec()),
+        present(sequence(points.iter().map(Vec::as_slice))?),
+        present(input.stroke_width_milli.to_le_bytes()),
     ])
 }
 
@@ -1323,10 +1375,10 @@ mod tests {
         assert_eq!(
             digest.as_bytes(),
             &[
-                107, 68, 85, 113, 226, 200, 178, 223, 232, 172, 81, 145, 242, 150, 89, 74, 166,
-                208, 214, 120, 140, 73, 94, 240, 177, 73, 88, 66, 58, 179, 204, 72,
+                114, 108, 149, 91, 144, 81, 152, 35, 170, 238, 121, 155, 88, 226, 180, 60, 190, 37,
+                164, 252, 130, 195, 29, 189, 108, 40, 129, 43, 25, 198, 30, 79,
             ],
-            "schema-6 digest changes require an explicit golden update"
+            "schema-7 digest changes require an explicit golden update"
         );
     }
 

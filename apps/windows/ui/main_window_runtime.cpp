@@ -550,6 +550,9 @@ void HandleActiveTreePlaneTransition(ApplicationHost& state) noexcept {
 void ResetDocumentShellTransientState(DocumentShellState& document) noexcept {
     document.smoke_layer_id = 0U;
     document.selection_layer_id = 0U;
+    document.annotation_layer_id = 0U;
+    document.active_annotation_id = 0U;
+    document.annotation_draw_active = false;
 }
 
 void ResetPaneDocumentState(PaneUiState& panes) noexcept {
@@ -1082,6 +1085,10 @@ void ResetUiForNewActiveDocument(ApplicationHost& state) noexcept {
     state.Thumbnails().RemoveDocument(
         state.Document().id, state.Document().generation);
     ResetDocumentShellTransientState(state.Document().shell);
+    if (state.Workspace().windows.canvas != nullptr) {
+        (void)inkpod::renderer::SetCanvasAnnotationSelection(
+            state.Workspace().windows.canvas, 0U);
+    }
     ResetPaneDocumentState(state.Workspace().panes);
     ResetToolDocumentState(state.Workspace().tools);
     ResetViewDocumentState(state.ActiveView().presentation);
@@ -6029,6 +6036,12 @@ CommandStateInputs BuildCommandStateInputs(
     inputs.document_pane.layer_palette_visible =
         state.Workspace().windows.workspace.dock.IsPaneVisible(
             DockPaneType::Layer);
+    inputs.document_pane.annotation_available = has_document
+        && document->shell.annotation_layer_id != 0U;
+    inputs.document_pane.annotation_selected = has_document
+        && document->shell.active_annotation_id != 0U;
+    inputs.document_pane.annotation_draw_active = has_document
+        && document->shell.annotation_draw_active;
 
     inputs.animation.motion_fps = state.Workspace().animation.motion_fps;
     inputs.animation.sequence_switch_pending =
@@ -14765,6 +14778,194 @@ std::optional<LRESULT> RouteEffectsCommand(
 }
 
 
+struct OwnedAnnotationObject {
+    std::uint64_t id{};
+    std::uint64_t layer_id{};
+    std::uint32_t kind{};
+    std::uint32_t output{};
+    std::uint32_t style_flags{};
+    InkpodFrameRect bounds{};
+    std::uint32_t font_size_milli{};
+    std::uint32_t stroke_width_milli{};
+    InkpodColorValue color{};
+    std::vector<std::uint8_t> font;
+    std::vector<std::uint8_t> text;
+    std::vector<InkpodAnnotationPoint> points;
+};
+
+bool QueryAnnotationObjects(
+    ApplicationHost& state,
+    std::uint64_t layer_id,
+    std::vector<OwnedAnnotationObject>& output) noexcept {
+    if (state.engine == nullptr || layer_id == 0U) {
+        return false;
+    }
+    output.clear();
+    return state.engine->Invoke(
+               [layer_id, &output](InkpodCore* core) {
+                   InkpodSnapshotOptions options{};
+                   options.struct_size = sizeof(options);
+                   InkpodSnapshot* snapshot{};
+                   InkpodStatus status = inkpod_core_build_snapshot(core, &options, &snapshot);
+                   if (status != INKPOD_STATUS_OK) {
+                       return status;
+                   }
+                   InkpodSnapshotAnnotationView view{};
+                   view.struct_size = sizeof(view);
+                   status = inkpod_snapshot_get_annotations(snapshot, &view);
+                   try {
+                       if (status == INKPOD_STATUS_OK) {
+                           const auto* object_bytes =
+                               reinterpret_cast<const std::byte*>(view.objects);
+                           const auto* point_bytes =
+                               reinterpret_cast<const std::byte*>(view.points);
+                           for (std::uint64_t index = 0U; index < view.object_count; ++index) {
+                               const auto* object = reinterpret_cast<const InkpodSnapshotAnnotation*>(
+                                   object_bytes + static_cast<std::size_t>(
+                                       index * view.object_stride_bytes));
+                               if (object->layer_id != layer_id) {
+                                   continue;
+                               }
+                               OwnedAnnotationObject copy{};
+                               copy.id = object->object_id;
+                               copy.layer_id = object->layer_id;
+                               copy.kind = object->kind;
+                               copy.output = object->output;
+                               copy.style_flags = object->style_flags;
+                               copy.bounds = object->bounds;
+                               copy.font_size_milli = object->font_size_milli;
+                               copy.stroke_width_milli = object->stroke_width_milli;
+                               copy.color = object->color;
+                               copy.font.assign(
+                                   view.utf8_bytes + static_cast<std::size_t>(object->font_utf8_offset),
+                                   view.utf8_bytes + static_cast<std::size_t>(
+                                       object->font_utf8_offset + object->font_utf8_bytes));
+                               copy.text.assign(
+                                   view.utf8_bytes + static_cast<std::size_t>(object->text_utf8_offset),
+                                   view.utf8_bytes + static_cast<std::size_t>(
+                                       object->text_utf8_offset + object->text_utf8_bytes));
+                               copy.points.reserve(static_cast<std::size_t>(object->point_count));
+                               for (std::uint64_t point = 0U; point < object->point_count; ++point) {
+                                   copy.points.push_back(*reinterpret_cast<const InkpodAnnotationPoint*>(
+                                       point_bytes + static_cast<std::size_t>(
+                                           (object->first_point + point)
+                                           * view.point_stride_bytes)));
+                               }
+                               output.push_back(std::move(copy));
+                           }
+                       }
+                   } catch (const std::bad_alloc&) {
+                       status = INKPOD_STATUS_INVALID_STATE;
+                   }
+                   const InkpodStatus release = inkpod_snapshot_release(&snapshot);
+                   return status == INKPOD_STATUS_OK ? release : status;
+               },
+               false,
+               false)
+        == INKPOD_STATUS_OK;
+}
+
+InkpodAnnotationObjectInput AnnotationInput(const OwnedAnnotationObject& object) noexcept {
+    InkpodAnnotationObjectInput input{};
+    input.struct_size = sizeof(input);
+    input.kind = object.kind;
+    input.layer_id = object.layer_id;
+    input.output = object.output;
+    input.style_flags = object.style_flags;
+    input.bounds = object.bounds;
+    input.font_family_utf8 = object.font.empty() ? nullptr : object.font.data();
+    input.font_family_bytes = object.font.size();
+    input.font_size_milli = object.font_size_milli;
+    input.stroke_width_milli = object.stroke_width_milli;
+    input.color = object.color;
+    input.text_utf8 = object.text.empty() ? nullptr : object.text.data();
+    input.text_bytes = object.text.size();
+    input.points = object.points.empty() ? nullptr : object.points.data();
+    input.point_count = object.points.size();
+    input.point_stride_bytes = object.points.empty() ? 0U : sizeof(InkpodAnnotationPoint);
+    return input;
+}
+
+InkpodStatus ApplyAnnotationEdit(
+    ApplicationHost& state,
+    std::uint64_t expected_revision,
+    InkpodAnnotationEdit edit,
+    std::uint64_t& created_id) noexcept {
+    if (state.engine == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    created_id = 0U;
+    return state.engine->Invoke(
+        [expected_revision, edit, &created_id](InkpodCore* core) {
+            InkpodAnnotationEditResult result{};
+            result.struct_size = sizeof(result);
+            result.created_ids = &created_id;
+            result.created_capacity = 1U;
+            return inkpod_core_annotation_edit(
+                core, expected_revision, &edit, 1U, sizeof(edit), &result);
+        },
+        true,
+        true);
+}
+
+void PresentAnnotationSelection(ApplicationHost& state) noexcept {
+    if (state.Workspace().windows.canvas != nullptr) {
+        (void)inkpod::renderer::SetCanvasAnnotationSelection(
+            state.Workspace().windows.canvas,
+            state.Document().shell.active_annotation_id);
+    }
+}
+
+InkpodStatus EnsureAnnotationLayer(
+    ApplicationHost& state,
+    std::uint32_t kind,
+    std::uint64_t& layer_id) noexcept {
+    TreePaneNode selected{};
+    if (QueryTreeNode(state, false, selected)
+        && (selected.kind == INKPOD_LAYER_TEXT || selected.kind == INKPOD_LAYER_ANNOTATION)) {
+        layer_id = selected.id;
+        state.Document().shell.annotation_layer_id = layer_id;
+        return INKPOD_STATUS_OK;
+    }
+    InkpodTreeEdit edit{};
+    edit.struct_size = sizeof(edit);
+    edit.operation = INKPOD_TREE_CREATE_LAYER;
+    edit.flags = INKPOD_NODE_VISIBLE | INKPOD_NODE_EDITABLE;
+    edit.kind = kind;
+    edit.opacity_milli = 1000U;
+    const InkpodStatus status = ApplyTreeEditRecord(
+        state, edit, kind == INKPOD_LAYER_TEXT ? "Text" : "Instructions", layer_id);
+    if (status == INKPOD_STATUS_OK) {
+        state.Document().shell.annotation_layer_id = layer_id;
+        state.Document().shell.smoke_layer_id = layer_id;
+        RefreshTreePane(state);
+    }
+    return status;
+}
+
+bool Utf8AnnotationTextToWide(
+    const std::vector<std::uint8_t>& input, std::wstring& output) noexcept {
+    output.clear();
+    if (input.empty() || input.size() > static_cast<std::size_t>(INT_MAX)) {
+        return false;
+    }
+    const int count = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, reinterpret_cast<const char*>(input.data()),
+        static_cast<int>(input.size()), nullptr, 0);
+    if (count <= 0) {
+        return false;
+    }
+    try {
+        output.resize(static_cast<std::size_t>(count));
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return MultiByteToWideChar(
+               CP_UTF8, MB_ERR_INVALID_CHARS, reinterpret_cast<const char*>(input.data()),
+               static_cast<int>(input.size()), output.data(), count)
+        == count;
+}
+
 std::optional<LRESULT> RouteDocumentPaneCommand(
     ApplicationHost* state,
     HWND window,
@@ -14829,6 +15030,218 @@ std::optional<LRESULT> RouteDocumentPaneCommand(
             RefreshTreePane(*state);
             UpdateMenuState(*state);
             return 0;
+        }
+        case IDM_ANNOTATION_ADD_TEXT: {
+            std::uint64_t layer_id{};
+            InkpodStatus status = EnsureAnnotationLayer(*state, INKPOD_LAYER_TEXT, layer_id);
+            TextInputDialogState dialog{};
+            dialog.title = L"テキスト注釈";
+            dialog.label = L"本文（UTF-8で保存）";
+            dialog.value = L"修正指示";
+            if (status == INKPOD_STATUS_OK
+                && ShowTextInput(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
+                return 0;
+            }
+            InkpodDocumentInfo info{};
+            OwnedAnnotationObject object{};
+            object.layer_id = layer_id;
+            object.kind = INKPOD_ANNOTATION_TEXT;
+            object.output = INKPOD_ANNOTATION_OUTPUT_NORMAL;
+            object.bounds = {8, 8, 1, 1};
+            object.font_size_milli = 18'000U;
+            object.color.struct_size = sizeof(object.color);
+            object.color.depth = INKPOD_COLOR_DEPTH_8;
+            object.color.alpha = 255U;
+            if (const auto* editor = PresentedEditorState(*state); editor != nullptr) {
+                object.color = editor->current_color;
+            }
+            if (status == INKPOD_STATUS_OK && QueryDocument(*state, info)) {
+                object.bounds.x = info.width > 16U ? 8 : 0;
+                object.bounds.y = info.height > 16U ? 8 : 0;
+                object.bounds.width = static_cast<std::int32_t>(
+                    info.width > 16U ? info.width - 16U : info.width);
+                object.bounds.height = static_cast<std::int32_t>(
+                    std::min<std::uint32_t>(64U, info.height - static_cast<std::uint32_t>(object.bounds.y)));
+                status = object.bounds.width > 0 && object.bounds.height > 0
+                    && WidePathToUtf8(dialog.value, object.text)
+                    ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_ARGUMENT;
+            } else if (status == INKPOD_STATUS_OK) {
+                status = INKPOD_STATUS_INVALID_STATE;
+            }
+            if (status == INKPOD_STATUS_OK) {
+                const InkpodAnnotationObjectInput input = AnnotationInput(object);
+                InkpodAnnotationEdit edit{};
+                edit.struct_size = sizeof(edit);
+                edit.kind = INKPOD_ANNOTATION_EDIT_CREATE;
+                edit.input = &input;
+                status = ApplyAnnotationEdit(
+                    *state, info.document_revision, edit,
+                    state->Document().shell.active_annotation_id);
+            }
+            if (status == INKPOD_STATUS_OK) {
+                PresentAnnotationSelection(*state);
+            }
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"テキスト注釈の追加");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_ANNOTATION_EDIT_TEXT: {
+            std::uint64_t layer_id = state->Document().shell.annotation_layer_id;
+            TreePaneNode selected{};
+            if (QueryTreeNode(*state, false, selected)
+                && (selected.kind == INKPOD_LAYER_TEXT
+                    || selected.kind == INKPOD_LAYER_ANNOTATION)) {
+                layer_id = selected.id;
+            }
+            std::vector<OwnedAnnotationObject> objects;
+            InkpodStatus status = QueryAnnotationObjects(*state, layer_id, objects)
+                ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
+            auto found = std::find_if(
+                objects.begin(), objects.end(), [state](const OwnedAnnotationObject& object) {
+                    return object.id == state->Document().shell.active_annotation_id
+                        && (object.kind == INKPOD_ANNOTATION_TEXT
+                            || object.kind == INKPOD_ANNOTATION_VALUE);
+                });
+            if (found == objects.end()) {
+                found = std::find_if(objects.begin(), objects.end(), [](const auto& object) {
+                    return object.kind == INKPOD_ANNOTATION_TEXT
+                        || object.kind == INKPOD_ANNOTATION_VALUE;
+                });
+            }
+            TextInputDialogState dialog{};
+            dialog.title = L"テキスト注釈を再編集";
+            dialog.label = L"本文";
+            if (status == INKPOD_STATUS_OK && (found == objects.end()
+                    || !Utf8AnnotationTextToWide(found->text, dialog.value))) {
+                status = INKPOD_STATUS_INVALID_STATE;
+            }
+            if (status == INKPOD_STATUS_OK
+                && ShowTextInput(
+                    state->lifetime.instance, window, state->lifetime.smoke_test, dialog) != IDOK) {
+                return 0;
+            }
+            InkpodDocumentInfo info{};
+            if (status == INKPOD_STATUS_OK
+                && (!WidePathToUtf8(dialog.value, found->text) || !QueryDocument(*state, info))) {
+                status = INKPOD_STATUS_INVALID_ARGUMENT;
+            }
+            if (status == INKPOD_STATUS_OK) {
+                state->Document().shell.annotation_layer_id = found->layer_id;
+                state->Document().shell.active_annotation_id = found->id;
+                const InkpodAnnotationObjectInput input = AnnotationInput(*found);
+                InkpodAnnotationEdit edit{};
+                edit.struct_size = sizeof(edit);
+                edit.kind = INKPOD_ANNOTATION_EDIT_UPDATE;
+                edit.object_id = found->id;
+                edit.input = &input;
+                std::uint64_t ignored{};
+                status = ApplyAnnotationEdit(*state, info.document_revision, edit, ignored);
+            }
+            if (status == INKPOD_STATUS_OK) {
+                PresentAnnotationSelection(*state);
+            }
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"テキスト注釈の編集");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_ANNOTATION_DRAW_INSTRUCTION: {
+            std::uint64_t layer_id{};
+            InkpodStatus status = EnsureAnnotationLayer(
+                *state, INKPOD_LAYER_ANNOTATION, layer_id);
+            if (status == INKPOD_STATUS_OK) {
+                state->Document().shell.annotation_draw_active =
+                    !state->Document().shell.annotation_draw_active;
+                if (state->Workspace().windows.status_bar != nullptr) {
+                    SendMessageW(
+                        state->Workspace().windows.status_bar,
+                        SB_SETTEXTW,
+                        0,
+                        reinterpret_cast<LPARAM>(
+                            state->Document().shell.annotation_draw_active
+                                ? L"手描き指示モード：Canvasをドラッグ（Escで取消）"
+                                : L"手描き指示モードを終了"));
+                }
+            } else {
+                ShowCoreError(*state, window, L"手描き指示モード");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
+        }
+        case IDM_ANNOTATION_SELECT_PREVIOUS:
+        case IDM_ANNOTATION_SELECT_NEXT: {
+            std::uint64_t layer_id = state->Document().shell.annotation_layer_id;
+            TreePaneNode selected{};
+            if (QueryTreeNode(*state, false, selected)
+                && (selected.kind == INKPOD_LAYER_TEXT
+                    || selected.kind == INKPOD_LAYER_ANNOTATION)) {
+                layer_id = selected.id;
+            }
+            std::vector<OwnedAnnotationObject> objects;
+            if (!QueryAnnotationObjects(*state, layer_id, objects) || objects.empty()) {
+                return 0;
+            }
+            const auto current = std::find_if(
+                objects.begin(), objects.end(), [state](const auto& object) {
+                    return object.id == state->Document().shell.active_annotation_id;
+                });
+            std::size_t index{};
+            if (current == objects.end()) {
+                index = LOWORD(wparam) == IDM_ANNOTATION_SELECT_NEXT
+                    ? 0U : objects.size() - 1U;
+            } else {
+                index = static_cast<std::size_t>(current - objects.begin());
+                index = LOWORD(wparam) == IDM_ANNOTATION_SELECT_NEXT
+                    ? (index + 1U) % objects.size()
+                    : (index + objects.size() - 1U) % objects.size();
+            }
+            state->Document().shell.annotation_layer_id = layer_id;
+            state->Document().shell.active_annotation_id = objects[index].id;
+            PresentAnnotationSelection(*state);
+            if (state->Workspace().windows.status_bar != nullptr) {
+                const std::wstring label = L"選択注釈 ID "
+                    + std::to_wstring(objects[index].id)
+                    + L"（←/→コマンドで移動）";
+                SendMessageW(
+                    state->Workspace().windows.status_bar, SB_SETTEXTW, 0,
+                    reinterpret_cast<LPARAM>(label.c_str()));
+            }
+            UpdateMenuState(*state);
+            return 1;
+        }
+        case IDM_ANNOTATION_MOVE_LEFT:
+        case IDM_ANNOTATION_MOVE_RIGHT:
+        case IDM_ANNOTATION_DELETE: {
+            InkpodDocumentInfo info{};
+            if (!QueryDocument(*state, info)
+                || state->Document().shell.active_annotation_id == 0U) {
+                return 0;
+            }
+            InkpodAnnotationEdit edit{};
+            edit.struct_size = sizeof(edit);
+            edit.object_id = state->Document().shell.active_annotation_id;
+            edit.kind = LOWORD(wparam) == IDM_ANNOTATION_DELETE
+                ? INKPOD_ANNOTATION_EDIT_DELETE : INKPOD_ANNOTATION_EDIT_MOVE;
+            edit.delta_x = LOWORD(wparam) == IDM_ANNOTATION_MOVE_LEFT ? -1
+                : (LOWORD(wparam) == IDM_ANNOTATION_MOVE_RIGHT ? 1 : 0);
+            std::uint64_t ignored{};
+            const InkpodStatus status = ApplyAnnotationEdit(
+                *state, info.document_revision, edit, ignored);
+            if (status == INKPOD_STATUS_OK && LOWORD(wparam) == IDM_ANNOTATION_DELETE) {
+                state->Document().shell.active_annotation_id = 0U;
+            }
+            if (status == INKPOD_STATUS_OK) {
+                PresentAnnotationSelection(*state);
+            }
+            if (status != INKPOD_STATUS_OK) {
+                ShowCoreError(*state, window, L"注釈オブジェクト操作");
+            }
+            UpdateMenuState(*state);
+            return status == INKPOD_STATUS_OK ? 1 : 0;
         }
         case IDM_LAYER_DUPLICATE: {
             InkpodDocumentInfo info{};
@@ -18493,6 +18906,155 @@ std::optional<LRESULT> RouteKeyboardMessage(
 }
 
 
+struct AnnotationCanvasWork {
+    inkpod::renderer::CanvasStrokeEventKind kind{};
+    CommandContext context;
+    std::uint64_t view_id{};
+    std::uint64_t base_document_revision{};
+    std::uint64_t layer_id{};
+    InkpodColorValue color{};
+    std::vector<InkpodStrokeSample> samples;
+};
+
+bool QueueAnnotationCanvasEvent(
+    ApplicationHost& state,
+    inkpod::app::EditorGroup& source_group,
+    inkpod::app::DocumentView& source_view,
+    const inkpod::renderer::CanvasStrokeEvent& input) noexcept {
+    if (state.engine == nullptr || state.Document().shell.annotation_layer_id == 0U) {
+        return false;
+    }
+    InkpodDocumentInfo info{};
+    if (!QueryDocument(state, info)) {
+        return false;
+    }
+    std::shared_ptr<AnnotationCanvasWork> work;
+    try {
+        work = std::make_shared<AnnotationCanvasWork>();
+        work->kind = input.kind;
+        work->context = state.routing.targets.Capture();
+        work->view_id = source_view.core_view_id;
+        work->base_document_revision = info.document_revision;
+        work->layer_id = state.Document().shell.annotation_layer_id;
+        work->color.struct_size = sizeof(work->color);
+        work->color.depth = INKPOD_COLOR_DEPTH_8;
+        work->color.red = 255U;
+        work->color.green = 64U;
+        work->color.blue = 32U;
+        work->color.alpha = 255U;
+        if (const auto* editor = PresentedEditorState(state); editor != nullptr) {
+            work->color = editor->current_color;
+        }
+        if (input.sample_count != 0U) {
+            work->samples.assign(
+                input.samples, input.samples + static_cast<std::size_t>(input.sample_count));
+        }
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    if (state.routing.targets.Resolve(work->context, inkpod::app::kDocumentViewCommandScope)
+        != CommandResolveStatus::Ok) {
+        return false;
+    }
+    const bool publish = true;
+    const bool refresh = input.kind == inkpod::renderer::CanvasStrokeEventKind::End;
+    const bool queued = state.engine->Enqueue(
+        work->context,
+        [work](InkpodCore* core) {
+            if (work->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {
+                return inkpod_core_annotation_stroke_cancel(core);
+            }
+            if (work->kind != inkpod::renderer::CanvasStrokeEventKind::End
+                && work->samples.empty()) {
+                return INKPOD_STATUS_INVALID_ARGUMENT;
+            }
+            std::vector<InkpodGeometryPoint> resolved;
+            if (!work->samples.empty()) {
+                try {
+                    resolved.resize(work->samples.size());
+                } catch (const std::bad_alloc&) {
+                    return INKPOD_STATUS_INVALID_STATE;
+                }
+                for (auto& point : resolved) {
+                    point.struct_size = sizeof(point);
+                }
+                InkpodGeometryPointResolveInput request{};
+                request.struct_size = sizeof(request);
+                request.coordinate_space = INKPOD_COORDINATE_SPACE_DEVICE;
+                request.view_id = work->view_id;
+                request.samples = work->samples.data();
+                request.sample_count = work->samples.size();
+                request.sample_stride_bytes = sizeof(InkpodStrokeSample);
+                InkpodGeometryPointResolveResult result{};
+                result.struct_size = sizeof(result);
+                const InkpodStatus status = inkpod_core_geometry_points_resolve(
+                    core, &request, &result, resolved.data(), resolved.size());
+                if (status != INKPOD_STATUS_OK) {
+                    return status;
+                }
+            }
+            std::vector<InkpodAnnotationPoint> points;
+            try {
+                points.reserve(resolved.size());
+                for (const InkpodGeometryPoint& point : resolved) {
+                    const double x = std::round(static_cast<double>(point.x) * 1000.0);
+                    const double y = std::round(static_cast<double>(point.y) * 1000.0);
+                    if (x < static_cast<double>(INT32_MIN)
+                        || x > static_cast<double>(INT32_MAX)
+                        || y < static_cast<double>(INT32_MIN)
+                        || y > static_cast<double>(INT32_MAX)) {
+                        return INKPOD_STATUS_INVALID_ARGUMENT;
+                    }
+                    points.push_back(InkpodAnnotationPoint{
+                        sizeof(InkpodAnnotationPoint), 0U,
+                        static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)});
+                }
+            } catch (const std::bad_alloc&) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            if (work->kind == inkpod::renderer::CanvasStrokeEventKind::Begin) {
+                InkpodAnnotationStrokeInput start{};
+                start.struct_size = sizeof(start);
+                start.output = INKPOD_ANNOTATION_OUTPUT_INSTRUCTION;
+                start.base_document_revision = work->base_document_revision;
+                start.layer_id = work->layer_id;
+                start.color = work->color;
+                start.stroke_width_milli = 2'000U;
+                start.start = points.front();
+                InkpodStatus status = inkpod_core_annotation_stroke_begin(core, &start);
+                if (status != INKPOD_STATUS_OK || points.size() == 1U) {
+                    return status;
+                }
+                return inkpod_core_annotation_stroke_append(
+                    core, points.data() + 1U, points.size() - 1U, sizeof(InkpodAnnotationPoint));
+            }
+            if (work->kind == inkpod::renderer::CanvasStrokeEventKind::Append) {
+                return inkpod_core_annotation_stroke_append(
+                    core, points.data(), points.size(), sizeof(InkpodAnnotationPoint));
+            }
+            if (!points.empty()) {
+                const InkpodStatus append = inkpod_core_annotation_stroke_append(
+                    core, points.data(), points.size(), sizeof(InkpodAnnotationPoint));
+                if (append != INKPOD_STATUS_OK) {
+                    return append;
+                }
+            }
+            std::uint64_t created{};
+            InkpodAnnotationEditResult result{};
+            result.struct_size = sizeof(result);
+            result.created_ids = &created;
+            result.created_capacity = 1U;
+            return inkpod_core_annotation_stroke_end(core, &result);
+        },
+        publish,
+        refresh,
+        false);
+    if (queued) {
+        TrackAcceptedStrokePointer(state, source_group, source_view, input);
+    }
+    return queued;
+}
+
 std::optional<LRESULT> RouteCanvasMessage(
     ApplicationHost* state,
     HWND window,
@@ -18531,6 +19093,15 @@ std::optional<LRESULT> RouteCanvasMessage(
                     || input->sample_count > UINT64_C(1048576)
                     || (input->sample_count != 0U && input->samples == nullptr)) {
                     return 0;
+                }
+                auto* annotation_document = state->Documents().FindByView(source_group->ActiveView());
+                auto* annotation_view = annotation_document == nullptr
+                    ? nullptr : annotation_document->FindView(source_group->ActiveView());
+                if (state->Document().shell.annotation_draw_active) {
+                    return annotation_view != nullptr
+                            && QueueAnnotationCanvasEvent(
+                                *state, *source_group, *annotation_view, *input)
+                        ? 1 : 0;
                 }
                 if (state->ActiveView().presentation.guide_drag_active) {
                     if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel) {

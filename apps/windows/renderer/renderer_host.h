@@ -185,6 +185,10 @@ public:
         app::CanvasId canvas,
         app::Generation surface_generation,
         const CanvasGeometryPreview& preview) noexcept;
+    HRESULT SetAnnotationSelection(
+        app::CanvasId canvas,
+        app::Generation surface_generation,
+        std::uint64_t object_id) noexcept;
 
     [[nodiscard]] DWORD ThreadId() const noexcept;
     [[nodiscard]] std::uint64_t PresentedFrameCount(

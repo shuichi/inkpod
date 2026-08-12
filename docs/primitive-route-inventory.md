@@ -49,6 +49,9 @@ route|rust|document-primitive|rust-core|CutCore::edit_sequence CutCore::update
 route|rust|history-control-event|rust-core|CutCore::redo CutCore::undo
 route|rust|asset-data-plane|rust-core|CutCore::autosave CutCore::open CutCore::open_recovery CutCore::save
 route|rust|asset-data-plane|rust-format|inkpod_format::read_cut_descriptor inkpod_format::save_cut_descriptor_atomic inkpod_format::save_cut_recovery_atomic
+route|rust|document-primitive|rust-core|Core::edit_annotations Core::end_annotation_stroke
+route|rust|transient-preview-stroke|rust-core|Core::append_annotation_stroke Core::begin_annotation_stroke Core::cancel_annotation_stroke
+route|rust|query-snapshot|rust-core|Core::annotation_objects
 
 ## C ABI surface
 
@@ -74,6 +77,9 @@ route|ffi|transient-preview-stroke|rust-ffi-adapter|inkpod_cut_cancel_update ink
 route|ffi|query-snapshot|rust-ffi-adapter|inkpod_cut_info inkpod_cut_member_get inkpod_cut_metadata_copy
 route|ffi|asset-data-plane|rust-ffi-adapter|inkpod_cut_autosave inkpod_cut_open inkpod_cut_open_recovery inkpod_cut_save
 route|ffi|os-application-adapter|rust-ffi-adapter|inkpod_cut_create inkpod_cut_destroy
+route|ffi|document-primitive|rust-core|inkpod_core_annotation_edit inkpod_core_annotation_stroke_end
+route|ffi|transient-preview-stroke|rust-ffi-adapter|inkpod_core_annotation_stroke_append inkpod_core_annotation_stroke_begin inkpod_core_annotation_stroke_cancel
+route|ffi|query-snapshot|rust-ffi-adapter|inkpod_snapshot_annotation_copy_font_family inkpod_snapshot_annotation_copy_text inkpod_snapshot_get_annotations
 
 ## Windows production command surface
 
@@ -89,6 +95,9 @@ route|windows|document-primitive|rust-core|IDM_CUT_PROPERTIES IDM_CUT_SEQUENCE_A
 route|windows|history-control-event|rust-core|IDM_CUT_REDO IDM_CUT_UNDO
 route|windows|asset-data-plane|windows-adapter|IDM_CUT_SAVE
 route|windows|os-application-adapter|windows-adapter|IDM_FILE_NEW_CUT
+route|windows|document-primitive|rust-core|IDM_ANNOTATION_ADD_TEXT IDM_ANNOTATION_DELETE IDM_ANNOTATION_EDIT_TEXT IDM_ANNOTATION_MOVE_LEFT IDM_ANNOTATION_MOVE_RIGHT
+route|windows|transient-preview-stroke|windows-adapter|IDM_ANNOTATION_DRAW_INSTRUCTION
+route|windows|view-only-command|windows-adapter|IDM_ANNOTATION_SELECT_NEXT IDM_ANNOTATION_SELECT_PREVIOUS
 
 route|rust|document-primitive|rust-core|Core::select_output_color_guard Core::select_output_color_guard_with_cancel
 route|ffi|document-primitive|rust-core|inkpod_core_select_output_color_guard
@@ -118,10 +127,10 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   it exactly once; there is no queued arbitrary-callable work variant.
 - Palette and color-chart codecs are owned by `inkpod-format`; Windows supplies
   paths and presentation names but does not encode their native bytes.
-- Production `.inkpod` is exact-current v23. Its authoritative journal retains
+- Production `.inkpod` is exact-current v24. Its authoritative journal retains
   Genesis/assets/procedures/EditorState; optional CKPT is verified acceleration
   only, and explicit compaction writes a separate new-Genesis file.
-- Floating paste dialog, Canvas handles, renderer preview, ABI v11 record, Core
+- Floating paste dialog, Canvas handles, renderer preview, ABI v12 record, Core
   commit, Undo/Redo, and replay all use one half-open five-point absolute-anchor
   contract. Preview retries remain transient and Windows does not own a second
   document transform implementation.
@@ -130,7 +139,7 @@ route|windows|document-primitive|rust-core|IDM_SELECTION_OUTPUT_COLOR_GUARD
   Core-owned values into the existing `ApplyRasterStroke` canonical route;
   neither the pane nor renderer owns an alternative paint implementation.
 
-The source-derived inventory currently contains 271 Rust routes, 271 C ABI
-exports, and 364 Windows commands. Its architecture test requires every symbol
+The source-derived inventory currently contains 276 Rust routes, 279 C ABI
+exports, and 372 Windows commands. Its architecture test requires every symbol
 to have exactly one class and owner; unclassified and direct C++ document
 mutation counts are both zero.

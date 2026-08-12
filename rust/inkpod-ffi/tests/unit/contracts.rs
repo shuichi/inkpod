@@ -4075,6 +4075,305 @@ fn ffi_contract_vector_filter_and_task_state_machines() {
     }
 }
 
+#[test]
+fn annotation_ffi_is_bounded_atomic_and_exposes_snapshot_owned_records() {
+    let (mut core, _) = create_core(64, 48, 0xa190);
+    let layer_name = b"Annotations";
+    let create_layer = InkpodTreeEdit {
+        struct_size: size_of::<InkpodTreeEdit>() as u32,
+        operation: INKPOD_TREE_CREATE_LAYER,
+        flags: 0,
+        object_id: 0,
+        parent_id: 0,
+        destination_index: 0,
+        kind: INKPOD_LAYER_ANNOTATION,
+        pixel_format: 0,
+        opacity_milli: 0,
+        name_utf8: layer_name.as_ptr(),
+        name_bytes: layer_name.len() as u64,
+    };
+    let mut dispatch_result = dispatch();
+    let mut layer_id = 0_u64;
+    unsafe {
+        assert_eq!(
+            inkpod_core_tree_edit(core, &create_layer, &mut dispatch_result, &mut layer_id),
+            INKPOD_STATUS_OK
+        );
+    }
+    let base_revision = queried_document_info(core).document_revision;
+    let font = "游ゴシック".as_bytes();
+    let text = "修正指示：青を少し明るく".as_bytes();
+    let input = InkpodAnnotationObjectInput {
+        struct_size: size_of::<InkpodAnnotationObjectInput>() as u32,
+        kind: INKPOD_ANNOTATION_TEXT,
+        feature_flags: INKPOD_FEATURE_NONE,
+        layer_id,
+        output: INKPOD_ANNOTATION_OUTPUT_INSTRUCTION,
+        style_flags: INKPOD_ANNOTATION_STYLE_BOLD,
+        bounds: InkpodFrameRect {
+            x: 4,
+            y: 5,
+            width: 48,
+            height: 18,
+        },
+        font_family_utf8: font.as_ptr(),
+        font_family_bytes: font.len() as u64,
+        font_size_milli: 12_000,
+        stroke_width_milli: 0,
+        color: color(220, 30, 40, 255),
+        text_utf8: text.as_ptr(),
+        text_bytes: text.len() as u64,
+        points: ptr::null(),
+        point_count: 0,
+        point_stride_bytes: 0,
+    };
+    let edit = InkpodAnnotationEdit {
+        struct_size: size_of::<InkpodAnnotationEdit>() as u32,
+        kind: INKPOD_ANNOTATION_EDIT_CREATE,
+        feature_flags: INKPOD_FEATURE_NONE,
+        object_id: 0,
+        input: &input,
+        delta_x: 0,
+        delta_y: 0,
+    };
+    let mut no_ids = InkpodAnnotationEditResult {
+        struct_size: size_of::<InkpodAnnotationEditResult>() as u32,
+        ..InkpodAnnotationEditResult::default()
+    };
+    unsafe {
+        assert_eq!(
+            inkpod_core_annotation_edit(
+                core,
+                base_revision,
+                &edit,
+                1,
+                size_of::<InkpodAnnotationEdit>() as u64,
+                &mut no_ids,
+            ),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+    }
+    assert_eq!(no_ids.created_count, 1);
+    assert_eq!(queried_document_info(core).document_revision, base_revision);
+
+    let invalid_utf8 = [0xff_u8];
+    let invalid_input = InkpodAnnotationObjectInput {
+        text_utf8: invalid_utf8.as_ptr(),
+        text_bytes: invalid_utf8.len() as u64,
+        ..input
+    };
+    let invalid_edit = InkpodAnnotationEdit {
+        input: &invalid_input,
+        ..edit
+    };
+    let mut created_ids = [0_u64; 1];
+    let mut result = InkpodAnnotationEditResult {
+        struct_size: size_of::<InkpodAnnotationEditResult>() as u32,
+        reserved: 0,
+        feature_flags: INKPOD_FEATURE_NONE,
+        revision: 0,
+        created_ids: created_ids.as_mut_ptr(),
+        created_capacity: 1,
+        created_count: 0,
+    };
+    unsafe {
+        assert_eq!(
+            inkpod_core_annotation_edit(
+                core,
+                base_revision,
+                &invalid_edit,
+                1,
+                size_of::<InkpodAnnotationEdit>() as u64,
+                &mut result,
+            ),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+    }
+    assert_eq!(queried_document_info(core).document_revision, base_revision);
+
+    let mut short_edit = edit;
+    short_edit.struct_size -= 1;
+    unsafe {
+        assert_eq!(
+            inkpod_core_annotation_edit(
+                core,
+                base_revision,
+                &short_edit,
+                1,
+                size_of::<InkpodAnnotationEdit>() as u64,
+                &mut result,
+            ),
+            INKPOD_STATUS_INCOMPATIBLE_ABI
+        );
+        assert_eq!(
+            inkpod_core_annotation_edit(
+                core,
+                base_revision,
+                &edit,
+                1,
+                size_of::<InkpodAnnotationEdit>() as u64,
+                &mut result,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_ne!(created_ids[0], 0);
+    assert_eq!(result.revision, base_revision + 1);
+    unsafe {
+        assert_eq!(
+            inkpod_core_annotation_edit(
+                core,
+                base_revision,
+                &edit,
+                1,
+                size_of::<InkpodAnnotationEdit>() as u64,
+                &mut result,
+            ),
+            INKPOD_STATUS_INVALID_STATE
+        );
+    }
+
+    let snapshot_options = InkpodSnapshotOptions {
+        struct_size: size_of::<InkpodSnapshotOptions>() as u32,
+        reserved: 0,
+        feature_flags: INKPOD_FEATURE_NONE,
+    };
+    let mut snapshot = ptr::null_mut();
+    unsafe {
+        assert_eq!(
+            inkpod_core_build_snapshot(core, &snapshot_options, &mut snapshot),
+            INKPOD_STATUS_OK
+        );
+    }
+    let mut annotations = InkpodSnapshotAnnotationView {
+        struct_size: size_of::<InkpodSnapshotAnnotationView>() as u32,
+        ..InkpodSnapshotAnnotationView::default()
+    };
+    unsafe {
+        assert_eq!(
+            inkpod_snapshot_get_annotations(snapshot, &mut annotations),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_eq!(annotations.abi_version, INKPOD_ABI_VERSION);
+    assert_eq!(annotations.object_count, 1);
+    assert_eq!(
+        annotations.object_stride_bytes,
+        size_of::<InkpodSnapshotAnnotation>() as u64
+    );
+    let object = unsafe { &*annotations.objects };
+    assert_eq!(object.object_id, created_ids[0]);
+    assert_eq!(object.output, INKPOD_ANNOTATION_OUTPUT_INSTRUCTION);
+
+    let mut required = 0_u64;
+    unsafe {
+        assert_eq!(
+            inkpod_snapshot_annotation_copy_text(snapshot, 0, ptr::null_mut(), 0, &mut required,),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_eq!(required, text.len() as u64);
+    let mut copied = vec![0_u8; required as usize];
+    unsafe {
+        assert_eq!(
+            inkpod_snapshot_annotation_copy_text(
+                snapshot,
+                0,
+                copied.as_mut_ptr(),
+                copied.len() as u64,
+                &mut required,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_eq!(copied, text);
+
+    required = 0;
+    unsafe {
+        assert_eq!(
+            inkpod_snapshot_annotation_copy_font_family(
+                snapshot,
+                0,
+                ptr::null_mut(),
+                0,
+                &mut required,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_eq!(required, font.len() as u64);
+    copied.resize(required as usize, 0);
+    unsafe {
+        assert_eq!(
+            inkpod_snapshot_annotation_copy_font_family(
+                snapshot,
+                0,
+                copied.as_mut_ptr(),
+                copied.len() as u64,
+                &mut required,
+            ),
+            INKPOD_STATUS_OK
+        );
+    }
+    assert_eq!(copied, font);
+
+    let start = InkpodAnnotationStrokeInput {
+        struct_size: size_of::<InkpodAnnotationStrokeInput>() as u32,
+        output: INKPOD_ANNOTATION_OUTPUT_INSTRUCTION,
+        feature_flags: INKPOD_FEATURE_NONE,
+        base_document_revision: base_revision + 1,
+        layer_id,
+        color: color(255, 80, 40, 255),
+        stroke_width_milli: 1_500,
+        reserved: 0,
+        start: InkpodAnnotationPoint {
+            struct_size: size_of::<InkpodAnnotationPoint>() as u32,
+            reserved: 0,
+            x_milli: 2_000,
+            y_milli: 3_000,
+        },
+    };
+    let appended = [InkpodAnnotationPoint {
+        struct_size: size_of::<InkpodAnnotationPoint>() as u32,
+        reserved: 0,
+        x_milli: 12_000,
+        y_milli: 13_000,
+    }];
+    unsafe {
+        assert_eq!(
+            inkpod_core_annotation_stroke_begin(core, &start),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(inkpod_core_annotation_stroke_cancel(core), INKPOD_STATUS_OK);
+        assert_eq!(
+            inkpod_core_annotation_stroke_cancel(core),
+            INKPOD_STATUS_INVALID_STATE
+        );
+        assert_eq!(
+            inkpod_core_annotation_stroke_begin(core, &start),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_core_annotation_stroke_append(
+                core,
+                appended.as_ptr(),
+                appended.len() as u64,
+                size_of::<InkpodAnnotationPoint>() as u64,
+            ),
+            INKPOD_STATUS_OK
+        );
+        result.created_count = 0;
+        assert_eq!(
+            inkpod_core_annotation_stroke_end(core, &mut result),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(result.revision, base_revision + 2);
+        assert_eq!(result.created_count, 1);
+        assert_eq!(inkpod_snapshot_release(&mut snapshot), INKPOD_STATUS_OK);
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
+    }
+}
+
 fn names_followed_by_parenthesis(source: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     let bytes = source.as_bytes();
@@ -4141,8 +4440,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 20);
-        assert_eq!(contract.procedure_format_version, 23);
+        assert_eq!(contract.replay_epoch, 21);
+        assert_eq!(contract.procedure_format_version, 24);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);

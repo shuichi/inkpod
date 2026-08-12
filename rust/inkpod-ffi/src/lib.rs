@@ -22,7 +22,8 @@ mod ffi_contract_tests;
 mod cut_ffi_tests;
 
 use inkpod_core::{
-    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, ApplicationColor,
+    ActivePlane, Adjustment, AirbrushGesture, AirbrushStroke, AnnotationEdit, AnnotationKind,
+    AnnotationObjectInput, AnnotationOutput, AnnotationPoint, ApplicationColor,
     AssetAlphaSemantics, AssetColorSpace, BoundaryAirbrush, BrushShape, CellCreationOptions,
     CellCreationPlan, CellSizing, Channel, ClipboardPayload, ClipboardPixel, ClipboardPlane,
     ColorBalance, ColorChartEntry, ColorChartPreview, ColorCheckMode, CommonRasterFormat,
@@ -67,6 +68,7 @@ use std::thread::{self, ThreadId};
 
 mod abi;
 mod animation;
+mod annotation;
 mod determinism;
 mod document_edit;
 mod editor_state;
@@ -83,6 +85,7 @@ pub(crate) use abi::{
     MAX_SELECTION_POINT_COUNT, MAX_STROKE_SAMPLE_COUNT,
 };
 pub use animation::*;
+pub use annotation::*;
 pub use application_data::*;
 pub use color_chart::*;
 pub use cut::*;

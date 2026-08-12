@@ -236,6 +236,13 @@ Windows GUI は標準的な Windows 11 desktop application とし、古典的 MD
 composite は layer/plane 順、visibility、opacity、alpha、adjustment を決定的に適用してください。プレーンは所属 layer を越えて並べ替えず、layer 同士と同一 layer 内 plane 同士を別に並べ替えます。
 layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最上段、すなわち合成結果の最上位とする。Canvas、layer thumbnail、flatten export は、raster と vector が任意に混在しても同じ木順序を下から上へ合成し、adjustment は置かれた位置までの合成結果へ適用する。
 
+#### テキスト／指示 annotation の確定 contract
+
+- Text／Annotation layer は、document namespace 内で生成後に再利用しない stable `AnnotationObjectId` を持つ `Text`、`Stroke`、`Leader`、`Value` object を保持する。object は owning layer、通常／指示 output、正の document-pixel bounds、straight-alpha sRGB RGBA8/16、最大 65,536 byte の UTF-8 text、最大 1,024 byte の logical font-family hint、1..1,000,000 milli-pixel の font size／stroke width、bold／italic／underline style、最大 65,536 個の milli-pixel document point を typed に保持する。文書当たりの object は 16,384、単一 transaction の edit は 4,096 を上限とする。
+- `Text` は空でない text と正の font size、`Stroke` は 2 点以上、`Leader` はちょうど 2 点、`Value` は空でない text とちょうど 2 点を必要とする。create／complete-replacement edit／integral-pixel move／delete と stroke begin／append／end は同じ canonical executor を使う。複数 edit と完了 stroke はそれぞれ一回の transaction／Undo 単位であり、no-op、invalid、Cancel、stale、overflow、failure は state、revision、history、dirty、ID high-watermark を進めない。
+- immutable render snapshot は text、logical bounds、font hint／size／style、geometry、color、output policy だけを渡す。Windows Canvas の font 解決、glyph／text-format cache、DirectWrite resource は renderer thread が所有する。空の hint は `Segoe UI`、存在しない family は `Segoe UI` へ fallback し、Canvas 上部へ `Font fallback: Segoe UI` warning を表示する。OS font、fallback、glyph metrics は canonical procedure、document digest、replay の入力にしない。
+- 保存された logical bounds と code-point order が意味上の layout authority である。通常 flat export と thumbnail の描画 owner は OS 非依存の Rust Core とし、font file を参照せず、font size から得た固定 advance の portable deterministic glyph-cell raster を用いる。したがって system-font の glyph outline は完成画像の canonical layout ではなく Canvas preview であり、別 platform の font metrics を暗黙に確定結果として採用しない。通常 variant は Canvas、thumbnail、flat export に含め、指示 variant は Canvas と layer thumbnail に含めるが通常の完成画像 flat export から必ず除外する。
+
 ### 6. レイヤー・プレーンパレット
 
 - 上段に layer、下段に active layer の plane を表示する split pane とする。
@@ -609,6 +616,7 @@ layer と同一 layer 内 plane はどちらも配列 index 0 を palette の最
 - `DOC-002`: stable ID を持つ typed layer/plane tree
 - `DOC-003`: create/duplicate/delete/reorder/show/edit/opacity/convert/merge
 - `RENDER-001`: raster/vector 混在時の layer/plane 木順序、visibility、opacity、alpha、adjustment を共有する Canvas/thumbnail/flatten 合成
+- `ANNOTATION-001`: stable ID、bounded UTF-8／geometry、通常／指示 output policy を持つ再編集可能 Text／Stroke／Leader／Value annotation と、その canonical edit／stroke、Canvas／thumbnail／flat export、save／reopen contract
 - `VIEW-001`: zoom、box zoom、fit、1:1、pan、horizontal/vertical flip
 - `VIEW-002`: ruler、guide/grid、snap、transparent view
 - `SNAP-001`: view-targeted device/document座標変換、guide/grid優先順位、Ctrl一時解除を共有するproduction図形入力snap

@@ -4,6 +4,7 @@ mod support;
 use support::*;
 
 mod animation;
+mod annotation;
 mod assets_genesis;
 mod batch;
 mod brush_options;
@@ -21,7 +22,7 @@ mod geometry;
 mod history_stroke;
 mod mixed_order;
 mod multi_target;
-mod native_v22;
+mod native_v23;
 mod output_color_guard;
 mod primitive_kernel;
 mod procedure_journal;

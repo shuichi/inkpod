@@ -225,6 +225,19 @@ BEGIN
             MENUITEM "変換...", IDM_LAYER_CONVERT
             MENUITEM "同種を統合", IDM_LAYER_MERGE
             MENUITEM "プロパティ...", IDM_LAYER_PROPERTIES
+            MENUITEM SEPARATOR
+            POPUP "テキスト／指示"
+            BEGIN
+                MENUITEM "テキストを追加...", IDM_ANNOTATION_ADD_TEXT
+                MENUITEM "選択テキストを編集...", IDM_ANNOTATION_EDIT_TEXT
+                MENUITEM "手描き指示モード", IDM_ANNOTATION_DRAW_INSTRUCTION
+                MENUITEM SEPARATOR
+                MENUITEM "前の注釈を選択", IDM_ANNOTATION_SELECT_PREVIOUS
+                MENUITEM "次の注釈を選択", IDM_ANNOTATION_SELECT_NEXT
+                MENUITEM "選択注釈を左へ", IDM_ANNOTATION_MOVE_LEFT
+                MENUITEM "選択注釈を右へ", IDM_ANNOTATION_MOVE_RIGHT
+                MENUITEM "選択注釈を削除", IDM_ANNOTATION_DELETE
+            END
         END
         POPUP "プレーン(&P)"
         BEGIN

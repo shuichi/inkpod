@@ -12,6 +12,7 @@ pub(super) fn validate_document_metadata(
     if metadata.layers.is_empty()
         || metadata.layers.len() > MAX_LAYERS
         || metadata.guides.len() > MAX_GUIDES
+        || metadata.annotations.len() > MAX_ANNOTATION_OBJECTS
         || metadata.grid.spacing_x == 0
         || metadata.grid.spacing_y == 0
         || metadata.grid.spacing_x > 1_048_576
@@ -52,6 +53,71 @@ pub(super) fn validate_document_metadata(
     for guide in &metadata.guides {
         if guide.id == 0 || !ids.insert(guide.id) {
             return Err(FormatError::Invalid("guide ID is invalid"));
+        }
+    }
+    for object in &metadata.annotations {
+        let layer = metadata
+            .layers
+            .iter()
+            .find(|layer| layer.id == object.layer_id)
+            .ok_or(FormatError::Invalid(
+                "annotation object layer does not exist",
+            ))?;
+        if object.id == 0
+            || !ids.insert(object.id)
+            || !matches!(layer.kind, LayerKind::Text | LayerKind::Annotation)
+            || object.bounds.width <= 0
+            || object.bounds.height <= 0
+            || object.font_family_hint.len() > MAX_NODE_NAME_BYTES
+            || object.font_family_hint.chars().any(char::is_control)
+            || object.text.len() > MAX_ANNOTATION_TEXT_BYTES
+            || object.points.len() > MAX_ANNOTATION_POINTS
+            || object.style_flags & !7 != 0
+            || object.color.rgba16().is_none()
+        {
+            return Err(FormatError::Invalid(
+                "annotation object properties are invalid",
+            ));
+        }
+        let fields_valid = match object.kind {
+            FileAnnotationKind::Text => {
+                !object.text.is_empty()
+                    && object.points.is_empty()
+                    && object.font_size_milli != 0
+                    && object.font_size_milli <= 1_000_000
+                    && object.stroke_width_milli == 0
+            }
+            FileAnnotationKind::Stroke => {
+                object.text.is_empty()
+                    && object.font_family_hint.is_empty()
+                    && object.font_size_milli == 0
+                    && object.style_flags == 0
+                    && object.points.len() >= 2
+                    && object.stroke_width_milli != 0
+                    && object.stroke_width_milli <= 1_000_000
+            }
+            FileAnnotationKind::Leader => {
+                object.text.is_empty()
+                    && object.font_family_hint.is_empty()
+                    && object.font_size_milli == 0
+                    && object.style_flags == 0
+                    && object.points.len() == 2
+                    && object.stroke_width_milli != 0
+                    && object.stroke_width_milli <= 1_000_000
+            }
+            FileAnnotationKind::Value => {
+                !object.text.is_empty()
+                    && object.font_size_milli != 0
+                    && object.font_size_milli <= 1_000_000
+                    && object.points.len() == 2
+                    && object.stroke_width_milli != 0
+                    && object.stroke_width_milli <= 1_000_000
+            }
+        };
+        if !fields_valid {
+            return Err(FormatError::Invalid(
+                "annotation object fields are inconsistent",
+            ));
         }
     }
     if metadata.selection_plane_id == 0
@@ -244,6 +310,30 @@ pub(super) fn validate_document(document: &DocumentArchive) -> Result<(), Format
         }) {
             return Err(FormatError::Invalid(
                 "guide position is outside the document",
+            ));
+        }
+        let maximum_x_milli = i64::from(width) * 1_000;
+        let maximum_y_milli = i64::from(height) * 1_000;
+        if metadata.annotations.iter().any(|object| {
+            object.bounds.x < 0
+                || object.bounds.y < 0
+                || object
+                    .bounds
+                    .x
+                    .checked_add(object.bounds.width)
+                    .is_none_or(|right| right > width)
+                || object
+                    .bounds
+                    .y
+                    .checked_add(object.bounds.height)
+                    .is_none_or(|bottom| bottom > height)
+                || object.points.iter().any(|point| {
+                    !(0..=maximum_x_milli).contains(&i64::from(point.x_milli))
+                        || !(0..=maximum_y_milli).contains(&i64::from(point.y_milli))
+                })
+        }) {
+            return Err(FormatError::Invalid(
+                "annotation geometry is outside the document",
             ));
         }
         let selection = document

@@ -105,5 +105,6 @@ bool SetCanvasFloatingPreview(
     HWND canvas, const CanvasFloatingPreview& preview) noexcept;
 bool SetCanvasGeometryPreview(
     HWND canvas, const CanvasGeometryPreview& preview) noexcept;
+bool SetCanvasAnnotationSelection(HWND canvas, std::uint64_t object_id) noexcept;
 
 }  // namespace inkpod::renderer

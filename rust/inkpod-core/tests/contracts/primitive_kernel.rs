@@ -85,7 +85,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(main_line_procedure.primitive_id().get(), 0x0003_0001);
     assert_eq!(main_line_procedure.primitive_schema_version(), 1);
-    assert_eq!(main_line_procedure.replay_epoch().get(), 20);
+    assert_eq!(main_line_procedure.replay_epoch().get(), 21);
     assert_eq!(main_line_procedure.procedure_id().get(), 1);
     assert_eq!(main_line_procedure.base_state_id().get(), 1);
     assert_eq!(main_line_procedure.committed_state_id().get(), 2);
@@ -112,7 +112,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(palette_procedure.primitive_id().get(), 0x0003_0002);
     assert_eq!(palette_procedure.primitive_schema_version(), 1);
-    assert_eq!(palette_procedure.replay_epoch().get(), 20);
+    assert_eq!(palette_procedure.replay_epoch().get(), 21);
     assert_eq!(palette_procedure.procedure_id().get(), 2);
     assert_eq!(palette_procedure.base_state_id().get(), 2);
     assert_eq!(palette_procedure.committed_state_id().get(), 3);
@@ -160,7 +160,7 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .clone();
     assert_eq!(stroke_procedure.primitive_id().get(), 0x0005_0001);
     assert_eq!(stroke_procedure.primitive_schema_version(), 3);
-    assert_eq!(stroke_procedure.replay_epoch().get(), 20);
+    assert_eq!(stroke_procedure.replay_epoch().get(), 21);
     assert_eq!(stroke_procedure.procedure_id().get(), 3);
     assert_eq!(stroke_procedure.base_state_id().get(), 3);
     assert_eq!(stroke_procedure.committed_state_id().get(), 4);
@@ -176,43 +176,43 @@ fn canonical_execution_and_fresh_replay_are_bit_exact_at_each_primitive_boundary
         .canonical_composite_digest()
         .unwrap()
         .as_bytes();
-    assert_eq!(contract.replay_epoch().get(), 20);
-    assert_eq!(contract.procedure_format_version(), 23);
+    assert_eq!(contract.replay_epoch().get(), 21);
+    assert_eq!(contract.procedure_format_version(), 24);
     assert_eq!(contract.canonical_numeric_version(), 1);
-    assert_eq!(contract.primitive_count(), 82);
+    assert_eq!(contract.primitive_count(), 83);
     assert_eq!(
         *contract.primitive_catalog_digest(),
         [
-            229, 130, 61, 147, 31, 254, 102, 52, 240, 63, 168, 69, 74, 102, 124, 76, 22, 200, 218,
-            251, 39, 78, 91, 125, 13, 186, 214, 24, 93, 66, 112, 121
+            248, 0, 3, 194, 193, 193, 220, 191, 55, 84, 149, 197, 87, 242, 173, 176, 35, 202, 98,
+            215, 128, 183, 252, 207, 152, 195, 17, 195, 243, 6, 154, 81
         ]
     );
     assert_eq!(
         boundary_digests,
         vec![
             [
-                9, 21, 81, 79, 164, 238, 144, 30, 183, 178, 10, 217, 246, 199, 176, 132, 92, 158,
-                45, 41, 241, 95, 181, 87, 124, 1, 0, 166, 12, 225, 230, 33
+                234, 62, 156, 22, 35, 43, 73, 50, 20, 196, 13, 30, 44, 84, 243, 205, 191, 222, 50,
+                43, 126, 122, 245, 0, 202, 104, 15, 111, 72, 7, 97, 114
             ],
             [
-                37, 72, 159, 209, 15, 19, 144, 255, 185, 101, 86, 178, 68, 86, 135, 248, 106, 138,
-                170, 88, 130, 90, 58, 110, 130, 159, 5, 6, 173, 61, 210, 177
+                224, 170, 142, 17, 19, 25, 146, 238, 107, 125, 160, 83, 23, 101, 34, 142, 30, 96,
+                72, 75, 99, 121, 163, 206, 201, 31, 17, 117, 122, 248, 47, 238
             ],
             [
-                4, 182, 45, 84, 140, 230, 7, 178, 227, 240, 252, 194, 45, 11, 237, 86, 115, 161,
-                237, 157, 88, 11, 79, 255, 183, 155, 162, 152, 190, 214, 25, 249
+                170, 161, 235, 145, 197, 104, 168, 60, 116, 170, 251, 34, 174, 13, 64, 68, 129, 98,
+                45, 231, 80, 160, 137, 154, 53, 190, 211, 28, 42, 24, 108, 136
             ],
             [
-                159, 211, 34, 105, 72, 185, 107, 235, 26, 90, 54, 10, 209, 152, 143, 232, 145, 82,
-                221, 97, 55, 52, 77, 82, 16, 112, 231, 157, 174, 42, 78, 30
+                216, 2, 180, 242, 76, 204, 85, 111, 37, 81, 66, 184, 223, 19, 223, 23, 175, 198,
+                180, 34, 69, 67, 211, 91, 23, 210, 72, 62, 53, 56, 82, 107
             ],
         ]
     );
     assert_eq!(
         composite,
         [
-            51, 88, 148, 214, 238, 70, 18, 80, 131, 67, 44, 60, 133, 31, 255, 174, 184, 112, 85, 4,
-            197, 186, 100, 255, 77, 211, 50, 174, 164, 197, 251, 183
+            189, 163, 28, 248, 25, 134, 237, 34, 238, 30, 182, 179, 224, 229, 142, 46, 180, 40, 96,
+            126, 44, 248, 27, 182, 126, 94, 97, 35, 90, 69, 70, 10
         ]
     );
 }

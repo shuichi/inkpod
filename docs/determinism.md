@@ -1,10 +1,13 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 23, replay epoch 20,
-canonical numeric version 1, and the digest of the closed 82-entry primitive
-catalog. Production `.inkpod` is exact-current v23; an optional verified
+The current runtime replay contract is procedure format 24, replay epoch 21,
+canonical numeric version 1, and the digest of the closed 83-entry primitive
+catalog. Production `.inkpod` is exact-current v24; an optional verified
 checkpoint preserves this contract and never replaces the authoritative journal.
-Epoch 20 and format 23 add ordered atomic Cut membership editing, the separated
+Epoch 21 and format 24 add `EditAnnotations/canonical-v2`: bounded stable-ID
+Text/Stroke/Leader/Value objects, atomic multi-object edits, and committed
+instruction strokes share one deterministic replay contract. Epoch 20 and format
+23 added ordered atomic Cut membership editing, the separated
 immutable member-asset table, and membership-bearing Cut history; Cell-document
 procedure semantics remain closed. Epoch 19 and format 22 added the current-only
 Cut descriptor and its independent metadata/default canonical history. Epoch 18
@@ -68,7 +71,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 23 and replay epoch 20. A semantic change that updates
+together with format version 24 and replay epoch 21. A semantic change that updates
 the catalog or any golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 
@@ -81,6 +84,6 @@ same query. Cache revisions and view-only state are deliberately excluded.
 
 `core_workflows` runs `canonical_replay` in both quick and full profiles with
 the same five procedures, six boundary observations, revision/history counters,
-and checksum `f521d658a47051e9`. Wall-clock is diagnostic; the checksum and
+and checksum `264b98028ac92ac6`. Wall-clock is diagnostic; the checksum and
 semantic counters are hard failures. The established pan/zoom, dirty-rebuild,
 native wheel, and drawing ranges are unchanged.
